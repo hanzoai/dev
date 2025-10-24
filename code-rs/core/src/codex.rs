@@ -3353,6 +3353,14 @@ async fn submission_loop(
                     }
                 };
 
+                if config.debug {
+                    if let Ok(logger) = debug_logger.lock() {
+                        if let Err(e) = logger.set_session_usage_file(&session_id) {
+                            warn!("failed to initialise session usage log: {e}");
+                        }
+                    }
+                }
+
                 let conversation_id = code_protocol::mcp_protocol::ConversationId::from(session_id);
                 let auth_snapshot = auth_manager.as_ref().and_then(|mgr| mgr.auth());
                 let otel_event_manager = {

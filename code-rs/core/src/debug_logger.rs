@@ -18,6 +18,8 @@ pub struct DebugLogger {
     log_dir: PathBuf,
     // Maps request_id to stream info for collecting events
     active_streams: Mutex<HashMap<String, StreamInfo>>,
+    usage_dir: PathBuf,
+    session_usage_file: Mutex<PathBuf>,
 }
 
 impl DebugLogger {
@@ -27,6 +29,8 @@ impl DebugLogger {
                 enabled: false,
                 log_dir: PathBuf::new(),
                 active_streams: Mutex::new(HashMap::new()),
+                usage_dir: PathBuf::new(),
+                session_usage_file: Mutex::new(PathBuf::new()),
             });
         }
 
@@ -35,10 +39,16 @@ impl DebugLogger {
 
         fs::create_dir_all(&log_dir)?;
 
+        let mut usage_dir = log_dir.clone();
+        usage_dir.push("usage");
+        fs::create_dir_all(&usage_dir)?;
+
         Ok(Self {
             enabled,
             log_dir,
             active_streams: Mutex::new(HashMap::new()),
+            usage_dir,
+            session_usage_file: Mutex::new(PathBuf::new()),
         })
     }
 
@@ -116,9 +126,8 @@ impl DebugLogger {
             timestamp.format("%Y%m%d_%H%M%S%.3f"),
             request_id_short
         );
-        let response_file_path = log_dir.join(response_filename);
+        let response_file_path = log_dir.join(&response_filename);
 
-        // Store the stream info for this request_id
         if let Ok(mut streams) = self.active_streams.lock() {
             streams.insert(
                 request_id.clone(),
@@ -155,6 +164,14 @@ impl DebugLogger {
             }
         }
 
+        if let Some(response) = data.get("response") {
+            if let Some(usage) = response.get("usage") {
+                self.append_usage_entry(usage.clone())?;
+            }
+        } else if let Some(usage) = data.get("usage") {
+            self.append_usage_entry(usage.clone())?;
+        }
+
         Ok(())
     }
 
@@ -178,6 +195,62 @@ impl DebugLogger {
                 fs::write(&stream_info.response_file, formatted_response)?;
             }
         }
+
+        Ok(())
+    }
+
+    fn append_usage_entry(&self, usage: Value) -> Result<(), std::io::Error> {
+        if !self.enabled {
+            return Ok(());
+        }
+
+        let path = {
+            let guard = self
+                .session_usage_file
+                .lock()
+                .expect("usage lock poisoned");
+            if guard.as_os_str().is_empty() {
+                return Ok(());
+            }
+            guard.clone()
+        };
+
+        let mut entries: Vec<Value> = if path.exists() {
+            let contents = fs::read_to_string(&path)?;
+            serde_json::from_str(&contents).unwrap_or_default()
+        } else {
+            Vec::new()
+        };
+
+        entries.push(usage);
+
+        let formatted = serde_json::to_string_pretty(&entries)?;
+        fs::write(path, formatted)?;
+        Ok(())
+    }
+
+    pub fn set_session_usage_file(&self, session_id: &Uuid) -> Result<(), std::io::Error> {
+        if !self.enabled {
+            return Ok(());
+        }
+
+        let path = self
+            .usage_dir
+            .join(format!("{}_usage.json", session_id));
+
+        if let Some(parent) = path.parent() {
+            fs::create_dir_all(parent)?;
+        }
+
+        if !path.exists() {
+            fs::write(&path, "[]")?;
+        }
+
+        let mut guard = self
+            .session_usage_file
+            .lock()
+            .expect("usage lock poisoned");
+        *guard = path;
 
         Ok(())
     }
