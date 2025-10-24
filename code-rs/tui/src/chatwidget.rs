@@ -7403,13 +7403,10 @@ impl ChatWidget<'_> {
         if trimmed.is_empty() {
             return None;
         }
-        if !self.auto_state.is_auto_active() {
+        if !self.auto_state.is_active() {
             return None;
         }
-        if matches!(
-            self.auto_state.current_phase(),
-            AutoRunPhase::PausedManual { .. }
-        )
+        if self.auto_state.is_paused_manual()
             && self.auto_state.should_bypass_coordinator_next_submit()
         {
             return None;
@@ -7495,18 +7492,13 @@ impl ChatWidget<'_> {
         let original_text = message.display_text.clone();
 
         let mut submitted_cli = false;
-        let manual_edit_pending = self
-            .auto_state
-            .paused_for_manual_edit
-            && self.auto_state.resume_after_manual_submit;
-        let manual_override_active = matches!(
-            self.auto_state.current_phase(),
-            AutoRunPhase::PausedManual { .. }
-        );
+        let manual_edit_pending = self.auto_state.is_paused_manual()
+            && self.auto_state.resume_after_submit();
+        let manual_override_active = self.auto_state.is_paused_manual();
 
         let should_route_through_coordinator = !message.suppress_persistence
             && !original_text.trim().starts_with('/')
-            && self.auto_state.is_auto_active()
+            && self.auto_state.is_active()
             && self.config.auto_drive.coordinator_routing
             && (!self.auto_state.should_bypass_coordinator_next_submit()
                 || manual_edit_pending
@@ -9224,7 +9216,7 @@ impl ChatWidget<'_> {
             }
         }
 
-        if self.auto_state.active && self.auto_state.resume_after_manual_submit {
+        if self.auto_state.is_active() && self.auto_state.resume_after_submit() {
             self.auto_state.waiting_for_response = true;
             self.auto_state.resume_after_manual_submit = false;
             self.auto_state.paused_for_manual_edit = false;
@@ -10953,7 +10945,7 @@ impl ChatWidget<'_> {
                     );
                     self.history_push_plain_state(state);
                 }
-                if self.auto_state.active {
+                if self.auto_state.is_active() {
                     self.auto_state.waiting_for_review = true;
                     self.auto_rebuild_live_ring();
                 }
@@ -10998,7 +10990,7 @@ impl ChatWidget<'_> {
                         ));
                     }
                 }
-                if self.auto_state.active && self.auto_state.waiting_for_review {
+                if self.auto_state.is_active() && self.auto_state.awaiting_review() {
                     if self.auto_resolve_should_block_auto_resume() {
                         self.request_redraw();
                     } else {
@@ -12931,7 +12923,7 @@ fi\n\
     }
 
     fn refresh_auto_drive_visuals(&mut self) {
-        if self.auto_state.active
+        if self.auto_state.is_active()
             || self.auto_state.awaiting_goal_input
             || self.auto_state.last_run_summary.is_some()
         {
@@ -13101,7 +13093,7 @@ fi\n\
             (SandboxPolicy::DangerFullAccess, AskForApproval::Never)
         );
 
-        if !full_auto_enabled && !(trimmed.is_empty() && self.auto_state.active) {
+        if !full_auto_enabled && !(trimmed.is_empty() && self.auto_state.is_active()) {
             self.push_background_tail(
                 "Please use Shift+Tab to switch to Full Auto before using Auto Drive"
                     .to_string(),
@@ -13110,7 +13102,7 @@ fi\n\
             return;
         }
         if trimmed.is_empty() {
-            if self.auto_state.active {
+            if self.auto_state.is_active() {
                 self.auto_stop(None);
             }
             self.auto_state.reset();
@@ -13122,7 +13114,7 @@ fi\n\
 
         let goal_text = trimmed.to_string();
 
-        if self.auto_state.active {
+        if self.auto_state.is_active() {
             self.auto_stop(None);
         }
 
@@ -13154,8 +13146,8 @@ fi\n\
         ) {
             self.close_settings_overlay();
         }
-        let should_rebuild_view = if self.auto_state.active {
-            !self.auto_state.paused_for_manual_edit
+        let should_rebuild_view = if self.auto_state.is_active() {
+            !self.auto_state.is_paused_manual()
         } else {
             self.auto_state.awaiting_goal_input || self.auto_state.last_run_summary.is_some()
         };
@@ -13223,14 +13215,11 @@ fi\n\
     }
 
     fn auto_send_conversation(&mut self) {
-        if !self.auto_state.active || self.auto_state.waiting_for_response {
+        if !self.auto_state.is_active() || self.auto_state.waiting_for_response {
             return;
         }
         self.auto_state.waiting_for_review = false;
-        if !matches!(
-            self.auto_state.current_phase(),
-            AutoRunPhase::PausedManual { .. }
-        ) {
+        if !self.auto_state.is_paused_manual() {
             self.auto_state.clear_bypass_coordinator_flag();
         }
         let conversation = self.current_auto_history();
@@ -13264,13 +13253,10 @@ fi\n\
     }
 
     fn auto_send_conversation_force(&mut self) {
-        if !self.auto_state.active {
+        if !self.auto_state.is_active() {
             return;
         }
-        if !matches!(
-            self.auto_state.current_phase(),
-            AutoRunPhase::PausedManual { .. }
-        ) {
+        if !self.auto_state.is_paused_manual() {
             self.auto_state.clear_bypass_coordinator_flag();
         }
         let conversation = self.current_auto_history();
@@ -13389,7 +13375,7 @@ fi\n\
         agents: Vec<AutoTurnAgentsAction>,
         transcript: Vec<code_protocol::models::ResponseItem>,
     ) {
-        if !self.auto_state.active {
+        if !self.auto_state.is_active() {
             return;
         }
 
@@ -13611,10 +13597,7 @@ Have we met every part of this goal and is there no further work to do?"#
                 }
                 AutoControllerEffect::SubmitPrompt => {
                     if self.auto_state.should_bypass_coordinator_next_submit()
-                        && matches!(
-                            self.auto_state.current_phase(),
-                            AutoRunPhase::PausedManual { .. }
-                        )
+                        && self.auto_state.is_paused_manual()
                     {
                         self.auto_state.clear_bypass_coordinator_flag();
                         self.auto_state.set_phase(AutoRunPhase::Active);
