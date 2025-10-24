@@ -96,6 +96,7 @@ use code_auto_drive_core::{
     AutoCoordinatorStatus,
     AutoDriveHistory,
     AutoDriveController,
+    AutoRunPhase,
     AutoControllerEffect,
     AutoTurnAgentsAction,
     AutoTurnAgentsTiming,
@@ -4768,7 +4769,9 @@ impl ChatWidget<'_> {
             match key_event.code {
                 crossterm::event::KeyCode::Enter
                 | crossterm::event::KeyCode::Char(' ') if key_event.modifiers.is_empty() => {
-                    self.auto_submit_prompt();
+                    if !self.auto_state.should_bypass_coordinator_next_submit() {
+                        self.auto_submit_prompt();
+                    }
                     return;
                 }
                 crossterm::event::KeyCode::Char('e') | crossterm::event::KeyCode::Char('E')
@@ -7400,7 +7403,12 @@ impl ChatWidget<'_> {
         if trimmed.is_empty() {
             return None;
         }
-        if !self.auto_state.active {
+        if !self.auto_state.is_auto_active() {
+            return None;
+        }
+        if self.auto_state.current_phase() == AutoRunPhase::PausedManual
+            && self.auto_state.should_bypass_coordinator_next_submit()
+        {
             return None;
         }
         if !self.config.auto_drive.coordinator_routing {
@@ -7484,10 +7492,22 @@ impl ChatWidget<'_> {
         let original_text = message.display_text.clone();
 
         let mut submitted_cli = false;
-        if !message.suppress_persistence
+        let manual_edit_pending = self
+            .auto_state
+            .paused_for_manual_edit
+            && self.auto_state.resume_after_manual_submit;
+        let manual_override_active =
+            self.auto_state.current_phase() == AutoRunPhase::PausedManual;
+
+        let should_route_through_coordinator = !message.suppress_persistence
             && !original_text.trim().starts_with('/')
-            && self.auto_state.active
+            && self.auto_state.is_auto_active()
             && self.config.auto_drive.coordinator_routing
+            && (!self.auto_state.should_bypass_coordinator_next_submit()
+                || manual_edit_pending
+                || manual_override_active);
+
+        if should_route_through_coordinator
         {
             let mut conversation = self.current_auto_history();
             if let Some(user_item) = Self::auto_drive_make_user_message(original_text.clone()) {
@@ -7501,7 +7521,11 @@ impl ChatWidget<'_> {
             }
         }
 
-        if !message.suppress_persistence {
+        if !message.suppress_persistence
+            && (!self.auto_state.should_bypass_coordinator_next_submit()
+                || manual_edit_pending
+                || manual_override_active)
+        {
             if let Some(mut routed) = self.try_coordinator_route(&original_text) {
                 self.finalize_sent_user_message(message);
                 self.consume_pending_prompt_for_ui_only_turn();
@@ -12968,6 +12992,8 @@ fi\n\
         self.bottom_pane.update_status_text("Auto Drive".to_string());
         self.auto_update_terminal_hint();
         self.bottom_pane.ensure_input_focus();
+        self.auto_state.awaiting_goal_input = true;
+        self.clear_composer();
         self.request_redraw();
     }
 
@@ -13083,17 +13109,7 @@ fi\n\
                 self.auto_stop(None);
             }
             self.auto_state.reset();
-            self.auto_state.awaiting_goal_input = true;
-            self.clear_composer();
-            self.bottom_pane.ensure_input_focus();
-            let defaults = self.config.auto_drive.clone();
-            self.auto_state.review_enabled = defaults.review_enabled;
-            self.auto_state.subagents_enabled = defaults.agents_enabled;
-            self.auto_state.cross_check_enabled = defaults.cross_check_enabled;
-            self.auto_state.qa_automation_enabled = defaults.qa_automation_enabled;
-            self.auto_state.continue_mode = auto_continue_from_config(defaults.continue_mode);
-            self.auto_state.reset_countdown();
-            self.auto_state.mark_intro_pending();
+            self.auto_state.set_phase(AutoRunPhase::Idle);
             self.auto_show_goal_entry_panel();
             self.request_redraw();
             return;
@@ -13206,6 +13222,9 @@ fi\n\
             return;
         }
         self.auto_state.waiting_for_review = false;
+        if self.auto_state.current_phase() != AutoRunPhase::PausedManual {
+            self.auto_state.clear_bypass_coordinator_flag();
+        }
         let conversation = self.current_auto_history();
         let Some(handle) = self.auto_handle.as_ref() else {
             return;
@@ -13239,6 +13258,9 @@ fi\n\
     fn auto_send_conversation_force(&mut self) {
         if !self.auto_state.active {
             return;
+        }
+        if self.auto_state.current_phase() != AutoRunPhase::PausedManual {
+            self.auto_state.clear_bypass_coordinator_flag();
         }
         let conversation = self.current_auto_history();
         let Some(handle) = self.auto_handle.as_ref() else {
@@ -13577,7 +13599,15 @@ Have we met every part of this goal and is there no further work to do?"#
                     }
                 }
                 AutoControllerEffect::SubmitPrompt => {
-                    self.auto_submit_prompt();
+                    if self.auto_state.should_bypass_coordinator_next_submit()
+                        && self.auto_state.current_phase() == AutoRunPhase::PausedManual
+                    {
+                        self.auto_state.clear_bypass_coordinator_flag();
+                        self.auto_state.set_phase(AutoRunPhase::Active);
+                    }
+                    if !self.auto_state.should_bypass_coordinator_next_submit() {
+                        self.auto_submit_prompt();
+                    }
                 }
                 AutoControllerEffect::LaunchStarted { goal } => {
                     self.bottom_pane.set_task_running(false);
@@ -13965,6 +13995,8 @@ Have we met every part of this goal and is there no further work to do?"#
         self.auto_state.coordinator_waiting = false;
         self.auto_state.paused_for_manual_edit = false;
         self.auto_state.resume_after_manual_submit = false;
+        self.auto_state.clear_bypass_coordinator_flag();
+        self.auto_state.set_phase(AutoRunPhase::Active);
         self.auto_state.seconds_remaining = 0;
         let post_submit_display = self.auto_state.last_decision_display.clone();
         self.auto_state.current_summary = None;
@@ -14023,6 +14055,8 @@ use crate::chatwidget::message::UserMessage;
 
         self.auto_state.paused_for_manual_edit = true;
         self.auto_state.resume_after_manual_submit = true;
+        self.auto_state.set_phase(AutoRunPhase::PausedManual);
+        self.auto_state.set_bypass_coordinator_next_submit();
         self.auto_state.countdown_id = self.auto_state.countdown_id.wrapping_add(1);
         self.auto_state.reset_countdown();
         self.clear_composer();
@@ -14166,7 +14200,9 @@ use crate::chatwidget::message::UserMessage;
             return;
         }
 
-        self.auto_send_conversation();
+        if !self.auto_state.should_bypass_coordinator_next_submit() {
+            self.auto_send_conversation();
+        }
     }
 
     #[cfg(any(test, feature = "test-helpers"))]
@@ -23364,7 +23400,9 @@ impl ChatWidget<'_> {
             return;
         }
         self.auto_state.waiting_for_review = false;
-        self.auto_send_conversation();
+        if !self.auto_state.should_bypass_coordinator_next_submit() {
+            self.auto_send_conversation();
+        }
         self.request_redraw();
     }
 
