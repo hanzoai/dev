@@ -7483,11 +7483,18 @@ impl ChatWidget<'_> {
         let original_text = message.display_text.clone();
 
         let mut submitted_cli = false;
-        if !message.suppress_persistence
+        let manual_edit_pending = self
+            .auto_state
+            .paused_for_manual_edit
+            && self.auto_state.resume_after_manual_submit;
+
+        let should_route_through_coordinator = !message.suppress_persistence
             && !original_text.trim().starts_with('/')
             && self.auto_state.is_auto_active()
-            && !self.auto_state.should_bypass_coordinator_next_submit()
             && self.config.auto_drive.coordinator_routing
+            && (!self.auto_state.should_bypass_coordinator_next_submit() || manual_edit_pending);
+
+        if should_route_through_coordinator
         {
             let mut conversation = self.current_auto_history();
             if let Some(user_item) = Self::auto_drive_make_user_message(original_text.clone()) {
@@ -7502,7 +7509,7 @@ impl ChatWidget<'_> {
         }
 
         if !message.suppress_persistence
-            && !self.auto_state.should_bypass_coordinator_next_submit()
+            && (!self.auto_state.should_bypass_coordinator_next_submit() || manual_edit_pending)
         {
             if let Some(mut routed) = self.try_coordinator_route(&original_text) {
                 self.finalize_sent_user_message(message);
@@ -9203,11 +9210,9 @@ impl ChatWidget<'_> {
             self.auto_state.paused_for_manual_edit = false;
             self.auto_state.awaiting_submission = false;
             self.auto_state.seconds_remaining = 0;
-            self.auto_state.clear_bypass_coordinator_flag();
             self.auto_rebuild_live_ring();
             self.bottom_pane.update_status_text(String::new());
             self.bottom_pane.set_task_running(false);
-            self.auto_state.set_phase(AutoRunPhase::Active);
         }
 
         self.request_redraw();
