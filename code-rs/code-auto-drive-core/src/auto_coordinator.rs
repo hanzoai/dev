@@ -180,6 +180,8 @@ pub struct TurnConfig {
     #[serde(default)]
     #[allow(dead_code)]
     pub complexity: Option<TurnComplexity>,
+    #[serde(default)]
+    pub text_format_override: Option<code_core::TextFormat>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
@@ -256,6 +258,8 @@ pub struct TurnDescriptor {
     pub agent_preferences: Option<AgentPreferences>,
     #[serde(default)]
     pub review_strategy: Option<ReviewStrategy>,
+    #[serde(default)]
+    pub text_format_override: Option<code_core::TextFormat>,
 }
 
 impl Default for TurnDescriptor {
@@ -266,6 +270,7 @@ impl Default for TurnDescriptor {
             complexity: None,
             agent_preferences: None,
             review_strategy: None,
+            text_format_override: None,
         }
     }
 }

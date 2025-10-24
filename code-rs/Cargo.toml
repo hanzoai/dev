@@ -7,6 +7,7 @@ members = [
     "apply-patch",
     "arg0",
     "code-auto-drive-core",
+    "code-auto-drive-diagnostics",
     "code-backend-openapi-models",
     "cloud-tasks",
     "cloud-tasks-client",

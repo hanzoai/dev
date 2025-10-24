@@ -1101,6 +1101,21 @@ dependencies = [
 ]
 
 [[package]]
+name = "code-auto-drive-diagnostics"
+version = "0.0.0"
+dependencies = [
+ "anyhow",
+ "code-auto-drive-core",
+ "code-core",
+ "code-protocol",
+ "pretty_assertions",
+ "serde",
+ "serde_json",
+ "thiserror 2.0.17",
+ "tracing",
+]
+
+[[package]]
 name = "code-backend-client"
 version = "0.0.0"
 dependencies = [
@@ -1580,6 +1595,7 @@ dependencies = [
  "code-ansi-escape",
  "code-arg0",
  "code-auto-drive-core",
+ "code-auto-drive-diagnostics",
  "code-browser",
  "code-cloud-tasks-client",
  "code-common",
