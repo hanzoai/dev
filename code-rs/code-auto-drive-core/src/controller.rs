@@ -84,6 +84,13 @@ impl AutoRunPhase {
     pub fn should_show_goal_entry(&self) -> bool {
         matches!(self, Self::Idle)
     }
+
+    pub fn resume_after_submit(&self) -> Option<bool> {
+        match self {
+            Self::PausedManual { resume_after_submit } => Some(*resume_after_submit),
+            _ => None,
+        }
+    }
 }
 
 impl Default for AutoRunPhase {
@@ -677,10 +684,6 @@ impl AutoDriveController {
         &self.phase
     }
 
-    pub fn awaiting_coordinator_submit(&self) -> bool {
-        self.phase.awaiting_coordinator_submit()
-    }
-
     pub fn should_show_goal_entry(&self) -> bool {
         self.phase.should_show_goal_entry()
     }
@@ -695,6 +698,30 @@ impl AutoDriveController {
 
     pub fn clear_bypass_coordinator_flag(&mut self) {
         self.bypass_coordinator_next_submit = false;
+    }
+
+    pub fn is_paused_manual(&self) -> bool {
+        matches!(self.phase, AutoRunPhase::PausedManual { .. }) || self.paused_for_manual_edit
+    }
+
+    pub fn resume_after_submit(&self) -> bool {
+        self.phase
+            .resume_after_submit()
+            .unwrap_or(self.resume_after_manual_submit)
+    }
+
+    pub fn awaiting_coordinator_submit(&self) -> bool {
+        self.phase.awaiting_coordinator_submit()
+            || (self.awaiting_submission && !self.paused_for_manual_edit)
+    }
+
+    pub fn awaiting_review(&self) -> bool {
+        matches!(self.phase, AutoRunPhase::AwaitingReview { .. }) || self.waiting_for_review
+    }
+
+    pub fn in_transient_recovery(&self) -> bool {
+        matches!(self.phase, AutoRunPhase::TransientRecovery { .. })
+            || self.waiting_for_transient_recovery
     }
 
     fn auto_restart_delay(attempt: u32) -> Duration {
