@@ -11,7 +11,7 @@ use code_apply_patch::APPLY_PATCH_TOOL_INSTRUCTIONS;
 use code_protocol::models::ContentItem;
 use code_protocol::models::ResponseItem;
 use futures::Stream;
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::borrow::Cow;
 use std::ops::Deref;
@@ -323,7 +323,7 @@ impl From<TextVerbosityConfig> for OpenAiTextVerbosity {
 }
 
 /// Optional structured output format for `text.format` in the Responses API.
-#[derive(Debug, Serialize, Clone)]
+#[derive(Debug, Serialize, Deserialize, Clone, PartialEq)]
 pub struct TextFormat {
     #[serde(rename = "type")]
     pub r#type: String, // e.g. "json_schema"

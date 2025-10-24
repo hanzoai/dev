@@ -189,6 +189,7 @@ pub struct AutoDriveController {
     pub intro_reduced_motion: bool,
     pub intro_pending: bool,
     pub elapsed_override: Option<Duration>,
+    pub pending_stop_message: Option<String>,
 }
 
 impl AutoDriveController {
@@ -288,6 +289,7 @@ impl AutoDriveController {
         self.last_run_summary = Some(summary.clone());
         self.awaiting_goal_input = true;
 
+        self.pending_stop_message = None;
         vec![
             AutoControllerEffect::CancelCoordinator,
             AutoControllerEffect::ResetHistory,
@@ -463,6 +465,7 @@ impl AutoDriveController {
         let intro_started_at = self.intro_started_at;
         let intro_reduced_motion = self.intro_reduced_motion;
         let elapsed_override = self.elapsed_override;
+        let pending_stop_message = self.pending_stop_message.clone();
 
         *self = Self::default();
 
@@ -476,6 +479,7 @@ impl AutoDriveController {
         self.intro_started_at = intro_started_at;
         self.intro_reduced_motion = intro_reduced_motion;
         self.elapsed_override = elapsed_override;
+        self.pending_stop_message = pending_stop_message;
     }
 
     pub fn reset_intro_timing(&mut self) {

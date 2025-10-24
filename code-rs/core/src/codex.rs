@@ -209,6 +209,7 @@ pub(crate) struct TurnContext {
     pub(crate) sandbox_policy: SandboxPolicy,
     pub(crate) shell_environment_policy: ShellEnvironmentPolicy,
     pub(crate) is_review_mode: bool,
+    pub(crate) text_format_override: Option<TextFormat>,
 }
 
 /// Gather ephemeral, per-turn context that should not be persisted to history.
@@ -536,7 +537,7 @@ use crate::apply_patch::convert_apply_patch_to_protocol;
 use crate::apply_patch::get_writable_roots;
 use crate::apply_patch::{self, ApplyPatchResult};
 use crate::client::ModelClient;
-use crate::client_common::{Prompt, ResponseEvent, REVIEW_PROMPT};
+use crate::client_common::{Prompt, ResponseEvent, TextFormat, REVIEW_PROMPT};
 use crate::environment_context::EnvironmentContext;
 use crate::user_instructions::UserInstructions;
 use crate::config::{persist_model_selection, Config};
@@ -990,6 +991,7 @@ pub(crate) struct Session {
     validation: Arc<RwLock<crate::config_types::ValidationConfig>>,
     self_handle: Weak<Session>,
     active_review: Mutex<Option<ReviewRequest>>,
+    next_turn_text_format: Mutex<Option<TextFormat>>,
 }
 
 struct HookGuard<'a> {
@@ -1516,6 +1518,7 @@ impl Session {
             sandbox_policy: self.sandbox_policy.clone(),
             shell_environment_policy: self.shell_environment_policy.clone(),
             is_review_mode: false,
+            text_format_override: self.next_turn_text_format.lock().unwrap().take(),
         })
     }
 
@@ -3524,6 +3527,7 @@ async fn submission_loop(
                     validation: Arc::new(RwLock::new(config.validation.clone())),
                     self_handle: Weak::new(),
                     active_review: Mutex::new(None),
+                    next_turn_text_format: Mutex::new(None),
                 });
                 let weak_handle = Arc::downgrade(&new_session);
                 if let Some(inner) = Arc::get_mut(&mut new_session) {
@@ -3864,6 +3868,16 @@ async fn submission_loop(
                 let sub_id = sub.id.clone();
                 spawn_review_thread(sess, config, sub_id, review_request).await;
             }
+            Op::SetNextTextFormat { format } => {
+                let sess_arc = match sess.as_ref() {
+                    Some(sess) => Arc::clone(sess),
+                    None => {
+                        send_no_session_event(sub.id).await;
+                        continue;
+                    }
+                };
+                *sess_arc.next_turn_text_format.lock().unwrap() = Some(format);
+            }
             Op::Shutdown => {
                 info!("Shutting down Codex instance");
 
@@ -3981,6 +3995,7 @@ async fn spawn_review_thread(
         sandbox_policy: parent_turn_context.sandbox_policy.clone(),
         shell_environment_policy: parent_turn_context.shell_environment_policy.clone(),
         is_review_mode: true,
+        text_format_override: None,
     });
 
     let review_prompt_text = format!(
@@ -4506,7 +4521,7 @@ async fn run_turn(
             status_items, // Include status items with this request
             base_instructions_override: tc.base_instructions.clone(),
             include_additional_instructions: true,
-            text_format: None,
+            text_format: tc.text_format_override.clone(),
             model_override: None,
             model_family_override: None,
             output_schema: None,
