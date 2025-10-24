@@ -13073,18 +13073,7 @@ fi\n\
             if self.auto_state.active {
                 self.auto_stop(None);
             }
-            self.auto_state.reset();
-            self.auto_state.awaiting_goal_input = true;
-            self.clear_composer();
-            self.bottom_pane.ensure_input_focus();
-            let defaults = self.config.auto_drive.clone();
-            self.auto_state.review_enabled = defaults.review_enabled;
-            self.auto_state.subagents_enabled = defaults.agents_enabled;
-            self.auto_state.cross_check_enabled = defaults.cross_check_enabled;
-            self.auto_state.qa_automation_enabled = defaults.qa_automation_enabled;
-            self.auto_state.continue_mode = auto_continue_from_config(defaults.continue_mode);
-            self.auto_state.reset_countdown();
-            self.auto_state.mark_intro_pending();
+            self.reset_auto_state_to_defaults();
             self.auto_show_goal_entry_panel();
             self.request_redraw();
             return;
