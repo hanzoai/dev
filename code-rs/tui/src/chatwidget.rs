@@ -10943,7 +10943,7 @@ impl ChatWidget<'_> {
                     self.history_push_plain_state(state);
                 }
                 if self.auto_state.is_active() {
-                    self.auto_state.waiting_for_review = true;
+                    self.auto_state.on_begin_review(false);
                     self.auto_rebuild_live_ring();
                 }
                 self.request_redraw();
@@ -13223,14 +13223,14 @@ fi\n\
         let Some(handle) = self.auto_handle.as_ref() else {
             return;
         };
-        if handle
-            .send(AutoCoordinatorCommand::UpdateConversation(conversation))
-            .is_err()
-        {
-            self.auto_stop(Some("Coordinator stopped unexpectedly.".to_string()));
-        } else {
-            self.auto_state.waiting_for_response = true;
-            self.auto_state.coordinator_waiting = true;
+       if handle
+           .send(AutoCoordinatorCommand::UpdateConversation(conversation))
+           .is_err()
+       {
+           self.auto_stop(Some("Coordinator stopped unexpectedly.".to_string()));
+       } else {
+            self.auto_state.set_waiting_for_response(true);
+            self.auto_state.set_coordinator_waiting(true);
             self.auto_state.current_summary = None;
             self.auto_state.current_progress_past = None;
             self.auto_state.current_progress_current = None;
@@ -13454,7 +13454,7 @@ fi\n\
 
         if !matches!(status, AutoCoordinatorStatus::Failed) {
             self.auto_state.transient_restart_attempts = 0;
-            self.auto_state.waiting_for_transient_recovery = false;
+           self.auto_state.waiting_for_transient_recovery = false;
             self.auto_state.pending_restart = None;
         }
 
@@ -13739,7 +13739,7 @@ Have we met every part of this goal and is there no further work to do?"#
                 "Auto Drive restart skipped because the goal is no longer available.".to_string(),
             );
             self.auto_state.pending_restart = None;
-            self.auto_state.waiting_for_transient_recovery = false;
+            self.auto_state.on_recovery_attempt();
             self.auto_stop(Some("Auto Drive restart aborted.".to_string()));
             return;
         };
@@ -13754,7 +13754,7 @@ Have we met every part of this goal and is there no further work to do?"#
         let qa_automation_enabled = self.auto_state.qa_automation_enabled;
 
         self.auto_state.pending_restart = None;
-        self.auto_state.waiting_for_transient_recovery = false;
+        self.auto_state.on_recovery_attempt();
         self.auto_state.restart_token = token;
 
         if restart.reason.is_empty() {
@@ -14154,11 +14154,7 @@ use crate::chatwidget::message::UserMessage;
         if !self.auto_state.active || !self.auto_state.waiting_for_response {
             return;
         }
-        self.auto_state.waiting_for_response = false;
-        self.auto_state.coordinator_waiting = false;
-        self.auto_state.awaiting_submission = false;
-        self.auto_state.paused_for_manual_edit = false;
-        self.auto_state.resume_after_manual_submit = false;
+        self.auto_state.on_resume_from_manual();
         self.auto_state.reset_countdown();
         self.auto_state.current_summary = Some(String::new());
         self.auto_state.current_progress_past = None;
