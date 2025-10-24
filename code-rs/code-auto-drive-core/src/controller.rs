@@ -79,6 +79,12 @@ impl AutoRunPhase {
     }
 }
 
+impl Default for AutoRunPhase {
+    fn default() -> Self {
+        Self::Idle
+    }
+}
+
 #[derive(Debug, Clone)]
 pub struct AutoRunSummary {
     pub duration: Duration,
@@ -209,6 +215,7 @@ pub struct AutoDriveController {
     pub intro_pending: bool,
     pub elapsed_override: Option<Duration>,
     pub phase: AutoRunPhase,
+    pub bypass_coordinator_next_submit: bool,
 }
 
 impl AutoDriveController {
@@ -238,6 +245,7 @@ impl AutoDriveController {
         self.goal = Some(goal);
         self.awaiting_goal_input = false;
         self.phase = AutoRunPhase::Launching;
+        self.bypass_coordinator_next_submit = false;
     }
 
     pub fn launch_succeeded(
@@ -269,6 +277,7 @@ impl AutoDriveController {
         self.coordinator_waiting = true;
         self.reset_countdown();
         self.phase = AutoRunPhase::Active;
+        self.bypass_coordinator_next_submit = false;
 
         vec![
             AutoControllerEffect::LaunchStarted { goal },
@@ -283,6 +292,7 @@ impl AutoDriveController {
         self.mark_intro_pending();
         self.reset_countdown();
         self.phase = AutoRunPhase::Idle;
+        self.bypass_coordinator_next_submit = false;
 
         vec![
             AutoControllerEffect::LaunchFailed { goal, error },
@@ -311,6 +321,7 @@ impl AutoDriveController {
         self.last_run_summary = Some(summary.clone());
         self.awaiting_goal_input = true;
         self.phase = AutoRunPhase::Idle;
+        self.bypass_coordinator_next_submit = false;
 
         vec![
             AutoControllerEffect::CancelCoordinator,
@@ -343,6 +354,7 @@ impl AutoDriveController {
         self.pending_agent_actions.clear();
         self.pending_agent_timing = None;
         self.phase = AutoRunPhase::TransientRecovery;
+        self.bypass_coordinator_next_submit = false;
 
         if pending_attempt > AUTO_RESTART_MAX_ATTEMPTS {
             self.transient_restart_attempts = pending_attempt;
@@ -506,6 +518,9 @@ impl AutoDriveController {
         } else {
             AutoRunPhase::Idle
         };
+        if self.phase != AutoRunPhase::PausedManual {
+            self.bypass_coordinator_next_submit = false;
+        }
     }
 
     pub fn reset_intro_timing(&mut self) {
@@ -548,6 +563,33 @@ impl AutoDriveController {
 
     pub fn reset_countdown(&mut self) {
         self.seconds_remaining = self.countdown_seconds().unwrap_or(0);
+    }
+
+    pub fn set_phase(&mut self, phase: AutoRunPhase) {
+        self.phase = phase;
+        if phase != AutoRunPhase::PausedManual {
+            self.bypass_coordinator_next_submit = false;
+        }
+    }
+
+    pub fn is_auto_active(&self) -> bool {
+        self.phase.is_active()
+    }
+
+    pub fn current_phase(&self) -> AutoRunPhase {
+        self.phase
+    }
+
+    pub fn set_bypass_coordinator_next_submit(&mut self) {
+        self.bypass_coordinator_next_submit = true;
+    }
+
+    pub fn should_bypass_coordinator_next_submit(&self) -> bool {
+        self.bypass_coordinator_next_submit
+    }
+
+    pub fn clear_bypass_coordinator_flag(&mut self) {
+        self.bypass_coordinator_next_submit = false;
     }
 
     fn auto_restart_delay(attempt: u32) -> Duration {
