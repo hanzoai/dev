@@ -316,7 +316,7 @@ pub(crate) fn explore_lines_from_record_with_force(
     for (display_idx, entry_idx) in visible_indices.iter().enumerate() {
         if truncated && display_idx == HEAD_ENTRIES {
             lines.push(Line::styled(
-                "⋮",
+                "  ⋮",
                 Style::default().add_modifier(Modifier::DIM),
             ));
         }
