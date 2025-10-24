@@ -118,6 +118,7 @@ use self::history_render::{
     CachedLayout, HistoryRenderState, RenderRequest, RenderRequestKind, RenderSettings, VisibleCell,
 };
 use code_core::parse_command::ParsedCommand;
+use code_core::TextFormat;
 use code_core::protocol::AgentMessageDeltaEvent;
 use code_core::protocol::ApprovedCommandMatchKind;
 use code_core::protocol::AskForApproval;
@@ -853,6 +854,10 @@ pub(crate) struct ChatWidget<'a> {
     perf_state: PerfState,
     // Current session id (from SessionConfigured)
     session_id: Option<uuid::Uuid>,
+
+    // Pending diagnostics integration
+    awaiting_diagnostics: bool,
+    next_cli_text_format: Option<TextFormat>,
 
     // Pending jump-back state (reversible until submit)
 
@@ -3952,6 +3957,8 @@ impl ChatWidget<'_> {
             cloud_task_apply_tickets: HashMap::new(),
             cloud_task_create_ticket: None,
             browser_is_external: false,
+            awaiting_diagnostics: false,
+            next_cli_text_format: None,
             // Stable ordering & routing init
             cell_order_seq: vec![OrderKey {
                 req: 0,
@@ -4255,6 +4262,8 @@ impl ChatWidget<'_> {
             cloud_task_apply_tickets: HashMap::new(),
             cloud_task_create_ticket: None,
             browser_is_external: false,
+            awaiting_diagnostics: false,
+            next_cli_text_format: None,
             // Strict ordering init for forked widget
             cell_order_seq: vec![OrderKey {
                 req: 0,
@@ -13456,7 +13465,33 @@ fi\n\
                 } else {
                     format!("Coordinator success: {summary_text}")
                 };
-                self.auto_stop(Some(message));
+
+                let diagnostics_goal = self
+                    .auto_state
+                    .goal
+                    .as_deref()
+                    .unwrap_or("(goal unavailable)");
+
+                let prompt_text = format!(
+                    r#"Here was the original goal:
+{diagnostics_goal}
+
+Have we met every part of this goal and is there no further work to do?"#
+                );
+
+                let tf = TextFormat {
+                    r#type: "json_schema".to_string(),
+                    name: Some("auto_drive_diagnostics".to_string()),
+                    strict: Some(true),
+                    schema: Some(code_auto_drive_diagnostics::AutoDriveDiagnostics::completion_schema()),
+                };
+                self.submit_op(Op::SetNextTextFormat { format: tf.clone() });
+                self.next_cli_text_format = Some(tf);
+                self.awaiting_diagnostics = true;
+                self.auto_state.pending_stop_message = Some(message);
+                self.push_background_tail("Auto Drive Diagnostics: Validating progress".to_string());
+                self.schedule_auto_cli_prompt(prompt_text);
+                self.auto_submit_prompt();
                 return;
             }
             AutoCoordinatorStatus::Failed => {
@@ -13962,6 +13997,9 @@ fi\n\
 use crate::chatwidget::message::UserMessage;
         let mut message: UserMessage = full_prompt.into();
         message.suppress_persistence = true;
+        if self.awaiting_diagnostics {
+            message.display_text.clear();
+        }
         self.submit_user_message(message);
         self.auto_state.pending_agent_actions.clear();
         self.auto_state.pending_agent_timing = None;
@@ -14086,6 +14124,8 @@ use crate::chatwidget::message::UserMessage;
     }
 
     fn auto_stop(&mut self, message: Option<String>) {
+        self.awaiting_diagnostics = false;
+        self.next_cli_text_format = None;
         let effects = self
             .auto_state
             .stop_run(Instant::now(), message);
@@ -18161,6 +18201,64 @@ use crate::chatwidget::message::UserMessage;
         );
         tracing::info!("[order] final Answer id={:?}", id);
         let final_source = source.clone();
+        if self.awaiting_diagnostics {
+            self.awaiting_diagnostics = false;
+            match serde_json::from_str::<code_auto_drive_diagnostics::CompletionCheck>(&final_source)
+            {
+                Ok(check) => {
+                    if check.complete {
+                        let pending = self.auto_state.pending_stop_message.take();
+                        if let Some(idx) = self.history_cells.iter().rposition(|c| {
+                            c.as_any()
+                                .downcast_ref::<history_cell::StreamingContentCell>()
+                                .and_then(|sc| sc.id.as_ref())
+                                .map(|existing| Some(existing.as_str()) == id.as_deref())
+                                .unwrap_or(false)
+                        }) {
+                            self.history_remove_at(idx);
+                        }
+                        if let Some(ref stream_id) = id {
+                            let _ = self.history_state.finalize_assistant_stream_state(
+                                Some(stream_id.as_str()),
+                                String::new(),
+                                None,
+                                None,
+                            );
+                            self.stream_state
+                                .closed_answer_ids
+                                .insert(StreamId(stream_id.clone()));
+                        }
+                        self.auto_stop(pending);
+                        return;
+                    } else {
+                        let goal = self
+                            .auto_state
+                            .goal
+                            .as_deref()
+                            .unwrap_or("(goal unavailable)");
+                        let follow_up = format!(
+                            "The primary goal has not been met. Please continue working on this.\nPrimary Goal: {goal}\nExplanation: {explanation}",
+                            explanation = check.explanation
+                        );
+                        let conversation = self.rebuild_auto_history();
+                        if !self.auto_send_user_prompt_to_coordinator(follow_up, conversation) {
+                            self.auto_stop(Some(
+                                "Coordinator stopped unexpectedly while scheduling diagnostics follow-up.".to_string(),
+                            ));
+                        }
+                        return;
+                    }
+                }
+                Err(err) => {
+                    tracing::warn!(
+                        "failed to parse diagnostics completion check: {}",
+                        err
+                    );
+                    let pending = self.auto_state.pending_stop_message.take();
+                    self.auto_stop(pending);
+                }
+            }
+        }
         if self.is_review_flow_active() {
             if let Some(ref want) = id {
                 if !self
@@ -21934,6 +22032,7 @@ mod tests {
         let turn_config = TurnConfig {
             read_only: false,
             complexity: Some(TurnComplexity::Low),
+            text_format_override: None,
         };
         chat.pending_auto_turn_config = Some(turn_config.clone());
         chat.pending_turn_descriptor = Some(TurnDescriptor {
@@ -21942,6 +22041,7 @@ mod tests {
             complexity: Some(TurnComplexity::Low),
             agent_preferences: None,
             review_strategy: None,
+            text_format_override: None,
         });
 
         let base_id = "base-commit".to_string();
@@ -22013,6 +22113,7 @@ mod tests {
         let turn_config = TurnConfig {
             read_only: false,
             complexity: Some(TurnComplexity::Low),
+            text_format_override: None,
         };
         chat.pending_auto_turn_config = Some(turn_config.clone());
         chat.pending_turn_descriptor = Some(TurnDescriptor {
@@ -22021,6 +22122,7 @@ mod tests {
             complexity: Some(TurnComplexity::Low),
             agent_preferences: None,
             review_strategy: None,
+            text_format_override: None,
         });
 
         let base_id = "base-commit".to_string();
@@ -22276,6 +22378,7 @@ mod tests {
         let turn_config = TurnConfig {
             read_only: false,
             complexity: Some(TurnComplexity::Low),
+            text_format_override: None,
         };
         chat.pending_auto_turn_config = Some(turn_config.clone());
         chat.pending_turn_descriptor = Some(TurnDescriptor {
@@ -22284,6 +22387,7 @@ mod tests {
             complexity: Some(TurnComplexity::Low),
             agent_preferences: None,
             review_strategy: None,
+            text_format_override: None,
         });
 
         let base_id = "base-commit".to_string();
