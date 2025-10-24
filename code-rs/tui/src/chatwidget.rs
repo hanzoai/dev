@@ -9217,10 +9217,7 @@ impl ChatWidget<'_> {
         }
 
         if self.auto_state.is_active() && self.auto_state.resume_after_submit() {
-            self.auto_state.waiting_for_response = true;
-            self.auto_state.resume_after_manual_submit = false;
-            self.auto_state.paused_for_manual_edit = false;
-            self.auto_state.awaiting_submission = false;
+            self.auto_state.on_prompt_submitted();
             self.auto_state.seconds_remaining = 0;
             self.auto_rebuild_live_ring();
             self.bottom_pane.update_status_text(String::new());
@@ -13218,7 +13215,7 @@ fi\n\
         if !self.auto_state.is_active() || self.auto_state.waiting_for_response {
             return;
         }
-        self.auto_state.waiting_for_review = false;
+        self.auto_state.on_complete_review();
         if !self.auto_state.is_paused_manual() {
             self.auto_state.clear_bypass_coordinator_flag();
         }
@@ -13406,10 +13403,7 @@ fi\n\
         self.auto_state.last_decision_display = self.auto_state.current_display_line.clone();
         self.auto_state.last_decision_display_is_summary =
             self.auto_state.current_display_is_summary;
-        self.auto_state.paused_for_manual_edit = false;
-        self.auto_state.resume_after_manual_submit = false;
-        self.auto_state.awaiting_submission = false;
-        self.auto_state.waiting_for_response = false;
+            self.auto_state.on_resume_from_manual();
 
         self.pending_turn_descriptor = None;
         self.pending_auto_turn_config = None;
@@ -13987,13 +13981,8 @@ Have we met every part of this goal and is there no further work to do?"#
             return;
         };
 
-        self.auto_state.awaiting_submission = false;
-        self.auto_state.waiting_for_response = true;
-        self.auto_state.coordinator_waiting = false;
-        self.auto_state.paused_for_manual_edit = false;
-        self.auto_state.resume_after_manual_submit = false;
+        self.auto_state.on_prompt_submitted();
         self.auto_state.clear_bypass_coordinator_flag();
-        self.auto_state.set_phase(AutoRunPhase::Active);
         self.auto_state.seconds_remaining = 0;
         let post_submit_display = self.auto_state.last_decision_display.clone();
         self.auto_state.current_summary = None;
@@ -14050,8 +14039,7 @@ use crate::chatwidget::message::UserMessage;
             .build_auto_turn_message(&prompt_text)
             .unwrap_or_else(|| prompt_text.clone());
 
-        self.auto_state
-            .set_phase(AutoRunPhase::PausedManual { resume_after_submit: true });
+        self.auto_state.on_pause_for_manual(true);
         self.auto_state.set_bypass_coordinator_next_submit();
         self.auto_state.countdown_id = self.auto_state.countdown_id.wrapping_add(1);
         self.auto_state.reset_countdown();
@@ -14187,7 +14175,11 @@ use crate::chatwidget::message::UserMessage;
                     .as_ref()
                     .is_some_and(|cfg| !cfg.read_only));
 
-        self.auto_state.waiting_for_review = review_pending || auto_resolve_blocking;
+        if review_pending || auto_resolve_blocking {
+            self.auto_state.on_begin_review(false);
+        } else {
+            self.auto_state.on_complete_review();
+        }
         self.auto_rebuild_live_ring();
         self.request_redraw();
         self.rebuild_auto_history();
