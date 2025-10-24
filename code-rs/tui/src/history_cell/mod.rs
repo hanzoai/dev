@@ -72,8 +72,9 @@ use tracing::error;
 
 mod assistant;
 mod animated;
-mod card_style;
+mod auto_drive_previews;
 mod background;
+mod card_style;
 mod exec;
 mod diff;
 mod explore;
@@ -98,6 +99,7 @@ pub(crate) use assistant::{
     AssistantMarkdownCell,
 };
 pub(crate) use animated::AnimatedWelcomeCell;
+pub(crate) use auto_drive_previews::auto_drive_preview_cells;
 pub(crate) use background::BackgroundEventCell;
 pub(crate) use exec::{
     display_lines_from_record as exec_display_lines_from_record,
