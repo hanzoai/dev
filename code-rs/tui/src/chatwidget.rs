@@ -4762,8 +4762,8 @@ impl ChatWidget<'_> {
             self.bottom_pane.clear_ctrl_c_quit_hint();
         }
 
-        if self.auto_state.awaiting_submission
-            && !self.auto_state.paused_for_manual_edit
+        if self.auto_state.awaiting_coordinator_submit()
+            && !self.auto_state.is_paused_manual()
             && matches!(key_event.kind, KeyEventKind::Press | KeyEventKind::Repeat)
         {
             match key_event.code {
@@ -13730,7 +13730,7 @@ Have we met every part of this goal and is there no further work to do?"#
     }
 
     pub(crate) fn auto_handle_restart(&mut self, token: u64, attempt: u32) {
-        if !self.auto_state.active || !self.auto_state.waiting_for_transient_recovery {
+        if !self.auto_state.is_active() || !self.auto_state.in_transient_recovery() {
             return;
         }
         let Some(restart) = self.auto_state.pending_restart.clone() else {
@@ -13799,7 +13799,7 @@ Have we met every part of this goal and is there no further work to do?"#
     }
 
     pub(crate) fn auto_handle_thinking(&mut self, delta: String, summary_index: Option<u32>) {
-        if !self.auto_state.active {
+        if !self.auto_state.is_active() {
             return;
         }
         self.auto_on_reasoning_delta(&delta, summary_index);
@@ -13899,7 +13899,7 @@ Have we met every part of this goal and is there no further work to do?"#
     }
 
     fn prepare_auto_turn_review_state(&mut self) {
-        if !self.auto_state.active || !self.auto_state.review_enabled {
+        if !self.auto_state.is_active() || !self.auto_state.review_enabled {
             self.auto_turn_review_state = None;
             return;
         }
@@ -14050,8 +14050,6 @@ use crate::chatwidget::message::UserMessage;
             .build_auto_turn_message(&prompt_text)
             .unwrap_or_else(|| prompt_text.clone());
 
-        self.auto_state.paused_for_manual_edit = true;
-        self.auto_state.resume_after_manual_submit = true;
         self.auto_state
             .set_phase(AutoRunPhase::PausedManual { resume_after_submit: true });
         self.auto_state.set_bypass_coordinator_next_submit();
@@ -14409,7 +14407,7 @@ use crate::chatwidget::message::UserMessage;
 
         let headline = self.auto_format_status_headline(&status_text);
         let mut status_lines = vec![headline];
-        if !self.auto_state.waiting_for_review {
+        if !self.auto_state.awaiting_review() {
             self.auto_append_progress_lines(
                 &mut status_lines,
                 self.auto_state.current_progress_current.as_ref(),
@@ -14445,7 +14443,7 @@ use crate::chatwidget::message::UserMessage;
             }
         }
         let cli_running = self.is_cli_running();
-        let progress_hint_active = self.auto_state.awaiting_submission
+        let progress_hint_active = self.auto_state.awaiting_coordinator_submit()
             || (self.auto_state.waiting_for_response && !self.auto_state.coordinator_waiting)
             || cli_running;
 
@@ -14483,7 +14481,7 @@ use crate::chatwidget::message::UserMessage;
 
         let countdown_limit = self.auto_state.countdown_seconds();
         let countdown_active = self.auto_state.countdown_active();
-        let countdown = if self.auto_state.awaiting_submission {
+        let countdown = if self.auto_state.awaiting_coordinator_submit() {
             match countdown_limit {
                 Some(limit) if limit > 0 => Some(CountdownState {
                     remaining: self.auto_state.seconds_remaining.min(limit),
@@ -14494,7 +14492,7 @@ use crate::chatwidget::message::UserMessage;
             None
         };
 
-        let button = if self.auto_state.awaiting_submission {
+        let button = if self.auto_state.awaiting_coordinator_submit() {
             let label = if countdown_active {
                 format!("Send prompt ({}s)", self.auto_state.seconds_remaining)
             } else {
@@ -14508,8 +14506,8 @@ use crate::chatwidget::message::UserMessage;
             None
         };
 
-        let manual_hint = if self.auto_state.awaiting_submission {
-            if self.auto_state.paused_for_manual_edit {
+        let manual_hint = if self.auto_state.awaiting_coordinator_submit() {
+            if self.auto_state.is_paused_manual() {
                 Some("Edit the prompt, then press Enter to continue.".to_string())
             } else if countdown_active {
                 Some("Enter to send now • Esc to edit".to_string())
@@ -14520,8 +14518,8 @@ use crate::chatwidget::message::UserMessage;
             None
         };
 
-        let ctrl_switch_hint = if self.auto_state.awaiting_submission {
-            if self.auto_state.paused_for_manual_edit {
+        let ctrl_switch_hint = if self.auto_state.awaiting_coordinator_submit() {
+            if self.auto_state.is_paused_manual() {
                 "Esc to cancel".to_string()
             } else {
                 "Esc to edit".to_string()
@@ -14532,16 +14530,17 @@ use crate::chatwidget::message::UserMessage;
             String::new()
         };
 
-        let show_composer = !self.auto_state.awaiting_submission || self.auto_state.paused_for_manual_edit;
+        let show_composer =
+            !self.auto_state.awaiting_coordinator_submit() || self.auto_state.is_paused_manual();
 
         let model = AutoCoordinatorViewModel::Active(AutoActiveViewModel {
             goal: self.auto_state.goal.clone(),
             status_lines,
             cli_prompt,
-            awaiting_submission: self.auto_state.awaiting_submission,
+            awaiting_submission: self.auto_state.awaiting_coordinator_submit(),
             waiting_for_response: self.auto_state.waiting_for_response,
             coordinator_waiting: self.auto_state.coordinator_waiting,
-            waiting_for_review: self.auto_state.waiting_for_review,
+            waiting_for_review: self.auto_state.awaiting_review(),
             countdown,
             button,
             manual_hint,
@@ -14554,7 +14553,7 @@ use crate::chatwidget::message::UserMessage;
             progress_current: progress_current_for_view,
             cli_context,
             show_composer,
-            editing_prompt: self.auto_state.paused_for_manual_edit,
+            editing_prompt: self.auto_state.is_paused_manual(),
             intro_started_at: self.auto_state.intro_started_at,
             intro_reduced_motion: self.auto_state.intro_reduced_motion,
         });
@@ -17619,7 +17618,7 @@ use crate::chatwidget::message::UserMessage;
 
     pub(crate) fn auto_manual_entry_active(&self) -> bool {
         self.auto_state.awaiting_goal_input
-            || (self.auto_state.active && self.auto_state.awaiting_submission)
+            || (self.auto_state.is_active() && self.auto_state.awaiting_coordinator_submit())
     }
 
     pub(crate) fn describe_esc_context(&self) -> EscRoute {
@@ -17643,7 +17642,7 @@ use crate::chatwidget::message::UserMessage;
             return EscRoute::new(EscIntent::CloseFilePopup, false, false);
         }
 
-        if self.auto_state.active {
+        if self.auto_state.is_active() {
             if self.auto_state.countdown_active() {
                 return EscRoute::new(EscIntent::AutoPauseCountdown, true, false);
             }
@@ -17652,7 +17651,7 @@ use crate::chatwidget::message::UserMessage;
                 return EscRoute::new(EscIntent::CancelAgents, true, false);
             }
 
-            if self.auto_state.awaiting_submission {
+            if self.auto_state.awaiting_coordinator_submit() {
                 return EscRoute::new(EscIntent::AutoStopDuringApproval, true, false);
             }
 
