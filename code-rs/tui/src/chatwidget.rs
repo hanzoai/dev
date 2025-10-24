@@ -13970,7 +13970,7 @@ Have we met every part of this goal and is there no further work to do?"#
     }
 
     fn auto_submit_prompt(&mut self) {
-        if !self.auto_state.active {
+        if !self.auto_state.is_active() {
             return;
         }
         let Some(prompt) = self.auto_state.current_cli_prompt.clone() else {
@@ -14037,7 +14037,7 @@ use crate::chatwidget::message::UserMessage;
     }
 
     fn auto_pause_for_manual_edit(&mut self) {
-        if !self.auto_state.active || !self.auto_state.awaiting_submission {
+        if !self.auto_state.is_active() || !self.auto_state.awaiting_coordinator_submit() {
             return;
         }
 
