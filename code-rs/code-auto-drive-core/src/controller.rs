@@ -257,6 +257,62 @@ pub struct AutoDriveController {
 }
 
 impl AutoDriveController {
+    pub fn set_waiting_for_response(&mut self, waiting: bool) {
+        self.waiting_for_response = waiting;
+    }
+
+    pub fn set_coordinator_waiting(&mut self, waiting: bool) {
+        self.coordinator_waiting = waiting;
+    }
+
+    pub fn on_prompt_submitted(&mut self) {
+        self.awaiting_submission = false;
+        self.waiting_for_response = true;
+        self.coordinator_waiting = false;
+        self.paused_for_manual_edit = false;
+        self.resume_after_manual_submit = false;
+        self.phase = AutoRunPhase::Active;
+    }
+
+    pub fn on_pause_for_manual(&mut self, resume_after_submit: bool) {
+        self.paused_for_manual_edit = true;
+        self.resume_after_manual_submit = resume_after_submit;
+        self.phase = AutoRunPhase::PausedManual { resume_after_submit };
+    }
+
+    pub fn on_resume_from_manual(&mut self) {
+        self.paused_for_manual_edit = false;
+        self.resume_after_manual_submit = false;
+        self.phase = AutoRunPhase::Active;
+        self.bypass_coordinator_next_submit = false;
+    }
+
+    pub fn on_begin_review(&mut self, diagnostics_pending: bool) {
+        self.waiting_for_review = true;
+        self.phase = AutoRunPhase::AwaitingReview { diagnostics_pending };
+    }
+
+    pub fn on_complete_review(&mut self) {
+        self.waiting_for_review = false;
+        self.phase = AutoRunPhase::Active;
+        self.bypass_coordinator_next_submit = false;
+    }
+
+    pub fn on_transient_failure(&mut self, backoff_ms: u64) {
+        self.waiting_for_transient_recovery = true;
+        self.waiting_for_response = false;
+        self.coordinator_waiting = false;
+        self.awaiting_submission = false;
+        self.paused_for_manual_edit = false;
+        self.resume_after_manual_submit = false;
+        self.phase = AutoRunPhase::TransientRecovery { backoff_ms };
+        self.bypass_coordinator_next_submit = false;
+    }
+
+    pub fn on_recovery_attempt(&mut self) {
+        self.waiting_for_transient_recovery = false;
+    }
+
     pub fn transition(&mut self, transition: PhaseTransition) -> TransitionEffects {
         let old_phase = self.phase.clone();
         let effects = Vec::new();
