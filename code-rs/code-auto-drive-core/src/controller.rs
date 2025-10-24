@@ -265,6 +265,13 @@ impl AutoDriveController {
         self.coordinator_waiting = waiting;
     }
 
+    pub fn on_prompt_ready(&mut self, prompt_ready: bool) {
+        self.awaiting_submission = true;
+        self.coordinator_waiting = true;
+        self.waiting_for_response = false;
+        self.phase = AutoRunPhase::AwaitingCoordinator { prompt_ready };
+    }
+
     pub fn on_prompt_submitted(&mut self) {
         self.awaiting_submission = false;
         self.waiting_for_response = true;

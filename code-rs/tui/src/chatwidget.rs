@@ -21878,7 +21878,7 @@ mod tests {
         let chat = harness.chat();
 
         chat.auto_state.active = true;
-        chat.auto_state.waiting_for_review = true;
+        chat.auto_state.on_begin_review(false);
 
         let route = chat.describe_esc_context();
         assert_eq!(route.intent, EscIntent::AutoStopActive);
@@ -22021,7 +22021,7 @@ mod tests {
         chat.auto_state.active = true;
         chat.auto_state.waiting_for_response = true;
         chat.auto_state.review_enabled = true;
-        chat.auto_state.waiting_for_review = false;
+        chat.auto_state.on_complete_review();
         chat.pending_turn_descriptor = None;
         chat.pending_auto_turn_config = None;
         chat.auto_resolve_state = Some(make_pending_fix_state(ReviewOutputEvent::default()));
@@ -22048,7 +22048,7 @@ mod tests {
         chat.auto_state.active = true;
         chat.auto_state.review_enabled = true;
         chat.auto_state.waiting_for_response = true;
-        chat.auto_state.waiting_for_review = false;
+        chat.auto_state.on_complete_review();
 
         let turn_config = TurnConfig {
             read_only: false,
@@ -22129,7 +22129,7 @@ mod tests {
         chat.auto_state.active = true;
         chat.auto_state.review_enabled = true;
         chat.auto_state.waiting_for_response = true;
-        chat.auto_state.waiting_for_review = false;
+        chat.auto_state.on_complete_review();
 
         let turn_config = TurnConfig {
             read_only: false,

@@ -316,15 +316,14 @@ impl ChatWidgetHarness {
             chat.auto_state.reset_countdown();
             let started_at = Instant::now() - Duration::from_secs(1);
             chat.auto_state.started_at = Some(started_at);
-            chat.auto_state.waiting_for_response = true;
-            chat.auto_state.coordinator_waiting = true;
+            chat.auto_state.on_prompt_submitted();
+            chat.auto_state.set_coordinator_waiting(true);
             chat.auto_state.placeholder_phrase = Some(placeholder);
             chat.auto_state.current_display_line = None;
             chat.auto_state.current_progress_current = None;
             chat.auto_state.current_progress_past = None;
             chat.auto_state.current_cli_prompt = None;
-            chat.auto_state.awaiting_submission = false;
-            chat.auto_state.waiting_for_review = false;
+            chat.auto_state.on_complete_review();
             chat.auto_state.last_run_summary = None;
             chat.auto_state.last_decision_summary = None;
             chat.auto_state.last_decision_progress_past = None;
@@ -347,10 +346,9 @@ impl ChatWidgetHarness {
     ) {
         {
             let chat = self.chat();
-            chat.auto_state.awaiting_submission = false;
-            chat.auto_state.waiting_for_review = false;
-            chat.auto_state.waiting_for_response = true;
-            chat.auto_state.coordinator_waiting = false;
+            chat.auto_state.on_complete_review();
+            chat.auto_state.on_prompt_submitted();
+            chat.auto_state.set_coordinator_waiting(false);
             chat.auto_state.current_display_line = Some(display.into());
             chat.auto_state.current_display_is_summary = false;
             chat.auto_state.placeholder_phrase = None;
@@ -393,11 +391,10 @@ impl ChatWidgetHarness {
     pub fn auto_drive_simulate_cli_submission(&mut self) {
         {
             let chat = self.chat();
-            chat.auto_state.awaiting_submission = false;
+            chat.auto_state.on_prompt_submitted();
+            chat.auto_state.set_coordinator_waiting(false);
             chat.auto_state.current_progress_current = None;
             chat.auto_state.current_progress_past = None;
-            chat.auto_state.waiting_for_response = true;
-            chat.auto_state.coordinator_waiting = false;
             chat.refresh_auto_drive_visuals();
             chat.request_redraw();
         }
@@ -412,10 +409,10 @@ impl ChatWidgetHarness {
     ) {
         {
             let chat = self.chat();
-            chat.auto_state.awaiting_submission = true;
-            chat.auto_state.waiting_for_response = false;
-            chat.auto_state.waiting_for_review = false;
-            chat.auto_state.coordinator_waiting = false;
+            chat.auto_state.on_prompt_ready(true);
+            chat.auto_state.set_waiting_for_response(false);
+            chat.auto_state.set_coordinator_waiting(false);
+            chat.auto_state.on_complete_review();
             chat.auto_state.current_cli_prompt = Some(cli_prompt.into());
             chat.auto_state.current_display_line = Some(headline.into());
             chat.auto_state.current_display_is_summary = summary.is_some();
@@ -463,9 +460,8 @@ impl ChatWidgetHarness {
                     let _ = chat.auto_handle_countdown(chat.auto_state.countdown_id, 0);
                 }
                 if countdown == Some(0) {
-                    chat.auto_state.awaiting_submission = false;
-                    chat.auto_state.waiting_for_response = true;
-                    chat.auto_state.coordinator_waiting = false;
+                    chat.auto_state.on_prompt_submitted();
+                    chat.auto_state.set_coordinator_waiting(false);
                     chat.auto_state.seconds_remaining = 0;
                 }
             }
@@ -489,10 +485,9 @@ impl ChatWidgetHarness {
     pub fn auto_drive_set_waiting_for_review(&mut self, summary: Option<String>) {
         {
             let chat = self.chat();
-            chat.auto_state.awaiting_submission = false;
-            chat.auto_state.waiting_for_response = false;
-            chat.auto_state.waiting_for_review = true;
-            chat.auto_state.coordinator_waiting = false;
+            chat.auto_state.on_prompt_submitted();
+            chat.auto_state.on_begin_review(summary.is_some());
+            chat.auto_state.set_coordinator_waiting(false);
             if let Some(text) = summary {
                 chat.auto_state.current_summary = Some(text.clone());
                 chat.auto_state.current_display_line = Some(text);
