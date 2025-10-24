@@ -7406,7 +7406,10 @@ impl ChatWidget<'_> {
         if !self.auto_state.is_auto_active() {
             return None;
         }
-        if self.auto_state.current_phase() == AutoRunPhase::PausedManual
+        if matches!(
+            self.auto_state.current_phase(),
+            AutoRunPhase::PausedManual { .. }
+        )
             && self.auto_state.should_bypass_coordinator_next_submit()
         {
             return None;
@@ -7496,8 +7499,10 @@ impl ChatWidget<'_> {
             .auto_state
             .paused_for_manual_edit
             && self.auto_state.resume_after_manual_submit;
-        let manual_override_active =
-            self.auto_state.current_phase() == AutoRunPhase::PausedManual;
+        let manual_override_active = matches!(
+            self.auto_state.current_phase(),
+            AutoRunPhase::PausedManual { .. }
+        );
 
         let should_route_through_coordinator = !message.suppress_persistence
             && !original_text.trim().starts_with('/')
@@ -13222,7 +13227,10 @@ fi\n\
             return;
         }
         self.auto_state.waiting_for_review = false;
-        if self.auto_state.current_phase() != AutoRunPhase::PausedManual {
+        if !matches!(
+            self.auto_state.current_phase(),
+            AutoRunPhase::PausedManual { .. }
+        ) {
             self.auto_state.clear_bypass_coordinator_flag();
         }
         let conversation = self.current_auto_history();
@@ -13259,7 +13267,10 @@ fi\n\
         if !self.auto_state.active {
             return;
         }
-        if self.auto_state.current_phase() != AutoRunPhase::PausedManual {
+        if !matches!(
+            self.auto_state.current_phase(),
+            AutoRunPhase::PausedManual { .. }
+        ) {
             self.auto_state.clear_bypass_coordinator_flag();
         }
         let conversation = self.current_auto_history();
@@ -13600,7 +13611,10 @@ Have we met every part of this goal and is there no further work to do?"#
                 }
                 AutoControllerEffect::SubmitPrompt => {
                     if self.auto_state.should_bypass_coordinator_next_submit()
-                        && self.auto_state.current_phase() == AutoRunPhase::PausedManual
+                        && matches!(
+                            self.auto_state.current_phase(),
+                            AutoRunPhase::PausedManual { .. }
+                        )
                     {
                         self.auto_state.clear_bypass_coordinator_flag();
                         self.auto_state.set_phase(AutoRunPhase::Active);
@@ -14055,7 +14069,8 @@ use crate::chatwidget::message::UserMessage;
 
         self.auto_state.paused_for_manual_edit = true;
         self.auto_state.resume_after_manual_submit = true;
-        self.auto_state.set_phase(AutoRunPhase::PausedManual);
+        self.auto_state
+            .set_phase(AutoRunPhase::PausedManual { resume_after_submit: true });
         self.auto_state.set_bypass_coordinator_next_submit();
         self.auto_state.countdown_id = self.auto_state.countdown_id.wrapping_add(1);
         self.auto_state.reset_countdown();

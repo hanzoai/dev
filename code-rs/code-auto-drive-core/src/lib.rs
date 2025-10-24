@@ -35,6 +35,8 @@ pub use controller::{
     AutoRestartState,
     AutoRunSummary,
     AutoTurnReviewState,
+    PhaseTransition,
+    TransitionEffects,
     AUTO_RESTART_BASE_DELAY,
     AUTO_RESTART_MAX_ATTEMPTS,
     AUTO_RESTART_MAX_DELAY,
