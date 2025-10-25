@@ -106,7 +106,7 @@ Each entry below lists read vs. write occurrences (line numbers and snippets). C
 - `waiting_for_response && !coordinator_waiting` — drives “model is thinking” messaging and hides coordinator countdown. (`chatwidget.rs:14403`)
 - `awaiting_submission && !paused_for_manual_edit` — determines when countdown and auto-submit button should be live. (`controller.rs:678`, `chatwidget.rs:14501`)
 - `active && waiting_for_review` — blocks manual resume until review flow resolves. (`chatwidget.rs:22093`)
-- `is_paused_manual() && should_bypass_coordinator_next_submit()` — keeps manual edit overlay while skipping coordinator prompt; both flags piggyback on phase + legacy boolean. (`chatwidget.rs:14045` vicinity)
+- `is_paused_manual() && should_bypass_coordinator_next_submit()` — keeps manual edit overlay while skipping coordinator prompt; helper now derives directly from `AutoRunPhase::PausedManual { bypass_next_submit }`. (`chatwidget.rs:14045` vicinity)
 - `in_transient_recovery() && waiting_for_transient_recovery` — redundant gating around restart timer, still split between phase helper and boolean. (`controller.rs:850`)
 
 These combinations highlight where the new `AutoRunPhase` variants must carry the data currently modeled via multiple booleans, allowing legacy mirrors to be dropped once consumers migrate.

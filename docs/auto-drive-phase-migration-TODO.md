@@ -3,9 +3,10 @@
 ## Phase Invariants Snapshot
 
 - `Idle` — Auto Drive inactive; no pending coordinator/diagnostics/review; countdown cleared.
+- `AwaitingGoalEntry` — Auto Drive inactive; goal entry composer visible; legacy `awaiting_goal_input` flag collapses into this variant.
 - `Launching` — Preparing first turn; mirrors `Idle` legacy booleans until launch success/failure.
 - `Active` — Run active with no pending gates; diagnostics/review/manual/edit/transient flags cleared.
-- `PausedManual { resume_after_submit }` — Run active; manual editor visible; `resume_after_manual_submit` mirrors payload.
+- `PausedManual { resume_after_submit, bypass_next_submit }` — Run active; manual editor visible; `resume_after_manual_submit` mirrors payload and bypass flag controls coordinator auto-submit.
 - `AwaitingCoordinator { prompt_ready }` — Run active; prompt staged; coordinator waiting true regardless of `prompt_ready`; countdown enabled when legacy auto-submit applies.
 - `AwaitingDiagnostics` — Awaiting model response (streaming); coordinator waiting false; review/manual flags cleared.
 - `AwaitingReview { diagnostics_pending }` — Awaiting user review; diagnostics chip toggled by payload; other waits cleared.

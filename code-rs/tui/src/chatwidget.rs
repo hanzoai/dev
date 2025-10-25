@@ -184,9 +184,11 @@ pub(crate) enum EscIntent {
     DismissModal,
     CloseSettings,
     CloseFilePopup,
-    AutoPauseCountdown,
+    AutoPauseForEdit,
     AutoStopDuringApproval,
     AutoStopActive,
+    AutoGoalEnableEdit,
+    AutoGoalExitPreserveDraft,
     AutoDismissSummary,
     DiffConfirm,
     AgentsTerminal,
@@ -196,6 +198,13 @@ pub(crate) enum EscIntent {
     ShowUndoHint,
     OpenUndoTimeline,
     None,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum AutoGoalEscState {
+    Inactive,
+    NeedsEnableEditing,
+    ArmedForExit,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -857,7 +866,6 @@ pub(crate) struct ChatWidget<'a> {
     session_id: Option<uuid::Uuid>,
 
     // Pending diagnostics integration
-    awaiting_diagnostics: bool,
     next_cli_text_format: Option<TextFormat>,
 
     // Pending jump-back state (reversible until submit)
@@ -887,6 +895,7 @@ pub(crate) struct ChatWidget<'a> {
 
     auto_drive_variant: AutoDriveVariant,
     auto_state: AutoDriveController,
+    auto_goal_escape_state: AutoGoalEscState,
     auto_handle: Option<AutoCoordinatorHandle>,
     auto_history: AutoDriveHistory,
     auto_turn_review_state: Option<AutoTurnReviewState>,
@@ -2420,6 +2429,7 @@ impl ChatWidget<'_> {
             }
         }
         self.request_redraw();
+
         true
     }
 
@@ -3475,6 +3485,12 @@ impl ChatWidget<'_> {
     }
 
     pub(crate) fn insert_str(&mut self, s: &str) {
+        if self.auto_state.should_show_goal_entry()
+            && matches!(self.auto_goal_escape_state, AutoGoalEscState::Inactive)
+            && !s.trim().is_empty()
+        {
+            self.auto_goal_escape_state = AutoGoalEscState::NeedsEnableEditing;
+        }
         self.bottom_pane.insert_str(s);
     }
 
@@ -3947,6 +3963,7 @@ impl ChatWidget<'_> {
             pending_snapshot_dispatches: VecDeque::new(),
             auto_drive_variant,
             auto_state: AutoDriveController::default(),
+            auto_goal_escape_state: AutoGoalEscState::Inactive,
             auto_handle: None,
             auto_history: AutoDriveHistory::new(),
             auto_turn_review_state: None,
@@ -3958,7 +3975,6 @@ impl ChatWidget<'_> {
             cloud_task_apply_tickets: HashMap::new(),
             cloud_task_create_ticket: None,
             browser_is_external: false,
-            awaiting_diagnostics: false,
             next_cli_text_format: None,
             // Stable ordering & routing init
             cell_order_seq: vec![OrderKey {
@@ -4009,6 +4025,7 @@ impl ChatWidget<'_> {
         w.auto_state.qa_automation_enabled = auto_defaults.qa_automation_enabled;
         w.auto_state.continue_mode = auto_continue_from_config(auto_defaults.continue_mode);
         w.auto_state.reset_countdown();
+        w.auto_goal_escape_state = AutoGoalEscState::Inactive;
         w.set_standard_terminal_mode(!config.tui.alternate_screen);
         if config.experimental_resume.is_none() {
             w.history_push_top_next_req(history_cell::new_animated_welcome()); // tag: prelude
@@ -4252,6 +4269,7 @@ impl ChatWidget<'_> {
             pending_snapshot_dispatches: VecDeque::new(),
             auto_drive_variant,
             auto_state: AutoDriveController::default(),
+            auto_goal_escape_state: AutoGoalEscState::Inactive,
             auto_handle: None,
             auto_history: AutoDriveHistory::new(),
             auto_turn_review_state: None,
@@ -4263,7 +4281,6 @@ impl ChatWidget<'_> {
             cloud_task_apply_tickets: HashMap::new(),
             cloud_task_create_ticket: None,
             browser_is_external: false,
-            awaiting_diagnostics: false,
             next_cli_text_format: None,
             // Strict ordering init for forked widget
             cell_order_seq: vec![OrderKey {
@@ -4777,7 +4794,7 @@ impl ChatWidget<'_> {
                 crossterm::event::KeyCode::Char('e') | crossterm::event::KeyCode::Char('E')
                     if key_event.modifiers.is_empty() =>
                 {
-                    self.auto_pause_for_manual_edit();
+                    self.auto_pause_for_manual_edit(false);
                     return;
                 }
                 _ => {}
@@ -4923,9 +4940,12 @@ impl ChatWidget<'_> {
             }
         }
 
-        match self.bottom_pane.handle_key_event(key_event) {
+        let input_result = self.bottom_pane.handle_key_event(key_event);
+        self.auto_sync_goal_escape_state_from_composer();
+
+        match input_result {
             InputResult::Submitted(text) => {
-                if self.auto_state.awaiting_goal_input {
+                if self.auto_state.should_show_goal_entry() {
                     let trimmed = text.trim();
                     if trimmed.is_empty() {
                         self.bottom_pane.set_task_running(true);
@@ -4935,8 +4955,6 @@ impl ChatWidget<'_> {
                         self.request_redraw();
                         return;
                     }
-
-                    self.auto_state.awaiting_goal_input = false;
                     self.clear_composer();
                     self.bottom_pane.update_status_text(String::new());
                     self.bottom_pane.set_task_running(false);
@@ -6001,6 +6019,7 @@ impl ChatWidget<'_> {
 
                     // Add the placeholder text to the compose field
                     self.bottom_pane.handle_paste(placeholder);
+                    self.auto_sync_goal_escape_state_from_composer();
                     // Force immediate redraw to reflect input growth/wrap
                     self.request_redraw();
                     return;
@@ -6012,6 +6031,7 @@ impl ChatWidget<'_> {
                 let path = PathBuf::from(&path_str);
                 if path.exists() && path.is_file() {
                     self.bottom_pane.handle_paste(path_str);
+                    self.auto_sync_goal_escape_state_from_composer();
                     self.request_redraw();
                     return;
                 }
@@ -6020,6 +6040,7 @@ impl ChatWidget<'_> {
 
         // Otherwise handle as regular text paste
         self.bottom_pane.handle_paste(text);
+        self.auto_sync_goal_escape_state_from_composer();
         // Force immediate redraw so compose height matches new content
         self.request_redraw();
     }
@@ -12921,7 +12942,7 @@ fi\n\
 
     fn refresh_auto_drive_visuals(&mut self) {
         if self.auto_state.is_active()
-            || self.auto_state.awaiting_goal_input
+            || self.auto_state.should_show_goal_entry()
             || self.auto_state.last_run_summary.is_some()
         {
             self.auto_rebuild_live_ring();
@@ -12948,12 +12969,14 @@ fi\n\
     }
 
     fn auto_show_goal_entry_panel(&mut self) {
+        self.auto_state.set_phase(AutoRunPhase::AwaitingGoalEntry);
         self.auto_state.goal = None;
         let seed_intro = self.auto_state.take_intro_pending();
         if seed_intro {
             self.auto_reset_intro_timing();
             self.auto_ensure_intro_timing();
         }
+        self.auto_goal_escape_state = AutoGoalEscState::Inactive;
         let hint = "Let's do this! What's your goal?".to_string();
         let status_lines = vec![hint];
         let model = AutoCoordinatorViewModel::Active(AutoActiveViewModel {
@@ -12986,9 +13009,39 @@ fi\n\
         self.bottom_pane.update_status_text("Auto Drive".to_string());
         self.auto_update_terminal_hint();
         self.bottom_pane.ensure_input_focus();
-        self.auto_state.awaiting_goal_input = true;
         self.clear_composer();
         self.request_redraw();
+    }
+
+    fn auto_exit_goal_entry_preserve_draft(&mut self) -> bool {
+        if !self.auto_state.should_show_goal_entry() {
+            return false;
+        }
+
+        let last_run_summary = self.auto_state.last_run_summary.clone();
+        let last_decision_summary = self.auto_state.last_decision_summary.clone();
+        let last_decision_progress_past = self.auto_state.last_decision_progress_past.clone();
+        let last_decision_progress_current =
+            self.auto_state.last_decision_progress_current.clone();
+        let last_decision_display = self.auto_state.last_decision_display.clone();
+        let last_decision_display_is_summary = self.auto_state.last_decision_display_is_summary;
+
+        self.auto_state.reset();
+        self.auto_state.last_run_summary = last_run_summary;
+        self.auto_state.last_decision_summary = last_decision_summary;
+        self.auto_state.last_decision_progress_past = last_decision_progress_past;
+        self.auto_state.last_decision_progress_current = last_decision_progress_current;
+        self.auto_state.last_decision_display = last_decision_display;
+        self.auto_state.last_decision_display_is_summary = last_decision_display_is_summary;
+        self.auto_state.set_phase(AutoRunPhase::Idle);
+        self.auto_goal_escape_state = AutoGoalEscState::Inactive;
+        self.bottom_pane.clear_auto_coordinator_view(true);
+        self.bottom_pane.clear_live_ring();
+        self.bottom_pane.set_task_running(false);
+        self.bottom_pane.update_status_text(String::new());
+        self.auto_rebuild_live_ring();
+        self.request_redraw();
+        true
     }
 
     fn auto_launch_with_goal(
@@ -13146,7 +13199,7 @@ fi\n\
         let should_rebuild_view = if self.auto_state.is_active() {
             !self.auto_state.is_paused_manual()
         } else {
-            self.auto_state.awaiting_goal_input || self.auto_state.last_run_summary.is_some()
+            self.auto_state.should_show_goal_entry() || self.auto_state.last_run_summary.is_some()
         };
 
         if should_rebuild_view {
@@ -13499,7 +13552,6 @@ Have we met every part of this goal and is there no further work to do?"#
                 };
                 self.submit_op(Op::SetNextTextFormat { format: tf.clone() });
                 self.next_cli_text_format = Some(tf);
-                self.awaiting_diagnostics = true;
                 self.auto_state.pending_stop_message = Some(message);
                 self.push_background_tail("Auto Drive Diagnostics: Validating progress".to_string());
                 self.schedule_auto_cli_prompt(prompt_text);
@@ -13980,6 +14032,7 @@ Have we met every part of this goal and is there no further work to do?"#
         };
 
         self.auto_state.on_prompt_submitted();
+        self.auto_state.set_coordinator_waiting(false);
         self.auto_state.clear_bypass_coordinator_flag();
         self.auto_state.seconds_remaining = 0;
         let post_submit_display = self.auto_state.last_decision_display.clone();
@@ -14013,7 +14066,7 @@ Have we met every part of this goal and is there no further work to do?"#
 use crate::chatwidget::message::UserMessage;
         let mut message: UserMessage = full_prompt.into();
         message.suppress_persistence = true;
-        if self.awaiting_diagnostics {
+        if self.auto_state.pending_stop_message.is_some() {
             message.display_text.clear();
         }
         self.submit_user_message(message);
@@ -14023,8 +14076,12 @@ use crate::chatwidget::message::UserMessage;
         self.request_redraw();
     }
 
-    fn auto_pause_for_manual_edit(&mut self) {
-        if !self.auto_state.is_active() || !self.auto_state.awaiting_coordinator_submit() {
+    fn auto_pause_for_manual_edit(&mut self, force: bool) {
+        if !self.auto_state.is_active() {
+            return;
+        }
+
+        if !force && !self.auto_state.awaiting_coordinator_submit() {
             return;
         }
 
@@ -14044,6 +14101,8 @@ use crate::chatwidget::message::UserMessage;
         self.clear_composer();
         if !full_prompt.is_empty() {
             self.insert_str(&full_prompt);
+        } else if force && !prompt_text.is_empty() {
+            self.insert_str(&prompt_text);
         }
         self.bottom_pane.ensure_input_focus();
         self.bottom_pane.set_task_running(true);
@@ -14140,11 +14199,11 @@ use crate::chatwidget::message::UserMessage;
     }
 
     fn auto_stop(&mut self, message: Option<String>) {
-        self.awaiting_diagnostics = false;
         self.next_cli_text_format = None;
         let effects = self
             .auto_state
             .stop_run(Instant::now(), message);
+        self.auto_goal_escape_state = AutoGoalEscState::Inactive;
         self.auto_apply_controller_effects(effects);
     }
 
@@ -14304,7 +14363,7 @@ use crate::chatwidget::message::UserMessage;
 
     fn auto_rebuild_live_ring(&mut self) {
         if !self.auto_state.is_active() {
-            if self.auto_state.awaiting_goal_input {
+            if self.auto_state.should_show_goal_entry() {
                 self.auto_show_goal_entry_panel();
                 return;
             }
@@ -14525,7 +14584,7 @@ use crate::chatwidget::message::UserMessage;
             cli_prompt,
             awaiting_submission: self.auto_state.awaiting_coordinator_submit(),
             waiting_for_response: self.auto_state.is_waiting_for_response(),
-            coordinator_waiting: self.auto_state.coordinator_waiting,
+            coordinator_waiting: self.auto_state.is_coordinator_waiting(),
             waiting_for_review: self.auto_state.awaiting_review(),
             countdown,
             button,
@@ -14583,7 +14642,7 @@ use crate::chatwidget::message::UserMessage;
     }
 
     fn auto_update_terminal_hint(&mut self) {
-        if !self.auto_state.is_active() && !self.auto_state.awaiting_goal_input {
+        if !self.auto_state.is_active() && !self.auto_state.should_show_goal_entry() {
             self.bottom_pane.set_standard_terminal_hint(None);
             return;
         }
@@ -17603,7 +17662,7 @@ use crate::chatwidget::message::UserMessage;
     }
 
     pub(crate) fn auto_manual_entry_active(&self) -> bool {
-        self.auto_state.awaiting_goal_input
+        self.auto_state.should_show_goal_entry()
             || (self.auto_state.is_active() && self.auto_state.awaiting_coordinator_submit())
     }
 
@@ -17629,19 +17688,38 @@ use crate::chatwidget::message::UserMessage;
         }
 
         if self.auto_state.is_active() {
-            if self.auto_state.countdown_active() {
-                return EscRoute::new(EscIntent::AutoPauseCountdown, true, false);
+            if self.auto_state.countdown_active()
+                || (self.auto_state.awaiting_coordinator_submit()
+                    && !self.auto_state.is_paused_manual())
+            {
+                return EscRoute::new(EscIntent::AutoPauseForEdit, true, false);
             }
 
-            if self.has_cancelable_agents() {
-                return EscRoute::new(EscIntent::CancelAgents, true, false);
-            }
+        if self.has_cancelable_agents() {
+            return EscRoute::new(EscIntent::CancelAgents, true, false);
+        }
 
-            if self.auto_state.awaiting_coordinator_submit() {
-                return EscRoute::new(EscIntent::AutoStopDuringApproval, true, false);
+        if self.has_running_commands_or_tools() {
+            return EscRoute::new(EscIntent::CancelTask, true, false);
+        }
+
+        if self.auto_state.awaiting_coordinator_submit() {
+            return EscRoute::new(EscIntent::AutoStopDuringApproval, true, false);
             }
 
             return EscRoute::new(EscIntent::AutoStopActive, true, false);
+        }
+
+        if self.auto_state.should_show_goal_entry() {
+            return EscRoute::new(
+                match self.auto_goal_escape_state {
+                    AutoGoalEscState::Inactive => EscIntent::AutoGoalExitPreserveDraft,
+                    AutoGoalEscState::NeedsEnableEditing => EscIntent::AutoGoalEnableEdit,
+                    AutoGoalEscState::ArmedForExit => EscIntent::AutoGoalExitPreserveDraft,
+                },
+                true,
+                false,
+            );
         }
 
         if self.has_cancelable_agents() {
@@ -17678,8 +17756,8 @@ use crate::chatwidget::message::UserMessage;
                 true
             }
             EscIntent::CloseFilePopup => self.close_file_popup_if_active(),
-            EscIntent::AutoPauseCountdown => {
-                self.auto_pause_for_manual_edit();
+            EscIntent::AutoPauseForEdit => {
+                self.auto_pause_for_manual_edit(false);
                 true
             }
             EscIntent::AutoStopDuringApproval => {
@@ -17690,6 +17768,13 @@ use crate::chatwidget::message::UserMessage;
                 self.auto_stop(Some("Auto Drive stopped by user.".to_string()));
                 true
             }
+            EscIntent::AutoGoalEnableEdit => {
+                self.auto_goal_escape_state = AutoGoalEscState::ArmedForExit;
+                self.bottom_pane.ensure_input_focus();
+                self.request_redraw();
+                true
+            }
+            EscIntent::AutoGoalExitPreserveDraft => self.auto_exit_goal_entry_preserve_draft(),
             EscIntent::AutoDismissSummary => {
                 self.auto_state.last_run_summary = None;
                 self.bottom_pane.clear_auto_coordinator_view(true);
@@ -17711,6 +17796,9 @@ use crate::chatwidget::message::UserMessage;
             EscIntent::CancelAgents => self.cancel_active_agents(),
             EscIntent::CancelTask => {
                 let _ = self.on_ctrl_c();
+                if self.auto_state.is_active() {
+                    self.auto_pause_for_manual_edit(true);
+                }
                 true
             }
             EscIntent::ClearComposer => {
@@ -17729,6 +17817,15 @@ use crate::chatwidget::message::UserMessage;
         }
     }
 
+    fn has_running_commands_or_tools(&self) -> bool {
+        self.terminal_is_running()
+            || !self.exec.running_commands.is_empty()
+            || !self.tools_state.running_custom_tools.is_empty()
+            || !self.tools_state.running_web_search.is_empty()
+            || !self.tools_state.running_wait_tools.is_empty()
+            || !self.tools_state.running_kill_tools.is_empty()
+    }
+
     pub(crate) fn is_task_running(&self) -> bool {
         self.bottom_pane.is_task_running()
             || self.terminal_is_running()
@@ -17742,11 +17839,34 @@ use crate::chatwidget::message::UserMessage;
     /// Clear the composer text and any pending paste placeholders/history cursors.
     pub(crate) fn clear_composer(&mut self) {
         self.bottom_pane.clear_composer();
+        if self.auto_state.should_show_goal_entry() {
+            self.auto_goal_escape_state = AutoGoalEscState::Inactive;
+        }
         // Mark a height change so layout adjusts immediately if the composer shrinks.
         self.height_manager
             .borrow_mut()
             .record_event(crate::height_manager::HeightEvent::ComposerModeChange);
         self.request_redraw();
+    }
+
+    fn auto_sync_goal_escape_state_from_composer(&mut self) {
+        if !self.auto_state.should_show_goal_entry() {
+            return;
+        }
+
+        let has_content = !self.bottom_pane.composer_text().trim().is_empty();
+        match self.auto_goal_escape_state {
+            AutoGoalEscState::Inactive => {
+                if has_content {
+                    self.auto_goal_escape_state = AutoGoalEscState::NeedsEnableEditing;
+                }
+            }
+            AutoGoalEscState::NeedsEnableEditing | AutoGoalEscState::ArmedForExit => {
+                if !has_content {
+                    self.auto_goal_escape_state = AutoGoalEscState::Inactive;
+                }
+            }
+        }
     }
 
     pub(crate) fn close_file_popup_if_active(&mut self) -> bool {
@@ -18220,8 +18340,7 @@ use crate::chatwidget::message::UserMessage;
         );
         tracing::info!("[order] final Answer id={:?}", id);
         let final_source = source.clone();
-        if self.awaiting_diagnostics {
-            self.awaiting_diagnostics = false;
+        if self.auto_state.pending_stop_message.is_some() {
             match serde_json::from_str::<code_auto_drive_diagnostics::CompletionCheck>(&final_source)
             {
                 Ok(check) => {
@@ -18255,18 +18374,21 @@ use crate::chatwidget::message::UserMessage;
                             .goal
                             .as_deref()
                             .unwrap_or("(goal unavailable)");
-                        let follow_up = format!(
-                            "The primary goal has not been met. Please continue working on this.\nPrimary Goal: {goal}\nExplanation: {explanation}",
-                            explanation = check.explanation
-                        );
-                        let conversation = self.rebuild_auto_history();
-                        if !self.auto_send_user_prompt_to_coordinator(follow_up, conversation) {
-                            self.auto_stop(Some(
-                                "Coordinator stopped unexpectedly while scheduling diagnostics follow-up.".to_string(),
-                            ));
-                        }
-                        return;
+                    let follow_up = format!(
+                        "The primary goal has not been met. Please continue working on this.\nPrimary Goal: {goal}\nExplanation: {explanation}",
+                        explanation = check.explanation
+                    );
+                    let conversation = self.rebuild_auto_history();
+                    self.auto_state.pending_stop_message = None;
+                    let dispatched = self.auto_send_user_prompt_to_coordinator(follow_up, conversation);
+                    self.auto_state.pending_stop_message = None;
+                    if !dispatched {
+                        self.auto_stop(Some(
+                            "Coordinator stopped unexpectedly while scheduling diagnostics follow-up.".to_string(),
+                        ));
                     }
+                    return;
+                }
                 }
                 Err(err) => {
                     tracing::warn!(
@@ -21678,6 +21800,8 @@ mod tests {
     use crate::chatwidget::smoke_helpers::ChatWidgetHarness;
     use crate::history_cell::{self, ExploreAggregationCell, HistoryCellType};
     use code_auto_drive_core::{
+        AutoRunPhase,
+        AutoRunSummary,
         TurnComplexity,
         TurnMode,
         AUTO_RESOLVE_MAX_REVIEW_ATTEMPTS,
@@ -21715,7 +21839,7 @@ mod tests {
     use ratatui::text::Line;
     use ratatui::Terminal;
     use std::collections::HashMap;
-    use std::time::SystemTime;
+    use std::time::{Duration, SystemTime};
     use std::path::PathBuf;
 
     use code_core::protocol::{ReviewFinding, ReviewCodeLocation, ReviewLineRange};
@@ -21904,6 +22028,159 @@ mod tests {
     }
 
     #[test]
+    fn esc_requires_follow_up_after_canceling_agents() {
+        let mut harness = ChatWidgetHarness::new();
+        let chat = harness.chat();
+
+        chat.auto_state.set_phase(AutoRunPhase::Active);
+        chat.active_agents.push(AgentInfo {
+            id: "agent-1".to_string(),
+            name: "Agent 1".to_string(),
+            status: AgentStatus::Running,
+            batch_id: Some("batch-1".to_string()),
+            model: None,
+            result: None,
+            error: None,
+            last_progress: None,
+        });
+
+        let esc_event = KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE);
+
+        let route = chat.describe_esc_context();
+        assert_eq!(route.intent, EscIntent::CancelAgents);
+        assert!(chat.execute_esc_intent(route.intent, esc_event));
+        assert!(chat.auto_state.is_active(), "Auto Drive remains active until follow-up Esc");
+        assert!(chat
+            .active_agents
+            .iter()
+            .all(|agent| matches!(agent.status, AgentStatus::Cancelled)));
+
+        let esc_event = KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE);
+        let route = chat.describe_esc_context();
+        assert_eq!(route.intent, EscIntent::AutoStopActive);
+        assert!(chat.execute_esc_intent(route.intent, esc_event));
+        assert!(!chat.auto_state.is_active());
+    }
+
+    #[test]
+    fn goal_entry_esc_sequence_preserves_draft_and_summary() {
+        let mut harness = ChatWidgetHarness::new();
+        let chat = harness.chat();
+
+        chat.auto_state.last_run_summary = Some(AutoRunSummary {
+            duration: Duration::from_secs(42),
+            turns_completed: 3,
+            message: Some("All tasks done.".to_string()),
+            goal: Some("Finish feature".to_string()),
+        });
+        chat.auto_show_goal_entry_panel();
+        chat.handle_paste("Suggested goal".to_string());
+        assert!(matches!(
+            chat.auto_goal_escape_state,
+            AutoGoalEscState::NeedsEnableEditing
+        ));
+
+        let esc_event = KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE);
+
+        let route = chat.describe_esc_context();
+        assert_eq!(route.intent, EscIntent::AutoGoalEnableEdit);
+        assert!(chat.execute_esc_intent(route.intent, esc_event));
+        assert!(chat.auto_state.should_show_goal_entry());
+        assert!(matches!(
+            chat.auto_goal_escape_state,
+            AutoGoalEscState::ArmedForExit
+        ));
+
+        let esc_event = KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE);
+        let route = chat.describe_esc_context();
+        assert_eq!(route.intent, EscIntent::AutoGoalExitPreserveDraft);
+        assert!(chat.execute_esc_intent(route.intent, esc_event));
+        assert!(!chat.auto_state.should_show_goal_entry());
+        assert_eq!(chat.bottom_pane.composer_text(), "Suggested goal");
+        assert!(chat.auto_state.last_run_summary.is_some());
+
+        let route = chat.describe_esc_context();
+        assert_eq!(route.intent, EscIntent::ClearComposer);
+    }
+
+    #[test]
+    fn goal_entry_typing_arms_escape_state() {
+        let mut harness = ChatWidgetHarness::new();
+        {
+            let chat = harness.chat();
+            chat.auto_show_goal_entry_panel();
+        }
+
+        harness.send_key(KeyEvent::new(KeyCode::Char('x'), KeyModifiers::NONE));
+
+        let chat = harness.chat();
+        assert!(matches!(
+            chat.auto_goal_escape_state,
+            AutoGoalEscState::NeedsEnableEditing
+        ));
+        assert_eq!(chat.bottom_pane.composer_text(), "x");
+    }
+
+    #[test]
+    fn goal_entry_esc_exits_immediately_without_suggestion() {
+        let mut harness = ChatWidgetHarness::new();
+        let chat = harness.chat();
+
+        chat.auto_show_goal_entry_panel();
+        assert!(chat.auto_state.should_show_goal_entry());
+        assert!(matches!(chat.auto_goal_escape_state, AutoGoalEscState::Inactive));
+
+        let esc_event = KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE);
+        let route = chat.describe_esc_context();
+        assert_eq!(route.intent, EscIntent::AutoGoalExitPreserveDraft);
+        assert!(chat.execute_esc_intent(route.intent, esc_event));
+
+        assert!(!chat.auto_state.should_show_goal_entry());
+        assert_eq!(chat.bottom_pane.composer_text(), "");
+    }
+
+    #[test]
+    fn esc_unwinds_cli_before_stopping_auto() {
+        let mut harness = ChatWidgetHarness::new();
+        let chat = harness.chat();
+
+        chat.auto_state.set_phase(AutoRunPhase::Active);
+        let call_id = ExecCallId("exec-1".to_string());
+        chat.exec.running_commands.insert(
+            call_id.clone(),
+            RunningCommand {
+                command: vec!["echo".to_string()],
+                parsed: Vec::new(),
+                history_index: None,
+                history_id: None,
+                explore_entry: None,
+                stdout: String::new(),
+                stderr: String::new(),
+                wait_total: None,
+                wait_active: false,
+                wait_notes: Vec::new(),
+            },
+        );
+        chat.bottom_pane.set_task_running(true);
+
+        let esc_event = KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE);
+
+        let route = chat.describe_esc_context();
+        assert_eq!(route.intent, EscIntent::CancelTask);
+        assert!(chat.execute_esc_intent(route.intent, esc_event));
+        assert!(chat.auto_state.is_paused_manual(), "Auto Drive should pause for manual edit after cancelling CLI");
+
+        chat.exec.running_commands.clear();
+        chat.bottom_pane.set_task_running(false);
+
+        let esc_event = KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE);
+        let route = chat.describe_esc_context();
+        assert_eq!(route.intent, EscIntent::AutoStopActive);
+        assert!(chat.execute_esc_intent(route.intent, esc_event));
+        assert!(!chat.auto_state.is_active());
+    }
+
+    #[test]
     fn esc_router_cancels_running_task() {
         let mut harness = ChatWidgetHarness::new();
         let chat = harness.chat();
@@ -21948,7 +22225,8 @@ mod tests {
         let mut harness = ChatWidgetHarness::new();
         let chat = harness.chat();
 
-        chat.auto_state.awaiting_goal_input = true;
+        chat.auto_show_goal_entry_panel();
+        assert!(chat.auto_state.should_show_goal_entry());
         chat.bottom_pane.insert_str("draft goal");
 
         let route = chat.describe_esc_context();
@@ -22019,6 +22297,7 @@ mod tests {
         chat.auto_state.on_prompt_submitted();
         chat.auto_state.review_enabled = true;
         chat.auto_state.on_complete_review();
+        chat.auto_state.set_waiting_for_response(true);
         chat.pending_turn_descriptor = None;
         chat.pending_auto_turn_config = None;
         chat.auto_resolve_state = Some(make_pending_fix_state(ReviewOutputEvent::default()));
@@ -22045,7 +22324,9 @@ mod tests {
         chat.auto_state.set_phase(AutoRunPhase::Active);
         chat.auto_state.review_enabled = true;
         chat.auto_state.on_prompt_submitted();
+        chat.auto_state.set_waiting_for_response(true);
         chat.auto_state.on_complete_review();
+        chat.auto_state.set_waiting_for_response(true);
 
         let turn_config = TurnConfig {
             read_only: false,
@@ -22127,6 +22408,7 @@ mod tests {
         chat.auto_state.review_enabled = true;
         chat.auto_state.on_prompt_submitted();
         chat.auto_state.on_complete_review();
+        chat.auto_state.set_waiting_for_response(true);
 
         let turn_config = TurnConfig {
             read_only: false,
