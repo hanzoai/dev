@@ -5270,30 +5270,41 @@ impl ChatWidget<'_> {
         if !self.auto_drive_previews_enabled {
             return false;
         }
-        const DYNAMIC_TAGS: [&str; 6] = [
+        const DYNAMIC_TAGS: [&str; 16] = [
             "auto-drive-preview-dynamic-0",
             "auto-drive-preview-dynamic-1",
             "auto-drive-preview-dynamic-2",
             "auto-drive-preview-dynamic-3",
             "auto-drive-preview-dynamic-4",
             "auto-drive-preview-dynamic-5",
+            "auto-drive-preview-dynamic-6",
+            "auto-drive-preview-dynamic-7",
+            "auto-drive-preview-dynamic-8",
+            "auto-drive-preview-dynamic-9",
+            "auto-drive-preview-dynamic-10",
+            "auto-drive-preview-dynamic-11",
+            "auto-drive-preview-dynamic-12",
+            "auto-drive-preview-dynamic-13",
+            "auto-drive-preview-dynamic-14",
+            "auto-drive-preview-dynamic-15",
         ];
 
-        let previews = history_cell::auto_drive_preview_cells();
-        let total = previews.len();
-        if total == 0 {
+        let dynamic_total = history_cell::experimental_auto_drive_preview_count();
+        let base_total = history_cell::auto_drive_preview_cells().len()
+            .saturating_sub(dynamic_total);
+
+        if dynamic_total == 0 {
             return false;
         }
-        let dynamic_count = total.min(DYNAMIC_TAGS.len());
+        let dynamic_count = dynamic_total.min(DYNAMIC_TAGS.len());
         if dynamic_count == 0 {
             return false;
         }
 
-        let base = total - dynamic_count;
         let offset = self.auto_drive_preview_index % dynamic_count;
-        let target_index = base + offset;
+        let target_index = base_total + offset;
 
-        let cell = previews
+        let cell = history_cell::auto_drive_preview_cells()
             .into_iter()
             .enumerate()
             .find(|(idx, _)| *idx == target_index)

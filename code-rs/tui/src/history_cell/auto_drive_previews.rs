@@ -46,6 +46,7 @@ enum RevealVariant {
     PrismRise,
     NeonRoad,
     HorizonRush,
+    LightBloom,
 }
 
 struct CardRevealAnimation {
@@ -96,6 +97,10 @@ pub(crate) fn auto_drive_preview_cells() -> Vec<Box<dyn HistoryCell>> {
                 }),
         )
         .collect()
+}
+
+pub(crate) fn experimental_auto_drive_preview_count() -> usize {
+    EXPERIMENTAL_RAINBOW_ROAD_PREVIEWS.len()
 }
 
 struct AutoDrivePreviewCell {
@@ -233,6 +238,7 @@ impl HistoryCell for AutoDrivePreviewCell {
 
         if let Some(anim) = &self.animation {
             let progress = anim.progress();
+            let intro_light = self.name.contains("Light");
             paint_reveal(
                 buf,
                 area,
@@ -242,6 +248,7 @@ impl HistoryCell for AutoDrivePreviewCell {
                 self.spec.text_color,
                 progress,
                 anim.variant,
+                intro_light,
             );
         } else {
             paint_horizontal(
@@ -308,8 +315,26 @@ fn paint_reveal(
     fg: Color,
     progress: f32,
     variant: RevealVariant,
+    intro_light: bool,
 ) {
-    if progress >= 0.999 {
+    let clamped_progress = progress.clamp(0.0, 1.0);
+    const LIGHT_REVEAL_HOLD: f32 = 0.06;
+    const LIGHT_REVEAL_FADE_END: f32 = 0.32;
+
+    if intro_light && clamped_progress < LIGHT_REVEAL_HOLD {
+        let warm_fg = mix_rgb(fg, Color::Rgb(255, 255, 255), 0.55);
+        paint_horizontal(
+            buf,
+            area,
+            Color::Rgb(255, 255, 255),
+            Color::Rgb(255, 255, 255),
+            0.0,
+            warm_fg,
+        );
+        return;
+    }
+
+    if clamped_progress >= 0.999 {
         paint_horizontal(buf, area, left, right, bias, fg);
         return;
     }
@@ -327,24 +352,32 @@ fn paint_reveal(
             let final_color = colors::mix_toward(left, right, gradient_pos);
 
             let coverage = reveal_coverage(
-                progress,
+                clamped_progress,
                 x_norm,
                 y_norm,
                 col as u16,
                 row as u16,
                 variant,
             );
-            let blend = smoothstep(0.0, 1.0, coverage);
+            let mut blend = smoothstep(0.0, 1.0, coverage);
 
-            let accent = accent_color(
+            let mut accent = accent_color(
                 variant,
-                progress,
+                clamped_progress,
                 x_norm,
                 y_norm,
                 col as u16,
                 row as u16,
                 final_color,
             );
+            if intro_light {
+                let fade_factor = ((clamped_progress - LIGHT_REVEAL_HOLD)
+                    / (LIGHT_REVEAL_FADE_END - LIGHT_REVEAL_HOLD))
+                    .clamp(0.0, 1.0);
+                let whiten_mix = fade_factor.powf(1.1);
+                accent = mix_rgb(Color::Rgb(255, 255, 255), accent, whiten_mix);
+                blend *= fade_factor.max(0.02);
+            }
             let bg_color = mix_rgb(accent, final_color, blend);
             let text_color = mix_rgb(fg, accent, (1.0 - blend) * 0.35);
 
@@ -394,7 +427,8 @@ fn reveal_coverage(
         }
         RevealVariant::RainbowBloom => {
             let center = (x - 0.5).abs();
-            let sweep = (p * 1.4 - center).powf(1.2) - 0.2;
+            let lead = (p * 1.4 - center).max(0.0);
+            let sweep = lead.powf(1.2) - 0.2;
             let ripple = ((y * 4.0 + p * 9.0).sin()) * 0.08;
             sweep + ripple
         }
@@ -419,7 +453,14 @@ fn reveal_coverage(
             let horizon = (p * 1.32 - band) - 0.12;
             horizon + ((y * 7.0 + p * 5.0).cos()) * 0.05
         }
+        RevealVariant::LightBloom => {
+            let radial = ((x - 0.5).powi(2) + (y - 0.5).powi(2)).sqrt();
+            let envelope = (p * 1.8 - radial * 1.2).max(-0.12);
+            envelope + ((x + y) * std::f32::consts::PI * 1.6).sin() * 0.05
+        }
     };
+
+    let base = if base.is_finite() { base } else { 0.0 };
 
     smoothstep(-0.15, 0.95, base)
 }
@@ -486,6 +527,11 @@ fn accent_color(
             let dawn = mix_rgb(base, Color::Rgb(255, 200, 150), wash * 0.4);
             mix_rgb(dawn, final_color, 0.36)
         }
+        RevealVariant::LightBloom => {
+            let halo = ((progress * 6.0 + (x - 0.5).abs() * 18.0).sin() + 1.0) * 0.25;
+            let glow = mix_rgb(base, Color::Rgb(255, 240, 255), halo * 0.5);
+            mix_rgb(glow, final_color, 0.28)
+        }
     }
 }
 
@@ -549,6 +595,21 @@ const LEGACY_NAMES: &[&str] = &[
 
 const EXPERIMENTAL_NAMES: &[&str] = &[
     "Rainbow 01",
+    "Rainbow 01 Light Bloom",
+    "Rainbow 01 Light Soft",
+    "Rainbow 01 Light Pastel",
+    "Rainbow 01 Light Aurora",
+    "Rainbow 01 Light Classic",
+    "Rainbow 01 Light Legacy 31",
+    "Rainbow 01 Light Legacy 32",
+    "Rainbow 01 Light Legacy 33",
+    "Rainbow 01 Light Legacy 34",
+    "Rainbow 01 Light Legacy 35",
+    "Rainbow 01 Dark 01",
+    "Rainbow 01 Dark 02",
+    "Rainbow 01 Dark 03",
+    "Rainbow 01 Dark 04",
+    "Rainbow 01 Dark 05",
     "Rainbow 02",
     "Rainbow 03",
     "Rainbow 04",
@@ -952,7 +1013,7 @@ const LEGACY_PREVIEWS: &[PreviewSpec] = &[
     PreviewSpec {
         body: BODY_PARAGRAPHS,
         gradient: GradientSpec {
-            left: Color::Rgb(216, 190, 255),
+            left: Color::Rgb(230, 210, 255),
             right: Color::Rgb(248, 228, 255),
             bias: 0.1,
         },
@@ -968,7 +1029,7 @@ const LEGACY_PREVIEWS: &[PreviewSpec] = &[
     PreviewSpec {
         body: BODY_PARAGRAPHS,
         gradient: GradientSpec {
-            left: Color::Rgb(160, 210, 240),
+            left: Color::Rgb(190, 225, 248),
             right: Color::Rgb(184, 232, 255),
             bias: 0.15,
         },
@@ -984,7 +1045,7 @@ const LEGACY_PREVIEWS: &[PreviewSpec] = &[
     PreviewSpec {
         body: BODY_PARAGRAPHS,
         gradient: GradientSpec {
-            left: Color::Rgb(255, 220, 200),
+            left: Color::Rgb(255, 232, 216),
             right: Color::Rgb(220, 130, 100),
             bias: 0.2,
         },
@@ -1000,7 +1061,7 @@ const LEGACY_PREVIEWS: &[PreviewSpec] = &[
     PreviewSpec {
         body: BODY_PARAGRAPHS,
         gradient: GradientSpec {
-            left: Color::Rgb(150, 190, 230),
+            left: Color::Rgb(184, 210, 240),
             right: Color::Rgb(110, 140, 190),
             bias: -0.05,
         },
@@ -1016,7 +1077,7 @@ const LEGACY_PREVIEWS: &[PreviewSpec] = &[
     PreviewSpec {
         body: BODY_PARAGRAPHS,
         gradient: GradientSpec {
-            left: Color::Rgb(170, 210, 190),
+            left: Color::Rgb(196, 230, 210),
             right: Color::Rgb(220, 255, 230),
             bias: 0.05,
         },
@@ -1048,6 +1109,7 @@ const LEGACY_PREVIEWS: &[PreviewSpec] = &[
 ];
 
 const EXPERIMENTAL_RAINBOW_ROAD_PREVIEWS: &[PreviewSpec] = &[
+    // Rainbow 01 retains the original gradient
     PreviewSpec {
         body: BODY_PARAGRAPHS,
         gradient: GradientSpec {
@@ -1064,6 +1126,249 @@ const EXPERIMENTAL_RAINBOW_ROAD_PREVIEWS: &[PreviewSpec] = &[
             variant: RevealVariant::RainbowBloom,
         }),
     },
+    // Light variations for Rainbow 01
+    PreviewSpec {
+        body: BODY_PARAGRAPHS,
+        gradient: GradientSpec {
+            left: Color::Rgb(230, 218, 250),
+            right: Color::Rgb(210, 234, 248),
+            bias: -0.05,
+        },
+        border_color: Color::Rgb(150, 160, 214),
+        text_color: Color::Rgb(48, 56, 96),
+        title_color: Color::Rgb(66, 78, 128),
+        footer_color: Color::Rgb(84, 96, 144),
+        reveal: Some(RevealConfig {
+            duration: Duration::from_millis(720),
+            variant: RevealVariant::LightBloom,
+        }),
+    },
+    PreviewSpec {
+        body: BODY_PARAGRAPHS,
+        gradient: GradientSpec {
+            left: Color::Rgb(246, 234, 220),
+            right: Color::Rgb(208, 232, 244),
+            bias: -0.05,
+        },
+        border_color: Color::Rgb(174, 160, 196),
+        text_color: Color::Rgb(72, 62, 112),
+        title_color: Color::Rgb(88, 76, 130),
+        footer_color: Color::Rgb(102, 90, 144),
+        reveal: Some(RevealConfig {
+            duration: Duration::from_millis(720),
+            variant: RevealVariant::RainbowBloom,
+        }),
+    },
+    PreviewSpec {
+        body: BODY_PARAGRAPHS,
+        gradient: GradientSpec {
+            left: Color::Rgb(234, 242, 224),
+            right: Color::Rgb(206, 226, 240),
+            bias: -0.05,
+        },
+        border_color: Color::Rgb(158, 184, 174),
+        text_color: Color::Rgb(58, 80, 78),
+        title_color: Color::Rgb(72, 100, 98),
+        footer_color: Color::Rgb(84, 112, 108),
+        reveal: Some(RevealConfig {
+            duration: Duration::from_millis(720),
+            variant: RevealVariant::RainbowBloom,
+        }),
+    },
+    PreviewSpec {
+        body: BODY_PARAGRAPHS,
+        gradient: GradientSpec {
+            left: Color::Rgb(242, 238, 228),
+            right: Color::Rgb(236, 230, 248),
+            bias: -0.05,
+        },
+        border_color: Color::Rgb(190, 172, 206),
+        text_color: Color::Rgb(80, 64, 116),
+        title_color: Color::Rgb(94, 78, 132),
+        footer_color: Color::Rgb(106, 88, 144),
+        reveal: Some(RevealConfig {
+            duration: Duration::from_millis(720),
+            variant: RevealVariant::LightBloom,
+        }),
+    },
+    PreviewSpec {
+        body: BODY_PARAGRAPHS,
+        gradient: GradientSpec {
+            left: Color::Rgb(224, 240, 248),
+            right: Color::Rgb(226, 228, 244),
+            bias: -0.05,
+        },
+        border_color: Color::Rgb(152, 178, 216),
+        text_color: Color::Rgb(56, 72, 112),
+        title_color: Color::Rgb(72, 88, 128),
+        footer_color: Color::Rgb(84, 102, 140),
+        reveal: Some(RevealConfig {
+            duration: Duration::from_millis(720),
+            variant: RevealVariant::RainbowBloom,
+        }),
+    },
+    PreviewSpec {
+        body: BODY_PARAGRAPHS,
+        gradient: GradientSpec {
+            left: Color::Rgb(248, 228, 255),
+            right: Color::Rgb(216, 190, 255),
+            bias: -0.05,
+        },
+        border_color: Color::Rgb(82, 48, 164),
+        text_color: Color::Rgb(20, 12, 54),
+        title_color: Color::Rgb(30, 18, 72),
+        footer_color: Color::Rgb(36, 22, 86),
+        reveal: Some(RevealConfig {
+            duration: Duration::from_millis(720),
+            variant: RevealVariant::LightBloom,
+        }),
+    },
+    PreviewSpec {
+        body: BODY_PARAGRAPHS,
+        gradient: GradientSpec {
+            left: Color::Rgb(216, 238, 255),
+            right: Color::Rgb(180, 210, 245),
+            bias: -0.05,
+        },
+        border_color: Color::Rgb(32, 96, 140),
+        text_color: Color::Rgb(12, 34, 52),
+        title_color: Color::Rgb(18, 48, 70),
+        footer_color: Color::Rgb(24, 60, 86),
+        reveal: Some(RevealConfig {
+            duration: Duration::from_millis(720),
+            variant: RevealVariant::LightBloom,
+        }),
+    },
+    PreviewSpec {
+        body: BODY_PARAGRAPHS,
+        gradient: GradientSpec {
+            left: Color::Rgb(255, 220, 200),
+            right: Color::Rgb(220, 130, 100),
+            bias: -0.05,
+        },
+        border_color: Color::Rgb(140, 64, 30),
+        text_color: Color::Rgb(78, 26, 4),
+        title_color: Color::Rgb(92, 34, 6),
+        footer_color: Color::Rgb(104, 40, 10),
+        reveal: Some(RevealConfig {
+            duration: Duration::from_millis(720),
+            variant: RevealVariant::LightBloom,
+        }),
+    },
+    PreviewSpec {
+        body: BODY_PARAGRAPHS,
+        gradient: GradientSpec {
+            left: Color::Rgb(200, 220, 242),
+            right: Color::Rgb(104, 132, 180),
+            bias: -0.05,
+        },
+        border_color: Color::Rgb(40, 70, 120),
+        text_color: Color::Rgb(16, 22, 44),
+        title_color: Color::Rgb(26, 34, 70),
+        footer_color: Color::Rgb(32, 42, 82),
+        reveal: Some(RevealConfig {
+            duration: Duration::from_millis(720),
+            variant: RevealVariant::LightBloom,
+        }),
+    },
+    PreviewSpec {
+        body: BODY_PARAGRAPHS,
+        gradient: GradientSpec {
+            left: Color::Rgb(220, 255, 230),
+            right: Color::Rgb(170, 210, 190),
+            bias: -0.05,
+        },
+        border_color: Color::Rgb(48, 102, 82),
+        text_color: Color::Rgb(18, 40, 32),
+        title_color: Color::Rgb(26, 52, 40),
+        footer_color: Color::Rgb(34, 64, 50),
+        reveal: Some(RevealConfig {
+            duration: Duration::from_millis(720),
+            variant: RevealVariant::LightBloom,
+        }),
+    },
+    // Dark variations for Rainbow 01
+    PreviewSpec {
+        body: BODY_PARAGRAPHS,
+        gradient: GradientSpec {
+            left: Color::Rgb(120, 90, 180),
+            right: Color::Rgb(200, 150, 240),
+            bias: -0.05,
+        },
+        border_color: Color::Rgb(210, 170, 245),
+        text_color: Color::Rgb(242, 234, 255),
+        title_color: Color::Rgb(248, 240, 255),
+        footer_color: Color::Rgb(232, 220, 250),
+        reveal: Some(RevealConfig {
+            duration: Duration::from_millis(720),
+            variant: RevealVariant::RainbowBloom,
+        }),
+    },
+    PreviewSpec {
+        body: BODY_PARAGRAPHS,
+        gradient: GradientSpec {
+            left: Color::Rgb(70, 90, 160),
+            right: Color::Rgb(150, 190, 230),
+            bias: -0.05,
+        },
+        border_color: Color::Rgb(180, 210, 248),
+        text_color: Color::Rgb(232, 242, 254),
+        title_color: Color::Rgb(240, 248, 255),
+        footer_color: Color::Rgb(220, 234, 248),
+        reveal: Some(RevealConfig {
+            duration: Duration::from_millis(720),
+            variant: RevealVariant::RainbowBloom,
+        }),
+    },
+    PreviewSpec {
+        body: BODY_PARAGRAPHS,
+        gradient: GradientSpec {
+            left: Color::Rgb(130, 70, 30),
+            right: Color::Rgb(210, 130, 60),
+            bias: -0.05,
+        },
+        border_color: Color::Rgb(226, 168, 120),
+        text_color: Color::Rgb(248, 230, 216),
+        title_color: Color::Rgb(254, 240, 228),
+        footer_color: Color::Rgb(236, 212, 200),
+        reveal: Some(RevealConfig {
+            duration: Duration::from_millis(720),
+            variant: RevealVariant::RainbowBloom,
+        }),
+    },
+    PreviewSpec {
+        body: BODY_PARAGRAPHS,
+        gradient: GradientSpec {
+            left: Color::Rgb(60, 82, 64),
+            right: Color::Rgb(162, 214, 172),
+            bias: -0.05,
+        },
+        border_color: Color::Rgb(182, 220, 196),
+        text_color: Color::Rgb(220, 244, 230),
+        title_color: Color::Rgb(230, 250, 238),
+        footer_color: Color::Rgb(210, 234, 220),
+        reveal: Some(RevealConfig {
+            duration: Duration::from_millis(720),
+            variant: RevealVariant::RainbowBloom,
+        }),
+    },
+    PreviewSpec {
+        body: BODY_PARAGRAPHS,
+        gradient: GradientSpec {
+            left: Color::Rgb(96, 52, 30),
+            right: Color::Rgb(210, 130, 100),
+            bias: -0.05,
+        },
+        border_color: Color::Rgb(228, 170, 140),
+        text_color: Color::Rgb(248, 226, 214),
+        title_color: Color::Rgb(254, 236, 226),
+        footer_color: Color::Rgb(238, 208, 196),
+        reveal: Some(RevealConfig {
+            duration: Duration::from_millis(720),
+            variant: RevealVariant::RainbowBloom,
+        }),
+    },
+    // Original Rainbow 02 - Rainbow 05 entries
     PreviewSpec {
         body: BODY_PARAGRAPHS,
         gradient: GradientSpec {
