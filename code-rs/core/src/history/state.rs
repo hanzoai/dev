@@ -859,6 +859,10 @@ pub enum ExploreSummary {
         annotation: Option<String>,
         range: Option<(u32, u32)>,
     },
+    Count {
+        target: Option<String>,
+        annotation: Option<String>,
+    },
     Command {
         display: String,
         annotation: Option<String>,
