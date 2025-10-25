@@ -1,14 +1,11 @@
 ---
 source: tui/tests/vt100_chatwidget_snapshot.rs
-assertion_line: 1200
 expression: output
 ---
  +----------------------------------------------------------------------------+
  |                                    Code                                    |
  +----------------------------------------------------------------------------+
- + Agents --------------------------------------------------------------------+
- | • QA Bot (running 0s) - Executing smoke tests         Ctrl+A open terminal |
- +----------------------------------------------------------------------------+
+
 
 
  ★ Popular commands:
@@ -22,11 +19,13 @@ expression: output
 
    +- qa-bot
    |
-   |   Context: regression sweep
+   |  Run targeted regression suite
    |
-   |   Run targeted regression suite
+   |  Agents
+   |    • claude  running  (18s)
    |
-   |   • claude running (18s)
+   |  Actions
+   |    0s  Started agent run for qa-bot
    |
    +- [Ctrl+A] Expand · [Esc] Stop
 

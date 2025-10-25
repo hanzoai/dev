@@ -5,11 +5,6 @@ expression: output
  +----------------------------------------------------------------------------+
  |                                    Code                                    |
  +----------------------------------------------------------------------------+
-
-
-
- ★ Popular commands:
-   /settings - manage all settings in one place NEW
    /auto - work autonomously on long tasks with Auto Drive UPDATED
    /chrome - connect to your Chrome browser
    /plan - create a comprehensive plan (multiple agents)
@@ -25,17 +20,22 @@ expression: output
 
    +- Browser (headless): Browser Session
    |
-   |   Clicked  #login-button
+   |   0s  Clicked  #login-button
    |
-   +- [Ctrl+B] Expand · [Esc] Stop
+   +- [Ctrl+B] View · [Esc] Stop
 
    +- deploy-helper
    |
-   |   Run targeted regression suite
+   |  Run targeted regression suite
    |
-   |   No agent updates yet
+   |  Agents
+   |    No agent updates yet
    |
-   +- [Ctrl+A] Expand · [Esc] Stop
+   |  Actions
+   |    0s  Started agent run for qa-bot
+   |    0s  Waiting for agents
+   |
+   +- [Ctrl+A] Expand
 
  +----------------------------------------------------------------------------+
  | What can I code for you today?                                             |

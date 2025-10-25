@@ -27649,9 +27649,11 @@ impl WidgetRef for &ChatWidget<'_> {
                             } else {
                                 true
                             };
+                            let full_detail = self.is_reasoning_shown();
                             kind = RenderRequestKind::Explore {
                                 id: history_id,
                                 hold_header,
+                                full_detail,
                             };
                         }
                         HistoryRecord::Diff(_) => {

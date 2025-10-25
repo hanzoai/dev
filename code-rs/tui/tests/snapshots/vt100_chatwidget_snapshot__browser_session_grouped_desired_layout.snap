@@ -5,9 +5,8 @@ expression: output
  +----------------------------------------------------------------------------+
  |                                    Code                                    |
  +----------------------------------------------------------------------------+
- + Browser -------------------------------------------------------------------+
- | • https://example.com/docs                                   Ctrl+B expand |
- +----------------------------------------------------------------------------+
+ ★ Popular commands:
+   /settings - manage all settings in one place NEW
    /auto - work autonomously on long tasks with Auto Drive UPDATED
    /chrome - connect to your Chrome browser
    /plan - create a comprehensive plan (multiple agents)
@@ -17,17 +16,18 @@ expression: output
 
    +- +Browser--------------------------------+
    |  |Screenshot:                            |
-   |  |browser_session.png                    |  Opened    https://example.co
-   |  |                                       |            m/docs
-   |  |                                       |  Clicked   Sign in button
-   |  +---------------------------------------+  Scrolled  dy=640
-   |                                             Typed     docs search
+   |  |browser_session.png                    |  0s   Opened    https://examp
+   |  |                                       |                 le.com/docs
+   |  |                                       |  5s   Clicked   Sign in
+   |  +---------------------------------------+                 button
+   |                                             18s  Scrolled  dy=640
+   |                                             32s  Typed     docs search
    |
    |                                             Console: ⚠️  cdp warning:
-   |                                             Refused to load script fr...
+   |                                             Refused to load script from
    |                                             cdn.example.com
    |
-   +- [Ctrl+B] Expand · [Esc] Stop
+   +- [Ctrl+B] View · [Esc] Stop
 
  +----------------------------------------------------------------------------+
  | What can I code for you today?                                             |
