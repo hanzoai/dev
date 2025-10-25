@@ -60,15 +60,26 @@ impl Default for AutoContinueMode {
     }
 }
 
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+/// High-level Auto Drive run phase. Each variant implies a precise legacy
+/// boolean configuration so older call sites can continue to rely on mirrored
+/// flags during the migration.
 pub enum AutoRunPhase {
+    /// No run in flight; all transient state must be cleared.
     Idle,
+    /// Launch sequence is preparing the first turn; coordinator not armed yet.
     Launching,
+    /// Run is executing normally with no outstanding coordinator or review gates.
     Active,
+    /// User is editing the prompt; resume behaviour carried in payload.
     PausedManual { resume_after_submit: bool },
+    /// Coordinator has a prompt ready for approval.
     AwaitingCoordinator { prompt_ready: bool },
+    /// Model response is streaming or pending diagnostics.
     AwaitingDiagnostics,
+    /// Awaiting user review/approval; may include diagnostics to show.
     AwaitingReview { diagnostics_pending: bool },
+    /// Backoff between restart attempts after a transient failure.
     TransientRecovery { backoff_ms: u64 },
 }
 
@@ -77,12 +88,48 @@ impl AutoRunPhase {
         !matches!(self, Self::Idle)
     }
 
+    pub fn is_running(&self) -> bool {
+        matches!(
+            self,
+            Self::Active
+                | Self::PausedManual { .. }
+                | Self::AwaitingCoordinator { .. }
+                | Self::AwaitingDiagnostics
+                | Self::AwaitingReview { .. }
+                | Self::TransientRecovery { .. }
+        )
+    }
+
     pub fn awaiting_coordinator_submit(&self) -> bool {
         matches!(self, Self::AwaitingCoordinator { prompt_ready: true })
     }
 
+    pub fn awaiting_review(&self) -> bool {
+        matches!(self, Self::AwaitingReview { .. })
+    }
+
+    pub fn in_transient_recovery(&self) -> bool {
+        matches!(self, Self::TransientRecovery { .. })
+    }
+
+    pub fn is_paused_manual(&self) -> bool {
+        matches!(self, Self::PausedManual { .. })
+    }
+
     pub fn should_show_goal_entry(&self) -> bool {
         matches!(self, Self::Idle)
+    }
+
+    pub fn prompt_ready(&self) -> bool {
+        matches!(self, Self::AwaitingCoordinator { prompt_ready: true })
+    }
+
+    pub fn diagnostics_pending(&self) -> bool {
+        matches!(self, Self::AwaitingReview { diagnostics_pending: true })
+    }
+
+    pub fn is_waiting_for_response(&self) -> bool {
+        matches!(self, Self::AwaitingDiagnostics)
     }
 
     pub fn resume_after_submit(&self) -> Option<bool> {
@@ -205,7 +252,6 @@ pub enum AutoControllerEffect {
 
 #[derive(Default, Clone)]
 pub struct AutoDriveController {
-    pub active: bool,
     pub goal: Option<String>,
     pub current_summary: Option<String>,
     pub current_progress_past: Option<String>,
@@ -218,11 +264,6 @@ pub struct AutoDriveController {
     pub placeholder_phrase: Option<String>,
     pub thinking_prefix_stripped: bool,
     pub current_summary_index: Option<u32>,
-    pub awaiting_submission: bool,
-    pub waiting_for_response: bool,
-    pub paused_for_manual_edit: bool,
-    pub resume_after_manual_submit: bool,
-    pub waiting_for_review: bool,
     pub countdown_id: u64,
     pub seconds_remaining: u8,
     pub awaiting_goal_input: bool,
@@ -243,7 +284,6 @@ pub struct AutoDriveController {
     pub started_at: Option<Instant>,
     pub turns_completed: usize,
     pub last_run_summary: Option<AutoRunSummary>,
-    pub waiting_for_transient_recovery: bool,
     pub pending_restart: Option<AutoRestartState>,
     pub restart_token: u64,
     pub transient_restart_attempts: u32,
@@ -257,83 +297,18 @@ pub struct AutoDriveController {
 }
 
 impl AutoDriveController {
-    fn sync_booleans_from_phase(&mut self) {
-        match &self.phase {
-            AutoRunPhase::Idle | AutoRunPhase::Launching => {
-                self.active = false;
-                self.awaiting_submission = false;
-                self.waiting_for_response = false;
-                self.coordinator_waiting = false;
-                self.paused_for_manual_edit = false;
-                self.resume_after_manual_submit = false;
-                self.waiting_for_review = false;
-                self.waiting_for_transient_recovery = false;
-            }
-            AutoRunPhase::Active => {
-                self.active = true;
-                self.awaiting_submission = false;
-                self.waiting_for_response = false;
-                self.coordinator_waiting = false;
-                self.paused_for_manual_edit = false;
-                self.resume_after_manual_submit = false;
-                self.waiting_for_review = false;
-                self.waiting_for_transient_recovery = false;
-            }
-            AutoRunPhase::AwaitingCoordinator { .. } => {
-                self.active = true;
-                self.awaiting_submission = true;
-                self.waiting_for_response = false;
-                self.coordinator_waiting = true;
-                self.paused_for_manual_edit = false;
-                self.resume_after_manual_submit = false;
-                self.waiting_for_review = false;
-                self.waiting_for_transient_recovery = false;
-            }
-            AutoRunPhase::AwaitingDiagnostics => {
-                self.active = true;
-                self.awaiting_submission = false;
-                self.waiting_for_response = true;
-                self.coordinator_waiting = false;
-                self.paused_for_manual_edit = false;
-                self.resume_after_manual_submit = false;
-                self.waiting_for_review = false;
-                self.waiting_for_transient_recovery = false;
-            }
-            AutoRunPhase::AwaitingReview { .. } => {
-                self.active = true;
-                self.awaiting_submission = false;
-                self.waiting_for_response = false;
-                self.coordinator_waiting = false;
-                self.paused_for_manual_edit = false;
-                self.resume_after_manual_submit = false;
-                self.waiting_for_review = true;
-                self.waiting_for_transient_recovery = false;
-            }
-            AutoRunPhase::PausedManual { resume_after_submit } => {
-                self.active = true;
-                self.awaiting_submission = false;
-                self.waiting_for_response = false;
-                self.coordinator_waiting = false;
-                self.paused_for_manual_edit = true;
-                self.resume_after_manual_submit = *resume_after_submit;
-                self.waiting_for_review = false;
-                self.waiting_for_transient_recovery = false;
-            }
-            AutoRunPhase::TransientRecovery { .. } => {
-                self.active = true;
-                self.awaiting_submission = false;
-                self.waiting_for_response = false;
-                self.coordinator_waiting = false;
-                self.paused_for_manual_edit = false;
-                self.resume_after_manual_submit = false;
-                self.waiting_for_review = false;
-                self.waiting_for_transient_recovery = true;
-            }
-        }
+    fn apply_phase(&mut self, phase: AutoRunPhase) {
+        self.phase = phase;
     }
 
     pub fn set_waiting_for_response(&mut self, waiting: bool) {
-        self.waiting_for_response = waiting;
+        if waiting {
+            if !self.phase.is_waiting_for_response() {
+                self.apply_phase(AutoRunPhase::AwaitingDiagnostics);
+            }
+        } else if self.phase.is_waiting_for_response() {
+            self.apply_phase(AutoRunPhase::Active);
+        }
     }
 
     pub fn set_coordinator_waiting(&mut self, waiting: bool) {
@@ -341,52 +316,40 @@ impl AutoDriveController {
     }
 
     pub fn on_prompt_ready(&mut self, prompt_ready: bool) {
-        self.phase = AutoRunPhase::AwaitingCoordinator { prompt_ready };
-        self.sync_booleans_from_phase();
+        self.apply_phase(AutoRunPhase::AwaitingCoordinator { prompt_ready });
     }
 
     pub fn on_prompt_submitted(&mut self) {
-        self.phase = AutoRunPhase::AwaitingDiagnostics;
-        self.sync_booleans_from_phase();
+        self.apply_phase(AutoRunPhase::AwaitingDiagnostics);
     }
 
     pub fn on_pause_for_manual(&mut self, resume_after_submit: bool) {
-        self.paused_for_manual_edit = true;
-        self.resume_after_manual_submit = resume_after_submit;
-        self.phase = AutoRunPhase::PausedManual { resume_after_submit };
+        self.apply_phase(AutoRunPhase::PausedManual { resume_after_submit });
     }
 
     pub fn on_resume_from_manual(&mut self) {
-        self.paused_for_manual_edit = false;
-        self.resume_after_manual_submit = false;
-        self.phase = AutoRunPhase::Active;
+        self.apply_phase(AutoRunPhase::Active);
         self.bypass_coordinator_next_submit = false;
     }
 
     pub fn on_begin_review(&mut self, diagnostics_pending: bool) {
-        self.waiting_for_review = true;
-        self.phase = AutoRunPhase::AwaitingReview { diagnostics_pending };
+        self.apply_phase(AutoRunPhase::AwaitingReview { diagnostics_pending });
     }
 
     pub fn on_complete_review(&mut self) {
-        self.waiting_for_review = false;
-        self.phase = AutoRunPhase::Active;
+        self.apply_phase(AutoRunPhase::Active);
         self.bypass_coordinator_next_submit = false;
     }
 
     pub fn on_transient_failure(&mut self, backoff_ms: u64) {
-        self.waiting_for_transient_recovery = true;
-        self.waiting_for_response = false;
-        self.coordinator_waiting = false;
-        self.awaiting_submission = false;
-        self.paused_for_manual_edit = false;
-        self.resume_after_manual_submit = false;
-        self.phase = AutoRunPhase::TransientRecovery { backoff_ms };
+        self.apply_phase(AutoRunPhase::TransientRecovery { backoff_ms });
         self.bypass_coordinator_next_submit = false;
     }
 
     pub fn on_recovery_attempt(&mut self) {
-        self.waiting_for_transient_recovery = false;
+        if self.phase.in_transient_recovery() {
+            self.apply_phase(AutoRunPhase::Active);
+        }
     }
 
     pub fn transition(&mut self, transition: PhaseTransition) -> TransitionEffects {
@@ -395,49 +358,49 @@ impl AutoDriveController {
 
         match (&self.phase, &transition) {
             (AutoRunPhase::Idle, PhaseTransition::BeginLaunch) => {
-                self.phase = AutoRunPhase::Launching;
+                self.apply_phase(AutoRunPhase::Launching);
                 self.bypass_coordinator_next_submit = false;
             }
             (AutoRunPhase::Launching, PhaseTransition::LaunchSuccess) => {
-                self.phase = AutoRunPhase::Active;
+                self.apply_phase(AutoRunPhase::Active);
                 self.bypass_coordinator_next_submit = false;
             }
             (AutoRunPhase::Launching, PhaseTransition::LaunchFailed) => {
-                self.phase = AutoRunPhase::Idle;
+                self.apply_phase(AutoRunPhase::Idle);
                 self.bypass_coordinator_next_submit = false;
             }
             (AutoRunPhase::Active, PhaseTransition::PauseForManualEdit { resume_after_submit }) => {
-                self.phase = AutoRunPhase::PausedManual { resume_after_submit: *resume_after_submit };
+                self.apply_phase(AutoRunPhase::PausedManual { resume_after_submit: *resume_after_submit });
             }
             (AutoRunPhase::PausedManual { .. }, PhaseTransition::ResumeFromManual) => {
-                self.phase = AutoRunPhase::Active;
+                self.apply_phase(AutoRunPhase::Active);
             }
             (AutoRunPhase::Active, PhaseTransition::PromptReady) => {
-                self.phase = AutoRunPhase::AwaitingCoordinator { prompt_ready: true };
+                self.apply_phase(AutoRunPhase::AwaitingCoordinator { prompt_ready: true });
             }
             (AutoRunPhase::AwaitingCoordinator { .. }, PhaseTransition::SubmitPrompt) => {
-                self.phase = AutoRunPhase::Active;
+                self.apply_phase(AutoRunPhase::Active);
             }
             (AutoRunPhase::Active, PhaseTransition::AwaitDiagnostics) => {
-                self.phase = AutoRunPhase::AwaitingDiagnostics;
+                self.apply_phase(AutoRunPhase::AwaitingDiagnostics);
             }
             (AutoRunPhase::AwaitingDiagnostics | AutoRunPhase::Active, PhaseTransition::BeginReview { diagnostics_pending }) => {
-                self.phase = AutoRunPhase::AwaitingReview { diagnostics_pending: *diagnostics_pending };
+                self.apply_phase(AutoRunPhase::AwaitingReview { diagnostics_pending: *diagnostics_pending });
             }
             (AutoRunPhase::AwaitingReview { .. }, PhaseTransition::CompleteReview) => {
-                self.phase = AutoRunPhase::Active;
+                self.apply_phase(AutoRunPhase::Active);
             }
             (_, PhaseTransition::TransientFailure { backoff_ms }) => {
                 if !matches!(self.phase, AutoRunPhase::Idle) {
-                    self.phase = AutoRunPhase::TransientRecovery { backoff_ms: *backoff_ms };
+                    self.apply_phase(AutoRunPhase::TransientRecovery { backoff_ms: *backoff_ms });
                     self.bypass_coordinator_next_submit = false;
                 }
             }
             (AutoRunPhase::TransientRecovery { .. }, PhaseTransition::RecoveryAttempt) => {
-                self.phase = AutoRunPhase::Active;
+                self.apply_phase(AutoRunPhase::Active);
             }
             (_, PhaseTransition::Stop) => {
-                self.phase = AutoRunPhase::Idle;
+                self.apply_phase(AutoRunPhase::Idle);
                 self.bypass_coordinator_next_submit = false;
             }
             _ => {
@@ -482,7 +445,6 @@ impl AutoDriveController {
         placeholder_phrase: Option<String>,
         now: Instant,
     ) -> Vec<AutoControllerEffect> {
-        self.active = true;
         self.started_at = Some(now);
         self.turns_completed = 0;
         self.last_run_summary = None;
@@ -501,10 +463,8 @@ impl AutoDriveController {
         self.last_broadcast_summary = None;
         self.last_decision_progress_past = None;
         self.last_decision_progress_current = None;
-        self.waiting_for_response = true;
-        self.coordinator_waiting = true;
         self.reset_countdown();
-        self.transition(PhaseTransition::LaunchSuccess);
+        self.apply_phase(AutoRunPhase::AwaitingDiagnostics);
 
         vec![
             AutoControllerEffect::LaunchStarted { goal },
@@ -513,12 +473,11 @@ impl AutoDriveController {
     }
 
     pub fn launch_failed(&mut self, goal: String, error: String) -> Vec<AutoControllerEffect> {
-        self.active = false;
         self.goal = None;
         self.awaiting_goal_input = true;
         self.mark_intro_pending();
         self.reset_countdown();
-        self.transition(PhaseTransition::LaunchFailed);
+        self.apply_phase(AutoRunPhase::Idle);
 
         vec![
             AutoControllerEffect::LaunchFailed { goal, error },
@@ -568,19 +527,12 @@ impl AutoDriveController {
     ) -> Vec<AutoControllerEffect> {
         let pending_attempt = self.transient_restart_attempts.saturating_add(1);
         let truncated_reason = Self::truncate_error(&reason);
-        self.waiting_for_transient_recovery = true;
-        self.waiting_for_response = false;
-        self.coordinator_waiting = false;
-        self.awaiting_submission = false;
-        self.paused_for_manual_edit = false;
-        self.resume_after_manual_submit = false;
-        self.waiting_for_review = false;
         self.current_cli_prompt = None;
         self.current_cli_context = None;
         self.pending_agent_actions.clear();
         self.pending_agent_timing = None;
         let delay = Self::auto_restart_delay(pending_attempt);
-        self.transition(PhaseTransition::TransientFailure { backoff_ms: delay.as_millis() as u64 });
+        self.apply_phase(AutoRunPhase::TransientRecovery { backoff_ms: delay.as_millis() as u64 });
 
         if pending_attempt > AUTO_RESTART_MAX_ATTEMPTS {
             self.transient_restart_attempts = pending_attempt;
@@ -600,7 +552,6 @@ impl AutoDriveController {
             self.awaiting_goal_input = true;
 
             return vec![
-                AutoControllerEffect::CancelCoordinator,
                 AutoControllerEffect::ResetHistory,
                 AutoControllerEffect::ClearCoordinatorView,
                 AutoControllerEffect::UpdateTerminalHint { hint: None },
@@ -658,7 +609,7 @@ impl AutoDriveController {
 
     pub fn schedule_cli_prompt(&mut self, prompt_text: String) -> Vec<AutoControllerEffect> {
         self.current_cli_prompt = Some(prompt_text);
-        self.awaiting_submission = true;
+        self.apply_phase(AutoRunPhase::AwaitingCoordinator { prompt_ready: true });
         self.reset_countdown();
         self.countdown_id = self.countdown_id.wrapping_add(1);
         let countdown_id = self.countdown_id;
@@ -681,7 +632,7 @@ impl AutoDriveController {
         self.seconds_remaining = self.countdown_seconds().unwrap_or(0);
 
         let mut effects = vec![AutoControllerEffect::RefreshUi];
-        if self.awaiting_submission && !self.paused_for_manual_edit {
+        if self.phase.awaiting_coordinator_submit() && !self.phase.is_paused_manual() {
             self.countdown_id = self.countdown_id.wrapping_add(1);
             let countdown_id = self.countdown_id;
             let countdown = self.countdown_seconds();
@@ -700,10 +651,10 @@ impl AutoDriveController {
         countdown_id: u64,
         seconds_left: u8,
     ) -> Vec<AutoControllerEffect> {
-        if !self.active
+        if !self.phase.is_active()
             || countdown_id != self.countdown_id
-            || !self.awaiting_submission
-            || self.paused_for_manual_edit
+            || !self.phase.awaiting_coordinator_submit()
+            || self.phase.is_paused_manual()
         {
             return Vec::new();
         }
@@ -741,7 +692,7 @@ impl AutoDriveController {
         self.intro_reduced_motion = intro_reduced_motion;
         self.elapsed_override = elapsed_override;
         self.pending_stop_message = pending_stop_message;
-        self.phase = if self.active {
+        self.phase = if self.phase.is_active() {
             AutoRunPhase::Active
         } else {
             AutoRunPhase::Idle
@@ -777,8 +728,8 @@ impl AutoDriveController {
     }
 
     pub fn countdown_active(&self) -> bool {
-        self.awaiting_submission
-            && !self.paused_for_manual_edit
+        self.phase.awaiting_coordinator_submit()
+            && !self.phase.is_paused_manual()
             && self
                 .countdown_seconds()
                 .map(|seconds| seconds > 0)
@@ -833,27 +784,31 @@ impl AutoDriveController {
     }
 
     pub fn is_paused_manual(&self) -> bool {
-        matches!(self.phase, AutoRunPhase::PausedManual { .. }) || self.paused_for_manual_edit
+        self.phase.is_paused_manual()
     }
 
     pub fn resume_after_submit(&self) -> bool {
-        self.phase
-            .resume_after_submit()
-            .unwrap_or(self.resume_after_manual_submit)
+        self.phase.resume_after_submit().unwrap_or(false)
     }
 
     pub fn awaiting_coordinator_submit(&self) -> bool {
         self.phase.awaiting_coordinator_submit()
-            || (self.awaiting_submission && !self.paused_for_manual_edit)
     }
 
     pub fn awaiting_review(&self) -> bool {
-        matches!(self.phase, AutoRunPhase::AwaitingReview { .. }) || self.waiting_for_review
+        self.phase.awaiting_review()
     }
 
     pub fn in_transient_recovery(&self) -> bool {
-        matches!(self.phase, AutoRunPhase::TransientRecovery { .. })
-            || self.waiting_for_transient_recovery
+        self.phase.in_transient_recovery()
+    }
+
+    pub fn is_waiting_for_response(&self) -> bool {
+        self.phase.is_waiting_for_response()
+    }
+
+    pub fn is_coordinator_waiting(&self) -> bool {
+        self.coordinator_waiting
     }
 
     fn auto_restart_delay(attempt: u32) -> Duration {
