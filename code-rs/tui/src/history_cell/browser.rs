@@ -12,6 +12,7 @@ use super::card_style::{
 };
 use super::{HistoryCell, HistoryCellType, ToolCellStatus};
 use crate::colors;
+use code_common::elapsed::format_duration_digital;
 use ratatui::buffer::Buffer;
 use ratatui::layout::Rect;
 use ratatui::prelude::Style;
@@ -489,9 +490,15 @@ impl BrowserSessionCell {
                         if indent_cols > 0 {
                             segments.push(CardSegment::new(" ".repeat(indent_cols), Style::default()));
                         }
-                        let ellipsis_time = format!("{:<width$}", "⋮", width = time_width);
+                        let padded = if time_width <= 1 {
+                            "⋮".to_string()
+                        } else {
+                            let lead = 2.min(time_width.saturating_sub(1));
+                            let trail = time_width.saturating_sub(lead + 1);
+                            format!("{}{}{}", " ".repeat(lead), "⋮", " ".repeat(trail))
+                        };
                         segments.push(CardSegment::new(
-                            ellipsis_time,
+                            padded,
                             secondary_text_style(style),
                         ));
                         if ACTION_TIME_GAP > 0 {
@@ -856,14 +863,7 @@ impl BrowserSessionCell {
     }
 
     pub(crate) fn format_elapsed_label(duration: Duration, _show_minutes: bool) -> String {
-        let total_secs = duration.as_secs();
-        if total_secs < 60 {
-            format!("{}s", total_secs)
-        } else {
-            let minutes = total_secs / 60;
-            let seconds = total_secs % 60;
-            format!("{}m {}s", minutes, seconds)
-        }
+        format_duration_digital(duration)
     }
 
     fn compute_screenshot_layout(&self, body_width: usize) -> Option<ScreenshotLayout> {
