@@ -21,13 +21,13 @@ expression: output
 
    +- Browser (headless): example.com
    |
-   |   Opened   https://example.com
-   |   Typed    pizza
-   |   Pressed  Enter
+   |   0s  Opened   https://example.com
+   |   3s  Typed    pizza
+   |   5s  Pressed  Enter
    |
    |   Console: ⚠️  Encountering captcha block
    |
-   +- [Ctrl+B] Expand · [Esc] Stop
+   +- [Ctrl+B] View · [Esc] Stop
 
  +----------------------------------------------------------------------------+
  | What can I code for you today?                                             |
