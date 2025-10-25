@@ -496,18 +496,24 @@ impl ModelClient {
                 .create_request_builder(&self.client, &auth)
                 .await?;
 
+            // `Codex-Task-Type` differentiates traffic for caching; default to "standard" until
+            // task-specific dispatch is re-introduced.
+            let codex_task_type = "standard";
+
             req_builder = req_builder
-                .header("OpenAI-Beta", "responses=v1")
+                .header("OpenAI-Beta", "responses=experimental")
+                // Send `conversation_id`/`session_id` so the server can hit the prompt-cache.
+                .header("conversation_id", self.session_id.to_string())
+                .header("session_id", self.session_id.to_string())
                 .header(reqwest::header::ACCEPT, "text/event-stream")
+                .header("Codex-Task-Type", codex_task_type)
                 .json(&payload_json);
 
-            // Avoid unstable `let` chains: expand into nested conditionals.
-            if let Some(auth) = auth.as_ref() {
-                if auth.mode == AuthMode::ChatGPT {
-                    if let Some(account_id) = auth.get_account_id() {
-                        req_builder = req_builder.header("chatgpt-account-id", account_id);
-                    }
-                }
+            if let Some(auth) = auth.as_ref()
+                && auth.mode == AuthMode::ChatGPT
+                && let Some(account_id) = auth.get_account_id()
+            {
+                req_builder = req_builder.header("chatgpt-account-id", account_id);
             }
 
             let res = if let Some(otel) = self.otel_event_manager.as_ref() {
