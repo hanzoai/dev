@@ -838,8 +838,9 @@ fn run_auto_loop(
                         transcript: response_items,
                     };
 
+                    let should_stop = matches!(decision_event.status, AutoCoordinatorStatus::Failed);
                     event_tx.send(decision_event.into_event());
-                    stopped = true;
+                    stopped = should_stop;
                     continue;
                 }
                 Err(err) => {
