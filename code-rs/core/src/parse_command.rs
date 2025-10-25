@@ -138,6 +138,36 @@ mod tests {
     }
 
     #[test]
+    fn git_branch_listing_is_read_command() {
+        assert_parsed(
+            &vec_str(&["git", "branch"]),
+            vec![ParsedCommand::ReadCommand {
+                cmd: "git branch".to_string(),
+            }],
+        );
+    }
+
+    #[test]
+    fn git_branch_list_with_pattern_is_read_command() {
+        assert_parsed(
+            &vec_str(&["git", "branch", "--list", "feature/*"]),
+            vec![ParsedCommand::ReadCommand {
+                cmd: "git branch --list feature/*".to_string(),
+            }],
+        );
+    }
+
+    #[test]
+    fn git_branch_create_is_not_read_only() {
+        assert_parsed(
+            &vec_str(&["git", "branch", "new-branch"]),
+            vec![ParsedCommand::Unknown {
+                cmd: "git branch new-branch".to_string(),
+            }],
+        );
+    }
+
+    #[test]
     fn git_grep_simple_is_search() {
         assert_parsed(
             &vec_str(&["git", "grep", "needle"]),
@@ -1596,6 +1626,7 @@ fn git_command_is_read_only(subcmd: &str, args: &[String]) -> bool {
             .all(|arg| !(arg == "-o" || arg == "--output" || arg.starts_with("--output="))),
         "log" => true,
         "show" => true,
+        "branch" => git_branch_is_read_only(args),
         "rev-parse" => true,
         "rev-list" => true,
         "describe" => true,
@@ -1626,6 +1657,101 @@ fn git_command_is_read_only(subcmd: &str, args: &[String]) -> bool {
         }
         _ => false,
     }
+}
+
+fn git_branch_is_read_only(args: &[String]) -> bool {
+    if args.is_empty() {
+        return true;
+    }
+
+    const MUTATING_LONG_FLAGS: &[&str] = &[
+        "--delete",
+        "--move",
+        "--copy",
+        "--create-reflog",
+        "--force",
+        "--set-upstream-to",
+        "--set-upstream",
+        "--unset-upstream",
+        "--track",
+        "--edit-description",
+    ];
+    const SAFE_VALUE_FLAGS: &[&str] = &[
+        "--contains",
+        "--merged",
+        "--no-merged",
+        "--points-at",
+        "--format",
+        "--sort",
+        "--color",
+        "--column",
+    ];
+    const SAFE_SHORT_FLAGS: &[char] = &['a', 'r', 'v', 'q', 'l'];
+    const MUTATING_SHORT_FLAGS: &[char] = &['d', 'D', 'm', 'M', 'c', 'C', 'f', 'F', 'b', 'B', 't', 'u'];
+
+    let mut expect_value = false;
+    let mut allow_patterns = false;
+
+    for arg in args {
+        if expect_value {
+            expect_value = false;
+            continue;
+        }
+
+        if let Some(stripped) = arg.strip_prefix("--") {
+            let (flag, has_value) = if let Some((head, _)) = stripped.split_once('=') {
+                (format!("--{head}"), true)
+            } else {
+                (format!("--{stripped}"), false)
+            };
+
+            if MUTATING_LONG_FLAGS.contains(&flag.as_str()) {
+                return false;
+            }
+
+            if SAFE_VALUE_FLAGS.contains(&flag.as_str()) {
+                if !has_value {
+                    expect_value = true;
+                }
+                continue;
+            }
+
+            if flag == "--list" {
+                allow_patterns = true;
+                continue;
+            }
+
+            // Other long options (including --all/--remotes) are display-only.
+            continue;
+        }
+
+        if arg.starts_with('-') {
+            let mut chars = arg.chars();
+            chars.next(); // skip '-'
+            for ch in chars {
+                if MUTATING_SHORT_FLAGS.contains(&ch) {
+                    return false;
+                }
+                if !SAFE_SHORT_FLAGS.contains(&ch) {
+                    // Unknown short flag; default to denying writes.
+                    return false;
+                }
+                if ch == 'l' {
+                    allow_patterns = true;
+                }
+            }
+            continue;
+        }
+
+        if allow_patterns {
+            continue;
+        }
+
+        // If we reach here the command is attempting to create/modify a branch.
+        return false;
+    }
+
+    true
 }
 
 fn summarize_main_tokens(main_cmd: &[String]) -> ParsedCommand {
