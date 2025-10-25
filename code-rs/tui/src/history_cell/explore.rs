@@ -274,6 +274,14 @@ pub(crate) fn explore_lines_from_record_with_force(
     record: &ExploreRecord,
     force_exploring: bool,
 ) -> Vec<Line<'static>> {
+    explore_lines_with_truncation(record, force_exploring, true)
+}
+
+fn explore_lines_with_truncation(
+    record: &ExploreRecord,
+    force_exploring: bool,
+    allow_truncation: bool,
+) -> Vec<Line<'static>> {
     let exploring = force_exploring
         || record.entries.is_empty()
         || record
@@ -297,7 +305,7 @@ pub(crate) fn explore_lines_from_record_with_force(
     const TAIL_ENTRIES: usize = 4;
 
     let entry_count = record.entries.len();
-    let (visible_indices, truncated) = if entry_count <= MAX_VISIBLE_ENTRIES {
+    let (visible_indices, truncated) = if !allow_truncation || entry_count <= MAX_VISIBLE_ENTRIES {
         ((0..entry_count).collect::<Vec<_>>(), false)
     } else {
         let tail_start = entry_count.saturating_sub(TAIL_ENTRIES);
@@ -367,6 +375,13 @@ pub(crate) fn explore_lines_from_record_with_force(
     }
 
     lines
+}
+
+pub(crate) fn explore_lines_without_truncation(
+    record: &ExploreRecord,
+    force_exploring: bool,
+) -> Vec<Line<'static>> {
+    explore_lines_with_truncation(record, force_exploring, false)
 }
 
 
