@@ -142,6 +142,13 @@ pub(crate) fn explore_record_push_from_parsed(
         }),
         ExecAction::Run => parsed.iter().find_map(|p| match p {
             ParsedCommand::ReadCommand { cmd } => {
+                if let Some(summary) = build_count_summary(cmd, cwd, session_root) {
+                    return Some(ExploreSummary::Count {
+                        target: summary.target,
+                        annotation: summary.annotation,
+                    });
+                }
+
                 let summary = build_command_summary(cmd, original_command);
                 Some(ExploreSummary::Command {
                     display: summary.display,
@@ -241,6 +248,25 @@ pub(crate) fn explore_record_push_from_parsed(
             } = &record.entries[idx].summary
             {
                 if existing_display == display && existing_annotation == annotation {
+                    record.entries[idx].status = status;
+                    return Some(idx);
+                }
+            }
+        }
+    }
+
+    if let ExploreSummary::Count {
+        target,
+        annotation,
+    } = &summary
+    {
+        for idx in (0..record.entries.len()).rev() {
+            if let ExploreSummary::Count {
+                target: existing_target,
+                annotation: existing_annotation,
+            } = &record.entries[idx].summary
+            {
+                if existing_target == target && existing_annotation == annotation {
                     record.entries[idx].status = status;
                     return Some(idx);
                 }
@@ -387,8 +413,10 @@ pub(crate) fn explore_lines_without_truncation(
 
 
 fn entry_label(entry: &ExploreEntry) -> &'static str {
-    if matches!(entry.summary, ExploreSummary::Command { .. }) {
-        return "Ran";
+    match entry.summary {
+        ExploreSummary::Command { .. } => return "Ran",
+        ExploreSummary::Count { .. } => return "Count",
+        _ => {}
     }
     match entry.action {
         ExecAction::Read => "Read",
@@ -466,12 +494,34 @@ fn entry_summary_spans(entry: &ExploreEntry) -> Vec<Span<'static>> {
             text.clone(),
             Style::default().fg(crate::colors::text()),
         )],
+        ExploreSummary::Count { target, annotation } => {
+            let mut spans = Vec::new();
+            if let Some(target) = target {
+                spans.push(Span::styled(
+                    target.clone(),
+                    Style::default().fg(crate::colors::text()),
+                ));
+            }
+            if let Some(annotation) = annotation {
+                spans.push(Span::styled(
+                    format!(" {}", annotation),
+                    Style::default().fg(crate::colors::text_dim()),
+                ));
+            }
+            spans
+        }
     }
 }
 
 #[derive(Clone, Debug, PartialEq)]
 struct CommandSummary {
     display: String,
+    annotation: Option<String>,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+struct CountSummary {
+    target: Option<String>,
     annotation: Option<String>,
 }
 
@@ -506,6 +556,70 @@ fn build_command_summary(cmd: &str, original_command: &[String]) -> CommandSumma
     }
 
     CommandSummary { display, annotation }
+}
+
+fn build_count_summary(cmd: &str, cwd: &Path, session_root: &Path) -> Option<CountSummary> {
+    let parsed = CountPipeline::parse(cmd)?;
+    let annotation = parsed.line_filter.and_then(|filter| {
+        super::parse_read_line_annotation(&filter)
+    });
+
+    let target = parsed
+        .target
+        .map(|raw| format_read_target(raw.as_str(), cwd, session_root));
+
+    Some(CountSummary { target, annotation })
+}
+
+struct CountPipeline {
+    target: Option<String>,
+    line_filter: Option<String>,
+}
+
+impl CountPipeline {
+    fn parse(cmd: &str) -> Option<Self> {
+        let trimmed = cmd.trim();
+        if trimmed.is_empty() {
+            return None;
+        }
+
+        if let Some((head, tail)) = split_pipeline_for_filter(trimmed) {
+            if is_wc_count(&tail) {
+                let target = extract_count_target(&head);
+                let line_filter = looks_like_line_filter(&head).then_some(head);
+                return Some(CountPipeline { target, line_filter });
+            }
+        }
+
+        if is_wc_count(trimmed) {
+            let target = extract_count_target(trimmed);
+            return Some(CountPipeline {
+                target,
+                line_filter: None,
+            });
+        }
+
+        None
+    }
+}
+
+fn is_wc_count(cmd: &str) -> bool {
+    let tokens = tokenize_count_command(cmd);
+    if tokens.is_empty() {
+        return false;
+    }
+    tokens[0] == "wc" && tokens.iter().skip(1).any(|token| token == "-l")
+}
+
+fn tokenize_count_command(cmd: &str) -> Vec<String> {
+    Shlex::new(cmd).collect()
+}
+
+fn extract_count_target(cmd: &str) -> Option<String> {
+    tokenize_count_command(cmd)
+        .into_iter()
+        .rev()
+        .find(|token| !token.starts_with('-'))
 }
 
 fn split_pipeline_for_filter(cmd: &str) -> Option<(String, String)> {
