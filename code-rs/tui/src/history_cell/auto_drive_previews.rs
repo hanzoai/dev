@@ -46,11 +46,6 @@ enum RevealVariant {
     PrismRise,
     NeonRoad,
     HorizonRush,
-    DaybreakGlow,
-    CloudwayPulse,
-    AuroraMist,
-    PrismBoulevard,
-    NeonTraverse,
 }
 
 struct CardRevealAnimation {
@@ -84,23 +79,41 @@ impl CardRevealAnimation {
 
 /// Generate a set of experimental history cells for Auto Drive.
 pub(crate) fn auto_drive_preview_cells() -> Vec<Box<dyn HistoryCell>> {
-    EXPERIMENTAL_RAINBOW_ROAD_PREVIEWS
+    LEGACY_PREVIEWS
         .iter()
-        .map(|spec| Box::new(AutoDrivePreviewCell::new(spec)) as Box<dyn HistoryCell>)
+        .enumerate()
+        .map(|(idx, spec)| {
+            let name = LEGACY_NAMES[idx];
+            Box::new(AutoDrivePreviewCell::new(name, spec)) as Box<dyn HistoryCell>
+        })
+        .chain(
+            EXPERIMENTAL_RAINBOW_ROAD_PREVIEWS
+                .iter()
+                .enumerate()
+                .map(|(idx, spec)| {
+                    let name = EXPERIMENTAL_NAMES[idx];
+                    Box::new(AutoDrivePreviewCell::new(name, spec)) as Box<dyn HistoryCell>
+                }),
+        )
         .collect()
 }
 
 struct AutoDrivePreviewCell {
+    name: &'static str,
     spec: &'static PreviewSpec,
     animation: Option<CardRevealAnimation>,
 }
 
 impl AutoDrivePreviewCell {
-    fn new(spec: &'static PreviewSpec) -> Self {
+    fn new(name: &'static str, spec: &'static PreviewSpec) -> Self {
         let animation = spec
             .reveal
             .map(|config| CardRevealAnimation::new(config.duration, config.variant));
-        Self { spec, animation }
+        Self {
+            name,
+            spec,
+            animation,
+        }
     }
 
     fn layout_lines(&self, width: u16) -> Vec<Line<'static>> {
@@ -135,6 +148,12 @@ impl AutoDrivePreviewCell {
         lines.push(with_indent(vec![
             Span::styled("╭─ ".to_string(), border_style),
             Span::styled(CARD_TITLE.to_string(), title_style),
+        ]));
+
+        lines.push(with_indent(vec![
+            Span::styled("│".to_string(), border_style),
+            Span::raw(CARD_PADDING),
+            Span::styled(self.name.to_string(), body_style),
         ]));
 
         lines.push(with_indent(vec![Span::styled("│".to_string(), border_style)]));
@@ -400,41 +419,6 @@ fn reveal_coverage(
             let horizon = (p * 1.32 - band) - 0.12;
             horizon + ((y * 7.0 + p * 5.0).cos()) * 0.05
         }
-        RevealVariant::DaybreakGlow => {
-            let diag = x * 0.78 + y * 0.34;
-            let center = ((x - 0.5).abs() + (y - 0.5).abs()) * 0.45;
-            let sweep = p * 1.38 - diag - center - 0.08;
-            let flare = (((x + y) * std::f32::consts::PI * 2.6) + p * 8.5).sin() * 0.08;
-            sweep + flare
-        }
-        RevealVariant::CloudwayPulse => {
-            let diag = (1.0 - x) * 0.82 + y * 0.36;
-            let band = ((y - 0.35).abs() * 0.4).min(0.25);
-            let sweep = p * 1.35 - diag - band - 0.1;
-            let pulse = (((x - y) * std::f32::consts::PI * 2.2) + p * 7.4).cos() * 0.07;
-            sweep + pulse
-        }
-        RevealVariant::AuroraMist => {
-            let diag = (x * 0.7) + (1.0 - y) * 0.55;
-            let sway = ((x - 0.5).abs() * 0.35).min(0.2);
-            let sweep = p * 1.32 - diag - sway - 0.09;
-            let shimmer = (((x + y * 0.6) * std::f32::consts::PI * 3.0) + p * 9.0).sin() * 0.06;
-            sweep + shimmer
-        }
-        RevealVariant::PrismBoulevard => {
-            let diag = (1.0 - x) * 0.76 + y * 0.42;
-            let center = ((x - 0.5).powi(2) + (y - 0.55).powi(2)).sqrt() * 0.6;
-            let sweep = p * 1.4 - diag - center - 0.08;
-            let streak = (((x * 1.4 + y) * std::f32::consts::PI * 1.8) + p * 7.0).sin() * 0.07;
-            sweep + streak
-        }
-        RevealVariant::NeonTraverse => {
-            let diag = x * 0.84 + (1.0 - y) * 0.33;
-            let ridge = ((x - 0.5).abs() * 0.4 + y * 0.15).min(0.25);
-            let sweep = p * 1.36 - diag - ridge - 0.09;
-            let surge = (((x + y) * std::f32::consts::PI * 2.4) + p * 8.2).sin() * 0.08;
-            sweep + surge
-        }
     };
 
     smoothstep(-0.15, 0.95, base)
@@ -502,31 +486,6 @@ fn accent_color(
             let dawn = mix_rgb(base, Color::Rgb(255, 200, 150), wash * 0.4);
             mix_rgb(dawn, final_color, 0.36)
         }
-        RevealVariant::DaybreakGlow => {
-            let bloom = ((progress * 8.5 + (x + y) * 3.2).sin() + 1.0) * 0.32;
-            let sunrise = mix_rgb(base, Color::Rgb(255, 180, 120), bloom * 0.4);
-            mix_rgb(sunrise, final_color, 0.42)
-        }
-        RevealVariant::CloudwayPulse => {
-            let mist = ((progress * 7.4 + x * 4.0 - y * 2.2).cos() + 1.0) * 0.3;
-            let glow = mix_rgb(base, Color::Rgb(200, 230, 255), mist * 0.42);
-            mix_rgb(glow, final_color, 0.44)
-        }
-        RevealVariant::AuroraMist => {
-            let veil = ((progress * 9.0 + x * 5.5 + y * 3.3).sin() + 1.0) * 0.33;
-            let haze = mix_rgb(base, Color::Rgb(186, 210, 255), veil * 0.45);
-            mix_rgb(haze, final_color, 0.46)
-        }
-        RevealVariant::PrismBoulevard => {
-            let stripe = ((progress * 6.8 + x * 7.2 + y * 4.6).cos() + 1.0) * 0.34;
-            let pastel = mix_rgb(base, Color::Rgb(242, 200, 255), stripe * 0.43);
-            mix_rgb(pastel, final_color, 0.44)
-        }
-        RevealVariant::NeonTraverse => {
-            let shimmer = ((progress * 7.9 + x * 8.0 + y * 5.0).sin() + 1.0) * 0.36;
-            let beam = mix_rgb(base, Color::Rgb(212, 210, 255), shimmer * 0.46);
-            mix_rgb(beam, final_color, 0.45)
-        }
     }
 }
 
@@ -547,6 +506,53 @@ fn smoothstep(e0: f32, e1: f32, x: f32) -> f32 {
 
 const BODY_PARAGRAPHS: &[&str] = &[
     "Scan the codebase to identify all tracing targets and log statements related to diagnostics. Produce a short guide with exact RUST_LOG filters (for example, module targets), expected example log lines when diagnostics are active, and a brief note on why no LLM content appears by design.",
+];
+
+const LEGACY_NAMES: &[&str] = &[
+    "Legacy 01",
+    "Legacy 02",
+    "Legacy 03",
+    "Legacy 04",
+    "Legacy 05",
+    "Legacy 06",
+    "Legacy 07",
+    "Legacy 08",
+    "Legacy 09",
+    "Legacy 10",
+    "Legacy 11",
+    "Legacy 12",
+    "Legacy 13",
+    "Legacy 14",
+    "Legacy 15",
+    "Legacy 16",
+    "Legacy 17",
+    "Legacy 18",
+    "Legacy 19",
+    "Legacy 20",
+    "Legacy 21",
+    "Legacy 22",
+    "Legacy 23",
+    "Legacy 24",
+    "Legacy 25",
+    "Legacy 26",
+    "Legacy 27",
+    "Legacy 28",
+    "Legacy 29",
+    "Legacy 30",
+    "Legacy 31",
+    "Legacy 32",
+    "Legacy 33",
+    "Legacy 34",
+    "Legacy 35",
+    "Legacy 36",
+];
+
+const EXPERIMENTAL_NAMES: &[&str] = &[
+    "Rainbow 01",
+    "Rainbow 02",
+    "Rainbow 03",
+    "Rainbow 04",
+    "Rainbow 05",
 ];
 
 #[allow(dead_code)]
@@ -1120,86 +1126,6 @@ const EXPERIMENTAL_RAINBOW_ROAD_PREVIEWS: &[PreviewSpec] = &[
         reveal: Some(RevealConfig {
             duration: Duration::from_millis(760),
             variant: RevealVariant::HorizonRush,
-        }),
-    },
-    PreviewSpec {
-        body: BODY_PARAGRAPHS,
-        gradient: GradientSpec {
-            left: Color::Rgb(255, 238, 220),
-            right: Color::Rgb(255, 204, 150),
-            bias: 0.05,
-        },
-        border_color: Color::Rgb(168, 108, 52),
-        text_color: Color::Rgb(82, 44, 18),
-        title_color: Color::Rgb(212, 132, 62),
-        footer_color: Color::Rgb(212, 132, 62),
-        reveal: Some(RevealConfig {
-            duration: Duration::from_millis(720),
-            variant: RevealVariant::DaybreakGlow,
-        }),
-    },
-    PreviewSpec {
-        body: BODY_PARAGRAPHS,
-        gradient: GradientSpec {
-            left: Color::Rgb(244, 250, 255),
-            right: Color::Rgb(214, 236, 255),
-            bias: -0.02,
-        },
-        border_color: Color::Rgb(90, 130, 170),
-        text_color: Color::Rgb(32, 56, 92),
-        title_color: Color::Rgb(124, 176, 220),
-        footer_color: Color::Rgb(124, 176, 220),
-        reveal: Some(RevealConfig {
-            duration: Duration::from_millis(690),
-            variant: RevealVariant::CloudwayPulse,
-        }),
-    },
-    PreviewSpec {
-        body: BODY_PARAGRAPHS,
-        gradient: GradientSpec {
-            left: Color::Rgb(252, 252, 252),
-            right: Color::Rgb(220, 232, 250),
-            bias: 0.08,
-        },
-        border_color: Color::Rgb(152, 176, 222),
-        text_color: Color::Rgb(48, 70, 116),
-        title_color: Color::Rgb(186, 210, 248),
-        footer_color: Color::Rgb(186, 210, 248),
-        reveal: Some(RevealConfig {
-            duration: Duration::from_millis(680),
-            variant: RevealVariant::AuroraMist,
-        }),
-    },
-    PreviewSpec {
-        body: BODY_PARAGRAPHS,
-        gradient: GradientSpec {
-            left: Color::Rgb(236, 248, 255),
-            right: Color::Rgb(255, 225, 240),
-            bias: 0.12,
-        },
-        border_color: Color::Rgb(182, 130, 192),
-        text_color: Color::Rgb(110, 46, 118),
-        title_color: Color::Rgb(214, 166, 224),
-        footer_color: Color::Rgb(214, 166, 224),
-        reveal: Some(RevealConfig {
-            duration: Duration::from_millis(710),
-            variant: RevealVariant::PrismBoulevard,
-        }),
-    },
-    PreviewSpec {
-        body: BODY_PARAGRAPHS,
-        gradient: GradientSpec {
-            left: Color::Rgb(250, 250, 255),
-            right: Color::Rgb(224, 232, 255),
-            bias: -0.04,
-        },
-        border_color: Color::Rgb(150, 162, 206),
-        text_color: Color::Rgb(46, 52, 94),
-        title_color: Color::Rgb(200, 208, 252),
-        footer_color: Color::Rgb(200, 208, 252),
-        reveal: Some(RevealConfig {
-            duration: Duration::from_millis(700),
-            variant: RevealVariant::NeonTraverse,
         }),
     },
 ];
