@@ -12,6 +12,7 @@ use super::card_style::{
 };
 use super::{HistoryCell, HistoryCellType, ToolCellStatus};
 use crate::colors;
+use code_common::elapsed::format_duration_digital;
 use ratatui::buffer::Buffer;
 use ratatui::layout::Rect;
 use ratatui::prelude::{Color, Style};
@@ -29,6 +30,7 @@ const MAX_SUMMARY_LINES: usize = 4;
 const MAX_AGENT_DISPLAY: usize = 8;
 const ACTION_TIME_COLUMN_MIN_WIDTH: usize = 2;
 const ACTION_TIME_SEPARATOR_WIDTH: usize = 2;
+const ACTION_TIME_INDENT: usize = 2;
 
 #[derive(Clone, Default)]
 pub(crate) struct AgentRunCell {
@@ -1025,18 +1027,30 @@ impl AgentRunCell {
             .unwrap_or(0)
             .max(ACTION_TIME_COLUMN_MIN_WIDTH);
 
-        let indent_text = " ".repeat(CONTENT_INDENT);
+        let time_indent = " ".repeat(ACTION_TIME_INDENT);
         let indent_style = secondary_text_style(style);
         let time_style = Style::default().fg(colors::text());
         let label_style = secondary_text_style(style);
+        let ellipsis_time = |width: usize| {
+            if width <= 1 {
+                return "⋮".to_string();
+            }
+            let lead = 2.min(width.saturating_sub(1));
+            let trail = width.saturating_sub(lead + 1);
+            format!(
+                "{}{}{}",
+                " ".repeat(lead),
+                "⋮",
+                " ".repeat(trail)
+            )
+        };
 
         for (position, idx) in display_indices.iter().enumerate() {
             if truncated && position == head_count {
                 let mut ellipsis_segments = Vec::new();
-                ellipsis_segments.push(CardSegment::new(indent_text.clone(), indent_style));
-                let ellipsis_time = format!("{:<width$}", "⋮", width = time_width);
+                ellipsis_segments.push(CardSegment::new(time_indent.clone(), indent_style));
                 ellipsis_segments.push(CardSegment::new(
-                    ellipsis_time,
+                    ellipsis_time(time_width),
                     secondary_text_style(style),
                 ));
                 if ACTION_TIME_SEPARATOR_WIDTH > 0 {
@@ -1061,9 +1075,9 @@ impl AgentRunCell {
             }
 
             let mut segments = Vec::new();
-            segments.push(CardSegment::new(indent_text.clone(), indent_style));
+            segments.push(CardSegment::new(time_indent.clone(), indent_style));
 
-            let mut remaining = body_width.saturating_sub(CONTENT_INDENT);
+            let mut remaining = body_width.saturating_sub(ACTION_TIME_INDENT);
             if remaining <= time_width {
                 continue;
             }
@@ -1155,27 +1169,21 @@ impl AgentRunCell {
                     }
                 }
             }
-            if duration.as_secs() == 0 {
+            let total_secs = duration.as_secs();
+            if total_secs == 0 {
                 "0s".to_string()
-            } else if duration.as_secs() < 60 {
-                format!("{}s", duration.as_secs())
+            } else if total_secs < 60 {
+                format!("{}s", total_secs)
             } else {
-                let minutes = duration.as_secs() / 60;
-                let seconds = duration.as_secs() % 60;
+                let minutes = total_secs / 60;
+                let seconds = total_secs % 60;
                 format!("{}m {:02}s", minutes, seconds)
             }
         })
     }
 
     fn format_elapsed_label(duration: Duration) -> String {
-        let total_secs = duration.as_secs();
-        if total_secs < 60 {
-            format!("{}s", total_secs)
-        } else {
-            let minutes = total_secs / 60;
-            let seconds = total_secs % 60;
-            format!("{}m {}s", minutes, seconds)
-        }
+        format_duration_digital(duration)
     }
     fn agent_counts(&self) -> AgentCountSummary {
         let mut summary = AgentCountSummary::default();
@@ -1194,7 +1202,7 @@ impl AgentRunCell {
             }
         }
         if let Some(duration) = self.duration {
-            lines.push(format!("Duration: {}", format_duration_compact(duration)));
+            lines.push(format!("Duration: {}", format_duration_digital(duration)));
         }
 
         let counts = self.agent_counts();
@@ -1387,18 +1395,6 @@ fn detail_display_text(detail: &AgentDetail) -> String {
         | AgentDetail::Result(text)
         | AgentDetail::Error(text)
         | AgentDetail::Info(text) => text.clone(),
-    }
-}
-
-fn format_duration_compact(duration: Duration) -> String {
-    let total_secs = duration.as_secs();
-    let hours = total_secs / 3600;
-    let minutes = (total_secs % 3600) / 60;
-    let seconds = total_secs % 60;
-    if hours > 0 {
-        format!("{}h{:02}m", hours, minutes)
-    } else {
-        format!("{:02}:{:02}", minutes, seconds)
     }
 }
 
