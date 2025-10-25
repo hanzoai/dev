@@ -13212,7 +13212,7 @@ fi\n\
     }
 
     fn auto_send_conversation(&mut self) {
-        if !self.auto_state.is_active() || self.auto_state.waiting_for_response {
+        if !self.auto_state.is_active() || self.auto_state.is_waiting_for_response() {
             return;
         }
         self.auto_state.on_complete_review();
@@ -13229,7 +13229,7 @@ fi\n\
        {
            self.auto_stop(Some("Coordinator stopped unexpectedly.".to_string()));
        } else {
-            self.auto_state.set_waiting_for_response(true);
+            self.auto_state.on_prompt_submitted();
             self.auto_state.set_coordinator_waiting(true);
             self.auto_state.current_summary = None;
             self.auto_state.current_progress_past = None;
@@ -13266,8 +13266,8 @@ fi\n\
         {
             self.auto_stop(Some("Coordinator stopped unexpectedly.".to_string()));
         } else {
-            self.auto_state.waiting_for_response = true;
-            self.auto_state.coordinator_waiting = true;
+            self.auto_state.on_prompt_submitted();
+            self.auto_state.set_coordinator_waiting(true);
             self.auto_state.current_summary = None;
             self.auto_state.current_progress_past = None;
             self.auto_state.current_progress_current = None;
@@ -13300,9 +13300,8 @@ fi\n\
         };
         match handle.send(command) {
             Ok(()) => {
-                self.auto_state.waiting_for_response = true;
-                self.auto_state.coordinator_waiting = true;
-                self.auto_state.awaiting_submission = false;
+                self.auto_state.on_prompt_submitted();
+                self.auto_state.set_coordinator_waiting(true);
                 self.auto_state.placeholder_phrase =
                     Some(auto_drive_strings::next_auto_drive_phrase().to_string());
                 self.auto_rebuild_live_ring();
@@ -13398,7 +13397,7 @@ fi\n\
 
         let summary_text = Self::compose_progress_summary(&progress_current, &progress_past);
         self.auto_state.last_decision_summary = Some(summary_text.clone());
-        self.auto_state.coordinator_waiting = false;
+        self.auto_state.set_coordinator_waiting(false);
         self.auto_on_reasoning_final(&summary_text);
         self.auto_state.last_decision_display = self.auto_state.current_display_line.clone();
         self.auto_state.last_decision_display_is_summary =
@@ -13454,7 +13453,7 @@ fi\n\
 
         if !matches!(status, AutoCoordinatorStatus::Failed) {
             self.auto_state.transient_restart_attempts = 0;
-           self.auto_state.waiting_for_transient_recovery = false;
+           self.auto_state.on_recovery_attempt();
             self.auto_state.pending_restart = None;
         }
 
@@ -13555,8 +13554,7 @@ Have we met every part of this goal and is there no further work to do?"#
                 self.submit_user_message(message);
             }
         } else {
-            self.auto_state.waiting_for_response = false;
-            self.auto_state.coordinator_waiting = false;
+            self.auto_state.set_phase(AutoRunPhase::Active);
             self.auto_state.placeholder_phrase = None;
         }
 
@@ -13817,7 +13815,7 @@ Have we met every part of this goal and is there no further work to do?"#
         match self.auto_prepare_commit_scope() {
             AutoReviewOutcome::Skip => {
                 self.auto_turn_review_state = None;
-                if self.auto_state.waiting_for_review {
+                if self.auto_state.awaiting_review() {
                     self.maybe_resume_auto_after_review();
                 }
             }
@@ -14151,7 +14149,7 @@ use crate::chatwidget::message::UserMessage;
     }
 
     fn auto_on_assistant_final(&mut self) {
-        if !self.auto_state.active || !self.auto_state.waiting_for_response {
+        if !self.auto_state.is_active() || !self.auto_state.is_waiting_for_response() {
             return;
         }
         self.auto_state.on_resume_from_manual();
@@ -14180,7 +14178,7 @@ use crate::chatwidget::message::UserMessage;
         self.request_redraw();
         self.rebuild_auto_history();
 
-        if self.auto_state.waiting_for_review {
+        if self.auto_state.awaiting_review() {
             return;
         }
 
@@ -14305,7 +14303,7 @@ use crate::chatwidget::message::UserMessage;
     }
 
     fn auto_rebuild_live_ring(&mut self) {
-        if !self.auto_state.active {
+        if !self.auto_state.is_active() {
             if self.auto_state.awaiting_goal_input {
                 self.auto_show_goal_entry_panel();
                 return;
@@ -14367,7 +14365,7 @@ use crate::chatwidget::message::UserMessage;
         return;
     }
 
-    if self.auto_state.paused_for_manual_edit {
+    if self.auto_state.is_paused_manual() {
         self.bottom_pane.clear_auto_coordinator_view(false);
         self.bottom_pane.clear_live_ring();
         self.bottom_pane.set_standard_terminal_hint(None);
@@ -14376,7 +14374,7 @@ use crate::chatwidget::message::UserMessage;
 
         self.bottom_pane.clear_live_ring();
 
-        let status_text = if self.auto_state.waiting_for_review {
+        let status_text = if self.auto_state.awaiting_review() {
             "waiting for code review...".to_string()
         } else if let Some(line) = self
             .auto_state
@@ -14401,7 +14399,7 @@ use crate::chatwidget::message::UserMessage;
                 self.auto_state.current_progress_current.as_ref(),
                 self.auto_state.current_progress_past.as_ref(),
             );
-            if self.auto_state.waiting_for_response && !self.auto_state.coordinator_waiting {
+            if self.auto_state.is_waiting_for_response() && !self.auto_state.is_coordinator_waiting() {
                 let appended = self.auto_append_progress_lines(
                     &mut status_lines,
                     self.auto_state.last_decision_progress_current.as_ref(),
@@ -14432,7 +14430,7 @@ use crate::chatwidget::message::UserMessage;
         }
         let cli_running = self.is_cli_running();
         let progress_hint_active = self.auto_state.awaiting_coordinator_submit()
-            || (self.auto_state.waiting_for_response && !self.auto_state.coordinator_waiting)
+            || (self.auto_state.is_waiting_for_response() && !self.auto_state.is_coordinator_waiting())
             || cli_running;
 
         // Keep the most recent coordinator progress visible across approval and
@@ -14512,7 +14510,7 @@ use crate::chatwidget::message::UserMessage;
             } else {
                 "Esc to edit".to_string()
             }
-        } else if self.auto_state.waiting_for_response {
+        } else if self.auto_state.is_waiting_for_response() {
             String::new()
         } else {
             String::new()
@@ -14526,7 +14524,7 @@ use crate::chatwidget::message::UserMessage;
             status_lines,
             cli_prompt,
             awaiting_submission: self.auto_state.awaiting_coordinator_submit(),
-            waiting_for_response: self.auto_state.waiting_for_response,
+            waiting_for_response: self.auto_state.is_waiting_for_response(),
             coordinator_waiting: self.auto_state.coordinator_waiting,
             waiting_for_review: self.auto_state.awaiting_review(),
             countdown,
@@ -14568,7 +14566,7 @@ use crate::chatwidget::message::UserMessage;
             return trimmed.to_string();
         }
 
-        let show_summary_without_ellipsis = self.auto_state.awaiting_submission
+        let show_summary_without_ellipsis = self.auto_state.awaiting_coordinator_submit()
             && self.auto_state.current_reasoning_title.is_none()
             && self
                 .auto_state
@@ -14585,7 +14583,7 @@ use crate::chatwidget::message::UserMessage;
     }
 
     fn auto_update_terminal_hint(&mut self) {
-        if !self.auto_state.active && !self.auto_state.awaiting_goal_input {
+        if !self.auto_state.is_active() && !self.auto_state.awaiting_goal_input {
             self.bottom_pane.set_standard_terminal_hint(None);
             return;
         }
@@ -14611,7 +14609,7 @@ use crate::chatwidget::message::UserMessage;
     }
 
     fn auto_update_display_title(&mut self) {
-        if !self.auto_state.active {
+        if !self.auto_state.is_active() {
             return;
         }
 
@@ -14644,7 +14642,7 @@ use crate::chatwidget::message::UserMessage;
     }
 
     fn auto_broadcast_summary(&mut self, raw: &str) {
-        if !self.auto_state.active {
+        if !self.auto_state.is_active() {
             return;
         }
 
@@ -14673,7 +14671,7 @@ use crate::chatwidget::message::UserMessage;
     }
 
     fn auto_on_reasoning_delta(&mut self, delta: &str, summary_index: Option<u32>) {
-        if !self.auto_state.active || delta.trim().is_empty() {
+        if !self.auto_state.is_active() || delta.trim().is_empty() {
             return;
         }
 
@@ -14760,7 +14758,7 @@ use crate::chatwidget::message::UserMessage;
     }
 
     fn auto_on_reasoning_final(&mut self, text: &str) {
-        if !self.auto_state.active {
+        if !self.auto_state.is_active() {
             return;
         }
 
@@ -14771,7 +14769,7 @@ use crate::chatwidget::message::UserMessage;
         self.auto_update_display_title();
         self.auto_broadcast_summary(text);
 
-        if self.auto_state.waiting_for_response {
+        if self.auto_state.is_waiting_for_response() {
             self.auto_rebuild_live_ring();
             self.request_redraw();
         }
@@ -21877,7 +21875,6 @@ mod tests {
         let mut harness = ChatWidgetHarness::new();
         let chat = harness.chat();
 
-        chat.auto_state.active = true;
         chat.auto_state.on_begin_review(false);
 
         let route = chat.describe_esc_context();
@@ -22018,8 +22015,8 @@ mod tests {
         let mut harness = ChatWidgetHarness::new();
         let chat = harness.chat();
 
-        chat.auto_state.active = true;
-        chat.auto_state.waiting_for_response = true;
+        chat.auto_state.set_phase(AutoRunPhase::Active);
+        chat.auto_state.on_prompt_submitted();
         chat.auto_state.review_enabled = true;
         chat.auto_state.on_complete_review();
         chat.pending_turn_descriptor = None;
@@ -22030,12 +22027,12 @@ mod tests {
 
         // With cloud-gpt-5-codex gated off, the review request is still queued but
         // may be processed synchronously; ensure the review slot was populated.
-        if chat.auto_state.waiting_for_review {
+        if chat.auto_state.awaiting_review() {
             // Review remains pending; nothing else to assert.
         } else {
             assert!(chat.auto_state.current_cli_prompt.is_some());
         }
-        assert!(!chat.auto_state.waiting_for_response);
+        assert!(!chat.auto_state.is_waiting_for_response());
     }
 
     #[test]
@@ -22045,9 +22042,9 @@ mod tests {
 
         let _stub_lock = AUTO_STUB_LOCK.lock().unwrap();
 
-        chat.auto_state.active = true;
+        chat.auto_state.set_phase(AutoRunPhase::Active);
         chat.auto_state.review_enabled = true;
-        chat.auto_state.waiting_for_response = true;
+        chat.auto_state.on_prompt_submitted();
         chat.auto_state.on_complete_review();
 
         let turn_config = TurnConfig {
@@ -22091,13 +22088,13 @@ mod tests {
         let initial_history_len = chat.auto_history.raw_snapshot().len();
 
         chat.auto_on_assistant_final();
-        assert!(chat.auto_state.waiting_for_review, "post-turn review should be pending");
+        assert!(chat.auto_state.awaiting_review(), "post-turn review should be pending");
 
         let descriptor_snapshot = chat.pending_turn_descriptor.clone();
         chat.auto_handle_post_turn_review(turn_config.clone(), descriptor_snapshot.as_ref());
 
         assert!(
-            !chat.auto_state.waiting_for_review,
+            !chat.auto_state.awaiting_review(),
             "auto drive should clear waiting flag after skipped review"
         );
 
@@ -22113,7 +22110,7 @@ mod tests {
 
         let final_history_len = chat.auto_history.raw_snapshot().len();
         assert!(
-            chat.auto_state.waiting_for_response
+            chat.auto_state.is_waiting_for_response()
                 || final_history_len > initial_history_len,
             "auto drive should resume conversation after skipped review"
         );
@@ -22126,9 +22123,9 @@ mod tests {
 
         let _stub_lock = AUTO_STUB_LOCK.lock().unwrap();
 
-        chat.auto_state.active = true;
+        chat.auto_state.set_phase(AutoRunPhase::Active);
         chat.auto_state.review_enabled = true;
-        chat.auto_state.waiting_for_response = true;
+        chat.auto_state.on_prompt_submitted();
         chat.auto_state.on_complete_review();
 
         let turn_config = TurnConfig {
@@ -22172,17 +22169,17 @@ mod tests {
         });
 
         chat.auto_on_assistant_final();
-        assert!(chat.auto_state.waiting_for_review, "auto-resolve should block resume before skip");
+        assert!(chat.auto_state.awaiting_review(), "auto-resolve should block resume before skip");
 
         let descriptor_snapshot = chat.pending_turn_descriptor.clone();
         chat.auto_handle_post_turn_review(turn_config.clone(), descriptor_snapshot.as_ref());
 
         assert!(
-            chat.auto_state.waiting_for_review,
+            chat.auto_state.awaiting_review(),
             "auto drive should remain waiting when auto-resolve blocks"
         );
         assert!(
-            !chat.auto_state.waiting_for_response,
+            !chat.auto_state.is_waiting_for_response(),
             "skip should not resume coordinator when auto-resolve blocks"
         );
     }
@@ -22192,7 +22189,7 @@ mod tests {
         let mut harness = ChatWidgetHarness::new();
         let chat = harness.chat();
 
-        chat.auto_state.active = true;
+        chat.auto_state.set_phase(AutoRunPhase::Active);
         chat.auto_state.review_enabled = true;
         chat.config.sandbox_policy = SandboxPolicy::DangerFullAccess;
 
@@ -22219,7 +22216,7 @@ mod tests {
             chat.auto_state.current_cli_prompt.as_deref(),
             Some("Run cargo test")
         );
-        assert!(!chat.auto_state.waiting_for_review);
+        assert!(!chat.auto_state.awaiting_review());
         assert_eq!(chat.auto_state.pending_agent_actions.len(), 1);
         assert_eq!(
             chat.auto_state.pending_agent_timing,
@@ -22248,7 +22245,7 @@ mod tests {
         let mut harness = ChatWidgetHarness::new();
         {
             let chat = harness.chat();
-            chat.auto_state.active = true;
+        chat.auto_state.set_phase(AutoRunPhase::Active);
             chat.config.auto_drive.coordinator_routing = true;
             chat.config.sandbox_policy = SandboxPolicy::DangerFullAccess;
         }
@@ -22302,7 +22299,7 @@ mod tests {
         let mut harness = ChatWidgetHarness::new();
         {
             let chat = harness.chat();
-            chat.auto_state.active = true;
+        chat.auto_state.set_phase(AutoRunPhase::Active);
             chat.config.auto_drive.coordinator_routing = true;
             chat.config.sandbox_policy = SandboxPolicy::DangerFullAccess;
         }
@@ -22331,7 +22328,7 @@ mod tests {
         let mut harness = ChatWidgetHarness::new();
         {
             let chat = harness.chat();
-            chat.auto_state.active = true;
+        chat.auto_state.set_phase(AutoRunPhase::Active);
             chat.config.auto_drive.coordinator_routing = true;
         }
 
@@ -22392,9 +22389,9 @@ mod tests {
 
         let _stub_lock = AUTO_STUB_LOCK.lock().unwrap();
 
-        chat.auto_state.active = true;
+        chat.auto_state.set_phase(AutoRunPhase::Active);
         chat.auto_state.review_enabled = true;
-        chat.auto_state.waiting_for_response = true;
+        chat.auto_state.on_prompt_submitted();
 
         let turn_config = TurnConfig {
             read_only: false,
@@ -22435,7 +22432,7 @@ mod tests {
         });
 
         chat.auto_on_assistant_final();
-        assert!(chat.auto_state.waiting_for_review);
+        assert!(chat.auto_state.awaiting_review());
 
         let descriptor_snapshot = chat.pending_turn_descriptor.clone();
         chat.auto_handle_post_turn_review(turn_config.clone(), descriptor_snapshot.as_ref());
@@ -22450,7 +22447,7 @@ mod tests {
         });
 
         assert!(
-            !chat.auto_state.waiting_for_review,
+            !chat.auto_state.awaiting_review(),
             "waiting flag should clear after TaskComplete launches skip review"
         );
 
@@ -23378,13 +23375,13 @@ impl ChatWidget<'_> {
     }
 
     fn maybe_resume_auto_after_review(&mut self) {
-        if !self.auto_state.active || !self.auto_state.waiting_for_review {
+        if !self.auto_state.is_active() || !self.auto_state.awaiting_review() {
             return;
         }
         if self.is_review_flow_active() || self.auto_resolve_should_block_auto_resume() {
             return;
         }
-        self.auto_state.waiting_for_review = false;
+        self.auto_state.on_complete_review();
         if !self.auto_state.should_bypass_coordinator_next_submit() {
             self.auto_send_conversation();
         }

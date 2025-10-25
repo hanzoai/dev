@@ -308,7 +308,6 @@ impl ChatWidgetHarness {
             let mode = continue_mode.into_internal();
             chat.auto_state.reset();
             chat.auto_state.elapsed_override = Some(Duration::from_secs(1));
-            chat.auto_state.active = true;
             chat.auto_state.goal = Some(goal);
             chat.auto_state.review_enabled = review_enabled;
             chat.auto_state.subagents_enabled = agents_enabled;
