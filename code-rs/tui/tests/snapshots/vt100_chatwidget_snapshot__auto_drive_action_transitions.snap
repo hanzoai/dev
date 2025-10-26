@@ -1,5 +1,6 @@
 ---
 source: tui/tests/vt100_chatwidget_snapshot.rs
+assertion_line: 364
 expression: "frames.join(\"\\n---FRAME---\\n\")"
 ---
  +----------------------------------------------------------------------------+
@@ -14,45 +15,7 @@ expression: "frames.join(\"\\n---FRAME---\\n\")"
    /plan - create a comprehensive plan (multiple agents)
    /code - perform a coding task (multiple agents)
 
-  Auto Drive > Comparing diffs against last run.                ✶ Thinking (1s)
- +----------------------------------------------------------------------------+
- | What can I code for you today?                                             |
- +----------------------------------------------------------------------------+
-   Agents Enabled  •  Diagnostics Enabled Ctrl+S settings • Esc stop Auto Drive
-
----FRAME---
- +----------------------------------------------------------------------------+
- |                                    Code                                    |
- +----------------------------------------------------------------------------+
-   /settings - manage all settings in one place NEW
-   /auto - work autonomously on long tasks with Auto Drive UPDATED
-   /chrome - connect to your Chrome browser
-   /plan - create a comprehensive plan (multiple agents)
-   /code - perform a coding task (multiple agents)
-
-  Auto Drive > Comparing diffs against last run.                 ✶ Waiting (1s)
- + Next Prompt ---------------------------------------------------------------+
- |  cargo test --workspace                                                    |
- +----------------------------------------------------------------------------+
- +------------------+
- | Send prompt (6s) |   Esc to edit
- +------------------+
-   Agents Enabled  •  Diagnostics Enabled Ctrl+S settings • Esc stop Auto Drive
-
----FRAME---
- +----------------------------------------------------------------------------+
- |                                    Code                                    |
- +----------------------------------------------------------------------------+
-
-
- ★ Popular commands:
-   /settings - manage all settings in one place NEW
-   /auto - work autonomously on long tasks with Auto Drive UPDATED
-   /chrome - connect to your Chrome browser
-   /plan - create a comprehensive plan (multiple agents)
-   /code - perform a coding task (multiple agents)
-
-  Auto Drive > Working                                   ✶ Awaiting review (1s)
+  Auto Drive > Comparing diffs against last run.  ✶ Thinking (1s)
  +----------------------------------------------------------------------------+
  | What can I code for you today?                                             |
  +----------------------------------------------------------------------------+
@@ -71,7 +34,45 @@ expression: "frames.join(\"\\n---FRAME---\\n\")"
    /plan - create a comprehensive plan (multiple agents)
    /code - perform a coding task (multiple agents)
 
-  Auto Drive > Queued new command for execution.                ✶ Thinking (1s)
+  Auto Drive > Working  ✶ Running (1s)
+ +----------------------------------------------------------------------------+
+ | What can I code for you today?                                             |
+ +----------------------------------------------------------------------------+
+   Agents Enabled  •  Diagnostics Enabled Ctrl+S settings • Esc stop Auto Drive
+
+---FRAME---
+ +----------------------------------------------------------------------------+
+ |                                    Code                                    |
+ +----------------------------------------------------------------------------+
+
+
+ ★ Popular commands:
+   /settings - manage all settings in one place NEW
+   /auto - work autonomously on long tasks with Auto Drive UPDATED
+   /chrome - connect to your Chrome browser
+   /plan - create a comprehensive plan (multiple agents)
+   /code - perform a coding task (multiple agents)
+
+  Auto Drive > Working  ✶ Awaiting review (1s)
+ +----------------------------------------------------------------------------+
+ | What can I code for you today?                                             |
+ +----------------------------------------------------------------------------+
+   Agents Enabled  •  Diagnostics Enabled Ctrl+S settings • Esc stop Auto Drive
+
+---FRAME---
+ +----------------------------------------------------------------------------+
+ |                                    Code                                    |
+ +----------------------------------------------------------------------------+
+
+
+ ★ Popular commands:
+   /settings - manage all settings in one place NEW
+   /auto - work autonomously on long tasks with Auto Drive UPDATED
+   /chrome - connect to your Chrome browser
+   /plan - create a comprehensive plan (multiple agents)
+   /code - perform a coding task (multiple agents)
+
+  Auto Drive > Queued new command for execution.  ✶ Thinking (1s)
  +----------------------------------------------------------------------------+
  | What can I code for you today?                                             |
  +----------------------------------------------------------------------------+

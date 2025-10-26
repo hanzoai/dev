@@ -192,7 +192,7 @@ impl BottomPane<'_> {
             .as_ref()
             .and_then(|view| view.as_any())
             .and_then(|any| any.downcast_ref::<AutoCoordinatorView>())
-            .map(|view| view.model.clone())
+            .map(|view| view.model().clone())
     }
 
     fn apply_auto_drive_style(&mut self) {

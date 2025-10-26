@@ -1,8 +1,9 @@
 ---
 source: tui/tests/bottom_spacer_clip_regression.rs
+assertion_line: 31
 expression: output
 ---
- |    Code  •  Directory: ~/.code/working/code/branches/code-branch-20251021-101202/code-rs/tui   |
+ |                                              Code                                              |
                                                                                                    
    with scroll offsets.
                                                                                                    
@@ -29,4 +30,4 @@ expression: output
 
  | What can I code for you today?                                                                 |
                                                                                                    
-   Read Only  (Shift+Tab change)                                                       Ctrl+H help
+   Read Only  (Shift+Tab change)                                           Ctrl+H help  •  API key

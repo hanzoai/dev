@@ -66,6 +66,10 @@ impl ChatWidgetHarness {
         // Safe: tests run single-threaded by design.
         unsafe { std::env::set_var("CODEX_TUI_FAKE_HOUR", "12"); }
 
+        unsafe {
+            std::env::set_var("CODEX_TUI_FORCE_MINIMAL_HEADER", "1");
+        }
+
         let cfg = Config::load_from_base_config_with_overrides(
             ConfigToml::default(),
             ConfigOverrides::default(),
@@ -181,6 +185,12 @@ impl ChatWidgetHarness {
 
     pub(crate) fn chat(&mut self) -> &mut ChatWidget<'static> {
         &mut self.chat
+    }
+
+    pub(crate) fn with_chat<R>(&mut self, f: impl FnOnce(&mut ChatWidget<'static>) -> R) -> R {
+        let runtime = &*TEST_RUNTIME;
+        let _guard = runtime.enter();
+        f(&mut self.chat)
     }
 
     pub fn open_agents_settings_overlay(&mut self) {

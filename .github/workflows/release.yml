@@ -613,9 +613,15 @@ jobs:
           echo "Previous tag: ${PREV_TAG:-<none>}"
           echo "Range: $RANGE"
 
+          if [ -f CHANGELOG.md ] && [ -f release-notes/RELEASE_NOTES.md ] \
+             && grep -qF "## [${NEW_VERSION}]" CHANGELOG.md 2>/dev/null \
+             && grep -qF "## @just-every/code v${NEW_VERSION}" release-notes/RELEASE_NOTES.md 2>/dev/null; then
+            echo "CHANGELOG.md and release-notes/RELEASE_NOTES.md already contain v${NEW_VERSION}; skipping regeneration."
+            exit 0
+          fi
+
           # Extract a Linux x86_64 Code binary from artifacts and make it runnable.
           mkdir -p .code-bin release-notes
-          # Always start from a blank file so stale content never leaks through
           : > release-notes/RELEASE_NOTES.md
           LNX_ZST=$(ls -1 release-assets/code-x86_64-unknown-linux-musl.* 2>/dev/null | head -n1 || true)
           if [ -z "$LNX_ZST" ]; then

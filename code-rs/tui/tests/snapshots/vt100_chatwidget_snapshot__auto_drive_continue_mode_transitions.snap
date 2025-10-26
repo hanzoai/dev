@@ -1,59 +1,60 @@
 ---
 source: tui/tests/vt100_chatwidget_snapshot.rs
+assertion_line: 319
 expression: "frames.join(\"\\n---FRAME---\\n\")"
 ---
  +----------------------------------------------------------------------------+
  |                                    Code                                    |
  +----------------------------------------------------------------------------+
+
+
+ ★ Popular commands:
    /settings - manage all settings in one place NEW
    /auto - work autonomously on long tasks with Auto Drive UPDATED
    /chrome - connect to your Chrome browser
    /plan - create a comprehensive plan (multiple agents)
    /code - perform a coding task (multiple agents)
 
-  Auto Drive > Working                                           ✶ Waiting (1s)
- + Next Prompt ---------------------------------------------------------------+
- |  cargo nextest run --no-fail-fast                                          |
+  Auto Drive > Working  ✶ Running (1s)
  +----------------------------------------------------------------------------+
- +------------------+
- | Send prompt (9s) |   Esc to edit
- +------------------+
+ | What can I code for you today?                                             |
+ +----------------------------------------------------------------------------+
    Agents Enabled  •  Diagnostics Enabled Ctrl+S settings • Esc stop Auto Drive
 
 ---FRAME---
  +----------------------------------------------------------------------------+
  |                                    Code                                    |
  +----------------------------------------------------------------------------+
+
+
+ ★ Popular commands:
    /settings - manage all settings in one place NEW
    /auto - work autonomously on long tasks with Auto Drive UPDATED
    /chrome - connect to your Chrome browser
    /plan - create a comprehensive plan (multiple agents)
    /code - perform a coding task (multiple agents)
 
-  Auto Drive > Working                                           ✶ Waiting (1s)
- + Next Prompt ---------------------------------------------------------------+
- |  cargo nextest run --no-fail-fast                                          |
+  Auto Drive > Working  ✶ Running (1s)
  +----------------------------------------------------------------------------+
- +------------------+
- | Send prompt (9s) |   Esc to edit
- +------------------+
+ | What can I code for you today?                                             |
+ +----------------------------------------------------------------------------+
    Agents Enabled  •  Diagnostics Enabled Ctrl+S settings • Esc stop Auto Drive
 
 ---FRAME---
  +----------------------------------------------------------------------------+
  |                                    Code                                    |
  +----------------------------------------------------------------------------+
+
+
+ ★ Popular commands:
    /settings - manage all settings in one place NEW
    /auto - work autonomously on long tasks with Auto Drive UPDATED
    /chrome - connect to your Chrome browser
    /plan - create a comprehensive plan (multiple agents)
    /code - perform a coding task (multiple agents)
 
-  Auto Drive > Working                                           ✶ Waiting (1s)
- + Next Prompt ---------------------------------------------------------------+
- |  cargo nextest run --no-fail-fast                                          |
+  Auto Drive > Working  ✶ Running (1s)
  +----------------------------------------------------------------------------+
- +------------------+
- | Send prompt (9s) |   Esc to edit
- +------------------+
+ | What can I code for you today?                                             |
+ +----------------------------------------------------------------------------+
    Agents Enabled  •  Diagnostics Enabled Ctrl+S settings • Esc stop Auto Drive
