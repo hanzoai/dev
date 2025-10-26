@@ -1,5 +1,6 @@
 ---
 source: tui/tests/vt100_chatwidget_snapshot.rs
+assertion_line: 1366
 expression: "&output"
 ---
  +--------------------------------------------------------------------------------------------+
@@ -25,8 +26,8 @@ expression: "&output"
  |                             |                                                            | |
  |                             | [MM:SS] claude-3-opus status: Status → Completed        | |
  |                             |                                                            | |
- |                             | [MM:SS] claude-3-opus result: Highlights                | |
- |                             |                                  - New Auto Drive controls | |
+ |                             | [MM:SS] claude-3-opus progress: Synthesizing highlights | |
+ |                             |                                                            | |
  |                             +------------------------------------------------------------+ |
  | ↑/↓ Navigate/Scroll  →/Enter Focus output  ← Back to list  Tab Next agent  PgUp/PgDn Page  |
  |                                                                                            |
