@@ -118,8 +118,8 @@ fn is_dark_theme_active() -> bool {
 }
 
 fn adjust_gradient(gradient: GradientSpec, is_dark: bool) -> GradientSpec {
-    const LIGHTEN_FACTOR: f32 = 0.22;
-    const DARKEN_FACTOR: f32 = 0.18;
+    const LIGHTEN_FACTOR: f32 = 0.35;
+    const DARKEN_FACTOR: f32 = 0.28;
 
     let target = if is_dark { Color::Black } else { Color::White };
     let amount = if is_dark { DARKEN_FACTOR } else { LIGHTEN_FACTOR };
