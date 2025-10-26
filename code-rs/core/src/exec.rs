@@ -48,6 +48,7 @@ const EXEC_TIMEOUT_EXIT_CODE: i32 = 124; // conventional timeout exit code
 // I/O buffer sizing
 const READ_CHUNK_SIZE: usize = 8192; // bytes per read
 const AGGREGATE_BUFFER_INITIAL_CAPACITY: usize = 8 * 1024; // 8 KiB
+pub(crate) const EXEC_CAPTURE_MAX_BYTES: usize = 32 * 1024 * 1024; // 32 MiB tail per stream
 
 /// Limit the number of ExecCommandOutputDelta events emitted per exec call.
 /// Aggregation still collects full output; only the live event stream is capped.
@@ -230,6 +231,7 @@ fn is_likely_sandbox_denied(sandbox_type: SandboxType, exit_code: i32) -> bool {
 pub struct StreamOutput<T> {
     pub text: T,
     pub truncated_after_lines: Option<u32>,
+    pub truncated_before_bytes: Option<usize>,
 }
 #[derive(Debug)]
 struct RawExecToolCallOutput {
@@ -245,6 +247,7 @@ impl StreamOutput<String> {
         Self {
             text,
             truncated_after_lines: None,
+            truncated_before_bytes: None,
         }
     }
 }
@@ -254,13 +257,74 @@ impl StreamOutput<Vec<u8>> {
         StreamOutput {
             text: String::from_utf8_lossy(&self.text).to_string(),
             truncated_after_lines: self.truncated_after_lines,
+            truncated_before_bytes: self.truncated_before_bytes,
         }
     }
 }
 
-#[inline]
-fn append_all(dst: &mut Vec<u8>, src: &[u8]) {
-    dst.extend_from_slice(src);
+#[derive(Debug)]
+struct TruncatingBuffer {
+    buf: Vec<u8>,
+    max_bytes: usize,
+    truncated_before_bytes: usize,
+}
+
+impl TruncatingBuffer {
+    fn with_capacity(max_bytes: usize, capacity_hint: usize) -> Self {
+        let capped_hint = max_bytes.min(capacity_hint);
+        Self {
+            buf: Vec::with_capacity(capped_hint),
+            max_bytes,
+            truncated_before_bytes: 0,
+        }
+    }
+
+    fn push(&mut self, chunk: &[u8]) {
+        if chunk.is_empty() {
+            return;
+        }
+
+        if self.max_bytes == 0 {
+            self.truncated_before_bytes = self
+                .truncated_before_bytes
+                .saturating_add(chunk.len());
+            return;
+        }
+
+        if chunk.len() >= self.max_bytes {
+            let drop_existing = self.buf.len();
+            let keep_start = chunk.len().saturating_sub(self.max_bytes);
+            self.truncated_before_bytes = self
+                .truncated_before_bytes
+                .saturating_add(drop_existing + keep_start);
+            self.buf.clear();
+            self.buf
+                .extend_from_slice(&chunk[chunk.len() - self.max_bytes..]);
+            return;
+        }
+
+        let total = self.buf.len().saturating_add(chunk.len());
+        if total <= self.max_bytes {
+            self.buf.extend_from_slice(chunk);
+            return;
+        }
+
+        let overflow = total - self.max_bytes;
+        self.buf.drain(..overflow);
+        self.truncated_before_bytes = self
+            .truncated_before_bytes
+            .saturating_add(overflow);
+        self.buf.extend_from_slice(chunk);
+    }
+
+    fn into_parts(self) -> (Vec<u8>, Option<usize>) {
+        let truncated = if self.truncated_before_bytes > 0 {
+            Some(self.truncated_before_bytes)
+        } else {
+            None
+        };
+        (self.buf, truncated)
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -398,8 +462,16 @@ async fn consume_truncated_output(
         stdout_handle.abort();
         stderr_handle.abort();
         (
-            StreamOutput { text: Vec::new(), truncated_after_lines: None },
-            StreamOutput { text: Vec::new(), truncated_after_lines: None },
+            StreamOutput {
+                text: Vec::new(),
+                truncated_after_lines: None,
+                truncated_before_bytes: None,
+            },
+            StreamOutput {
+                text: Vec::new(),
+                truncated_after_lines: None,
+                truncated_before_bytes: None,
+            },
         )
     } else {
         (stdout_handle.await??, stderr_handle.await??)
@@ -407,13 +479,18 @@ async fn consume_truncated_output(
 
     drop(agg_tx);
 
-    let mut combined_buf = Vec::with_capacity(AGGREGATE_BUFFER_INITIAL_CAPACITY);
+    let mut combined = TruncatingBuffer::with_capacity(
+        EXEC_CAPTURE_MAX_BYTES,
+        AGGREGATE_BUFFER_INITIAL_CAPACITY,
+    );
     while let Ok(chunk) = agg_rx.recv().await {
-        append_all(&mut combined_buf, &chunk);
+        combined.push(&chunk);
     }
+    let (combined_buf, truncated_before_bytes) = combined.into_parts();
     let aggregated_output = StreamOutput {
         text: combined_buf,
         truncated_after_lines: None,
+        truncated_before_bytes,
     };
 
     Ok(RawExecToolCallOutput {
@@ -431,11 +508,12 @@ async fn read_capped<R: AsyncRead + Unpin + Send + 'static>(
     is_stderr: bool,
     aggregate_tx: Option<Sender<Vec<u8>>>,
 ) -> io::Result<StreamOutput<Vec<u8>>> {
-    let mut buf = Vec::with_capacity(AGGREGATE_BUFFER_INITIAL_CAPACITY);
+    let mut buf = TruncatingBuffer::with_capacity(
+        EXEC_CAPTURE_MAX_BYTES,
+        AGGREGATE_BUFFER_INITIAL_CAPACITY,
+    );
     let mut tmp = [0u8; READ_CHUNK_SIZE];
     let mut emitted_deltas: usize = 0;
-
-    // No caps: append all bytes
 
     loop {
         let n = reader.read(&mut tmp).await?;
@@ -481,13 +559,15 @@ async fn read_capped<R: AsyncRead + Unpin + Send + 'static>(
             let _ = tx.send(tmp[..n].to_vec()).await;
         }
 
-        append_all(&mut buf, &tmp[..n]);
+        buf.push(&tmp[..n]);
         // Continue reading to EOF to avoid back-pressure
     }
 
+    let (buf, truncated_before_bytes) = buf.into_parts();
     Ok(StreamOutput {
         text: buf,
         truncated_after_lines: None,
+        truncated_before_bytes,
     })
 }
 

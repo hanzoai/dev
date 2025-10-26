@@ -748,18 +748,63 @@ fn prune_exec_stream(chunks: &mut Vec<ExecStreamChunk>, max_bytes: usize) {
     }
 }
 
-fn append_assistant_delta(deltas: &mut Vec<AssistantStreamDelta>, delta: AssistantStreamDelta) {
+fn append_assistant_delta(deltas: &mut Vec<AssistantStreamDelta>, delta: AssistantStreamDelta) -> usize {
     if let Some(last) = deltas.last_mut() {
         if delta.sequence.is_some() && delta.sequence == last.sequence {
             last.delta.push_str(&delta.delta);
-            return;
+            return prune_assistant_stream(deltas, MAX_ASSISTANT_STREAM_RETAINED_BYTES);
         }
         if delta.sequence.is_none() && last.sequence.is_none() {
             last.delta.push_str(&delta.delta);
-            return;
+            return prune_assistant_stream(deltas, MAX_ASSISTANT_STREAM_RETAINED_BYTES);
         }
     }
     deltas.push(delta);
+    prune_assistant_stream(deltas, MAX_ASSISTANT_STREAM_RETAINED_BYTES)
+}
+
+fn prune_assistant_stream(deltas: &mut Vec<AssistantStreamDelta>, max_bytes: usize) -> usize {
+    if max_bytes == 0 {
+        let dropped = deltas.iter().map(|d| d.delta.len()).sum();
+        deltas.clear();
+        return dropped;
+    }
+
+    let mut total: usize = deltas.iter().map(|d| d.delta.len()).sum();
+    if total <= max_bytes {
+        return 0;
+    }
+
+    let mut truncated = 0usize;
+    while total > max_bytes && !deltas.is_empty() {
+        if let Some(first) = deltas.first_mut() {
+            let first_len = first.delta.len();
+            if total.saturating_sub(first_len) >= max_bytes {
+                let removed = deltas.remove(0);
+                truncated = truncated.saturating_add(removed.delta.len());
+                total = total.saturating_sub(first_len);
+                continue;
+            }
+
+            let mut drain = total - max_bytes;
+            drain = drain.min(first_len);
+            while drain < first_len && !first.delta.is_char_boundary(drain) {
+                drain += 1;
+            }
+
+            if drain >= first_len {
+                let removed = deltas.remove(0);
+                truncated = truncated.saturating_add(removed.delta.len());
+                total = total.saturating_sub(first_len);
+                continue;
+            }
+
+            first.delta.drain(..drain);
+            truncated = truncated.saturating_add(drain);
+            total = total.saturating_sub(drain);
+        }
+    }
+    truncated
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -779,6 +824,8 @@ pub struct AssistantStreamState {
     pub metadata: Option<MessageMetadata>,
     pub in_progress: bool,
     pub last_updated_at: SystemTime,
+    #[serde(default)]
+    pub truncated_prefix_bytes: usize,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -946,6 +993,9 @@ const EXEC_STREAM_BYTE_STEP: usize = 2 * 1024 * 1024;
 /// Maximum per-stream payload we retain in memory for exec stdout/stderr.
 /// Older bytes are truncated from the front once this threshold is exceeded.
 pub const MAX_EXEC_STREAM_RETAINED_BYTES: usize = 32 * 1024 * 1024; // 32 MiB
+
+/// Maximum bytes retained in memory for assistant streaming output.
+pub const MAX_ASSISTANT_STREAM_RETAINED_BYTES: usize = 6 * 1024 * 1024; // 6 MiB
 
 const ASSISTANT_STREAM_CHUNK_THRESHOLD: usize = 2048;
 const ASSISTANT_STREAM_CHUNK_STEP: usize = 256;
@@ -1746,7 +1796,12 @@ impl HistoryState {
                         if let Some(delta_clone) = delta.clone() {
                             self.usage_tracker
                                 .add_assistant_delta(updated.id, delta_clone.delta.len());
-                            append_assistant_delta(&mut updated.deltas, delta_clone);
+                            let truncated = append_assistant_delta(&mut updated.deltas, delta_clone);
+                            if truncated > 0 {
+                                updated.truncated_prefix_bytes = updated
+                                    .truncated_prefix_bytes
+                                    .saturating_add(truncated);
+                            }
                         }
                         updated.preview_markdown = preview_markdown.clone();
                         if let Some(meta) = metadata.clone() {
@@ -1768,6 +1823,7 @@ impl HistoryState {
                 }
 
                 let mut deltas = Vec::new();
+                let mut truncated_prefix_bytes = 0usize;
                 if let Some(delta_value) = delta {
                     if let Some(existing_id) = self.records
                         .iter()
@@ -1781,7 +1837,7 @@ impl HistoryState {
                         self.usage_tracker
                             .add_assistant_delta(existing_id, delta_value.delta.len());
                     }
-                    deltas.push(delta_value);
+                    truncated_prefix_bytes = append_assistant_delta(&mut deltas, delta_value);
                 }
                 let citations = metadata
                     .as_ref()
@@ -1796,6 +1852,7 @@ impl HistoryState {
                     metadata,
                     in_progress: true,
                     last_updated_at: now,
+                    truncated_prefix_bytes,
                 };
                 let record = HistoryRecord::AssistantStream(assistant_state);
                 self.apply_event(HistoryEvent::Insert {
@@ -2593,6 +2650,7 @@ mod tests {
             metadata: None,
             in_progress: true,
             last_updated_at: SystemTime::UNIX_EPOCH,
+            truncated_prefix_bytes: 0,
         }));
 
         let snapshot = state.snapshot();
@@ -2762,6 +2820,7 @@ mod tests {
             metadata: Some(metadata.clone()),
             in_progress: true,
             last_updated_at: now,
+            truncated_prefix_bytes: 0,
         }));
 
         records.push(HistoryRecord::AssistantMessage(AssistantMessageState {
