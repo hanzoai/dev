@@ -3887,7 +3887,7 @@ impl ChatWidget<'_> {
             },
             interrupts: interrupts::InterruptManager::new(),
             auto_drive_preview_index: 0,
-            auto_drive_previews_enabled: true,
+            auto_drive_previews_enabled: false,
             ended_call_ids: HashSet::new(),
             diffs: DiffsState {
                 session_patch_sets: Vec::new(),
@@ -4193,7 +4193,7 @@ impl ChatWidget<'_> {
             },
             interrupts: interrupts::InterruptManager::new(),
             auto_drive_preview_index: 0,
-            auto_drive_previews_enabled: true,
+            auto_drive_previews_enabled: false,
             ended_call_ids: HashSet::new(),
             diffs: DiffsState {
                 session_patch_sets: Vec::new(),
@@ -7098,6 +7098,9 @@ impl ChatWidget<'_> {
     }
 
     fn inject_auto_drive_previews(&mut self) {
+        if !self.auto_drive_previews_enabled {
+            return;
+        }
         let preview_cells = history_cell::auto_drive_preview_cells();
         for (index, cell) in preview_cells.into_iter().enumerate() {
             let tag = if index == 0 {
