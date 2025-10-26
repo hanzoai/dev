@@ -96,6 +96,7 @@ pub enum AutoCoordinatorEvent {
         status: AutoCoordinatorStatus,
         progress_past: Option<String>,
         progress_current: Option<String>,
+        goal: Option<String>,
         cli: Option<AutoTurnCliAction>,
         agents_timing: Option<AutoTurnAgentsTiming>,
         agents: Vec<AutoTurnAgentsAction>,
@@ -145,6 +146,7 @@ struct PendingDecision {
     status: AutoCoordinatorStatus,
     progress_past: Option<String>,
     progress_current: Option<String>,
+    goal: Option<String>,
     cli: Option<AutoTurnCliAction>,
     agents_timing: Option<AutoTurnAgentsTiming>,
     agents: Vec<AutoTurnAgentsAction>,
@@ -157,6 +159,7 @@ impl PendingDecision {
             status: self.status,
             progress_past: self.progress_past,
             progress_current: self.progress_current,
+            goal: self.goal,
             cli: self.cli,
             agents_timing: self.agents_timing,
             agents: self.agents,
@@ -304,6 +307,7 @@ mod tests {
             .get("properties")
             .and_then(|v| v.as_object())
             .expect("schema properties");
+        assert!(!props.contains_key("goal"));
         assert!(props.contains_key("cli"), "cli property missing");
         assert!(props.contains_key("agents"), "agents property missing");
         assert!(!props.contains_key("code_review"));
@@ -423,6 +427,49 @@ mod tests {
             .and_then(|v| v.as_array())
             .expect("required array");
         assert!(!required.contains(&json!("agents")));
+        assert!(!required.contains(&json!("goal")));
+    }
+
+    #[test]
+    fn schema_marks_goal_required_with_bootstrap_description() {
+        let mut features = SchemaFeatures::default();
+        features.include_goal_field = true;
+        let schema = build_schema(&Vec::new(), features);
+        let required = schema
+            .get("required")
+            .and_then(|v| v.as_array())
+            .expect("required array");
+        assert!(required.contains(&json!("goal")), "goal should be required");
+
+        let props = schema
+            .get("properties")
+            .and_then(|v| v.as_object())
+            .expect("schema properties");
+        let goal = props
+            .get("goal")
+            .and_then(|v| v.as_object())
+            .expect("goal schema");
+        let description = goal
+            .get("description")
+            .and_then(|v| v.as_str())
+            .expect("goal description");
+        assert!(description.contains("primary coding goal"));
+    }
+
+    #[test]
+    fn developer_message_uses_bootstrap_instructions_when_deriving_goal() {
+        let (_intro_bootstrap, primary_bootstrap) = build_developer_message(
+            "Deriving goal from recent conversation",
+            "Env",
+            None,
+            true,
+        );
+        assert!(primary_bootstrap.contains("You are preparing to start Auto Drive"));
+
+        let (_intro_normal, primary_normal) =
+            build_developer_message("Ship feature", "Env", None, false);
+        assert!(primary_normal.contains("Ship feature"));
+        assert!(!primary_normal.contains("You are preparing to start Auto Drive"));
     }
 
     #[test]
@@ -549,6 +596,8 @@ struct CoordinatorDecisionNew {
     cli: Option<CliPayload>,
     #[serde(default)]
     agents: Option<AgentsField>,
+    #[serde(default)]
+    goal: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -627,6 +676,8 @@ struct CoordinatorDecisionLegacy {
     cli_context: Option<String>,
     #[serde(default)]
     cli_prompt: Option<String>,
+    #[serde(default)]
+    goal: Option<String>,
 }
 
 struct ParsedCoordinatorDecision {
@@ -636,6 +687,7 @@ struct ParsedCoordinatorDecision {
     cli: Option<CliAction>,
     agents_timing: Option<AutoTurnAgentsTiming>,
     agents: Vec<AgentAction>,
+    goal: Option<String>,
     response_items: Vec<ResponseItem>,
 }
 
@@ -659,6 +711,7 @@ pub fn start_auto_coordinator(
     conversation: Vec<ResponseItem>,
     config: Config,
     debug_enabled: bool,
+    derive_goal_from_history: bool,
 ) -> Result<AutoCoordinatorHandle> {
     let (cmd_tx, cmd_rx) = mpsc::channel();
     let thread_tx = cmd_tx.clone();
@@ -677,6 +730,7 @@ pub fn start_auto_coordinator(
             cmd_rx,
             debug_enabled,
             thread_cancel,
+            derive_goal_from_history,
         ) {
             tracing::error!("auto coordinator loop error: {err:#}");
         }
@@ -701,6 +755,7 @@ fn run_auto_loop(
     cmd_rx: Receiver<AutoCoordinatorCommand>,
     debug_enabled: bool,
     cancel_token: CancellationToken,
+    derive_goal_from_history: bool,
 ) -> Result<()> {
     let preferred_auth = if config.using_chatgpt_auth {
         code_protocol::mcp_protocol::AuthMode::ChatGPT
@@ -762,11 +817,18 @@ fn run_auto_loop(
     };
     let environment_details = format_environment_details(sandbox_label);
     let coordinator_prompt = read_coordinator_prompt(config.as_ref());
-    let (base_developer_intro, primary_goal_message) =
-        build_developer_message(&goal_text, &environment_details, coordinator_prompt.as_deref());
-    let schema_features = SchemaFeatures::from_auto_settings(&config.auto_drive);
+    let (base_developer_intro, mut primary_goal_message) = build_developer_message(
+        &goal_text,
+        &environment_details,
+        coordinator_prompt.as_deref(),
+        derive_goal_from_history,
+    );
+    let mut schema_features = SchemaFeatures::from_auto_settings(&config.auto_drive);
+    if derive_goal_from_history {
+        schema_features.include_goal_field = true;
+    }
     let include_agents = schema_features.include_agents;
-    let schema = build_schema(&active_agent_names, schema_features);
+    let mut schema = build_schema(&active_agent_names, schema_features);
     let platform = std::env::consts::OS;
     debug!("[Auto coordinator] starting: goal={goal_text} platform={platform}");
 
@@ -803,6 +865,7 @@ fn run_auto_loop(
                     status,
                     progress_past,
                     progress_current,
+                    goal,
                     cli,
                     mut agents_timing,
                     mut agents,
@@ -814,11 +877,23 @@ fn run_auto_loop(
                         agents.clear();
                     }
                     consecutive_decision_failures = 0;
+                    if let Some(goal_text) = goal
+                        .as_ref()
+                        .map(|value| value.trim())
+                        .filter(|value| !value.is_empty())
+                    {
+                        primary_goal_message = format!("**Primary Goal**\n{goal_text}");
+                        if schema_features.include_goal_field {
+                            schema_features.include_goal_field = false;
+                            schema = build_schema(&active_agent_names, schema_features);
+                        }
+                    }
                     if matches!(status, AutoCoordinatorStatus::Continue) {
                         let event = AutoCoordinatorEvent::Decision {
                             status,
                             progress_past,
                             progress_current,
+                            goal: goal.clone(),
                             cli: cli.as_ref().map(cli_action_to_event),
                             agents_timing,
                             agents: agents.iter().map(agent_action_to_event).collect(),
@@ -832,6 +907,7 @@ fn run_auto_loop(
                         status,
                         progress_past,
                         progress_current,
+                        goal: goal.clone(),
                         cli: cli.as_ref().map(cli_action_to_event),
                         agents_timing,
                         agents: agents.iter().map(agent_action_to_event).collect(),
@@ -881,6 +957,7 @@ fn run_auto_loop(
                         status: AutoCoordinatorStatus::Failed,
                         progress_past: None,
                         progress_current: Some(format!("Coordinator error: {err}")),
+                        goal: None,
                         cli: None,
                         agents_timing: None,
                         agents: Vec::new(),
@@ -965,6 +1042,7 @@ fn build_developer_message(
     goal_text: &str,
     environment_details: &str,
     coordinator_prompt: Option<&str>,
+    derive_goal_from_history: bool,
 ) -> (String, String) {
     let prompt_body = coordinator_prompt.unwrap_or("").trim();
     let intro = if prompt_body.is_empty() {
@@ -976,8 +1054,11 @@ fn build_developer_message(
 Environment:
 {environment_details}")
     };
-    let primary_goal = format!("**Primary Goal**
-{}", goal_text);
+    let primary_goal = if derive_goal_from_history {
+        "**Primary Goal**\nYou are preparing to start Auto Drive. Review the recent conversation history and identify the single primary coding goal the assistant should pursue next.".to_string()
+    } else {
+        format!("**Primary Goal**\n{}", goal_text)
+    };
     (intro, primary_goal)
 }
 
@@ -1014,12 +1095,14 @@ fn run_git_command<const N: usize>(args: [&str; N]) -> Option<String> {
 #[derive(Clone, Copy)]
 struct SchemaFeatures {
     include_agents: bool,
+    include_goal_field: bool,
 }
 
 impl SchemaFeatures {
     fn from_auto_settings(settings: &AutoDriveSettings) -> Self {
         Self {
             include_agents: settings.agents_enabled,
+            include_goal_field: false,
         }
     }
 }
@@ -1028,6 +1111,7 @@ impl Default for SchemaFeatures {
     fn default() -> Self {
         Self {
             include_agents: true,
+            include_goal_field: false,
         }
     }
 }
@@ -1145,6 +1229,19 @@ fn build_schema(active_agents: &[String], features: SchemaFeatures) -> Value {
         }),
     );
     required.push(Value::String("progress".to_string()));
+
+    if features.include_goal_field {
+        properties.insert(
+            "goal".to_string(),
+            json!({
+                "type": "string",
+                "minLength": 4,
+                "maxLength": 200,
+                "description": "Provide the single primary coding goal derived from the recent conversation history to begin Auto Drive without a user-supplied prompt."
+            }),
+        );
+        required.push(Value::String("goal".to_string()));
+    }
 
     properties.insert(
         "cli".to_string(),
@@ -1950,10 +2047,12 @@ fn convert_decision_new(
         progress,
         cli,
         agents: agent_payloads,
+        goal,
     } = decision;
 
     let progress_past = clean_optional(progress.past);
     let progress_current = clean_optional(progress.current);
+    let goal = clean_optional(goal);
 
     let cli = match (status, cli) {
         (AutoCoordinatorStatus::Continue, Some(payload)) => Some(CliAction {
@@ -2015,6 +2114,7 @@ fn convert_decision_new(
         cli,
         agents_timing,
         agents: agent_actions,
+        goal,
         response_items: Vec::new(),
     })
 }
@@ -2029,11 +2129,13 @@ fn convert_decision_legacy(
         progress_current,
         cli_context,
         cli_prompt,
+        goal,
     } = decision;
 
     let progress_past = clean_optional(progress_past);
     let progress_current = clean_optional(progress_current);
     let context = clean_optional(cli_context);
+    let goal = clean_optional(goal);
 
     let cli = match (status, cli_prompt) {
         (AutoCoordinatorStatus::Continue, Some(prompt)) => Some(CliAction {
@@ -2057,6 +2159,7 @@ fn convert_decision_legacy(
         cli,
         agents_timing: None,
         agents: Vec::new(),
+        goal,
         response_items: Vec::new(),
     })
 }
