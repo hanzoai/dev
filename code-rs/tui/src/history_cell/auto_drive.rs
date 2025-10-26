@@ -1,6 +1,5 @@
 use super::card_style::{
     auto_drive_card_style,
-    fill_card_background,
     hint_text_style,
     primary_text_style,
     rows_to_lines,
@@ -13,6 +12,8 @@ use super::card_style::{
     CARD_ACCENT_WIDTH,
 };
 use super::{HistoryCell, HistoryCellType, ToolCellStatus};
+use crate::card_theme;
+use crate::gradient_background::{GradientBackground, RevealRender};
 use crate::colors;
 use ratatui::buffer::Buffer;
 use ratatui::layout::Rect;
@@ -20,6 +21,7 @@ use ratatui::style::{Modifier, Style};
 use ratatui::text::{Line, Text};
 use ratatui::widgets::{Paragraph, Widget, Wrap};
 use unicode_width::UnicodeWidthStr;
+use std::time::Instant;
 
 const BORDER_TOP: &str = "╭─";
 const BORDER_BODY: &str = "│";
@@ -96,16 +98,22 @@ pub(crate) struct AutoDriveCardCell {
     actions: Vec<AutoDriveAction>,
     cell_key: Option<String>,
     signature: Option<String>,
+    reveal_started_at: Option<Instant>,
 }
 
 impl AutoDriveCardCell {
     pub(crate) fn new(goal: Option<String>) -> Self {
+        let reveal_started_at = active_auto_drive_theme()
+            .theme
+            .reveal
+            .map(|_| Instant::now());
         let mut cell = Self {
             goal: goal.and_then(Self::normalize_text),
             status: AutoDriveStatus::Running,
             actions: Vec::new(),
             cell_key: None,
             signature: None,
+            reveal_started_at,
         };
         if let Some(goal) = cell.goal.clone() {
             cell.actions.push(AutoDriveAction::new(
@@ -246,8 +254,27 @@ impl AutoDriveCardCell {
         if area.width == 0 || area.height == 0 {
             return;
         }
+        let is_dark = is_dark_theme_active();
+        let theme = active_auto_drive_theme();
         let style = auto_drive_card_style();
-        fill_card_background(buf, area, &style);
+
+        let reveal = theme.theme.reveal.map(|config| {
+            let progress = self
+                .reveal_started_at
+                .map(|started| {
+                    let elapsed = started.elapsed().as_secs_f32();
+                    (elapsed / config.duration.as_secs_f32()).clamp(0.0, 1.0)
+                })
+                .unwrap_or(1.0);
+            RevealRender {
+                progress,
+                variant: config.variant,
+                intro_light: !is_dark,
+            }
+        });
+
+        GradientBackground::render(buf, area, &style.gradient, style.text_primary, reveal);
+
         let rows = self.build_card_rows(area.width, &style);
         let lines = rows_to_lines(&rows, &style, area.width);
         let text = Text::from(lines);
@@ -276,6 +303,20 @@ impl AutoDriveCardCell {
 
     pub(crate) fn signature(&self) -> Option<&str> {
         self.signature.as_deref()
+    }
+}
+
+fn is_dark_theme_active() -> bool {
+    let (r, g, b) = colors::color_to_rgb(colors::background());
+    let luminance = (0.2126 * r as f32 + 0.7152 * g as f32 + 0.0722 * b as f32) / 255.0;
+    luminance < 0.5
+}
+
+fn active_auto_drive_theme() -> card_theme::CardThemeDefinition {
+    if is_dark_theme_active() {
+        card_theme::auto_drive_dark_theme()
+    } else {
+        card_theme::auto_drive_light_theme()
     }
 }
 
