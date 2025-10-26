@@ -805,9 +805,6 @@ pub(crate) struct ChatWidget<'a> {
     // Interrupt manager for handling cancellations
     interrupts: interrupts::InterruptManager,
 
-    auto_drive_preview_index: usize,
-    auto_drive_previews_enabled: bool,
-
     // Guard for out-of-order exec events: track call_ids that already ended
     ended_call_ids: HashSet<ExecCallId>,
     /// Exec call_ids that were explicitly cancelled by user interrupt. Used to
@@ -3886,8 +3883,6 @@ impl ChatWidget<'_> {
                 drop_streaming: false,
             },
             interrupts: interrupts::InterruptManager::new(),
-            auto_drive_preview_index: 0,
-            auto_drive_previews_enabled: false,
             ended_call_ids: HashSet::new(),
             diffs: DiffsState {
                 session_patch_sets: Vec::new(),
@@ -4034,7 +4029,6 @@ impl ChatWidget<'_> {
             w.welcome_shown = true;
             w.insert_resume_placeholder();
         }
-        w.inject_auto_drive_previews();
         w.maybe_start_auto_upgrade_task();
         w
     }
@@ -4192,8 +4186,6 @@ impl ChatWidget<'_> {
                 drop_streaming: false,
             },
             interrupts: interrupts::InterruptManager::new(),
-            auto_drive_preview_index: 0,
-            auto_drive_previews_enabled: false,
             ended_call_ids: HashSet::new(),
             diffs: DiffsState {
                 session_patch_sets: Vec::new(),
@@ -4302,7 +4294,6 @@ impl ChatWidget<'_> {
         if show_welcome {
             w.history_push_top_next_req(history_cell::new_animated_welcome());
         }
-        w.inject_auto_drive_previews();
         w.maybe_start_auto_upgrade_task();
         w
     }
@@ -4756,18 +4747,6 @@ impl ChatWidget<'_> {
             if self.handle_browser_overlay_key(key_event) {
                 return;
             }
-        }
-        if let KeyEvent {
-            code: crossterm::event::KeyCode::Char('p'),
-            modifiers: crossterm::event::KeyModifiers::CONTROL,
-            kind: KeyEventKind::Press | KeyEventKind::Repeat,
-            ..
-        } = key_event
-        {
-            if self.auto_drive_cycle_next_preview() {
-                self.request_redraw();
-            }
-            return;
         }
         if key_event.kind == KeyEventKind::Press {
             self.bottom_pane.clear_ctrl_c_quit_hint();
@@ -5264,66 +5243,6 @@ impl ChatWidget<'_> {
         }
         self.browser_overlay_state
             .set_action_scroll(updated as u16);
-    }
-
-    fn auto_drive_cycle_next_preview(&mut self) -> bool {
-        if !self.auto_drive_previews_enabled {
-            return false;
-        }
-        const DYNAMIC_TAGS: [&str; 16] = [
-            "auto-drive-preview-dynamic-0",
-            "auto-drive-preview-dynamic-1",
-            "auto-drive-preview-dynamic-2",
-            "auto-drive-preview-dynamic-3",
-            "auto-drive-preview-dynamic-4",
-            "auto-drive-preview-dynamic-5",
-            "auto-drive-preview-dynamic-6",
-            "auto-drive-preview-dynamic-7",
-            "auto-drive-preview-dynamic-8",
-            "auto-drive-preview-dynamic-9",
-            "auto-drive-preview-dynamic-10",
-            "auto-drive-preview-dynamic-11",
-            "auto-drive-preview-dynamic-12",
-            "auto-drive-preview-dynamic-13",
-            "auto-drive-preview-dynamic-14",
-            "auto-drive-preview-dynamic-15",
-        ];
-
-        let dynamic_total = history_cell::experimental_auto_drive_preview_count();
-        let base_total = history_cell::auto_drive_preview_cells().len()
-            .saturating_sub(dynamic_total);
-
-        if dynamic_total == 0 {
-            return false;
-        }
-        let dynamic_count = dynamic_total.min(DYNAMIC_TAGS.len());
-        if dynamic_count == 0 {
-            return false;
-        }
-
-        let offset = self.auto_drive_preview_index % dynamic_count;
-        let target_index = base_total + offset;
-
-        let cell = history_cell::auto_drive_preview_cells()
-            .into_iter()
-            .enumerate()
-            .find(|(idx, _)| *idx == target_index)
-            .map(|(_, cell)| cell);
-
-        if let Some(cell) = cell {
-            self.auto_drive_preview_index = (self.auto_drive_preview_index + 1) % dynamic_count;
-            self.push_system_cell(
-                cell,
-                SystemPlacement::EndOfCurrent,
-                None,
-                None,
-                DYNAMIC_TAGS[offset],
-                None,
-            );
-            true
-        } else {
-            false
-        }
     }
 
     fn toggle_agents_hud(&mut self) {
@@ -7095,28 +7014,6 @@ impl ChatWidget<'_> {
             BackgroundPlacement::Tail,
             Some(ticket.next_order()),
         );
-    }
-
-    fn inject_auto_drive_previews(&mut self) {
-        if !self.auto_drive_previews_enabled {
-            return;
-        }
-        let preview_cells = history_cell::auto_drive_preview_cells();
-        for (index, cell) in preview_cells.into_iter().enumerate() {
-            let tag = if index == 0 {
-                "auto-drive-preview"
-            } else {
-                "auto-drive-preview-extra"
-            };
-            self.push_system_cell(
-                cell,
-                SystemPlacement::EndOfCurrent,
-                None,
-                None,
-                tag,
-                None,
-            );
-        }
     }
 
     pub(crate) fn push_background_before_next_output(&mut self, message: impl Into<String>) {
