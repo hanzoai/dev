@@ -1,5 +1,6 @@
 use ratatui::buffer::Buffer;
 use ratatui::prelude::*;
+use ratatui::style::Color;
 use unicode_width::{UnicodeWidthChar, UnicodeWidthStr};
 
 use crate::card_theme;
@@ -60,49 +61,53 @@ impl CardRow {
 pub(crate) const CARD_ACCENT_WIDTH: usize = 2;
 
 pub(crate) fn agent_card_style(_write_enabled: Option<bool>) -> CardStyle {
-    let definition = if is_dark_theme_active() {
+    let is_dark = is_dark_theme_active();
+    let definition = if is_dark {
         card_theme::agent_write_dark_theme()
     } else {
         card_theme::agent_write_light_theme()
     };
-    style_from_theme(definition)
+    style_from_theme(definition, is_dark)
 }
 
 pub(crate) fn browser_card_style() -> CardStyle {
-    let definition = if is_dark_theme_active() {
+    let is_dark = is_dark_theme_active();
+    let definition = if is_dark {
         card_theme::browser_dark_theme()
     } else {
         card_theme::browser_light_theme()
     };
-    style_from_theme(definition)
+    style_from_theme(definition, is_dark)
 }
 
 pub(crate) fn auto_drive_card_style() -> CardStyle {
-    let definition = if is_dark_theme_active() {
+    let is_dark = is_dark_theme_active();
+    let definition = if is_dark {
         card_theme::auto_drive_dark_theme()
     } else {
         card_theme::auto_drive_light_theme()
     };
-    style_from_theme(definition)
+    style_from_theme(definition, is_dark)
 }
 
 pub(crate) fn web_search_card_style() -> CardStyle {
-    let definition = if is_dark_theme_active() {
+    let is_dark = is_dark_theme_active();
+    let definition = if is_dark {
         card_theme::search_dark_theme()
     } else {
         card_theme::search_light_theme()
     };
-    style_from_theme(definition)
+    style_from_theme(definition, is_dark)
 }
 
-fn style_from_theme(definition: CardThemeDefinition) -> CardStyle {
+fn style_from_theme(definition: CardThemeDefinition, is_dark: bool) -> CardStyle {
     let theme = definition.theme;
     CardStyle {
         accent_fg: theme.palette.border,
         text_primary: theme.palette.text,
         text_secondary: theme.palette.footer,
         title_text: theme.palette.title,
-        gradient: theme.gradient,
+        gradient: adjust_gradient(theme.gradient, is_dark),
     }
 }
 
@@ -110,6 +115,19 @@ fn is_dark_theme_active() -> bool {
     let (r, g, b) = colors::color_to_rgb(colors::background());
     let luminance = (0.2126 * r as f32 + 0.7152 * g as f32 + 0.0722 * b as f32) / 255.0;
     luminance < 0.5
+}
+
+fn adjust_gradient(gradient: GradientSpec, is_dark: bool) -> GradientSpec {
+    const LIGHTEN_FACTOR: f32 = 0.22;
+    const DARKEN_FACTOR: f32 = 0.18;
+
+    let target = if is_dark { Color::Black } else { Color::White };
+    let amount = if is_dark { DARKEN_FACTOR } else { LIGHTEN_FACTOR };
+    GradientSpec {
+        left: colors::mix_toward(gradient.left, target, amount),
+        right: colors::mix_toward(gradient.right, target, amount),
+        bias: gradient.bias,
+    }
 }
 
 pub(crate) fn fill_card_background(buf: &mut Buffer, area: Rect, style: &CardStyle) {
