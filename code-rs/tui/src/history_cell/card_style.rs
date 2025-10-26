@@ -255,3 +255,8 @@ pub(crate) fn secondary_text_style(style: &CardStyle) -> Style {
 pub(crate) fn title_text_style(style: &CardStyle) -> Style {
     Style::default().fg(style.title_text)
 }
+
+pub(crate) fn hint_text_style(style: &CardStyle) -> Style {
+    let fg = colors::mix_toward(style.text_secondary, colors::background(), 0.65);
+    Style::default().fg(fg)
+}

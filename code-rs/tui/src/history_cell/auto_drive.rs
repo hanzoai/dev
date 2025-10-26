@@ -1,6 +1,7 @@
 use super::card_style::{
     auto_drive_card_style,
     fill_card_background,
+    hint_text_style,
     primary_text_style,
     rows_to_lines,
     secondary_text_style,
@@ -231,7 +232,7 @@ impl AutoDriveCardCell {
 
     fn bottom_border_row(&self, body_width: usize, style: &CardStyle) -> CardRow {
         let text = truncate_with_ellipsis(HINT_TEXT, body_width);
-        let mut segment = CardSegment::new(text, secondary_text_style(style));
+        let mut segment = CardSegment::new(text, hint_text_style(style));
         segment.inherit_background = true;
         CardRow::new(
             BORDER_BOTTOM.to_string(),
