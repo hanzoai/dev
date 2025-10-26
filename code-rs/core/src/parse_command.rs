@@ -48,6 +48,13 @@ fn shlex_join(tokens: &[String]) -> String {
         .unwrap_or_else(|_| "<command included NUL byte>".to_string())
 }
 
+fn simple_space_join(tokens: &[String]) -> Option<String> {
+    if tokens.iter().any(|t| t.chars().any(char::is_whitespace)) {
+        return None;
+    }
+    Some(tokens.join(" "))
+}
+
 fn is_shell_executable(cmd: &str) -> bool {
     is_shell_like_executable(cmd)
 }
@@ -153,6 +160,16 @@ mod tests {
             &vec_str(&["git", "branch", "--list", "feature/*"]),
             vec![ParsedCommand::ReadCommand {
                 cmd: "git branch --list feature/*".to_string(),
+            }],
+        );
+    }
+
+    #[test]
+    fn git_branch_list_with_spaced_pattern_keeps_quotes() {
+        assert_parsed(
+            &vec_str(&["git", "branch", "--list", "feature name/*"]),
+            vec![ParsedCommand::ReadCommand {
+                cmd: "git branch --list 'feature name/*'".to_string(),
             }],
         );
     }
@@ -1757,7 +1774,11 @@ fn summarize_main_tokens(main_cmd: &[String]) -> ParsedCommand {
             }
         }
         Some((head, tail)) if head == "git" => {
-            let cmd = shlex_join(main_cmd);
+            let cmd = if main_cmd.get(1).map(|s| s.as_str()) == Some("branch") {
+                simple_space_join(main_cmd).unwrap_or_else(|| shlex_join(main_cmd))
+            } else {
+                shlex_join(main_cmd)
+            };
             if let Some(idx) = git_subcommand_index(tail) {
                 let sub = tail[idx].as_str();
                 let rest = &tail[idx + 1..];

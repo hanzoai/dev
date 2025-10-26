@@ -5,18 +5,16 @@
 
 ## [Unreleased]
 
-- Auto Drive: retire coordinator-driven `cross_check`/`code_review` actions; QA scheduling now lives in the standalone orchestrator thread.
-- QA/Observer: bootstrap each run with a read-only validation pass,
-  track deltas-only between turns, and reuse observer history for
-  cross-check before completion.
-- TUI: surface `AutoObserverThinking` streams in the Auto Threads
-  overlay, label observer entries by mode, and show banners for
-  bootstrap and cross-check milestones.
-- Debug: `--debug` request logs now land in helper-specific directories
-  under `~/.code/debug_logs/` (for example `auto/coordinator`,
-  `auto/observer/cadence`, `guided_terminal/agent_install_flow`).
-- Ops: tune QA cadence with `CODE_QA_CADENCE` (turns between updates) and `CODE_QA_REVIEW_COOLDOWN_TURNS` (turns between automated reviews).
-- QA: post-turn code review is now triggered exclusively via QA automation events instead of every write turn.
+- (none)
+
+## [0.4.0] - 2025-10-26
+
+- Auto Drive: graduate the orchestrator into the new `code-auto-drive-core` crate, coordinate multi-agent runs end to end, and add self-checks plus elapsed-time tracking for every action.
+- Automation workflow: rely on Auto Drive for long-lived `/auto` sessions — plan a run, hand it off, and return to completed work while the orchestrator pauses, resumes, and recovers automatically.
+- Settings overlay: consolidate every `/settings` pane into a two-level overlay so limits, themes, and automation toggles sit in one place with quick navigation.
+- TUI cards: introduce card-based history entries for Agents, Browser sessions, Web Search, and Auto Drive with grouped actions and overlays for deep detail.
+- Performance: tighten CPU and memory usage discovered in heavy automation scenarios to keep scrolling and rendering smooth.
+- Agents: let `/plan`, `/code`, and related commands target specific CLIs (e.g., `gemini-2.5-flash`, `claude-sonnet-4.5`) with future expansion handled from the new settings hub.
 
 ## [0.2.188] - 2025-10-06
 

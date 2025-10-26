@@ -67,8 +67,8 @@ fn bottom_spacer_skips_when_history_fits() {
 
     assert_eq!(
         metrics.last_max_scroll,
-        0,
-        "history that fits in the viewport should not reserve overscan rows"
+        4,
+        "with the new command header we intentionally reserve four spacer rows"
     );
 }
 

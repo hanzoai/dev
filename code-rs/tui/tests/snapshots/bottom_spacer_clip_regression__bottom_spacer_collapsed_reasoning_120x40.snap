@@ -1,8 +1,9 @@
 ---
 source: tui/tests/bottom_spacer_clip_regression.rs
+assertion_line: 49
 expression: collapsed
 ---
- |  Code  •  Model: GPT-5-Codex  •  Directory: ~/.code/working/code/branches/code-branch-20251021-101202/code-rs/tui  |
+ |                                                        Code                                                        |
                                                                                                                        
 
                                                                                                                        
@@ -39,4 +40,4 @@ expression: collapsed
 
  | What can I code for you today?                                                                                     |
                                                                                                                        
-   Read Only  (Shift+Tab change)                                                                           Ctrl+H help
+   Read Only  (Shift+Tab change)                                                               Ctrl+H help  •  API key

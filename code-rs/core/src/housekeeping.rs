@@ -554,21 +554,22 @@ fn check_pid_alive(pid: i32) -> Option<bool> {
 
 #[cfg(target_os = "windows")]
 fn check_pid_alive(pid: i32) -> Option<bool> {
-    use windows_sys::Win32::Foundation::{CloseHandle, STILL_ACTIVE};
+    use windows_sys::Win32::Foundation::{CloseHandle, HANDLE, STILL_ACTIVE};
     use windows_sys::Win32::System::Threading::{GetExitCodeProcess, OpenProcess, PROCESS_QUERY_LIMITED_INFORMATION};
 
     unsafe {
-        let handle = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, 0, pid as u32);
-        if handle == 0 {
+        let handle: HANDLE = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, 0, pid as u32);
+        if handle.is_null() {
             return Some(false);
         }
+
         let mut status: u32 = 0;
         let ok = GetExitCodeProcess(handle, &mut status as *mut u32);
         CloseHandle(handle);
         if ok == 0 {
             return None;
         }
-        Some(status == STILL_ACTIVE)
+        Some(status == STILL_ACTIVE as u32)
     }
 }
 
@@ -849,5 +850,30 @@ mod tests {
 
         assert!(active.is_empty());
         assert!(!registry_path.exists());
+    }
+
+    #[cfg(target_os = "windows")]
+    #[test]
+    fn process_still_running_reports_status() {
+        use std::process::{Command, Stdio};
+        use std::thread;
+        use std::time::Duration;
+
+        let mut child = Command::new("cmd")
+            .args(["/C", "timeout /T 2 >NUL"])
+            .stdin(Stdio::null())
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .spawn()
+            .expect("failed to spawn cmd timeout helper");
+
+        thread::sleep(Duration::from_millis(100));
+
+        let pid = child.id() as i32;
+        assert_eq!(check_pid_alive(pid), Some(true));
+
+        child.wait().expect("failed to wait for cmd child");
+
+        assert_eq!(check_pid_alive(pid), Some(false));
     }
 }
