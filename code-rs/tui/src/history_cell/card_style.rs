@@ -123,9 +123,11 @@ fn adjust_gradient(gradient: GradientSpec, is_dark: bool) -> GradientSpec {
 
     let target = if is_dark { Color::Black } else { Color::White };
     let amount = if is_dark { DARKEN_FACTOR } else { LIGHTEN_FACTOR };
+    let adjusted_left = colors::mix_toward(gradient.left, target, amount);
+    let adjusted_right = colors::mix_toward(gradient.right, target, amount);
     GradientSpec {
-        left: colors::mix_toward(gradient.left, target, amount),
-        right: colors::mix_toward(gradient.right, target, amount),
+        left: adjusted_right,
+        right: adjusted_left,
         bias: gradient.bias,
     }
 }
