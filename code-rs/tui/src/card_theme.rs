@@ -115,9 +115,9 @@ pub fn auto_drive_dark_theme() -> CardThemeDefinition {
     CardThemeDefinition {
         name: "Auto Drive Dark",
         theme: CardTheme {
-            gradient: gradient((33, 0, 67), (12, 39, 74), -0.05),
+            gradient: gradient((33, 0, 67), (38, 96, 127), -0.05),
             palette: palette((140, 110, 200), (236, 228, 255), (246, 238, 255), (188, 170, 228)),
-            reveal: reveal(720, RevealVariant::RainbowBloom),
+            reveal: reveal(1440, RevealVariant::RainbowBloom),
         },
     }
 }
@@ -172,7 +172,7 @@ pub fn auto_drive_light_theme() -> CardThemeDefinition {
         theme: CardTheme {
             gradient: gradient((204, 223, 245), (247, 235, 254), -0.05),
             palette: palette((170, 195, 222), (52, 75, 109), (30, 54, 85), (92, 121, 153)),
-            reveal: reveal(720, RevealVariant::LightBloom),
+            reveal: reveal(1440, RevealVariant::LightBloom),
         },
     }
 }

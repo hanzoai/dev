@@ -22,6 +22,7 @@ use ratatui::style::{Modifier, Style};
 use ratatui::text::{Line, Text};
 use ratatui::widgets::{Paragraph, Widget, Wrap};
 use unicode_width::UnicodeWidthStr;
+use std::f32;
 use std::time::{Duration, Instant};
 
 const BORDER_TOP: &str = "╭─";
@@ -127,6 +128,19 @@ impl AutoDriveCardCell {
         let elapsed = now.saturating_duration_since(*base);
         self.actions
             .push(AutoDriveAction::new(text.into(), kind, elapsed));
+    }
+
+    fn reveal_progress(&self) -> Option<(f32, card_theme::CardThemeDefinition)> {
+        let theme = active_auto_drive_theme();
+        let reveal = theme.theme.reveal?;
+        let started = self.reveal_started_at?;
+        let duration = reveal.duration.as_secs_f32();
+        if duration <= f32::EPSILON {
+            return None;
+        }
+        let elapsed = started.elapsed().as_secs_f32();
+        let progress = (elapsed / duration).clamp(0.0, 1.0);
+        Some((progress, theme))
     }
 
     fn accent_style(style: &CardStyle) -> Style {
@@ -400,23 +414,14 @@ impl AutoDriveCardCell {
         if area.width == 0 || area.height == 0 {
             return;
         }
-        let is_dark = is_dark_theme_active();
-        let theme = active_auto_drive_theme();
         let style = auto_drive_card_style();
 
-        let reveal = theme.theme.reveal.map(|config| {
-            let progress = self
-                .reveal_started_at
-                .map(|started| {
-                    let elapsed = started.elapsed().as_secs_f32();
-                    (elapsed / config.duration.as_secs_f32()).clamp(0.0, 1.0)
-                })
-                .unwrap_or(1.0);
-            RevealRender {
+        let reveal = self.reveal_progress().and_then(|(progress, theme)| {
+            theme.theme.reveal.map(|config| RevealRender {
                 progress,
                 variant: config.variant,
-                intro_light: !is_dark,
-            }
+                intro_light: !is_dark_theme_active(),
+            })
         });
 
         GradientBackground::render(buf, area, &style.gradient, style.text_primary, reveal);
@@ -509,6 +514,13 @@ impl HistoryCell for AutoDriveCardCell {
             lines.push(Line::from(format!("- {}", action.text)));
         }
         lines
+    }
+
+    fn is_animating(&self) -> bool {
+        self
+            .reveal_progress()
+            .map(|(progress, _)| progress < 0.999)
+            .unwrap_or(false)
     }
 
     fn desired_height(&self, width: u16) -> u16 {
