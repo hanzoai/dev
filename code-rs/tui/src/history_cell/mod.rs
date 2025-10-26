@@ -72,8 +72,8 @@ use tracing::error;
 
 mod assistant;
 mod animated;
-mod card_style;
 mod background;
+mod card_style;
 mod exec;
 mod diff;
 mod explore;
