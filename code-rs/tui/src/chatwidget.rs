@@ -76,6 +76,8 @@ mod terminal;
 mod tools;
 mod browser_sessions;
 mod agent_runs;
+mod web_search_sessions;
+mod auto_drive_cards;
 pub(crate) mod tool_cards;
 mod running_tools;
 #[cfg(any(test, feature = "test-helpers"))]
@@ -448,6 +450,7 @@ use crate::history_cell::PatchEventType;
 use crate::history_cell::PlainHistoryCell;
 use crate::history_cell::PlanUpdateCell;
 use crate::history_cell::DiffCell;
+use crate::history_cell::{AutoDriveActionKind, AutoDriveStatus};
 use crate::history::state::PatchEventType as HistoryPatchEventType;
 use crate::history::state::{
     AssistantMessageState,
@@ -894,6 +897,7 @@ pub(crate) struct ChatWidget<'a> {
     next_ghost_snapshot_id: u64,
     pending_snapshot_dispatches: VecDeque<PendingSnapshotDispatch>,
 
+    auto_drive_card_sequence: u64,
     auto_drive_variant: AutoDriveVariant,
     auto_state: AutoDriveController,
     auto_goal_escape_state: AutoGoalEscState,
@@ -1869,6 +1873,50 @@ impl ChatWidget<'_> {
         self.background_before_next_output_ticket_internal()
     }
 
+    fn auto_card_next_order_key(&mut self) -> OrderKey {
+        let ticket = self.make_background_tail_ticket();
+        let meta = ticket.next_order();
+        self.provider_order_key_from_order_meta(&meta)
+    }
+
+    fn auto_card_start(&mut self, goal: Option<String>) {
+        let order_key = self.auto_card_next_order_key();
+        auto_drive_cards::start_session(self, order_key, goal);
+    }
+
+    fn auto_card_add_action(&mut self, message: String, kind: AutoDriveActionKind) {
+        let order_key = self.auto_card_next_order_key();
+        let had_tracker = self.tools_state.auto_drive_tracker.is_some();
+        auto_drive_cards::record_action(self, order_key, message.clone(), kind);
+        if !had_tracker {
+            self.push_background_tail(message);
+        }
+    }
+
+    fn auto_card_set_status(&mut self, status: AutoDriveStatus) {
+        if self.tools_state.auto_drive_tracker.is_some() {
+            let order_key = self.auto_card_next_order_key();
+            auto_drive_cards::set_status(self, order_key, status);
+        }
+    }
+
+    fn auto_card_finalize(
+        &mut self,
+        message: Option<String>,
+        status: AutoDriveStatus,
+        kind: AutoDriveActionKind,
+    ) {
+        let had_tracker = self.tools_state.auto_drive_tracker.is_some();
+        let order_key = self.auto_card_next_order_key();
+        auto_drive_cards::finalize(self, order_key, message.clone(), status, kind);
+        if !had_tracker {
+            if let Some(msg) = message {
+                self.push_background_tail(msg);
+            }
+        }
+        auto_drive_cards::clear(self);
+    }
+
     fn spawn_conversation_runtime(
         &mut self,
         config: Config,
@@ -2442,7 +2490,7 @@ impl ChatWidget<'_> {
     fn maybe_hide_spinner(&mut self) {
         let any_tools_running = !self.exec.running_commands.is_empty()
             || !self.tools_state.running_custom_tools.is_empty()
-            || !self.tools_state.running_web_search.is_empty();
+            || !self.tools_state.web_search_sessions.is_empty();
         let any_streaming = self.stream.is_write_cycle_active();
         let any_agents_active = self.agents_are_actively_running();
         let any_tasks_active = !self.active_task_ids.is_empty();
@@ -3680,7 +3728,7 @@ impl ChatWidget<'_> {
         let bottom_running = self.bottom_pane.is_task_running();
         let exec_related_running = !self.exec.running_commands.is_empty()
             || !self.tools_state.running_custom_tools.is_empty()
-            || !self.tools_state.running_web_search.is_empty()
+            || !self.tools_state.web_search_sessions.is_empty()
             || !self.tools_state.running_wait_tools.is_empty()
             || !self.tools_state.running_kill_tools.is_empty();
 
@@ -3966,6 +4014,7 @@ impl ChatWidget<'_> {
             active_ghost_snapshot: None,
             next_ghost_snapshot_id: 0,
             pending_snapshot_dispatches: VecDeque::new(),
+            auto_drive_card_sequence: 0,
             auto_drive_variant,
             auto_state: AutoDriveController::default(),
             auto_goal_escape_state: AutoGoalEscState::Inactive,
@@ -4155,7 +4204,7 @@ impl ChatWidget<'_> {
             canceled_exec_call_ids: HashSet::new(),
             tools_state: ToolState {
                 running_custom_tools: HashMap::new(),
-                running_web_search: HashMap::new(),
+                web_search_sessions: HashMap::new(),
                 running_wait_tools: HashMap::new(),
                 running_kill_tools: HashMap::new(),
                 browser_sessions: HashMap::new(),
@@ -4168,6 +4217,7 @@ impl ChatWidget<'_> {
                 agent_run_by_batch: HashMap::new(),
                 agent_run_by_agent: HashMap::new(),
                 agent_last_key: None,
+                auto_drive_tracker: None,
             },
             live_builder: RowBuilder::new(usize::MAX),
             header_wave: {
@@ -4272,6 +4322,7 @@ impl ChatWidget<'_> {
             active_ghost_snapshot: None,
             next_ghost_snapshot_id: 0,
             pending_snapshot_dispatches: VecDeque::new(),
+            auto_drive_card_sequence: 0,
             auto_drive_variant,
             auto_state: AutoDriveController::default(),
             auto_goal_escape_state: AutoGoalEscState::Inactive,
@@ -7219,6 +7270,7 @@ impl ChatWidget<'_> {
     }
 
     // Merge adjacent tool cells with the same header (e.g., successive Web Search blocks)
+    #[allow(dead_code)]
     fn history_maybe_merge_tool_with_previous(&mut self, idx: usize) {
         if idx == 0 || idx >= self.history_cells.len() {
             return;
@@ -9640,61 +9692,17 @@ impl ChatWidget<'_> {
                 // Convert any lingering running exec/tool cells to completed so the UI doesn't hang
                 self.finalize_all_running_due_to_answer();
                 // Mark any running web searches as completed
-                if !self.tools_state.running_web_search.is_empty() {
-                    // Replace each running web search cell in-place with a completed one
-                    // Iterate over a snapshot of keys to avoid borrow issues
-                    let entries: Vec<(ToolCallId, (usize, Option<String>))> = self
-                        .tools_state
-                        .running_web_search
-                        .iter()
-                        .map(|(k, v)| (k.clone(), v.clone()))
-                        .collect();
-                    for (call_id, (idx, query_opt)) in entries {
-                        // Try exact index; if out of bounds or shifted, search nearby from end
-                        let mut target_idx = None;
-                        if idx < self.history_cells.len() {
-                            // Verify this index is still a running web search cell
-                            let is_ws = self.history_cells[idx]
-                                .as_any()
-                                .downcast_ref::<history_cell::RunningToolCallCell>()
-                                .is_some_and(|rt| rt.has_title("Web Search..."));
-                            if is_ws {
-                                target_idx = Some(idx);
-                            }
-                        }
-                        if target_idx.is_none() {
-                            for i in (0..self.history_cells.len()).rev() {
-                                if let Some(rt) = self.history_cells[i]
-                                    .as_any()
-                                    .downcast_ref::<history_cell::RunningToolCallCell>(
-                                ) {
-                                    if rt.has_title("Web Search...") {
-                                        target_idx = Some(i);
-                                        break;
-                                    }
-                                }
-                            }
-                        }
-                        if let Some(i) = target_idx {
-                            if let Some(rt) = self.history_cells[i]
-                                .as_any()
-                                .downcast_ref::<history_cell::RunningToolCallCell>()
-                            {
-                                let completed = rt.finalize_web_search(true, query_opt);
-                                self.history_replace_at(i, Box::new(completed));
-                            }
-                        }
-                        // Remove from running set
-                        self.tools_state.running_web_search.remove(&call_id);
-                    }
-                }
+                web_search_sessions::finalize_all_failed(
+                    self,
+                    "Search cancelled before completion",
+                );
                 // Now that streaming is complete, flush any queued interrupts
         self.flush_interrupt_queue();
 
         // Only drop the working status if nothing is actually running.
         let any_tools_running = !self.exec.running_commands.is_empty()
             || !self.tools_state.running_custom_tools.is_empty()
-            || !self.tools_state.running_web_search.is_empty();
+            || !self.tools_state.web_search_sessions.is_empty();
                 let any_streaming = self.stream.is_write_cycle_active();
                 let any_agents_active = self.agents_are_actively_running();
                 let any_tasks_active = !self.active_task_ids.is_empty();
@@ -10832,7 +10840,7 @@ impl ChatWidget<'_> {
                     if all_agents_terminal {
                         let any_tools_running = !self.exec.running_commands.is_empty()
                             || !self.tools_state.running_custom_tools.is_empty()
-                            || !self.tools_state.running_web_search.is_empty();
+                            || !self.tools_state.web_search_sessions.is_empty();
                         let any_streaming = self.stream.is_write_cycle_active();
                         if !(any_tools_running || any_streaming) {
                             self.bottom_pane.set_task_running(false);
@@ -12930,7 +12938,7 @@ fi\n\
             return true;
         }
         if !self.tools_state.running_custom_tools.is_empty()
-            || !self.tools_state.running_web_search.is_empty()
+            || !self.tools_state.web_search_sessions.is_empty()
             || !self.tools_state.running_wait_tools.is_empty()
             || !self.tools_state.running_kill_tools.is_empty()
         {
@@ -13506,9 +13514,10 @@ fi\n\
                 })
                 .collect::<Vec<_>>()
                 .join(", ");
-            self.push_background_tail(format!(
-                "Auto Drive enabled write mode for agent prompt(s): {joined}"
-            ));
+            self.auto_card_add_action(
+                format!("Auto Drive enabled write mode for agent prompt(s): {joined}"),
+                AutoDriveActionKind::Info,
+            );
         }
 
         if !matches!(status, AutoCoordinatorStatus::Failed) {
@@ -13560,7 +13569,10 @@ Have we met every part of this goal and is there no further work to do?"#
                 self.submit_op(Op::SetNextTextFormat { format: tf.clone() });
                 self.next_cli_text_format = Some(tf);
                 self.auto_state.pending_stop_message = Some(message);
-                self.push_background_tail("Auto Drive Diagnostics: Validating progress".to_string());
+                self.auto_card_add_action(
+                    "Auto Drive Diagnostics: Validating progress".to_string(),
+                    AutoDriveActionKind::Info,
+                );
                 self.schedule_auto_cli_prompt(prompt_text);
                 self.auto_submit_prompt();
                 return;
@@ -13660,22 +13672,41 @@ Have we met every part of this goal and is there no further work to do?"#
                 AutoControllerEffect::LaunchStarted { goal } => {
                     self.bottom_pane.set_task_running(false);
                     self.bottom_pane.update_status_text("Auto Drive".to_string());
-                    self.push_background_tail(format!("Auto Drive started: {goal}"));
+                    self.auto_card_start(Some(goal.clone()));
+                    self.auto_card_add_action(
+                        format!("Auto Drive started: {goal}"),
+                        AutoDriveActionKind::Info,
+                    );
+                    self.auto_card_set_status(AutoDriveStatus::Running);
                 }
                 AutoControllerEffect::LaunchFailed { goal, error } => {
-                    self.push_background_tail(format!(
+                    let message = format!(
                         "Coordinator failed to start for goal '{goal}': {error}"
-                    ));
+                    );
+                    self.auto_card_finalize(
+                        Some(message),
+                        AutoDriveStatus::Failed,
+                        AutoDriveActionKind::Error,
+                    );
                 }
                 AutoControllerEffect::StopCompleted { summary, message } => {
                     if let Some(handle) = self.auto_handle.take() {
                         handle.cancel();
                         let _ = handle.send(AutoCoordinatorCommand::Stop);
                     }
-                    if let Some(msg) = message.or_else(|| summary.message.clone()) {
+                    let final_message = message.or_else(|| summary.message.clone());
+                    if let Some(msg) = final_message.clone() {
                         if !msg.trim().is_empty() {
-                            self.push_background_tail(msg);
+                            self.auto_card_finalize(
+                                Some(msg),
+                                AutoDriveStatus::Stopped,
+                                AutoDriveActionKind::Info,
+                            );
+                        } else {
+                            self.auto_card_finalize(None, AutoDriveStatus::Stopped, AutoDriveActionKind::Info);
                         }
+                    } else {
+                        self.auto_card_finalize(None, AutoDriveStatus::Stopped, AutoDriveActionKind::Info);
                     }
                     self.auto_turn_review_state = None;
                     if ENABLE_WARP_STRIPES {
@@ -13694,9 +13725,11 @@ Have we met every part of this goal and is there no further work to do?"#
                     self.bottom_pane.set_standard_terminal_hint(Some(
                         "Press Esc again to exit Auto Drive".to_string(),
                     ));
-                    self.push_background_tail(format!(
+                    let message = format!(
                         "Auto Drive will retry automatically in {human_delay} (attempt {attempt}/{AUTO_RESTART_MAX_ATTEMPTS}). Last error: {reason}"
-                    ));
+                    );
+                    self.auto_card_add_action(message, AutoDriveActionKind::Warning);
+                    self.auto_card_set_status(AutoDriveStatus::Paused);
                 }
                 AutoControllerEffect::ScheduleRestart {
                     token,
@@ -13721,7 +13754,7 @@ Have we met every part of this goal and is there no further work to do?"#
                     let has_activity = running
                         || !self.exec.running_commands.is_empty()
                         || !self.tools_state.running_custom_tools.is_empty()
-                        || !self.tools_state.running_web_search.is_empty()
+                        || !self.tools_state.web_search_sessions.is_empty()
                         || !self.tools_state.running_wait_tools.is_empty()
                         || !self.tools_state.running_kill_tools.is_empty()
                         || self.stream.is_write_cycle_active()
@@ -13792,8 +13825,9 @@ Have we met every part of this goal and is there no further work to do?"#
         }
 
         let Some(goal) = self.auto_state.goal.clone() else {
-            self.push_background_tail(
+            self.auto_card_add_action(
                 "Auto Drive restart skipped because the goal is no longer available.".to_string(),
+                AutoDriveActionKind::Warning,
             );
             self.auto_state.pending_restart = None;
             self.auto_state.on_recovery_attempt();
@@ -13814,16 +13848,18 @@ Have we met every part of this goal and is there no further work to do?"#
         self.auto_state.on_recovery_attempt();
         self.auto_state.restart_token = token;
 
-        if restart.reason.is_empty() {
-            self.push_background_tail(format!(
+        let resume_message = if restart.reason.is_empty() {
+            format!(
                 "Auto Drive resuming automatically (attempt {attempt}/{AUTO_RESTART_MAX_ATTEMPTS})."
-            ));
+            )
         } else {
-            self.push_background_tail(format!(
+            format!(
                 "Auto Drive resuming automatically (attempt {attempt}/{AUTO_RESTART_MAX_ATTEMPTS}); previous error: {}",
                 restart.reason
-            ));
-        }
+            )
+        };
+        self.auto_card_add_action(resume_message, AutoDriveActionKind::Info);
+        self.auto_card_set_status(AutoDriveStatus::Running);
 
         self.auto_launch_with_goal(
             goal,
@@ -17677,7 +17713,7 @@ use crate::chatwidget::message::UserMessage;
         }
         let exec_related_running = !self.exec.running_commands.is_empty()
             || !self.tools_state.running_custom_tools.is_empty()
-            || !self.tools_state.running_web_search.is_empty()
+            || !self.tools_state.web_search_sessions.is_empty()
             || !self.tools_state.running_wait_tools.is_empty()
             || !self.tools_state.running_kill_tools.is_empty();
         if self.bottom_pane.is_task_running() || exec_related_running {
@@ -17903,7 +17939,7 @@ use crate::chatwidget::message::UserMessage;
         self.terminal_is_running()
             || !self.exec.running_commands.is_empty()
             || !self.tools_state.running_custom_tools.is_empty()
-            || !self.tools_state.running_web_search.is_empty()
+            || !self.tools_state.web_search_sessions.is_empty()
             || !self.tools_state.running_wait_tools.is_empty()
             || !self.tools_state.running_kill_tools.is_empty()
     }
@@ -17913,7 +17949,7 @@ use crate::chatwidget::message::UserMessage;
             || self.terminal_is_running()
             || !self.exec.running_commands.is_empty()
             || !self.tools_state.running_custom_tools.is_empty()
-            || !self.tools_state.running_web_search.is_empty()
+            || !self.tools_state.web_search_sessions.is_empty()
             || !self.tools_state.running_wait_tools.is_empty()
             || !self.tools_state.running_kill_tools.is_empty()
     }
@@ -18004,7 +18040,7 @@ use crate::chatwidget::message::UserMessage;
     pub(crate) fn mark_task_idle_after_denied(&mut self) {
         let any_tools_running = !self.exec.running_commands.is_empty()
             || !self.tools_state.running_custom_tools.is_empty()
-            || !self.tools_state.running_web_search.is_empty();
+            || !self.tools_state.web_search_sessions.is_empty();
         let any_streaming = self.stream.is_write_cycle_active();
         let any_agents_active = self.agents_are_actively_running();
         let any_tasks_active = !self.active_task_ids.is_empty();
@@ -29800,7 +29836,7 @@ impl RunningToolEntry {
 #[derive(Default)]
 struct ToolState {
     running_custom_tools: HashMap<ToolCallId, RunningToolEntry>,
-    running_web_search: HashMap<ToolCallId, (usize, Option<String>)>,
+    web_search_sessions: HashMap<ToolCallId, web_search_sessions::WebSearchTracker>,
     running_wait_tools: HashMap<ToolCallId, ExecCallId>,
     running_kill_tools: HashMap<ToolCallId, ExecCallId>,
     browser_sessions: HashMap<String, browser_sessions::BrowserSessionTracker>,
@@ -29813,6 +29849,7 @@ struct ToolState {
     agent_run_by_batch: HashMap<String, String>,
     agent_run_by_agent: HashMap<String, String>,
     agent_last_key: Option<String>,
+    auto_drive_tracker: Option<auto_drive_cards::AutoDriveTracker>,
 }
 #[derive(Default)]
 struct StreamState {

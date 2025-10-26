@@ -92,6 +92,42 @@ pub(crate) fn browser_card_style() -> CardStyle {
     }
 }
 
+pub(crate) fn auto_drive_card_style() -> CardStyle {
+    let bg = colors::background();
+    let warning = colors::warning();
+    let accent = colors::mix_toward(warning, bg, 0.18);
+    let accent_fg = colors::mix_toward(colors::text_bright(), accent, 0.35);
+    let secondary = colors::text_mid();
+    let background_bottom = colors::mix_toward(bg, warning, 0.12);
+    let background_top = colors::mix_toward(bg, warning, 0.05);
+
+    CardStyle {
+        accent_fg,
+        background_top,
+        background_bottom,
+        text_primary: colors::text(),
+        text_secondary: secondary,
+    }
+}
+
+pub(crate) fn web_search_card_style() -> CardStyle {
+    let bg = colors::background();
+    let success = colors::success();
+    let accent = colors::mix_toward(success, bg, 0.18);
+    let accent_fg = colors::mix_toward(colors::text_bright(), accent, 0.30);
+    let secondary = colors::text_mid();
+    let background_bottom = colors::mix_toward(bg, success, 0.10);
+    let background_top = colors::mix_toward(bg, success, 0.04);
+
+    CardStyle {
+        accent_fg,
+        background_top,
+        background_bottom,
+        text_primary: colors::text(),
+        text_secondary: secondary,
+    }
+}
+
 pub(crate) fn fill_card_background(buf: &mut Buffer, area: Rect, style: &CardStyle) {
     let height = area.height.max(1);
     for row in 0..area.height {

@@ -83,6 +83,8 @@ mod reasoning;
 mod tool;
 mod browser;
 mod agent;
+mod auto_drive;
+mod web_search;
 mod wait_status;
 mod plan_update;
 mod rate_limits;
@@ -113,6 +115,15 @@ pub(crate) use diff::{
     DiffCell,
 };
 pub(crate) use browser::BrowserSessionCell;
+pub(crate) use auto_drive::{
+    AutoDriveActionKind,
+    AutoDriveCardCell,
+    AutoDriveStatus,
+};
+pub(crate) use web_search::{
+    WebSearchSessionCell,
+    WebSearchStatus,
+};
 pub(crate) use agent::{AgentDetail, AgentRunCell, AgentStatusKind, AgentStatusPreview, StepProgress};
 pub(crate) use explore::{
     explore_lines_from_record,
@@ -4277,28 +4288,6 @@ pub(crate) fn new_running_custom_tool_call(
         wait_has_target,
         wait_has_call_id,
         wait_cap_ms,
-    };
-    RunningToolCallCell::new(state)
-}
-
-/// Running web search call (native Responses web_search)
-pub(crate) fn new_running_web_search(query: Option<String>) -> RunningToolCallCell {
-    let mut arguments: Vec<ToolArgument> = Vec::new();
-    if let Some(q) = query {
-        arguments.push(ToolArgument {
-            name: "query".to_string(),
-            value: ArgumentValue::Text(q),
-        });
-    }
-    let state = RunningToolState {
-        id: HistoryId::ZERO,
-        call_id: None,
-        title: "Web Search...".to_string(),
-        started_at: SystemTime::now(),
-        arguments,
-        wait_has_target: false,
-        wait_has_call_id: false,
-        wait_cap_ms: None,
     };
     RunningToolCallCell::new(state)
 }
