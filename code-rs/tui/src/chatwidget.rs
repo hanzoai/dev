@@ -17875,11 +17875,17 @@ use crate::chatwidget::message::UserMessage;
             EscIntent::CancelAgents => self.cancel_active_agents(),
             EscIntent::CancelTask => {
                 let had_running = self.is_task_running();
+                let auto_was_active = self.auto_state.is_active();
                 let _ = self.on_ctrl_c();
                 if had_running {
-                    self.bottom_pane
-                        .update_status_text("Command cancelled. Esc stops Auto Drive.".to_string());
-                    self.auto_stop_via_escape(Some("Auto Drive stopped by user.".to_string()));
+                    if auto_was_active {
+                        self.bottom_pane
+                            .update_status_text("Command cancelled. Esc stops Auto Drive.".to_string());
+                        self.auto_stop_via_escape(Some("Auto Drive stopped by user.".to_string()));
+                    } else {
+                        self.bottom_pane
+                            .update_status_text("Command cancelled.".to_string());
+                    }
                 }
                 true
             }
@@ -22323,6 +22329,43 @@ mod tests {
 
         let route = chat.describe_esc_context();
         assert_eq!(route.intent, EscIntent::CancelTask);
+    }
+
+    #[test]
+    fn esc_cancel_task_while_manual_command_does_not_trigger_auto_drive() {
+        let mut harness = ChatWidgetHarness::new();
+        let chat = harness.chat();
+
+        chat.exec.running_commands.insert(
+            ExecCallId("exec-1".to_string()),
+            RunningCommand {
+                command: vec!["echo".to_string()],
+                parsed: Vec::new(),
+                history_index: None,
+                history_id: None,
+                explore_entry: None,
+                stdout: String::new(),
+                stderr: String::new(),
+                wait_total: None,
+                wait_active: false,
+                wait_notes: Vec::new(),
+            },
+        );
+        chat.bottom_pane.set_task_running(true);
+
+        let esc_event = KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE);
+
+        let route = chat.describe_esc_context();
+        assert_eq!(route.intent, EscIntent::CancelTask);
+        assert!(chat.execute_esc_intent(route.intent, esc_event));
+        assert!(
+            !chat.auto_state.is_active(),
+            "Auto Drive should remain inactive after cancelling manual command",
+        );
+        assert!(
+            chat.auto_state.last_run_summary.is_none(),
+            "Cancelling manual command should not create an Auto Drive summary",
+        );
     }
 
     #[test]
