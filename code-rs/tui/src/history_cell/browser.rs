@@ -1014,7 +1014,11 @@ impl HistoryCell for BrowserSessionCell {
 
     fn desired_height(&self, width: u16) -> u16 {
         let style = browser_card_style();
-        let (rows, _) = self.build_card_rows(width, &style);
+        let trimmed_width = width.saturating_sub(2);
+        if trimmed_width == 0 {
+            return 0;
+        }
+        let (rows, _) = self.build_card_rows(trimmed_width, &style);
         rows.len().max(1) as u16
     }
 
@@ -1023,24 +1027,40 @@ impl HistoryCell for BrowserSessionCell {
     }
 
     fn custom_render_with_skip(&self, area: Rect, buf: &mut Buffer, skip_rows: u16) {
-        if area.width == 0 || area.height == 0 {
+        if area.width <= 2 || area.height == 0 {
             return;
         }
 
         let style = browser_card_style();
-        fill_card_background(buf, area, &style);
-        let (rows, screenshot_meta) = self.build_card_rows(area.width, &style);
-        let lines = rows_to_lines(&rows, &style, area.width);
+        let draw_width = area.width - 2;
+        let render_area = Rect {
+            width: draw_width,
+            ..area
+        };
+
+        fill_card_background(buf, render_area, &style);
+        let (rows, screenshot_meta) = self.build_card_rows(render_area.width, &style);
+        let lines = rows_to_lines(&rows, &style, render_area.width);
         let text = Text::from(lines);
 
         Paragraph::new(text)
             .wrap(Wrap { trim: false })
             .scroll((skip_rows, 0))
-            .render(area, buf);
+            .render(render_area, buf);
 
         if let Some(layout) = screenshot_meta.as_ref() {
             if let Some(path) = self.screenshot_path.as_ref() {
-                self.render_screenshot_preview(area, buf, skip_rows, layout, path);
+                self.render_screenshot_preview(render_area, buf, skip_rows, layout, path);
+            }
+        }
+
+        let clear_start = area.x + draw_width;
+        let clear_end = area.x + area.width;
+        for x in clear_start..clear_end {
+            for row in 0..area.height {
+                let cell = &mut buf[(x, area.y + row)];
+                cell.set_symbol(" ");
+                cell.set_bg(crate::colors::background());
             }
         }
     }

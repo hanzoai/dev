@@ -412,22 +412,41 @@ impl WebSearchSessionCell {
 
     fn desired_rows(&self, width: u16) -> usize {
         let style = web_search_card_style();
-        self.build_card_rows(width, &style).len().max(1)
+        let trimmed_width = width.saturating_sub(2);
+        if trimmed_width == 0 {
+            return 0;
+        }
+        self.build_card_rows(trimmed_width, &style).len().max(1)
     }
 
     fn render_rows(&self, area: Rect, buf: &mut Buffer, skip_rows: u16) {
-        if area.width == 0 || area.height == 0 {
+        if area.width <= 2 || area.height == 0 {
             return;
         }
         let style = web_search_card_style();
-        fill_card_background(buf, area, &style);
-        let rows = self.build_card_rows(area.width, &style);
-        let lines = rows_to_lines(&rows, &style, area.width);
+        let draw_width = area.width - 2;
+        let render_area = Rect {
+            width: draw_width,
+            ..area
+        };
+        fill_card_background(buf, render_area, &style);
+        let rows = self.build_card_rows(render_area.width, &style);
+        let lines = rows_to_lines(&rows, &style, render_area.width);
         let text = Text::from(lines);
         Paragraph::new(text)
             .wrap(Wrap { trim: false })
             .scroll((skip_rows, 0))
-            .render(area, buf);
+            .render(render_area, buf);
+
+        let clear_start = area.x + draw_width;
+        let clear_end = area.x + area.width;
+        for x in clear_start..clear_end {
+            for row in 0..area.height {
+                let cell = &mut buf[(x, area.y + row)];
+                cell.set_symbol(" ");
+                cell.set_bg(crate::colors::background());
+            }
+        }
     }
 
     pub(crate) fn set_tool_card_key_internal(&mut self, key: Option<String>) {
