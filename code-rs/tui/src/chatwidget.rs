@@ -2416,6 +2416,9 @@ impl ChatWidget<'_> {
         } else {
             status_parts.join(", ")
         };
+        let auto_active = self.auto_state.is_active();
+        let non_agent_activity =
+            self.has_running_commands_or_tools() || !self.active_task_ids.is_empty();
         self.push_background_tail(format!("Cancelling {descriptor}…"));
         self.bottom_pane
             .update_status_text("Cancelling agents…".to_string());
@@ -2430,9 +2433,26 @@ impl ChatWidget<'_> {
                 agent.status = AgentStatus::Cancelled;
             }
         }
+        let status_message = if auto_active {
+            "Agents cancelled. Esc stops Auto Drive.".to_string()
+        } else if non_agent_activity {
+            "Agents cancelled. Esc cancels the running command.".to_string()
+        } else {
+            "Agents cancelled.".to_string()
+        };
+        self.bottom_pane.update_status_text(status_message);
         self.bottom_pane
-            .update_status_text("Agents cancelled. Esc cancels the running command.".to_string());
-        self.show_auto_drive_exit_hint();
+            .set_task_running(auto_active || non_agent_activity);
+
+        if auto_active {
+            self.show_auto_drive_exit_hint();
+        } else if self
+            .bottom_pane
+            .standard_terminal_hint()
+            .is_some_and(|hint| hint == AUTO_ESC_EXIT_HINT)
+        {
+            self.bottom_pane.set_standard_terminal_hint(None);
+        }
         self.request_redraw();
 
         true
@@ -22200,6 +22220,60 @@ mod tests {
 
         let route = chat.describe_esc_context();
         assert_eq!(route.intent, EscIntent::AutoGoalExitPreserveDraft);
+    }
+
+    #[test]
+    fn esc_cancels_agents_then_command_without_auto_hint() {
+        let mut harness = ChatWidgetHarness::new();
+        let chat = harness.chat();
+
+        chat.active_agents.push(AgentInfo {
+            id: "agent-1".to_string(),
+            name: "Agent 1".to_string(),
+            status: AgentStatus::Running,
+            batch_id: Some("batch-1".to_string()),
+            model: None,
+            result: None,
+            error: None,
+            last_progress: None,
+        });
+
+        chat.exec.running_commands.insert(
+            ExecCallId("exec-1".to_string()),
+            RunningCommand {
+                command: vec!["echo".to_string(), "hi".to_string()],
+                parsed: Vec::new(),
+                history_index: None,
+                history_id: None,
+                explore_entry: None,
+                stdout: String::new(),
+                stderr: String::new(),
+                wait_total: None,
+                wait_active: false,
+                wait_notes: Vec::new(),
+            },
+        );
+        chat.bottom_pane.set_task_running(true);
+
+        let esc_event = KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE);
+        let route = chat.describe_esc_context();
+        assert_eq!(route.intent, EscIntent::CancelAgents);
+        assert!(chat.execute_esc_intent(route.intent, esc_event));
+        assert!(chat
+            .active_agents
+            .iter()
+            .all(|agent| matches!(agent.status, AgentStatus::Cancelled)));
+        assert!(
+            chat.bottom_pane.standard_terminal_hint().is_none(),
+            "Auto Drive exit hint should not display when Auto Drive is inactive",
+        );
+
+        let esc_event = KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE);
+        let route = chat.describe_esc_context();
+        assert_eq!(route.intent, EscIntent::CancelTask);
+        assert!(chat.execute_esc_intent(route.intent, esc_event));
+        assert!(chat.exec.running_commands.is_empty());
+        assert!(!chat.bottom_pane.is_task_running());
     }
 
     #[test]

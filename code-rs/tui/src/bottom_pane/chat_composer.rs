@@ -871,6 +871,10 @@ impl ChatComposer {
         self.standard_terminal_hint = hint;
     }
 
+    pub fn standard_terminal_hint(&self) -> Option<&str> {
+        self.standard_terminal_hint.as_deref()
+    }
+
     pub fn set_text_content(&mut self, text: String) {
         self.textarea.set_text(&text);
         *self.textarea_state.borrow_mut() = TextAreaState::default();
