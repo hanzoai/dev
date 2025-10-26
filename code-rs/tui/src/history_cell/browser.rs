@@ -1,6 +1,7 @@
 use super::card_style::{
     browser_card_style,
     fill_card_background,
+    hint_text_style,
     primary_text_style,
     rows_to_lines,
     secondary_text_style,
@@ -382,7 +383,7 @@ impl BrowserSessionCell {
     fn bottom_border_row(&self, body_width: usize, style: &CardStyle) -> CardRow {
         let text_value = format!(" [Ctrl+B] View · [Esc] Stop");
         let text = truncate_with_ellipsis(text_value.as_str(), body_width);
-        let segment = CardSegment::new(text, secondary_text_style(style));
+        let segment = CardSegment::new(text, hint_text_style(style));
         CardRow::new(BORDER_BOTTOM.to_string(), Self::accent_style(style), vec![segment], None)
     }
 

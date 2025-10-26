@@ -1,6 +1,7 @@
 use super::card_style::{
     agent_card_style,
     fill_card_background,
+    hint_text_style,
     primary_text_style,
     rows_to_lines,
     secondary_text_style,
@@ -464,7 +465,7 @@ impl AgentRunCell {
     }
 
     fn mode_label_style(style: &CardStyle) -> Style {
-        let fg = colors::mix_toward(style.text_secondary, style.text_primary, 0.6);
+        let fg = colors::mix_toward(style.text_secondary, colors::background(), 0.75);
         Style::default().fg(fg)
     }
 
@@ -551,7 +552,7 @@ impl AgentRunCell {
             " [Ctrl+A] Expand".to_string()
         };
         let text = truncate_with_ellipsis(text_value.as_str(), body_width);
-        let segment = CardSegment::new(text, secondary_text_style(style));
+        let segment = CardSegment::new(text, hint_text_style(style));
         CardRow::new(BORDER_BOTTOM.to_string(), Self::accent_style(style), vec![segment], None)
     }
 
