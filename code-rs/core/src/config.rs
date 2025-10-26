@@ -2402,14 +2402,29 @@ impl Config {
         let code_home = code_dir?;
         let read_path = resolve_code_path_for_read(code_home, Path::new("AGENTS.md"));
 
-        std::fs::read_to_string(&read_path).ok().and_then(|s| {
-            let s = s.trim();
-            if s.is_empty() {
-                None
-            } else {
-                Some(s.to_string())
+        let contents = match std::fs::read_to_string(&read_path) {
+            Ok(s) => s,
+            Err(_) => {
+                if env_overrides_present() {
+                    return None;
+                }
+                let Some(legacy_home) = legacy_code_home_dir() else {
+                    return None;
+                };
+                let legacy_path = legacy_home.join("AGENTS.md");
+                match std::fs::read_to_string(&legacy_path) {
+                    Ok(s) => s,
+                    Err(_) => return None,
+                }
             }
-        })
+        };
+
+        let trimmed = contents.trim();
+        if trimmed.is_empty() {
+            None
+        } else {
+            Some(trimmed.to_string())
+        }
     }
 
     fn get_base_instructions(
@@ -2474,6 +2489,12 @@ fn env_overrides_present() -> bool {
         || matches!(std::env::var("CODEX_HOME"), Ok(ref v) if !v.trim().is_empty())
 }
 
+fn default_code_home_dir() -> Option<PathBuf> {
+    let mut path = home_dir()?;
+    path.push(".code");
+    Some(path)
+}
+
 fn compute_legacy_code_home_dir() -> Option<PathBuf> {
     if env_overrides_present() {
         return None;
@@ -2519,6 +2540,12 @@ pub fn resolve_code_path_for_read(code_home: &Path, relative: &Path) -> PathBuf 
 
     if path_exists(&default_path) {
         return default_path;
+    }
+
+    if let Some(default_home) = default_code_home_dir() {
+        if default_home != code_home {
+            return default_path;
+        }
     }
 
     if let Some(legacy) = legacy_code_home_dir() {
