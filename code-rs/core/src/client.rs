@@ -416,6 +416,11 @@ impl ModelClient {
             .as_deref()
             .unwrap_or(self.config.model.as_str());
 
+        let session_id = prompt
+            .session_id_override
+            .unwrap_or(self.session_id);
+        let session_id_str = session_id.to_string();
+
         let payload = ResponsesApiRequest {
             model: &self.config.model,
             instructions: &full_instructions,
@@ -429,7 +434,7 @@ impl ModelClient {
             stream: true,
             include,
             // Use a stable per-process cache key (session id). With store=false this is inert.
-            prompt_cache_key: Some(self.session_id.to_string()),
+            prompt_cache_key: Some(session_id_str.clone()),
         };
 
         let mut payload_json = serde_json::to_value(&payload)?;
@@ -503,8 +508,8 @@ impl ModelClient {
             req_builder = req_builder
                 .header("OpenAI-Beta", "responses=experimental")
                 // Send `conversation_id`/`session_id` so the server can hit the prompt-cache.
-                .header("conversation_id", self.session_id.to_string())
-                .header("session_id", self.session_id.to_string())
+                .header("conversation_id", session_id_str.clone())
+                .header("session_id", session_id_str.clone())
                 .header(reqwest::header::ACCEPT, "text/event-stream")
                 .header("Codex-Task-Type", codex_task_type)
                 .json(&payload_json);

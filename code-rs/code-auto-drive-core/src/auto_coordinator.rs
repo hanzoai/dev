@@ -1534,6 +1534,7 @@ fn build_user_turn_prompt(
 ) -> Prompt {
     let mut prompt = Prompt::default();
     prompt.store = true;
+    prompt.session_id_override = Some(Uuid::new_v4());
     if let Some(instructions) = auto_instructions {
         let trimmed = instructions.trim();
         if !trimmed.is_empty() {
