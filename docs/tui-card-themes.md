@@ -57,7 +57,7 @@ After painting the background, write title/body/footer text with the palette col
 
 ## 4. Drive animations when available
 
-Themes that define a `RevealConfig` opt into animated reveals. Create a small animation state object (see `CardRevealAnimation` in `history_cell/auto_drive_previews.rs`) to track progress and feed it into `RevealRender`. Themes with `reveal: None` render statically; pass `None` to `GradientBackground::render` in that case.
+Themes that define a `RevealConfig` opt into animated reveals. Track an animation progress value (`0.0..=1.0`) of your choosing and pass it through `RevealRender`. Themes with `reveal: None` render statically; supply `None` to `GradientBackground::render` in that case.
 
 ## 5. Examples by surface
 
