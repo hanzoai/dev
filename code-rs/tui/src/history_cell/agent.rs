@@ -358,8 +358,13 @@ impl AgentRunCell {
         Style::default().fg(dim)
     }
 
-    fn softened_secondary(style: &CardStyle) -> Style {
-        let fg = colors::mix_toward(style.text_secondary, style.text_primary, 0.75);
+    fn prompt_text_style(style: &CardStyle) -> Style {
+        let fg = colors::mix_toward(style.text_primary, colors::background(), 0.70);
+        Style::default().fg(fg)
+    }
+
+    fn action_description_style(style: &CardStyle) -> Style {
+        let fg = colors::mix_toward(style.text_secondary, colors::background(), 0.70);
         Style::default().fg(fg)
     }
 
@@ -647,7 +652,7 @@ impl AgentRunCell {
                     line,
                     body_width,
                     style,
-                    Self::softened_secondary(style),
+                    Self::prompt_text_style(style),
                     HEADING_INDENT,
                 )
             })
@@ -1035,9 +1040,9 @@ impl AgentRunCell {
             .max(ACTION_TIME_COLUMN_MIN_WIDTH);
 
         let time_indent = " ".repeat(ACTION_TIME_INDENT);
-        let indent_style = Self::softened_secondary(style);
+        let indent_style = secondary_text_style(style);
         let time_style = Style::default().fg(colors::text());
-        let label_style = Self::softened_secondary(style);
+        let label_style = Self::action_description_style(style);
         let ellipsis_time = |width: usize| {
             if width <= 1 {
                 return "⋮".to_string();
@@ -1058,7 +1063,7 @@ impl AgentRunCell {
                 ellipsis_segments.push(CardSegment::new(time_indent.clone(), indent_style));
                 ellipsis_segments.push(CardSegment::new(
                     ellipsis_time(time_width),
-                    Self::softened_secondary(style),
+                    label_style,
                 ));
                 if ACTION_TIME_SEPARATOR_WIDTH > 0 {
                     ellipsis_segments.push(CardSegment::new(
