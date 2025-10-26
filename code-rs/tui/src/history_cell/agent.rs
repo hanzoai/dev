@@ -359,7 +359,7 @@ impl AgentRunCell {
     }
 
     fn softened_secondary(style: &CardStyle) -> Style {
-        let fg = colors::mix_toward(style.text_secondary, style.text_primary, 0.45);
+        let fg = colors::mix_toward(style.text_secondary, style.text_primary, 0.75);
         Style::default().fg(fg)
     }
 
@@ -433,9 +433,10 @@ impl AgentRunCell {
             };
 
             let truncated = truncate_with_ellipsis(text_value, name_allow.max(1));
-            let name_width = string_width(truncated.as_str());
-            if !truncated.is_empty() {
-                segments.push(CardSegment::new(truncated, title_text_style(style)));
+            let trimmed_name = truncated.trim_end().to_string();
+            let name_width = string_width(trimmed_name.as_str());
+            if !trimmed_name.is_empty() {
+                segments.push(CardSegment::new(trimmed_name, title_text_style(style)));
             }
             available = available.saturating_sub(name_width);
 
