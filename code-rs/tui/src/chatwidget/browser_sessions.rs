@@ -381,11 +381,6 @@ fn select_session_key(
                 return existing;
             }
         }
-        if let Some(last) = chat.tools_state.browser_last_key.clone() {
-            if chat.tools_state.browser_sessions.contains_key(&last) {
-                return last;
-            }
-        }
     }
 
     let mut key = browser_key(order, call_id);

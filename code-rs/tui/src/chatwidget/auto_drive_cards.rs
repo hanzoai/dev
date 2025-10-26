@@ -6,15 +6,17 @@ pub(super) struct AutoDriveTracker {
     pub slot: ToolCardSlot,
     pub cell: AutoDriveCardCell,
     pub session_id: u64,
+    pub request_ordinal: u64,
     pub active: bool,
 }
 
 impl AutoDriveTracker {
-    fn new(order_key: OrderKey, session_id: u64, goal: Option<String>) -> Self {
+    fn new(order_key: OrderKey, session_id: u64, request_ordinal: u64, goal: Option<String>) -> Self {
         Self {
             slot: ToolCardSlot::new(order_key),
             cell: AutoDriveCardCell::new(goal),
             session_id,
+            request_ordinal,
             active: true,
         }
     }
@@ -47,10 +49,21 @@ pub(super) fn start_session(
     order_key: OrderKey,
     goal: Option<String>,
 ) {
+    let request_ordinal = order_key.req;
+
+    if let Some(mut tracker) = chat.tools_state.auto_drive_tracker.take() {
+        if tracker.request_ordinal == request_ordinal {
+            tracker.slot.set_order_key(order_key);
+            tracker.replace(chat);
+            chat.tools_state.auto_drive_tracker = Some(tracker);
+            return;
+        }
+    }
+
     let session_id = chat.auto_drive_card_sequence;
     chat.auto_drive_card_sequence = chat.auto_drive_card_sequence.wrapping_add(1);
 
-    let mut tracker = AutoDriveTracker::new(order_key, session_id, goal);
+    let mut tracker = AutoDriveTracker::new(order_key, session_id, request_ordinal, goal);
     tracker.ensure_insert(chat);
     chat.tools_state.auto_drive_tracker = Some(tracker);
 }
@@ -62,6 +75,7 @@ pub(super) fn record_action(
     kind: AutoDriveActionKind,
 ) {
     if let Some(mut tracker) = chat.tools_state.auto_drive_tracker.take() {
+        tracker.request_ordinal = order_key.req;
         tracker.slot.set_order_key(order_key);
         tracker.cell.push_action(text, kind);
         tracker.replace(chat);
@@ -71,6 +85,7 @@ pub(super) fn record_action(
 
 pub(super) fn set_status(chat: &mut ChatWidget<'_>, order_key: OrderKey, status: AutoDriveStatus) {
     if let Some(mut tracker) = chat.tools_state.auto_drive_tracker.take() {
+        tracker.request_ordinal = order_key.req;
         tracker.slot.set_order_key(order_key);
         tracker.cell.set_status(status);
         tracker.replace(chat);
@@ -86,6 +101,7 @@ pub(super) fn finalize(
     action_kind: AutoDriveActionKind,
 ) {
     if let Some(mut tracker) = chat.tools_state.auto_drive_tracker.take() {
+        tracker.request_ordinal = order_key.req;
         tracker.slot.set_order_key(order_key);
         if let Some(msg) = message {
             tracker.cell.push_action(msg, action_kind);

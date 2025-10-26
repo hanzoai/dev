@@ -4205,6 +4205,8 @@ impl ChatWidget<'_> {
             tools_state: ToolState {
                 running_custom_tools: HashMap::new(),
                 web_search_sessions: HashMap::new(),
+                web_search_by_call: HashMap::new(),
+                web_search_by_order: HashMap::new(),
                 running_wait_tools: HashMap::new(),
                 running_kill_tools: HashMap::new(),
                 browser_sessions: HashMap::new(),
@@ -9400,7 +9402,7 @@ impl ChatWidget<'_> {
                     ev.call_id,
                     event.event_seq
                 );
-                tools::web_search_begin(self, ev.call_id, ev.query, ok)
+                tools::web_search_begin(self, ev.call_id, ev.query, event.order.as_ref(), ok)
             }
             EventMsg::AgentMessage(AgentMessageEvent { message }) => {
                 // If the user requested an interrupt, ignore late final answers.
@@ -9502,7 +9504,7 @@ impl ChatWidget<'_> {
                         self.next_internal_key()
                     }
                 };
-                tools::web_search_complete(self, ev.call_id, ev.query, ok)
+                tools::web_search_complete(self, ev.call_id, ev.query, event.order.as_ref(), ok)
             }
             EventMsg::AgentMessageDelta(AgentMessageDeltaEvent { delta }) => {
                 tracing::debug!("AgentMessageDelta: {:?}", delta);
@@ -29836,7 +29838,9 @@ impl RunningToolEntry {
 #[derive(Default)]
 struct ToolState {
     running_custom_tools: HashMap<ToolCallId, RunningToolEntry>,
-    web_search_sessions: HashMap<ToolCallId, web_search_sessions::WebSearchTracker>,
+    web_search_sessions: HashMap<String, web_search_sessions::WebSearchTracker>,
+    web_search_by_call: HashMap<String, String>,
+    web_search_by_order: HashMap<u64, String>,
     running_wait_tools: HashMap<ToolCallId, ExecCallId>,
     running_kill_tools: HashMap<ToolCallId, ExecCallId>,
     browser_sessions: HashMap<String, browser_sessions::BrowserSessionTracker>,

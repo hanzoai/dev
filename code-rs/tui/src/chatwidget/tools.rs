@@ -2,19 +2,31 @@
 
 use super::{running_tools, web_search_sessions, ChatWidget, OrderKey};
 use crate::history_cell;
-use code_core::protocol::{McpToolCallBeginEvent, McpToolCallEndEvent};
+use code_core::protocol::{McpToolCallBeginEvent, McpToolCallEndEvent, OrderMeta};
 
-pub(super) fn web_search_begin(chat: &mut ChatWidget<'_>, call_id: String, query: Option<String>, key: OrderKey) {
+pub(super) fn web_search_begin(
+    chat: &mut ChatWidget<'_>,
+    call_id: String,
+    query: Option<String>,
+    order: Option<&OrderMeta>,
+    key: OrderKey,
+) {
     for cell in &chat.history_cells { cell.trigger_fade(); }
     chat.finalize_active_stream();
     chat.flush_interrupt_queue();
 
-    web_search_sessions::handle_begin(chat, key, call_id, query);
+    web_search_sessions::handle_begin(chat, order, call_id, query, key);
 }
 
-pub(super) fn web_search_complete(chat: &mut ChatWidget<'_>, call_id: String, query: Option<String>, key: OrderKey) {
+pub(super) fn web_search_complete(
+    chat: &mut ChatWidget<'_>,
+    call_id: String,
+    query: Option<String>,
+    order: Option<&OrderMeta>,
+    key: OrderKey,
+) {
     running_tools::collapse_spinner(chat, &call_id);
-    web_search_sessions::handle_complete(chat, key, call_id, query);
+    web_search_sessions::handle_complete(chat, order, call_id, query, key);
 }
 
 pub(super) fn mcp_begin(chat: &mut ChatWidget<'_>, ev: McpToolCallBeginEvent, key: OrderKey) {
