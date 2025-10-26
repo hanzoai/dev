@@ -106,18 +106,18 @@ pub(super) fn handle_custom_tool_begin(
         return false;
     }
 
+    let request_ordinal = order
+        .map(|meta| meta.request_ordinal)
+        .unwrap_or_else(|| chat.last_seen_request_index);
     let (order_key, ordinal) = order_key_and_ordinal(chat, order);
-    let key = select_session_key(chat, order, call_id, tool_name, order_key.req);
+    let key = select_session_key(chat, order, call_id, tool_name, request_ordinal);
     let mut tracker = chat
         .tools_state
         .browser_sessions
         .remove(&key)
-        .unwrap_or_else(|| BrowserSessionTracker::new(order_key, order_key.req));
+        .unwrap_or_else(|| BrowserSessionTracker::new(order_key, request_ordinal));
     tracker.slot.set_order_key(order_key);
-    tracker.request_ordinal = order_key.req;
-    tracker.request_ordinal = order_key.req;
-    tracker.request_ordinal = order_key.req;
-    tracker.request_ordinal = order_key.req;
+    tracker.request_ordinal = request_ordinal;
 
     if let Some(Value::Object(json)) = params.as_ref() {
         if tool_name == "browser_open" {
@@ -155,7 +155,7 @@ pub(super) fn handle_custom_tool_begin(
             chat
                 .tools_state
                 .browser_session_by_order
-                .insert(order_key.req, key.clone());
+                .insert(request_ordinal, key.clone());
         }
     }
     chat.tools_state.browser_last_key = Some(key.clone());
@@ -211,9 +211,12 @@ pub(super) fn handle_custom_tool_end(
     let order_key = order
         .map(|meta| chat.provider_order_key_from_order_meta(meta))
         .unwrap_or(tracker.slot.order_key);
+    let request_ordinal = order
+        .map(|meta| meta.request_ordinal)
+        .unwrap_or(tracker.request_ordinal);
 
     tracker.slot.set_order_key(order_key);
-    tracker.request_ordinal = order_key.req;
+    tracker.request_ordinal = request_ordinal;
 
     let params_to_use = params.as_ref();
     if tool_name == "browser_open" {
@@ -263,7 +266,7 @@ pub(super) fn handle_custom_tool_end(
             chat
                 .tools_state
                 .browser_session_by_order
-                .insert(order_key.req, key.clone());
+                .insert(request_ordinal, key.clone());
         }
     }
     chat
@@ -295,8 +298,11 @@ pub(super) fn handle_background_event(
     let order_key = order
         .map(|meta| chat.provider_order_key_from_order_meta(meta))
         .unwrap_or(tracker.slot.order_key);
+    let request_ordinal = order
+        .map(|meta| meta.request_ordinal)
+        .unwrap_or(tracker.request_ordinal);
     tracker.slot.set_order_key(order_key);
-    tracker.request_ordinal = order_key.req;
+    tracker.request_ordinal = request_ordinal;
 
     let console_line = if message.starts_with("⚠️") {
         message.to_string()
@@ -326,7 +332,7 @@ pub(super) fn handle_background_event(
             chat
                 .tools_state
                 .browser_session_by_order
-                .insert(tracker.request_ordinal, key.clone());
+                .insert(request_ordinal, key.clone());
         }
     }
     chat
@@ -364,8 +370,11 @@ pub(super) fn handle_screenshot_update(
     let order_key = order
         .map(|meta| chat.provider_order_key_from_order_meta(meta))
         .unwrap_or(tracker.slot.order_key);
+    let request_ordinal = order
+        .map(|meta| meta.request_ordinal)
+        .unwrap_or(tracker.request_ordinal);
     tracker.slot.set_order_key(order_key);
-    tracker.request_ordinal = order_key.req;
+    tracker.request_ordinal = request_ordinal;
 
     tracker.cell.set_url(url.to_string());
 
@@ -396,10 +405,25 @@ pub(super) fn handle_screenshot_update(
 
     result.session_key = Some(key.clone());
 
+    match order.map(|m| m.request_ordinal) {
+        Some(ord) => {
+            chat
+                .tools_state
+                .browser_session_by_order
+                .insert(ord, key.clone());
+        }
+        None => {
+            chat
+                .tools_state
+                .browser_session_by_order
+                .insert(request_ordinal, key.clone());
+        }
+    }
     chat
         .tools_state
         .browser_sessions
-        .insert(key, tracker);
+        .insert(key.clone(), tracker);
+    chat.tools_state.browser_last_key = Some(key);
 
     result.grouped = true;
     result
