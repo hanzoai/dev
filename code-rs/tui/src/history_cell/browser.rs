@@ -273,14 +273,20 @@ impl BrowserSessionCell {
         let mut entries: Vec<(String, String, String)> = Vec::new();
         if self.actions.is_empty() {
             if let Some(url) = self.url.as_ref() {
-                let time_label = Self::format_elapsed_label(Duration::ZERO, show_minutes);
+                let time_label = format!(
+                    " {}",
+                    Self::format_elapsed_label(Duration::ZERO, show_minutes)
+                );
                 entries.push((time_label, "Opened".to_string(), url.clone()));
             }
             return entries;
         }
 
         for action in &self.actions {
-            let time_label = Self::format_elapsed_label(action.timestamp, show_minutes);
+            let time_label = format!(
+                " {}",
+                Self::format_elapsed_label(action.timestamp, show_minutes)
+            );
             let entry = format_action_entry(action, time_label);
             entries.push((entry.time_label, entry.label, entry.detail));
         }
@@ -456,6 +462,15 @@ impl BrowserSessionCell {
             .unwrap_or(0)
             .max(ACTION_TIME_COLUMN_MIN_WIDTH);
 
+        rows.push(self.body_text_row(
+            "Actions",
+            body_width,
+            style,
+            primary_text_style(style),
+            indent_cols,
+            right_padding,
+        ));
+
         if action_display.is_empty() {
             for wrapped in wrap_card_lines(
                 "No browser actions yet",
@@ -492,13 +507,7 @@ impl BrowserSessionCell {
                         if indent_cols > 0 {
                             segments.push(CardSegment::new(" ".repeat(indent_cols), Style::default()));
                         }
-                        let padded = if time_width <= 1 {
-                            "⋮".to_string()
-                        } else {
-                            let lead = 2.min(time_width.saturating_sub(1));
-                            let trail = time_width.saturating_sub(lead + 1);
-                            format!("{}{}{}", " ".repeat(lead), "⋮", " ".repeat(trail))
-                        };
+                        let padded = format!("{:>width$}", "⋮", width = time_width.max(1));
                         segments.push(CardSegment::new(
                             padded,
                             secondary_text_style(style),
@@ -652,7 +661,7 @@ impl BrowserSessionCell {
         let mut rows = Vec::new();
         let label_style = secondary_text_style(style);
         let detail_style = primary_text_style(style);
-        let time_style = Style::default().fg(colors::text());
+        let time_style = primary_text_style(style);
 
         let indent_string = if indent > 0 {
             Some(" ".repeat(indent))
@@ -826,13 +835,16 @@ impl BrowserSessionCell {
                 entries.push(ActionEntry {
                     label: "Opened".to_string(),
                     detail: url.clone(),
-                    time_label: Self::format_elapsed_label(Duration::ZERO, show_minutes),
+                    time_label: format!(" {}", Self::format_elapsed_label(Duration::ZERO, show_minutes)),
                 });
             }
         }
 
         entries.extend(self.actions.iter().map(|action| {
-            let time_label = Self::format_elapsed_label(action.timestamp, show_minutes);
+            let time_label = format!(
+                " {}",
+                Self::format_elapsed_label(action.timestamp, show_minutes)
+            );
             format_action_entry(action, time_label)
         }));
 

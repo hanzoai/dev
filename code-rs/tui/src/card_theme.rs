@@ -104,8 +104,8 @@ pub fn search_dark_theme() -> CardThemeDefinition {
     CardThemeDefinition {
         name: "Search Dark",
         theme: CardTheme {
-            gradient: gradient((48, 12, 96), (210, 120, 255), -0.05),
-            palette: palette((210, 170, 245), (242, 234, 255), (248, 240, 255), (232, 220, 250)),
+            gradient: gradient((66, 51, 0), (109, 95, 48), -0.05),
+            palette: palette((174, 144, 50), (255, 239, 210), (255, 247, 224), (224, 203, 120)),
             reveal: None,
         },
     }
@@ -115,8 +115,8 @@ pub fn auto_drive_dark_theme() -> CardThemeDefinition {
     CardThemeDefinition {
         name: "Auto Drive Dark",
         theme: CardTheme {
-            gradient: gradient((50, 70, 200), (190, 220, 255), -0.05),
-            palette: palette((180, 210, 248), (232, 242, 254), (240, 248, 255), (220, 234, 248)),
+            gradient: gradient((33, 0, 67), (12, 39, 74), -0.05),
+            palette: palette((140, 110, 200), (236, 228, 255), (246, 238, 255), (188, 170, 228)),
             reveal: reveal(720, RevealVariant::RainbowBloom),
         },
     }
@@ -126,8 +126,8 @@ pub fn agent_orange_dark_theme() -> CardThemeDefinition {
     CardThemeDefinition {
         name: "Agent Orange Dark",
         theme: CardTheme {
-            gradient: gradient((150, 60, 20), (235, 120, 50), -0.05),
-            palette: palette((226, 168, 120), (248, 230, 216), (254, 240, 228), (236, 212, 200)),
+            gradient: gradient((39, 18, 2), (114, 62, 22), -0.05),
+            palette: palette((180, 100, 40), (252, 235, 220), (255, 242, 226), (210, 168, 132)),
             reveal: None,
         },
     }
@@ -137,8 +137,8 @@ pub fn browser_dark_theme() -> CardThemeDefinition {
     CardThemeDefinition {
         name: "Browser Dark",
         theme: CardTheme {
-            gradient: gradient((18, 32, 72), (96, 140, 210), -0.05),
-            palette: palette((150, 200, 255), (220, 236, 255), (204, 224, 252), (192, 212, 240)),
+            gradient: gradient((1, 13, 33), (1, 23, 60), -0.05),
+            palette: palette((110, 150, 210), (230, 242, 255), (244, 248, 255), (180, 205, 236)),
             reveal: None,
         },
     }
@@ -148,8 +148,8 @@ pub fn agent_green_dark_theme() -> CardThemeDefinition {
     CardThemeDefinition {
         name: "Agent Green Dark",
         theme: CardTheme {
-            gradient: gradient((20, 70, 36), (160, 240, 120), -0.05),
-            palette: palette((168, 236, 186), (226, 250, 224), (210, 248, 210), (200, 240, 202)),
+            gradient: gradient((6, 33, 10), (0, 90, 13), -0.05),
+            palette: palette((120, 180, 130), (226, 250, 230), (240, 252, 240), (180, 220, 188)),
             reveal: None,
         },
     }
@@ -159,8 +159,8 @@ pub fn search_light_theme() -> CardThemeDefinition {
     CardThemeDefinition {
         name: "Search Light",
         theme: CardTheme {
-            gradient: gradient((248, 228, 255), (216, 190, 255), -0.05),
-            palette: palette((82, 48, 164), (20, 12, 54), (30, 18, 72), (36, 22, 86)),
+            gradient: gradient((253, 246, 219), (255, 254, 246), -0.05),
+            palette: palette((215, 196, 140), (134, 98, 30), (97, 75, 24), (167, 134, 60)),
             reveal: None,
         },
     }
@@ -170,8 +170,8 @@ pub fn auto_drive_light_theme() -> CardThemeDefinition {
     CardThemeDefinition {
         name: "Auto Drive Light",
         theme: CardTheme {
-            gradient: gradient((216, 238, 255), (160, 196, 232), -0.05),
-            palette: palette((32, 96, 140), (12, 34, 52), (18, 48, 70), (24, 60, 86)),
+            gradient: gradient((204, 223, 245), (247, 235, 254), -0.05),
+            palette: palette((170, 195, 222), (52, 75, 109), (30, 54, 85), (92, 121, 153)),
             reveal: reveal(720, RevealVariant::LightBloom),
         },
     }
@@ -181,8 +181,8 @@ pub fn agent_orange_light_theme() -> CardThemeDefinition {
     CardThemeDefinition {
         name: "Agent Orange Light",
         theme: CardTheme {
-            gradient: gradient((255, 220, 200), (232, 160, 120), -0.05),
-            palette: palette((140, 64, 30), (78, 26, 4), (92, 34, 6), (104, 40, 10)),
+            gradient: gradient((244, 211, 193), (255, 243, 237), -0.05),
+            palette: palette((216, 166, 132), (142, 76, 44), (110, 55, 28), (184, 111, 77)),
             reveal: None,
         },
     }
@@ -192,8 +192,8 @@ pub fn browser_light_theme() -> CardThemeDefinition {
     CardThemeDefinition {
         name: "Browser Light",
         theme: CardTheme {
-            gradient: gradient((200, 220, 242), (104, 132, 180), -0.05),
-            palette: palette((40, 70, 120), (16, 22, 44), (26, 34, 70), (32, 42, 82)),
+            gradient: gradient((184, 202, 232), (216, 230, 252), -0.05),
+            palette: palette((160, 185, 220), (40, 66, 110), (26, 46, 88), (82, 111, 150)),
             reveal: None,
         },
     }
@@ -203,8 +203,8 @@ pub fn agent_green_light_theme() -> CardThemeDefinition {
     CardThemeDefinition {
         name: "Agent Green Light",
         theme: CardTheme {
-            gradient: gradient((220, 255, 230), (182, 228, 188), -0.05),
-            palette: palette((48, 102, 82), (18, 40, 32), (26, 52, 40), (34, 64, 50)),
+            gradient: gradient((193, 221, 197), (230, 248, 233), -0.05),
+            palette: palette((156, 206, 168), (40, 90, 54), (30, 70, 44), (86, 128, 95)),
             reveal: None,
         },
     }
