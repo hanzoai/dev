@@ -214,9 +214,9 @@ pub fn dark_theme_catalog() -> Vec<CardThemeDefinition> {
     vec![
         search_dark_theme(),
         auto_drive_dark_theme(),
-        agent_orange_dark_theme(),
+        agent_read_only_dark_theme(),
         browser_dark_theme(),
-        agent_green_dark_theme(),
+        agent_write_dark_theme(),
     ]
 }
 
@@ -224,9 +224,9 @@ pub fn light_theme_catalog() -> Vec<CardThemeDefinition> {
     vec![
         search_light_theme(),
         auto_drive_light_theme(),
-        agent_orange_light_theme(),
+        agent_read_only_light_theme(),
         browser_light_theme(),
-        agent_green_light_theme(),
+        agent_write_light_theme(),
     ]
 }
 
@@ -241,17 +241,17 @@ pub fn auto_drive_theme_catalog() -> Vec<CardThemeDefinition> {
 }
 
 pub fn agent_read_only_dark_theme() -> CardThemeDefinition {
-    agent_orange_dark_theme()
-}
-
-pub fn agent_read_only_light_theme() -> CardThemeDefinition {
-    agent_orange_light_theme()
-}
-
-pub fn agent_write_dark_theme() -> CardThemeDefinition {
     agent_green_dark_theme()
 }
 
-pub fn agent_write_light_theme() -> CardThemeDefinition {
+pub fn agent_read_only_light_theme() -> CardThemeDefinition {
     agent_green_light_theme()
+}
+
+pub fn agent_write_dark_theme() -> CardThemeDefinition {
+    agent_orange_dark_theme()
+}
+
+pub fn agent_write_light_theme() -> CardThemeDefinition {
+    agent_orange_light_theme()
 }
