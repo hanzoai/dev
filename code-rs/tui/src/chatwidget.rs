@@ -178,6 +178,7 @@ use crate::exec_command::strip_bash_lc_and_escape;
 use crate::tui_event_extensions::handle_browser_screenshot;
 
 pub(crate) const DOUBLE_ESC_HINT: &str = "undo timeline";
+const AUTO_ESC_EXIT_HINT: &str = "Press Esc again to exit Auto Drive";
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum EscIntent {
@@ -2416,7 +2417,8 @@ impl ChatWidget<'_> {
             status_parts.join(", ")
         };
         self.push_background_tail(format!("Cancelling {descriptor}…"));
-        self.bottom_pane.update_status_text("cancelling agents".to_string());
+        self.bottom_pane
+            .update_status_text("Cancelling agents…".to_string());
         self.bottom_pane.set_task_running(true);
         self.submit_op(Op::CancelAgents { batch_ids, agent_ids });
 
@@ -2428,6 +2430,9 @@ impl ChatWidget<'_> {
                 agent.status = AgentStatus::Cancelled;
             }
         }
+        self.bottom_pane
+            .update_status_text("Agents cancelled. Esc cancels the running command.".to_string());
+        self.show_auto_drive_exit_hint();
         self.request_redraw();
 
         true
@@ -13276,12 +13281,13 @@ fi\n\
         let Some(handle) = self.auto_handle.as_ref() else {
             return;
         };
-       if handle
-           .send(AutoCoordinatorCommand::UpdateConversation(conversation))
-           .is_err()
-       {
-           self.auto_stop(Some("Coordinator stopped unexpectedly.".to_string()));
-       } else {
+        if handle
+            .send(AutoCoordinatorCommand::UpdateConversation(conversation))
+            .is_err()
+        {
+            self.auto_stop(Some("Coordinator stopped unexpectedly.".to_string()));
+        } else {
+            self.bottom_pane.set_standard_terminal_hint(None);
             self.auto_state.on_prompt_submitted();
             self.auto_state.set_coordinator_waiting(true);
             self.auto_state.current_summary = None;
@@ -13319,6 +13325,7 @@ fi\n\
         {
             self.auto_stop(Some("Coordinator stopped unexpectedly.".to_string()));
         } else {
+            self.bottom_pane.set_standard_terminal_hint(None);
             self.auto_state.on_prompt_submitted();
             self.auto_state.set_coordinator_waiting(true);
             self.auto_state.current_summary = None;
@@ -14031,6 +14038,7 @@ Have we met every part of this goal and is there no further work to do?"#
             return;
         };
 
+        self.bottom_pane.set_standard_terminal_hint(None);
         self.auto_state.on_prompt_submitted();
         self.auto_state.set_coordinator_waiting(false);
         self.auto_state.clear_bypass_coordinator_flag();
@@ -14107,7 +14115,8 @@ use crate::chatwidget::message::UserMessage;
         self.bottom_pane.ensure_input_focus();
         self.bottom_pane.set_task_running(true);
         self.bottom_pane
-            .update_status_text("Auto Drive".to_string());
+            .update_status_text("Auto Drive paused".to_string());
+        self.show_auto_drive_exit_hint();
         self.auto_rebuild_live_ring();
         self.request_redraw();
     }
@@ -17698,6 +17707,40 @@ use crate::chatwidget::message::UserMessage;
             .flash_footer_notice(format!("Esc {}", Self::double_esc_hint_label()));
     }
 
+    fn show_auto_drive_exit_hint(&mut self) {
+        self.bottom_pane
+            .set_standard_terminal_hint(Some(AUTO_ESC_EXIT_HINT.to_string()));
+    }
+
+    fn auto_stop_via_escape(&mut self, message: Option<String>) {
+        self.auto_stop(message);
+        self.bottom_pane
+            .update_status_text("Auto Drive stopped.".to_string());
+        if self.auto_state.last_run_summary.is_some() {
+            self.auto_clear_summary_panel();
+        } else {
+            self.bottom_pane.set_standard_terminal_hint(None);
+            self.bottom_pane.ensure_input_focus();
+            self.request_redraw();
+        }
+    }
+
+    fn auto_clear_summary_panel(&mut self) {
+        if self.auto_state.last_run_summary.is_none() {
+            self.bottom_pane.set_standard_terminal_hint(None);
+            self.bottom_pane.ensure_input_focus();
+            self.request_redraw();
+            return;
+        }
+        self.auto_state.last_run_summary = None;
+        self.bottom_pane.clear_auto_coordinator_view(true);
+        self.bottom_pane.clear_live_ring();
+        self.bottom_pane.set_standard_terminal_hint(None);
+        self.bottom_pane.ensure_input_focus();
+        self.auto_rebuild_live_ring();
+        self.request_redraw();
+    }
+
     pub(crate) fn auto_manual_entry_active(&self) -> bool {
         self.auto_state.should_show_goal_entry()
             || (self.auto_state.is_active() && self.auto_state.awaiting_coordinator_submit())
@@ -17732,16 +17775,16 @@ use crate::chatwidget::message::UserMessage;
                 return EscRoute::new(EscIntent::AutoPauseForEdit, true, false);
             }
 
-        if self.has_cancelable_agents() {
-            return EscRoute::new(EscIntent::CancelAgents, true, false);
-        }
+            if self.has_cancelable_agents() {
+                return EscRoute::new(EscIntent::CancelAgents, true, false);
+            }
 
-        if self.has_running_commands_or_tools() {
-            return EscRoute::new(EscIntent::CancelTask, true, false);
-        }
+            if self.has_running_commands_or_tools() {
+                return EscRoute::new(EscIntent::CancelTask, true, false);
+            }
 
-        if self.auto_state.awaiting_coordinator_submit() {
-            return EscRoute::new(EscIntent::AutoStopDuringApproval, true, false);
+            if self.auto_state.awaiting_coordinator_submit() {
+                return EscRoute::new(EscIntent::AutoStopDuringApproval, true, false);
             }
 
             return EscRoute::new(EscIntent::AutoStopActive, true, false);
@@ -17798,11 +17841,15 @@ use crate::chatwidget::message::UserMessage;
                 true
             }
             EscIntent::AutoStopDuringApproval => {
-                self.auto_stop(Some("Auto Drive stopped during approval.".to_string()));
+                self.bottom_pane
+                    .update_status_text("Auto Drive stopped during approval.".to_string());
+                self.auto_stop_via_escape(Some("Auto Drive stopped during approval.".to_string()));
                 true
             }
             EscIntent::AutoStopActive => {
-                self.auto_stop(Some("Auto Drive stopped by user.".to_string()));
+                self.bottom_pane
+                    .update_status_text("Stopping Auto Drive…".to_string());
+                self.auto_stop_via_escape(Some("Auto Drive stopped by user.".to_string()));
                 true
             }
             EscIntent::AutoGoalEnableEdit => {
@@ -17813,12 +17860,7 @@ use crate::chatwidget::message::UserMessage;
             }
             EscIntent::AutoGoalExitPreserveDraft => self.auto_exit_goal_entry_preserve_draft(),
             EscIntent::AutoDismissSummary => {
-                self.auto_state.last_run_summary = None;
-                self.bottom_pane.clear_auto_coordinator_view(true);
-                self.bottom_pane.clear_live_ring();
-                self.bottom_pane.set_standard_terminal_hint(None);
-                self.bottom_pane.ensure_input_focus();
-                self.request_redraw();
+                self.auto_clear_summary_panel();
                 true
             }
             EscIntent::DiffConfirm => {
@@ -17832,9 +17874,12 @@ use crate::chatwidget::message::UserMessage;
             }
             EscIntent::CancelAgents => self.cancel_active_agents(),
             EscIntent::CancelTask => {
+                let had_running = self.is_task_running();
                 let _ = self.on_ctrl_c();
-                if self.auto_state.is_active() {
-                    self.auto_pause_for_manual_edit(true);
+                if had_running {
+                    self.bottom_pane
+                        .update_status_text("Command cancelled. Esc stops Auto Drive.".to_string());
+                    self.auto_stop_via_escape(Some("Auto Drive stopped by user.".to_string()));
                 }
                 true
             }
@@ -22097,6 +22142,57 @@ mod tests {
         assert_eq!(route.intent, EscIntent::AutoStopActive);
         assert!(chat.execute_esc_intent(route.intent, esc_event));
         assert!(!chat.auto_state.is_active());
+        assert!(chat.auto_state.last_run_summary.is_none());
+    }
+
+    #[test]
+    fn esc_cancels_agents_then_command_and_stops_auto_drive() {
+        let mut harness = ChatWidgetHarness::new();
+        let chat = harness.chat();
+
+        chat.auto_state.set_phase(AutoRunPhase::Active);
+        chat.active_agents.push(AgentInfo {
+            id: "agent-1".to_string(),
+            name: "Agent 1".to_string(),
+            status: AgentStatus::Running,
+            batch_id: Some("batch-1".to_string()),
+            model: None,
+            result: None,
+            error: None,
+            last_progress: None,
+        });
+
+        chat.exec.running_commands.insert(
+            ExecCallId("exec-1".to_string()),
+            RunningCommand {
+                command: vec!["echo".to_string(), "hi".to_string()],
+                parsed: Vec::new(),
+                history_index: None,
+                history_id: None,
+                explore_entry: None,
+                stdout: String::new(),
+                stderr: String::new(),
+                wait_total: None,
+                wait_active: false,
+                wait_notes: Vec::new(),
+            },
+        );
+        chat.bottom_pane.set_task_running(true);
+
+        let esc_event = KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE);
+        let route = chat.describe_esc_context();
+        assert_eq!(route.intent, EscIntent::CancelAgents);
+        assert!(chat.execute_esc_intent(route.intent, esc_event));
+
+        let esc_event = KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE);
+        let route = chat.describe_esc_context();
+        assert_eq!(route.intent, EscIntent::CancelTask);
+        assert!(chat.execute_esc_intent(route.intent, esc_event));
+        assert!(!chat.auto_state.is_active(), "Auto Drive should stop after cancelling the command");
+        assert!(chat.auto_state.last_run_summary.is_none());
+
+        let route = chat.describe_esc_context();
+        assert_eq!(route.intent, EscIntent::AutoGoalExitPreserveDraft);
     }
 
     #[test]
