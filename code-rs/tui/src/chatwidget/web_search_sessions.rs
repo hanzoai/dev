@@ -145,14 +145,21 @@ pub(super) fn handle_complete(
         tracker.ensure_insert(chat);
     }
 
-    chat
-        .tools_state
-        .web_search_sessions
-        .insert(key.clone(), tracker);
-    chat
-        .tools_state
-        .web_search_by_order
-        .insert(request_ordinal, key);
+    if !tracker.active_calls.is_empty() {
+        chat
+            .tools_state
+            .web_search_sessions
+            .insert(key.clone(), tracker);
+        chat
+            .tools_state
+            .web_search_by_order
+            .insert(request_ordinal, key);
+    } else {
+        chat
+            .tools_state
+            .web_search_by_order
+            .remove(&request_ordinal);
+    }
 
     chat.bottom_pane.update_status_text("responding".to_string());
     chat.maybe_hide_spinner();
