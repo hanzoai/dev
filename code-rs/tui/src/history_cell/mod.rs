@@ -5665,6 +5665,75 @@ pub(crate) struct PatchSummaryCell {
     pub(crate) record: PatchRecord,
 }
 
+fn patch_changes_are_rename_only(changes: &HashMap<PathBuf, FileChange>) -> bool {
+    !changes.is_empty() && changes.values().all(file_change_is_rename_only)
+}
+
+fn patch_changes_are_noop(changes: &HashMap<PathBuf, FileChange>) -> bool {
+    !changes.is_empty()
+        && changes.values().all(|change| match change {
+            FileChange::Update {
+                move_path: None,
+                unified_diff,
+                ..
+            } => {
+                !diff_contains_line_edits(unified_diff)
+                    && !diff_contains_binary_markers(unified_diff)
+                    && !diff_contains_metadata_markers(unified_diff)
+            }
+            _ => false,
+        })
+}
+
+fn file_change_is_rename_only(change: &FileChange) -> bool {
+    match change {
+        FileChange::Update {
+            move_path: Some(_),
+            unified_diff,
+            ..
+        } => {
+            !diff_contains_line_edits(unified_diff)
+                && !diff_contains_binary_markers(unified_diff)
+                && !diff_contains_metadata_markers_excluding_rename(unified_diff)
+        }
+        _ => false,
+    }
+}
+
+fn diff_contains_line_edits(diff: &str) -> bool {
+    for line in diff.lines() {
+        if line.starts_with("+++") || line.starts_with("---") || line.starts_with("@@") {
+            continue;
+        }
+        match line.as_bytes().first() {
+            Some(b'+') | Some(b'-') => return true,
+            _ => {}
+        }
+    }
+    false
+}
+
+fn diff_contains_binary_markers(diff: &str) -> bool {
+    diff.contains("Binary files") || diff.contains("GIT binary patch") || diff.as_bytes().contains(&0)
+}
+
+fn diff_contains_metadata_markers(diff: &str) -> bool {
+    diff.contains("new file mode")
+        || diff.contains("deleted file mode")
+        || diff.contains("old mode")
+        || diff.contains("new mode")
+        || diff.contains("similarity index")
+        || diff.contains("rename from")
+        || diff.contains("rename to")
+}
+
+fn diff_contains_metadata_markers_excluding_rename(diff: &str) -> bool {
+    diff.contains("new file mode")
+        || diff.contains("deleted file mode")
+        || diff.contains("old mode")
+        || diff.contains("new mode")
+}
+
 impl PatchSummaryCell {
     pub(crate) fn from_record(record: PatchRecord) -> Self {
         let kind = match record.patch_type {
@@ -5673,11 +5742,21 @@ impl PatchSummaryCell {
             HistoryPatchEventType::ApplySuccess => PatchKind::ApplySuccess,
             HistoryPatchEventType::ApplyFailure => PatchKind::ApplyFailure,
         };
+        let rename_only = patch_changes_are_rename_only(&record.changes);
+        let noop_only = patch_changes_are_noop(&record.changes);
         let title = match record.patch_type {
             HistoryPatchEventType::ApprovalRequest => "proposed patch".to_string(),
-            HistoryPatchEventType::ApplyBegin { .. } => "Updated".to_string(),
-            HistoryPatchEventType::ApplySuccess => "Updated".to_string(),
             HistoryPatchEventType::ApplyFailure => "Patch failed".to_string(),
+            HistoryPatchEventType::ApplyBegin { .. }
+            | HistoryPatchEventType::ApplySuccess => {
+                if rename_only {
+                    "Renamed".to_string()
+                } else if noop_only {
+                    "No changes".to_string()
+                } else {
+                    "Updated".to_string()
+                }
+            }
         };
         Self {
             title,
