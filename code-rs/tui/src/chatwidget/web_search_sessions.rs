@@ -205,7 +205,6 @@ fn resolve_request_ordinal(order: Option<&OrderMeta>, fallback: u64) -> u64 {
     order
         .map(|meta| meta.request_ordinal)
         .unwrap_or(fallback)
-        .max(1)
 }
 
 fn web_search_key(request_ordinal: u64) -> String {
