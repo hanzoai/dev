@@ -570,12 +570,12 @@ impl AgentRunCell {
         }
 
         let accent_width = CARD_ACCENT_WIDTH.min(width as usize);
-        let body_width = width
-            .saturating_sub(accent_width as u16)
-            .saturating_sub(1) as usize;
-        if body_width == 0 {
+        let available = width.saturating_sub(accent_width as u16);
+        if available <= 2 {
             return Vec::new();
         }
+
+        let body_width = (available - 2) as usize;
 
         let mut rows: Vec<CardRow> = Vec::new();
         rows.push(self.top_border_row(body_width, style));
@@ -1295,7 +1295,11 @@ impl HistoryCell for AgentRunCell {
 
     fn desired_height(&self, width: u16) -> u16 {
         let style = agent_card_style(self.write_enabled);
-        let rows = self.build_card_rows(width, &style);
+        let trimmed_width = width.saturating_sub(2);
+        if trimmed_width == 0 {
+            return 0;
+        }
+        let rows = self.build_card_rows(trimmed_width, &style);
         rows.len().max(1) as u16
     }
 
@@ -1304,20 +1308,36 @@ impl HistoryCell for AgentRunCell {
     }
 
     fn custom_render_with_skip(&self, area: Rect, buf: &mut Buffer, skip_rows: u16) {
-        if area.width == 0 || area.height == 0 {
+        if area.width <= 2 || area.height == 0 {
             return;
         }
 
         let style = agent_card_style(self.write_enabled);
-        fill_card_background(buf, area, &style);
-        let rows = self.build_card_rows(area.width, &style);
-        let lines = rows_to_lines(&rows, &style, area.width);
+        let draw_width = area.width - 2;
+        let render_area = Rect {
+            width: draw_width,
+            ..area
+        };
+
+        fill_card_background(buf, render_area, &style);
+        let rows = self.build_card_rows(render_area.width, &style);
+        let lines = rows_to_lines(&rows, &style, render_area.width);
         let text = Text::from(lines);
 
         Paragraph::new(text)
             .wrap(Wrap { trim: false })
             .scroll((skip_rows, 0))
-            .render(area, buf);
+            .render(render_area, buf);
+
+        let clear_start = area.x + draw_width;
+        let clear_end = area.x + area.width;
+        for x in clear_start..clear_end {
+            for row in 0..area.height {
+                let cell = &mut buf[(x, area.y + row)];
+                cell.set_symbol(" ");
+                cell.set_bg(crate::colors::background());
+            }
+        }
     }
 }
 
