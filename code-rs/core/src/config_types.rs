@@ -666,9 +666,9 @@ pub struct Tui {
     #[serde(default)]
     pub theme: ThemeConfig,
 
-    /// Auto Drive behavioral defaults.
+    /// Auto Drive behavioral defaults (legacy location; prefer top-level `[auto_drive]`).
     #[serde(default)]
-    pub auto_drive: AutoDriveSettings,
+    pub auto_drive: Option<AutoDriveSettings>,
 
     /// Cached autodetect result so we can skip probing the terminal repeatedly.
     #[serde(default)]
@@ -716,7 +716,7 @@ impl Default for Tui {
     fn default() -> Self {
         Self {
             theme: ThemeConfig::default(),
-            auto_drive: AutoDriveSettings::default(),
+            auto_drive: None,
             cached_terminal_background: None,
             highlight: HighlightConfig::default(),
             show_reasoning: false,
@@ -732,11 +732,24 @@ impl Default for Tui {
 /// Auto Drive behavioral defaults persisted via `config.toml`.
 #[derive(Deserialize, Debug, Clone, PartialEq)]
 pub struct AutoDriveSettings {
-    #[serde(default)]
+    #[serde(default = "default_true")]
     pub review_enabled: bool,
 
-    #[serde(default)]
+    #[serde(default = "default_true")]
     pub agents_enabled: bool,
+
+    #[serde(default = "default_true")]
+    pub qa_automation_enabled: bool,
+
+    #[serde(default = "default_true")]
+    pub cross_check_enabled: bool,
+
+    #[serde(default = "default_true")]
+    pub observer_enabled: bool,
+
+    /// Enable coordinator routing of user prompts during Auto Drive turns.
+    #[serde(default = "default_true")]
+    pub coordinator_routing: bool,
 
     #[serde(default)]
     pub continue_mode: AutoDriveContinueMode,
@@ -745,8 +758,12 @@ pub struct AutoDriveSettings {
 impl Default for AutoDriveSettings {
     fn default() -> Self {
         Self {
-            review_enabled: false,
-            agents_enabled: false,
+            review_enabled: true,
+            agents_enabled: true,
+            qa_automation_enabled: true,
+            cross_check_enabled: true,
+            observer_enabled: true,
+            coordinator_routing: true,
             continue_mode: AutoDriveContinueMode::TenSeconds,
         }
     }

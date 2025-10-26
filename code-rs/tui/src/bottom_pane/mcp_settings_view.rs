@@ -1,3 +1,5 @@
+#![allow(dead_code)]
+
 use ratatui::buffer::Buffer;
 use ratatui::layout::{Alignment, Rect};
 use ratatui::style::{Modifier, Style};
@@ -54,24 +56,45 @@ impl McpSettingsView {
             _ => { self.is_complete = true; }
         }
     }
-}
 
-impl<'a> BottomPaneView<'a> for McpSettingsView {
-    fn handle_key_event(&mut self, _pane: &mut BottomPane<'a>, key_event: KeyEvent) {
+    fn process_key_event(&mut self, key_event: KeyEvent) {
         match key_event {
             KeyEvent { code: KeyCode::Up, .. } => {
-                if self.selected == 0 { self.selected = self.len().saturating_sub(1); } else { self.selected -= 1; }
+                if self.selected == 0 {
+                    self.selected = self.len().saturating_sub(1);
+                } else {
+                    self.selected -= 1;
+                }
             }
             KeyEvent { code: KeyCode::Down, .. } => {
                 self.selected = (self.selected + 1) % self.len().max(1);
             }
-            KeyEvent { code: KeyCode::Left | KeyCode::Right, .. } | KeyEvent { code: KeyCode::Char(' '), modifiers: KeyModifiers::NONE, .. } => {
+            KeyEvent { code: KeyCode::Left | KeyCode::Right, .. }
+            | KeyEvent { code: KeyCode::Char(' '), modifiers: KeyModifiers::NONE, .. } => {
                 self.on_toggle();
             }
             KeyEvent { code: KeyCode::Enter, .. } => self.on_enter(),
-            KeyEvent { code: KeyCode::Esc, .. } => { self.is_complete = true; }
+            KeyEvent { code: KeyCode::Esc, .. } => {
+                self.is_complete = true;
+            }
             _ => {}
         }
+    }
+
+    pub(crate) fn handle_key_event_direct(&mut self, key_event: KeyEvent) -> bool {
+        let handled = matches!(
+            key_event,
+            KeyEvent { code: KeyCode::Up | KeyCode::Down | KeyCode::Left | KeyCode::Right | KeyCode::Enter | KeyCode::Esc, .. }
+                | KeyEvent { code: KeyCode::Char(' '), modifiers: KeyModifiers::NONE, .. }
+        );
+        self.process_key_event(key_event);
+        handled
+    }
+}
+
+impl<'a> BottomPaneView<'a> for McpSettingsView {
+    fn handle_key_event(&mut self, _pane: &mut BottomPane<'a>, key_event: KeyEvent) {
+        self.process_key_event(key_event);
     }
 
     fn is_complete(&self) -> bool { self.is_complete }

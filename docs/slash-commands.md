@@ -14,12 +14,15 @@ Notes
 ## Navigation & Session
 
 - `/browser`: open internal browser.
-- `/chrome`: connect to Chrome.
+- `/chrome`: connect to your Chrome browser.
 - `/new`: start a new chat during a conversation.
 - `/resume`: resume a past session for this folder.
 - `/quit`: exit Codex.
 - `/logout`: log out of Codex.
 - `/login`: manage Code sign-ins (select, add, or disconnect accounts).
+- `/settings [section]`: open the settings panel. Optional section argument
+  jumps directly to `model`, `theme`, `agents`, `limits`, `chrome`, `mcp`, or
+  `notifications`.
 
 ## Workspace & Git
 
@@ -46,17 +49,23 @@ Notes
 
 ## UX & Display
 
-- `/theme`: switch between color themes.
+- `/theme`: customize the app theme.
 - `/verbosity (high|medium|low)`: change text verbosity.
-- `/model`: choose what model and reasoning effort to use.
+- `/model`: choose your default model.
 - `/reasoning (minimal|low|medium|high)`: change reasoning effort.
 - `/prompts`: show example prompts.
 - `/status`: show current session configuration and token usage.
-- `/limits`: visualize current hourly and weekly rate-limit usage.
+- `/limits`: adjust session limits and visualize hourly and weekly rate-limit
+  usage.
 - `/update`: check the installed version, detect available upgrades, and open a
   guided upgrade terminal that runs the installer interactively when possible.
-- `/notifications`: inspect and toggle TUI notifications.
-- `/mcp`: manage MCP servers (status/on/off/add).
+- `/notifications [status|on|off]`: manage notification settings. Without
+  arguments, shows the notifications panel. With arguments: `status` shows
+  current config, `on` enables all, `off` disables all.
+- `/mcp [status|on|off <name>|add]`: manage MCP servers. Without arguments,
+  shows all servers with toggle controls. With arguments: `status` lists
+  servers, `on <name>` enables, `off <name>` disables, and `add` starts the new
+  server workflow.
 - `/validation [status|on|off|<tool> (on|off)]`: inspect or toggle validation
   harness settings.
 
@@ -67,9 +76,8 @@ Notes
 ## Performance & Agents
 
 - `/perf (on|off|show|reset)`: performance tracing controls.
-- `/agents`: list agents (running and availability).
-  including autonomous follow-ups and observer status (available in dev,
-  dev-fast, and pref builds).
+- `/agents`: configure agents and subagent commands (including autonomous
+  follow-ups and observer status; available in dev, dev-fast, and perf builds).
 - `/auto [goal]`: start the maintainer-style auto coordinator. If no goal is
   provided it defaults to "review the git log for recent changes and come up
   with sensible follow up work".
@@ -97,6 +105,8 @@ Implementation Notes
 - Prompt formatting for `/plan`, `/solve`, and `/code` lives in
   `code-rs/core/src/slash_commands.rs`.
   When no `[[agents]]` are configured, the orchestrator advertises the
-  following agent names to the LLM for multi‑agent runs: `claude`, `gemini`,
-  `qwen`, `code`, and `cloud`. You can replace or pin this set via `[[agents]]`
-  or per‑command `[[subagents.commands]].agents`.
+  following model slugs to the LLM for multi‑agent runs: `code-gpt-5-codex`,
+  `code-gpt-5`, `claude-sonnet-4.5`, `claude-opus-4.1`, `gemini-2.5-pro`,
+  `gemini-2.5-flash`, and `qwen-3-coder` (with `cloud-gpt-5-codex` gated by
+  `CODE_ENABLE_CLOUD_AGENT_MODEL`). You can replace or pin this set via
+  `[[agents]]` or per-command `[[subagents.commands]].agents`.

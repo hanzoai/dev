@@ -52,13 +52,14 @@ use uuid::Uuid;
 use crate::AuthManager;
 use crate::CodexAuth;
 use crate::agent_tool::AgentStatusUpdatePayload;
+use crate::git_worktree;
 use crate::protocol::ApprovedCommandMatchKind;
 use crate::protocol::WebSearchBeginEvent;
 use crate::protocol::WebSearchCompleteEvent;
 use code_protocol::mcp_protocol::AuthMode;
 use crate::account_usage;
 use crate::auth_accounts;
-use crate::agent_defaults::DEFAULT_AGENT_NAMES;
+use crate::agent_defaults::{default_agent_configs, enabled_agent_model_specs};
 use code_protocol::models::WebSearchAction;
 use code_protocol::protocol::RolloutItem;
 use shlex::split as shlex_split;
@@ -73,6 +74,7 @@ use self::compact::collect_user_messages;
 pub(crate) const INITIAL_SUBMIT_ID: &str = "";
 const HOOK_OUTPUT_LIMIT: usize = 2048;
 const PENDING_ONLY_SENTINEL: &str = "__code_pending_only__";
+const MIN_SHELL_TIMEOUT_MS: u64 = 30 * 60 * 1000;
 
 #[derive(Clone, Default)]
 struct ConfirmGuardRuntime {
@@ -207,6 +209,7 @@ pub(crate) struct TurnContext {
     pub(crate) sandbox_policy: SandboxPolicy,
     pub(crate) shell_environment_policy: ShellEnvironmentPolicy,
     pub(crate) is_review_mode: bool,
+    pub(crate) text_format_override: Option<TextFormat>,
 }
 
 /// Gather ephemeral, per-turn context that should not be persisted to history.
@@ -534,7 +537,7 @@ use crate::apply_patch::convert_apply_patch_to_protocol;
 use crate::apply_patch::get_writable_roots;
 use crate::apply_patch::{self, ApplyPatchResult};
 use crate::client::ModelClient;
-use crate::client_common::{Prompt, ResponseEvent, REVIEW_PROMPT};
+use crate::client_common::{Prompt, ResponseEvent, TextFormat, REVIEW_PROMPT};
 use crate::environment_context::EnvironmentContext;
 use crate::user_instructions::UserInstructions;
 use crate::config::{persist_model_selection, Config};
@@ -550,6 +553,7 @@ use crate::exec::ExecToolCallOutput;
 use crate::exec::SandboxType;
 use crate::exec::StdoutStream;
 use crate::exec::StreamOutput;
+use crate::exec::EXEC_CAPTURE_MAX_BYTES;
 use crate::exec::process_exec_tool_call;
 use crate::review_format::format_review_findings_block;
 use crate::exec_env::create_env;
@@ -824,6 +828,20 @@ fn is_shell_wrapper(shell: &str, flag: &str) -> bool {
     ) && matches!(flag, "-lc" | "-c")
 }
 
+#[derive(Clone)]
+struct RunningExecMeta {
+    sub_id: String,
+    order_meta: crate::protocol::OrderMeta,
+    cancel_flag: Arc<AtomicBool>,
+    end_emitted: Arc<AtomicBool>,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum WaitInterruptReason {
+    UserMessage,
+    SessionAborted,
+}
+
 #[derive(Default)]
 struct State {
     approved_commands: HashSet<ApprovedCommandPattern>,
@@ -849,10 +867,14 @@ struct State {
     dry_run_guard: DryRunGuardState,
     /// Background execs by call_id
     background_execs: std::collections::HashMap<String, BackgroundExecState>,
+    /// Active foreground exec calls keyed by call_id (ExecCommandBegin/End lifecycle)
+    running_execs: HashMap<String, RunningExecMeta>,
     next_internal_sub_id: u64,
     token_usage_info: Option<TokenUsageInfo>,
     latest_rate_limits: Option<RateLimitSnapshotEvent>,
     pending_manual_compacts: VecDeque<String>,
+    wait_interrupt_epoch: u64,
+    wait_interrupt_reason: Option<WaitInterruptReason>,
 }
 
 #[derive(Clone)]
@@ -978,6 +1000,7 @@ pub(crate) struct Session {
     validation: Arc<RwLock<crate::config_types::ValidationConfig>>,
     self_handle: Weak<Session>,
     active_review: Mutex<Option<ReviewRequest>>,
+    next_turn_text_format: Mutex<Option<TextFormat>>,
 }
 
 struct HookGuard<'a> {
@@ -1249,6 +1272,17 @@ impl Session {
         state.pending_user_input.push(queued);
     }
 
+    fn notify_wait_interrupted(&self, reason: WaitInterruptReason) {
+        let mut state = self.state.lock().unwrap();
+        state.wait_interrupt_epoch = state.wait_interrupt_epoch.saturating_add(1);
+        state.wait_interrupt_reason = Some(reason);
+    }
+
+    fn wait_interrupt_snapshot(&self) -> (u64, Option<WaitInterruptReason>) {
+        let state = self.state.lock().unwrap();
+        (state.wait_interrupt_epoch, state.wait_interrupt_reason)
+    }
+
     fn enforce_user_message_limits(
         &self,
         sub_id: &str,
@@ -1504,6 +1538,7 @@ impl Session {
             sandbox_policy: self.sandbox_policy.clone(),
             shell_environment_policy: self.shell_environment_policy.clone(),
             is_review_mode: false,
+            text_format_override: self.next_turn_text_format.lock().unwrap().take(),
         })
     }
 
@@ -1869,6 +1904,92 @@ impl Session {
             .await
     }
 
+    fn track_running_exec(
+        &self,
+        call_id: &str,
+        sub_id: &str,
+        order_meta: crate::protocol::OrderMeta,
+        cancel_flag: Arc<AtomicBool>,
+        end_emitted: Arc<AtomicBool>,
+    ) {
+        let mut state = self.state.lock().unwrap();
+        state.running_execs.insert(
+            call_id.to_string(),
+            RunningExecMeta {
+                sub_id: sub_id.to_string(),
+                order_meta,
+                cancel_flag,
+                end_emitted,
+            },
+        );
+    }
+
+    fn unregister_running_exec(&self, call_id: &str) {
+        let mut state = self.state.lock().unwrap();
+        state.running_execs.remove(call_id);
+    }
+
+    fn mark_running_exec_as_cancelled(&self, sub_id: &str) {
+        let state = self.state.lock().unwrap();
+        for meta in state.running_execs.values() {
+            if meta.sub_id == sub_id {
+                meta.cancel_flag.store(true, Ordering::Release);
+            }
+        }
+    }
+
+    fn mark_all_running_execs_as_cancelled(&self) {
+        let sub_ids: Vec<String> = {
+            let state = self.state.lock().unwrap();
+            state
+                .running_execs
+                .values()
+                .map(|meta| meta.sub_id.clone())
+                .collect()
+        };
+        for sub_id in sub_ids {
+            self.mark_running_exec_as_cancelled(&sub_id);
+        }
+    }
+
+    async fn finalize_cancelled_execs(&self, sub_id: &str) {
+        let mut to_emit = Vec::new();
+        {
+            let mut state = self.state.lock().unwrap();
+            let mut remove_keys = Vec::new();
+            for (call_id, meta) in state.running_execs.iter() {
+                if meta.sub_id == sub_id && !meta.end_emitted.load(Ordering::Acquire) {
+                    to_emit.push((
+                        call_id.clone(),
+                        meta.order_meta.clone(),
+                        meta.cancel_flag.clone(),
+                        meta.end_emitted.clone(),
+                    ));
+                    remove_keys.push(call_id.clone());
+                }
+            }
+            for key in remove_keys {
+                state.running_execs.remove(&key);
+            }
+        }
+
+        for (call_id, order_meta, cancel_flag, end_emitted) in to_emit {
+            cancel_flag.store(true, Ordering::Release);
+            if !end_emitted.swap(true, Ordering::AcqRel) {
+                let (exit_code, stderr) = synthetic_exec_end_payload(true);
+                let msg = EventMsg::ExecCommandEnd(ExecCommandEndEvent {
+                    call_id,
+                    stdout: String::new(),
+                    stderr,
+                    exit_code,
+                    duration: Duration::ZERO,
+                });
+                let event = self.make_event_with_order(sub_id, msg, order_meta.clone(), order_meta.sequence_number);
+                let _ = self.tx_event.send(event).await;
+            }
+        }
+    }
+
     async fn run_exec_with_events_inner<'a>(
         &self,
         turn_diff_tracker: &mut TurnDiffTracker,
@@ -1882,6 +2003,26 @@ impl Session {
         let is_apply_patch = begin_ctx.apply_patch.is_some();
         let sub_id = begin_ctx.sub_id.clone();
         let call_id = begin_ctx.call_id.clone();
+
+        let order_for_end = crate::protocol::OrderMeta {
+            request_ordinal: attempt_req,
+            output_index,
+            sequence_number: seq_hint.map(|h| h.saturating_add(1)),
+        };
+
+        let cancel_flag = Arc::new(AtomicBool::new(false));
+        let end_emitted = Arc::new(AtomicBool::new(false));
+        self.track_running_exec(&call_id, &sub_id, order_for_end.clone(), cancel_flag.clone(), end_emitted.clone());
+
+        let mut exec_guard = ExecDropGuard::new(
+            self.self_handle.clone(),
+            self.tx_event.clone(),
+            sub_id.clone(),
+            call_id.clone(),
+            order_for_end.clone(),
+            cancel_flag,
+            end_emitted,
+        );
 
         let ExecInvokeArgs { params, sandbox_type, sandbox_policy, sandbox_cwd, code_linux_sandbox_exe, stdout_stream } = exec_args;
         let tracking_command = params.command.clone();
@@ -1946,6 +2087,9 @@ impl Session {
             attempt_req,
         )
         .await;
+
+        exec_guard.mark_completed();
+        self.finalize_cancelled_execs(&sub_id).await;
 
         if enable_hooks {
             if let Some(params_ref) = params_for_hooks.as_ref() {
@@ -2548,6 +2692,8 @@ impl Session {
     fn abort(&self) {
         info!("Aborting existing session");
 
+        self.mark_all_running_execs_as_cancelled();
+
         let mut state = self.state.lock().unwrap();
         state.pending_approvals.clear();
         // Do not clear `pending_input` here. When a user submits a new message
@@ -2617,6 +2763,104 @@ impl State {
             dry_run_guard: self.dry_run_guard.clone(),
             next_internal_sub_id: self.next_internal_sub_id,
             ..Default::default()
+        }
+    }
+}
+
+fn synthetic_exec_end_payload(cancelled: bool) -> (i32, String) {
+    if cancelled {
+        (130, "Command cancelled by user.".to_string())
+    } else {
+        (130, "Command interrupted before completion.".to_string())
+    }
+}
+
+struct ExecDropGuard {
+    sub_id: String,
+    call_id: String,
+    order_meta: crate::protocol::OrderMeta,
+    tx_event: Sender<Event>,
+    cancel_flag: Arc<AtomicBool>,
+    end_emitted: Arc<AtomicBool>,
+    session: Weak<Session>,
+    completed: bool,
+}
+
+impl ExecDropGuard {
+    fn new(
+        session: Weak<Session>,
+        tx_event: Sender<Event>,
+        sub_id: String,
+        call_id: String,
+        order_meta: crate::protocol::OrderMeta,
+        cancel_flag: Arc<AtomicBool>,
+        end_emitted: Arc<AtomicBool>,
+    ) -> Self {
+        Self {
+            sub_id,
+            call_id,
+            order_meta,
+            tx_event,
+            cancel_flag,
+            end_emitted,
+            session,
+            completed: false,
+        }
+    }
+
+    fn mark_completed(&mut self) {
+        self.completed = true;
+        self.end_emitted.store(true, Ordering::Release);
+        self.remove_from_registry();
+    }
+
+    fn remove_from_registry(&self) {
+        if let Some(session) = self.session.upgrade() {
+            session.unregister_running_exec(&self.call_id);
+        }
+    }
+}
+
+impl Drop for ExecDropGuard {
+    fn drop(&mut self) {
+        self.remove_from_registry();
+
+        if self.completed {
+            return;
+        }
+
+        if self.end_emitted.swap(true, Ordering::AcqRel) {
+            return;
+        }
+
+        let (exit_code, stderr) = synthetic_exec_end_payload(
+            self.cancel_flag.load(Ordering::Acquire),
+        );
+        let msg = EventMsg::ExecCommandEnd(ExecCommandEndEvent {
+            call_id: self.call_id.clone(),
+            stdout: String::new(),
+            stderr,
+            exit_code,
+            duration: Duration::ZERO,
+        });
+
+        if let Some(session) = self.session.upgrade() {
+            let event = session.make_event_with_order(
+                &self.sub_id,
+                msg,
+                self.order_meta.clone(),
+                self.order_meta.sequence_number,
+            );
+            let _ = self.tx_event.try_send(event);
+        } else {
+            // Fallback: emit directly if session no longer exists.
+            let event = Event {
+                id: self.sub_id.clone(),
+                event_seq: 0,
+                msg,
+                order: Some(self.order_meta.clone()),
+            };
+            let _ = self.tx_event.try_send(event);
         }
     }
 }
@@ -2894,7 +3138,65 @@ async fn submission_loop(
                         continue;
                     }
                 };
-                tokio::spawn(async move { sess.abort() });
+                tokio::spawn(async move {
+                    sess.notify_wait_interrupted(WaitInterruptReason::SessionAborted);
+                    sess.abort();
+                });
+            }
+            Op::CancelAgents { batch_ids, agent_ids } => {
+                let sess_arc = match sess.as_ref() {
+                    Some(sess) => Arc::clone(sess),
+                    None => {
+                        send_no_session_event(sub.id).await;
+                        continue;
+                    }
+                };
+
+                let mut manager = AGENT_MANAGER.write().await;
+                let mut seen_batches: HashSet<String> = HashSet::new();
+                let mut seen_agents: HashSet<String> = HashSet::new();
+                let mut cancelled = 0usize;
+
+                for batch in batch_ids {
+                    let trimmed = batch.trim();
+                    if trimmed.is_empty() {
+                        continue;
+                    }
+                    if !seen_batches.insert(trimmed.to_string()) {
+                        continue;
+                    }
+                    cancelled += manager.cancel_batch(trimmed).await;
+                }
+
+                for agent_id in agent_ids {
+                    let trimmed = agent_id.trim();
+                    if trimmed.is_empty() {
+                        continue;
+                    }
+                    if !seen_agents.insert(trimmed.to_string()) {
+                        continue;
+                    }
+                    if manager.cancel_agent(trimmed).await {
+                        cancelled += 1;
+                    }
+                }
+
+                drop(manager);
+
+                send_agent_status_update(&sess_arc).await;
+
+                let message = if cancelled == 0 {
+                    "No running agents to cancel.".to_string()
+                } else {
+                    let suffix = if cancelled == 1 { "" } else { "s" };
+                    format!("Cancelled {cancelled} running agent{suffix}.")
+                };
+
+                let event = sess_arc.make_event(
+                    &sub.id,
+                    EventMsg::AgentMessage(AgentMessageEvent { message }),
+                );
+                sess_arc.send_event(event).await;
             }
             Op::AddPendingInputDeveloper { text } => {
                 let sess = match sess.as_ref() { Some(s) => s.clone(), None => { send_no_session_event(sub.id).await; continue; } };
@@ -3077,6 +3379,14 @@ async fn submission_loop(
                     }
                 };
 
+                if config.debug {
+                    if let Ok(logger) = debug_logger.lock() {
+                        if let Err(e) = logger.set_session_usage_file(&session_id) {
+                            warn!("failed to initialise session usage log: {e}");
+                        }
+                    }
+                }
+
                 let conversation_id = code_protocol::mcp_protocol::ConversationId::from(session_id);
                 let auth_snapshot = auth_manager.as_ref().and_then(|mgr| mgr.auth());
                 let otel_event_manager = {
@@ -3126,6 +3436,7 @@ async fn submission_loop(
                 // abort any current running session and clone its state
                 let state = match sess.take() {
                     Some(sess) => {
+                        sess.notify_wait_interrupted(WaitInterruptReason::SessionAborted);
                         sess.abort();
                         sess.state.lock().unwrap().partial_clone()
                     }
@@ -3196,17 +3507,18 @@ async fn submission_loop(
                     config.tools_web_search_allowed_domains.clone();
 
                 let mut agent_models: Vec<String> = if config.agents.is_empty() {
-                    DEFAULT_AGENT_NAMES
-                        .iter()
-                        .map(|s| (*s).to_string())
+                    default_agent_configs()
+                        .into_iter()
+                        .filter(|cfg| cfg.enabled)
+                        .map(|cfg| cfg.name)
                         .collect()
                 } else {
                     get_enabled_agents(&config.agents)
                 };
                 if agent_models.is_empty() {
-                    agent_models = DEFAULT_AGENT_NAMES
-                        .iter()
-                        .map(|s| (*s).to_string())
+                    agent_models = enabled_agent_model_specs()
+                        .into_iter()
+                        .map(|spec| spec.slug.to_string())
                         .collect();
                 }
                 agent_models.sort_by(|a, b| a.to_ascii_lowercase().cmp(&b.to_ascii_lowercase()));
@@ -3247,6 +3559,7 @@ async fn submission_loop(
                     validation: Arc::new(RwLock::new(config.validation.clone())),
                     self_handle: Weak::new(),
                     active_review: Mutex::new(None),
+                    next_turn_text_format: Mutex::new(None),
                 });
                 let weak_handle = Arc::downgrade(&new_session);
                 if let Some(inner) = Arc::get_mut(&mut new_session) {
@@ -3378,6 +3691,7 @@ async fn submission_loop(
 
                 // Abort synchronously here to avoid a race that can kill the
                 // newly spawned agent if the async abort runs after set_task.
+                sess.notify_wait_interrupted(WaitInterruptReason::UserMessage);
                 sess.abort();
 
                 // Spawn a new agent for this user input.
@@ -3397,6 +3711,7 @@ async fn submission_loop(
                 if sess.has_running_task() {
                     let mut response_item = response_input_from_core_items(items.clone());
                     sess.enforce_user_message_limits(&sub.id, &mut response_item);
+                    sess.notify_wait_interrupted(WaitInterruptReason::UserMessage);
                     let queued = QueuedUserInput {
                         submission_id: sub.id.clone(),
                         response_item,
@@ -3421,6 +3736,7 @@ async fn submission_loop(
                 };
                 match decision {
                     ReviewDecision::Abort => {
+                        sess.notify_wait_interrupted(WaitInterruptReason::SessionAborted);
                         sess.abort();
                     }
                     other => sess.notify_approval(&id, other),
@@ -3454,6 +3770,7 @@ async fn submission_loop(
                 };
                 match decision {
                     ReviewDecision::Abort => {
+                        sess.notify_wait_interrupted(WaitInterruptReason::SessionAborted);
                         sess.abort();
                     }
                     other => sess.notify_approval(&id, other),
@@ -3587,13 +3904,26 @@ async fn submission_loop(
                 let sub_id = sub.id.clone();
                 spawn_review_thread(sess, config, sub_id, review_request).await;
             }
+            Op::SetNextTextFormat { format } => {
+                let sess_arc = match sess.as_ref() {
+                    Some(sess) => Arc::clone(sess),
+                    None => {
+                        send_no_session_event(sub.id).await;
+                        continue;
+                    }
+                };
+                *sess_arc.next_turn_text_format.lock().unwrap() = Some(format);
+            }
             Op::Shutdown => {
                 info!("Shutting down Codex instance");
 
                 // Ensure any running agent is aborted so streaming stops promptly.
                 if let Some(sess_arc) = sess.as_ref() {
                     let s2 = sess_arc.clone();
-                    tokio::spawn(async move { s2.abort(); });
+                    tokio::spawn(async move {
+                        s2.notify_wait_interrupted(WaitInterruptReason::SessionAborted);
+                        s2.abort();
+                    });
                 }
 
                 // Gracefully flush and shutdown rollout recorder on session end so tests
@@ -3644,6 +3974,7 @@ async fn spawn_review_thread(
     review_request: ReviewRequest,
 ) {
     // Ensure any running task is stopped before starting the review flow.
+    sess.notify_wait_interrupted(WaitInterruptReason::SessionAborted);
     sess.abort();
 
     let parent_turn_context = sess.make_turn_context();
@@ -3704,6 +4035,7 @@ async fn spawn_review_thread(
         sandbox_policy: parent_turn_context.sandbox_policy.clone(),
         shell_environment_policy: parent_turn_context.shell_environment_policy.clone(),
         is_review_mode: true,
+        text_format_override: None,
     });
 
     let review_prompt_text = format!(
@@ -3734,7 +4066,7 @@ async fn exit_review_mode(
     let event = session.make_event(&task_sub_id, EventMsg::ExitedReviewMode(review_output.clone()));
     session.send_event(event).await;
 
-    let active_request = session.take_active_review();
+    let _active_request = session.take_active_review();
 
     let developer_text = match review_output.clone() {
         Some(output) => {
@@ -3781,44 +4113,8 @@ async fn exit_review_mode(
         content: vec![ContentItem::InputText { text: developer_text.clone() }],
     };
 
-    let status = if review_output.is_some() {
-        "complete"
-    } else {
-        "no_output"
-    };
-
-    let mut metadata_payload = json!({
-        "type": "code_review_metadata",
-        "status": status,
-        "summary": developer_text,
-    });
-
-    if let Some(request) = active_request {
-        metadata_payload["prompt"] = json!(request.prompt);
-        metadata_payload["user_facing_hint"] = json!(request.user_facing_hint);
-        if let Some(meta) = request.metadata {
-            metadata_payload["review_context"] = serde_json::to_value(meta).unwrap_or(json!({}));
-        }
-    }
-
-    if let Some(ref output) = review_output {
-        metadata_payload["overall_correctness"] = json!(output.overall_correctness);
-        metadata_payload["overall_confidence_score"] = json!(output.overall_confidence_score);
-        metadata_payload["finding_count"] = json!(output.findings.len());
-        metadata_payload["findings"] = serde_json::to_value(&output.findings).unwrap_or(json!([]));
-    }
-
-    let metadata_text = serde_json::to_string_pretty(&metadata_payload)
-        .unwrap_or_else(|_| metadata_payload.to_string());
-
-    let metadata_message = ResponseItem::Message {
-        id: None,
-        role: "developer".to_string(),
-        content: vec![ContentItem::InputText { text: metadata_text }],
-    };
-
     session
-        .record_conversation_items(&[developer_message, metadata_message])
+        .record_conversation_items(&[developer_message])
         .await;
 }
 
@@ -4265,10 +4561,12 @@ async fn run_turn(
             status_items, // Include status items with this request
             base_instructions_override: tc.base_instructions.clone(),
             include_additional_instructions: true,
-            text_format: None,
+            text_format: tc.text_format_override.clone(),
             model_override: None,
             model_family_override: None,
             output_schema: None,
+            log_tag: Some("codex/turn".to_string()),
+            session_id_override: None,
         };
 
         // Start a new scratchpad for this HTTP attempt
@@ -6384,22 +6682,31 @@ async fn handle_kill(
 }
 
 fn to_exec_params(params: ShellToolCallParams, sess: &Session) -> ExecParams {
+    let timeout_ms = params
+        .timeout_ms
+        .map(|ms| ms.max(MIN_SHELL_TIMEOUT_MS));
     ExecParams {
         command: params.command,
         cwd: sess.resolve_path(params.workdir.clone()),
-        timeout_ms: params.timeout_ms,
+        timeout_ms,
         env: create_env(&sess.shell_environment_policy),
         with_escalated_permissions: params.with_escalated_permissions,
         justification: params.justification,
     }
 }
 
-fn resolve_agent_read_only(requested: Option<bool>, config: Option<&crate::config_types::AgentConfig>) -> bool {
-    if let Some(flag) = requested {
-        flag
-    } else {
-        config.map(|c| c.read_only).unwrap_or(false)
+fn resolve_agent_read_only(
+    write: Option<bool>,
+    read_only: Option<bool>,
+    config: Option<&crate::config_types::AgentConfig>,
+) -> bool {
+    if let Some(flag) = write {
+        return !flag;
     }
+    if let Some(flag) = read_only {
+        return flag;
+    }
+    config.map(|c| c.read_only).unwrap_or(false)
 }
 
 #[cfg(test)]
@@ -6423,21 +6730,36 @@ mod resolve_read_only_tests {
     }
 
     #[test]
-    fn explicit_flag_overrides_config_true() {
+    fn explicit_write_overrides_config_read_only() {
         let cfg = make_config(true);
-        assert!(!resolve_agent_read_only(Some(false), Some(&cfg)));
+        assert!(
+            !resolve_agent_read_only(Some(true), None, Some(&cfg)),
+            "write=true should allow writes even when config prefers read-only"
+        );
+    }
+
+    #[test]
+    fn explicit_read_only_flag_takes_precedence() {
+        let cfg = make_config(false);
+        assert!(
+            resolve_agent_read_only(None, Some(true), Some(&cfg)),
+            "read_only=true should force read-only even when config allows writes"
+        );
+        assert!(
+            resolve_agent_read_only(Some(false), None, Some(&cfg)),
+            "write=false should force read-only"
+        );
     }
 
     #[test]
     fn falls_back_to_config_when_request_absent() {
         let cfg = make_config(true);
-        assert!(resolve_agent_read_only(None, Some(&cfg)));
+        assert!(resolve_agent_read_only(None, None, Some(&cfg)));
     }
 
     #[test]
     fn defaults_to_false_without_config() {
-        assert!(!resolve_agent_read_only(None, None));
-        assert!(resolve_agent_read_only(Some(true), None));
+        assert!(!resolve_agent_read_only(None, None, None));
     }
 }
 
@@ -6534,6 +6856,7 @@ pub(crate) async fn handle_agent_tool(
             let context = create_opts.context.take();
             let output = create_opts.output.take();
             let files = create_opts.files.take();
+            let write = create_opts.write.take();
             let read_only = create_opts.read_only.take();
             let mut normalized_name = normalize_agent_name(create_opts.name.take());
             if normalized_name.is_none() {
@@ -6546,6 +6869,7 @@ pub(crate) async fn handle_agent_tool(
                 context: context.clone(),
                 output: output.clone(),
                 files: files.clone(),
+                write,
                 read_only,
                 name: normalized_name.clone(),
             };
@@ -6588,8 +6912,11 @@ pub(crate) async fn handle_agent_tool(
                     );
                 }
             }
-            if let Some(ro) = read_only {
-                create_event.insert("read_only".to_string(), serde_json::Value::Bool(ro));
+            if let Some(flag) = write {
+                create_event.insert("write".to_string(), serde_json::Value::Bool(flag));
+            }
+            if let Some(flag) = read_only {
+                create_event.insert("read_only".to_string(), serde_json::Value::Bool(flag));
             }
             if let Some(ref name_str) = normalized_name {
                 if !name_str.is_empty() {
@@ -6608,24 +6935,40 @@ pub(crate) async fn handle_agent_tool(
             }
         }
         "status" => {
-            let agent_id = match req
-                .status
-                .as_mut()
-                .and_then(|opts| opts.agent_id.take())
-            {
-                Some(id) => id,
+            let mut status_opts = match req.status.take() {
+                Some(opts) => opts,
                 None => {
+                    return agent_tool_failure(
+                        ctx,
+                        "action=status requires a 'status' object",
+                    );
+                }
+            };
+            let agent_id = match status_opts.agent_id.take() {
+                Some(id) if !id.trim().is_empty() => id,
+                _ => {
                     return agent_tool_failure(
                         ctx,
                         "action=status requires 'status.agent_id'",
                     );
                 }
             };
+            let batch_id = match status_opts.batch_id.take() {
+                Some(batch) if !batch.trim().is_empty() => batch,
+                _ => {
+                    return agent_tool_failure(
+                        ctx,
+                        "action=status requires 'status.batch_id'",
+                    );
+                }
+            };
             let params = CheckAgentStatusParams {
                 agent_id: agent_id.clone(),
+                batch_id: batch_id.clone(),
             };
             let mut status_event = serde_json::Map::new();
             status_event.insert("agent_id".to_string(), serde_json::Value::String(agent_id));
+            status_event.insert("batch_id".to_string(), serde_json::Value::String(batch_id));
             let mut status_event_root = serde_json::Map::new();
             status_event_root.insert("action".to_string(), serde_json::Value::String("status".to_string()));
             status_event_root.insert("status".to_string(), serde_json::Value::Object(status_event));
@@ -6636,24 +6979,40 @@ pub(crate) async fn handle_agent_tool(
             }
         }
         "result" => {
-            let agent_id = match req
-                .result
-                .as_mut()
-                .and_then(|opts| opts.agent_id.take())
-            {
-                Some(id) => id,
+            let mut result_opts = match req.result.take() {
+                Some(opts) => opts,
                 None => {
+                    return agent_tool_failure(
+                        ctx,
+                        "action=result requires a 'result' object",
+                    );
+                }
+            };
+            let agent_id = match result_opts.agent_id.take() {
+                Some(id) if !id.trim().is_empty() => id,
+                _ => {
                     return agent_tool_failure(
                         ctx,
                         "action=result requires 'result.agent_id'",
                     );
                 }
             };
+            let batch_id = match result_opts.batch_id.take() {
+                Some(batch) if !batch.trim().is_empty() => batch,
+                _ => {
+                    return agent_tool_failure(
+                        ctx,
+                        "action=result requires 'result.batch_id'",
+                    );
+                }
+            };
             let params = GetAgentResultParams {
                 agent_id: agent_id.clone(),
+                batch_id: batch_id.clone(),
             };
             let mut result_event = serde_json::Map::new();
             result_event.insert("agent_id".to_string(), serde_json::Value::String(agent_id));
+            result_event.insert("batch_id".to_string(), serde_json::Value::String(batch_id));
             let mut result_event_root = serde_json::Map::new();
             result_event_root.insert("action".to_string(), serde_json::Value::String("result".to_string()));
             result_event_root.insert("result".to_string(), serde_json::Value::Object(result_event));
@@ -6673,22 +7032,25 @@ pub(crate) async fn handle_agent_tool(
                     );
                 }
             };
-            if cancel_opts.agent_id.is_none() && cancel_opts.batch_id.is_none() {
-                return agent_tool_failure(ctx, "action=cancel requires 'cancel.agent_id' or 'cancel.batch_id'");
-            }
             let cancel_agent_id = cancel_opts.agent_id.clone();
-            let cancel_batch_id = cancel_opts.batch_id.clone();
+            let cancel_batch_id = match cancel_opts.batch_id.take() {
+                Some(batch) if !batch.trim().is_empty() => batch,
+                _ => {
+                    return agent_tool_failure(
+                        ctx,
+                        "action=cancel requires 'cancel.batch_id'",
+                    );
+                }
+            };
             let params = CancelAgentParams {
                 agent_id: cancel_opts.agent_id.take(),
-                batch_id: cancel_opts.batch_id.take(),
+                batch_id: Some(cancel_batch_id.clone()),
             };
             let mut cancel_event = serde_json::Map::new();
             if let Some(id) = cancel_agent_id {
                 cancel_event.insert("agent_id".to_string(), serde_json::Value::String(id));
             }
-            if let Some(batch) = cancel_batch_id {
-                cancel_event.insert("batch_id".to_string(), serde_json::Value::String(batch));
-            }
+            cancel_event.insert("batch_id".to_string(), serde_json::Value::String(cancel_batch_id));
             let mut cancel_event_root = serde_json::Map::new();
             cancel_event_root.insert("action".to_string(), serde_json::Value::String("cancel".to_string()));
             cancel_event_root.insert("cancel".to_string(), serde_json::Value::Object(cancel_event));
@@ -6708,16 +7070,21 @@ pub(crate) async fn handle_agent_tool(
                     );
                 }
             };
-            if wait_opts.agent_id.is_none() && wait_opts.batch_id.is_none() {
-                return agent_tool_failure(ctx, "action=wait requires 'wait.agent_id' or 'wait.batch_id'");
-            }
             let wait_agent_id = wait_opts.agent_id.clone();
-            let wait_batch_id = wait_opts.batch_id.clone();
+            let wait_batch_id = match wait_opts.batch_id.take() {
+                Some(batch) if !batch.trim().is_empty() => batch,
+                _ => {
+                    return agent_tool_failure(
+                        ctx,
+                        "action=wait requires 'wait.batch_id'",
+                    );
+                }
+            };
             let wait_timeout = wait_opts.timeout_seconds;
             let wait_return_all = wait_opts.return_all;
             let params = WaitForAgentParams {
                 agent_id: wait_opts.agent_id.take(),
-                batch_id: wait_opts.batch_id.take(),
+                batch_id: Some(wait_batch_id.clone()),
                 timeout_seconds: wait_timeout,
                 return_all: wait_return_all,
             };
@@ -6725,9 +7092,7 @@ pub(crate) async fn handle_agent_tool(
             if let Some(id) = wait_agent_id {
                 wait_event.insert("agent_id".to_string(), serde_json::Value::String(id));
             }
-            if let Some(batch) = wait_batch_id {
-                wait_event.insert("batch_id".to_string(), serde_json::Value::String(batch));
-            }
+            wait_event.insert("batch_id".to_string(), serde_json::Value::String(wait_batch_id));
             if let Some(timeout) = wait_timeout {
                 wait_event.insert("timeout_seconds".to_string(), serde_json::Value::from(timeout));
             }
@@ -6746,18 +7111,27 @@ pub(crate) async fn handle_agent_tool(
         "list" => {
             let mut list_opts = match req.list.take() {
                 Some(opts) => opts,
-                None => crate::agent_tool::AgentListOptions {
-                    status_filter: None,
-                    batch_id: None,
-                    recent_only: None,
-                },
+                None => {
+                    return agent_tool_failure(
+                        ctx,
+                        "action=list requires a 'list' object",
+                    );
+                }
             };
             let status_filter = list_opts.status_filter.take();
-            let batch_id = list_opts.batch_id.take();
+            let batch_id = match list_opts.batch_id.take() {
+                Some(batch) if !batch.trim().is_empty() => batch,
+                _ => {
+                    return agent_tool_failure(
+                        ctx,
+                        "action=list requires 'list.batch_id'",
+                    );
+                }
+            };
             let recent_only = list_opts.recent_only;
             let params = ListAgentsParams {
                 status_filter: status_filter.clone(),
-                batch_id: batch_id.clone(),
+                batch_id: Some(batch_id.clone()),
                 recent_only,
             };
             let mut list_event = serde_json::Map::new();
@@ -6766,11 +7140,7 @@ pub(crate) async fn handle_agent_tool(
                     list_event.insert("status_filter".to_string(), serde_json::Value::String(status.clone()));
                 }
             }
-            if let Some(ref batch) = batch_id {
-                if !batch.is_empty() {
-                    list_event.insert("batch_id".to_string(), serde_json::Value::String(batch.clone()));
-                }
-            }
+            list_event.insert("batch_id".to_string(), serde_json::Value::String(batch_id));
             if let Some(recent) = recent_only {
                 list_event.insert("recent_only".to_string(), serde_json::Value::Bool(recent));
             }
@@ -6795,12 +7165,25 @@ pub(crate) async fn handle_run_agent(
 ) -> ResponseInputItem {
     let arguments_clone = arguments.clone();
     let call_id_clone = ctx.call_id.clone();
+    let generated_batch_id = Uuid::new_v4().to_string();
+    let payload_with_batch = match event_payload {
+        serde_json::Value::Object(mut map) => {
+            map.insert(
+                "batch_id".to_string(),
+                serde_json::Value::String(generated_batch_id.clone()),
+            );
+            serde_json::Value::Object(map)
+        }
+        other => other,
+    };
+    let closure_batch_id = generated_batch_id.clone();
     execute_custom_tool(
         sess,
         ctx,
         "agent".to_string(),
-        Some(event_payload),
-        || async move {
+        Some(payload_with_batch),
+        move || async move {
+            let batch_id = closure_batch_id.clone();
     match serde_json::from_str::<RunAgentParams>(&arguments_clone) {
         Ok(mut params) => {
             let trimmed_task = params.task.trim().to_string();
@@ -6926,12 +7309,6 @@ pub(crate) async fn handle_run_agent(
                 }
             }
 
-            let batch_id = if models.len() > 1 {
-                Some(Uuid::new_v4().to_string())
-            } else {
-                None
-            };
-
             let multi_model = models.len() > 1;
             let display_label_for = |model: &str| -> String {
                 agent_name
@@ -6971,7 +7348,11 @@ pub(crate) async fn handle_run_agent(
                     }
 
                     // Respect explicit read_only flag from the caller; otherwise fall back to the config default.
-                    let read_only = resolve_agent_read_only(params.read_only, Some(config));
+                    let read_only = resolve_agent_read_only(
+                        params.write,
+                        params.read_only,
+                        Some(config),
+                    );
 
                     let agent_id = manager
                         .create_agent_with_config(
@@ -6982,7 +7363,7 @@ pub(crate) async fn handle_run_agent(
                             params.output.clone(),
                             params.files.clone().unwrap_or_default(),
                             read_only,
-                            batch_id.clone(),
+                            Some(batch_id.clone()),
                             config.clone(),
                         )
                         .await;
@@ -6996,7 +7377,7 @@ pub(crate) async fn handle_run_agent(
                         skipped.push(format!("{} (missing: {})", model, cmd_to_check));
                         continue;
                     }
-                    let read_only = resolve_agent_read_only(params.read_only, None);
+                    let read_only = resolve_agent_read_only(params.write, params.read_only, None);
                     let agent_id = manager
                         .create_agent(
                             model.clone(),
@@ -7006,7 +7387,7 @@ pub(crate) async fn handle_run_agent(
                             params.output.clone(),
                             params.files.clone().unwrap_or_default(),
                             read_only,
-                            batch_id.clone(),
+                            Some(batch_id.clone()),
                         )
                         .await;
                     agent_ids.push(agent_id);
@@ -7017,7 +7398,7 @@ pub(crate) async fn handle_run_agent(
 
             // If nothing runnable remains, fall back to a single built‑in Codex agent.
             if agent_ids.is_empty() {
-                let read_only = resolve_agent_read_only(params.read_only, None);
+                let read_only = resolve_agent_read_only(params.write, params.read_only, None);
                 let agent_id = manager
                     .create_agent(
                         "code".to_string(),
@@ -7027,7 +7408,7 @@ pub(crate) async fn handle_run_agent(
                         params.output.clone(),
                         params.files.clone().unwrap_or_default(),
                         read_only,
-                        None,
+                        Some(batch_id.clone()),
                     )
                     .await;
                 agent_ids.push(agent_id);
@@ -7041,8 +7422,8 @@ pub(crate) async fn handle_run_agent(
                 send_agent_status_update(sess).await;
             }
 
-            let launch_hint = if let Some(batch) = &batch_id {
-                let short_batch = short_id(batch);
+            let launch_hint = if agent_ids.len() > 1 {
+                let short_batch = short_id(&batch_id);
                 let agent_phrase = agent_labels
                     .iter()
                     .map(|(id, label)| format!("{} [{}]", short_id(id), label))
@@ -7051,48 +7432,79 @@ pub(crate) async fn handle_run_agent(
                 let first_agent = agent_labels
                     .first()
                     .map(|(id, _)| id.as_str())
-                    .unwrap_or(batch.as_str());
+                    .unwrap_or(batch_id.as_str());
                 format!(
-                    "🤖 Agent batch {short_batch} started: {agent_phrase}.\nUse `agent {{\"action\":\"wait\",\"wait\":{{\"batch_id\":\"{batch}\",\"return_all\":true}}}}` to wait for all agents, then `agent {{\"action\":\"result\",\"result\":{{\"agent_id\":\"{first_agent}\"}}}}` for a detailed report."
+                    "🤖 Agent batch {short_batch} started: {agent_phrase}.\nUse `agent {{\"action\":\"wait\",\"wait\":{{\"batch_id\":\"{batch}\",\"return_all\":true}}}}` to wait for all agents, then `agent {{\"action\":\"result\",\"result\":{{\"agent_id\":\"{first_agent}\"}}}}` for a detailed report.",
+                    batch = batch_id,
                 )
             } else {
                 let (single_id, single_model) = agent_labels
                     .first()
                     .map(|(id, model)| (id.as_str(), model.as_str()))
                     .unwrap();
+                let short_batch = short_id(&batch_id);
                 format!(
-                    "🤖 Agent {} [{}] started. Use `agent {{\"action\":\"wait\",\"wait\":{{\"agent_id\":\"{}\",\"return_all\":true}}}}` to follow progress, or `agent {{\"action\":\"result\",\"result\":{{\"agent_id\":\"{}\"}}}}` when it finishes.",
-                    short_id(single_id),
-                    single_model,
-                    single_id,
-                    single_id
+                    "🤖 Agent batch {short_batch} started with {model}. Use `agent {{\"action\":\"wait\",\"wait\":{{\"batch_id\":\"{batch}\",\"return_all\":true}}}}` to follow progress, or `agent {{\"action\":\"result\",\"result\":{{\"agent_id\":\"{agent}\"}}}}` when it finishes.",
+                    model = single_model,
+                    batch = batch_id,
+                    agent = single_id,
                 )
             };
 
-            let req = sess.current_request_ordinal();
-            let order = sess.background_order_for_ctx(ctx, req);
-            sess
-                .notify_background_event_with_order(&ctx.sub_id, order, launch_hint.clone())
-                .await;
-
-            let response = if let Some(batch_id) = batch_id {
-                serde_json::json!({
-                    "batch_id": batch_id,
-                    "agent_ids": agent_ids,
-                    "status": "started",
-                    "message": format!("Started {} agents", agent_labels.len()),
-                    "next_steps": launch_hint,
-                    "skipped": if skipped.is_empty() { None } else { Some(skipped) }
-                })
+            let mut response_map = serde_json::Map::new();
+            response_map.insert(
+                "batch_id".to_string(),
+                serde_json::Value::String(batch_id.clone()),
+            );
+            response_map.insert(
+                "agent_ids".to_string(),
+                serde_json::Value::Array(
+                    agent_ids
+                        .iter()
+                        .cloned()
+                        .map(serde_json::Value::String)
+                        .collect(),
+                ),
+            );
+            response_map.insert(
+                "status".to_string(),
+                serde_json::Value::String("started".to_string()),
+            );
+            let message = if agent_ids.len() > 1 {
+                format!("Started {} agents", agent_labels.len())
             } else {
-                serde_json::json!({
-                    "agent_id": agent_ids[0],
-                    "status": "started",
-                    "message": "Agent started successfully",
-                    "next_steps": launch_hint,
-                    "skipped": if skipped.is_empty() { None } else { Some(skipped) }
-                })
+                "Agent started successfully".to_string()
             };
+            response_map.insert(
+                "message".to_string(),
+                serde_json::Value::String(message),
+            );
+            response_map.insert(
+                "next_steps".to_string(),
+                serde_json::Value::String(launch_hint.clone()),
+            );
+            if agent_ids.len() == 1 {
+                if let Some(first) = agent_ids.first() {
+                    response_map.insert(
+                        "agent_id".to_string(),
+                        serde_json::Value::String(first.clone()),
+                    );
+                }
+            }
+            if skipped.is_empty() {
+                response_map.insert("skipped".to_string(), serde_json::Value::Null);
+            } else {
+                response_map.insert(
+                    "skipped".to_string(),
+                    serde_json::Value::Array(
+                        skipped
+                            .into_iter()
+                            .map(serde_json::Value::String)
+                            .collect(),
+                    ),
+                );
+            }
+            let response = serde_json::Value::Object(response_map);
 
             ResponseInputItem::FunctionCallOutput {
                 call_id: call_id_clone,
@@ -7110,7 +7522,7 @@ pub(crate) async fn handle_run_agent(
             },
         },
     }
-        },
+        }
     ).await
 }
 
@@ -7157,6 +7569,22 @@ async fn handle_check_agent_status(
             let manager = AGENT_MANAGER.read().await;
 
             if let Some(agent) = manager.get_agent(&params.agent_id) {
+                match agent.batch_id.as_deref() {
+                    Some(batch) if batch == params.batch_id => {}
+                    _ => {
+                        return ResponseInputItem::FunctionCallOutput {
+                            call_id: call_id_clone,
+                            output: FunctionCallOutputPayload {
+                                content: format!(
+                                    "Agent {} does not belong to batch {}",
+                                    params.agent_id, params.batch_id
+                                ),
+                                success: Some(false),
+                            },
+                        };
+                    }
+                }
+
                 // Limit progress in the response; write full progress to file if large
                 let max_progress_lines = 50usize;
                 let total_progress = agent.progress.len();
@@ -7213,6 +7641,7 @@ async fn handle_check_agent_status(
                     "name": agent.name,
                     "status": agent.status,
                     "model": agent.model,
+                    "batch_id": agent.batch_id,
                     "created_at": agent.created_at,
                     "started_at": agent.started_at,
                     "completed_at": agent.completed_at,
@@ -7272,6 +7701,21 @@ async fn handle_get_agent_result(
             let manager = AGENT_MANAGER.read().await;
 
             if let Some(agent) = manager.get_agent(&params.agent_id) {
+                match agent.batch_id.as_deref() {
+                    Some(batch) if batch == params.batch_id => {}
+                    _ => {
+                        return ResponseInputItem::FunctionCallOutput {
+                            call_id: call_id_clone,
+                            output: FunctionCallOutputPayload {
+                                content: format!(
+                                    "Agent {} does not belong to batch {}",
+                                    params.agent_id, params.batch_id
+                                ),
+                                success: Some(false),
+                            },
+                        };
+                    }
+                }
                 let cwd = sess.get_cwd().to_path_buf();
                 let dir = match ensure_agent_dir(&cwd, &params.agent_id) {
                     Ok(d) => d,
@@ -7296,6 +7740,7 @@ async fn handle_get_agent_result(
                         };
                         let response = serde_json::json!({
                             "agent_id": params.agent_id,
+                            "batch_id": params.batch_id.clone(),
                             "status": agent.status,
                             "output_preview": preview,
                             "output_total_lines": total_lines,
@@ -7318,6 +7763,7 @@ async fn handle_get_agent_result(
                         };
                         let response = serde_json::json!({
                             "agent_id": params.agent_id,
+                            "batch_id": params.batch_id.clone(),
                             "status": agent.status,
                             "error_preview": preview,
                             "error_total_lines": total_lines,
@@ -7384,6 +7830,32 @@ async fn handle_cancel_agent(
             let mut manager = AGENT_MANAGER.write().await;
 
             if let Some(agent_id) = params.agent_id {
+                let batch_id = match params.batch_id.as_ref() {
+                    Some(batch) => batch,
+                    None => {
+                        return ResponseInputItem::FunctionCallOutput {
+                            call_id: call_id_clone,
+                            output: FunctionCallOutputPayload {
+                                content: "action=cancel requires 'cancel.batch_id'".to_string(),
+                                success: Some(false),
+                            },
+                        };
+                    }
+                };
+                if let Some(agent) = manager.get_agent(&agent_id) {
+                    if agent.batch_id.as_deref() != Some(batch_id.as_str()) {
+                        return ResponseInputItem::FunctionCallOutput {
+                            call_id: call_id_clone,
+                            output: FunctionCallOutputPayload {
+                                content: format!(
+                                    "Agent {} does not belong to batch {}",
+                                    agent_id, batch_id
+                                ),
+                                success: Some(false),
+                            },
+                        };
+                    }
+                }
                 if manager.cancel_agent(&agent_id).await {
                     ResponseInputItem::FunctionCallOutput {
                         call_id: call_id_clone,
@@ -7446,28 +7918,57 @@ async fn handle_wait_for_agent(
         "agent".to_string(),
         Some(event_payload),
         || async move {
-    match serde_json::from_str::<WaitForAgentParams>(&arguments_clone) {
-        Ok(params) => {
-            let timeout =
-                std::time::Duration::from_secs(params.timeout_seconds.unwrap_or(300).min(600));
-            let start = std::time::Instant::now();
-
-            loop {
-                if start.elapsed() > timeout {
-                    return ResponseInputItem::FunctionCallOutput {
-                        call_id: call_id_clone,
-                        output: FunctionCallOutputPayload {
-                            content: "Timeout waiting for agent completion".to_string(),
-                            success: Some(false),
-                        },
+            let (initial_wait_epoch, _) = sess.wait_interrupt_snapshot();
+            match serde_json::from_str::<WaitForAgentParams>(&arguments_clone) {
+                Ok(params) => {
+                    let batch_id = match params.batch_id.as_ref() {
+                        Some(batch) if !batch.trim().is_empty() => batch.clone(),
+                        _ => {
+                            return ResponseInputItem::FunctionCallOutput {
+                                call_id: call_id_clone,
+                                output: FunctionCallOutputPayload {
+                                    content: "action=wait requires 'wait.batch_id'".to_string(),
+                                    success: Some(false),
+                                },
+                            };
+                        }
                     };
-                }
+                    let timeout = std::time::Duration::from_secs(
+                        params.timeout_seconds.unwrap_or(300).min(600),
+                    );
+                    let start = std::time::Instant::now();
 
-                let manager = AGENT_MANAGER.read().await;
+                    loop {
+                        if start.elapsed() > timeout {
+                            return ResponseInputItem::FunctionCallOutput {
+                                call_id: call_id_clone,
+                                output: FunctionCallOutputPayload {
+                                    content: "Timeout waiting for agent completion".to_string(),
+                                    success: Some(false),
+                                },
+                            };
+                        }
 
-                if let Some(agent_id) = &params.agent_id {
-                    if let Some(agent) = manager.get_agent(agent_id) {
-                        if matches!(
+                        let manager = AGENT_MANAGER.read().await;
+
+                        if let Some(agent_id) = &params.agent_id {
+                            if let Some(agent) = manager.get_agent(agent_id) {
+                                match agent.batch_id.as_deref() {
+                                    Some(batch) if batch == batch_id => {}
+                                    _ => {
+                                        return ResponseInputItem::FunctionCallOutput {
+                                            call_id: call_id_clone,
+                                            output: FunctionCallOutputPayload {
+                                                content: format!(
+                                                    "Agent {} does not belong to batch {}",
+                                                    agent_id, batch_id
+                                                ),
+                                                success: Some(false),
+                                            },
+                                        };
+                                    }
+                                }
+                                if matches!(
                             agent.status,
                             AgentStatus::Completed | AgentStatus::Failed | AgentStatus::Cancelled
                         ) {
@@ -7516,16 +8017,18 @@ async fn handle_wait_for_agent(
                             };
 
                             let hint = format!(
-                                "agent {{\"action\":\"result\",\"result\":{{\"agent_id\":\"{}\"}}}}",
-                                agent.id
+                                "agent {{\"action\":\"result\",\"result\":{{\"agent_id\":\"{}\",\"batch_id\":\"{}\"}}}}",
+                                agent.id,
+                                batch_id
                             );
                             let mut response = serde_json::json!({
                                 "agent_id": agent.id,
+                                "batch_id": batch_id,
                                 "status": agent.status,
                                 "wait_time_seconds": start.elapsed().as_secs(),
                                 "total_lines": total_lines,
                                 "agent_result_hint": hint,
-                                "agent_result_params": { "action": "result", "result": { "agent_id": agent.id } },
+                                "agent_result_params": { "action": "result", "result": { "agent_id": agent.id, "batch_id": batch_id } },
                             });
                             if let Some(obj) = response.as_object_mut() {
                                 obj.insert(preview_key.to_string(), serde_json::Value::String(preview));
@@ -7540,7 +8043,7 @@ async fn handle_wait_for_agent(
                             };
                         }
                     }
-                } else if let Some(batch_id) = &params.batch_id {
+                } else {
                     let agents = manager.list_agents(None, Some(batch_id.clone()), false);
 
                     // Separate terminal vs non-terminal agents
@@ -7610,15 +8113,16 @@ async fn handle_wait_for_agent(
                                 };
 
                                 let hint = format!(
-                                    "agent {{\"action\":\"result\",\"result\":{{\"agent_id\":\"{}\"}}}}",
-                                    a.id
+                                    "agent {{\"action\":\"result\",\"result\":{{\"agent_id\":\"{}\",\"batch_id\":\"{}\"}}}}",
+                                    a.id,
+                                    batch_id
                                 );
                                 let mut obj = serde_json::json!({
                                     "agent_id": a.id,
                                     "status": a.status,
                                     "total_lines": total_lines,
                                     "agent_result_hint": hint,
-                                    "agent_result_params": { "action": "result", "result": { "agent_id": a.id } },
+                                "agent_result_params": { "action": "result", "result": { "agent_id": a.id, "batch_id": batch_id } },
                                 });
                                 if let Some(map) = obj.as_object_mut() {
                                     map.insert(preview_key.to_string(), serde_json::Value::String(preview));
@@ -7704,8 +8208,9 @@ async fn handle_wait_for_agent(
                             };
 
                             let hint = format!(
-                                "agent {{\"action\":\"result\",\"result\":{{\"agent_id\":\"{}\"}}}}",
-                                unseen.id
+                                "agent {{\"action\":\"result\",\"result\":{{\"agent_id\":\"{}\",\"batch_id\":\"{}\"}}}}",
+                                unseen.id,
+                                batch_id
                             );
                             let mut response = serde_json::json!({
                                 "agent_id": unseen.id,
@@ -7713,7 +8218,7 @@ async fn handle_wait_for_agent(
                                 "wait_time_seconds": start.elapsed().as_secs(),
                                 "total_lines": total_lines,
                                 "agent_result_hint": hint,
-                                "agent_result_params": { "action": "result", "result": { "agent_id": unseen.id } },
+                                "agent_result_params": { "action": "result", "result": { "agent_id": unseen.id, "batch_id": batch_id } },
                             });
                             if let Some(obj) = response.as_object_mut() {
                                 obj.insert(preview_key.to_string(), serde_json::Value::String(preview));
@@ -7753,17 +8258,33 @@ async fn handle_wait_for_agent(
                 }
 
                 drop(manager);
+                let (current_epoch, reason) = sess.wait_interrupt_snapshot();
+                if current_epoch != initial_wait_epoch {
+                    let message = match reason {
+                        Some(WaitInterruptReason::UserMessage) => {
+                            "wait ended due to new user message".to_string()
+                        }
+                        _ => "wait ended because the session was interrupted".to_string(),
+                    };
+                    return ResponseInputItem::FunctionCallOutput {
+                        call_id: call_id_clone,
+                        output: FunctionCallOutputPayload {
+                            content: message,
+                            success: Some(false),
+                        },
+                    };
+                }
                 tokio::time::sleep(std::time::Duration::from_secs(1)).await;
             }
-        }
-        Err(e) => ResponseInputItem::FunctionCallOutput {
-            call_id: call_id_clone,
-            output: FunctionCallOutputPayload {
-                content: format!("Invalid agent arguments for action=wait: {}", e),
-                success: None,
-            },
-        },
-    }
+                }
+                Err(e) => ResponseInputItem::FunctionCallOutput {
+                    call_id: call_id_clone,
+                    output: FunctionCallOutputPayload {
+                        content: format!("Invalid agent arguments for action=wait: {}", e),
+                        success: None,
+                    },
+                },
+            }
         },
     ).await
 }
@@ -7786,6 +8307,19 @@ async fn handle_list_agents(
         Ok(params) => {
             let manager = AGENT_MANAGER.read().await;
 
+            let batch_id = match params.batch_id.clone() {
+                Some(batch) if !batch.trim().is_empty() => batch,
+                _ => {
+                    return ResponseInputItem::FunctionCallOutput {
+                        call_id: call_id_clone,
+                        output: FunctionCallOutputPayload {
+                            content: "action=list requires 'list.batch_id'".to_string(),
+                            success: Some(false),
+                        },
+                    };
+                }
+            };
+
             let status_filter =
                 params
                     .status_filter
@@ -7800,7 +8334,7 @@ async fn handle_list_agents(
 
             let agents = manager.list_agents(
                 status_filter,
-                params.batch_id,
+                Some(batch_id.clone()),
                 params.recent_only.unwrap_or(false),
             );
 
@@ -7853,6 +8387,7 @@ async fn handle_list_agents(
                     "failed": failed_count,
                     "cancelled": cancelled_count,
                 },
+                "batch_id": batch_id,
                 "agents": agents.iter().map(|t| {
                     serde_json::json!({
                         "id": t.id,
@@ -8481,6 +9016,23 @@ async fn handle_container_exec_with_params(
         .await
     {
         MaybeApplyPatchVerified::Body(action) => {
+            if let Some(branch_root) = git_worktree::branch_worktree_root(sess.get_cwd()) {
+                if let Some(guidance) = guard_apply_patch_outside_branch(&branch_root, &action) {
+                    let order = sess.next_background_order(&sub_id, attempt_req, output_index);
+                    sess
+                        .notify_background_event_with_order(
+                            &sub_id,
+                            order,
+                            format!("Command guard: {}", guidance.clone()),
+                        )
+                        .await;
+
+                    return ResponseInputItem::FunctionCallOutput {
+                        call_id,
+                        output: FunctionCallOutputPayload { content: guidance, success: None },
+                    };
+                }
+            }
             let changes = convert_apply_patch_to_protocol(&action);
             turn_diff_tracker.on_patch_begin(&changes);
 
@@ -9124,6 +9676,14 @@ fn format_exec_output_str(exec_output: &ExecToolCallOutput) -> String {
     // Always use the aggregated (stdout + stderr interleaved) stream so the
     // model sees the full build log regardless of which stream a tool used.
     let mut formatted_output = aggregated_output.text.clone();
+    if let Some(truncated_before_bytes) = aggregated_output.truncated_before_bytes {
+        let note = format!(
+            "… clipped {} from the start of command output (showing last {}).\n\n",
+            format_bytes(truncated_before_bytes),
+            format_bytes(EXEC_CAPTURE_MAX_BYTES),
+        );
+        formatted_output = format!("{note}{formatted_output}");
+    }
     if let Some(truncated_after_lines) = aggregated_output.truncated_after_lines {
         formatted_output.push_str(&format!(
             "\n\n[Output truncated after {truncated_after_lines} lines: too many lines or bytes.]",
@@ -9195,6 +9755,22 @@ fn format_exec_output_with_limit(
 
     #[expect(clippy::expect_used)]
     serde_json::to_string(&payload).expect("serialize ExecOutput")
+}
+
+fn format_bytes(bytes: usize) -> String {
+    const KIB: f64 = 1024.0;
+    const MIB: f64 = KIB * 1024.0;
+    const GIB: f64 = MIB * 1024.0;
+    let bytes_f = bytes as f64;
+    if bytes >= GIB as usize {
+        format!("{:.1} GiB", bytes_f / GIB)
+    } else if bytes >= MIB as usize {
+        format!("{:.1} MiB", bytes_f / MIB)
+    } else if bytes >= KIB as usize {
+        format!("{:.1} KiB", bytes_f / KIB)
+    } else {
+        format!("{bytes} B")
+    }
 }
 
 fn get_last_assistant_message_from_turn(responses: &[ResponseItem]) -> Option<String> {
@@ -10787,6 +11363,86 @@ fn line_contains_cat_heredoc_write(line: &str) -> bool {
     }
 
     false
+}
+
+fn guard_apply_patch_outside_branch(branch_root: &Path, action: &ApplyPatchAction) -> Option<String> {
+    let branch_norm = match normalize_absolute(branch_root) {
+        Some(path) => path,
+        None => {
+            return Some(format!(
+                "apply_patch blocked: failed to resolve /branch worktree root {}. Stay inside the worktree until you finish with `/merge`.",
+                branch_root.display()
+            ));
+        }
+    };
+    let action_cwd_norm = match normalize_absolute(&action.cwd) {
+        Some(path) => path,
+        None => {
+            return Some(format!(
+                "apply_patch blocked: the command resolved outside the /branch worktree (cwd {}). Stay inside {} until you finish with `/merge`.",
+                action.cwd.display(),
+                branch_root.display()
+            ));
+        }
+    };
+    if !path_within(&action_cwd_norm, &branch_norm) {
+        return Some(format!(
+            "apply_patch blocked: the active /branch worktree is {} but the command tried to run from {}. Stay inside the worktree until you finish with `/merge`.",
+            branch_root.display(),
+            action.cwd.display()
+        ));
+    }
+
+    for path in action.changes().keys() {
+        let normalized = match normalize_absolute(path) {
+            Some(value) => value,
+            None => {
+                return Some(format!(
+                    "apply_patch blocked: could not resolve patch target {} inside worktree {}. Keep edits within the /branch directory.",
+                    path.display(),
+                    branch_root.display()
+                ));
+            }
+        };
+        if !path_within(&normalized, &branch_norm) {
+            return Some(format!(
+                "apply_patch blocked: patch would modify {} outside the active /branch worktree {}. Apply changes from within the worktree before `/merge`.",
+                path.display(),
+                branch_root.display()
+            ));
+        }
+    }
+
+    None
+}
+
+fn normalize_absolute(path: &Path) -> Option<PathBuf> {
+    if !path.is_absolute() {
+        return None;
+    }
+    let mut result = PathBuf::new();
+    for component in path.components() {
+        match component {
+            Component::Prefix(prefix) => result.push(prefix.as_os_str()),
+            Component::RootDir => result.push(component.as_os_str()),
+            Component::CurDir => {}
+            Component::ParentDir => {
+                if !result.pop() {
+                    return None;
+                }
+            }
+            Component::Normal(part) => result.push(part),
+        }
+    }
+    if result.as_os_str().is_empty() {
+        None
+    } else {
+        Some(result)
+    }
+}
+
+fn path_within(path: &Path, base: &Path) -> bool {
+    path.starts_with(base)
 }
 
 fn guidance_for_cat_write(suggestion: &CatWriteSuggestion) -> String {

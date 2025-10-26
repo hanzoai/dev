@@ -1,0 +1,42 @@
+---
+source: tui/tests/bottom_spacer_clip_regression.rs
+expression: collapsed
+---
+ |  Code  •  Model: GPT-5-Codex  •  Directory: ~/.code/working/code/branches/code-branch-20251021-101202/code-rs/tui  |
+                                                                                                                       
+
+                                                                                                                       
+
+    █
+    █
+    █
+    █
+    █
+    █
+    █
+    █
+    █
+    █
+
+
+
+
+
+
+
+
+ ★ Popular commands:
+   /settings - manage all settings in one place NEW
+   /auto - work autonomously on long tasks with Auto Drive UPDATED
+   /chrome - connect to your Chrome browser
+   /plan - create a comprehensive plan (multiple agents)
+   /code - perform a coding task (multiple agents)
+
+ › Share your reasoning and then your final answer.
+
+   Having reasoned through the constraints, the assistant now presents a final answer summarising why the spacer
+ • preserves the last visible line.
+
+ | What can I code for you today?                                                                                     |
+                                                                                                                       
+   Read Only  (Shift+Tab change)                                                                           Ctrl+H help

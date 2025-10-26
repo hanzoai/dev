@@ -10,10 +10,13 @@ use super::bottom_pane_view::ConditionalUpdate;
 use super::BottomPane;
 use crossterm::event::{KeyCode, KeyEvent};
 use ratatui::buffer::Buffer;
-use ratatui::layout::{Alignment, Rect};
+use ratatui::layout::{Alignment, Margin, Rect};
+use ratatui::prelude::Widget;
 use ratatui::style::{Modifier, Style};
 use ratatui::text::{Line, Span};
-use ratatui::widgets::{Block, Borders, Clear, Padding, Paragraph, Wrap, Widget};
+use ratatui::widgets::{Paragraph, Wrap};
+
+use super::settings_panel::{render_panel, PanelFrameStyle};
 
 #[derive(Debug, Clone, Default)]
 pub struct UpdateSharedState {
@@ -36,6 +39,8 @@ pub(crate) struct UpdateSettingsView {
 }
 
 impl UpdateSettingsView {
+    const PANEL_TITLE: &'static str = "Upgrade";
+
     pub fn new(
         app_event_tx: AppEventSender,
         ticket: BackgroundOrderTicket,
@@ -227,10 +232,7 @@ impl UpdateSettingsView {
         lines
     }
 
-}
-
-impl<'a> BottomPaneView<'a> for UpdateSettingsView {
-    fn handle_key_event(&mut self, _pane: &mut BottomPane<'a>, key_event: KeyEvent) {
+    pub fn handle_key_event_direct(&mut self, key_event: KeyEvent) {
         const FIELD_COUNT: usize = 3;
 
         match key_event.code {
@@ -248,16 +250,45 @@ impl<'a> BottomPaneView<'a> for UpdateSettingsView {
             KeyCode::Left | KeyCode::Right | KeyCode::Char(' ') if self.field == 1 => {
                 self.toggle_auto();
             }
-            KeyCode::Enter => {
-                match self.field {
-                    0 => self.invoke_run_upgrade(),
-                    1 => self.toggle_auto(),
-                    _ => self.is_complete = true,
-                }
-            }
+            KeyCode::Enter => match self.field {
+                0 => self.invoke_run_upgrade(),
+                1 => self.toggle_auto(),
+                _ => self.is_complete = true,
+            },
             _ => {}
         }
         self.app_event_tx.send(AppEvent::RequestRedraw);
+    }
+
+    pub fn is_view_complete(&self) -> bool {
+        self.is_complete
+    }
+
+    fn render_panel_body(&self, area: Rect, buf: &mut Buffer) {
+        if area.width == 0 || area.height == 0 {
+            return;
+        }
+
+        let lines = self.build_lines();
+        let bg_style = Style::default().bg(colors::background()).fg(colors::text());
+        fill_rect(buf, area, Some(' '), bg_style);
+
+        Paragraph::new(lines)
+            .alignment(Alignment::Left)
+            .style(bg_style)
+            .wrap(Wrap { trim: false })
+            .render(area, buf);
+    }
+
+    pub(crate) fn render_without_frame(&self, area: Rect, buf: &mut Buffer) {
+        self.render_panel_body(area, buf);
+    }
+
+}
+
+impl<'a> BottomPaneView<'a> for UpdateSettingsView {
+    fn handle_key_event(&mut self, _pane: &mut BottomPane<'a>, key_event: KeyEvent) {
+        self.handle_key_event_direct(key_event);
     }
 
     fn is_complete(&self) -> bool {
@@ -269,26 +300,13 @@ impl<'a> BottomPaneView<'a> for UpdateSettingsView {
     }
 
     fn render(&self, area: Rect, buf: &mut Buffer) {
-        Clear.render(area, buf);
-        let block = Block::default()
-            .borders(Borders::ALL)
-            .border_style(Style::default().fg(colors::border()))
-            .padding(Padding::horizontal(1))
-            .title(" Upgrade ")
-            .title_alignment(Alignment::Center)
-            .style(Style::default().bg(colors::background()).fg(colors::text()));
-        let inner = block.inner(area);
-        block.render(area, buf);
-
-        let lines = self.build_lines();
-        let bg_style = Style::default().bg(colors::background()).fg(colors::text());
-        fill_rect(buf, inner, Some(' '), bg_style);
-
-        Paragraph::new(lines)
-            .alignment(Alignment::Left)
-            .style(bg_style)
-            .wrap(Wrap { trim: false })
-            .render(inner, buf);
+        render_panel(
+            area,
+            buf,
+            Self::PANEL_TITLE,
+            PanelFrameStyle::bottom_pane().with_margin(Margin::new(1, 0)),
+            |inner, buf| self.render_panel_body(inner, buf),
+        );
     }
 
     fn handle_paste(&mut self, _text: String) -> ConditionalUpdate {

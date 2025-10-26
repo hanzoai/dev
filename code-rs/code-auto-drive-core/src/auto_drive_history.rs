@@ -8,14 +8,14 @@ use code_protocol::models::{ContentItem, ResponseItem};
 /// when re-seeding the coordinator conversation. `raw` captures the exact
 /// ResponseItems returned by the Auto Drive model so we can retain full
 /// reasoning output without depending on UI rendering.
-pub(crate) struct AutoDriveHistory {
+pub struct AutoDriveHistory {
     converted: Vec<ResponseItem>,
     raw: Vec<ResponseItem>,
     pending_duplicates: VecDeque<NormalizedMessage>,
 }
 
 impl AutoDriveHistory {
-    pub(crate) fn new() -> Self {
+    pub fn new() -> Self {
         Self {
             converted: Vec::new(),
             raw: Vec::new(),
@@ -25,7 +25,7 @@ impl AutoDriveHistory {
 
     /// Replace the stored converted transcript. Returns any new tail items that
     /// were not present previously, preserving insertion order.
-    pub(crate) fn replace_converted(&mut self, items: Vec<ResponseItem>) -> Vec<ResponseItem> {
+    pub fn replace_converted(&mut self, items: Vec<ResponseItem>) -> Vec<ResponseItem> {
         let prev_len = self.converted.len();
         self.converted = items;
         let tail: Vec<_> = if self.converted.len() <= prev_len {
@@ -114,7 +114,7 @@ impl AutoDriveHistory {
             })
     }
 
-    pub(crate) fn append_raw(&mut self, items: &[ResponseItem]) {
+    pub fn append_raw(&mut self, items: &[ResponseItem]) {
         if items.is_empty() {
             return;
         }
@@ -126,24 +126,24 @@ impl AutoDriveHistory {
         }
     }
 
-    pub(crate) fn append_converted_tail(&mut self, items: &[ResponseItem]) {
+    pub fn append_converted_tail(&mut self, items: &[ResponseItem]) {
         if items.is_empty() {
             return;
         }
         self.raw.extend(items.iter().cloned());
     }
 
-    pub(crate) fn raw_snapshot(&self) -> Vec<ResponseItem> {
+    pub fn raw_snapshot(&self) -> Vec<ResponseItem> {
         self.raw.clone()
     }
 
-    pub(crate) fn clear(&mut self) {
+    pub fn clear(&mut self) {
         self.converted.clear();
         self.raw.clear();
         self.pending_duplicates.clear();
     }
 
-    pub(crate) fn converted_is_empty(&self) -> bool {
+    pub fn converted_is_empty(&self) -> bool {
         self.converted.is_empty()
     }
 

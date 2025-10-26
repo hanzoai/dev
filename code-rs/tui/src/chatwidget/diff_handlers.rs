@@ -10,22 +10,13 @@ pub(super) fn handle_diff_key(chat: &mut ChatWidget<'_>, key_event: KeyEvent) ->
 
     // If a confirmation banner is active, only Enter/Esc apply to it.
     if let Some(confirm) = chat.diffs.confirm.take() {
-        match key_event.code {
-            KeyCode::Enter => {
-                chat.submit_user_message(confirm.text_to_submit.into());
-                chat.request_redraw();
-                return true;
-            }
-            KeyCode::Esc => {
-                chat.diffs.confirm = None;
-                chat.request_redraw();
-                return true;
-            }
-            _ => {
-                // Put it back for other keys
-                chat.diffs.confirm = Some(confirm);
-            }
+        if matches!(key_event.code, KeyCode::Enter) {
+            chat.submit_user_message(confirm.text_to_submit.into());
+            chat.request_redraw();
+            return true;
         }
+        // Put it back for other keys (Esc now handled by the global router).
+        chat.diffs.confirm = Some(confirm);
     }
 
     match key_event.code {

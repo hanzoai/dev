@@ -206,14 +206,39 @@ pub(super) fn create_diff_summary_with_width(
     width_cols: Option<usize>,
 ) -> Vec<RtLine<'static>> {
     struct FileSummary {
-        display_path: String,
+        original_path: String,
+        rename_target: Option<String>,
         added: usize,
         removed: usize,
+        change: FileSummaryKind,
     }
 
-    let count_from_unified = |diff: &str| -> (usize, usize) {
+    enum FileSummaryKind {
+        Add { empty: bool },
+        Delete { removed_unknown: bool },
+        Update {
+            rename_only: bool,
+            no_content_change: bool,
+            binary: bool,
+            metadata_only: bool,
+        },
+    }
+
+    struct DiffTally {
+        added: usize,
+        removed: usize,
+        binary_marker: bool,
+        metadata_marker: bool,
+    }
+
+    let count_from_unified = |diff: &str| -> DiffTally {
+        let mut binary_marker = diff.contains("Binary files") || diff.contains("GIT binary patch");
+        if diff.as_bytes().contains(&0) {
+            binary_marker = true;
+        }
+        let mut metadata_marker = diff_contains_metadata_markers(diff);
         if let Ok(patch) = diffy::Patch::from_str(diff) {
-            patch
+            let (added, removed) = patch
                 .hunks()
                 .iter()
                 .flat_map(|h| h.lines())
@@ -221,7 +246,13 @@ pub(super) fn create_diff_summary_with_width(
                     diffy::Line::Insert(_) => (a + 1, d),
                     diffy::Line::Delete(_) => (a, d + 1),
                     _ => (a, d),
-                })
+                });
+            DiffTally {
+                added,
+                removed,
+                binary_marker,
+                metadata_marker,
+            }
         } else {
             // Fallback: manual scan to preserve counts even for unparsable diffs
             let mut adds = 0usize;
@@ -230,47 +261,87 @@ pub(super) fn create_diff_summary_with_width(
                 if l.starts_with("+++") || l.starts_with("---") || l.starts_with("@@") {
                     continue;
                 }
-                match l.as_bytes().first() {
+                let first = l.as_bytes().first().copied();
+                match first {
                     Some(b'+') => adds += 1,
                     Some(b'-') => dels += 1,
                     _ => {}
                 }
+                if l.contains("Binary files") || l.contains("GIT binary patch") {
+                    binary_marker = true;
+                }
+                if !metadata_marker && line_has_metadata_marker(l) {
+                    metadata_marker = true;
+                }
             }
-            (adds, dels)
+            DiffTally {
+                added: adds,
+                removed: dels,
+                binary_marker,
+                metadata_marker,
+            }
         }
     };
 
     let mut files: Vec<FileSummary> = Vec::new();
     for (path, change) in changes.iter() {
         match change {
-            FileChange::Add { content } => files.push(FileSummary {
-                display_path: path.display().to_string(),
-                added: content.lines().count(),
-                removed: 0,
-            }),
-            FileChange::Delete => files.push(FileSummary {
-                display_path: path.display().to_string(),
-                added: 0,
-                removed: std::fs::read_to_string(path)
-                    .ok()
-                    .map(|s| s.lines().count())
-                    .unwrap_or(0),
-            }),
+            FileChange::Add { content } => {
+                let added = content.lines().count();
+                let empty = added == 0;
+                files.push(FileSummary {
+                    original_path: path.display().to_string(),
+                    rename_target: None,
+                    added,
+                    removed: 0,
+                    change: FileSummaryKind::Add { empty },
+                });
+            }
+            FileChange::Delete => {
+                let (removed, removed_unknown) = match std::fs::read_to_string(path) {
+                    Ok(existing) => (existing.lines().count(), false),
+                    Err(_) => (0, true),
+                };
+                files.push(FileSummary {
+                    original_path: path.display().to_string(),
+                    rename_target: None,
+                    added: 0,
+                    removed,
+                    change: FileSummaryKind::Delete { removed_unknown },
+                });
+            }
             FileChange::Update {
                 unified_diff,
                 move_path,
                 ..
             } => {
-                let (added, removed) = count_from_unified(unified_diff);
-                let display_path = if let Some(new_path) = move_path {
-                    format!("{} → {}", path.display(), new_path.display())
-                } else {
-                    path.display().to_string()
-                };
+                let tally = count_from_unified(unified_diff);
+                let rename_target = move_path.as_ref().map(|new_path| new_path.display().to_string());
+                let binary_change = tally.binary_marker;
+                let metadata_only = tally.metadata_marker
+                    && tally.added == 0
+                    && tally.removed == 0;
+                let rename_only = rename_target.is_some()
+                    && tally.added == 0
+                    && tally.removed == 0
+                    && !binary_change
+                    && !tally.metadata_marker;
+                let no_content_change = rename_target.is_none()
+                    && !binary_change
+                    && !tally.metadata_marker
+                    && tally.added == 0
+                    && tally.removed == 0;
                 files.push(FileSummary {
-                    display_path,
-                    added,
-                    removed,
+                    original_path: path.display().to_string(),
+                    rename_target,
+                    added: tally.added,
+                    removed: tally.removed,
+                    change: FileSummaryKind::Update {
+                        rename_only,
+                        no_content_change,
+                        binary: binary_change,
+                        metadata_only,
+                    },
                 });
             }
         }
@@ -325,23 +396,106 @@ pub(super) fn create_diff_summary_with_width(
             prefix.to_string(),
             Style::default().add_modifier(Modifier::DIM),
         ));
-        // File path
-        spans.push(RtSpan::styled(
-            f.display_path.clone(),
-            Style::default().fg(crate::colors::text_dim()),
-        ));
-        // Per-file counts shown inline in chat summary
-        spans.push(RtSpan::styled(" (".to_string(), Style::default().fg(crate::colors::text_dim())));
-        spans.push(RtSpan::styled(
-            format!("+{}", f.added),
-            Style::default().fg(crate::colors::success()),
-        ));
-        spans.push(RtSpan::raw(" "));
-        spans.push(RtSpan::styled(
-            format!("-{}", f.removed),
-            Style::default().fg(crate::colors::error()),
-        ));
-        spans.push(RtSpan::styled(")".to_string(), Style::default().fg(crate::colors::text_dim())));
+        let dim_style = Style::default().fg(crate::colors::text_dim());
+
+        if let FileSummaryKind::Update {
+            rename_only: true,
+            ..
+        } = &f.change
+        {
+            if let Some(rename_target) = &f.rename_target {
+                spans.push(RtSpan::styled(f.original_path.clone(), dim_style));
+                spans.push(RtSpan::styled(" to ".to_string(), dim_style));
+                spans.push(RtSpan::styled(
+                    rename_target.clone(),
+                    Style::default().fg(crate::colors::text()),
+                ));
+            } else {
+                spans.push(RtSpan::styled(f.original_path.clone(), dim_style));
+                spans.push(RtSpan::styled(" (renamed)".to_string(), dim_style));
+            }
+            out.push(RtLine::from(spans));
+            continue;
+        }
+
+        let descriptor = if let Some(rename_target) = &f.rename_target {
+            format!("{} → {}", f.original_path, rename_target)
+        } else {
+            f.original_path.clone()
+        };
+        let mut annotation: Option<String> = None;
+        let mut skip_counts = false;
+
+        match &f.change {
+            FileSummaryKind::Update {
+                metadata_only: true,
+                ..
+            } => {
+                annotation = Some(" (metadata change)".to_string());
+                skip_counts = true;
+            }
+            FileSummaryKind::Update {
+                no_content_change: true,
+                ..
+            } => {
+                annotation = Some(" (no changes)".to_string());
+                skip_counts = true;
+            }
+            FileSummaryKind::Update {
+                binary: true,
+                ..
+            } => {
+                annotation = Some(" (binary change)".to_string());
+                skip_counts = true;
+            }
+            FileSummaryKind::Delete {
+                removed_unknown: true,
+            } => {
+                annotation = Some(" (deleted)".to_string());
+                skip_counts = true;
+            }
+            FileSummaryKind::Add { empty: true } => {
+                annotation = Some(" (empty file)".to_string());
+                skip_counts = true;
+            }
+            _ => {}
+        }
+
+        spans.push(RtSpan::styled(descriptor, dim_style));
+        if let Some(extra) = annotation {
+            spans.push(RtSpan::styled(extra, dim_style));
+        }
+
+        if skip_counts {
+            out.push(RtLine::from(spans));
+            continue;
+        }
+
+        if !skip_counts {
+            if let FileSummaryKind::Delete { removed_unknown: false } = &f.change {
+                spans.push(RtSpan::styled(" (".to_string(), dim_style));
+                spans.push(RtSpan::styled(
+                    format!("-{}", f.removed),
+                    Style::default().fg(crate::colors::error()),
+                ));
+                spans.push(RtSpan::styled(")".to_string(), dim_style));
+            } else if matches!(
+                &f.change,
+                FileSummaryKind::Update { .. } | FileSummaryKind::Add { empty: false }
+            ) {
+                spans.push(RtSpan::styled(" (".to_string(), dim_style));
+                spans.push(RtSpan::styled(
+                    format!("+{}", f.added),
+                    Style::default().fg(crate::colors::success()),
+                ));
+                spans.push(RtSpan::raw(" "));
+                spans.push(RtSpan::styled(
+                    format!("-{}", f.removed),
+                    Style::default().fg(crate::colors::error()),
+                ));
+                spans.push(RtSpan::styled(")".to_string(), dim_style));
+            }
+        }
         out.push(RtLine::from(spans));
     }
 
@@ -359,6 +513,22 @@ pub(super) fn create_diff_summary_with_width(
     }
 
     out
+}
+
+fn diff_contains_metadata_markers(diff: &str) -> bool {
+    diff.contains("new file mode")
+        || diff.contains("deleted file mode")
+        || diff.contains("old mode")
+        || diff.contains("new mode")
+        || diff.contains("similarity index")
+}
+
+fn line_has_metadata_marker(line: &str) -> bool {
+    line.contains("new file mode")
+        || line.contains("deleted file mode")
+        || line.contains("old mode")
+        || line.contains("new mode")
+        || line.contains("similarity index")
 }
 
 #[allow(dead_code)]

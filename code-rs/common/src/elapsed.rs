@@ -1,8 +1,7 @@
 use std::time::Duration;
 use std::time::Instant;
 
-/// Returns a string representing the elapsed time since `start_time` like
-/// "1m 15s" or "1.50s".
+/// Returns a string representing the elapsed time since `start_time`.
 pub fn format_elapsed(start_time: Instant) -> String {
     format_duration(start_time.elapsed())
 }
@@ -11,7 +10,7 @@ pub fn format_elapsed(start_time: Instant) -> String {
 ///
 /// Formatting rules:
 /// * < 1 s  -> "{milli}ms"
-/// * < 60 s -> "{sec:.2}s" (two decimal places)
+/// * < 60 s -> "{sec}s"
 /// * < 60 m -> "{min}m {sec:02}s"
 /// * < 24 h -> "{hour}h {minute:02}m" (rounded to the nearest minute)
 /// * >= 24 h -> "{day}d {hour:02}h" (rounded to the nearest hour)
@@ -23,7 +22,7 @@ pub fn format_duration(duration: Duration) -> String {
 
     let secs = duration.as_secs();
     if secs < 60 {
-        return format!("{:.2}s", duration.as_secs_f64());
+        return format!("{secs}s");
     }
 
     if secs < 3_600 {
@@ -74,6 +73,23 @@ fn format_days_hours(duration: Duration) -> String {
     format!("{days}d {hours:02}h")
 }
 
+/// Format a duration as a zero-padded digital clock string.
+///
+/// * < 1 h  -> "{mm}:{ss}"
+/// * >= 1 h -> "{hh}:{mm}:{ss}"
+pub fn format_duration_digital(duration: Duration) -> String {
+    let total_seconds = duration.as_secs();
+    let hours = total_seconds / 3_600;
+    let minutes = (total_seconds % 3_600) / 60;
+    let seconds = total_seconds % 60;
+
+    if hours == 0 {
+        return format!("{minutes:02}:{seconds:02}");
+    }
+
+    format!("{hours:02}:{minutes:02}:{seconds:02}")
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -92,13 +108,13 @@ mod tests {
     #[test]
     fn test_format_duration_seconds() {
         // Durations between 1s (inclusive) and 60s (exclusive) should be
-        // printed with 2-decimal-place seconds.
+        // printed with whole seconds and no decimal places.
         let dur = Duration::from_millis(1_500); // 1.5s
-        assert_eq!(format_duration(dur), "1.50s");
+        assert_eq!(format_duration(dur), "1s");
 
-        // 59.999s rounds to 60.00s
+        // Values just shy of the next second truncate to the lower bound.
         let dur2 = Duration::from_millis(59_999);
-        assert_eq!(format_duration(dur2), "60.00s");
+        assert_eq!(format_duration(dur2), "59s");
     }
 
     #[test]
@@ -130,5 +146,23 @@ mod tests {
     fn test_format_duration_days_rounds_hours() {
         let dur = Duration::from_secs(2 * 86_400 + 11 * 3_600 + 45 * 60);
         assert_eq!(format_duration(dur), "2d 12h");
+    }
+
+    #[test]
+    fn test_format_duration_digital_under_minute() {
+        let dur = Duration::from_secs(5);
+        assert_eq!(format_duration_digital(dur), "00:05");
+    }
+
+    #[test]
+    fn test_format_duration_digital_under_hour() {
+        let dur = Duration::from_secs(5 * 60 + 3);
+        assert_eq!(format_duration_digital(dur), "05:03");
+    }
+
+    #[test]
+    fn test_format_duration_digital_over_hour() {
+        let dur = Duration::from_secs(2 * 3_600 + 7 * 60 + 9);
+        assert_eq!(format_duration_digital(dur), "02:07:09");
     }
 }

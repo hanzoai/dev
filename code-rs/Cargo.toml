@@ -6,6 +6,8 @@ members = [
     "app-server-protocol",
     "apply-patch",
     "arg0",
+    "code-auto-drive-core",
+    "code-auto-drive-diagnostics",
     "code-backend-openapi-models",
     "cloud-tasks",
     "cloud-tasks-client",
@@ -72,6 +74,7 @@ code-otel = { path = "otel" }
 code-tui = { path = "tui" }
 code-utils-json-to-toml = { path = "utils/json-to-toml" }
 code-utils-readiness = { path = "utils/readiness" }
+code-auto-drive-core = { path = "code-auto-drive-core" }
 mcp-types = { path = "mcp-types", package = "code-mcp-types" }
 codex-mcp-client = { path = "../codex-rs/mcp-client" }
 codex-ansi-escape = { path = "../codex-rs/ansi-escape" }
@@ -126,6 +129,7 @@ log = "0.4"
 maplit = "1.0.2"
 mime_guess = "2.0.5"
 multimap = "0.10.0"
+once_cell = "1"
 nucleo-matcher = "0.3.1"
 openssl-sys = "*"
 opentelemetry = "0.30.0"

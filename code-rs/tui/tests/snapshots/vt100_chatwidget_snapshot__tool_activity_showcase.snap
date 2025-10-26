@@ -2,42 +2,42 @@
 source: tui/tests/vt100_chatwidget_snapshot.rs
 expression: output
 ---
- ┌────────────────────────────────────────────────────────────────────────────┐
- │                                    Code                                    │
- └────────────────────────────────────────────────────────────────────────────┘
-   /cloud - browse, apply, and create cloud tasks NEW
+ +----------------------------------------------------------------------------+
+ |                                    Code                                    |
+ +----------------------------------------------------------------------------+
+   /auto - work autonomously on long tasks with Auto Drive UPDATED
+   /chrome - connect to your Chrome browser
+   /plan - create a comprehensive plan (multiple agents)
+   /code - perform a coding task (multiple agents)
+
  › Can you gather details from the latest docs update?
 
- ✔ Web Search, duration: 0ms
-   └ query: ratatui widget patterns
+ ✔ Web Search, duration: Xms
+   + query: ratatui widget patterns
 
- ⚙ Web Search... (1m 15s)
-   └ query: async rust tui example
+ ⚙ Web Search... (Xm Ys)
+   + query: async rust tui example
 
- ⚙ ╭─ BROWSER (headless): Browser Session · 1 action · 8.0s
-   │
-   │  #  ACTION                     TARGET        VALUE      RESULT       t
-   │   1 Click                      #login-button —          ok            8.0s
-   │
-   ╰─ [Ctrl+B] Expand · [Esc] Stop
+   +- Browser (headless): Browser Session
+   |
+   |   0s  Clicked  #login-button
+   |
+   +- [Ctrl+B] View · [Esc] Stop
 
- ✔ ╭─ AGENTS · “Run targeted regression suite” · 0 agents · COMPLETED 01:34
-   │
-   │   TASK Run targeted regression suite
-   │
-   │   PLAN
-   │   1. Init workspace
-   │   2. Nextest smoke
-   │   3. Summarize
-   │
-   │   SUMMARY
-   │  Regression sweep complete
-   │  - 58 tests passed
-   │  - 0 failures
-   │
-   ╰─ [Ctrl+B] Expand · [Esc] Stop
+   +- deploy-helper
+   |
+   |  Run targeted regression suite
+   |
+   |  Agents
+   |    No agent updates yet
+   |
+   |  Actions
+   |    0s  Started agent run for qa-bot
+   |    0s  Waiting for agents
+   |
+   +- [Ctrl+A] Expand
 
- ┌────────────────────────────────────────────────────────────────────────────┐
- │ What can I code for you today?                                             │
- └────────────────────────────────────────────────────────────────────────────┘
+ +----------------------------------------------------------------------------+
+ | What can I code for you today?                                             |
+ +----------------------------------------------------------------------------+
    Read Only  (Shift+Tab change)                                   Ctrl+H help

@@ -1,0 +1,41 @@
+---
+source: tui/tests/vt100_chatwidget_snapshot.rs
+expression: "frames.join(\"\\n---FRAME---\\n\")"
+---
+ +----------------------------------------------------------------------------+
+ |                                    Code                                    |
+ +----------------------------------------------------------------------------+
+   /plan - create a comprehensive plan (multiple agents)
+   /code - perform a coding task (multiple agents)
+
+  Auto Drive > Installed dependencies > Running cargo check...   ✶ Waiting (1s)
+ + Next Prompt ---------------------------------------------------------------+
+ |  cargo check                                                               |
+ +----------------------------------------------------------------------------+
+   Agents Enabled  •  Diagnostics Enabled Ctrl+S settings • Esc stop Auto Drive
+
+---FRAME---
+ +----------------------------------------------------------------------------+
+ |                                    Code                                    |
+ +----------------------------------------------------------------------------+
+   /plan - create a comprehensive plan (multiple agents)
+   /code - perform a coding task (multiple agents)
+
+  Auto Drive > Installed dependencies > Running cargo check...   ✶ Waiting (1s)
+ + Next Prompt ---------------------------------------------------------------+
+ |  cargo check                                                               |
+ +----------------------------------------------------------------------------+
+   Agents Enabled  •  Diagnostics Enabled Ctrl+S settings • Esc stop Auto Drive
+
+---FRAME---
+ +----------------------------------------------------------------------------+
+ |                                    Code                                    |
+ +----------------------------------------------------------------------------+
+   /plan - create a comprehensive plan (multiple agents)
+   /code - perform a coding task (multiple agents)
+
+  Auto Drive > Installed dependencies > Running cargo check...   ✶ Waiting (1s)
+ + Next Prompt ---------------------------------------------------------------+
+ |  cargo check                                                               |
+ +----------------------------------------------------------------------------+
+   Agents Enabled  •  Diagnostics Enabled Ctrl+S settings • Esc stop Auto Drive

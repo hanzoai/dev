@@ -2,34 +2,34 @@
 source: tui/tests/vt100_chatwidget_snapshot.rs
 expression: output
 ---
- ┌────────────────────────────────────────────────────────────────────────────┐
- │                                    Code                                    │
- └────────────────────────────────────────────────────────────────────────────┘
- ┌ Agents ────────────────────────────────────────────────────────────────────┐
- │ • QA Bot (running 0s) — Executing smoke tests         Ctrl+A open terminal │
- └────────────────────────────────────────────────────────────────────────────┘
+ +----------------------------------------------------------------------------+
+ |                                    Code                                    |
+ +----------------------------------------------------------------------------+
+
+
+
+ ★ Popular commands:
+   /settings - manage all settings in one place NEW
+   /auto - work autonomously on long tasks with Auto Drive UPDATED
+   /chrome - connect to your Chrome browser
+   /plan - create a comprehensive plan (multiple agents)
+   /code - perform a coding task (multiple agents)
+
  › Kick off QA bot regression run
 
- ✔ ╭─ BATCH #001 · “Run targeted regression suite” · 1 agents · ▶1 · COMPLET...
-   │
-   │   TASK Run targeted regression suite
-   │
-   │   PLAN
-   │   1. Init workspace
-   │   2. Nextest smoke
-   │   3. Summarize
-   │
-   │  #  STATE AGENT           MODEL    STEPS ELAP  TOK   LAST
-   │   1 ▶     QA Bot          claude       — 00:18 8,900 Executing smoke tests
-   │
-   │   SUMMARY
-   │  Regression sweep complete
-   │  - 58 tests passed
-   │  - 0 failures
-   │
-   ╰─ [Ctrl+B] Expand · [Esc] Stop
+   +- qa-bot
+   |
+   |  Run targeted regression suite
+   |
+   |  Agents
+   |    • claude  running  (18s)
+   |
+   |  Actions
+   |    0s  Started agent run for qa-bot
+   |
+   +- [Ctrl+A] Expand · [Esc] Stop
 
- ┌───────────────────────────── ✶ Responding... ──────────────────────────────┐
- │ What can I code for you today?                                             │
- └────────────────────────────────────────────────────────────────────────────┘
+ +----------------------------- ✶ Responding... ------------------------------+
+ | What can I code for you today?                                             |
+ +----------------------------------------------------------------------------+
    Read Only  (Shift+Tab change)                                   Ctrl+H help

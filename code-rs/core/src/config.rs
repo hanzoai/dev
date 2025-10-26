@@ -2,6 +2,8 @@ use crate::codex::ApprovedCommandPattern;
 use crate::protocol::ApprovedCommandMatchKind;
 use crate::config_profile::ConfigProfile;
 use crate::config_types::AgentConfig;
+use crate::agent_defaults::{agent_model_spec, default_agent_configs};
+use std::collections::HashSet;
 use crate::config_types::AutoDriveContinueMode;
 use crate::config_types::AutoDriveSettings;
 use crate::config_types::AllowedCommand;
@@ -239,6 +241,9 @@ pub struct Config {
 
     /// Collection of settings that are specific to the TUI.
     pub tui: Tui,
+
+    /// Shared Auto Drive defaults.
+    pub auto_drive: AutoDriveSettings,
 
     /// Path to the `codex-linux-sandbox` executable. This must be set if
     /// [`crate::exec::SandboxType::LinuxSeccomp`] is used. Note that this
@@ -979,8 +984,8 @@ pub fn set_tui_review_auto_resolve(code_home: &Path, enabled: bool) -> anyhow::R
     Ok(())
 }
 
-/// Persist Auto Drive defaults under `[tui.auto_drive]`.
-pub fn set_tui_auto_drive_settings(
+/// Persist Auto Drive defaults under `[auto_drive]`.
+pub fn set_auto_drive_settings(
     code_home: &Path,
     settings: &AutoDriveSettings,
 ) -> anyhow::Result<()> {
@@ -993,8 +998,20 @@ pub fn set_tui_auto_drive_settings(
         Err(e) => return Err(e.into()),
     };
 
-    doc["tui"]["auto_drive"]["review_enabled"] = toml_edit::value(settings.review_enabled);
-    doc["tui"]["auto_drive"]["agents_enabled"] = toml_edit::value(settings.agents_enabled);
+    if let Some(tui_tbl) = doc["tui"].as_table_mut() {
+        tui_tbl.remove("auto_drive");
+    }
+
+    doc["auto_drive"]["review_enabled"] = toml_edit::value(settings.review_enabled);
+    doc["auto_drive"]["agents_enabled"] = toml_edit::value(settings.agents_enabled);
+    doc["auto_drive"]["qa_automation_enabled"] =
+        toml_edit::value(settings.qa_automation_enabled);
+    doc["auto_drive"]["cross_check_enabled"] =
+        toml_edit::value(settings.cross_check_enabled);
+    doc["auto_drive"]["observer_enabled"] =
+        toml_edit::value(settings.observer_enabled);
+    doc["auto_drive"]["coordinator_routing"] =
+        toml_edit::value(settings.coordinator_routing);
 
     let mode_str = match settings.continue_mode {
         AutoDriveContinueMode::Immediate => "immediate",
@@ -1002,7 +1019,7 @@ pub fn set_tui_auto_drive_settings(
         AutoDriveContinueMode::SixtySeconds => "sixty-seconds",
         AutoDriveContinueMode::Manual => "manual",
     };
-    doc["tui"]["auto_drive"]["continue_mode"] = toml_edit::value(mode_str);
+    doc["auto_drive"]["continue_mode"] = toml_edit::value(mode_str);
 
     std::fs::create_dir_all(code_home)?;
     let tmp_file = NamedTempFile::new_in(code_home)?;
@@ -1010,6 +1027,16 @@ pub fn set_tui_auto_drive_settings(
     tmp_file.persist(config_path)?;
 
     Ok(())
+}
+
+/// Legacy helper: persist Auto Drive defaults under `[auto_drive]` while
+/// accepting the former API surface.
+#[deprecated(note = "use set_auto_drive_settings instead")]
+pub fn set_tui_auto_drive_settings(
+    code_home: &Path,
+    settings: &AutoDriveSettings,
+) -> anyhow::Result<()> {
+    set_auto_drive_settings(code_home, settings)
 }
 
 /// Persist the GitHub workflow check preference under `[github].check_workflows_on_push`.
@@ -1694,6 +1721,9 @@ pub struct ConfigToml {
     /// Collection of settings that are specific to the TUI.
     pub tui: Option<Tui>,
 
+    /// Auto Drive behavioral defaults.
+    pub auto_drive: Option<AutoDriveSettings>,
+
     #[serde(default)]
     pub auto_drive_observer_cadence: Option<u32>,
 
@@ -2161,14 +2191,57 @@ impl Config {
             .unwrap_or_else(|| default_responses_originator());
 
         // Normalize agents: when `command` is missing/empty, default to `name`.
-        let agents: Vec<AgentConfig> = cfg
+        let mut agents: Vec<AgentConfig> = cfg
             .agents
             .into_iter()
             .map(|mut a| {
-                if a.command.trim().is_empty() { a.command = a.name.clone(); }
+                let command_trimmed = a.command.trim();
+                if command_trimmed.is_empty() {
+                    if let Some(spec) = agent_model_spec(&a.name) {
+                        a.command = spec.cli.to_string();
+                    } else {
+                        a.command = a.name.clone();
+                    }
+                }
+
                 a
             })
             .collect();
+
+        if agents.is_empty() {
+            agents = default_agent_configs();
+        } else {
+            let mut seen = HashSet::new();
+            for agent in &agents {
+                let canonical = agent_model_spec(&agent.name)
+                    .map(|spec| spec.slug.to_ascii_lowercase())
+                    .unwrap_or_else(|| agent.name.to_ascii_lowercase());
+                seen.insert(canonical);
+            }
+
+            for default_agent in default_agent_configs() {
+                let key = default_agent.name.to_ascii_lowercase();
+                if !seen.contains(&key) {
+                    seen.insert(key);
+                    agents.push(default_agent);
+                }
+            }
+        }
+
+        for agent in &agents {
+            if agent.name.eq_ignore_ascii_case("code")
+                || agent.name.eq_ignore_ascii_case("codex")
+                || agent.name.eq_ignore_ascii_case("claude")
+                || agent.name.eq_ignore_ascii_case("gemini")
+                || agent.name.eq_ignore_ascii_case("qwen")
+                || agent.name.eq_ignore_ascii_case("cloud")
+            {
+                tracing::warn!(
+                    "legacy agent name '{}' detected; update config to use model slugs (e.g., code-gpt-5-codex)",
+                    agent.name
+                );
+            }
+        }
 
         let mut confirm_guard = ConfirmGuardConfig::default();
         if let Some(mut user_guard) = cfg.confirm_guard {
@@ -2236,6 +2309,11 @@ impl Config {
             history,
             file_opener: cfg.file_opener.unwrap_or(UriBasedFileOpener::VsCode),
             tui: cfg.tui.clone().unwrap_or_default(),
+            auto_drive: cfg
+                .auto_drive
+                .clone()
+                .or_else(|| cfg.tui.as_ref().and_then(|t| t.auto_drive.clone()))
+                .unwrap_or_default(),
             code_linux_sandbox_exe,
             active_profile: active_profile_name,
 
@@ -3230,6 +3308,49 @@ model_verbosity = "high"
             &gpt5_profile_config.model_providers
         );
 
+        Ok(())
+    }
+
+    #[test]
+    fn test_custom_agent_entries_extend_defaults() -> std::io::Result<()> {
+        let fixture = create_test_fixture()?;
+
+        let mut cfg = fixture.cfg.clone();
+        cfg.agents = vec![AgentConfig {
+            name: "code-gpt-5-codex".to_string(),
+            command: String::new(),
+            args: Vec::new(),
+            read_only: false,
+            enabled: true,
+            description: None,
+            env: None,
+            args_read_only: None,
+            args_write: None,
+            instructions: None,
+        }];
+
+        let overrides = ConfigOverrides {
+            cwd: Some(fixture.cwd()),
+            ..Default::default()
+        };
+
+        let loaded = Config::load_from_base_config_with_overrides(
+            cfg,
+            overrides,
+            fixture.code_home(),
+        )?;
+
+        let enabled_names: std::collections::HashSet<String> = loaded
+            .agents
+            .into_iter()
+            .filter(|agent| agent.enabled)
+            .map(|agent| agent.name.to_ascii_lowercase())
+            .collect();
+
+        assert!(enabled_names.contains("code-gpt-5-codex"));
+        assert!(enabled_names.contains("claude-sonnet-4.5"));
+        assert!(enabled_names.contains("gemini-2.5-pro"));
+        assert!(enabled_names.contains("qwen-3-coder"));
         Ok(())
     }
 

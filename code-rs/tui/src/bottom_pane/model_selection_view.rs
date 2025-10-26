@@ -8,18 +8,14 @@ use crossterm::event::KeyCode;
 use crossterm::event::KeyEvent;
 use crossterm::event::KeyModifiers;
 use ratatui::buffer::Buffer;
-use ratatui::layout::Alignment;
-use ratatui::layout::Rect;
-use ratatui::style::Modifier;
-use ratatui::style::Style;
-use ratatui::text::Line;
-use ratatui::text::Span;
-use ratatui::widgets::Block;
-use ratatui::widgets::Borders;
-use ratatui::widgets::Clear;
+use ratatui::layout::{Alignment, Rect};
+use ratatui::prelude::Widget;
+use ratatui::style::{Modifier, Style};
+use ratatui::text::{Line, Span};
 use ratatui::widgets::Paragraph;
-use ratatui::widgets::Widget;
 use std::cmp::Ordering;
+
+use super::settings_panel::{render_panel, PanelFrameStyle};
 
 pub(crate) struct ModelSelectionView {
     presets: Vec<ModelPreset>,
@@ -31,6 +27,8 @@ pub(crate) struct ModelSelectionView {
 }
 
 impl ModelSelectionView {
+    const PANEL_TITLE: &'static str = "Select Model & Reasoning";
+
     pub fn new(
         presets: Vec<ModelPreset>,
         current_model: String,
@@ -262,8 +260,8 @@ impl ModelSelectionView {
     }
 }
 
-impl<'a> BottomPaneView<'a> for ModelSelectionView {
-    fn handle_key_event(&mut self, _pane: &mut BottomPane<'a>, key_event: KeyEvent) {
+impl ModelSelectionView {
+    pub(crate) fn handle_key_event_direct(&mut self, key_event: KeyEvent) -> bool {
         match key_event {
             KeyEvent {
                 code: KeyCode::Up,
@@ -271,13 +269,16 @@ impl<'a> BottomPaneView<'a> for ModelSelectionView {
                 ..
             } => {
                 self.move_selection_up();
+                true
             }
             KeyEvent {
                 code: KeyCode::Down,
                 modifiers: KeyModifiers::NONE,
                 ..
-            } => {
+            }
+            => {
                 self.move_selection_down();
+                true
             }
             KeyEvent {
                 code: KeyCode::Enter,
@@ -285,6 +286,7 @@ impl<'a> BottomPaneView<'a> for ModelSelectionView {
                 ..
             } => {
                 self.confirm_selection();
+                true
             }
             KeyEvent {
                 code: KeyCode::Esc,
@@ -292,38 +294,16 @@ impl<'a> BottomPaneView<'a> for ModelSelectionView {
                 ..
             } => {
                 self.is_complete = true;
+                true
             }
-            _ => {}
+            _ => false,
         }
     }
 
-    fn is_complete(&self) -> bool {
-        self.is_complete
-    }
-
-    fn desired_height(&self, _width: u16) -> u16 {
-        // Account for content rows plus bordered block padding.
-        let content_lines = self.content_line_count();
-        let total = content_lines.saturating_add(2);
-        total.max(9)
-    }
-
-    fn render(&self, area: Rect, buf: &mut Buffer) {
-        Clear.render(area, buf);
-
-        let block = Block::default()
-            .borders(Borders::ALL)
-            .border_style(Style::default().fg(crate::colors::border()))
-            .style(
-                Style::default()
-                    .bg(crate::colors::background())
-                    .fg(crate::colors::text()),
-            )
-            .title(" Select Model & Reasoning ")
-            .title_alignment(Alignment::Center);
-
-        let inner_area = block.inner(area);
-        block.render(area, buf);
+    fn render_panel_body(&self, area: Rect, buf: &mut Buffer) {
+        if area.width == 0 || area.height == 0 {
+            return;
+        }
 
         let mut lines: Vec<Line> = Vec::new();
         lines.push(Line::from(vec![
@@ -435,17 +415,51 @@ impl<'a> BottomPaneView<'a> for ModelSelectionView {
         ]));
 
         let padded = Rect {
-            x: inner_area.x.saturating_add(1),
-            y: inner_area.y,
-            width: inner_area.width.saturating_sub(1),
-            height: inner_area.height,
+            x: area.x.saturating_add(1),
+            y: area.y,
+            width: area.width.saturating_sub(1),
+            height: area.height,
         };
 
-        let paragraph = Paragraph::new(lines).alignment(Alignment::Left).style(
-            Style::default()
-                .bg(crate::colors::background())
-                .fg(crate::colors::text()),
+        Paragraph::new(lines)
+            .alignment(Alignment::Left)
+            .style(
+                Style::default()
+                    .bg(crate::colors::background())
+                    .fg(crate::colors::text()),
+            )
+            .render(padded, buf);
+    }
+
+    pub(crate) fn render_without_frame(&self, area: Rect, buf: &mut Buffer) {
+        self.render_panel_body(area, buf);
+    }
+
+}
+
+impl<'a> BottomPaneView<'a> for ModelSelectionView {
+    fn handle_key_event(&mut self, _pane: &mut BottomPane<'a>, key_event: KeyEvent) {
+        let _ = self.handle_key_event_direct(key_event);
+    }
+
+    fn is_complete(&self) -> bool {
+        self.is_complete
+    }
+
+    fn desired_height(&self, _width: u16) -> u16 {
+        // Account for content rows plus bordered block padding.
+        let content_lines = self.content_line_count();
+        let total = content_lines.saturating_add(2);
+        total.max(9)
+    }
+
+    fn render(&self, area: Rect, buf: &mut Buffer) {
+        render_panel(
+            area,
+            buf,
+            Self::PANEL_TITLE,
+            PanelFrameStyle::bottom_pane(),
+            |inner, buf| self.render_panel_body(inner, buf),
         );
-        paragraph.render(padded, buf);
     }
 }

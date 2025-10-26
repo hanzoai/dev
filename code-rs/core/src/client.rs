@@ -23,6 +23,7 @@ use tracing::trace;
 use tracing::warn;
 use uuid::Uuid;
 
+use crate::agent_defaults::{default_agent_configs, enabled_agent_model_specs};
 use crate::chat_completions::AggregateStreamExt;
 use crate::chat_completions::stream_chat_completions;
 use crate::client_common::Prompt;
@@ -31,7 +32,6 @@ use crate::client_common::ResponseStream;
 use crate::client_common::ResponsesApiRequest;
 use crate::client_common::create_reasoning_param_for_request;
 use crate::config::Config;
-use crate::openai_model_info::get_model_info;
 use crate::config_types::ReasoningEffort as ReasoningEffortConfig;
 use crate::config_types::ReasoningSummary as ReasoningSummaryConfig;
 use crate::config_types::TextVerbosity as TextVerbosityConfig;
@@ -46,9 +46,14 @@ use crate::flags::CODEX_RS_SSE_FIXTURE;
 use crate::model_family::ModelFamily;
 use crate::model_provider_info::ModelProviderInfo;
 use crate::model_provider_info::WireApi;
+use crate::openai_model_info::get_model_info;
 use crate::openai_tools::create_tools_json_for_responses_api;
+use crate::openai_tools::ConfigShellToolType;
+use crate::openai_tools::ToolsConfig;
 use crate::protocol::RateLimitSnapshotEvent;
+use crate::protocol::SandboxPolicy;
 use crate::protocol::TokenUsage;
+use crate::slash_commands::get_enabled_agents;
 use crate::util::backoff;
 use code_otel::otel_event_manager::OtelEventManager;
 use std::sync::Arc;
@@ -179,6 +184,74 @@ impl ModelClient {
         &self.config.code_home
     }
 
+    pub fn build_tools_config_with_sandbox(
+        &self,
+        sandbox_policy: SandboxPolicy,
+    ) -> ToolsConfig {
+        let mut tools_config = ToolsConfig::new(
+            &self.config.model_family,
+            self.config.approval_policy,
+            sandbox_policy.clone(),
+            self.config.include_plan_tool,
+            self.config.include_apply_patch_tool,
+            self.config.tools_web_search_request,
+            self.config.use_experimental_streamable_shell_tool,
+            self.config.include_view_image_tool,
+        );
+        tools_config.web_search_allowed_domains = self.config.tools_web_search_allowed_domains.clone();
+
+        let mut agent_models: Vec<String> = if self.config.agents.is_empty() {
+            default_agent_configs()
+                .into_iter()
+                .filter(|cfg| cfg.enabled)
+                .map(|cfg| cfg.name)
+                .collect()
+        } else {
+            get_enabled_agents(&self.config.agents)
+        };
+        if agent_models.is_empty() {
+            agent_models = enabled_agent_model_specs()
+                .into_iter()
+                .map(|spec| spec.slug.to_string())
+                .collect();
+        }
+        agent_models.sort_by(|a, b| a.to_ascii_lowercase().cmp(&b.to_ascii_lowercase()));
+        agent_models.dedup_by(|a, b| a.eq_ignore_ascii_case(b));
+        tools_config.set_agent_models(agent_models);
+
+        let base_shell_type = tools_config.shell_type.clone();
+        let base_uses_native_shell = matches!(
+            &base_shell_type,
+            ConfigShellToolType::LocalShell | ConfigShellToolType::StreamableShell
+        );
+
+        tools_config.shell_type = match sandbox_policy.clone() {
+            SandboxPolicy::ReadOnly => {
+                if base_uses_native_shell {
+                    base_shell_type.clone()
+                } else {
+                    ConfigShellToolType::ShellWithRequest {
+                        sandbox_policy: SandboxPolicy::ReadOnly,
+                    }
+                }
+            }
+            sp @ SandboxPolicy::WorkspaceWrite { .. } => {
+                if base_uses_native_shell {
+                    base_shell_type.clone()
+                } else {
+                    ConfigShellToolType::ShellWithRequest { sandbox_policy: sp }
+                }
+            }
+            SandboxPolicy::DangerFullAccess => base_shell_type,
+        };
+
+        tools_config
+    }
+
+    pub fn build_tools_config(&self) -> ToolsConfig {
+        self.build_tools_config_with_sandbox(self.config.sandbox_policy.clone())
+    }
+
     pub fn get_auto_compact_token_limit(&self) -> Option<i64> {
         self.config.model_auto_compact_token_limit.or_else(|| {
             get_model_info(&self.config.model_family).and_then(|info| info.auto_compact_token_limit)
@@ -197,8 +270,9 @@ impl ModelClient {
     /// the provider config.  Public callers always invoke `stream()` – the
     /// specialised helpers are private to avoid accidental misuse.
     pub async fn stream(&self, prompt: &Prompt) -> Result<ResponseStream> {
+        let log_tag = prompt.log_tag.as_deref();
         match self.provider.wire_api {
-            WireApi::Responses => self.stream_responses(prompt).await,
+            WireApi::Responses => self.stream_responses(prompt, log_tag).await,
             WireApi::Chat => {
                 let effective_family = prompt
                     .model_family_override
@@ -218,6 +292,7 @@ impl ModelClient {
                     &self.debug_logger,
                     self.auth_manager.clone(),
                     self.otel_event_manager.clone(),
+                    log_tag,
                 )
                 .await?;
 
@@ -250,7 +325,7 @@ impl ModelClient {
     }
 
     /// Implementation for the OpenAI *Responses* experimental API.
-    async fn stream_responses(&self, prompt: &Prompt) -> Result<ResponseStream> {
+    async fn stream_responses(&self, prompt: &Prompt, log_tag: Option<&str>) -> Result<ResponseStream> {
         if let Some(path) = &*CODEX_RS_SSE_FIXTURE {
             // short circuit for tests
             warn!(path, "Streaming from fixture");
@@ -341,6 +416,11 @@ impl ModelClient {
             .as_deref()
             .unwrap_or(self.config.model.as_str());
 
+        let session_id = prompt
+            .session_id_override
+            .unwrap_or(self.session_id);
+        let session_id_str = session_id.to_string();
+
         let payload = ResponsesApiRequest {
             model: &self.config.model,
             instructions: &full_instructions,
@@ -354,7 +434,7 @@ impl ModelClient {
             stream: true,
             include,
             // Use a stable per-process cache key (session id). With store=false this is inert.
-            prompt_cache_key: Some(self.session_id.to_string()),
+            prompt_cache_key: Some(session_id_str.clone()),
         };
 
         let mut payload_json = serde_json::to_value(&payload)?;
@@ -398,7 +478,7 @@ impl ModelClient {
         // Start logging the request and get a request_id to track the response
         let request_id = if let Ok(logger) = self.debug_logger.lock() {
             logger
-                .start_request_log(&endpoint, &payload_json)
+                .start_request_log(&endpoint, &payload_json, log_tag)
                 .unwrap_or_default()
         } else {
             String::new()
@@ -421,18 +501,24 @@ impl ModelClient {
                 .create_request_builder(&self.client, &auth)
                 .await?;
 
+            // `Codex-Task-Type` differentiates traffic for caching; default to "standard" until
+            // task-specific dispatch is re-introduced.
+            let codex_task_type = "standard";
+
             req_builder = req_builder
-                .header("OpenAI-Beta", "responses=v1")
+                .header("OpenAI-Beta", "responses=experimental")
+                // Send `conversation_id`/`session_id` so the server can hit the prompt-cache.
+                .header("conversation_id", session_id_str.clone())
+                .header("session_id", session_id_str.clone())
                 .header(reqwest::header::ACCEPT, "text/event-stream")
+                .header("Codex-Task-Type", codex_task_type)
                 .json(&payload_json);
 
-            // Avoid unstable `let` chains: expand into nested conditionals.
-            if let Some(auth) = auth.as_ref() {
-                if auth.mode == AuthMode::ChatGPT {
-                    if let Some(account_id) = auth.get_account_id() {
-                        req_builder = req_builder.header("chatgpt-account-id", account_id);
-                    }
-                }
+            if let Some(auth) = auth.as_ref()
+                && auth.mode == AuthMode::ChatGPT
+                && let Some(account_id) = auth.get_account_id()
+            {
+                req_builder = req_builder.header("chatgpt-account-id", account_id);
             }
 
             let res = if let Some(otel) = self.otel_event_manager.as_ref() {
@@ -648,7 +734,7 @@ impl ModelClient {
                     if attempt > max_retries {
                         // Log network error
                         if let Ok(logger) = self.debug_logger.lock() {
-                            let _ = logger.log_error(&endpoint, &format!("Network error: {}", e));
+                            let _ = logger.log_error(&endpoint, &format!("Network error: {}", e), log_tag);
                         }
                         return Err(e.into());
                     }
