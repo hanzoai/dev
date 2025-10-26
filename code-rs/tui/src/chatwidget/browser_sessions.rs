@@ -381,14 +381,23 @@ fn select_session_key(
                 return existing;
             }
         }
+        if let Some(last) = chat.tools_state.browser_last_key.clone() {
+            if let Some(last_tracker) = chat.tools_state.browser_sessions.get(&last) {
+                if last_tracker.slot.order_key.req == chat.current_request_index {
+                    return last;
+                }
+            }
+        }
     }
 
     let mut key = browser_key(order, call_id);
 
     if order.is_none() && tool_name != "browser_open" {
         if let Some(last) = chat.tools_state.browser_last_key.clone() {
-            if chat.tools_state.browser_sessions.contains_key(&last) {
-                key = last;
+            if let Some(last_tracker) = chat.tools_state.browser_sessions.get(&last) {
+                if last_tracker.slot.order_key.req == chat.current_request_index {
+                    key = last;
+                }
             }
         }
     }
