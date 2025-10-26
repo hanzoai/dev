@@ -2,15 +2,18 @@ use ratatui::buffer::Buffer;
 use ratatui::prelude::*;
 use unicode_width::{UnicodeWidthChar, UnicodeWidthStr};
 
+use crate::card_theme;
+use crate::card_theme::{CardThemeDefinition, GradientSpec};
 use crate::colors;
+use crate::gradient_background::GradientBackground;
 
 #[derive(Clone, Copy)]
 pub(crate) struct CardStyle {
     pub accent_fg: Color,
-    pub background_top: Color,
-    pub background_bottom: Color,
     pub text_primary: Color,
     pub text_secondary: Color,
+    pub title_text: Color,
+    pub gradient: GradientSpec,
 }
 
 #[derive(Clone, Debug)]
@@ -56,96 +59,63 @@ impl CardRow {
 
 pub(crate) const CARD_ACCENT_WIDTH: usize = 2;
 
-pub(crate) fn agent_card_style() -> CardStyle {
-    let bg = colors::background();
-    let info = colors::info();
-    let accent = colors::mix_toward(info, bg, 0.15);
-    let accent_fg = colors::mix_toward(colors::text_bright(), accent, 0.40);
-    let secondary = colors::text_dim();
-    let background_bottom = colors::mix_toward(bg, info, 0.10);
-    let background_top = colors::mix_toward(bg, info, 0.05);
-
-    CardStyle {
-        accent_fg,
-        background_top,
-        background_bottom,
-        text_primary: colors::text(),
-        text_secondary: secondary,
-    }
+pub(crate) fn agent_card_style(write_enabled: Option<bool>) -> CardStyle {
+    let is_dark = is_dark_theme_active();
+    let definition = match (write_enabled.unwrap_or(false), is_dark) {
+        (true, true) => card_theme::agent_write_dark_theme(),
+        (true, false) => card_theme::agent_write_light_theme(),
+        (false, true) => card_theme::agent_read_only_dark_theme(),
+        (false, false) => card_theme::agent_read_only_light_theme(),
+    };
+    style_from_theme(definition)
 }
 
 pub(crate) fn browser_card_style() -> CardStyle {
-    let bg = colors::background();
-    let primary = colors::primary();
-    let accent = colors::mix_toward(primary, bg, 0.20);
-    let accent_fg = colors::mix_toward(colors::text_bright(), accent, 0.35);
-    let secondary = colors::text_mid();
-    let background_bottom = colors::mix_toward(bg, primary, 0.09);
-    let background_top = colors::mix_toward(bg, primary, 0.04);
-
-    CardStyle {
-        accent_fg,
-        background_top,
-        background_bottom,
-        text_primary: colors::text(),
-        text_secondary: secondary,
-    }
+    let definition = if is_dark_theme_active() {
+        card_theme::browser_dark_theme()
+    } else {
+        card_theme::browser_light_theme()
+    };
+    style_from_theme(definition)
 }
 
 pub(crate) fn auto_drive_card_style() -> CardStyle {
-    let bg = colors::background();
-    let warning = colors::warning();
-    let accent = colors::mix_toward(warning, bg, 0.18);
-    let accent_fg = colors::mix_toward(colors::text_bright(), accent, 0.35);
-    let secondary = colors::text_mid();
-    let background_bottom = colors::mix_toward(bg, warning, 0.12);
-    let background_top = colors::mix_toward(bg, warning, 0.05);
-
-    CardStyle {
-        accent_fg,
-        background_top,
-        background_bottom,
-        text_primary: colors::text(),
-        text_secondary: secondary,
-    }
+    let definition = if is_dark_theme_active() {
+        card_theme::auto_drive_dark_theme()
+    } else {
+        card_theme::auto_drive_light_theme()
+    };
+    style_from_theme(definition)
 }
 
 pub(crate) fn web_search_card_style() -> CardStyle {
-    let bg = colors::background();
-    let success = colors::success();
-    let accent = colors::mix_toward(success, bg, 0.18);
-    let accent_fg = colors::mix_toward(colors::text_bright(), accent, 0.30);
-    let secondary = colors::text_mid();
-    let background_bottom = colors::mix_toward(bg, success, 0.10);
-    let background_top = colors::mix_toward(bg, success, 0.04);
+    let definition = if is_dark_theme_active() {
+        card_theme::search_dark_theme()
+    } else {
+        card_theme::search_light_theme()
+    };
+    style_from_theme(definition)
+}
 
+fn style_from_theme(definition: CardThemeDefinition) -> CardStyle {
+    let theme = definition.theme;
     CardStyle {
-        accent_fg,
-        background_top,
-        background_bottom,
-        text_primary: colors::text(),
-        text_secondary: secondary,
+        accent_fg: theme.palette.border,
+        text_primary: theme.palette.text,
+        text_secondary: theme.palette.footer,
+        title_text: theme.palette.title,
+        gradient: theme.gradient,
     }
+}
+
+fn is_dark_theme_active() -> bool {
+    let (r, g, b) = colors::color_to_rgb(colors::background());
+    let luminance = (0.2126 * r as f32 + 0.7152 * g as f32 + 0.0722 * b as f32) / 255.0;
+    luminance < 0.5
 }
 
 pub(crate) fn fill_card_background(buf: &mut Buffer, area: Rect, style: &CardStyle) {
-    let height = area.height.max(1);
-    for row in 0..area.height {
-        let color = gradient_color(style, row as usize, height as usize);
-        for col in 0..area.width {
-            let cell = &mut buf[(area.x + col, area.y + row)];
-            cell.set_symbol(" ");
-            cell.set_style(Style::default().bg(color).fg(style.text_primary));
-        }
-    }
-}
-
-pub(crate) fn gradient_color(style: &CardStyle, position: usize, total: usize) -> Color {
-    if total <= 1 {
-        return style.background_bottom;
-    }
-    let t = position as f32 / ((total - 1) as f32);
-    colors::mix_toward(style.background_top, style.background_bottom, t)
+    GradientBackground::render(buf, area, &style.gradient, style.text_primary, None);
 }
 
 pub(crate) fn pad_icon(icon: &str, width: usize) -> String {
@@ -213,7 +183,7 @@ pub(crate) fn truncate_with_ellipsis(text: &str, width: usize) -> String {
     result
 }
 
-pub(crate) fn rows_to_lines(rows: &[CardRow], style: &CardStyle, total_width: u16) -> Vec<Line<'static>> {
+pub(crate) fn rows_to_lines(rows: &[CardRow], _style: &CardStyle, total_width: u16) -> Vec<Line<'static>> {
     if total_width == 0 {
         return Vec::new();
     }
@@ -225,8 +195,7 @@ pub(crate) fn rows_to_lines(rows: &[CardRow], style: &CardStyle, total_width: u1
     };
     let body_width = total_width.saturating_sub(accent_width as u16) as usize;
     let mut lines: Vec<Line<'static>> = Vec::new();
-    let total_rows = rows.len();
-    for (idx, row) in rows.iter().enumerate() {
+    for row in rows.iter() {
         let mut spans: Vec<Span<'static>> = Vec::new();
         if accent_width > 0 {
             let accent_text = pad_icon(row.accent.as_str(), accent_width);
@@ -234,14 +203,12 @@ pub(crate) fn rows_to_lines(rows: &[CardRow], style: &CardStyle, total_width: u1
             spans.push(accent_span);
         }
 
-        let row_bg = row
-            .body_bg
-            .unwrap_or_else(|| gradient_color(style, idx, total_rows.max(1)));
+        let row_bg = row.body_bg;
         let mut used_width = 0;
         for segment in &row.segments {
             let mut seg_style = segment.style;
-            if segment.inherit_background {
-                seg_style = seg_style.bg(row_bg);
+            if let (true, Some(bg)) = (segment.inherit_background, row_bg) {
+                seg_style = seg_style.bg(bg);
             }
             let width = UnicodeWidthStr::width(segment.text.as_str());
             used_width += width;
@@ -249,7 +216,10 @@ pub(crate) fn rows_to_lines(rows: &[CardRow], style: &CardStyle, total_width: u1
         }
         if used_width < body_width {
             let filler = " ".repeat(body_width - used_width);
-            spans.push(Span::styled(filler, Style::default().bg(row_bg)));
+            let filler_style = row_bg
+                .map(|bg| Style::default().bg(bg))
+                .unwrap_or_else(Style::default);
+            spans.push(Span::styled(filler, filler_style));
         }
         lines.push(Line::from(spans));
     }
@@ -262,4 +232,8 @@ pub(crate) fn primary_text_style(style: &CardStyle) -> Style {
 
 pub(crate) fn secondary_text_style(style: &CardStyle) -> Style {
     Style::default().fg(style.text_secondary)
+}
+
+pub(crate) fn title_text_style(style: &CardStyle) -> Style {
+    Style::default().fg(style.title_text)
 }

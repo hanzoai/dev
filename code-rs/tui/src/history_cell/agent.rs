@@ -4,6 +4,7 @@ use super::card_style::{
     primary_text_style,
     rows_to_lines,
     secondary_text_style,
+    title_text_style,
     truncate_with_ellipsis,
     CardRow,
     CardSegment,
@@ -353,7 +354,7 @@ impl AgentRunCell {
     }
 
     fn accent_style(style: &CardStyle) -> Style {
-        let dim = colors::mix_toward(style.accent_fg, colors::text_dim(), 0.85);
+        let dim = colors::mix_toward(style.accent_fg, style.text_secondary, 0.85);
         Style::default().fg(dim)
     }
 
@@ -428,7 +429,7 @@ impl AgentRunCell {
             let truncated = truncate_with_ellipsis(text_value, name_allow.max(1));
             let name_width = string_width(truncated.as_str());
             if !truncated.is_empty() {
-                segments.push(CardSegment::new(truncated, primary_text_style(style)));
+                segments.push(CardSegment::new(truncated, title_text_style(style)));
             }
             available = available.saturating_sub(name_width);
 
@@ -1282,7 +1283,7 @@ impl HistoryCell for AgentRunCell {
     }
 
     fn desired_height(&self, width: u16) -> u16 {
-        let style = agent_card_style();
+        let style = agent_card_style(self.write_enabled);
         let rows = self.build_card_rows(width, &style);
         rows.len().max(1) as u16
     }
@@ -1296,7 +1297,7 @@ impl HistoryCell for AgentRunCell {
             return;
         }
 
-        let style = agent_card_style();
+        let style = agent_card_style(self.write_enabled);
         fill_card_background(buf, area, &style);
         let rows = self.build_card_rows(area.width, &style);
         let lines = rows_to_lines(&rows, &style, area.width);

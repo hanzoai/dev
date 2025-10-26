@@ -4,6 +4,7 @@ use super::card_style::{
     primary_text_style,
     rows_to_lines,
     secondary_text_style,
+    title_text_style,
     truncate_with_ellipsis,
     CardRow,
     CardSegment,
@@ -287,7 +288,7 @@ impl BrowserSessionCell {
     }
 
     fn accent_style(style: &CardStyle) -> Style {
-        let dim = colors::mix_toward(style.accent_fg, colors::text_dim(), 0.85);
+        let dim = colors::mix_toward(style.accent_fg, style.text_secondary, 0.85);
         Style::default().fg(dim)
     }
 
@@ -324,11 +325,11 @@ impl BrowserSessionCell {
             );
         }
 
-        segments.push(CardSegment::new(" ".to_string(), primary_text_style(style)));
+        segments.push(CardSegment::new(" ".to_string(), title_text_style(style)));
         let remaining = body_width.saturating_sub(1);
         let text = truncate_with_ellipsis(self.header_summary_text().as_str(), remaining);
         if !text.is_empty() {
-            segments.push(CardSegment::new(text, primary_text_style(style)));
+            segments.push(CardSegment::new(text, title_text_style(style)));
         }
         CardRow::new(BORDER_TOP.to_string(), Self::accent_style(style), segments, None)
     }
