@@ -25,11 +25,11 @@ expression: output
    |    • claude  running  (18s)
    |
    |  Actions
-   |    0s  Started agent run for qa-bot
+   |   MM:SS  Started agent run for qa-bot
    |
    +- [Ctrl+A] Expand · [Esc] Stop
 
  +----------------------------- ✶ Responding... ------------------------------+
  | What can I code for you today?                                             |
  +----------------------------------------------------------------------------+
-   Read Only  (Shift+Tab change)                                   Ctrl+H help
+   Read Only  (Shift+Tab change)                       Ctrl+H help

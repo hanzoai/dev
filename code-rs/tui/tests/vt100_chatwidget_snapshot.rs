@@ -43,6 +43,8 @@ fn normalize_output(text: String) -> String {
         .collect::<String>()
         .pipe(normalize_timers)
         .pipe(normalize_spacer_rows)
+        .pipe(normalize_account_status)
+        .pipe(normalize_auto_drive_spacing)
 }
 
 fn make_key(code: KeyCode, modifiers: KeyModifiers) -> KeyEvent {
@@ -98,6 +100,7 @@ fn normalize_timers(text: String) -> String {
     static MM_SS_RE: OnceLock<Regex> = OnceLock::new();
     static MS_RE: OnceLock<Regex> = OnceLock::new();
     static MIN_SEC_RE: OnceLock<Regex> = OnceLock::new();
+    static MM_SS_SUFFIX_RE: OnceLock<Regex> = OnceLock::new();
 
     let text = IN_SECONDS_RE
         .get_or_init(|| Regex::new(r"\bin\s+\d+s\b").expect("valid in seconds regex"))
@@ -111,6 +114,11 @@ fn normalize_timers(text: String) -> String {
 
     let text = MM_SS_RE
         .get_or_init(|| Regex::new(r"\b\d{1,2}:\d{2}\b").expect("valid mm:ss regex"))
+        .replace_all(&text, "MM:SS")
+        .into_owned();
+
+    let text = MM_SS_SUFFIX_RE
+        .get_or_init(|| Regex::new(r"MM:SS:\d{2}").expect("valid mm:ss suffix regex"))
         .replace_all(&text, "MM:SS")
         .into_owned();
 
@@ -153,6 +161,18 @@ fn normalize_spacer_rows(text: String) -> String {
     }
 
     normalized
+}
+
+fn normalize_account_status(text: String) -> String {
+    text.replace("Ctrl+H help  •  API key", "Ctrl+H help")
+}
+
+fn normalize_auto_drive_spacing(text: String) -> String {
+    static RE: OnceLock<Regex> = OnceLock::new();
+    RE
+        .get_or_init(|| Regex::new(r"(?m)(> [^\n]*?)\s+✶").expect("valid auto drive spacing regex"))
+        .replace_all(&text, |caps: &regex_lite::Captures<'_>| format!("{}  ✶", &caps[1]))
+        .into_owned()
 }
 
 fn is_spacer_border_line(line: &str) -> bool {

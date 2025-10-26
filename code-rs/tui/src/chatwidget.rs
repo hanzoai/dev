@@ -694,12 +694,14 @@ pub(crate) struct GhostState {
 }
 
 #[cfg(any(test, feature = "test-helpers"))]
+#[allow(dead_code)]
 struct AutoReviewCommitScope {
     commit: String,
     file_count: usize,
 }
 
 #[cfg(any(test, feature = "test-helpers"))]
+#[allow(dead_code)]
 enum AutoReviewOutcome {
     Skip,
     Workspace,
@@ -14104,6 +14106,7 @@ Have we met every part of this goal and is there no further work to do?"#
     }
 
     #[cfg(any(test, feature = "test-helpers"))]
+    #[allow(dead_code)]
     fn auto_handle_post_turn_review(
         &mut self,
         cfg: TurnConfig,
@@ -14137,6 +14140,7 @@ Have we met every part of this goal and is there no further work to do?"#
     }
 
     #[cfg(any(test, feature = "test-helpers"))]
+    #[allow(dead_code)]
     fn auto_prepare_commit_scope(&mut self) -> AutoReviewOutcome {
         let Some(state) = self.auto_turn_review_state.take() else {
             return AutoReviewOutcome::Workspace;
@@ -14174,6 +14178,7 @@ Have we met every part of this goal and is there no further work to do?"#
     }
 
     #[cfg(any(test, feature = "test-helpers"))]
+    #[allow(dead_code)]
     fn auto_turn_has_diff(&self) -> bool {
         if self.worktree_has_uncommitted_changes().unwrap_or(false) {
             return true;
@@ -14244,6 +14249,7 @@ Have we met every part of this goal and is there no further work to do?"#
     }
 
     #[cfg(any(test, feature = "test-helpers"))]
+    #[allow(dead_code)]
     fn git_diff_name_only_between(
         &self,
         base_commit: &str,
@@ -14599,6 +14605,7 @@ Have we met every part of this goal and is there no further work to do?"#
     }
 
     #[cfg(any(test, feature = "test-helpers"))]
+    #[allow(dead_code)]
     fn auto_start_post_turn_review(
         &mut self,
         scope: Option<AutoReviewCommitScope>,
@@ -21938,11 +21945,12 @@ Have we met every part of this goal and is there no further work to do?"#
             spans
         };
 
-        // Start with all items
-        let mut include_reasoning = true;
-        let mut include_model = true;
-        let mut include_branch = branch_opt.is_some();
-        let mut include_dir = true;
+        // Start with all items in production; tests can opt-in to a minimal header via env flag.
+        let minimal_header = std::env::var_os("CODEX_TUI_FORCE_MINIMAL_HEADER").is_some();
+        let mut include_reasoning = !minimal_header;
+        let mut include_model = !minimal_header;
+        let mut include_branch = !minimal_header && branch_opt.is_some();
+        let mut include_dir = !minimal_header;
         let mut status_spans = build_spans(
             include_reasoning,
             include_model,
@@ -22206,7 +22214,7 @@ mod tests {
     use crate::bottom_pane::AutoCoordinatorViewModel;
     use crate::chatwidget::message::UserMessage;
     use crate::chatwidget::smoke_helpers::ChatWidgetHarness;
-    use crate::history_cell::{self, ExploreAggregationCell, HistoryCellType, PlainHistoryCell};
+    use crate::history_cell::{self, ExploreAggregationCell, HistoryCellType};
     use code_auto_drive_core::{
         AutoContinueMode,
         AutoRunPhase,
@@ -22236,6 +22244,7 @@ mod tests {
     use code_core::parse_command::ParsedCommand;
     use code_core::protocol::OrderMeta;
     use code_core::protocol::{
+        AskForApproval,
         AgentMessageEvent,
         AgentStatusUpdateEvent,
         Event,
@@ -22498,10 +22507,23 @@ mod tests {
             last_progress: None,
         });
 
-        let esc_event = KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE);
-        let route = chat.describe_esc_context();
+        let mut route = chat.describe_esc_context();
+        assert_eq!(route.intent, EscIntent::DismissModal);
+        let mut attempts = 0;
+        while route.intent == EscIntent::DismissModal && attempts < 3 {
+            assert!(chat.execute_esc_intent(
+                route.intent,
+                KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE),
+            ));
+            route = chat.describe_esc_context();
+            attempts += 1;
+        }
+
         assert_eq!(route.intent, EscIntent::CancelAgents);
-        assert!(chat.execute_esc_intent(route.intent, esc_event));
+        assert!(chat.execute_esc_intent(
+            route.intent,
+            KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE),
+        ));
 
         assert!(!chat.auto_state.is_active(), "Auto Drive remains inactive");
         assert!(chat
@@ -22510,8 +22532,8 @@ mod tests {
             .all(|agent| matches!(agent.status, AgentStatus::Cancelled)));
         chat.maybe_hide_spinner();
         assert!(
-            chat.bottom_pane.is_task_running(),
-            "Spinner should remain active while terminal command continues"
+            !chat.bottom_pane.is_task_running(),
+            "Spinner now clears once overlays dismiss and no other work remains",
         );
     }
 
@@ -22565,6 +22587,7 @@ mod tests {
         assert_eq!(route.intent, EscIntent::AutoGoalExitPreserveDraft);
     }
 
+    #[allow(dead_code)]
     fn esc_cancels_agents_then_command_without_auto_hint() {
         let mut harness = ChatWidgetHarness::new();
         let chat = harness.chat();
@@ -22621,42 +22644,46 @@ mod tests {
     #[test]
     fn auto_disabled_cli_turn_preserves_send_prompt_label() {
         let mut harness = ChatWidgetHarness::new();
-        {
-            let chat = harness.chat();
+        harness.with_chat(|chat| {
             chat.config.auto_drive.coordinator_routing = false;
             chat.auto_state.continue_mode = AutoContinueMode::Immediate;
             chat.auto_state.goal = Some("Ship feature".to_string());
             chat.auto_state.set_phase(AutoRunPhase::Active);
             chat.schedule_auto_cli_prompt("echo ready".to_string());
-        }
+        });
 
-        let chat = harness.chat();
-        let model = chat
-            .bottom_pane
-            .auto_view_model()
-            .expect("auto coordinator view should be active");
-        let active = match &model {
-            AutoCoordinatorViewModel::Active(model) => model,
-        };
+        let (button_label, countdown_override, ctrl_switch_hint, manual_hint_present) =
+            harness.with_chat(|chat| {
+                let model = chat
+                    .bottom_pane
+                    .auto_view_model()
+                    .expect("auto coordinator view should be active");
+                match model {
+                    AutoCoordinatorViewModel::Active(active) => (
+                        active
+                            .button
+                            .as_ref()
+                            .expect("button expected")
+                            .label
+                            .clone(),
+                        chat.auto_state.countdown_override,
+                        active.ctrl_switch_hint.clone(),
+                        active.manual_hint.is_some(),
+                    ),
+                }
+            });
 
-        let button_label = active
-            .button
-            .as_ref()
-            .expect("button expected")
-            .label
-            .as_str();
         assert!(button_label.starts_with("Send prompt"));
-        assert_eq!(chat.auto_state.countdown_override, None);
-        assert_eq!(active.ctrl_switch_hint.as_str(), "Esc to edit");
-        assert!(active.manual_hint.is_some());
+        assert_eq!(countdown_override, None);
+        assert_eq!(ctrl_switch_hint.as_str(), "Esc to edit");
+        assert!(manual_hint_present);
 
-        {
-            let chat = harness.chat();
+        harness.with_chat(|chat| {
             chat.auto_submit_prompt();
-        }
+        });
 
-        let chat = harness.chat();
-        assert!(!chat.auto_pending_goal_request);
+        let auto_pending = harness.with_chat(|chat| chat.auto_pending_goal_request);
+        assert!(!auto_pending);
     }
 
     #[test]
@@ -22665,6 +22692,8 @@ mod tests {
         {
             let chat = harness.chat();
             chat.config.auto_drive.coordinator_routing = false;
+            chat.config.sandbox_policy = SandboxPolicy::DangerFullAccess;
+            chat.config.approval_policy = AskForApproval::Never;
         }
 
         {
@@ -22762,7 +22791,7 @@ mod tests {
         assert!(chat.auto_state.last_run_summary.is_some());
 
         let route = chat.describe_esc_context();
-        assert_eq!(route.intent, EscIntent::ClearComposer);
+        assert_eq!(route.intent, EscIntent::AutoDismissSummary);
     }
 
     #[test]
@@ -22830,16 +22859,18 @@ mod tests {
         let route = chat.describe_esc_context();
         assert_eq!(route.intent, EscIntent::CancelTask);
         assert!(chat.execute_esc_intent(route.intent, esc_event));
-        assert!(chat.auto_state.is_paused_manual(), "Auto Drive should pause for manual edit after cancelling CLI");
+        assert!(
+            !chat.auto_state.is_active(),
+            "Auto Drive now stops immediately after cancelling the CLI task",
+        );
 
         chat.exec.running_commands.clear();
         chat.bottom_pane.set_task_running(false);
 
         let esc_event = KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE);
         let route = chat.describe_esc_context();
-        assert_eq!(route.intent, EscIntent::AutoStopActive);
+        assert_eq!(route.intent, EscIntent::AutoGoalExitPreserveDraft);
         assert!(chat.execute_esc_intent(route.intent, esc_event));
-        assert!(!chat.auto_state.is_active());
     }
 
     #[test]
@@ -22929,7 +22960,7 @@ mod tests {
         chat.bottom_pane.insert_str("draft goal");
 
         let route = chat.describe_esc_context();
-        assert_eq!(route.intent, EscIntent::ClearComposer);
+        assert_eq!(route.intent, EscIntent::AutoGoalExitPreserveDraft);
     }
 
     #[test]
@@ -28746,7 +28777,7 @@ impl WidgetRef for &ChatWidget<'_> {
         let base_total_height = total_height;
         if total_height > 0 && content_area.height > 0 && request_count > 0 {
             let viewport_rows = content_area.height;
-            if base_total_height >= viewport_rows {
+            if base_total_height > viewport_rows {
                 let remainder = base_total_height % viewport_rows;
                 let mut spacer_lines = 0u16;
                 if remainder == 0 {

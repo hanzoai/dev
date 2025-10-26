@@ -114,6 +114,12 @@ impl AutoCoordinatorView {
         self.style = style;
     }
 
+    #[cfg(any(test, feature = "test-helpers"))]
+    #[allow(dead_code)]
+    pub(crate) fn model(&self) -> &AutoCoordinatorViewModel {
+        &self.model
+    }
+
     pub(crate) fn composer_visible(&self) -> bool {
         matches!(
             &self.model,

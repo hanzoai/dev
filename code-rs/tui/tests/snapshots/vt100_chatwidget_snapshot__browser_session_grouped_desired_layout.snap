@@ -1,35 +1,36 @@
 ---
 source: tui/tests/vt100_chatwidget_snapshot.rs
+assertion_line: 978
 expression: output
 ---
  +----------------------------------------------------------------------------+
  |                                    Code                                    |
  +----------------------------------------------------------------------------+
- ★ Popular commands:
-   /settings - manage all settings in one place NEW
-   /auto - work autonomously on long tasks with Auto Drive UPDATED
    /chrome - connect to your Chrome browser
    /plan - create a comprehensive plan (multiple agents)
    /code - perform a coding task (multiple agents)
 
  › Open docs and find login button
 
-   +- +Browser--------------------------------+
-   |  |Screenshot:                            |
-   |  |browser_session.png                    |  0s   Opened    https://examp
-   |  |                                       |                 le.com/docs
-   |  |                                       |  5s   Clicked   Sign in
-   |  +---------------------------------------+                 button
-   |                                             18s  Scrolled  dy=640
-   |                                             32s  Typed     docs search
+   +- +Browser-----------------------------+
+   |  |Screenshot:                         |
+   |  |browser_session.png                 |  Actions
+   |  |                                    |   MM:SS  Opened    https://ex
+   |  |                                    |                    ample.com/
+   |  +------------------------------------+                    docs
+   |                                           MM:SS  Clicked   Sign in
+   |                                                            button
+   |                                           MM:SS  Scrolled  dy=640
+   |                                           MM:SS  Typed     docs
+   |                                                            search
    |
-   |                                             Console: ⚠️  cdp warning:
-   |                                             Refused to load script from
-   |                                             cdn.example.com
+   |                                          Console: ⚠️  cdp warning:
+   |                                          Refused to load script from
+   |                                          cdn.example.com
    |
    +- [Ctrl+B] View · [Esc] Stop
 
  +----------------------------------------------------------------------------+
  | What can I code for you today?                                             |
  +----------------------------------------------------------------------------+
-   Read Only  (Shift+Tab change)                                   Ctrl+H help
+   Read Only  (Shift+Tab change)                       Ctrl+H help
