@@ -585,9 +585,6 @@ impl AutoCoordinatorView {
             .fg(colors::text_dim())
             .add_modifier(Modifier::ITALIC);
         let prompt_style = Style::default().fg(colors::text());
-        let placeholder_style = Style::default()
-            .fg(colors::text_dim())
-            .add_modifier(Modifier::ITALIC);
 
         let context = model
             .cli_context
@@ -642,14 +639,7 @@ impl AutoCoordinatorView {
         }
 
         if !inserted_prompt {
-            if inserted_context {
-                add_segments("", prompt_style, &mut rows);
-            }
-            add_segments(
-                "(Coordinator did not supply a prompt)",
-                placeholder_style,
-                &mut rows,
-            );
+            return Vec::new();
         }
 
         rows
@@ -871,7 +861,7 @@ impl AutoCoordinatorView {
             .map(|value| value.trim())
             .filter(|value| !value.is_empty());
 
-        if prompt.is_none() && context.is_none() {
+        if prompt.is_none() {
             return None;
         }
 
@@ -879,9 +869,6 @@ impl AutoCoordinatorView {
             .fg(colors::text_dim())
             .add_modifier(Modifier::ITALIC);
         let prompt_style = Style::default().fg(colors::text());
-        let placeholder_style = Style::default()
-            .fg(colors::text_dim())
-            .add_modifier(Modifier::ITALIC);
         let indent = "  ";
 
         let mut lines: Vec<Line<'static>> = Vec::new();
@@ -915,14 +902,6 @@ impl AutoCoordinatorView {
                     ]));
                 }
             }
-        } else {
-            lines.push(Line::from(vec![
-                Span::raw(indent),
-                Span::styled(
-                    "(Coordinator did not supply a prompt)".to_string(),
-                    placeholder_style,
-                ),
-            ]));
         }
 
         Some(lines)

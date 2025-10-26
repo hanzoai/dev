@@ -2517,7 +2517,13 @@ impl ChatWidget<'_> {
         let any_streaming = self.stream.is_write_cycle_active();
         let any_agents_active = self.agents_are_actively_running();
         let any_tasks_active = !self.active_task_ids.is_empty();
-        if !(any_tools_running || any_streaming || any_agents_active || any_tasks_active) {
+        let terminal_running = self.terminal_is_running();
+        if !(any_tools_running
+            || any_streaming
+            || any_agents_active
+            || any_tasks_active
+            || terminal_running)
+        {
             self.bottom_pane.set_task_running(false);
             self.bottom_pane.update_status_text(String::new());
         }
@@ -22318,13 +22324,56 @@ mod tests {
             .active_agents
             .iter()
             .all(|agent| matches!(agent.status, AgentStatus::Cancelled)));
-
         let esc_event = KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE);
         let route = chat.describe_esc_context();
         assert_eq!(route.intent, EscIntent::AutoStopActive);
         assert!(chat.execute_esc_intent(route.intent, esc_event));
         assert!(!chat.auto_state.is_active());
         assert!(chat.auto_state.last_run_summary.is_none());
+    }
+
+    #[test]
+    fn cancel_agents_preserves_spinner_for_running_terminal_when_auto_inactive() {
+        let mut harness = ChatWidgetHarness::new();
+        let chat = harness.chat();
+
+        let terminal_launch = TerminalLaunch {
+            id: 42,
+            title: "Terminal".to_string(),
+            command: vec!["sleep".to_string(), "10".to_string()],
+            command_display: "sleep 10".to_string(),
+            controller: None,
+            auto_close_on_success: false,
+            start_running: true,
+        };
+        chat.terminal_open(&terminal_launch);
+
+        chat.active_agents.push(AgentInfo {
+            id: "agent-1".to_string(),
+            name: "Agent 1".to_string(),
+            status: AgentStatus::Running,
+            batch_id: Some("batch-1".to_string()),
+            model: None,
+            result: None,
+            error: None,
+            last_progress: None,
+        });
+
+        let esc_event = KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE);
+        let route = chat.describe_esc_context();
+        assert_eq!(route.intent, EscIntent::CancelAgents);
+        assert!(chat.execute_esc_intent(route.intent, esc_event));
+
+        assert!(!chat.auto_state.is_active(), "Auto Drive remains inactive");
+        assert!(chat
+            .active_agents
+            .iter()
+            .all(|agent| matches!(agent.status, AgentStatus::Cancelled)));
+        chat.maybe_hide_spinner();
+        assert!(
+            chat.bottom_pane.is_task_running(),
+            "Spinner should remain active while terminal command continues"
+        );
     }
 
     #[test]
