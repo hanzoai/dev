@@ -3,6 +3,7 @@ use super::card_style::{
     primary_text_style,
     rows_to_lines,
     secondary_text_style,
+    title_text_style,
     truncate_with_ellipsis,
     web_search_card_style,
     CardRow,
@@ -175,7 +176,8 @@ impl WebSearchSessionCell {
     }
 
     fn accent_style(style: &CardStyle) -> Style {
-        Style::default().fg(style.accent_fg)
+        let dim = colors::mix_toward(style.accent_fg, style.text_secondary, 0.85);
+        Style::default().fg(dim)
     }
 
     fn build_card_rows(&self, width: u16, style: &CardStyle) -> Vec<CardRow> {
@@ -209,15 +211,15 @@ impl WebSearchSessionCell {
         let total = format!("{title_text}{status_text}");
 
         if UnicodeWidthStr::width(total.as_str()) <= body_width {
-            let mut primary = primary_text_style(style);
-            primary = primary.add_modifier(Modifier::BOLD);
-            segments.push(CardSegment::new(title_text.to_string(), primary));
+            let mut title_style = title_text_style(style);
+            title_style = title_style.add_modifier(Modifier::BOLD);
+            segments.push(CardSegment::new(title_text.to_string(), title_style));
             segments.push(CardSegment::new(status_text, self.status_style()));
         } else {
-            let mut primary = primary_text_style(style);
-            primary = primary.add_modifier(Modifier::BOLD);
+            let mut title_style = title_text_style(style);
+            title_style = title_style.add_modifier(Modifier::BOLD);
             let display = truncate_with_ellipsis(title_text, body_width);
-            segments.push(CardSegment::new(display, primary));
+            segments.push(CardSegment::new(display, title_style));
         }
 
         CardRow::new(
