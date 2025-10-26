@@ -23,6 +23,7 @@ use crate::config_types::ReasoningSummary as ReasoningSummaryConfig;
 use crate::config_types::TextVerbosity as TextVerbosityConfig;
 use crate::message_history::HistoryEntry;
 use crate::model_provider_info::ModelProviderInfo;
+use crate::client_common::TextFormat;
 use crate::parse_command::ParsedCommand;
 use crate::plan_tool::UpdatePlanArgs;
 
@@ -114,6 +115,16 @@ pub enum Op {
     /// This server sends no corresponding Event
     Interrupt,
 
+    /// Cancel running agents immediately without waiting for the model to issue a tool call.
+    CancelAgents {
+        /// Agent batch identifiers to cancel.
+        #[serde(default)]
+        batch_ids: Vec<String>,
+        /// Specific agent identifiers to cancel when no batch is available.
+        #[serde(default)]
+        agent_ids: Vec<String>,
+    },
+
     /// Input from the user
     UserInput {
         /// User input items, see `InputItem`
@@ -125,6 +136,11 @@ pub enum Op {
     QueueUserInput {
         /// User input items, see `InputItem`
         items: Vec<InputItem>,
+    },
+
+    /// Set a one-off text format to apply on the next turn.
+    SetNextTextFormat {
+        format: TextFormat,
     },
 
     /// Approve a command execution

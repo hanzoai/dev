@@ -15,6 +15,7 @@ use tokio::sync::RwLock;
 use tokio::sync::mpsc;
 use tokio::task::JoinHandle;
 
+use crate::agent_defaults::{agent_model_spec, default_params_for};
 use crate::config_types::AgentConfig;
 use crate::openai_tools::JsonSchema;
 use crate::openai_tools::OpenAiTool;
@@ -469,6 +470,7 @@ async fn execute_agent(agent_id: String, config: Option<AgentConfig>) {
         .await;
 
     let model = agent.model.clone();
+    let model_spec = agent_model_spec(&model);
     let prompt = agent.prompt.clone();
     let read_only = agent.read_only;
     let context = agent.context.clone();
@@ -498,6 +500,17 @@ async fn execute_agent(agent_id: String, config: Option<AgentConfig>) {
     }
 
     // Setup working directory and execute
+    let gating_error_message = |spec: &crate::agent_defaults::AgentModelSpec| {
+        if let Some(flag) = spec.gating_env {
+            format!(
+                "agent model '{}' is disabled; set {}=1 to enable it",
+                spec.slug, flag
+            )
+        } else {
+            format!("agent model '{}' is disabled", spec.slug)
+        }
+    };
+
     let result = if !read_only {
         // Check git and setup worktree for non-read-only mode
         match get_git_root().await {
@@ -529,8 +542,35 @@ async fn execute_agent(agent_id: String, config: Option<AgentConfig>) {
                         drop(manager);
 
                         // Execute with full permissions in the worktree
-                        if model.to_ascii_lowercase() == "cloud" && config.is_none() {
-                            execute_cloud_built_in_streaming(&agent_id, &full_prompt, Some(worktree_path), config.clone()).await
+                        let use_built_in_cloud = config.is_none()
+                            && model_spec
+                                .map(|spec| spec.cli.eq_ignore_ascii_case("cloud"))
+                                .unwrap_or_else(|| model.eq_ignore_ascii_case("cloud"));
+
+                        if use_built_in_cloud {
+                            if let Some(spec) = model_spec {
+                                if !spec.is_enabled() {
+                                    Err(gating_error_message(spec))
+                                } else {
+                                    execute_cloud_built_in_streaming(
+                                        &agent_id,
+                                        &full_prompt,
+                                        Some(worktree_path),
+                                        config.clone(),
+                                        spec.slug,
+                                    )
+                                    .await
+                                }
+                            } else {
+                                execute_cloud_built_in_streaming(
+                                    &agent_id,
+                                    &full_prompt,
+                                    Some(worktree_path),
+                                    config.clone(),
+                                    model.as_str(),
+                                )
+                                .await
+                            }
                         } else {
                             execute_model_with_permissions(
                                 &model,
@@ -553,8 +593,21 @@ async fn execute_agent(agent_id: String, config: Option<AgentConfig>) {
             "{}\n\n[Running in read-only mode - no modifications allowed]",
             full_prompt
         );
-        if model.to_ascii_lowercase() == "cloud" && config.is_none() {
-            execute_cloud_built_in_streaming(&agent_id, &full_prompt, None, config).await
+        let use_built_in_cloud = config.is_none()
+            && model_spec
+                .map(|spec| spec.cli.eq_ignore_ascii_case("cloud"))
+                .unwrap_or_else(|| model.eq_ignore_ascii_case("cloud"));
+
+        if use_built_in_cloud {
+            if let Some(spec) = model_spec {
+                if !spec.is_enabled() {
+                    Err(gating_error_message(spec))
+                } else {
+                    execute_cloud_built_in_streaming(&agent_id, &full_prompt, None, config, spec.slug).await
+                }
+            } else {
+                execute_cloud_built_in_streaming(&agent_id, &full_prompt, None, config, model.as_str()).await
+            }
         } else {
             execute_model_with_permissions(&model, &full_prompt, true, None, config).await
         }
@@ -613,9 +666,35 @@ async fn execute_model_with_permissions(
         }
     }
 
-    // Use config command if provided, otherwise use model name
+    let spec_opt = agent_model_spec(model)
+        .or_else(|| config.as_ref().and_then(|cfg| agent_model_spec(&cfg.name)))
+        .or_else(|| config.as_ref().and_then(|cfg| agent_model_spec(&cfg.command)));
+
+    if let Some(spec) = spec_opt {
+        if !spec.is_enabled() {
+            if let Some(flag) = spec.gating_env {
+                return Err(format!(
+                    "agent model '{}' is disabled; set {}=1 to enable it",
+                    spec.slug, flag
+                ));
+            }
+            return Err(format!("agent model '{}' is disabled", spec.slug));
+        }
+    }
+
+    // Use config command if provided, otherwise fall back to the spec CLI (or the
+    // lowercase model string).
     let command = if let Some(ref cfg) = config {
-        cfg.command.clone()
+        let cmd = cfg.command.trim();
+        if !cmd.is_empty() {
+            cfg.command.clone()
+        } else if let Some(spec) = spec_opt {
+            spec.cli.to_string()
+        } else {
+            cfg.name.clone()
+        }
+    } else if let Some(spec) = spec_opt {
+        spec.cli.to_string()
     } else {
         model.to_lowercase()
     };
@@ -625,7 +704,38 @@ async fn execute_model_with_permissions(
     // `codex` binary to be present on PATH. This improves portability,
     // especially on Windows where global shims may be missing.
     let model_lower = model.to_lowercase();
-    let mut cmd = if ((model_lower == "code" || model_lower == "codex") || model_lower == "cloud") && config.is_none() {
+    let command_lower = command.to_ascii_lowercase();
+    fn is_known_family(s: &str) -> bool {
+        matches!(s, "claude" | "gemini" | "qwen" | "codex" | "code" | "cloud")
+    }
+
+    let slug_for_defaults = spec_opt.map(|spec| spec.slug).unwrap_or(model);
+    let spec_family = spec_opt.map(|spec| spec.family);
+    let family = if let Some(spec_family) = spec_family {
+        spec_family
+    } else if is_known_family(model_lower.as_str()) {
+        model_lower.as_str()
+    } else if is_known_family(command_lower.as_str()) {
+        command_lower.as_str()
+    } else {
+        model_lower.as_str()
+    };
+
+    let mut use_current_exe = false;
+
+    if matches!(family, "code" | "codex" | "cloud") {
+        if config.is_none() {
+            if !command_exists(&command) {
+                use_current_exe = true;
+            }
+        } else if let Some(ref cfg) = config {
+            if cfg.command.trim().is_empty() {
+                use_current_exe = true;
+            }
+        }
+    }
+
+    let mut cmd = if use_current_exe {
         match std::env::current_exe() {
             Ok(path) => Command::new(path),
             Err(e) => return Err(format!("Failed to resolve current executable: {}", e)),
@@ -646,71 +756,74 @@ async fn execute_model_with_permissions(
                 cmd.env(key, value);
             }
         }
+    }
 
-        // Add any configured args first, preferring mode‑specific values
+    let mut final_args: Vec<String> = Vec::new();
+
+    if let Some(ref cfg) = config {
         if read_only {
             if let Some(ro) = cfg.args_read_only.as_ref() {
-                for arg in ro { cmd.arg(arg); }
+                final_args.extend(ro.iter().cloned());
             } else {
-                for arg in &cfg.args { cmd.arg(arg); }
+                final_args.extend(cfg.args.iter().cloned());
             }
         } else if let Some(w) = cfg.args_write.as_ref() {
-            for arg in w { cmd.arg(arg); }
+            final_args.extend(w.iter().cloned());
         } else {
-            for arg in &cfg.args { cmd.arg(arg); }
+                final_args.extend(cfg.args.iter().cloned());
         }
     }
 
-    // Build command based on model and permissions
-    // Determine agent family for behavior (claude/gemini/qwen/code/codex/cloud).
-    // Prefer the model name; if it's not a known family, fall back to the configured
-    // command so aliases like command = "cloud-agent" still get cloud behavior.
-    let command_lower = command.to_ascii_lowercase();
-    fn is_known_family(s: &str) -> bool {
-        matches!(s, "claude" | "gemini" | "qwen" | "codex" | "code" | "cloud")
-    }
-    let family = if is_known_family(model_lower.as_str()) {
-        model_lower.as_str()
-    } else if is_known_family(command_lower.as_str()) {
-        command_lower.as_str()
+    strip_model_flags(&mut final_args);
+
+    let spec_model_args: Vec<String> = if let Some(spec) = spec_opt {
+        if matches!(spec.family, "code" | "codex" | "cloud") && use_current_exe {
+            Vec::new()
+        } else {
+            spec.model_args.iter().map(|arg| (*arg).to_string()).collect()
+        }
     } else {
-        model_lower.as_str()
+        Vec::new()
     };
 
     let built_in_cloud = family == "cloud" && config.is_none();
     match family {
         "claude" | "gemini" | "qwen" => {
-            let mut defaults = crate::agent_defaults::default_params_for(family, read_only);
-            defaults.push("-p".into());
-            defaults.push(prompt.to_string());
-            cmd.args(defaults);
+            let mut defaults = default_params_for(slug_for_defaults, read_only);
+            strip_model_flags(&mut defaults);
+            final_args.extend(defaults);
+            final_args.extend(spec_model_args.iter().cloned());
+            final_args.push("-p".into());
+            final_args.push(prompt.to_string());
         }
         "codex" | "code" => {
-            // If config provided explicit args for this mode, do not append defaults.
-            let have_mode_args = config.as_ref().map(|c| if read_only { c.args_read_only.is_some() } else { c.args_write.is_some() }).unwrap_or(false);
-            if have_mode_args {
-                cmd.arg(prompt);
-            } else {
-                let mut defaults = crate::agent_defaults::default_params_for(family, read_only);
-                defaults.push(prompt.to_string());
-                cmd.args(defaults);
-            }
-        }
-        // Cloud agent: built-in path uses `code cloud submit <prompt>`; external
-        // command path falls back to positional prompt with optional defaults.
-        "cloud" => {
-            if built_in_cloud { cmd.args(["cloud", "submit", "--wait"]); }
             let have_mode_args = config
                 .as_ref()
                 .map(|c| if read_only { c.args_read_only.is_some() } else { c.args_write.is_some() })
                 .unwrap_or(false);
-            if have_mode_args {
-                cmd.arg(prompt);
-            } else {
-                let mut defaults = crate::agent_defaults::default_params_for(family, read_only);
-                defaults.push(prompt.to_string());
-                cmd.args(defaults);
+            if !have_mode_args {
+                let mut defaults = default_params_for(slug_for_defaults, read_only);
+                strip_model_flags(&mut defaults);
+                final_args.extend(defaults);
             }
+            final_args.extend(spec_model_args.iter().cloned());
+            final_args.push(prompt.to_string());
+        }
+        "cloud" => {
+            if built_in_cloud {
+                final_args.extend(["cloud", "submit", "--wait"].map(String::from));
+            }
+            let have_mode_args = config
+                .as_ref()
+                .map(|c| if read_only { c.args_read_only.is_some() } else { c.args_write.is_some() })
+                .unwrap_or(false);
+            if !have_mode_args {
+                let mut defaults = default_params_for(slug_for_defaults, read_only);
+                strip_model_flags(&mut defaults);
+                final_args.extend(defaults);
+            }
+            final_args.extend(spec_model_args.iter().cloned());
+            final_args.push(prompt.to_string());
         }
         _ => { return Err(format!("Unknown model: {}", model)); }
     }
@@ -789,9 +902,6 @@ async fn execute_model_with_permissions(
         // No OS sandbox.
 
         // Resolve the command and args we prepared above into Vec<String> for spawn helpers.
-        // Intentionally build args fresh for sandbox helpers; `Command` does not expose argv.
-        // Rebuild the invocation as `command` + args set above.
-        // We reconstruct to run under our sandbox helpers.
         let program = if ((model_lower == "code" || model_lower == "codex") || model_lower == "cloud") && config.is_none() {
             // Use current exe path
             std::env::current_exe().map_err(|e| format!("Failed to resolve current executable: {}", e))?
@@ -799,59 +909,7 @@ async fn execute_model_with_permissions(
             // Use program name; PATH resolution will be handled by spawn helper with provided env.
             std::path::PathBuf::from(&command)
         };
-
-        // Rebuild args exactly as above
-        let mut args: Vec<String> = Vec::new();
-        // Include configured args (mode‑specific preferred) first, to mirror the
-        // immediate-Command path above.
-        if let Some(ref cfg) = config {
-            if read_only {
-                if let Some(ro) = cfg.args_read_only.as_ref() {
-                    args.extend(ro.iter().cloned());
-                } else {
-                    args.extend(cfg.args.iter().cloned());
-                }
-            } else if let Some(w) = cfg.args_write.as_ref() {
-                args.extend(w.iter().cloned());
-            } else {
-                args.extend(cfg.args.iter().cloned());
-            }
-        }
-
-        let built_in_cloud = family == "cloud" && config.is_none();
-        match family {
-            "claude" | "gemini" | "qwen" => {
-                let mut defaults = crate::agent_defaults::default_params_for(family, read_only);
-                defaults.push("-p".into());
-                defaults.push(prompt.to_string());
-                args.extend(defaults);
-            }
-            "codex" | "code" => {
-                let have_mode_args = config.as_ref().map(|c| if read_only { c.args_read_only.is_some() } else { c.args_write.is_some() }).unwrap_or(false);
-                if have_mode_args {
-                    args.push(prompt.to_string());
-                } else {
-                    let mut defaults = crate::agent_defaults::default_params_for(family, read_only);
-                    defaults.push(prompt.to_string());
-                    args.extend(defaults);
-                }
-            }
-            "cloud" => {
-                if built_in_cloud { args.extend(["cloud", "submit", "--wait"].map(String::from)); }
-                let have_mode_args = config
-                    .as_ref()
-                    .map(|c| if read_only { c.args_read_only.is_some() } else { c.args_write.is_some() })
-                    .unwrap_or(false);
-                if have_mode_args {
-                    args.push(prompt.to_string());
-                } else {
-                    let mut defaults = crate::agent_defaults::default_params_for(family, read_only);
-                    defaults.push(prompt.to_string());
-                    args.extend(defaults);
-                }
-            }
-            _ => {}
-        }
+        let args = final_args.clone();
 
         // Always run agents without OS sandboxing.
         let sandbox_type = crate::exec::SandboxType::None;
@@ -889,6 +947,7 @@ async fn execute_model_with_permissions(
         }
     } else {
         // Read-only path: use prior behavior
+        cmd.args(final_args.clone());
         match cmd.output().await {
             Ok(o) => o,
             Err(e) => {
@@ -903,11 +962,7 @@ async fn execute_model_with_permissions(
                         model, e, e2
                     )),
                 };
-                if read_only {
-                    fb.args(["-s", "read-only", "-a", "never", "exec", "--skip-git-repo-check", prompt]);
-                } else {
-                    fb.args(["-s", "workspace-write", "-a", "never", "exec", "--skip-git-repo-check", prompt]);
-                }
+                fb.args(final_args.clone());
                 fb.output().await.map_err(|e2| {
                     format!(
                         "Failed to execute {} ({}). Built-in fallback also failed: {}",
@@ -934,6 +989,25 @@ async fn execute_model_with_permissions(
     }
 }
 
+fn strip_model_flags(args: &mut Vec<String>) {
+    let mut i = 0;
+    while i < args.len() {
+        let lowered = args[i].to_ascii_lowercase();
+        if lowered == "--model" || lowered == "-m" {
+            args.remove(i);
+            if i < args.len() {
+                args.remove(i);
+            }
+            continue;
+        }
+        if lowered.starts_with("--model=") || lowered.starts_with("-m=") {
+            args.remove(i);
+            continue;
+        }
+        i += 1;
+    }
+}
+
 /// Execute the built-in cloud agent via the current `code` binary, streaming
 /// stderr lines into the HUD as progress and returning final stdout. Applies a
 /// modest truncation cap to very large outputs to keep UI responsive.
@@ -942,16 +1016,16 @@ async fn execute_cloud_built_in_streaming(
     prompt: &str,
     working_dir: Option<std::path::PathBuf>,
     _config: Option<AgentConfig>,
+    model_slug: &str,
 ) -> Result<String, String> {
     // Program and argv
     let program = std::env::current_exe()
         .map_err(|e| format!("Failed to resolve current executable: {}", e))?;
-    let args: Vec<String> = vec![
-        "cloud".into(),
-        "submit".into(),
-        "--wait".into(),
-        prompt.into(),
-    ];
+    let mut args: Vec<String> = vec!["cloud".into(), "submit".into(), "--wait".into()];
+    if let Some(spec) = agent_model_spec(model_slug) {
+        args.extend(spec.model_args.iter().map(|arg| (*arg).to_string()));
+    }
+    args.push(prompt.into());
 
     // Baseline env mirrors behavior in execute_model_with_permissions
     let env: std::collections::HashMap<String, String> = std::env::vars().collect();
@@ -1109,7 +1183,7 @@ pub fn create_agent_tool(allowed_models: &[String]) -> OpenAiTool {
                 },
             }),
             description: Some(
-                "Optional array of model names (e.g., ['claude','gemini','qwen','code','cloud'])".to_string(),
+                "Optional array of model names (e.g., ['claude-sonnet-4.5','code-gpt-5-codex','gemini-2.5-pro'])".to_string(),
             ),
         },
     );
@@ -1133,10 +1207,18 @@ pub fn create_agent_tool(allowed_models: &[String]) -> OpenAiTool {
         },
     );
     create_properties.insert(
+        "write".to_string(),
+        JsonSchema::Boolean {
+            description: Some(
+                "Enable isolated write worktrees for each agent (default: true). Set false to keep the agent read-only.".to_string(),
+            ),
+        },
+    );
+    create_properties.insert(
         "read_only".to_string(),
         JsonSchema::Boolean {
             description: Some(
-                "When true, run in read-only mode (default: false)".to_string(),
+                "Deprecated: inverse of `write`. Prefer setting `write` instead.".to_string(),
             ),
         },
     );
@@ -1304,6 +1386,9 @@ pub struct RunAgentParams {
     pub context: Option<String>,
     pub output: Option<String>,
     pub files: Option<Vec<String>>,
+    #[serde(default)]
+    pub write: Option<bool>,
+    #[serde(default)]
     pub read_only: Option<bool>,
     pub name: Option<String>,
 }
@@ -1316,6 +1401,9 @@ pub struct AgentCreateOptions {
     pub context: Option<String>,
     pub output: Option<String>,
     pub files: Option<Vec<String>>,
+    #[serde(default)]
+    pub write: Option<bool>,
+    #[serde(default)]
     pub read_only: Option<bool>,
     pub name: Option<String>,
 }
@@ -1323,6 +1411,7 @@ pub struct AgentCreateOptions {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AgentIdentifierOptions {
     pub agent_id: Option<String>,
+    pub batch_id: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -1516,11 +1605,13 @@ mod tests {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct CheckAgentStatusParams {
     pub agent_id: String,
+    pub batch_id: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct GetAgentResultParams {
     pub agent_id: String,
+    pub batch_id: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

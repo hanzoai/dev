@@ -93,6 +93,20 @@ The command execution flow in Codex follows an event-driven pattern:
 
 This architecture separates concerns between execution logic (core), UI state management (chatwidget), and rendering (history_cell).
 
+### Auto Drive Escape Handling
+
+- All Auto Drive escape routing lives in `code-rs/tui/src/chatwidget.rs`. The
+  `ChatWidget::auto_should_handle_global_esc` helper decides whether the global
+  Esc handler in `app.rs` should defer to Auto Drive, and
+  `ChatWidget::handle_key_event` owns the actual stop / pause behaviour. When
+  you need to tweak Esc semantics, update those two locations together.
+- The approval pane must *never* swallow Esc. `code-rs/tui/src/bottom_pane/auto_coordinator_view.rs`
+  intentionally lets Esc (and the other approval shortcuts) bubble back to the
+  chat widget; keep this contract intact when editing the view layer.
+- Avoid adding additional Esc handlers elsewhere for Auto Drive flows. Doing
+  so breaks the modal-first ordering in `app.rs` and prevents users from
+  reliably stopping a run.
+
 ## Writing New UI Regression Tests
 
 - Start with `make_chatwidget_manual()` (or `make_chatwidget_manual_with_sender()`) to build a `ChatWidget` in isolation with in-memory channels.

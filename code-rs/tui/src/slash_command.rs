@@ -67,6 +67,7 @@ pub enum SlashCommand {
     Update,
     Notifications,
     Theme,
+    Settings,
     Model,
     Reasoning,
     Verbosity,
@@ -96,7 +97,7 @@ impl SlashCommand {
     /// User-visible description shown in the popup.
     pub fn description(self) -> &'static str {
         match self {
-            SlashCommand::Chrome => "connect to Chrome",
+            SlashCommand::Chrome => "connect to your Chrome browser",
             SlashCommand::Browser => "open internal browser",
             SlashCommand::Resume => "resume a past session for this folder",
             SlashCommand::Plan => "create a comprehensive plan (multiple agents)",
@@ -115,13 +116,14 @@ impl SlashCommand {
             SlashCommand::Mention => "mention a file",
             SlashCommand::Cmd => "run a project command",
             SlashCommand::Status => "show current session configuration and token usage",
-            SlashCommand::Limits => "visualize weekly and hourly rate limits",
+            SlashCommand::Limits => "adjust session limits",
             SlashCommand::Update => "check for updates and optionally upgrade",
-            SlashCommand::Notifications => "toggle TUI notifications (status/on/off)",
-            SlashCommand::Theme => "switch between color themes",
+            SlashCommand::Notifications => "manage notification settings",
+            SlashCommand::Theme => "customize the app theme",
+            SlashCommand::Settings => "manage all settings in one place",
             SlashCommand::Prompts => "show example prompts",
-            SlashCommand::Model => "choose model & reasoning effort",
-            SlashCommand::Agents => "create and configure agents",
+            SlashCommand::Model => "choose your default model",
+            SlashCommand::Agents => "configure agents",
             SlashCommand::Auto => "work autonomously on long tasks with Auto Drive",
             SlashCommand::Branch => {
                 "work in an isolated /branch then /merge when done (great for parallel work)"
@@ -129,7 +131,7 @@ impl SlashCommand {
             SlashCommand::Merge => "merge current worktree branch back to default",
             SlashCommand::Github => "GitHub Actions watcher (status/on/off)",
             SlashCommand::Validation => "control validation harness (status/on/off)",
-            SlashCommand::Mcp => "manage MCP servers (status/on/off/add)",
+            SlashCommand::Mcp => "manage MCP servers",
             SlashCommand::Perf => "performance tracing (on/off/show/reset)",
             SlashCommand::Demo => "populate history with demo cells (dev/perf only)",
             SlashCommand::Login => "manage Code sign-ins (add/select/disconnect)",
@@ -151,6 +153,18 @@ impl SlashCommand {
             self,
             SlashCommand::Plan | SlashCommand::Solve | SlashCommand::Code
         )
+    }
+
+    pub fn settings_section_from_args<'a>(&self, args: &'a str) -> Option<&'a str> {
+        if *self != SlashCommand::Settings {
+            return None;
+        }
+        let section = args.split_whitespace().next().unwrap_or("");
+        if section.is_empty() {
+            None
+        } else {
+            Some(section)
+        }
     }
 
     /// Returns true if this command requires additional arguments after the command.

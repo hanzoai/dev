@@ -1,20 +1,18 @@
 use super::{history_cell, ChatWidget, RunningToolEntry, ToolCallId};
-use crate::history::state::ArgumentValue;
 use crate::history_cell::RunningToolCallCell;
 use std::collections::HashMap;
 use std::mem;
 
 pub(super) fn rehydrate(chat: &mut ChatWidget<'_>) {
     let prev_custom = chat.tools_state.running_custom_tools.len();
-    let prev_web = chat.tools_state.running_web_search.len();
     let prev_wait = chat.tools_state.running_wait_tools.len();
     let prev_kill = chat.tools_state.running_kill_tools.len();
 
     let old_state = mem::take(&mut chat.tools_state);
     let mut new_state = super::ToolState::default();
     chat.history_debug(format!(
-        "running_tools.rehydrate.begin prev_custom={} prev_web={} prev_wait={} prev_kill={}",
-        prev_custom, prev_web, prev_wait, prev_kill
+        "running_tools.rehydrate.begin prev_custom={} prev_wait={} prev_kill={}",
+        prev_custom, prev_wait, prev_kill
     ));
 
     for (idx, cell) in chat.history_cells.iter().enumerate() {
@@ -38,34 +36,6 @@ pub(super) fn rehydrate(chat: &mut ChatWidget<'_>) {
         let tool_key = ToolCallId(call_id.clone());
         let history_id = chat.history_cell_ids.get(idx).and_then(|slot| *slot);
 
-        if running_cell.has_title("Web Search...") {
-            let query = state.arguments.iter().find_map(|arg| {
-                if arg.name == "query" {
-                    if let ArgumentValue::Text(text) = &arg.value {
-                        Some(text.clone())
-                    } else {
-                        None
-                    }
-                } else {
-                    None
-                }
-            });
-            new_state
-                .running_web_search
-                .insert(tool_key, (idx, query.clone()));
-            chat.history_debug(format!(
-                "running_tools.rehydrate.web call_id={} idx={} history_id={:?} order=({}, {}, {}) query_present={}",
-                call_id,
-                idx,
-                history_id,
-                order_key.req,
-                order_key.out,
-                order_key.seq,
-                query.is_some()
-            ));
-            continue;
-        }
-
         new_state
             .running_custom_tools
             .insert(tool_key, RunningToolEntry::new(order_key, idx).with_history_id(history_id));
@@ -83,6 +53,9 @@ pub(super) fn rehydrate(chat: &mut ChatWidget<'_>) {
     let super::ToolState {
         running_wait_tools,
         running_kill_tools,
+        web_search_sessions,
+        web_search_by_call,
+        web_search_by_order,
         browser_sessions,
         browser_session_by_call,
         browser_session_by_order,
@@ -93,10 +66,14 @@ pub(super) fn rehydrate(chat: &mut ChatWidget<'_>) {
         agent_run_by_batch,
         agent_run_by_agent,
         agent_last_key,
+        auto_drive_tracker,
         ..
     } = old_state;
     new_state.running_wait_tools = running_wait_tools;
     new_state.running_kill_tools = running_kill_tools;
+    new_state.web_search_sessions = web_search_sessions;
+    new_state.web_search_by_call = web_search_by_call;
+    new_state.web_search_by_order = web_search_by_order;
     new_state.browser_sessions = browser_sessions;
     new_state.browser_session_by_call = browser_session_by_call;
     new_state.browser_session_by_order = browser_session_by_order;
@@ -107,12 +84,13 @@ pub(super) fn rehydrate(chat: &mut ChatWidget<'_>) {
     new_state.agent_run_by_batch = agent_run_by_batch;
     new_state.agent_run_by_agent = agent_run_by_agent;
     new_state.agent_last_key = agent_last_key;
+    new_state.auto_drive_tracker = auto_drive_tracker;
     chat.tools_state = new_state;
 
     chat.history_debug(format!(
         "running_tools.rehydrate.end custom={} web={} wait={} kill={}",
         chat.tools_state.running_custom_tools.len(),
-        chat.tools_state.running_web_search.len(),
+        chat.tools_state.web_search_sessions.len(),
         chat.tools_state.running_wait_tools.len(),
         chat.tools_state.running_kill_tools.len()
     ));

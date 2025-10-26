@@ -10,8 +10,9 @@ use crate::history::state::{HistoryId, HistoryRecord, HistoryState};
 use crate::history_cell::{
     assistant_markdown_lines,
     compute_assistant_layout,
-    explore_lines_from_record_with_force,
     diff_lines_from_record,
+    explore_lines_from_record_with_force,
+    explore_lines_without_truncation,
     exec_display_lines_from_record,
     merged_exec_lines_from_record,
     stream_lines_from_state,
@@ -518,8 +519,16 @@ impl<'a> RenderRequest<'a> {
             }
         }
 
-        if let RenderRequestKind::Explore { id, hold_header } = self.kind {
+        if let RenderRequestKind::Explore {
+            id,
+            hold_header,
+            full_detail,
+        } = self.kind
+        {
             if let Some(HistoryRecord::Explore(record)) = history_state.record(id) {
+                if full_detail {
+                    return explore_lines_without_truncation(record, hold_header);
+                }
                 return explore_lines_from_record_with_force(record, hold_header);
             }
         }
@@ -561,7 +570,11 @@ pub(crate) enum RenderRequestKind {
     Legacy,
     Exec { id: HistoryId },
     MergedExec { id: HistoryId },
-    Explore { id: HistoryId, hold_header: bool },
+    Explore {
+        id: HistoryId,
+        hold_header: bool,
+        full_detail: bool,
+    },
     Diff { id: HistoryId },
     Streaming { id: HistoryId },
     Assistant { id: HistoryId },

@@ -18,6 +18,8 @@ pub struct DebugLogger {
     log_dir: PathBuf,
     // Maps request_id to stream info for collecting events
     active_streams: Mutex<HashMap<String, StreamInfo>>,
+    usage_dir: PathBuf,
+    session_usage_file: Mutex<PathBuf>,
 }
 
 impl DebugLogger {
@@ -27,6 +29,8 @@ impl DebugLogger {
                 enabled: false,
                 log_dir: PathBuf::new(),
                 active_streams: Mutex::new(HashMap::new()),
+                usage_dir: PathBuf::new(),
+                session_usage_file: Mutex::new(PathBuf::new()),
             });
         }
 
@@ -35,11 +39,49 @@ impl DebugLogger {
 
         fs::create_dir_all(&log_dir)?;
 
+        let mut usage_dir = log_dir.clone();
+        usage_dir.push("usage");
+        fs::create_dir_all(&usage_dir)?;
+
         Ok(Self {
             enabled,
             log_dir,
             active_streams: Mutex::new(HashMap::new()),
+            usage_dir,
+            session_usage_file: Mutex::new(PathBuf::new()),
         })
+    }
+
+    fn ensure_log_dir(&self, tag: Option<&str>) -> Result<PathBuf, std::io::Error> {
+        let Some(tag) = tag else {
+            return Ok(self.log_dir.clone());
+        };
+
+        let mut dir = self.log_dir.clone();
+        let mut applied = false;
+        for segment in tag.split('/') {
+            let trimmed = segment.trim();
+            if trimmed.is_empty() {
+                continue;
+            }
+            let mut cleaned = String::with_capacity(trimmed.len());
+            for ch in trimmed.chars() {
+                let valid = ch.is_ascii_alphanumeric() || matches!(ch, '-' | '_' | '.');
+                cleaned.push(if valid { ch } else { '_' });
+            }
+            if cleaned.is_empty() {
+                continue;
+            }
+            dir.push(cleaned);
+            applied = true;
+        }
+
+        if !applied {
+            return Ok(self.log_dir.clone());
+        }
+
+        fs::create_dir_all(&dir)?;
+        Ok(dir)
     }
 
     /// Start a new request/response log file and return the request ID
@@ -47,11 +89,13 @@ impl DebugLogger {
         &self,
         endpoint: &str,
         payload: &Value,
+        tag: Option<&str>,
     ) -> Result<String, std::io::Error> {
         if !self.enabled {
             return Ok(String::new());
         }
 
+        let log_dir = self.ensure_log_dir(tag)?;
         let timestamp = Local::now();
         let request_id = Uuid::new_v4().to_string();
         let request_id_short = &request_id[..8]; // Use first 8 chars of UUID for brevity
@@ -62,7 +106,7 @@ impl DebugLogger {
             timestamp.format("%Y%m%d_%H%M%S%.3f"),
             request_id_short
         );
-        let request_file_path = self.log_dir.join(request_filename);
+        let request_file_path = log_dir.join(request_filename);
 
         // Create request object with metadata
         let request_entry = serde_json::json!({
@@ -82,9 +126,8 @@ impl DebugLogger {
             timestamp.format("%Y%m%d_%H%M%S%.3f"),
             request_id_short
         );
-        let response_file_path = self.log_dir.join(response_filename);
+        let response_file_path = log_dir.join(&response_filename);
 
-        // Store the stream info for this request_id
         if let Ok(mut streams) = self.active_streams.lock() {
             streams.insert(
                 request_id.clone(),
@@ -121,6 +164,14 @@ impl DebugLogger {
             }
         }
 
+        if let Some(response) = data.get("response") {
+            if let Some(usage) = response.get("usage") {
+                self.append_usage_entry(usage.clone())?;
+            }
+        } else if let Some(usage) = data.get("usage") {
+            self.append_usage_entry(usage.clone())?;
+        }
+
         Ok(())
     }
 
@@ -148,16 +199,78 @@ impl DebugLogger {
         Ok(())
     }
 
-    // Legacy methods for backward compatibility - they now create standalone files
-    pub fn log_request(&self, endpoint: &str, payload: &Value) -> Result<(), std::io::Error> {
+    fn append_usage_entry(&self, usage: Value) -> Result<(), std::io::Error> {
         if !self.enabled {
             return Ok(());
         }
 
+        let path = {
+            let guard = self
+                .session_usage_file
+                .lock()
+                .expect("usage lock poisoned");
+            if guard.as_os_str().is_empty() {
+                return Ok(());
+            }
+            guard.clone()
+        };
+
+        let mut entries: Vec<Value> = if path.exists() {
+            let contents = fs::read_to_string(&path)?;
+            serde_json::from_str(&contents).unwrap_or_default()
+        } else {
+            Vec::new()
+        };
+
+        entries.push(usage);
+
+        let formatted = serde_json::to_string_pretty(&entries)?;
+        fs::write(path, formatted)?;
+        Ok(())
+    }
+
+    pub fn set_session_usage_file(&self, session_id: &Uuid) -> Result<(), std::io::Error> {
+        if !self.enabled {
+            return Ok(());
+        }
+
+        let path = self
+            .usage_dir
+            .join(format!("{}_usage.json", session_id));
+
+        if let Some(parent) = path.parent() {
+            fs::create_dir_all(parent)?;
+        }
+
+        if !path.exists() {
+            fs::write(&path, "[]")?;
+        }
+
+        let mut guard = self
+            .session_usage_file
+            .lock()
+            .expect("usage lock poisoned");
+        *guard = path;
+
+        Ok(())
+    }
+
+    // Legacy methods for backward compatibility - they now create standalone files
+    pub fn log_request(
+        &self,
+        endpoint: &str,
+        payload: &Value,
+        tag: Option<&str>,
+    ) -> Result<(), std::io::Error> {
+        if !self.enabled {
+            return Ok(());
+        }
+
+        let log_dir = self.ensure_log_dir(tag)?;
         let timestamp = Local::now();
         let filename = format!("{}_request.json", timestamp.format("%Y%m%d_%H%M%S%.3f"));
 
-        let file_path = self.log_dir.join(filename);
+        let file_path = log_dir.join(filename);
 
         let log_entry = serde_json::json!({
             "timestamp": timestamp.to_rfc3339(),
@@ -172,15 +285,21 @@ impl DebugLogger {
         Ok(())
     }
 
-    pub fn log_response(&self, endpoint: &str, response: &Value) -> Result<(), std::io::Error> {
+    pub fn log_response(
+        &self,
+        endpoint: &str,
+        response: &Value,
+        tag: Option<&str>,
+    ) -> Result<(), std::io::Error> {
         if !self.enabled {
             return Ok(());
         }
 
+        let log_dir = self.ensure_log_dir(tag)?;
         let timestamp = Local::now();
         let filename = format!("{}_response.json", timestamp.format("%Y%m%d_%H%M%S%.3f"));
 
-        let file_path = self.log_dir.join(filename);
+        let file_path = log_dir.join(filename);
 
         let log_entry = serde_json::json!({
             "timestamp": timestamp.to_rfc3339(),
@@ -195,15 +314,21 @@ impl DebugLogger {
         Ok(())
     }
 
-    pub fn log_stream_chunk(&self, endpoint: &str, chunk: &str) -> Result<(), std::io::Error> {
+    pub fn log_stream_chunk(
+        &self,
+        endpoint: &str,
+        chunk: &str,
+        tag: Option<&str>,
+    ) -> Result<(), std::io::Error> {
         if !self.enabled {
             return Ok(());
         }
 
+        let log_dir = self.ensure_log_dir(tag)?;
         let timestamp = Local::now();
         let filename = format!("{}_stream.txt", timestamp.format("%Y%m%d_%H%M%S%.3f"));
 
-        let file_path = self.log_dir.join(filename);
+        let file_path = log_dir.join(filename);
 
         let log_entry = format!(
             "=== Stream Chunk at {} ===\nEndpoint: {}\n\n{}\n",
@@ -217,15 +342,21 @@ impl DebugLogger {
         Ok(())
     }
 
-    pub fn log_error(&self, endpoint: &str, error: &str) -> Result<(), std::io::Error> {
+    pub fn log_error(
+        &self,
+        endpoint: &str,
+        error: &str,
+        tag: Option<&str>,
+    ) -> Result<(), std::io::Error> {
         if !self.enabled {
             return Ok(());
         }
 
+        let log_dir = self.ensure_log_dir(tag)?;
         let timestamp = Local::now();
         let filename = format!("{}_error.txt", timestamp.format("%Y%m%d_%H%M%S%.3f"));
 
-        let file_path = self.log_dir.join(filename);
+        let file_path = log_dir.join(filename);
 
         let log_entry = format!(
             "=== Error at {} ===\nEndpoint: {}\n\n{}\n",
@@ -243,16 +374,22 @@ impl DebugLogger {
         self.enabled
     }
 
-    pub fn log_sse_event(&self, endpoint: &str, event_data: &Value) -> Result<(), std::io::Error> {
+    pub fn log_sse_event(
+        &self,
+        endpoint: &str,
+        event_data: &Value,
+        tag: Option<&str>,
+    ) -> Result<(), std::io::Error> {
         // Legacy method - now creates standalone files
         if !self.enabled {
             return Ok(());
         }
 
+        let log_dir = self.ensure_log_dir(tag)?;
         let timestamp = Local::now();
         let filename = format!("{}_sse.json", timestamp.format("%Y%m%d_%H%M%S%.3f"));
 
-        let file_path = self.log_dir.join(filename);
+        let file_path = log_dir.join(filename);
 
         let log_entry = serde_json::json!({
             "timestamp": timestamp.to_rfc3339(),

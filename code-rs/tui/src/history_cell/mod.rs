@@ -72,8 +72,8 @@ use tracing::error;
 
 mod assistant;
 mod animated;
-mod card_style;
 mod background;
+mod card_style;
 mod exec;
 mod diff;
 mod explore;
@@ -83,6 +83,8 @@ mod reasoning;
 mod tool;
 mod browser;
 mod agent;
+mod auto_drive;
+mod web_search;
 mod wait_status;
 mod plan_update;
 mod rate_limits;
@@ -113,10 +115,20 @@ pub(crate) use diff::{
     DiffCell,
 };
 pub(crate) use browser::BrowserSessionCell;
+pub(crate) use auto_drive::{
+    AutoDriveActionKind,
+    AutoDriveCardCell,
+    AutoDriveStatus,
+};
+pub(crate) use web_search::{
+    WebSearchSessionCell,
+    WebSearchStatus,
+};
 pub(crate) use agent::{AgentDetail, AgentRunCell, AgentStatusKind, AgentStatusPreview, StepProgress};
 pub(crate) use explore::{
     explore_lines_from_record,
     explore_lines_from_record_with_force,
+    explore_lines_without_truncation,
     explore_record_push_from_parsed,
     explore_record_update_status,
     ExploreAggregationCell,
@@ -2096,18 +2108,22 @@ fn popular_commands_lines(_latest_version: Option<&str>) -> Vec<Line<'static>> {
         Style::default().fg(crate::colors::text_bright()),
     ));
     lines.push(Line::from(vec![
-        Span::styled("/agents", Style::default().fg(crate::colors::primary())),
+        Span::styled("/settings", Style::default().fg(crate::colors::primary())),
         Span::from(" - "),
-        Span::from(SlashCommand::Agents.description())
-            .style(Style::default().add_modifier(Modifier::DIM)),
-    ]));
-    lines.push(Line::from(vec![
-        Span::styled("/model", Style::default().fg(crate::colors::primary())),
-        Span::from(" - "),
-        Span::from(SlashCommand::Model.description())
+        Span::from(SlashCommand::Settings.description())
             .style(Style::default().add_modifier(Modifier::DIM)),
         Span::styled(
-            " NEW with GPT-5-Codex!",
+            " NEW",
+            Style::default().fg(crate::colors::primary()),
+        ),
+    ]));
+    lines.push(Line::from(vec![
+        Span::styled("/auto", Style::default().fg(crate::colors::primary())),
+        Span::from(" - "),
+        Span::from(SlashCommand::Auto.description())
+            .style(Style::default().add_modifier(Modifier::DIM)),
+        Span::styled(
+            " UPDATED",
             Style::default().fg(crate::colors::primary()),
         ),
     ]));
@@ -2128,41 +2144,6 @@ fn popular_commands_lines(_latest_version: Option<&str>) -> Vec<Line<'static>> {
         Span::from(" - "),
         Span::from(SlashCommand::Code.description())
             .style(Style::default().add_modifier(Modifier::DIM)),
-    ]));
-    lines.push(Line::from(vec![
-        Span::styled("/branch", Style::default().fg(crate::colors::primary())),
-        Span::from(" - "),
-        Span::from(SlashCommand::Branch.description())
-            .style(Style::default().add_modifier(Modifier::DIM)),
-    ]));
-    lines.push(Line::from(vec![
-        Span::styled("/limits", Style::default().fg(crate::colors::primary())),
-        Span::from(" - "),
-        Span::from(SlashCommand::Limits.description())
-            .style(Style::default().add_modifier(Modifier::DIM)),
-    ]));
-    lines.push(Line::from(vec![
-        Span::styled("/review", Style::default().fg(crate::colors::primary())),
-        Span::from(" - "),
-        Span::from(SlashCommand::Review.description())
-            .style(Style::default().add_modifier(Modifier::DIM)),
-    ]));
-    lines.push(Line::from(vec![
-        Span::styled("/auto", Style::default().fg(crate::colors::primary())),
-        Span::from(" - "),
-        Span::from(SlashCommand::Auto.description())
-            .style(Style::default().add_modifier(Modifier::DIM)),
-        Span::styled(
-            " Experimental",
-            Style::default().fg(crate::colors::primary()),
-        ),
-    ]));
-    lines.push(Line::from(vec![
-        Span::styled("/cloud", Style::default().fg(crate::colors::primary())),
-        Span::from(" - "),
-        Span::from(SlashCommand::Cloud.description())
-            .style(Style::default().add_modifier(Modifier::DIM)),
-        Span::styled(" NEW", Style::default().fg(crate::colors::primary())),
     ]));
 
     lines
@@ -4311,28 +4292,6 @@ pub(crate) fn new_running_custom_tool_call(
     RunningToolCallCell::new(state)
 }
 
-/// Running web search call (native Responses web_search)
-pub(crate) fn new_running_web_search(query: Option<String>) -> RunningToolCallCell {
-    let mut arguments: Vec<ToolArgument> = Vec::new();
-    if let Some(q) = query {
-        arguments.push(ToolArgument {
-            name: "query".to_string(),
-            value: ArgumentValue::Text(q),
-        });
-    }
-    let state = RunningToolState {
-        id: HistoryId::ZERO,
-        call_id: None,
-        title: "Web Search...".to_string(),
-        started_at: SystemTime::now(),
-        arguments,
-        wait_has_target: false,
-        wait_has_call_id: false,
-        wait_cap_ms: None,
-    };
-    RunningToolCallCell::new(state)
-}
-
 pub(crate) fn new_running_mcp_tool_call(invocation: McpInvocation) -> RunningToolCallCell {
     // Represent as provider.tool(...) on one dim line beneath a generic running header with timer
     let line = format_mcp_invocation(invocation);
@@ -5695,6 +5654,75 @@ pub(crate) struct PatchSummaryCell {
     pub(crate) record: PatchRecord,
 }
 
+fn patch_changes_are_rename_only(changes: &HashMap<PathBuf, FileChange>) -> bool {
+    !changes.is_empty() && changes.values().all(file_change_is_rename_only)
+}
+
+fn patch_changes_are_noop(changes: &HashMap<PathBuf, FileChange>) -> bool {
+    !changes.is_empty()
+        && changes.values().all(|change| match change {
+            FileChange::Update {
+                move_path: None,
+                unified_diff,
+                ..
+            } => {
+                !diff_contains_line_edits(unified_diff)
+                    && !diff_contains_binary_markers(unified_diff)
+                    && !diff_contains_metadata_markers(unified_diff)
+            }
+            _ => false,
+        })
+}
+
+fn file_change_is_rename_only(change: &FileChange) -> bool {
+    match change {
+        FileChange::Update {
+            move_path: Some(_),
+            unified_diff,
+            ..
+        } => {
+            !diff_contains_line_edits(unified_diff)
+                && !diff_contains_binary_markers(unified_diff)
+                && !diff_contains_metadata_markers_excluding_rename(unified_diff)
+        }
+        _ => false,
+    }
+}
+
+fn diff_contains_line_edits(diff: &str) -> bool {
+    for line in diff.lines() {
+        if line.starts_with("+++") || line.starts_with("---") || line.starts_with("@@") {
+            continue;
+        }
+        match line.as_bytes().first() {
+            Some(b'+') | Some(b'-') => return true,
+            _ => {}
+        }
+    }
+    false
+}
+
+fn diff_contains_binary_markers(diff: &str) -> bool {
+    diff.contains("Binary files") || diff.contains("GIT binary patch") || diff.as_bytes().contains(&0)
+}
+
+fn diff_contains_metadata_markers(diff: &str) -> bool {
+    diff.contains("new file mode")
+        || diff.contains("deleted file mode")
+        || diff.contains("old mode")
+        || diff.contains("new mode")
+        || diff.contains("similarity index")
+        || diff.contains("rename from")
+        || diff.contains("rename to")
+}
+
+fn diff_contains_metadata_markers_excluding_rename(diff: &str) -> bool {
+    diff.contains("new file mode")
+        || diff.contains("deleted file mode")
+        || diff.contains("old mode")
+        || diff.contains("new mode")
+}
+
 impl PatchSummaryCell {
     pub(crate) fn from_record(record: PatchRecord) -> Self {
         let kind = match record.patch_type {
@@ -5703,11 +5731,21 @@ impl PatchSummaryCell {
             HistoryPatchEventType::ApplySuccess => PatchKind::ApplySuccess,
             HistoryPatchEventType::ApplyFailure => PatchKind::ApplyFailure,
         };
+        let rename_only = patch_changes_are_rename_only(&record.changes);
+        let noop_only = patch_changes_are_noop(&record.changes);
         let title = match record.patch_type {
             HistoryPatchEventType::ApprovalRequest => "proposed patch".to_string(),
-            HistoryPatchEventType::ApplyBegin { .. } => "Updated".to_string(),
-            HistoryPatchEventType::ApplySuccess => "Updated".to_string(),
             HistoryPatchEventType::ApplyFailure => "Patch failed".to_string(),
+            HistoryPatchEventType::ApplyBegin { .. }
+            | HistoryPatchEventType::ApplySuccess => {
+                if rename_only {
+                    "Renamed".to_string()
+                } else if noop_only {
+                    "No changes".to_string()
+                } else {
+                    "Updated".to_string()
+                }
+            }
         };
         Self {
             title,

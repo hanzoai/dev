@@ -36,10 +36,114 @@ pub(crate) struct AgentEditorView {
     complete: bool,
     app_event_tx: AppEventSender,
     installed: bool,
+    command: String,
     install_hint: String,
 }
 
 impl AgentEditorView {
+    fn handle_key_internal(&mut self, key_event: KeyEvent) -> bool {
+        if !self.installed {
+            match key_event.code {
+                KeyCode::Esc | KeyCode::Enter => {
+                    self.complete = true;
+                    true
+                }
+                _ => false,
+            }
+        } else {
+            match key_event {
+                KeyEvent { code: KeyCode::Esc, .. } => {
+                    self.complete = true;
+                    self.app_event_tx.send(AppEvent::ShowAgentsOverview);
+                    true
+                }
+                KeyEvent { code: KeyCode::Up, .. } => {
+                    if self.field > 0 {
+                        self.field -= 1;
+                    }
+                    true
+                }
+                KeyEvent { code: KeyCode::Down, .. } => {
+                    self.field = (self.field + 1).min(5);
+                    true
+                }
+                KeyEvent { code: KeyCode::Left, .. } if self.field == 0 => {
+                    self.enabled = true;
+                    true
+                }
+                KeyEvent { code: KeyCode::Right, .. } if self.field == 0 => {
+                    self.enabled = false;
+                    true
+                }
+                KeyEvent { code: KeyCode::Left, .. } if self.field == 5 => {
+                    self.field = 4;
+                    true
+                }
+                KeyEvent { code: KeyCode::Right, .. } if self.field == 4 => {
+                    self.field = 5;
+                    true
+                }
+                KeyEvent { code: KeyCode::Char(' '), .. } if self.field == 0 => {
+                    self.enabled = !self.enabled;
+                    true
+                }
+                ev @ KeyEvent { .. } if self.field == 1 => {
+                    let _ = self.params_ro.handle_key(ev);
+                    true
+                }
+                ev @ KeyEvent { .. } if self.field == 2 => {
+                    let _ = self.params_wr.handle_key(ev);
+                    true
+                }
+                ev @ KeyEvent { .. } if self.field == 3 => {
+                    let _ = self.instr.handle_key(ev);
+                    true
+                }
+                KeyEvent { code: KeyCode::Enter, .. } if self.field == 4 => {
+                    let ro = self
+                        .params_ro
+                        .text()
+                        .split_whitespace()
+                        .map(|s| s.to_string())
+                        .collect::<Vec<_>>();
+                    let wr = self
+                        .params_wr
+                        .text()
+                        .split_whitespace()
+                        .map(|s| s.to_string())
+                        .collect::<Vec<_>>();
+                    let ro_opt = if ro.is_empty() { None } else { Some(ro) };
+                    let wr_opt = if wr.is_empty() { None } else { Some(wr) };
+                    let instr_opt = {
+                        let t = self.instr.text().trim().to_string();
+                        if t.is_empty() { None } else { Some(t) }
+                    };
+                    self.app_event_tx.send(AppEvent::UpdateAgentConfig {
+                        name: self.name.clone(),
+                        enabled: self.enabled,
+                        args_read_only: ro_opt,
+                        args_write: wr_opt,
+                        instructions: instr_opt,
+                        command: self.command.clone(),
+                    });
+                    self.complete = true;
+                    self.app_event_tx.send(AppEvent::ShowAgentsOverview);
+                    true
+                }
+                KeyEvent { code: KeyCode::Enter, .. } if self.field == 5 => {
+                    self.complete = true;
+                    self.app_event_tx.send(AppEvent::ShowAgentsOverview);
+                    true
+                }
+                _ => false,
+            }
+        }
+    }
+
+    pub(crate) fn handle_key_event_direct(&mut self, key_event: KeyEvent) -> bool {
+        self.handle_key_internal(key_event)
+    }
+
     fn clear_rect(buf: &mut Buffer, rect: Rect) {
         if rect.width == 0 || rect.height == 0 {
             return;
@@ -107,6 +211,7 @@ impl AgentEditorView {
             complete: false,
             app_event_tx,
             installed: command_exists(&command),
+            command,
             install_hint: String::new(),
         };
 
@@ -117,13 +222,13 @@ impl AgentEditorView {
         // OS-specific short hint
         #[cfg(target_os = "macos")]
         {
-            let brew_formula = macos_brew_formula_for_command(&command);
-            v.install_hint = format!("'{command}' not found. On macOS, try Homebrew (brew install {brew_formula}) or consult the agent's docs.");
+            let brew_formula = macos_brew_formula_for_command(&v.command);
+            v.install_hint = format!("'{}' not found. On macOS, try Homebrew (brew install {brew_formula}) or consult the agent's docs.", v.command);
         }
         #[cfg(target_os = "linux")]
-        { v.install_hint = format!("'{}' not found. On Linux, install via your package manager or consult the agent's docs.", command); }
+        { v.install_hint = format!("'{}' not found. On Linux, install via your package manager or consult the agent's docs.", v.command); }
         #[cfg(target_os = "windows")]
-        { v.install_hint = format!("'{}' not found. On Windows, install the CLI from the vendor site and ensure it’s on PATH.", command); }
+        { v.install_hint = format!("'{}' not found. On Windows, install the CLI from the vendor site and ensure it’s on PATH.", v.command); }
 
         v
     }
@@ -303,45 +408,7 @@ impl AgentEditorView {
 
 impl<'a> BottomPaneView<'a> for AgentEditorView {
     fn handle_key_event(&mut self, _pane: &mut BottomPane<'a>, key_event: KeyEvent) {
-        if !self.installed {
-            match key_event {
-                KeyEvent { code: KeyCode::Esc, .. } | KeyEvent { code: KeyCode::Enter, .. } => { self.complete = true; }
-                _ => {}
-            }
-            return;
-        }
-        match key_event {
-            KeyEvent { code: KeyCode::Esc, .. } => { self.complete = true; self.app_event_tx.send(AppEvent::ShowAgentsOverview); },
-            KeyEvent { code: KeyCode::Up, .. } => { if self.field > 0 { self.field -= 1; } },
-            KeyEvent { code: KeyCode::Down, .. } => { self.field = (self.field + 1).min(5); },
-            KeyEvent { code: KeyCode::Left, .. } if self.field == 0 => { self.enabled = true; },
-            KeyEvent { code: KeyCode::Right, .. } if self.field == 0 => { self.enabled = false; },
-            KeyEvent { code: KeyCode::Left, .. } if self.field == 5 => { self.field = 4; },
-            KeyEvent { code: KeyCode::Right, .. } if self.field == 4 => { self.field = 5; },
-            KeyEvent { code: KeyCode::Char(' '), .. } if self.field == 0 => { self.enabled = !self.enabled; },
-            ev @ KeyEvent { .. } if self.field == 1 => { let _ = self.params_ro.handle_key(ev); },
-            ev @ KeyEvent { .. } if self.field == 2 => { let _ = self.params_wr.handle_key(ev); },
-            ev @ KeyEvent { .. } if self.field == 3 => { let _ = self.instr.handle_key(ev); },
-            KeyEvent { code: KeyCode::Enter, .. } if self.field == 4 => {
-                // Save: split params by whitespace; empty -> None
-                let ro = self.params_ro.text().split_whitespace().map(|s| s.to_string()).collect::<Vec<_>>();
-                let wr = self.params_wr.text().split_whitespace().map(|s| s.to_string()).collect::<Vec<_>>();
-                let ro_opt = if ro.is_empty() { None } else { Some(ro) };
-                let wr_opt = if wr.is_empty() { None } else { Some(wr) };
-                let instr_opt = { let t = self.instr.text().trim().to_string(); if t.is_empty() { None } else { Some(t) } };
-                self.app_event_tx.send(AppEvent::UpdateAgentConfig {
-                    name: self.name.clone(),
-                    enabled: self.enabled,
-                    args_read_only: ro_opt,
-                    args_write: wr_opt,
-                    instructions: instr_opt,
-                });
-                self.complete = true;
-                self.app_event_tx.send(AppEvent::ShowAgentsOverview);
-            }
-            KeyEvent { code: KeyCode::Enter, .. } if self.field == 5 => { self.complete = true; self.app_event_tx.send(AppEvent::ShowAgentsOverview); }
-            _ => {}
-        }
+        let _ = self.handle_key_internal(key_event);
     }
 
     fn is_complete(&self) -> bool { self.complete }
@@ -442,4 +509,3 @@ impl<'a> BottomPaneView<'a> for AgentEditorView {
         }
     }
 }
-

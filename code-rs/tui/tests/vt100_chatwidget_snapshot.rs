@@ -26,19 +26,171 @@ use code_tui::test_helpers::{
     force_scroll_offset as harness_force_scroll_offset,
     layout_metrics as harness_layout_metrics,
     render_chat_widget_to_vt100,
+    AutoContinueModeFixture,
     ChatWidgetHarness,
 };
+use crossterm::event::{KeyCode, KeyEvent, KeyEventKind, KeyEventState, KeyModifiers};
+use regex_lite::Regex;
 use serde_json::json;
 use std::path::PathBuf;
+use std::sync::OnceLock;
 use std::time::Duration;
 
 fn normalize_output(text: String) -> String {
     text
-        .replace('✧', "✶")
-        .replace('◇', "✶")
-        .replace('✦', "✶")
-        .replace('◆', "✶")
-        .replace('✨', "✶")
+        .chars()
+        .map(normalize_glyph)
+        .collect::<String>()
+        .pipe(normalize_timers)
+        .pipe(normalize_spacer_rows)
+}
+
+fn make_key(code: KeyCode, modifiers: KeyModifiers) -> KeyEvent {
+    KeyEvent {
+        code,
+        modifiers,
+        kind: KeyEventKind::Press,
+        state: KeyEventState::empty(),
+    }
+}
+
+fn normalize_glyph(ch: char) -> char {
+    match ch {
+        // Decorative sparkles → single sentinel to keep intent without variation.
+        '✧' | '◇' | '✦' | '◆' | '✨' => '✶',
+        // Box-drawing corners → '+' for ASCII snapshots.
+        '┌' | '┐' | '└' | '┘'
+        | '┏' | '┓' | '┗' | '┛'
+        | '╔' | '╗' | '╚' | '╝'
+        | '╒' | '╕' | '╛' | '╜'
+        | '╓' | '╖' | '╙' | '╘'
+        | '╭' | '╮' | '╯' | '╰' => '+',
+        // Tee / cross junctions also collapse to '+' to keep structure recognizable.
+        '┬' | '┴' | '┼' | '├' | '┤'
+        | '┽' | '┾' | '┿'
+        | '╀' | '╁' | '╂' | '╃' | '╄'
+        | '╅' | '╆' | '╇' | '╈' | '╉'
+        | '╊' | '╋' | '╟' | '╠' | '╡'
+        | '╢' | '╫' | '╪' | '╬' => '+',
+        // Horizontal box drawing and variants → '-'.
+        '─' | '━' | '═' | '╼' | '╾'
+        | '╸' | '╺' | '╴' | '╶'
+        | '┄' | '┅' | '┈' | '┉' => '-',
+        // Vertical box drawing variants → '|'.
+        '│' | '┃' | '║' | '╽' | '╿'
+        | '╏' | '╎' | '┆' | '┇'
+        | '╷' | '╹' => '|',
+        // Diagonal strokes → ASCII approximations.
+        '╱' => '/',
+        '╲' => '/',
+        '╳' => 'X',
+        // Shade blocks → space to avoid rendering noise.
+        '█' | '▓' | '▒' | '░' => ' ',
+        // Various unicode dash variants → ASCII hyphen.
+        '‐' | '‑' | '‒' | '–' | '—' | '―' => '-',
+        other => other,
+    }
+}
+
+fn normalize_timers(text: String) -> String {
+    static IN_SECONDS_RE: OnceLock<Regex> = OnceLock::new();
+    static T_MINUS_RE: OnceLock<Regex> = OnceLock::new();
+    static MM_SS_RE: OnceLock<Regex> = OnceLock::new();
+    static MS_RE: OnceLock<Regex> = OnceLock::new();
+    static MIN_SEC_RE: OnceLock<Regex> = OnceLock::new();
+
+    let text = IN_SECONDS_RE
+        .get_or_init(|| Regex::new(r"\bin\s+\d+s\b").expect("valid in seconds regex"))
+        .replace_all(&text, "in XS")
+        .into_owned();
+
+    let text = T_MINUS_RE
+        .get_or_init(|| Regex::new(r"\bT-\d+\b").expect("valid T-minus regex"))
+        .replace_all(&text, "T-X")
+        .into_owned();
+
+    let text = MM_SS_RE
+        .get_or_init(|| Regex::new(r"\b\d{1,2}:\d{2}\b").expect("valid mm:ss regex"))
+        .replace_all(&text, "MM:SS")
+        .into_owned();
+
+    let text = MS_RE
+        .get_or_init(|| Regex::new(r"\b\d+ms\b").expect("valid milliseconds regex"))
+        .replace_all(&text, "Xms")
+        .into_owned();
+
+    MIN_SEC_RE
+        .get_or_init(|| Regex::new(r"\b\d+m\s+\d+s\b").expect("valid minute-second regex"))
+        .replace_all(&text, "Xm Ys")
+        .into_owned()
+}
+
+fn normalize_spacer_rows(text: String) -> String {
+    let ends_with_newline = text.ends_with('\n');
+    let mut lines: Vec<String> = Vec::new();
+    let mut pending_blank: Option<usize> = None;
+
+    for line in text.lines() {
+        if is_spacer_border_line(line) {
+            pending_blank = Some(line.chars().count());
+            continue;
+        }
+
+        lines.push(line.to_string());
+
+        if let Some(width) = pending_blank.take() {
+            lines.push(" ".repeat(width));
+        }
+    }
+
+    if let Some(width) = pending_blank {
+        lines.push(" ".repeat(width));
+    }
+
+    let mut normalized = lines.join("\n");
+    if ends_with_newline && (!normalized.is_empty() || text.is_empty()) {
+        normalized.push('\n');
+    }
+
+    normalized
+}
+
+fn is_spacer_border_line(line: &str) -> bool {
+    if line.trim().is_empty() {
+        return false;
+    }
+
+    let trimmed = line.trim();
+    if trimmed.len() < 3 {
+        return false;
+    }
+
+    let bytes = trimmed.as_bytes();
+    if bytes.first() != Some(&b'|') || bytes.last() != Some(&b'|') {
+        return false;
+    }
+
+    let inner = &trimmed[1..trimmed.len() - 1];
+    if inner.trim().is_empty() {
+        return false;
+    }
+
+    inner.chars().all(|ch| ch == '-' || ch == ' ')
+}
+
+trait Pipe: Sized {
+    fn pipe<F, R>(self, f: F) -> R
+    where
+        F: FnOnce(Self) -> R;
+}
+
+impl<T> Pipe for T {
+    fn pipe<F, R>(self, f: F) -> R
+    where
+        F: FnOnce(Self) -> R,
+    {
+        f(self)
+    }
 }
 
 fn is_history_header(line: &str) -> bool {
@@ -114,8 +266,229 @@ fn baseline_empty_chat() {
     let mut harness = ChatWidgetHarness::new();
     code_tui::test_helpers::set_standard_terminal_mode(&mut harness, false);
 
-    let output = render_chat_widget_to_vt100(&mut harness, 80, 24);
+    let output = normalize_output(render_chat_widget_to_vt100(&mut harness, 80, 24));
     insta::assert_snapshot!("empty_chat", output);
+}
+
+#[test]
+fn auto_drive_continue_mode_transitions() {
+    let mut harness = ChatWidgetHarness::new();
+
+    harness.auto_drive_activate(
+        "Expand Auto Drive validation",
+        true,
+        true,
+        AutoContinueModeFixture::TenSeconds,
+    );
+    harness.auto_drive_set_awaiting_submission(
+        "cargo nextest run --no-fail-fast",
+        "Auto Drive ready to run cargo nextest",
+        Some("Proposed action: run focused tests before continuing.".to_string()),
+    );
+    harness.auto_drive_override_countdown(9);
+
+    let mut frames = Vec::new();
+    frames.push(normalize_output(render_chat_widget_to_vt100(&mut harness, 80, 18)));
+
+    harness.auto_drive_set_continue_mode(AutoContinueModeFixture::Manual);
+    frames.push(normalize_output(render_chat_widget_to_vt100(&mut harness, 80, 18)));
+
+    harness.auto_drive_set_continue_mode(AutoContinueModeFixture::Immediate);
+    frames.push(normalize_output(render_chat_widget_to_vt100(&mut harness, 80, 18)));
+
+    insta::assert_snapshot!(
+        "auto_drive_continue_mode_transitions",
+        frames.join("\n---FRAME---\n"),
+    );
+}
+
+#[test]
+fn auto_drive_action_transitions() {
+    let mut harness = ChatWidgetHarness::new();
+
+    harness.auto_drive_activate(
+        "Diagnose Auto Drive regressions",
+        true,
+        true,
+        AutoContinueModeFixture::TenSeconds,
+    );
+    harness.auto_drive_set_waiting_for_response(
+        "Analyzing workspace changes",
+        Some("Comparing diffs against last run.".to_string()),
+        Some("Completed git status check.".to_string()),
+    );
+
+    let mut frames = Vec::new();
+    frames.push(normalize_output(render_chat_widget_to_vt100(&mut harness, 80, 18)));
+
+    harness.auto_drive_set_awaiting_submission(
+        "cargo test --workspace",
+        "Ready: run cargo test --workspace",
+        Some("Suggested step: confirm tests before resuming.".to_string()),
+    );
+    harness.auto_drive_override_countdown(6);
+    frames.push(normalize_output(render_chat_widget_to_vt100(&mut harness, 80, 18)));
+
+    harness.auto_drive_set_waiting_for_review(Some(
+        "Waiting for code review to complete.".to_string(),
+    ));
+    frames.push(normalize_output(render_chat_widget_to_vt100(&mut harness, 80, 18)));
+
+    harness.auto_drive_set_waiting_for_response(
+        "Resuming automated investigation",
+        Some("Queued new command for execution.".to_string()),
+        None,
+    );
+    frames.push(normalize_output(render_chat_widget_to_vt100(&mut harness, 80, 18)));
+
+    insta::assert_snapshot!(
+        "auto_drive_action_transitions",
+        frames.join("\n---FRAME---\n"),
+    );
+}
+
+#[test]
+fn auto_drive_cli_progress_header() {
+    let mut harness = ChatWidgetHarness::new();
+
+    harness.auto_drive_activate(
+        "Highlight CLI progress",
+        true,
+        true,
+        AutoContinueModeFixture::TenSeconds,
+    );
+    harness.auto_drive_set_waiting_for_response(
+        "Preparing workspace",
+        Some("Running cargo check...".to_string()),
+        Some("Installed dependencies".to_string()),
+    );
+    harness.auto_drive_set_awaiting_submission(
+        "cargo check",
+        "Ready: run cargo check",
+        Some("Running cargo check...".to_string()),
+    );
+
+    let mut frames = Vec::new();
+    frames.push(normalize_output(render_chat_widget_to_vt100(&mut harness, 80, 12)));
+
+    harness.auto_drive_simulate_cli_submission();
+    frames.push(normalize_output(render_chat_widget_to_vt100(&mut harness, 80, 12)));
+
+    harness.auto_drive_mark_cli_running();
+    frames.push(normalize_output(render_chat_widget_to_vt100(&mut harness, 80, 12)));
+
+    insta::assert_snapshot!(
+        "auto_drive_cli_progress_header",
+        frames.join("\n---FRAME---\n"),
+    );
+}
+
+#[test]
+fn auto_drive_countdown_auto_submit() {
+    let mut harness = ChatWidgetHarness::new();
+
+    harness.auto_drive_activate(
+        "Handle countdown exhaustion",
+        true,
+        false,
+        AutoContinueModeFixture::TenSeconds,
+    );
+    harness.auto_drive_set_awaiting_submission(
+        "cargo fmt --check",
+        "Auto Drive queued cargo fmt --check",
+        Some("Will run formatter unless cancelled.".to_string()),
+    );
+    harness.auto_drive_override_countdown(3);
+
+    let mut frames = Vec::new();
+    frames.push(normalize_output(render_chat_widget_to_vt100(&mut harness, 80, 18)));
+
+    harness.auto_drive_advance_countdown(1);
+    frames.push(normalize_output(render_chat_widget_to_vt100(&mut harness, 80, 18)));
+
+    harness.auto_drive_advance_countdown(0);
+    harness.auto_drive_set_waiting_for_response(
+        "Auto Drive executing formatter",
+        Some("Running cargo fmt --check.".to_string()),
+        None,
+    );
+    frames.push(normalize_output(render_chat_widget_to_vt100(&mut harness, 80, 18)));
+
+    insta::assert_snapshot!(
+        "auto_drive_countdown_auto_submit",
+        frames.join("\n---FRAME---\n"),
+    );
+}
+
+#[test]
+fn auto_drive_review_footer_persists() {
+    let mut harness = ChatWidgetHarness::new();
+
+    harness.auto_drive_activate(
+        "Verify review footer",
+        true,
+        true,
+        AutoContinueModeFixture::TenSeconds,
+    );
+    harness.auto_drive_set_waiting_for_review(Some(
+        "Waiting for code review to complete.".to_string(),
+    ));
+
+    let frame = normalize_output(render_chat_widget_to_vt100(&mut harness, 80, 18));
+
+    insta::assert_snapshot!("auto_drive_review_footer_persists", frame);
+}
+
+#[test]
+fn auto_drive_manual_mode_waits() {
+    let mut harness = ChatWidgetHarness::new();
+
+    harness.auto_drive_activate(
+        "Manual mode requires explicit continue",
+        true,
+        true,
+        AutoContinueModeFixture::TenSeconds,
+    );
+    harness.auto_drive_set_awaiting_submission(
+        "justfile run manual",
+        "Auto Drive prepared to run justfile target",
+        Some("User confirmation required before continuing.".to_string()),
+    );
+    harness.auto_drive_set_continue_mode(AutoContinueModeFixture::Manual);
+
+    let frame = normalize_output(render_chat_widget_to_vt100(&mut harness, 80, 18));
+
+    insta::assert_snapshot!("auto_drive_manual_mode_waits", frame);
+}
+
+#[test]
+fn auto_drive_review_resume_returns_to_running() {
+    let mut harness = ChatWidgetHarness::new();
+
+    harness.auto_drive_activate(
+        "Resume after review",
+        true,
+        true,
+        AutoContinueModeFixture::TenSeconds,
+    );
+    harness.auto_drive_set_waiting_for_review(Some(
+        "Waiting for reviewer feedback.".to_string(),
+    ));
+
+    let mut frames = Vec::new();
+    frames.push(normalize_output(render_chat_widget_to_vt100(&mut harness, 80, 18)));
+
+    harness.auto_drive_set_waiting_for_response(
+        "Review complete — resuming tasks",
+        Some("Coordinator resumed the workflow.".to_string()),
+        Some("Review cleared open issues.".to_string()),
+    );
+    frames.push(normalize_output(render_chat_widget_to_vt100(&mut harness, 80, 18)));
+
+    insta::assert_snapshot!(
+        "auto_drive_review_resume_returns_to_running",
+        frames.join("\n---FRAME---\n"),
+    );
 }
 
 #[test]
@@ -236,7 +609,7 @@ fn baseline_simple_conversation() {
         }),
     });
 
-    let output = render_chat_widget_to_vt100(&mut harness, 80, 24);
+    let output = normalize_output(render_chat_widget_to_vt100(&mut harness, 80, 24));
     insta::assert_snapshot!("simple_conversation", output);
 }
 
@@ -318,7 +691,7 @@ fn baseline_multiline_formatting() {
         }),
     });
 
-    let output = render_chat_widget_to_vt100(&mut harness, 80, 24);
+    let output = normalize_output(render_chat_widget_to_vt100(&mut harness, 80, 24));
     insta::assert_snapshot!("multiline_formatting", output);
 }
 
@@ -425,6 +798,7 @@ fn tool_activity_showcase() {
             tool_name: "agent".into(),
             parameters: Some(json!({
                 "action": "create",
+                "batch_id": "batch-demo",
                 "create": {
                     "name": "qa-bot",
                     "task": "Run targeted regression suite"
@@ -441,6 +815,7 @@ fn tool_activity_showcase() {
             tool_name: "agent".into(),
             parameters: Some(json!({
                 "action": "create",
+                "batch_id": "batch-demo",
                 "create": {
                     "name": "qa-bot",
                     "task": "Run targeted regression suite"
@@ -463,6 +838,7 @@ fn tool_activity_showcase() {
                 "action": "wait",
                 "wait": {
                     "agent_id": "deploy-helper",
+                    "batch_id": "batch-demo",
                     "timeout_seconds": 600
                 }
             })),
@@ -470,7 +846,7 @@ fn tool_activity_showcase() {
     );
     harness.override_running_tool_elapsed("agent-pending", Duration::from_secs(185));
 
-    let output = render_chat_widget_to_vt100(&mut harness, 80, 40);
+    let output = normalize_output(render_chat_widget_to_vt100(&mut harness, 80, 40));
     insta::assert_snapshot!("tool_activity_showcase", output);
 }
 
@@ -587,7 +963,7 @@ fn browser_session_grouped_desired_layout() {
         }),
     });
 
-    let output = render_chat_widget_to_vt100(&mut harness, 80, 32);
+    let output = normalize_output(render_chat_widget_to_vt100(&mut harness, 80, 32));
     insta::assert_snapshot!("browser_session_grouped_desired_layout", output);
 }
 
@@ -697,6 +1073,7 @@ fn agent_run_grouped_desired_layout() {
             tool_name: "agent".into(),
             parameters: Some(json!({
                 "action": "create",
+                "batch_id": "batch-qa",
                 "create": {
                     "name": "qa-bot",
                     "task": "Run targeted regression suite"
@@ -715,7 +1092,7 @@ fn agent_run_grouped_desired_layout() {
                     id: "qa-bot".into(),
                     name: "QA Bot".into(),
                     status: "running tests".into(),
-                    batch_id: None,
+                    batch_id: Some("batch-qa".into()),
                     model: None,
                     last_progress: None,
                     result: None,
@@ -727,7 +1104,7 @@ fn agent_run_grouped_desired_layout() {
                     id: "doc-writer".into(),
                     name: "Doc Writer".into(),
                     status: "planning".into(),
-                    batch_id: None,
+                    batch_id: Some("batch-qa".into()),
                     model: None,
                     last_progress: None,
                     result: None,
@@ -758,6 +1135,7 @@ fn agent_run_grouped_desired_layout() {
             tool_name: "agent".into(),
             parameters: Some(json!({
                 "action": "create",
+                "batch_id": "batch-qa",
                 "create": {
                     "name": "qa-bot",
                     "task": "Run targeted regression suite"
@@ -794,6 +1172,7 @@ fn agent_run_grouped_plain_tool_name() {
             tool_name: "agent".into(),
             parameters: Some(json!({
                 "action": "create",
+                "batch_id": "batch-plain",
                 "create": {
                     "name": "qa-bot",
                     "task": "Run targeted regression suite"
@@ -811,7 +1190,7 @@ fn agent_run_grouped_plain_tool_name() {
                     id: "qa-bot".into(),
                     name: "QA Bot".into(),
                     status: "running".into(),
-                    batch_id: Some("batch-001".into()),
+                    batch_id: Some("batch-plain".into()),
                     model: Some("claude".into()),
                     last_progress: Some("Executing smoke tests".into()),
                     result: None,
@@ -841,6 +1220,7 @@ fn agent_run_grouped_plain_tool_name() {
             tool_name: "agent".into(),
             parameters: Some(json!({
                 "action": "create",
+                "batch_id": "batch-plain",
                 "create": {
                     "name": "qa-bot",
                     "task": "Run targeted regression suite"
@@ -854,6 +1234,116 @@ fn agent_run_grouped_plain_tool_name() {
     let output = render_chat_widget_to_vt100(&mut harness, 80, 32);
     let output = normalize_output(output);
     insta::assert_snapshot!("agent_run_grouped_plain_tool_name", output);
+}
+
+#[test]
+fn agents_terminal_overlay_full_details() {
+    let mut harness = ChatWidgetHarness::new();
+    let mut event_seq = 1;
+    let mut order_seq = 1;
+
+    push_ordered_event(
+        &mut harness,
+        &mut event_seq,
+        &mut order_seq,
+        EventMsg::CustomToolCallBegin(CustomToolCallBeginEvent {
+            call_id: "agent-run".into(),
+            tool_name: "agent".into(),
+            parameters: Some(json!({
+                "action": "create",
+                "batch_id": "batch-docs",
+                "create": {
+                    "name": "Docs Sweep",
+                    "task": "Compile the release highlights",
+                    "context": "Focus on October 2025 product changes"
+                }
+            })),
+        }),
+    );
+
+    harness.handle_event(Event {
+        id: "agent-status-0".into(),
+        event_seq,
+        msg: EventMsg::AgentStatusUpdate(AgentStatusUpdateEvent {
+            agents: vec![
+                AgentInfo {
+                    id: "docs-sweep-claude".into(),
+                    name: "Docs Sweep (Claude)".into(),
+                    status: "running".into(),
+                    batch_id: Some("batch-docs".into()),
+                    model: Some("claude-3-opus".into()),
+                    last_progress: Some("Collecting release notes\nReviewing eng updates".into()),
+                    result: None,
+                    error: None,
+                    elapsed_ms: Some(4_200),
+                    token_count: Some(3_500),
+                },
+                AgentInfo {
+                    id: "docs-sweep-gpt".into(),
+                    name: "Docs Sweep (GPT)".into(),
+                    status: "pending".into(),
+                    batch_id: Some("batch-docs".into()),
+                    model: Some("gpt-4o".into()),
+                    last_progress: None,
+                    result: None,
+                    error: None,
+                    elapsed_ms: Some(1_100),
+                    token_count: None,
+                },
+            ],
+            context: Some("Focus on October 2025 product changes".into()),
+            task: Some("Compile the release highlights".into()),
+        }),
+        order: Some(OrderMeta {
+            request_ordinal: 1,
+            output_index: Some(0),
+            sequence_number: Some(order_seq),
+        }),
+    });
+    event_seq += 1;
+    order_seq += 1;
+
+    push_ordered_event(
+        &mut harness,
+        &mut event_seq,
+        &mut order_seq,
+        EventMsg::AgentStatusUpdate(AgentStatusUpdateEvent {
+            agents: vec![
+                AgentInfo {
+                    id: "docs-sweep-claude".into(),
+                    name: "Docs Sweep (Claude)".into(),
+                    status: "completed".into(),
+                    batch_id: Some("batch-docs".into()),
+                    model: Some("claude-3-opus".into()),
+                    last_progress: Some("Synthesizing highlights".into()),
+                    result: Some("### Highlights\n- New Auto Drive controls\n- Faster release approvals".into()),
+                    error: None,
+                    elapsed_ms: Some(12_700),
+                    token_count: Some(7_200),
+                },
+                AgentInfo {
+                    id: "docs-sweep-gpt".into(),
+                    name: "Docs Sweep (GPT)".into(),
+                    status: "failed".into(),
+                    batch_id: Some("batch-docs".into()),
+                    model: Some("gpt-4o".into()),
+                    last_progress: Some("Drafting rollout summary".into()),
+                    result: None,
+                    error: Some("Timed out waiting for GitHub diff".into()),
+                    elapsed_ms: Some(9_300),
+                    token_count: Some(4_900),
+                },
+            ],
+            context: Some("Focus on October 2025 product changes".into()),
+            task: Some("Compile the release highlights".into()),
+        }),
+    );
+
+    harness.send_key(make_key(KeyCode::Char('a'), KeyModifiers::CONTROL));
+
+    let output = render_chat_widget_to_vt100(&mut harness, 96, 30);
+    let output = normalize_output(output);
+    insta::assert_snapshot!("agents_terminal_overlay_full_details", &output);
 }
 
 #[test]
@@ -874,6 +1364,7 @@ fn plan_agent_keeps_single_aggregate_block() {
             tool_name: "agent".into(),
             parameters: Some(json!({
                 "action": "create",
+                "batch_id": "batch-plan",
                 "create": {
                     "name": "planner",
                     "task": "Draft implementation plan"
@@ -926,4 +1417,328 @@ fn plan_agent_keeps_single_aggregate_block() {
     let output = render_chat_widget_to_vt100(&mut harness, 80, 40);
     let agent_blocks = harness.count_agent_run_cells();
     assert_eq!(agent_blocks, 1, "expected a single aggregate agent block, saw {}\n{}", agent_blocks, output);
+}
+
+#[test]
+fn settings_overlay_overview_layout() {
+    let mut harness = ChatWidgetHarness::new();
+
+    harness.suppress_rate_limit_refresh();
+    harness.open_settings_overlay_overview();
+
+    let frame = render_chat_widget_to_vt100(&mut harness, 100, 28);
+    let output = normalize_output(frame);
+    insta::assert_snapshot!("settings_overlay_overview_layout", output);
+}
+
+#[test]
+fn settings_overlay_overview_truncates() {
+    let mut harness = ChatWidgetHarness::new();
+
+    harness.suppress_rate_limit_refresh();
+    harness.open_settings_overlay_overview();
+
+    let frame = render_chat_widget_to_vt100(&mut harness, 60, 20);
+    let output = normalize_output(frame);
+    insta::assert_snapshot!("settings_overlay_overview_truncates", output);
+}
+
+#[test]
+fn settings_overview_hints_clean() {
+    let mut harness = ChatWidgetHarness::new();
+
+    harness.suppress_rate_limit_refresh();
+    harness.open_settings_overlay_overview();
+
+    let frame = render_chat_widget_to_vt100(&mut harness, 100, 22);
+    let output = normalize_output(frame);
+    assert!(
+        output
+            .lines()
+            .any(|line| line.contains("Settings ▸ Overview")),
+        "border title should show settings breadcrumb\n{}",
+        output
+    );
+    assert!(
+        output
+            .lines()
+            .any(|line| line.contains("↑ ↓ Move    Enter Open    Esc Close    ? Help")),
+        "footer hints should appear on the last row\n{}",
+        output
+    );
+    insta::assert_snapshot!("settings_overview_hints_clean", output);
+}
+
+#[test]
+fn settings_overlay_theme_swatch_visible() {
+    let mut harness = ChatWidgetHarness::new();
+
+    harness.suppress_rate_limit_refresh();
+    harness.open_settings_overlay_overview();
+
+    let frame = render_chat_widget_to_vt100(&mut harness, 100, 28);
+    let normalized = normalize_output(frame.clone());
+    assert!(
+        normalized.contains("Theme: "),
+        "theme summary should include labeled theme value\n{}",
+        frame
+    );
+    assert!(
+        normalized.contains("Spinner:"),
+        "theme summary should include spinner label\n{}",
+        frame
+    );
+}
+
+#[test]
+fn settings_help_overlay_toggles() {
+    let mut harness = ChatWidgetHarness::new();
+
+    harness.suppress_rate_limit_refresh();
+    harness.open_settings_overlay_overview();
+
+    harness.send_key(make_key(KeyCode::Char('?'), KeyModifiers::NONE));
+    let open = normalize_output(render_chat_widget_to_vt100(&mut harness, 100, 28));
+    insta::assert_snapshot!("settings_help_overlay_open", open);
+
+    harness.send_key(make_key(KeyCode::Esc, KeyModifiers::NONE));
+    let closed = normalize_output(render_chat_widget_to_vt100(&mut harness, 100, 28));
+    insta::assert_snapshot!("settings_help_overlay_closed", closed);
+}
+
+#[test]
+fn settings_help_overlay_from_section() {
+    let mut harness = ChatWidgetHarness::new();
+
+    harness.suppress_rate_limit_refresh();
+    harness.open_settings_overlay_overview();
+
+    harness.send_key(make_key(KeyCode::Enter, KeyModifiers::NONE));
+    harness.send_key(make_key(KeyCode::Char('?'), KeyModifiers::NONE));
+    let section_open = normalize_output(render_chat_widget_to_vt100(&mut harness, 100, 28));
+    insta::assert_snapshot!("settings_help_overlay_section_open", section_open);
+
+    harness.send_key(make_key(KeyCode::Esc, KeyModifiers::NONE));
+    let section_closed = normalize_output(render_chat_widget_to_vt100(&mut harness, 100, 28));
+    insta::assert_snapshot!("settings_help_overlay_section_closed", section_closed);
+}
+
+#[test]
+fn agent_status_missing_batch_displays_error() {
+    let mut harness = ChatWidgetHarness::new();
+    harness.push_user_prompt("/agents");
+
+    harness.handle_event(Event {
+        id: "agent-status-missing-batch".into(),
+        event_seq: 0,
+        msg: EventMsg::AgentStatusUpdate(AgentStatusUpdateEvent {
+            agents: vec![AgentInfo {
+                id: "orphan-agent".into(),
+                name: "Orphan".into(),
+                status: "running".into(),
+                batch_id: None,
+                model: Some("code".into()),
+                last_progress: Some("trying something risky".into()),
+                result: None,
+                error: None,
+                elapsed_ms: Some(8_000),
+                token_count: Some(3_200),
+            }],
+            context: Some("debug orphan".into()),
+            task: Some("Investigate logs".into()),
+        }),
+        order: None,
+    });
+
+    let output = render_chat_widget_to_vt100(&mut harness, 80, 20);
+    let output = normalize_output(output);
+    insta::assert_snapshot!("agent_status_missing_batch_displays_error", output);
+}
+
+#[test]
+fn agent_parallel_batches_do_not_duplicate_cells() {
+    let mut harness = ChatWidgetHarness::new();
+    harness.push_user_prompt("Run parallel meal plans");
+
+    let mut event_seq = 0u64;
+    let mut order_seq = 0u64;
+
+    // Begin pizza batch
+    push_ordered_event(
+        &mut harness,
+        &mut event_seq,
+        &mut order_seq,
+        EventMsg::CustomToolCallBegin(CustomToolCallBeginEvent {
+            call_id: "agent-pizza".into(),
+            tool_name: "agent".into(),
+            parameters: Some(json!({
+                "action": "create",
+                "batch_id": "batch-pizza",
+                "create": {
+                    "name": "Pizza Plan",
+                    "task": "Plan how to make a pizza with prep and bake timelines"
+                }
+            })),
+        }),
+    );
+
+    // Begin burger batch
+    push_ordered_event(
+        &mut harness,
+        &mut event_seq,
+        &mut order_seq,
+        EventMsg::CustomToolCallBegin(CustomToolCallBeginEvent {
+            call_id: "agent-burger".into(),
+            tool_name: "agent".into(),
+            parameters: Some(json!({
+                "action": "create",
+                "batch_id": "batch-burger",
+                "create": {
+                    "name": "Burger Plan",
+                    "task": "Plan how to make a burger with toppings and timing"
+                }
+            })),
+        }),
+    );
+
+    // Status update for both batches while running
+    harness.handle_event(Event {
+        id: "status-running".into(),
+        event_seq,
+        msg: EventMsg::AgentStatusUpdate(AgentStatusUpdateEvent {
+            agents: vec![
+                AgentInfo {
+                    id: "pizza-agent".into(),
+                    name: "Pizza Plan".into(),
+                    status: "running".into(),
+                    batch_id: Some("batch-pizza".into()),
+                    model: Some("code".into()),
+                    last_progress: Some("assembling ingredient checklist".into()),
+                    result: None,
+                    error: None,
+                    elapsed_ms: Some(4_000),
+                    token_count: Some(2_400),
+                },
+                AgentInfo {
+                    id: "burger-agent".into(),
+                    name: "Burger Plan".into(),
+                    status: "running".into(),
+                    batch_id: Some("batch-burger".into()),
+                    model: Some("code".into()),
+                    last_progress: Some("drafting grill timing".into()),
+                    result: None,
+                    error: None,
+                    elapsed_ms: Some(3_200),
+                    token_count: Some(1_900),
+                },
+            ],
+            context: Some("Parallel meal planning".into()),
+            task: Some("Plan how to make a pizza.".into()),
+        }),
+        order: Some(OrderMeta {
+            request_ordinal: 1,
+            output_index: Some(1),
+            sequence_number: Some(order_seq),
+        }),
+    });
+    event_seq += 1;
+    order_seq += 1;
+
+    // Completion update with results
+    harness.handle_event(Event {
+        id: "status-complete".into(),
+        event_seq,
+        msg: EventMsg::AgentStatusUpdate(AgentStatusUpdateEvent {
+            agents: vec![
+                AgentInfo {
+                    id: "pizza-agent".into(),
+                    name: "Pizza Plan".into(),
+                    status: "completed".into(),
+                    batch_id: Some("batch-pizza".into()),
+                    model: Some("code".into()),
+                    last_progress: Some("documented bake schedule".into()),
+                    result: Some("1. Prep dough\n2. Simmer sauce\n3. Bake at 475°F".into()),
+                    error: None,
+                    elapsed_ms: Some(9_500),
+                    token_count: Some(4_200),
+                },
+                AgentInfo {
+                    id: "burger-agent".into(),
+                    name: "Burger Plan".into(),
+                    status: "completed".into(),
+                    batch_id: Some("batch-burger".into()),
+                    model: Some("code".into()),
+                    last_progress: Some("outlined topping staging".into()),
+                    result: Some("1. Toast buns\n2. Grill patties\n3. Layer toppings".into()),
+                    error: None,
+                    elapsed_ms: Some(8_100),
+                    token_count: Some(3_600),
+                },
+            ],
+            context: Some("Parallel meal planning".into()),
+            task: Some("Plan how to make a pizza.".into()),
+        }),
+        order: Some(OrderMeta {
+            request_ordinal: 1,
+            output_index: Some(2),
+            sequence_number: Some(order_seq),
+        }),
+    });
+    event_seq += 1;
+    order_seq += 1;
+
+    // End events for each batch
+    push_ordered_event(
+        &mut harness,
+        &mut event_seq,
+        &mut order_seq,
+        EventMsg::CustomToolCallEnd(CustomToolCallEndEvent {
+            call_id: "agent-pizza".into(),
+            tool_name: "agent".into(),
+            parameters: Some(json!({
+                "action": "create",
+                "batch_id": "batch-pizza",
+                "create": {
+                    "name": "Pizza Plan",
+                    "task": "Plan how to make a pizza with prep and bake timelines"
+                }
+            })),
+            duration: Duration::from_secs(12),
+            result: Ok("Pizza plan ready".into()),
+        }),
+    );
+
+    push_ordered_event(
+        &mut harness,
+        &mut event_seq,
+        &mut order_seq,
+        EventMsg::CustomToolCallEnd(CustomToolCallEndEvent {
+            call_id: "agent-burger".into(),
+            tool_name: "agent".into(),
+            parameters: Some(json!({
+                "action": "create",
+                "batch_id": "batch-burger",
+                "create": {
+                    "name": "Burger Plan",
+                    "task": "Plan how to make a burger with toppings and timing"
+                }
+            })),
+            duration: Duration::from_secs(10),
+            result: Ok("Burger plan ready".into()),
+        }),
+    );
+
+    let output = normalize_output(render_chat_widget_to_vt100(&mut harness, 80, 32));
+    assert_eq!(harness.count_agent_run_cells(), 2, "expected one card per batch\n{output}");
+    assert!(output.contains("Pizza Plan"), "missing pizza batch details\n{output}");
+    assert!(output.contains("Burger Plan"), "missing burger batch details\n{output}");
+    assert!(
+        output.contains("Plan how to make a pizza with prep and bake timelines"),
+        "pizza task missing\n{output}"
+    );
+    assert!(
+        output.contains("Plan how to make a burger with toppings and timing"),
+        "burger task missing or overwritten\n{output}"
+    );
+    assert!(!output.contains("batch-pizza"), "raw pizza batch id leaked into header\n{output}");
 }

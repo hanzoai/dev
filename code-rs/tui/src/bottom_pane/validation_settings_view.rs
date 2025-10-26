@@ -60,6 +60,7 @@ pub(crate) struct ValidationSettingsView {
     is_complete: bool,
     tool_name_width: usize,
     viewport_rows: Cell<usize>,
+    pending_notice: Option<String>,
 }
 
 impl ValidationSettingsView {
@@ -81,6 +82,7 @@ impl ValidationSettingsView {
             is_complete: false,
             tool_name_width,
             viewport_rows: Cell::new(0),
+            pending_notice: None,
         }
     }
 
@@ -158,27 +160,34 @@ impl ValidationSettingsView {
         (rows, selection_rows, selection_kinds)
     }
 
-    fn activate_selection(&mut self, pane: &mut BottomPane<'_>, selection: SelectionKind) {
+    fn activate_selection(&mut self, pane: Option<&mut BottomPane<'_>>, selection: SelectionKind) {
         match selection {
             SelectionKind::Group(idx) => self.toggle_group(idx),
             SelectionKind::Tool(idx) => {
                 if let Some(tool) = self.tools.get(idx) {
                     if !tool.status.installed {
-                        let command = tool.status.install_hint.trim();
+                        let command = tool.status.install_hint.trim().to_string();
+                        let tool_name = tool.status.name.to_string();
                         if command.is_empty() {
-                            pane.flash_footer_notice(format!(
-                                "No install command available for {}",
-                                tool.status.name
-                            ));
+                            self.flash_notice(
+                                pane,
+                                format!(
+                                    "No install command available for {}",
+                                    tool_name
+                                ),
+                            );
                         } else {
-                            pane.flash_footer_notice(format!(
-                                "Opening terminal to install {}",
-                                tool.status.name
-                            ));
+                            self.flash_notice(
+                                pane,
+                                format!(
+                                    "Opening terminal to install {}",
+                                    tool_name
+                                ),
+                            );
                             self.is_complete = true;
                             self.app_event_tx.send(AppEvent::RequestValidationToolInstall {
-                                name: tool.status.name.to_string(),
-                                command: command.to_string(),
+                                name: tool_name,
+                                command,
                             });
                         }
                     } else {
@@ -187,6 +196,96 @@ impl ValidationSettingsView {
                 }
             }
         }
+    }
+
+    fn flash_notice(&mut self, pane: Option<&mut BottomPane<'_>>, text: String) {
+        if let Some(pane) = pane {
+            pane.flash_footer_notice(text.clone());
+        }
+        self.pending_notice = Some(text);
+        self.app_event_tx.send(AppEvent::RequestRedraw);
+    }
+
+    fn handle_key_event_internal(&mut self, mut pane: Option<&mut BottomPane<'_>>, key_event: KeyEvent) {
+        let (_, _, selection_kinds) = self.build_rows();
+        let mut total = selection_kinds.len();
+        if total == 0 {
+            if matches!(key_event.code, KeyCode::Esc) {
+                self.is_complete = true;
+            }
+            return;
+        }
+
+        if self.state.selected_idx.is_none() {
+            self.state.selected_idx = Some(0);
+        }
+        self.state.clamp_selection(total);
+        self.state.scroll_top = self.state.scroll_top.min(total.saturating_sub(1));
+        let visible_budget = self.visible_budget(total);
+        self.state.ensure_visible(total, visible_budget);
+
+        let current_kind = self
+            .state
+            .selected_idx
+            .and_then(|sel| selection_kinds.get(sel))
+            .copied();
+
+        match key_event {
+            KeyEvent { code: KeyCode::Up, .. } => {
+                self.state.move_up_wrap(total);
+            }
+            KeyEvent { code: KeyCode::Down, .. } => {
+                self.state.move_down_wrap(total);
+            }
+            KeyEvent { code: KeyCode::Left, .. } | KeyEvent { code: KeyCode::Right, .. } => {
+                if let Some(kind) = current_kind {
+                    match kind {
+                        SelectionKind::Group(idx) => self.toggle_group(idx),
+                        SelectionKind::Tool(idx) => {
+                            if let Some(tool) = self.tools.get(idx) {
+                                if tool.status.installed {
+                                    self.toggle_tool(idx);
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+            KeyEvent { code: KeyCode::Char(' '), .. } => {
+                if let Some(kind) = current_kind {
+                    self.activate_selection(pane.take(), kind);
+                }
+            }
+            KeyEvent { code: KeyCode::Enter, modifiers: KeyModifiers::NONE, .. } => {
+                if let Some(kind) = current_kind {
+                    self.activate_selection(pane.take(), kind);
+                }
+            }
+            KeyEvent { code: KeyCode::Esc, .. } => {
+                self.is_complete = true;
+            }
+            _ => {}
+        }
+
+        let (_, _, selection_kinds) = self.build_rows();
+        total = selection_kinds.len();
+        if total == 0 {
+            self.state.selected_idx = None;
+            self.state.scroll_top = 0;
+        } else {
+            self.state.clamp_selection(total);
+            self.state.scroll_top = self.state.scroll_top.min(total.saturating_sub(1));
+            let visible_budget = self.visible_budget(total);
+            self.state.ensure_visible(total, visible_budget);
+        }
+    }
+
+    pub fn handle_key_event_direct(&mut self, key_event: KeyEvent) {
+        self.handle_key_event_internal(None, key_event);
+    }
+
+    pub fn is_view_complete(&self) -> bool {
+        self.is_complete
     }
 
     fn render_header_lines(&self) -> Vec<Line<'static>> {
@@ -203,8 +302,8 @@ impl ValidationSettingsView {
         ]
     }
 
-    fn render_footer_line(&self) -> Line<'static> {
-        Line::from(vec![
+    fn render_footer_lines(&self) -> Vec<Line<'static>> {
+        let base = Line::from(vec![
             Span::styled("↑↓", Style::default().fg(colors::function())),
             Span::styled(" Navigate  ", Style::default().fg(colors::text_dim())),
             Span::styled("Enter", Style::default().fg(colors::success())),
@@ -213,7 +312,16 @@ impl ValidationSettingsView {
             Span::styled(" Toggle  ", Style::default().fg(colors::text_dim())),
             Span::styled("Esc", Style::default().fg(colors::error())),
             Span::styled(" Close", Style::default().fg(colors::text_dim())),
-        ])
+        ]);
+
+        let mut lines = vec![base];
+        if let Some(notice) = &self.pending_notice {
+            lines.push(Line::from(vec![Span::styled(
+                notice.clone(),
+                Style::default().fg(colors::warning()),
+            )]));
+        }
+        lines
     }
 
     fn render_row(&self, row: &RowData, selected: bool) -> Line<'static> {
@@ -312,73 +420,7 @@ impl ValidationSettingsView {
 
 impl<'a> BottomPaneView<'a> for ValidationSettingsView {
     fn handle_key_event(&mut self, pane: &mut BottomPane<'a>, key_event: KeyEvent) {
-        let (_, _, selection_kinds) = self.build_rows();
-        let mut total = selection_kinds.len();
-        if total == 0 {
-            if matches!(key_event.code, KeyCode::Esc) {
-                self.is_complete = true;
-            }
-            return;
-        }
-
-        if self.state.selected_idx.is_none() {
-            self.state.selected_idx = Some(0);
-        }
-        self.state.clamp_selection(total);
-        self.state.scroll_top = self.state.scroll_top.min(total.saturating_sub(1));
-        let visible_budget = self.visible_budget(total);
-        self.state.ensure_visible(total, visible_budget);
-
-        let current_kind = self.state.selected_idx.and_then(|sel| selection_kinds.get(sel)).copied();
-
-        match key_event {
-            KeyEvent { code: KeyCode::Up, .. } => {
-                self.state.move_up_wrap(total);
-            }
-            KeyEvent { code: KeyCode::Down, .. } => {
-                self.state.move_down_wrap(total);
-            }
-            KeyEvent { code: KeyCode::Left, .. } | KeyEvent { code: KeyCode::Right, .. } => {
-                if let Some(kind) = current_kind {
-                    match kind {
-                        SelectionKind::Group(idx) => self.toggle_group(idx),
-                        SelectionKind::Tool(idx) => {
-                            if let Some(tool) = self.tools.get(idx) {
-                                if tool.status.installed {
-                                    self.toggle_tool(idx);
-                                }
-                            }
-                        }
-                    }
-                }
-            }
-            KeyEvent { code: KeyCode::Char(' '), .. } => {
-                if let Some(kind) = current_kind {
-                    self.activate_selection(pane, kind);
-                }
-            }
-            KeyEvent { code: KeyCode::Enter, modifiers: KeyModifiers::NONE, .. } => {
-                if let Some(kind) = current_kind {
-                    self.activate_selection(pane, kind);
-                }
-            }
-            KeyEvent { code: KeyCode::Esc, .. } => {
-                self.is_complete = true;
-            }
-            _ => {}
-        }
-
-        let (_, _, selection_kinds) = self.build_rows();
-        total = selection_kinds.len();
-        if total == 0 {
-            self.state.selected_idx = None;
-            self.state.scroll_top = 0;
-        } else {
-            self.state.clamp_selection(total);
-            self.state.scroll_top = self.state.scroll_top.min(total.saturating_sub(1));
-            let visible_budget = self.visible_budget(total);
-            self.state.ensure_visible(total, visible_budget);
-        }
+        self.handle_key_event_internal(Some(pane), key_event);
     }
 
     fn is_complete(&self) -> bool {
@@ -407,11 +449,15 @@ impl<'a> BottomPaneView<'a> for ValidationSettingsView {
         block.render(area, buf);
 
         let header_lines = self.render_header_lines();
-        let footer_line = self.render_footer_line();
+        let footer_lines = self.render_footer_lines();
 
         let available_height = inner.height as usize;
         let header_height = header_lines.len().min(available_height) as usize;
-        let footer_height = if available_height > header_height { 1 } else { 0 };
+        let footer_height = if available_height > header_height {
+            1 + footer_lines.len()
+        } else {
+            0
+        };
         let list_height = available_height.saturating_sub(header_height + footer_height);
         let visible_slots = list_height.max(1);
         self.viewport_rows.set(visible_slots);
@@ -448,7 +494,7 @@ impl<'a> BottomPaneView<'a> for ValidationSettingsView {
 
         if footer_height > 0 {
             visible_lines.push(Line::from(""));
-            visible_lines.push(footer_line);
+            visible_lines.extend(footer_lines.into_iter());
         }
 
         Paragraph::new(visible_lines)

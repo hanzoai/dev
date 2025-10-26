@@ -48,6 +48,33 @@ const EXEC_TIMEOUT_EXIT_CODE: i32 = 124; // conventional timeout exit code
 // I/O buffer sizing
 const READ_CHUNK_SIZE: usize = 8192; // bytes per read
 const AGGREGATE_BUFFER_INITIAL_CAPACITY: usize = 8 * 1024; // 8 KiB
+pub(crate) const EXEC_CAPTURE_MAX_BYTES: usize = 32 * 1024 * 1024; // 32 MiB cap per stream
+
+fn append_with_cap(
+    buf: &mut Vec<u8>,
+    chunk: &[u8],
+    truncated: &mut bool,
+    truncated_lines: &mut u32,
+    truncated_bytes: &mut usize,
+) {
+    if chunk.is_empty() {
+        return;
+    }
+
+    buf.extend_from_slice(chunk);
+    if buf.len() > EXEC_CAPTURE_MAX_BYTES {
+        let drop_len = buf.len() - EXEC_CAPTURE_MAX_BYTES;
+        let mut lines_dropped = 0u32;
+        for byte in buf.drain(0..drop_len) {
+            if byte == b'\n' {
+                lines_dropped = lines_dropped.saturating_add(1);
+            }
+        }
+        *truncated = true;
+        *truncated_lines = (*truncated_lines).saturating_add(lines_dropped);
+        *truncated_bytes = (*truncated_bytes).saturating_add(drop_len);
+    }
+}
 
 /// Limit the number of ExecCommandOutputDelta events emitted per exec call.
 /// Aggregation still collects full output; only the live event stream is capped.
@@ -230,6 +257,7 @@ fn is_likely_sandbox_denied(sandbox_type: SandboxType, exit_code: i32) -> bool {
 pub struct StreamOutput<T> {
     pub text: T,
     pub truncated_after_lines: Option<u32>,
+    pub truncated_before_bytes: Option<usize>,
 }
 #[derive(Debug)]
 struct RawExecToolCallOutput {
@@ -245,6 +273,7 @@ impl StreamOutput<String> {
         Self {
             text,
             truncated_after_lines: None,
+            truncated_before_bytes: None,
         }
     }
 }
@@ -254,13 +283,9 @@ impl StreamOutput<Vec<u8>> {
         StreamOutput {
             text: String::from_utf8_lossy(&self.text).to_string(),
             truncated_after_lines: self.truncated_after_lines,
+            truncated_before_bytes: self.truncated_before_bytes,
         }
     }
-}
-
-#[inline]
-fn append_all(dst: &mut Vec<u8>, src: &[u8]) {
-    dst.extend_from_slice(src);
 }
 
 #[derive(Debug, Clone)]
@@ -398,8 +423,16 @@ async fn consume_truncated_output(
         stdout_handle.abort();
         stderr_handle.abort();
         (
-            StreamOutput { text: Vec::new(), truncated_after_lines: None },
-            StreamOutput { text: Vec::new(), truncated_after_lines: None },
+            StreamOutput {
+                text: Vec::new(),
+                truncated_after_lines: None,
+                truncated_before_bytes: None,
+            },
+            StreamOutput {
+                text: Vec::new(),
+                truncated_after_lines: None,
+                truncated_before_bytes: None,
+            },
         )
     } else {
         (stdout_handle.await??, stderr_handle.await??)
@@ -408,12 +441,24 @@ async fn consume_truncated_output(
     drop(agg_tx);
 
     let mut combined_buf = Vec::with_capacity(AGGREGATE_BUFFER_INITIAL_CAPACITY);
+    let mut combined_truncated = false;
+    let mut combined_truncated_lines = 0u32;
+    let mut combined_truncated_bytes = 0usize;
     while let Ok(chunk) = agg_rx.recv().await {
-        append_all(&mut combined_buf, &chunk);
+        append_with_cap(
+            &mut combined_buf,
+            &chunk,
+            &mut combined_truncated,
+            &mut combined_truncated_lines,
+            &mut combined_truncated_bytes,
+        );
     }
     let aggregated_output = StreamOutput {
         text: combined_buf,
-        truncated_after_lines: None,
+        truncated_after_lines: combined_truncated
+            .then_some(combined_truncated_lines.max(1)),
+        truncated_before_bytes: (combined_truncated_bytes > 0)
+            .then_some(combined_truncated_bytes),
     };
 
     Ok(RawExecToolCallOutput {
@@ -432,10 +477,11 @@ async fn read_capped<R: AsyncRead + Unpin + Send + 'static>(
     aggregate_tx: Option<Sender<Vec<u8>>>,
 ) -> io::Result<StreamOutput<Vec<u8>>> {
     let mut buf = Vec::with_capacity(AGGREGATE_BUFFER_INITIAL_CAPACITY);
+    let mut truncated = false;
+    let mut truncated_lines = 0u32;
+    let mut truncated_bytes = 0usize;
     let mut tmp = [0u8; READ_CHUNK_SIZE];
     let mut emitted_deltas: usize = 0;
-
-    // No caps: append all bytes
 
     loop {
         let n = reader.read(&mut tmp).await?;
@@ -481,13 +527,20 @@ async fn read_capped<R: AsyncRead + Unpin + Send + 'static>(
             let _ = tx.send(tmp[..n].to_vec()).await;
         }
 
-        append_all(&mut buf, &tmp[..n]);
+        append_with_cap(
+            &mut buf,
+            &tmp[..n],
+            &mut truncated,
+            &mut truncated_lines,
+            &mut truncated_bytes,
+        );
         // Continue reading to EOF to avoid back-pressure
     }
 
     Ok(StreamOutput {
         text: buf,
-        truncated_after_lines: None,
+        truncated_after_lines: truncated.then_some(truncated_lines.max(1)),
+        truncated_before_bytes: (truncated_bytes > 0).then_some(truncated_bytes),
     })
 }
 

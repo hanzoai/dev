@@ -44,7 +44,7 @@ pub struct FreeformToolFormat {
 #[allow(dead_code)]
 #[derive(Debug, Clone, Serialize, PartialEq)]
 #[serde(tag = "type")]
-pub(crate) enum OpenAiTool {
+pub enum OpenAiTool {
     #[serde(rename = "function")]
     Function(ResponsesApiTool),
     #[serde(rename = "local_shell")]
@@ -78,7 +78,7 @@ pub enum ConfigShellToolType {
 }
 
 #[derive(Debug, Clone)]
-pub(crate) struct ToolsConfig {
+pub struct ToolsConfig {
     pub shell_type: ConfigShellToolType,
     pub plan_tool: bool,
     #[allow(dead_code)]
@@ -148,7 +148,7 @@ impl ToolsConfig {
 
     // Compatibility constructor used by some tests/upstream calls.
     #[allow(dead_code)]
-    pub fn new_from_params(p: &ToolsConfigParams) -> Self {
+    pub(crate) fn new_from_params(p: &ToolsConfigParams) -> Self {
         Self::new(
             p.model_family,
             p.approval_policy,
@@ -334,7 +334,7 @@ fn create_shell_tool() -> OpenAiTool {
     properties.insert(
         "timeout".to_string(),
         JsonSchema::Number {
-            description: Some("Optional hard timeout in milliseconds. By default, commands have no hard timeout; long runs are streamed and may be backgrounded by the agent.".to_string()),
+            description: Some("Optional hard timeout in milliseconds (minimum 1,800,000 / 30 minutes). By default, commands have no hard timeout; long runs are streamed and may be backgrounded by the agent.".to_string()),
         },
     );
 
@@ -372,7 +372,7 @@ fn create_shell_tool_for_sandbox(sandbox_policy: &SandboxPolicy) -> OpenAiTool {
     properties.insert(
         "timeout_ms".to_string(),
         JsonSchema::Number {
-            description: Some("Optional hard timeout in milliseconds. By default, commands have no hard timeout; long runs are streamed and may be backgrounded by the agent.".to_string()),
+            description: Some("Optional hard timeout in milliseconds (minimum 1,800,000 / 30 minutes). By default, commands have no hard timeout; long runs are streamed and may be backgrounded by the agent.".to_string()),
         },
     );
 
@@ -647,7 +647,7 @@ fn sanitize_json_schema(value: &mut JsonValue) {
 /// Returns a list of OpenAiTools based on the provided config and MCP tools.
 /// Note that the keys of mcp_tools should be fully qualified names. See
 /// [`McpConnectionManager`] for more details.
-pub(crate) fn get_openai_tools(
+pub fn get_openai_tools(
     config: &ToolsConfig,
     mcp_tools: Option<HashMap<String, mcp_types::Tool>>,
     browser_enabled: bool,
@@ -785,15 +785,17 @@ mod tests {
 
     use super::*;
 
-    const TEST_AGENT_MODELS: &[&str] = &["claude", "gemini", "qwen", "code", "cloud"];
+    use crate::agent_defaults::enabled_agent_model_specs;
+
+    fn test_agent_models() -> Vec<String> {
+        enabled_agent_model_specs()
+            .into_iter()
+            .map(|spec| spec.slug.to_string())
+            .collect()
+    }
 
     fn apply_default_agent_models(config: &mut ToolsConfig) {
-        config.set_agent_models(
-            TEST_AGENT_MODELS
-                .iter()
-                .map(|name| (*name).to_string())
-                .collect(),
-        );
+        config.set_agent_models(test_agent_models());
     }
 
     fn assert_eq_tool_names(tools: &[OpenAiTool], expected_names: &[&str]) {
@@ -1292,9 +1294,14 @@ mod tests {
                 "dash/paginate",
             ],
         );
+        let paginate_tool = tools
+            .iter()
+            .find(|tool| matches!(tool, OpenAiTool::Function(ResponsesApiTool { name, .. }) if name == "dash/paginate"))
+            .expect("dash/paginate tool present");
+
         assert_eq!(
-            tools[8],
-            OpenAiTool::Function(ResponsesApiTool {
+            paginate_tool,
+            &OpenAiTool::Function(ResponsesApiTool {
                 name: "dash/paginate".to_string(),
                 parameters: JsonSchema::Object {
                     properties: BTreeMap::from([(

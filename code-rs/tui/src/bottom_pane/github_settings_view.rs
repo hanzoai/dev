@@ -40,37 +40,51 @@ impl GithubSettingsView {
         self.app_event_tx
             .send(AppEvent::UpdateGithubWatcher(self.watcher_enabled));
     }
-}
 
-impl<'a> BottomPaneView<'a> for GithubSettingsView {
-    fn handle_key_event(&mut self, _pane: &mut BottomPane<'a>, key_event: KeyEvent) {
+    pub fn handle_key_event_direct(&mut self, key_event: KeyEvent) {
         match key_event {
             KeyEvent { code: KeyCode::Up, modifiers: KeyModifiers::NONE, .. } => {
-                if self.selected_row > 0 { self.selected_row -= 1; }
+                if self.selected_row > 0 {
+                    self.selected_row -= 1;
+                }
             }
             KeyEvent { code: KeyCode::Down, modifiers: KeyModifiers::NONE, .. } => {
-                if self.selected_row < 1 { self.selected_row += 1; }
+                if self.selected_row < 1 {
+                    self.selected_row += 1;
+                }
             }
             KeyEvent { code: KeyCode::Left | KeyCode::Right, modifiers: KeyModifiers::NONE, .. } => {
-                if self.selected_row == 0 { self.toggle(); }
+                if self.selected_row == 0 {
+                    self.toggle();
+                }
             }
             KeyEvent { code: KeyCode::Enter, modifiers: KeyModifiers::NONE, .. } => {
                 if self.selected_row == 0 {
-                    // Toggle and stay; Enter behaves like toggle
                     self.toggle();
                 } else {
-                    // Close
                     self.is_complete = true;
                 }
             }
             KeyEvent { code: KeyCode::Char(' '), modifiers: KeyModifiers::NONE, .. } => {
-                if self.selected_row == 0 { self.toggle(); }
+                if self.selected_row == 0 {
+                    self.toggle();
+                }
             }
             KeyEvent { code: KeyCode::Esc, .. } => {
                 self.is_complete = true;
             }
             _ => {}
         }
+    }
+
+    pub fn is_view_complete(&self) -> bool {
+        self.is_complete
+    }
+}
+
+impl<'a> BottomPaneView<'a> for GithubSettingsView {
+    fn handle_key_event(&mut self, _pane: &mut BottomPane<'a>, key_event: KeyEvent) {
+        self.handle_key_event_direct(key_event);
     }
 
     fn is_complete(&self) -> bool { self.is_complete }
@@ -142,4 +156,3 @@ impl<'a> BottomPaneView<'a> for GithubSettingsView {
         paragraph.render(Rect { x: inner.x.saturating_add(1), y: inner.y, width: inner.width.saturating_sub(2), height: inner.height }, buf);
     }
 }
-

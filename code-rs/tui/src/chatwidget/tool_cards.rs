@@ -1,6 +1,12 @@
 use super::{ChatWidget, OrderKey};
 use crate::history::state::HistoryId;
-use crate::history_cell::HistoryCell;
+use crate::history_cell::{
+    AgentRunCell,
+    CollapsibleReasoningCell,
+    HistoryCell,
+    HistoryCellType,
+};
+use std::any::TypeId;
 
 pub(super) struct ToolCardSlot {
     pub order_key: OrderKey,
@@ -9,6 +15,7 @@ pub(super) struct ToolCardSlot {
     pub cell_key: Option<String>,
     previous_key: Option<String>,
     signature: Option<String>,
+    last_order_key: Option<OrderKey>,
 }
 
 impl ToolCardSlot {
@@ -20,11 +27,23 @@ impl ToolCardSlot {
             cell_key: None,
             previous_key: None,
             signature: None,
+            last_order_key: None,
         }
     }
 
     pub fn set_order_key(&mut self, order_key: OrderKey) {
         self.order_key = order_key;
+    }
+
+    pub fn last_inserted_order(&self) -> Option<OrderKey> {
+        self.last_order_key
+    }
+
+    pub fn has_order_change(&self) -> bool {
+        match self.last_order_key {
+            Some(last) => last != self.order_key,
+            None => false,
+        }
     }
 
     pub fn set_key(&mut self, key: Option<String>) {
@@ -103,6 +122,7 @@ pub(super) fn ensure_tool_card<C: ToolCardCell>(
     let idx = chat.history_insert_with_key_global(Box::new(cell.clone()), slot.order_key);
     slot.cell_index = Some(idx);
     slot.history_id = chat.history_cell_ids.get(idx).and_then(|slot| *slot);
+    slot.last_order_key = Some(slot.order_key);
     idx
 }
 
@@ -111,13 +131,91 @@ pub(super) fn replace_tool_card<C: ToolCardCell>(
     slot: &mut ToolCardSlot,
     cell: &C,
 ) -> usize {
+    let mut order_changed = slot.has_order_change();
+
+    if order_changed && TypeId::of::<C>() == TypeId::of::<AgentRunCell>() {
+        if should_anchor_agent_slot(chat, slot) {
+            if let Some(previous) = slot.last_inserted_order() {
+                slot.set_order_key(previous);
+                order_changed = false;
+            }
+        }
+    }
+
+    if order_changed {
+        remove_existing_card::<C>(chat, slot);
+    }
+
     let idx = ensure_tool_card(chat, slot, cell);
     chat.history_replace_at(idx, Box::new(cell.clone()));
     slot.cell_index = Some(idx);
     slot.history_id = chat.history_cell_ids.get(idx).and_then(|slot| *slot);
+    slot.last_order_key = Some(slot.order_key);
     let signature = slot.signature().map(|s| s.to_string());
     prune_tool_card_duplicates::<C>(chat, slot, idx, signature.as_deref());
     idx
+}
+
+fn should_anchor_agent_slot(chat: &ChatWidget<'_>, slot: &ToolCardSlot) -> bool {
+    let Some(idx) = slot.cell_index else {
+        return false;
+    };
+
+    for cell in chat.history_cells.iter().skip(idx + 1) {
+        if cell.as_any().downcast_ref::<AgentRunCell>().is_some() {
+            continue;
+        }
+        if cell
+            .as_any()
+            .downcast_ref::<CollapsibleReasoningCell>()
+            .is_some()
+        {
+            continue;
+        }
+        if matches!(cell.kind(), HistoryCellType::BackgroundEvent) {
+            continue;
+        }
+        return false;
+    }
+
+    true
+}
+
+fn remove_existing_card<C: ToolCardCell>(chat: &mut ChatWidget<'_>, slot: &mut ToolCardSlot) {
+    let signature = slot.signature().map(|s| s.to_string());
+
+    let mut target_idx = if let Some(id) = slot.history_id {
+        if let Some(idx) = chat.cell_index_for_history_id(id) {
+            if cell_matches::<C>(chat, idx, slot, signature.as_deref()) {
+                Some(idx)
+            } else {
+                None
+            }
+        } else {
+            None
+        }
+    } else {
+        None
+    };
+
+    if target_idx.is_none() {
+        if let Some(idx) = slot.cell_index {
+            if idx < chat.history_cells.len() && cell_matches::<C>(chat, idx, slot, signature.as_deref()) {
+                target_idx = Some(idx);
+            }
+        }
+    }
+
+    if target_idx.is_none() {
+        target_idx = find_card_index::<C>(chat, slot, signature.as_deref());
+    }
+
+    if let Some(idx) = target_idx {
+        chat.history_remove_at(idx);
+    }
+
+    slot.cell_index = None;
+    slot.history_id = None;
 }
 
 fn prune_tool_card_duplicates<C: ToolCardCell>(

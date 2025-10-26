@@ -1,0 +1,31 @@
+---
+source: tui/tests/vt100_chatwidget_snapshot.rs
+expression: open
+---
+ +------------------------------------------------------------------------------------------------+
+ |    Code  •  Directory: ~/.code/working/code/branches/code-branch-20251024-135958/code-rs/tui   |
+ +------------------------------------------------------------------------------------------------+
+ +Settings ▸ Overview-----------------------------------------------------------------------------+
+ |                                                                                                |
+ | › Model              Model: gpt-5-codex · Effort: Medium                                       |
+ |   + Choose the language model used for new completions.                                        |
+ |                           +----------------------------------------+                           |
+ |   Theme              Theme|Settings Overview                       |mond                       |
+ |   + Switch between preset |                                        |                           |
+ |                           |• ↑/↓  Move between sections            |                           |
+ |   Updates            Auto |• Enter  Open selected section          |                           |
+ |   + Control CLI auto-updat|• Tab    Jump forward between sections  |                           |
+ |                           |• Esc    Close settings                 |                           |
+ |   ------------------------|• ?      Toggle this help               |-------------------------- |
+ |                           |                                        |                           |
+ |   Agents             Enabl|Press Esc to close                      |                           |
+ |   + Configure linked agent+----------------------------------------+                           |
+ |                                                                                                |
+ | ↑ ↓ Move    Enter Open    Esc Close    ? Help                                                  |
+ |                                                                                                |
+ +------------------------------------------------------------------------------------------------+
+
+ +------------------------------------------------------------------------------------------------+
+ | What can I code for you today?                                                                 |
+ +------------------------------------------------------------------------------------------------+
+   Read Only  (Shift+Tab change)                                                       Ctrl+H help

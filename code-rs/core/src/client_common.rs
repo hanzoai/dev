@@ -11,7 +11,7 @@ use code_apply_patch::APPLY_PATCH_TOOL_INSTRUCTIONS;
 use code_protocol::models::ContentItem;
 use code_protocol::models::ResponseItem;
 use futures::Stream;
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::borrow::Cow;
 use std::ops::Deref;
@@ -19,6 +19,7 @@ use std::pin::Pin;
 use std::task::Context;
 use std::task::Poll;
 use tokio::sync::mpsc;
+use uuid::Uuid;
 
 /// Additional prompt for Code. Can not edit Codex instructions.
 const ADDITIONAL_INSTRUCTIONS: &str = include_str!("../prompt_coder.md");
@@ -74,6 +75,10 @@ pub struct Prompt {
     pub model_family_override: Option<ModelFamily>,
     /// Optional the output schema for the model's response.
     pub output_schema: Option<Value>,
+    /// Optional tag used to route debug logs into helper-specific directories.
+    pub log_tag: Option<String>,
+    /// Optional override for session/conversation identifiers used for caching.
+    pub session_id_override: Option<Uuid>,
 }
 
 impl Default for Prompt {
@@ -91,6 +96,8 @@ impl Default for Prompt {
             model_override: None,
             model_family_override: None,
             output_schema: None,
+            log_tag: None,
+            session_id_override: None,
         }
     }
 }
@@ -120,6 +127,10 @@ impl Prompt {
         } else {
             Cow::Borrowed(base)
         }
+    }
+
+    pub fn set_log_tag<S: Into<String>>(&mut self, tag: S) {
+        self.log_tag = Some(tag.into());
     }
 
     fn get_formatted_user_instructions(&self) -> Option<String> {
@@ -205,6 +216,10 @@ impl Prompt {
         limit_screenshots_in_input(&mut input_with_instructions);
 
         input_with_instructions
+    }
+
+    pub fn set_tools(&mut self, tools: Vec<OpenAiTool>) {
+        self.tools = tools;
     }
 
     /// Creates a formatted user instructions message from a string
@@ -312,7 +327,7 @@ impl From<TextVerbosityConfig> for OpenAiTextVerbosity {
 }
 
 /// Optional structured output format for `text.format` in the Responses API.
-#[derive(Debug, Serialize, Clone)]
+#[derive(Debug, Serialize, Deserialize, Clone, PartialEq)]
 pub struct TextFormat {
     #[serde(rename = "type")]
     pub r#type: String, // e.g. "json_schema"

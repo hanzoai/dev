@@ -2,34 +2,34 @@
 source: tui/tests/vt100_chatwidget_snapshot.rs
 expression: output
 ---
- ┌────────────────────────────────────────────────────────────────────────────┐
- │                                    Code                                    │
- └────────────────────────────────────────────────────────────────────────────┘
- ┌ Browser ───────────────────────────────────────────────────────────────────┐
- │ • https://example.com/docs                                   Ctrl+B expand │
- └────────────────────────────────────────────────────────────────────────────┘
-   /limits - visualize weekly and hourly rate limits
-   /review - review your changes for potential issues
-   /auto - work autonomously on long tasks with Auto Drive Experimental
-   /cloud - browse, apply, and create cloud tasks NEW
+ +----------------------------------------------------------------------------+
+ |                                    Code                                    |
+ +----------------------------------------------------------------------------+
+ ★ Popular commands:
+   /settings - manage all settings in one place NEW
+   /auto - work autonomously on long tasks with Auto Drive UPDATED
+   /chrome - connect to your Chrome browser
+   /plan - create a comprehensive plan (multiple agents)
+   /code - perform a coding task (multiple agents)
 
  › Open docs and find login button
 
- ⚙ ╭─ BROWSER (headless): example.com · 4 actions · 65.0s
-   │
-   │  #  ACTION       TARGET                   VALUE         RESULT       t
-   │   1 Nav          https://example.com/docs —             ok            5.0s
-   │   2 Click        Sign in button           "#sign-in"    ok           13.0s
-   │   3 Scroll       —                        "dy=640"      ok           14.0s
-   │   4 Type         —                        "docs search" ok           33.0s
-   │
-   │  Console: ⚠️   cdp warning: Refused to load script from cdn.example.com
-   │
-   │  Screenshot: /tmp/browser_session.png
-   │
-   ╰─ [Ctrl+B] Expand · [Esc] Stop
+   +- +Browser--------------------------------+
+   |  |Screenshot:                            |
+   |  |browser_session.png                    |  0s   Opened    https://examp
+   |  |                                       |                 le.com/docs
+   |  |                                       |  5s   Clicked   Sign in
+   |  +---------------------------------------+                 button
+   |                                             18s  Scrolled  dy=640
+   |                                             32s  Typed     docs search
+   |
+   |                                             Console: ⚠️  cdp warning:
+   |                                             Refused to load script from
+   |                                             cdn.example.com
+   |
+   +- [Ctrl+B] View · [Esc] Stop
 
- ┌────────────────────────────────────────────────────────────────────────────┐
- │ What can I code for you today?                                             │
- └────────────────────────────────────────────────────────────────────────────┘
+ +----------------------------------------------------------------------------+
+ | What can I code for you today?                                             |
+ +----------------------------------------------------------------------------+
    Read Only  (Shift+Tab change)                                   Ctrl+H help

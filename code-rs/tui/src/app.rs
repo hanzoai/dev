@@ -1,6 +1,7 @@
 use crate::app_event::{AppEvent, TerminalRunController, TerminalRunEvent};
 use crate::app_event_sender::AppEventSender;
-use crate::chatwidget::{ChatWidget, GhostState};
+use crate::chatwidget::{ChatWidget, EscIntent, GhostState};
+use crate::bottom_pane::SettingsSection;
 use crate::cloud_tasks_service;
 use crate::exec_command::strip_bash_lc_and_escape;
 use crate::file_search::FileSearchManager;
@@ -12,6 +13,7 @@ use crate::onboarding::onboarding_screen::KeyboardHandler;
 use crate::onboarding::onboarding_screen::OnboardingScreen;
 use crate::onboarding::onboarding_screen::OnboardingScreenArgs;
 use crate::slash_command::SlashCommand;
+use crate::thread_spawner;
 use crate::tui;
 use crate::tui::TerminalInfo;
 use code_core::config::add_project_allowed_command;
@@ -37,16 +39,21 @@ use portable_pty::{native_pty_system, CommandBuilder, MasterPty, PtyPair, PtySiz
 use ratatui::buffer::Buffer;
 use ratatui::CompletedFrame;
 use shlex::try_join;
-use std::collections::{BTreeSet, HashMap, HashSet};
+use std::cmp::Reverse;
+use std::collections::{BTreeSet, BinaryHeap, HashMap, HashSet};
 use std::io::{Read, Write};
 use std::path::PathBuf;
 use std::sync::atomic::AtomicBool;
 use std::sync::atomic::Ordering;
 use std::sync::mpsc::{channel, Receiver, Sender as StdSender};
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Condvar, Mutex};
 use std::thread;
 use std::time::Duration;
 use std::time::Instant;
+#[cfg(unix)]
+use signal_hook::consts::signal::SIGTERM;
+#[cfg(unix)]
+use signal_hook::{flag, SigId};
 use tokio::sync::oneshot;
 
 /// Time window for debouncing redraw requests.
@@ -82,6 +89,91 @@ struct TerminalRunState {
     pty: Option<Arc<Mutex<Box<dyn MasterPty + Send>>>>,
 }
 
+struct FrameTimer {
+    state: Mutex<FrameTimerState>,
+    cv: Condvar,
+}
+
+struct FrameTimerState {
+    deadlines: BinaryHeap<Reverse<Instant>>,
+    worker_running: bool,
+}
+
+impl FrameTimer {
+    fn new() -> Self {
+        Self {
+            state: Mutex::new(FrameTimerState {
+                deadlines: BinaryHeap::new(),
+                worker_running: false,
+            }),
+            cv: Condvar::new(),
+        }
+    }
+
+    fn schedule(self: &Arc<Self>, duration: Duration, tx: AppEventSender) {
+        let deadline = Instant::now() + duration;
+        let mut state = self.state.lock().unwrap();
+        state.deadlines.push(Reverse(deadline));
+        let should_spawn = if !state.worker_running {
+            state.worker_running = true;
+            true
+        } else {
+            false
+        };
+        self.cv.notify_one();
+        drop(state);
+
+        if should_spawn {
+            let timer = Arc::clone(self);
+            let tx_for_thread = tx.clone();
+            if thread_spawner::spawn_lightweight("frame-timer", move || timer.run(tx_for_thread)).is_none() {
+                let mut state = self.state.lock().unwrap();
+                state.worker_running = false;
+                let drained = state.deadlines.len();
+                state.deadlines.clear();
+                drop(state);
+                for _ in 0..drained.max(1) {
+                    tx.send(AppEvent::RequestRedraw);
+                }
+                tracing::warn!(
+                    drained_deadlines = drained,
+                    "frame timer spawn rejected: background thread limit reached; flushed deadlines"
+                );
+            }
+        }
+    }
+
+    fn run(self: Arc<Self>, tx: AppEventSender) {
+        let mut state = self.state.lock().unwrap();
+        loop {
+            let deadline = match state.deadlines.peek().copied() {
+                Some(Reverse(deadline)) => deadline,
+                None => {
+                    state.worker_running = false;
+                    break;
+                }
+            };
+
+            let now = Instant::now();
+            if deadline <= now {
+                state.deadlines.pop();
+                drop(state);
+                tx.send(AppEvent::RequestRedraw);
+                state = self.state.lock().unwrap();
+                continue;
+            }
+
+            let wait_dur = deadline.saturating_duration_since(now);
+            let (new_state, result) = self.cv.wait_timeout(state, wait_dur).unwrap();
+            state = new_state;
+
+            if result.timed_out() {
+                continue;
+            }
+        }
+    }
+}
+
 struct LoginFlowState {
     shutdown: code_login::ShutdownHandle,
     join_handle: tokio::task::JoinHandle<()>,
@@ -111,10 +203,9 @@ pub(crate) struct App<'a> {
     /// Set if a redraw request arrived while another frame was in flight. Ensures we
     /// queue one more frame immediately after the current draw completes.
     post_frame_redraw: Arc<AtomicBool>,
-    /// True while a one-shot timer for a future animation frame is armed.
-    /// This prevents arming multiple timers at once, while allowing timers
-    /// to run independently of the short debounce used for immediate redraws.
-    scheduled_frame_armed: Arc<AtomicBool>,
+    /// Shared scheduler for future animation frames. Ensures the shortest
+    /// requested interval wins while preserving later deadlines.
+    frame_timer: Arc<FrameTimer>,
     /// Controls the input reader thread spawned at startup.
     input_running: Arc<AtomicBool>,
 
@@ -134,6 +225,11 @@ pub(crate) struct App<'a> {
 
     /// Terminal information queried at startup
     terminal_info: TerminalInfo,
+
+    #[cfg(unix)]
+    sigterm_guard: Option<SigId>,
+    #[cfg(unix)]
+    sigterm_flag: Arc<AtomicBool>,
 
     /// Perform a hard clear on the first frame to ensure the entire buffer
     /// starts with our theme background. This avoids terminals that may show
@@ -218,7 +314,7 @@ impl App<'_> {
         let pending_redraw = Arc::new(AtomicBool::new(false));
         let redraw_inflight = Arc::new(AtomicBool::new(false));
         let post_frame_redraw = Arc::new(AtomicBool::new(false));
-        let scheduled_frame_armed = Arc::new(AtomicBool::new(false));
+        let frame_timer = Arc::new(FrameTimer::new());
 
         let enhanced_keys_supported = supports_keyboard_enhancement().unwrap_or(false);
 
@@ -226,6 +322,10 @@ impl App<'_> {
         // re-publishing the events as AppEvents, as appropriate.
         // Create the input thread stop flag up front so we can store it on `Self`.
         let input_running = Arc::new(AtomicBool::new(true));
+        #[cfg(unix)]
+        let mut sigterm_guard = None;
+        #[cfg(unix)]
+        let sigterm_flag = Arc::new(AtomicBool::new(false));
         {
             let app_event_tx = app_event_tx.clone();
             let input_running_thread = input_running.clone();
@@ -320,6 +420,40 @@ impl App<'_> {
             });
         }
 
+        #[cfg(unix)]
+        {
+            let term_trigger = Arc::new(AtomicBool::new(false));
+            let tx = app_event_tx.clone();
+            let running_for_thread = input_running.clone();
+            let trigger_for_thread = Arc::clone(&term_trigger);
+            let flag_for_thread = sigterm_flag.clone();
+            let listener = move || {
+                while running_for_thread.load(Ordering::Relaxed) {
+                    if trigger_for_thread.swap(false, Ordering::SeqCst) {
+                        running_for_thread.store(false, Ordering::Release);
+                        flag_for_thread.store(true, Ordering::Release);
+                        tx.send(AppEvent::ExitRequest);
+                        break;
+                    }
+                    std::thread::sleep(Duration::from_millis(50));
+                }
+            };
+
+            if thread_spawner::spawn_lightweight("sigterm-listener", listener).is_some() {
+                match flag::register(SIGTERM, Arc::clone(&term_trigger)) {
+                    Ok(sig_id) => {
+                        sigterm_guard = Some(sig_id);
+                    }
+                    Err(err) => {
+                        tracing::warn!("failed to register SIGTERM handler: {err}");
+                        input_running.store(false, Ordering::Release);
+                    }
+                }
+            } else {
+                tracing::warn!("SIGTERM listener spawn skipped: background thread limit reached");
+            }
+        }
+
         let login_status = get_login_status(&config);
         let should_show_onboarding =
             should_show_onboarding(login_status, &config, show_trust_screen);
@@ -386,7 +520,7 @@ impl App<'_> {
             pending_redraw,
             redraw_inflight,
             post_frame_redraw,
-            scheduled_frame_armed,
+            frame_timer,
             input_running,
             enhanced_keys_supported,
             non_enhanced_pressed_keys: HashSet::new(),
@@ -406,7 +540,21 @@ impl App<'_> {
             terminal_runs: HashMap::new(),
             terminal_title_override: None,
             login_flow: None,
+            #[cfg(unix)]
+            sigterm_guard,
+            #[cfg(unix)]
+            sigterm_flag,
         }
+    }
+
+    #[cfg(unix)]
+    pub(crate) fn sigterm_triggered(&self) -> bool {
+        self.sigterm_flag.load(Ordering::Relaxed)
+    }
+
+    #[cfg(unix)]
+    pub(crate) fn clear_sigterm_guard(&mut self) {
+        self.sigterm_guard.take();
     }
 
     fn apply_terminal_title(&self) {
@@ -506,31 +654,22 @@ impl App<'_> {
             .is_ok()
         {
             let pending_redraw = self.pending_redraw.clone();
-            thread::spawn(move || {
+            let pending_redraw_for_thread = pending_redraw.clone();
+            if thread_spawner::spawn_lightweight("redraw-debounce", move || {
                 thread::sleep(REDRAW_DEBOUNCE);
+                pending_redraw_for_thread.store(false, Ordering::Release);
+            })
+            .is_none()
+            {
                 pending_redraw.store(false, Ordering::Release);
-            });
+            }
         }
     }
     
-    /// Schedule a redraw after the specified duration
+    /// Schedule a redraw after the specified duration.
     fn schedule_redraw_in(&self, duration: Duration) {
-        // Coalesce timers: only arm one future frame at a time. Crucially, do
-        // NOT gate this on the short debounce flag used for immediate redraws,
-        // otherwise animations can stall if the timer is suppressed by debounce.
-        if self
-            .scheduled_frame_armed
-            .compare_exchange(false, true, Ordering::Acquire, Ordering::Relaxed)
-            .is_err()
-        { return; }
-        let scheduled = self.scheduled_frame_armed.clone();
-        let tx = self.app_event_tx.clone();
-        thread::spawn(move || {
-            thread::sleep(duration);
-            // Allow a subsequent timer to be armed.
-            scheduled.store(false, Ordering::Release);
-            tx.send(AppEvent::RequestRedraw);
-        });
+        self.frame_timer
+            .schedule(duration, self.app_event_tx.clone());
     }
 
     fn handle_login_mode_change(&mut self, using_chatgpt_auth: bool) {
@@ -1051,6 +1190,7 @@ impl App<'_> {
                     {
                         let tx = self.app_event_tx.clone();
                         let running = self.commit_anim_running.clone();
+                        let running_for_thread = running.clone();
                         let tick_ms: u64 = self
                             .config
                             .tui
@@ -1058,12 +1198,16 @@ impl App<'_> {
                             .commit_tick_ms
                             .or(if self.config.tui.stream.responsive { Some(30) } else { None })
                             .unwrap_or(50);
-                        thread::spawn(move || {
-                            while running.load(Ordering::Relaxed) {
+                        if thread_spawner::spawn_lightweight("commit-anim", move || {
+                            while running_for_thread.load(Ordering::Relaxed) {
                                 thread::sleep(Duration::from_millis(tick_ms));
                                 tx.send(AppEvent::CommitTick);
                             }
-                        });
+                        })
+                        .is_none()
+                        {
+                            running.store(false, Ordering::Release);
+                        }
                     }
                 }
                 AppEvent::StopCommitAnimation => {
@@ -1131,65 +1275,73 @@ impl App<'_> {
 
                     match key_event {
                         KeyEvent { code: KeyCode::Esc, kind: KeyEventKind::Press | KeyEventKind::Repeat, .. } => {
-                            // Unified Esc policy with modal-first handling:
-                            // - If any modal is active, forward Esc to the widget so the modal can close itself.
-                            // - Otherwise apply global Esc ordering:
-                            //   1) If agent is running, stop it (even if the composer has text).
-                            //   2) Else if there's text, clear it.
-                            //   3) Else double‑Esc opens the undo timeline.
                             if let AppState::Chat { widget } = &mut self.app_state {
-                                // Modal-first: give active modal views priority to handle Esc.
-                                if widget.has_active_modal_view() {
-                                    widget.handle_key_event(key_event);
-                                    continue;
-                                }
+                                let now = Instant::now();
+                                const THRESHOLD: Duration = Duration::from_millis(600);
+                                let double_ready = self
+                                    .last_esc_time
+                                    .is_some_and(|prev| now.duration_since(prev) <= THRESHOLD);
 
-                                // If a file-search popup is visible, close it first
-                                // then continue with global Esc policy in the same keypress.
-                                let _closed_file_popup = widget.close_file_popup_if_active();
-                                if widget.auto_should_handle_global_esc() {
-                                    widget.handle_key_event(key_event);
-                                    continue;
-                                }
-                                {
-                                    let now = Instant::now();
-                                    const THRESHOLD: Duration = Duration::from_millis(600);
+                                let mut handled = false;
+                                let mut attempts = 0;
+                                let esc_event = key_event;
 
-                                    if widget.auto_manual_entry_active()
-                                        && !widget.composer_is_empty()
+                                while attempts < 8 {
+                                    attempts += 1;
+                                    let route = widget.describe_esc_context();
+                                    let mut intent = route.intent;
+
+                                    if intent == EscIntent::None {
+                                        break;
+                                    }
+
+                                    if intent == EscIntent::ShowUndoHint
+                                        && route.allows_double_esc
+                                        && double_ready
                                     {
-                                        widget.clear_composer();
-                                        self.last_esc_time = Some(now);
-                                        continue;
+                                        intent = EscIntent::OpenUndoTimeline;
                                     }
 
-                                    // Step 1: stop agent if running, regardless of composer content.
-                                    if widget.is_task_running() {
-                                        let _ = widget.on_ctrl_c();
-                                        // Arm double‑Esc so next Esc can trigger backtrack.
-                                        self.last_esc_time = Some(now);
-                                        continue;
-                                    }
+                                    let performed = widget.execute_esc_intent(intent, esc_event);
 
-                                    // Step 2: clear composer text if present.
-                                    if !widget.composer_is_empty() {
-                                        widget.clear_composer();
-                                        // Arm double‑Esc so a quick second Esc proceeds to step 3.
-                                        self.last_esc_time = Some(now);
-                                        continue;
-                                    }
-
-                                    // Step 3: double‑Esc opens the undo timeline.
-                                    if let Some(prev) = self.last_esc_time {
-                                        if now.duration_since(prev) <= THRESHOLD {
-                                            self.last_esc_time = None;
-                                            widget.handle_undo_command();
+                                    match intent {
+                                        EscIntent::CloseFilePopup if !route.consume => {
+                                            if !performed {
+                                                break;
+                                            }
                                             continue;
                                         }
+                                        EscIntent::CloseFilePopup => {
+                                            handled = true;
+                                            break;
+                                        }
+                                        EscIntent::ShowUndoHint => {
+                                            if route.allows_double_esc && !double_ready {
+                                                self.last_esc_time = Some(now);
+                                            } else {
+                                                self.last_esc_time = None;
+                                            }
+                                            handled = true;
+                                            break;
+                                        }
+                                        EscIntent::OpenUndoTimeline => {
+                                            self.last_esc_time = None;
+                                            handled = true;
+                                            break;
+                                        }
+                                        EscIntent::CancelTask | EscIntent::ClearComposer => {
+                                            self.last_esc_time = Some(now);
+                                            handled = true;
+                                            break;
+                                        }
+                                        _ => {
+                                            handled = true;
+                                            break;
+                                        }
                                     }
-                                    // First Esc in empty/idle state: show hint and arm timer.
-                                    self.last_esc_time = Some(now);
-                                    widget.show_esc_undo_hint();
+                                }
+
+                                if handled {
                                     continue;
                                 }
                             }
@@ -1619,12 +1771,16 @@ impl App<'_> {
                 AppEvent::AutoDriveSettingsChanged {
                     review_enabled,
                     agents_enabled,
+                    cross_check_enabled,
+                    qa_automation_enabled,
                     continue_mode,
                 } => {
                     if let AppState::Chat { widget } = &mut self.app_state {
                         widget.apply_auto_drive_settings(
                             review_enabled,
                             agents_enabled,
+                            cross_check_enabled,
+                            qa_automation_enabled,
                             continue_mode,
                         );
                     }
@@ -1650,23 +1806,31 @@ impl App<'_> {
                     status,
                     progress_past,
                     progress_current,
-                    cli_context,
-                    cli_prompt,
+                    goal,
+                    cli,
+                    agents_timing,
+                    agents,
                     transcript,
-                    turn_descriptor,
-                    turn_config,
                 } => {
                     if let AppState::Chat { widget } = &mut self.app_state {
                         widget.auto_handle_decision(
                             status,
                             progress_past,
                             progress_current,
-                            cli_context,
-                            cli_prompt,
+                            goal,
+                            cli,
+                            agents_timing,
+                            agents,
                             transcript,
-                            turn_descriptor,
-                            turn_config,
                         );
+                    }
+                }
+                AppEvent::AutoCoordinatorUserReply {
+                    user_response,
+                    cli_command,
+                } => {
+                    if let AppState::Chat { widget } = &mut self.app_state {
+                        widget.auto_handle_user_reply(user_response, cli_command);
                     }
                 }
                 AppEvent::AutoCoordinatorThinking { delta, summary_index } => {
@@ -1679,19 +1843,9 @@ impl App<'_> {
                         widget.auto_handle_countdown(countdown_id, seconds_left);
                     }
                 }
-                AppEvent::AutoObserverReport {
-                    status,
-                    telemetry,
-                    replace_message,
-                    additional_instructions,
-                } => {
+                AppEvent::AutoCoordinatorRestart { token, attempt } => {
                     if let AppState::Chat { widget } = &mut self.app_state {
-                        widget.auto_handle_observer_report(
-                            status,
-                            telemetry,
-                            replace_message,
-                            additional_instructions,
-                        );
+                        widget.auto_handle_restart(token, attempt);
                     }
                 }
                 AppEvent::PerformUndoRestore {
@@ -1848,12 +2002,20 @@ impl App<'_> {
                         }
                         SlashCommand::Limits => {
                             if let AppState::Chat { widget } = &mut self.app_state {
-                                widget.add_limits_output();
+                                widget.handle_limits_command(command_args);
                             }
                         }
                         SlashCommand::Update => {
                             if let AppState::Chat { widget } = &mut self.app_state {
                                 widget.handle_update_command(command_args.trim());
+                            }
+                        }
+                        SlashCommand::Settings => {
+                            if let AppState::Chat { widget } = &mut self.app_state {
+                                let section = command
+                                    .settings_section_from_args(&command_args)
+                                    .and_then(ChatWidget::settings_section_from_hint);
+                                widget.show_settings_overlay(section);
                             }
                         }
                         SlashCommand::Notifications => {
@@ -1883,7 +2045,11 @@ impl App<'_> {
                         }
                         SlashCommand::Model => {
                             if let AppState::Chat { widget } = &mut self.app_state {
-                                widget.handle_model_command(command_args);
+                                if command_args.trim().is_empty() {
+                                    widget.show_settings_overlay(Some(SettingsSection::Model));
+                                } else {
+                                    widget.handle_model_command(command_args);
+                                }
                             }
                         }
                         SlashCommand::Reasoning => {
@@ -1900,7 +2066,7 @@ impl App<'_> {
                             // Theme selection is handled in submit_user_message
                             // This case is here for completeness
                             if let AppState::Chat { widget } = &mut self.app_state {
-                                widget.show_theme_selection();
+                                widget.show_settings_overlay(Some(SettingsSection::Theme));
                             }
                         }
                         SlashCommand::Prompts => {
@@ -1938,7 +2104,11 @@ impl App<'_> {
                         SlashCommand::Chrome => {
                             if let AppState::Chat { widget } = &mut self.app_state {
                                 tracing::info!("[cdp] /chrome invoked, args='{}'", command_args);
-                                widget.handle_chrome_command(command_args);
+                                if command_args.trim().is_empty() {
+                                    widget.show_settings_overlay(Some(SettingsSection::Chrome));
+                                } else {
+                                    widget.handle_chrome_command(command_args);
+                                }
                             }
                         }
                         #[cfg(debug_assertions)]
@@ -2022,6 +2192,7 @@ impl App<'_> {
                 }
                 AppEvent::ShowAgentEditor { name } => {
                     if let AppState::Chat { widget } = &mut self.app_state {
+                        widget.ensure_settings_overlay_section(SettingsSection::Agents);
                         widget.show_agent_editor_ui(name);
                     }
                 }
@@ -2084,23 +2255,26 @@ impl App<'_> {
                 // ShowAgentsSettings removed
                 AppEvent::ShowAgentsOverview => {
                     if let AppState::Chat { widget } = &mut self.app_state {
+                        widget.ensure_settings_overlay_section(SettingsSection::Agents);
                         widget.show_agents_overview_ui();
                     }
                 }
                 // ShowSubagentEditor removed; use ShowSubagentEditorForName/ShowSubagentEditorNew
                 AppEvent::ShowSubagentEditorForName { name } => {
                     if let AppState::Chat { widget } = &mut self.app_state {
+                        widget.ensure_settings_overlay_section(SettingsSection::Agents);
                         widget.show_subagent_editor_for_name(name);
                     }
                 }
                 AppEvent::ShowSubagentEditorNew => {
                     if let AppState::Chat { widget } = &mut self.app_state {
+                        widget.ensure_settings_overlay_section(SettingsSection::Agents);
                         widget.show_new_subagent_editor();
                     }
                 }
-                AppEvent::UpdateAgentConfig { name, enabled, args_read_only, args_write, instructions } => {
+                AppEvent::UpdateAgentConfig { name, enabled, args_read_only, args_write, instructions, command } => {
                     if let AppState::Chat { widget } = &mut self.app_state {
-                        widget.apply_agent_update(&name, enabled, args_read_only, args_write, instructions);
+                        widget.apply_agent_update(&name, enabled, args_read_only, args_write, instructions, command);
                     }
                 }
                 AppEvent::PrefillComposer(text) => {
@@ -2439,6 +2613,12 @@ impl App<'_> {
                 AppEvent::CycleAccessMode => {
                     if let AppState::Chat { widget } = &mut self.app_state {
                         widget.cycle_access_mode();
+                    }
+                    self.schedule_redraw();
+                }
+                AppEvent::CycleAutoDriveVariant => {
+                    if let AppState::Chat { widget } = &mut self.app_state {
+                        widget.cycle_auto_drive_variant();
                     }
                     self.schedule_redraw();
                 }

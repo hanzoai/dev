@@ -217,26 +217,7 @@ fn query_terminal_info() -> TerminalInfo {
 }
 
 fn set_panic_hook() {
-    // Chain to any previously installed hook so users still get rich reports.
-    let prev = std::panic::take_hook();
-    std::panic::set_hook(Box::new(move |panic_info| {
-        // Always attempt to restore the terminal state before printing the panic.
-        // This is crucial on Windows and when background threads panic — otherwise
-        // raw mode, mouse/focus reporting, and the alt screen can be left enabled,
-        // causing sequences like "[A", "[B", or "[I" to appear and making Ctrl+C
-        // ineffective. Ignore any restore error as we're already failing.
-        let _ = restore();
-
-        // Delegate to the previous hook (color-eyre or default) to render details.
-        prev(panic_info);
-
-        // Ensure the process terminates. Without exiting here, a panic in a
-        // background thread (e.g., streaming/agent worker) would leave the main
-        // UI thread running after we've torn down the terminal, which manifests
-        // as the "CLI bugs out" behavior described in issue #80.
-        // Exiting avoids that half‑alive state and returns control to the shell.
-        std::process::exit(1);
-    }));
+    crate::install_unified_panic_hook();
 }
 
 /// Restore the terminal to its original state

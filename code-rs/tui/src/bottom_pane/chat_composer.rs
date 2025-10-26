@@ -2,7 +2,7 @@ use ratatui::buffer::Buffer;
 use ratatui::layout::{Constraint, Layout, Margin, Rect};
 use ratatui::style::{Modifier, Style, Stylize};
 use ratatui::text::{Line, Span};
-use ratatui::widgets::{Block, Borders, StatefulWidgetRef, WidgetRef};
+use ratatui::widgets::{Block, BorderType, Borders, StatefulWidgetRef, WidgetRef};
 use code_core::protocol::TokenUsage;
 use crossterm::event::KeyCode;
 use crossterm::event::KeyEvent;
@@ -19,6 +19,8 @@ use code_protocol::custom_prompts::CustomPrompt;
 use code_protocol::custom_prompts::PROMPTS_CMD_PREFIX;
 
 use crate::app_event_sender::AppEventSender;
+use crate::auto_drive_style::ComposerStyle;
+use crate::thread_spawner;
 use crate::bottom_pane::textarea::TextArea;
 use crate::bottom_pane::textarea::TextAreaState;
 use crate::clipboard_paste::normalize_pasted_path;
@@ -68,6 +70,12 @@ pub enum InputResult {
     ScrollUp,
     ScrollDown,
     None,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum ComposerRenderMode {
+    Full,
+    FooterOnly,
 }
 
 struct TokenUsageInfo {
@@ -148,6 +156,9 @@ pub(crate) struct ChatComposer {
     post_paste_space_guard: Option<PostPasteSpaceGuard>,
     footer_hint_override: Option<Vec<(String, String)>>,
     embedded_mode: bool,
+    render_mode: ComposerRenderMode,
+    auto_drive_active: bool,
+    auto_drive_style: Option<ComposerStyle>,
 }
 
 /// Popup state – at most one can be visible at any time.
@@ -206,6 +217,9 @@ impl ChatComposer {
             post_paste_space_guard: None,
             footer_hint_override: None,
             embedded_mode: false,
+            render_mode: ComposerRenderMode::Full,
+            auto_drive_active: false,
+            auto_drive_style: None,
         }
     }
 
@@ -250,7 +264,8 @@ impl ChatComposer {
                 // phase‑aligned, monotonic scheduler to minimize drift and
                 // reduce perceived frame skipping under load. We purposely
                 // avoid very small intervals to keep CPU impact low.
-                thread::spawn(move || {
+                let fallback_tx = self.app_event_tx.clone();
+                if thread_spawner::spawn_lightweight("composer-anim", move || {
                     use std::time::Instant;
                     // Default to ~120ms if spinner state is not yet initialized
                     let default_ms: u64 = 120;
@@ -289,9 +304,14 @@ impl ChatComposer {
                             next = target;
                         }
                     }
-                });
-
-                self.animation_running = Some(animation_flag);
+                })
+                .is_none()
+                {
+                    animation_flag.store(false, Ordering::Relaxed);
+                    fallback_tx.send(crate::app_event::AppEvent::RequestRedraw);
+                } else {
+                    self.animation_running = Some(animation_flag);
+                }
             }
         } else {
             // Stop animation thread
@@ -323,6 +343,20 @@ impl ChatComposer {
         if self.embedded_mode != enabled {
             self.embedded_mode = enabled;
         }
+    }
+
+    pub(crate) fn set_render_mode(&mut self, mode: ComposerRenderMode) {
+        if self.render_mode != mode {
+            self.render_mode = mode;
+        }
+    }
+
+    pub(crate) fn set_auto_drive_active(&mut self, active: bool) {
+        self.auto_drive_active = active;
+    }
+
+    pub(crate) fn set_auto_drive_style(&mut self, style: Option<ComposerStyle>) {
+        self.auto_drive_style = style;
     }
 
     /// Override the footer hint line with a simple key/label list.
@@ -837,6 +871,10 @@ impl ChatComposer {
         self.standard_terminal_hint = hint;
     }
 
+    pub fn standard_terminal_hint(&self) -> Option<&str> {
+        self.standard_terminal_hint.as_deref()
+    }
+
     pub fn set_text_content(&mut self, text: String) {
         self.textarea.set_text(&text);
         *self.textarea_state.borrow_mut() = TextAreaState::default();
@@ -867,6 +905,10 @@ impl ChatComposer {
             }
             _ => false,
         }
+    }
+
+    pub(crate) fn file_popup_visible(&self) -> bool {
+        matches!(self.active_popup, ActivePopup::File(_))
     }
 
     /// Handle a key event coming from the main UI.
@@ -1395,6 +1437,16 @@ impl ChatComposer {
                 self.app_event_tx.send(crate::app_event::AppEvent::CycleAccessMode);
                 (InputResult::None, true)
             }
+            KeyEvent {
+                code: KeyCode::Tab,
+                modifiers: KeyModifiers::NONE,
+                ..
+            } if self.auto_drive_active && self.has_focus => {
+                self
+                    .app_event_tx
+                    .send(crate::app_event::AppEvent::CycleAutoDriveVariant);
+                (InputResult::None, true)
+            }
             // -------------------------------------------------------------
             // Tab-press file search when not using @ or ./ and not in slash cmd
             // -------------------------------------------------------------
@@ -1887,39 +1939,467 @@ impl ChatComposer {
         }
         spans
     }
+
+    fn build_auto_drive_hint_spans(
+        text: &str,
+        key_style: Style,
+        label_style: Style,
+    ) -> Vec<Span<'static>> {
+        let mut spans: Vec<Span<'static>> = Vec::new();
+        let parts: Vec<String> = text
+            .split('•')
+            .map(|part| part.trim())
+            .filter(|part| !part.is_empty())
+            .map(|part| part.to_string())
+            .collect();
+
+        for (index, part) in parts.iter().enumerate() {
+            if index > 0 {
+                spans.push(Span::from("  •  ".to_string()).style(label_style));
+            }
+            let (key, label) = Self::split_auto_drive_key_label(part);
+            if let Some(key) = key {
+                spans.push(Span::from(key).style(key_style));
+                if !label.is_empty() {
+                    spans.push(Span::from(format!(" {}", label)).style(label_style));
+                }
+            } else if !label.is_empty() {
+                spans.push(Span::from(label).style(label_style));
+            }
+        }
+
+        spans
+    }
+
+    fn split_auto_drive_key_label(part: &str) -> (Option<String>, String) {
+        let trimmed = part.trim();
+        if trimmed.is_empty() {
+            return (None, String::new());
+        }
+        if let Some((first, rest)) = trimmed.split_once(' ') {
+            let key = first.trim();
+            let remainder = rest.trim_start();
+            if Self::is_auto_drive_key(key) {
+                return (Some(key.to_string()), remainder.to_string());
+            }
+        }
+        (None, trimmed.to_string())
+    }
+
+    fn is_auto_drive_key(token: &str) -> bool {
+        let normalized = token.trim();
+        if normalized.is_empty() {
+            return false;
+        }
+        if normalized.contains('+') {
+            return true;
+        }
+        matches!(normalized, "Esc" | "Enter" | "Tab" | "Space" | "Backspace")
+    }
+
+    pub(crate) fn footer_height(&self) -> u16 {
+        if self.render_mode == ComposerRenderMode::FooterOnly {
+            return if self.standard_terminal_hint.is_some() { 1 } else { 0 };
+        }
+
+        match (&self.active_popup, self.embedded_mode) {
+            (ActivePopup::Command(popup), _) => popup.calculate_required_height(),
+            (ActivePopup::File(popup), _) => popup.calculate_required_height(),
+            (ActivePopup::None, true) => 0,
+            (ActivePopup::None, false) => 1,
+        }
+    }
+
+    fn render_footer(&self, area: Rect, buf: &mut Buffer) {
+        if area.width == 0 || area.height == 0 {
+            return;
+        }
+
+        match &self.active_popup {
+            ActivePopup::Command(popup) => {
+                popup.render_ref(area, buf);
+            }
+            ActivePopup::File(popup) => {
+                popup.render_ref(area, buf);
+            }
+            ActivePopup::None => {
+                if self.embedded_mode {
+                    return;
+                }
+
+                let key_hint_style = Style::default().fg(crate::colors::function());
+                let label_style = Style::default().fg(crate::colors::text_dim());
+
+                if let Some(hints) = &self.footer_hint_override {
+                    let mut left_spans: Vec<Span<'static>> = vec![Span::from("  ")];
+                    for (idx, (key, label)) in hints.iter().enumerate() {
+                        if idx > 0 {
+                            left_spans.push(Span::from("   ").style(label_style));
+                        }
+                        if !key.is_empty() {
+                            left_spans.push(Span::from(key.clone()).style(key_hint_style));
+                        }
+                        if !label.is_empty() {
+                            let prefix = if key.is_empty() { String::new() } else { String::from(" ") };
+                            left_spans.push(Span::from(format!("{prefix}{label}")).style(label_style));
+                        }
+                    }
+
+                    let token_spans: Vec<Span<'static>> = self.token_usage_spans(label_style);
+                    let left_len: usize = left_spans.iter().map(|s| s.content.chars().count()).sum();
+                    let right_len: usize = token_spans.iter().map(|s| s.content.chars().count()).sum();
+                    let total_width = area.width as usize;
+                    let trailing_pad = 1usize;
+                    let spacer = if total_width > left_len + right_len + trailing_pad {
+                        " ".repeat(total_width - left_len - right_len - trailing_pad)
+                    } else {
+                        String::from(" ")
+                    };
+
+                    let mut line_spans = left_spans;
+                    line_spans.push(Span::from(spacer));
+                    line_spans.extend(token_spans);
+                    line_spans.push(Span::from(" "));
+
+                    Line::from(line_spans)
+                        .style(
+                            Style::default()
+                                .fg(crate::colors::text_dim())
+                                .add_modifier(Modifier::DIM),
+                        )
+                        .render_ref(area, buf);
+                    return;
+                }
+
+                let mut left_spans: Vec<Span> = vec![Span::from("  ")];
+                let mut right_spans: Vec<Span<'static>> = Vec::new();
+
+                let show_access_label = if let Some(until) = self.access_mode_label_expiry {
+                    std::time::Instant::now() <= until
+                } else {
+                    true
+                };
+                if show_access_label && !self.auto_drive_active {
+                    if let Some(label) = &self.access_mode_label {
+                        left_spans.push(Span::from(label.clone()).style(label_style));
+                        let show_suffix = if let Some(until) = self.access_mode_hint_expiry {
+                            std::time::Instant::now() <= until
+                        } else {
+                            self.access_mode_label_expiry.is_some()
+                        };
+                        if show_suffix {
+                            left_spans.push(Span::from("  (").style(label_style));
+                            left_spans.push(Span::from("Shift+Tab").style(key_hint_style));
+                            left_spans.push(Span::from(" change)").style(label_style));
+                        }
+                    }
+                }
+
+                if self.ctrl_c_quit_hint {
+                    if self.access_mode_label.is_some() {
+                        left_spans.push(Span::from("   "));
+                    }
+                    left_spans.push(Span::from("Ctrl+C").style(key_hint_style));
+                    left_spans.push(Span::from(" again to quit").style(label_style));
+                }
+
+                if let Some(hint) = &self.standard_terminal_hint {
+                    if self.auto_drive_active {
+                        let (left_hint, right_hint) = match hint.split_once('\t') {
+                            Some((left, right)) => (left.trim().to_string(), Some(right.trim().to_string())),
+                            None => (hint.trim().to_string(), None),
+                        };
+
+                        let auto_label_style = Style::default().fg(crate::colors::text_dim());
+                        let auto_key_style = Style::default().fg(crate::colors::info());
+
+                        if !left_hint.is_empty() {
+                            if left_spans.len() > 1 {
+                                left_spans.push(Span::from("   ").style(auto_label_style));
+                            }
+                            let spans = Self::build_auto_drive_hint_spans(
+                                &left_hint,
+                                auto_key_style,
+                                auto_label_style,
+                            );
+                            left_spans.extend(spans);
+                        }
+
+                        if let Some(right_hint) = right_hint {
+                            if !right_hint.is_empty() {
+                                let spans = Self::build_auto_drive_hint_spans(
+                                    &right_hint,
+                                    auto_key_style,
+                                    auto_label_style,
+                                );
+                                if !spans.is_empty() && !right_spans.is_empty() {
+                                    right_spans.push(Span::from("  •  ").style(auto_label_style));
+                                }
+                                right_spans.extend(spans);
+                            }
+                        }
+                    } else {
+                        if left_spans.len() > 1 {
+                            left_spans.push(Span::from("   "));
+                        }
+                        left_spans.push(
+                            Span::from(hint.clone())
+                                .style(Style::default().fg(crate::colors::warning()).add_modifier(Modifier::BOLD)),
+                        );
+                    }
+                }
+
+                if let Some((msg, until)) = &self.footer_notice {
+                    if std::time::Instant::now() <= *until {
+                        if left_spans.len() > 1 {
+                            left_spans.push(Span::from("   "));
+                        }
+                        left_spans.push(
+                            Span::from(msg.clone()).style(Style::default().add_modifier(Modifier::DIM)),
+                        );
+                    }
+                }
+
+                let token_spans: Vec<Span<'static>> = self.token_usage_spans(label_style);
+
+                let build_hints = |include_reasoning: bool,
+                                   include_diff: bool|
+                 -> Vec<Span<'static>> {
+                    let mut spans: Vec<Span<'static>> = Vec::new();
+                    if self.auto_drive_active {
+                        return spans;
+                    }
+                    if !self.ctrl_c_quit_hint {
+                        if self.show_reasoning_hint && include_reasoning {
+                            if !spans.is_empty() {
+                                spans.push(Span::from("  •  ").style(label_style));
+                            }
+                            spans.push(Span::from("Ctrl+R").style(key_hint_style));
+                            let label = if self.reasoning_shown {
+                                " hide reasoning"
+                            } else {
+                                " show reasoning"
+                            };
+                            spans.push(Span::from(label).style(label_style));
+                        }
+                        if self.show_diffs_hint && include_diff {
+                            if !spans.is_empty() {
+                                spans.push(Span::from("  •  ").style(label_style));
+                            }
+                            spans.push(Span::from("Ctrl+D").style(key_hint_style));
+                            spans.push(Span::from(" diff viewer").style(label_style));
+                        }
+                        if !spans.is_empty() {
+                            spans.push(Span::from("  •  ").style(label_style));
+                        }
+                        spans.push(Span::from("Ctrl+H").style(key_hint_style));
+                        spans.push(Span::from(" help").style(label_style));
+                    }
+                    spans
+                };
+
+                let mut include_reasoning = true;
+                let mut include_diff = true;
+                let mut hint_spans = build_hints(include_reasoning, include_diff);
+
+                if self.auto_drive_active {
+                    hint_spans.clear();
+
+                    let mut auto_drive_hint_spans: Vec<Span<'static>> = Vec::new();
+                    auto_drive_hint_spans.push(Span::from("Ctrl+S").style(key_hint_style));
+                    auto_drive_hint_spans.push(Span::from(" settings").style(label_style));
+                    auto_drive_hint_spans.push(Span::from(" • ").style(label_style));
+                    auto_drive_hint_spans.push(Span::from("Esc").style(key_hint_style));
+                    auto_drive_hint_spans.push(Span::from(" stop Auto Drive").style(label_style));
+
+                    if !auto_drive_hint_spans.is_empty() {
+                        if !right_spans.is_empty() {
+                            right_spans.push(Span::from("  •  ").style(label_style));
+                        }
+                        right_spans.extend(auto_drive_hint_spans);
+                    }
+                }
+
+                let measure = |spans: &[Span<'static>]| -> usize {
+                    spans.iter().map(|s| s.content.chars().count()).sum()
+                };
+
+                let base_right_len = measure(&right_spans);
+                let has_base_right = !right_spans.is_empty();
+                let total_width = area.width as usize;
+                let trailing_pad = 1usize;
+
+                let mut auth_spans: Vec<Span<'static>> = if self.using_chatgpt_auth {
+                    Vec::new()
+                } else {
+                    vec![Span::from("API key").style(label_style)]
+                };
+
+                let separator_len = "  •  ".chars().count();
+                let combined_len =
+                    |h: &[Span<'static>], t: &[Span<'static>], a: &[Span<'static>]| -> usize {
+                        let mut len = base_right_len;
+                        let mut sections = if has_base_right { 1 } else { 0 };
+
+                        if !h.is_empty() {
+                            if sections > 0 {
+                                len += separator_len;
+                            }
+                            len += measure(h);
+                            sections += 1;
+                        }
+                        if !t.is_empty() {
+                            if sections > 0 {
+                                len += separator_len;
+                            }
+                            len += measure(t);
+                            sections += 1;
+                        }
+                        if !a.is_empty() {
+                            if sections > 0 {
+                                len += separator_len;
+                            }
+                            len += measure(a);
+                        }
+
+                        len
+                    };
+
+                let mut left_len: usize = left_spans.iter().map(|s| s.content.chars().count()).sum();
+
+                while left_len + combined_len(&hint_spans, &token_spans, &auth_spans) + trailing_pad
+                    > total_width
+                {
+                    if include_reasoning {
+                        include_reasoning = false;
+                    } else if include_diff {
+                        include_diff = false;
+                    } else if !auth_spans.is_empty() {
+                        auth_spans.clear();
+                    } else {
+                        break;
+                    }
+                    hint_spans = build_hints(include_reasoning, include_diff);
+                }
+
+                if !hint_spans.is_empty() {
+                    if !right_spans.is_empty() {
+                        right_spans.push(Span::from("  •  ").style(label_style));
+                    }
+                    right_spans.extend(hint_spans);
+                }
+                if !token_spans.is_empty() {
+                    if !right_spans.is_empty() {
+                        right_spans.push(Span::from("  •  ").style(label_style));
+                    }
+                    right_spans.extend(token_spans);
+                }
+                if !auth_spans.is_empty() {
+                    if !right_spans.is_empty() {
+                        right_spans.push(Span::from("  •  ").style(label_style));
+                    }
+                    right_spans.extend(auth_spans);
+                }
+
+                let right_len: usize = right_spans.iter().map(|s| s.content.chars().count()).sum();
+                if left_len + right_len + trailing_pad > total_width {
+                    let mut remaining = total_width.saturating_sub(right_len + trailing_pad);
+                    if remaining == 0 {
+                        left_spans.clear();
+                    } else {
+                        let mut truncated: Vec<Span> = Vec::new();
+                        for span in left_spans.iter() {
+                            if remaining == 0 {
+                                break;
+                            }
+                            let span_len = span.content.chars().count();
+                            if span_len <= remaining {
+                                truncated.push(span.clone());
+                                remaining -= span_len;
+                                continue;
+                            }
+
+                            if span.content.trim().is_empty() {
+                                truncated.push(Span::from(" ".repeat(remaining)).style(span.style));
+                                remaining = 0;
+                            } else if remaining <= 1 {
+                                truncated.push(Span::from("…").style(span.style));
+                                remaining = 0;
+                            } else {
+                                let mut collected = span
+                                    .content
+                                    .chars()
+                                    .take(remaining)
+                                    .collect::<String>();
+                                if !collected.is_empty() {
+                                    collected.pop();
+                                }
+                                collected.push('…');
+                                truncated.push(Span::from(collected).style(span.style));
+                                remaining = 0;
+                            }
+                        }
+                        if truncated.is_empty() {
+                            truncated.push(Span::from("  "));
+                        }
+                        left_spans = truncated;
+                    }
+                    left_len = left_spans.iter().map(|s| s.content.chars().count()).sum();
+                }
+
+                let spacer = if total_width > left_len + right_len + trailing_pad {
+                    " ".repeat(total_width - left_len - right_len - trailing_pad)
+                } else {
+                    String::from(" ")
+                };
+
+                let mut line_spans = left_spans;
+                line_spans.push(Span::from(spacer));
+                line_spans.extend(right_spans);
+                line_spans.push(Span::from(" "));
+
+                Line::from(line_spans)
+                    .style(
+                        Style::default()
+                            .fg(crate::colors::text_dim())
+                            .add_modifier(Modifier::DIM),
+                    )
+                    .render_ref(area, buf);
+            }
+        }
+    }
 }
 
 impl WidgetRef for ChatComposer {
     fn render_ref(&self, area: Rect, buf: &mut Buffer) {
-        let popup_height = match &self.active_popup {
-            ActivePopup::Command(popup) => popup.calculate_required_height(),
-            ActivePopup::File(popup) => popup.calculate_required_height(),
-            ActivePopup::None => 1,
-        };
-        // Split area: textarea with border at top, hints/popup at bottom
-        let hint_height = if self.embedded_mode {
-            match &self.active_popup {
-                ActivePopup::None => 0,
-                _ => popup_height,
+        if self.render_mode == ComposerRenderMode::FooterOnly {
+            let footer_height = self.footer_height();
+            if footer_height == 0 {
+                return;
             }
-        } else if matches!(self.active_popup, ActivePopup::None) {
-            1
-        } else {
-            popup_height
-        };
+            let footer_area = Rect {
+                x: area.x,
+                y: area.y + area.height.saturating_sub(footer_height),
+                width: area.width,
+                height: footer_height,
+            };
+            self.render_footer(footer_area, buf);
+            return;
+        }
 
-        // Calculate dynamic height based on content
-        let content_width = area.width.saturating_sub(4); // Account for border and padding
+        let footer_height = self.footer_height();
+
+        let content_width = area.width.saturating_sub(4);
         let content_lines = self.textarea.desired_height(content_width).max(1);
-        let desired_input_height = (content_lines + 2).max(3); // Parent layout enforces max
+        let desired_input_height = (content_lines + 2).max(3);
 
-        let available_height = area.height.saturating_sub(hint_height);
+        let available_height = area.height.saturating_sub(footer_height);
         if available_height == 0 {
             return;
         }
         let input_height = desired_input_height.min(available_height);
 
-        let (input_area, hint_area) = if hint_height == 0 {
+        let (input_area, footer_area) = if footer_height == 0 {
             (
                 Rect {
                     x: area.x,
@@ -1930,291 +2410,53 @@ impl WidgetRef for ChatComposer {
                 None,
             )
         } else {
-            let [input_area, hint_area] = Layout::vertical([
+            let [input_area, footer_area] = Layout::vertical([
                 Constraint::Length(input_height),
-                Constraint::Length(hint_height),
+                Constraint::Length(footer_height),
             ])
             .areas(area);
-            (input_area, Some(hint_area))
+            (input_area, Some(footer_area))
         };
 
-        if let Some(hint_area) = hint_area {
-            match &self.active_popup {
-                ActivePopup::Command(popup) => {
-                    popup.render_ref(hint_area, buf);
-                }
-                ActivePopup::File(popup) => {
-                    popup.render_ref(hint_area, buf);
-                }
-                ActivePopup::None => {
-                    if self.embedded_mode {
-                        // Suppress footer hints entirely when embedded inside another UI shell.
-                    } else if let Some(hints) = &self.footer_hint_override {
-                        let key_hint_style = Style::default().fg(crate::colors::function());
-                        let label_style = Style::default().fg(crate::colors::text_dim());
-                        let mut left_spans: Vec<Span<'static>> = vec![Span::from("  ")];
-                        for (idx, (key, label)) in hints.iter().enumerate() {
-                            if idx > 0 {
-                                left_spans.push(Span::from("   ").style(label_style));
-                            }
-                            if !key.is_empty() {
-                                left_spans.push(Span::from(key.clone()).style(key_hint_style));
-                            }
-                            if !label.is_empty() {
-                                let prefix = if key.is_empty() { String::new() } else { String::from(" ") };
-                                left_spans.push(Span::from(format!("{prefix}{label}")).style(label_style));
-                            }
-                        }
-
-                        let token_spans: Vec<Span<'static>> = self.token_usage_spans(label_style);
-                        let left_len: usize = left_spans.iter().map(|s| s.content.chars().count()).sum();
-                        let right_len: usize = token_spans.iter().map(|s| s.content.chars().count()).sum();
-                        let total_width = hint_area.width as usize;
-                        let trailing_pad = 1usize;
-                        let spacer = if total_width > left_len + right_len + trailing_pad {
-                            " ".repeat(total_width - left_len - right_len - trailing_pad)
-                        } else {
-                            String::from(" ")
-                        };
-
-                        let mut line_spans = left_spans;
-                        line_spans.push(Span::from(spacer));
-                        line_spans.extend(token_spans);
-                        line_spans.push(Span::from(" "));
-
-                        Line::from(line_spans)
-                            .style(
-                                Style::default()
-                                    .fg(crate::colors::text_dim())
-                                    .add_modifier(Modifier::DIM),
-                            )
-                            .render_ref(hint_area, buf);
-                    } else {
-                        let key_hint_style = Style::default().fg(crate::colors::function());
-                        let label_style = Style::default().fg(crate::colors::text_dim());
-
-                        // Left side: padding + notices (and Ctrl+C again-to-quit notice if active)
-                        let mut left_spans: Vec<Span> = vec![Span::from("  ")];
-
-                        // Access mode indicator (Read Only / Write with Approval / Full Access)
-                        // When the label is ephemeral, hide it after expiry. The "(Shift+Tab change)"
-                        // suffix is shown for a short time even for persistent labels.
-                        let show_access_label = if let Some(until) = self.access_mode_label_expiry {
-                            std::time::Instant::now() <= until
-                        } else {
-                            true
-                        };
-                        if show_access_label {
-                            if let Some(label) = &self.access_mode_label {
-                                // Access label without bold per design
-                                left_spans.push(Span::from(label.clone()).style(label_style));
-                                // Show the hint suffix while the hint timer is active; if the whole label
-                                // is ephemeral, keep the suffix visible for the same duration.
-                                let show_suffix = if let Some(until) = self.access_mode_hint_expiry {
-                                    std::time::Instant::now() <= until
-                                } else {
-                                    // If label itself is ephemeral, mirror its lifetime for the suffix
-                                    self.access_mode_label_expiry.is_some()
-                                };
-                                if show_suffix {
-                                    left_spans.push(Span::from("  (").style(label_style));
-                                    left_spans.push(Span::from("Shift+Tab").style(key_hint_style));
-                                    left_spans.push(Span::from(" change)").style(label_style));
-                                }
-                            }
-                        }
-
-                        if self.ctrl_c_quit_hint {
-                            // Treat as a notice; keep on the left
-                            if self.access_mode_label.is_some() {
-                                left_spans.push(Span::from("   "));
-                            }
-                            left_spans.push(Span::from("Ctrl+C").style(key_hint_style));
-                            left_spans.push(Span::from(" again to quit").style(label_style));
-                        }
-
-                        if let Some(hint) = &self.standard_terminal_hint {
-                            if left_spans.len() > 1 {
-                                left_spans.push(Span::from("   "));
-                            }
-                            left_spans.push(
-                                Span::from(hint.clone())
-                                    .style(Style::default().fg(crate::colors::warning()).add_modifier(Modifier::BOLD)),
-                            );
-                        }
-
-                        // Append ephemeral footer notice if present and not expired
-                        if let Some((msg, until)) = &self.footer_notice {
-                            if std::time::Instant::now() <= *until {
-                                if left_spans.len() > 1 {
-                                    left_spans.push(Span::from("   "));
-                                }
-                                left_spans.push(
-                                    Span::from(msg.clone()).style(Style::default().add_modifier(Modifier::DIM)),
-                                );
-                            }
-                        }
-
-                        // Right side: command key hints (Ctrl+R/D/H), token usage, and a small auth notice
-                        // when using an API key instead of ChatGPT auth. We elide hints first if space is tight.
-                        let mut right_spans: Vec<Span<'static>> = Vec::new();
-
-                        // Prepare token usage spans (always shown when available)
-                        let token_spans: Vec<Span> = self.token_usage_spans(label_style);
-
-                        // Helper to build hint spans based on inclusion flags
-                        let build_hints = |include_reasoning: bool,
-                                           include_diff: bool|
-                         -> Vec<Span<'static>> {
-                            let mut spans: Vec<Span<'static>> = Vec::new();
-                            if !self.ctrl_c_quit_hint {
-                                if self.show_reasoning_hint && include_reasoning {
-                                    if !spans.is_empty() {
-                                        spans.push(Span::from("  •  ").style(label_style));
-                                    }
-                                    spans.push(Span::from("Ctrl+R").style(key_hint_style));
-                                    let label = if self.reasoning_shown {
-                                        " hide reasoning"
-                                    } else {
-                                        " show reasoning"
-                                    };
-                                    spans.push(Span::from(label).style(label_style));
-                                }
-                                if self.show_diffs_hint && include_diff {
-                                    if !spans.is_empty() {
-                                        spans.push(Span::from("  •  ").style(label_style));
-                                    }
-                                    spans.push(Span::from("Ctrl+D").style(key_hint_style));
-                                    spans.push(Span::from(" diff viewer").style(label_style));
-                                }
-                                // Always show help at the end of the command hints
-                                if !spans.is_empty() {
-                                    spans.push(Span::from("  •  ").style(label_style));
-                                }
-                                spans.push(Span::from("Ctrl+H").style(key_hint_style));
-                                spans.push(Span::from(" help").style(label_style));
-                            }
-                            spans
-                        };
-
-                        // Start with all hints included
-                        let mut include_reasoning = true;
-                        let mut include_diff = true;
-                        let mut hint_spans = build_hints(include_reasoning, include_diff);
-
-                        // Measure function for spans length
-                        let measure = |spans: &[Span<'static>]| -> usize {
-                            spans.iter().map(|s| s.content.chars().count()).sum()
-                        };
-
-                        // Compute spacer between left and right to make right content right-aligned
-                        let left_len: usize = left_spans.iter().map(|s| s.content.chars().count()).sum();
-                        let total_width = hint_area.width as usize;
-                        let trailing_pad = 1usize; // one space on the right edge
-
-                        // Optional auth notice: show a small "API key" tag when not using ChatGPT auth
-                        let mut auth_spans: Vec<Span<'static>> = Vec::new();
-                        if !self.using_chatgpt_auth {
-                            auth_spans.push(Span::from("API key").style(label_style));
-                        }
-
-                        // We'll add separators between sections when both are present
-                        let sep_len = "  •  ".chars().count();
-                        let combined_len =
-                            |h: &[Span<'static>], t: &[Span<'static>], a: &[Span<'static>]| -> usize {
-                                let mut len = measure(h) + measure(t) + measure(a);
-                                if !h.is_empty() && !t.is_empty() {
-                                    len += sep_len;
-                                }
-                                if (!h.is_empty() || !t.is_empty()) && !a.is_empty() {
-                                    len += sep_len;
-                                }
-                                len
-                            };
-
-                        // Elide hints in order until content fits
-                        while left_len + combined_len(&hint_spans, &token_spans, &auth_spans) + trailing_pad
-                            > total_width
-                        {
-                            if include_reasoning {
-                                include_reasoning = false;
-                            } else if include_diff {
-                                include_diff = false;
-                            } else if !auth_spans.is_empty() {
-                                // If still too tight, drop the auth tag as a last resort
-                                auth_spans.clear();
-                            } else {
-                                break;
-                            }
-                            hint_spans = build_hints(include_reasoning, include_diff);
-                        }
-
-                        // Compose final right spans: hints, optional separator, then tokens
-                        if !hint_spans.is_empty() {
-                            right_spans.extend(hint_spans);
-                        }
-                        if !right_spans.is_empty() && !token_spans.is_empty() {
-                            right_spans.push(Span::from("  •  ").style(label_style));
-                        }
-                        right_spans.extend(token_spans);
-                        // Append auth notice at the very end (right-most) if present
-                        if !right_spans.is_empty() && !auth_spans.is_empty() {
-                            right_spans.push(Span::from("  •  ").style(label_style));
-                        }
-                        right_spans.extend(auth_spans);
-
-                        // Recompute spacer after elision
-                        let right_len: usize = right_spans.iter().map(|s| s.content.chars().count()).sum();
-                        let spacer = if total_width > left_len + right_len + trailing_pad {
-                            " ".repeat(total_width - left_len - right_len - trailing_pad)
-                        } else {
-                            String::from(" ")
-                        };
-
-                        let mut line_spans = left_spans;
-                        line_spans.push(Span::from(spacer));
-                        line_spans.extend(right_spans);
-                        line_spans.push(Span::from(" "));
-
-                        Line::from(line_spans)
-                            .style(
-                                Style::default()
-                                    .fg(crate::colors::text_dim())
-                                    .add_modifier(Modifier::DIM),
-                            )
-                            .render_ref(hint_area, buf);
-                    }
-                }
-            }
+        if let Some(area) = footer_area {
+            self.render_footer(area, buf);
         }
-        // Draw border around input area with optional "Coding" title when task is running
-        let mut input_block = Block::default()
-            .borders(Borders::ALL)
-            .border_style(Style::default().fg(crate::colors::border()))
-            // Fill input block with theme background so underlying content
-            // never shows through when the composer grows/shrinks.
-            .style(Style::default().bg(crate::colors::background()));
+        // Draw border around input area with optional variant title when task is running
+        let mut input_block = Block::default().borders(Borders::ALL);
+        if let Some(style) = self
+            .auto_drive_style
+            .as_ref()
+            .filter(|_| self.auto_drive_active)
+        {
+            input_block = input_block
+                .border_style(style.border_style.clone())
+                .border_type(style.border_type)
+                .style(style.background_style.clone());
+        } else {
+            input_block = input_block
+                .border_style(Style::default().fg(crate::colors::border()))
+                .border_type(BorderType::Plain)
+                .style(Style::default().bg(crate::colors::background()));
+        }
 
         if self.is_task_running && !self.embedded_mode {
-            if self.status_message.eq_ignore_ascii_case("auto drive") {
-                let title_line = Line::from(Span::styled(
-                    " Auto Drive ",
-                    Style::default()
-                        .fg(crate::colors::text())
-                        .add_modifier(Modifier::BOLD),
-                ));
-                input_block = input_block.title(title_line);
-            } else if self.status_message.eq_ignore_ascii_case("auto drive goal") {
-                let title_line = Line::from(Span::styled(
-                    " Auto Drive Goal ",
-                    Style::default()
-                        .fg(crate::colors::text())
-                        .add_modifier(Modifier::BOLD),
-                ));
-                input_block = input_block.title(title_line);
+            if self.auto_drive_active {
+                if let Some(style) = self.auto_drive_style.as_ref() {
+                    if self
+                        .status_message
+                        .eq_ignore_ascii_case("auto drive goal")
+                    {
+                        let title_text = format!(
+                            "{}Auto Drive Goal{}",
+                            style.goal_title_prefix, style.goal_title_suffix
+                        );
+                        let title_line =
+                            Line::from(Span::styled(title_text, style.title_style.clone()));
+                        input_block = input_block.title(title_line);
+                    }
+                }
             } else {
                 use std::time::{SystemTime, UNIX_EPOCH};
-                // Use selected spinner style
                 let now_ms = SystemTime::now()
                     .duration_since(UNIX_EPOCH)
                     .unwrap_or_default()
@@ -2222,14 +2464,13 @@ impl WidgetRef for ChatComposer {
                 let def = crate::spinner::current_spinner();
                 let spinner_str = crate::spinner::frame_at_time(def, now_ms);
 
-                // Create centered title with spinner and spaces
                 let title_line = Line::from(vec![
-                    Span::raw(" "), // Space before spinner
+                    Span::raw(" "),
                     Span::styled(spinner_str, Style::default().fg(crate::colors::info())),
                     Span::styled(
                         format!(" {}... ", self.status_message),
                         Style::default().fg(crate::colors::info()),
-                    ), // Space after spinner and after text
+                    ),
                 ])
                 .centered();
                 input_block = input_block.title(title_line);

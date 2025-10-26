@@ -47,7 +47,7 @@ impl BrowserInjector {
         };
 
         let screenshots = page.screenshot(mode).await?;
-        let ttl_ms = 300000;
+        let ttl_ms = 86_400_000; // keep screenshots for 24 hours
         let images = self
             .asset_manager
             .store_screenshots(screenshots, ttl_ms)

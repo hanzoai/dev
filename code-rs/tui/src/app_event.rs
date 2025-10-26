@@ -19,14 +19,13 @@ use code_git_tooling::{GhostCommit, GitToolingError};
 use code_cloud_tasks_client::{ApplyOutcome, CloudTaskError, CreatedTask, TaskSummary};
 
 use crate::app::ChatWidgetArgs;
-use crate::bottom_pane::chrome_selection_view::ChromeLaunchOption;
+use crate::chrome_launch::ChromeLaunchOption;
 use crate::slash_command::SlashCommand;
 use code_protocol::models::ResponseItem;
 use std::fmt;
 use std::path::PathBuf;
 use std::sync::mpsc::Sender as StdSender;
 use crate::cloud_tasks_service::CloudEnvironment;
-use crate::chatwidget::auto_coordinator::{TurnConfig, TurnDescriptor};
 
 /// Wrapper to allow including non-Debug types in Debug enums without leaking internals.
 pub(crate) struct Redacted<T>(pub T);
@@ -78,83 +77,13 @@ pub(crate) enum BackgroundPlacement {
     BeforeNextOutput,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) enum AutoCoordinatorStatus {
-    Continue,
-    Success,
-    Failed,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) enum AutoObserverStatus {
-    Ok,
-    Failing,
-}
-
-impl Default for AutoObserverStatus {
-    fn default() -> Self {
-        Self::Ok
-    }
-}
-
-#[derive(Debug, Clone, Default)]
-pub(crate) struct AutoObserverTelemetry {
-    pub trigger_count: u64,
-    pub last_status: AutoObserverStatus,
-    pub last_intervention: Option<String>,
-}
-
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub(crate) enum AutoContinueMode {
-    Immediate,
-    TenSeconds,
-    SixtySeconds,
-    Manual,
-}
-
-impl Default for AutoContinueMode {
-    fn default() -> Self {
-        Self::TenSeconds
-    }
-}
-
-impl AutoContinueMode {
-    pub fn seconds(self) -> Option<u8> {
-        match self {
-            Self::Immediate => Some(0),
-            Self::TenSeconds => Some(10),
-            Self::SixtySeconds => Some(60),
-            Self::Manual => None,
-        }
-    }
-
-    pub fn label(self) -> &'static str {
-        match self {
-            Self::Immediate => "Immediate",
-            Self::TenSeconds => "10 seconds",
-            Self::SixtySeconds => "60 seconds",
-            Self::Manual => "Manual approval",
-        }
-    }
-
-    pub fn cycle_forward(self) -> Self {
-        match self {
-            Self::Immediate => Self::TenSeconds,
-            Self::TenSeconds => Self::SixtySeconds,
-            Self::SixtySeconds => Self::Manual,
-            Self::Manual => Self::Immediate,
-        }
-    }
-
-    pub fn cycle_backward(self) -> Self {
-        match self {
-            Self::Immediate => Self::Manual,
-            Self::TenSeconds => Self::Immediate,
-            Self::SixtySeconds => Self::TenSeconds,
-            Self::Manual => Self::SixtySeconds,
-        }
-    }
-}
+pub(crate) use code_auto_drive_core::{
+    AutoContinueMode,
+    AutoCoordinatorStatus,
+    AutoTurnAgentsAction,
+    AutoTurnAgentsTiming,
+    AutoTurnCliAction,
+};
 
 #[allow(clippy::large_enum_variant)]
 #[derive(Debug)]
@@ -207,11 +136,15 @@ pub(crate) enum AppEvent {
         status: AutoCoordinatorStatus,
         progress_past: Option<String>,
         progress_current: Option<String>,
-        cli_context: Option<String>,
-        cli_prompt: Option<String>,
+        goal: Option<String>,
+        cli: Option<AutoTurnCliAction>,
+        agents_timing: Option<AutoTurnAgentsTiming>,
+        agents: Vec<AutoTurnAgentsAction>,
         transcript: Vec<ResponseItem>,
-        turn_descriptor: Option<TurnDescriptor>,
-        turn_config: Option<TurnConfig>,
+    },
+    AutoCoordinatorUserReply {
+        user_response: Option<String>,
+        cli_command: Option<String>,
     },
     AutoCoordinatorThinking {
         delta: String,
@@ -221,17 +154,18 @@ pub(crate) enum AppEvent {
         countdown_id: u64,
         seconds_left: u8,
     },
-    AutoObserverReport {
-        status: AutoObserverStatus,
-        telemetry: AutoObserverTelemetry,
-        replace_message: Option<String>,
-        additional_instructions: Option<String>,
+    /// Trigger an automatic Auto Drive restart after a transient failure.
+    AutoCoordinatorRestart {
+        token: u64,
+        attempt: u32,
     },
     ShowAutoDriveSettings,
     CloseAutoDriveSettings,
     AutoDriveSettingsChanged {
         review_enabled: bool,
         agents_enabled: bool,
+        cross_check_enabled: bool,
+        qa_automation_enabled: bool,
         continue_mode: AutoContinueMode,
     },
 
@@ -275,9 +209,11 @@ pub(crate) enum AppEvent {
     RequestValidationToolInstall { name: String, command: String },
 
     /// Enable/disable a specific MCP server
+    #[allow(dead_code)]
     UpdateMcpServer { name: String, enable: bool },
 
     /// Prefill the composer input with the given text
+    #[allow(dead_code)]
     PrefillComposer(String),
 
     /// Submit a message with hidden preface instructions
@@ -350,6 +286,7 @@ pub(crate) enum AppEvent {
     },
 
     /// Update the theme (with history event)
+    #[allow(dead_code)]
     UpdateTheme(ThemeName),
     /// Add or update a subagent command in memory (UI already persisted to config.toml)
     UpdateSubagentCommand(code_core::config_types::SubagentCommandConfig),
@@ -368,13 +305,18 @@ pub(crate) enum AppEvent {
     ShowSubagentEditorNew,
 
     /// Preview theme (no history event)
+    #[allow(dead_code)]
     PreviewTheme(ThemeName),
     /// Update the loading spinner style (with history event)
+    #[allow(dead_code)]
     UpdateSpinner(String),
     /// Preview loading spinner (no history event)
+    #[allow(dead_code)]
     PreviewSpinner(String),
     /// Rotate access/safety preset (Read Only → Write with Approval → Full Access)
     CycleAccessMode,
+    /// Cycle Auto Drive composer styling variants (Sentinel → Whisper → …)
+    CycleAutoDriveVariant,
     /// Bottom composer expanded (e.g., slash command popup opened)
     ComposerExpanded,
 
@@ -529,6 +471,7 @@ pub(crate) enum AppEvent {
         args_read_only: Option<Vec<String>>,
         args_write: Option<Vec<String>>,
         instructions: Option<String>,
+        command: String,
     },
     
 }
