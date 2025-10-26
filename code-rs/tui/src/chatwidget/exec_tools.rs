@@ -1,6 +1,6 @@
 //! Exec and tool call lifecycle helpers for `ChatWidget`.
 
-use super::{running_tools, ChatWidget};
+use super::{running_tools, web_search_sessions, ChatWidget};
 use crate::app_event::AppEvent;
 use crate::height_manager::HeightEvent;
 use crate::history::state::{
@@ -484,49 +484,7 @@ pub(super) fn finalize_all_running_as_interrupted(chat: &mut ChatWidget<'_>) {
         chat.request_redraw();
     }
 
-    if !chat.tools_state.running_web_search.is_empty() {
-        let entries: Vec<(super::ToolCallId, (usize, Option<String>))> = chat
-            .tools_state
-            .running_web_search
-            .iter()
-            .map(|(k, v)| (k.clone(), v.clone()))
-            .collect();
-        for (call_id, (idx, query_opt)) in entries {
-            let mut target_idx = None;
-            if idx < chat.history_cells.len() {
-                let is_ws = chat.history_cells[idx]
-                    .as_any()
-                    .downcast_ref::<history_cell::RunningToolCallCell>()
-                    .is_some_and(|rt| rt.has_title("Web Search..."));
-                if is_ws {
-                    target_idx = Some(idx);
-                }
-            }
-            if target_idx.is_none() {
-                for i in (0..chat.history_cells.len()).rev() {
-                    if let Some(rt) = chat.history_cells[i]
-                        .as_any()
-                        .downcast_ref::<history_cell::RunningToolCallCell>()
-                    {
-                        if rt.has_title("Web Search...") {
-                            target_idx = Some(i);
-                            break;
-                        }
-                    }
-                }
-            }
-            if let Some(i) = target_idx {
-                if let Some(rt) = chat.history_cells[i]
-                    .as_any()
-                    .downcast_ref::<history_cell::RunningToolCallCell>()
-                {
-                    let completed = rt.finalize_web_search(false, query_opt);
-                    chat.history_replace_at(i, Box::new(completed));
-                }
-            }
-            chat.tools_state.running_web_search.remove(&call_id);
-        }
-    }
+    web_search_sessions::finalize_all_failed(chat, "Search cancelled by user.");
 
     if !chat.tools_state.running_wait_tools.is_empty() {
         chat.tools_state.running_wait_tools.clear();
@@ -586,49 +544,7 @@ pub(super) fn finalize_all_running_due_to_answer(chat: &mut ChatWidget<'_>) {
 
     crate::chatwidget::running_tools::finalize_all_due_to_answer(chat);
 
-    if !chat.tools_state.running_web_search.is_empty() {
-        let entries: Vec<(super::ToolCallId, (usize, Option<String>))> = chat
-            .tools_state
-            .running_web_search
-            .iter()
-            .map(|(k, v)| (k.clone(), v.clone()))
-            .collect();
-        for (call_id, (idx, query_opt)) in entries {
-            let mut target_idx = None;
-            if idx < chat.history_cells.len() {
-                let is_ws = chat.history_cells[idx]
-                    .as_any()
-                    .downcast_ref::<history_cell::RunningToolCallCell>()
-                    .is_some_and(|rt| rt.has_title("Web Search..."));
-                if is_ws {
-                    target_idx = Some(idx);
-                }
-            }
-            if target_idx.is_none() {
-                for i in (0..chat.history_cells.len()).rev() {
-                    if let Some(rt) = chat.history_cells[i]
-                        .as_any()
-                        .downcast_ref::<history_cell::RunningToolCallCell>()
-                    {
-                        if rt.has_title("Web Search...") {
-                            target_idx = Some(i);
-                            break;
-                        }
-                    }
-                }
-            }
-            if let Some(i) = target_idx {
-                if let Some(rt) = chat.history_cells[i]
-                    .as_any()
-                    .downcast_ref::<history_cell::RunningToolCallCell>()
-                {
-                    let completed = rt.finalize_web_search(true, query_opt);
-                    chat.history_replace_at(i, Box::new(completed));
-                }
-            }
-            chat.tools_state.running_web_search.remove(&call_id);
-        }
-    }
+    web_search_sessions::finalize_all_completed(chat, "Search finished");
 
     chat.maybe_hide_spinner();
     chat.refresh_auto_drive_visuals();
@@ -1110,7 +1026,7 @@ pub(super) fn handle_exec_begin_now(
             .or_else(|| chat.history_cell_ids.get(idx).and_then(|slot| *slot));
         running.history_id = history_id;
     }
-    if !chat.tools_state.running_web_search.is_empty() {
+    if !chat.tools_state.web_search_sessions.is_empty() {
         chat.bottom_pane.update_status_text("Search".to_string());
     } else {
         let preview = chat
