@@ -154,7 +154,9 @@ impl AutoDriveCardCell {
         }
 
         let accent_width = CARD_ACCENT_WIDTH.min(width as usize);
-        let body_width = width.saturating_sub(accent_width as u16) as usize;
+        let body_width = width
+            .saturating_sub(accent_width as u16)
+            .saturating_sub(1) as usize;
         if body_width == 0 {
             return Vec::new();
         }
