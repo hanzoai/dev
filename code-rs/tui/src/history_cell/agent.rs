@@ -1,9 +1,11 @@
 use super::card_style::{
     agent_card_style,
     fill_card_background,
+    hint_text_style,
     primary_text_style,
     rows_to_lines,
     secondary_text_style,
+    title_text_style,
     truncate_with_ellipsis,
     CardRow,
     CardSegment,
@@ -353,8 +355,18 @@ impl AgentRunCell {
     }
 
     fn accent_style(style: &CardStyle) -> Style {
-        let dim = colors::mix_toward(style.accent_fg, colors::text_dim(), 0.85);
+        let dim = colors::mix_toward(style.accent_fg, style.text_secondary, 0.85);
         Style::default().fg(dim)
+    }
+
+    fn prompt_text_style(style: &CardStyle) -> Style {
+        let fg = colors::mix_toward(style.text_primary, colors::background(), 0.45);
+        Style::default().fg(fg)
+    }
+
+    fn action_description_style(style: &CardStyle) -> Style {
+        let fg = colors::mix_toward(style.text_secondary, colors::background(), 0.55);
+        Style::default().fg(fg)
     }
 
     fn top_border_row(&self, body_width: usize, style: &CardStyle) -> CardRow {
@@ -411,37 +423,35 @@ impl AgentRunCell {
             }
             segments.push(CardSegment::new(" ".to_string(), primary_text_style(style)));
             remaining = remaining.saturating_sub(1);
-            let write_label = self.write_mode_label();
+
+            let mode_label = self.write_mode_label();
+            let bullet_label = mode_label.map(|value| format!(" • {value}"));
+            let bullet_width = bullet_label
+                .as_ref()
+                .map(|value| string_width(value.as_str()))
+                .unwrap_or(0);
 
             let mut available = remaining;
-            let mut name_allow = available;
-            if let Some(label) = write_label.as_ref() {
-                let label_width = string_width(label.as_str());
-                if label_width + 1 <= available {
-                    name_allow = available.saturating_sub(label_width);
-                } else {
-                    // Not enough room for label; skip rendering it.
-                    name_allow = available;
-                }
-            }
+            let name_allow = if bullet_width > 0 {
+                available.saturating_sub(bullet_width).max(1)
+            } else {
+                available
+            };
 
             let truncated = truncate_with_ellipsis(text_value, name_allow.max(1));
-            let name_width = string_width(truncated.as_str());
-            if !truncated.is_empty() {
-                segments.push(CardSegment::new(truncated, primary_text_style(style)));
+            let trimmed_name = truncated.trim_end().to_string();
+            let name_width = string_width(trimmed_name.as_str());
+            if !trimmed_name.is_empty() {
+                segments.push(CardSegment::new(trimmed_name, title_text_style(style)));
             }
             available = available.saturating_sub(name_width);
 
-            if let Some(label) = write_label {
-                if available >= string_width(label.as_str()) {
-                    let label_style = if label.contains("read only") {
-                        Style::default().fg(colors::success())
-                    } else if label.contains("write") {
-                        Style::default().fg(colors::warning())
-                    } else {
-                        secondary_text_style(style)
-                    };
-                    segments.push(CardSegment::new(label, label_style));
+            if let Some(bullet) = bullet_label {
+                if available >= bullet_width && bullet_width > 0 {
+                    segments.push(CardSegment::new(
+                        bullet,
+                        Self::mode_label_style(style),
+                    ));
                 }
             }
         }
@@ -452,6 +462,11 @@ impl AgentRunCell {
             segments,
             None,
         )
+    }
+
+    fn mode_label_style(style: &CardStyle) -> Style {
+        let fg = colors::mix_toward(style.text_secondary, colors::background(), 0.55);
+        Style::default().fg(fg)
     }
 
     fn blank_border_row(&self, body_width: usize, style: &CardStyle) -> CardRow {
@@ -537,7 +552,7 @@ impl AgentRunCell {
             " [Ctrl+A] Expand".to_string()
         };
         let text = truncate_with_ellipsis(text_value.as_str(), body_width);
-        let segment = CardSegment::new(text, secondary_text_style(style));
+        let segment = CardSegment::new(text, hint_text_style(style));
         CardRow::new(BORDER_BOTTOM.to_string(), Self::accent_style(style), vec![segment], None)
     }
 
@@ -597,14 +612,12 @@ impl AgentRunCell {
         rows
     }
 
-    fn write_mode_label(&self) -> Option<String> {
-        self.write_enabled.map(|flag| {
-            if flag {
-                " write ".to_string()
-            } else {
-                " read only ".to_string()
-            }
-        })
+    fn write_mode_label(&self) -> Option<&'static str> {
+        match self.write_enabled {
+            Some(true) => Some("Write Agents"),
+            Some(false) => Some("Read Agents"),
+            None => None,
+        }
     }
 
     fn prompt_rows(&self, body_width: usize, style: &CardStyle) -> Vec<CardRow> {
@@ -640,7 +653,7 @@ impl AgentRunCell {
                     line,
                     body_width,
                     style,
-                    secondary_text_style(style),
+                    Self::prompt_text_style(style),
                     HEADING_INDENT,
                 )
             })
@@ -1030,7 +1043,7 @@ impl AgentRunCell {
         let time_indent = " ".repeat(ACTION_TIME_INDENT);
         let indent_style = secondary_text_style(style);
         let time_style = Style::default().fg(colors::text());
-        let label_style = secondary_text_style(style);
+        let label_style = Self::action_description_style(style);
         let ellipsis_time = |width: usize| {
             if width <= 1 {
                 return "⋮".to_string();
@@ -1051,7 +1064,7 @@ impl AgentRunCell {
                 ellipsis_segments.push(CardSegment::new(time_indent.clone(), indent_style));
                 ellipsis_segments.push(CardSegment::new(
                     ellipsis_time(time_width),
-                    secondary_text_style(style),
+                    label_style,
                 ));
                 if ACTION_TIME_SEPARATOR_WIDTH > 0 {
                     ellipsis_segments.push(CardSegment::new(
@@ -1282,7 +1295,7 @@ impl HistoryCell for AgentRunCell {
     }
 
     fn desired_height(&self, width: u16) -> u16 {
-        let style = agent_card_style();
+        let style = agent_card_style(self.write_enabled);
         let rows = self.build_card_rows(width, &style);
         rows.len().max(1) as u16
     }
@@ -1296,7 +1309,7 @@ impl HistoryCell for AgentRunCell {
             return;
         }
 
-        let style = agent_card_style();
+        let style = agent_card_style(self.write_enabled);
         fill_card_background(buf, area, &style);
         let rows = self.build_card_rows(area.width, &style);
         let lines = rows_to_lines(&rows, &style, area.width);
