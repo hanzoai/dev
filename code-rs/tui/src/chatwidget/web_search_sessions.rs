@@ -66,8 +66,8 @@ pub(super) fn handle_begin(
         tracker.cell.ensure_started_message();
     }
 
-    if tracker.cell.set_query(query.clone()) {
-        if let Some(q) = tracker.cell.current_query() {
+    if let Some(ref q) = query {
+        if tracker.cell.set_query(Some(q.clone())) {
             tracker
                 .cell
                 .record_info(tracker.started_at.elapsed(), format!("Query: \"{}\"", q));
