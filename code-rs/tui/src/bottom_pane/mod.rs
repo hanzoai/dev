@@ -551,6 +551,10 @@ impl BottomPane<'_> {
         self.request_redraw();
     }
 
+    pub(crate) fn standard_terminal_hint(&self) -> Option<&str> {
+        self.composer.standard_terminal_hint()
+    }
+
     pub(crate) fn show_ctrl_c_quit_hint(&mut self) {
         self.ctrl_c_quit_hint = true;
         self.composer
