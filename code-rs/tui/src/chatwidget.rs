@@ -14877,6 +14877,10 @@ Have we met every part of this goal and is there no further work to do?"#
             .filter(|value| !value.trim().is_empty());
 
         let bootstrap_pending = self.auto_pending_goal_request;
+        let continue_mode = self.auto_state.continue_mode;
+        let continue_cta_active = self.auto_state.awaiting_coordinator_submit()
+            && !self.auto_state.is_paused_manual()
+            && continue_mode != AutoContinueMode::Manual;
 
         let countdown_limit = self.auto_state.countdown_seconds();
         let countdown_active = self.auto_state.countdown_active();
@@ -14894,6 +14898,8 @@ Have we met every part of this goal and is there no further work to do?"#
         let button = if self.auto_state.awaiting_coordinator_submit() {
             let base_label = if bootstrap_pending {
                 "Complete Current Task"
+            } else if continue_cta_active {
+                "Continue current task"
             } else {
                 "Send prompt"
             };
@@ -14915,6 +14921,12 @@ Have we met every part of this goal and is there no further work to do?"#
                 Some("Edit the prompt, then press Enter to continue.".to_string())
             } else if bootstrap_pending {
                 None
+            } else if continue_cta_active {
+                if countdown_active {
+                    Some("Enter to continue now • Esc to stop".to_string())
+                } else {
+                    Some("Enter to continue • Esc to stop".to_string())
+                }
             } else if countdown_active {
                 Some("Enter to send now • Esc to edit".to_string())
             } else {
@@ -14929,6 +14941,8 @@ Have we met every part of this goal and is there no further work to do?"#
                 "Esc to cancel".to_string()
             } else if bootstrap_pending {
                 "Esc enter new goal".to_string()
+            } else if continue_cta_active {
+                "Esc to stop".to_string()
             } else {
                 "Esc to edit".to_string()
             }
@@ -18085,6 +18099,15 @@ Have we met every part of this goal and is there no further work to do?"#
         }
 
         if self.auto_state.is_active() {
+            let continue_mode = self.auto_state.continue_mode;
+            let awaiting_continue_cta = self.auto_state.awaiting_coordinator_submit()
+                && !self.auto_state.is_paused_manual()
+                && continue_mode != AutoContinueMode::Manual;
+
+            if awaiting_continue_cta {
+                return EscRoute::new(EscIntent::AutoStopDuringApproval, true, false);
+            }
+
             if self.auto_state.countdown_active()
                 || (self.auto_state.awaiting_coordinator_submit()
                     && !self.auto_state.is_paused_manual())
@@ -22206,7 +22229,7 @@ mod tests {
     use crate::bottom_pane::AutoCoordinatorViewModel;
     use crate::chatwidget::message::UserMessage;
     use crate::chatwidget::smoke_helpers::ChatWidgetHarness;
-    use crate::history_cell::{self, ExploreAggregationCell, HistoryCellType, PlainHistoryCell};
+    use crate::history_cell::{self, ExploreAggregationCell, HistoryCellType};
     use code_auto_drive_core::{
         AutoContinueMode,
         AutoRunPhase,

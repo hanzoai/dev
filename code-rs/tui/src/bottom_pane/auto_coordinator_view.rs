@@ -110,6 +110,11 @@ impl AutoCoordinatorView {
         self.model = model;
     }
 
+    #[cfg(test)]
+    pub(crate) fn model(&self) -> &AutoCoordinatorViewModel {
+        &self.model
+    }
+
     pub fn set_style(&mut self, style: AutoDriveStyle) {
         self.style = style;
     }
@@ -643,6 +648,10 @@ impl AutoCoordinatorView {
         }
 
         rows
+    }
+
+    fn has_pending_prompt_content(model: &AutoActiveViewModel) -> bool {
+        model.cli_prompt.is_some() || model.cli_context.is_some()
     }
 
     fn render_pending_prompt_block(
@@ -1208,29 +1217,35 @@ impl AutoCoordinatorView {
         }
 
         let mut prompt_lines = self.cli_prompt_lines(model);
+        let has_pending_prompt = Self::has_pending_prompt_content(model);
         let mut top_lines: Vec<Line<'static>> = Vec::new();
         let mut after_lines: Vec<Line<'static>> = Vec::new();
         let mut button_block = self.button_block_lines(&ctx);
 
         if !model.editing_prompt {
-            let base_y = inner.y;
-            let base_height = inner.height;
-            let used = self.render_pending_prompt_block(inner, buf, model);
-            if used == 0 {
+            if has_pending_prompt {
+                let base_y = inner.y;
+                let base_height = inner.height;
+                let used = self.render_pending_prompt_block(inner, buf, model);
+                if used >= base_height {
+                    return;
+                }
+                if used > 0 {
+                    let new_y = base_y + used;
+                    let remaining_height =
+                        base_height.saturating_sub(new_y.saturating_sub(base_y));
+                    inner = Rect {
+                        x: inner.x,
+                        y: new_y,
+                        width: inner.width,
+                        height: remaining_height,
+                    };
+                } else {
+                    Self::clear_rect(inner, buf);
+                }
+            } else {
                 Self::clear_rect(inner, buf);
-                return;
             }
-            if used >= base_height {
-                return;
-            }
-            let new_y = base_y + used;
-            let remaining_height = base_height.saturating_sub(new_y.saturating_sub(base_y));
-            inner = Rect {
-                x: inner.x,
-                y: new_y,
-                width: inner.width,
-                height: remaining_height,
-            };
         } else if let Some(mut lines) = prompt_lines.take() {
             top_lines.append(&mut lines);
         }

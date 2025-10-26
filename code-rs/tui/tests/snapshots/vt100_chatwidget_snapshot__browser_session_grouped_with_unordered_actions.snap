@@ -1,11 +1,11 @@
 ---
 source: tui/tests/vt100_chatwidget_snapshot.rs
+assertion_line: 1052
 expression: output
 ---
  +----------------------------------------------------------------------------+
  |                                    Code                                    |
  +----------------------------------------------------------------------------+
-
 
 
 
@@ -21,9 +21,10 @@ expression: output
 
    +- Browser (headless): example.com
    |
-   |   0s  Opened   https://example.com
-   |   3s  Typed    pizza
-   |   5s  Pressed  Enter
+   |   Actions
+   |    MM:SS  Opened   https://example.com
+   |    MM:SS  Typed    pizza
+   |    MM:SS  Pressed  Enter
    |
    |   Console: ⚠️  Encountering captcha block
    |

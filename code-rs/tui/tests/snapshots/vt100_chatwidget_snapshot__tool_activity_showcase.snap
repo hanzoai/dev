@@ -1,26 +1,28 @@
 ---
 source: tui/tests/vt100_chatwidget_snapshot.rs
+assertion_line: 850
 expression: output
 ---
  +----------------------------------------------------------------------------+
  |                                    Code                                    |
  +----------------------------------------------------------------------------+
-   /auto - work autonomously on long tasks with Auto Drive UPDATED
-   /chrome - connect to your Chrome browser
-   /plan - create a comprehensive plan (multiple agents)
    /code - perform a coding task (multiple agents)
 
  › Can you gather details from the latest docs update?
 
- ✔ Web Search, duration: Xms
-   + query: ratatui widget patterns
-
- ⚙ Web Search... (Xm Ys)
-   + query: async rust tui example
+   +- Web Search · Completed
+   |
+   |  Actions
+   |   MM:SS  • Searching…
+   |   MM:SS  • Query: "ratatui widget patterns"
+   |   MM:SS  ✓ Results ready
+   |
+   +- [Ctrl+S] Settings · [Esc] Stop
 
    +- Browser (headless): Browser Session
    |
-   |   0s  Clicked  #login-button
+   |   Actions
+   |    MM:SS  Clicked  #login-button
    |
    +- [Ctrl+B] View · [Esc] Stop
 
@@ -32,10 +34,9 @@ expression: output
    |    No agent updates yet
    |
    |  Actions
-   |    0s  Started agent run for qa-bot
-   |    0s  Waiting for agents
+   |   MM:SS  Started agent run for qa-bot
+   |   MM:SS  Waiting for agents
    |
-   +- [Ctrl+A] Expand
 
  +----------------------------------------------------------------------------+
  | What can I code for you today?                                             |

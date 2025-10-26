@@ -895,12 +895,25 @@ pub(super) fn handle_exec_begin_now(
     let has_read_command = parsed_command
         .iter()
         .any(|p| matches!(p, ParsedCommand::ReadCommand { .. }));
+    let mut upgraded_tool_idx = if let Some(entry) = chat
+        .tools_state
+        .running_custom_tools
+        .remove(&super::ToolCallId(ev.call_id.clone()))
+    {
+        running_tools::resolve_entry_index(chat, &entry, &ev.call_id)
+            .or_else(|| running_tools::find_by_call_id(chat, &ev.call_id))
+    } else {
+        running_tools::find_by_call_id(chat, &ev.call_id)
+    };
 
     if matches!(
         action,
         ExecAction::Read | ExecAction::Search | ExecAction::List
     ) || has_read_command
     {
+        if let Some(idx) = upgraded_tool_idx.take() {
+            chat.history_remove_at(idx);
+        }
         let mut created_new = false;
         let mut agg_idx = chat.exec.running_explore_agg_index.and_then(|idx| {
             if idx < chat.history_cells.len()
@@ -993,19 +1006,42 @@ pub(super) fn handle_exec_begin_now(
 
     let exec_record = exec_record_from_begin(&ev);
     let key = chat.provider_order_key_from_order_meta(order);
-    let cell = history_cell::ExecCell::from_record(exec_record.clone());
-    let idx = chat.history_insert_with_key_global_tagged(
-        Box::new(cell),
-        key,
-        "exec-begin",
-        Some(HistoryDomainRecord::Exec(exec_record)),
-    );
+    let history_idx = if let Some(idx) = upgraded_tool_idx {
+        let replacement = history_cell::ExecCell::from_record(exec_record.clone());
+        chat.history_replace_with_record(
+            idx,
+            Box::new(replacement),
+            HistoryDomainRecord::Exec(exec_record.clone()),
+        );
+        if idx < chat.cell_order_seq.len() {
+            chat.cell_order_seq[idx] = key;
+        }
+        if idx < chat.cell_order_dbg.len() {
+            chat.cell_order_dbg[idx] = None;
+        }
+        chat.last_assigned_order = Some(
+            chat
+                .last_assigned_order
+                .map(|prev| prev.max(key))
+                .unwrap_or(key),
+        );
+        chat.bottom_pane.set_has_chat_history(true);
+        idx
+    } else {
+        let cell = history_cell::ExecCell::from_record(exec_record.clone());
+        chat.history_insert_with_key_global_tagged(
+            Box::new(cell),
+            key,
+            "exec-begin",
+            Some(HistoryDomainRecord::Exec(exec_record.clone())),
+        )
+    };
     chat.exec.running_commands.insert(
         super::ExecCallId(ev.call_id.clone()),
         super::RunningCommand {
             command: ev.command.clone(),
             parsed: parsed_command,
-            history_index: Some(idx),
+            history_index: Some(history_idx),
             history_id: None,
             explore_entry: None,
             stdout: String::new(),
@@ -1023,7 +1059,7 @@ pub(super) fn handle_exec_begin_now(
         let history_id = chat
             .history_state
             .history_id_for_exec_call(&ev.call_id)
-            .or_else(|| chat.history_cell_ids.get(idx).and_then(|slot| *slot));
+            .or_else(|| chat.history_cell_ids.get(history_idx).and_then(|slot| *slot));
         running.history_id = history_id;
     }
     if !chat.tools_state.web_search_sessions.is_empty() {
