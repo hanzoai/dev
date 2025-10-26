@@ -284,6 +284,7 @@ pub struct AutoDriveController {
     pub current_summary_index: Option<u32>,
     pub countdown_id: u64,
     pub seconds_remaining: u8,
+    pub countdown_override: Option<u8>,
     pub last_broadcast_summary: Option<String>,
     pub last_decision_summary: Option<String>,
     pub last_decision_progress_past: Option<String>,
@@ -348,6 +349,7 @@ impl AutoDriveController {
     }
 
     pub fn on_prompt_submitted(&mut self) {
+        self.countdown_override = None;
         self.apply_phase(AutoRunPhase::AwaitingDiagnostics { coordinator_waiting: true });
     }
 
@@ -486,6 +488,7 @@ impl AutoDriveController {
         self.placeholder_phrase = placeholder_phrase;
         self.thinking_prefix_stripped = false;
         self.last_broadcast_summary = None;
+        self.countdown_override = None;
         self.last_decision_progress_past = None;
         self.last_decision_progress_current = None;
         self.reset_countdown();
@@ -500,6 +503,7 @@ impl AutoDriveController {
     pub fn launch_failed(&mut self, goal: String, error: String) -> Vec<AutoControllerEffect> {
         self.goal = None;
         self.mark_intro_pending();
+        self.countdown_override = None;
         self.reset_countdown();
         self.apply_phase(AutoRunPhase::AwaitingGoalEntry);
 
@@ -632,9 +636,14 @@ impl AutoDriveController {
         ]
     }
 
-    pub fn schedule_cli_prompt(&mut self, prompt_text: String) -> Vec<AutoControllerEffect> {
+    pub fn schedule_cli_prompt(
+        &mut self,
+        prompt_text: String,
+        countdown_override: Option<u8>,
+    ) -> Vec<AutoControllerEffect> {
         self.current_cli_prompt = Some(prompt_text);
         self.apply_phase(AutoRunPhase::AwaitingCoordinator { prompt_ready: true });
+        self.countdown_override = countdown_override;
         self.reset_countdown();
         self.countdown_id = self.countdown_id.wrapping_add(1);
         let countdown_id = self.countdown_id;
@@ -653,6 +662,7 @@ impl AutoDriveController {
 
     pub fn update_continue_mode(&mut self, mode: AutoContinueMode) -> Vec<AutoControllerEffect> {
         self.continue_mode = mode;
+        self.countdown_override = None;
         self.reset_countdown();
         self.seconds_remaining = self.countdown_seconds().unwrap_or(0);
 
@@ -759,7 +769,7 @@ impl AutoDriveController {
     }
 
     pub fn countdown_seconds(&self) -> Option<u8> {
-        self.continue_mode.seconds()
+        self.countdown_override.or_else(|| self.continue_mode.seconds())
     }
 
     pub fn reset_countdown(&mut self) {
