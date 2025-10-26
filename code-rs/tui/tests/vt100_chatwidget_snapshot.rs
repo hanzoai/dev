@@ -30,7 +30,7 @@ use code_tui::test_helpers::{
     ChatWidgetHarness,
 };
 use crossterm::event::{KeyCode, KeyEvent, KeyEventKind, KeyEventState, KeyModifiers};
-use regex_lite::Regex;
+use regex_lite::{Captures, Regex};
 use serde_json::json;
 use std::path::PathBuf;
 use std::sync::OnceLock;
@@ -42,9 +42,9 @@ fn normalize_output(text: String) -> String {
         .map(normalize_glyph)
         .collect::<String>()
         .pipe(normalize_timers)
+        .pipe(normalize_auto_drive_layout)
+        .pipe(normalize_agent_history_details)
         .pipe(normalize_spacer_rows)
-        .pipe(normalize_account_status)
-        .pipe(normalize_auto_drive_spacing)
 }
 
 fn make_key(code: KeyCode, modifiers: KeyModifiers) -> KeyEvent {
@@ -98,9 +98,15 @@ fn normalize_timers(text: String) -> String {
     static IN_SECONDS_RE: OnceLock<Regex> = OnceLock::new();
     static T_MINUS_RE: OnceLock<Regex> = OnceLock::new();
     static MM_SS_RE: OnceLock<Regex> = OnceLock::new();
+    static MM_SS_SUFFIX_RE: OnceLock<Regex> = OnceLock::new();
     static MS_RE: OnceLock<Regex> = OnceLock::new();
     static MIN_SEC_RE: OnceLock<Regex> = OnceLock::new();
-    static MM_SS_SUFFIX_RE: OnceLock<Regex> = OnceLock::new();
+    static PAREN_SECONDS_RE: OnceLock<Regex> = OnceLock::new();
+    static PAREN_MINUTES_RE: OnceLock<Regex> = OnceLock::new();
+    static PAREN_MINUTES_SECONDS_RE: OnceLock<Regex> = OnceLock::new();
+    static PAREN_HOURS_MINUTES_RE: OnceLock<Regex> = OnceLock::new();
+    static PAREN_HOURS_MINUTES_SECONDS_RE: OnceLock<Regex> = OnceLock::new();
+    static RAW_SECONDS_SUFFIX_RE: OnceLock<Regex> = OnceLock::new();
 
     let text = IN_SECONDS_RE
         .get_or_init(|| Regex::new(r"\bin\s+\d+s\b").expect("valid in seconds regex"))
@@ -127,10 +133,130 @@ fn normalize_timers(text: String) -> String {
         .replace_all(&text, "Xms")
         .into_owned();
 
+    let text = PAREN_SECONDS_RE
+        .get_or_init(|| Regex::new(r"\(\d+s\)").expect("valid paren seconds regex"))
+        .replace_all(&text, "(Xs)")
+        .into_owned();
+
+    let text = PAREN_MINUTES_RE
+        .get_or_init(|| Regex::new(r"\(\d+m\)").expect("valid paren minutes regex"))
+        .replace_all(&text, "(Xm)")
+        .into_owned();
+
+    let text = PAREN_MINUTES_SECONDS_RE
+        .get_or_init(|| Regex::new(r"\(\d+m\s+\d+s\)").expect("valid paren minutes seconds regex"))
+        .replace_all(&text, "(Xm Xs)")
+        .into_owned();
+
+    let text = PAREN_HOURS_MINUTES_RE
+        .get_or_init(|| Regex::new(r"\(\d+h\s+\d+m\)").expect("valid paren hours minutes regex"))
+        .replace_all(&text, "(Xh Xm)")
+        .into_owned();
+
+    let text = PAREN_HOURS_MINUTES_SECONDS_RE
+        .get_or_init(|| Regex::new(r"\(\d+h\s+\d+m\s+\d+s\)").expect("valid paren hours minutes seconds regex"))
+        .replace_all(&text, "(Xh Xm Xs)")
+        .into_owned();
+
+    let text = RAW_SECONDS_SUFFIX_RE
+        .get_or_init(|| Regex::new(r"\b\d+s\b").expect("valid raw seconds suffix regex"))
+        .replace_all(&text, "Xs")
+        .into_owned();
+
     MIN_SEC_RE
         .get_or_init(|| Regex::new(r"\b\d+m\s+\d+s\b").expect("valid minute-second regex"))
         .replace_all(&text, "Xm Ys")
         .into_owned()
+}
+
+fn normalize_auto_drive_layout(text: String) -> String {
+    static AUTO_DRIVE_STATUS_ALIGN_RE: OnceLock<Regex> = OnceLock::new();
+    static AUTO_DRIVE_BANNER_RE: OnceLock<Regex> = OnceLock::new();
+
+    let text = AUTO_DRIVE_STATUS_ALIGN_RE
+        .get_or_init(|| {
+            Regex::new(r"(?m)^(?P<prefix>\s*Auto Drive >[^\n]*?)(?P<spaces>\s+)✶(?P<rest>[^\n]*)$")
+                .expect("valid auto drive status alignment regex")
+        })
+        .replace_all(&text, |caps: &Captures| {
+            format!("{}  ✶{}", &caps["prefix"], &caps["rest"])
+        })
+        .into_owned();
+
+    AUTO_DRIVE_BANNER_RE
+        .get_or_init(|| {
+            Regex::new(
+                r"(?m)^(?P<indent>\s*)\+(?P<left>-+)\s+✶\s*(?P<title>[^\-\n]+?)\s+(?P<right>-+)\+$",
+            )
+            .expect("valid auto drive banner regex")
+        })
+        .replace_all(&text, |caps: &Captures| {
+            let indent = &caps["indent"];
+            let title = caps["title"].trim();
+            format!("{indent}+----------------------------- ✶ {title} -----------------------------+")
+        })
+        .into_owned()
+}
+
+fn normalize_agent_history_details(text: String) -> String {
+    let mut blank_next_detail_line = false;
+    let mut result = String::new();
+
+    for line in text.lines() {
+        let mut transformed = line.to_string();
+        let mut handled_detail = false;
+
+        for (token, label) in [("progress:", "detail:"), ("result:", "detail:")] {
+            if let Some(idx) = line.find(token) {
+                let prefix = &line[..idx];
+                let label = label;
+                let prefix_end = idx + token.len();
+                if let Some(tail_start) = line.rfind("| |") {
+                    let tail = &line[tail_start..];
+                    let span_width = tail_start.saturating_sub(prefix_end);
+                    let mut filler = String::from(" …");
+                    if span_width > 2 {
+                        filler.push_str(&" ".repeat(span_width - 2));
+                    }
+                    transformed = format!("{prefix}{label}{filler}{tail}");
+                } else {
+                    transformed = format!("{}{label} …", prefix);
+                }
+                handled_detail = true;
+                break;
+            }
+        }
+
+        if handled_detail {
+            blank_next_detail_line = true;
+        } else if blank_next_detail_line {
+            if let Some(blanked) = blank_between_pipes(line) {
+                transformed = blanked;
+            }
+            blank_next_detail_line = false;
+        }
+
+        result.push_str(&transformed);
+        result.push('\n');
+    }
+
+    if !text.ends_with('\n') {
+        result.pop();
+    }
+
+    result
+}
+
+fn blank_between_pipes(line: &str) -> Option<String> {
+    let (first_pipe, last_pipe) = (line.find('|')?, line.rfind('|')?);
+    if last_pipe <= first_pipe {
+        return None;
+    }
+
+    let indent = &line[..first_pipe + 1];
+    let tail = &line[last_pipe..];
+    let span_width = last_pipe.saturating_sub(first_pipe + 1);
+    Some(format!("{indent}{}{tail}", " ".repeat(span_width)))
 }
 
 fn normalize_spacer_rows(text: String) -> String {
@@ -161,18 +287,6 @@ fn normalize_spacer_rows(text: String) -> String {
     }
 
     normalized
-}
-
-fn normalize_account_status(text: String) -> String {
-    text.replace("Ctrl+H help  •  API key", "Ctrl+H help")
-}
-
-fn normalize_auto_drive_spacing(text: String) -> String {
-    static RE: OnceLock<Regex> = OnceLock::new();
-    RE
-        .get_or_init(|| Regex::new(r"(?m)(> [^\n]*?)\s+✶").expect("valid auto drive spacing regex"))
-        .replace_all(&text, |caps: &regex_lite::Captures<'_>| format!("{}  ✶", &caps[1]))
-        .into_owned()
 }
 
 fn is_spacer_border_line(line: &str) -> bool {

@@ -1,6 +1,6 @@
 ---
 source: tui/tests/vt100_chatwidget_snapshot.rs
-assertion_line: 481
+assertion_line: 533
 expression: frame
 ---
  +----------------------------------------------------------------------------+
@@ -15,7 +15,7 @@ expression: frame
    /plan - create a comprehensive plan (multiple agents)
    /code - perform a coding task (multiple agents)
 
-  Auto Drive > Working  ✶ Running (1s)
+  Auto Drive > Working  ✶ Running (Xs)
  +----------------------------------------------------------------------------+
  | What can I code for you today?                                             |
  +----------------------------------------------------------------------------+
