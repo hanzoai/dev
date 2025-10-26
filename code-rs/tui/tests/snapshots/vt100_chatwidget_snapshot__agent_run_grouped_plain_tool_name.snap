@@ -1,5 +1,6 @@
 ---
 source: tui/tests/vt100_chatwidget_snapshot.rs
+assertion_line: 1278
 expression: output
 ---
  +----------------------------------------------------------------------------+
@@ -22,14 +23,14 @@ expression: output
    |  Run targeted regression suite
    |
    |  Agents
-   |    • claude  running  (18s)
+   |    • claude  running  (Xs)
    |
    |  Actions
    |   MM:SS  Started agent run for qa-bot
    |
    +- [Ctrl+A] Expand · [Esc] Stop
 
- +----------------------------- ✶ Responding... ------------------------------+
+ +----------------------------- ✶ Responding... -----------------------------+
  | What can I code for you today?                                             |
  +----------------------------------------------------------------------------+
    Read Only  (Shift+Tab change)                       Ctrl+H help

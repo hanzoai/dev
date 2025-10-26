@@ -1,6 +1,6 @@
 ---
 source: tui/tests/vt100_chatwidget_snapshot.rs
-assertion_line: 400
+assertion_line: 452
 expression: "frames.join(\"\\n---FRAME---\\n\")"
 ---
  +----------------------------------------------------------------------------+
@@ -9,7 +9,7 @@ expression: "frames.join(\"\\n---FRAME---\\n\")"
    /plan - create a comprehensive plan (multiple agents)
    /code - perform a coding task (multiple agents)
 
-  Auto Drive > Working  ✶ Running (1s)
+  Auto Drive > Working  ✶ Running (Xs)
  +----------------------------------------------------------------------------+
  | What can I code for you today?                                             |
  +----------------------------------------------------------------------------+
@@ -22,7 +22,7 @@ expression: "frames.join(\"\\n---FRAME---\\n\")"
    /plan - create a comprehensive plan (multiple agents)
    /code - perform a coding task (multiple agents)
 
-  Auto Drive > Installed dependencies > Running cargo check...  ✶ Thinking (1s)
+  Auto Drive > Installed dependencies > Running cargo check...  ✶ Thinking (Xs)
  +----------------------------------------------------------------------------+
  | What can I code for you today?                                             |
  +----------------------------------------------------------------------------+
@@ -35,7 +35,7 @@ expression: "frames.join(\"\\n---FRAME---\\n\")"
    /plan - create a comprehensive plan (multiple agents)
    /code - perform a coding task (multiple agents)
 
-  Auto Drive > Installed dependencies > Running cargo check...  ✶ Running (1s)
+  Auto Drive > Installed dependencies > Running cargo check...  ✶ Running (Xs)
  +----------------------------------------------------------------------------+
  | What can I code for you today?                                             |
  +----------------------------------------------------------------------------+
