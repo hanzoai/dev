@@ -168,41 +168,6 @@ impl RunningToolCallCell {
         self.state.title == title
     }
 
-    pub(crate) fn finalize_web_search(
-        &self,
-        success: bool,
-        query: Option<String>,
-    ) -> ToolCallCell {
-        let duration = self.elapsed_duration();
-        let mut arguments: Vec<ToolArgument> = Vec::new();
-        if let Some(q) = query {
-            arguments.push(ToolArgument {
-                name: "query".to_string(),
-                value: ArgumentValue::Text(q),
-            });
-        }
-        let status = if success {
-            HistoryToolStatus::Success
-        } else {
-            HistoryToolStatus::Failed
-        };
-        let state = ToolCallState {
-            id: HistoryId::ZERO,
-            call_id: None,
-            status,
-            title: if success {
-                "Web Search".to_string()
-            } else {
-                "Web Search (failed)".to_string()
-            },
-            duration: Some(duration),
-            arguments,
-            result_preview: None,
-            error_message: None,
-        };
-        ToolCallCell::new(state)
-    }
-
     fn elapsed_duration(&self) -> Duration {
         SystemTime::now()
             .duration_since(self.state.started_at)
