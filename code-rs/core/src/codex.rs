@@ -4534,6 +4534,7 @@ async fn run_turn(
             model_family_override: None,
             output_schema: None,
             log_tag: Some("codex/turn".to_string()),
+            session_id_override: None,
         };
 
         // Start a new scratchpad for this HTTP attempt
