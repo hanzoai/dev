@@ -553,6 +553,7 @@ use crate::exec::ExecToolCallOutput;
 use crate::exec::SandboxType;
 use crate::exec::StdoutStream;
 use crate::exec::StreamOutput;
+use crate::exec::EXEC_CAPTURE_MAX_BYTES;
 use crate::exec::process_exec_tool_call;
 use crate::review_format::format_review_findings_block;
 use crate::exec_env::create_env;
@@ -9626,6 +9627,14 @@ fn format_exec_output_str(exec_output: &ExecToolCallOutput) -> String {
     // Always use the aggregated (stdout + stderr interleaved) stream so the
     // model sees the full build log regardless of which stream a tool used.
     let mut formatted_output = aggregated_output.text.clone();
+    if let Some(truncated_before_bytes) = aggregated_output.truncated_before_bytes {
+        let note = format!(
+            "… clipped {} from the start of command output (showing last {}).\n\n",
+            format_bytes(truncated_before_bytes),
+            format_bytes(EXEC_CAPTURE_MAX_BYTES),
+        );
+        formatted_output = format!("{note}{formatted_output}");
+    }
     if let Some(truncated_after_lines) = aggregated_output.truncated_after_lines {
         formatted_output.push_str(&format!(
             "\n\n[Output truncated after {truncated_after_lines} lines: too many lines or bytes.]",
@@ -9697,6 +9706,22 @@ fn format_exec_output_with_limit(
 
     #[expect(clippy::expect_used)]
     serde_json::to_string(&payload).expect("serialize ExecOutput")
+}
+
+fn format_bytes(bytes: usize) -> String {
+    const KIB: f64 = 1024.0;
+    const MIB: f64 = KIB * 1024.0;
+    const GIB: f64 = MIB * 1024.0;
+    let bytes_f = bytes as f64;
+    if bytes >= GIB as usize {
+        format!("{:.1} GiB", bytes_f / GIB)
+    } else if bytes >= MIB as usize {
+        format!("{:.1} MiB", bytes_f / MIB)
+    } else if bytes >= KIB as usize {
+        format!("{:.1} KiB", bytes_f / KIB)
+    } else {
+        format!("{bytes} B")
+    }
 }
 
 fn get_last_assistant_message_from_turn(responses: &[ResponseItem]) -> Option<String> {

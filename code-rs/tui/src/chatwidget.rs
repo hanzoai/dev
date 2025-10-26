@@ -18268,6 +18268,7 @@ use crate::chatwidget::message::UserMessage;
             metadata: None,
             in_progress,
             last_updated_at: SystemTime::now(),
+            truncated_prefix_bytes: 0,
         }
     }
 
@@ -23303,6 +23304,7 @@ mod tests {
             metadata: None,
             in_progress: true,
             last_updated_at: SystemTime::now(),
+            truncated_prefix_bytes: 0,
         };
         let stream_cell = history_cell::new_streaming_content(stream_state, &chat.config);
 
