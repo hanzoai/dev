@@ -1,5 +1,6 @@
 use super::*;
 use crate::history::{AssistantMessageState, AssistantStreamState};
+use code_core::history::state::MAX_ASSISTANT_STREAM_RETAINED_BYTES;
 use code_core::config_types::UriBasedFileOpener;
 use ratatui::style::Style;
 use ratatui::text::Line;
@@ -95,10 +96,20 @@ pub(crate) fn stream_lines_from_state_with_context(
     cwd: &Path,
     show_ellipsis: bool,
 ) -> Vec<Line<'static>> {
+    let mut markdown = state.preview_markdown.clone();
+    if state.truncated_prefix_bytes > 0 {
+        let note = format!(
+            "… clipped {} from the start of assistant response (showing last {}).\n\n",
+            format_bytes(state.truncated_prefix_bytes),
+            format_bytes(MAX_ASSISTANT_STREAM_RETAINED_BYTES),
+        );
+        markdown = format!("{note}{markdown}");
+    }
+
     let message_state = AssistantMessageState {
         id: state.id,
         stream_id: Some(state.stream_id.clone()),
-        markdown: state.preview_markdown.clone(),
+        markdown,
         citations: state.citations.clone(),
         metadata: state.metadata.clone(),
         token_usage: state
@@ -143,4 +154,20 @@ fn ellipsis_line() -> Line<'static> {
         FRAMES[idx].to_string(),
         Style::default().fg(crate::colors::text_dim()),
     )
+}
+
+fn format_bytes(bytes: usize) -> String {
+    const KIB: f64 = 1024.0;
+    const MIB: f64 = KIB * 1024.0;
+    const GIB: f64 = MIB * 1024.0;
+    let bytes_f = bytes as f64;
+    if bytes >= GIB as usize {
+        format!("{:.1} GiB", bytes_f / GIB)
+    } else if bytes >= MIB as usize {
+        format!("{:.1} MiB", bytes_f / MIB)
+    } else if bytes >= KIB as usize {
+        format!("{:.1} KiB", bytes_f / KIB)
+    } else {
+        format!("{bytes} B")
+    }
 }
