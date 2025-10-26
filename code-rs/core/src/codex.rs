@@ -836,6 +836,12 @@ struct RunningExecMeta {
     end_emitted: Arc<AtomicBool>,
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum WaitInterruptReason {
+    UserMessage,
+    SessionAborted,
+}
+
 #[derive(Default)]
 struct State {
     approved_commands: HashSet<ApprovedCommandPattern>,
@@ -867,6 +873,8 @@ struct State {
     token_usage_info: Option<TokenUsageInfo>,
     latest_rate_limits: Option<RateLimitSnapshotEvent>,
     pending_manual_compacts: VecDeque<String>,
+    wait_interrupt_epoch: u64,
+    wait_interrupt_reason: Option<WaitInterruptReason>,
 }
 
 #[derive(Clone)]
@@ -1262,6 +1270,17 @@ impl Session {
     pub fn queue_user_input(&self, queued: QueuedUserInput) {
         let mut state = self.state.lock().unwrap();
         state.pending_user_input.push(queued);
+    }
+
+    fn notify_wait_interrupted(&self, reason: WaitInterruptReason) {
+        let mut state = self.state.lock().unwrap();
+        state.wait_interrupt_epoch = state.wait_interrupt_epoch.saturating_add(1);
+        state.wait_interrupt_reason = Some(reason);
+    }
+
+    fn wait_interrupt_snapshot(&self) -> (u64, Option<WaitInterruptReason>) {
+        let state = self.state.lock().unwrap();
+        (state.wait_interrupt_epoch, state.wait_interrupt_reason)
     }
 
     fn enforce_user_message_limits(
@@ -3119,7 +3138,10 @@ async fn submission_loop(
                         continue;
                     }
                 };
-                tokio::spawn(async move { sess.abort() });
+                tokio::spawn(async move {
+                    sess.notify_wait_interrupted(WaitInterruptReason::SessionAborted);
+                    sess.abort();
+                });
             }
             Op::CancelAgents { batch_ids, agent_ids } => {
                 let sess_arc = match sess.as_ref() {
@@ -3414,6 +3436,7 @@ async fn submission_loop(
                 // abort any current running session and clone its state
                 let state = match sess.take() {
                     Some(sess) => {
+                        sess.notify_wait_interrupted(WaitInterruptReason::SessionAborted);
                         sess.abort();
                         sess.state.lock().unwrap().partial_clone()
                     }
@@ -3668,6 +3691,7 @@ async fn submission_loop(
 
                 // Abort synchronously here to avoid a race that can kill the
                 // newly spawned agent if the async abort runs after set_task.
+                sess.notify_wait_interrupted(WaitInterruptReason::UserMessage);
                 sess.abort();
 
                 // Spawn a new agent for this user input.
@@ -3687,6 +3711,7 @@ async fn submission_loop(
                 if sess.has_running_task() {
                     let mut response_item = response_input_from_core_items(items.clone());
                     sess.enforce_user_message_limits(&sub.id, &mut response_item);
+                    sess.notify_wait_interrupted(WaitInterruptReason::UserMessage);
                     let queued = QueuedUserInput {
                         submission_id: sub.id.clone(),
                         response_item,
@@ -3711,6 +3736,7 @@ async fn submission_loop(
                 };
                 match decision {
                     ReviewDecision::Abort => {
+                        sess.notify_wait_interrupted(WaitInterruptReason::SessionAborted);
                         sess.abort();
                     }
                     other => sess.notify_approval(&id, other),
@@ -3744,6 +3770,7 @@ async fn submission_loop(
                 };
                 match decision {
                     ReviewDecision::Abort => {
+                        sess.notify_wait_interrupted(WaitInterruptReason::SessionAborted);
                         sess.abort();
                     }
                     other => sess.notify_approval(&id, other),
@@ -3893,7 +3920,10 @@ async fn submission_loop(
                 // Ensure any running agent is aborted so streaming stops promptly.
                 if let Some(sess_arc) = sess.as_ref() {
                     let s2 = sess_arc.clone();
-                    tokio::spawn(async move { s2.abort(); });
+                    tokio::spawn(async move {
+                        s2.notify_wait_interrupted(WaitInterruptReason::SessionAborted);
+                        s2.abort();
+                    });
                 }
 
                 // Gracefully flush and shutdown rollout recorder on session end so tests
@@ -3944,6 +3974,7 @@ async fn spawn_review_thread(
     review_request: ReviewRequest,
 ) {
     // Ensure any running task is stopped before starting the review flow.
+    sess.notify_wait_interrupted(WaitInterruptReason::SessionAborted);
     sess.abort();
 
     let parent_turn_context = sess.make_turn_context();
@@ -7887,55 +7918,57 @@ async fn handle_wait_for_agent(
         "agent".to_string(),
         Some(event_payload),
         || async move {
-    match serde_json::from_str::<WaitForAgentParams>(&arguments_clone) {
-        Ok(params) => {
-            let batch_id = match params.batch_id.as_ref() {
-                Some(batch) if !batch.trim().is_empty() => batch.clone(),
-                _ => {
-                    return ResponseInputItem::FunctionCallOutput {
-                        call_id: call_id_clone,
-                        output: FunctionCallOutputPayload {
-                            content: "action=wait requires 'wait.batch_id'".to_string(),
-                            success: Some(false),
-                        },
-                    };
-                }
-            };
-            let timeout =
-                std::time::Duration::from_secs(params.timeout_seconds.unwrap_or(300).min(600));
-            let start = std::time::Instant::now();
-
-            loop {
-                if start.elapsed() > timeout {
-                    return ResponseInputItem::FunctionCallOutput {
-                        call_id: call_id_clone,
-                        output: FunctionCallOutputPayload {
-                            content: "Timeout waiting for agent completion".to_string(),
-                            success: Some(false),
-                        },
-                    };
-                }
-
-                let manager = AGENT_MANAGER.read().await;
-
-                if let Some(agent_id) = &params.agent_id {
-                    if let Some(agent) = manager.get_agent(agent_id) {
-                        match agent.batch_id.as_deref() {
-                            Some(batch) if batch == batch_id => {}
-                            _ => {
-                                return ResponseInputItem::FunctionCallOutput {
-                                    call_id: call_id_clone,
-                                    output: FunctionCallOutputPayload {
-                                        content: format!(
-                                            "Agent {} does not belong to batch {}",
-                                            agent_id, batch_id
-                                        ),
-                                        success: Some(false),
-                                    },
-                                };
-                            }
+            let (initial_wait_epoch, _) = sess.wait_interrupt_snapshot();
+            match serde_json::from_str::<WaitForAgentParams>(&arguments_clone) {
+                Ok(params) => {
+                    let batch_id = match params.batch_id.as_ref() {
+                        Some(batch) if !batch.trim().is_empty() => batch.clone(),
+                        _ => {
+                            return ResponseInputItem::FunctionCallOutput {
+                                call_id: call_id_clone,
+                                output: FunctionCallOutputPayload {
+                                    content: "action=wait requires 'wait.batch_id'".to_string(),
+                                    success: Some(false),
+                                },
+                            };
                         }
-                        if matches!(
+                    };
+                    let timeout = std::time::Duration::from_secs(
+                        params.timeout_seconds.unwrap_or(300).min(600),
+                    );
+                    let start = std::time::Instant::now();
+
+                    loop {
+                        if start.elapsed() > timeout {
+                            return ResponseInputItem::FunctionCallOutput {
+                                call_id: call_id_clone,
+                                output: FunctionCallOutputPayload {
+                                    content: "Timeout waiting for agent completion".to_string(),
+                                    success: Some(false),
+                                },
+                            };
+                        }
+
+                        let manager = AGENT_MANAGER.read().await;
+
+                        if let Some(agent_id) = &params.agent_id {
+                            if let Some(agent) = manager.get_agent(agent_id) {
+                                match agent.batch_id.as_deref() {
+                                    Some(batch) if batch == batch_id => {}
+                                    _ => {
+                                        return ResponseInputItem::FunctionCallOutput {
+                                            call_id: call_id_clone,
+                                            output: FunctionCallOutputPayload {
+                                                content: format!(
+                                                    "Agent {} does not belong to batch {}",
+                                                    agent_id, batch_id
+                                                ),
+                                                success: Some(false),
+                                            },
+                                        };
+                                    }
+                                }
+                                if matches!(
                             agent.status,
                             AgentStatus::Completed | AgentStatus::Failed | AgentStatus::Cancelled
                         ) {
@@ -8225,17 +8258,33 @@ async fn handle_wait_for_agent(
                 }
 
                 drop(manager);
+                let (current_epoch, reason) = sess.wait_interrupt_snapshot();
+                if current_epoch != initial_wait_epoch {
+                    let message = match reason {
+                        Some(WaitInterruptReason::UserMessage) => {
+                            "wait ended due to new user message".to_string()
+                        }
+                        _ => "wait ended because the session was interrupted".to_string(),
+                    };
+                    return ResponseInputItem::FunctionCallOutput {
+                        call_id: call_id_clone,
+                        output: FunctionCallOutputPayload {
+                            content: message,
+                            success: Some(false),
+                        },
+                    };
+                }
                 tokio::time::sleep(std::time::Duration::from_secs(1)).await;
             }
-        }
-        Err(e) => ResponseInputItem::FunctionCallOutput {
-            call_id: call_id_clone,
-            output: FunctionCallOutputPayload {
-                content: format!("Invalid agent arguments for action=wait: {}", e),
-                success: None,
-            },
-        },
-    }
+                }
+                Err(e) => ResponseInputItem::FunctionCallOutput {
+                    call_id: call_id_clone,
+                    output: FunctionCallOutputPayload {
+                        content: format!("Invalid agent arguments for action=wait: {}", e),
+                        success: None,
+                    },
+                },
+            }
         },
     ).await
 }
