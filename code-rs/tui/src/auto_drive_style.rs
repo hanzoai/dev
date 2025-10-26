@@ -1,9 +1,9 @@
 use std::env;
 
-use ratatui::style::{Modifier, Style};
+use ratatui::style::{Color, Modifier, Style};
 use ratatui::widgets::BorderType;
 
-use crate::colors;
+use crate::{card_theme, colors};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum AutoDriveVariant {
@@ -183,8 +183,23 @@ pub struct ComposerStyle {
     pub title_style: Style,
 }
 
+fn auto_drive_accent_color() -> Color {
+    if is_dark_theme_active() {
+        card_theme::auto_drive_dark_theme().theme.gradient.left
+    } else {
+        card_theme::auto_drive_light_theme().theme.gradient.left
+    }
+}
+
+fn is_dark_theme_active() -> bool {
+    let (r, g, b) = colors::color_to_rgb(colors::background());
+    let luminance = (0.2126 * r as f32 + 0.7152 * g as f32 + 0.0722 * b as f32) / 255.0;
+    luminance < 0.5
+}
+
 fn sentinel_style() -> AutoDriveStyle {
     let primary = colors::primary();
+    let accent = auto_drive_accent_color();
     AutoDriveStyle {
         variant: AutoDriveVariant::Sentinel,
         frame: FrameStyle {
@@ -208,13 +223,13 @@ fn sentinel_style() -> AutoDriveStyle {
             disabled_style: Style::default().fg(colors::text_dim()),
         },
         composer: ComposerStyle {
-            border_style: Style::default().fg(primary),
+            border_style: Style::default().fg(accent),
             border_type: BorderType::Rounded,
             background_style: Style::default().bg(colors::background()),
             goal_title_prefix: " ▶ Goal ",
             goal_title_suffix: " ",
             title_style: Style::default()
-                .fg(primary)
+                .fg(accent)
                 .add_modifier(Modifier::BOLD),
         },
         footer_separator: "  •  ",

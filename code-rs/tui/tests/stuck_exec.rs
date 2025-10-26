@@ -3,6 +3,8 @@ use code_core::protocol::{
     EventMsg,
     ExecCommandBeginEvent,
     ExecCommandEndEvent,
+    McpInvocation,
+    McpToolCallBeginEvent,
     OrderMeta,
     PatchApplyBeginEvent,
     PatchApplyEndEvent,
@@ -178,5 +180,67 @@ fn synthetic_end_clears_cancelled_exec_spinner() {
         after.contains("Command cancelled by user."),
         "expected cancellation context in output, got:\n{}",
         after
+    );
+}
+
+#[test]
+fn exec_begin_upgrades_running_tool_cell() {
+    let mut harness = ChatWidgetHarness::new();
+    let mut seq = 0_u64;
+    let call_id = "call_coalesce".to_string();
+    let cwd = PathBuf::from("/tmp");
+
+    harness.handle_event(Event {
+        id: "mcp-begin".to_string(),
+        event_seq: 0,
+        msg: EventMsg::McpToolCallBegin(McpToolCallBeginEvent {
+            call_id: call_id.clone(),
+            invocation: McpInvocation {
+                server: "demo".to_string(),
+                tool: "run_command".to_string(),
+                arguments: None,
+            },
+        }),
+        order: Some(next_order_meta(1, &mut seq)),
+    });
+
+    harness.handle_event(Event {
+        id: "exec-begin-coalesce".to_string(),
+        event_seq: 1,
+        msg: EventMsg::ExecCommandBegin(ExecCommandBeginEvent {
+            call_id: call_id.clone(),
+            command: vec!["bash".into(), "-lc".into(), "echo upgraded".into()],
+            cwd: cwd.clone(),
+            parsed_cmd: Vec::new(),
+        }),
+        order: Some(next_order_meta(1, &mut seq)),
+    });
+
+    harness.handle_event(Event {
+        id: "exec-end-coalesce".to_string(),
+        event_seq: 2,
+        msg: EventMsg::ExecCommandEnd(ExecCommandEndEvent {
+            call_id: call_id,
+            stdout: "upgraded\n".into(),
+            stderr: String::new(),
+            exit_code: 0,
+            duration: Duration::from_millis(5),
+        }),
+        order: Some(next_order_meta(1, &mut seq)),
+    });
+
+    let output = render_chat_widget_to_vt100(&mut harness, 80, 12);
+    assert!(
+        !output.contains("Working..."),
+        "running tool spinner should be upgraded to an exec cell:\n{output}",
+    );
+    let command_occurrences = output.matches("echo upgraded").count();
+    assert_eq!(
+        command_occurrences, 1,
+        "expected exactly one exec command row after upgrade:\n{output}",
+    );
+    assert!(
+        output.contains("upgraded"),
+        "exec output should remain attached to the upgraded cell:\n{output}",
     );
 }
