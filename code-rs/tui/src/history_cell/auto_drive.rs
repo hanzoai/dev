@@ -15,18 +15,23 @@ use super::{HistoryCell, HistoryCellType, ToolCellStatus};
 use crate::card_theme;
 use crate::gradient_background::{GradientBackground, RevealRender};
 use crate::colors;
+use code_common::elapsed::format_duration_digital;
 use ratatui::buffer::Buffer;
 use ratatui::layout::Rect;
 use ratatui::style::{Modifier, Style};
 use ratatui::text::{Line, Text};
 use ratatui::widgets::{Paragraph, Widget, Wrap};
 use unicode_width::UnicodeWidthStr;
-use std::time::Instant;
+use std::f32;
+use std::time::{Duration, Instant};
 
 const BORDER_TOP: &str = "╭─";
 const BORDER_BODY: &str = "│";
 const BORDER_BOTTOM: &str = "╰─";
 const HINT_TEXT: &str = " [Ctrl+S] Settings · [Esc] Stop";
+const ACTION_TIME_INDENT: usize = 1;
+const ACTION_TIME_SEPARATOR_WIDTH: usize = 2;
+const ACTION_TIME_COLUMN_MIN_WIDTH: usize = 6;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum AutoDriveStatus {
@@ -43,15 +48,6 @@ impl AutoDriveStatus {
             AutoDriveStatus::Paused => "Paused",
             AutoDriveStatus::Failed => "Failed",
             AutoDriveStatus::Stopped => "Stopped",
-        }
-    }
-
-    fn style(self) -> Style {
-        match self {
-            AutoDriveStatus::Running => Style::default().fg(colors::info()),
-            AutoDriveStatus::Paused => Style::default().fg(colors::warning()),
-            AutoDriveStatus::Failed => Style::default().fg(colors::error()),
-            AutoDriveStatus::Stopped => Style::default().fg(colors::text_mid()),
         }
     }
 
@@ -75,19 +71,12 @@ pub(crate) enum AutoDriveActionKind {
 struct AutoDriveAction {
     text: String,
     kind: AutoDriveActionKind,
+    elapsed: Duration,
 }
 
 impl AutoDriveAction {
-    fn new(text: String, kind: AutoDriveActionKind) -> Self {
-        Self { text, kind }
-    }
-
-    fn style(&self, style: &CardStyle) -> Style {
-        match self.kind {
-            AutoDriveActionKind::Info => primary_text_style(style),
-            AutoDriveActionKind::Warning => Style::default().fg(colors::warning()),
-            AutoDriveActionKind::Error => Style::default().fg(colors::error()),
-        }
+    fn new(text: String, kind: AutoDriveActionKind, elapsed: Duration) -> Self {
+        Self { text, kind, elapsed }
     }
 }
 
@@ -99,6 +88,7 @@ pub(crate) struct AutoDriveCardCell {
     cell_key: Option<String>,
     signature: Option<String>,
     reveal_started_at: Option<Instant>,
+    first_action_at: Option<Instant>,
 }
 
 impl AutoDriveCardCell {
@@ -107,20 +97,15 @@ impl AutoDriveCardCell {
             .theme
             .reveal
             .map(|_| Instant::now());
-        let mut cell = Self {
+        let cell = Self {
             goal: goal.and_then(Self::normalize_text),
             status: AutoDriveStatus::Running,
             actions: Vec::new(),
             cell_key: None,
             signature: None,
             reveal_started_at,
+            first_action_at: None,
         };
-        if let Some(goal) = cell.goal.clone() {
-            cell.actions.push(AutoDriveAction::new(
-                format!("Goal: {goal}"),
-                AutoDriveActionKind::Info,
-            ));
-        }
         cell
     }
 
@@ -138,7 +123,24 @@ impl AutoDriveCardCell {
     }
 
     pub(crate) fn push_action(&mut self, text: impl Into<String>, kind: AutoDriveActionKind) {
-        self.actions.push(AutoDriveAction::new(text.into(), kind));
+        let now = Instant::now();
+        let base = self.first_action_at.get_or_insert(now);
+        let elapsed = now.saturating_duration_since(*base);
+        self.actions
+            .push(AutoDriveAction::new(text.into(), kind, elapsed));
+    }
+
+    fn reveal_progress(&self) -> Option<(f32, card_theme::CardThemeDefinition)> {
+        let theme = active_auto_drive_theme();
+        let reveal = theme.theme.reveal?;
+        let started = self.reveal_started_at?;
+        let duration = reveal.duration.as_secs_f32();
+        if duration <= f32::EPSILON {
+            return None;
+        }
+        let elapsed = started.elapsed().as_secs_f32();
+        let progress = (elapsed / duration).clamp(0.0, 1.0);
+        Some((progress, theme))
     }
 
     fn accent_style(style: &CardStyle) -> Style {
@@ -152,7 +154,9 @@ impl AutoDriveCardCell {
         }
 
         let accent_width = CARD_ACCENT_WIDTH.min(width as usize);
-        let body_width = width.saturating_sub(accent_width as u16) as usize;
+        let body_width = width
+            .saturating_sub(accent_width as u16)
+            .saturating_sub(1) as usize;
         if body_width == 0 {
             return Vec::new();
         }
@@ -160,15 +164,22 @@ impl AutoDriveCardCell {
         let mut rows: Vec<CardRow> = Vec::new();
 
         rows.push(self.title_row(body_width, style));
+        rows.push(self.blank_row(body_width, style));
 
         if let Some(goal) = &self.goal {
-            rows.push(self.description_row(goal.as_str(), body_width, style));
+            rows.push(self.goal_row(goal.as_str(), body_width, style));
+            rows.push(self.blank_row(body_width, style));
         }
 
-        for action in &self.actions {
-            rows.push(self.action_row(action, body_width, style));
+        rows.push(self.actions_heading_row(body_width, style));
+        let action_rows = self.action_rows(body_width, style);
+        if action_rows.is_empty() {
+            rows.push(self.actions_placeholder_row(body_width, style));
+        } else {
+            rows.extend(action_rows);
         }
 
+        rows.push(self.blank_row(body_width, style));
         rows.push(self.bottom_border_row(body_width, style));
 
         rows
@@ -177,19 +188,25 @@ impl AutoDriveCardCell {
     fn title_row(&self, body_width: usize, style: &CardStyle) -> CardRow {
         let mut segments: Vec<CardSegment> = Vec::new();
         let title_text = " Auto Drive";
-        let status_text = format!("  {}", self.status.label());
+        let status_text = format!(" · {}", self.status.label());
         let combined = format!("{title_text}{status_text}");
 
         if UnicodeWidthStr::width(combined.as_str()) <= body_width {
-            let mut title_style = title_text_style(style);
-            title_style = title_style.add_modifier(Modifier::BOLD);
-            segments.push(CardSegment::new(title_text.to_string(), title_style));
-            segments.push(CardSegment::new(status_text, self.status.style()));
+            let mut bold_title = title_text_style(style);
+            bold_title = bold_title.add_modifier(Modifier::BOLD);
+            segments.push(CardSegment::new(
+                title_text.to_string(),
+                bold_title,
+            ));
+            segments.push(CardSegment::new(
+                status_text,
+                secondary_text_style(style),
+            ));
         } else {
-            let mut title_style = title_text_style(style);
-            title_style = title_style.add_modifier(Modifier::BOLD);
             let display = truncate_with_ellipsis(title_text, body_width);
-            segments.push(CardSegment::new(display, title_style));
+            let mut bold_title = title_text_style(style);
+            bold_title = bold_title.add_modifier(Modifier::BOLD);
+            segments.push(CardSegment::new(display, bold_title));
         }
 
         CardRow::new(
@@ -200,8 +217,20 @@ impl AutoDriveCardCell {
         )
     }
 
-    fn description_row(&self, goal: &str, body_width: usize, style: &CardStyle) -> CardRow {
-        let display = truncate_with_ellipsis(goal, body_width);
+    fn blank_row(&self, body_width: usize, style: &CardStyle) -> CardRow {
+        let filler = " ".repeat(body_width);
+        CardRow::new(
+            BORDER_BODY.to_string(),
+            Self::accent_style(style),
+            vec![CardSegment::new(filler, Style::default())],
+            None,
+        )
+    }
+
+    fn goal_row(&self, goal: &str, body_width: usize, style: &CardStyle) -> CardRow {
+        let cleaned = goal.trim();
+        let value = format!(" {}", cleaned);
+        let display = truncate_with_ellipsis(value.as_str(), body_width);
         let mut segment = CardSegment::new(display, secondary_text_style(style));
         segment.inherit_background = true;
         CardRow::new(
@@ -212,7 +241,7 @@ impl AutoDriveCardCell {
         )
     }
 
-    fn action_row(&self, action: &AutoDriveAction, body_width: usize, style: &CardStyle) -> CardRow {
+    fn actions_heading_row(&self, body_width: usize, style: &CardStyle) -> CardRow {
         if body_width == 0 {
             return CardRow::new(
                 BORDER_BODY.to_string(),
@@ -221,21 +250,154 @@ impl AutoDriveCardCell {
                 None,
             );
         }
-        let bullet = match action.kind {
-            AutoDriveActionKind::Warning => "! ",
-            AutoDriveActionKind::Error => "✗ ",
-            AutoDriveActionKind::Info => "• ",
-        };
-        let value = format!("{bullet}{}", action.text);
-        let display = truncate_with_ellipsis(value.as_str(), body_width);
-        let mut segment = CardSegment::new(display, action.style(style));
-        segment.inherit_background = true;
+
+        let mut segments = Vec::new();
+        if ACTION_TIME_INDENT > 0 {
+            segments.push(CardSegment::new(
+                " ".repeat(ACTION_TIME_INDENT),
+                secondary_text_style(style),
+            ));
+        }
+
+        let available = body_width.saturating_sub(ACTION_TIME_INDENT);
+        if available > 0 {
+            let title = truncate_with_ellipsis("Actions", available);
+            let mut heading = CardSegment::new(title, primary_text_style(style));
+            heading.inherit_background = true;
+            segments.push(heading);
+        }
+
         CardRow::new(
             BORDER_BODY.to_string(),
             Self::accent_style(style),
-            vec![segment],
+            segments,
             None,
         )
+    }
+
+    fn actions_placeholder_row(&self, body_width: usize, style: &CardStyle) -> CardRow {
+        if body_width == 0 {
+            return CardRow::new(
+                BORDER_BODY.to_string(),
+                Self::accent_style(style),
+                Vec::new(),
+                None,
+            );
+        }
+
+        let mut segments = Vec::new();
+        if ACTION_TIME_INDENT > 0 {
+            segments.push(CardSegment::new(
+                " ".repeat(ACTION_TIME_INDENT),
+                secondary_text_style(style),
+            ));
+        }
+
+        let available = body_width.saturating_sub(ACTION_TIME_INDENT);
+        if available > 0 {
+            let message = truncate_with_ellipsis("Awaiting auto drive activity", available);
+            let mut placeholder = CardSegment::new(message, secondary_text_style(style));
+            placeholder.inherit_background = true;
+            segments.push(placeholder);
+        }
+
+        CardRow::new(
+            BORDER_BODY.to_string(),
+            Self::accent_style(style),
+            segments,
+            None,
+        )
+    }
+
+    fn action_rows(&self, body_width: usize, style: &CardStyle) -> Vec<CardRow> {
+        if body_width == 0 {
+            return Vec::new();
+        }
+        if self.actions.is_empty() {
+            return Vec::new();
+        }
+
+        let elapsed_labels: Vec<String> = self
+            .actions
+            .iter()
+            .map(|action| format!(" {}", format_duration_digital(action.elapsed)))
+            .collect();
+
+        let time_width = elapsed_labels
+            .iter()
+            .map(|label| UnicodeWidthStr::width(label.as_str()))
+            .max()
+            .unwrap_or(0)
+            .max(ACTION_TIME_COLUMN_MIN_WIDTH);
+
+        let indent_text = " ".repeat(ACTION_TIME_INDENT);
+        let indent_style = secondary_text_style(style);
+        let time_style = primary_text_style(style);
+        let separator_text = if ACTION_TIME_SEPARATOR_WIDTH > 0 {
+            Some(" ".repeat(ACTION_TIME_SEPARATOR_WIDTH))
+        } else {
+            None
+        };
+
+        let mut rows = Vec::new();
+
+        for (action, elapsed) in self.actions.iter().zip(elapsed_labels.iter()) {
+            let mut segments = Vec::new();
+            if ACTION_TIME_INDENT > 0 {
+                segments.push(CardSegment::new(indent_text.clone(), indent_style));
+            }
+
+            let mut remaining = body_width.saturating_sub(ACTION_TIME_INDENT);
+            if remaining == 0 {
+                rows.push(CardRow::new(
+                    BORDER_BODY.to_string(),
+                    Self::accent_style(style),
+                    segments,
+                    None,
+                ));
+                continue;
+            }
+
+            let padded_time = format!("{elapsed:<width$}", width = time_width);
+            segments.push(CardSegment::new(padded_time, time_style));
+            remaining = remaining.saturating_sub(time_width);
+
+            if let Some(separator) = separator_text.as_ref() {
+                if remaining < ACTION_TIME_SEPARATOR_WIDTH {
+                    rows.push(CardRow::new(
+                        BORDER_BODY.to_string(),
+                        Self::accent_style(style),
+                        segments,
+                        None,
+                    ));
+                    continue;
+                }
+                segments.push(CardSegment::new(separator.clone(), Style::default()));
+                remaining = remaining.saturating_sub(ACTION_TIME_SEPARATOR_WIDTH);
+            }
+
+            if remaining > 0 {
+                let description = match action.kind {
+                    AutoDriveActionKind::Info => action.text.trim().to_string(),
+                    AutoDriveActionKind::Warning => format!("! {}", action.text.trim()),
+                    AutoDriveActionKind::Error => format!("✗ {}", action.text.trim()),
+                };
+                let display = truncate_with_ellipsis(description.as_str(), remaining);
+                let mut description_segment =
+                    CardSegment::new(display, secondary_text_style(style));
+                description_segment.inherit_background = true;
+                segments.push(description_segment);
+            }
+
+            rows.push(CardRow::new(
+                BORDER_BODY.to_string(),
+                Self::accent_style(style),
+                segments,
+                None,
+            ));
+        }
+
+        rows
     }
 
     fn bottom_border_row(&self, body_width: usize, style: &CardStyle) -> CardRow {
@@ -251,42 +413,53 @@ impl AutoDriveCardCell {
     }
 
     fn render_rows(&self, area: Rect, buf: &mut Buffer, skip_rows: u16) {
-        if area.width == 0 || area.height == 0 {
+        if area.width <= 2 || area.height == 0 {
             return;
         }
-        let is_dark = is_dark_theme_active();
-        let theme = active_auto_drive_theme();
         let style = auto_drive_card_style();
 
-        let reveal = theme.theme.reveal.map(|config| {
-            let progress = self
-                .reveal_started_at
-                .map(|started| {
-                    let elapsed = started.elapsed().as_secs_f32();
-                    (elapsed / config.duration.as_secs_f32()).clamp(0.0, 1.0)
-                })
-                .unwrap_or(1.0);
-            RevealRender {
+        let reveal = self.reveal_progress().and_then(|(progress, theme)| {
+            theme.theme.reveal.map(|config| RevealRender {
                 progress,
                 variant: config.variant,
-                intro_light: !is_dark,
-            }
+                intro_light: !is_dark_theme_active(),
+            })
         });
 
-        GradientBackground::render(buf, area, &style.gradient, style.text_primary, reveal);
+        let draw_width = area.width - 2;
+        let render_area = Rect {
+            width: draw_width,
+            ..area
+        };
 
-        let rows = self.build_card_rows(area.width, &style);
-        let lines = rows_to_lines(&rows, &style, area.width);
+        GradientBackground::render(buf, render_area, &style.gradient, style.text_primary, reveal);
+
+        let rows = self.build_card_rows(render_area.width, &style);
+        let lines = rows_to_lines(&rows, &style, render_area.width);
         let text = Text::from(lines);
         Paragraph::new(text)
             .wrap(Wrap { trim: false })
             .scroll((skip_rows, 0))
-            .render(area, buf);
+            .render(render_area, buf);
+
+        let clear_start = area.x + draw_width;
+        let clear_end = area.x + area.width;
+        for x in clear_start..clear_end {
+            for row in 0..area.height {
+                let cell = &mut buf[(x, area.y + row)];
+                cell.set_symbol(" ");
+                cell.set_bg(crate::colors::background());
+            }
+        }
     }
 
     fn desired_rows(&self, width: u16) -> usize {
         let style = auto_drive_card_style();
-        self.build_card_rows(width, &style).len().max(1)
+        let trimmed_width = width.saturating_sub(2);
+        if trimmed_width == 0 {
+            return 0;
+        }
+        self.build_card_rows(trimmed_width, &style).len().max(1)
     }
 
     pub(crate) fn set_tool_card_key_internal(&mut self, key: Option<String>) {
@@ -363,6 +536,13 @@ impl HistoryCell for AutoDriveCardCell {
             lines.push(Line::from(format!("- {}", action.text)));
         }
         lines
+    }
+
+    fn is_animating(&self) -> bool {
+        self
+            .reveal_progress()
+            .map(|(progress, _)| progress < 0.999)
+            .unwrap_or(false)
     }
 
     fn desired_height(&self, width: u16) -> u16 {
