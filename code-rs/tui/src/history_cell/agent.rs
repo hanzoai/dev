@@ -360,12 +360,12 @@ impl AgentRunCell {
     }
 
     fn prompt_text_style(style: &CardStyle) -> Style {
-        let fg = colors::mix_toward(style.text_primary, colors::background(), 0.70);
+        let fg = colors::mix_toward(style.text_primary, colors::background(), 0.45);
         Style::default().fg(fg)
     }
 
     fn action_description_style(style: &CardStyle) -> Style {
-        let fg = colors::mix_toward(style.text_secondary, colors::background(), 0.70);
+        let fg = colors::mix_toward(style.text_secondary, colors::background(), 0.55);
         Style::default().fg(fg)
     }
 
@@ -465,7 +465,7 @@ impl AgentRunCell {
     }
 
     fn mode_label_style(style: &CardStyle) -> Style {
-        let fg = colors::mix_toward(style.text_secondary, colors::background(), 0.75);
+        let fg = colors::mix_toward(style.text_secondary, colors::background(), 0.55);
         Style::default().fg(fg)
     }
 
