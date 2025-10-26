@@ -66,11 +66,12 @@ pub(super) fn handle_begin(
         tracker.cell.ensure_started_message();
     }
 
-    if let Some(q) = query.clone() {
-        tracker
-            .cell
-            .push_info(format!("Searching for \"{}\"", q));
-        tracker.cell.set_query(Some(q));
+    if tracker.cell.set_query(query.clone()) {
+        if let Some(q) = tracker.cell.current_query() {
+            tracker
+                .cell
+                .record_info(tracker.started_at.elapsed(), format!("Query: \"{}\"", q));
+        }
     }
 
     tracker.cell.set_status(WebSearchStatus::Running);
@@ -123,13 +124,19 @@ pub(super) fn handle_complete(
     tracker.request_ordinal = request_ordinal;
     tracker.active_calls.remove(&call_id);
 
-    tracker.cell.set_query(query.clone());
+    if tracker.cell.set_query(query.clone()) {
+        if let Some(q) = tracker.cell.current_query() {
+            tracker
+                .cell
+                .record_info(tracker.started_at.elapsed(), format!("Query: \"{}\"", q));
+        }
+    }
+
+    let elapsed = tracker.started_at.elapsed();
     tracker
         .cell
-        .push_success("Results ready".to_string());
-    tracker
-        .cell
-        .set_duration(Some(tracker.started_at.elapsed()));
+        .record_success(elapsed, "Results ready".to_string());
+    tracker.cell.set_duration(Some(elapsed));
     tracker.cell.set_status(WebSearchStatus::Completed);
 
     if existed {
@@ -160,7 +167,10 @@ pub(super) fn finalize_all_failed(chat: &mut ChatWidget<'_>, message: &str) {
     chat.tools_state.web_search_by_order.clear();
     for (_, mut tracker) in trackers.drain() {
         tracker.slot.set_order_key(chat.next_internal_key());
-        tracker.cell.push_error(message.to_string());
+        let elapsed = tracker.started_at.elapsed();
+        tracker
+            .cell
+            .record_error(elapsed, message.to_string());
         tracker.cell.set_status(WebSearchStatus::Failed);
         tracker.replace(chat);
     }
@@ -175,7 +185,10 @@ pub(super) fn finalize_all_completed(chat: &mut ChatWidget<'_>, message: &str) {
     chat.tools_state.web_search_by_order.clear();
     for (_, mut tracker) in trackers.drain() {
         tracker.slot.set_order_key(chat.next_internal_key());
-        tracker.cell.push_success(message.to_string());
+        let elapsed = tracker.started_at.elapsed();
+        tracker
+            .cell
+            .record_success(elapsed, message.to_string());
         tracker.cell.set_status(WebSearchStatus::Completed);
         tracker.replace(chat);
     }
