@@ -44,11 +44,16 @@ enum WebSearchActionKind {
 struct WebSearchAction {
     text: String,
     kind: WebSearchActionKind,
+    timestamp: Duration,
 }
 
 impl WebSearchAction {
-    fn new(text: String, kind: WebSearchActionKind) -> Self {
-        Self { text, kind }
+    fn new(text: String, kind: WebSearchActionKind, timestamp: Duration) -> Self {
+        Self {
+            text,
+            kind,
+            timestamp,
+        }
     }
 
     fn style(&self, style: &CardStyle) -> Style {
@@ -82,7 +87,8 @@ impl WebSearchSessionCell {
         }
     }
 
-    pub(crate) fn set_query(&mut self, query: Option<String>) {
+    pub(crate) fn set_query(&mut self, query: Option<String>) -> bool {
+        let previous = self.query.clone();
         self.query = query
             .and_then(|value| {
                 let trimmed = value.trim();
@@ -92,26 +98,37 @@ impl WebSearchSessionCell {
                     Some(trimmed.to_string())
                 }
             });
+        self.query != previous
+    }
+
+    pub(crate) fn current_query(&self) -> Option<&str> {
+        self.query.as_deref()
     }
 
     pub(crate) fn set_status(&mut self, status: WebSearchStatus) {
         self.status = status;
     }
 
-    fn push_action(&mut self, text: impl Into<String>, kind: WebSearchActionKind) {
-        self.actions.push(WebSearchAction::new(text.into(), kind));
+    fn record_action(
+        &mut self,
+        timestamp: Duration,
+        text: impl Into<String>,
+        kind: WebSearchActionKind,
+    ) {
+        self.actions
+            .push(WebSearchAction::new(text.into(), kind, timestamp));
     }
 
-    pub(crate) fn push_info(&mut self, text: impl Into<String>) {
-        self.push_action(text, WebSearchActionKind::Info);
+    pub(crate) fn record_info(&mut self, timestamp: Duration, text: impl Into<String>) {
+        self.record_action(timestamp, text, WebSearchActionKind::Info);
     }
 
-    pub(crate) fn push_success(&mut self, text: impl Into<String>) {
-        self.push_action(text, WebSearchActionKind::Success);
+    pub(crate) fn record_success(&mut self, timestamp: Duration, text: impl Into<String>) {
+        self.record_action(timestamp, text, WebSearchActionKind::Success);
     }
 
-    pub(crate) fn push_error(&mut self, text: impl Into<String>) {
-        self.push_action(text, WebSearchActionKind::Error);
+    pub(crate) fn record_error(&mut self, timestamp: Duration, text: impl Into<String>) {
+        self.record_action(timestamp, text, WebSearchActionKind::Error);
     }
 
     pub(crate) fn set_duration(&mut self, duration: Option<Duration>) {
@@ -120,7 +137,7 @@ impl WebSearchSessionCell {
 
     pub(crate) fn ensure_started_message(&mut self) {
         if self.actions.is_empty() {
-            self.push_info("Searching…");
+            self.record_action(Duration::ZERO, "Searching…", WebSearchActionKind::Info);
         }
     }
 
@@ -245,8 +262,13 @@ impl WebSearchSessionCell {
             );
         }
 
-        let bullet = "• ";
-        let text_value = format!("{bullet}{}", action.text);
+        let icon = match action.kind {
+            WebSearchActionKind::Info => "•",
+            WebSearchActionKind::Success => "✓",
+            WebSearchActionKind::Error => "✗",
+        };
+        let time_text = format_duration_digital(action.timestamp);
+        let text_value = format!("{time_text:>6}  {icon} {}", action.text);
         let display = truncate_with_ellipsis(text_value.as_str(), body_width);
 
         let mut segment = CardSegment::new(display, action.style(style));
