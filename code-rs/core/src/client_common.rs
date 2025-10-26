@@ -19,6 +19,7 @@ use std::pin::Pin;
 use std::task::Context;
 use std::task::Poll;
 use tokio::sync::mpsc;
+use uuid::Uuid;
 
 /// Additional prompt for Code. Can not edit Codex instructions.
 const ADDITIONAL_INSTRUCTIONS: &str = include_str!("../prompt_coder.md");
@@ -76,6 +77,8 @@ pub struct Prompt {
     pub output_schema: Option<Value>,
     /// Optional tag used to route debug logs into helper-specific directories.
     pub log_tag: Option<String>,
+    /// Optional override for session/conversation identifiers used for caching.
+    pub session_id_override: Option<Uuid>,
 }
 
 impl Default for Prompt {
@@ -94,6 +97,7 @@ impl Default for Prompt {
             model_family_override: None,
             output_schema: None,
             log_tag: None,
+            session_id_override: None,
         }
     }
 }
