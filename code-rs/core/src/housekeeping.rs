@@ -554,22 +554,18 @@ fn check_pid_alive(pid: i32) -> Option<bool> {
 
 #[cfg(target_os = "windows")]
 fn check_pid_alive(pid: i32) -> Option<bool> {
-    use core::ffi::c_void;
-    use std::ptr::NonNull;
-    use windows_sys::Win32::Foundation::{CloseHandle, STILL_ACTIVE};
+    use windows_sys::Win32::Foundation::{CloseHandle, HANDLE, STILL_ACTIVE};
     use windows_sys::Win32::System::Threading::{GetExitCodeProcess, OpenProcess, PROCESS_QUERY_LIMITED_INFORMATION};
 
     unsafe {
-        let handle = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, 0, pid as u32);
-        let handle_ptr = match NonNull::new(handle as *mut c_void) {
-            Some(ptr) => ptr,
-            None => return Some(false),
-        };
+        let handle: HANDLE = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, 0, pid as u32);
+        if handle.is_null() {
+            return Some(false);
+        }
 
         let mut status: u32 = 0;
-        let raw_handle = handle_ptr.as_ptr() as isize;
-        let ok = GetExitCodeProcess(raw_handle, &mut status as *mut u32);
-        CloseHandle(raw_handle);
+        let ok = GetExitCodeProcess(handle, &mut status as *mut u32);
+        CloseHandle(handle);
         if ok == 0 {
             return None;
         }
