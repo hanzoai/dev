@@ -1632,29 +1632,6 @@ fn git_command_is_read_only(subcmd: &str, args: &[String]) -> bool {
         "describe" => true,
         "ls-files" => true,
         "ls-tree" => true,
-        "branch" => {
-            // Treat `git branch` as read-only when it is used purely for listing branches.
-            // Creating or deleting branches requires a non-flag argument or specific flags.
-            let mut saw_non_flag = false;
-            for arg in args {
-                if !arg.starts_with('-') {
-                    saw_non_flag = true;
-                    break;
-                }
-
-                let normalized = arg.trim_start_matches('-').trim_start_matches('-').to_ascii_lowercase();
-                if matches!(
-                    normalized.as_str(),
-                    "d" | "D" | "delete" | "m" | "M" | "move" | "c" | "create" | "rename"
-                ) {
-                    // Deletion / movement / creation implies mutation even without extra operands.
-                    saw_non_flag = true;
-                    break;
-                }
-            }
-
-            !saw_non_flag
-        }
         _ => false,
     }
 }
