@@ -360,13 +360,11 @@ impl AgentRunCell {
     }
 
     fn prompt_text_style(style: &CardStyle) -> Style {
-        let fg = colors::mix_toward(style.text_primary, colors::background(), 0.45);
-        Style::default().fg(fg)
+        secondary_text_style(style)
     }
 
     fn action_description_style(style: &CardStyle) -> Style {
-        let fg = colors::mix_toward(style.text_secondary, colors::background(), 0.55);
-        Style::default().fg(fg)
+        secondary_text_style(style)
     }
 
     fn top_border_row(&self, body_width: usize, style: &CardStyle) -> CardRow {
@@ -425,7 +423,7 @@ impl AgentRunCell {
             remaining = remaining.saturating_sub(1);
 
             let mode_label = self.write_mode_label();
-            let bullet_label = mode_label.map(|value| format!(" • {value}"));
+            let bullet_label = mode_label.map(|value| format!(" · {value}"));
             let bullet_width = bullet_label
                 .as_ref()
                 .map(|value| string_width(value.as_str()))
@@ -465,8 +463,7 @@ impl AgentRunCell {
     }
 
     fn mode_label_style(style: &CardStyle) -> Style {
-        let fg = colors::mix_toward(style.text_secondary, colors::background(), 0.55);
-        Style::default().fg(fg)
+        secondary_text_style(style)
     }
 
     fn blank_border_row(&self, body_width: usize, style: &CardStyle) -> CardRow {
@@ -573,10 +570,12 @@ impl AgentRunCell {
         }
 
         let accent_width = CARD_ACCENT_WIDTH.min(width as usize);
-        let body_width = width.saturating_sub(accent_width as u16) as usize;
-        if body_width == 0 {
+        let available = width.saturating_sub(accent_width as u16);
+        if available <= 2 {
             return Vec::new();
         }
+
+        let body_width = (available - 2) as usize;
 
         let mut rows: Vec<CardRow> = Vec::new();
         rows.push(self.top_border_row(body_width, style));
@@ -1042,7 +1041,7 @@ impl AgentRunCell {
 
         let time_indent = " ".repeat(ACTION_TIME_INDENT);
         let indent_style = secondary_text_style(style);
-        let time_style = Style::default().fg(colors::text());
+        let time_style = primary_text_style(style);
         let label_style = Self::action_description_style(style);
         let ellipsis_time = |width: usize| {
             if width <= 1 {
@@ -1296,7 +1295,11 @@ impl HistoryCell for AgentRunCell {
 
     fn desired_height(&self, width: u16) -> u16 {
         let style = agent_card_style(self.write_enabled);
-        let rows = self.build_card_rows(width, &style);
+        let trimmed_width = width.saturating_sub(2);
+        if trimmed_width == 0 {
+            return 0;
+        }
+        let rows = self.build_card_rows(trimmed_width, &style);
         rows.len().max(1) as u16
     }
 
@@ -1305,20 +1308,36 @@ impl HistoryCell for AgentRunCell {
     }
 
     fn custom_render_with_skip(&self, area: Rect, buf: &mut Buffer, skip_rows: u16) {
-        if area.width == 0 || area.height == 0 {
+        if area.width <= 2 || area.height == 0 {
             return;
         }
 
         let style = agent_card_style(self.write_enabled);
-        fill_card_background(buf, area, &style);
-        let rows = self.build_card_rows(area.width, &style);
-        let lines = rows_to_lines(&rows, &style, area.width);
+        let draw_width = area.width - 2;
+        let render_area = Rect {
+            width: draw_width,
+            ..area
+        };
+
+        fill_card_background(buf, render_area, &style);
+        let rows = self.build_card_rows(render_area.width, &style);
+        let lines = rows_to_lines(&rows, &style, render_area.width);
         let text = Text::from(lines);
 
         Paragraph::new(text)
             .wrap(Wrap { trim: false })
             .scroll((skip_rows, 0))
-            .render(area, buf);
+            .render(render_area, buf);
+
+        let clear_start = area.x + draw_width;
+        let clear_end = area.x + area.width;
+        for x in clear_start..clear_end {
+            for row in 0..area.height {
+                let cell = &mut buf[(x, area.y + row)];
+                cell.set_symbol(" ");
+                cell.set_bg(crate::colors::background());
+            }
+        }
     }
 }
 

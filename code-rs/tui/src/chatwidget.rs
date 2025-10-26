@@ -11387,6 +11387,145 @@ impl ChatWidget<'_> {
         let final_stream = history_cell::new_streaming_content(final_state, &self.config);
         self.history_push(final_stream);
 
+        self.push_background_tail("demo: rendering sample tool cards for theme review…");
+
+        let mut agent_card = history_cell::AgentRunCell::new("Demo Agent Batch".to_string());
+        agent_card.set_batch_label(Some("Demo Agents".to_string()));
+        agent_card.set_task(Some("Draft a release checklist".to_string()));
+        agent_card.set_context(Some("Context: codex workspace demo run".to_string()));
+        agent_card.set_plan(vec![
+            "Collect recent commits".to_string(),
+            "Summarize blockers".to_string(),
+            "Draft announcement".to_string(),
+        ]);
+        let mut completed_preview = history_cell::AgentStatusPreview::default();
+        completed_preview.id = "demo-completed".to_string();
+        completed_preview.name = "Docs Scout".to_string();
+        completed_preview.status = "Completed".to_string();
+        completed_preview.model = Some("gpt-5.1-large".to_string());
+        completed_preview.details = vec![history_cell::AgentDetail::Result(
+            "Summarized API changes".to_string(),
+        )];
+        completed_preview.status_kind = history_cell::AgentStatusKind::Completed;
+        completed_preview.step_progress = Some(history_cell::StepProgress { completed: 3, total: 3 });
+        completed_preview.elapsed = Some(Duration::from_secs(32));
+        completed_preview.last_update = Some("Wrapped up summary".to_string());
+        let mut running_preview = history_cell::AgentStatusPreview::default();
+        running_preview.id = "demo-running".to_string();
+        running_preview.name = "Lint Fixer".to_string();
+        running_preview.status = "Running".to_string();
+        running_preview.model = Some("code-gpt-5".to_string());
+        running_preview.details = vec![history_cell::AgentDetail::Progress(
+            "Refining suggested fixes".to_string(),
+        )];
+        running_preview.status_kind = history_cell::AgentStatusKind::Running;
+        running_preview.step_progress = Some(history_cell::StepProgress { completed: 1, total: 3 });
+        running_preview.elapsed = Some(Duration::from_secs(18));
+        running_preview.last_update = Some("Step 2 of 3".to_string());
+        agent_card.set_agent_overview(vec![completed_preview, running_preview]);
+        agent_card.set_latest_result(vec!["Generated release briefing".to_string()]);
+        agent_card.record_action("Collecting changelog entries");
+        agent_card.record_action("Writing release notes");
+        agent_card.set_duration(Some(Duration::from_secs(96)));
+        agent_card.set_write_mode(Some(true));
+        agent_card.set_status_label("Completed");
+        agent_card.mark_completed();
+        self.history_push(agent_card);
+
+        let mut agent_read_card = history_cell::AgentRunCell::new("Demo Read Batch".to_string());
+        agent_read_card.set_batch_label(Some("Read Agents".to_string()));
+        agent_read_card.set_task(Some("Survey docs for regression notes".to_string()));
+        agent_read_card.set_context(Some("Scope: analyze docs, no writes".to_string()));
+        agent_read_card.set_plan(vec![
+            "Gather doc highlights".to_string(),
+            "Verify changelog snippets".to_string(),
+        ]);
+        let mut pending_preview = history_cell::AgentStatusPreview::default();
+        pending_preview.id = "demo-read-pending".to_string();
+        pending_preview.name = "Doc Harvester".to_string();
+        pending_preview.status = "Pending".to_string();
+        pending_preview.model = Some("gpt-4.5".to_string());
+        pending_preview.details = vec![history_cell::AgentDetail::Info(
+            "Waiting for search index".to_string(),
+        )];
+        pending_preview.status_kind = history_cell::AgentStatusKind::Pending;
+        let mut running_read = history_cell::AgentStatusPreview::default();
+        running_read.id = "demo-read-running".to_string();
+        running_read.name = "Spec Parser".to_string();
+        running_read.status = "Running".to_string();
+        running_read.model = Some("code-gpt-3.5".to_string());
+        running_read.details = vec![history_cell::AgentDetail::Progress(
+            "Scanning RFC summaries".to_string(),
+        )];
+        running_read.status_kind = history_cell::AgentStatusKind::Running;
+        running_read.step_progress = Some(history_cell::StepProgress { completed: 2, total: 5 });
+        running_read.elapsed = Some(Duration::from_secs(22));
+        agent_read_card.set_agent_overview(vec![pending_preview, running_read]);
+        agent_read_card.record_action("Fetching documentation excerpts");
+        agent_read_card.set_duration(Some(Duration::from_secs(54)));
+        agent_read_card.set_write_mode(Some(false));
+        agent_read_card.set_status_label("Running");
+        self.history_push(agent_read_card);
+
+        let mut browser_card = history_cell::BrowserSessionCell::new();
+        browser_card.set_url("https://example.dev/releases");
+        browser_card.set_headless(Some(false));
+        browser_card.record_action(
+            Duration::from_millis(0),
+            Duration::from_millis(420),
+            "open".to_string(),
+            Some("https://example.dev/releases".to_string()),
+            None,
+            Some("status=200".to_string()),
+        );
+        browser_card.record_action(
+            Duration::from_millis(620),
+            Duration::from_millis(380),
+            "scroll".to_string(),
+            Some("main timeline".to_string()),
+            Some("dy=512".to_string()),
+            None,
+        );
+        browser_card.record_action(
+            Duration::from_millis(1280),
+            Duration::from_millis(520),
+            "click".to_string(),
+            Some(".release-card".to_string()),
+            Some("index=2".to_string()),
+            Some("status=OK".to_string()),
+        );
+        browser_card.add_console_message("Loaded demo assets".to_string());
+        browser_card.add_console_message("Fetched changelog via XHR".to_string());
+        browser_card.set_status_code(Some("200 OK".to_string()));
+        self.history_push(browser_card);
+
+        let mut search_card = history_cell::WebSearchSessionCell::new();
+        search_card.set_query(Some("rust async cancellation strategy".to_string()));
+        search_card.ensure_started_message();
+        search_card.record_info(Duration::from_millis(120), "Searching documentation index");
+        search_card.record_success(Duration::from_millis(620), "Found tokio.rs guides");
+        search_card.record_success(Duration::from_millis(1040), "Linked blog: cancellation patterns");
+        search_card.set_status(history_cell::WebSearchStatus::Completed);
+        search_card.set_duration(Some(Duration::from_millis(1400)));
+        self.history_push(search_card);
+
+        let mut auto_drive_card =
+            history_cell::AutoDriveCardCell::new(Some("Stabilize nightly CI pipeline".to_string()));
+        auto_drive_card.push_action(
+            "Queued smoke tests across agents",
+            history_cell::AutoDriveActionKind::Info,
+        );
+        auto_drive_card.push_action(
+            "Warning: macOS shard flaked",
+            history_cell::AutoDriveActionKind::Warning,
+        );
+        auto_drive_card.push_action(
+            "Action required: retry or pause run",
+            history_cell::AutoDriveActionKind::Error,
+        );
+        auto_drive_card.set_status(history_cell::AutoDriveStatus::Paused);
+        self.history_push(auto_drive_card);
+
         self.push_background_tail("demo: finished populating sample history.");
         self.request_redraw();
     }

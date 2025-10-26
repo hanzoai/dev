@@ -273,14 +273,20 @@ impl BrowserSessionCell {
         let mut entries: Vec<(String, String, String)> = Vec::new();
         if self.actions.is_empty() {
             if let Some(url) = self.url.as_ref() {
-                let time_label = Self::format_elapsed_label(Duration::ZERO, show_minutes);
+                let time_label = format!(
+                    " {}",
+                    Self::format_elapsed_label(Duration::ZERO, show_minutes)
+                );
                 entries.push((time_label, "Opened".to_string(), url.clone()));
             }
             return entries;
         }
 
         for action in &self.actions {
-            let time_label = Self::format_elapsed_label(action.timestamp, show_minutes);
+            let time_label = format!(
+                " {}",
+                Self::format_elapsed_label(action.timestamp, show_minutes)
+            );
             let entry = format_action_entry(action, time_label);
             entries.push((entry.time_label, entry.label, entry.detail));
         }
@@ -415,7 +421,9 @@ impl BrowserSessionCell {
         }
 
         let accent_width = CARD_ACCENT_WIDTH.min(width as usize);
-        let body_width = width.saturating_sub(accent_width as u16) as usize;
+        let body_width = width
+            .saturating_sub(accent_width as u16)
+            .saturating_sub(1) as usize;
         if body_width == 0 {
             return (Vec::new(), None);
         }
@@ -456,6 +464,15 @@ impl BrowserSessionCell {
             .unwrap_or(0)
             .max(ACTION_TIME_COLUMN_MIN_WIDTH);
 
+        rows.push(self.body_text_row(
+            "Actions",
+            body_width,
+            style,
+            primary_text_style(style),
+            indent_cols,
+            right_padding,
+        ));
+
         if action_display.is_empty() {
             for wrapped in wrap_card_lines(
                 "No browser actions yet",
@@ -492,13 +509,7 @@ impl BrowserSessionCell {
                         if indent_cols > 0 {
                             segments.push(CardSegment::new(" ".repeat(indent_cols), Style::default()));
                         }
-                        let padded = if time_width <= 1 {
-                            "⋮".to_string()
-                        } else {
-                            let lead = 2.min(time_width.saturating_sub(1));
-                            let trail = time_width.saturating_sub(lead + 1);
-                            format!("{}{}{}", " ".repeat(lead), "⋮", " ".repeat(trail))
-                        };
+                        let padded = format!("{:>width$}", "⋮", width = time_width.max(1));
                         segments.push(CardSegment::new(
                             padded,
                             secondary_text_style(style),
@@ -652,7 +663,7 @@ impl BrowserSessionCell {
         let mut rows = Vec::new();
         let label_style = secondary_text_style(style);
         let detail_style = primary_text_style(style);
-        let time_style = Style::default().fg(colors::text());
+        let time_style = primary_text_style(style);
 
         let indent_string = if indent > 0 {
             Some(" ".repeat(indent))
@@ -826,13 +837,16 @@ impl BrowserSessionCell {
                 entries.push(ActionEntry {
                     label: "Opened".to_string(),
                     detail: url.clone(),
-                    time_label: Self::format_elapsed_label(Duration::ZERO, show_minutes),
+                    time_label: format!(" {}", Self::format_elapsed_label(Duration::ZERO, show_minutes)),
                 });
             }
         }
 
         entries.extend(self.actions.iter().map(|action| {
-            let time_label = Self::format_elapsed_label(action.timestamp, show_minutes);
+            let time_label = format!(
+                " {}",
+                Self::format_elapsed_label(action.timestamp, show_minutes)
+            );
             format_action_entry(action, time_label)
         }));
 
@@ -1000,7 +1014,11 @@ impl HistoryCell for BrowserSessionCell {
 
     fn desired_height(&self, width: u16) -> u16 {
         let style = browser_card_style();
-        let (rows, _) = self.build_card_rows(width, &style);
+        let trimmed_width = width.saturating_sub(2);
+        if trimmed_width == 0 {
+            return 0;
+        }
+        let (rows, _) = self.build_card_rows(trimmed_width, &style);
         rows.len().max(1) as u16
     }
 
@@ -1009,24 +1027,40 @@ impl HistoryCell for BrowserSessionCell {
     }
 
     fn custom_render_with_skip(&self, area: Rect, buf: &mut Buffer, skip_rows: u16) {
-        if area.width == 0 || area.height == 0 {
+        if area.width <= 2 || area.height == 0 {
             return;
         }
 
         let style = browser_card_style();
-        fill_card_background(buf, area, &style);
-        let (rows, screenshot_meta) = self.build_card_rows(area.width, &style);
-        let lines = rows_to_lines(&rows, &style, area.width);
+        let draw_width = area.width - 2;
+        let render_area = Rect {
+            width: draw_width,
+            ..area
+        };
+
+        fill_card_background(buf, render_area, &style);
+        let (rows, screenshot_meta) = self.build_card_rows(render_area.width, &style);
+        let lines = rows_to_lines(&rows, &style, render_area.width);
         let text = Text::from(lines);
 
         Paragraph::new(text)
             .wrap(Wrap { trim: false })
             .scroll((skip_rows, 0))
-            .render(area, buf);
+            .render(render_area, buf);
 
         if let Some(layout) = screenshot_meta.as_ref() {
             if let Some(path) = self.screenshot_path.as_ref() {
-                self.render_screenshot_preview(area, buf, skip_rows, layout, path);
+                self.render_screenshot_preview(render_area, buf, skip_rows, layout, path);
+            }
+        }
+
+        let clear_start = area.x + draw_width;
+        let clear_end = area.x + area.width;
+        for x in clear_start..clear_end {
+            for row in 0..area.height {
+                let cell = &mut buf[(x, area.y + row)];
+                cell.set_symbol(" ");
+                cell.set_bg(crate::colors::background());
             }
         }
     }
