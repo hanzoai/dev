@@ -176,9 +176,11 @@ use crate::bottom_pane::mcp_settings_view::{McpServerRow, McpServerRows};
 use crate::exec_command::strip_bash_lc_and_escape;
 #[cfg(feature = "code-fork")]
 use crate::tui_event_extensions::handle_browser_screenshot;
+use crate::chatwidget::message::UserMessage;
 
 pub(crate) const DOUBLE_ESC_HINT: &str = "undo timeline";
 const AUTO_ESC_EXIT_HINT: &str = "Press Esc again to exit Auto Drive";
+const AUTO_BOOTSTRAP_GOAL_PLACEHOLDER: &str = "Deriving goal from recent conversation";
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum EscIntent {
@@ -900,6 +902,8 @@ pub(crate) struct ChatWidget<'a> {
     auto_handle: Option<AutoCoordinatorHandle>,
     auto_history: AutoDriveHistory,
     auto_turn_review_state: Option<AutoTurnReviewState>,
+    auto_pending_goal_request: bool,
+    auto_goal_bootstrap_done: bool,
     cloud_tasks_selected_env: Option<CloudEnvironment>,
     cloud_tasks_environments: Vec<CloudEnvironment>,
     cloud_tasks_last_tasks: Vec<TaskSummary>,
@@ -1426,7 +1430,6 @@ use self::settings_overlay::{
 use ratatui::text::Line as RtLine;
 use ratatui::text::Span as RtSpan;
 
-use self::message::UserMessage;
 
 use self::perf::PerfStats;
 
@@ -3992,6 +3995,8 @@ impl ChatWidget<'_> {
             auto_handle: None,
             auto_history: AutoDriveHistory::new(),
             auto_turn_review_state: None,
+            auto_pending_goal_request: false,
+            auto_goal_bootstrap_done: false,
             cloud_tasks_selected_env: None,
             cloud_tasks_environments: Vec::new(),
             cloud_tasks_last_tasks: Vec::new(),
@@ -4298,6 +4303,8 @@ impl ChatWidget<'_> {
             auto_handle: None,
             auto_history: AutoDriveHistory::new(),
             auto_turn_review_state: None,
+            auto_pending_goal_request: false,
+            auto_goal_bootstrap_done: false,
             cloud_tasks_selected_env: None,
             cloud_tasks_environments: Vec::new(),
             cloud_tasks_last_tasks: Vec::new(),
@@ -12996,6 +13003,8 @@ fi\n\
     fn auto_show_goal_entry_panel(&mut self) {
         self.auto_state.set_phase(AutoRunPhase::AwaitingGoalEntry);
         self.auto_state.goal = None;
+        self.auto_pending_goal_request = false;
+        self.auto_goal_bootstrap_done = false;
         let seed_intro = self.auto_state.take_intro_pending();
         if seed_intro {
             self.auto_reset_intro_timing();
@@ -13072,6 +13081,7 @@ fi\n\
     fn auto_launch_with_goal(
         &mut self,
         goal: String,
+        derive_goal_from_history: bool,
         review_enabled: bool,
         subagents_enabled: bool,
         cross_check_enabled: bool,
@@ -13099,6 +13109,7 @@ fi\n\
                         status,
                         progress_past,
                         progress_current,
+                        goal,
                         cli,
                         agents_timing,
                         agents,
@@ -13108,6 +13119,7 @@ fi\n\
                             status,
                             progress_past,
                             progress_current,
+                            goal,
                             cli,
                             agents_timing,
                             agents,
@@ -13136,6 +13148,7 @@ fi\n\
             conversation,
             self.config.clone(),
             self.config.debug,
+            derive_goal_from_history,
         ) {
             Ok(handle) => {
                 self.auto_handle = Some(handle);
@@ -13180,9 +13193,12 @@ fi\n\
             if self.auto_state.is_active() {
                 self.auto_stop(None);
             }
-            self.auto_state.reset();
-            self.auto_state.set_phase(AutoRunPhase::Idle);
-            self.auto_show_goal_entry_panel();
+            let started = self.auto_start_bootstrap_from_history();
+            if !started {
+                self.auto_state.reset();
+                self.auto_state.set_phase(AutoRunPhase::Idle);
+                self.auto_show_goal_entry_panel();
+            }
             self.request_redraw();
             return;
         }
@@ -13199,6 +13215,7 @@ fi\n\
         self.auto_state.mark_intro_pending();
         self.auto_launch_with_goal(
             goal_text,
+            false,
             defaults.review_enabled,
             defaults.agents_enabled,
             defaults.cross_check_enabled,
@@ -13446,6 +13463,7 @@ fi\n\
         status: AutoCoordinatorStatus,
         progress_past: Option<String>,
         progress_current: Option<String>,
+        goal: Option<String>,
         cli: Option<AutoTurnCliAction>,
         agents_timing: Option<AutoTurnAgentsTiming>,
         agents: Vec<AutoTurnAgentsAction>,
@@ -13453,6 +13471,13 @@ fi\n\
     ) {
         if !self.auto_state.is_active() {
             return;
+        }
+
+        self.auto_pending_goal_request = false;
+
+        if let Some(goal_text) = goal.as_ref().map(|g| g.trim()).filter(|g| !g.is_empty()) {
+            self.auto_state.goal = Some(goal_text.to_string());
+            self.auto_goal_bootstrap_done = true;
         }
 
         let progress_past = Self::normalize_progress_field(progress_past);
@@ -13642,8 +13667,26 @@ Have we met every part of this goal and is there no further work to do?"#
     }
 
     fn schedule_auto_cli_prompt(&mut self, prompt_text: String) {
-        let effects = self.auto_state.schedule_cli_prompt(prompt_text);
+        self.schedule_auto_cli_prompt_with_override(prompt_text, None);
+    }
+
+    fn schedule_auto_cli_prompt_with_override(
+        &mut self,
+        prompt_text: String,
+        countdown_override: Option<u8>,
+    ) {
+        let effects = self
+            .auto_state
+            .schedule_cli_prompt(prompt_text, countdown_override);
         self.auto_apply_controller_effects(effects);
+    }
+
+    fn auto_can_bootstrap_from_history(&self) -> bool {
+        self.history_cells.iter().any(|cell| match cell.kind() {
+            HistoryCellType::User | HistoryCellType::Assistant | HistoryCellType::Plain => true,
+            HistoryCellType::Exec { .. } => true,
+            _ => false,
+        })
     }
 
     fn auto_apply_controller_effects(&mut self, effects: Vec<AutoControllerEffect>) {
@@ -13847,6 +13890,7 @@ Have we met every part of this goal and is there no further work to do?"#
 
         self.auto_launch_with_goal(
             goal,
+            false,
             review_enabled,
             agents_enabled,
             cross_check_enabled,
@@ -14044,19 +14088,77 @@ Have we met every part of this goal and is there no further work to do?"#
         if !self.auto_state.is_active() {
             return;
         }
-        let Some(prompt) = self.auto_state.current_cli_prompt.clone() else {
+
+        if self.auto_pending_goal_request {
+            self.auto_pending_goal_request = false;
+            self.auto_send_conversation_force();
+            return;
+        }
+
+        let Some(original_prompt) = self.auto_state.current_cli_prompt.clone() else {
             self.auto_stop(Some("Coordinator prompt missing when attempting to submit.".to_string()));
             return;
         };
-        if prompt.trim().is_empty() {
+
+        if original_prompt.trim().is_empty() {
             self.auto_stop(Some("Coordinator produced an empty prompt.".to_string()));
             return;
         }
 
-        let Some(full_prompt) = self.build_auto_turn_message(&prompt) else {
+        let Some(full_prompt) = self.build_auto_turn_message(&original_prompt) else {
             self.auto_stop(Some("Coordinator produced an empty prompt.".to_string()));
             return;
         };
+
+        self.auto_dispatch_cli_prompt(full_prompt);
+    }
+
+    fn auto_start_bootstrap_from_history(&mut self) -> bool {
+        if !self.auto_can_bootstrap_from_history() {
+            return false;
+        }
+
+        let defaults = self.config.auto_drive.clone();
+        let default_mode = auto_continue_from_config(defaults.continue_mode);
+
+        if self.auto_state.is_active() {
+            self.auto_stop(None);
+        }
+
+        self.auto_state.mark_intro_pending();
+        self.auto_launch_with_goal(
+            AUTO_BOOTSTRAP_GOAL_PLACEHOLDER.to_string(),
+            true,
+            defaults.review_enabled,
+            defaults.agents_enabled,
+            defaults.cross_check_enabled,
+            defaults.qa_automation_enabled,
+            default_mode,
+        );
+
+        if self.auto_handle.is_none() {
+            return false;
+        }
+
+        self.auto_state.current_cli_context = None;
+        self.auto_state.current_cli_prompt = Some(String::new());
+        self.auto_pending_goal_request = true;
+        self.auto_goal_bootstrap_done = false;
+
+        let override_seconds = if matches!(
+            self.auto_state.continue_mode,
+            AutoContinueMode::Immediate
+        ) {
+            Some(10)
+        } else {
+            None
+        };
+        self.schedule_auto_cli_prompt_with_override(String::new(), override_seconds);
+        true
+    }
+
+    fn auto_dispatch_cli_prompt(&mut self, full_prompt: String) {
+        self.auto_pending_goal_request = false;
 
         self.bottom_pane.set_standard_terminal_hint(None);
         self.auto_state.on_prompt_submitted();
@@ -14077,7 +14179,7 @@ Have we met every part of this goal and is there no further work to do?"#
         });
         self.auto_state.current_reasoning_title = None;
         self.auto_state.thinking_prefix_stripped = false;
-        // If coordinator hinted medium/high complexity, prime the Agents HUD
+
         let should_prepare_agents = self.auto_state.subagents_enabled
             && !self.auto_state.pending_agent_actions.is_empty();
         if should_prepare_agents {
@@ -14091,7 +14193,6 @@ Have we met every part of this goal and is there no further work to do?"#
         }
         self.bottom_pane.update_status_text(String::new());
         self.bottom_pane.set_task_running(false);
-use crate::chatwidget::message::UserMessage;
         let mut message: UserMessage = full_prompt.into();
         message.suppress_persistence = true;
         if self.auto_state.pending_stop_message.is_some() {
@@ -14266,6 +14367,8 @@ use crate::chatwidget::message::UserMessage;
 
     fn auto_stop(&mut self, message: Option<String>) {
         self.next_cli_text_format = None;
+        self.auto_pending_goal_request = false;
+        self.auto_goal_bootstrap_done = false;
         let effects = self
             .auto_state
             .stop_run(Instant::now(), message);
@@ -14590,6 +14693,8 @@ use crate::chatwidget::message::UserMessage;
             .clone()
             .filter(|value| !value.trim().is_empty());
 
+        let bootstrap_pending = self.auto_pending_goal_request;
+
         let countdown_limit = self.auto_state.countdown_seconds();
         let countdown_active = self.auto_state.countdown_active();
         let countdown = if self.auto_state.awaiting_coordinator_submit() {
@@ -14604,10 +14709,15 @@ use crate::chatwidget::message::UserMessage;
         };
 
         let button = if self.auto_state.awaiting_coordinator_submit() {
-            let label = if countdown_active {
-                format!("Send prompt ({}s)", self.auto_state.seconds_remaining)
+            let base_label = if bootstrap_pending {
+                "Complete Current Task"
             } else {
-                "Send prompt".to_string()
+                "Send prompt"
+            };
+            let label = if countdown_active {
+                format!("{base_label} ({}s)", self.auto_state.seconds_remaining)
+            } else {
+                base_label.to_string()
             };
             Some(AutoCoordinatorButton {
                 label,
@@ -14620,6 +14730,8 @@ use crate::chatwidget::message::UserMessage;
         let manual_hint = if self.auto_state.awaiting_coordinator_submit() {
             if self.auto_state.is_paused_manual() {
                 Some("Edit the prompt, then press Enter to continue.".to_string())
+            } else if bootstrap_pending {
+                None
             } else if countdown_active {
                 Some("Enter to send now • Esc to edit".to_string())
             } else {
@@ -14632,6 +14744,8 @@ use crate::chatwidget::message::UserMessage;
         let ctrl_switch_hint = if self.auto_state.awaiting_coordinator_submit() {
             if self.auto_state.is_paused_manual() {
                 "Esc to cancel".to_string()
+            } else if bootstrap_pending {
+                "Esc enter new goal".to_string()
             } else {
                 "Esc to edit".to_string()
             }
@@ -18449,6 +18563,7 @@ use crate::chatwidget::message::UserMessage;
         );
         tracing::info!("[order] final Answer id={:?}", id);
         let final_source = source.clone();
+
         if self.auto_state.pending_stop_message.is_some() {
             match serde_json::from_str::<code_auto_drive_diagnostics::CompletionCheck>(&final_source)
             {
@@ -21905,10 +22020,12 @@ mod tests {
         CAPTURE_AUTO_TURN_COMMIT_STUB,
         GIT_DIFF_NAME_ONLY_BETWEEN_STUB,
     };
+    use crate::bottom_pane::AutoCoordinatorViewModel;
     use crate::chatwidget::message::UserMessage;
     use crate::chatwidget::smoke_helpers::ChatWidgetHarness;
-    use crate::history_cell::{self, ExploreAggregationCell, HistoryCellType};
+    use crate::history_cell::{self, ExploreAggregationCell, HistoryCellType, PlainHistoryCell};
     use code_auto_drive_core::{
+        AutoContinueMode,
         AutoRunPhase,
         AutoRunSummary,
         TurnComplexity,
@@ -22222,7 +22339,6 @@ mod tests {
         assert_eq!(route.intent, EscIntent::AutoGoalExitPreserveDraft);
     }
 
-    #[test]
     fn esc_cancels_agents_then_command_without_auto_hint() {
         let mut harness = ChatWidgetHarness::new();
         let chat = harness.chat();
@@ -22274,6 +22390,112 @@ mod tests {
         assert!(chat.execute_esc_intent(route.intent, esc_event));
         assert!(chat.exec.running_commands.is_empty());
         assert!(!chat.bottom_pane.is_task_running());
+    }
+
+    #[test]
+    fn auto_disabled_cli_turn_preserves_send_prompt_label() {
+        let mut harness = ChatWidgetHarness::new();
+        {
+            let chat = harness.chat();
+            chat.config.auto_drive.coordinator_routing = false;
+            chat.auto_state.continue_mode = AutoContinueMode::Immediate;
+            chat.auto_state.goal = Some("Ship feature".to_string());
+            chat.auto_state.set_phase(AutoRunPhase::Active);
+            chat.schedule_auto_cli_prompt("echo ready".to_string());
+        }
+
+        let chat = harness.chat();
+        let model = chat
+            .bottom_pane
+            .auto_view_model()
+            .expect("auto coordinator view should be active");
+        let active = match &model {
+            AutoCoordinatorViewModel::Active(model) => model,
+        };
+
+        let button_label = active
+            .button
+            .as_ref()
+            .expect("button expected")
+            .label
+            .as_str();
+        assert!(button_label.starts_with("Send prompt"));
+        assert_eq!(chat.auto_state.countdown_override, None);
+        assert_eq!(active.ctrl_switch_hint.as_str(), "Esc to edit");
+        assert!(active.manual_hint.is_some());
+
+        {
+            let chat = harness.chat();
+            chat.auto_submit_prompt();
+        }
+
+        let chat = harness.chat();
+        assert!(!chat.auto_pending_goal_request);
+    }
+
+    #[test]
+    fn auto_bootstrap_starts_from_history() {
+        let mut harness = ChatWidgetHarness::new();
+        {
+            let chat = harness.chat();
+            chat.config.auto_drive.coordinator_routing = false;
+        }
+
+        {
+            let chat = harness.chat();
+            insert_plain_cell(chat, &["User: summarize recent progress"]);
+            insert_plain_cell(chat, &["Assistant: Tests are passing, next step pending."]);
+            chat.handle_auto_command(Some(String::new()));
+        }
+
+        let chat = harness.chat();
+        assert!(chat.auto_pending_goal_request);
+        assert!(!chat.auto_goal_bootstrap_done);
+        assert_eq!(
+            chat.auto_state.goal.as_deref(),
+            Some(AUTO_BOOTSTRAP_GOAL_PLACEHOLDER)
+        );
+        assert!(chat.next_cli_text_format.is_none());
+        let pending_prompt = chat
+            .auto_state
+            .current_cli_prompt
+            .as_deref()
+            .expect("bootstrap prompt");
+        assert!(pending_prompt.trim().is_empty());
+    }
+
+    #[test]
+    fn auto_bootstrap_updates_goal_after_first_decision() {
+        let mut harness = ChatWidgetHarness::new();
+        {
+            let chat = harness.chat();
+            chat.auto_state.set_phase(AutoRunPhase::Active);
+            chat.auto_state.goal = Some(AUTO_BOOTSTRAP_GOAL_PLACEHOLDER.to_string());
+            chat.auto_goal_bootstrap_done = false;
+        }
+
+        {
+            let chat = harness.chat();
+            chat.auto_handle_decision(
+                AutoCoordinatorStatus::Continue,
+                None,
+                None,
+                Some("Finish migrations".to_string()),
+                Some(AutoTurnCliAction {
+                    prompt: "echo ready".to_string(),
+                    context: None,
+                }),
+                None,
+                Vec::new(),
+                Vec::new(),
+            );
+        }
+
+        let chat = harness.chat();
+        assert_eq!(chat.auto_state.goal.as_deref(), Some("Finish migrations"));
+        assert!(chat.auto_goal_bootstrap_done);
+        assert!(!chat.auto_pending_goal_request);
+        assert_eq!(chat.auto_state.current_cli_prompt.as_deref(), Some("echo ready"));
     }
 
     #[test]
@@ -22730,6 +22952,7 @@ mod tests {
             AutoCoordinatorStatus::Continue,
             Some("Finished setup".to_string()),
             Some("Running unit tests".to_string()),
+            Some("Refine goal".to_string()),
             Some(AutoTurnCliAction {
                 prompt: "Run cargo test".to_string(),
                 context: Some("use --all-features".to_string()),

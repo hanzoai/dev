@@ -182,6 +182,19 @@ impl BottomPane<'_> {
             .and_then(|any| any.downcast_mut::<AutoCoordinatorView>())
     }
 
+    #[cfg(test)]
+    pub(crate) fn auto_view_model(&self) -> Option<AutoCoordinatorViewModel> {
+        if self.active_view_kind != ActiveViewKind::AutoCoordinator {
+            return None;
+        }
+
+        self.active_view
+            .as_ref()
+            .and_then(|view| view.as_any())
+            .and_then(|any| any.downcast_ref::<AutoCoordinatorView>())
+            .map(|view| view.model.clone())
+    }
+
     fn apply_auto_drive_style(&mut self) {
         if !self.auto_drive_active {
             self.composer.set_auto_drive_style(None);
