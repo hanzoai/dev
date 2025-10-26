@@ -181,7 +181,7 @@ pub fn agent_orange_light_theme() -> CardThemeDefinition {
     CardThemeDefinition {
         name: "Agent Orange Light",
         theme: CardTheme {
-            gradient: gradient((255, 220, 200), (220, 130, 100), -0.05),
+            gradient: gradient((255, 220, 200), (232, 160, 120), -0.05),
             palette: palette((140, 64, 30), (78, 26, 4), (92, 34, 6), (104, 40, 10)),
             reveal: None,
         },
@@ -203,7 +203,7 @@ pub fn agent_green_light_theme() -> CardThemeDefinition {
     CardThemeDefinition {
         name: "Agent Green Light",
         theme: CardTheme {
-            gradient: gradient((220, 255, 230), (150, 210, 170), -0.05),
+            gradient: gradient((220, 255, 230), (182, 228, 188), -0.05),
             palette: palette((48, 102, 82), (18, 40, 32), (26, 52, 40), (34, 64, 50)),
             reveal: None,
         },
