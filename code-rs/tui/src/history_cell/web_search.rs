@@ -25,6 +25,9 @@ const BORDER_TOP: &str = "╭─";
 const BORDER_BODY: &str = "│";
 const BORDER_BOTTOM: &str = "╰─";
 const HINT_TEXT: &str = " [Ctrl+S] Settings · [Esc] Stop";
+const ACTION_TIME_INDENT: usize = 2;
+const ACTION_TIME_SEPARATOR_WIDTH: usize = 2;
+const ACTION_TIME_COLUMN_MIN_WIDTH: usize = 2;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum WebSearchStatus {
@@ -38,6 +41,16 @@ enum WebSearchActionKind {
     Info,
     Success,
     Error,
+}
+
+impl WebSearchActionKind {
+    fn glyph(self) -> &'static str {
+        match self {
+            WebSearchActionKind::Info => "•",
+            WebSearchActionKind::Success => "✓",
+            WebSearchActionKind::Error => "✗",
+        }
+    }
 }
 
 #[derive(Clone, Debug)]
@@ -179,24 +192,11 @@ impl WebSearchSessionCell {
         let mut rows: Vec<CardRow> = Vec::new();
 
         rows.push(self.title_row(body_width, style));
+        rows.push(self.blank_border_row(body_width, style));
 
-        if let Some(query) = &self.query {
-            rows.push(self.description_row(query.as_str(), body_width, style));
-        }
+        rows.extend(self.actions_section_rows(body_width, style));
 
-        if !self.actions.is_empty() {
-            for action in &self.actions {
-                rows.push(self.action_row(action, body_width, style));
-            }
-        }
-
-        if let Some(duration) = self.duration {
-            if matches!(self.status, WebSearchStatus::Completed) {
-                let duration_text = format!("Completed in {}", format_duration_digital(duration));
-                rows.push(self.detail_row(duration_text.as_str(), body_width, style));
-            }
-        }
-
+        rows.push(self.blank_border_row(body_width, style));
         rows.push(self.bottom_border_row(body_width, style));
 
         rows
@@ -228,31 +228,7 @@ impl WebSearchSessionCell {
         )
     }
 
-    fn description_row(&self, text: &str, body_width: usize, style: &CardStyle) -> CardRow {
-        let display = truncate_with_ellipsis(text, body_width);
-        let mut segment = CardSegment::new(display, secondary_text_style(style));
-        segment.inherit_background = true;
-        CardRow::new(
-            BORDER_BODY.to_string(),
-            Self::accent_style(style),
-            vec![segment],
-            None,
-        )
-    }
-
-    fn detail_row(&self, text: &str, body_width: usize, style: &CardStyle) -> CardRow {
-        let display = truncate_with_ellipsis(text, body_width);
-        let mut segment = CardSegment::new(display, secondary_text_style(style));
-        segment.inherit_background = true;
-        CardRow::new(
-            BORDER_BODY.to_string(),
-            Self::accent_style(style),
-            vec![segment],
-            None,
-        )
-    }
-
-    fn action_row(&self, action: &WebSearchAction, body_width: usize, style: &CardStyle) -> CardRow {
+    fn blank_border_row(&self, body_width: usize, style: &CardStyle) -> CardRow {
         if body_width == 0 {
             return CardRow::new(
                 BORDER_BODY.to_string(),
@@ -262,22 +238,174 @@ impl WebSearchSessionCell {
             );
         }
 
-        let icon = match action.kind {
-            WebSearchActionKind::Info => "•",
-            WebSearchActionKind::Success => "✓",
-            WebSearchActionKind::Error => "✗",
-        };
-        let time_text = format_duration_digital(action.timestamp);
-        let text_value = format!("{time_text:>6}  {icon} {}", action.text);
-        let display = truncate_with_ellipsis(text_value.as_str(), body_width);
+        let filler = " ".repeat(body_width);
+        CardRow::new(
+            BORDER_BODY.to_string(),
+            Self::accent_style(style),
+            vec![CardSegment::new(filler, Style::default())],
+            None,
+        )
+    }
 
-        let mut segment = CardSegment::new(display, action.style(style));
-        segment.inherit_background = true;
+    fn actions_section_rows(&self, body_width: usize, style: &CardStyle) -> Vec<CardRow> {
+        if body_width == 0 {
+            return Vec::new();
+        }
+
+        let mut rows = Vec::new();
+        rows.push(self.actions_heading_row(body_width, style));
+
+        if self.actions.is_empty() {
+            rows.push(self.placeholder_row(body_width, style));
+            return rows;
+        }
+
+        let elapsed_labels: Vec<String> = self
+            .actions
+            .iter()
+            .map(|action| format_duration_digital(action.timestamp))
+            .collect();
+
+        let time_width = elapsed_labels
+            .iter()
+            .map(|label| UnicodeWidthStr::width(label.as_str()))
+            .max()
+            .unwrap_or(0)
+            .max(ACTION_TIME_COLUMN_MIN_WIDTH);
+
+        let indent_text = " ".repeat(ACTION_TIME_INDENT);
+        let indent_style = secondary_text_style(style);
+        let time_style = secondary_text_style(style);
+        let separator_text = if ACTION_TIME_SEPARATOR_WIDTH > 0 {
+            Some(" ".repeat(ACTION_TIME_SEPARATOR_WIDTH))
+        } else {
+            None
+        };
+
+        for (action, elapsed) in self.actions.iter().zip(elapsed_labels.iter()) {
+            let mut segments = Vec::new();
+            segments.push(CardSegment::new(indent_text.clone(), indent_style));
+
+            let mut remaining = body_width.saturating_sub(ACTION_TIME_INDENT);
+            if remaining == 0 {
+                rows.push(CardRow::new(
+                    BORDER_BODY.to_string(),
+                    Self::accent_style(style),
+                    segments,
+                    None,
+                ));
+                continue;
+            }
+
+            let padded_time = format!("{elapsed:>width$}", width = time_width);
+            segments.push(CardSegment::new(padded_time, time_style));
+            remaining = remaining.saturating_sub(time_width);
+
+            if let Some(separator) = separator_text.as_ref() {
+                if remaining < ACTION_TIME_SEPARATOR_WIDTH {
+                    rows.push(CardRow::new(
+                        BORDER_BODY.to_string(),
+                        Self::accent_style(style),
+                        segments,
+                        None,
+                    ));
+                    continue;
+                }
+                segments.push(CardSegment::new(separator.clone(), Style::default()));
+                remaining = remaining.saturating_sub(ACTION_TIME_SEPARATOR_WIDTH);
+            }
+
+            if remaining == 0 {
+                rows.push(CardRow::new(
+                    BORDER_BODY.to_string(),
+                    Self::accent_style(style),
+                    segments,
+                    None,
+                ));
+                continue;
+            }
+
+            let description_text = format!("{} {}", action.kind.glyph(), action.text);
+            let display = truncate_with_ellipsis(description_text.as_str(), remaining);
+            let mut description_segment = CardSegment::new(display, action.style(style));
+            description_segment.inherit_background = true;
+            segments.push(description_segment);
+
+            rows.push(CardRow::new(
+                BORDER_BODY.to_string(),
+                Self::accent_style(style),
+                segments,
+                None,
+            ));
+        }
+
+        rows
+    }
+
+    fn actions_heading_row(&self, body_width: usize, style: &CardStyle) -> CardRow {
+        if body_width == 0 {
+            return CardRow::new(
+                BORDER_BODY.to_string(),
+                Self::accent_style(style),
+                Vec::new(),
+                None,
+            );
+        }
+
+        let mut segments = Vec::new();
+        if ACTION_TIME_INDENT > 0 {
+            segments.push(CardSegment::new(
+                " ".repeat(ACTION_TIME_INDENT),
+                secondary_text_style(style),
+            ));
+        }
+
+        let available = body_width.saturating_sub(ACTION_TIME_INDENT);
+        if available > 0 {
+            let title = truncate_with_ellipsis("Actions", available);
+            let mut heading = CardSegment::new(title, primary_text_style(style));
+            heading.inherit_background = true;
+            segments.push(heading);
+        }
 
         CardRow::new(
             BORDER_BODY.to_string(),
             Self::accent_style(style),
-            vec![segment],
+            segments,
+            None,
+        )
+    }
+
+    fn placeholder_row(&self, body_width: usize, style: &CardStyle) -> CardRow {
+        if body_width == 0 {
+            return CardRow::new(
+                BORDER_BODY.to_string(),
+                Self::accent_style(style),
+                Vec::new(),
+                None,
+            );
+        }
+
+        let mut segments = Vec::new();
+        if ACTION_TIME_INDENT > 0 {
+            segments.push(CardSegment::new(
+                " ".repeat(ACTION_TIME_INDENT),
+                secondary_text_style(style),
+            ));
+        }
+
+        let available = body_width.saturating_sub(ACTION_TIME_INDENT);
+        if available > 0 {
+            let message = truncate_with_ellipsis("Awaiting web search activity", available);
+            let mut placeholder = CardSegment::new(message, secondary_text_style(style));
+            placeholder.inherit_background = true;
+            segments.push(placeholder);
+        }
+
+        CardRow::new(
+            BORDER_BODY.to_string(),
+            Self::accent_style(style),
+            segments,
             None,
         )
     }
