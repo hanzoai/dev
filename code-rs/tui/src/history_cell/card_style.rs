@@ -103,11 +103,39 @@ pub(crate) fn web_search_card_style() -> CardStyle {
 
 fn style_from_theme(definition: CardThemeDefinition, is_dark: bool) -> CardStyle {
     let theme = definition.theme;
+    let mut text_primary = theme.palette.text;
+    let mut text_secondary = theme.palette.footer;
+
+    let is_rgb = |color: Color, r: u8, g: u8, b: u8| matches!(color, Color::Rgb(rr, gg, bb) if rr == r && gg == g && bb == b);
+
+    if !is_dark && is_rgb(text_primary, 0, 0, 0) {
+        let left = theme.gradient.left;
+        text_primary = Color::Black;
+        text_secondary = colors::mix_toward(Color::Black, left, 0.35);
+    } else if is_dark && is_rgb(text_primary, 255, 255, 255) {
+        let left = theme.gradient.left;
+        text_primary = Color::White;
+        text_secondary = colors::mix_toward(Color::White, left, 0.25);
+    }
+
+    let adjust = |color: Color, target: Color| match color {
+        Color::Rgb(_, _, _) => colors::mix_toward(color, target, 0.15),
+        other => other,
+    };
+
+    if is_dark {
+        text_primary = adjust(text_primary, Color::White);
+    } else {
+        text_primary = adjust(text_primary, Color::Black);
+    }
+
+    let title_text = text_primary;
+
     CardStyle {
         accent_fg: theme.palette.border,
-        text_primary: theme.palette.text,
-        text_secondary: theme.palette.footer,
-        title_text: theme.palette.title,
+        text_primary,
+        text_secondary,
+        title_text,
         gradient: adjust_gradient(theme.gradient, is_dark),
     }
 }
@@ -118,19 +146,8 @@ fn is_dark_theme_active() -> bool {
     luminance < 0.5
 }
 
-fn adjust_gradient(gradient: GradientSpec, is_dark: bool) -> GradientSpec {
-    const LIGHTEN_FACTOR: f32 = 0.75;
-    const DARKEN_FACTOR: f32 = 0.42;
-
-    let target = if is_dark { Color::Black } else { Color::White };
-    let amount = if is_dark { DARKEN_FACTOR } else { LIGHTEN_FACTOR };
-    let adjusted_left = colors::mix_toward(gradient.left, target, amount);
-    let adjusted_right = colors::mix_toward(gradient.right, target, amount);
-    GradientSpec {
-        left: adjusted_right,
-        right: adjusted_left,
-        bias: gradient.bias,
-    }
+fn adjust_gradient(gradient: GradientSpec, _is_dark: bool) -> GradientSpec {
+    gradient
 }
 
 pub(crate) fn fill_card_background(buf: &mut Buffer, area: Rect, style: &CardStyle) {
@@ -258,6 +275,5 @@ pub(crate) fn title_text_style(style: &CardStyle) -> Style {
 }
 
 pub(crate) fn hint_text_style(style: &CardStyle) -> Style {
-    let fg = colors::mix_toward(style.text_secondary, colors::background(), 0.45);
-    Style::default().fg(fg)
+    Style::default().fg(style.text_secondary)
 }

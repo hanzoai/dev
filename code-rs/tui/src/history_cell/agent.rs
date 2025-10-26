@@ -360,13 +360,11 @@ impl AgentRunCell {
     }
 
     fn prompt_text_style(style: &CardStyle) -> Style {
-        let fg = colors::mix_toward(style.text_primary, colors::background(), 0.45);
-        Style::default().fg(fg)
+        secondary_text_style(style)
     }
 
     fn action_description_style(style: &CardStyle) -> Style {
-        let fg = colors::mix_toward(style.text_secondary, colors::background(), 0.55);
-        Style::default().fg(fg)
+        secondary_text_style(style)
     }
 
     fn top_border_row(&self, body_width: usize, style: &CardStyle) -> CardRow {
@@ -425,7 +423,7 @@ impl AgentRunCell {
             remaining = remaining.saturating_sub(1);
 
             let mode_label = self.write_mode_label();
-            let bullet_label = mode_label.map(|value| format!(" • {value}"));
+            let bullet_label = mode_label.map(|value| format!(" · {value}"));
             let bullet_width = bullet_label
                 .as_ref()
                 .map(|value| string_width(value.as_str()))
@@ -465,8 +463,7 @@ impl AgentRunCell {
     }
 
     fn mode_label_style(style: &CardStyle) -> Style {
-        let fg = colors::mix_toward(style.text_secondary, colors::background(), 0.55);
-        Style::default().fg(fg)
+        secondary_text_style(style)
     }
 
     fn blank_border_row(&self, body_width: usize, style: &CardStyle) -> CardRow {
@@ -1042,7 +1039,7 @@ impl AgentRunCell {
 
         let time_indent = " ".repeat(ACTION_TIME_INDENT);
         let indent_style = secondary_text_style(style);
-        let time_style = Style::default().fg(colors::text());
+        let time_style = primary_text_style(style);
         let label_style = Self::action_description_style(style);
         let ellipsis_time = |width: usize| {
             if width <= 1 {

@@ -27,7 +27,7 @@ const BORDER_TOP: &str = "╭─";
 const BORDER_BODY: &str = "│";
 const BORDER_BOTTOM: &str = "╰─";
 const HINT_TEXT: &str = " [Ctrl+S] Settings · [Esc] Stop";
-const ACTION_TIME_INDENT: usize = 2;
+const ACTION_TIME_INDENT: usize = 1;
 const ACTION_TIME_SEPARATOR_WIDTH: usize = 2;
 const ACTION_TIME_COLUMN_MIN_WIDTH: usize = 2;
 
@@ -71,13 +71,6 @@ impl WebSearchAction {
         }
     }
 
-    fn style(&self, style: &CardStyle) -> Style {
-        match self.kind {
-            WebSearchActionKind::Info => primary_text_style(style),
-            WebSearchActionKind::Success => Style::default().fg(colors::success()),
-            WebSearchActionKind::Error => Style::default().fg(colors::error()),
-        }
-    }
 }
 
 #[derive(Clone)]
@@ -164,14 +157,6 @@ impl WebSearchSessionCell {
         }
     }
 
-    fn status_style(&self) -> Style {
-        match self.status {
-            WebSearchStatus::Running => Style::default().fg(colors::info()),
-            WebSearchStatus::Completed => Style::default().fg(colors::success()),
-            WebSearchStatus::Failed => Style::default().fg(colors::error()),
-        }
-    }
-
     fn accent_style(style: &CardStyle) -> Style {
         let dim = colors::mix_toward(style.accent_fg, style.text_secondary, 0.85);
         Style::default().fg(dim)
@@ -204,19 +189,21 @@ impl WebSearchSessionCell {
     fn title_row(&self, body_width: usize, style: &CardStyle) -> CardRow {
         let mut segments: Vec<CardSegment> = Vec::new();
         let title_text = " Web Search";
-        let status_text = format!("  {}", self.status_label());
+        let status_text = format!(" · {}", self.status_label());
         let total = format!("{title_text}{status_text}");
 
         if UnicodeWidthStr::width(total.as_str()) <= body_width {
-            let mut title_style = title_text_style(style);
-            title_style = title_style.add_modifier(Modifier::BOLD);
-            segments.push(CardSegment::new(title_text.to_string(), title_style));
-            segments.push(CardSegment::new(status_text, self.status_style()));
+            segments.push(CardSegment::new(
+                title_text.to_string(),
+                title_text_style(style),
+            ));
+            segments.push(CardSegment::new(
+                status_text,
+                secondary_text_style(style),
+            ));
         } else {
-            let mut title_style = title_text_style(style);
-            title_style = title_style.add_modifier(Modifier::BOLD);
             let display = truncate_with_ellipsis(title_text, body_width);
-            segments.push(CardSegment::new(display, title_style));
+            segments.push(CardSegment::new(display, title_text_style(style)));
         }
 
         CardRow::new(
@@ -262,7 +249,7 @@ impl WebSearchSessionCell {
         let elapsed_labels: Vec<String> = self
             .actions
             .iter()
-            .map(|action| format_duration_digital(action.timestamp))
+            .map(|action| format!(" {}", format_duration_digital(action.timestamp)))
             .collect();
 
         let time_width = elapsed_labels
@@ -274,7 +261,7 @@ impl WebSearchSessionCell {
 
         let indent_text = " ".repeat(ACTION_TIME_INDENT);
         let indent_style = secondary_text_style(style);
-        let time_style = secondary_text_style(style);
+        let time_style = primary_text_style(style);
         let separator_text = if ACTION_TIME_SEPARATOR_WIDTH > 0 {
             Some(" ".repeat(ACTION_TIME_SEPARATOR_WIDTH))
         } else {
@@ -296,7 +283,7 @@ impl WebSearchSessionCell {
                 continue;
             }
 
-            let padded_time = format!("{elapsed:>width$}", width = time_width);
+            let padded_time = format!("{elapsed:<width$}", width = time_width);
             segments.push(CardSegment::new(padded_time, time_style));
             remaining = remaining.saturating_sub(time_width);
 
@@ -326,7 +313,7 @@ impl WebSearchSessionCell {
 
             let description_text = format!("{} {}", action.kind.glyph(), action.text);
             let display = truncate_with_ellipsis(description_text.as_str(), remaining);
-            let mut description_segment = CardSegment::new(display, action.style(style));
+            let mut description_segment = CardSegment::new(display, secondary_text_style(style));
             description_segment.inherit_background = true;
             segments.push(description_segment);
 
