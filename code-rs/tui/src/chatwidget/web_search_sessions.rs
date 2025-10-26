@@ -124,8 +124,8 @@ pub(super) fn handle_complete(
     tracker.request_ordinal = request_ordinal;
     tracker.active_calls.remove(&call_id);
 
-    if tracker.cell.set_query(query.clone()) {
-        if let Some(q) = tracker.cell.current_query() {
+    if let Some(ref q) = query {
+        if tracker.cell.set_query(Some(q.clone())) {
             tracker
                 .cell
                 .record_info(tracker.started_at.elapsed(), format!("Query: \"{}\"", q));

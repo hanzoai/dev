@@ -116,10 +116,6 @@ impl WebSearchSessionCell {
         self.query != previous
     }
 
-    pub(crate) fn current_query(&self) -> Option<&str> {
-        self.query.as_deref()
-    }
-
     pub(crate) fn set_status(&mut self, status: WebSearchStatus) {
         self.status = status;
     }
