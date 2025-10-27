@@ -115,11 +115,7 @@ pub(crate) use diff::{
     DiffCell,
 };
 pub(crate) use browser::BrowserSessionCell;
-pub(crate) use auto_drive::{
-    AutoDriveActionKind,
-    AutoDriveCardCell,
-    AutoDriveStatus,
-};
+pub(crate) use auto_drive::{AutoDriveActionKind, AutoDriveCardCell, AutoDriveStatus};
 pub(crate) use web_search::{
     WebSearchSessionCell,
     WebSearchStatus,
