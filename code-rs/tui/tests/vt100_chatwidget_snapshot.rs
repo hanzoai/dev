@@ -45,6 +45,20 @@ fn normalize_output(text: String) -> String {
         .pipe(normalize_auto_drive_layout)
         .pipe(normalize_agent_history_details)
         .pipe(normalize_spacer_rows)
+        .pipe(normalize_trailing_whitespace)
+}
+
+fn normalize_trailing_whitespace(text: String) -> String {
+    let mut normalized = String::with_capacity(text.len());
+    for segment in text.split_inclusive('\n') {
+        if let Some(stripped) = segment.strip_suffix('\n') {
+            normalized.push_str(stripped.trim_end());
+            normalized.push('\n');
+        } else {
+            normalized.push_str(segment.trim_end());
+        }
+    }
+    normalized
 }
 
 fn make_key(code: KeyCode, modifiers: KeyModifiers) -> KeyEvent {
