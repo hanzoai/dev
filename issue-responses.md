@@ -11,3 +11,7 @@ Thanks for raising this! The CLI no longer assumes the Codex-only GPT-5 tier:
 If you already have a `config.toml`, you do not need to change anything—your configured `model` continues to win. New installs and empty configs now pick the provider-agnostic defaults.
 
 Let us know if anything else still suggests Codex is mandatory, and we can sweep those spots too.
+
+## #343 — OPENAI_WIRE_API support was removed
+
+We’ve reinstated the documented `OPENAI_WIRE_API` override. Setting `OPENAI_WIRE_API=chat` now forces the built-in OpenAI provider to use the Chat Completions endpoint, while `responses` (or the default) stays on the Responses API. The new regression tests in `code-rs/core/tests/openai_wire_api_env.rs` cover chat/responses/default/invalid cases so this stays verified going forward.

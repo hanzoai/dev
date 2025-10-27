@@ -366,6 +366,23 @@ const DEFAULT_OLLAMA_PORT: u32 = 11434;
 pub const BUILT_IN_OSS_MODEL_PROVIDER_ID: &str = "oss";
 
 /// Built-in default provider list.
+fn wire_api_override_from_env(env_key: &str) -> Option<WireApi> {
+    match std::env::var(env_key) {
+        Ok(value) => match value.trim().to_ascii_lowercase().as_str() {
+            "chat" => Some(WireApi::Chat),
+            "responses" => Some(WireApi::Responses),
+            other if !other.is_empty() => {
+                tracing::warn!(
+                    "Ignoring unknown {env_key} value '{other}'; falling back to default wire API"
+                );
+                None
+            }
+            _ => None,
+        },
+        Err(_) => None,
+    }
+}
+
 pub fn built_in_model_providers() -> HashMap<String, ModelProviderInfo> {
     use ModelProviderInfo as P;
 
@@ -388,7 +405,8 @@ pub fn built_in_model_providers() -> HashMap<String, ModelProviderInfo> {
                     .filter(|v| !v.trim().is_empty()),
                 env_key: None,
                 env_key_instructions: None,
-                wire_api: WireApi::Responses,
+                wire_api: wire_api_override_from_env("OPENAI_WIRE_API")
+                    .unwrap_or(WireApi::Responses),
                 query_params: None,
                 http_headers: Some(
                     [
