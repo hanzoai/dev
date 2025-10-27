@@ -1838,6 +1838,24 @@ impl App<'_> {
                         widget.auto_handle_thinking(delta, summary_index);
                     }
                 }
+                AppEvent::AutoCoordinatorTokenMetrics {
+                    total_usage,
+                    last_turn_usage,
+                    turn_count,
+                } => {
+                    if let AppState::Chat { widget } = &mut self.app_state {
+                        widget.auto_handle_token_metrics(
+                            total_usage,
+                            last_turn_usage,
+                            turn_count,
+                        );
+                    }
+                }
+                AppEvent::AutoCoordinatorCompactedHistory { conversation } => {
+                    if let AppState::Chat { widget } = &mut self.app_state {
+                        widget.auto_handle_compacted_history(conversation);
+                    }
+                }
                 AppEvent::AutoCoordinatorCountdown { countdown_id, seconds_left } => {
                     if let AppState::Chat { widget } = &mut self.app_state {
                         widget.auto_handle_countdown(countdown_id, seconds_left);

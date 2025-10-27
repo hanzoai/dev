@@ -1,5 +1,7 @@
 mod auto_coordinator;
 mod auto_drive_history;
+mod auto_compact;
+mod session_metrics;
 mod coordinator_router;
 mod coordinator_user_schema;
 mod controller;
@@ -45,6 +47,7 @@ pub use controller::{
 };
 
 pub use auto_drive_history::AutoDriveHistory;
+pub use session_metrics::SessionMetrics;
 pub use coordinator_router::{
     route_user_message,
     CoordinatorContext,
