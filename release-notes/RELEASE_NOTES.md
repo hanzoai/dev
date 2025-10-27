@@ -1,32 +1,17 @@
-## @just-every/code v0.4.0
+## @just-every/code v0.4.1
 
-A landmark release for Code: Auto Drive graduates into a multi-agent powerhouse, the TUI gains a card-based activity stream, and every setting now lives in a single overlay.
+This release polishes Auto Drive progress feedback and restores the CLI prompt label for smoother command runs.
 
-### Massive upgrades to Auto Drive
-- Auto Drive now orchestrates complex projects end to end, coordinating agents, running self-checks, and recovering from transient failures.
-- `/auto` sessions can be left unattended — plan a run, hand control to Auto Drive, and come back to finished work.
-- Multi-agent stacks get smarter the more helpers you configure; we already rely on Auto Drive in ~70% of internal sessions.
-
-### All `/settings` in one place
-- A new two-level settings overlay gathers limits, themes, automation toggles, and CLI integrations under a single `/settings` command.
-- Quickly inspect which features are enabled, tweak model routing, and return to coding without losing context.
-
-### Card-based UX refresh
-- Agents, Browser sessions, Web Search, and Auto Drive now render as compact cards in history, with overlays for full detail when you need it.
-- Grouped actions highlight overall progress while preserving deep logs for debugging.
-
-### Huge performance improvements
-- CPU and memory hotspots uncovered during large agent runs are fixed, keeping Code responsive even with heavy automation.
-- Stream rendering and history updates are smoother, trimming scroll jank on long sessions.
-
-### Agent upgrades
-- `/plan`, `/code`, and other commands can target different orchestrator CLIs, letting you mix fast research models (e.g., `gemini-2.5-flash`) with heavyweight builders (`claude-sonnet-4.5`).
-- Future releases will let you register additional CLIs directly from the new settings hub.
+### Changes
+- Auto Drive: show in-progress summaries in the card so runs surface status while they execute.
+- Auto Drive: refresh gradients and status colors to clarify automation progress states.
+- TUI: restore the CLI send prompt label and stabilize vt100 rendering.
+- Core/Debug: capture outgoing headers and order usage logs for clearer traces.
 
 ### Install
-```
+```bash
 npm install -g @just-every/code@latest
 code
 ```
 
-Compare: https://github.com/just-every/code/compare/v0.2.188...v0.4.0
+Compare: https://github.com/just-every/code/compare/v0.4.0...v0.4.1

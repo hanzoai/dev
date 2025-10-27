@@ -7,6 +7,13 @@
 
 - (none)
 
+## [0.4.1] - 2025-10-27
+
+- Auto Drive: show in-progress summaries in the card so runs surface status while they execute. (c7991ed)
+- Auto Drive: refresh gradients and status colors to clarify automation progress states. (ed0c895)
+- TUI: restore the CLI send prompt label and stabilize vt100 rendering. (b1c04d0)
+- Core/Debug: capture outgoing headers and order usage logs for clearer traces. (80497db)
+
 ## [0.4.0] - 2025-10-26
 
 - Auto Drive: graduate the orchestrator into the new `code-auto-drive-core` crate, coordinate multi-agent runs end to end, and add self-checks plus elapsed-time tracking for every action.
