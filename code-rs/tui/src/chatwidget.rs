@@ -19774,10 +19774,7 @@ Have we met every part of this goal and is there no further work to do?"#
         }
 
         // Add status message
-        self.history_push_plain_paragraphs(
-            PlainMessageKind::Background,
-            vec!["✅ Chrome launched with user profile".to_string()],
-        );
+        self.push_background_tail("✅ Chrome launched with user profile".to_string());
         // Show browsing state in input border after launch
         self.bottom_pane
             .update_status_text("using browser".to_string());
@@ -20420,13 +20417,10 @@ Have we met every part of this goal and is there no further work to do?"#
         }
 
         // Add status message
-        self.history_push_plain_paragraphs(
-            PlainMessageKind::Background,
-            vec![format!(
-                "✅ Chrome launched with temporary profile at {}",
-                profile_dir.display()
-            )],
-        );
+        self.push_background_tail(format!(
+            "✅ Chrome launched with temporary profile at {}",
+            profile_dir.display()
+        ));
     }
 
     fn schedule_browser_autofix(
@@ -20603,10 +20597,7 @@ Have we met every part of this goal and is there no further work to do?"#
 
                 // Add status message
                 let status_msg = format!("🌐 Opening internal browser: {}", full_url);
-                self.history_push_plain_paragraphs(
-                    PlainMessageKind::Background,
-                    vec![status_msg],
-                );
+                self.push_background_tail(status_msg);
                 // Also reflect browsing activity in the input border
                 self.bottom_pane
                     .update_status_text("using browser".to_string());
@@ -21000,7 +20991,7 @@ Have we met every part of this goal and is there no further work to do?"#
         };
 
         let lines: Vec<String> = response.lines().map(|line| line.to_string()).collect();
-        self.history_push_plain_paragraphs(PlainMessageKind::Background, lines);
+        self.push_background_tail(lines.join("\n"));
 
         self.ensure_github_settings_overlay();
     }
@@ -21748,7 +21739,7 @@ Have we met every part of this goal and is there no further work to do?"#
 
             // Add the response to the UI
             let lines: Vec<String> = status.lines().map(|line| line.to_string()).collect();
-            self.history_push_plain_paragraphs(PlainMessageKind::Background, lines);
+            self.push_background_tail(lines.join("\n"));
             return;
         }
 
