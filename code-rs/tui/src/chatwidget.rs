@@ -13190,6 +13190,7 @@ fi\n\
             elapsed: None,
             progress_past: None,
             progress_current: None,
+            session_tokens: self.auto_session_tokens(),
             editing_prompt: false,
             intro_started_at: self.auto_state.intro_started_at,
             intro_reduced_motion: self.auto_state.intro_reduced_motion,
@@ -13293,6 +13294,22 @@ fi\n\
                         app_event_tx.send(AppEvent::AutoCoordinatorUserReply {
                             user_response,
                             cli_command,
+                        });
+                    }
+                    AutoCoordinatorEvent::TokenMetrics {
+                        total_usage,
+                        last_turn_usage,
+                        turn_count,
+                    } => {
+                        app_event_tx.send(AppEvent::AutoCoordinatorTokenMetrics {
+                            total_usage,
+                            last_turn_usage,
+                            turn_count,
+                        });
+                    }
+                    AutoCoordinatorEvent::CompactedHistory { conversation } => {
+                        app_event_tx.send(AppEvent::AutoCoordinatorCompactedHistory {
+                            conversation,
                         });
                     }
                 }
@@ -13823,6 +13840,36 @@ Have we met every part of this goal and is there no further work to do?"#
             self.auto_state.placeholder_phrase = None;
         }
 
+        self.auto_rebuild_live_ring();
+        self.request_redraw();
+    }
+
+    pub(crate) fn auto_handle_token_metrics(
+        &mut self,
+        total_usage: TokenUsage,
+        last_turn_usage: TokenUsage,
+        turn_count: u32,
+    ) {
+        self.auto_history
+            .apply_token_metrics(total_usage, last_turn_usage, turn_count);
+        self.request_redraw();
+    }
+
+    fn auto_session_tokens(&self) -> Option<u64> {
+        let total = self.auto_history.total_tokens().blended_total();
+        (total > 0).then_some(total)
+    }
+
+    pub(crate) fn auto_handle_compacted_history(&mut self, conversation: Vec<ResponseItem>) {
+        self.auto_history.replace_all(conversation.clone());
+        if let Some(handle) = self.auto_handle.as_ref() {
+            if handle
+                .send(AutoCoordinatorCommand::UpdateConversation(conversation))
+                .is_err()
+            {
+                self.auto_stop(Some("Coordinator stopped unexpectedly.".to_string()));
+            }
+        }
         self.auto_rebuild_live_ring();
         self.request_redraw();
     }
@@ -14764,6 +14811,7 @@ Have we met every part of this goal and is there no further work to do?"#
                     elapsed: Some(summary.duration),
                     progress_past: None,
                     progress_current: None,
+                    session_tokens: self.auto_session_tokens(),
                     editing_prompt: false,
                     intro_started_at: self.auto_state.intro_started_at,
                     intro_reduced_motion: self.auto_state.intro_reduced_motion,
@@ -14966,6 +15014,7 @@ Have we met every part of this goal and is there no further work to do?"#
             elapsed: self.auto_state.elapsed_override,
             progress_past: progress_past_for_view,
             progress_current: progress_current_for_view,
+            session_tokens: self.auto_session_tokens(),
             cli_context,
             show_composer,
             editing_prompt: self.auto_state.is_paused_manual(),
