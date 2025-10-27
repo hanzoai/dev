@@ -46,12 +46,6 @@ Read the full notes in `release-notes/RELEASE_NOTES.md`.
   </a>
 </p>
 
-&ensp;
-| <img src="docs/screenshots/simple.png" alt="Simple interface" width="100%"><br>Simple interface | <img src="docs/screenshots/diff.png" alt="Unified diff viewer" width="100%"><br>Unified diffs |
-|:--:|:--:|
-
-| <br><img src="docs/screenshots/browser.png" alt="Browser control" width="100%"><br>Browser control | <br><img src="docs/screenshots/agents.png" alt="Assist with Claude & Gemini" width="100%"><br>Assist with Claude & Gemini |
-|:--:|:--:|
 
 
 &ensp;
@@ -75,7 +69,6 @@ Note: If another tool already provides a `code` command (e.g. VS Code), our CLI 
 **Authenticate** (one of the following):
 - **Sign in with ChatGPT** (Plus/Pro/Team; uses models available to your plan)
   - Run `code` and pick "Sign in with ChatGPT"
-  - Stores creds locally at `~/.code/auth.json` (still reads legacy `~/.codex/auth.json` if present)
 - **API key** (usage-based)
   - Set `export OPENAI_API_KEY=xyz` and run `code`
 
@@ -222,7 +215,7 @@ Code supports MCP for extended capabilities:
 - **API integrations**: Connect to external services
 - **Custom tools**: Build your own extensions
 
-Configure MCP in `~/.code/config.toml` (legacy `~/.codex/config.toml` is still read if present). Define each server under a named table like `[mcp_servers.<name>]` (this maps to the JSON `mcpServers` object used by other clients):
+Configure MCP in `~/.code/config.toml` Define each server under a named table like `[mcp_servers.<name>]` (this maps to the JSON `mcpServers` object used by other clients):
 
 ```toml
 [mcp_servers.filesystem]
@@ -263,7 +256,7 @@ model_reasoning_summary = "detailed"
 
 ### Environment variables
 
-- `CODEX_HOME`: Override config directory location
+- `CODE_HOME`: Override config directory location
 - `OPENAI_API_KEY`: Use API key instead of ChatGPT auth
 - `OPENAI_BASE_URL`: Use alternative API endpoints
 - `OPENAI_WIRE_API`: Force the built-in OpenAI provider to use `chat` or `responses` wiring
@@ -328,7 +321,7 @@ Using OpenAI, Anthropic or Google services through Code means you agree to **the
 - If you configure other model providers, you're responsible for their terms.
 
 ### Privacy
-- Your auth file lives at `~/.code/auth.json` (legacy `~/.codex/auth.json` is still read).
+- Your auth file lives at `~/.code/auth.json`
 - Inputs/outputs you send to AI providers are handled under their Terms and Privacy Policy; consult those documents (and any org-level data-sharing settings).
 
 ### Subject to change
