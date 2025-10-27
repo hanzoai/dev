@@ -240,8 +240,8 @@ mod tests {
         assert!(result.is_some());
         let plan_prompt = result.unwrap();
         assert!(plan_prompt.contains("final, comprehensive plan"));
-        // Default agents list should include cloud when no [[agents]] configured
-        assert!(plan_prompt.contains("code-gpt-5-codex"));
+        // Default agents list should include non-Codex providers when no [[agents]] configured
+        assert!(plan_prompt.contains("code-gpt-5"));
         assert!(!plan_prompt.contains("cloud-gpt-5-codex"));
 
         // Test /solve command

@@ -1225,19 +1225,19 @@ fn build_schema(active_agents: &[String], features: SchemaFeatures) -> Value {
         let guides = [
             (
                 "claude-sonnet-4.5",
-                "Default for most coding tasks (along with code-gpt-5-codex) — excels at implementation, tool use, debugging, and testing.",
+                "Default for most coding tasks (along with code-gpt-5) — excels at implementation, tool use, debugging, and testing.",
             ),
             (
                 "claude-opus-4.1",
                 "Prefer claude-sonnet-4.5 for most tasks, but a good fallback for complex reasoning when other attempts have failed.",
             ),
             (
-                "code-gpt-5-codex",
-                "Default for most coding tasks (along with claude-sonnet-4.5) - excels at implementation, refactors, multi-file edits and code review.",
-            ),
-            (
                 "code-gpt-5",
                 "Use for UI/UX or mixed tasks where explanation, design judgment, or multi-domain reasoning is equally important as code.",
+            ),
+            (
+                "code-gpt-5-codex",
+                "Legacy Codex-compatible target; keep around for accounts that still expose the Codex-only model tier.",
             ),
             (
                 "gemini-2.5-pro",

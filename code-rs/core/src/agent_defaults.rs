@@ -30,13 +30,13 @@ const CLOUD_GPT5_CODEX_WRITE: &[&str] = &[];
 /// entries are configured. The ordering here controls priority for legacy
 /// CLI-name lookups.
 pub const DEFAULT_AGENT_NAMES: &[&str] = &[
-    "code-gpt-5-codex",
     "code-gpt-5",
     "claude-sonnet-4.5",
     "claude-opus-4.1",
     "gemini-2.5-pro",
     "gemini-2.5-flash",
     "qwen-3-coder",
+    "code-gpt-5-codex",
     "cloud-gpt-5-codex",
 ];
 
@@ -77,17 +77,6 @@ impl AgentModelSpec {
 
 const AGENT_MODEL_SPECS: &[AgentModelSpec] = &[
     AgentModelSpec {
-        slug: "code-gpt-5-codex",
-        family: "code",
-        cli: "coder",
-        read_only_args: CODE_GPT5_CODEX_READ_ONLY,
-        write_args: CODE_GPT5_CODEX_WRITE,
-        model_args: &["--model", "gpt-5-codex"],
-        enabled_by_default: true,
-        aliases: &["coder", "code", "codex"],
-        gating_env: None,
-    },
-    AgentModelSpec {
         slug: "code-gpt-5",
         family: "code",
         cli: "coder",
@@ -96,6 +85,17 @@ const AGENT_MODEL_SPECS: &[AgentModelSpec] = &[
         model_args: &["--model", "gpt-5"],
         enabled_by_default: true,
         aliases: &["coder-gpt-5", "code-gpt-5"],
+        gating_env: None,
+    },
+    AgentModelSpec {
+        slug: "code-gpt-5-codex",
+        family: "code",
+        cli: "coder",
+        read_only_args: CODE_GPT5_CODEX_READ_ONLY,
+        write_args: CODE_GPT5_CODEX_WRITE,
+        model_args: &["--model", "gpt-5-codex"],
+        enabled_by_default: true,
+        aliases: &["coder", "code", "codex"],
         gating_env: None,
     },
     AgentModelSpec {

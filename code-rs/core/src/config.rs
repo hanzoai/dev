@@ -66,9 +66,9 @@ use toml_edit::Item as TomlItem;
 use toml_edit::Table as TomlTable;
 use which::which;
 
-const OPENAI_DEFAULT_MODEL: &str = "gpt-5-codex";
-const OPENAI_DEFAULT_REVIEW_MODEL: &str = "gpt-5-codex";
-pub const GPT_5_CODEX_MEDIUM_MODEL: &str = "gpt-5-codex";
+const OPENAI_DEFAULT_MODEL: &str = "gpt-5";
+const OPENAI_DEFAULT_REVIEW_MODEL: &str = "gpt-5";
+pub const GPT_5_CODEX_MEDIUM_MODEL: &str = "gpt-5";
 
 /// Maximum number of bytes of the documentation that will be embedded. Larger
 /// files are *silently truncated* to this size so we do not take up too much of
@@ -104,7 +104,7 @@ pub struct Config {
     /// Optional override of model selection.
     pub model: String,
 
-    /// Model used specifically for review sessions. Defaults to "gpt-5-codex".
+    /// Model used specifically for review sessions. Defaults to "gpt-5".
     pub review_model: String,
 
     pub model_family: ModelFamily,
@@ -3374,6 +3374,7 @@ model_verbosity = "high"
             .map(|agent| agent.name.to_ascii_lowercase())
             .collect();
 
+        assert!(enabled_names.contains("code-gpt-5"));
         assert!(enabled_names.contains("code-gpt-5-codex"));
         assert!(enabled_names.contains("claude-sonnet-4.5"));
         assert!(enabled_names.contains("gemini-2.5-pro"));
