@@ -4751,7 +4751,7 @@ impl ChatWidget<'_> {
 
         let mut prefix_items_end = new_items.len().saturating_sub(suffix_len);
 
-        let mut tail_start_cell = if suffix_len == 0 {
+        let tail_start_cell = if suffix_len == 0 {
             self.history_cells.len()
         } else {
             let start = previous_items.len() - suffix_len;
