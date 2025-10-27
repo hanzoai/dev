@@ -8,12 +8,14 @@ use code_core::config::Config;
 use code_core::config_types::{AutoDriveSettings, ReasoningEffort};
 use code_core::debug_logger::DebugLogger;
 use code_core::model_family::{derive_default_model_family, find_family_for_model};
+use code_core::openai_model_info::get_model_info;
 use code_core::project_doc::read_auto_drive_docs;
 use code_core::protocol::SandboxPolicy;
 use code_core::slash_commands::get_enabled_agents;
 use code_core::{AuthManager, ModelClient, Prompt, ResponseEvent, TextFormat};
 use code_core::error::CodexErr;
 use code_protocol::models::{ContentItem, ReasoningItemContent, ResponseItem};
+use code_core::protocol::TokenUsage;
 use futures::StreamExt;
 use reqwest::StatusCode;
 use serde::Deserialize;
@@ -22,7 +24,15 @@ use tokio_util::sync::CancellationToken;
 use tracing::{debug, warn};
 use uuid::Uuid;
 
+use crate::auto_compact::{
+    apply_compaction,
+    build_checkpoint_summary,
+    compute_slice_bounds,
+    estimate_item_tokens,
+    CheckpointSummary,
+};
 use crate::coordinator_user_schema::{parse_user_turn_reply, user_turn_schema};
+use crate::session_metrics::SessionMetrics;
 use crate::retry::{retry_with_backoff, RetryDecision, RetryError, RetryOptions};
 #[cfg(feature = "dev-faults")]
 use crate::faults::{fault_to_error, next_fault, FaultScope, InjectedFault};
@@ -35,6 +45,7 @@ const RATE_LIMIT_BUFFER: Duration = Duration::from_secs(120);
 const RATE_LIMIT_JITTER_MAX: Duration = Duration::from_secs(30);
 const MAX_RETRY_ELAPSED: Duration = Duration::from_secs(7 * 24 * 60 * 60);
 const MAX_DECISION_RECOVERY_ATTEMPTS: u32 = 3;
+const MESSAGE_LIMIT_FALLBACK: usize = 120;
 
 #[derive(Debug, thiserror::Error)]
 #[error("auto coordinator cancelled")]
@@ -109,6 +120,14 @@ pub enum AutoCoordinatorEvent {
     UserReply {
         user_response: Option<String>,
         cli_command: Option<String>,
+    },
+    TokenMetrics {
+        total_usage: TokenUsage,
+        last_turn_usage: TokenUsage,
+        turn_count: u32,
+    },
+    CompactedHistory {
+        conversation: Vec<ResponseItem>,
     },
 }
 
@@ -586,6 +605,52 @@ mod tests {
         assert_eq!(guidance.len(), 2);
         assert!(guidance.iter().any(|hint| hint == "Respond with JSON only"));
     }
+
+    #[test]
+    fn compaction_triggers_when_projected_exceeds_threshold() {
+        assert!(should_compact("gpt-5", 220_000, 10_000, 0, true));
+        assert!(!should_compact("gpt-5", 100_000, 10_000, 0, true));
+    }
+
+    #[test]
+    fn compaction_falls_back_to_message_limit_when_unknown_model() {
+        assert!(should_compact(
+            "unknown-model",
+            0,
+            0,
+            MESSAGE_LIMIT_FALLBACK,
+            false,
+        ));
+        assert!(!should_compact(
+            "unknown-model",
+            0,
+            0,
+            MESSAGE_LIMIT_FALLBACK.saturating_sub(1),
+            false,
+        ));
+    }
+
+    #[test]
+    fn compaction_fallback_runs_before_tokens_exist() {
+        assert!(should_compact(
+            "gpt-5",
+            0,
+            4_000,
+            MESSAGE_LIMIT_FALLBACK,
+            false,
+        ));
+    }
+
+    #[test]
+    fn compaction_fallback_stops_once_tokens_recorded() {
+        assert!(!should_compact(
+            "gpt-5",
+            1,
+            0,
+            MESSAGE_LIMIT_FALLBACK,
+            true,
+        ));
+    }
 }
 
 #[derive(Debug, Deserialize)]
@@ -689,6 +754,8 @@ struct ParsedCoordinatorDecision {
     agents: Vec<AgentAction>,
     goal: Option<String>,
     response_items: Vec<ResponseItem>,
+    token_usage: Option<TokenUsage>,
+    model_slug: String,
 }
 
 #[derive(Debug, Clone)]
@@ -836,6 +903,9 @@ fn run_auto_loop(
     let mut stopped = false;
     let mut requests_completed: u64 = 0;
     let mut consecutive_decision_failures: u32 = 0;
+    let mut session_metrics = SessionMetrics::default();
+    let mut active_model_slug = MODEL_SLUG.to_string();
+    let mut prev_compact_summary: Option<String> = None;
 
     loop {
         if stopped {
@@ -848,6 +918,18 @@ fn run_auto_loop(
                 continue;
             }
 
+            let mut conv = conv;
+            if let Some(summary) = maybe_compact(
+                &runtime,
+                client.as_ref(),
+                &event_tx,
+                &mut conv,
+                &session_metrics,
+                prev_compact_summary.as_deref(),
+                &active_model_slug,
+            ) {
+                prev_compact_summary = Some(summary);
+            }
             let developer_intro = base_developer_intro.as_str();
             let mut retry_conversation = Some(conv.clone());
             match request_coordinator_decision(
@@ -870,8 +952,15 @@ fn run_auto_loop(
                     mut agents_timing,
                     mut agents,
                     mut response_items,
+                    token_usage,
+                    model_slug,
                 }) => {
                     retry_conversation.take();
+                    if let Some(usage) = token_usage.as_ref() {
+                        session_metrics.record_turn(usage);
+                        emit_auto_drive_metrics(&event_tx, &session_metrics);
+                    }
+                    active_model_slug = model_slug;
                     if !include_agents {
                         agents_timing = None;
                         agents.clear();
@@ -1336,6 +1425,8 @@ fn build_schema(active_agents: &[String], features: SchemaFeatures) -> Value {
 struct RequestStreamResult {
     output_text: String,
     response_items: Vec<ResponseItem>,
+    token_usage: Option<TokenUsage>,
+    model_slug: String,
 }
 
 fn request_coordinator_decision(
@@ -1349,7 +1440,12 @@ fn request_coordinator_decision(
     event_tx: &AutoCoordinatorEventSender,
     cancel_token: &CancellationToken,
 ) -> Result<ParsedCoordinatorDecision> {
-    let (raw, response_items) = request_decision(
+    let RequestStreamResult {
+        output_text,
+        response_items,
+        token_usage,
+        model_slug,
+    } = request_decision(
         runtime,
         client,
         developer_intro,
@@ -1360,9 +1456,11 @@ fn request_coordinator_decision(
         event_tx,
         cancel_token,
     )?;
-    let (mut decision, value) = parse_decision(&raw)?;
+    let (mut decision, value) = parse_decision(&output_text)?;
     debug!("[Auto coordinator] model decision: {:?}", value);
     decision.response_items = response_items;
+    decision.token_usage = token_usage;
+    decision.model_slug = model_slug;
     Ok(decision)
 }
 
@@ -1376,7 +1474,7 @@ fn request_decision(
     auto_instructions: Option<&str>,
     event_tx: &AutoCoordinatorEventSender,
     cancel_token: &CancellationToken,
-) -> Result<(String, Vec<ResponseItem>)> {
+) -> Result<RequestStreamResult> {
     match request_decision_with_model(
         runtime,
         client,
@@ -1389,7 +1487,7 @@ fn request_decision(
         cancel_token,
         MODEL_SLUG,
     ) {
-        Ok(result) => Ok((result.output_text, result.response_items)),
+        Ok(result) => Ok(result),
         Err(err) => {
             let fallback_slug = client.default_model_slug().to_string();
             if fallback_slug != MODEL_SLUG && should_retry_with_default_model(&err) {
@@ -1411,7 +1509,6 @@ fn request_decision(
                     cancel_token,
                     &fallback_slug,
                 )
-                .map(|res| (res.output_text, res.response_items))
                 .map_err(|fallback_err| {
                     fallback_err.context(format!(
                         "coordinator fallback with model '{}' failed after original error: {}",
@@ -1435,7 +1532,7 @@ fn request_user_turn_decision(
     event_tx: &AutoCoordinatorEventSender,
     cancel_token: &CancellationToken,
 ) -> Result<(Option<String>, Option<String>)> {
-    let (raw, _response_items) = request_decision(
+    let result = request_decision(
         runtime,
         client,
         developer_intro,
@@ -1446,7 +1543,7 @@ fn request_user_turn_decision(
         event_tx,
         cancel_token,
     )?;
-    let (user_response, cli_command) = parse_user_turn_reply(&raw)?;
+    let (user_response, cli_command) = parse_user_turn_reply(&result.output_text)?;
     Ok((user_response, cli_command))
 }
 
@@ -1496,6 +1593,7 @@ fn request_decision_with_model(
                     let mut response_items: Vec<ResponseItem> = Vec::new();
                     let mut reasoning_delta_accumulator = String::new();
                     let mut saw_output_text_delta = false;
+                    let mut token_usage: Option<TokenUsage> = None;
                     while let Some(ev) = stream.next().await {
                         match ev {
                             Ok(ResponseEvent::OutputTextDelta { delta, .. }) => {
@@ -1540,7 +1638,10 @@ fn request_decision_with_model(
                                     summary_index: None,
                                 });
                             }
-                            Ok(ResponseEvent::Completed { .. }) => break,
+                            Ok(ResponseEvent::Completed { token_usage: usage, .. }) => {
+                                token_usage = usage;
+                                break;
+                            }
                             Err(err) => return Err(err.into()),
                             _ => {}
                         }
@@ -1562,6 +1663,8 @@ fn request_decision_with_model(
                     Ok(RequestStreamResult {
                         output_text: out,
                         response_items,
+                        token_usage,
+                        model_slug: model_slug.to_string(),
                     })
                 }
             },
@@ -2116,6 +2219,8 @@ fn convert_decision_new(
         agents: agent_actions,
         goal,
         response_items: Vec::new(),
+        token_usage: None,
+        model_slug: MODEL_SLUG.to_string(),
     })
 }
 
@@ -2161,6 +2266,8 @@ fn convert_decision_legacy(
         agents: Vec::new(),
         goal,
         response_items: Vec::new(),
+        token_usage: None,
+        model_slug: MODEL_SLUG.to_string(),
     })
 }
 
@@ -2277,7 +2384,7 @@ pub(super) fn extract_first_json_object(input: &str) -> Option<String> {
     None
 }
 
-pub(super) fn make_message(role: &str, text: String) -> ResponseItem {
+pub(crate) fn make_message(role: &str, text: String) -> ResponseItem {
     let content = if role.eq_ignore_ascii_case("assistant") {
         ContentItem::OutputText { text }
     } else {
@@ -2304,4 +2411,124 @@ fn strip_role_prefix(input: &str) -> &str {
         }
     }
     input
+}
+
+fn emit_auto_drive_metrics(event_tx: &AutoCoordinatorEventSender, metrics: &SessionMetrics) {
+    if metrics.turn_count() == 0 && metrics.running_total().is_zero() {
+        return;
+    }
+
+    let event = AutoCoordinatorEvent::TokenMetrics {
+        total_usage: metrics.running_total().clone(),
+        last_turn_usage: metrics.last_turn().clone(),
+        turn_count: metrics.turn_count(),
+    };
+    event_tx.send(event);
+}
+
+fn maybe_compact(
+    runtime: &tokio::runtime::Runtime,
+    client: &ModelClient,
+    event_tx: &AutoCoordinatorEventSender,
+    conversation: &mut Vec<ResponseItem>,
+    metrics: &SessionMetrics,
+    prev_summary: Option<&str>,
+    model_slug: &str,
+) -> Option<String> {
+    let transcript_tokens: u64 = conversation
+        .iter()
+        .map(|item| estimate_item_tokens(item) as u64)
+        .sum();
+    let estimated_next = metrics.estimated_next_prompt_tokens();
+    let message_count = conversation.len();
+    let has_recorded_turns = metrics.turn_count() > 0;
+
+    if !should_compact(
+        model_slug,
+        transcript_tokens,
+        estimated_next,
+        message_count,
+        has_recorded_turns,
+    ) {
+        return None;
+    }
+
+    let Some(bounds) = compute_slice_bounds(conversation) else {
+        return None;
+    };
+
+    let slice: Vec<ResponseItem> = conversation[bounds.0..bounds.1].to_vec();
+    event_tx.send(AutoCoordinatorEvent::Thinking {
+        delta: "Compacting history to stay within the context window…".to_string(),
+        summary_index: None,
+    });
+
+    let CheckpointSummary { message, text } = build_checkpoint_summary(
+        runtime,
+        client,
+        model_slug,
+        &slice,
+        prev_summary,
+    );
+
+    if apply_compaction(conversation, bounds, prev_summary, message).is_none() {
+        return None;
+    }
+
+    event_tx.send(AutoCoordinatorEvent::CompactedHistory {
+        conversation: conversation.clone(),
+    });
+
+    debug!(
+        "[Auto coordinator] compacted {} messages; new conversation length {}",
+        slice.len(),
+        conversation.len()
+    );
+    Some(text)
+}
+
+/// Determine if compaction should occur based on token usage.
+///
+/// Uses 80% of the model's max_context as the threshold.
+/// Returns true if `session_total + estimated_next >= 0.8 * model_context_window`.
+///
+/// # Arguments
+/// * `model_slug` - The model identifier to look up context limits
+/// * `session_total` - Total tokens used in the session so far
+/// * `estimated_next` - Estimated tokens for the next turn
+/// * `message_count` - Number of messages in the current conversation (fallback heuristic)
+pub fn should_compact(
+    model_slug: &str,
+    transcript_tokens: u64,
+    estimated_next: u64,
+    message_count: usize,
+    has_recorded_turns: bool,
+) -> bool {
+    // Get model family to look up model info
+    let family = find_family_for_model(model_slug)
+        .unwrap_or_else(|| derive_default_model_family(model_slug));
+
+    if let Some(model_info) = get_model_info(&family) {
+        let context_window = model_info
+            .auto_compact_token_limit
+            .and_then(|limit| (limit > 0).then(|| limit as u64))
+            .unwrap_or(model_info.context_window);
+        if context_window > 0 {
+            let threshold = (context_window as f64 * 0.8) as u64;
+            let projected_total = transcript_tokens.saturating_add(estimated_next);
+            if projected_total >= threshold {
+                return true;
+            }
+
+            if has_recorded_turns {
+                return false;
+            }
+        }
+    }
+
+    fallback_message_limit(message_count)
+}
+
+fn fallback_message_limit(message_count: usize) -> bool {
+    message_count >= MESSAGE_LIMIT_FALLBACK
 }

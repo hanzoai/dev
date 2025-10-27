@@ -56,6 +56,7 @@ pub(crate) struct AutoActiveViewModel {
     pub elapsed: Option<Duration>,
     pub progress_past: Option<String>,
     pub progress_current: Option<String>,
+    pub session_tokens: Option<u64>,
     pub intro_started_at: Option<Instant>,
     pub intro_reduced_motion: bool,
 }
@@ -413,6 +414,9 @@ impl AutoCoordinatorView {
             if duration.as_secs() > 0 {
                 details.push(Self::format_elapsed(duration));
             }
+        }
+        if let Some(tokens) = model.session_tokens {
+            details.push(Self::format_tokens(tokens));
         }
         if model.turns_completed > 0 {
             details.push(Self::format_turns(model.turns_completed));
@@ -1478,6 +1482,14 @@ impl AutoCoordinatorView {
     fn format_turns(turns: usize) -> String {
         let label = if turns == 1 { "turn" } else { "turns" };
         format!("{} {}", turns, label)
+    }
+
+    fn format_tokens(tokens: u64) -> String {
+        if tokens >= 1_000 {
+            format!("{}k tokens", tokens / 1_000)
+        } else {
+            format!("{} tokens", tokens)
+        }
     }
 
     fn progress_labels(model: &AutoActiveViewModel) -> (Option<String>, Option<String>) {

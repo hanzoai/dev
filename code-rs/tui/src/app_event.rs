@@ -5,6 +5,7 @@ use code_core::protocol::Event;
 use code_core::protocol::OrderMeta;
 use code_core::protocol::ValidationGroup;
 use code_core::protocol::ApprovedCommandMatchKind;
+use code_core::protocol::TokenUsage;
 use code_core::git_info::CommitLogEntry;
 use code_core::protocol::ReviewContextMetadata;
 use code_file_search::FileMatch;
@@ -149,6 +150,14 @@ pub(crate) enum AppEvent {
     AutoCoordinatorThinking {
         delta: String,
         summary_index: Option<u32>,
+    },
+    AutoCoordinatorTokenMetrics {
+        total_usage: TokenUsage,
+        last_turn_usage: TokenUsage,
+        turn_count: u32,
+    },
+    AutoCoordinatorCompactedHistory {
+        conversation: Vec<ResponseItem>,
     },
     AutoCoordinatorCountdown {
         countdown_id: u64,

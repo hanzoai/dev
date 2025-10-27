@@ -1,6 +1,12 @@
 use std::collections::VecDeque;
 
+use code_core::protocol::TokenUsage;
 use code_protocol::models::{ContentItem, ResponseItem};
+
+use crate::session_metrics::SessionMetrics;
+
+/// Token estimation: 4 bytes per token (same as core/truncate.rs)
+const BYTES_PER_TOKEN: usize = 4;
 
 /// Maintains the Auto Drive conversation transcript between coordinator turns.
 ///
@@ -12,6 +18,9 @@ pub struct AutoDriveHistory {
     converted: Vec<ResponseItem>,
     raw: Vec<ResponseItem>,
     pending_duplicates: VecDeque<NormalizedMessage>,
+    /// Summary from the previous compaction, if any
+    prev_compact_summary: Option<String>,
+    session_metrics: SessionMetrics,
 }
 
 impl AutoDriveHistory {
@@ -20,6 +29,8 @@ impl AutoDriveHistory {
             converted: Vec::new(),
             raw: Vec::new(),
             pending_duplicates: VecDeque::new(),
+            prev_compact_summary: None,
+            session_metrics: SessionMetrics::default(),
         }
     }
 
@@ -137,14 +148,132 @@ impl AutoDriveHistory {
         self.raw.clone()
     }
 
+    pub fn replace_all(&mut self, items: Vec<ResponseItem>) {
+        self.converted = items.clone();
+        self.raw = items;
+        self.pending_duplicates.clear();
+    }
+
     pub fn clear(&mut self) {
         self.converted.clear();
         self.raw.clear();
         self.pending_duplicates.clear();
+        self.prev_compact_summary = None;
+        self.session_metrics.reset();
     }
 
     pub fn converted_is_empty(&self) -> bool {
         self.converted.is_empty()
+    }
+
+    /// Replace the tracked metrics with the latest values reported by the coordinator.
+    pub fn apply_token_metrics(
+        &mut self,
+        total: TokenUsage,
+        last: TokenUsage,
+        turn_count: u32,
+    ) {
+        self.session_metrics.sync_absolute(total, last, turn_count);
+    }
+
+    /// Returns the cumulative token usage across all coordinator turns.
+    pub fn total_tokens(&self) -> &TokenUsage {
+        self.session_metrics.running_total()
+    }
+
+    /// Returns the token usage from the most recent coordinator turn.
+    pub fn last_turn_tokens(&self) -> &TokenUsage {
+        self.session_metrics.last_turn()
+    }
+
+    /// Returns the number of turns recorded so far.
+    pub fn recorded_turns(&self) -> u32 {
+        self.session_metrics.turn_count()
+    }
+
+    /// Returns the estimated prompt tokens for the next turn.
+    pub fn estimated_next_prompt_tokens(&self) -> u64 {
+        self.session_metrics.estimated_next_prompt_tokens()
+    }
+
+    /// Perform compaction by selecting a slice after the goal message (first user message),
+    /// finding the 50% token midpoint, advancing to the end of a turn boundary, and replacing
+    /// the slice with a compact summary item.
+    ///
+    /// Returns `Ok(true)` if compaction was performed, `Ok(false)` if skipped, or an error.
+    pub fn compact_slice(&mut self, summarizer: impl FnOnce(&[ResponseItem]) -> String) -> Result<bool, String> {
+        // Find the goal message (first user message)
+        let goal_idx = self.converted.iter().position(|item| {
+            matches!(item, ResponseItem::Message { role, .. } if role == "user")
+        });
+
+        let Some(goal_idx) = goal_idx else {
+            // No goal message found; nothing to compact
+            return Ok(false);
+        };
+
+        // We need at least a few items after the goal to make compaction worthwhile
+        if self.converted.len() <= goal_idx + 3 {
+            return Ok(false);
+        }
+
+        // Calculate total tokens after the goal message
+        let items_after_goal = &self.converted[goal_idx + 1..];
+        let total_tokens = estimate_tokens(items_after_goal);
+
+        // We need a reasonable amount of content to compact
+        if total_tokens < 1000 {
+            return Ok(false);
+        }
+
+        // Find the 50% midpoint
+        let target_tokens = total_tokens / 2;
+        let mut accumulated_tokens = 0;
+        let mut midpoint_idx = goal_idx + 1;
+
+        for (i, item) in items_after_goal.iter().enumerate() {
+            accumulated_tokens += estimate_item_tokens(item);
+            if accumulated_tokens >= target_tokens {
+                midpoint_idx = goal_idx + 1 + i;
+                break;
+            }
+        }
+
+        // Advance to the end of the turn boundary
+        let slice_end = advance_to_turn_boundary(&self.converted, midpoint_idx);
+
+        // The slice to compact is from (goal_idx + 1) to slice_end
+        if slice_end <= goal_idx + 1 {
+            return Ok(false);
+        }
+
+        let slice_to_compact = &self.converted[goal_idx + 1..slice_end];
+
+        // Generate summary
+        let summary_text = summarizer(slice_to_compact);
+
+        // Build the compact summary item
+        let compact_item = ResponseItem::Message {
+            id: None,
+            role: "user".to_string(),
+            content: vec![ContentItem::InputText {
+                text: format!(
+                    "<compact_summary>\n{}\n</compact_summary>",
+                    summary_text
+                ),
+            }],
+        };
+
+        // Replace the slice with the compact item
+        let mut new_converted = Vec::new();
+        new_converted.extend_from_slice(&self.converted[..=goal_idx]);
+        new_converted.push(compact_item);
+        new_converted.extend_from_slice(&self.converted[slice_end..]);
+
+        self.converted = new_converted;
+        self.prev_compact_summary = Some(summary_text);
+
+        Ok(true)
     }
 
 }
@@ -189,5 +318,188 @@ fn content_text(content: &NormalizedContent) -> Option<&str> {
         NormalizedContent::InputText(text)
         | NormalizedContent::OutputText(text)
         | NormalizedContent::InputImage(text) => Some(text.as_str()),
+    }
+}
+
+/// Estimate the total tokens for a slice of ResponseItems.
+fn estimate_tokens(items: &[ResponseItem]) -> usize {
+    items.iter().map(estimate_item_tokens).sum()
+}
+
+/// Estimate tokens for a single ResponseItem.
+/// Uses byte count divided by BYTES_PER_TOKEN (4) as fallback, same as core/truncate.rs.
+fn estimate_item_tokens(item: &ResponseItem) -> usize {
+    let byte_count = match item {
+        ResponseItem::Message { content, .. } => {
+            content.iter().map(|c| match c {
+                ContentItem::InputText { text } | ContentItem::OutputText { text } => text.len(),
+                ContentItem::InputImage { image_url } => image_url.len() / 10, // images are less token-heavy
+            }).sum()
+        }
+        ResponseItem::FunctionCall { name, arguments, .. } => name.len() + arguments.len(),
+        ResponseItem::FunctionCallOutput { output, .. } => output.content.len(),
+        ResponseItem::CustomToolCall { name, input, .. } => name.len() + input.len(),
+        ResponseItem::CustomToolCallOutput { output, .. } => output.len(),
+        ResponseItem::Reasoning { summary, content, .. } => {
+            summary.iter().map(|s| match s {
+                code_protocol::models::ReasoningItemReasoningSummary::SummaryText { text } => text.len(),
+            }).sum::<usize>()
+                + content.as_ref().map(|c| c.iter().map(|item| match item {
+                    code_protocol::models::ReasoningItemContent::ReasoningText { text } |
+                    code_protocol::models::ReasoningItemContent::Text { text } => text.len(),
+                }).sum()).unwrap_or(0)
+        }
+        // Catch-all for other types: Other, LocalShellCall, WebSearchCall, etc.
+        _ => 0,
+    };
+    byte_count.div_ceil(BYTES_PER_TOKEN)
+}
+
+/// Advance from the given index to the end of the current turn boundary.
+/// A turn boundary ends when we see a user message (the start of the next turn).
+fn advance_to_turn_boundary(items: &[ResponseItem], start_idx: usize) -> usize {
+    let mut idx = start_idx;
+
+    // Scan forward to find the next user message
+    while idx < items.len() {
+        if matches!(&items[idx], ResponseItem::Message { role, .. } if role == "user") {
+            // Found the start of the next turn; stop here
+            return idx;
+        }
+        idx += 1;
+    }
+
+    // Reached the end of the history
+    idx
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn make_user_message(text: &str) -> ResponseItem {
+        ResponseItem::Message {
+            id: None,
+            role: "user".to_string(),
+            content: vec![ContentItem::InputText {
+                text: text.to_string(),
+            }],
+        }
+    }
+
+    fn make_assistant_message(text: &str) -> ResponseItem {
+        ResponseItem::Message {
+            id: None,
+            role: "assistant".to_string(),
+            content: vec![ContentItem::OutputText {
+                text: text.to_string(),
+            }],
+        }
+    }
+
+    fn make_usage(input: u64, output: u64) -> TokenUsage {
+        TokenUsage {
+            input_tokens: input,
+            cached_input_tokens: 0,
+            output_tokens: output,
+            reasoning_output_tokens: 0,
+            total_tokens: input + output,
+        }
+    }
+
+    #[test]
+    fn test_compact_slice_no_goal_message() {
+        let mut history = AutoDriveHistory::new();
+        history.converted = vec![
+            make_assistant_message("Hello"),
+        ];
+
+        let result = history.compact_slice(|_| "SUMMARY".to_string());
+        assert!(result.is_ok());
+        assert!(!result.unwrap()); // Should skip compaction
+    }
+
+    #[test]
+    fn test_compact_slice_insufficient_items() {
+        let mut history = AutoDriveHistory::new();
+        history.converted = vec![
+            make_user_message("Goal"),
+            make_assistant_message("Response 1"),
+        ];
+
+        let result = history.compact_slice(|_| "SUMMARY".to_string());
+        assert!(result.is_ok());
+        assert!(!result.unwrap()); // Should skip compaction
+    }
+
+    #[test]
+    fn test_compact_slice_basic() {
+        let mut history = AutoDriveHistory::new();
+        // Create a history with a goal and enough content to compact
+        let large_text = "x".repeat(4000); // ~1000 tokens
+        history.converted = vec![
+            make_user_message("Goal message"),
+            make_assistant_message(&large_text),
+            make_user_message("Turn 2"),
+            make_assistant_message(&large_text),
+            make_user_message("Turn 3"),
+        ];
+
+        let result = history.compact_slice(|items| {
+            format!("Compacted {} items", items.len())
+        });
+
+        assert!(result.is_ok());
+        assert!(result.unwrap()); // Compaction should occur
+
+        // Verify structure: goal + compact summary inserted ahead of remaining turns
+        assert_eq!(history.converted.len(), 5);
+        assert!(matches!(&history.converted[0], ResponseItem::Message { role, .. } if role == "user"));
+        assert!(matches!(&history.converted[1], ResponseItem::Message { role, content, .. }
+            if role == "user" && content.iter().any(|c| matches!(c, ContentItem::InputText { text } if text.contains("<compact_summary>")))));
+        assert!(matches!(&history.converted[2], ResponseItem::Message { role, content, .. }
+            if role == "user" && content.iter().any(|c| matches!(c, ContentItem::InputText { text } if text.contains("Turn 2")))));
+    }
+
+    #[test]
+    fn test_apply_token_metrics_updates_totals() {
+        let mut history = AutoDriveHistory::new();
+        history.apply_token_metrics(make_usage(10, 5), make_usage(4, 2), 3);
+
+        assert_eq!(history.total_tokens().input_tokens, 10);
+        assert_eq!(history.last_turn_tokens().input_tokens, 4);
+        assert_eq!(history.recorded_turns(), 3);
+        assert_eq!(history.estimated_next_prompt_tokens(), 4);
+    }
+
+    #[test]
+    fn test_advance_to_turn_boundary() {
+        let items = vec![
+            make_user_message("Goal"),
+            make_assistant_message("Response 1"),
+            make_assistant_message("Response 2"),
+            make_user_message("Turn 2"),
+            make_assistant_message("Response 3"),
+        ];
+
+        // Starting from index 1 should advance to index 3 (next user message)
+        let end = advance_to_turn_boundary(&items, 1);
+        assert_eq!(end, 3);
+
+        // Starting from index 4 should advance to the end (no more user messages)
+        let end = advance_to_turn_boundary(&items, 4);
+        assert_eq!(end, 5);
+    }
+
+    #[test]
+    fn test_estimate_tokens() {
+        let items = vec![
+            make_user_message("Hello world"), // ~11 chars / 4 = ~2-3 tokens
+            make_assistant_message("How are you?"), // ~12 chars / 4 = ~3 tokens
+        ];
+
+        let tokens = estimate_tokens(&items);
+        assert!(tokens > 0);
+        assert!(tokens < 100); // Reasonable estimate
     }
 }
