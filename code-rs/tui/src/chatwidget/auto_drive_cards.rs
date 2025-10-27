@@ -83,6 +83,20 @@ pub(super) fn record_action(
     }
 }
 
+pub(super) fn update_goal(
+    chat: &mut ChatWidget<'_>,
+    order_key: OrderKey,
+    goal: Option<String>,
+) {
+    if let Some(mut tracker) = chat.tools_state.auto_drive_tracker.take() {
+        tracker.request_ordinal = order_key.req;
+        tracker.slot.set_order_key(order_key);
+        tracker.cell.set_goal(goal);
+        tracker.replace(chat);
+        chat.tools_state.auto_drive_tracker = Some(tracker);
+    }
+}
+
 pub(super) fn set_status(chat: &mut ChatWidget<'_>, order_key: OrderKey, status: AutoDriveStatus) {
     if let Some(mut tracker) = chat.tools_state.auto_drive_tracker.take() {
         tracker.request_ordinal = order_key.req;

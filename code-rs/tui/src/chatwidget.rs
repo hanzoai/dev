@@ -1905,6 +1905,14 @@ impl ChatWidget<'_> {
         }
     }
 
+    fn auto_card_set_goal(&mut self, goal: Option<String>) {
+        if self.tools_state.auto_drive_tracker.is_none() {
+            return;
+        }
+        let order_key = self.auto_card_next_order_key();
+        auto_drive_cards::update_goal(self, order_key, goal);
+    }
+
     fn auto_card_finalize(
         &mut self,
         message: Option<String>,
@@ -13633,8 +13641,10 @@ fi\n\
         self.auto_pending_goal_request = false;
 
         if let Some(goal_text) = goal.as_ref().map(|g| g.trim()).filter(|g| !g.is_empty()) {
-            self.auto_state.goal = Some(goal_text.to_string());
+            let derived_goal = goal_text.to_string();
+            self.auto_state.goal = Some(derived_goal.clone());
             self.auto_goal_bootstrap_done = true;
+            self.auto_card_set_goal(Some(derived_goal));
         }
 
         let progress_past = Self::normalize_progress_field(progress_past);
@@ -13668,6 +13678,17 @@ fi\n\
 
         self.pending_turn_descriptor = None;
         self.pending_auto_turn_config = None;
+
+        if let Some(current) = progress_current
+            .as_ref()
+            .map(|value| value.trim())
+            .filter(|value| !value.is_empty())
+        {
+            self.auto_card_add_action(
+                format!("Progress: {current}"),
+                AutoDriveActionKind::Info,
+            );
+        }
 
         let mut promoted_agents: Vec<String> = Vec::new();
         let continue_status = matches!(status, AutoCoordinatorStatus::Continue);
@@ -13852,8 +13873,8 @@ Have we met every part of this goal and is there no further work to do?"#
 
     fn auto_apply_controller_effects(&mut self, effects: Vec<AutoControllerEffect>) {
         for effect in effects {
-            match effect {
-                AutoControllerEffect::RefreshUi => {
+        match effect {
+            AutoControllerEffect::RefreshUi => {
                     self.auto_rebuild_live_ring();
                     self.request_redraw();
                 }
@@ -22774,6 +22795,79 @@ mod tests {
         assert!(chat.auto_goal_bootstrap_done);
         assert!(!chat.auto_pending_goal_request);
         assert_eq!(chat.auto_state.current_cli_prompt.as_deref(), Some("echo ready"));
+    }
+
+    #[test]
+    fn auto_card_goal_updates_after_derivation() {
+        let mut harness = ChatWidgetHarness::new();
+        {
+            let chat = harness.chat();
+            chat.auto_state.set_phase(AutoRunPhase::Active);
+            chat.auto_state.goal = Some(AUTO_BOOTSTRAP_GOAL_PLACEHOLDER.to_string());
+            chat.auto_card_start(Some(AUTO_BOOTSTRAP_GOAL_PLACEHOLDER.to_string()));
+        }
+
+        {
+            let chat = harness.chat();
+            chat.auto_handle_decision(
+                AutoCoordinatorStatus::Continue,
+                None,
+                None,
+                Some("Document release tasks".to_string()),
+                Some(AutoTurnCliAction {
+                    prompt: "echo start".to_string(),
+                    context: None,
+                }),
+                None,
+                Vec::new(),
+                Vec::new(),
+            );
+        }
+
+        let chat = harness.chat();
+        let tracker = chat
+            .tools_state
+            .auto_drive_tracker
+            .as_ref()
+            .expect("auto drive tracker should be present");
+        assert_eq!(tracker.cell.goal_text(), Some("Document release tasks"));
+    }
+
+    #[test]
+    fn auto_card_shows_progress_current_in_state_detail() {
+        let mut harness = ChatWidgetHarness::new();
+        {
+            let chat = harness.chat();
+            chat.auto_state.set_phase(AutoRunPhase::Active);
+            chat.auto_state.goal = Some("Ship feature".to_string());
+            chat.auto_card_start(Some("Ship feature".to_string()));
+        }
+
+        {
+            let chat = harness.chat();
+            chat.auto_handle_decision(
+                AutoCoordinatorStatus::Continue,
+                Some("Past work".to_string()),
+                Some("Drafting fix".to_string()),
+                None,
+                Some(AutoTurnCliAction {
+                    prompt: "echo work".to_string(),
+                    context: None,
+                }),
+                None,
+                Vec::new(),
+                Vec::new(),
+            );
+        }
+
+        let chat = harness.chat();
+        let tracker = chat
+            .tools_state
+            .auto_drive_tracker
+            .as_ref()
+            .expect("auto drive tracker should be present");
+        let actions = tracker.cell.action_texts();
+        assert!(actions.iter().any(|text| text == "Progress: Drafting fix"));
     }
 
     #[test]
