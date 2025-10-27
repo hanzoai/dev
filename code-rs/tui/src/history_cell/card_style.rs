@@ -60,13 +60,14 @@ impl CardRow {
 
 pub(crate) const CARD_ACCENT_WIDTH: usize = 2;
 
-pub(crate) fn agent_card_style(write_enabled: Option<bool>) -> CardStyle {
+pub(crate) fn agent_card_style(_write_enabled: Option<bool>) -> CardStyle {
+    // Agent batches should share the calmer green theme regardless of write access so
+    // mixed read/write runs stay visually consistent.
     let is_dark = is_dark_theme_active();
-    let definition = match (write_enabled.unwrap_or(false), is_dark) {
-        (true, true) => card_theme::agent_write_dark_theme(),
-        (true, false) => card_theme::agent_write_light_theme(),
-        (false, true) => card_theme::agent_read_only_dark_theme(),
-        (false, false) => card_theme::agent_read_only_light_theme(),
+    let definition = if is_dark {
+        card_theme::agent_read_only_dark_theme()
+    } else {
+        card_theme::agent_read_only_light_theme()
     };
     style_from_theme(definition, is_dark)
 }
