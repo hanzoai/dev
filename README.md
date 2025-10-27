@@ -33,21 +33,17 @@ Read the full notes in `release-notes/RELEASE_NOTES.md`.
 - 🔒 **Safety modes** – Read-only, approvals, and workspace sandboxing.
 
 <p align="center">
-  <strong>Introducing Auto Drive</strong>
-  <video width="100%" controls playsinline>
-    <source src="https://upload.justevery.com/AutoDrive.webm" type="video/webm">
-    <source src="https://upload.justevery.com/AutoDrive.mp4" type="video/mp4">
-    Your browser does not support embedded videos. Watch the <a href="https://upload.justevery.com/AutoDrive.mp4">Auto Drive demo</a> instead.
-  </video>
+  <strong>Introducing Auto Drive</strong><br>
+  <a href="https://youtu.be/Du3p7Q8_eUo">
+    <img src="docs/screenshots/video-auto-drive-play.jpg" alt="Play Introducing Auto Drive video" width="100%">
+  </a>
 </p>
 
 <p align="center">
-  <strong>Multi-Agent Support</strong>
-  <video width="100%" controls playsinline>
-    <source src="https://upload.justevery.com/v0-3.webm" type="video/webm">
-    <source src="https://upload.justevery.com/v0-3.mp4" type="video/mp4">
-    Your browser does not support embedded videos. Watch the <a href="https://upload.justevery.com/v0-3.mp4">v0.3 overview</a> instead.
-  </video>
+  <strong>Multi-Agent Support</strong><br>
+  <a href="https://youtu.be/1_X8O8W2X0M">
+    <img src="docs/screenshots/video-v03-play.jpg" alt="Play Multi-Agent Support video" width="100%">
+  </a>
 </p>
 
 &ensp;
