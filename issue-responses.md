@@ -57,3 +57,7 @@ Thanks for the detailed report! The Agents overlay now persists the “Enabled�
 - #255 — backlog (Ctrl-A shortcut conflict)
 - #232 — backlog (background bash support)
 - #207 — fixed (Codex optional defaults)
+
+## #307 — Gemini agent error
+
+Appreciate the heads-up! The Gemini sub-agents now invoke the CLI with the long `--model` flag, which unblocks the newer releases that rejected `-m`. A dedicated unit test guards the flag so we don’t regress, and the update will land in the next release.
