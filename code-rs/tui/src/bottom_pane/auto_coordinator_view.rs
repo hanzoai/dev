@@ -110,11 +110,6 @@ impl AutoCoordinatorView {
         self.model = model;
     }
 
-    #[cfg(test)]
-    pub(crate) fn model(&self) -> &AutoCoordinatorViewModel {
-        &self.model
-    }
-
     pub fn set_style(&mut self, style: AutoDriveStyle) {
         self.style = style;
     }
