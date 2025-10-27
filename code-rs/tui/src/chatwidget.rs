@@ -14924,8 +14924,11 @@ Have we met every part of this goal and is there no further work to do?"#
         };
 
         let button = if self.auto_state.awaiting_coordinator_submit() {
+            let has_cli_prompt = cli_prompt.is_some();
             let base_label = if bootstrap_pending {
                 "Complete Current Task"
+            } else if has_cli_prompt {
+                "Send prompt"
             } else if continue_cta_active {
                 "Continue current task"
             } else {
@@ -14965,10 +14968,13 @@ Have we met every part of this goal and is there no further work to do?"#
         };
 
         let ctrl_switch_hint = if self.auto_state.awaiting_coordinator_submit() {
+            let has_cli_prompt = cli_prompt.is_some();
             if self.auto_state.is_paused_manual() {
                 "Esc to cancel".to_string()
             } else if bootstrap_pending {
                 "Esc enter new goal".to_string()
+            } else if has_cli_prompt {
+                "Esc to edit".to_string()
             } else if continue_cta_active {
                 "Esc to stop".to_string()
             } else {
@@ -22717,11 +22723,9 @@ mod tests {
                 }
             });
 
-        // With AutoContinueMode::Immediate, the button shows "Continue current task"
-        assert!(button_label.starts_with("Continue current task"));
+        assert!(button_label.starts_with("Send prompt"));
         assert_eq!(countdown_override, None);
-        // With continue mode active, the hint is "Esc to stop"
-        assert_eq!(ctrl_switch_hint.as_str(), "Esc to stop");
+        assert_eq!(ctrl_switch_hint.as_str(), "Esc to edit");
         assert!(manual_hint_present);
 
         harness.with_chat(|chat| {

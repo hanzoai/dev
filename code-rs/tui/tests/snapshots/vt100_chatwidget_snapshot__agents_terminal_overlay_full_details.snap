@@ -18,14 +18,14 @@ expression: "&output"
  |                             |                                                            | |
  |                             | [MM:SS] claude-3-opus status: Status → Running          | |
  |                             |                                                            | |
- |                             | [MM:SS] claude-3-opus detail: …                       | |
+ |                             | [MM:SS] claude-3-opus detail: ...                     | |
  |                                                                                            |
  |                             |                                                            | |
  |                             | [MM:SS] gpt-4o status: Status → Pending                 | |
  |                             |                                                            | |
  |                             | [MM:SS] claude-3-opus status: Status → Completed        | |
  |                             |                                                            | |
- |                             | [MM:SS] claude-3-opus detail: …                         | |
+ |                             | [MM:SS] claude-3-opus detail: ...                     | |
  |                                                                                            |
  |                             +------------------------------------------------------------+ |
  | ↑/↓ Navigate/Scroll  →/Enter Focus output  ← Back to list  Tab Next agent  PgUp/PgDn Page  |
