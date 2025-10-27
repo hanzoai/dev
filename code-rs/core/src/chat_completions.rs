@@ -1,3 +1,4 @@
+use std::collections::BTreeMap;
 use std::time::Duration;
 
 use bytes::Bytes;
@@ -7,6 +8,7 @@ use futures::Stream;
 use futures::StreamExt;
 use futures::TryStreamExt;
 use reqwest::StatusCode;
+use reqwest::header::HeaderMap;
 use serde_json::json;
 use std::pin::Pin;
 use std::task::Context;
@@ -344,17 +346,9 @@ pub(crate) async fn stream_chat_completions(
         serde_json::to_string_pretty(&payload).unwrap_or_default()
     );
 
-    // Start logging the request and get a request_id to track the response
-    let request_id = if let Ok(logger) = debug_logger.lock() {
-        logger
-            .start_request_log(&endpoint, &payload, log_tag)
-            .unwrap_or_default()
-    } else {
-        String::new()
-    };
-
     let mut attempt = 0;
     let max_retries = provider.request_max_retries();
+    let mut request_id = String::new();
     loop {
         attempt += 1;
 
@@ -369,11 +363,30 @@ pub(crate) async fn stream_chat_completions(
             }
         }
 
-        let res = req_builder
+        req_builder = req_builder
             .header(reqwest::header::ACCEPT, "text/event-stream")
-            .json(&payload)
-            .send()
-            .await;
+            .json(&payload);
+
+        if request_id.is_empty() {
+            let endpoint_for_log = provider.get_full_url(&auth);
+            let header_snapshot = req_builder
+                .try_clone()
+                .and_then(|builder| builder.build().ok())
+                .map(|req| header_map_to_json(req.headers()));
+
+            if let Ok(logger) = debug_logger.lock() {
+                request_id = logger
+                    .start_request_log(
+                        &endpoint_for_log,
+                        &payload,
+                        header_snapshot.as_ref(),
+                        log_tag,
+                    )
+                    .unwrap_or_default();
+            }
+        }
+
+        let res = req_builder.send().await;
 
         match res {
             Ok(resp) if resp.status().is_success() => {
@@ -1096,4 +1109,14 @@ impl<S> AggregatedChatStream<S> {
     pub(crate) fn streaming_mode(inner: S) -> Self {
         Self::new(inner, AggregateMode::Streaming)
     }
+}
+
+fn header_map_to_json(headers: &HeaderMap) -> serde_json::Value {
+    let mut ordered: BTreeMap<String, Vec<String>> = BTreeMap::new();
+    for (name, value) in headers.iter() {
+        let entry = ordered.entry(name.as_str().to_string()).or_default();
+        entry.push(value.to_str().unwrap_or_default().to_string());
+    }
+
+    serde_json::to_value(ordered).unwrap_or(serde_json::Value::Null)
 }
