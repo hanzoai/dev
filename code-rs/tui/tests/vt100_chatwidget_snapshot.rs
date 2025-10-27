@@ -41,11 +41,16 @@ fn normalize_output(text: String) -> String {
         .chars()
         .map(normalize_glyph)
         .collect::<String>()
+        .pipe(normalize_ellipsis)
         .pipe(normalize_timers)
         .pipe(normalize_auto_drive_layout)
         .pipe(normalize_agent_history_details)
         .pipe(normalize_spacer_rows)
         .pipe(normalize_trailing_whitespace)
+}
+
+fn normalize_ellipsis(text: String) -> String {
+    text.replace('…', "...")
 }
 
 fn normalize_trailing_whitespace(text: String) -> String {
@@ -224,17 +229,12 @@ fn normalize_agent_history_details(text: String) -> String {
             if let Some(idx) = line.find(token) {
                 let prefix = &line[..idx];
                 let label = label;
-                let prefix_end = idx + token.len();
                 if let Some(tail_start) = line.rfind("| |") {
                     let tail = &line[tail_start..];
-                    let span_width = tail_start.saturating_sub(prefix_end);
-                    let mut filler = String::from(" …");
-                    if span_width > 2 {
-                        filler.push_str(&" ".repeat(span_width - 2));
-                    }
-                    transformed = format!("{prefix}{label}{filler}{tail}");
+                    const DETAIL_FILLER: &str = " ...                     ";
+                    transformed = format!("{prefix}{label}{DETAIL_FILLER}{tail}");
                 } else {
-                    transformed = format!("{}{label} …", prefix);
+                    transformed = format!("{}{label} ...", prefix);
                 }
                 handled_detail = true;
                 break;
