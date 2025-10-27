@@ -115,7 +115,7 @@ pub fn auto_drive_dark_theme() -> CardThemeDefinition {
     CardThemeDefinition {
         name: "Auto Drive Dark",
         theme: CardTheme {
-            gradient: gradient((33, 0, 67), (38, 96, 127), -0.05),
+            gradient: gradient((2, 75, 128), (128, 81, 3), -0.05),
             palette: palette((140, 110, 200), (236, 228, 255), (246, 238, 255), (188, 170, 228)),
             reveal: reveal(1440, RevealVariant::RainbowBloom),
         },
@@ -170,7 +170,7 @@ pub fn auto_drive_light_theme() -> CardThemeDefinition {
     CardThemeDefinition {
         name: "Auto Drive Light",
         theme: CardTheme {
-            gradient: gradient((204, 223, 245), (247, 235, 254), -0.05),
+            gradient: gradient((206, 235, 254), (255, 232, 206), -0.05),
             palette: palette((170, 195, 222), (52, 75, 109), (30, 54, 85), (92, 121, 153)),
             reveal: reveal(1440, RevealVariant::LightBloom),
         },
@@ -203,7 +203,7 @@ pub fn agent_green_light_theme() -> CardThemeDefinition {
     CardThemeDefinition {
         name: "Agent Green Light",
         theme: CardTheme {
-            gradient: gradient((193, 221, 197), (230, 248, 233), -0.05),
+            gradient: gradient((203, 233, 208), (230, 248, 233), -0.05),
             palette: palette((156, 206, 168), (40, 90, 54), (30, 70, 44), (86, 128, 95)),
             reveal: None,
         },

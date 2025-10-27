@@ -1,6 +1,6 @@
 use ratatui::buffer::Buffer;
 use ratatui::layout::{Constraint, Layout, Margin, Rect};
-use ratatui::style::{Modifier, Style, Stylize};
+use ratatui::style::{Color, Modifier, Style, Stylize};
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, BorderType, Borders, StatefulWidgetRef, WidgetRef};
 use code_core::protocol::TokenUsage;
@@ -19,7 +19,7 @@ use code_protocol::custom_prompts::CustomPrompt;
 use code_protocol::custom_prompts::PROMPTS_CMD_PREFIX;
 
 use crate::app_event_sender::AppEventSender;
-use crate::auto_drive_style::ComposerStyle;
+use crate::auto_drive_style::{BorderGradient, ComposerStyle};
 use crate::thread_spawner;
 use crate::bottom_pane::textarea::TextArea;
 use crate::bottom_pane::textarea::TextAreaState;
@@ -2423,11 +2423,13 @@ impl WidgetRef for ChatComposer {
         }
         // Draw border around input area with optional variant title when task is running
         let mut input_block = Block::default().borders(Borders::ALL);
+        let mut auto_drive_border_gradient = None;
         if let Some(style) = self
             .auto_drive_style
             .as_ref()
             .filter(|_| self.auto_drive_active)
         {
+            auto_drive_border_gradient = style.border_gradient;
             input_block = input_block
                 .border_style(style.border_style.clone())
                 .border_type(style.border_type)
@@ -2479,6 +2481,9 @@ impl WidgetRef for ChatComposer {
 
         let textarea_rect = input_block.inner(input_area);
         input_block.render_ref(input_area, buf);
+        if let Some(gradient) = auto_drive_border_gradient {
+            apply_auto_drive_border_gradient(buf, input_area, gradient);
+        }
 
         // Add padding inside the text area (1 char horizontal only, no vertical padding)
         let padded_textarea_rect = textarea_rect.inner(Margin::new(1, 0));
@@ -2522,4 +2527,59 @@ impl WidgetRef for ChatComposer {
             }
         }
     }
+}
+
+fn apply_auto_drive_border_gradient(
+    buf: &mut Buffer,
+    area: Rect,
+    gradient: BorderGradient,
+) {
+    let width = area.width as usize;
+    let height = area.height as usize;
+    if width == 0 || height == 0 {
+        return;
+    }
+
+    let horizontal_span = (width.saturating_sub(1)) as f32;
+    for dx in 0..width {
+        let ratio = if horizontal_span <= 0.0 {
+            0.0
+        } else {
+            dx as f32 / horizontal_span
+        };
+        let color = lerp_gradient_color(gradient, ratio);
+        let x = area.x + dx as u16;
+        let top = &mut buf[(x, area.y)];
+        top.set_fg(color);
+
+        if height > 1 {
+            let bottom_y = area.y + area.height.saturating_sub(1);
+            let bottom = &mut buf[(x, bottom_y)];
+            bottom.set_fg(color);
+        }
+    }
+
+    if height <= 2 {
+        return;
+    }
+
+    let left_x = area.x;
+    let right_x = area.x + area.width.saturating_sub(1);
+    for dy in 1..height.saturating_sub(1) {
+        let y = area.y + dy as u16;
+        buf[(left_x, y)].set_fg(gradient.left);
+        buf[(right_x, y)].set_fg(gradient.right);
+    }
+}
+
+fn lerp_gradient_color(gradient: BorderGradient, ratio: f32) -> Color {
+    let clamped = ratio.clamp(0.0, 1.0);
+    let (lr, lg, lb) = crate::colors::color_to_rgb(gradient.left);
+    let (rr, rg, rb) = crate::colors::color_to_rgb(gradient.right);
+    let mix = |a: u8, b: u8| -> u8 {
+        let a = a as f32;
+        let b = b as f32;
+        (a + (b - a) * clamped).round().clamp(0.0, 255.0) as u8
+    };
+    Color::Rgb(mix(lr, rr), mix(lg, rg), mix(lb, rb))
 }

@@ -107,7 +107,7 @@ impl AgentStatusKind {
 
     fn color(self) -> Color {
         match self {
-            AgentStatusKind::Running => colors::primary(),
+            AgentStatusKind::Running => colors::info(),
             AgentStatusKind::Completed => colors::success(),
             AgentStatusKind::Failed => colors::error(),
             AgentStatusKind::Cancelled => colors::text_dim(),
