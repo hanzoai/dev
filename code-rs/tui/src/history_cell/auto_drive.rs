@@ -114,11 +114,13 @@ impl AutoDriveCardCell {
     }
 
     #[cfg(any(test, feature = "test-helpers"))]
+    #[cfg_attr(all(feature = "test-helpers", not(test)), allow(dead_code))]
     pub(crate) fn goal_text(&self) -> Option<&str> {
         self.goal.as_deref()
     }
 
     #[cfg(any(test, feature = "test-helpers"))]
+    #[cfg_attr(all(feature = "test-helpers", not(test)), allow(dead_code))]
     pub(crate) fn action_texts(&self) -> Vec<String> {
         self.actions.iter().map(|action| action.text.clone()).collect()
     }
