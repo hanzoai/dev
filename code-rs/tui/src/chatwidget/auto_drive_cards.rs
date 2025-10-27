@@ -99,6 +99,7 @@ pub(super) fn finalize(
     message: Option<String>,
     status: AutoDriveStatus,
     action_kind: AutoDriveActionKind,
+    completion_message: Option<String>,
 ) {
     if let Some(mut tracker) = chat.tools_state.auto_drive_tracker.take() {
         tracker.request_ordinal = order_key.req;
@@ -106,11 +107,48 @@ pub(super) fn finalize(
         if let Some(msg) = message {
             tracker.cell.push_action(msg, action_kind);
         }
+        tracker.cell.set_completion_message(completion_message);
         tracker.cell.set_status(status);
         tracker.replace(chat);
         tracker.active = false;
         chat.tools_state.auto_drive_tracker = Some(tracker);
     }
+}
+
+pub(super) fn start_celebration(
+    chat: &mut ChatWidget<'_>,
+    message: Option<String>,
+) -> bool {
+    if let Some(mut tracker) = chat.tools_state.auto_drive_tracker.take() {
+        tracker.cell.start_celebration(message);
+        tracker.replace(chat);
+        chat.tools_state.auto_drive_tracker = Some(tracker);
+        return true;
+    }
+    false
+}
+
+pub(super) fn stop_celebration(chat: &mut ChatWidget<'_>) -> bool {
+    if let Some(mut tracker) = chat.tools_state.auto_drive_tracker.take() {
+        tracker.cell.stop_celebration();
+        tracker.replace(chat);
+        chat.tools_state.auto_drive_tracker = Some(tracker);
+        return true;
+    }
+    false
+}
+
+pub(super) fn update_completion_message(
+    chat: &mut ChatWidget<'_>,
+    message: Option<String>,
+) -> bool {
+    if let Some(mut tracker) = chat.tools_state.auto_drive_tracker.take() {
+        tracker.cell.set_completion_message(message);
+        tracker.replace(chat);
+        chat.tools_state.auto_drive_tracker = Some(tracker);
+        return true;
+    }
+    false
 }
 
 pub(super) fn clear(chat: &mut ChatWidget<'_>) {
