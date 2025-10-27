@@ -11,16 +11,26 @@
 **Code** is a fast, local coding agent for your terminal. It's a community-driven fork of `openai/codex` focused on real developer ergonomics: Browser integration, multi-agents, theming, and reasoning control — all while staying compatible with upstream.
 
 &ensp;
+## What's new in v0.4.0 (October 26, 2025)
+
+- **Auto Drive runs the whole play** – hand `/auto` a task and it now plans, coordinates agents, reruns checks, and recovers from hiccups without babysitting.
+- **Unified settings overlay** – `/settings` centralizes limits, model routing, themes, and CLI integrations so you can audit configuration in one place.
+- **Card-based activity stream** – Agents, browser sessions, web search, and Auto Drive render as compact cards with drill-down overlays for full logs.
+- **Turbocharged performance** – History rendering and streaming were optimized to stay smooth even during long multi-agent sessions.
+- **Smarter agent routing** – Mix and match orchestrator CLIs (Claude, Gemini, GPT-5, Qwen, and more) per `/plan`, `/code`, or `/solve` run.
+
+Read the full notes in `release-notes/RELEASE_NOTES.md`.
+
+&ensp;
 ## Why Code
 
-  - 🌐 **Browser Integration** - CDP support, headless browsing, screenshots
-  - 📝 **Diff Viewer** - Side-by-side diffs with syntax highlighting
-  - 🤖 **Multi-Agent Commands** - /plan, /solve, /code with agent panels
-  - 🎨 **Theme System** - /themes with live preview and accessibility
-  - 🧠 **Reasoning Control** - /reasoning for dynamic effort adjustment
-  - 🔌 **MCP support** – Extend with filesystem, DBs, APIs, or your own tools.
-  - 🔒 **Safety modes** – Read-only, approvals, and workspace sandboxing.
-  - 🔁 **Backwards compatible** – Reads both `~/.code/*` (primary) and legacy `~/.codex/*`; writes only to `~/.code/*`
+- 🚀 **Auto Drive orchestration** – Multi-agent automation that now self-heals and ships complete tasks.
+- 🌐 **Browser Integration** – CDP support, headless browsing, screenshots captured inline.
+- 🤖 **Multi-agent commands** – `/plan`, `/code` and `/solve` coordinate multiple CLI agents.
+- 🧭 **Unified settings hub** – `/settings` overlay for limits, theming, approvals, and provider wiring.
+- 🎨 **Theme system** – Switch between accessible presets, customize accents, and preview live via `/themes`.
+- 🔌 **MCP support** – Extend with filesystem, DBs, APIs, or your own tools.
+- 🔒 **Safety modes** – Read-only, approvals, and workspace sandboxing.
 
 &ensp;
 | <img src="docs/screenshots/simple.png" alt="Simple interface" width="100%"><br>Simple interface | <img src="docs/screenshots/diff.png" alt="Unified diff viewer" width="100%"><br>Unified diffs |
@@ -107,6 +117,15 @@ qwen --version
 # Write code! (Claude, Gemini and GPT-5 consensus)
 # Creates multiple worktrees then implements the optimal solution
 /code "Show dark mode when I feel cranky"
+```
+
+### Auto Drive
+```bash
+# Hand off a multi-step task; Auto Drive will coordinate agents and approvals
+/auto "Refactor the auth flow and add device login"
+
+# Resume or inspect an active Auto Drive run
+/auto status
 ```
 
 ### General
