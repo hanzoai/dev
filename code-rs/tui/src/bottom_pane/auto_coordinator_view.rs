@@ -1,7 +1,7 @@
 use crate::app_event::AppEvent;
 use crate::app_event_sender::AppEventSender;
 use crate::auto_drive_strings;
-use crate::auto_drive_style::{AutoDriveStyle, AutoDriveVariant, FrameStyle};
+use crate::auto_drive_style::{AutoDriveStyle, AutoDriveVariant, FrameStyle, BorderGradient};
 use crate::colors;
 use crate::glitch_animation::{gradient_multi, mix_rgb};
 use crate::spinner;
@@ -448,11 +448,19 @@ impl AutoCoordinatorView {
         let mut base_spans: Vec<Span<'static>> = Vec::new();
         base_spans.push(Span::raw(" "));
 
-        let fallback_color = frame_style
-            .border_style
-            .fg
-            .or(frame_style.title_style.fg)
-            .unwrap_or_else(colors::primary);
+        let border_gradient = self.style.composer.border_gradient;
+        let (text_left, text_right) = border_gradient
+            .map(text_gradient_colors)
+            .unwrap_or((colors::primary(), colors::text_dim()));
+        let fallback_color = if border_gradient.is_some() {
+            text_left
+        } else {
+            frame_style
+                .border_style
+                .fg
+                .or(frame_style.title_style.fg)
+                .unwrap_or(text_left)
+        };
 
         if animating {
             let total_chars = full_title.chars().count().max(1);
@@ -498,6 +506,11 @@ impl AutoCoordinatorView {
         };
 
         let runtime_text = self.runtime_text(model);
+        let runtime_color = if border_gradient.is_some() {
+            text_right
+        } else {
+            colors::text_dim()
+        };
         let mut right_spans: Vec<Span<'static>> = Vec::new();
         let now_ms = SystemTime::now()
             .duration_since(UNIX_EPOCH)
@@ -507,13 +520,13 @@ impl AutoCoordinatorView {
         right_spans.push(Span::raw(" "));
         right_spans.push(Span::styled(
             spinner_frame,
-            Style::default().fg(colors::text_dim()),
+            Style::default().fg(runtime_color),
         ));
         if !runtime_text.is_empty() {
             right_spans.push(Span::raw(" "));
             right_spans.push(Span::styled(
                 runtime_text,
-                Style::default().fg(colors::text_dim()),
+                Style::default().fg(runtime_color),
             ));
         }
         let right_line = Line::from(right_spans.clone());
@@ -1589,7 +1602,7 @@ impl<'a> BottomPaneView<'a> for AutoCoordinatorView {
         }
     }
 
-    fn handle_paste_with_composer(
+fn handle_paste_with_composer(
         &mut self,
         composer: &mut ChatComposer,
         pasted: String,
@@ -1603,5 +1616,22 @@ impl<'a> BottomPaneView<'a> for AutoCoordinatorView {
 
     fn as_any_mut(&mut self) -> Option<&mut dyn std::any::Any> {
         Some(self)
+    }
+}
+
+fn is_dark_theme_active() -> bool {
+    let (r, g, b) = colors::color_to_rgb(colors::background());
+    let luminance = (0.2126 * r as f32 + 0.7152 * g as f32 + 0.0722 * b as f32) / 255.0;
+    luminance < 0.5
+}
+
+fn text_gradient_colors(gradient: BorderGradient) -> (Color, Color) {
+    if is_dark_theme_active() {
+        (gradient.left, gradient.right)
+    } else {
+        (
+            Color::Rgb(93, 187, 255),
+            Color::Rgb(243, 173, 72),
+        )
     }
 }
