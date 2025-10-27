@@ -1,6 +1,4 @@
-use std::cmp::min;
-
-use anyhow::Result;
+use anyhow::{anyhow, Result};
 use futures::StreamExt;
 
 use code_core::codex::compact::SUMMARIZATION_PROMPT;
@@ -108,70 +106,91 @@ fn summarize_with_model(
     items: &[ResponseItem],
     prev_summary: Option<&str>,
 ) -> Result<String> {
-    let mut prompt = Prompt::default();
-    prompt.store = false;
-    prompt.text_format = Some(TextFormat {
-        r#type: "text".to_string(),
-        name: None,
-        strict: None,
-        schema: None,
-    });
-    prompt.model_override = Some(model_slug.to_string());
-    let family = find_family_for_model(model_slug)
-        .unwrap_or_else(|| derive_default_model_family(model_slug));
-    prompt.model_family_override = Some(family);
+    let mut aggregate_summary = prev_summary
+        .filter(|text| !text.trim().is_empty())
+        .map(|text| text.to_string());
 
-    prompt
-        .input
-        .push(plain_message("developer", SUMMARIZATION_PROMPT.to_string()));
-
-    let mut user_text = String::new();
-    if let Some(prev) = prev_summary.filter(|text| !text.trim().is_empty()) {
-        user_text.push_str("Previous checkpoint summary:\n");
-        user_text.push_str(prev);
-        user_text.push_str("\n\n");
+    let flattened = flatten_items(items);
+    let chunks = chunk_text(&flattened);
+    if chunks.is_empty() {
+        return Err(anyhow!("empty transcript chunk"));
     }
-    user_text.push_str("Conversation slice:\n");
-    user_text.push_str(&flatten_items(items));
 
-    prompt.input.push(plain_message("user", user_text));
-
-    runtime.block_on(async move {
-        let mut stream = client.stream(&prompt).await?;
-        let mut collected = String::new();
-        let mut response_items = Vec::new();
-
-        while let Some(event) = stream.next().await {
-            match event {
-                Ok(ResponseEvent::OutputTextDelta { delta, .. }) => {
-                    collected.push_str(&delta);
-                }
-                Ok(ResponseEvent::OutputItemDone { item, .. }) => {
-                    response_items.push(item);
-                }
-                Ok(ResponseEvent::Completed { .. }) => break,
-                Ok(_) => {}
-                Err(err) => return Err(err.into()),
-            }
+    for chunk in chunks {
+        if chunk.trim().is_empty() {
+            continue;
         }
 
-        if let Some(message) = response_items.into_iter().find_map(|item| match item {
-            ResponseItem::Message { role, content, .. } if role == "assistant" => Some(content),
-            _ => None,
-        }) {
-            let mut text = String::new();
-            for chunk in message {
-                if let ContentItem::OutputText { text: chunk_text } = chunk {
-                    text.push_str(&chunk_text);
+        let current_prev = aggregate_summary.as_deref();
+        let summary = runtime.block_on(async {
+            let mut prompt = Prompt::default();
+            prompt.store = false;
+            prompt.text_format = Some(TextFormat {
+                r#type: "text".to_string(),
+                name: None,
+                strict: None,
+                schema: None,
+            });
+            prompt.model_override = Some(model_slug.to_string());
+            let family = find_family_for_model(model_slug)
+                .unwrap_or_else(|| derive_default_model_family(model_slug));
+            prompt.model_family_override = Some(family);
+
+            prompt
+                .input
+                .push(plain_message("developer", SUMMARIZATION_PROMPT.to_string()));
+
+            let mut user_text = String::new();
+            if let Some(prev) = current_prev {
+                user_text.push_str("Previous checkpoint summary:\n");
+                user_text.push_str(prev);
+                user_text.push_str("\n\n");
+            }
+            user_text.push_str("Conversation slice:\n");
+            user_text.push_str(&chunk);
+
+            prompt.input.push(plain_message("user", user_text));
+
+            let mut stream = client.stream(&prompt).await?;
+            let mut collected = String::new();
+            let mut response_items = Vec::new();
+
+            while let Some(event) = stream.next().await {
+                match event {
+                    Ok(ResponseEvent::OutputTextDelta { delta, .. }) => collected.push_str(&delta),
+                    Ok(ResponseEvent::OutputItemDone { item, .. }) => {
+                        response_items.push(item);
+                    }
+                    Ok(ResponseEvent::Completed { .. }) => break,
+                    Ok(_) => {}
+                    Err(err) => return Err(anyhow!(err)),
                 }
             }
-            if !text.trim().is_empty() {
-                return Ok(text);
-            }
-        }
 
-        Ok(collected)
-    })
+            if let Some(message) = response_items.into_iter().find_map(|item| match item {
+                ResponseItem::Message { role, content, .. } if role == "assistant" => Some(content),
+                _ => None,
+            }) {
+                let mut text = String::new();
+                for chunk in message {
+                    if let ContentItem::OutputText { text: chunk_text } = chunk {
+                        text.push_str(&chunk_text);
+                    }
+                }
+                if !text.trim().is_empty() {
+                    return Ok(text);
+                }
+            }
+
+            Ok(collected)
+        })?;
+
+        if !summary.trim().is_empty() {
+            aggregate_summary = Some(summary);
+        }
+    }
+
+    aggregate_summary.ok_or_else(|| anyhow!("empty summary"))
 }
 
 fn deterministic_summary(items: &[ResponseItem], prev_summary: Option<&str>) -> String {
@@ -270,21 +289,54 @@ fn flatten_items(items: &[ResponseItem]) -> String {
             }
             ResponseItem::Reasoning { summary, .. } => {
                 for item in summary {
-            match item {
-                code_protocol::models::ReasoningItemReasoningSummary::SummaryText { text } => {
-                    buf.push_str(&format!("reasoning: {text}\n"));
-                }
-            }
+                    match item {
+                        code_protocol::models::ReasoningItemReasoningSummary::SummaryText { text } => {
+                            buf.push_str(&format!("reasoning: {text}\n"));
+                        }
+                    }
                 }
             }
             _ => {}
         }
-        if buf.len() >= MAX_TRANSCRIPT_BYTES {
+    }
+    buf
+}
+
+fn chunk_text(text: &str) -> Vec<String> {
+    if text.is_empty() {
+        return Vec::new();
+    }
+
+    let mut chunks = Vec::new();
+    let mut start = 0;
+    let len = text.len();
+    while start < len {
+        let mut end = (start + MAX_TRANSCRIPT_BYTES).min(len);
+        if end < len {
+            while end > start && !text.is_char_boundary(end) {
+                end -= 1;
+            }
+            if end == start {
+                // The next character alone exceeds the byte budget; include it to make progress.
+                end = start
+                    + text[start..]
+                        .chars()
+                        .next()
+                        .map(|c| c.len_utf8())
+                        .unwrap_or(len - start);
+            }
+        }
+
+        if end <= start {
             break;
         }
+
+        let chunk = text[start..end].to_string();
+        chunks.push(chunk);
+        start = end;
     }
-    buf.truncate(min(buf.len(), MAX_TRANSCRIPT_BYTES));
-    buf
+
+    chunks
 }
 
 fn advance_to_turn_boundary(items: &[ResponseItem], start_idx: usize) -> usize {
@@ -427,5 +479,37 @@ mod tests {
         } else {
             panic!("expected message");
         }
+    }
+
+    #[test]
+    fn flatten_items_preserves_full_messages() {
+        let large = "a".repeat(MAX_TRANSCRIPT_BYTES * 2);
+        let items = vec![assistant_message(&large)];
+
+        let flattened = flatten_items(&items);
+        assert!(flattened.contains(&large[..32]));
+        assert!(flattened.contains(&large[large.len() - 32..]));
+        assert!(flattened.len() > MAX_TRANSCRIPT_BYTES);
+    }
+
+    #[test]
+    fn chunk_text_consumes_entire_string() {
+        let text = "a".repeat(MAX_TRANSCRIPT_BYTES * 2 + 123);
+        let chunks = chunk_text(&text);
+        let reconstructed: String = chunks.concat();
+        assert_eq!(reconstructed, text);
+        assert!(chunks.iter().all(|chunk| chunk.len() <= MAX_TRANSCRIPT_BYTES));
+    }
+
+    #[test]
+    fn chunk_text_respects_utf8_boundaries() {
+        let text = "🙂".repeat((MAX_TRANSCRIPT_BYTES / 4) + 10);
+        let chunks = chunk_text(&text);
+        assert!(!chunks.is_empty());
+        for chunk in &chunks {
+            assert!(chunk.is_char_boundary(chunk.len()));
+            assert!(chunk.len() <= MAX_TRANSCRIPT_BYTES);
+        }
+        assert_eq!(chunks.concat(), text);
     }
 }
