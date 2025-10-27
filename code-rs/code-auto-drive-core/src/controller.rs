@@ -309,6 +309,7 @@ pub struct AutoDriveController {
     pub intro_pending: bool,
     pub elapsed_override: Option<Duration>,
     pub pending_stop_message: Option<String>,
+    pub last_completion_explanation: Option<String>,
     pub phase: AutoRunPhase,
 }
 
@@ -475,6 +476,7 @@ impl AutoDriveController {
         self.started_at = Some(now);
         self.turns_completed = 0;
         self.last_run_summary = None;
+        self.last_completion_explanation = None;
         self.goal = Some(goal.clone());
         self.current_summary = None;
         self.current_progress_past = None;
@@ -713,6 +715,7 @@ impl AutoDriveController {
         let intro_reduced_motion = self.intro_reduced_motion;
         let elapsed_override = self.elapsed_override;
         let pending_stop_message = self.pending_stop_message.clone();
+        let last_completion_explanation = self.last_completion_explanation.clone();
 
         *self = Self::default();
 
@@ -727,6 +730,7 @@ impl AutoDriveController {
         self.intro_reduced_motion = intro_reduced_motion;
         self.elapsed_override = elapsed_override;
         self.pending_stop_message = pending_stop_message;
+        self.last_completion_explanation = last_completion_explanation;
         self.phase = if self.phase.is_active() {
             AutoRunPhase::Active
         } else {

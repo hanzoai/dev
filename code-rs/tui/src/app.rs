@@ -1729,6 +1729,16 @@ impl App<'_> {
                         widget.handle_terminal_approval_decision(id, approved);
                     }
                 }
+                AppEvent::StartAutoDriveCelebration { message } => {
+                    if let AppState::Chat { widget } = &mut self.app_state {
+                        widget.start_auto_drive_card_celebration(message);
+                    }
+                }
+                AppEvent::StopAutoDriveCelebration => {
+                    if let AppState::Chat { widget } = &mut self.app_state {
+                        widget.stop_auto_drive_card_celebration();
+                    }
+                }
                 AppEvent::TerminalAfter(after) => {
                     if let AppState::Chat { widget } = &mut self.app_state {
                         widget.handle_terminal_after(after);

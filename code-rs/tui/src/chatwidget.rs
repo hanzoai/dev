@@ -98,6 +98,7 @@ use code_auto_drive_core::{
     AutoCoordinatorStatus,
     AutoDriveHistory,
     AutoDriveController,
+    AutoRunSummary,
     AutoRunPhase,
     AutoControllerEffect,
     AutoTurnAgentsAction,
@@ -182,6 +183,8 @@ use crate::chatwidget::message::UserMessage;
 
 pub(crate) const DOUBLE_ESC_HINT: &str = "undo timeline";
 const AUTO_ESC_EXIT_HINT: &str = "Press Esc again to exit Auto Drive";
+const AUTO_COMPLETION_CELEBRATION_DURATION: Duration = Duration::from_secs(5);
+const HISTORY_ANIMATION_FRAME_INTERVAL: Duration = Duration::from_millis(120);
 const AUTO_BOOTSTRAP_GOAL_PLACEHOLDER: &str = "Deriving goal from recent conversation";
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -1933,11 +1936,26 @@ impl ChatWidget<'_> {
     ) {
         let had_tracker = self.tools_state.auto_drive_tracker.is_some();
         let order_key = self.auto_card_next_order_key();
-        auto_drive_cards::finalize(self, order_key, message.clone(), status, kind);
+        let completion_message = if matches!(status, AutoDriveStatus::Stopped) {
+            self.auto_state.last_completion_explanation.clone()
+        } else {
+            None
+        };
+        auto_drive_cards::finalize(
+            self,
+            order_key,
+            message.clone(),
+            status,
+            kind,
+            completion_message,
+        );
         if !had_tracker {
             if let Some(msg) = message {
                 self.push_background_tail(msg);
             }
+        }
+        if matches!(status, AutoDriveStatus::Stopped) {
+            self.auto_state.last_completion_explanation = None;
         }
         auto_drive_cards::clear(self);
     }
@@ -4895,13 +4913,14 @@ impl ChatWidget<'_> {
     /// Check if there are any animations and trigger redraw if needed
     pub fn check_for_initial_animations(&mut self) {
         if self.history_cells.iter().any(|cell| cell.is_animating()) {
+            if Self::auto_reduced_motion_preference() {
+                return;
+            }
             tracing::info!("Initial animation detected, scheduling frame");
             // Schedule initial frame for animations to ensure they start properly.
             // Use ScheduleFrameIn to avoid debounce issues with immediate RequestRedraw.
             self.app_event_tx
-                .send(AppEvent::ScheduleFrameIn(std::time::Duration::from_millis(
-                    50,
-                )));
+                .send(AppEvent::ScheduleFrameIn(HISTORY_ANIMATION_FRAME_INTERVAL));
         }
     }
 
@@ -11650,7 +11669,17 @@ impl ChatWidget<'_> {
         auto_drive_card.set_status(history_cell::AutoDriveStatus::Paused);
         self.history_push(auto_drive_card);
 
-        self.push_background_tail("demo: finished populating sample history.");
+        let goal = "Stabilize nightly CI pipeline".to_string();
+        self.auto_state.last_run_summary = Some(AutoRunSummary {
+            duration: Duration::from_secs(95),
+            turns_completed: 4,
+            message: Some("Auto Drive completed demo run.".to_string()),
+            goal: Some(goal),
+        });
+        let celebration_message = "Diagnostics report: all demo checks passed.".to_string();
+        self.auto_state.last_completion_explanation = Some(celebration_message.clone());
+        self.schedule_auto_drive_card_celebration(Duration::from_secs(2), Some(celebration_message));
+
         self.request_redraw();
     }
 
@@ -14097,6 +14126,10 @@ Have we met every part of this goal and is there no further work to do?"#
                     } else {
                         self.auto_card_finalize(None, AutoDriveStatus::Stopped, AutoDriveActionKind::Info);
                     }
+                    self.schedule_auto_drive_card_celebration(
+                        Duration::from_secs(0),
+                        self.auto_state.last_completion_explanation.clone(),
+                    );
                     self.auto_turn_review_state = None;
                     if ENABLE_WARP_STRIPES {
                         self.header_wave.set_enabled(false, Instant::now());
@@ -14394,6 +14427,22 @@ Have we met every part of this goal and is there no further work to do?"#
         if read_only {
             self.auto_turn_review_state = None;
             return;
+        }
+
+        let existing_base = self
+            .auto_turn_review_state
+            .as_ref()
+            .and_then(|state| state.base_commit.as_ref());
+
+        if existing_base.is_some() {
+            return;
+        }
+
+        #[cfg(test)]
+        {
+            if CAPTURE_AUTO_TURN_COMMIT_STUB.lock().unwrap().is_some() {
+                return;
+            }
         }
 
         match self.capture_auto_turn_commit("auto turn base snapshot", None) {
@@ -15063,10 +15112,7 @@ Have we met every part of this goal and is there no further work to do?"#
             .filter(|value| !value.trim().is_empty());
 
         let bootstrap_pending = self.auto_pending_goal_request;
-        let continue_mode = self.auto_state.continue_mode;
-        let continue_cta_active = self.auto_state.awaiting_coordinator_submit()
-            && !self.auto_state.is_paused_manual()
-            && continue_mode != AutoContinueMode::Manual;
+        let continue_cta_active = self.auto_should_show_continue_cta();
 
         let countdown_limit = self.auto_state.countdown_seconds();
         let countdown_active = self.auto_state.countdown_active();
@@ -15183,6 +15229,14 @@ Have we met every part of this goal and is there no further work to do?"#
             self.app_event_tx
                 .send(AppEvent::ScheduleFrameIn(Duration::from_secs(1)));
         }
+    }
+
+    fn auto_should_show_continue_cta(&self) -> bool {
+        self.auto_state.is_active()
+            && self.auto_state.awaiting_coordinator_submit()
+            && !self.auto_state.is_paused_manual()
+            && self.config.auto_drive.coordinator_routing
+            && self.auto_state.continue_mode != AutoContinueMode::Manual
     }
 
     fn auto_format_status_headline(&self, text: &str) -> String {
@@ -15439,14 +15493,29 @@ Have we met every part of this goal and is there no further work to do?"#
         progress_current: &Option<String>,
         progress_past: &Option<String>,
     ) -> String {
-        let mut lines = Vec::new();
-        if let Some(current) = progress_current.as_ref() {
-            lines.push(current.clone());
+        let mut parts: Vec<String> = Vec::new();
+        if let Some(current) = progress_current
+            .as_ref()
+            .map(|value| value.trim())
+            .filter(|value| !value.is_empty())
+        {
+            parts.push(current.to_string());
         }
-        if let Some(past) = progress_past.as_ref() {
-            lines.push(past.clone());
+        if let Some(past) = progress_past
+            .as_ref()
+            .map(|value| value.trim())
+            .filter(|value| !value.is_empty())
+        {
+            if !parts.iter().any(|existing| existing.eq_ignore_ascii_case(past)) {
+                parts.push(past.to_string());
+            }
         }
-        lines.join("\n")
+
+        match parts.len() {
+            0 => String::new(),
+            1 => parts.into_iter().next().unwrap(),
+            _ => parts.join(" · "),
+        }
     }
 
     fn auto_append_progress_lines(
@@ -18265,6 +18334,94 @@ Have we met every part of this goal and is there no further work to do?"#
         self.request_redraw();
     }
 
+    fn schedule_auto_drive_card_celebration(
+        &self,
+        delay: Duration,
+        message: Option<String>,
+    ) {
+        let event = AppEvent::StartAutoDriveCelebration { message };
+        self.spawn_app_event_after(delay, event);
+    }
+
+    pub(crate) fn start_auto_drive_card_celebration(&mut self, message: Option<String>) {
+        let mut started = auto_drive_cards::start_celebration(self, message.clone());
+        if !started {
+            if let Some(card) = self.latest_auto_drive_card_mut() {
+                card.start_celebration(message.clone());
+                started = true;
+            }
+        }
+        if !started {
+            return;
+        }
+
+        self.spawn_app_event_after(
+            AUTO_COMPLETION_CELEBRATION_DURATION,
+            AppEvent::StopAutoDriveCelebration,
+        );
+
+        if let Some(msg) = message.clone() {
+            if !auto_drive_cards::update_completion_message(self, Some(msg.clone())) {
+                if let Some(card) = self.latest_auto_drive_card_mut() {
+                    card.set_completion_message(Some(msg));
+                }
+            }
+        }
+
+        self.mark_history_dirty();
+        self.request_redraw();
+    }
+
+    pub(crate) fn stop_auto_drive_card_celebration(&mut self) {
+        let mut stopped = auto_drive_cards::stop_celebration(self);
+        if !stopped {
+            if let Some(card) = self.latest_auto_drive_card_mut() {
+                card.stop_celebration();
+                stopped = true;
+            }
+        }
+        if stopped {
+            self.mark_history_dirty();
+            self.request_redraw();
+        }
+    }
+
+    fn spawn_app_event_after(&self, delay: Duration, event: AppEvent) {
+        if delay.is_zero() {
+            self.app_event_tx.send(event);
+            return;
+        }
+
+        if let Ok(handle) = tokio::runtime::Handle::try_current() {
+            let tx = self.app_event_tx.clone();
+            handle.spawn(async move {
+                tokio::time::sleep(delay).await;
+                tx.send(event);
+            });
+        } else {
+            #[cfg(test)]
+            {
+                let tx = self.app_event_tx.clone();
+                std::thread::spawn(move || {
+                    tx.send(event);
+                });
+            }
+            #[cfg(not(test))]
+            {
+                let _ = event;
+            }
+        }
+    }
+
+    fn latest_auto_drive_card_mut(
+        &mut self,
+    ) -> Option<&mut history_cell::AutoDriveCardCell> {
+        self.history_cells
+            .iter_mut()
+            .rev()
+            .find_map(|cell| cell.as_any_mut().downcast_mut::<history_cell::AutoDriveCardCell>())
+    }
+
     pub(crate) fn auto_manual_entry_active(&self) -> bool {
         self.auto_state.should_show_goal_entry()
             || (self.auto_state.is_active() && self.auto_state.awaiting_coordinator_submit())
@@ -18292,10 +18449,7 @@ Have we met every part of this goal and is there no further work to do?"#
         }
 
         if self.auto_state.is_active() {
-            let continue_mode = self.auto_state.continue_mode;
-            let awaiting_continue_cta = self.auto_state.awaiting_coordinator_submit()
-                && !self.auto_state.is_paused_manual()
-                && continue_mode != AutoContinueMode::Manual;
+            let awaiting_continue_cta = self.auto_should_show_continue_cta();
 
             if awaiting_continue_cta {
                 return EscRoute::new(EscIntent::AutoStopDuringApproval, true, false);
@@ -18968,6 +19122,13 @@ Have we met every part of this goal and is there no further work to do?"#
             {
                 Ok(check) => {
                     if check.complete {
+                        let explanation = check.explanation.trim();
+                        if explanation.is_empty() {
+                            self.auto_state.last_completion_explanation = None;
+                        } else {
+                            self.auto_state.last_completion_explanation =
+                                Some(explanation.to_string());
+                        }
                         let pending = self.auto_state.pending_stop_message.take();
                         if let Some(idx) = self.history_cells.iter().rposition(|c| {
                             c.as_any()
@@ -18992,6 +19153,7 @@ Have we met every part of this goal and is there no further work to do?"#
                         self.auto_stop(pending);
                         return;
                     } else {
+                        self.auto_state.last_completion_explanation = None;
                         let goal = self
                             .auto_state
                             .goal
@@ -19018,6 +19180,7 @@ Have we met every part of this goal and is there no further work to do?"#
                         "failed to parse diagnostics completion check: {}",
                         err
                     );
+                    self.auto_state.last_completion_explanation = None;
                     let pending = self.auto_state.pending_stop_message.take();
                     self.auto_stop(pending);
                 }
@@ -29185,12 +29348,10 @@ impl WidgetRef for &ChatWidget<'_> {
                 .map(|cell| cell.is_animating())
                 .unwrap_or(false)
         });
-        if has_visible_animation {
+        if has_visible_animation && !ChatWidget::auto_reduced_motion_preference() {
             tracing::debug!("Visible animation detected, scheduling next frame");
             self.app_event_tx
-                .send(AppEvent::ScheduleFrameIn(std::time::Duration::from_millis(
-                    50,
-                )));
+                .send(AppEvent::ScheduleFrameIn(HISTORY_ANIMATION_FRAME_INTERVAL));
         }
 
         let render_loop_start = if self.perf_state.enabled {
