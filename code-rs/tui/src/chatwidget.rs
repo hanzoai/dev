@@ -907,6 +907,7 @@ pub(crate) struct ChatWidget<'a> {
     auto_goal_escape_state: AutoGoalEscState,
     auto_handle: Option<AutoCoordinatorHandle>,
     auto_history: AutoDriveHistory,
+    auto_compaction_overlay: Option<AutoCompactionOverlay>,
     auto_turn_review_state: Option<AutoTurnReviewState>,
     auto_pending_goal_request: bool,
     auto_goal_bootstrap_done: bool,
@@ -968,6 +969,17 @@ pub(crate) struct ChatWidget<'a> {
     last_assigned_order: Option<OrderKey>,
     replay_history_depth: usize,
     resume_placeholder_visible: bool,
+}
+
+#[derive(Clone, Debug)]
+struct AutoCompactionOverlay {
+    /// Snapshot of the conversation prefix (including the latest compact summary)
+    /// that should be injected ahead of any history-derived tail when exporting
+    /// the next Auto Drive request.
+    prefix_items: Vec<code_protocol::models::ResponseItem>,
+    /// History cell index that marks the beginning of the still-live tail that
+    /// we continue to mirror directly from the UI.
+    tail_start_cell: usize,
 }
 
 #[derive(Clone)]
@@ -4059,6 +4071,7 @@ impl ChatWidget<'_> {
             auto_goal_escape_state: AutoGoalEscState::Inactive,
             auto_handle: None,
             auto_history: AutoDriveHistory::new(),
+            auto_compaction_overlay: None,
             auto_turn_review_state: None,
             auto_pending_goal_request: false,
             auto_goal_bootstrap_done: false,
@@ -4371,6 +4384,7 @@ impl ChatWidget<'_> {
             auto_goal_escape_state: AutoGoalEscState::Inactive,
             auto_handle: None,
             auto_history: AutoDriveHistory::new(),
+            auto_compaction_overlay: None,
             auto_turn_review_state: None,
             auto_pending_goal_request: false,
             auto_goal_bootstrap_done: false,
@@ -4506,6 +4520,10 @@ impl ChatWidget<'_> {
         })
     }
 
+    fn reset_auto_compaction_overlay(&mut self) {
+        self.auto_compaction_overlay = None;
+    }
+
     fn auto_drive_normalize_diff_path(raw: &str) -> Option<String> {
         let trimmed = raw.trim();
         if trimmed == "/dev/null" {
@@ -4582,8 +4600,43 @@ impl ChatWidget<'_> {
     }
 
     pub(crate) fn export_auto_drive_items(&self) -> Vec<code_protocol::models::ResponseItem> {
+        let (items, _) = self.export_auto_drive_items_with_indices();
+        items
+    }
+
+    fn export_auto_drive_items_with_indices(
+        &self,
+    ) -> (
+        Vec<code_protocol::models::ResponseItem>,
+        Vec<Option<usize>>,
+    ) {
+        if let Some(overlay) = &self.auto_compaction_overlay {
+            let mut items = overlay.prefix_items.clone();
+            let mut indices = vec![None; overlay.prefix_items.len()];
+            let tail = self.export_auto_drive_items_from_index_with_indices(overlay.tail_start_cell);
+            for (cell_idx, item) in tail {
+                indices.push(Some(cell_idx));
+                items.push(item);
+            }
+            (items, indices)
+        } else {
+            let tail = self.export_auto_drive_items_from_index_with_indices(0);
+            let mut items = Vec::with_capacity(tail.len());
+            let mut indices = Vec::with_capacity(tail.len());
+            for (cell_idx, item) in tail {
+                indices.push(Some(cell_idx));
+                items.push(item);
+            }
+            (items, indices)
+        }
+    }
+
+    fn export_auto_drive_items_from_index_with_indices(
+        &self,
+        start_idx: usize,
+    ) -> Vec<(usize, code_protocol::models::ResponseItem)> {
         let mut items = Vec::new();
-        for cell in &self.history_cells {
+        for (idx, cell) in self.history_cells.iter().enumerate().skip(start_idx) {
             let Some(role) = Self::auto_drive_role_for_kind(cell.kind()) else {
                 continue;
             };
@@ -4656,9 +4709,70 @@ impl ChatWidget<'_> {
                 }
             };
 
-            items.push(item);
+            items.push((idx, item));
         }
         items
+    }
+
+    fn derive_compaction_overlay(
+        &self,
+        previous_items: &[code_protocol::models::ResponseItem],
+        previous_indices: &[Option<usize>],
+        new_items: &[code_protocol::models::ResponseItem],
+    ) -> Option<AutoCompactionOverlay> {
+        if previous_items == new_items {
+            return self.auto_compaction_overlay.clone();
+        }
+
+        if new_items.is_empty() {
+            return Some(AutoCompactionOverlay {
+                prefix_items: Vec::new(),
+                tail_start_cell: self.history_cells.len(),
+            });
+        }
+
+        let max_prefix = previous_items.len().min(new_items.len());
+        let mut prefix_len = 0;
+        while prefix_len < max_prefix && previous_items[prefix_len] == new_items[prefix_len] {
+            prefix_len += 1;
+        }
+
+        let remaining_prev = previous_items.len().saturating_sub(prefix_len);
+        let remaining_new = new_items.len().saturating_sub(prefix_len);
+        let mut suffix_len = 0;
+        while suffix_len < remaining_prev && suffix_len < remaining_new {
+            let prev_idx = previous_items.len() - 1 - suffix_len;
+            let new_idx = new_items.len() - 1 - suffix_len;
+            if previous_items[prev_idx] != new_items[new_idx] {
+                break;
+            }
+            suffix_len += 1;
+        }
+
+        let mut prefix_items_end = new_items.len().saturating_sub(suffix_len);
+
+        let mut tail_start_cell = if suffix_len == 0 {
+            self.history_cells.len()
+        } else {
+            let start = previous_items.len() - suffix_len;
+            previous_indices[start..]
+                .iter()
+                .find_map(|idx| *idx)
+                .unwrap_or(self.history_cells.len())
+        };
+
+        if suffix_len > 0 && tail_start_cell == self.history_cells.len() {
+            // Suffix items no longer map to on-screen cells (e.g., after repeated compactions),
+            // so treat the whole conversation as the overlay prefix.
+            prefix_items_end = new_items.len();
+        }
+
+        let prefix_items = new_items[..prefix_items_end].to_vec();
+
+        Some(AutoCompactionOverlay {
+            prefix_items,
+            tail_start_cell,
+        })
     }
 
     fn rebuild_auto_history(&mut self) -> Vec<code_protocol::models::ResponseItem> {
@@ -13198,6 +13312,7 @@ fi\n\
             elapsed: None,
             progress_past: None,
             progress_current: None,
+            session_tokens: self.auto_session_tokens(),
             editing_prompt: false,
             intro_started_at: self.auto_state.intro_started_at,
             intro_reduced_motion: self.auto_state.intro_reduced_motion,
@@ -13301,6 +13416,22 @@ fi\n\
                         app_event_tx.send(AppEvent::AutoCoordinatorUserReply {
                             user_response,
                             cli_command,
+                        });
+                    }
+                    AutoCoordinatorEvent::TokenMetrics {
+                        total_usage,
+                        last_turn_usage,
+                        turn_count,
+                    } => {
+                        app_event_tx.send(AppEvent::AutoCoordinatorTokenMetrics {
+                            total_usage,
+                            last_turn_usage,
+                            turn_count,
+                        });
+                    }
+                    AutoCoordinatorEvent::CompactedHistory { conversation } => {
+                        app_event_tx.send(AppEvent::AutoCoordinatorCompactedHistory {
+                            conversation,
                         });
                     }
                 }
@@ -13848,6 +13979,31 @@ Have we met every part of this goal and is there no further work to do?"#
         self.request_redraw();
     }
 
+    pub(crate) fn auto_handle_token_metrics(
+        &mut self,
+        total_usage: TokenUsage,
+        last_turn_usage: TokenUsage,
+        turn_count: u32,
+    ) {
+        self.auto_history
+            .apply_token_metrics(total_usage, last_turn_usage, turn_count);
+        self.request_redraw();
+    }
+
+    fn auto_session_tokens(&self) -> Option<u64> {
+        let total = self.auto_history.total_tokens().blended_total();
+        (total > 0).then_some(total)
+    }
+
+    pub(crate) fn auto_handle_compacted_history(&mut self, conversation: Vec<ResponseItem>) {
+        let (previous_items, previous_indices) = self.export_auto_drive_items_with_indices();
+        self.auto_history.replace_all(conversation.clone());
+        self.auto_compaction_overlay =
+            self.derive_compaction_overlay(&previous_items, &previous_indices, &conversation);
+        self.auto_rebuild_live_ring();
+        self.request_redraw();
+    }
+
     fn schedule_auto_cli_prompt(&mut self, prompt_text: String) {
         self.schedule_auto_cli_prompt_with_override(prompt_text, None);
     }
@@ -13979,6 +14135,7 @@ Have we met every part of this goal and is there no further work to do?"#
                 }
                 AutoControllerEffect::ResetHistory => {
                     self.auto_history.clear();
+                    self.reset_auto_compaction_overlay();
                 }
                 AutoControllerEffect::UpdateTerminalHint { hint } => {
                     self.bottom_pane.set_standard_terminal_hint(hint);
@@ -14785,6 +14942,7 @@ Have we met every part of this goal and is there no further work to do?"#
                     elapsed: Some(summary.duration),
                     progress_past: None,
                     progress_current: None,
+                    session_tokens: self.auto_session_tokens(),
                     editing_prompt: false,
                     intro_started_at: self.auto_state.intro_started_at,
                     intro_reduced_motion: self.auto_state.intro_reduced_motion,
@@ -15007,6 +15165,7 @@ Have we met every part of this goal and is there no further work to do?"#
             elapsed: self.auto_state.elapsed_override,
             progress_past: progress_past_for_view,
             progress_current: progress_current_for_view,
+            session_tokens: self.auto_session_tokens(),
             cli_context,
             show_composer,
             editing_prompt: self.auto_state.is_paused_manual(),

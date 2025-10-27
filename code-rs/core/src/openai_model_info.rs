@@ -6,16 +6,16 @@ use crate::model_family::ModelFamily;
 /// override this in config.toml, as this information can get out of date.
 /// Though this would help present more accurate pricing information in the UI.
 #[derive(Debug)]
-pub(crate) struct ModelInfo {
+pub struct ModelInfo {
     /// Size of the context window in tokens. This is the maximum size of the input context.
-    pub(crate) context_window: u64,
+    pub context_window: u64,
 
     /// Maximum number of output tokens that can be generated for the model.
-    pub(crate) max_output_tokens: u64,
+    pub max_output_tokens: u64,
 
     /// Token threshold where we should automatically compact conversation history. This considers
     /// input tokens + output tokens of this turn.
-    pub(crate) auto_compact_token_limit: Option<i64>,
+    pub auto_compact_token_limit: Option<i64>,
 }
 
 impl ModelInfo {
@@ -28,7 +28,7 @@ impl ModelInfo {
     }
 }
 
-pub(crate) fn get_model_info(model_family: &ModelFamily) -> Option<ModelInfo> {
+pub fn get_model_info(model_family: &ModelFamily) -> Option<ModelInfo> {
     let slug = model_family.slug.as_str();
     match slug {
         // OSS models have a 128k shared token pool.
