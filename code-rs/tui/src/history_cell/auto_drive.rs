@@ -21,7 +21,7 @@ use ratatui::layout::Rect;
 use ratatui::style::{Modifier, Style};
 use ratatui::text::{Line, Text};
 use ratatui::widgets::{Paragraph, Widget, Wrap};
-use unicode_width::UnicodeWidthStr;
+use unicode_width::{UnicodeWidthChar, UnicodeWidthStr};
 use std::f32;
 use std::time::{Duration, Instant};
 
@@ -109,6 +109,20 @@ impl AutoDriveCardCell {
         cell
     }
 
+    pub(crate) fn set_goal(&mut self, goal: Option<String>) {
+        self.goal = goal.and_then(Self::normalize_text);
+    }
+
+    #[cfg(any(test, feature = "test-helpers"))]
+    pub(crate) fn goal_text(&self) -> Option<&str> {
+        self.goal.as_deref()
+    }
+
+    #[cfg(any(test, feature = "test-helpers"))]
+    pub(crate) fn action_texts(&self) -> Vec<String> {
+        self.actions.iter().map(|action| action.text.clone()).collect()
+    }
+
     fn normalize_text(value: String) -> Option<String> {
         let trimmed = value.trim();
         if trimmed.is_empty() {
@@ -167,8 +181,11 @@ impl AutoDriveCardCell {
         rows.push(self.blank_row(body_width, style));
 
         if let Some(goal) = &self.goal {
-            rows.push(self.goal_row(goal.as_str(), body_width, style));
-            rows.push(self.blank_row(body_width, style));
+            let goal_rows = self.goal_rows(goal.as_str(), body_width, style);
+            if !goal_rows.is_empty() {
+                rows.extend(goal_rows);
+                rows.push(self.blank_row(body_width, style));
+            }
         }
 
         rows.push(self.actions_heading_row(body_width, style));
@@ -227,18 +244,146 @@ impl AutoDriveCardCell {
         )
     }
 
-    fn goal_row(&self, goal: &str, body_width: usize, style: &CardStyle) -> CardRow {
+    fn goal_rows(&self, goal: &str, body_width: usize, style: &CardStyle) -> Vec<CardRow> {
+        if body_width == 0 {
+            return Vec::new();
+        }
         let cleaned = goal.trim();
-        let value = format!(" {}", cleaned);
-        let display = truncate_with_ellipsis(value.as_str(), body_width);
-        let mut segment = CardSegment::new(display, secondary_text_style(style));
-        segment.inherit_background = true;
-        CardRow::new(
-            BORDER_BODY.to_string(),
-            Self::accent_style(style),
-            vec![segment],
-            None,
-        )
+        if cleaned.is_empty() {
+            return Vec::new();
+        }
+
+        let indent = if body_width > 1 { " " } else { "" };
+        let indent_width = UnicodeWidthStr::width(indent);
+        let text_width = body_width
+            .saturating_sub(indent_width)
+            .max(1);
+        let wrapped = Self::wrap_goal_text(cleaned, text_width);
+
+        wrapped
+            .into_iter()
+            .map(|line| {
+                let content = if line.is_empty() {
+                    String::new()
+                } else {
+                    format!("{indent}{line}")
+                };
+                let mut segment = CardSegment::new(content, secondary_text_style(style));
+                segment.inherit_background = true;
+                CardRow::new(
+                    BORDER_BODY.to_string(),
+                    Self::accent_style(style),
+                    vec![segment],
+                    None,
+                )
+            })
+            .collect()
+    }
+
+    fn wrap_goal_text(text: &str, width: usize) -> Vec<String> {
+        if width == 0 {
+            return vec![String::new()];
+        }
+
+        let mut rows: Vec<String> = Vec::new();
+        for paragraph in text.split('\n') {
+            let trimmed = paragraph.trim_end();
+            if trimmed.is_empty() {
+                rows.push(String::new());
+                continue;
+            }
+            rows.extend(Self::wrap_goal_line(trimmed, width));
+        }
+
+        if rows.is_empty() {
+            rows.push(String::new());
+        }
+
+        rows
+    }
+
+    fn wrap_goal_line(line: &str, width: usize) -> Vec<String> {
+        if width == 0 {
+            return vec![String::new()];
+        }
+
+        let mut rows: Vec<String> = Vec::new();
+        let mut current = String::new();
+        let mut current_width = 0usize;
+
+        for word in line.split_whitespace() {
+            let word_width = UnicodeWidthStr::width(word);
+            if word_width == 0 {
+                continue;
+            }
+            if word_width > width {
+                if !current.is_empty() {
+                    rows.push(current);
+                    current = String::new();
+                    current_width = 0;
+                }
+                rows.extend(Self::break_long_word(word, width));
+                continue;
+            }
+
+            let separator_width = if current.is_empty() { 0 } else { 1 };
+            if current_width + separator_width + word_width > width {
+                if !current.is_empty() {
+                    rows.push(current);
+                }
+                current = word.to_string();
+                current_width = word_width;
+            } else {
+                if separator_width > 0 {
+                    current.push(' ');
+                }
+                current.push_str(word);
+                current_width += separator_width + word_width;
+            }
+        }
+
+        if !current.is_empty() {
+            rows.push(current);
+        }
+
+        if rows.is_empty() {
+            rows.push(String::new());
+        }
+
+        rows
+    }
+
+    fn break_long_word(word: &str, width: usize) -> Vec<String> {
+        if width == 0 {
+            return vec![String::new()];
+        }
+
+        let mut rows: Vec<String> = Vec::new();
+        let mut current = String::new();
+        let mut current_width = 0usize;
+
+        for ch in word.chars() {
+            let char_width = UnicodeWidthChar::width(ch).unwrap_or(1);
+            if current_width + char_width > width {
+                if !current.is_empty() {
+                    rows.push(current);
+                }
+                current = String::new();
+                current_width = 0;
+            }
+            current.push(ch);
+            current_width += char_width;
+        }
+
+        if !current.is_empty() {
+            rows.push(current);
+        }
+
+        if rows.is_empty() {
+            rows.push(String::new());
+        }
+
+        rows
     }
 
     fn actions_heading_row(&self, body_width: usize, style: &CardStyle) -> CardRow {
@@ -556,4 +701,38 @@ impl HistoryCell for AutoDriveCardCell {
     fn custom_render_with_skip(&self, area: Rect, buf: &mut Buffer, skip_rows: u16) {
         self.render_rows(area, buf, skip_rows);
     }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn set_goal_trims_and_rejects_empty_text() {
+        let mut cell = AutoDriveCardCell::new(None);
+        cell.set_goal(Some("  Build the release pipeline  ".to_string()));
+        assert_eq!(cell.goal.as_deref(), Some("Build the release pipeline"));
+
+        cell.set_goal(Some("   \n \t  ".to_string()));
+        assert!(cell.goal.is_none());
+    }
+
+    #[test]
+    fn goal_rows_wrap_long_text() {
+        let goal = "Ship the multiline goal by implementing wrapping so the Auto Drive card can show every detail clearly";
+        let cell = AutoDriveCardCell::new(Some(goal.to_string()));
+        let style = auto_drive_card_style();
+        let rows = cell.goal_rows(goal, 16, &style);
+
+        assert!(rows.len() >= 3, "expected multiple wrapped rows, got {}", rows.len());
+        for row in &rows {
+            let combined: String = row
+                .segments
+                .iter()
+                .map(|seg| seg.text.clone())
+                .collect();
+            assert!(UnicodeWidthStr::width(combined.as_str()) <= 16);
+        }
+    }
+
 }
