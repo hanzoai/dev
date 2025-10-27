@@ -32,6 +32,24 @@ Read the full notes in `release-notes/RELEASE_NOTES.md`.
 - 🔌 **MCP support** – Extend with filesystem, DBs, APIs, or your own tools.
 - 🔒 **Safety modes** – Read-only, approvals, and workspace sandboxing.
 
+<p align="center">
+  <strong>Introducing Auto Drive</strong>
+  <video width="100%" controls playsinline>
+    <source src="https://upload.justevery.com/AutoDrive.webm" type="video/webm">
+    <source src="https://upload.justevery.com/AutoDrive.mp4" type="video/mp4">
+    Your browser does not support embedded videos. Watch the <a href="https://upload.justevery.com/AutoDrive.mp4">Auto Drive demo</a> instead.
+  </video>
+</p>
+
+<p align="center">
+  <strong>Multi-Agent Support</strong>
+  <video width="100%" controls playsinline>
+    <source src="https://upload.justevery.com/v0-3.webm" type="video/webm">
+    <source src="https://upload.justevery.com/v0-3.mp4" type="video/mp4">
+    Your browser does not support embedded videos. Watch the <a href="https://upload.justevery.com/v0-3.mp4">v0.3 overview</a> instead.
+  </video>
+</p>
+
 &ensp;
 | <img src="docs/screenshots/simple.png" alt="Simple interface" width="100%"><br>Simple interface | <img src="docs/screenshots/diff.png" alt="Unified diff viewer" width="100%"><br>Unified diffs |
 |:--:|:--:|
