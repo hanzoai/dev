@@ -7,6 +7,12 @@
 
 - (none)
 
+## [0.4.2] - 2025-10-27
+
+- Auto Drive: add compaction, token metrics, and durable transcripts so long runs stay stable. (0071313, 57b398f, cd880a5)
+- TUI/Auto Drive: celebrate completion with a dedicated state to clarify run outcomes. (2130ed2)
+- TUI: route browser status logs through the tail helper so log panes update live. (4630825)
+
 ## [0.4.1] - 2025-10-27
 
 - Auto Drive: show in-progress summaries in the card so runs surface status while they execute. (c7991ed)
