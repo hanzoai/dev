@@ -24,7 +24,9 @@ use mcp_types::Tool;
 use serde_json::json;
 use sha1::Digest;
 use sha1::Sha1;
+use tokio::sync::RwLock;
 use tokio::task::JoinSet;
+use tokio::task::yield_now;
 use tracing::info;
 use tracing::warn;
 
@@ -152,6 +154,20 @@ impl McpClientAdapter {
             McpClientAdapter::Rmcp(client) => client.call_tool(name, arguments, timeout).await,
         }
     }
+
+    async fn into_shutdown(self) {
+        match self {
+            McpClientAdapter::Legacy(client) => {
+                drop(client);
+                // Yield so Tokio can propagate the kill-on-drop signal before
+                // the next session spins up a replacement server.
+                yield_now().await;
+            }
+            McpClientAdapter::Rmcp(client) => {
+                client.shutdown().await;
+            }
+        }
+    }
 }
 
 /// A thin wrapper around a set of running [`McpClient`] instances.
@@ -161,7 +177,7 @@ pub struct McpConnectionManager {
     ///
     /// The server name originates from the keys of the `mcp_servers` map in
     /// the user configuration.
-    clients: HashMap<String, ManagedClient>,
+    clients: RwLock<HashMap<String, ManagedClient>>,
 
     /// Fully qualified tool name -> tool instance.
     tools: HashMap<String, ToolInfo>,
@@ -317,7 +333,10 @@ impl McpConnectionManager {
 
         let tools = qualify_tools(all_tools);
 
-        Ok((Self { clients, tools }, errors))
+        Ok((Self {
+            clients: RwLock::new(clients),
+            tools,
+        }, errors))
     }
 
     /// Returns a single map that contains **all** tools. Each key is the
@@ -337,12 +356,14 @@ impl McpConnectionManager {
         arguments: Option<serde_json::Value>,
         timeout_override: Option<Duration>,
     ) -> Result<mcp_types::CallToolResult> {
-        let managed = self
-            .clients
-            .get(server)
-            .ok_or_else(|| anyhow!("unknown MCP server '{server}'"))?;
-        let client = managed.client.clone();
-        let timeout = timeout_override.or(managed.tool_timeout);
+        let (client, timeout) = {
+            let clients = self.clients.read().await;
+            let managed = clients
+                .get(server)
+                .ok_or_else(|| anyhow!("unknown MCP server '{server}'"))?;
+            let timeout = timeout_override.or(managed.tool_timeout);
+            (managed.client.clone(), timeout)
+        };
 
         client
             .call_tool(tool.to_string(), arguments, timeout)
@@ -354,6 +375,23 @@ impl McpConnectionManager {
         self.tools
             .get(tool_name)
             .map(|tool| (tool.server_name.clone(), tool.tool_name.clone()))
+    }
+
+    pub async fn shutdown_all(&self) {
+        let mut clients = self.clients.write().await;
+        let drained: Vec<ManagedClient> = clients.drain().map(|(_, managed)| managed).collect();
+        drop(clients);
+
+        for managed in drained {
+            managed.shutdown().await;
+        }
+    }
+
+}
+
+impl ManagedClient {
+    async fn shutdown(self) {
+        self.client.into_shutdown().await;
     }
 }
 
