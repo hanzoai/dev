@@ -1,6 +1,5 @@
 ---
 source: tui/tests/vt100_chatwidget_snapshot.rs
-assertion_line: 658
 expression: scrolled
 ---
  +----------------------------------------------------------------------------+
@@ -25,4 +24,4 @@ expression: scrolled
  +----------------------------------------------------------------------------+
  | What can I code for you today?                                             |
  +----------------------------------------------------------------------------+
-   Read Only  (Shift+Tab change)                       Ctrl+H help
+   Read Only  (Shift+Tab change)                       Ctrl+H help  •  API key

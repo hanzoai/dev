@@ -1,10 +1,9 @@
 ---
 source: tui/tests/vt100_chatwidget_snapshot.rs
-assertion_line: 1519
 expression: section_open
 ---
  +------------------------------------------------------------------------------------------------+
- |    Code  •  Directory: ~/.code/working/code/branches/code-branch-20251026-150523/code-rs/tui   |
+ |                                              Code                                              |
  +------------------------------------------------------------------------------------------------+
  +Settings ▸ Model--------------------------------------------------------------------------------+
  |                                                                                                |
@@ -29,4 +28,4 @@ expression: section_open
  +------------------------------------------------------------------------------------------------+
  | What can I code for you today?                                                                 |
  +------------------------------------------------------------------------------------------------+
-   Read Only  (Shift+Tab change)                                                       Ctrl+H help
+   Read Only  (Shift+Tab change)                                           Ctrl+H help  •  API key

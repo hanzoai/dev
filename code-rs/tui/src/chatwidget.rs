@@ -22717,9 +22717,11 @@ mod tests {
                 }
             });
 
-        assert!(button_label.starts_with("Send prompt"));
+        // With AutoContinueMode::Immediate, the button shows "Continue current task"
+        assert!(button_label.starts_with("Continue current task"));
         assert_eq!(countdown_override, None);
-        assert_eq!(ctrl_switch_hint.as_str(), "Esc to edit");
+        // With continue mode active, the hint is "Esc to stop"
+        assert_eq!(ctrl_switch_hint.as_str(), "Esc to stop");
         assert!(manual_hint_present);
 
         harness.with_chat(|chat| {
