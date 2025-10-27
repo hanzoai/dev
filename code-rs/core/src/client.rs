@@ -1,3 +1,4 @@
+use std::collections::BTreeMap;
 use std::io::BufRead;
 use std::path::Path;
 // use std::sync::OnceLock;
@@ -464,6 +465,7 @@ impl ModelClient {
 
         let mut attempt = 0;
         let max_retries = self.provider.request_max_retries();
+        let mut request_id = String::new();
 
         // Compute endpoint with the latest available auth (may be None at this point).
         let endpoint = self
@@ -474,15 +476,6 @@ impl ModelClient {
             endpoint,
             serde_json::to_string(&payload_json)?
         );
-
-        // Start logging the request and get a request_id to track the response
-        let request_id = if let Ok(logger) = self.debug_logger.lock() {
-            logger
-                .start_request_log(&endpoint, &payload_json, log_tag)
-                .unwrap_or_default()
-        } else {
-            String::new()
-        };
 
         loop {
             attempt += 1;
@@ -519,6 +512,25 @@ impl ModelClient {
                 && let Some(account_id) = auth.get_account_id()
             {
                 req_builder = req_builder.header("chatgpt-account-id", account_id);
+            }
+
+            if request_id.is_empty() {
+                let endpoint_for_log = self.provider.get_full_url(&auth);
+                let header_snapshot = req_builder
+                    .try_clone()
+                    .and_then(|builder| builder.build().ok())
+                    .map(|req| header_map_to_json(req.headers()));
+
+                if let Ok(logger) = self.debug_logger.lock() {
+                    request_id = logger
+                        .start_request_log(
+                            &endpoint_for_log,
+                            &payload_json,
+                            header_snapshot.as_ref(),
+                            log_tag,
+                        )
+                        .unwrap_or_default();
+                }
             }
 
             let res = if let Some(otel) = self.otel_event_manager.as_ref() {
@@ -908,6 +920,16 @@ fn parse_header_u64(headers: &HeaderMap, name: &str) -> Option<u64> {
 
 fn parse_header_str<'a>(headers: &'a HeaderMap, name: &str) -> Option<&'a str> {
     headers.get(name)?.to_str().ok()
+}
+
+fn header_map_to_json(headers: &HeaderMap) -> Value {
+    let mut ordered: BTreeMap<String, Vec<String>> = BTreeMap::new();
+    for (name, value) in headers.iter() {
+        let entry = ordered.entry(name.as_str().to_string()).or_default();
+        entry.push(value.to_str().unwrap_or_default().to_string());
+    }
+
+    serde_json::to_value(ordered).unwrap_or(Value::Null)
 }
 
 async fn process_sse<S>(

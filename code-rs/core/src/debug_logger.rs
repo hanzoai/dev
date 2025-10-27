@@ -89,6 +89,7 @@ impl DebugLogger {
         &self,
         endpoint: &str,
         payload: &Value,
+        headers: Option<&Value>,
         tag: Option<&str>,
     ) -> Result<String, std::io::Error> {
         if !self.enabled {
@@ -109,12 +110,16 @@ impl DebugLogger {
         let request_file_path = log_dir.join(request_filename);
 
         // Create request object with metadata
-        let request_entry = serde_json::json!({
+        let mut request_entry = serde_json::json!({
             "timestamp": timestamp.to_rfc3339(),
             "request_id": request_id,
             "endpoint": endpoint,
             "payload": payload
         });
+
+        if let (Some(headers), Some(obj)) = (headers, request_entry.as_object_mut()) {
+            obj.insert("headers".to_string(), headers.clone());
+        }
 
         // Write pretty-printed JSON to request file
         let formatted_request = serde_json::to_string_pretty(&request_entry)?;
@@ -234,9 +239,15 @@ impl DebugLogger {
             return Ok(());
         }
 
-        let path = self
-            .usage_dir
-            .join(format!("{}_usage.json", session_id));
+        let session_id_str = session_id.to_string();
+        let path = if let Some(existing) = self.find_existing_usage_log(&session_id_str) {
+            existing
+        } else {
+            let timestamp = Local::now().format("%Y%m%d_%H%M%S%.3f");
+            self
+                .usage_dir
+                .join(format!("{}_{}_usage.json", timestamp, session_id_str))
+        };
 
         if let Some(parent) = path.parent() {
             fs::create_dir_all(parent)?;
@@ -253,6 +264,25 @@ impl DebugLogger {
         *guard = path;
 
         Ok(())
+    }
+
+    fn find_existing_usage_log(&self, session_id: &str) -> Option<PathBuf> {
+        if let Ok(entries) = fs::read_dir(&self.usage_dir) {
+            for entry in entries.flatten() {
+                let path = entry.path();
+                if !path.is_file() {
+                    continue;
+                }
+                if let Some(name) = path.file_name().and_then(|n| n.to_str()) {
+                    if name == format!("{}_usage.json", session_id)
+                        || name.ends_with(&format!("_{}_usage.json", session_id))
+                    {
+                        return Some(path);
+                    }
+                }
+            }
+        }
+        None
     }
 
     // Legacy methods for backward compatibility - they now create standalone files
