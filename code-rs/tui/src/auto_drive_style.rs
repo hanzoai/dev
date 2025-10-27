@@ -181,6 +181,13 @@ pub struct ComposerStyle {
     pub goal_title_prefix: &'static str,
     pub goal_title_suffix: &'static str,
     pub title_style: Style,
+    pub border_gradient: Option<BorderGradient>,
+}
+
+#[derive(Clone, Copy)]
+pub struct BorderGradient {
+    pub left: Color,
+    pub right: Color,
 }
 
 fn auto_drive_accent_color() -> Color {
@@ -231,6 +238,7 @@ fn sentinel_style() -> AutoDriveStyle {
             title_style: Style::default()
                 .fg(accent)
                 .add_modifier(Modifier::BOLD),
+            border_gradient: Some(auto_drive_border_gradient()),
         },
         footer_separator: "  •  ",
         summary_style: Style::default()
@@ -270,6 +278,7 @@ fn whisper_style() -> AutoDriveStyle {
             title_style: Style::default()
                 .fg(colors::text_dim())
                 .add_modifier(Modifier::ITALIC),
+            border_gradient: Some(auto_drive_border_gradient()),
         },
         footer_separator: "  ∙  ",
         summary_style: Style::default()
@@ -316,6 +325,7 @@ fn beacon_style() -> AutoDriveStyle {
             title_style: Style::default()
                 .fg(colors::keyword())
                 .add_modifier(Modifier::BOLD),
+            border_gradient: Some(auto_drive_border_gradient()),
         },
         footer_separator: "  |  ",
         summary_style: Style::default()
@@ -359,6 +369,7 @@ fn horizon_style() -> AutoDriveStyle {
             title_style: Style::default()
                 .fg(info)
                 .add_modifier(Modifier::BOLD),
+            border_gradient: Some(auto_drive_border_gradient()),
         },
         footer_separator: "  ≡  ",
         summary_style: Style::default()
@@ -402,10 +413,25 @@ fn pulse_style() -> AutoDriveStyle {
             title_style: Style::default()
                 .fg(success)
                 .add_modifier(Modifier::BOLD),
+            border_gradient: Some(auto_drive_border_gradient()),
         },
         footer_separator: "  ✶  ",
         summary_style: Style::default()
             .fg(success)
             .add_modifier(Modifier::BOLD),
+    }
+}
+
+fn auto_drive_border_gradient() -> BorderGradient {
+    if is_dark_theme_active() {
+        BorderGradient {
+            left: Color::Rgb(0, 150, 255),
+            right: Color::Rgb(255, 162, 0),
+        }
+    } else {
+        BorderGradient {
+            left: Color::Rgb(206, 235, 254),
+            right: Color::Rgb(255, 232, 206),
+        }
     }
 }
