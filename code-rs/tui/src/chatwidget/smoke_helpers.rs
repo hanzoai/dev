@@ -133,6 +133,29 @@ impl ChatWidgetHarness {
                     self.chat
                         .insert_background_event_with_placement(message, placement, order);
                 }
+                AppEvent::UpdateAgentConfig {
+                    name,
+                    enabled,
+                    args_read_only,
+                    args_write,
+                    instructions,
+                    command,
+                } => {
+                    let runtime = &*TEST_RUNTIME;
+                    let _guard = runtime.enter();
+                    self.chat.apply_agent_update(
+                        &name,
+                        enabled,
+                        args_read_only,
+                        args_write,
+                        instructions,
+                        command,
+                    );
+                }
+                AppEvent::ShowAgentsOverview => {
+                    self.chat.ensure_settings_overlay_section(SettingsSection::Agents);
+                    self.chat.show_agents_overview_ui();
+                }
                 AppEvent::CommitTick => {
                     self.chat.on_commit_tick();
                     let newly_emitted = self.drain_events();

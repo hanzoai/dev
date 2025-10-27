@@ -19,3 +19,7 @@ We’ve reinstated the documented `OPENAI_WIRE_API` override. Setting `OPENAI_WI
 ## #289 — Custom prompts not discovered
 
 Prompt discovery now uses the same legacy-aware resolver as other config files, so `~/.codex/prompts/*.md` is picked up when `~/.code/prompts` is absent. Fresh async tests in `code-rs/core/tests/custom_prompts_discovery.rs` lock environment variables and cover CODE_HOME override, legacy fallback, dual-directory preference, and ignoring non-Markdown files.
+
+## #351 — Agents toggle state not persisting
+
+Thanks for the detailed report! The Agents overlay now persists the “Enabled” checkbox immediately, so you no longer need to close and reopen the menu to see the change. We also added a VT100 snapshot regression test (`agents_toggle_claude_opus_persists_via_slash_command`) to keep the toggle flow locked. The fix is merged and will ride out in the next release.

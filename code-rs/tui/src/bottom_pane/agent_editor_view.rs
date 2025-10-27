@@ -41,6 +41,36 @@ pub(crate) struct AgentEditorView {
 }
 
 impl AgentEditorView {
+    fn persist_current_agent(&self) {
+        let ro = self
+            .params_ro
+            .text()
+            .split_whitespace()
+            .map(|s| s.to_string())
+            .collect::<Vec<_>>();
+        let wr = self
+            .params_wr
+            .text()
+            .split_whitespace()
+            .map(|s| s.to_string())
+            .collect::<Vec<_>>();
+        let ro_opt = if ro.is_empty() { None } else { Some(ro) };
+        let wr_opt = if wr.is_empty() { None } else { Some(wr) };
+        let instr_opt = {
+            let t = self.instr.text().trim().to_string();
+            if t.is_empty() { None } else { Some(t) }
+        };
+
+        self.app_event_tx.send(AppEvent::UpdateAgentConfig {
+            name: self.name.clone(),
+            enabled: self.enabled,
+            args_read_only: ro_opt,
+            args_write: wr_opt,
+            instructions: instr_opt,
+            command: self.command.clone(),
+        });
+    }
+
     fn handle_key_internal(&mut self, key_event: KeyEvent) -> bool {
         if !self.installed {
             match key_event.code {
@@ -69,10 +99,12 @@ impl AgentEditorView {
                 }
                 KeyEvent { code: KeyCode::Left, .. } if self.field == 0 => {
                     self.enabled = true;
+                    self.persist_current_agent();
                     true
                 }
                 KeyEvent { code: KeyCode::Right, .. } if self.field == 0 => {
                     self.enabled = false;
+                    self.persist_current_agent();
                     true
                 }
                 KeyEvent { code: KeyCode::Left, .. } if self.field == 5 => {
@@ -85,6 +117,7 @@ impl AgentEditorView {
                 }
                 KeyEvent { code: KeyCode::Char(' '), .. } if self.field == 0 => {
                     self.enabled = !self.enabled;
+                    self.persist_current_agent();
                     true
                 }
                 ev @ KeyEvent { .. } if self.field == 1 => {
@@ -100,32 +133,7 @@ impl AgentEditorView {
                     true
                 }
                 KeyEvent { code: KeyCode::Enter, .. } if self.field == 4 => {
-                    let ro = self
-                        .params_ro
-                        .text()
-                        .split_whitespace()
-                        .map(|s| s.to_string())
-                        .collect::<Vec<_>>();
-                    let wr = self
-                        .params_wr
-                        .text()
-                        .split_whitespace()
-                        .map(|s| s.to_string())
-                        .collect::<Vec<_>>();
-                    let ro_opt = if ro.is_empty() { None } else { Some(ro) };
-                    let wr_opt = if wr.is_empty() { None } else { Some(wr) };
-                    let instr_opt = {
-                        let t = self.instr.text().trim().to_string();
-                        if t.is_empty() { None } else { Some(t) }
-                    };
-                    self.app_event_tx.send(AppEvent::UpdateAgentConfig {
-                        name: self.name.clone(),
-                        enabled: self.enabled,
-                        args_read_only: ro_opt,
-                        args_write: wr_opt,
-                        instructions: instr_opt,
-                        command: self.command.clone(),
-                    });
+                    self.persist_current_agent();
                     self.complete = true;
                     self.app_event_tx.send(AppEvent::ShowAgentsOverview);
                     true
