@@ -22,7 +22,7 @@ Both the `--config` flag and the `config.toml` file support the following option
 The model that Codex should use.
 
 ```toml
-model = "o3"  # overrides the default of "gpt-5-codex"
+model = "o3"  # overrides the default of "gpt-5"
 ```
 
 ## model_providers
@@ -245,7 +245,7 @@ Users can specify config values at multiple levels. Order of precedence is as fo
 1. custom command-line argument, e.g., `--model o3`
 2. as part of a profile, where the `--profile` is specified via a CLI (or in the config file itself)
 3. as an entry in `config.toml`, e.g., `model = "o3"`
-4. the default value that comes with Codex CLI (i.e., Codex CLI defaults to `gpt-5-codex`)
+4. the default value that comes with Codex CLI (i.e., Codex CLI defaults to `gpt-5`)
 
 ## model_reasoning_effort
 
@@ -428,13 +428,13 @@ tool_timeout_sec = 30
 
 Sub-agents are orchestrated helper workflows you can trigger with slash commands (for example `/plan`, `/solve`, `/code`). Each entry under `[[subagents.commands]]` defines the slash command name, whether spawned agents run in read-only mode, which `agents` to launch, and extra guidance for both the orchestrator (Code) and the individual agents.
 
-By default (when no `[[agents]]` are configured) Code advertises these model slugs for multi-agent runs: `code-gpt-5-codex`, `code-gpt-5`, `claude-sonnet-4.5`, `claude-opus-4.1`, `gemini-2.5-pro`, `gemini-2.5-flash`, and `qwen-3-coder`. The cloud counterpart, `cloud-gpt-5-codex`, only appears when `CODE_ENABLE_CLOUD_AGENT_MODEL=1` is set. You can override the list by defining `[[agents]]` entries or by specifying `agents = [ … ]` on a given `[[subagents.commands]]` entry.
+By default (when no `[[agents]]` are configured) Code advertises these model slugs for multi-agent runs: `code-gpt-5`, `claude-sonnet-4.5`, `claude-opus-4.1`, `gemini-2.5-pro`, `gemini-2.5-flash`, `qwen-3-coder`, and `code-gpt-5-codex`. The cloud counterpart, `cloud-gpt-5-codex`, only appears when `CODE_ENABLE_CLOUD_AGENT_MODEL=1` is set. You can override the list by defining `[[agents]]` entries or by specifying `agents = [ … ]` on a given `[[subagents.commands]]` entry.
 
 ```toml
 [[subagents.commands]]
 name = "context"
 read-only = true
-agents = ["context-collector", "code-gpt-5-codex"]
+agents = ["context-collector", "code-gpt-5"]
 orchestrator-instructions = "Coordinate a context sweep before coding. Ask each agent to emit concise, linked summaries of relevant files and tooling the primary task might need."
 agent-instructions = "Summarize the repository areas most relevant to the user's request. List file paths, rationale, and suggested follow-up scripts to run. Keep the reply under 2,000 tokens."
 ```

@@ -210,4 +210,10 @@ impl RmcpClient {
             ClientState::Connecting { .. } => Err(anyhow!("MCP client not initialized")),
         }
     }
+
+    pub async fn shutdown(&self) {
+        if let Ok(service) = self.service().await {
+            service.cancellation_token().cancel();
+        }
+    }
 }
