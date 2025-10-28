@@ -1,4 +1,4 @@
-## @just-every/code v0.4.2
+## @just-every/code v0.4.3
 
 This release sharpens Auto Drive reliability and keeps the TUI's log panes informative.
 

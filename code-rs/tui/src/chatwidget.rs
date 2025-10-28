@@ -9517,6 +9517,15 @@ impl ChatWidget<'_> {
             "handle_code_event({})",
             serde_json::to_string_pretty(&event).unwrap_or_default()
         );
+
+        if self.session_id.is_none() && !matches!(&event.msg, EventMsg::SessionConfigured(_)) {
+            tracing::debug!(
+                "Ignoring stale event {:?} (seq={}) while waiting for SessionConfigured",
+                &event.msg,
+                event.event_seq
+            );
+            return;
+        }
         // Strict ordering: all LLM/tool events must carry OrderMeta; internal events use synthetic keys.
         // Track provider order to anchor internal inserts at the bottom of the active request.
         self.note_order(event.order.as_ref());
@@ -18672,6 +18681,26 @@ Have we met every part of this goal and is there no further work to do?"#
     /// as pressing Ctrl-C/Esc while a task is running.
     pub(crate) fn cancel_running_task_from_approval(&mut self) {
         self.interrupt_running_task();
+    }
+
+    /// Stop any in-flight turn (Auto Drive, agents, streaming responses) before
+    /// starting a brand new chat so that stale output cannot leak into the new
+    /// conversation.
+    pub(crate) fn abort_active_turn_for_new_chat(&mut self) {
+        if self.has_cancelable_agents() {
+            self.cancel_active_agents();
+        }
+
+        if self.auto_state.is_active() {
+            self.auto_stop(None);
+        }
+
+        self.interrupt_running_task();
+        self.finalize_active_stream();
+        self.stream_state.drop_streaming = true;
+        self.bottom_pane.set_task_running(false);
+        self.bottom_pane.clear_live_ring();
+        self.maybe_hide_spinner();
     }
 
     pub(crate) fn register_approved_command(
