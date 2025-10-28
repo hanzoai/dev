@@ -189,7 +189,13 @@ jobs:
   release:
     name: Publish prerelease (all targets)
     needs: [build]
-    if: github.event_name == 'pull_request' && github.event.pull_request.head.ref != 'upstream-merge'
+    # Only publish for PRs from the main repo (not forks) to avoid permission failures.
+    # Fixes: https://github.com/just-every/code/issues/355
+    # Fixes: https://github.com/just-every/code/issues/356
+    if: >-
+      github.event_name == 'pull_request' &&
+      github.event.pull_request.head.ref != 'upstream-merge' &&
+      github.event.pull_request.head.repo.full_name == github.repository
     runs-on: ubuntu-latest
     steps:
       - name: Resolve slug and next tag
@@ -327,6 +333,11 @@ jobs:
   comment:
     name: Post Artifact Links
     needs: [build, release]
+    # Only run if release job ran (which is conditional on non-fork PRs)
+    if: >-
+      github.event_name == 'pull_request' &&
+      github.event.pull_request.head.ref != 'upstream-merge' &&
+      github.event.pull_request.head.repo.full_name == github.repository
     runs-on: ubuntu-latest
     steps:
       - name: Resolve slug and latest tag
