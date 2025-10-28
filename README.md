@@ -13,11 +13,11 @@
 &ensp;
 ## What's new in v0.4.0 (October 26, 2025)
 
-- **Auto Drive runs the whole play** – hand `/auto` a task and it now plans, coordinates agents, reruns checks, and recovers from hiccups without babysitting.
-- **Unified settings overlay** – `/settings` centralizes limits, model routing, themes, and CLI integrations so you can audit configuration in one place.
-- **Card-based activity stream** – Agents, browser sessions, web search, and Auto Drive render as compact cards with drill-down overlays for full logs.
+- **Auto Drive upgraded** – hand `/auto` a task and it now plans, coordinates agents, reruns checks, and recovers from hiccups without babysitting.
+- **Unified settings** – `/settings` centralizes limits, model routing, themes, and CLI integrations so you can audit configuration in one place.
+- **Card-based activity** – Agents, browser sessions, web search, and Auto Drive render as compact cards with drill-down overlays for full logs.
 - **Turbocharged performance** – History rendering and streaming were optimized to stay smooth even during long multi-agent sessions.
-- **Smarter agent routing** – Mix and match orchestrator CLIs (Claude, Gemini, GPT-5, Qwen, and more) per `/plan`, `/code`, or `/solve` run.
+- **Smarter agents** – Mix and match orchestrator CLIs (Claude, Gemini, GPT-5, Qwen, and more) per `/plan`, `/code`, or `/solve` run.
 
 Read the full notes in `release-notes/RELEASE_NOTES.md`.
 
@@ -32,18 +32,23 @@ Read the full notes in `release-notes/RELEASE_NOTES.md`.
 - 🔌 **MCP support** – Extend with filesystem, DBs, APIs, or your own tools.
 - 🔒 **Safety modes** – Read-only, approvals, and workspace sandboxing.
 
+&ensp;
+## AI Videos
+
+&ensp;
 <p align="center">
-  <strong>Introducing Auto Drive</strong><br>
-  <a href="https://youtu.be/Du3p7Q8_eUo">
-    <img src="docs/screenshots/video-auto-drive-play.jpg" alt="Play Introducing Auto Drive video" width="100%">
-  </a>
+  <a href="https://youtu.be/UOASHZPruQk">
+    <img src="docs/screenshots/video-auto-drive-new-play.jpg" alt="Play Introducing Auto Drive video" width="100%">
+  </a><br>
+  <strong>Auto Drive Overview</strong>
 </p>
 
+&ensp;
 <p align="center">
-  <strong>Multi-Agent Support</strong><br>
-  <a href="https://youtu.be/1_X8O8W2X0M">
+  <a href="https://youtu.be/sV317OhiysQ">
     <img src="docs/screenshots/video-v03-play.jpg" alt="Play Multi-Agent Support video" width="100%">
-  </a>
+  </a><br>
+  <strong>Multi-Agent Promo</strong>
 </p>
 
 
