@@ -40,21 +40,21 @@ jobs:
           # Linux MUSL (static-ish) builds
           - os: ubuntu-24.04
             target: x86_64-unknown-linux-musl
-            artifact: code-x86_64-unknown-linux-musl
+            artifact: dev-x86_64-unknown-linux-musl
           - os: ubuntu-24.04-arm
             target: aarch64-unknown-linux-musl
-            artifact: code-aarch64-unknown-linux-musl
+            artifact: dev-aarch64-unknown-linux-musl
           # macOS builds (both architectures)
           - os: macos-14
             target: x86_64-apple-darwin
-            artifact: code-x86_64-apple-darwin
+            artifact: dev-x86_64-apple-darwin
           - os: macos-14
             target: aarch64-apple-darwin
-            artifact: code-aarch64-apple-darwin
+            artifact: dev-aarch64-apple-darwin
           # Windows build
           - os: windows-latest
             target: x86_64-pc-windows-msvc
-            artifact: code-x86_64-pc-windows-msvc.exe
+            artifact: dev-x86_64-pc-windows-msvc.exe
 
     steps:
       - name: Checkout
@@ -136,20 +136,20 @@ jobs:
           CARGO_NET_GIT_FETCH_WITH_CLI: "true"
         run: cargo fetch --locked
 
-      - name: Build code (release)
+      - name: Build dev (release)
         shell: bash
         run: |
           cd "${RUST_WORKSPACE_DIR}"
-          cargo build --release --locked --target "${{ matrix.target }}" --bin code
+          cargo build --release --locked --target "${{ matrix.target }}" --bin dev
 
       - name: Prepare artifacts
         shell: bash
         run: |
           mkdir -p artifacts
           if [[ "${{ matrix.os }}" == "windows-latest" ]]; then
-            cp "${RUST_WORKSPACE_DIR}/target/${{ matrix.target }}/release/code.exe" "artifacts/${{ matrix.artifact }}"
+            cp "${RUST_WORKSPACE_DIR}/target/${{ matrix.target }}/release/dev.exe" "artifacts/${{ matrix.artifact }}"
           else
-            cp "${RUST_WORKSPACE_DIR}/target/${{ matrix.target }}/release/code" "artifacts/${{ matrix.artifact }}"
+            cp "${RUST_WORKSPACE_DIR}/target/${{ matrix.target }}/release/dev" "artifacts/${{ matrix.artifact }}"
           fi
 
       - name: Compress artifacts (Windows)
