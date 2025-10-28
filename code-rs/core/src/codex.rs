@@ -167,12 +167,13 @@ fn to_proto_sandbox_policy(policy: SandboxPolicy) -> ProtoSandboxPolicy {
             network_access,
             exclude_tmpdir_env_var,
             exclude_slash_tmp,
-            allow_git_writes: _,
+            allow_git_writes,
         } => ProtoSandboxPolicy::WorkspaceWrite {
             writable_roots,
             network_access,
             exclude_tmpdir_env_var,
             exclude_slash_tmp,
+            allow_git_writes,
         },
     }
 }
