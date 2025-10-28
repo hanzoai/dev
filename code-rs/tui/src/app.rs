@@ -1942,6 +1942,9 @@ impl App<'_> {
                             }
                         }
                         SlashCommand::New => {
+                            if let AppState::Chat { widget } = &mut self.app_state {
+                                widget.abort_active_turn_for_new_chat();
+                            }
                             // Start a brand new conversation (core session) with no carried history.
                             // Replace the chat widget entirely, mirroring SwitchCwd flow but without import.
                             let mut new_widget = ChatWidget::new(
