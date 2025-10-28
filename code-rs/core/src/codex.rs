@@ -1123,6 +1123,10 @@ impl Session {
         &self.mcp_connection_manager
     }
 
+    pub(crate) async fn shutdown_mcp_clients(&self) {
+        self.mcp_connection_manager.shutdown_all().await;
+    }
+
     pub(crate) fn update_validation_tool(&self, name: &str, enable: bool) {
         if name == "actionlint" {
             if let Ok(mut github) = self.github.write() {
@@ -3434,16 +3438,16 @@ async fn submission_loop(
                 );
 
                 // abort any current running session and clone its state
-                let state = match sess.take() {
-                    Some(sess) => {
-                        sess.notify_wait_interrupted(WaitInterruptReason::SessionAborted);
-                        sess.abort();
-                        sess.state.lock().unwrap().partial_clone()
-                    }
-                    None => State {
+                let old_session = sess.take();
+                let state = if let Some(sess_arc) = old_session.as_ref() {
+                    sess_arc.notify_wait_interrupted(WaitInterruptReason::SessionAborted);
+                    sess_arc.abort();
+                    sess_arc.state.lock().unwrap().partial_clone()
+                } else {
+                    State {
                         history: ConversationHistory::new(),
                         ..Default::default()
-                    },
+                    }
                 };
 
                 let writable_roots = get_writable_roots(&cwd);
@@ -3465,6 +3469,11 @@ async fn submission_loop(
                             tool.tool_name.to_string(),
                         ));
                     }
+                }
+
+                if let Some(old_session_arc) = old_session {
+                    old_session_arc.shutdown_mcp_clients().await;
+                    drop(old_session_arc);
                 }
 
                 let (mcp_connection_manager, failed_clients) = match McpConnectionManager::new(

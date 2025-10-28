@@ -32,9 +32,11 @@ use code_tui::test_helpers::{
 use crossterm::event::{KeyCode, KeyEvent, KeyEventKind, KeyEventState, KeyModifiers};
 use regex_lite::{Captures, Regex};
 use serde_json::json;
-use std::path::PathBuf;
-use std::sync::OnceLock;
+use std::path::{Path, PathBuf};
+use std::sync::{Mutex, OnceLock};
 use std::time::Duration;
+use once_cell::sync::Lazy;
+use tempfile::TempDir;
 
 fn normalize_output(text: String) -> String {
     text
@@ -64,6 +66,52 @@ fn normalize_trailing_whitespace(text: String) -> String {
         }
     }
     normalized
+}
+
+static ENV_LOCK: Lazy<Mutex<()>> = Lazy::new(|| Mutex::new(()));
+
+struct EnvGuard {
+    saved: Vec<(&'static str, Option<String>)>,
+}
+
+impl EnvGuard {
+    fn new(keys: &[&'static str]) -> Self {
+        let mut saved = Vec::with_capacity(keys.len());
+        for key in keys {
+            saved.push((*key, std::env::var(key).ok()));
+            unsafe {
+                std::env::remove_var(key);
+            }
+        }
+        Self { saved }
+    }
+
+    fn set_path(&self, key: &'static str, path: &Path) {
+        unsafe {
+            std::env::set_var(key, path);
+        }
+    }
+
+    fn remove(&self, key: &'static str) {
+        unsafe {
+            std::env::remove_var(key);
+        }
+    }
+}
+
+impl Drop for EnvGuard {
+    fn drop(&mut self) {
+        for (key, value) in self.saved.drain(..) {
+            match value {
+                Some(v) => unsafe {
+                    std::env::set_var(key, v);
+                },
+                None => unsafe {
+                    std::env::remove_var(key);
+                },
+            }
+        }
+    }
 }
 
 fn make_key(code: KeyCode, modifiers: KeyModifiers) -> KeyEvent {
@@ -1701,6 +1749,52 @@ fn agent_status_missing_batch_displays_error() {
     let output = render_chat_widget_to_vt100(&mut harness, 80, 20);
     let output = normalize_output(output);
     insta::assert_snapshot!("agent_status_missing_batch_displays_error", output);
+}
+
+#[test]
+fn agents_toggle_claude_opus_persists_via_slash_command() {
+    let _lock = ENV_LOCK.lock().unwrap();
+    let env = EnvGuard::new(&["HOME", "CODE_HOME", "CODEX_HOME"]);
+    let home_dir = TempDir::new().expect("temp home");
+    let code_home = TempDir::new().expect("code home");
+    env.set_path("HOME", home_dir.path());
+    env.set_path("CODE_HOME", code_home.path());
+    env.remove("CODEX_HOME");
+
+    let mut harness = ChatWidgetHarness::new();
+
+    harness.open_agents_settings_overlay();
+
+    let overlay_initial = normalize_output(render_chat_widget_to_vt100(&mut harness, 100, 28));
+    assert!(overlay_initial.contains("Agents"), "Agents overlay did not open");
+
+    harness.show_agent_editor("claude-opus-4.1");
+
+    let editor_frame = normalize_output(render_chat_widget_to_vt100(&mut harness, 100, 28));
+    assert!(editor_frame.to_lowercase().contains("enabled"));
+
+    harness.send_key(make_key(KeyCode::Char(' '), KeyModifiers::NONE));
+    let editor_after_toggle = normalize_output(render_chat_widget_to_vt100(&mut harness, 100, 28));
+    assert!(editor_after_toggle.to_lowercase().contains("disabled"));
+    for _ in 0..4 {
+        harness.send_key(make_key(KeyCode::Down, KeyModifiers::NONE));
+    }
+    harness.send_key(make_key(KeyCode::Enter, KeyModifiers::NONE));
+
+    let overview_after_save = normalize_output(render_chat_widget_to_vt100(&mut harness, 100, 28));
+    let overview_lower = overview_after_save.to_lowercase();
+    assert!(overview_lower.contains("claude-opus-4.1"));
+    assert!(overview_lower.contains("disabled"));
+
+    harness.send_key(make_key(KeyCode::Esc, KeyModifiers::NONE));
+
+    harness.open_agents_settings_overlay();
+    harness.send_key(make_key(KeyCode::Down, KeyModifiers::NONE));
+    harness.send_key(make_key(KeyCode::Down, KeyModifiers::NONE));
+    let overlay_reopen = normalize_output(render_chat_widget_to_vt100(&mut harness, 100, 28));
+    let reopen_lower = overlay_reopen.to_lowercase();
+    assert!(reopen_lower.contains("claude-opus-4.1"));
+    assert!(reopen_lower.contains("disabled"));
 }
 
 #[test]
