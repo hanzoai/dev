@@ -14,7 +14,7 @@ Environment flags:
   DETERMINISTIC=1                     Add -C debuginfo=0; promotes to release-prod unless DETERMINISTIC_FORCE_RELEASE=0
   DETERMINISTIC_FORCE_RELEASE=0|1     Keep dev-fast (0) or switch to release-prod (1, default)
   DETERMINISTIC_NO_UUID=1             macOS only: strip LC_UUID on final executables
-  BUILD_FAST_BINS="code code-tui"      Override bins to build (space or comma separated)
+  BUILD_FAST_BINS="dev dev-tui"         Override bins to build (space or comma separated)
   --workspace codex|code|both         Select workspace to build (default: code)
 
 Examples:
@@ -110,10 +110,10 @@ resolve_bin_path() {
   fi
 
   TARGET_DIR_ABS="${target_root}"
-  BIN_CARGO_FILENAME="${CRATE_PREFIX}"
-  BIN_FILENAME="${CRATE_PREFIX}"
+  BIN_CARGO_FILENAME="${BIN_NAME}"
+  BIN_FILENAME="${BIN_NAME}"
   if [ "$PROFILE" = "perf" ]; then
-    BIN_FILENAME="${CRATE_PREFIX}-perf"
+    BIN_FILENAME="${BIN_NAME}-perf"
   fi
   BIN_SUBPATH="${BIN_SUBDIR}/${BIN_FILENAME}"
   BIN_CARGO_SUBPATH="${BIN_SUBDIR}/${BIN_CARGO_FILENAME}"
@@ -236,10 +236,13 @@ case "$WORKSPACE_CHOICE" in
   codex|codex-rs)
     WORKSPACE_DIR="codex-rs"
     CRATE_PREFIX="codex"
+    BIN_NAME="codex"
     ;;
   code|code-rs)
     WORKSPACE_DIR="code-rs"
     CRATE_PREFIX="code"
+    # Hanzo dev uses "dev" binary name instead of "code"
+    BIN_NAME="dev"
     ;;
   *)
     echo "Error: Unknown workspace '${WORKSPACE_CHOICE}'. Use codex, code, or both." >&2
@@ -321,17 +324,17 @@ if [ -n "${BUILD_FAST_BINS:-}" ]; then
   done
 fi
 if [ "${#TARGET_BINS[@]}" -eq 0 ]; then
-  TARGET_BINS=("${CRATE_PREFIX}")
+  TARGET_BINS=("${BIN_NAME}")
 fi
 PRIMARY_PRESENT=0
 for candidate in "${TARGET_BINS[@]}"; do
-  if [ "${candidate}" = "${CRATE_PREFIX}" ]; then
+  if [ "${candidate}" = "${BIN_NAME}" ]; then
     PRIMARY_PRESENT=1
     break
   fi
 done
 if [ "$PRIMARY_PRESENT" -eq 0 ]; then
-  TARGET_BINS=("${CRATE_PREFIX}" "${TARGET_BINS[@]}")
+  TARGET_BINS=("${BIN_NAME}" "${TARGET_BINS[@]}")
 fi
 PRIMARY_BIN="${TARGET_BINS[0]}"
 
@@ -495,7 +498,7 @@ if [ "${DEBUG_SYMBOLS:-}" = "1" ]; then
   export CARGO_PROFILE_RELEASE_PROD_STRIP="none"
 fi
 
-echo "Building ${CRATE_PREFIX} binary (${PROFILE} mode)..."
+echo "Building ${BIN_NAME} binary (${PROFILE} mode)..."
 
 # Ensure Cargo cache locations are stable.
 # In CI, we can optionally enforce a specific CARGO_HOME regardless of caller env
