@@ -4,7 +4,7 @@ use ratatui::layout::{Alignment, Constraint, Direction, Layout, Margin, Rect};
 use ratatui::style::{Modifier, Style};
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, Borders, Clear, Paragraph, Widget, Wrap};
-use unicode_width::UnicodeWidthStr;
+use unicode_width::{UnicodeWidthChar, UnicodeWidthStr};
 
 use crate::app_event::AppEvent;
 use crate::app_event_sender::AppEventSender;
@@ -13,20 +13,24 @@ use crate::bottom_pane::{
     agents_settings_view::SubagentEditorView,
     AutoDriveSettingsView,
     BottomPaneView,
+    ConditionalUpdate,
     settings_panel::{render_panel, PanelFrameStyle},
-    GithubSettingsView,
     McpSettingsView,
     ModelSelectionView,
     NotificationsSettingsView,
+    prompts_settings_view::PromptsSettingsView,
+    PlanningSettingsView,
     SettingsSection,
     ThemeSelectionView,
     UpdateSettingsView,
+    ReviewSettingsView,
     ValidationSettingsView,
 };
 use crate::chrome_launch::{ChromeLaunchOption, CHROME_LAUNCH_CHOICES};
 use super::limits_overlay::{LimitsOverlay, LimitsOverlayContent};
 use crate::live_wrap::take_prefix_by_width;
 use crate::util::buffer::fill_rect;
+use code_core::config_types::ReasoningEffort;
 
 const LABEL_COLUMN_WIDTH: usize = 18;
 
@@ -35,6 +39,9 @@ pub(crate) trait SettingsContent {
     fn handle_key(&mut self, key: KeyEvent) -> bool;
     fn is_complete(&self) -> bool;
     fn on_close(&mut self) {}
+    fn handle_paste(&mut self, _text: String) -> bool {
+        false
+    }
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -181,9 +188,42 @@ pub(crate) struct ThemeSettingsContent {
     view: ThemeSelectionView,
 }
 
+pub(crate) struct PlanningSettingsContent {
+    view: PlanningSettingsView,
+}
+
 impl ThemeSettingsContent {
     pub(crate) fn new(view: ThemeSelectionView) -> Self {
         Self { view }
+    }
+}
+
+impl PlanningSettingsContent {
+    pub(crate) fn new(view: PlanningSettingsView) -> Self {
+        Self { view }
+    }
+
+    pub(crate) fn update_planning_model(&mut self, model: String, effort: ReasoningEffort) {
+        self.view.set_planning_model(model, effort);
+    }
+
+    pub(crate) fn set_use_chat_model(&mut self, use_chat: bool) {
+        self.view.set_use_chat_model(use_chat);
+    }
+}
+
+impl SettingsContent for PlanningSettingsContent {
+    fn render(&self, area: Rect, buf: &mut Buffer) {
+        self.view.render(area, buf);
+    }
+
+    fn handle_key(&mut self, key: KeyEvent) -> bool {
+        self.view.handle_key_event_direct(key);
+        true
+    }
+
+    fn is_complete(&self) -> bool {
+        self.view.is_complete()
     }
 }
 
@@ -205,13 +245,37 @@ pub(crate) struct NotificationsSettingsContent {
     view: NotificationsSettingsView,
 }
 
+pub(crate) struct PromptsSettingsContent {
+    view: PromptsSettingsView,
+}
+
 impl NotificationsSettingsContent {
     pub(crate) fn new(view: NotificationsSettingsView) -> Self {
         Self { view }
     }
 }
 
+impl PromptsSettingsContent {
+    pub(crate) fn new(view: PromptsSettingsView) -> Self {
+        Self { view }
+    }
+}
+
 impl SettingsContent for NotificationsSettingsContent {
+    fn render(&self, area: Rect, buf: &mut Buffer) {
+        self.view.render(area, buf);
+    }
+
+    fn handle_key(&mut self, key: KeyEvent) -> bool {
+        self.view.handle_key_event_direct(key)
+    }
+
+    fn is_complete(&self) -> bool {
+        self.view.is_complete()
+    }
+}
+
+impl SettingsContent for PromptsSettingsContent {
     fn render(&self, area: Rect, buf: &mut Buffer) {
         self.view.render(area, buf);
     }
@@ -260,7 +324,61 @@ impl ValidationSettingsContent {
     }
 }
 
-impl SettingsContent for ValidationSettingsContent {
+pub(crate) struct ReviewSettingsContent {
+    view: ReviewSettingsView,
+}
+
+impl ReviewSettingsContent {
+    pub(crate) fn new(view: ReviewSettingsView) -> Self {
+        Self { view }
+    }
+
+    pub(crate) fn update_review_model(&mut self, model: String, effort: ReasoningEffort) {
+        self.view.set_review_model(model, effort);
+    }
+
+    pub(crate) fn set_review_use_chat_model(&mut self, use_chat: bool) {
+        self.view.set_review_use_chat_model(use_chat);
+    }
+
+    pub(crate) fn update_review_resolve_model(&mut self, model: String, effort: ReasoningEffort) {
+        self.view.set_review_resolve_model(model, effort);
+    }
+
+    pub(crate) fn set_review_resolve_use_chat_model(&mut self, use_chat: bool) {
+        self.view.set_review_resolve_use_chat_model(use_chat);
+    }
+
+    pub(crate) fn update_auto_review_model(&mut self, model: String, effort: ReasoningEffort) {
+        self.view.set_auto_review_model(model, effort);
+    }
+
+    pub(crate) fn set_auto_review_use_chat_model(&mut self, use_chat: bool) {
+        self.view.set_auto_review_use_chat_model(use_chat);
+    }
+
+    pub(crate) fn update_auto_review_resolve_model(
+        &mut self,
+        model: String,
+        effort: ReasoningEffort,
+    ) {
+        self.view.set_auto_review_resolve_model(model, effort);
+    }
+
+    pub(crate) fn set_auto_review_resolve_use_chat_model(&mut self, use_chat: bool) {
+        self.view.set_auto_review_resolve_use_chat_model(use_chat);
+    }
+
+    pub(crate) fn set_review_followups(&mut self, attempts: u32) {
+        self.view.set_review_followups(attempts);
+    }
+
+    pub(crate) fn set_auto_review_followups(&mut self, attempts: u32) {
+        self.view.set_auto_review_followups(attempts);
+    }
+}
+
+impl SettingsContent for ReviewSettingsContent {
     fn render(&self, area: Rect, buf: &mut Buffer) {
         self.view.render(area, buf);
     }
@@ -271,21 +389,11 @@ impl SettingsContent for ValidationSettingsContent {
     }
 
     fn is_complete(&self) -> bool {
-        self.view.is_view_complete()
+        self.view.is_complete()
     }
 }
 
-pub(crate) struct GithubSettingsContent {
-    view: GithubSettingsView,
-}
-
-impl GithubSettingsContent {
-    pub(crate) fn new(view: GithubSettingsView) -> Self {
-        Self { view }
-    }
-}
-
-impl SettingsContent for GithubSettingsContent {
+impl SettingsContent for ValidationSettingsContent {
     fn render(&self, area: Rect, buf: &mut Buffer) {
         self.view.render(area, buf);
     }
@@ -307,6 +415,14 @@ pub(crate) struct AutoDriveSettingsContent {
 impl AutoDriveSettingsContent {
     pub(crate) fn new(view: AutoDriveSettingsView) -> Self {
         Self { view }
+    }
+
+    pub(crate) fn update_model(&mut self, model: String, effort: ReasoningEffort) {
+        self.view.set_model(model, effort);
+    }
+
+    pub(crate) fn set_use_chat_model(&mut self, use_chat: bool, model: String, effort: ReasoningEffort) {
+        self.view.set_use_chat_model(use_chat, model, effort);
     }
 }
 
@@ -354,6 +470,7 @@ pub(crate) struct AgentOverviewRow {
     pub(crate) name: String,
     pub(crate) enabled: bool,
     pub(crate) installed: bool,
+    pub(crate) description: Option<String>,
 }
 
 #[derive(Default)]
@@ -365,7 +482,7 @@ struct AgentsOverviewState {
 
 impl AgentsOverviewState {
     fn total_rows(&self) -> usize {
-        self.rows.len().saturating_add(self.commands.len()).saturating_add(1)
+        self.rows.len().saturating_add(self.commands.len()).saturating_add(2)
     }
 
     fn clamp_selection(&mut self) {
@@ -435,17 +552,29 @@ impl AgentsSettingsContent {
     fn render_overview(&self, area: Rect, buf: &mut Buffer, state: &AgentsOverviewState) {
         use ratatui::widgets::Paragraph;
 
-        let mut lines: Vec<Line<'static>> = Vec::new();
+        let lines = Self::build_overview_lines(state, Some(area.width as usize));
+        Paragraph::new(lines)
+            .style(Style::default().bg(crate::colors::background()).fg(crate::colors::text()))
+            .render(area, buf);
+    }
 
+    fn build_overview_lines(state: &AgentsOverviewState, available_width: Option<usize>) -> Vec<Line<'static>> {
+        let mut lines: Vec<Line<'static>> = Vec::new();
         lines.push(Line::from(Span::styled(
             "Agents",
             Style::default().add_modifier(Modifier::BOLD),
         )));
 
-        let max_name = state
+        let max_name_chars = state
             .rows
             .iter()
             .map(|row| row.name.chars().count())
+            .max()
+            .unwrap_or(0);
+        let max_name_width = state
+            .rows
+            .iter()
+            .map(|row| UnicodeWidthStr::width(row.name.as_str()))
             .max()
             .unwrap_or(0);
 
@@ -469,7 +598,7 @@ impl AgentsSettingsContent {
                 },
             ));
             spans.push(Span::styled(
-                format!("{:<width$}", row.name, width = max_name),
+                format!("{:<width$}", row.name, width = max_name_chars),
                 if selected {
                     Style::default()
                         .fg(crate::colors::primary())
@@ -483,7 +612,34 @@ impl AgentsSettingsContent {
             spans.push(Span::raw(" "));
             spans.push(Span::styled(status.0.to_string(), Style::default().fg(status.1)));
 
-            if selected {
+            let mut showed_desc = false;
+            if let Some(desc) = row
+                .description
+                .as_deref()
+                .map(str::trim)
+                .filter(|value| !value.is_empty())
+            {
+                if let Some(width) = available_width {
+                    let status_width = UnicodeWidthStr::width(status.0);
+                    let prefix_width = 2 + max_name_width + 2 + 2 + status_width;
+                    if width > prefix_width + 3 {
+                        let desc_width = width - prefix_width - 3;
+                        if desc_width > 0 {
+                            let truncated = Self::truncate_to_width(desc, desc_width);
+                            if !truncated.is_empty() {
+                                spans.push(Span::raw("  "));
+                                spans.push(Span::styled(
+                                    truncated,
+                                    Style::default().fg(crate::colors::text_dim()),
+                                ));
+                                showed_desc = true;
+                            }
+                        }
+                    }
+                }
+            }
+
+            if selected && !showed_desc {
                 spans.push(Span::raw("  "));
                 let hint = if !row.installed {
                     "Enter to install"
@@ -497,13 +653,45 @@ impl AgentsSettingsContent {
         }
 
         lines.push(Line::from(""));
+
+        let add_agent_idx = state.rows.len();
+        let add_agent_selected = add_agent_idx == state.selected;
+        let mut add_spans: Vec<Span<'static>> = Vec::new();
+        add_spans.push(Span::styled(
+            if add_agent_selected { "› " } else { "  " },
+            if add_agent_selected {
+                Style::default().fg(crate::colors::primary())
+            } else {
+                Style::default()
+            },
+        ));
+        add_spans.push(Span::styled(
+            "Add new agent…",
+            if add_agent_selected {
+                Style::default()
+                    .fg(crate::colors::primary())
+                    .add_modifier(Modifier::BOLD)
+            } else {
+                Style::default()
+            },
+        ));
+        if add_agent_selected {
+            add_spans.push(Span::raw("  "));
+            add_spans.push(Span::styled(
+                "Enter to configure",
+                Style::default().fg(crate::colors::text_dim()),
+            ));
+        }
+        lines.push(Line::from(add_spans));
+
+        lines.push(Line::from(""));
         lines.push(Line::from(Span::styled(
             "Commands",
             Style::default().add_modifier(Modifier::BOLD),
         )));
 
         for (offset, cmd) in state.commands.iter().enumerate() {
-            let idx = state.rows.len() + offset;
+            let idx = state.rows.len() + 1 + offset;
             let selected = idx == state.selected;
             let mut spans = Vec::new();
             spans.push(Span::styled(
@@ -534,7 +722,7 @@ impl AgentsSettingsContent {
             lines.push(Line::from(spans));
         }
 
-        let add_idx = state.rows.len() + state.commands.len();
+        let add_idx = state.rows.len() + 1 + state.commands.len();
         let add_selected = add_idx == state.selected;
         let mut add_spans = Vec::new();
         add_spans.push(Span::styled(
@@ -574,9 +762,27 @@ impl AgentsSettingsContent {
             Span::styled(" Close", Style::default().fg(crate::colors::text_dim())),
         ]));
 
-        Paragraph::new(lines)
-            .style(Style::default().bg(crate::colors::background()).fg(crate::colors::text()))
-            .render(area, buf);
+        lines
+    }
+
+    fn truncate_to_width(text: &str, max_width: usize) -> String {
+        if max_width == 0 {
+            return String::new();
+        }
+        let mut width = 0;
+        let mut truncated = String::new();
+        for ch in text.chars() {
+            let ch_width = ch.width().unwrap_or(0);
+            if width + ch_width > max_width {
+                break;
+            }
+            truncated.push(ch);
+            width += ch_width;
+            if width == max_width {
+                break;
+            }
+        }
+        truncated
     }
 
     fn handle_overview_key(
@@ -609,20 +815,23 @@ impl AgentsSettingsContent {
                 true
             }
             KeyCode::Enter => {
-                let idx = state.selected;
-                if idx < state.rows.len() {
-                    let row = &state.rows[idx];
-                    if !row.installed {
-                        app_event_tx
-                            .send(AppEvent::RequestAgentInstall { name: row.name.clone(), selected_index: idx });
-                    } else {
-                        app_event_tx
-                            .send(AppEvent::ShowAgentEditor { name: row.name.clone() });
+            let idx = state.selected;
+            let add_agent_idx = state.rows.len();
+            if idx == add_agent_idx {
+                app_event_tx.send(AppEvent::ShowAgentEditorNew);
+            } else if idx < add_agent_idx {
+                let row = &state.rows[idx];
+                if !row.installed {
+                    app_event_tx
+                        .send(AppEvent::RequestAgentInstall { name: row.name.clone(), selected_index: idx });
+                } else {
+                    app_event_tx
+                        .send(AppEvent::ShowAgentEditor { name: row.name.clone() });
                     }
                 } else {
-                    let cmd_idx = idx.saturating_sub(state.rows.len());
-                    if cmd_idx < state.commands.len() {
-                        if let Some(name) = state.commands.get(cmd_idx) {
+                let cmd_idx = idx.saturating_sub(state.rows.len() + 1);
+                if cmd_idx < state.commands.len() {
+                    if let Some(name) = state.commands.get(cmd_idx) {
                             app_event_tx
                                 .send(AppEvent::ShowSubagentEditorForName { name: name.clone() });
                         }
@@ -664,6 +873,15 @@ impl SettingsContent for AgentsSettingsContent {
 
     fn is_complete(&self) -> bool {
         false
+    }
+
+    fn handle_paste(&mut self, text: String) -> bool {
+        match &mut self.pane {
+            AgentsPane::Agent(view) => {
+                matches!(view.handle_paste(text), ConditionalUpdate::NeedsRedraw)
+            }
+            _ => false,
+        }
     }
 }
 
@@ -732,7 +950,7 @@ impl LimitsSettingsContent {
         };
 
         Paragraph::new(viewport)
-            .wrap(Wrap { trim: true })
+            .wrap(Wrap { trim: false })
             .style(Style::default().bg(crate::colors::background()).fg(crate::colors::text()))
             .render(area, buf);
     }
@@ -1027,13 +1245,15 @@ pub(crate) struct SettingsOverlayView {
     last_section: SettingsSection,
     help: Option<SettingsHelpOverlay>,
     model_content: Option<ModelSettingsContent>,
+    planning_content: Option<PlanningSettingsContent>,
     theme_content: Option<ThemeSettingsContent>,
     updates_content: Option<UpdatesSettingsContent>,
     notifications_content: Option<NotificationsSettingsContent>,
+    prompts_content: Option<PromptsSettingsContent>,
     mcp_content: Option<McpSettingsContent>,
     agents_content: Option<AgentsSettingsContent>,
+    review_content: Option<ReviewSettingsContent>,
     validation_content: Option<ValidationSettingsContent>,
-    github_content: Option<GithubSettingsContent>,
     auto_drive_content: Option<AutoDriveSettingsContent>,
     limits_content: Option<LimitsSettingsContent>,
     chrome_content: Option<ChromeSettingsContent>,
@@ -1048,13 +1268,15 @@ impl SettingsOverlayView {
             last_section: section,
             help: None,
             model_content: None,
+            planning_content: None,
             theme_content: None,
             updates_content: None,
             notifications_content: None,
+            prompts_content: None,
             mcp_content: None,
             agents_content: None,
+            review_content: None,
             validation_content: None,
-            github_content: None,
             auto_drive_content: None,
             limits_content: None,
             chrome_content: None,
@@ -1118,6 +1340,10 @@ impl SettingsOverlayView {
         self.model_content = Some(content);
     }
 
+    pub(crate) fn set_planning_content(&mut self, content: PlanningSettingsContent) {
+        self.planning_content = Some(content);
+    }
+
     pub(crate) fn set_theme_content(&mut self, content: ThemeSettingsContent) {
         self.theme_content = Some(content);
     }
@@ -1130,6 +1356,10 @@ impl SettingsOverlayView {
         self.notifications_content = Some(content);
     }
 
+    pub(crate) fn set_prompts_content(&mut self, content: PromptsSettingsContent) {
+        self.prompts_content = Some(content);
+    }
+
     pub(crate) fn set_mcp_content(&mut self, content: McpSettingsContent) {
         self.mcp_content = Some(content);
     }
@@ -1138,12 +1368,12 @@ impl SettingsOverlayView {
         self.agents_content = Some(content);
     }
 
-    pub(crate) fn set_validation_content(&mut self, content: ValidationSettingsContent) {
-        self.validation_content = Some(content);
+    pub(crate) fn set_review_content(&mut self, content: ReviewSettingsContent) {
+        self.review_content = Some(content);
     }
 
-    pub(crate) fn set_github_content(&mut self, content: GithubSettingsContent) {
-        self.github_content = Some(content);
+    pub(crate) fn set_validation_content(&mut self, content: ValidationSettingsContent) {
+        self.validation_content = Some(content);
     }
 
     pub(crate) fn set_auto_drive_content(&mut self, content: AutoDriveSettingsContent) {
@@ -1165,6 +1395,18 @@ impl SettingsOverlayView {
 
     pub(crate) fn agents_content_mut(&mut self) -> Option<&mut AgentsSettingsContent> {
         self.agents_content.as_mut()
+    }
+
+    pub(crate) fn review_content_mut(&mut self) -> Option<&mut ReviewSettingsContent> {
+        self.review_content.as_mut()
+    }
+
+    pub(crate) fn planning_content_mut(&mut self) -> Option<&mut PlanningSettingsContent> {
+        self.planning_content.as_mut()
+    }
+
+    pub(crate) fn auto_drive_content_mut(&mut self) -> Option<&mut AutoDriveSettingsContent> {
+        self.auto_drive_content.as_mut()
     }
 
     pub(crate) fn limits_content_mut(&mut self) -> Option<&mut LimitsSettingsContent> {
@@ -1609,15 +1851,17 @@ impl SettingsOverlayView {
         match section {
             SettingsSection::Model => "Select Model & Reasoning",
             SettingsSection::Theme => "Theme Settings",
+            SettingsSection::Planning => "Planning Settings",
             SettingsSection::Updates => "Upgrade",
             SettingsSection::Agents => "Agents",
             SettingsSection::AutoDrive => "Auto Drive Settings",
+            SettingsSection::Review => "Review Settings",
             SettingsSection::Validation => "Validation Settings",
-            SettingsSection::Github => "GitHub Settings",
             SettingsSection::Limits => "Rate Limits",
             SettingsSection::Chrome => "Chrome Launch Options",
             SettingsSection::Notifications => "Notifications",
             SettingsSection::Mcp => "MCP Servers",
+            SettingsSection::Prompts => "Custom Prompts",
         }
     }
 
@@ -1900,6 +2144,13 @@ impl SettingsOverlayView {
                 }
                 self.render_placeholder(area, buf, SettingsSection::Model.placeholder());
             }
+            SettingsSection::Planning => {
+                if let Some(content) = self.planning_content.as_ref() {
+                    content.render(area, buf);
+                    return;
+                }
+                self.render_placeholder(area, buf, SettingsSection::Planning.placeholder());
+            }
             SettingsSection::Theme => {
                 if let Some(content) = self.theme_content.as_ref() {
                     content.render(area, buf);
@@ -1921,6 +2172,13 @@ impl SettingsOverlayView {
                 }
                 self.render_placeholder(area, buf, SettingsSection::Agents.placeholder());
             }
+            SettingsSection::Prompts => {
+                if let Some(content) = self.prompts_content.as_ref() {
+                    content.render(area, buf);
+                    return;
+                }
+                self.render_placeholder(area, buf, SettingsSection::Prompts.placeholder());
+            }
             SettingsSection::AutoDrive => {
                 if let Some(content) = self.auto_drive_content.as_ref() {
                     content.render(area, buf);
@@ -1928,19 +2186,19 @@ impl SettingsOverlayView {
                 }
                 self.render_placeholder(area, buf, SettingsSection::AutoDrive.placeholder());
             }
+            SettingsSection::Review => {
+                if let Some(content) = self.review_content.as_ref() {
+                    content.render(area, buf);
+                    return;
+                }
+                self.render_placeholder(area, buf, SettingsSection::Review.placeholder());
+            }
             SettingsSection::Validation => {
                 if let Some(content) = self.validation_content.as_ref() {
                     content.render(area, buf);
                     return;
                 }
                 self.render_placeholder(area, buf, SettingsSection::Validation.placeholder());
-            }
-            SettingsSection::Github => {
-                if let Some(content) = self.github_content.as_ref() {
-                    content.render(area, buf);
-                    return;
-                }
-                self.render_placeholder(area, buf, SettingsSection::Github.placeholder());
             }
             SettingsSection::Limits => {
                 if let Some(content) = self.limits_content.as_ref() {
@@ -1990,6 +2248,10 @@ impl SettingsOverlayView {
                 .model_content
                 .as_mut()
                 .map(|content| content as &mut dyn SettingsContent),
+            SettingsSection::Planning => self
+                .planning_content
+                .as_mut()
+                .map(|content| content as &mut dyn SettingsContent),
             SettingsSection::Theme => self
                 .theme_content
                 .as_mut()
@@ -2002,16 +2264,20 @@ impl SettingsOverlayView {
                 .agents_content
                 .as_mut()
                 .map(|content| content as &mut dyn SettingsContent),
+            SettingsSection::Prompts => self
+                .prompts_content
+                .as_mut()
+                .map(|content| content as &mut dyn SettingsContent),
             SettingsSection::AutoDrive => self
                 .auto_drive_content
                 .as_mut()
                 .map(|content| content as &mut dyn SettingsContent),
-            SettingsSection::Validation => self
-                .validation_content
+            SettingsSection::Review => self
+                .review_content
                 .as_mut()
                 .map(|content| content as &mut dyn SettingsContent),
-            SettingsSection::Github => self
-                .github_content
+            SettingsSection::Validation => self
+                .validation_content
                 .as_mut()
                 .map(|content| content as &mut dyn SettingsContent),
             SettingsSection::Limits => self

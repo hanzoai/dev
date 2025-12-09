@@ -6,6 +6,8 @@ use std::path::{Path, PathBuf};
 use tokio::fs::OpenOptions;
 use tokio::process::Command;
 
+use crate::review_coord::bump_snapshot_epoch_for;
+
 /// Returns the `/.../.code/branches/<worktree>` root when `path` resides inside a branch worktree.
 pub fn branch_worktree_root(path: &Path) -> Option<PathBuf> {
     use std::ffi::OsStr;
@@ -121,8 +123,16 @@ pub async fn get_git_root_from(cwd: &Path) -> Result<PathBuf, String> {
 }
 
 /// Create a new worktree for `branch_id` under `<git_root>/.code/branches/<branch_id>`.
-/// If a previous worktree directory exists, remove it first.
-pub async fn setup_worktree(git_root: &Path, branch_id: &str) -> Result<(PathBuf, String), String> {
+/// When `base_ref` is provided, the worktree is created from that commit/ref so
+/// subsequent mutations in the primary working tree cannot affect the agent's
+/// view. If `base_ref` is `None`, the worktree is created from the current
+/// HEAD. When `base_ref` is set we always recreate the worktree directory to
+/// guarantee it reflects the requested snapshot.
+pub async fn setup_worktree(
+    git_root: &Path,
+    branch_id: &str,
+    base_ref: Option<&str>,
+) -> Result<(PathBuf, String), String> {
     // Global location: ~/.code/working/<repo_name>/branches
     let repo_name = git_root
         .file_name()
@@ -140,25 +150,116 @@ pub async fn setup_worktree(git_root: &Path, branch_id: &str) -> Result<(PathBuf
 
     let mut effective_branch = branch_id.to_string();
     let mut worktree_path = code_dir.join(&effective_branch);
+    let reuse_allowed = base_ref.is_none();
     if worktree_path.exists() {
-        // If the worktree directory already exists, re-use it to avoid the cost
-        // of removing and re-adding a worktree. This makes repeated agent runs
-        // start much faster.
-        record_worktree_in_session(git_root, &worktree_path).await;
-        return Ok((worktree_path, effective_branch));
+        if let Some(base) = base_ref {
+            // Reset existing worktree to the requested base instead of deleting it
+            // so caches (e.g., target/) are preserved.
+            let reset = Command::new("git")
+                .current_dir(&worktree_path)
+                .args(["reset", "--hard", base])
+                .output()
+                .await
+                .map_err(|e| format!("Failed to reset existing worktree: {}", e))?;
+            if !reset.status.success() {
+                let stderr = String::from_utf8_lossy(&reset.stderr);
+                return Err(format!("Failed to reset existing worktree: {stderr}"));
+            }
+            let clean = Command::new("git")
+                .current_dir(&worktree_path)
+                .args(["clean", "-fd"])
+                .output()
+                .await
+                .map_err(|e| format!("Failed to clean existing worktree: {}", e))?;
+            if !clean.status.success() {
+                let stderr = String::from_utf8_lossy(&clean.stderr);
+                return Err(format!("Failed to clean existing worktree: {stderr}"));
+            }
+            bump_snapshot_epoch_for(&worktree_path);
+            record_worktree_in_session(git_root, &worktree_path).await;
+            return Ok((worktree_path, effective_branch));
+        }
+
+        if reuse_allowed {
+            // Re-use existing worktree for speed when it does not need to be
+            // pinned to a specific snapshot.
+            record_worktree_in_session(git_root, &worktree_path).await;
+            return Ok((worktree_path, effective_branch));
+        }
+
+        // Fallback: remove if we cannot reuse
+        if let Ok(out) = Command::new("git")
+            .arg("worktree")
+            .arg("remove")
+            .arg("--force")
+            .arg(worktree_path.to_str().unwrap())
+            .current_dir(git_root)
+            .output()
+            .await
+        {
+            if out.status.success() {
+                bump_snapshot_epoch_for(&worktree_path);
+            }
+        }
+    }
+
+    let mut args = vec![
+        "worktree",
+        "add",
+        "-b",
+        &effective_branch,
+        worktree_path
+            .to_str()
+            .ok_or_else(|| "Invalid worktree path".to_string())?,
+    ];
+    if let Some(base) = base_ref {
+        args.push(base);
     }
 
     let output = Command::new("git")
         .current_dir(git_root)
-        .args(["worktree", "add", "-b", &effective_branch, worktree_path.to_str().unwrap()])
+        .args(args)
         .output()
         .await
-        .map_err(|e| format!("Failed to create git worktree: {}", e))?;
+        .map_err(|e| format!("Failed to create git worktree: {e}"))?;
+
+    if output.status.success() {
+        bump_snapshot_epoch_for(&worktree_path);
+    }
 
     if !output.status.success() {
         let stderr = String::from_utf8_lossy(&output.stderr);
-        // If the branch already exists, generate a unique name and retry once.
-        if stderr.contains("already exists") {
+        let missing_but_registered =
+            !worktree_path.exists() && (stderr.contains("already registered") || stderr.contains("already used by"));
+
+        if missing_but_registered {
+            prune_stale_worktrees(git_root).await?;
+
+            let mut retry_args = vec![
+                "worktree",
+                "add",
+                "-b",
+                &effective_branch,
+                worktree_path
+                    .to_str()
+                    .ok_or_else(|| "Invalid worktree path".to_string())?,
+            ];
+            if let Some(base) = base_ref {
+                retry_args.push(base);
+            }
+            let retry = Command::new("git")
+                .current_dir(git_root)
+                .args(retry_args)
+                .output()
+                .await
+                .map_err(|e| format!("Failed to create git worktree after prune: {e}"))?;
+            if !retry.status.success() {
+                let retry_err = String::from_utf8_lossy(&retry.stderr);
+                return Err(format!("Failed to create worktree after prune: {retry_err}"));
+            }
+            bump_snapshot_epoch_for(&worktree_path);
+            record_worktree_in_session(git_root, &worktree_path).await;
+        } else if stderr.contains("already exists") {
             effective_branch = format!("{}-{}", effective_branch, Utc::now().format("%Y%m%d-%H%M%S"));
             worktree_path = code_dir.join(&effective_branch);
             // Ensure target path is clean
@@ -172,19 +273,32 @@ pub async fn setup_worktree(git_root: &Path, branch_id: &str) -> Result<(PathBuf
                     .output()
                     .await;
             }
+            let mut retry_args = vec![
+                "worktree",
+                "add",
+                "-b",
+                &effective_branch,
+                worktree_path
+                    .to_str()
+                    .ok_or_else(|| "Invalid worktree path".to_string())?,
+            ];
+            if let Some(base) = base_ref {
+                retry_args.push(base);
+            }
             let retry = Command::new("git")
                 .current_dir(git_root)
-                .args(["worktree", "add", "-b", &effective_branch, worktree_path.to_str().unwrap()])
+                .args(retry_args)
                 .output()
                 .await
-                .map_err(|e| format!("Failed to create git worktree (retry): {}", e))?;
+                .map_err(|e| format!("Failed to create git worktree (retry): {e}"))?;
             if !retry.status.success() {
                 let retry_err = String::from_utf8_lossy(&retry.stderr);
-                return Err(format!("Failed to create worktree: {}", retry_err));
+                return Err(format!("Failed to create worktree: {retry_err}"));
             }
+            bump_snapshot_epoch_for(&worktree_path);
             record_worktree_in_session(git_root, &worktree_path).await;
         } else {
-            return Err(format!("Failed to create worktree: {}", stderr));
+            return Err(format!("Failed to create worktree: {stderr}"));
         }
     }
 
@@ -193,6 +307,141 @@ pub async fn setup_worktree(git_root: &Path, branch_id: &str) -> Result<(PathBuf
     // Record created worktree for this process; best-effort.
     record_worktree_in_session(git_root, &worktree_path).await;
     Ok((worktree_path, effective_branch))
+}
+
+/// Prepare (or create) a reusable worktree pinned to `base_ref`, keeping
+/// gitignored build outputs between runs. When the worktree already exists we
+/// simply reset and clean it; otherwise we create it detached at the requested
+/// commit. Returns the worktree path.
+pub async fn prepare_reusable_worktree(
+    git_root: &Path,
+    worktree_name: &str,
+    base_ref: &str,
+    keep_gitignored: bool,
+) -> Result<PathBuf, String> {
+    // Global location: ~/.code/working/<repo_name>/branches
+    let repo_name = git_root
+        .file_name()
+        .and_then(|s| s.to_str())
+        .unwrap_or("repo");
+    let mut code_dir = dirs::home_dir().unwrap_or_else(|| PathBuf::from("."));
+    code_dir = code_dir
+        .join(".code")
+        .join("working")
+        .join(repo_name)
+        .join("branches");
+    tokio::fs::create_dir_all(&code_dir)
+        .await
+        .map_err(|e| format!("Failed to create .code/branches directory: {}", e))?;
+
+    let worktree_path = code_dir.join(worktree_name);
+
+    if worktree_path.exists() {
+        // Reset to requested snapshot and clean tracked files; keep gitignored
+        // outputs (e.g., target/) when desired.
+        let reset = Command::new("git")
+            .current_dir(&worktree_path)
+            .args(["reset", "--hard", base_ref])
+            .output()
+            .await
+            .map_err(|e| format!("Failed to reset reusable worktree: {}", e))?;
+        if !reset.status.success() {
+            let stderr = String::from_utf8_lossy(&reset.stderr);
+            return Err(format!("Failed to reset reusable worktree: {stderr}"));
+        }
+
+        let clean_args = if keep_gitignored {
+            vec!["clean", "-fd"]
+        } else {
+            vec!["clean", "-fdx"]
+        };
+        let clean = Command::new("git")
+            .current_dir(&worktree_path)
+            .args(&clean_args)
+            .output()
+            .await
+            .map_err(|e| format!("Failed to clean reusable worktree: {}", e))?;
+        if !clean.status.success() {
+            let stderr = String::from_utf8_lossy(&clean.stderr);
+            return Err(format!("Failed to clean reusable worktree: {stderr}"));
+        }
+
+        bump_snapshot_epoch_for(&worktree_path);
+        record_worktree_in_session(git_root, &worktree_path).await;
+        return Ok(worktree_path);
+    }
+
+    // Create detached worktree at the snapshot commit.
+    let output = Command::new("git")
+        .current_dir(git_root)
+        .args([
+            "worktree",
+            "add",
+            "--detach",
+            worktree_path
+                .to_str()
+                .ok_or_else(|| "Invalid worktree path".to_string())?,
+            base_ref,
+        ])
+        .output()
+        .await
+        .map_err(|e| format!("Failed to create reusable worktree: {e}"))?;
+
+    if !output.status.success() {
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        let missing_but_registered =
+            !worktree_path.exists() && (stderr.contains("already registered") || stderr.contains("already used by"));
+
+        if missing_but_registered {
+            prune_stale_worktrees(git_root).await?;
+
+            let retry = Command::new("git")
+                .current_dir(git_root)
+                .args([
+                    "worktree",
+                    "add",
+                    "--detach",
+                    worktree_path
+                        .to_str()
+                        .ok_or_else(|| "Invalid worktree path".to_string())?,
+                    base_ref,
+                ])
+                .output()
+                .await
+                .map_err(|e| format!("Failed to create reusable worktree after prune: {e}"))?;
+
+            if !retry.status.success() {
+                let retry_err = String::from_utf8_lossy(&retry.stderr);
+                return Err(format!("Failed to create reusable worktree after prune: {retry_err}"));
+            }
+
+            bump_snapshot_epoch_for(&worktree_path);
+            record_worktree_in_session(git_root, &worktree_path).await;
+            return Ok(worktree_path);
+        }
+
+        return Err(format!("Failed to create reusable worktree: {stderr}"));
+    }
+
+    bump_snapshot_epoch_for(&worktree_path);
+    record_worktree_in_session(git_root, &worktree_path).await;
+    Ok(worktree_path)
+}
+
+async fn prune_stale_worktrees(git_root: &Path) -> Result<(), String> {
+    let output = Command::new("git")
+        .current_dir(git_root)
+        .args(["worktree", "prune"])
+        .output()
+        .await
+        .map_err(|e| format!("Failed to prune git worktrees: {e}"))?;
+
+    if !output.status.success() {
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        return Err(format!("Failed to prune git worktrees: {stderr}"));
+    }
+
+    Ok(())
 }
 
 /// Append the created worktree to a per-process session file so the TUI can
@@ -241,6 +490,7 @@ pub async fn ensure_local_default_remote(
                     let stderr = String::from_utf8_lossy(&update.stderr).trim().to_string();
                     return Err(format!("Failed to set {remote_name} URL: {stderr}"));
                 }
+                bump_snapshot_epoch_for(git_root);
             }
         }
         _ => {
@@ -254,6 +504,7 @@ pub async fn ensure_local_default_remote(
                 let stderr = String::from_utf8_lossy(&add.stderr).trim().to_string();
                 return Err(format!("Failed to add {remote_name}: {stderr}"));
             }
+            bump_snapshot_epoch_for(git_root);
         }
     }
 
@@ -292,6 +543,7 @@ pub async fn ensure_local_default_remote(
                     .map_err(|e| format!("Failed to update {remote_ref}: {e}"))?;
                 if update.status.success() {
                     metadata.remote_ref = Some(format!("{remote_name}/{base}"));
+                    bump_snapshot_epoch_for(git_root);
                 }
             }
         }
@@ -416,6 +668,7 @@ async fn _ensure_origin_remote(git_root: &Path) -> Result<(), String> {
                     if !add.status.success() {
                         return Err("failed to add origin".to_string());
                     }
+                    bump_snapshot_epoch_for(git_root);
                     let _ = Command::new("git")
                         .current_dir(git_root)
                         .args(["remote", "set-head", "origin", "-a"])
@@ -430,8 +683,8 @@ async fn _ensure_origin_remote(git_root: &Path) -> Result<(), String> {
     Err("no suitable remote to alias as origin".to_string())
 }
 
-/// Copy uncommitted (modified + untracked) files from `src_root` into the `worktree_path`.
-/// Returns the number of files copied.
+/// Copy uncommitted (modified + untracked) files from `src_root` into the `worktree_path`
+/// and mirror deletions. Returns the number of touched paths (copies + deletions).
 pub async fn copy_uncommitted_to_worktree(src_root: &Path, worktree_path: &Path) -> Result<usize, String> {
     // List modified and other (untracked) files relative to repo root
     let output = Command::new("git")
@@ -460,6 +713,29 @@ pub async fn copy_uncommitted_to_worktree(src_root: &Path, worktree_path: &Path)
         match tokio::fs::copy(&from, &to).await {
             Ok(_) => count += 1,
             Err(e) => return Err(format!("Failed to copy {} -> {}: {}", from.display(), to.display(), e)),
+        }
+    }
+
+    // Also mirror tracked deletions so the worktree matches current workspace state.
+    let deleted = Command::new("git")
+        .current_dir(src_root)
+        .args(["ls-files", "-d", "-z"])
+        .output()
+        .await
+        .map_err(|e| format!("Failed to list deletions: {}", e))?;
+    if !deleted.status.success() {
+        let stderr = String::from_utf8_lossy(&deleted.stderr);
+        return Err(format!("git ls-files -d failed: {}", stderr));
+    }
+    for path_bytes in deleted.stdout.split(|b| *b == 0) {
+        if path_bytes.is_empty() { continue; }
+        let rel = match String::from_utf8(path_bytes.to_vec()) { Ok(s) => s, Err(_) => continue };
+        if rel.starts_with(".git/") { continue; }
+        let target = worktree_path.join(&rel);
+        match tokio::fs::remove_file(&target).await {
+            Ok(_) => count += 1,
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => {},
+            Err(e) => return Err(format!("Failed to remove deleted path {}: {}", target.display(), e)),
         }
     }
 
@@ -524,4 +800,81 @@ pub async fn detect_default_branch(cwd: &Path) -> Option<String> {
         if out.status.success() { return Some(candidate.to_string()); }
     }
     None
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use serial_test::serial;
+    use std::path::Path;
+    use tempfile::TempDir;
+    use tokio::process::Command;
+
+    fn set_home(path: &Path) {
+        // SAFETY: tests isolate HOME inside a fresh temp directory.
+        unsafe { std::env::set_var("HOME", path); }
+    }
+
+    fn restore_home(prev: Option<String>) {
+        match prev {
+            Some(prev) => {
+                // SAFETY: restoring the previous HOME value at test end.
+                unsafe { std::env::set_var("HOME", prev); }
+            }
+            None => {
+                // SAFETY: clearing HOME after the test to match original state.
+                unsafe { std::env::remove_var("HOME"); }
+            }
+        }
+    }
+
+    async fn git(repo: &Path, args: &[&str]) {
+        let out = Command::new("git")
+            .current_dir(repo)
+            .args(args)
+            .output()
+            .await
+            .expect("git command");
+        if !out.status.success() {
+            let stderr = String::from_utf8_lossy(&out.stderr);
+            panic!("git {:?} failed: {}", args, stderr);
+        }
+    }
+
+    async fn init_repo(repo: &Path) {
+        tokio::fs::create_dir_all(repo).await.expect("create repo dir");
+        git(repo, &["init", "-q"]).await;
+        git(repo, &["config", "user.email", "test@example.com"]).await;
+        git(repo, &["config", "user.name", "Test User"]).await;
+        tokio::fs::write(repo.join("README.md"), b"hello").await.expect("write README");
+        git(repo, &["add", "."]).await;
+        git(repo, &["commit", "-m", "init"]).await;
+    }
+
+    #[tokio::test]
+    #[serial]
+    async fn prepare_reusable_worktree_recovers_missing_registration() {
+        let temp_home = TempDir::new().expect("temp home");
+        let repo_dir = temp_home.path().join("repo");
+        init_repo(&repo_dir).await;
+
+        let prev_home = std::env::var("HOME").ok();
+        set_home(temp_home.path());
+
+        let first = prepare_reusable_worktree(&repo_dir, "auto-review", "HEAD", false)
+            .await
+            .expect("first worktree");
+        assert!(first.exists());
+
+        std::fs::remove_dir_all(&first).expect("remove worktree");
+
+        let second = prepare_reusable_worktree(&repo_dir, "auto-review", "HEAD", false)
+            .await
+            .expect("recreated worktree");
+
+        assert_eq!(first, second);
+        assert!(second.exists());
+
+        restore_home(prev_home);
+    }
 }

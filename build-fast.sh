@@ -170,6 +170,39 @@ if [ -z "$WORKSPACE_CHOICE" ]; then
   WORKSPACE_CHOICE="code"
 fi
 
+if [ "$ARG_PROFILE" = "pref" ]; then
+  ARG_PROFILE="perf"
+fi
+
+# Resolve repository paths relative to this script so absolute invocation works
+SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" >/dev/null 2>&1 && pwd)"
+if [ -n "${CODE_CALLER_CWD:-}" ]; then
+  if ! CALLER_CWD="$(cd "${CODE_CALLER_CWD}" >/dev/null 2>&1 && pwd)"; then
+    echo "Error: CODE_CALLER_CWD is not a valid directory: ${CODE_CALLER_CWD}" >&2
+    exit 1
+  fi
+else
+  CALLER_CWD="$(pwd)"
+fi
+
+if [[ "${SCRIPT_DIR}" == */.code/working/*/branches/* ]]; then
+  WORKTREE_PARENT="${SCRIPT_DIR%/branches/*}"
+  REPO_NAME="$(basename "${WORKTREE_PARENT}")"
+else
+  REPO_NAME="$(basename "${SCRIPT_DIR}")"
+fi
+
+REPO_ROOT="${SCRIPT_DIR}"
+
+# Guard against regressions where a code-rs crate references ../codex-rs.
+if [ "${BUILD_FAST_SKIP_CODEX_GUARD:-0}" != "1" ]; then
+  echo "Running codex path dependency guard..."
+  (
+    cd "$REPO_ROOT"
+    scripts/check-codex-path-deps.sh
+  )
+fi
+
 if [ "$WORKSPACE_CHOICE" = "both" ]; then
   if [ "$RUN_AFTER_BUILD" -eq 1 ]; then
     echo "Error: --workspace both cannot be combined with 'run'." >&2
@@ -180,27 +213,6 @@ if [ "$WORKSPACE_CHOICE" = "both" ]; then
   done
   exit 0
 fi
-
-if [ "$ARG_PROFILE" = "pref" ]; then
-  ARG_PROFILE="perf"
-fi
-
-# Resolve repository paths relative to this script so absolute invocation works
-SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" >/dev/null 2>&1 && pwd)"
-if [ "${CHECK_RELEASE_NOTES_VERSION_RUN:-0}" = "0" ]; then
-  export CHECK_RELEASE_NOTES_VERSION_RUN=1
-  "${SCRIPT_DIR}/scripts/check-release-notes-version.sh"
-fi
-CALLER_CWD="$(pwd)"
-
-if [[ "${SCRIPT_DIR}" == */.code/working/*/branches/* ]]; then
-  WORKTREE_PARENT="${SCRIPT_DIR%/branches/*}"
-  REPO_NAME="$(basename "${WORKTREE_PARENT}")"
-else
-  REPO_NAME="$(basename "${SCRIPT_DIR}")"
-fi
-
-REPO_ROOT="${SCRIPT_DIR}"
 
 if [ -n "${CODE_HOME:-}" ] && [ -n "${CODE_HOME}" ]; then
   CACHE_HOME="${CODE_HOME%/}"
@@ -290,9 +302,9 @@ fi
 
 echo "Cache bucket: ${CACHE_KEY} (${CACHE_KEY_SOURCE})"
 
-CLI_PACKAGE="$(sed -n 's/^name\s*=\s*"\(.*\)"/\1/p' cli/Cargo.toml | head -n1)"
-TUI_PACKAGE="$(sed -n 's/^name\s*=\s*"\(.*\)"/\1/p' tui/Cargo.toml | head -n1)"
-EXEC_PACKAGE="$(sed -n 's/^name\s*=\s*"\(.*\)"/\1/p' exec/Cargo.toml | head -n1)"
+CLI_PACKAGE="$(sed -En 's/^name[[:space:]]*=[[:space:]]*"(.*)"/\1/p' cli/Cargo.toml | head -n1)"
+TUI_PACKAGE="$(sed -En 's/^name[[:space:]]*=[[:space:]]*"(.*)"/\1/p' tui/Cargo.toml | head -n1)"
+EXEC_PACKAGE="$(sed -En 's/^name[[:space:]]*=[[:space:]]*"(.*)"/\1/p' exec/Cargo.toml | head -n1)"
 CRATE_PREFIX="${CLI_PACKAGE%%-*}"
 EXEC_BIN="$(awk 'BEGIN{inbin=0} /^\[\[bin\]\]/{inbin=1; next} inbin && /^name[[:space:]]*=/{gsub(/.*"/,"",$0); gsub(/"/,"",$0); print; exit}' exec/Cargo.toml)"
 if [ -z "${EXEC_BIN}" ]; then

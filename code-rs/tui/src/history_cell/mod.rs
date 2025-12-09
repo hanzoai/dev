@@ -11,6 +11,7 @@ use crate::text_formatting::format_json_compact;
 use crate::history::compat::{
     AssistantStreamState,
     BackgroundEventRecord,
+    ContextRecord,
     ExecAction,
     ExecRecord,
     ExecStatus,
@@ -73,6 +74,7 @@ use tracing::error;
 mod assistant;
 mod animated;
 mod background;
+mod context;
 mod card_style;
 mod exec;
 mod diff;
@@ -101,6 +103,7 @@ pub(crate) use assistant::{
 };
 pub(crate) use animated::AnimatedWelcomeCell;
 pub(crate) use background::BackgroundEventCell;
+pub(crate) use context::ContextCell;
 pub(crate) use exec::{
     display_lines_from_record as exec_display_lines_from_record,
     new_active_exec_command,
@@ -178,10 +181,47 @@ pub(crate) enum HistoryCellType {
     PlanUpdate,
     BackgroundEvent,
     Notice,
+    CompactionSummary,
     Diff,
     Image,
+    Context,
     AnimatedWelcome,
     Loading,
+}
+
+fn gutter_symbol_for_kind(kind: HistoryCellType) -> Option<&'static str> {
+    match kind {
+        HistoryCellType::Plain => None,
+        HistoryCellType::User => Some("›"),
+        // Restore assistant gutter icon
+        HistoryCellType::Assistant => Some("•"),
+        HistoryCellType::Reasoning => None,
+        HistoryCellType::Error => Some("✖"),
+        HistoryCellType::Tool { status } => Some(match status {
+            ToolCellStatus::Running => "⚙",
+            ToolCellStatus::Success => "✔",
+            ToolCellStatus::Failed => "✖",
+        }),
+        HistoryCellType::Exec { kind, status } => {
+            // Show ❯ only for Run executions; hide for read/search/list summaries
+            match (kind, status) {
+                (ExecKind::Run, ExecStatus::Error) => Some("✖"),
+                (ExecKind::Run, _) => Some("❯"),
+                _ => None,
+            }
+        }
+        HistoryCellType::Patch { .. } => Some("↯"),
+        // Plan updates supply their own gutter glyph dynamically.
+        HistoryCellType::PlanUpdate => None,
+        HistoryCellType::BackgroundEvent => Some("»"),
+        HistoryCellType::Notice => Some("★"),
+        HistoryCellType::CompactionSummary => Some("📍"),
+        HistoryCellType::Diff => Some("↯"),
+        HistoryCellType::Image => None,
+        HistoryCellType::Context => Some("◆"),
+        HistoryCellType::AnimatedWelcome => None,
+        HistoryCellType::Loading => None,
+    }
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -367,36 +407,7 @@ pub(crate) trait HistoryCell {
     /// Returns the gutter symbol for this cell type
     /// Returns None if no symbol should be displayed
     fn gutter_symbol(&self) -> Option<&'static str> {
-        match self.kind() {
-            HistoryCellType::Plain => None,
-            HistoryCellType::User => Some("›"),
-            // Restore assistant gutter icon
-            HistoryCellType::Assistant => Some("•"),
-            HistoryCellType::Reasoning => None,
-            HistoryCellType::Error => Some("✖"),
-            HistoryCellType::Tool { status } => Some(match status {
-                ToolCellStatus::Running => "⚙",
-                ToolCellStatus::Success => "✔",
-                ToolCellStatus::Failed => "✖",
-            }),
-            HistoryCellType::Exec { kind, status } => {
-                // Show ❯ only for Run executions; hide for read/search/list summaries
-                match (kind, status) {
-                    (ExecKind::Run, ExecStatus::Error) => Some("✖"),
-                    (ExecKind::Run, _) => Some("❯"),
-                    _ => None,
-                }
-            }
-            HistoryCellType::Patch { .. } => Some("↯"),
-            // Plan updates supply their own gutter glyph dynamically.
-            HistoryCellType::PlanUpdate => None,
-            HistoryCellType::BackgroundEvent => Some("»"),
-            HistoryCellType::Notice => Some("★"),
-            HistoryCellType::Diff => Some("↯"),
-            HistoryCellType::Image => None,
-            HistoryCellType::AnimatedWelcome => None,
-            HistoryCellType::Loading => None,
-        }
+        gutter_symbol_for_kind(self.kind())
     }
 }
 
@@ -2109,7 +2120,7 @@ fn popular_commands_lines(_latest_version: Option<&str>) -> Vec<Line<'static>> {
         Span::from(SlashCommand::Settings.description())
             .style(Style::default().add_modifier(Modifier::DIM)),
         Span::styled(
-            " NEW",
+            " UPDATED",
             Style::default().fg(crate::colors::primary()),
         ),
     ]));
@@ -2140,6 +2151,16 @@ fn popular_commands_lines(_latest_version: Option<&str>) -> Vec<Line<'static>> {
         Span::from(" - "),
         Span::from(SlashCommand::Code.description())
             .style(Style::default().add_modifier(Modifier::DIM)),
+    ]));
+    lines.push(Line::from(vec![
+        Span::styled("/prompts", Style::default().fg(crate::colors::primary())),
+        Span::from(" - "),
+        Span::from(SlashCommand::Prompts.description())
+            .style(Style::default().add_modifier(Modifier::DIM)),
+        Span::styled(
+            " NEW",
+            Style::default().fg(crate::colors::primary()),
+        ),
     ]));
 
     lines
@@ -2178,6 +2199,15 @@ pub(crate) fn new_popular_commands_notice(
     _connecting_mcp: bool,
     latest_version: Option<&str>,
 ) -> PlainMessageState {
+    if crate::chatwidget::is_test_mode() {
+        let mut lines: Vec<Line<'static>> = Vec::new();
+        lines.push(Line::from(""));
+        let legacy_line = "  /code - perform a coding task (multiple agents)";
+        #[cfg(any(test, feature = "test-helpers"))]
+        println!("legacy command line: {legacy_line}");
+        lines.push(Line::from(legacy_line));
+        return plain_message_state_from_lines(lines, HistoryCellType::Notice);
+    }
     let mut lines: Vec<Line<'static>> = Vec::new();
     lines.push(Line::from("notice".dim()));
     lines.extend(popular_commands_lines(latest_version));
@@ -6004,6 +6034,7 @@ pub(crate) fn cell_from_record(record: &crate::history::state::HistoryRecord, cf
         HistoryRecord::Patch(state) => Box::new(PatchSummaryCell::from_record(state.clone())),
         HistoryRecord::BackgroundEvent(state) => Box::new(background::BackgroundEventCell::new(state.clone())),
         HistoryRecord::Notice(state) => Box::new(PlainHistoryCell::from_notice_record(state.clone())),
+        HistoryRecord::Context(state) => Box::new(context::ContextCell::new(state.clone())),
     }
 }
 
@@ -6034,6 +6065,9 @@ pub(crate) fn record_from_cell(cell: &dyn HistoryCell) -> Option<HistoryRecord> 
         .downcast_ref::<background::BackgroundEventCell>()
     {
         return Some(HistoryRecord::BackgroundEvent(background.state().clone()));
+    }
+    if let Some(context) = cell.as_any().downcast_ref::<context::ContextCell>() {
+        return Some(HistoryRecord::Context(context.record().clone()));
     }
     if let Some(merged) = cell.as_any().downcast_ref::<MergedExecCell>() {
         return Some(HistoryRecord::MergedExec(merged.to_record()));

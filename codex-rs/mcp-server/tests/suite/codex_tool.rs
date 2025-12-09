@@ -3,6 +3,7 @@ use std::env;
 use std::path::Path;
 use std::path::PathBuf;
 
+use codex_core::parse_command;
 use codex_core::protocol::FileChange;
 use codex_core::protocol::ReviewDecision;
 use codex_core::spawn::CODEX_SANDBOX_NETWORK_DISABLED_ENV_VAR;
@@ -29,7 +30,8 @@ use mcp_test_support::McpProcess;
 use mcp_test_support::create_apply_patch_sse_response;
 use mcp_test_support::create_final_assistant_message_sse_response;
 use mcp_test_support::create_mock_chat_completions_server;
-use mcp_test_support::create_shell_sse_response;
+use mcp_test_support::create_shell_command_sse_response;
+use mcp_test_support::format_with_current_shell;
 
 // Allow ample time on slower CI or under load to avoid flakes.
 const DEFAULT_READ_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(20);
@@ -70,13 +72,16 @@ async fn shell_command_approval_triggers_elicitation() -> anyhow::Result<()> {
         "-c".to_string(),
         format!("import pathlib; pathlib.Path('{created_filename}').touch()"),
     ];
+    let expected_shell_command = format_with_current_shell(&format!(
+        "python3 -c \"import pathlib; pathlib.Path('{created_filename}').touch()\""
+    ));
 
     let McpHandle {
         process: mut mcp_process,
         server: _server,
         dir: _dir,
     } = create_mcp_process(vec![
-        create_shell_sse_response(
+        create_shell_command_sse_response(
             shell_command.clone(),
             Some(workdir_for_shell_function_call.path()),
             Some(5_000),
@@ -110,7 +115,7 @@ async fn shell_command_approval_triggers_elicitation() -> anyhow::Result<()> {
     )?;
     let expected_elicitation_request = create_expected_elicitation_request(
         elicitation_request_id.clone(),
-        shell_command.clone(),
+        expected_shell_command,
         workdir_for_shell_function_call.path(),
         codex_request_id.to_string(),
         params.codex_event_id.clone(),
@@ -176,6 +181,7 @@ fn create_expected_elicitation_request(
         shlex::try_join(command.iter().map(std::convert::AsRef::as_ref))?,
         workdir.to_string_lossy()
     );
+    let codex_parsed_cmd = parse_command::parse_command(&command);
     Ok(JSONRPCRequest {
         jsonrpc: JSONRPC_VERSION.into(),
         id: elicitation_request_id,
@@ -193,6 +199,8 @@ fn create_expected_elicitation_request(
             codex_command: command,
             codex_cwd: workdir.to_path_buf(),
             codex_call_id: "call1234".to_string(),
+            codex_parsed_cmd,
+            codex_risk: None,
         })?),
     })
 }
@@ -214,6 +222,12 @@ async fn test_patch_approval_triggers_elicitation() {
 }
 
 async fn patch_approval_triggers_elicitation() -> anyhow::Result<()> {
+    if cfg!(windows) {
+        // powershell apply_patch shell calls are not parsed into apply patch approvals
+
+        return Ok(());
+    }
+
     let cwd = TempDir::new()?;
     let test_file = cwd.path().join("destination_file.txt");
     std::fs::write(&test_file, "original content\n")?;
@@ -337,6 +351,7 @@ async fn codex_tool_passes_base_instructions() -> anyhow::Result<()> {
         .send_codex_tool_call(CodexToolCallParam {
             prompt: "How are you?".to_string(),
             base_instructions: Some("You are a helpful assistant.".to_string()),
+            developer_instructions: Some("Foreshadow upcoming tool calls.".to_string()),
             ..Default::default()
         })
         .await?;
@@ -363,9 +378,27 @@ async fn codex_tool_passes_base_instructions() -> anyhow::Result<()> {
     );
 
     let requests = server.received_requests().await.unwrap();
-    let request = requests[0].body_json::<serde_json::Value>().unwrap();
+    let request = requests[0].body_json::<serde_json::Value>()?;
     let instructions = request["messages"][0]["content"].as_str().unwrap();
     assert!(instructions.starts_with("You are a helpful assistant."));
+
+    let developer_msg = request["messages"]
+        .as_array()
+        .and_then(|messages| {
+            messages
+                .iter()
+                .find(|msg| msg.get("role").and_then(|role| role.as_str()) == Some("developer"))
+        })
+        .unwrap();
+    let developer_content = developer_msg
+        .get("content")
+        .and_then(|value| value.as_str())
+        .unwrap();
+    assert!(
+        !developer_content.contains('<'),
+        "expected developer instructions without XML tags, got `{developer_content}`"
+    );
+    assert_eq!(developer_content, "Foreshadow upcoming tool calls.");
 
     Ok(())
 }
@@ -442,7 +475,7 @@ fn create_config_toml(codex_home: &Path, server_uri: &str) -> std::io::Result<()
             r#"
 model = "mock-model"
 approval_policy = "untrusted"
-sandbox_policy = "read-only"
+sandbox_policy = "workspace-write"
 
 model_provider = "mock_provider"
 

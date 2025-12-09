@@ -38,8 +38,10 @@ pub use code_protocol::protocol::GitInfo;
 pub use code_protocol::protocol::RolloutItem;
 pub use code_protocol::protocol::RolloutLine;
 pub use code_protocol::protocol::ConversationPathResponseEvent;
+pub use code_protocol::protocol::ListCustomPromptsResponseEvent;
 pub use code_protocol::protocol::ENVIRONMENT_CONTEXT_OPEN_TAG;
 pub use code_protocol::protocol::ExitedReviewModeEvent;
+pub use code_protocol::protocol::ReviewSnapshotInfo;
 
 /// Submission Queue Entry - requests from user
 #[derive(Debug, Clone, Deserialize, Serialize)]
@@ -207,6 +209,10 @@ pub enum Op {
 
     /// Request a single history entry identified by `log_id` + `offset`.
     GetHistoryEntryRequest { offset: usize, log_id: u64 },
+
+    /// Request the list of available custom prompts.
+    /// Reply is delivered via `EventMsg::ListCustomPromptsResponse`.
+    ListCustomPrompts,
 
     /// Request the agent to summarize the current conversation context.
     /// The agent will use its existing context (either conversation history or previous response id)
@@ -714,6 +720,18 @@ pub enum EventMsg {
     /// Signaled when the model begins a new reasoning summary section (e.g., a new titled block).
     AgentReasoningSectionBreak(AgentReasoningSectionBreakEvent),
 
+    /// Full environment context snapshot emitted to the model.
+    EnvironmentContextFull(EnvironmentContextFullEvent),
+
+    /// Environment context delta emitted to the model.
+    EnvironmentContextDelta(EnvironmentContextDeltaEvent),
+
+    /// Browser snapshot metadata emitted alongside environment context.
+    BrowserSnapshot(BrowserSnapshotEvent),
+
+    /// Warning that the platform compacted conversation history to stay within limits.
+    CompactionCheckpointWarning(code_protocol::protocol::CompactionCheckpointWarningEvent),
+
     /// Ack the client's configure message.
     SessionConfigured(SessionConfiguredEvent),
 
@@ -756,6 +774,9 @@ pub enum EventMsg {
     /// Response to GetHistoryEntryRequest.
     GetHistoryEntryResponse(GetHistoryEntryResponseEvent),
 
+    /// List of custom prompts available to the agent.
+    ListCustomPromptsResponse(ListCustomPromptsResponseEvent),
+
     PlanUpdate(UpdatePlanArgs),
 
     /// Browser screenshot has been captured and is ready for display
@@ -780,7 +801,7 @@ pub enum EventMsg {
     EnteredReviewMode(code_protocol::protocol::ReviewRequest),
 
     /// Exited review mode with an optional final result to apply.
-    ExitedReviewMode(Option<code_protocol::protocol::ReviewOutputEvent>),
+    ExitedReviewMode(code_protocol::protocol::ExitedReviewModeEvent),
 
     /// Replay a previously recorded transcript into the UI.
     /// Used after resuming from a rollout file so the user sees the full
@@ -1226,6 +1247,13 @@ pub struct AgentStatusUpdateEvent {
     pub task: Option<String>,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum AgentSourceKind {
+    Default,
+    AutoReview,
+}
+
 #[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct AgentInfo {
     /// Unique identifier for the agent
@@ -1260,6 +1288,11 @@ pub struct AgentInfo {
     #[serde(skip_serializing_if = "Option::is_none")]
     #[serde(default)]
     pub token_count: Option<u64>,
+
+    /// Source category for this agent (e.g., auto_review) to support UI filtering.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(default)]
+    pub source_kind: Option<AgentSourceKind>,
 }
 
 /// User's decision in response to an ExecApprovalRequest.
@@ -1305,6 +1338,39 @@ pub struct Chunk {
     pub orig_index: u32,
     pub deleted_lines: Vec<String>,
     pub inserted_lines: Vec<String>,
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize)]
+pub struct EnvironmentContextFullEvent {
+    /// JSON serialization of the environment context snapshot.
+    pub snapshot: serde_json::Value,
+    /// Sequence number associated with the snapshot emission.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub sequence: Option<u64>,
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize)]
+pub struct EnvironmentContextDeltaEvent {
+    /// JSON serialization of the environment context delta.
+    pub delta: serde_json::Value,
+    /// Sequence number associated with the delta emission.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub sequence: Option<u64>,
+    /// Fingerprint of the baseline snapshot for this delta.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub base_fingerprint: Option<String>,
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize)]
+pub struct BrowserSnapshotEvent {
+    /// JSON serialization of the browser snapshot metadata.
+    pub snapshot: serde_json::Value,
+    /// URL associated with the snapshot, if available.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub url: Option<String>,
+    /// Timestamp when the snapshot was captured.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub captured_at: Option<String>,
 }
 
 #[cfg(test)]

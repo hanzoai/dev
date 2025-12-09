@@ -1,5 +1,6 @@
 use chrono::DateTime;
 use chrono::Utc;
+use reqwest::StatusCode;
 use serde::Deserialize;
 use serde::Serialize;
 use std::env;
@@ -21,6 +22,7 @@ use crate::token_data::TokenData;
 use crate::token_data::{parse_id_token, PlanType};
 use crate::token_data::KnownPlan;
 use crate::config::resolve_code_path_for_read;
+use crate::util::backoff;
 
 #[derive(Debug, Clone)]
 pub struct CodexAuth {
@@ -32,6 +34,50 @@ pub struct CodexAuth {
     pub(crate) client: reqwest::Client,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum RefreshTokenErrorKind {
+    Permanent,
+    Transient,
+}
+
+#[derive(Debug, Clone)]
+pub struct RefreshTokenError {
+    pub kind: RefreshTokenErrorKind,
+    pub message: String,
+}
+
+impl RefreshTokenError {
+    pub fn permanent(message: impl Into<String>) -> Self {
+        Self {
+            kind: RefreshTokenErrorKind::Permanent,
+            message: message.into(),
+        }
+    }
+
+    pub fn transient(message: impl Into<String>) -> Self {
+        Self {
+            kind: RefreshTokenErrorKind::Transient,
+            message: message.into(),
+        }
+    }
+
+    pub fn is_permanent(&self) -> bool {
+        matches!(self.kind, RefreshTokenErrorKind::Permanent)
+    }
+
+    pub fn is_refresh_token_reused(&self) -> bool {
+        self.message.contains("refresh_token_reused")
+    }
+}
+
+impl std::fmt::Display for RefreshTokenError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", self.message)
+    }
+}
+
+impl std::error::Error for RefreshTokenError {}
+
 impl PartialEq for CodexAuth {
     fn eq(&self, other: &Self) -> bool {
         self.mode == other.mode
@@ -39,23 +85,72 @@ impl PartialEq for CodexAuth {
 }
 
 impl CodexAuth {
-    pub async fn refresh_token(&self) -> Result<String, std::io::Error> {
+    pub async fn refresh_token(&self) -> Result<String, RefreshTokenError> {
         let token_data = self
             .get_current_token_data()
-            .ok_or(std::io::Error::other("Token data is not available."))?;
-        let token = token_data.refresh_token;
+            .ok_or_else(|| RefreshTokenError::permanent("Token data is not available."))?;
+        let refresh_token = token_data.refresh_token.clone();
 
-        let refresh_response = try_refresh_token(token, &self.client)
-            .await
-            .map_err(std::io::Error::other)?;
+        let mut attempt: u32 = 0;
+        loop {
+            attempt = attempt.saturating_add(1);
+            match try_refresh_token(refresh_token.clone(), &self.client).await {
+                Ok(refresh_response) => {
+                    return self.persist_refresh_response(refresh_response).await
+                }
+                Err(err) => {
+                    if err.is_refresh_token_reused() {
+                        if let Some(access) =
+                            self.adopt_rotated_refresh_token_from_disk(&refresh_token)?
+                        {
+                            return Ok(access);
+                        }
+                    }
+                    if err.kind == RefreshTokenErrorKind::Transient && attempt < 4 {
+                        let delay = backoff(attempt as u64);
+                        tokio::time::sleep(delay).await;
+                        continue;
+                    }
+                    return Err(err);
+                }
+            }
+        }
+    }
 
+    fn adopt_rotated_refresh_token_from_disk(
+        &self,
+        stale_refresh_token: &str,
+    ) -> Result<Option<String>, RefreshTokenError> {
+        let auth_dot_json = try_read_auth_json(&self.auth_file)
+            .map_err(|err| RefreshTokenError::permanent(err.to_string()))?;
+
+        let Some(tokens) = auth_dot_json.tokens.clone() else {
+            return Ok(None);
+        };
+
+        if tokens.refresh_token == stale_refresh_token {
+            return Ok(None);
+        }
+
+        if let Ok(mut auth_lock) = self.auth_dot_json.lock() {
+            *auth_lock = Some(auth_dot_json);
+        }
+
+        Ok(Some(tokens.access_token))
+    }
+
+    async fn persist_refresh_response(
+        &self,
+        refresh_response: RefreshResponse,
+    ) -> Result<String, RefreshTokenError> {
         let updated = update_tokens(
             &self.auth_file,
             refresh_response.id_token,
             refresh_response.access_token,
             refresh_response.refresh_token,
         )
-        .await?;
+        .await
+        .map_err(|err| RefreshTokenError::permanent(err.to_string()))?;
 
         if let Ok(mut auth_lock) = self.auth_dot_json.lock() {
             *auth_lock = Some(updated.clone());
@@ -64,7 +159,7 @@ impl CodexAuth {
         let access = match updated.tokens {
             Some(t) => t.access_token,
             None => {
-                return Err(std::io::Error::other(
+                return Err(RefreshTokenError::permanent(
                     "Token data is not available after refresh.",
                 ));
             }
@@ -96,10 +191,10 @@ impl CodexAuth {
                         try_refresh_token(tokens.refresh_token.clone(), &self.client),
                     )
                     .await
-                    .map_err(|_| {
-                        std::io::Error::other("timed out while refreshing OpenAI API key")
-                    })?
-                    .map_err(std::io::Error::other)?;
+        .map_err(|_| {
+            std::io::Error::other("timed out while refreshing OpenAI API key")
+        })?
+        .map_err(|err| std::io::Error::other(err))?;
 
                     let updated_auth_dot_json = update_tokens(
                         &self.auth_file,
@@ -437,7 +532,7 @@ async fn update_tokens(
 async fn try_refresh_token(
     refresh_token: String,
     client: &reqwest::Client,
-) -> std::io::Result<RefreshResponse> {
+) -> Result<RefreshResponse, RefreshTokenError> {
     let refresh_request = RefreshRequest {
         client_id: CLIENT_ID,
         grant_type: "refresh_token",
@@ -452,20 +547,22 @@ async fn try_refresh_token(
         .json(&refresh_request)
         .send()
         .await
-        .map_err(std::io::Error::other)?;
+        .map_err(|err| RefreshTokenError::transient(format!("network error: {err}")))?;
 
     if response.status().is_success() {
         let refresh_response = response
             .json::<RefreshResponse>()
             .await
-            .map_err(std::io::Error::other)?;
-        Ok(refresh_response)
-    } else {
-        Err(std::io::Error::other(format!(
-            "Failed to refresh token: {}",
-            response.status()
-        )))
+            .map_err(|err| RefreshTokenError::transient(format!("invalid response: {err}")))?;
+        return Ok(refresh_response);
     }
+
+    let status = response.status();
+    let body = response
+        .text()
+        .await
+        .unwrap_or_else(|_| "<body unavailable>".to_string());
+    Err(classify_refresh_failure(status, &body))
 }
 
 #[derive(Serialize)]
@@ -481,6 +578,106 @@ struct RefreshResponse {
     id_token: String,
     access_token: Option<String>,
     refresh_token: Option<String>,
+}
+
+#[derive(Deserialize)]
+struct OAuthErrorBody {
+    error: Option<String>,
+    error_description: Option<String>,
+}
+
+#[derive(Deserialize)]
+struct OpenAiErrorWrapper {
+    error: Option<OpenAiErrorData>,
+}
+
+#[derive(Deserialize)]
+struct OpenAiErrorData {
+    code: Option<String>,
+    message: Option<String>,
+}
+
+fn classify_refresh_failure(status: StatusCode, body: &str) -> RefreshTokenError {
+    if let Ok(parsed) = serde_json::from_str::<OpenAiErrorWrapper>(body) {
+        if let Some(error) = parsed.error {
+            if error.code.as_deref() == Some("refresh_token_reused") {
+                let message = error
+                    .message
+                    .unwrap_or_else(|| "refresh token already rotated".to_string());
+                return RefreshTokenError::transient(format!(
+                    "refresh_token_reused: {message}"
+                ));
+            }
+        }
+    }
+
+    if let Ok(parsed) = serde_json::from_str::<OAuthErrorBody>(body) {
+        if let Some(code) = parsed.error.as_deref() {
+            let description = parsed
+                .error_description
+                .as_deref()
+                .unwrap_or(code)
+                .trim();
+            let formatted = format!("OAuth error ({code}): {description}");
+            match code {
+                "invalid_grant" | "invalid_client" | "invalid_scope" => {
+                    return RefreshTokenError::permanent(formatted)
+                }
+                "access_denied" => {
+                    return RefreshTokenError::permanent(formatted);
+                }
+                "temporarily_unavailable" => {
+                    return RefreshTokenError::transient(formatted);
+                }
+                _ => {
+                    if status.is_server_error() {
+                        return RefreshTokenError::transient(formatted);
+                    }
+                    if status.is_client_error() {
+                        return RefreshTokenError::permanent(formatted);
+                    }
+                }
+            }
+        }
+    }
+
+    if status == StatusCode::FORBIDDEN || status == StatusCode::UNAUTHORIZED {
+        return RefreshTokenError::permanent(format!(
+            "OAuth refresh rejected ({status}): {}",
+            summarize_body(body)
+        ));
+    }
+
+    if status.is_client_error() {
+        return RefreshTokenError::permanent(format!(
+            "OAuth refresh failed ({status}): {}",
+            summarize_body(body)
+        ));
+    }
+
+    if status.is_server_error() {
+        return RefreshTokenError::transient(format!(
+            "OAuth refresh temporarily unavailable ({status}): {}",
+            summarize_body(body)
+        ));
+    }
+
+    RefreshTokenError::transient(format!(
+        "OAuth refresh failed with unexpected response ({status})"
+    ))
+}
+
+fn summarize_body(body: &str) -> String {
+    let trimmed = body.trim();
+    if trimmed.is_empty() {
+        return "<empty response>".to_string();
+    }
+    const MAX_LEN: usize = 240;
+    if trimmed.len() > MAX_LEN {
+        format!("{}…", &trimmed[..MAX_LEN])
+    } else {
+        trimmed.to_string()
+    }
 }
 
 /// Expected structure for $CODEX_HOME/auth.json.
@@ -515,6 +712,7 @@ mod tests {
     use crate::token_data::KnownPlan;
     use crate::token_data::PlanType;
     use base64::Engine;
+    use reqwest::StatusCode;
     use pretty_assertions::assert_eq;
     use serde::Serialize;
     use serde_json::json;
@@ -734,6 +932,136 @@ mod tests {
         Ok(())
     }
 
+    fn assert_permanent(body: &str, status: StatusCode) {
+        let err = classify_refresh_failure(status, body);
+        assert!(err.is_permanent(), "expected permanent error, got {:?}", err.kind);
+    }
+
+    fn assert_transient(body: &str, status: StatusCode) {
+        let err = classify_refresh_failure(status, body);
+        assert!(
+            matches!(err.kind, RefreshTokenErrorKind::Transient),
+            "expected transient error, got {:?}",
+            err.kind
+        );
+    }
+
+    #[test]
+    fn invalid_grant_is_permanent() {
+        assert_permanent(
+            r#"{"error":"invalid_grant","error_description":"refresh token revoked"}"#,
+            StatusCode::BAD_REQUEST,
+        );
+    }
+
+    #[test]
+    fn invalid_client_is_permanent() {
+        assert_permanent(
+            r#"{"error":"invalid_client","error_description":"client mismatch"}"#,
+            StatusCode::UNAUTHORIZED,
+        );
+    }
+
+    #[test]
+    fn temporarily_unavailable_is_transient() {
+        assert_transient(
+            r#"{"error":"temporarily_unavailable","error_description":"please retry"}"#,
+            StatusCode::SERVICE_UNAVAILABLE,
+        );
+    }
+
+    #[test]
+    fn refresh_token_reused_is_transient_and_detected() {
+        let body = r#"{
+  "error": {
+    "message": "Your refresh token has already been used to generate a new access token. Please try signing in again.",
+    "type": "invalid_request_error",
+    "code": "refresh_token_reused"
+  }
+}"#;
+
+        let err = classify_refresh_failure(StatusCode::UNAUTHORIZED, body);
+        assert!(matches!(err.kind, RefreshTokenErrorKind::Transient));
+        assert!(err.is_refresh_token_reused());
+    }
+
+    #[test]
+    fn five_hundred_without_body_is_transient() {
+        assert_transient("", StatusCode::BAD_GATEWAY);
+    }
+
+    #[test]
+    fn forbidden_without_body_is_permanent() {
+        assert_permanent("", StatusCode::FORBIDDEN);
+    }
+
+    #[test]
+    fn adopts_rotated_refresh_token_from_disk() {
+        let dir = tempdir().unwrap();
+        let auth_file = get_auth_file(dir.path());
+        let fake_jwt = write_auth_file(
+            AuthFileParams {
+                openai_api_key: None,
+                chatgpt_plan_type: "pro".to_string(),
+            },
+            dir.path(),
+        )
+        .expect("failed to write auth file");
+
+        let cached_tokens = TokenData {
+            id_token: parse_id_token(&fake_jwt).expect("failed to parse id token"),
+            access_token: "cached-access".to_string(),
+            refresh_token: "stale-refresh".to_string(),
+            account_id: None,
+        };
+
+        let cached_auth = AuthDotJson {
+            openai_api_key: None,
+            tokens: Some(cached_tokens.clone()),
+            last_refresh: None,
+        };
+
+        let rotated_tokens = TokenData {
+            id_token: parse_id_token(&fake_jwt).expect("failed to parse id token"),
+            access_token: "rotated-access".to_string(),
+            refresh_token: "rotated-refresh".to_string(),
+            account_id: None,
+        };
+
+        let rotated_auth = AuthDotJson {
+            openai_api_key: None,
+            tokens: Some(rotated_tokens.clone()),
+            last_refresh: Some(Utc::now()),
+        };
+
+        write_auth_json(&auth_file, &rotated_auth).expect("failed to write rotated auth");
+
+        let auth = CodexAuth {
+            mode: AuthMode::ChatGPT,
+            api_key: None,
+            auth_dot_json: Arc::new(Mutex::new(Some(cached_auth))),
+            auth_file,
+            client: reqwest::Client::new(),
+        };
+
+        let rotated_access = rotated_tokens.access_token.clone();
+
+        let adopted = auth
+            .adopt_rotated_refresh_token_from_disk(&cached_tokens.refresh_token)
+            .expect("adoption should succeed");
+
+        assert_eq!(adopted, Some(rotated_access.clone()));
+
+        let guard = auth.auth_dot_json.lock().expect("mutex poisoned");
+        let updated = guard
+            .as_ref()
+            .and_then(|auth| auth.tokens.as_ref())
+            .expect("tokens should exist after adoption");
+
+        assert_eq!(updated.refresh_token, rotated_tokens.refresh_token);
+        assert_eq!(updated.access_token, rotated_access);
+    }
+
     struct AuthFileParams {
         openai_api_key: Option<String>,
         chatgpt_plan_type: String,
@@ -907,7 +1235,7 @@ impl AuthManager {
 
     /// Attempt to refresh the current auth token (if any). On success, reload
     /// the auth state from disk so other components observe refreshed token.
-    pub async fn refresh_token(&self) -> std::io::Result<Option<String>> {
+    pub async fn refresh_token_classified(&self) -> Result<Option<String>, RefreshTokenError> {
         let auth = match self.auth() {
             Some(a) => a,
             None => return Ok(None),
@@ -920,6 +1248,12 @@ impl AuthManager {
             }
             Err(e) => Err(e),
         }
+    }
+
+    pub async fn refresh_token(&self) -> std::io::Result<Option<String>> {
+        self.refresh_token_classified()
+            .await
+            .map_err(|err| std::io::Error::other(err))
     }
 
     /// Log out by deleting the on‑disk auth.json (if present). Returns Ok(true)

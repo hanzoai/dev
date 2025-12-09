@@ -1,73 +1,355 @@
-use code_app_server_protocol::AuthMode;
-use code_core::protocol_config_types::ReasoningEffort;
+use std::collections::HashMap;
 
-/// A simple preset pairing a model slug with a reasoning effort.
+use code_app_server_protocol::AuthMode;
+use code_core::config_types::TextVerbosity as TextVerbosityConfig;
+use code_core::protocol_config_types::ReasoningEffort;
+use once_cell::sync::Lazy;
+
+pub const HIDE_GPT5_1_MIGRATION_PROMPT_CONFIG: &str = "hide_gpt5_1_migration_prompt";
+pub const HIDE_GPT_5_1_CODEX_MAX_MIGRATION_PROMPT_CONFIG: &str =
+    "hide_gpt-5.1-codex-max_migration_prompt";
+
+/// A reasoning effort option surfaced for a model.
 #[derive(Debug, Clone, Copy)]
-pub struct ModelPreset {
-    /// Stable identifier for the preset.
-    pub id: &'static str,
-    /// Display label shown in UIs.
-    pub label: &'static str,
-    /// Short human description shown next to the label in UIs.
+pub struct ReasoningEffortPreset {
+    pub effort: ReasoningEffort,
     pub description: &'static str,
-    /// Model slug (e.g., "gpt-5").
-    pub model: &'static str,
-    /// Reasoning effort to apply for this preset.
-    pub effort: Option<ReasoningEffort>,
 }
 
-const PRESETS: &[ModelPreset] = &[
-    ModelPreset {
-        id: "gpt-5-codex-low",
-        label: "gpt-5-codex low",
-        description: "Fastest responses with limited reasoning",
-        model: "gpt-5-codex",
-        effort: Some(ReasoningEffort::Low),
-    },
-    ModelPreset {
-        id: "gpt-5-codex-medium",
-        label: "gpt-5-codex medium",
-        description: "Dynamically adjusts reasoning based on the task",
-        model: "gpt-5-codex",
-        effort: Some(ReasoningEffort::Medium),
-    },
-    ModelPreset {
-        id: "gpt-5-codex-high",
-        label: "gpt-5-codex high",
-        description: "Maximizes reasoning depth for complex or ambiguous problems",
-        model: "gpt-5-codex",
-        effort: Some(ReasoningEffort::High),
-    },
-    ModelPreset {
-        id: "gpt-5-minimal",
-        label: "gpt-5 minimal",
-        description: "Fastest responses with little reasoning",
-        model: "gpt-5",
-        effort: Some(ReasoningEffort::Minimal),
-    },
-    ModelPreset {
-        id: "gpt-5-low",
-        label: "gpt-5 low",
-        description: "Balances speed with some reasoning; useful for straightforward queries and short explanations",
-        model: "gpt-5",
-        effort: Some(ReasoningEffort::Low),
-    },
-    ModelPreset {
-        id: "gpt-5-medium",
-        label: "gpt-5 medium",
-        description: "Provides a solid balance of reasoning depth and latency for general-purpose tasks",
-        model: "gpt-5",
-        effort: Some(ReasoningEffort::Medium),
-    },
-    ModelPreset {
-        id: "gpt-5-high",
-        label: "gpt-5 high",
-        description: "Maximizes reasoning depth for complex or ambiguous problems",
-        model: "gpt-5",
-        effort: Some(ReasoningEffort::High),
-    },
+#[derive(Debug, Clone)]
+pub struct ModelUpgrade {
+    pub id: &'static str,
+    pub reasoning_effort_mapping: Option<HashMap<ReasoningEffort, ReasoningEffort>>,
+    pub migration_config_key: &'static str,
+}
+
+/// Metadata describing a Code-supported model.
+#[derive(Debug, Clone)]
+pub struct ModelPreset {
+    pub id: &'static str,
+    pub model: &'static str,
+    pub display_name: &'static str,
+    pub description: &'static str,
+    pub default_reasoning_effort: ReasoningEffort,
+    pub supported_reasoning_efforts: &'static [ReasoningEffortPreset],
+    pub supported_text_verbosity: &'static [TextVerbosityConfig],
+    pub is_default: bool,
+    pub upgrade: Option<ModelUpgrade>,
+    pub show_in_picker: bool,
+}
+
+const ALL_TEXT_VERBOSITY: &[TextVerbosityConfig] = &[
+    TextVerbosityConfig::Low,
+    TextVerbosityConfig::Medium,
+    TextVerbosityConfig::High,
 ];
 
-pub fn builtin_model_presets(_auth_mode: Option<AuthMode>) -> Vec<ModelPreset> {
-    PRESETS.to_vec()
+static PRESETS: Lazy<Vec<ModelPreset>> = Lazy::new(|| {
+    vec![
+        ModelPreset {
+            id: "gpt-5.1-codex-max",
+            model: "gpt-5.1-codex-max",
+            display_name: "gpt-5.1-codex-max",
+            description: "Latest Codex-optimized flagship for deep and fast reasoning.",
+            default_reasoning_effort: ReasoningEffort::Medium,
+            supported_reasoning_efforts: &[
+                ReasoningEffortPreset {
+                    effort: ReasoningEffort::Low,
+                    description: "Fast responses with lighter reasoning",
+                },
+                ReasoningEffortPreset {
+                    effort: ReasoningEffort::Medium,
+                    description: "Balances speed and reasoning depth for everyday tasks",
+                },
+                ReasoningEffortPreset {
+                    effort: ReasoningEffort::High,
+                    description: "Maximizes reasoning depth for complex problems",
+                },
+                ReasoningEffortPreset {
+                    effort: ReasoningEffort::XHigh,
+                    description: "Extra high reasoning depth for complex problems",
+                },
+            ],
+            supported_text_verbosity: &[TextVerbosityConfig::Medium],
+            is_default: true,
+            upgrade: None,
+            show_in_picker: true,
+        },
+        ModelPreset {
+            id: "gpt-5.1-codex",
+            model: "gpt-5.1-codex",
+            display_name: "gpt-5.1-codex",
+            description: "Optimized for Code.",
+            default_reasoning_effort: ReasoningEffort::Medium,
+            supported_reasoning_efforts: &[
+                ReasoningEffortPreset {
+                    effort: ReasoningEffort::Low,
+                    description: "Fastest responses with limited reasoning",
+                },
+                ReasoningEffortPreset {
+                    effort: ReasoningEffort::Medium,
+                    description: "Dynamically adjusts reasoning based on the task",
+                },
+                ReasoningEffortPreset {
+                    effort: ReasoningEffort::High,
+                    description: "Maximizes reasoning depth for complex or ambiguous problems",
+                },
+            ],
+            supported_text_verbosity: ALL_TEXT_VERBOSITY,
+            is_default: false,
+            upgrade: Some(ModelUpgrade {
+                id: "gpt-5.1-codex-max",
+                reasoning_effort_mapping: None,
+                migration_config_key: HIDE_GPT_5_1_CODEX_MAX_MIGRATION_PROMPT_CONFIG,
+            }),
+            show_in_picker: true,
+        },
+        ModelPreset {
+            id: "gpt-5.1-codex-mini",
+            model: "gpt-5.1-codex-mini",
+            display_name: "gpt-5.1-codex-mini",
+            description: "Optimized for Code. Cheaper, faster, but less capable.",
+            default_reasoning_effort: ReasoningEffort::Medium,
+            supported_reasoning_efforts: &[
+                ReasoningEffortPreset {
+                    effort: ReasoningEffort::Medium,
+                    description: "Dynamically adjusts reasoning based on the task",
+                },
+                ReasoningEffortPreset {
+                    effort: ReasoningEffort::High,
+                    description: "Maximizes reasoning depth for complex or ambiguous problems",
+                },
+            ],
+            supported_text_verbosity: ALL_TEXT_VERBOSITY,
+            is_default: false,
+            upgrade: Some(ModelUpgrade {
+                id: "gpt-5.1-codex-max",
+                reasoning_effort_mapping: None,
+                migration_config_key: HIDE_GPT_5_1_CODEX_MAX_MIGRATION_PROMPT_CONFIG,
+            }),
+            show_in_picker: true,
+        },
+        ModelPreset {
+            id: "gpt-5.1",
+            model: "gpt-5.1",
+            display_name: "gpt-5.1",
+            description: "Broad world knowledge with strong general reasoning.",
+            default_reasoning_effort: ReasoningEffort::Medium,
+            supported_reasoning_efforts: &[
+                ReasoningEffortPreset {
+                    effort: ReasoningEffort::Low,
+                    description:
+                        "Balances speed with some reasoning; useful for straightforward queries and short explanations",
+                },
+                ReasoningEffortPreset {
+                    effort: ReasoningEffort::Medium,
+                    description:
+                        "Provides a solid balance of reasoning depth and latency for general-purpose tasks",
+                },
+                ReasoningEffortPreset {
+                    effort: ReasoningEffort::High,
+                    description: "Maximizes reasoning depth for complex or ambiguous problems",
+                },
+            ],
+            supported_text_verbosity: ALL_TEXT_VERBOSITY,
+            is_default: false,
+            upgrade: Some(ModelUpgrade {
+                id: "gpt-5.1-codex-max",
+                reasoning_effort_mapping: None,
+                migration_config_key: HIDE_GPT_5_1_CODEX_MAX_MIGRATION_PROMPT_CONFIG,
+            }),
+            show_in_picker: true,
+        },
+        // Deprecated GPT-5 variants kept for migrations / config compatibility.
+        ModelPreset {
+            id: "gpt-5-codex",
+            model: "gpt-5-codex",
+            display_name: "gpt-5-codex",
+            description: "Optimized for Code.",
+            default_reasoning_effort: ReasoningEffort::Medium,
+            supported_reasoning_efforts: &[
+                ReasoningEffortPreset {
+                    effort: ReasoningEffort::Low,
+                    description: "Fastest responses with limited reasoning",
+                },
+                ReasoningEffortPreset {
+                    effort: ReasoningEffort::Medium,
+                    description: "Dynamically adjusts reasoning based on the task",
+                },
+                ReasoningEffortPreset {
+                    effort: ReasoningEffort::High,
+                    description: "Maximizes reasoning depth for complex or ambiguous problems",
+                },
+            ],
+            supported_text_verbosity: ALL_TEXT_VERBOSITY,
+            is_default: false,
+            upgrade: Some(ModelUpgrade {
+                id: "gpt-5.1-codex-max",
+                reasoning_effort_mapping: None,
+                migration_config_key: HIDE_GPT_5_1_CODEX_MAX_MIGRATION_PROMPT_CONFIG,
+            }),
+            show_in_picker: false,
+        },
+        ModelPreset {
+            id: "gpt-5-codex-mini",
+            model: "gpt-5-codex-mini",
+            display_name: "gpt-5-codex-mini",
+            description: "Optimized for Code. Cheaper, faster, but less capable.",
+            default_reasoning_effort: ReasoningEffort::Medium,
+            supported_reasoning_efforts: &[
+                ReasoningEffortPreset {
+                    effort: ReasoningEffort::Medium,
+                    description: "Dynamically adjusts reasoning based on the task",
+                },
+                ReasoningEffortPreset {
+                    effort: ReasoningEffort::High,
+                    description: "Maximizes reasoning depth for complex or ambiguous problems",
+                },
+            ],
+            supported_text_verbosity: ALL_TEXT_VERBOSITY,
+            is_default: false,
+            upgrade: Some(ModelUpgrade {
+                id: "gpt-5.1-codex-mini",
+                reasoning_effort_mapping: None,
+                migration_config_key: HIDE_GPT5_1_MIGRATION_PROMPT_CONFIG,
+            }),
+            show_in_picker: false,
+        },
+        ModelPreset {
+            id: "gpt-5",
+            model: "gpt-5",
+            display_name: "gpt-5",
+            description: "Broad world knowledge with strong general reasoning.",
+            default_reasoning_effort: ReasoningEffort::Medium,
+            supported_reasoning_efforts: &[
+                ReasoningEffortPreset {
+                    effort: ReasoningEffort::Minimal,
+                    description: "Fastest responses with little reasoning",
+                },
+                ReasoningEffortPreset {
+                    effort: ReasoningEffort::Low,
+                    description:
+                        "Balances speed with some reasoning; useful for straightforward queries and short explanations",
+                },
+                ReasoningEffortPreset {
+                    effort: ReasoningEffort::Medium,
+                    description:
+                        "Provides a solid balance of reasoning depth and latency for general-purpose tasks",
+                },
+                ReasoningEffortPreset {
+                    effort: ReasoningEffort::High,
+                    description: "Maximizes reasoning depth for complex or ambiguous problems",
+                },
+            ],
+            supported_text_verbosity: ALL_TEXT_VERBOSITY,
+            is_default: false,
+            upgrade: Some(ModelUpgrade {
+                id: "gpt-5.1-codex-max",
+                reasoning_effort_mapping: None,
+                migration_config_key: HIDE_GPT_5_1_CODEX_MAX_MIGRATION_PROMPT_CONFIG,
+            }),
+            show_in_picker: false,
+        },
+    ]
+});
+
+pub fn builtin_model_presets(auth_mode: Option<AuthMode>) -> Vec<ModelPreset> {
+    PRESETS
+        .iter()
+        .filter(|preset| match auth_mode {
+            Some(AuthMode::ApiKey) => preset.show_in_picker && preset.id != "gpt-5.1-codex-max",
+            _ => preset.show_in_picker,
+        })
+        .cloned()
+        .collect()
+}
+
+pub fn all_model_presets() -> &'static Vec<ModelPreset> {
+    &PRESETS
+}
+
+fn find_preset_for_model(model: &str) -> Option<&'static ModelPreset> {
+    let model_lower = model.to_ascii_lowercase();
+
+    PRESETS.iter().find(|preset| {
+        preset.model.eq_ignore_ascii_case(&model_lower)
+            || preset.id.eq_ignore_ascii_case(&model_lower)
+            || preset.display_name.eq_ignore_ascii_case(&model_lower)
+    })
+}
+
+fn reasoning_effort_rank(effort: ReasoningEffort) -> u8 {
+    match effort {
+        ReasoningEffort::Minimal => 0,
+        ReasoningEffort::Low => 1,
+        ReasoningEffort::Medium => 2,
+        ReasoningEffort::High => 3,
+        ReasoningEffort::XHigh => 4,
+    }
+}
+
+pub fn clamp_reasoning_effort_for_model(
+    model: &str,
+    requested: ReasoningEffort,
+) -> ReasoningEffort {
+    let Some(preset) = find_preset_for_model(model) else {
+        return requested;
+    };
+
+    if preset
+        .supported_reasoning_efforts
+        .iter()
+        .any(|opt| opt.effort == requested)
+    {
+        return requested;
+    }
+
+    let requested_rank = reasoning_effort_rank(requested);
+
+    preset
+        .supported_reasoning_efforts
+        .iter()
+        .min_by_key(|opt| {
+            let rank = reasoning_effort_rank(opt.effort);
+            (requested_rank.abs_diff(rank), u8::MAX - rank)
+        })
+        .map(|opt| opt.effort)
+        .unwrap_or(requested)
+}
+
+pub fn allowed_text_verbosity_for_model(model: &str) -> &'static [TextVerbosityConfig] {
+    find_preset_for_model(model)
+        .map(|preset| preset.supported_text_verbosity)
+        .unwrap_or(ALL_TEXT_VERBOSITY)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn only_one_default_model_is_configured() {
+        assert_eq!(PRESETS.iter().filter(|preset| preset.is_default).count(), 1);
+    }
+
+    #[test]
+    fn gpt_5_1_codex_max_hidden_for_api_key_auth() {
+        let presets = builtin_model_presets(Some(AuthMode::ApiKey));
+        assert!(presets
+            .iter()
+            .all(|preset| preset.id != "gpt-5.1-codex-max"));
+    }
+
+    #[test]
+    fn clamp_reasoning_effort_downgrades_to_supported_level() {
+        let clamped = clamp_reasoning_effort_for_model(
+            "gpt-5.1-codex",
+            ReasoningEffort::XHigh,
+        );
+        assert_eq!(clamped, ReasoningEffort::High);
+
+        let clamped_minimal =
+            clamp_reasoning_effort_for_model("gpt-5.1-codex-mini", ReasoningEffort::Minimal);
+        assert_eq!(clamped_minimal, ReasoningEffort::Medium);
+    }
 }

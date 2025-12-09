@@ -13,6 +13,7 @@ Completion/build step
 - Policy: All errors AND all warnings must be fixed before you’re done. Treat any compiler warning as a failure and address it (rename unused vars with `_`, remove `mut`, delete dead code, etc.).
 - Do not run additional format/lint/test commands on completion (e.g., `just fmt`, `just fix`, `cargo test`) unless explicitly requested for a specific task.
 - ***NEVER run rustfmt***
+- Before pushing to `main`, run `./pre-release.sh` to mirror the release preflight (dev-fast build, CLI smokes, workspace nextest).
 
 Optional regression checks (recommended when touching the Rust workspace):
 
@@ -20,6 +21,13 @@ Optional regression checks (recommended when touching the Rust workspace):
 - Focused sweeps stay quick and green: `cargo test -p code-tui --features test-helpers`, `cargo test -p code-cloud-tasks --tests`, and `cargo test -p mcp-types --tests`.
 
 When debugging regressions or bugs, write a failing test (or targeted reproduction script) first and confirm it captures the issue before touching code—if it can’t fail, you can’t be confident the fix works.
+
+## Documentation hygiene
+
+- Keep docs clean, clear, and current; prune stale instructions instead of piling on caveats.
+- Avoid excessive verbosity; prioritize concise guidance over long narratives.
+- Do not document minor or non-core features; focus on system-critical flows and expectations.
+- Never commit temporary "working" docs, plans, or scratch notes.
 
 ## Strict Ordering In The TUI History
 

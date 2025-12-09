@@ -6,6 +6,7 @@ use code_core::config::Config;
 use code_core::config::ConfigOverrides;
 use code_core::ModelClient;
 use code_core::ModelProviderInfo;
+use code_core::agent_defaults::model_guide_markdown_with_custom;
 use code_core::AuthManager;
 use code_core::Prompt;
 use code_core::TextFormat;
@@ -58,7 +59,7 @@ pub struct RequestArgs {
     #[arg(long = "schema-file")] 
     pub schema_file: Option<PathBuf>,
 
-    /// Optional model override (e.g. gpt-4.1, gpt-5)
+    /// Optional model override (e.g. gpt-4.1, gpt-5.1)
     #[arg(long)]
     pub model: Option<String>,
 }
@@ -76,8 +77,15 @@ async fn run_llm_request(
     let overrides_vec = cli_overrides.parse_overrides().map_err(anyhow::Error::msg)?;
 
     let overrides = if let Some(model) = &args.model {
-        ConfigOverrides { model: Some(model.clone()), ..ConfigOverrides::default() }
-    } else { ConfigOverrides::default() };
+        ConfigOverrides {
+            model: Some(model.clone()),
+            compact_prompt_override: None,
+            compact_prompt_override_file: None,
+            ..ConfigOverrides::default()
+        }
+    } else {
+        ConfigOverrides::default()
+    };
 
     let config = Config::load_with_cli_overrides(overrides_vec, overrides)?;
 
@@ -118,6 +126,9 @@ async fn run_llm_request(
     prompt.status_items = vec![];
     prompt.base_instructions_override = None;
     prompt.text_format = Some(text_format);
+    if let Some(custom) = model_guide_markdown_with_custom(&config.agents) {
+        prompt.model_descriptions = Some(custom);
+    }
     prompt.set_log_tag("cli/manual_prompt");
 
     // Auth + provider

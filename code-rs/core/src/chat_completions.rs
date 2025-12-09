@@ -80,6 +80,7 @@ pub(crate) async fn stream_chat_completions(
                 last_emitted_role = Some("assistant")
             }
             ResponseItem::FunctionCallOutput { .. } => last_emitted_role = Some("tool"),
+            ResponseItem::CompactionSummary { .. } => last_emitted_role = Some("assistant"),
             ResponseItem::Reasoning { .. } | ResponseItem::Other => {}
             ResponseItem::CustomToolCall { .. } => {}
             ResponseItem::CustomToolCallOutput { .. } => {}
@@ -206,6 +207,11 @@ pub(crate) async fn stream_chat_completions(
                     }
                     messages.push(json!({"role": role, "content": text}));
                 }
+            }
+            ResponseItem::CompactionSummary { .. } => {
+                // Compaction summaries are only meaningful to the Responses API; omit them
+                // when translating to Chat Completions.
+                continue;
             }
             ResponseItem::FunctionCall {
                 name,
@@ -441,6 +447,7 @@ pub(crate) async fn stream_chat_completions(
                     return Err(CodexErr::RetryLimit(RetryLimitReachedError {
                         status,
                         request_id: None,
+                        retryable: status.is_server_error() || status == StatusCode::TOO_MANY_REQUESTS,
                     }));
                 }
 
@@ -456,8 +463,8 @@ pub(crate) async fn stream_chat_completions(
                 tokio::time::sleep(delay).await;
             }
             Err(e) => {
+                let is_connectivity = e.is_connect() || e.is_timeout() || e.is_request();
                 if attempt > max_retries {
-                    // Log network error
                     if let Ok(logger) = debug_logger.lock() {
                         let _ = logger.append_response_event(
                             &request_id,
@@ -467,6 +474,14 @@ pub(crate) async fn stream_chat_completions(
                             }),
                         );
                         let _ = logger.end_request_log(&request_id);
+                    }
+                    if is_connectivity {
+                        let req_id = (!request_id.is_empty()).then(|| request_id.clone());
+                        return Err(CodexErr::Stream(
+                            format!("[transport] network unavailable: {e}"),
+                            None,
+                            req_id,
+                        ));
                     }
                     return Err(e.into());
                 }
@@ -523,7 +538,11 @@ async fn process_chat_sse<S>(
             Ok(Some(Ok(ev))) => ev,
             Ok(Some(Err(e))) => {
                 let _ = tx_event
-                    .send(Err(CodexErr::Stream(e.to_string(), None)))
+                    .send(Err(CodexErr::Stream(
+                        format!("[transport] {e}"),
+                        None,
+                        Some(request_id.clone()),
+                    )))
                     .await;
                 return;
             }
@@ -554,8 +573,9 @@ async fn process_chat_sse<S>(
             Err(_) => {
                 let _ = tx_event
                     .send(Err(CodexErr::Stream(
-                        "idle timeout waiting for SSE".into(),
+                        "[idle] timeout waiting for SSE".into(),
                         None,
+                        Some(request_id.clone()),
                     )))
                     .await;
                 return;

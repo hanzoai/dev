@@ -26,7 +26,9 @@ pub(crate) fn should_persist_response_item(item: &ResponseItem) -> bool {
         | ResponseItem::FunctionCallOutput { .. }
         | ResponseItem::CustomToolCall { .. }
         | ResponseItem::CustomToolCallOutput { .. }
-        | ResponseItem::WebSearchCall { .. } => true,
+        | ResponseItem::WebSearchCall { .. }
+        | ResponseItem::GhostSnapshot { .. }
+        | ResponseItem::CompactionSummary { .. } => true,
         ResponseItem::Other => false,
     }
 }
@@ -40,16 +42,20 @@ pub(crate) fn should_persist_event_msg(ev: &EventMsg) -> bool {
         | EventMsg::AgentReasoning(_)
         | EventMsg::AgentReasoningRawContent(_)
         | EventMsg::TokenCount(_)
+        | EventMsg::ContextCompacted(_)
         | EventMsg::EnteredReviewMode(_)
         | EventMsg::ExitedReviewMode(_)
+        | EventMsg::UndoCompleted(_)
         | EventMsg::TurnAborted(_) => true,
         EventMsg::Error(_)
+        | EventMsg::Warning(_)
         | EventMsg::TaskStarted(_)
         | EventMsg::TaskComplete(_)
         | EventMsg::AgentMessageDelta(_)
         | EventMsg::AgentReasoningDelta(_)
         | EventMsg::AgentReasoningRawContentDelta(_)
         | EventMsg::AgentReasoningSectionBreak(_)
+        | EventMsg::RawResponseItem(_)
         | EventMsg::SessionConfigured(_)
         | EventMsg::McpToolCallBegin(_)
         | EventMsg::McpToolCallEnd(_)
@@ -59,6 +65,7 @@ pub(crate) fn should_persist_event_msg(ev: &EventMsg) -> bool {
         | EventMsg::ExecCommandOutputDelta(_)
         | EventMsg::ExecCommandEnd(_)
         | EventMsg::ExecApprovalRequest(_)
+        | EventMsg::ElicitationRequest(_)
         | EventMsg::ApplyPatchApprovalRequest(_)
         | EventMsg::BackgroundEvent(_)
         | EventMsg::StreamError(_)
@@ -66,11 +73,19 @@ pub(crate) fn should_persist_event_msg(ev: &EventMsg) -> bool {
         | EventMsg::PatchApplyEnd(_)
         | EventMsg::TurnDiff(_)
         | EventMsg::GetHistoryEntryResponse(_)
+        | EventMsg::UndoStarted(_)
         | EventMsg::McpListToolsResponse(_)
+        | EventMsg::McpStartupUpdate(_)
+        | EventMsg::McpStartupComplete(_)
         | EventMsg::ListCustomPromptsResponse(_)
         | EventMsg::PlanUpdate(_)
         | EventMsg::ShutdownComplete
         | EventMsg::ViewImageToolCall(_)
-        | EventMsg::ConversationPath(_) => false,
+        | EventMsg::DeprecationNotice(_)
+        | EventMsg::ItemStarted(_)
+        | EventMsg::ItemCompleted(_)
+        | EventMsg::AgentMessageContentDelta(_)
+        | EventMsg::ReasoningContentDelta(_)
+        | EventMsg::ReasoningRawContentDelta(_) => false,
     }
 }

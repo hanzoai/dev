@@ -1050,6 +1050,20 @@ impl BrowserManager {
         self.config.try_read().map(|c| c.enabled).unwrap_or(false)
     }
 
+    /// Returns how long the browser has been idle when it exceeds the configured timeout.
+    /// Used to decide whether we should avoid taking fresh screenshots (which would reset
+    /// the idle timer) until the user interacts with browser_* tools again.
+    pub async fn idle_elapsed_past_timeout(&self) -> Option<(Duration, Duration)> {
+        let idle_timeout = Duration::from_millis(self.config.read().await.idle_timeout_ms);
+        let last = *self.last_activity.lock().await;
+        let elapsed = last.elapsed();
+        if elapsed > idle_timeout {
+            Some((elapsed, idle_timeout))
+        } else {
+            None
+        }
+    }
+
     /// Get a description of the browser connection type
     pub async fn get_browser_type(&self) -> String {
         let config = self.config.read().await;

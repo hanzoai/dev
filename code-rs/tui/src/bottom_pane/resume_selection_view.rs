@@ -5,6 +5,7 @@ use ratatui::style::{Modifier, Style};
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, Borders, Clear, Paragraph, Row, Table};
 use ratatui::widgets::Widget;
+use std::cell::Cell;
 
 use crate::app_event::AppEvent;
 use crate::app_event_sender::AppEventSender;
@@ -12,12 +13,14 @@ use crate::app_event_sender::AppEventSender;
 use super::bottom_pane_view::{BottomPaneView, ConditionalUpdate};
 use super::{BottomPane, popup_consts::MAX_POPUP_ROWS};
 
+const RESUME_POPUP_ROWS: usize = 14;
+
 pub struct ResumeRow {
     pub modified: String,
     pub created: String,
-    pub msgs: String,
+    pub user_msgs: String,
     pub branch: String,
-    pub summary: String,
+    pub last_user_message: String,
     pub path: std::path::PathBuf,
 }
 
@@ -28,13 +31,23 @@ pub struct ResumeSelectionView {
     selected: usize,
     // Topmost row index currently visible in the table viewport
     top: usize,
+    viewport_rows: Cell<usize>,
     complete: bool,
     app_event_tx: AppEventSender,
 }
 
 impl ResumeSelectionView {
     pub fn new(title: String, subtitle: String, rows: Vec<ResumeRow>, app_event_tx: AppEventSender) -> Self {
-        Self { title, subtitle, rows, selected: 0, top: 0, complete: false, app_event_tx }
+        Self {
+            title,
+            subtitle,
+            rows,
+            selected: 0,
+            top: 0,
+            viewport_rows: Cell::new(RESUME_POPUP_ROWS),
+            complete: false,
+            app_event_tx,
+        }
     }
 
     fn move_up(&mut self) {
@@ -77,7 +90,9 @@ impl ResumeSelectionView {
     }
 
     fn visible_rows(&self) -> usize {
-        self.rows.len().clamp(1, MAX_POPUP_ROWS)
+        let viewport = self.viewport_rows.get().max(1);
+        let limit = RESUME_POPUP_ROWS.max(MAX_POPUP_ROWS);
+        viewport.min(self.rows.len().max(1)).min(limit)
     }
 
     fn ensure_selected_visible(&mut self) {
@@ -121,7 +136,7 @@ impl BottomPaneView<'_> for ResumeSelectionView {
     fn desired_height(&self, _width: u16) -> u16 {
         // Include block borders (+2), optional subtitle (+1), table header (+1),
         // clamped rows, spacer (+1), footer (+1)
-        let rows = self.rows.len().clamp(1, MAX_POPUP_ROWS) as u16;
+        let rows = self.rows.len().min(RESUME_POPUP_ROWS).max(1) as u16;
         let subtitle = if self.subtitle.is_empty() { 0 } else { 1 };
         2 + subtitle + 1 + rows + 1 + 1
     }
@@ -164,6 +179,13 @@ impl BottomPaneView<'_> for ResumeSelectionView {
                 .saturating_sub(footer_reserved + (next_y - inner.y)),
         };
 
+        let header_rows = 1;
+        let viewport_capacity = table_area
+            .height
+            .saturating_sub(header_rows)
+            .max(1) as usize;
+        self.viewport_rows.set(viewport_capacity);
+
         // Build rows (windowed to the visible viewport)
         let page = self.visible_rows();
         let start = self.top.min(self.rows.len());
@@ -171,8 +193,14 @@ impl BottomPaneView<'_> for ResumeSelectionView {
         let rows_iter = self.rows[start..end].iter().enumerate().map(|(idx, r)| {
             let i = start + idx; // absolute index
             let cells = vec![
-                r.modified.clone(), r.created.clone(), r.msgs.clone(), r.branch.clone(), r.summary.clone()
-            ].into_iter().map(|c| ratatui::widgets::Cell::from(c));
+                r.modified.clone(),
+                r.created.clone(),
+                r.user_msgs.clone(),
+                r.branch.clone(),
+                r.last_user_message.clone(),
+            ]
+            .into_iter()
+            .map(ratatui::widgets::Cell::from);
             let mut row = Row::new(cells).height(1);
             if i == self.selected {
                 row = row.style(Style::default().bg(crate::colors::selection()).add_modifier(Modifier::BOLD));
@@ -184,12 +212,12 @@ impl BottomPaneView<'_> for ResumeSelectionView {
         let widths = [
             Constraint::Length(10), // Modified
             Constraint::Length(10), // Created
-            Constraint::Length(6),  // #Msgs
+            Constraint::Length(11), // User Msgs
             Constraint::Length(10), // Branch
-            Constraint::Min(10),    // Summary
+            Constraint::Min(10),    // Last User Message
         ];
 
-        let header = Row::new(vec!["Modified", "Created", "#Msgs", "Branch", "Summary"]).height(1)
+        let header = Row::new(vec!["Modified", "Created", "User Msgs", "Branch", "Last User Message"]).height(1)
             .style(Style::default().fg(crate::colors::text_bright()));
 
         let table = Table::new(rows_iter, widths)

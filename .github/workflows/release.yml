@@ -14,38 +14,69 @@ on:
       - 'test/**'
       - '*.md'
       - 'CHANGELOG.md'
-      - 'release-notes/**'
+      - 'docs/release-notes/**'
       - 'codex-cli/package.json'
 
 concurrency:
-  group: ci-${{ github.ref }}
-  cancel-in-progress: true
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
 
 permissions:
   contents: write
+  packages: write
+  id-token: write
+  issues: write
+  pull-requests: write
+  statuses: write
 
 jobs:
   preflight-tests:
     name: Preflight Tests (Linux fast E2E)
     runs-on: ubuntu-24.04
     env:
-      CARGO_TARGET_DIR: /home/runner/.cargo-target
+      CARGO_TARGET_DIR: /mnt/cargo-target
     steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
-
-      - name: Install Rust (1.90)
+      - name: Prepare cargo target dir on data disk
         shell: bash
         run: |
-          rustup set profile minimal
-          rustup toolchain install 1.90.0 --profile minimal
-          rustup default 1.90.0
+          set -euo pipefail
+          sudo mkdir -p "$CARGO_TARGET_DIR"
+          sudo chown "$USER":"$USER" "$CARGO_TARGET_DIR"
+
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Setup Python 3.12
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Read Rust toolchain channel
+        id: rust_toolchain
+        shell: bash
+        run: |
+          set -euo pipefail
+          TOOLCHAIN=$(python -c "import sys, pathlib; p=pathlib.Path('code-rs/rust-toolchain.toml').read_text();
+          try:
+              import tomllib as tl
+          except ModuleNotFoundError:
+              import tomli as tl
+          print(tl.loads(p)['toolchain']['channel'])")
+          echo "channel=$TOOLCHAIN" >> "$GITHUB_OUTPUT"
+          echo "RUST_TOOLCHAIN=$TOOLCHAIN" >> "$GITHUB_ENV"
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: ${{ steps.rust_toolchain.outputs.channel }}
 
       - name: Setup Rust Cache
         uses: Swatinem/rust-cache@v2
         with:
           prefix-key: v5-rust
-          shared-key: code-preflight-1.90
+          shared-key: code-preflight-${{ steps.rust_toolchain.outputs.channel }}
           workspaces: |
             code-rs -> target
           cache-targets: false
@@ -65,6 +96,13 @@ jobs:
           SKIP_CARGO_TESTS: "1"
           CI_CLI_BIN: ${{ env.CARGO_TARGET_DIR }}/dev-fast/dev
         run: bash scripts/ci-tests.sh
+
+      - name: Drop dev-fast artifacts before workspace tests
+        shell: bash
+        run: |
+          set -euo pipefail
+          rm -rf "$CARGO_TARGET_DIR"/dev-fast || true
+          df -h
 
       - name: Install cargo-nextest
         uses: taiki-e/install-action@v2
@@ -177,14 +215,33 @@ jobs:
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
-      - name: Install Rust (minimal)
+      - name: Setup Python 3.12
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Read Rust toolchain channel
+        id: rust_toolchain
         shell: bash
         run: |
-          rustup set profile minimal
-          rustup toolchain install 1.90.0 --profile minimal
-          rustup default 1.90.0
-          rustup target add ${{ matrix.target }}
+          set -euo pipefail
+          TOOLCHAIN=$(python -c "import sys, pathlib; p=pathlib.Path('code-rs/rust-toolchain.toml').read_text();
+          try:
+              import tomllib as tl
+          except ModuleNotFoundError:
+              import tomli as tl
+          print(tl.loads(p)['toolchain']['channel'])")
+          echo "channel=$TOOLCHAIN" >> "$GITHUB_OUTPUT"
+          echo "RUST_TOOLCHAIN=$TOOLCHAIN" >> "$GITHUB_ENV"
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: ${{ steps.rust_toolchain.outputs.channel }}
+          targets: ${{ matrix.target }}
 
       # Keep target/ across runs so Cargo can no-op when code hasn't changed
       - id: rust_cache
@@ -192,7 +249,7 @@ jobs:
         uses: Swatinem/rust-cache@v2
         with:
           prefix-key: v5-rust
-          shared-key: code-${{ matrix.target }}-toolchain-1.90
+          shared-key: code-${{ matrix.target }}-toolchain-${{ steps.rust_toolchain.outputs.channel }}
           workspaces: |
             code-rs -> target
           cache-targets: true
@@ -343,6 +400,11 @@ jobs:
             Remove-Item $src -Force
           }
 
+      - name: Install zstd (Linux)
+        if: contains(matrix.os, 'ubuntu')
+        shell: bash
+        run: sudo apt-get update -qq && sudo apt-get install -y zstd
+
       - name: Compress artifacts (Linux dual-format)
         if: contains(matrix.os, 'ubuntu')
         shell: bash
@@ -440,6 +502,11 @@ jobs:
           done < <(find artifacts -type f -name 'code-*' -print0)
           # Show what we collected
           ls -la release-assets/ || true
+
+      - name: Install zstd (package assembly)
+        if: runner.os == 'Linux'
+        shell: bash
+        run: sudo apt-get update -qq && sudo apt-get install -y zstd
 
       - name: Build per-target npm binary packages
         shell: bash
@@ -590,7 +657,12 @@ jobs:
       # It will:
       #  - Review changes between the previous tag and the new version
       #  - Update CHANGELOG.md with a new section for vNEW_VERSION
-      #  - Write rich release notes to release-notes/RELEASE_NOTES.md
+      #  - Write rich release notes to docs/release-notes/RELEASE_NOTES.md
+      - name: Install zstd (CHANGELOG generation)
+        if: runner.os == 'Linux' && env.OPENAI_API_KEY != ''
+        shell: bash
+        run: sudo apt-get update -qq && sudo apt-get install -y zstd
+
       - name: Generate CHANGELOG + release notes (Code)
         if: env.OPENAI_API_KEY != ''
         shell: bash
@@ -613,16 +685,16 @@ jobs:
           echo "Previous tag: ${PREV_TAG:-<none>}"
           echo "Range: $RANGE"
 
-          if [ -f CHANGELOG.md ] && [ -f release-notes/RELEASE_NOTES.md ] \
+          if [ -f CHANGELOG.md ] && [ -f docs/release-notes/RELEASE_NOTES.md ] \
              && grep -qF "## [${NEW_VERSION}]" CHANGELOG.md 2>/dev/null \
-             && grep -qF "## @hanzo/dev v${NEW_VERSION}" release-notes/RELEASE_NOTES.md 2>/dev/null; then
-            echo "CHANGELOG.md and release-notes/RELEASE_NOTES.md already contain v${NEW_VERSION}; skipping regeneration."
+             && grep -qF "## @hanzo/dev v${NEW_VERSION}" docs/release-notes/RELEASE_NOTES.md 2>/dev/null; then
+            echo "CHANGELOG.md and docs/release-notes/RELEASE_NOTES.md already contain v${NEW_VERSION}; skipping regeneration."
             exit 0
           fi
 
           # Extract a Linux x86_64 Code binary from artifacts and make it runnable.
-          mkdir -p .code-bin release-notes
-          : > release-notes/RELEASE_NOTES.md
+          mkdir -p .code-bin docs/release-notes
+          : > docs/release-notes/RELEASE_NOTES.md
           LNX_ZST=$(ls -1 release-assets/code-x86_64-unknown-linux-musl.* 2>/dev/null | head -n1 || true)
           if [ -z "$LNX_ZST" ]; then
             echo "Could not find linux x86_64 Code artifact in release-assets/" >&2
@@ -642,11 +714,11 @@ jobs:
 
           # Prepare context for the model.
           DATE=$(date -u +%Y-%m-%d)
-          echo "# Commit log ($RANGE)" > release-notes/context.md
-          git log --no-color --format='* %h %s (%an)' --abbrev=8 --no-merges $RANGE >> release-notes/context.md || true
+          echo "# Commit log ($RANGE)" > docs/release-notes/context.md
+          git log --no-color --format='* %h %s (%an)' --abbrev=8 --no-merges $RANGE >> docs/release-notes/context.md || true
 
           # Build the task prompt (with variables expanded by bash).
-          cat > release-notes/prompt.expanded.txt <<PROMPT
+          cat > docs/release-notes/prompt.expanded.txt <<PROMPT
           You are Code running headless in CI to prepare a new release.
 
           Inputs
@@ -658,7 +730,7 @@ jobs:
 
           Primary Tasks
           1) Update CHANGELOG.md with a new entry for this version using the EXACT house style below.
-          2) Generate GitHub release notes at release-notes/RELEASE_NOTES.md (concise, user‑facing), derived from the same changes.
+          2) Generate GitHub release notes at docs/release-notes/RELEASE_NOTES.md (concise, user‑facing), derived from the same changes.
 
           CHANGELOG.md House Style (strict)
           - File header stays as-is ("Changelog"). Do not rewrite older sections.
@@ -673,7 +745,7 @@ jobs:
           - Do NOT add any extra headers inside the changelog entry; only bullets under the version header.
           - Idempotent: if a section for ${NEW_VERSION} already exists, replace only that section’s body with the newly generated bullets and keep the header intact.
 
-          Release Notes (release-notes/RELEASE_NOTES.md)
+          Release Notes (docs/release-notes/RELEASE_NOTES.md)
           - Write exactly these sections in order; include the optional Thanks section only when applicable:
             1) Title: ## @hanzo/dev v${NEW_VERSION}
             2) One brief intro sentence (1–2 lines max).
@@ -702,12 +774,12 @@ jobs:
 
           Context (git log excerpt follows):
           PROMPT
-          cat release-notes/context.md >> release-notes/prompt.expanded.txt
+          cat docs/release-notes/context.md >> docs/release-notes/prompt.expanded.txt
 
           # Run Code in fully automated exec mode against the repo root.
           # Note: the working-directory flag is `--cd` on the `exec` subcommand.
           OPENAI_BASE_URL="http://127.0.0.1:5058/v1" \
-          ./.code-bin/code exec --cd "$GITHUB_WORKSPACE" --full-auto --skip-git-repo-check < release-notes/prompt.expanded.txt | tee .github/auto/RELEASE_AGENT_OUT.txt || {
+          ./.code-bin/code exec --cd "$GITHUB_WORKSPACE" --full-auto --skip-git-repo-check < docs/release-notes/prompt.expanded.txt | tee .github/auto/RELEASE_AGENT_OUT.txt || {
             echo "Code exec returned non-zero; continuing to check for outputs..." >&2
           }
 
@@ -721,10 +793,10 @@ jobs:
           fi
 
           # Post-process: scrub upstream contributors from the Thanks section (e.g., usernames ending with -oai)
-          if [ -s release-notes/RELEASE_NOTES.md ]; then
+          if [ -s docs/release-notes/RELEASE_NOTES.md ]; then
             node - <<'JS'
             const fs = require('fs');
-            const p = 'release-notes/RELEASE_NOTES.md';
+            const p = 'docs/release-notes/RELEASE_NOTES.md';
             if (!fs.existsSync(p)) process.exit(0);
             const src = fs.readFileSync(p,'utf8');
             const lines = src.split(/\r?\n/);
@@ -760,16 +832,16 @@ jobs:
           fi
 
           # If the agent forgot to write release notes, synthesize a minimal one from CHANGELOG.
-          if [ ! -s release-notes/RELEASE_NOTES.md ]; then
-            awk -v v="${NEW_VERSION}" '/^## /{p=($2==("v"v)||$2==v)} p{print}' CHANGELOG.md > release-notes/RELEASE_NOTES.md || true
+          if [ ! -s docs/release-notes/RELEASE_NOTES.md ]; then
+            awk -v v="${NEW_VERSION}" '/^## /{p=($2==("v"v)||$2==v)} p{print}' CHANGELOG.md > docs/release-notes/RELEASE_NOTES.md || true
           fi
-          if [ ! -s release-notes/RELEASE_NOTES.md ]; then
-            printf "## @hanzo/dev v%s\n\nSee CHANGELOG.md for details." "${NEW_VERSION}" > release-notes/RELEASE_NOTES.md
+          if [ ! -s docs/release-notes/RELEASE_NOTES.md ]; then
+            printf "## @hanzo/dev v%s\n\nSee CHANGELOG.md for details." "${NEW_VERSION}" > docs/release-notes/RELEASE_NOTES.md
           fi
 
           # Commit CHANGELOG changes if any.
           if ! git diff --quiet -- CHANGELOG.md; then
-            git add CHANGELOG.md release-notes/RELEASE_NOTES.md || true
+            git add CHANGELOG.md docs/release-notes/RELEASE_NOTES.md || true
             git commit -m "docs(changelog): update for v${NEW_VERSION} [skip ci]" || true
           fi
 
@@ -783,7 +855,7 @@ jobs:
           for f in "${files[@]}"; do
             [ -z "$f" ] && continue
             case "$f" in
-              CHANGELOG.md|release-notes/RELEASE_NOTES.md) ;; # allowed
+              CHANGELOG.md|docs/release-notes/RELEASE_NOTES.md) ;; # allowed
               *) notes_only=false ;;
             esac
           done
@@ -802,18 +874,18 @@ jobs:
           NEW_VERSION: ${{ needs.determine-version.outputs.version }}
         run: |
           set -euo pipefail
-          mkdir -p release-notes
+          mkdir -p docs/release-notes
           if [ -f CHANGELOG.md ]; then
-            awk -v v="${NEW_VERSION}" '/^## /{p=($2==("v"v)||$2==v)} p{print}' CHANGELOG.md > release-notes/RELEASE_NOTES.md || true
+            awk -v v="${NEW_VERSION}" '/^## /{p=($2==("v"v)||$2==v)} p{print}' CHANGELOG.md > docs/release-notes/RELEASE_NOTES.md || true
           fi
-          if [ ! -s release-notes/RELEASE_NOTES.md ]; then
-            printf "## @hanzo/dev v%s\n\nSee CHANGELOG.md for details." "${NEW_VERSION}" > release-notes/RELEASE_NOTES.md
+          if [ ! -s docs/release-notes/RELEASE_NOTES.md ]; then
+            printf "## @hanzo/dev v%s\n\nSee CHANGELOG.md for details." "${NEW_VERSION}" > docs/release-notes/RELEASE_NOTES.md
           fi
 
       - name: Assert release notes exist
         shell: bash
         run: |
-          test -s release-notes/RELEASE_NOTES.md || { echo "release-notes/RELEASE_NOTES.md missing" >&2; exit 1; }
+          test -s docs/release-notes/RELEASE_NOTES.md || { echo "docs/release-notes/RELEASE_NOTES.md missing" >&2; exit 1; }
 
       - name: Check if we should publish
         id: should_publish
@@ -882,7 +954,7 @@ jobs:
         with:
           tag_name: v${{ steps.version.outputs.version }}
           name: Release v${{ steps.version.outputs.version }}
-          body_path: release-notes/RELEASE_NOTES.md
+          body_path: docs/release-notes/RELEASE_NOTES.md
           files: |
             release-assets/*
         env:

@@ -8,7 +8,9 @@ use crate::chatwidget::BackgroundOrderTicket;
 use crate::user_approval_widget::{ApprovalRequest, UserApprovalWidget};
 use crate::thread_spawner;
 pub(crate) use bottom_pane_view::BottomPaneView;
+pub(crate) use bottom_pane_view::ConditionalUpdate;
 use crate::util::buffer::fill_rect;
+use code_protocol::custom_prompts::CustomPrompt;
 use code_core::protocol::TokenUsage;
 use code_file_search::FileMatch;
 use crossterm::event::{KeyCode, KeyEvent, KeyEventKind};
@@ -27,12 +29,13 @@ mod chat_composer;
 mod chat_composer_history;
 mod diff_popup;
 mod custom_prompt_view;
+pub(crate) mod prompt_args;
 mod command_popup;
 mod file_search_popup;
 mod paste_burst;
 mod popup_consts;
 pub(crate) mod agent_editor_view;
-mod model_selection_view;
+pub(crate) mod model_selection_view;
 mod scroll_state;
 mod selection_popup_common;
 pub mod list_selection_view;
@@ -42,13 +45,14 @@ mod cloud_tasks_view;
 pub(crate) use cloud_tasks_view::CloudTasksView;
 pub mod resume_selection_view;
 pub mod agents_settings_view;
-mod github_settings_view;
 pub mod mcp_settings_view;
 mod login_accounts_view;
 // no direct use of list_selection_view or its items here
 mod textarea;
 pub mod form_text_field;
+pub mod prompts_settings_view;
 mod theme_selection_view;
+mod planning_settings_view;
 mod verbosity_selection_view;
 pub(crate) mod validation_settings_view;
 mod update_settings_view;
@@ -56,6 +60,7 @@ mod undo_timeline_view;
 mod notifications_settings_view;
 mod settings_overlay;
 pub(crate) use settings_overlay::SettingsSection;
+pub(crate) mod review_settings_view;
 pub mod settings_panel;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -64,7 +69,7 @@ pub(crate) enum CancellationEvent {
     Handled,
 }
 
-pub(crate) use chat_composer::ChatComposer;
+pub(crate) use chat_composer::{AgentHintLabel, AutoReviewFooterStatus, AutoReviewPhase, ChatComposer};
 pub(crate) use chat_composer::InputResult;
 pub(crate) use auto_coordinator_view::{
     AutoActiveViewModel,
@@ -74,7 +79,6 @@ pub(crate) use auto_coordinator_view::{
     CountdownState,
 };
 pub(crate) use auto_drive_settings_view::AutoDriveSettingsView;
-pub(crate) use github_settings_view::GithubSettingsView;
 pub(crate) use login_accounts_view::{
     LoginAccountsState,
     LoginAccountsView,
@@ -85,6 +89,8 @@ pub(crate) use login_accounts_view::{
 pub(crate) use update_settings_view::{UpdateSettingsView, UpdateSharedState};
 pub(crate) use notifications_settings_view::{NotificationsMode, NotificationsSettingsView};
 pub(crate) use validation_settings_view::ValidationSettingsView;
+pub(crate) use review_settings_view::ReviewSettingsView;
+pub(crate) use planning_settings_view::PlanningSettingsView;
 use approval_modal_view::ApprovalModalView;
 #[cfg(feature = "code-fork")]
 use approval_ui::ApprovalUi;
@@ -92,7 +98,7 @@ use code_common::model_presets::ModelPreset;
 use code_core::config_types::ReasoningEffort;
 use code_core::config_types::TextVerbosity;
 use code_core::config_types::ThemeName;
-pub(crate) use model_selection_view::ModelSelectionView;
+pub(crate) use model_selection_view::{ModelSelectionTarget, ModelSelectionView};
 pub(crate) use mcp_settings_view::McpSettingsView;
 pub(crate) use theme_selection_view::ThemeSelectionView;
 use verbosity_selection_view::VerbositySelectionView;
@@ -134,6 +140,8 @@ pub(crate) struct BottomPane<'a> {
     auto_drive_variant: AutoDriveVariant,
     auto_drive_active: bool,
 
+    custom_prompts: Vec<CustomPrompt>,
+
 }
 
 pub(crate) struct BottomPaneParams {
@@ -169,6 +177,7 @@ impl BottomPane<'_> {
             using_chatgpt_auth: params.using_chatgpt_auth,
             auto_drive_variant: params.auto_drive_variant,
             auto_drive_active: false,
+            custom_prompts: Vec::new(),
         }
     }
 
@@ -527,6 +536,15 @@ impl BottomPane<'_> {
         }
     }
 
+    pub(crate) fn set_custom_prompts(&mut self, prompts: Vec<CustomPrompt>) {
+        self.custom_prompts = prompts.clone();
+        self.composer.set_custom_prompts(prompts);
+    }
+
+    pub(crate) fn custom_prompts(&self) -> &[CustomPrompt] {
+        &self.custom_prompts
+    }
+
     /// Enable or disable compact compose mode. When enabled, the spacer line
     /// above the input composer is removed so the history can scroll into that
     /// row. This is typically toggled when the user scrolls up.
@@ -566,6 +584,21 @@ impl BottomPane<'_> {
 
     pub(crate) fn standard_terminal_hint(&self) -> Option<&str> {
         self.composer.standard_terminal_hint()
+    }
+
+    pub(crate) fn set_auto_review_status(&mut self, status: Option<AutoReviewFooterStatus>) {
+        self.composer.set_auto_review_status(status);
+        self.request_redraw();
+    }
+
+    pub(crate) fn set_agent_hint_label(&mut self, label: AgentHintLabel) {
+        self.composer.set_agent_hint_label(label);
+        self.request_redraw();
+    }
+
+    #[cfg(test)]
+    pub(crate) fn auto_review_status(&self) -> Option<AutoReviewFooterStatus> {
+        self.composer.auto_review_status()
     }
 
     pub(crate) fn show_ctrl_c_quit_hint(&mut self) {
@@ -675,8 +708,17 @@ impl BottomPane<'_> {
         presets: Vec<ModelPreset>,
         current_model: String,
         current_effort: ReasoningEffort,
+        use_chat_model: bool,
+        target: ModelSelectionTarget,
     ) {
-        let view = ModelSelectionView::new(presets, current_model, current_effort, self.app_event_tx.clone());
+        let view = ModelSelectionView::new(
+            presets,
+            current_model,
+            current_effort,
+            use_chat_model,
+            target,
+            self.app_event_tx.clone(),
+        );
         self.active_view = Some(Box::new(view));
         self.active_view_kind = ActiveViewKind::Other;
         // Status shown in composer title now

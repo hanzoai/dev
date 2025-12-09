@@ -1,9 +1,10 @@
 use crate::codex::ApprovedCommandPattern;
 use crate::protocol::ApprovedCommandMatchKind;
+use crate::config_loader::{load_config_as_toml_blocking, LoaderOverrides};
 use crate::config_profile::ConfigProfile;
 use crate::config_types::AgentConfig;
 use crate::agent_defaults::{agent_model_spec, default_agent_configs};
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use crate::config_types::AutoDriveContinueMode;
 use crate::config_types::AutoDriveSettings;
 use crate::config_types::AllowedCommand;
@@ -11,6 +12,7 @@ use crate::config_types::AllowedCommandMatchKind;
 use crate::config_types::BrowserConfig;
 use crate::config_types::CachedTerminalBackground;
 use crate::config_types::ClientTools;
+use crate::config_types::Notice;
 use crate::config_types::History;
 use crate::config_types::GithubConfig;
 use crate::config_types::ValidationConfig;
@@ -39,6 +41,7 @@ use crate::model_family::find_family_for_model;
 use crate::model_provider_info::ModelProviderInfo;
 use crate::model_provider_info::built_in_model_providers;
 use crate::openai_model_info::get_model_info;
+use crate::reasoning::clamp_reasoning_effort_for_model;
 use crate::protocol::AskForApproval;
 use crate::protocol::SandboxPolicy;
 use crate::config_types::ReasoningEffort;
@@ -53,7 +56,6 @@ use dirs::home_dir;
 use serde::Deserialize;
 use serde::de::{self, Unexpected};
 use std::collections::BTreeMap;
-use std::collections::HashMap;
 use std::io::ErrorKind;
 use std::path::Path;
 use std::path::PathBuf;
@@ -66,16 +68,20 @@ use toml_edit::Item as TomlItem;
 use toml_edit::Table as TomlTable;
 use which::which;
 
-const OPENAI_DEFAULT_MODEL: &str = "gpt-5-codex";
-const OPENAI_DEFAULT_REVIEW_MODEL: &str = "gpt-5-codex";
-pub const GPT_5_CODEX_MEDIUM_MODEL: &str = "gpt-5-codex";
+const OPENAI_DEFAULT_MODEL: &str = "gpt-5.1-codex";
+const OPENAI_DEFAULT_REVIEW_MODEL: &str = "gpt-5.1-codex-mini";
+pub const GPT_5_CODEX_MEDIUM_MODEL: &str = "gpt-5.1-codex-max";
+
+const fn default_true_local() -> bool {
+    true
+}
 
 /// Maximum number of bytes of the documentation that will be embedded. Larger
 /// files are *silently truncated* to this size so we do not take up too much of
 /// the context window.
 pub(crate) const PROJECT_DOC_MAX_BYTES: usize = 32 * 1024; // 32 KiB
 
-const CONFIG_TOML_FILE: &str = "config.toml";
+pub(crate) const CONFIG_TOML_FILE: &str = "config.toml";
 
 const DEFAULT_RESPONSES_ORIGINATOR_HEADER: &str = "code_cli_rs";
 
@@ -98,14 +104,110 @@ fn default_responses_originator() -> String {
         .unwrap_or_else(|| DEFAULT_RESPONSES_ORIGINATOR_HEADER.to_owned())
 }
 
+fn normalize_agent(mut agent: AgentConfig) -> AgentConfig {
+    if let Some(spec) = agent_model_spec(&agent.name).or_else(|| agent_model_spec(&agent.command)) {
+        agent.name = spec.slug.to_string();
+        if agent.command.trim().is_empty() {
+            agent.command = spec.cli.to_string();
+        }
+    } else if agent.command.trim().is_empty() {
+        agent.command = agent.name.clone();
+    }
+
+    agent
+}
+
+fn canonical_agent_key(agent: &AgentConfig) -> String {
+    agent_model_spec(&agent.name)
+        .or_else(|| agent_model_spec(&agent.command))
+        .map(|spec| spec.slug.to_ascii_lowercase())
+        .unwrap_or_else(|| agent.name.to_ascii_lowercase())
+}
+
+fn merge_with_default_agents(agents: Vec<AgentConfig>) -> Vec<AgentConfig> {
+    let mut deduped: Vec<AgentConfig> = Vec::new();
+    let mut index: HashMap<String, usize> = HashMap::new();
+
+    for agent in agents.into_iter().map(normalize_agent) {
+        let key = canonical_agent_key(&agent);
+        if let Some(idx) = index.get(&key).copied() {
+            deduped[idx] = agent;
+        } else {
+            index.insert(key, deduped.len());
+            deduped.push(agent);
+        }
+    }
+
+    if deduped.is_empty() {
+        return default_agent_configs();
+    }
+
+    let mut seen = HashSet::new();
+    for agent in &deduped {
+        seen.insert(canonical_agent_key(agent));
+    }
+
+    for default_agent in default_agent_configs() {
+        let key = canonical_agent_key(&default_agent);
+        if !seen.contains(&key) {
+            seen.insert(key.clone());
+            deduped.push(default_agent);
+        }
+    }
+
+    deduped
+}
+
 /// Application configuration loaded from disk and merged with overrides.
 #[derive(Debug, Clone, PartialEq)]
 pub struct Config {
     /// Optional override of model selection.
     pub model: String,
 
-    /// Model used specifically for review sessions. Defaults to "gpt-5-codex".
+    /// Planning model (used when in Plan mode / Read Only access preset). Falls back to `model`.
+    pub planning_model: String,
+
+    /// Reasoning effort for planning model.
+    pub planning_model_reasoning_effort: ReasoningEffort,
+
+    /// Whether planning should inherit the chat model instead of using a dedicated override.
+    pub planning_use_chat_model: bool,
+
+    /// Model used specifically for review sessions. Defaults to "gpt-5.1-codex-mini".
     pub review_model: String,
+
+    /// Reasoning effort used when running review sessions.
+    pub review_model_reasoning_effort: ReasoningEffort,
+
+    /// Whether review should inherit the chat model instead of using a dedicated override.
+    pub review_use_chat_model: bool,
+
+    /// Model used to apply fixes during auto-resolve of `/review` flows.
+    pub review_resolve_model: String,
+
+    /// Reasoning effort used for the resolve model when auto-resolving `/review`.
+    pub review_resolve_model_reasoning_effort: ReasoningEffort,
+
+    /// Whether resolve steps should inherit the chat model instead of a dedicated override.
+    pub review_resolve_use_chat_model: bool,
+
+    /// Model used for background Auto Review runs.
+    pub auto_review_model: String,
+
+    /// Reasoning effort used when running Auto Review.
+    pub auto_review_model_reasoning_effort: ReasoningEffort,
+
+    /// Whether Auto Review should inherit the chat model instead of a dedicated override.
+    pub auto_review_use_chat_model: bool,
+
+    /// Model used to apply fixes during Auto Review follow-ups.
+    pub auto_review_resolve_model: String,
+
+    /// Reasoning effort used for Auto Review resolve steps.
+    pub auto_review_resolve_model_reasoning_effort: ReasoningEffort,
+
+    /// Whether Auto Review resolve steps should inherit the chat model.
+    pub auto_review_resolve_use_chat_model: bool,
 
     pub model_family: ModelFamily,
 
@@ -174,6 +276,9 @@ pub struct Config {
     /// Base instructions override.
     pub base_instructions: Option<String>,
 
+    /// Optional override for the compaction prompt text.
+    pub compact_prompt_override: Option<String>,
+
     /// Optional external notifier command. When set, Codex will spawn this
     /// program after each completed *turn* (i.e. when the agent finishes
     /// processing a user submission). The value must be the full command
@@ -196,6 +301,9 @@ pub struct Config {
     ///
     /// If unset the feature is disabled.
     pub notify: Option<Vec<String>>,
+
+    /// Record of which one-time notices the user has acknowledged.
+    pub notices: Notice,
 
     /// TUI notifications preference. When set, the TUI will send OSC 9 notifications on approvals
     /// and turn completions when not focused.
@@ -244,6 +352,8 @@ pub struct Config {
 
     /// Shared Auto Drive defaults.
     pub auto_drive: AutoDriveSettings,
+    /// Whether Auto Drive should inherit the chat model instead of a dedicated override.
+    pub auto_drive_use_chat_model: bool,
 
     /// Path to the `codex-linux-sandbox` executable. This must be set if
     /// [`crate::exec::SandboxType::LinuxSeccomp`] is used. Note that this
@@ -283,6 +393,10 @@ pub struct Config {
     pub use_experimental_use_rmcp_client: bool,
     /// Enable the `view_image` tool that lets the agent attach local images.
     pub include_view_image_tool: bool,
+    /// Experimental: enable JSON-based environment context snapshots and deltas (phase gated).
+    pub env_ctx_v2: bool,
+    /// Retention policy for env_ctx_v2 timeline management (gated by env_ctx_v2).
+    pub retention: crate::config_types::RetentionConfig,
     /// The value for the `originator` header included with Responses API requests.
     pub responses_originator_header: String,
 
@@ -365,24 +479,7 @@ pub fn load_config_as_toml_with_cli_overrides(
 /// Read `CODEX_HOME/config.toml` and return it as a generic TOML value. Returns
 /// an empty TOML table when the file does not exist.
 pub fn load_config_as_toml(code_home: &Path) -> std::io::Result<TomlValue> {
-    let read_path = resolve_code_path_for_read(code_home, Path::new(CONFIG_TOML_FILE));
-    match std::fs::read_to_string(&read_path) {
-        Ok(contents) => match toml::from_str::<TomlValue>(&contents) {
-            Ok(val) => Ok(val),
-            Err(e) => {
-                tracing::error!("Failed to parse config.toml: {e}");
-                Err(std::io::Error::new(std::io::ErrorKind::InvalidData, e))
-            }
-        },
-        Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
-            tracing::info!("config.toml not found, using defaults");
-            Ok(TomlValue::Table(Default::default()))
-        }
-        Err(e) => {
-            tracing::error!("Failed to read config.toml: {e}");
-            Err(e)
-        }
-    }
+    load_config_as_toml_blocking(code_home, LoaderOverrides::default())
 }
 
 pub fn load_global_mcp_servers(
@@ -984,10 +1081,209 @@ pub fn set_tui_review_auto_resolve(code_home: &Path, enabled: bool) -> anyhow::R
     Ok(())
 }
 
+/// Persist the auto review preference into `CODEX_HOME/config.toml` at `[tui].auto_review_enabled`.
+pub fn set_tui_auto_review_enabled(code_home: &Path, enabled: bool) -> anyhow::Result<()> {
+    let config_path = code_home.join(CONFIG_TOML_FILE);
+    let read_path = resolve_code_path_for_read(code_home, Path::new(CONFIG_TOML_FILE));
+
+    let mut doc = match std::fs::read_to_string(&read_path) {
+        Ok(contents) => contents.parse::<DocumentMut>()?,
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => DocumentMut::new(),
+        Err(e) => return Err(e.into()),
+    };
+
+    doc["tui"]["auto_review_enabled"] = toml_edit::value(enabled);
+
+    std::fs::create_dir_all(code_home)?;
+    let tmp_file = NamedTempFile::new_in(code_home)?;
+    std::fs::write(tmp_file.path(), doc.to_string())?;
+    tmp_file.persist(config_path)?;
+
+    Ok(())
+}
+
+/// Persist the review model + reasoning effort into `CODEX_HOME/config.toml`.
+pub fn set_review_model(
+    code_home: &Path,
+    model: &str,
+    effort: ReasoningEffort,
+    use_chat_model: bool,
+) -> anyhow::Result<()> {
+    let trimmed = model.trim();
+    if trimmed.is_empty() {
+        return Err(anyhow::anyhow!("review model cannot be empty"));
+    }
+
+    let config_path = code_home.join(CONFIG_TOML_FILE);
+    let read_path = resolve_code_path_for_read(code_home, Path::new(CONFIG_TOML_FILE));
+    let mut doc = match std::fs::read_to_string(&read_path) {
+        Ok(contents) => contents.parse::<DocumentMut>()?,
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => DocumentMut::new(),
+        Err(e) => return Err(e.into()),
+    };
+
+    doc["review_use_chat_model"] = toml_edit::value(use_chat_model);
+    if !use_chat_model {
+        doc["review_model"] = toml_edit::value(trimmed);
+        doc["review_model_reasoning_effort"] =
+            toml_edit::value(effort.to_string().to_ascii_lowercase());
+    }
+
+    std::fs::create_dir_all(code_home)?;
+    let tmp_file = NamedTempFile::new_in(code_home)?;
+    std::fs::write(tmp_file.path(), doc.to_string())?;
+    tmp_file.persist(config_path)?;
+
+    Ok(())
+}
+
+/// Persist the resolve model + reasoning effort for `/review` auto-resolve flows.
+pub fn set_review_resolve_model(
+    code_home: &Path,
+    model: &str,
+    effort: ReasoningEffort,
+    use_chat_model: bool,
+) -> anyhow::Result<()> {
+    let trimmed = model.trim();
+    if !use_chat_model && trimmed.is_empty() {
+        return Err(anyhow::anyhow!("review resolve model cannot be empty"));
+    }
+
+    let config_path = code_home.join(CONFIG_TOML_FILE);
+    let read_path = resolve_code_path_for_read(code_home, Path::new(CONFIG_TOML_FILE));
+    let mut doc = match std::fs::read_to_string(&read_path) {
+        Ok(contents) => contents.parse::<DocumentMut>()?,
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => DocumentMut::new(),
+        Err(e) => return Err(e.into()),
+    };
+
+    doc["review_resolve_use_chat_model"] = toml_edit::value(use_chat_model);
+    if !use_chat_model {
+        doc["review_resolve_model"] = toml_edit::value(trimmed);
+        doc["review_resolve_model_reasoning_effort"] =
+            toml_edit::value(effort.to_string().to_ascii_lowercase());
+    }
+
+    std::fs::create_dir_all(code_home)?;
+    let tmp_file = NamedTempFile::new_in(code_home)?;
+    std::fs::write(tmp_file.path(), doc.to_string())?;
+    tmp_file.persist(config_path)?;
+
+    Ok(())
+}
+
+/// Persist the planning model + reasoning effort into `CODEX_HOME/config.toml`.
+pub fn set_planning_model(
+    code_home: &Path,
+    model: &str,
+    effort: ReasoningEffort,
+    use_chat_model: bool,
+) -> anyhow::Result<()> {
+    let config_path = code_home.join(CONFIG_TOML_FILE);
+    let read_path = resolve_code_path_for_read(code_home, Path::new(CONFIG_TOML_FILE));
+
+    let mut doc = match std::fs::read_to_string(&read_path) {
+        Ok(contents) => contents.parse::<DocumentMut>()?,
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => DocumentMut::new(),
+        Err(e) => return Err(e.into()),
+    };
+
+    doc["planning_use_chat_model"] = toml_edit::value(use_chat_model);
+    if !use_chat_model {
+        let trimmed = model.trim();
+        if trimmed.is_empty() {
+            return Err(anyhow::anyhow!("planning model cannot be empty"));
+        }
+        doc["planning_model"] = toml_edit::value(trimmed);
+        doc["planning_model_reasoning_effort"] =
+            toml_edit::value(effort.to_string().to_ascii_lowercase());
+    }
+
+    std::fs::create_dir_all(code_home)?;
+    let tmp_file = NamedTempFile::new_in(code_home)?;
+    std::fs::write(tmp_file.path(), doc.to_string())?;
+    tmp_file.persist(config_path)?;
+
+    Ok(())
+}
+
+/// Persist the Auto Review review model + reasoning effort.
+pub fn set_auto_review_model(
+    code_home: &Path,
+    model: &str,
+    effort: ReasoningEffort,
+    use_chat_model: bool,
+) -> anyhow::Result<()> {
+    let trimmed = model.trim();
+    if !use_chat_model && trimmed.is_empty() {
+        return Err(anyhow::anyhow!("auto review model cannot be empty"));
+    }
+
+    let config_path = code_home.join(CONFIG_TOML_FILE);
+    let read_path = resolve_code_path_for_read(code_home, Path::new(CONFIG_TOML_FILE));
+
+    let mut doc = match std::fs::read_to_string(&read_path) {
+        Ok(contents) => contents.parse::<DocumentMut>()?,
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => DocumentMut::new(),
+        Err(e) => return Err(e.into()),
+    };
+
+    doc["auto_review_use_chat_model"] = toml_edit::value(use_chat_model);
+    if !use_chat_model {
+        doc["auto_review_model"] = toml_edit::value(trimmed);
+        doc["auto_review_model_reasoning_effort"] =
+            toml_edit::value(effort.to_string().to_ascii_lowercase());
+    }
+
+    std::fs::create_dir_all(code_home)?;
+    let tmp_file = NamedTempFile::new_in(code_home)?;
+    std::fs::write(tmp_file.path(), doc.to_string())?;
+    tmp_file.persist(config_path)?;
+
+    Ok(())
+}
+
+/// Persist the Auto Review resolve model + reasoning effort.
+pub fn set_auto_review_resolve_model(
+    code_home: &Path,
+    model: &str,
+    effort: ReasoningEffort,
+    use_chat_model: bool,
+) -> anyhow::Result<()> {
+    let trimmed = model.trim();
+    if !use_chat_model && trimmed.is_empty() {
+        return Err(anyhow::anyhow!("auto review resolve model cannot be empty"));
+    }
+
+    let config_path = code_home.join(CONFIG_TOML_FILE);
+    let read_path = resolve_code_path_for_read(code_home, Path::new(CONFIG_TOML_FILE));
+
+    let mut doc = match std::fs::read_to_string(&read_path) {
+        Ok(contents) => contents.parse::<DocumentMut>()?,
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => DocumentMut::new(),
+        Err(e) => return Err(e.into()),
+    };
+
+    doc["auto_review_resolve_use_chat_model"] = toml_edit::value(use_chat_model);
+    if !use_chat_model {
+        doc["auto_review_resolve_model"] = toml_edit::value(trimmed);
+        doc["auto_review_resolve_model_reasoning_effort"] =
+            toml_edit::value(effort.to_string().to_ascii_lowercase());
+    }
+
+    std::fs::create_dir_all(code_home)?;
+    let tmp_file = NamedTempFile::new_in(code_home)?;
+    std::fs::write(tmp_file.path(), doc.to_string())?;
+    tmp_file.persist(config_path)?;
+
+    Ok(())
+}
+
 /// Persist Auto Drive defaults under `[auto_drive]`.
 pub fn set_auto_drive_settings(
     code_home: &Path,
     settings: &AutoDriveSettings,
+    use_chat_model: bool,
 ) -> anyhow::Result<()> {
     let config_path = code_home.join(CONFIG_TOML_FILE);
     let read_path = resolve_code_path_for_read(code_home, Path::new(CONFIG_TOML_FILE));
@@ -1002,6 +1298,8 @@ pub fn set_auto_drive_settings(
         tui_tbl.remove("auto_drive");
     }
 
+    doc["auto_drive_use_chat_model"] = toml_edit::value(use_chat_model);
+
     doc["auto_drive"]["review_enabled"] = toml_edit::value(settings.review_enabled);
     doc["auto_drive"]["agents_enabled"] = toml_edit::value(settings.agents_enabled);
     doc["auto_drive"]["qa_automation_enabled"] =
@@ -1012,6 +1310,17 @@ pub fn set_auto_drive_settings(
         toml_edit::value(settings.observer_enabled);
     doc["auto_drive"]["coordinator_routing"] =
         toml_edit::value(settings.coordinator_routing);
+    doc["auto_drive"]["model"] = toml_edit::value(settings.model.trim());
+    doc["auto_drive"]["model_reasoning_effort"] = toml_edit::value(
+        settings
+            .model_reasoning_effort
+            .to_string()
+            .to_ascii_lowercase(),
+    );
+    doc["auto_drive"]["auto_resolve_review_attempts"] =
+        toml_edit::value(settings.auto_resolve_review_attempts.get() as i64);
+    doc["auto_drive"]["auto_review_followup_attempts"] =
+        toml_edit::value(settings.auto_review_followup_attempts.get() as i64);
 
     let mode_str = match settings.continue_mode {
         AutoDriveContinueMode::Immediate => "immediate",
@@ -1035,8 +1344,9 @@ pub fn set_auto_drive_settings(
 pub fn set_tui_auto_drive_settings(
     code_home: &Path,
     settings: &AutoDriveSettings,
+    use_chat_model: bool,
 ) -> anyhow::Result<()> {
-    set_auto_drive_settings(code_home, settings)
+    set_auto_drive_settings(code_home, settings, use_chat_model)
 }
 
 /// Persist the GitHub workflow check preference under `[github].check_workflows_on_push`.
@@ -1628,8 +1938,43 @@ fn apply_toml_override(root: &mut TomlValue, path: &str, value: TomlValue) {
 pub struct ConfigToml {
     /// Optional override of model selection.
     pub model: Option<String>,
+    /// Planning model override used when in Read Only (Plan Mode).
+    pub planning_model: Option<String>,
+    /// Reasoning effort override used for the planning model.
+    pub planning_model_reasoning_effort: Option<ReasoningEffort>,
+    /// Inherit chat model for planning mode when true.
+    pub planning_use_chat_model: Option<bool>,
     /// Review model override used by the `/review` feature.
     pub review_model: Option<String>,
+    /// Reasoning effort override used for the review model.
+    pub review_model_reasoning_effort: Option<ReasoningEffort>,
+    /// Inherit chat model for review flows when true.
+    #[serde(default)]
+    pub review_use_chat_model: bool,
+
+    /// Resolve model override used during auto-resolve for `/review`.
+    pub review_resolve_model: Option<String>,
+    /// Reasoning effort override used for the resolve model.
+    pub review_resolve_model_reasoning_effort: Option<ReasoningEffort>,
+    /// Inherit chat model for resolve flows when true.
+    #[serde(default = "default_true_local")]
+    pub review_resolve_use_chat_model: bool,
+
+    /// Auto Review model override used for background reviews.
+    pub auto_review_model: Option<String>,
+    /// Reasoning effort override used for the Auto Review model.
+    pub auto_review_model_reasoning_effort: Option<ReasoningEffort>,
+    /// Inherit chat model for Auto Review when true.
+    #[serde(default)]
+    pub auto_review_use_chat_model: bool,
+
+    /// Resolve model override used during Auto Review follow-ups.
+    pub auto_review_resolve_model: Option<String>,
+    /// Reasoning effort override used for the Auto Review resolve model.
+    pub auto_review_resolve_model_reasoning_effort: Option<ReasoningEffort>,
+    /// Inherit chat model for Auto Review resolve flows when true.
+    #[serde(default = "default_true_local")]
+    pub auto_review_resolve_use_chat_model: bool,
 
     /// Provider to use from the model_providers map.
     pub model_provider: Option<String>,
@@ -1676,6 +2021,9 @@ pub struct ConfigToml {
     /// Optional external command to spawn for end-user notifications.
     #[serde(default)]
     pub notify: Option<Vec<String>>,
+
+    /// Stored acknowledgement flags for in-product notices.
+    pub notice: Option<Notice>,
 
     /// System instructions.
     pub instructions: Option<String>,
@@ -1724,6 +2072,9 @@ pub struct ConfigToml {
     /// Auto Drive behavioral defaults.
     pub auto_drive: Option<AutoDriveSettings>,
 
+    /// If true, Auto Drive inherits the chat model instead of a dedicated override.
+    pub auto_drive_use_chat_model: Option<bool>,
+
     #[serde(default)]
     pub auto_drive_observer_cadence: Option<u32>,
 
@@ -1750,6 +2101,12 @@ pub struct ConfigToml {
 
     /// Experimental path to a file whose contents replace the built-in BASE_INSTRUCTIONS.
     pub experimental_instructions_file: Option<PathBuf>,
+
+    /// Optional override string for the compaction prompt.
+    pub compact_prompt_override: Option<String>,
+
+    /// Path to a file whose contents should replace the compaction prompt template.
+    pub compact_prompt_file: Option<PathBuf>,
 
     pub experimental_use_exec_command_tool: Option<bool>,
 
@@ -1924,6 +2281,64 @@ impl ConfigToml {
     }
 }
 
+fn upgrade_legacy_model_slugs(cfg: &mut ConfigToml) {
+    fn maybe_upgrade(field: &mut Option<String>) {
+        if let Some(old) = field.clone() {
+            if let Some(new) = upgrade_legacy_model_slug(&old) {
+                tracing::info!(
+                    target: "code.config",
+                    old,
+                    new,
+                    "upgrading legacy model slug to newer default",
+                );
+                *field = Some(new);
+            }
+        }
+    }
+
+    maybe_upgrade(&mut cfg.model);
+    maybe_upgrade(&mut cfg.review_model);
+
+    for profile in cfg.profiles.values_mut() {
+        maybe_upgrade(&mut profile.model);
+        maybe_upgrade(&mut profile.review_model);
+    }
+}
+
+fn upgrade_legacy_model_slug(slug: &str) -> Option<String> {
+    if slug.starts_with("gpt-5.1") || slug.starts_with("test-gpt-5.1") {
+        return None;
+    }
+
+    // Upgrade Anthropic Opus 4.1 to 4.5
+    if slug.eq_ignore_ascii_case("claude-opus-4.1") {
+        return Some("claude-opus-4.5".to_string());
+    }
+
+    // Upgrade Gemini 2.5 Pro to Gemini 3 Pro (or preview alias)
+    if slug.eq_ignore_ascii_case("gemini-2.5-pro") || slug.eq_ignore_ascii_case("gemini-3-pro-preview") {
+        return Some("gemini-3-pro".to_string());
+    }
+
+    if let Some(rest) = slug.strip_prefix("test-gpt-5-codex") {
+        return Some(format!("test-gpt-5.1-codex{rest}"));
+    }
+
+    if let Some(rest) = slug.strip_prefix("test-gpt-5") {
+        return Some(format!("test-gpt-5.1{rest}"));
+    }
+
+    if let Some(rest) = slug.strip_prefix("gpt-5-codex") {
+        return Some(format!("gpt-5.1-codex{rest}"));
+    }
+
+    if let Some(rest) = slug.strip_prefix("gpt-5") {
+        return Some(format!("gpt-5.1{rest}"));
+    }
+
+    None
+}
+
 /// Optional overrides for user configuration (e.g., from CLI flags).
 #[derive(Default, Debug, Clone)]
 pub struct ConfigOverrides {
@@ -1945,6 +2360,8 @@ pub struct ConfigOverrides {
     pub tools_web_search_request: Option<bool>,
     pub mcp_servers: Option<HashMap<String, McpServerConfig>>,
     pub experimental_client_tools: Option<ClientTools>,
+    pub compact_prompt_override: Option<String>,
+    pub compact_prompt_override_file: Option<PathBuf>,
 }
 
 impl Config {
@@ -1958,6 +2375,7 @@ impl Config {
         let user_instructions = Self::load_instructions(Some(&code_home));
 
         let mut cfg = cfg;
+        upgrade_legacy_model_slugs(&mut cfg);
 
         // Destructure ConfigOverrides fully to ensure all overrides are applied.
         let ConfigOverrides {
@@ -1979,6 +2397,8 @@ impl Config {
             tools_web_search_request: override_tools_web_search_request,
             mcp_servers,
             experimental_client_tools,
+            compact_prompt_override,
+            compact_prompt_override_file,
         } = overrides;
 
         if let Some(mcp_servers) = mcp_servers {
@@ -2143,6 +2563,8 @@ impl Config {
             .or(cfg.tools.as_ref().and_then(|t| t.view_image))
             .unwrap_or(true);
 
+        let env_ctx_v2_flag = *crate::flags::CTX_UI;
+
         // Determine auth mode early so defaults like model selection can depend on it.
         let using_chatgpt_auth = Self::is_using_chatgpt_auth(&code_home);
 
@@ -2159,6 +2581,14 @@ impl Config {
 
         let model_family =
             find_family_for_model(&model).unwrap_or_else(|| derive_default_model_family(&model));
+
+        // Chat model reasoning effort (used when other flows follow the chat model).
+        let chat_reasoning_effort = config_profile
+            .model_reasoning_effort
+            .or(cfg.model_reasoning_effort)
+            .unwrap_or(ReasoningEffort::Medium);
+        let chat_reasoning_effort =
+            clamp_reasoning_effort_for_model(&model, chat_reasoning_effort);
 
         let openai_model_info = get_model_info(&model_family);
         let model_context_window = cfg
@@ -2186,47 +2616,21 @@ impl Config {
             Self::get_base_instructions(experimental_instructions_path, &resolved_cwd)?;
         let base_instructions = base_instructions.or(file_base_instructions);
 
+        let compact_prompt_file = compact_prompt_override_file
+            .or(config_profile.compact_prompt_override_file.clone())
+            .or(cfg.compact_prompt_file.clone());
+        let file_compact_prompt =
+            Self::get_compact_prompt_override(compact_prompt_file.as_ref(), &resolved_cwd)?;
+        let compact_prompt_override = compact_prompt_override
+            .or(config_profile.compact_prompt_override.clone())
+            .or(cfg.compact_prompt_override.clone())
+            .or(file_compact_prompt);
+
         let responses_originator_header: String = cfg
             .responses_originator_header_internal_override
             .unwrap_or_else(|| default_responses_originator());
 
-        // Normalize agents: when `command` is missing/empty, default to `name`.
-        let mut agents: Vec<AgentConfig> = cfg
-            .agents
-            .into_iter()
-            .map(|mut a| {
-                let command_trimmed = a.command.trim();
-                if command_trimmed.is_empty() {
-                    if let Some(spec) = agent_model_spec(&a.name) {
-                        a.command = spec.cli.to_string();
-                    } else {
-                        a.command = a.name.clone();
-                    }
-                }
-
-                a
-            })
-            .collect();
-
-        if agents.is_empty() {
-            agents = default_agent_configs();
-        } else {
-            let mut seen = HashSet::new();
-            for agent in &agents {
-                let canonical = agent_model_spec(&agent.name)
-                    .map(|spec| spec.slug.to_ascii_lowercase())
-                    .unwrap_or_else(|| agent.name.to_ascii_lowercase());
-                seen.insert(canonical);
-            }
-
-            for default_agent in default_agent_configs() {
-                let key = default_agent.name.to_ascii_lowercase();
-                if !seen.contains(&key) {
-                    seen.insert(key);
-                    agents.push(default_agent);
-                }
-            }
-        }
+        let agents: Vec<AgentConfig> = merge_with_default_agents(cfg.agents);
 
         for agent in &agents {
             if agent.name.eq_ignore_ascii_case("code")
@@ -2237,7 +2641,7 @@ impl Config {
                 || agent.name.eq_ignore_ascii_case("cloud")
             {
                 tracing::warn!(
-                    "legacy agent name '{}' detected; update config to use model slugs (e.g., code-gpt-5-codex)",
+                    "legacy agent name '{}' detected; update config to use model slugs (e.g., code-gpt-5.1-codex-max)",
                     agent.name
                 );
             }
@@ -2258,12 +2662,184 @@ impl Config {
 
         // Default review model when not set in config; allow CLI override to take precedence.
         let review_model = override_review_model
+            .or(config_profile.review_model.clone())
             .or(cfg.review_model)
             .unwrap_or_else(default_review_model);
 
+        let review_model_reasoning_effort = config_profile
+            .review_model_reasoning_effort
+            .or(cfg.review_model_reasoning_effort)
+            .unwrap_or(ReasoningEffort::High);
+
+        let review_resolve_use_chat_model = config_profile
+            .review_resolve_use_chat_model
+            .or(Some(cfg.review_resolve_use_chat_model))
+            .unwrap_or(true);
+        let review_resolve_model = if review_resolve_use_chat_model {
+            model.clone()
+        } else {
+            config_profile
+                .review_resolve_model
+                .clone()
+                .or(cfg.review_resolve_model.clone())
+                .unwrap_or_else(|| model.clone())
+        };
+        let review_resolve_model_reasoning_effort = if review_resolve_use_chat_model {
+            chat_reasoning_effort
+        } else {
+            config_profile
+                .review_resolve_model_reasoning_effort
+                .or(cfg.review_resolve_model_reasoning_effort)
+                .unwrap_or(ReasoningEffort::High)
+        };
+        let review_resolve_model_reasoning_effort = clamp_reasoning_effort_for_model(
+            &review_resolve_model,
+            review_resolve_model_reasoning_effort,
+        );
+
+        let planning_use_chat_model = config_profile
+            .planning_use_chat_model
+            .or(cfg.planning_use_chat_model)
+            .unwrap_or_else(|| {
+                config_profile.planning_model.is_none() && cfg.planning_model.is_none()
+            });
+        let planning_model = if planning_use_chat_model {
+            model.clone()
+        } else {
+            config_profile
+                .planning_model
+                .or(cfg.planning_model)
+                .unwrap_or_else(|| model.clone())
+        };
+        let planning_model_reasoning_effort = if planning_use_chat_model {
+            chat_reasoning_effort
+        } else {
+            config_profile
+                .planning_model_reasoning_effort
+                .or(cfg.planning_model_reasoning_effort)
+                .unwrap_or(chat_reasoning_effort)
+        };
+        let planning_model_reasoning_effort = clamp_reasoning_effort_for_model(
+            &planning_model,
+            planning_model_reasoning_effort,
+        );
+
+        let review_use_chat_model = config_profile
+            .review_use_chat_model
+            .or(Some(cfg.review_use_chat_model))
+            .unwrap_or(false);
+        let review_model = if review_use_chat_model {
+            model.clone()
+        } else {
+            review_model
+        };
+        let review_model_reasoning_effort = if review_use_chat_model {
+            chat_reasoning_effort
+        } else {
+            review_model_reasoning_effort
+        };
+        let review_model_reasoning_effort = clamp_reasoning_effort_for_model(
+            &review_model,
+            review_model_reasoning_effort,
+        );
+
+        let auto_review_use_chat_model = config_profile
+            .auto_review_use_chat_model
+            .or(Some(cfg.auto_review_use_chat_model))
+            .unwrap_or(false);
+
+        let auto_review_model = if auto_review_use_chat_model {
+            model.clone()
+        } else {
+            config_profile
+                .auto_review_model
+                .clone()
+                .or(cfg.auto_review_model.clone())
+                .unwrap_or_else(default_review_model)
+        };
+
+        let auto_review_model_reasoning_effort = if auto_review_use_chat_model {
+            chat_reasoning_effort
+        } else {
+            config_profile
+                .auto_review_model_reasoning_effort
+                .or(cfg.auto_review_model_reasoning_effort)
+                .unwrap_or(ReasoningEffort::High)
+        };
+        let auto_review_model_reasoning_effort = clamp_reasoning_effort_for_model(
+            &auto_review_model,
+            auto_review_model_reasoning_effort,
+        );
+
+        let auto_review_resolve_use_chat_model = config_profile
+            .auto_review_resolve_use_chat_model
+            .or(Some(cfg.auto_review_resolve_use_chat_model))
+            .unwrap_or(true);
+
+        let auto_review_resolve_model = if auto_review_resolve_use_chat_model {
+            model.clone()
+        } else {
+            config_profile
+                .auto_review_resolve_model
+                .clone()
+                .or(cfg.auto_review_resolve_model.clone())
+                .unwrap_or_else(|| model.clone())
+        };
+
+        let auto_review_resolve_model_reasoning_effort = if auto_review_resolve_use_chat_model {
+            chat_reasoning_effort
+        } else {
+            config_profile
+                .auto_review_resolve_model_reasoning_effort
+                .or(cfg.auto_review_resolve_model_reasoning_effort)
+                .unwrap_or(ReasoningEffort::High)
+        };
+        let auto_review_resolve_model_reasoning_effort = clamp_reasoning_effort_for_model(
+            &auto_review_resolve_model,
+            auto_review_resolve_model_reasoning_effort,
+        );
+
+        let auto_drive_use_chat_model = cfg.auto_drive_use_chat_model.unwrap_or(false);
+
+        let mut auto_drive = cfg
+            .auto_drive
+            .clone()
+            .or_else(|| cfg.tui.as_ref().and_then(|t| t.auto_drive.clone()))
+            .unwrap_or_else(|| {
+                let mut defaults = AutoDriveSettings::default();
+                if using_chatgpt_auth {
+                    defaults.model = GPT_5_CODEX_MEDIUM_MODEL.to_string();
+                    defaults.model_reasoning_effort = ReasoningEffort::XHigh;
+                }
+                defaults
+            });
+        if auto_drive_use_chat_model {
+            auto_drive.model = model.clone();
+            auto_drive.model_reasoning_effort = chat_reasoning_effort;
+        }
+
+        auto_drive.model_reasoning_effort = clamp_reasoning_effort_for_model(
+            &auto_drive.model,
+            auto_drive.model_reasoning_effort,
+        );
+
         let config = Self {
             model,
+            planning_model,
+            planning_model_reasoning_effort,
+            planning_use_chat_model,
             review_model,
+            review_model_reasoning_effort,
+            review_use_chat_model,
+            review_resolve_model,
+            review_resolve_model_reasoning_effort,
+            review_resolve_use_chat_model,
+            auto_review_model,
+            auto_review_model_reasoning_effort,
+            auto_review_use_chat_model,
+            auto_review_resolve_model,
+            auto_review_resolve_model_reasoning_effort,
+            auto_review_resolve_use_chat_model,
             model_family,
             model_context_window,
             model_max_output_tokens,
@@ -2285,8 +2861,10 @@ impl Config {
                 .unwrap_or(false),
             auto_upgrade_enabled: cfg.auto_upgrade_enabled.unwrap_or(false),
             notify: cfg.notify,
+            notices: cfg.notice.unwrap_or_default(),
             user_instructions,
             base_instructions,
+            compact_prompt_override,
             mcp_servers: cfg.mcp_servers,
             experimental_client_tools: cfg.experimental_client_tools.clone(),
             agents,
@@ -2309,11 +2887,8 @@ impl Config {
             history,
             file_opener: cfg.file_opener.unwrap_or(UriBasedFileOpener::VsCode),
             tui: cfg.tui.clone().unwrap_or_default(),
-            auto_drive: cfg
-                .auto_drive
-                .clone()
-                .or_else(|| cfg.tui.as_ref().and_then(|t| t.auto_drive.clone()))
-                .unwrap_or_default(),
+            auto_drive,
+            auto_drive_use_chat_model,
             code_linux_sandbox_exe,
             active_profile: active_profile_name,
 
@@ -2322,10 +2897,7 @@ impl Config {
                 .show_raw_agent_reasoning
                 .or(show_raw_agent_reasoning)
                 .unwrap_or(false),
-            model_reasoning_effort: config_profile
-                .model_reasoning_effort
-                .or(cfg.model_reasoning_effort)
-                .unwrap_or(ReasoningEffort::Medium),
+            model_reasoning_effort: chat_reasoning_effort,
             model_reasoning_summary: config_profile
                 .model_reasoning_summary
                 .or(cfg.model_reasoning_summary)
@@ -2351,6 +2923,8 @@ impl Config {
                 .experimental_use_rmcp_client
                 .unwrap_or(false),
             include_view_image_tool: include_view_image_tool_flag,
+            env_ctx_v2: env_ctx_v2_flag,
+            retention: crate::config_types::RetentionConfig::default(),
             responses_originator_header,
             debug: debug.unwrap_or(false),
             // Already computed before moving code_home
@@ -2427,9 +3001,10 @@ impl Config {
         }
     }
 
-    fn get_base_instructions(
+    fn read_override_file(
         path: Option<&PathBuf>,
         cwd: &Path,
+        description: &str,
     ) -> std::io::Result<Option<String>> {
         let p = match path.as_ref() {
             None => return Ok(None),
@@ -2448,10 +3023,7 @@ impl Config {
         let contents = std::fs::read_to_string(&full_path).map_err(|e| {
             std::io::Error::new(
                 e.kind(),
-                format!(
-                    "failed to read experimental instructions file {}: {e}",
-                    full_path.display()
-                ),
+                format!("failed to read {description} {}: {e}", full_path.display()),
             )
         })?;
 
@@ -2459,14 +3031,25 @@ impl Config {
         if s.is_empty() {
             Err(std::io::Error::new(
                 std::io::ErrorKind::InvalidData,
-                format!(
-                    "experimental instructions file is empty: {}",
-                    full_path.display()
-                ),
+                format!("{description} is empty: {}", full_path.display()),
             ))
         } else {
             Ok(Some(s))
         }
+    }
+
+    fn get_base_instructions(
+        path: Option<&PathBuf>,
+        cwd: &Path,
+    ) -> std::io::Result<Option<String>> {
+        Self::read_override_file(path, cwd, "experimental instructions file")
+    }
+
+    fn get_compact_prompt_override(
+        path: Option<&PathBuf>,
+        cwd: &Path,
+    ) -> std::io::Result<Option<String>> {
+        Self::read_override_file(path, cwd, "compact prompt override file")
     }
 }
 
@@ -2872,7 +3455,7 @@ args = ["-y", "@upstash/context7-mcp"]
         persist_model_selection(
             code_home.path(),
             None,
-            "gpt-5-codex",
+            "gpt-5.1-codex",
             Some(ReasoningEffort::High),
         )
         .await?;
@@ -2881,7 +3464,7 @@ args = ["-y", "@upstash/context7-mcp"]
             tokio::fs::read_to_string(code_home.path().join(CONFIG_TOML_FILE)).await?;
         let parsed: ConfigToml = toml::from_str(&serialized)?;
 
-        assert_eq!(parsed.model.as_deref(), Some("gpt-5-codex"));
+        assert_eq!(parsed.model.as_deref(), Some("gpt-5.1-codex"));
         assert_eq!(parsed.model_reasoning_effort, Some(ReasoningEffort::High));
 
         Ok(())
@@ -2895,7 +3478,7 @@ args = ["-y", "@upstash/context7-mcp"]
         tokio::fs::write(
             &config_path,
             r#"
-model = "gpt-5-codex"
+model = "gpt-5.1-codex"
 model_reasoning_effort = "medium"
 
 [profiles.dev]
@@ -2935,7 +3518,7 @@ model = "gpt-4.1"
         persist_model_selection(
             code_home.path(),
             Some("dev"),
-            "gpt-5-codex",
+            "gpt-5.1-codex",
             Some(ReasoningEffort::Medium),
         )
         .await?;
@@ -2948,7 +3531,7 @@ model = "gpt-4.1"
             .get("dev")
             .expect("profile should be created");
 
-        assert_eq!(profile.model.as_deref(), Some("gpt-5-codex"));
+        assert_eq!(profile.model.as_deref(), Some("gpt-5.1-codex"));
         assert_eq!(
             profile.model_reasoning_effort,
             Some(ReasoningEffort::Medium)
@@ -2970,7 +3553,7 @@ model = "gpt-4"
 model_reasoning_effort = "medium"
 
 [profiles.prod]
-model = "gpt-5-codex"
+model = "gpt-5.1-codex"
 "#,
         )
         .await?;
@@ -3001,7 +3584,7 @@ model = "gpt-5-codex"
                 .profiles
                 .get("prod")
                 .and_then(|profile| profile.model.as_deref()),
-            Some("gpt-5-codex"),
+            Some("gpt-5.1-codex"),
         );
 
         Ok(())
@@ -3062,7 +3645,7 @@ approval_policy = "on-failure"
 disable_response_storage = true
 
 [profiles.gpt5]
-model = "gpt-5"
+model = "gpt-5.1"
 model_provider = "openai"
 approval_policy = "on-failure"
 model_reasoning_effort = "high"
@@ -3150,6 +3733,10 @@ model_verbosity = "high"
         assert_eq!("o3", o3_profile_config.model);
         assert_eq!(OPENAI_DEFAULT_REVIEW_MODEL, o3_profile_config.review_model);
         assert_eq!(
+            ReasoningEffort::High,
+            o3_profile_config.review_model_reasoning_effort
+        );
+        assert_eq!(
             find_family_for_model("o3").expect("known model slug"),
             o3_profile_config.model_family
         );
@@ -3199,6 +3786,10 @@ model_verbosity = "high"
         )?;
         assert_eq!("gpt-3.5-turbo", gpt3_profile_config.model);
         assert_eq!(OPENAI_DEFAULT_REVIEW_MODEL, gpt3_profile_config.review_model);
+        assert_eq!(
+            ReasoningEffort::High,
+            gpt3_profile_config.review_model_reasoning_effort
+        );
         assert_eq!(
             find_family_for_model("gpt-3.5-turbo").expect("known model slug"),
             gpt3_profile_config.model_family
@@ -3265,6 +3856,10 @@ model_verbosity = "high"
         assert_eq!("o3", zdr_profile_config.model);
         assert_eq!(OPENAI_DEFAULT_REVIEW_MODEL, zdr_profile_config.review_model);
         assert_eq!(
+            ReasoningEffort::High,
+            zdr_profile_config.review_model_reasoning_effort
+        );
+        assert_eq!(
             find_family_for_model("o3").expect("known model slug"),
             zdr_profile_config.model_family
         );
@@ -3303,10 +3898,14 @@ model_verbosity = "high"
             gpt5_profile_overrides,
             fixture.code_home(),
         )?;
-        assert_eq!("gpt-5", gpt5_profile_config.model);
+        assert_eq!("gpt-5.1", gpt5_profile_config.model);
         assert_eq!(OPENAI_DEFAULT_REVIEW_MODEL, gpt5_profile_config.review_model);
         assert_eq!(
-            find_family_for_model("gpt-5").expect("known model slug"),
+            ReasoningEffort::High,
+            gpt5_profile_config.review_model_reasoning_effort
+        );
+        assert_eq!(
+            find_family_for_model("gpt-5.1").expect("known model slug"),
             gpt5_profile_config.model_family
         );
         assert!(gpt5_profile_config.model_context_window.is_some());
@@ -3339,12 +3938,244 @@ model_verbosity = "high"
     }
 
     #[test]
+    fn planning_defaults_to_chat_model_when_not_overridden() -> std::io::Result<()> {
+        let fixture = create_test_fixture()?;
+
+        let overrides = ConfigOverrides {
+            cwd: Some(fixture.cwd()),
+            ..Default::default()
+        };
+
+        let config = Config::load_from_base_config_with_overrides(
+            fixture.cfg.clone(),
+            overrides,
+            fixture.code_home(),
+        )?;
+
+        assert!(config.planning_use_chat_model);
+        assert_eq!(config.planning_model, config.model);
+        assert_eq!(config.planning_model_reasoning_effort, config.model_reasoning_effort);
+        Ok(())
+    }
+
+    #[test]
+    fn planning_follow_chat_overrides_reasoning_override() -> std::io::Result<()> {
+        let fixture = create_test_fixture()?;
+        let mut cfg = fixture.cfg.clone();
+        cfg.planning_use_chat_model = Some(true);
+        cfg.planning_model_reasoning_effort = Some(ReasoningEffort::High);
+        cfg.model_reasoning_effort = Some(ReasoningEffort::Low);
+
+        let overrides = ConfigOverrides {
+            cwd: Some(fixture.cwd()),
+            ..Default::default()
+        };
+
+        let config = Config::load_from_base_config_with_overrides(
+            cfg,
+            overrides,
+            fixture.code_home(),
+        )?;
+
+        assert!(config.planning_use_chat_model);
+        assert_eq!(config.planning_model, config.model);
+        assert_eq!(config.model_reasoning_effort, ReasoningEffort::Low);
+        assert_eq!(config.planning_model_reasoning_effort, ReasoningEffort::Low);
+        Ok(())
+    }
+
+    #[test]
+    fn review_follow_chat_preserves_override_on_toggle() -> anyhow::Result<()> {
+        let code_home = tempfile::TempDir::new()?;
+        std::fs::write(
+            code_home.path().join(CONFIG_TOML_FILE),
+            format!(
+                "review_model = \"custom-review\"\nreview_model_reasoning_effort = \"{}\"\n",
+                ReasoningEffort::High.to_string().to_ascii_lowercase()
+            ),
+        )?;
+
+        set_review_model(
+            code_home.path(),
+            "chat-model-unused",
+            ReasoningEffort::Low,
+            true,
+        )?;
+
+        let written = std::fs::read_to_string(code_home.path().join(CONFIG_TOML_FILE))?;
+        let parsed: ConfigToml = toml::from_str(&written)?;
+
+        assert!(parsed.review_use_chat_model);
+        assert_eq!(parsed.review_model.as_deref(), Some("custom-review"));
+        assert_eq!(parsed.review_model_reasoning_effort, Some(ReasoningEffort::High));
+        Ok(())
+    }
+
+    #[test]
+    fn planning_follow_chat_preserves_override_on_toggle() -> anyhow::Result<()> {
+        let code_home = tempfile::TempDir::new()?;
+        std::fs::write(
+            code_home.path().join(CONFIG_TOML_FILE),
+            format!(
+                "planning_model = \"custom-plan\"\nplanning_model_reasoning_effort = \"{}\"\n",
+                ReasoningEffort::High.to_string().to_ascii_lowercase()
+            ),
+        )?;
+
+        set_planning_model(
+            code_home.path(),
+            "chat-model-unused",
+            ReasoningEffort::Low,
+            true,
+        )?;
+
+        let written = std::fs::read_to_string(code_home.path().join(CONFIG_TOML_FILE))?;
+        let parsed: ConfigToml = toml::from_str(&written)?;
+
+        assert!(parsed.planning_use_chat_model.unwrap_or(false));
+        assert_eq!(parsed.planning_model.as_deref(), Some("custom-plan"));
+        assert_eq!(
+            parsed.planning_model_reasoning_effort,
+            Some(ReasoningEffort::High)
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn auto_drive_follow_chat_model_applied_on_load() -> std::io::Result<()> {
+        let fixture = create_test_fixture()?;
+        let mut cfg = fixture.cfg.clone();
+        cfg.auto_drive_use_chat_model = Some(true);
+
+        let overrides = ConfigOverrides {
+            cwd: Some(fixture.cwd()),
+            ..Default::default()
+        };
+
+        let config = Config::load_from_base_config_with_overrides(
+            cfg,
+            overrides,
+            fixture.code_home(),
+        )?;
+
+        assert!(config.auto_drive_use_chat_model);
+        assert_eq!(config.auto_drive.model, config.model);
+        assert_eq!(config.auto_drive.model_reasoning_effort, config.model_reasoning_effort);
+        Ok(())
+    }
+
+    #[test]
+    fn review_follow_chat_model_applies_reasoning_on_load() -> std::io::Result<()> {
+        let fixture = create_test_fixture()?;
+        let mut cfg = fixture.cfg.clone();
+        cfg.review_use_chat_model = true;
+        cfg.review_model_reasoning_effort = Some(ReasoningEffort::High);
+
+        let overrides = ConfigOverrides {
+            cwd: Some(fixture.cwd()),
+            ..Default::default()
+        };
+
+        let config = Config::load_from_base_config_with_overrides(
+            cfg,
+            overrides,
+            fixture.code_home(),
+        )?;
+
+        assert!(config.review_use_chat_model);
+        assert_eq!(config.review_model, config.model);
+        assert_eq!(config.review_model_reasoning_effort, config.model_reasoning_effort);
+        Ok(())
+    }
+
+    #[test]
+    fn upgrade_legacy_model_slugs_updates_top_level() {
+        let mut cfg = ConfigToml {
+            model: Some("gpt-5-codex".to_string()),
+            review_model: Some("gpt-5".to_string()),
+            ..Default::default()
+        };
+
+        upgrade_legacy_model_slugs(&mut cfg);
+
+        assert_eq!(cfg.model.as_deref(), Some("gpt-5.1-codex"));
+        assert_eq!(cfg.review_model.as_deref(), Some("gpt-5.1"));
+    }
+
+    #[test]
+    fn upgrade_legacy_model_slugs_updates_profiles() {
+        let mut cfg = ConfigToml::default();
+        cfg.profiles.insert(
+            "legacy".to_string(),
+            ConfigProfile {
+                model: Some("test-gpt-5-codex".to_string()),
+                review_model: Some("gpt-5-codex".to_string()),
+                ..Default::default()
+            },
+        );
+
+        upgrade_legacy_model_slugs(&mut cfg);
+
+        let legacy = cfg.profiles.get("legacy").expect("profile exists");
+        assert_eq!(legacy.model.as_deref(), Some("test-gpt-5.1-codex"));
+        assert_eq!(legacy.review_model.as_deref(), Some("gpt-5.1-codex"));
+    }
+
+    #[test]
+    fn test_compact_prompt_override_prefers_cli_string() -> std::io::Result<()> {
+        let fixture = create_test_fixture()?;
+        let mut cfg = fixture.cfg.clone();
+        cfg.compact_prompt_override = Some("config prompt".to_string());
+
+        let overrides = ConfigOverrides {
+            cwd: Some(fixture.cwd()),
+            compact_prompt_override: Some("cli prompt".to_string()),
+            ..Default::default()
+        };
+
+        let resolved = Config::load_from_base_config_with_overrides(
+            cfg,
+            overrides,
+            fixture.code_home(),
+        )?;
+
+        assert_eq!(resolved.compact_prompt_override.as_deref(), Some("cli prompt"));
+        Ok(())
+    }
+
+    #[test]
+    fn test_compact_prompt_override_file_populates_string() -> std::io::Result<()> {
+        let fixture = create_test_fixture()?;
+        let mut file = NamedTempFile::new()?;
+        let file_contents = "file based compact prompt";
+        std::io::Write::write_all(&mut file, file_contents.as_bytes())?;
+
+        let overrides = ConfigOverrides {
+            cwd: Some(fixture.cwd()),
+            compact_prompt_override_file: Some(file.path().to_path_buf()),
+            ..Default::default()
+        };
+
+        let resolved = Config::load_from_base_config_with_overrides(
+            fixture.cfg.clone(),
+            overrides,
+            fixture.code_home(),
+        )?;
+
+        assert_eq!(
+            resolved.compact_prompt_override.as_deref(),
+            Some(file_contents)
+        );
+        Ok(())
+    }
+
+    #[test]
     fn test_custom_agent_entries_extend_defaults() -> std::io::Result<()> {
         let fixture = create_test_fixture()?;
 
         let mut cfg = fixture.cfg.clone();
         cfg.agents = vec![AgentConfig {
-            name: "code-gpt-5-codex".to_string(),
+            name: "code-gpt-5.1-codex".to_string(),
             command: String::new(),
             args: Vec::new(),
             read_only: false,
@@ -3374,9 +4205,9 @@ model_verbosity = "high"
             .map(|agent| agent.name.to_ascii_lowercase())
             .collect();
 
-        assert!(enabled_names.contains("code-gpt-5-codex"));
+        assert!(enabled_names.contains("code-gpt-5.1-codex-max"));
         assert!(enabled_names.contains("claude-sonnet-4.5"));
-        assert!(enabled_names.contains("gemini-2.5-pro"));
+        assert!(enabled_names.contains("gemini-3-pro"));
         assert!(enabled_names.contains("qwen-3-coder"));
         Ok(())
     }
@@ -3466,6 +4297,165 @@ model_verbosity = "high"
     }
 
     // No test enforcing the presence of a standalone [projects] header.
+}
+
+#[cfg(test)]
+mod agent_merge_tests {
+    use super::merge_with_default_agents;
+    use crate::config_types::AgentConfig;
+
+    fn agent(name: &str, command: &str, enabled: bool) -> AgentConfig {
+        AgentConfig {
+            name: name.to_string(),
+            command: command.to_string(),
+            args: Vec::new(),
+            read_only: false,
+            enabled,
+            description: None,
+            env: None,
+            args_read_only: None,
+            args_write: None,
+            instructions: None,
+        }
+    }
+
+    #[test]
+    fn disabled_codex_mini_alias_is_preserved() {
+        let agents = vec![agent("codex-mini", "coder", false)];
+        let merged = merge_with_default_agents(agents);
+
+        let mini = merged
+            .iter()
+            .find(|a| a.name.eq_ignore_ascii_case("code-gpt-5.1-codex-mini"))
+            .expect("mini present");
+
+        assert!(!mini.enabled, "disabled state should persist for alias");
+        assert_eq!(
+            merged
+                .iter()
+                .filter(|a| a.name.eq_ignore_ascii_case("code-gpt-5.1-codex-mini"))
+                .count(),
+            1,
+            "should dedupe alias/canonical"
+        );
+    }
+
+    #[test]
+    fn disabled_codex_mini_slug_is_preserved_with_command() {
+        let agents = vec![agent("code-gpt-5.1-codex-mini", "coder", false)];
+        let merged = merge_with_default_agents(agents);
+
+        let mini = merged
+            .iter()
+            .find(|a| a.name.eq_ignore_ascii_case("code-gpt-5.1-codex-mini"))
+            .expect("mini present");
+
+        assert!(!mini.enabled, "disabled state should persist for canonical slug");
+        assert_eq!(
+            merged
+                .iter()
+                .filter(|a| a.name.eq_ignore_ascii_case("code-gpt-5.1-codex-mini"))
+                .count(),
+            1,
+            "should dedupe canonical entry"
+        );
+    }
+
+    #[test]
+    fn codex_mini_alias_then_canonical_last_wins_disabled() {
+        let agents = vec![
+            agent("codex-mini", "coder", true),
+            agent("code-gpt-5.1-codex-mini", "coder", false),
+        ];
+        let merged = merge_with_default_agents(agents);
+
+        let mini = merged
+            .iter()
+            .find(|a| a.name.eq_ignore_ascii_case("code-gpt-5.1-codex-mini"))
+            .expect("mini present");
+
+        assert!(!mini.enabled, "later canonical disable should win");
+        assert_eq!(
+            merged
+                .iter()
+                .filter(|a| a.name.eq_ignore_ascii_case("code-gpt-5.1-codex-mini"))
+                .count(),
+            1,
+            "should dedupe alias and canonical"
+        );
+    }
+
+    #[test]
+    fn codex_mini_canonical_then_alias_last_wins_disabled() {
+        let agents = vec![
+            agent("code-gpt-5.1-codex-mini", "coder", true),
+            agent("codex-mini", "coder", false),
+        ];
+        let merged = merge_with_default_agents(agents);
+
+        let mini = merged
+            .iter()
+            .find(|a| a.name.eq_ignore_ascii_case("code-gpt-5.1-codex-mini"))
+            .expect("mini present");
+
+        assert!(!mini.enabled, "later alias disable should win");
+        assert_eq!(
+            merged
+                .iter()
+                .filter(|a| a.name.eq_ignore_ascii_case("code-gpt-5.1-codex-mini"))
+                .count(),
+            1,
+            "should dedupe alias and canonical"
+        );
+    }
+
+    #[test]
+    fn gemini_alias_and_canonical_dedupe_prefers_last_state() {
+        let agents = vec![
+            agent("gemini-2.5-pro", "gemini", true),
+            agent("gemini-3-pro", "gemini", false),
+        ];
+        let merged = merge_with_default_agents(agents);
+
+        let gemini = merged
+            .iter()
+            .find(|a| a.name.eq_ignore_ascii_case("gemini-3-pro"))
+            .expect("gemini present");
+
+        assert!(!gemini.enabled, "later canonical disable should win");
+        assert_eq!(
+            merged
+                .iter()
+                .filter(|a| a.name.eq_ignore_ascii_case("gemini-3-pro"))
+                .count(),
+            1,
+            "should dedupe gemini alias/canonical"
+        );
+    }
+
+    #[test]
+    fn gemini_alias_disable_overrides_prior_canonical_enable() {
+        let agents = vec![
+            agent("gemini-3-pro", "gemini", true),
+            agent("gemini-2.5-pro", "gemini", false),
+        ];
+        let merged = merge_with_default_agents(agents);
+
+        let gemini = merged
+            .iter()
+            .find(|a| a.name.eq_ignore_ascii_case("gemini-3-pro"))
+            .expect("gemini present");
+
+        assert!(!gemini.enabled, "later alias disable should win");
+        assert_eq!(
+            merged
+                .iter()
+                .filter(|a| a.name.eq_ignore_ascii_case("gemini-3-pro"))
+                .count(),
+            1,
+            "should dedupe gemini alias/canonical"
+        );
+    }
 }
 
 #[cfg(test)]

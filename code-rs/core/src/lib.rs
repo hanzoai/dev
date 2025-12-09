@@ -1,5 +1,6 @@
 //! Root of the `codex-core` library.
 
+
 // Prevent accidental direct writes to stdout/stderr in library code. All
 // user-visible output must go through the appropriate abstraction (e.g.,
 // the TUI or the tracing stack).
@@ -10,11 +11,13 @@ pub mod auth;
 pub mod auth_accounts;
 pub mod account_usage;
 pub mod bash;
+mod auto_drive_pid;
 mod chat_completions;
 mod client;
 mod client_common;
 pub mod codex;
 mod code_conversation;
+mod bridge_client;
 pub mod token_data;
 pub use code_conversation::CodexConversation;
 mod command_safety;
@@ -22,11 +25,25 @@ pub mod config;
 pub mod config_edit;
 pub mod config_profile;
 pub mod config_types;
+mod config_loader;
 mod conversation_history;
+pub mod context_timeline;
 pub mod acp;
 pub mod custom_prompts;
 pub mod debug_logger;
+pub mod review_coord;
 mod environment_context;
+mod reasoning;
+pub mod retention;
+pub mod telemetry;
+pub use environment_context::BrowserSnapshot;
+pub use environment_context::EnvironmentContextDelta;
+pub use environment_context::EnvironmentContextEmission;
+pub use environment_context::EnvironmentContextSnapshot;
+pub use environment_context::EnvironmentContextTracker;
+pub use environment_context::OperatingSystemInfo;
+pub use environment_context::ViewportDimensions;
+pub use auto_drive_pid::{AutoDriveMode, AutoDrivePidFile};
 pub mod error;
 pub mod exec;
 mod exec_command;
@@ -42,6 +59,7 @@ mod message_history;
 mod model_provider_info;
 pub mod agent_defaults;
 mod agent_tool;
+pub use agent_tool::AGENT_MANAGER;
 mod dry_run_guard;
 mod image_comparison;
 pub mod git_worktree;
@@ -62,12 +80,16 @@ mod conversation_manager;
 pub mod protocol;
 mod event_mapping;
 pub mod review_format;
+#[cfg(test)]
+mod prompt_assembly_tests;
 pub use code_protocol::protocol::InitialHistory;
 pub use conversation_manager::ConversationManager;
 pub use conversation_manager::NewConversation;
 // Re-export common auth types for workspace consumers
 pub use auth::AuthManager;
 pub use auth::CodexAuth;
+pub use auth::RefreshTokenError;
+pub use auth::RefreshTokenErrorKind;
 pub mod default_client;
 pub mod model_family;
 pub mod openai_model_info;
@@ -78,11 +100,13 @@ pub mod project_doc;
 pub mod project_features;
 mod rollout;
 pub(crate) mod safety;
+pub mod session_catalog;
 pub mod seatbelt;
 pub mod shell;
 pub mod spawn;
 pub mod terminal;
 pub mod otel_init;
+mod text_encoding;
 mod tool_apply_patch;
 mod workflow_validation;
 pub mod turn_diff_tracker;
@@ -95,12 +119,18 @@ pub use rollout::find_conversation_path_by_id_str;
 pub use rollout::list::ConversationItem;
 pub use rollout::list::ConversationsPage;
 pub use rollout::list::Cursor;
+pub use rollout::catalog::SessionIndexEntry;
+pub use session_catalog::entry_to_rollout_path;
+pub use session_catalog::SessionCatalog;
+pub use session_catalog::SessionQuery;
 mod function_tool;
 mod user_notification;
 pub mod util;
 
 pub use apply_patch::CODEX_APPLY_PATCH_ARG1;
 pub use command_safety::is_safe_command;
+pub use agent_tool::smoke_test_agent_blocking;
+pub use agent_tool::split_command_and_args;
 pub use safety::get_platform_sandbox;
 pub use housekeeping::run_housekeeping_if_due;
 pub use housekeeping::CleanupOutcome;

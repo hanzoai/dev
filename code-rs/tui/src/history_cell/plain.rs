@@ -13,6 +13,7 @@ use crate::history::state::{
     TextEmphasis,
     TextTone,
 };
+use crate::colors;
 use crate::theme::{current_theme, Theme};
 use ratatui::buffer::Buffer;
 use ratatui::layout::Rect;
@@ -53,8 +54,33 @@ pub(crate) struct PlainHistoryCell {
 }
 
 impl PlainHistoryCell {
+    pub(crate) fn is_auto_review_notice(&self) -> bool {
+        self.state
+            .header()
+            .map(|h| h.label.to_lowercase().contains("auto review"))
+            .unwrap_or(false)
+    }
+
+    pub(crate) fn auto_review_bg() -> ratatui::style::Color {
+        // Match the diff success background tint for consistent success styling.
+        colors::tint_background_toward(colors::success())
+    }
+
+    pub(crate) fn auto_review_padding() -> (u16, u16) {
+        // Symmetric top/bottom padding for auto-review notices.
+        (1, 1)
+    }
     pub(crate) fn from_state(state: PlainMessageState) -> Self {
-        let kind = history_cell_kind_from_plain(state.kind);
+        let mut kind = history_cell_kind_from_plain(state.kind);
+        if kind == HistoryCellType::User {
+            if let Some(first_line) = state.lines.first() {
+                if first_line.spans.first().map_or(false, |span| {
+                    span.text.starts_with("[Compaction Summary]")
+                }) {
+                    kind = HistoryCellType::CompactionSummary;
+                }
+            }
+        }
         Self {
             state: PlainCellState {
                 message: state,
@@ -116,8 +142,11 @@ impl PlainHistoryCell {
             };
         }
 
+        let is_auto_review = self.is_auto_review_notice();
         let cell_bg = match self.state.kind {
             HistoryCellType::Assistant => crate::colors::assistant_bg(),
+            HistoryCellType::CompactionSummary => crate::colors::background(),
+            _ if is_auto_review => Self::auto_review_bg(),
             _ => crate::colors::background(),
         };
         let bg_style = Style::default().bg(cell_bg).fg(crate::colors::text());
@@ -125,10 +154,20 @@ impl PlainHistoryCell {
         let trimmed_lines = self.display_lines_trimmed();
         let text = Text::from(trimmed_lines.clone());
         let paragraph = Paragraph::new(text).wrap(Wrap { trim: false });
-        let height: u16 = paragraph
+
+        let (pad_top, pad_bottom) = if is_auto_review {
+            Self::auto_review_padding()
+        } else {
+            (0, 0)
+        };
+
+        let inner_height: u16 = paragraph
             .line_count(effective_width)
             .try_into()
             .unwrap_or(0);
+        let height = inner_height
+            .saturating_add(pad_top)
+            .saturating_add(pad_bottom);
 
         if height == 0 {
             return PlainLayoutCache {
@@ -142,7 +181,8 @@ impl PlainHistoryCell {
         let render_height = height.max(1);
         let render_area = Rect::new(0, 0, requested_width, render_height);
         let mut buffer = Buffer::empty(render_area);
-        fill_rect(&mut buffer, render_area, Some(' '), bg_style);
+        // Paint full cell (including padding) with the cell background so tint extends through padding.
+        fill_rect(&mut buffer, render_area, Some(' '), Style::default().bg(cell_bg).fg(crate::colors::text()));
 
         let paragraph_lines = Text::from(trimmed_lines);
         if matches!(self.state.kind, HistoryCellType::User) {
@@ -161,11 +201,22 @@ impl PlainHistoryCell {
                 .render(render_area, &mut buffer);
         } else {
             let block = Block::default().style(Style::default().bg(cell_bg));
+            let inner_area = if pad_top + pad_bottom < render_height {
+                Rect::new(
+                    render_area.x,
+                    render_area.y.saturating_add(pad_top),
+                    render_area.width,
+                    render_height.saturating_sub(pad_top + pad_bottom),
+                )
+            } else {
+                render_area
+            };
+
             Paragraph::new(paragraph_lines)
                 .block(block)
                 .wrap(Wrap { trim: false })
                 .style(Style::default().bg(cell_bg))
-                .render(render_area, &mut buffer);
+                .render(inner_area, &mut buffer);
         }
 
         PlainLayoutCache {
@@ -206,6 +257,16 @@ impl HistoryCell for PlainHistoryCell {
         self.state.kind
     }
 
+    fn gutter_symbol(&self) -> Option<&'static str> {
+        if let Some(header) = self.state.header() {
+            let label = header.label.trim().to_lowercase();
+            if label == "auto review" {
+                return Some("•");
+            }
+        }
+        super::gutter_symbol_for_kind(self.kind())
+    }
+
     fn display_lines(&self) -> Vec<Line<'static>> {
         let theme = current_theme();
         let mut lines: Vec<Line<'static>> = Vec::new();
@@ -221,7 +282,7 @@ impl HistoryCell for PlainHistoryCell {
     }
 
     fn has_custom_render(&self) -> bool {
-        matches!(self.state.kind, HistoryCellType::User)
+        matches!(self.state.kind, HistoryCellType::User) || self.is_auto_review_notice()
     }
 
     fn desired_height(&self, width: u16) -> u16 {
@@ -248,11 +309,13 @@ impl HistoryCell for PlainHistoryCell {
             requested_width
         };
 
+        let is_auto_review = self.is_auto_review_notice();
         let cell_bg = match self.state.kind {
             HistoryCellType::Assistant => crate::colors::assistant_bg(),
+            _ if is_auto_review => Self::auto_review_bg(),
             _ => crate::colors::background(),
         };
-        if matches!(self.state.kind, HistoryCellType::Assistant) {
+        if matches!(self.state.kind, HistoryCellType::Assistant) || is_auto_review {
             let bg_style = Style::default().bg(cell_bg).fg(crate::colors::text());
             fill_rect(buf, area, Some(' '), bg_style);
         }
@@ -297,7 +360,6 @@ impl HistoryCell for PlainHistoryCell {
         trim_empty_lines(self.display_lines())
     }
 }
-
 struct PlainMessageStateBuilder;
 
 impl PlainMessageStateBuilder {

@@ -3,6 +3,8 @@ use code_core::protocol::{
     EventMsg,
     ExecCommandBeginEvent,
     ExecCommandEndEvent,
+    TaskCompleteEvent,
+    AgentReasoningDeltaEvent,
     McpInvocation,
     McpToolCallBeginEvent,
     OrderMeta,
@@ -242,5 +244,91 @@ fn exec_begin_upgrades_running_tool_cell() {
     assert!(
         output.contains("upgraded"),
         "exec output should remain attached to the upgraded cell:\n{output}",
+    );
+}
+
+#[test]
+fn stale_exec_is_finalized_on_task_complete() {
+    let mut harness = ChatWidgetHarness::new();
+    let mut seq = 0_u64;
+    let call_id = "call_stale".to_string();
+    let cwd = PathBuf::from("/tmp");
+
+    // Begin a command but never send ExecCommandEnd.
+    harness.handle_event(Event {
+        id: "exec-begin-stale".to_string(),
+        event_seq: 0,
+        msg: EventMsg::ExecCommandBegin(ExecCommandBeginEvent {
+            call_id: call_id.clone(),
+            command: vec!["bash".into(), "-lc".into(), "git diff".into()],
+            cwd: cwd.clone(),
+            parsed_cmd: Vec::new(),
+        }),
+        order: Some(next_order_meta(1, &mut seq)),
+    });
+
+    // Simulate the backend finishing the turn without ever emitting ExecEnd.
+    harness.handle_event(Event {
+        id: "task-complete".to_string(),
+        event_seq: 1,
+        msg: EventMsg::TaskComplete(TaskCompleteEvent {
+            last_agent_message: None,
+        }),
+        order: Some(next_order_meta(1, &mut seq)),
+    });
+
+    let output = render_chat_widget_to_vt100(&mut harness, 80, 14);
+    assert!(
+        output.contains("background") || output.contains("turn end"),
+        "stale exec should surface a clear completion notice:\n{}",
+        output
+    );
+}
+
+#[test]
+fn exec_interrupts_flush_when_stream_idles() {
+    let mut harness = ChatWidgetHarness::new();
+    let mut seq = 0_u64;
+    let call_id = "call_idle".to_string();
+    let cwd = PathBuf::from("/tmp");
+
+    // Kick off a reasoning stream so write-cycle is active.
+    harness.handle_event(Event {
+        id: "reasoning-delta".to_string(),
+        event_seq: 0,
+        msg: EventMsg::AgentReasoningDelta(AgentReasoningDeltaEvent {
+            delta: "Thinking through the next steps.\n".into(),
+        }),
+        order: Some(next_order_meta(1, &mut seq)),
+    });
+    harness.flush_into_widget();
+    // Drain any pending commits so the stream is idle but still marked active.
+    harness.drive_commit_tick();
+
+    // Queue an Exec begin; it should not stay deferred once the stream is idle.
+    harness.handle_event(Event {
+        id: "exec-begin-idle".to_string(),
+        event_seq: 1,
+        msg: EventMsg::ExecCommandBegin(ExecCommandBeginEvent {
+            call_id: call_id.clone(),
+            command: vec!["bash".into(), "-lc".into(), "echo idle".into()],
+            cwd: cwd.clone(),
+            parsed_cmd: Vec::new(),
+        }),
+        order: Some(next_order_meta(1, &mut seq)),
+    });
+
+    // Allow the flush timer to run and deliver the queued interrupt.
+    std::thread::sleep(Duration::from_millis(400));
+    harness.flush_into_widget();
+    // Give the idle-flush a second chance in case of scheduler jitter.
+    std::thread::sleep(Duration::from_millis(200));
+    harness.flush_into_widget();
+
+    let output = render_chat_widget_to_vt100(&mut harness, 80, 12);
+    assert!(
+        output.contains("Thinking through the next steps"),
+        "stream flush should still render the latest output:\n{}",
+        output
     );
 }

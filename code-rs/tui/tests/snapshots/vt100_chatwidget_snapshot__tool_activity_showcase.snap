@@ -5,8 +5,6 @@ expression: output
  +----------------------------------------------------------------------------+
  |                                    Code                                    |
  +----------------------------------------------------------------------------+
-   /code - perform a coding task (multiple agents)
-
  › Can you gather details from the latest docs update?
 
    +- Web Search · Completed
@@ -36,8 +34,10 @@ expression: output
    |   MM:SS  Started agent run for qa-bot
    |   MM:SS  Waiting for agents
    |
+   +- [Ctrl+A] Expand
+
 
  +----------------------------------------------------------------------------+
  | What can I code for you today?                                             |
  +----------------------------------------------------------------------------+
-   Read Only  (Shift+Tab change)                       Ctrl+H help  •  API key
+ Read Only  (Shift+Tab change)                        Ctrl+G guide  •  API key

@@ -35,6 +35,10 @@ pub const USER_INSTRUCTIONS_OPEN_TAG: &str = "<user_instructions>";
 pub const USER_INSTRUCTIONS_CLOSE_TAG: &str = "</user_instructions>";
 pub const ENVIRONMENT_CONTEXT_OPEN_TAG: &str = "<environment_context>";
 pub const ENVIRONMENT_CONTEXT_CLOSE_TAG: &str = "</environment_context>";
+pub const ENVIRONMENT_CONTEXT_DELTA_OPEN_TAG: &str = "<environment_context_delta>";
+pub const ENVIRONMENT_CONTEXT_DELTA_CLOSE_TAG: &str = "</environment_context_delta>";
+pub const BROWSER_SNAPSHOT_OPEN_TAG: &str = "<browser_snapshot>";
+pub const BROWSER_SNAPSHOT_CLOSE_TAG: &str = "</browser_snapshot>";
 pub const USER_MESSAGE_BEGIN: &str = "## My request for Codex:";
 
 /// Submission Queue Entry - requests from user
@@ -525,6 +529,18 @@ pub enum EventMsg {
     /// Signaled when the model begins a new reasoning summary section (e.g., a new titled block).
     AgentReasoningSectionBreak(AgentReasoningSectionBreakEvent),
 
+    /// Full environment context snapshot emitted to the model.
+    EnvironmentContextFull(EnvironmentContextFullEvent),
+
+    /// Environment context delta emitted to the model.
+    EnvironmentContextDelta(EnvironmentContextDeltaEvent),
+
+    /// Browser snapshot metadata emitted alongside environment context.
+    BrowserSnapshot(BrowserSnapshotEvent),
+
+    /// Warning that the platform compacted conversation history to stay within limits.
+    CompactionCheckpointWarning(CompactionCheckpointWarningEvent),
+
     /// Ack the client's configure message.
     SessionConfigured(SessionConfiguredEvent),
 
@@ -594,6 +610,26 @@ pub enum EventMsg {
 #[derive(Debug, Clone, Deserialize, Serialize, TS)]
 pub struct ExitedReviewModeEvent {
     pub review_output: Option<ReviewOutputEvent>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub snapshot: Option<ReviewSnapshotInfo>,
+}
+
+/// Git/worktree context captured at review time.
+#[derive(Debug, Clone, Deserialize, Serialize, PartialEq, TS)]
+pub struct ReviewSnapshotInfo {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub snapshot_commit: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub branch: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub worktree_path: Option<std::path::PathBuf>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub repo_root: Option<std::path::PathBuf>,
 }
 
 // Individual event payload types matching each `EventMsg` variant.
@@ -611,6 +647,11 @@ pub struct TaskCompleteEvent {
 #[derive(Debug, Clone, Deserialize, Serialize, TS)]
 pub struct TaskStartedEvent {
     pub model_context_window: Option<u64>,
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize, TS)]
+pub struct CompactionCheckpointWarningEvent {
+    pub message: String,
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Eq, Deserialize, Serialize, TS)]
@@ -1123,6 +1164,9 @@ pub struct ReviewContextMetadata {
     #[serde(skip_serializing_if = "Option::is_none")]
     #[ts(optional)]
     pub current_branch: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub auto_review: Option<bool>,
 }
 
 /// Structured review result produced by a child review session.
@@ -1387,6 +1431,39 @@ pub struct Chunk {
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize, TS)]
+pub struct EnvironmentContextFullEvent {
+    /// JSON serialization of the environment context snapshot.
+    pub snapshot: serde_json::Value,
+    /// Sequence number associated with the snapshot emission.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub sequence: Option<u64>,
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize, TS)]
+pub struct EnvironmentContextDeltaEvent {
+    /// JSON serialization of the environment context delta.
+    pub delta: serde_json::Value,
+    /// Sequence number associated with the delta emission.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub sequence: Option<u64>,
+    /// Fingerprint of the baseline snapshot for this delta.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub base_fingerprint: Option<String>,
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize, TS)]
+pub struct BrowserSnapshotEvent {
+    /// JSON serialization of the browser snapshot metadata.
+    pub snapshot: serde_json::Value,
+    /// URL associated with the snapshot, if available.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub url: Option<String>,
+    /// Timestamp when the snapshot was captured.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub captured_at: Option<String>,
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize, TS)]
 pub struct TurnAbortedEvent {
     pub reason: TurnAbortReason,
 }
@@ -1459,6 +1536,25 @@ mod tests {
 
         let deserialized: ExecCommandOutputDeltaEvent = serde_json::from_str(&serialized)?;
         assert_eq!(deserialized, event);
+        Ok(())
+    }
+
+    #[test]
+    fn compaction_checkpoint_warning_round_trips() -> Result<()> {
+        let event = EventMsg::CompactionCheckpointWarning(CompactionCheckpointWarningEvent {
+            message: "History checkpoint: earlier conversation compacted.".to_string(),
+        });
+
+        let serialized = serde_json::to_string(&event)?;
+        let restored: EventMsg = serde_json::from_str(&serialized)?;
+
+        match restored {
+            EventMsg::CompactionCheckpointWarning(payload) => {
+                assert!(payload.message.contains("checkpoint"));
+            }
+            other => panic!("unexpected variant: {other:?}"),
+        }
+
         Ok(())
     }
 }

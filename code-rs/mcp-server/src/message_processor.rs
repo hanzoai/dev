@@ -23,7 +23,7 @@ use code_app_server_protocol::ClientRequest;
 use code_protocol::ConversationId;
 use code_protocol::protocol::SessionSource;
 
-use code_common::model_presets::{builtin_model_presets, ModelPreset};
+use code_common::model_presets::{builtin_model_presets, clamp_reasoning_effort_for_model, ModelPreset};
 use code_core::AuthManager;
 use code_core::ConversationManager;
 use code_core::config_types::{ClientTools, McpServerConfig, McpServerTransportConfig, ReasoningEffort};
@@ -980,6 +980,8 @@ impl MessageProcessor {
             cwd: Some(request.cwd),
             mcp_servers: Some(mcp_servers),
             experimental_client_tools: client_tools,
+            compact_prompt_override: None,
+            compact_prompt_override_file: None,
             ..Default::default()
         };
 
@@ -1499,7 +1501,7 @@ fn session_models_from_config(config: &Config) -> Option<acp::SessionModelState>
         };
         available_models.push(acp::ModelInfo {
             model_id: id.clone(),
-            name: preset.label.to_string(),
+            name: preset.display_name.to_string(),
             description,
             meta: None,
         });
@@ -1548,10 +1550,7 @@ fn session_models_from_config(config: &Config) -> Option<acp::SessionModelState>
 }
 
 fn preset_effort(preset: &ModelPreset) -> ReasoningEffort {
-    preset
-        .effort
-        .map(ReasoningEffort::from)
-        .unwrap_or(ReasoningEffort::Medium)
+    preset.default_reasoning_effort.into()
 }
 
 fn resolve_model_selection(model_id: &acp::ModelId, config: &Config) -> Option<ModelSelection> {
@@ -1560,7 +1559,7 @@ fn resolve_model_selection(model_id: &acp::ModelId, config: &Config) -> Option<M
 
     for preset in builtin_model_presets(None).iter() {
         if preset.id.eq_ignore_ascii_case(&requested)
-            || preset.label.eq_ignore_ascii_case(&requested)
+            || preset.display_name.eq_ignore_ascii_case(&requested)
             || preset.model.eq_ignore_ascii_case(&requested)
         {
             return Some(ModelSelection {
@@ -1593,6 +1592,10 @@ fn resolve_model_selection(model_id: &acp::ModelId, config: &Config) -> Option<M
 }
 
 fn apply_model_selection(config: &mut Config, model: &str, effort: ReasoningEffort) -> bool {
+    let requested_effort: code_protocol::config_types::ReasoningEffort = effort.into();
+    let clamped_effort: ReasoningEffort =
+        clamp_reasoning_effort_for_model(model, requested_effort).into();
+
     let mut updated = false;
     if !config.model.eq_ignore_ascii_case(model) {
         config.model = model.to_string();
@@ -1601,8 +1604,8 @@ fn apply_model_selection(config: &mut Config, model: &str, effort: ReasoningEffo
         updated = true;
     }
 
-    if config.model_reasoning_effort != effort {
-        config.model_reasoning_effort = effort;
+    if config.model_reasoning_effort != clamped_effort {
+        config.model_reasoning_effort = clamped_effort;
         updated = true;
     }
 

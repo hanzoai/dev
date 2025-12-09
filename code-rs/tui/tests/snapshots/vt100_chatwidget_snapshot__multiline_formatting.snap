@@ -5,11 +5,11 @@ expression: output
  +----------------------------------------------------------------------------+
  |                                    Code                                    |
  +----------------------------------------------------------------------------+
-   /settings - manage all settings in one place NEW
-   /auto - work autonomously on long tasks with Auto Drive UPDATED
-   /chrome - connect to your Chrome browser
-   /plan - create a comprehensive plan (multiple agents)
-   /code - perform a coding task (multiple agents)
+
+   - Writing code
+   - Reading files
+   - Running commands
+
 
 
  • Here's a simple function:
@@ -24,4 +24,4 @@ expression: output
  +----------------------------------------------------------------------------+
  | What can I code for you today?                                             |
  +----------------------------------------------------------------------------+
-   Read Only  (Shift+Tab change)                       Ctrl+H help  •  API key
+ Read Only  (Shift+Tab change)                        Ctrl+G guide  •  API key

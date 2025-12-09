@@ -7,6 +7,167 @@
 
 - (none)
 
+## [0.5.15] - 2025-11-28
+
+- CLI: bump npm metadata to 0.5.15 so fresh installs pull the latest binaries. (0e5d3f9)
+- CI: enforce running ./pre-release.sh before pushes to main to keep release checks green. (3af8354)
+
+## [0.5.14] - 2025-11-28
+
+- Core/Bridge: surface code-bridge events directly in sessions so runs show live bridge activity. (ca8f0efa)
+- TUI: keep composer popups aligned after history navigation and wrap the agent list inside the command editor for better readability. (bb4a43cf, b890eac3)
+- Auto Drive: stabilize the intro placeholder and ensure exec completions render in order so automation transcripts stay coherent. (7a652b74, d9e5ddbd)
+- Core/Compact: prune orphan tool outputs before compaction to shrink bloated histories and speed up resumes. (8ba5f744)
+
+## [0.5.13] - 2025-11-27
+
+- CLI: bump the npm package and platform binaries to 0.5.13 so installs grab the latest build. (285c8ca7)
+- CI: add a placeholder rust-ci workflow so required checks stay green during migration. (6d6ee6cf)
+
+## [0.5.12] - 2025-11-27
+
+- CLI: bump npm metadata to 0.5.12 so fresh installs pull the latest binaries. (9f79140)
+- CI: drop the redundant CodeQL workflow to stop conflicting security scans. (ff71e00)
+
+## [0.5.10] - 2025-11-27
+
+- CLI: bump the npm package metadata to 0.5.10 so installs pick up the latest build. (16b47ef)
+- CI: add a Ruby-free CodeQL workflow to keep security scanning enabled without extra dependencies. (ae6a8d3)
+
+## [0.5.8] - 2025-11-26
+
+- Docs: publish the new CLAUDE guidance and move working references into docs/working for quicker updates. (da89924b)
+- CLI: bump the npm package metadata to 0.5.8 so installs pick up the latest build. (44c59ddd)
+
+## [0.5.7] - 2025-11-26
+
+- Core/Exec: decode shell output with detected encodings so Unicode logs stay readable across platforms. (4aaba9b1, ae000766)
+- Auto Drive: force read-only agents when no git repo exists to avoid accidental writes during automation. (13226204)
+- App Server: emit token usage, compaction, and turn diff events plus thread metadata to improve monitoring. (401f94ca, caf2749d, 9ba27cfa, 157a16ce)
+- Shell MCP: declare capabilities, add login support, and publish the npm package to keep tool integrations healthy. (c6f68c9d, e8ef6d3c, af63e6ec)
+
+## [0.5.5] - 2025-11-25
+
+- Auto Drive: restore 600-char CLI prompts, enforce sane bounds, add fallback to the current binary, and append test guidance to each goal for smoother automation handoffs. (24a0dd4c, 3651bc85, 15745f0a, f8f5c5b4)
+- TUI/Prompts: add a full management section with save/reload, slash access, and alias autocomplete so custom prompts stay at your fingertips. (814fa485, 8d9e08c8, 079046e2)
+- Streaming: show reconnecting spinners, log retry causes, and classify more transient errors so network hiccups stay visible without noise. (64a98b6b, 47e3cc76, 936cca8f)
+- Agents: retier frontline options, upgrade opus/gemini defaults, and tighten descriptions to highlight the recommended models. (fa58356c, 58c83225, 884d008f)
+
+## [0.5.4] - 2025-11-24
+
+- Core/Agent: pass reasoning effort overrides through config so automation consistently honors requested budgets. (d6a7666b)
+- Compact: trim chat history when context overflows and automatically retry to keep long sessions running. (2014c10d)
+
+## [0.5.3] - 2025-11-24
+
+- Auto Drive: add CLI aliases for automation runs and force headless sessions into full-auto so release flows stay hands-free. (288b1d94, 0bb2f8dd)
+- TUI: keep tab characters intact during paste bursts and block stray Enter submits from per-key pastes for reliable composer input. (92625277, 019adc32)
+- Connectivity: harden CLI/TUI retry paths so transient network drops automatically reconnect active sessions. (f0cb7afd, a7e4d25a)
+- Config: honor CODE_HOME and CODEX_HOME entries from .env and retry without reasoning summaries when providers reject them. (5970ac52, 16ead0ec)
+
+## [0.5.2] - 2025-11-22
+
+- Agents: default automation flows to gpt-5.1-codex-max and add gemini-3-pro as an option for higher-capacity runs. (f0f99f2e)
+- Models: clamp reasoning effort to supported bands so prompts no longer fail with invalid request errors. (6a7cac9d)
+
+## [0.5.0] - 2025-11-21
+
+- Rebrand the project to **Every Code** while keeping the `code` CLI name and refreshed docs.
+- Auto Drive resilience: compaction and diagnostics, retry/backoff with observer telemetry, resume safety, and clearer cards/status.
+- Default presets upgraded to gpt-5.1 with added codex-mini variants for lighter runs.
+- UX polish: unified settings overlay refinements, /review uncommitted preset, strict streaming order, slash navigation hotkeys, and backtrack improvements.
+- Notifications enabled by default plus clearer browser/exec logging and richer resume/session catalogs.
+- Platform hardening: Nix offline builds, Windows AltGr + PATHEXT fixes, BSD keyring gating, responses proxy tightening, and sandbox/process safeguards.
+- MCP & integrations: sturdier MCP client tooling, streamable HTTP support, improved Zed/ACP guidance, and a hardened responses API proxy.
+
+## [0.4.21] - 2025-11-20
+
+- Auto Drive: let runs choose a model and clamp verbosity so diagnostics stay predictable. (61209e0)
+- Models: add gpt-5.1-codex-max default with one-time migration prompt so upgrades stay smooth. (8a97572, 6d67b8b, 64ae9aa)
+- Core: wire execpolicy2 through core/exec-server and add shell fallbacks so commands keep running under the new policy. (65c13f1, 056c8f8, b00a7cf)
+- TUI: add branch-aware filtering to `codex resume` so large workspaces find the right session faster. (526eb3f)
+- Platform: enable remote compaction by default and schedule auto jobs to keep transcripts lean. (cac0a6a, 75f38f1)
+
+## [0.4.20] - 2025-11-18
+
+- Core: serialize `shell_command` tool invocations so concurrent steps no longer trample each other during runs. (497fb4a1)
+- Models: ignore empty Claude `finish_reason` fields so streamed answers no longer truncate mid-response. (de1768d3)
+- Windows: treat AltGr chords as literal text and resolve MCP script-based tools via PATHEXT so international keyboards and script servers work again. (702238f0, f828cd28)
+- Core: overhaul compaction/truncation paths to remove double-truncation panics and keep summaries concise on long sessions. (94dfb211, 0b28e72b, 3f1c4b9a)
+- Platform: gate keyring backends per target and add BSD hardening so FreeBSD/OpenBSD builds succeed out of the box. (5860481b)
+
+## [0.4.19] - 2025-11-17
+
+- Nix: vendor all git-sourced crates so offline builds no longer depend on network access. (079f833)
+- Build: point the Nix derivation at the repo root to keep codex-rs workspace dependencies available. (079f833)
+
+## [0.4.17] - 2025-11-17
+
+- TUI: add an uncommitted preset to /review so you can diff local edits without staging. (dda8d2d)
+- Resume: make the session picker async and add /push for fast handoff into publish. (a3be266)
+- Resume: ignore system status snippets so regenerated plans stay focused on user messages. (e08999a)
+- Resume: count user input coming from rollouts to keep token and action history accurate. (479edd1)
+- Resume: unify the session catalog across views so saved sessions appear consistently. (0b26627)
+
+## [0.4.16] - 2025-11-15
+
+- TUI: enable desktop notifications by default so background job updates surface immediately. (799364de)
+- TUI: refine unified exec with clearer UI and explicit workdir overrides for commands launched from history. (63c8c01f, f01f2ec9)
+- Onboarding: handle "Don't Trust" directory selections gracefully so setup cannot get stuck in untrusted folders. (89ecc00b)
+- SDK: add CLI environment override and AbortSignal support for better automation integrations. (93665000, 439bc5db)
+
+## [0.4.15] - 2025-11-14
+
+- Core: migrate default CLI, TUI, and Auto Drive models to gpt-5.1 so new sessions use the upgraded stack. (698c53f)
+- Prompts: align the gpt-5.1 system instructions with Codex guidance to keep responses consistent. (e0ec79c)
+- TUI Login: add device-code fallback and ensure ChatGPT auth links wrap cleanly on narrow terminals. (5279dd8, 2e47735, 322396c)
+
+## [0.4.14] - 2025-11-13
+
+- Settings: let reviewers choose the model used for /review from the settings overlay. (2134f3e)
+- TUI: keep the final scrollback line visible after a command completes so transcripts stay readable. (f6f7a75)
+- TUI: simplify the /merge handoff so follow-up flows resume without manual cleanup. (7d8684e)
+- TUI: keep multiline slash commands intact when dispatching plan or solve sequences. (8d9398d)
+- Stability: recover gracefully when the working directory vanishes mid-run instead of crashing. (97b956f)
+
+## [0.4.11] - 2025-11-07
+
+- Model: add gpt-5-codex-mini presets for quick access to lighter variants. (febfa7e)
+- Compaction: add per-message summaries, checkpoint warnings, and prompt overrides to keep long transcripts clear. (b21190f, 8dd3c30, 58cf74d)
+- Client: normalize retry-after handling, show resume times, and stop retrying fatal quota errors so recoveries are predictable. (0c82670, 0e0e85c, d996507)
+- CLI: enable CTRL-n and CTRL-p to navigate slash commands, files, and history without leaving the keyboard. (e30f651)
+- SDK: add network_access and web_search toggles to the TypeScript client for richer tool control. (c76528c)
+
+## [0.4.9] - 2025-11-03
+
+- CLI: rerun the bootstrap step when postinstall scripts are skipped so upgrades stay healthy. (8d842b8)
+- Auto Drive: salvage user-turn JSON to keep transcripts recoverable after crashes. (38caf29)
+- Homebrew: track the latest release so tap installs follow new versions immediately. (222d2e6)
+
+## [0.4.8] - 2025-11-03
+
+- Auto Drive: Surface coordinator schema details when retries fail so validation issues are actionable. (cbc31dad)
+- TUI/Auto Drive: Resume the decision pipeline after diagnostics follow-ups so runs wrap up correctly. (1714bbd8)
+
+## [0.4.7] - 2025-10-30
+
+- TUI/Auto Drive: Keep router answers visible in the transcript so automation context stays complete. (cf17fc1)
+- TUI/Auto Drive: Persist diagnostics follow-up prompts when resuming runs to avoid lost context. (d1e634d)
+
+## [0.4.6] - 2025-10-30
+
+- Build: keep release notes version in sync during `build-fast` to stop false release failures. (862851d)
+- Build: drop the release notes gate so `build-fast` runs cleanly in CI. (b0bfd1f)
+- CLI: publish the v0.4.6 package metadata for all platform bundles. (ceccd4b)
+
+## [0.4.4] - 2025-10-29
+
+- TUI: Interrupts in-flight runs when `/new` starts a fresh chat so responses never bleed between sessions. (0421f643)
+- TUI/MCP: Keeps the selected MCP row visible while scrolling large server lists. (4c114758)
+- Agents: Refreshes the Enabled toggle UX and persists state immediately in history. (56a0b37d)
+- Config: Surfaces legacy `~/.codex/prompts` directories so custom prompts load automatically. (0be4f19c)
+- Rollout: Sorts session history by latest activity to make resume picks faster. (9f6481a1)
+
 ## [0.4.2] - 2025-10-27
 
 - Auto Drive: add compaction, token metrics, and durable transcripts so long runs stay stable. (0071313, 57b398f, cd880a5)
@@ -323,7 +484,6 @@
 
 ## [0.2.137] - 2025-09-12
 
-- Dev: add `scripts/test-responses.js` to probe Responses API with ChatGPT/API key auth; includes schema/tools/store tests. (79c69f96)
 - Proxy: default Responses v1; fail-fast on 5xx; add STRICT_HEADERS and RESPONSES_BETA override. (acfaeb7d, 1ddedb8b)
 
 ## [0.2.133] - 2025-09-12
