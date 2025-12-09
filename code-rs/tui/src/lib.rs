@@ -4,6 +4,15 @@
 #![deny(clippy::print_stdout, clippy::print_stderr)]
 #![deny(clippy::disallowed_methods)]
 use app::App;
+use code_common::model_presets::{
+    all_model_presets,
+    ModelPreset,
+    HIDE_GPT5_1_MIGRATION_PROMPT_CONFIG,
+    HIDE_GPT_5_1_CODEX_MAX_MIGRATION_PROMPT_CONFIG,
+};
+use code_core::config_edit::{self, CONFIG_KEY_EFFORT, CONFIG_KEY_MODEL};
+use code_core::config_types::Notice;
+use code_core::config_types::ReasoningEffort;
 use code_core::BUILT_IN_OSS_MODEL_PROVIDER_ID;
 use code_core::config::set_cached_terminal_background;
 use code_core::config::Config;
@@ -21,10 +30,15 @@ use code_core::config_types::ThemeName;
 use regex_lite::Regex;
 use code_login::AuthMode;
 use code_login::CodexAuth;
+use model_migration::{migration_copy_for_key, run_model_migration_prompt, ModelMigrationOutcome};
 use code_ollama::DEFAULT_OSS_MODEL;
 use code_protocol::config_types::SandboxMode;
 use std::fs::OpenOptions;
-use std::path::PathBuf;
+use std::io;
+use std::path::{Path, PathBuf};
+use code_core::review_coord::{
+    bump_snapshot_epoch, clear_stale_lock_if_dead, read_lock_info, try_acquire_lock,
+};
 use std::sync::Once;
 use std::sync::OnceLock;
 use tracing_appender::non_blocking;
@@ -68,12 +82,13 @@ mod syntax_highlight;
 pub mod onboarding;
 pub mod public_widgets;
 mod render;
+mod model_migration;
 // mod scroll_view; // Orphaned after trait-based HistoryCell migration
 mod session_log;
 mod shimmer;
 mod slash_command;
 mod rate_limits_view;
-mod resume;
+pub mod resume;
 mod streaming;
 mod sanitize;
 mod layout_consts;
@@ -298,6 +313,13 @@ pub struct ExitSummary {
     pub session_id: Option<Uuid>,
 }
 
+fn empty_exit_summary() -> ExitSummary {
+    ExitSummary {
+        token_usage: code_core::protocol::TokenUsage::default(),
+        session_id: None,
+    }
+}
+
 pub fn resume_command_name() -> &'static str {
     static COMMAND: OnceLock<&'static str> = OnceLock::new();
     COMMAND.get_or_init(|| {
@@ -378,6 +400,8 @@ pub async fn run_main(
         tools_web_search_request: Some(cli.web_search),
         mcp_servers: None,
         experimental_client_tools: None,
+        compact_prompt_override: cli.compact_prompt_override.clone(),
+        compact_prompt_override_file: cli.compact_prompt_file.clone(),
     };
 
     // Parse `-c` overrides from the CLI.
@@ -431,7 +455,7 @@ pub async fn run_main(
         // Load configuration and support CLI overrides.
 
         #[allow(clippy::print_stderr)]
-        match Config::load_with_cli_overrides(cli_kv_overrides.clone(), overrides) {
+        match Config::load_with_cli_overrides(cli_kv_overrides.clone(), overrides.clone()) {
             Ok(config) => config,
             Err(err) => {
                 eprintln!("Error loading configuration: {err}");
@@ -439,6 +463,84 @@ pub async fn run_main(
             }
         }
     };
+
+    let cli_model_override = cli.model.is_some()
+        || cli_kv_overrides
+            .iter()
+            .any(|(path, _)| path == "model" || path.ends_with(".model"));
+    if !cli_model_override && !cli.oss {
+        let auth_mode = if config.using_chatgpt_auth {
+            AuthMode::ChatGPT
+        } else {
+            AuthMode::ApiKey
+        };
+        if let Some(plan) = determine_migration_plan(&config, auth_mode) {
+            if matches!(auth_mode, AuthMode::ChatGPT) {
+                if let Err(err) = persist_migration_acceptance(
+                    &code_home,
+                    cli.config_profile.as_deref(),
+                    plan,
+                )
+                .await
+                {
+                    tracing::warn!("failed to persist migration acceptance: {err}");
+                } else {
+                    match Config::load_with_cli_overrides(
+                        cli_kv_overrides.clone(),
+                        overrides.clone(),
+                    ) {
+                        Ok(updated) => config = updated,
+                        Err(err) => {
+                            eprintln!("Error reloading configuration: {err}");
+                            std::process::exit(1);
+                        }
+                    }
+                }
+            } else {
+                let copy = migration_copy_for_key(plan.hide_key);
+                match run_model_migration_prompt(&copy)? {
+                    ModelMigrationOutcome::Accepted => {
+                        if let Err(err) = persist_migration_acceptance(
+                            &code_home,
+                            cli.config_profile.as_deref(),
+                            plan,
+                        )
+                        .await
+                        {
+                            tracing::warn!("failed to persist migration acceptance: {err}");
+                        } else {
+                            match Config::load_with_cli_overrides(
+                                cli_kv_overrides.clone(),
+                                overrides.clone(),
+                            ) {
+                                Ok(updated) => config = updated,
+                                Err(err) => {
+                                    eprintln!("Error reloading configuration: {err}");
+                                    std::process::exit(1);
+                                }
+                            }
+                        }
+                    }
+                    ModelMigrationOutcome::Rejected => {
+                        let hide_key = plan.hide_key;
+                        if let Err(err) = persist_notice_hide(
+                            &code_home,
+                            cli.config_profile.as_deref(),
+                            hide_key,
+                        )
+                        .await
+                        {
+                            tracing::warn!("failed to persist migration opt-out: {err}");
+                        }
+                        set_notice_flag(&mut config.notices, hide_key);
+                    }
+                    ModelMigrationOutcome::Exit => {
+                        return Ok(empty_exit_summary());
+                    }
+                }
+            }
+        }
+    }
 
     let startup_footer_notice = None;
 
@@ -498,7 +600,7 @@ pub async fn run_main(
     let (critical_writer, _critical_guard) = non_blocking(critical_appender);
 
     let default_filter = if cli.debug {
-        "code_core=info,code_tui=info,code_browser=info"
+        "code_core=info,code_tui=info,code_browser=info,code_auto_drive_core=info"
     } else {
         "code_core=warn,code_tui=warn,code_browser=warn"
     };
@@ -743,12 +845,60 @@ fn reclaim_worktrees_from_file(path: &std::path::Path, label: &str) {
     }
 
     eprintln!("Cleaning remaining worktrees for {} ({}).", label, entries.len());
+    let current_pid = std::process::id();
     for (git_root, worktree) in entries {
         let Some(wt_str) = worktree.to_str() else { continue };
-        let _ = Command::new("git")
+
+        // Retry a few times if the global review lock is busy.
+        let mut acquired = None;
+        let mut lock_info = None;
+        for attempt in 0..3 {
+            acquired = try_acquire_lock("tui-worktree-cleanup", &git_root)
+                .ok()
+                .flatten();
+            if acquired.is_some() {
+                break;
+            }
+
+            // If the lock holder died, clear it and retry immediately.
+            if let Ok(true) = clear_stale_lock_if_dead(Some(&git_root)) {
+                continue;
+            }
+
+            // Remember who is holding the lock for diagnostics and potential self-cleanup.
+            lock_info = read_lock_info(Some(&git_root));
+            if matches!(lock_info.as_ref(), Some(info) if info.pid == current_pid) {
+                // Our own process still holds the lock (e.g., background task still winding down).
+                // Proceed without a guard so we still reclaim our worktrees on shutdown.
+                break;
+            }
+
+            std::thread::sleep(std::time::Duration::from_millis(150 * (attempt + 1)));
+        }
+
+        let lock_is_self = matches!(lock_info.as_ref(), Some(info) if info.pid == current_pid);
+
+        if acquired.is_none() && !lock_is_self {
+            let detail = lock_info
+                .as_ref()
+                .map(|info| format!("pid {} (intent: {})", info.pid, info.intent))
+                .unwrap_or_else(|| "unknown holder".to_string());
+            eprintln!(
+                "Deferring cleanup of {} — cleanup lock busy ({detail}); will retry on next shutdown",
+                worktree.display()
+            );
+            continue;
+        }
+
+        if let Ok(out) = Command::new("git")
             .current_dir(&git_root)
             .args(["worktree", "remove", wt_str, "--force"])
-            .output();
+            .output()
+        {
+            if out.status.success() {
+                bump_snapshot_epoch();
+            }
+        }
         let _ = std::fs::remove_dir_all(&worktree);
     }
     let _ = std::fs::remove_file(path);
@@ -838,6 +988,122 @@ fn maybe_apply_terminal_theme_detection(config: &mut Config, theme_configured_ex
                 "Terminal theme autodetect unavailable; using configured default theme"
             );
         }
+    }
+}
+
+#[derive(Clone, Copy)]
+struct MigrationPlan {
+    target: &'static ModelPreset,
+    hide_key: &'static str,
+    new_effort: Option<ReasoningEffort>,
+}
+
+fn determine_migration_plan(config: &Config, auth_mode: AuthMode) -> Option<MigrationPlan> {
+    let current_slug = config.model.to_ascii_lowercase();
+    let presets = all_model_presets();
+    let current = presets
+        .iter()
+        .find(|preset| preset.id.eq_ignore_ascii_case(&current_slug))?;
+    let upgrade = current.upgrade.as_ref()?;
+    if notice_hidden(&config.notices, upgrade.migration_config_key) {
+        return None;
+    }
+    let target = presets
+        .iter()
+        .find(|preset| preset.id.eq_ignore_ascii_case(upgrade.id))?;
+    if !auth_allows_target(auth_mode, target) {
+        return None;
+    }
+    let new_effort = None;
+    Some(MigrationPlan {
+        target,
+        hide_key: upgrade.migration_config_key,
+        new_effort,
+    })
+}
+
+const NOTICE_TABLE: &str = "notice";
+
+async fn persist_migration_acceptance(
+    code_home: &Path,
+    profile: Option<&str>,
+    plan: MigrationPlan,
+) -> io::Result<()> {
+    let mut pending: Vec<(Vec<&str>, String)> = Vec::new();
+    pending.push((vec![CONFIG_KEY_MODEL], plan.target.model.to_string()));
+
+    if let Some(effort) = plan.new_effort {
+        pending.push((
+            vec![CONFIG_KEY_EFFORT],
+            reasoning_effort_to_str(effort).to_string(),
+        ));
+    }
+
+    pending.push((vec![NOTICE_TABLE, plan.hide_key], "true".to_string()));
+
+    let overrides: Vec<(&[&str], &str)> = pending
+        .iter()
+        .map(|(path, value)| (path.as_slice(), value.as_str()))
+        .collect();
+
+    config_edit::persist_overrides(code_home, profile, &overrides)
+        .await
+        .map_err(|err| io::Error::other(err.to_string()))
+}
+
+async fn persist_notice_hide(
+    code_home: &Path,
+    profile: Option<&str>,
+    hide_key: &'static str,
+) -> io::Result<()> {
+    let notice_path = [NOTICE_TABLE, hide_key];
+    let overrides = [(&notice_path[..], "true")];
+    config_edit::persist_overrides(code_home, profile, &overrides)
+        .await
+        .map_err(|err| io::Error::other(err.to_string()))
+}
+
+fn set_notice_flag(notices: &mut Notice, key: &str) {
+    match key {
+        HIDE_GPT5_1_MIGRATION_PROMPT_CONFIG => {
+            notices.hide_gpt5_1_migration_prompt = Some(true);
+        }
+        HIDE_GPT_5_1_CODEX_MAX_MIGRATION_PROMPT_CONFIG => {
+            notices.hide_gpt_5_1_codex_max_migration_prompt = Some(true);
+        }
+        _ => {}
+    }
+}
+
+fn notice_hidden(notices: &Notice, key: &str) -> bool {
+    match key {
+        HIDE_GPT5_1_MIGRATION_PROMPT_CONFIG => {
+            notices.hide_gpt5_1_migration_prompt.unwrap_or(false)
+        }
+        HIDE_GPT_5_1_CODEX_MAX_MIGRATION_PROMPT_CONFIG => {
+            notices.hide_gpt_5_1_codex_max_migration_prompt.unwrap_or(false)
+        }
+        _ => false,
+    }
+}
+
+fn auth_allows_target(auth_mode: AuthMode, target: &ModelPreset) -> bool {
+    if matches!(auth_mode, AuthMode::ApiKey)
+        && target.id.eq_ignore_ascii_case("gpt-5.1-codex-max")
+    {
+        return false;
+    }
+    true
+}
+
+fn reasoning_effort_to_str(effort: ReasoningEffort) -> &'static str {
+    match effort {
+        ReasoningEffort::Minimal => "minimal",
+        ReasoningEffort::Low => "low",
+        ReasoningEffort::Medium => "medium",
+        ReasoningEffort::High => "high",
+        ReasoningEffort::XHigh => "xhigh",
+        ReasoningEffort::None => "none",
     }
 }
 
@@ -1000,6 +1266,8 @@ mod tests {
 
         let overrides = ConfigOverrides {
             cwd: Some(workspace.path().to_path_buf()),
+            compact_prompt_override: None,
+            compact_prompt_override_file: None,
             ..Default::default()
         };
 

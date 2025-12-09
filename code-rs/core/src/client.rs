@@ -1,16 +1,19 @@
 use std::collections::BTreeMap;
 use std::io::BufRead;
 use std::path::Path;
-// use std::sync::OnceLock;
+use std::sync::OnceLock;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Duration;
 
 use crate::AuthManager;
+use crate::RefreshTokenError;
 use bytes::Bytes;
 use code_app_server_protocol::AuthMode;
 use code_protocol::models::ResponseItem;
 use eventsource_stream::Eventsource;
 use futures::prelude::*;
-// use regex_lite::Regex;
+use httpdate::parse_http_date;
+use regex_lite::Regex;
 use reqwest::StatusCode;
 use reqwest::header::HeaderMap;
 use serde::Deserialize;
@@ -23,6 +26,9 @@ use tracing::debug;
 use tracing::trace;
 use tracing::warn;
 use uuid::Uuid;
+use chrono::{DateTime, Utc};
+
+const AUTH_REQUIRED_MESSAGE: &str = "Authentication required. Run `code login` to continue.";
 
 use crate::agent_defaults::{default_agent_configs, enabled_agent_model_specs};
 use crate::chat_completions::AggregateStreamExt;
@@ -38,13 +44,13 @@ use crate::config_types::ReasoningSummary as ReasoningSummaryConfig;
 use crate::config_types::TextVerbosity as TextVerbosityConfig;
 use crate::debug_logger::DebugLogger;
 use crate::default_client::create_client;
-use crate::error::CodexErr;
+use crate::error::{CodexErr, RetryAfter};
 use crate::error::Result;
 use crate::error::RetryLimitReachedError;
 use crate::error::UnexpectedResponseError;
 use crate::error::UsageLimitReachedError;
 use crate::flags::CODEX_RS_SSE_FIXTURE;
-use crate::model_family::ModelFamily;
+use crate::model_family::{find_family_for_model, ModelFamily};
 use crate::model_provider_info::ModelProviderInfo;
 use crate::model_provider_info::WireApi;
 use crate::openai_model_info::get_model_info;
@@ -54,11 +60,22 @@ use crate::openai_tools::ToolsConfig;
 use crate::protocol::RateLimitSnapshotEvent;
 use crate::protocol::SandboxPolicy;
 use crate::protocol::TokenUsage;
+use crate::reasoning::clamp_reasoning_effort_for_model;
 use crate::slash_commands::get_enabled_agents;
 use crate::util::backoff;
-use code_otel::otel_event_manager::OtelEventManager;
+use code_otel::otel_event_manager::{OtelEventManager, TurnLatencyPayload};
 use std::sync::Arc;
 use std::sync::Mutex;
+use std::sync::RwLock;
+
+const RESPONSES_BETA_HEADER_V1: &str = "responses=v1";
+const RESPONSES_BETA_HEADER_EXPERIMENTAL: &str = "responses=experimental";
+
+#[derive(Default, Debug)]
+struct StreamCheckpoint {
+    /// Highest sequence_number observed across attempts. Used to drop replayed deltas.
+    last_sequence: Option<u64>,
+}
 
 #[derive(Debug, Deserialize)]
 struct ErrorResponse {
@@ -70,6 +87,9 @@ struct Error {
     r#type: Option<String>,
     #[allow(dead_code)]
     code: Option<String>,
+    /// Optional parameter that triggered the error (e.g. "reasoning.summary").
+    #[allow(dead_code)]
+    param: Option<String>,
     message: Option<String>,
 
     // Optional fields available on "usage_limit_reached" and "usage_not_included" errors
@@ -77,49 +97,103 @@ struct Error {
     resets_in_seconds: Option<u64>,
 }
 
-fn try_parse_retry_after(err: &Error) -> Option<std::time::Duration> {
+#[derive(Serialize)]
+struct CompactHistoryRequest<'a> {
+    model: &'a str,
+    #[serde(borrow)]
+    input: &'a [ResponseItem],
+    instructions: String,
+}
+
+#[derive(Debug, Deserialize)]
+struct CompactHistoryResponse {
+    output: Vec<ResponseItem>,
+}
+
+fn rate_limit_regex() -> &'static Regex {
+    static RE: OnceLock<Regex> = OnceLock::new();
+    RE.get_or_init(|| {
+        Regex::new(
+            r"(?i)(?:please\s+try\s+again|try\s+again|please\s+retry|retry|try)\s+(?:in|after)\s*(\d+(?:\.\d+)?)\s*(ms|milliseconds?|s|sec|secs|seconds?)"
+        )
+            .expect("valid rate limit regex")
+    })
+}
+
+fn try_parse_retry_after(err: &Error, now: DateTime<Utc>) -> Option<RetryAfter> {
     if let Some(seconds) = err.resets_in_seconds {
-        return Some(std::time::Duration::from_secs(seconds));
+        return Some(RetryAfter::from_duration(Duration::from_secs(seconds), now));
     }
 
     let message = err.message.as_deref()?;
-    let needle = "Please try again in ";
-    let start = message.find(needle)? + needle.len();
-    let rest = &message[start..];
-
-    let mut value = String::new();
-    let mut unit = String::new();
-    for ch in rest.chars() {
-        if ch.is_ascii_digit() || ch == '.' {
-            if unit.is_empty() {
-                value.push(ch);
-                continue;
-            }
-            break;
-        } else if ch.is_ascii_alphabetic() {
-            unit.push(ch);
-        } else if !value.is_empty() && !unit.is_empty() {
-            break;
-        } else if !value.is_empty() {
-            break;
-        }
-    }
-
-    if value.is_empty() {
+    let re = rate_limit_regex();
+    let captures = re.captures(message)?;
+    let value = captures.get(1)?.as_str().trim().parse::<f64>().ok()?;
+    if value.is_sign_negative() {
         return None;
     }
+    let unit = captures.get(2)?.as_str().trim().to_ascii_lowercase();
 
-    match unit.as_str() {
-        "ms" => value
-            .parse::<f64>()
-            .ok()
-            .map(|ms| std::time::Duration::from_millis(ms as u64)),
-        "s" | "sec" | "secs" | "seconds" => value.parse::<f64>().ok().map(std::time::Duration::from_secs_f64),
-        _ => None,
+    if unit.starts_with("ms") {
+        Some(RetryAfter::from_duration(Duration::from_millis(value.round() as u64), now))
+    } else if unit.starts_with("sec") || unit == "s" || unit.starts_with("second") {
+        Some(RetryAfter::from_duration(Duration::from_secs_f64(value), now))
+    } else {
+        None
     }
 }
 
-#[derive(Debug, Clone)]
+fn is_quota_exceeded_error(error: &Error) -> bool {
+    matches!(
+        error.code.as_deref().or_else(|| error.r#type.as_deref()),
+        Some("insufficient_quota")
+    )
+}
+
+fn is_quota_exceeded_http_error(status: StatusCode, error: &Error) -> bool {
+    status.is_client_error() && is_quota_exceeded_error(error)
+}
+
+fn is_reasoning_summary_rejected(error: &Error) -> bool {
+    let param_matches = matches!(error.param.as_deref(), Some("reasoning.summary"));
+    let code_matches = matches!(error.code.as_deref(), Some("unsupported_value"));
+
+    let message_matches = error
+        .message
+        .as_deref()
+        .map(|msg| {
+            let msg = msg.to_ascii_lowercase();
+            msg.contains("organization must be verified") && msg.contains("reasoning summar")
+        })
+        .unwrap_or(false);
+
+    // Only treat as rejection if it's specifically an "unsupported_value" error
+    // for the reasoning.summary parameter, or if the message explicitly says
+    // the organization must be verified for reasoning summaries.
+    (param_matches && code_matches) || (code_matches && message_matches)
+}
+
+fn map_unauthorized_outcome(
+    had_auth: bool,
+    refresh_error: Option<&RefreshTokenError>,
+) -> Option<CodexErr> {
+    if let Some(err) = refresh_error {
+        if err.is_permanent() {
+            return Some(CodexErr::AuthRefreshPermanent(err.message.clone()));
+        }
+        return None;
+    }
+
+    if !had_auth {
+        return Some(CodexErr::AuthRefreshPermanent(
+            AUTH_REQUIRED_MESSAGE.to_string(),
+        ));
+    }
+
+    None
+}
+
+#[derive(Debug)]
 pub struct ModelClient {
     config: Arc<Config>,
     auth_manager: Option<Arc<AuthManager>>,
@@ -129,8 +203,29 @@ pub struct ModelClient {
     session_id: Uuid,
     effort: ReasoningEffortConfig,
     summary: ReasoningSummaryConfig,
+    reasoning_summary_disabled: AtomicBool,
     verbosity: TextVerbosityConfig,
     debug_logger: Arc<Mutex<DebugLogger>>,
+}
+
+impl Clone for ModelClient {
+    fn clone(&self) -> Self {
+        Self {
+            config: Arc::clone(&self.config),
+            auth_manager: self.auth_manager.clone(),
+            otel_event_manager: self.otel_event_manager.clone(),
+            client: self.client.clone(),
+            provider: self.provider.clone(),
+            session_id: self.session_id,
+            effort: self.effort,
+            summary: self.summary,
+            reasoning_summary_disabled: AtomicBool::new(
+                self.reasoning_summary_disabled.load(Ordering::Relaxed),
+            ),
+            verbosity: self.verbosity,
+            debug_logger: Arc::clone(&self.debug_logger),
+        }
+    }
 }
 
 impl ModelClient {
@@ -145,6 +240,8 @@ impl ModelClient {
         session_id: Uuid,
         debug_logger: Arc<Mutex<DebugLogger>>,
     ) -> Self {
+        let effective_verbosity = clamp_text_verbosity_for_model(config.model.as_str(), verbosity);
+        let clamped_effort = clamp_reasoning_effort_for_model(config.model.as_str(), effort);
         let client = create_client(&config.responses_originator_header);
 
         Self {
@@ -154,9 +251,10 @@ impl ModelClient {
             client,
             provider,
             session_id,
-            effort,
+            effort: clamped_effort,
             summary,
-            verbosity,
+            reasoning_summary_disabled: AtomicBool::new(false),
+            verbosity: effective_verbosity,
             debug_logger,
         }
     }
@@ -168,7 +266,33 @@ impl ModelClient {
 
     /// Get the reasoning summary configuration
     pub fn get_reasoning_summary(&self) -> ReasoningSummaryConfig {
-        self.summary
+        if self.reasoning_summary_disabled.load(Ordering::Relaxed) {
+            ReasoningSummaryConfig::None
+        } else {
+            self.summary
+        }
+    }
+
+    fn current_reasoning_param(
+        &self,
+        family: &ModelFamily,
+        effort: ReasoningEffortConfig,
+    ) -> Option<crate::client_common::Reasoning> {
+        if self.reasoning_summary_disabled.load(Ordering::Relaxed) {
+            return None;
+        }
+
+        create_reasoning_param_for_request(
+            family,
+            Some(effort),
+            self.summary,
+        )
+    }
+
+    fn disable_reasoning_summary(&self) {
+        if !self.reasoning_summary_disabled.swap(true, Ordering::Relaxed) {
+            tracing::warn!("disabling reasoning summaries after API rejection");
+        }
     }
 
     /// Get the text verbosity configuration
@@ -179,6 +303,12 @@ impl ModelClient {
 
     pub fn get_otel_event_manager(&self) -> Option<OtelEventManager> {
         self.otel_event_manager.clone()
+    }
+
+    pub fn log_turn_latency_debug(&self, payload: &TurnLatencyPayload) {
+        if let Ok(logger) = self.debug_logger.lock() {
+            let _ = logger.log_turn_latency(payload);
+        }
     }
 
     pub fn code_home(&self) -> &Path {
@@ -271,7 +401,10 @@ impl ModelClient {
     /// the provider config.  Public callers always invoke `stream()` – the
     /// specialised helpers are private to avoid accidental misuse.
     pub async fn stream(&self, prompt: &Prompt) -> Result<ResponseStream> {
-        let log_tag = prompt.log_tag.as_deref();
+        let env_log_tag = std::env::var("CODE_DEBUG_LOG_TAG").ok();
+        let log_tag = env_log_tag
+            .as_deref()
+            .or(prompt.log_tag.as_deref());
         match self.provider.wire_api {
             WireApi::Responses => self.stream_responses(prompt, log_tag).await,
             WireApi::Chat => {
@@ -345,37 +478,31 @@ impl ModelClient {
         // Use non-stored turns on all paths for stability.
         let store = false;
 
+        let request_model = prompt
+            .model_override
+            .as_deref()
+            .unwrap_or(self.config.model.as_str());
+        let effective_effort = clamp_reasoning_effort_for_model(request_model, self.effort);
+        let request_family = find_family_for_model(request_model)
+            .unwrap_or_else(|| self.config.model_family.clone());
+
         let full_instructions = prompt.get_full_instructions(&self.config.model_family);
         let mut tools_json = create_tools_json_for_responses_api(&prompt.tools)?;
-        if matches!(self.effort, ReasoningEffortConfig::Minimal) {
+        if matches!(effective_effort, ReasoningEffortConfig::Minimal) {
             tools_json.retain(|tool| {
                 tool.get("type")
                     .and_then(|value| value.as_str())
                     .map(|tool_type| tool_type != "web_search")
                     .unwrap_or(true)
-            });
+                });
         }
-
-        let reasoning = create_reasoning_param_for_request(
-            &self.config.model_family,
-            Some(self.effort),
-            self.summary,
-        );
-
-        // Request encrypted COT if we are not storing responses,
-        // otherwise reasoning items will be referenced by ID
-        let include: Vec<String> = if !store && reasoning.is_some() {
-            vec!["reasoning.encrypted_content".to_string()]
-        } else {
-            vec![]
-        };
 
         let input_with_instructions = prompt.get_formatted_input();
 
         // Build `text` parameter with conditional verbosity and optional format.
         // - Omit entirely for ChatGPT auth unless a `text.format` or output schema is present.
         // - Only include `text.verbosity` for GPT-5 family models; warn and ignore otherwise.
-        // - When a structured `format` is present, omit `verbosity` in serialization.
+        // - When a structured `format` is present, still include `verbosity` so GPT-5 can honor it.
         let want_format = prompt.text_format.clone().or_else(|| {
             prompt.output_schema.as_ref().map(|schema| crate::client_common::TextFormat {
                 r#type: "json_schema".to_string(),
@@ -385,19 +512,21 @@ impl ModelClient {
             })
         });
 
-        let verbosity = match &self.config.model_family.family {
-            family if family == "gpt-5" => Some(self.config.model_text_verbosity),
+        let effective_verbosity = clamp_text_verbosity_for_model(request_model, self.verbosity);
+
+        let verbosity = match &request_family.family {
+            family if family == "gpt-5" || family == "gpt-5.1" => Some(effective_verbosity),
             _ => None,
         };
 
-        let text = match (auth_mode, want_format, verbosity) {
+        let text_template = match (auth_mode, want_format, verbosity) {
             (Some(AuthMode::ChatGPT), None, _) => None,
             (_, Some(fmt), _) => Some(crate::client_common::Text {
-                verbosity: self.verbosity.into(),
+                verbosity: effective_verbosity.into(),
                 format: Some(fmt),
             }),
             (_, None, Some(_)) => Some(crate::client_common::Text {
-                verbosity: self.verbosity.into(),
+                verbosity: effective_verbosity.into(),
                 format: None,
             }),
             (_, None, None) => None,
@@ -412,56 +541,12 @@ impl ModelClient {
         // For Azure, we send `store: true` and preserve reasoning item IDs.
         let azure_workaround = self.provider.is_azure_responses_endpoint();
 
-        let model_slug = prompt
-            .model_override
-            .as_deref()
-            .unwrap_or(self.config.model.as_str());
+        let model_slug = request_model;
 
         let session_id = prompt
             .session_id_override
             .unwrap_or(self.session_id);
         let session_id_str = session_id.to_string();
-
-        let payload = ResponsesApiRequest {
-            model: &self.config.model,
-            instructions: &full_instructions,
-            input: &input_with_instructions,
-            tools: &tools_json,
-            tool_choice: "auto",
-            parallel_tool_calls: true,
-            reasoning,
-            text,
-            store: azure_workaround,
-            stream: true,
-            include,
-            // Use a stable per-process cache key (session id). With store=false this is inert.
-            prompt_cache_key: Some(session_id_str.clone()),
-        };
-
-        let mut payload_json = serde_json::to_value(&payload)?;
-        if let Some(model_value) = payload_json.get_mut("model") {
-            *model_value = serde_json::Value::String(model_slug.to_string());
-        }
-        if azure_workaround {
-            attach_item_ids(&mut payload_json, &input_with_instructions);
-        }
-        if let Some(openrouter_cfg) = self.provider.openrouter_config() {
-            if let Some(obj) = payload_json.as_object_mut() {
-                if let Some(provider) = &openrouter_cfg.provider {
-                    obj.insert(
-                        "provider".to_string(),
-                        serde_json::to_value(provider)?
-                    );
-                }
-                if let Some(route) = &openrouter_cfg.route {
-                    obj.insert("route".to_string(), route.clone());
-                }
-                for (key, value) in &openrouter_cfg.extra {
-                    obj.entry(key.clone()).or_insert(value.clone());
-                }
-            }
-        }
-        let payload_body = serde_json::to_string(&payload_json)?;
 
         let mut attempt = 0;
         let max_retries = self.provider.request_max_retries();
@@ -471,14 +556,63 @@ impl ModelClient {
         let endpoint = self
             .provider
             .get_full_url(&auth_manager.as_ref().and_then(|m| m.auth()));
-        trace!(
-            "POST to {}: {}",
-            endpoint,
-            serde_json::to_string(&payload_json)?
-        );
 
         loop {
             attempt += 1;
+
+            let reasoning = self.current_reasoning_param(&request_family, effective_effort);
+            // Request encrypted COT if we are not storing responses,
+            // otherwise reasoning items will be referenced by ID
+            let include: Vec<String> = if !store && reasoning.is_some() {
+                vec!["reasoning.encrypted_content".to_string()]
+            } else {
+                Vec::new()
+            };
+
+            let text = text_template.clone();
+
+            let payload = ResponsesApiRequest {
+                model: model_slug,
+                instructions: &full_instructions,
+                input: &input_with_instructions,
+                tools: &tools_json,
+                tool_choice: "auto",
+                parallel_tool_calls: true,
+                reasoning,
+                text,
+                store: azure_workaround,
+                stream: true,
+                include,
+                // Use a stable per-process cache key (session id). With store=false this is inert.
+                prompt_cache_key: Some(session_id_str.clone()),
+            };
+
+            let mut payload_json = serde_json::to_value(&payload)?;
+            if let Some(model_value) = payload_json.get_mut("model") {
+                *model_value = serde_json::Value::String(model_slug.to_string());
+            }
+            if azure_workaround {
+                attach_item_ids(&mut payload_json, &input_with_instructions);
+            }
+            if let Some(openrouter_cfg) = self.provider.openrouter_config() {
+                if let Some(obj) = payload_json.as_object_mut() {
+                    if let Some(provider) = &openrouter_cfg.provider {
+                        obj.insert(
+                            "provider".to_string(),
+                            serde_json::to_value(provider)?
+                        );
+                    }
+                    if let Some(route) = &openrouter_cfg.route {
+                        obj.insert("route".to_string(), route.clone());
+                    }
+                    for (key, value) in &openrouter_cfg.extra {
+                        obj.entry(key.clone()).or_insert(value.clone());
+                    }
+                }
+            }
+            let payload_body = serde_json::to_string(&payload_json)?;
+
+            let mut auth_refresh_error: Option<RefreshTokenError> = None;
 
             // Always fetch the latest auth in case a prior attempt refreshed the token.
             let auth = auth_manager.as_ref().and_then(|m| m.auth());
@@ -494,17 +628,25 @@ impl ModelClient {
                 .create_request_builder(&self.client, &auth)
                 .await?;
 
-            // `Codex-Task-Type` differentiates traffic for caching; default to "standard" until
-            // task-specific dispatch is re-introduced.
-            let codex_task_type = "standard";
+            let has_beta_header = req_builder
+                .try_clone()
+                .and_then(|builder| builder.build().ok())
+                .map_or(false, |req| req.headers().contains_key("OpenAI-Beta"));
+
+            if !has_beta_header {
+                let beta_value = if self.provider.is_public_openai_responses_endpoint() {
+                    RESPONSES_BETA_HEADER_V1
+                } else {
+                    RESPONSES_BETA_HEADER_EXPERIMENTAL
+                };
+                req_builder = req_builder.header("OpenAI-Beta", beta_value);
+            }
 
             req_builder = req_builder
-                .header("OpenAI-Beta", "responses=experimental")
                 // Send `conversation_id`/`session_id` so the server can hit the prompt-cache.
                 .header("conversation_id", session_id_str.clone())
                 .header("session_id", session_id_str.clone())
                 .header(reqwest::header::ACCEPT, "text/event-stream")
-                .header("Codex-Task-Type", codex_task_type)
                 .json(&payload_json);
 
             if let Some(auth) = auth.as_ref()
@@ -595,6 +737,7 @@ impl ModelClient {
                         debug_logger,
                         request_id_clone,
                         otel_event_manager,
+                        Arc::new(RwLock::new(StreamCheckpoint::default())),
                     ));
 
                     return Ok(ResponseStream { rx_event });
@@ -607,22 +750,65 @@ impl ModelClient {
                         .get("x-request-id")
                         .and_then(|v| v.to_str().ok())
                         .map(|s| s.to_string());
+                    let now = Utc::now();
 
                     // Pull out Retry‑After header if present.
-                    let retry_after_secs = res
+                    let retry_after_hint = res
                         .headers()
                         .get(reqwest::header::RETRY_AFTER)
                         .and_then(|v| v.to_str().ok())
-                        .and_then(|s| s.parse::<u64>().ok());
+                        .and_then(|raw| parse_retry_after_header(raw, now));
 
                     if status == StatusCode::UNAUTHORIZED {
-                        if let Some(a) = auth.as_ref() {
-                            let _ = a.refresh_token().await;
+                        if let Some(manager) = auth_manager.as_ref() {
+                            match manager.refresh_token_classified().await {
+                                Ok(Some(_)) => {}
+                                Ok(None) => {
+                                    auth_refresh_error = Some(RefreshTokenError::permanent(
+                                        AUTH_REQUIRED_MESSAGE,
+                                    ));
+                                }
+                                Err(err) => {
+                                    auth_refresh_error = Some(err);
+                                }
+                            }
+                        } else {
+                            auth_refresh_error = Some(RefreshTokenError::permanent(
+                                "Authentication manager unavailable; please log in again.",
+                            ));
                         }
                     }
 
                     // Read the response body once for diagnostics across error branches.
                     let body_text = res.text().await.unwrap_or_default();
+                    let body = serde_json::from_str::<ErrorResponse>(&body_text).ok();
+
+                    if status == StatusCode::BAD_REQUEST {
+                        if let Some(ErrorResponse { ref error }) = body {
+                            if !self.reasoning_summary_disabled.load(Ordering::Relaxed)
+                                && is_reasoning_summary_rejected(error)
+                            {
+                                self.disable_reasoning_summary();
+
+                                if let Ok(logger) = self.debug_logger.lock() {
+                                    let _ = logger.append_response_event(
+                                        &request_id,
+                                        "reasoning_summary_disabled",
+                                        &serde_json::json!({
+                                            "status": status.as_u16(),
+                                            "message": error.message.clone(),
+                                            "code": error.code.clone(),
+                                            "param": error.param.clone(),
+                                        }),
+                                    );
+                                }
+
+                                // Retry immediately with reasoning summaries removed.
+                                attempt = 0;
+                                continue;
+                            }
+                        }
+                    }
 
                     // The OpenAI Responses endpoint returns structured JSON bodies even for 4xx/5xx
                     // errors. When we bubble early with only the HTTP status the caller sees an opaque
@@ -654,15 +840,29 @@ impl ModelClient {
                         }));
                     }
 
+                    if let Some(ErrorResponse { ref error }) = body {
+                        if is_quota_exceeded_http_error(status, error) {
+                            return Err(CodexErr::QuotaExceeded);
+                        }
+                    }
+
+                    if status == StatusCode::UNAUTHORIZED {
+                        if let Some(error) =
+                            map_unauthorized_outcome(auth.is_some(), auth_refresh_error.as_ref())
+                        {
+                            return Err(error);
+                        }
+                    }
+
                     if status == StatusCode::TOO_MANY_REQUESTS {
-                        let body = serde_json::from_str::<ErrorResponse>(&body_text).ok();
-                        if let Some(ErrorResponse { error }) = body {
+                        if let Some(ErrorResponse { ref error }) = body {
                             if error.r#type.as_deref() == Some("usage_limit_reached") {
                                 // Prefer the plan_type provided in the error message if present
                                 // because it's more up to date than the one encoded in the auth
                                 // token.
                                 let plan_type = error
                                     .plan_type
+                                    .clone()
                                     .or_else(|| auth.and_then(|a| a.get_plan_type()));
                                 let resets_in_seconds = error.resets_in_seconds;
                                 return Err(CodexErr::UsageLimitReached(UsageLimitReachedError {
@@ -734,19 +934,37 @@ impl ModelClient {
                         return Err(CodexErr::RetryLimit(RetryLimitReachedError {
                             status,
                             request_id: None,
+                            retryable: status.is_server_error() || status == StatusCode::TOO_MANY_REQUESTS,
                         }));
                     }
 
-                    let delay = retry_after_secs
-                        .map(|s| Duration::from_millis(s * 1_000))
+                    let mut retry_after_delay = retry_after_hint;
+                    if retry_after_delay.is_none() {
+                        if let Some(ErrorResponse { ref error }) = body {
+                            retry_after_delay = try_parse_retry_after(error, now);
+                        }
+                    }
+
+                    let delay = retry_after_delay
+                        .as_ref()
+                        .map(|info| info.delay)
                         .unwrap_or_else(|| backoff(attempt));
                     tokio::time::sleep(delay).await;
                 }
                 Err(e) => {
+                    let is_connectivity = e.is_connect() || e.is_timeout() || e.is_request();
                     if attempt > max_retries {
-                        // Log network error
+                        // Log network error before surfacing.
                         if let Ok(logger) = self.debug_logger.lock() {
                             let _ = logger.log_error(&endpoint, &format!("Network error: {}", e), log_tag);
+                        }
+                        if is_connectivity {
+                            let req_id = (!request_id.is_empty()).then(|| request_id.clone());
+                            return Err(CodexErr::Stream(
+                                format!("[transport] network unavailable: {e}"),
+                                None,
+                                req_id,
+                            ));
                         }
                         return Err(e.into());
                     }
@@ -782,6 +1000,141 @@ impl ModelClient {
     pub fn get_auth_manager(&self) -> Option<Arc<AuthManager>> {
         self.auth_manager.clone()
     }
+
+    pub async fn compact_conversation_history(&self, prompt: &Prompt) -> Result<Vec<ResponseItem>> {
+        if prompt.input.is_empty() {
+            return Ok(Vec::new());
+        }
+
+        let auth_manager = self.auth_manager.clone();
+        let auth = auth_manager.as_ref().and_then(|m| m.auth());
+        let mut request = self
+            .provider
+            .create_compact_request_builder(&self.client, &auth)
+            .await?;
+
+        // Ensure Responses API beta header is present for compact calls. Mirror the
+        // streaming path: use the public "responses=v1" header for the public OpenAI
+        // endpoint and fall back to "responses=experimental" for other providers.
+        let has_beta_header = request
+            .try_clone()
+            .and_then(|builder| builder.build().ok())
+            .map_or(false, |req| req.headers().contains_key("OpenAI-Beta"));
+
+        if !has_beta_header {
+            let beta_value = if self.provider.is_public_openai_responses_endpoint() {
+                RESPONSES_BETA_HEADER_V1
+            } else {
+                RESPONSES_BETA_HEADER_EXPERIMENTAL
+            };
+            request = request.header("OpenAI-Beta", beta_value);
+        }
+
+        if let Some(auth) = auth.as_ref()
+            && auth.mode == AuthMode::ChatGPT
+            && let Some(account_id) = auth.get_account_id()
+        {
+            request = request.header("chatgpt-account-id", account_id);
+        }
+
+        let instructions = prompt
+            .get_full_instructions(&self.config.model_family)
+            .into_owned();
+        let payload = CompactHistoryRequest {
+            model: &self.config.model,
+            input: &prompt.input,
+            instructions: instructions.clone(),
+        };
+        let payload_json = serde_json::json!({
+            "model": payload.model,
+            "input": payload.input,
+            "instructions": instructions,
+        });
+        request = request.json(&payload);
+
+        let header_snapshot = request
+            .try_clone()
+            .and_then(|builder| builder.build().ok())
+            .map(|req| header_map_to_json(req.headers()));
+
+        let mut request_id = String::new();
+        if let Ok(logger) = self.debug_logger.lock() {
+            let endpoint = self
+                .provider
+                .get_compact_url(&auth)
+                .unwrap_or_else(|| self.provider.get_full_url(&auth));
+            request_id = logger
+                .start_request_log(&endpoint, &payload_json, header_snapshot.as_ref(), Some("compact_remote"))
+                .unwrap_or_default();
+        }
+
+        let response = request.send().await?;
+        let status = response.status();
+        let body = response.text().await?;
+
+        if let Ok(logger) = self.debug_logger.lock() {
+            let response_body: serde_json::Value = serde_json::from_str(&body)
+                .unwrap_or_else(|_| serde_json::json!({ "raw": body }));
+            let _ = logger.append_response_event(
+                &request_id,
+                "compact_response",
+                &serde_json::json!({
+                    "status_code": status.as_u16(),
+                    "body": response_body,
+                }),
+            );
+            let _ = logger.end_request_log(&request_id);
+        }
+
+        if !status.is_success() {
+            return Err(CodexErr::UnexpectedStatus(UnexpectedResponseError {
+                status,
+                body,
+                request_id: None,
+            }));
+        }
+
+        let CompactHistoryResponse { output } = serde_json::from_str(&body)?;
+        Ok(output)
+    }
+}
+
+fn clamp_text_verbosity_for_model(
+    model: &str,
+    requested: TextVerbosityConfig,
+) -> TextVerbosityConfig {
+    let allowed = supported_text_verbosity_for_model(model);
+    if allowed.iter().any(|v| v == &requested) {
+        return requested;
+    }
+
+    if let Some(medium) = allowed.iter().find(|v| matches!(v, TextVerbosityConfig::Medium)) {
+        tracing::debug!(
+            model,
+            requested = ?requested,
+            fallback = ?medium,
+            "text verbosity clamped to supported value for model",
+        );
+        return *medium;
+    }
+
+    let fallback = *allowed.first().unwrap_or(&TextVerbosityConfig::Medium);
+    tracing::debug!(
+        model,
+        requested = ?requested,
+        fallback = ?fallback,
+        "text verbosity clamped to first supported value for model",
+    );
+    fallback
+}
+
+fn supported_text_verbosity_for_model(model: &str) -> &'static [TextVerbosityConfig] {
+    if model.eq_ignore_ascii_case("gpt-5.1-codex-max") {
+        return &[TextVerbosityConfig::Medium];
+    }
+
+    const ALL: &[TextVerbosityConfig] = &[TextVerbosityConfig::Low, TextVerbosityConfig::Medium, TextVerbosityConfig::High];
+    ALL
 }
 
 #[derive(Debug, Deserialize, Serialize)]
@@ -922,6 +1275,43 @@ fn parse_header_str<'a>(headers: &'a HeaderMap, name: &str) -> Option<&'a str> {
     headers.get(name)?.to_str().ok()
 }
 
+fn parse_retry_after_header(value: &str, now: DateTime<Utc>) -> Option<RetryAfter> {
+    let trimmed = value.trim();
+    if trimmed.is_empty() {
+        return None;
+    }
+    let normalized = trimmed
+        .trim_matches(|c: char| matches!(c, '"' | '\'' | '<' | '>'))
+        .trim();
+    if normalized.is_empty() {
+        return None;
+    }
+
+    if let Ok(secs) = normalized.parse::<u64>() {
+        return Some(RetryAfter::from_duration(Duration::from_secs(secs), now));
+    }
+    if let Ok(float_secs) = normalized.parse::<f64>() {
+        if !float_secs.is_sign_negative() {
+            return Some(RetryAfter::from_duration(Duration::from_secs_f64(float_secs), now));
+        }
+    }
+    if let Ok(system_time) = parse_http_date(normalized) {
+        let resume_at: DateTime<Utc> = system_time.into();
+        return Some(RetryAfter::from_resume_at(resume_at, now));
+    }
+    if let Ok(dt) = DateTime::parse_from_rfc3339(normalized) {
+        return Some(RetryAfter::from_resume_at(dt.with_timezone(&Utc), now));
+    }
+    if let Ok(dt) = DateTime::parse_from_rfc2822(normalized) {
+        return Some(RetryAfter::from_resume_at(dt.with_timezone(&Utc), now));
+    }
+    if let Ok(dt) = DateTime::parse_from_str(normalized, "%a, %d %b %Y %H:%M:%S %z") {
+        return Some(RetryAfter::from_resume_at(dt.with_timezone(&Utc), now));
+    }
+
+    None
+}
+
 fn header_map_to_json(headers: &HeaderMap) -> Value {
     let mut ordered: BTreeMap<String, Vec<String>> = BTreeMap::new();
     for (name, value) in headers.iter() {
@@ -939,6 +1329,7 @@ async fn process_sse<S>(
     debug_logger: Arc<Mutex<DebugLogger>>,
     request_id: String,
     otel_event_manager: Option<OtelEventManager>,
+    checkpoint: Arc<RwLock<StreamCheckpoint>>,
 ) where
     S: Stream<Item = Result<Bytes>> + Unpin,
 {
@@ -961,6 +1352,7 @@ async fn process_sse<S>(
     // Best-effort duplicate text guard when sequence_number is unavailable.
     let mut last_text_reasoning_summary: HashMap<(String, u32, u32), String> = HashMap::new();
     let mut last_text_reasoning_content: HashMap<(String, u32, u32), String> = HashMap::new();
+    let mut global_last_seq: Option<u64> = checkpoint.read().ok().and_then(|c| c.last_sequence);
 
     loop {
         let next_event = if let Some(manager) = otel_event_manager.as_ref() {
@@ -975,7 +1367,11 @@ async fn process_sse<S>(
             Ok(Some(Ok(sse))) => sse,
             Ok(Some(Err(e))) => {
                 debug!("SSE Error: {e:#}");
-                let event = CodexErr::Stream(e.to_string(), None);
+                let event = CodexErr::Stream(
+                    format!("[transport] {e}"),
+                    None,
+                    Some(request_id.clone()),
+                );
                 let _ = tx_event.send(Err(event)).await;
                 return;
             }
@@ -1010,6 +1406,7 @@ async fn process_sse<S>(
                         let error = response_error.unwrap_or(CodexErr::Stream(
                             "stream closed before response.completed".into(),
                             None,
+                            Some(request_id.clone()),
                         ));
                         if let Some(manager) = otel_event_manager.as_ref() {
                             manager.see_event_completed_failed(&error);
@@ -1026,8 +1423,9 @@ async fn process_sse<S>(
             Err(_) => {
                 let _ = tx_event
                     .send(Err(CodexErr::Stream(
-                        "idle timeout waiting for SSE".into(),
+                        "[idle] timeout waiting for SSE".into(),
                         None,
+                        Some(request_id.clone()),
                     )))
                     .await;
                 return;
@@ -1067,6 +1465,18 @@ async fn process_sse<S>(
                 continue;
             }
         };
+
+        if let Some(seq) = event.sequence_number {
+            if let Some(last) = global_last_seq {
+                if seq <= last {
+                    continue;
+                }
+            }
+            global_last_seq = Some(seq);
+            if let Ok(mut guard) = checkpoint.write() {
+                guard.last_sequence = Some(seq);
+            }
+        }
 
         match event.kind.as_str() {
             // Individual output item finalised. Forward immediately so the
@@ -1250,6 +1660,7 @@ async fn process_sse<S>(
                     response_error = Some(CodexErr::Stream(
                         "response.failed event received".to_string(),
                         None,
+                        Some(request_id.clone()),
                     ));
 
                     let error = resp_val.get("error");
@@ -1257,9 +1668,17 @@ async fn process_sse<S>(
                     if let Some(error) = error {
                         match serde_json::from_value::<Error>(error.clone()) {
                             Ok(error) => {
-                                let delay = try_parse_retry_after(&error);
-                                let message = error.message.unwrap_or_default();
-                                response_error = Some(CodexErr::Stream(message, delay));
+                                if is_quota_exceeded_error(&error) {
+                                    response_error = Some(CodexErr::QuotaExceeded);
+                                } else {
+                                    let retry_after = try_parse_retry_after(&error, Utc::now());
+                                    let message = error.message.unwrap_or_default();
+                                    response_error = Some(CodexErr::Stream(
+                                        message,
+                                        retry_after,
+                                        Some(request_id.clone()),
+                                    ));
+                                }
                             }
                             Err(e) => {
                                 debug!("failed to parse ErrorResponse: {e}");
@@ -1349,6 +1768,7 @@ async fn stream_from_fixture(
         debug_logger,
         String::new(), // Empty request_id for test fixture
         otel_event_manager,
+        Arc::new(RwLock::new(StreamCheckpoint::default())),
     ));
     Ok(ResponseStream { rx_event })
 }
@@ -1360,14 +1780,187 @@ async fn stream_from_fixture(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::model_provider_info::{ModelProviderInfo, WireApi};
+    use std::collections::HashMap;
     use serde_json::json;
     use tokio::sync::mpsc;
     use tokio_test::io::Builder as IoBuilder;
     use tokio_util::io::ReaderStream;
+    use chrono::{Duration as ChronoDuration, TimeZone, Utc};
 
     // ────────────────────────────
     // Helpers
     // ────────────────────────────
+
+    #[test]
+    fn unauthorized_outcome_returns_permanent_error_for_permanent_refresh_failure() {
+        let err = RefreshTokenError::permanent("token revoked");
+        let outcome = map_unauthorized_outcome(true, Some(&err))
+            .expect("should produce CodexErr");
+        match outcome {
+            CodexErr::AuthRefreshPermanent(msg) => {
+                assert!(
+                    msg.contains("token revoked"),
+                    "unexpected message: {}",
+                    msg
+                );
+            }
+            other => panic!("unexpected outcome: {:?}", other),
+        }
+    }
+
+    #[test]
+    fn unauthorized_outcome_requires_login_without_auth() {
+        let outcome = map_unauthorized_outcome(false, None)
+            .expect("should require login");
+        match outcome {
+            CodexErr::AuthRefreshPermanent(msg) => {
+                assert_eq!(msg, AUTH_REQUIRED_MESSAGE);
+            }
+            other => panic!("unexpected outcome: {:?}", other),
+        }
+    }
+
+    #[test]
+    fn unauthorized_outcome_allows_retry_for_transient_refresh_error() {
+        let err = RefreshTokenError::transient("server busy");
+        assert!(map_unauthorized_outcome(true, Some(&err)).is_none());
+    }
+
+    #[tokio::test]
+    async fn responses_request_uses_beta_header_for_public_openai() {
+        let provider = ModelProviderInfo {
+            name: "openai".to_string(),
+            base_url: Some("https://api.openai.com/v1".to_string()),
+            env_key: None,
+            env_key_instructions: None,
+            wire_api: WireApi::Responses,
+            query_params: None,
+            http_headers: None,
+            env_http_headers: None,
+            request_max_retries: Some(0),
+            stream_max_retries: None,
+            stream_idle_timeout_ms: None,
+            requires_openai_auth: false,
+            openrouter: None,
+        };
+
+        let client = reqwest::Client::builder()
+            .redirect(reqwest::redirect::Policy::none())
+            .build()
+            .expect("client");
+
+        let mut builder = provider
+            .create_request_builder(&client, &None)
+            .await
+            .expect("builder");
+        let has_beta = builder
+            .try_clone()
+            .and_then(|b| b.build().ok())
+            .map_or(false, |req| req.headers().contains_key("OpenAI-Beta"));
+        if !has_beta {
+            builder = builder.header("OpenAI-Beta", RESPONSES_BETA_HEADER_V1);
+        }
+        let request = builder
+            .try_clone()
+            .expect("clone request builder")
+            .build()
+            .expect("build request");
+
+        let header_value = request
+            .headers()
+            .get("OpenAI-Beta")
+            .expect("OpenAI-Beta header present");
+        assert_eq!(header_value, RESPONSES_BETA_HEADER_V1);
+    }
+
+    #[tokio::test]
+    async fn responses_request_uses_experimental_for_backend() {
+        let provider = ModelProviderInfo {
+            name: "backend".to_string(),
+            base_url: Some("https://chatgpt.com/backend-api/codex".to_string()),
+            env_key: None,
+            env_key_instructions: None,
+            wire_api: WireApi::Responses,
+            query_params: None,
+            http_headers: None,
+            env_http_headers: None,
+            request_max_retries: Some(0),
+            stream_max_retries: None,
+            stream_idle_timeout_ms: None,
+            requires_openai_auth: false,
+            openrouter: None,
+        };
+
+        let client = reqwest::Client::builder()
+            .redirect(reqwest::redirect::Policy::none())
+            .build()
+            .expect("client");
+
+        let mut builder = provider
+            .create_request_builder(&client, &None)
+            .await
+            .expect("builder");
+        let has_beta = builder
+            .try_clone()
+            .and_then(|b| b.build().ok())
+            .map_or(false, |req| req.headers().contains_key("OpenAI-Beta"));
+        if !has_beta {
+            builder = builder.header("OpenAI-Beta", RESPONSES_BETA_HEADER_EXPERIMENTAL);
+        }
+        let request = builder
+            .try_clone()
+            .expect("clone request builder")
+            .build()
+            .expect("build request");
+
+        let header_value = request
+            .headers()
+            .get("OpenAI-Beta")
+            .expect("OpenAI-Beta header present");
+        assert_eq!(header_value, RESPONSES_BETA_HEADER_EXPERIMENTAL);
+    }
+
+    #[tokio::test]
+    async fn responses_request_respects_preexisting_beta_header() {
+        let mut headers = HashMap::new();
+        headers.insert("OpenAI-Beta".to_string(), "custom".to_string());
+        let provider = ModelProviderInfo {
+            name: "custom".to_string(),
+            base_url: Some("https://api.openai.com/v1".to_string()),
+            env_key: None,
+            env_key_instructions: None,
+            wire_api: WireApi::Responses,
+            query_params: None,
+            http_headers: Some(headers),
+            env_http_headers: None,
+            request_max_retries: Some(0),
+            stream_max_retries: None,
+            stream_idle_timeout_ms: None,
+            requires_openai_auth: false,
+            openrouter: None,
+        };
+
+        let client = reqwest::Client::builder()
+            .redirect(reqwest::redirect::Policy::none())
+            .build()
+            .expect("client");
+
+        let request = provider
+            .create_request_builder(&client, &None)
+            .await
+            .expect("builder")
+            .try_clone()
+            .expect("clone request builder")
+            .build()
+            .expect("build request");
+
+        let header_value = request
+            .headers()
+            .get("OpenAI-Beta")
+            .expect("OpenAI-Beta header present");
+        assert_eq!(header_value, "custom");
+    }
 
     /// Runs the SSE parser on pre-chunked byte slices and returns every event
     /// (including any final `Err` from a stream-closure check).
@@ -1384,6 +1977,7 @@ mod tests {
         let stream = ReaderStream::new(reader).map_err(CodexErr::Io);
         let (tx, mut rx) = mpsc::channel::<Result<ResponseEvent>>(16);
         let debug_logger = Arc::new(Mutex::new(DebugLogger::new(false).unwrap()));
+        let checkpoint = Arc::new(RwLock::new(StreamCheckpoint::default()));
         tokio::spawn(process_sse(
             stream,
             tx,
@@ -1391,6 +1985,7 @@ mod tests {
             debug_logger,
             String::new(),
             None,
+            checkpoint,
         ));
 
         let mut events = Vec::new();
@@ -1422,6 +2017,7 @@ mod tests {
         let (tx, mut rx) = mpsc::channel::<Result<ResponseEvent>>(8);
         let stream = ReaderStream::new(std::io::Cursor::new(body)).map_err(CodexErr::Io);
         let debug_logger = Arc::new(Mutex::new(DebugLogger::new(false).unwrap()));
+        let checkpoint = Arc::new(RwLock::new(StreamCheckpoint::default()));
         tokio::spawn(process_sse(
             stream,
             tx,
@@ -1429,6 +2025,7 @@ mod tests {
             debug_logger,
             String::new(),
             None,
+            checkpoint,
         ));
 
         let mut out = Vec::new();
@@ -1565,7 +2162,7 @@ mod tests {
         );
 
         match &events[1] {
-            Err(CodexErr::Stream(msg, _)) => {
+            Err(CodexErr::Stream(msg, _, _)) => {
                 assert_eq!(msg, "stream closed before response.completed")
             }
             other => panic!("unexpected second event: {other:?}"),
@@ -1574,7 +2171,7 @@ mod tests {
 
     #[tokio::test]
     async fn error_when_error_event() {
-        let raw_error = r#"{"type":"response.failed","sequence_number":3,"response":{"id":"resp_689bcf18d7f08194bf3440ba62fe05d803fee0cdac429894","object":"response","created_at":1755041560,"status":"failed","background":false,"error":{"code":"rate_limit_exceeded","message":"Rate limit reached for gpt-5 in organization org-AAA on tokens per min (TPM): Limit 30000, Used 22999, Requested 12528. Please try again in 11.054s. Visit https://platform.openai.com/account/rate-limits to learn more."}, "usage":null,"user":null,"metadata":{}}}"#;
+        let raw_error = r#"{"type":"response.failed","sequence_number":3,"response":{"id":"resp_689bcf18d7f08194bf3440ba62fe05d803fee0cdac429894","object":"response","created_at":1755041560,"status":"failed","background":false,"error":{"code":"rate_limit_exceeded","message":"Rate limit reached for gpt-5.1 in organization org-AAA on tokens per min (TPM): Limit 30000, Used 22999, Requested 12528. Please try again in 11.054s. Visit https://platform.openai.com/account/rate-limits to learn more."}, "usage":null,"user":null,"metadata":{}}}"#;
 
         let sse1 = format!("event: response.failed\ndata: {raw_error}\n\n");
         let provider = ModelProviderInfo {
@@ -1598,12 +2195,12 @@ mod tests {
         assert_eq!(events.len(), 1);
 
         match &events[0] {
-            Err(CodexErr::Stream(msg, delay)) => {
+            Err(CodexErr::Stream(msg, Some(retry), _)) => {
                 assert_eq!(
                     msg,
-                    "Rate limit reached for gpt-5 in organization org-AAA on tokens per min (TPM): Limit 30000, Used 22999, Requested 12528. Please try again in 11.054s. Visit https://platform.openai.com/account/rate-limits to learn more."
+                    "Rate limit reached for gpt-5.1 in organization org-AAA on tokens per min (TPM): Limit 30000, Used 22999, Requested 12528. Please try again in 11.054s. Visit https://platform.openai.com/account/rate-limits to learn more."
                 );
-                assert_eq!(*delay, Some(Duration::from_secs_f64(11.054)));
+                assert_eq!(retry.delay, Duration::from_secs_f64(11.054));
             }
             other => panic!("unexpected second event: {other:?}"),
         }
@@ -1709,30 +2306,241 @@ mod tests {
         }
     }
 
-    #[test]
-    fn test_try_parse_retry_after() {
-        let err = Error {
-            r#type: None,
-            message: Some("Rate limit reached for gpt-5 in organization org- on tokens per min (TPM): Limit 1, Used 1, Requested 19304. Please try again in 28ms. Visit https://platform.openai.com/account/rate-limits to learn more.".to_string()),
-            code: Some("rate_limit_exceeded".to_string()),
-            plan_type: None,
-            resets_in_seconds: None
-        };
-
-        let delay = try_parse_retry_after(&err);
-        assert_eq!(delay, Some(Duration::from_millis(28)));
+    fn fixed_now() -> DateTime<Utc> {
+        Utc.with_ymd_and_hms(2025, 11, 7, 12, 0, 0).unwrap()
     }
 
     #[test]
-    fn test_try_parse_retry_after_no_delay() {
+    fn test_try_parse_retry_after_ms() {
+        let now = fixed_now();
         let err = Error {
             r#type: None,
-            message: Some("Rate limit reached for gpt-5 in organization <ORG> on tokens per min (TPM): Limit 30000, Used 6899, Requested 24050. Please try again in 1.898s. Visit https://platform.openai.com/account/rate-limits to learn more.".to_string()),
+            message: Some("Rate limit reached for gpt-5.1 in organization org- on tokens per min (TPM): Limit 1, Used 1, Requested 19304. Please try again in 28ms. Visit https://platform.openai.com/account/rate-limits to learn more.".to_string()),
             code: Some("rate_limit_exceeded".to_string()),
+            param: None,
             plan_type: None,
-            resets_in_seconds: None
+            resets_in_seconds: None,
         };
-        let delay = try_parse_retry_after(&err);
-        assert_eq!(delay, Some(Duration::from_secs_f64(1.898)));
+
+        let retry_after = try_parse_retry_after(&err, now).expect("retry");
+        assert_eq!(retry_after.delay, Duration::from_millis(28));
+        assert!(retry_after.resume_at >= now);
+    }
+
+    #[test]
+    fn test_try_parse_retry_after_seconds() {
+        let now = fixed_now();
+        let err = Error {
+            r#type: None,
+            message: Some("Rate limit reached for gpt-5.1 in organization <ORG> on tokens per min (TPM): Limit 30000, Used 6899, Requested 24050. Please try again in 1.898s. Visit https://platform.openai.com/account/rate-limits to learn more.".to_string()),
+            code: Some("rate_limit_exceeded".to_string()),
+            param: None,
+            plan_type: None,
+            resets_in_seconds: None,
+        };
+        let retry_after = try_parse_retry_after(&err, now).expect("retry");
+        assert_eq!(retry_after.delay, Duration::from_secs_f64(1.898));
+    }
+
+    #[test]
+    fn test_try_parse_retry_after_azure() {
+        let now = fixed_now();
+        let err = Error {
+            r#type: None,
+            message: Some("Rate limit exceeded. Retry after 35 seconds.".to_string()),
+            code: Some("rate_limit_exceeded".to_string()),
+            param: None,
+            plan_type: None,
+            resets_in_seconds: None,
+        };
+        let retry_after = try_parse_retry_after(&err, now).expect("retry");
+        assert_eq!(retry_after.delay, Duration::from_secs(35));
+    }
+
+    #[test]
+    fn test_try_parse_retry_after_none_when_missing() {
+        let now = fixed_now();
+        let err = Error {
+            r#type: None,
+            message: Some("Some other error".to_string()),
+            code: None,
+            param: None,
+            plan_type: None,
+            resets_in_seconds: None,
+        };
+
+        assert!(try_parse_retry_after(&err, now).is_none());
+    }
+
+    #[test]
+    fn parse_retry_after_header_parses_seconds() {
+        let now = fixed_now();
+        let retry = parse_retry_after_header("42", now).expect("header");
+        assert_eq!(retry.delay, Duration::from_secs(42));
+        assert_eq!(retry.resume_at, now + ChronoDuration::seconds(42));
+    }
+
+    #[test]
+    fn parse_retry_after_header_parses_rfc7231_date() {
+        let now = Utc.with_ymd_and_hms(1994, 11, 15, 8, 0, 0).unwrap();
+        let retry = parse_retry_after_header("Tue, 15 Nov 1994 08:12:31 GMT", now).expect("header");
+        assert_eq!(
+            retry.resume_at,
+            Utc.with_ymd_and_hms(1994, 11, 15, 8, 12, 31).unwrap()
+        );
+    }
+
+    #[test]
+    fn parse_retry_after_header_clamps_past_date() {
+        let now = Utc.with_ymd_and_hms(2025, 1, 1, 0, 0, 0).unwrap();
+        let retry = parse_retry_after_header("Tue, 15 Nov 1994 08:12:31 GMT", now).expect("header");
+        assert_eq!(retry.delay, Duration::ZERO);
+        assert_eq!(retry.resume_at, now);
+    }
+
+    #[test]
+    fn parse_retry_after_header_strips_wrappers() {
+        let now = fixed_now();
+        let retry = parse_retry_after_header(" \"17\" ", now).expect("header");
+        assert_eq!(retry.delay, Duration::from_secs(17));
+    }
+
+    #[test]
+    fn retry_after_prefers_header_over_body_hint() {
+        let now = fixed_now();
+        let header_retry = parse_retry_after_header("5", now);
+        let mut chosen = header_retry.clone();
+        if chosen.is_none() {
+            let err = Error {
+                r#type: None,
+                message: Some(
+                    "Rate limit reached for gpt-5.1. Please try again in 30 seconds.".to_string(),
+                ),
+                code: Some("rate_limit_exceeded".to_string()),
+                param: None,
+                plan_type: None,
+                resets_in_seconds: None,
+            };
+            chosen = try_parse_retry_after(&err, now);
+        }
+        let retry = chosen.expect("retry");
+        assert_eq!(retry.delay, Duration::from_secs(5));
+    }
+
+    #[test]
+    fn parse_retry_after_header_handles_timezones() {
+        let now = Utc.with_ymd_and_hms(2025, 3, 9, 5, 0, 0).unwrap();
+        let retry = parse_retry_after_header("Sun, 09 Mar 2025 01:30:00 -0500", now).expect("header");
+        assert_eq!(
+            retry.resume_at,
+            Utc.with_ymd_and_hms(2025, 3, 9, 6, 30, 0).unwrap()
+        );
+    }
+
+    #[test]
+    fn quota_error_detected_for_common_statuses() {
+        let error = Error {
+            r#type: Some("invalid_request_error".to_string()),
+            message: Some("You exceeded your current quota".to_string()),
+            code: Some("insufficient_quota".to_string()),
+            param: None,
+            plan_type: None,
+            resets_in_seconds: None,
+        };
+
+        for status in [
+            StatusCode::BAD_REQUEST,
+            StatusCode::FORBIDDEN,
+            StatusCode::TOO_MANY_REQUESTS,
+        ] {
+            assert!(is_quota_exceeded_http_error(status, &error), "status {status} should be fatal");
+        }
+
+        assert!(
+            !is_quota_exceeded_http_error(StatusCode::INTERNAL_SERVER_ERROR, &error),
+            "server errors should not map to quota handling"
+        );
+    }
+
+    #[test]
+    fn malformed_quota_body_is_ignored() {
+        let error = Error {
+            r#type: Some("invalid_request_error".to_string()),
+            message: Some("missing code".to_string()),
+            code: None,
+            param: None,
+            plan_type: None,
+            resets_in_seconds: None,
+        };
+
+        assert!(!is_quota_exceeded_http_error(StatusCode::BAD_REQUEST, &error));
+    }
+
+    #[test]
+    fn reasoning_summary_rejection_is_detected() {
+        let error_with_param = Error {
+            r#type: Some("invalid_request_error".to_string()),
+            message: Some("Your organization must be verified to generate reasoning summaries.".to_string()),
+            code: Some("unsupported_value".to_string()),
+            param: Some("reasoning.summary".to_string()),
+            plan_type: None,
+            resets_in_seconds: None,
+        };
+
+        assert!(is_reasoning_summary_rejected(&error_with_param));
+
+        let error_by_message = Error {
+            r#type: Some("invalid_request_error".to_string()),
+            message: Some("Your organization must be verified to generate reasoning summaries. If you just verified, it can take up to 15 minutes for access to propagate.".to_string()),
+            code: Some("unsupported_value".to_string()),
+            param: None,
+            plan_type: None,
+            resets_in_seconds: None,
+        };
+
+        assert!(is_reasoning_summary_rejected(&error_by_message));
+
+        // An error with param="reasoning.summary" but a different error code
+        // (e.g., rate_limit_exceeded) should NOT be treated as a rejection.
+        let rate_limit_error = Error {
+            r#type: Some("rate_limit_error".to_string()),
+            message: Some("Rate limit reached for reasoning.summary requests.".to_string()),
+            code: Some("rate_limit_exceeded".to_string()),
+            param: Some("reasoning.summary".to_string()),
+            plan_type: None,
+            resets_in_seconds: None,
+        };
+
+        assert!(!is_reasoning_summary_rejected(&rate_limit_error));
+    }
+
+    #[tokio::test]
+    async fn quota_exceeded_error_is_fatal() {
+        let raw_error = r#"{"type":"response.failed","sequence_number":3,"response":{"id":"resp_quota","object":"response","created_at":1759771626,"status":"failed","background":false,"error":{"code":"insufficient_quota","message":"You exceeded your current quota, please check your plan and billing details."},"incomplete_details":null}}"#;
+
+        let sse1 = format!("event: response.failed\ndata: {raw_error}\n\n");
+        let provider = ModelProviderInfo {
+            name: "test".to_string(),
+            base_url: Some("https://test.com".to_string()),
+            env_key: Some("TEST_API_KEY".to_string()),
+            env_key_instructions: None,
+            wire_api: WireApi::Responses,
+            query_params: None,
+            http_headers: None,
+            env_http_headers: None,
+            request_max_retries: Some(0),
+            stream_max_retries: Some(0),
+            stream_idle_timeout_ms: Some(1000),
+            requires_openai_auth: false,
+            openrouter: None,
+        };
+
+        let events = collect_events(&[sse1.as_bytes()], provider).await;
+
+        assert_eq!(events.len(), 1);
+        match &events[0] {
+            Err(CodexErr::QuotaExceeded) => {}
+            other => panic!("unexpected quota event: {other:?}"),
+        }
     }
 }

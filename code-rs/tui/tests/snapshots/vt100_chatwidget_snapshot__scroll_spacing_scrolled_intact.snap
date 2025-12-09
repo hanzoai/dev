@@ -5,6 +5,7 @@ expression: scrolled
  +----------------------------------------------------------------------------+
  |                                    Code                                    |
  +----------------------------------------------------------------------------+
+ •
    Here is another paragraph to expand height.
 
    Yet another paragraph for good measure.
@@ -19,9 +20,8 @@ expression: scrolled
 
  › Fourth user prompt to guarantee overflow beyond the viewport height.
 
-   Assistant reply number four with extra padding to pad out the history list
 
  +----------------------------------------------------------------------------+
  | What can I code for you today?                                             |
  +----------------------------------------------------------------------------+
-   Read Only  (Shift+Tab change)                       Ctrl+H help  •  API key
+ Read Only  (Shift+Tab change)                        Ctrl+G guide  •  API key

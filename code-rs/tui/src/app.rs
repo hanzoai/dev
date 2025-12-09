@@ -175,7 +175,7 @@ impl FrameTimer {
 }
 
 struct LoginFlowState {
-    shutdown: code_login::ShutdownHandle,
+    shutdown: Option<code_login::ShutdownHandle>,
     join_handle: tokio::task::JoinHandle<()>,
 }
 
@@ -203,6 +203,8 @@ pub(crate) struct App<'a> {
     /// Set if a redraw request arrived while another frame was in flight. Ensures we
     /// queue one more frame immediately after the current draw completes.
     post_frame_redraw: Arc<AtomicBool>,
+    /// Count of consecutive redraws skipped because stdout/PTY was not writable.
+    stdout_backpressure_skips: u32,
     /// Shared scheduler for future animation frames. Ensures the shortest
     /// requested interval wins while preserving later deadlines.
     frame_timer: Arc<FrameTimer>,
@@ -520,6 +522,7 @@ impl App<'_> {
             pending_redraw,
             redraw_inflight,
             post_frame_redraw,
+            stdout_backpressure_skips: 0,
             frame_timer,
             input_running,
             enhanced_keys_supported,
@@ -1164,15 +1167,42 @@ impl App<'_> {
                 AppEvent::RequestRedraw => {
                     self.schedule_redraw();
                 }
+                AppEvent::UpdatePlanningUseChatModel(use_chat) => {
+                    if let AppState::Chat { widget } = &mut self.app_state {
+                        widget.set_planning_use_chat_model(use_chat);
+                    }
+                    self.schedule_redraw();
+                }
                 AppEvent::FlushPendingExecEnds => {
                     if let AppState::Chat { widget } = &mut self.app_state {
                         widget.flush_pending_exec_ends();
                     }
                     self.schedule_redraw();
                 }
+                AppEvent::FlushInterruptsIfIdle => {
+                    if let AppState::Chat { widget } = &mut self.app_state {
+                        widget.flush_interrupts_if_stream_idle();
+                    }
+                }
                 AppEvent::Redraw => {
                     if self.timing_enabled { self.timing.on_redraw_begin(); }
                     let t0 = Instant::now();
+                    if !tui::stdout_ready_for_writes() {
+                        self.stdout_backpressure_skips = self.stdout_backpressure_skips.saturating_add(1);
+                        if self.stdout_backpressure_skips == 1
+                            || self.stdout_backpressure_skips % 25 == 0
+                        {
+                            tracing::warn!(
+                                skips = self.stdout_backpressure_skips,
+                                "stdout not writable; deferring redraw to avoid blocking"
+                            );
+                        }
+                        self.redraw_inflight.store(false, Ordering::Release);
+                        self.app_event_tx
+                            .send(AppEvent::ScheduleFrameIn(Duration::from_millis(120)));
+                        continue;
+                    }
+                    self.stdout_backpressure_skips = 0;
                     let draw_result = std::io::stdout().sync_update(|_| self.draw_next_frame(terminal));
                     self.redraw_inflight.store(false, Ordering::Release);
                     let needs_follow_up = self.post_frame_redraw.swap(false, Ordering::AcqRel);
@@ -1478,6 +1508,18 @@ impl App<'_> {
                                     widget.toggle_reasoning_visibility();
                                 }
                                 AppState::Onboarding { .. } => {}
+                            }
+                        }
+                        KeyEvent {
+                            code: KeyCode::Char('c'),
+                            modifiers,
+                            kind: KeyEventKind::Press,
+                            ..
+                        } if modifiers.contains(crossterm::event::KeyModifiers::CONTROL)
+                            && modifiers.contains(crossterm::event::KeyModifiers::SHIFT) =>
+                        {
+                            if let AppState::Chat { widget } = &mut self.app_state {
+                                widget.toggle_context_expansion();
                             }
                         }
                         KeyEvent {
@@ -1831,9 +1873,10 @@ impl App<'_> {
                     AppState::Onboarding { .. } => {}
                 },
                 AppEvent::AutoCoordinatorDecision {
+                    seq,
                     status,
-                    progress_past,
-                    progress_current,
+                    status_title,
+                    status_sent_to_user,
                     goal,
                     cli,
                     agents_timing,
@@ -1842,9 +1885,10 @@ impl App<'_> {
                 } => {
                     if let AppState::Chat { widget } = &mut self.app_state {
                         widget.auto_handle_decision(
+                            seq,
                             status,
-                            progress_past,
-                            progress_current,
+                            status_title,
+                            status_sent_to_user,
                             goal,
                             cli,
                             agents_timing,
@@ -1866,22 +1910,34 @@ impl App<'_> {
                         widget.auto_handle_thinking(delta, summary_index);
                     }
                 }
+                AppEvent::AutoCoordinatorAction { message } => {
+                    if let AppState::Chat { widget } = &mut self.app_state {
+                        widget.auto_handle_action(message);
+                    }
+                }
                 AppEvent::AutoCoordinatorTokenMetrics {
                     total_usage,
                     last_turn_usage,
                     turn_count,
+                    duplicate_items,
+                    replay_updates,
                 } => {
                     if let AppState::Chat { widget } = &mut self.app_state {
                         widget.auto_handle_token_metrics(
                             total_usage,
                             last_turn_usage,
                             turn_count,
+                            duplicate_items,
+                            replay_updates,
                         );
                     }
                 }
-                AppEvent::AutoCoordinatorCompactedHistory { conversation } => {
+                AppEvent::AutoCoordinatorStopAck => {
+                    // Coordinator acknowledged stop; no additional action required currently.
+                }
+                AppEvent::AutoCoordinatorCompactedHistory { conversation, show_notice } => {
                     if let AppState::Chat { widget } = &mut self.app_state {
-                        widget.auto_handle_compacted_history(conversation);
+                        widget.auto_handle_compacted_history(conversation, show_notice);
                     }
                 }
                 AppEvent::AutoCoordinatorCountdown { countdown_id, seconds_left } => {
@@ -1952,6 +2008,11 @@ impl App<'_> {
                         SlashCommand::Merge => {
                             if let AppState::Chat { widget } = &mut self.app_state {
                                 widget.handle_merge_command();
+                            }
+                        }
+                        SlashCommand::Push => {
+                            if let AppState::Chat { widget } = &mut self.app_state {
+                                widget.handle_push_command();
                             }
                         }
                         SlashCommand::Resume => {
@@ -2077,11 +2138,6 @@ impl App<'_> {
                                 widget.handle_agents_command(command_args);
                             }
                         }
-                        SlashCommand::Github => {
-                            if let AppState::Chat { widget } = &mut self.app_state {
-                                widget.handle_github_command(command_args);
-                            }
-                        }
                         SlashCommand::Validation => {
                             if let AppState::Chat { widget } = &mut self.app_state {
                                 widget.handle_validation_command(command_args);
@@ -2120,7 +2176,7 @@ impl App<'_> {
                         }
                         SlashCommand::Prompts => {
                             if let AppState::Chat { widget } = &mut self.app_state {
-                                widget.add_prompts_output();
+                                widget.handle_prompts_command(command_args.as_str());
                             }
                         }
                         SlashCommand::Perf => {
@@ -2213,6 +2269,16 @@ impl App<'_> {
                         widget.switch_cwd(target, initial_prompt);
                     }
                 }
+                AppEvent::ResumePickerLoaded { cwd, candidates } => {
+                    if let AppState::Chat { widget } = &mut self.app_state {
+                        widget.present_resume_picker(cwd, candidates);
+                    }
+                }
+                AppEvent::ResumePickerLoadFailed { message } => {
+                    if let AppState::Chat { widget } = &mut self.app_state {
+                        widget.handle_resume_picker_load_failed(message);
+                    }
+                }
                 AppEvent::ResumeFrom(path) => {
                     // Replace the current chat widget with a new one configured to resume
                     let mut cfg = self.config.clone();
@@ -2245,19 +2311,80 @@ impl App<'_> {
                         widget.show_agent_editor_ui(name);
                     }
                 }
+                AppEvent::ShowAgentEditorNew => {
+                    if let AppState::Chat { widget } = &mut self.app_state {
+                        widget.ensure_settings_overlay_section(SettingsSection::Agents);
+                        widget.show_agent_editor_new_ui();
+                    }
+                }
                 AppEvent::UpdateModelSelection { model, effort } => {
                     if let AppState::Chat { widget } = &mut self.app_state {
                         widget.apply_model_selection(model, effort);
                     }
                 }
+                AppEvent::UpdateReviewModelSelection { model, effort } => {
+                    if let AppState::Chat { widget } = &mut self.app_state {
+                        widget.apply_review_model_selection(model, effort);
+                    }
+                }
+                AppEvent::UpdateReviewResolveModelSelection { model, effort } => {
+                    if let AppState::Chat { widget } = &mut self.app_state {
+                        widget.apply_review_resolve_model_selection(model, effort);
+                    }
+                }
+                AppEvent::UpdateReviewUseChatModel(use_chat) => {
+                    if let AppState::Chat { widget } = &mut self.app_state {
+                        widget.set_review_use_chat_model(use_chat);
+                    }
+                }
+                AppEvent::UpdateReviewResolveUseChatModel(use_chat) => {
+                    if let AppState::Chat { widget } = &mut self.app_state {
+                        widget.set_review_resolve_use_chat_model(use_chat);
+                    }
+                }
+                AppEvent::UpdatePlanningModelSelection { model, effort } => {
+                    if let AppState::Chat { widget } = &mut self.app_state {
+                        widget.apply_planning_model_selection(model, effort);
+                    }
+                }
+                AppEvent::UpdateAutoDriveModelSelection { model, effort } => {
+                    if let AppState::Chat { widget } = &mut self.app_state {
+                        widget.apply_auto_drive_model_selection(model, effort);
+                    }
+                }
+                AppEvent::UpdateAutoDriveUseChatModel(use_chat) => {
+                    if let AppState::Chat { widget } = &mut self.app_state {
+                        widget.set_auto_drive_use_chat_model(use_chat);
+                    }
+                }
+                AppEvent::UpdateAutoReviewModelSelection { model, effort } => {
+                    if let AppState::Chat { widget } = &mut self.app_state {
+                        widget.apply_auto_review_model_selection(model, effort);
+                    }
+                }
+                AppEvent::UpdateAutoReviewUseChatModel(use_chat) => {
+                    if let AppState::Chat { widget } = &mut self.app_state {
+                        widget.set_auto_review_use_chat_model(use_chat);
+                    }
+                }
+                AppEvent::UpdateAutoReviewResolveModelSelection { model, effort } => {
+                    if let AppState::Chat { widget } = &mut self.app_state {
+                        widget.apply_auto_review_resolve_model_selection(model, effort);
+                    }
+                }
+                AppEvent::UpdateAutoReviewResolveUseChatModel(use_chat) => {
+                    if let AppState::Chat { widget } = &mut self.app_state {
+                        widget.set_auto_review_resolve_use_chat_model(use_chat);
+                    }
+                }
+                AppEvent::ModelSelectionClosed { target, accepted } => {
+                    if let AppState::Chat { widget } = &mut self.app_state {
+                        widget.handle_model_selection_closed(target, accepted);
+                    }
+                }
                 AppEvent::UpdateTextVerbosity(new_verbosity) => {
                     if let AppState::Chat { widget } = &mut self.app_state {
                         widget.set_text_verbosity(new_verbosity);
-                    }
-                }
-                AppEvent::UpdateGithubWatcher(enabled) => {
-                    if let AppState::Chat { widget } = &mut self.app_state {
-                        widget.set_github_watcher(enabled);
                     }
                 }
                 AppEvent::UpdateTuiNotifications(enabled) => {
@@ -2321,9 +2448,14 @@ impl App<'_> {
                         widget.show_new_subagent_editor();
                     }
                 }
-                AppEvent::UpdateAgentConfig { name, enabled, args_read_only, args_write, instructions, command } => {
+                AppEvent::UpdateAgentConfig { name, enabled, args_read_only, args_write, instructions, description, command } => {
                     if let AppState::Chat { widget } = &mut self.app_state {
-                        widget.apply_agent_update(&name, enabled, args_read_only, args_write, instructions, command);
+                        widget.apply_agent_update(&name, enabled, args_read_only, args_write, instructions, description, command);
+                    }
+                }
+                AppEvent::AgentValidationFinished { name, result, attempt_id } => {
+                    if let AppState::Chat { widget } = &mut self.app_state {
+                        widget.handle_agent_validation_finished(&name, attempt_id, result);
                     }
                 }
                 AppEvent::PrefillComposer(text) => {
@@ -2336,14 +2468,64 @@ impl App<'_> {
                         widget.submit_text_message_with_preface(visible, preface);
                     }
                 }
+                AppEvent::SubmitHiddenTextWithPreface { agent_text, preface } => {
+                    if let AppState::Chat { widget } = &mut self.app_state {
+                        widget.submit_hidden_text_message_with_preface(agent_text, preface);
+                    }
+                }
                 AppEvent::RunReviewCommand(args) => {
                     if let AppState::Chat { widget } = &mut self.app_state {
                         widget.handle_review_command(args);
                     }
                 }
-                AppEvent::ToggleReviewAutoResolve => {
+                AppEvent::UpdateReviewAutoResolveEnabled(enabled) => {
                     if let AppState::Chat { widget } = &mut self.app_state {
-                        widget.toggle_review_auto_resolve();
+                        widget.set_review_auto_resolve_enabled(enabled);
+                    }
+                }
+                AppEvent::UpdateAutoReviewEnabled(enabled) => {
+                    if let AppState::Chat { widget } = &mut self.app_state {
+                        widget.set_auto_review_enabled(enabled);
+                    }
+                }
+                AppEvent::UpdateReviewAutoResolveAttempts(attempts) => {
+                    if let AppState::Chat { widget } = &mut self.app_state {
+                        widget.set_review_auto_resolve_attempts(attempts);
+                    }
+                }
+                AppEvent::UpdateAutoReviewFollowupAttempts(attempts) => {
+                    if let AppState::Chat { widget } = &mut self.app_state {
+                        widget.set_auto_review_followup_attempts(attempts);
+                    }
+                }
+                AppEvent::ShowReviewModelSelector => {
+                    if let AppState::Chat { widget } = &mut self.app_state {
+                        widget.show_review_model_selector();
+                    }
+                }
+                AppEvent::ShowReviewResolveModelSelector => {
+                    if let AppState::Chat { widget } = &mut self.app_state {
+                        widget.show_review_resolve_model_selector();
+                    }
+                }
+                AppEvent::ShowPlanningModelSelector => {
+                    if let AppState::Chat { widget } = &mut self.app_state {
+                        widget.show_planning_model_selector();
+                    }
+                }
+                AppEvent::ShowAutoDriveModelSelector => {
+                    if let AppState::Chat { widget } = &mut self.app_state {
+                        widget.show_auto_drive_model_selector();
+                    }
+                }
+                AppEvent::ShowAutoReviewModelSelector => {
+                    if let AppState::Chat { widget } = &mut self.app_state {
+                        widget.show_auto_review_model_selector();
+                    }
+                }
+                AppEvent::ShowAutoReviewResolveModelSelector => {
+                    if let AppState::Chat { widget } = &mut self.app_state {
+                        widget.show_auto_review_resolve_model_selector();
                     }
                 }
                 AppEvent::RunReviewWithScope {
@@ -2360,6 +2542,25 @@ impl App<'_> {
                             preparation_label,
                             metadata,
                             auto_resolve,
+                        );
+                    }
+                }
+                AppEvent::BackgroundReviewStarted { worktree_path, branch, agent_id, snapshot } => {
+                    if let AppState::Chat { widget } = &mut self.app_state {
+                        widget.on_background_review_started(worktree_path, branch, agent_id, snapshot);
+                    }
+                }
+                AppEvent::BackgroundReviewFinished { worktree_path, branch, has_findings, findings, summary, error, agent_id, snapshot } => {
+                    if let AppState::Chat { widget } = &mut self.app_state {
+                        widget.on_background_review_finished(
+                            worktree_path,
+                            branch,
+                            has_findings,
+                            findings,
+                            summary.clone(),
+                            error.clone(),
+                            agent_id.clone(),
+                            snapshot.clone(),
                         );
                     }
                 }
@@ -2678,7 +2879,9 @@ impl App<'_> {
                         }
 
                         if let Some(flow) = self.login_flow.take() {
-                            flow.shutdown.shutdown();
+                            if let Some(shutdown) = flow.shutdown {
+                                shutdown.shutdown();
+                            }
                             flow.join_handle.abort();
                         }
 
@@ -2700,7 +2903,10 @@ impl App<'_> {
                                         .map_err(|e| e.to_string());
                                     tx.send(AppEvent::LoginChatGptComplete { result });
                                 });
-                                self.login_flow = Some(LoginFlowState { shutdown, join_handle });
+                                self.login_flow = Some(LoginFlowState {
+                                    shutdown: Some(shutdown),
+                                    join_handle,
+                                });
                             }
                             Err(err) => {
                                 widget.notify_login_chatgpt_failed(format!(
@@ -2710,18 +2916,60 @@ impl App<'_> {
                         }
                     }
                 }
+                AppEvent::LoginStartDeviceCode => {
+                    if let AppState::Chat { widget } = &mut self.app_state {
+                        if !widget.login_add_view_active() {
+                            continue 'main;
+                        }
+
+                        if let Some(flow) = self.login_flow.take() {
+                            if let Some(shutdown) = flow.shutdown {
+                                shutdown.shutdown();
+                            }
+                            flow.join_handle.abort();
+                        }
+
+                        widget.notify_login_device_code_pending();
+
+                        let opts = ServerOptions::new(
+                            self.config.code_home.clone(),
+                            code_login::CLIENT_ID.to_string(),
+                            self.config.responses_originator_header.clone(),
+                        );
+                        let tx = self.app_event_tx.clone();
+                        let join_handle = tokio::spawn(async move {
+                            match code_login::DeviceCodeSession::start(opts).await {
+                                Ok(session) => {
+                                    let authorize_url = session.authorize_url();
+                                    let user_code = session.user_code().to_string();
+                                    let _ = tx.send(AppEvent::LoginDeviceCodeReady { authorize_url, user_code });
+                                    let result = session.wait_for_tokens().await.map_err(|e| e.to_string());
+                                    let _ = tx.send(AppEvent::LoginDeviceCodeComplete { result });
+                                }
+                                Err(err) => {
+                                    let _ = tx.send(AppEvent::LoginDeviceCodeFailed { message: err.to_string() });
+                                }
+                            }
+                        });
+                        self.login_flow = Some(LoginFlowState { shutdown: None, join_handle });
+                    }
+                }
                 AppEvent::LoginCancelChatGpt => {
                     if let Some(flow) = self.login_flow.take() {
-                        flow.shutdown.shutdown();
+                        if let Some(shutdown) = flow.shutdown {
+                            shutdown.shutdown();
+                        }
                         flow.join_handle.abort();
                     }
                     if let AppState::Chat { widget } = &mut self.app_state {
-                        widget.notify_login_chatgpt_cancelled();
+                        widget.notify_login_flow_cancelled();
                     }
                 }
                 AppEvent::LoginChatGptComplete { result } => {
                     if let Some(flow) = self.login_flow.take() {
-                        flow.shutdown.shutdown();
+                        if let Some(shutdown) = flow.shutdown {
+                            shutdown.shutdown();
+                        }
                         // Allow the task to finish naturally; if still running, abort.
                         if !flow.join_handle.is_finished() {
                             flow.join_handle.abort();
@@ -2730,6 +2978,38 @@ impl App<'_> {
 
                     if let AppState::Chat { widget } = &mut self.app_state {
                         widget.notify_login_chatgpt_complete(result);
+                    }
+                }
+                AppEvent::LoginDeviceCodeReady { authorize_url, user_code } => {
+                    if let AppState::Chat { widget } = &mut self.app_state {
+                        widget.notify_login_device_code_ready(authorize_url, user_code);
+                    }
+                }
+                AppEvent::LoginDeviceCodeFailed { message } => {
+                    if let Some(flow) = self.login_flow.take() {
+                        if let Some(shutdown) = flow.shutdown {
+                            shutdown.shutdown();
+                        }
+                        if !flow.join_handle.is_finished() {
+                            flow.join_handle.abort();
+                        }
+                    }
+                    if let AppState::Chat { widget } = &mut self.app_state {
+                        widget.notify_login_device_code_failed(message);
+                    }
+                }
+                AppEvent::LoginDeviceCodeComplete { result } => {
+                    if let Some(flow) = self.login_flow.take() {
+                        if let Some(shutdown) = flow.shutdown {
+                            shutdown.shutdown();
+                        }
+                        if !flow.join_handle.is_finished() {
+                            flow.join_handle.abort();
+                        }
+                    }
+
+                    if let AppState::Chat { widget } = &mut self.app_state {
+                        widget.notify_login_device_code_complete(result);
                     }
                 }
                 AppEvent::LoginUsingChatGptChanged { using_chatgpt_auth } => {

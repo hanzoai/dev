@@ -3,7 +3,6 @@
 use super::{ChatWidget, ExecCallId, RunningCommand};
 use crate::app_event::{AppEvent, AutoContinueMode};
 use crate::app_event_sender::AppEventSender;
-use crate::auto_drive_strings;
 use crate::history_cell::{self, HistoryCellType};
 use crate::markdown_render::render_markdown_text;
 use crate::tui::TerminalInfo;
@@ -28,11 +27,18 @@ static TEST_RUNTIME: Lazy<Runtime> = Lazy::new(|| {
         .expect("test runtime")
 });
 
+pub fn enter_test_runtime_guard() -> tokio::runtime::EnterGuard<'static> {
+    TEST_RUNTIME.enter()
+}
+
 pub struct ChatWidgetHarness {
     chat: ChatWidget<'static>,
     events: Receiver<AppEvent>,
     helper_seq: u64,
 }
+
+// Use a deterministic Auto Drive placeholder so VT100 snapshots stay stable.
+const TEST_AUTO_DRIVE_PLACEHOLDER: &str = "Mapping strategy…";
 
 #[derive(Debug, Clone, Copy)]
 pub struct LayoutMetrics {
@@ -68,6 +74,10 @@ impl ChatWidgetHarness {
 
         unsafe {
             std::env::set_var("CODEX_TUI_FORCE_MINIMAL_HEADER", "1");
+        }
+
+        unsafe {
+            std::env::set_var("CODE_TUI_TEST_MODE", "1");
         }
 
         let cfg = Config::load_from_base_config_with_overrides(
@@ -111,7 +121,7 @@ impl ChatWidgetHarness {
         self.chat.handle_code_event(event);
     }
 
-    pub(crate) fn flush_into_widget(&mut self) {
+    pub fn flush_into_widget(&mut self) {
         let mut queue: VecDeque<AppEvent> = self
             .drain_events()
             .into_iter()
@@ -139,6 +149,7 @@ impl ChatWidgetHarness {
                     args_read_only,
                     args_write,
                     instructions,
+                    description,
                     command,
                 } => {
                     let runtime = &*TEST_RUNTIME;
@@ -149,8 +160,21 @@ impl ChatWidgetHarness {
                         args_read_only,
                         args_write,
                         instructions,
+                        description,
                         command,
                     );
+                }
+                AppEvent::AgentValidationFinished { name, result, attempt_id } => {
+                    self.chat.handle_agent_validation_finished(&name, attempt_id, result);
+                }
+                AppEvent::UpdateReviewAutoResolveEnabled(enabled) => {
+                    self.chat.set_review_auto_resolve_enabled(enabled);
+                }
+                AppEvent::UpdateReviewAutoResolveAttempts(attempts) => {
+                    self.chat.set_review_auto_resolve_attempts(attempts);
+                }
+                AppEvent::FlushInterruptsIfIdle => {
+                    self.chat.flush_interrupts_if_stream_idle();
                 }
                 AppEvent::ShowAgentsOverview => {
                     self.chat.ensure_settings_overlay_section(SettingsSection::Agents);
@@ -193,6 +217,11 @@ impl ChatWidgetHarness {
         }
     }
 
+    pub fn drive_commit_tick(&mut self) {
+        self.chat.on_commit_tick();
+        self.flush_into_widget();
+    }
+
     pub fn send_key(&mut self, key_event: KeyEvent) {
         self.chat.handle_key_event(key_event);
         self.flush_into_widget();
@@ -206,8 +235,39 @@ impl ChatWidgetHarness {
         out
     }
 
+    pub fn take_scheduled_frame_events(&self) -> usize {
+        self.drain_events()
+            .into_iter()
+            .filter(|event| matches!(event, AppEvent::ScheduleFrameIn(_)))
+            .count()
+    }
+
+    pub fn bottom_spacer_lines(&self) -> u16 {
+        self.chat.history_render.bottom_spacer_lines_for_test()
+    }
+
+    pub fn history_viewport_height(&self) -> u16 {
+        self.chat.layout.last_history_viewport_height.get()
+    }
+
+    pub fn pending_bottom_spacer_request(&self) -> Option<u16> {
+        self.chat
+            .history_render
+            .pending_bottom_spacer_lines_for_test()
+    }
+
     pub(crate) fn chat(&mut self) -> &mut ChatWidget<'static> {
         &mut self.chat
+    }
+
+    pub fn open_auto_drive_settings(&mut self) {
+        self.chat().show_auto_drive_settings();
+        self.flush_into_widget();
+    }
+
+    pub fn close_auto_drive_settings(&mut self) {
+        self.chat().close_auto_drive_settings();
+        self.flush_into_widget();
     }
 
     pub(crate) fn with_chat<R>(&mut self, f: impl FnOnce(&mut ChatWidget<'static>) -> R) -> R {
@@ -216,10 +276,62 @@ impl ChatWidgetHarness {
         f(&mut self.chat)
     }
 
+    #[cfg(any(test, feature = "test-helpers"))]
+    pub fn enable_context_ui(&mut self) {
+        let runtime = &*TEST_RUNTIME;
+        let _guard = runtime.enter();
+        self.chat.config.env_ctx_v2 = true;
+    }
+
+    pub fn toggle_context_expansion(&mut self) {
+        self.chat.toggle_context_expansion();
+        self.flush_into_widget();
+    }
+
     pub fn open_agents_settings_overlay(&mut self) {
         self.chat.ensure_settings_overlay_section(SettingsSection::Agents);
         self.chat.show_agents_overview_ui();
         self.flush_into_widget();
+    }
+
+    pub fn open_validation_settings_overlay(&mut self) {
+        self.chat.ensure_settings_overlay_section(SettingsSection::Validation);
+        self.chat.show_settings_overlay(Some(SettingsSection::Validation));
+        self.flush_into_widget();
+    }
+
+    pub fn open_review_settings_overlay(&mut self) {
+        self.chat.ensure_settings_overlay_section(SettingsSection::Review);
+        self.chat.show_settings_overlay(Some(SettingsSection::Review));
+        self.flush_into_widget();
+    }
+
+    pub fn review_auto_review_enabled(&mut self) -> bool {
+        self.flush_into_widget();
+        self.chat.config.tui.auto_review_enabled
+    }
+
+    pub fn review_auto_review_followups(&mut self) -> u32 {
+        self.flush_into_widget();
+        self.chat
+            .config
+            .auto_drive
+            .auto_review_followup_attempts
+            .get()
+    }
+
+    pub fn review_auto_resolve_enabled(&mut self) -> bool {
+        self.flush_into_widget();
+        self.chat.config.tui.review_auto_resolve
+    }
+
+    pub fn review_auto_resolve_attempts(&mut self) -> u32 {
+        self.flush_into_widget();
+        self.chat
+            .config
+            .auto_drive
+            .auto_resolve_review_attempts
+            .get()
     }
 
     pub fn open_settings_overlay_overview(&mut self) {
@@ -337,7 +449,7 @@ impl ChatWidgetHarness {
         let goal = goal.into();
         {
             let chat = self.chat();
-            let placeholder = auto_drive_strings::next_auto_drive_phrase().to_string();
+            let placeholder = TEST_AUTO_DRIVE_PLACEHOLDER.to_string();
             let mode = continue_mode.into_internal();
             chat.auto_state.reset();
             chat.auto_state.elapsed_override = Some(Duration::from_secs(1));
@@ -352,14 +464,14 @@ impl ChatWidgetHarness {
             chat.auto_state.set_coordinator_waiting(true);
             chat.auto_state.placeholder_phrase = Some(placeholder);
             chat.auto_state.current_display_line = None;
-            chat.auto_state.current_progress_current = None;
-            chat.auto_state.current_progress_past = None;
+            chat.auto_state.current_status_title = None;
+            chat.auto_state.current_status_sent_to_user = None;
             chat.auto_state.current_cli_prompt = None;
             chat.auto_state.on_complete_review();
             chat.auto_state.last_run_summary = None;
             chat.auto_state.last_decision_summary = None;
-            chat.auto_state.last_decision_progress_past = None;
-            chat.auto_state.last_decision_progress_current = None;
+            chat.auto_state.last_decision_status_sent_to_user = None;
+            chat.auto_state.last_decision_status_title = None;
             chat.auto_state.current_summary = None;
             chat.auto_state.current_summary_index = None;
             chat.auto_state.current_reasoning_title = None;
@@ -373,8 +485,8 @@ impl ChatWidgetHarness {
     pub fn auto_drive_set_waiting_for_response(
         &mut self,
         display: impl Into<String>,
-        progress_current: Option<String>,
-        progress_past: Option<String>,
+        status_title: Option<String>,
+        status_sent_to_user: Option<String>,
     ) {
         {
             let chat = self.chat();
@@ -384,10 +496,10 @@ impl ChatWidgetHarness {
             chat.auto_state.current_display_line = Some(display.into());
             chat.auto_state.current_display_is_summary = false;
             chat.auto_state.placeholder_phrase = None;
-            chat.auto_state.current_progress_current = progress_current.clone();
-            chat.auto_state.current_progress_past = progress_past.clone();
-            chat.auto_state.last_decision_progress_current = progress_current;
-            chat.auto_state.last_decision_progress_past = progress_past;
+            chat.auto_state.current_status_title = status_title.clone();
+            chat.auto_state.current_status_sent_to_user = status_sent_to_user.clone();
+            chat.auto_state.last_decision_status_title = status_title;
+            chat.auto_state.last_decision_status_sent_to_user = status_sent_to_user;
             chat.auto_state.last_decision_summary = None;
             chat.auto_rebuild_live_ring();
             chat.request_redraw();
@@ -425,8 +537,8 @@ impl ChatWidgetHarness {
             let chat = self.chat();
             chat.auto_state.on_prompt_submitted();
             chat.auto_state.set_coordinator_waiting(false);
-            chat.auto_state.current_progress_current = None;
-            chat.auto_state.current_progress_past = None;
+            chat.auto_state.current_status_title = None;
+            chat.auto_state.current_status_sent_to_user = None;
             chat.refresh_auto_drive_visuals();
             chat.request_redraw();
         }
@@ -487,7 +599,11 @@ impl ChatWidgetHarness {
             chat.auto_state.seconds_remaining = countdown.unwrap_or(0);
             if chat.auto_state.awaiting_coordinator_submit() && !chat.auto_state.is_paused_manual() {
                 if let Some(seconds) = countdown {
-                    chat.auto_spawn_countdown(chat.auto_state.countdown_id, seconds);
+                    chat.auto_spawn_countdown(
+                        chat.auto_state.countdown_id,
+                        chat.auto_state.countdown_decision_seq,
+                        seconds,
+                    );
                 } else {
                     let _ = chat.auto_handle_countdown(chat.auto_state.countdown_id, 0);
                 }
@@ -530,6 +646,19 @@ impl ChatWidgetHarness {
                 chat.auto_state.current_display_is_summary = false;
             }
             chat.auto_state.placeholder_phrase = None;
+            chat.auto_rebuild_live_ring();
+            chat.request_redraw();
+        }
+        self.flush_into_widget();
+    }
+
+    pub fn simulate_settings_toggle_during_auto(&mut self) {
+        {
+            let chat = self.chat();
+            // Simulate opening and closing settings during the AutoDrive intro animation.
+            // This exercises the auto_rebuild_live_ring path that previously left the
+            // header partially rendered and scrambled.
+            chat.history_render.invalidate_all();
             chat.auto_rebuild_live_ring();
             chat.request_redraw();
         }
@@ -606,6 +735,11 @@ pub fn assert_has_insert_history(events: &[AppEvent]) {
         matches!(
             event,
             AppEvent::InsertHistory(_) | AppEvent::InsertHistoryWithKind { .. } | AppEvent::InsertFinalAnswer { .. }
+        ) || matches!(
+            event,
+            AppEvent::CodexEvent(ev)
+                if crate::chatwidget::is_test_mode()
+                    && matches!(ev.msg, EventMsg::SessionConfigured(_))
         )
     });
     assert!(found, "expected InsertHistory-like event, got: {events:#?}");

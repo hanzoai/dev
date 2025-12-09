@@ -1,6 +1,30 @@
 use super::ChatWidget;
 use crossterm::event::{KeyCode, KeyEvent, KeyEventKind};
 
+pub(super) fn handle_settings_paste(chat: &mut ChatWidget<'_>, text: String) -> bool {
+    if chat.settings.overlay.is_none() {
+        return false;
+    }
+
+    let overlay = match chat.settings.overlay.as_mut() {
+        Some(overlay) => overlay,
+        None => return false,
+    };
+
+    if overlay.is_menu_active() || overlay.is_help_visible() {
+        return false;
+    }
+
+    if let Some(content) = overlay.active_content_mut() {
+        if content.handle_paste(text) {
+            chat.request_redraw();
+            return true;
+        }
+    }
+
+    false
+}
+
 /// Handle key presses for the full-screen settings overlay. Returns true when the
 /// key has been consumed (overlay stays modal while active).
 pub(super) fn handle_settings_key(chat: &mut ChatWidget<'_>, key_event: KeyEvent) -> bool {
@@ -78,15 +102,7 @@ pub(super) fn handle_settings_key(chat: &mut ChatWidget<'_>, key_event: KeyEvent
         return handled;
     }
 
-    match key_event.code {
-        KeyCode::Esc if key_event.modifiers.is_empty() => {
-            overlay.set_mode_menu(None);
-            chat.request_redraw();
-            return true;
-        }
-        _ => {}
-    }
-
+    // Give the active content first chance to handle keys (including Esc)
     let mut handled_by_content = false;
     let mut should_close = false;
 
@@ -105,6 +121,15 @@ pub(super) fn handle_settings_key(chat: &mut ChatWidget<'_>, key_event: KeyEvent
             chat.close_settings_overlay();
         }
         return true;
+    }
+
+    match key_event.code {
+        KeyCode::Esc if key_event.modifiers.is_empty() => {
+            overlay.set_mode_menu(None);
+            chat.request_redraw();
+            return true;
+        }
+        _ => {}
     }
 
     let mut handled = true;

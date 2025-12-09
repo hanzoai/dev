@@ -207,6 +207,7 @@ pub async fn upsert_agent_config(
     args_read_only: Option<&[String]>,
     args_write: Option<&[String]>,
     instructions: Option<&str>,
+    description: Option<&str>,
     command: Option<&str>,
 ) -> Result<()> {
     let config_path = code_home.join(CONFIG_TOML_FILE);
@@ -224,7 +225,7 @@ pub async fn upsert_agent_config(
     // Search existing [[agents]] for a case‑insensitive name match
     let mut found = false;
     if let Some(item) = doc.as_table().get("agents").cloned() {
-        let Some(arr) = item.as_array_of_tables() else { /* not an array, treat as missing */ return write_new_or_append(doc, code_home, config_path, name, enabled, args, args_read_only, args_write, instructions, command).await };
+        let Some(arr) = item.as_array_of_tables() else { /* not an array, treat as missing */ return write_new_or_append(doc, code_home, config_path, name, enabled, args, args_read_only, args_write, instructions, description, command).await };
         let mut new_arr = toml_edit::ArrayOfTables::new();
         for tbl_ref in arr.iter() {
             let mut tbl = tbl_ref.clone();
@@ -246,6 +247,13 @@ pub async fn upsert_agent_config(
                     if instr.trim().is_empty() { tbl.remove("instructions"); }
                     else { tbl["instructions"] = toml_edit::value(instr.to_string()); }
                 }
+                if let Some(desc) = description {
+                    if desc.trim().is_empty() {
+                        tbl.remove("description");
+                    } else {
+                        tbl["description"] = toml_edit::value(desc.to_string());
+                    }
+                }
                 if let Some(cmd) = command {
                     if cmd.trim().is_empty() {
                         tbl.remove("command");
@@ -262,7 +270,7 @@ pub async fn upsert_agent_config(
 
     if !found {
         // Append a new entry safely
-        append_agent_entry(&mut doc, name, enabled, args, args_read_only, args_write, instructions, command);
+        append_agent_entry(&mut doc, name, enabled, args, args_read_only, args_write, instructions, description, command);
     }
 
     // Write back atomically
@@ -281,6 +289,7 @@ fn append_agent_entry(
     args_read_only: Option<&[String]>,
     args_write: Option<&[String]>,
     instructions: Option<&str>,
+    description: Option<&str>,
     command: Option<&str>,
 ) {
     let mut t = toml_edit::Table::new();
@@ -291,6 +300,7 @@ fn append_agent_entry(
     if let Some(ro) = args_read_only { t["args-read-only"] = toml_edit::value(toml_edit::Array::from_iter(ro.iter().cloned())); }
     if let Some(w) = args_write { t["args-write"] = toml_edit::value(toml_edit::Array::from_iter(w.iter().cloned())); }
     if let Some(instr) = instructions { if !instr.trim().is_empty() { t["instructions"] = toml_edit::value(instr.to_string()); } }
+    if let Some(desc) = description { if !desc.trim().is_empty() { t["description"] = toml_edit::value(desc.to_string()); } }
     if let Some(cmd) = command {
         if !cmd.trim().is_empty() {
             t["command"] = toml_edit::value(cmd.to_string());
@@ -316,9 +326,10 @@ async fn write_new_or_append(
     args_read_only: Option<&[String]>,
     args_write: Option<&[String]>,
     instructions: Option<&str>,
+    description: Option<&str>,
     command: Option<&str>,
 ) -> Result<()> {
-    append_agent_entry(&mut doc, name, enabled, args, args_read_only, args_write, instructions, command);
+    append_agent_entry(&mut doc, name, enabled, args, args_read_only, args_write, instructions, description, command);
     let tmp_file = NamedTempFile::new_in(code_home)?;
     tokio::fs::write(tmp_file.path(), doc.to_string()).await?;
     tmp_file.persist(config_path)?;
@@ -431,7 +442,7 @@ mod tests {
             code_home,
             None,
             &[
-                (&[CONFIG_KEY_MODEL], "gpt-5-codex"),
+                (&[CONFIG_KEY_MODEL], "gpt-5.1-codex"),
                 (&[CONFIG_KEY_EFFORT], "high"),
             ],
         )
@@ -445,7 +456,7 @@ mod tests {
             table
                 .get(CONFIG_KEY_MODEL)
                 .and_then(|value| value.as_str()),
-            Some("gpt-5-codex")
+            Some("gpt-5.1-codex")
         );
         assert_eq!(
             table
@@ -561,7 +572,7 @@ model_reasoning_effort = "high"
             &[
                 (&["a", "b", "c"], "v"),
                 (&["x"], "y"),
-                (&["profiles", "p1", CONFIG_KEY_MODEL], "gpt-5-codex"),
+                (&["profiles", "p1", CONFIG_KEY_MODEL], "gpt-5.1-codex"),
             ],
         )
         .await
@@ -593,7 +604,7 @@ model_reasoning_effort = "high"
             .expect("profile p1");
         assert_eq!(
             p1.get(CONFIG_KEY_MODEL).and_then(toml::Value::as_str),
-            Some("gpt-5-codex")
+            Some("gpt-5.1-codex")
         );
     }
 
@@ -705,7 +716,7 @@ existing = "keep"
             code_home,
             None,
             &[
-                (&[CONFIG_KEY_MODEL], "gpt-5-codex"),
+                (&[CONFIG_KEY_MODEL], "gpt-5.1-codex"),
                 (&[CONFIG_KEY_EFFORT], "minimal"),
             ],
         )
@@ -717,7 +728,7 @@ existing = "keep"
 # should be preserved
 
 existing = "keep"
-model = "gpt-5-codex"
+model = "gpt-5.1-codex"
 model_reasoning_effort = "minimal"
 "#;
         assert_eq!(contents, expected);
@@ -775,7 +786,7 @@ model = "o3"
         let code_home = tmpdir.path();
 
         // Seed with a model value only
-        let seed = "model = \"gpt-5-codex\"\n";
+        let seed = "model = \"gpt-5.1-codex\"\n";
         tokio::fs::write(code_home.join(CONFIG_TOML_FILE), seed)
             .await
             .expect("seed write");
@@ -786,7 +797,7 @@ model = "o3"
             .expect("persist");
 
         let contents = read_config(code_home).await;
-        let expected = r#"model = "gpt-5-codex"
+        let expected = r#"model = "gpt-5.1-codex"
 model_reasoning_effort = "high"
 "#;
         assert_eq!(contents, expected);
@@ -830,7 +841,7 @@ model = "o4-mini"
 
         // No active profile key; we'll target an explicit override
         let seed = r#"[profiles.team]
-model = "gpt-5-codex"
+model = "gpt-5.1-codex"
 "#;
         tokio::fs::write(code_home.join(CONFIG_TOML_FILE), seed)
             .await
@@ -846,7 +857,7 @@ model = "gpt-5-codex"
 
         let contents = read_config(code_home).await;
         let expected = r#"[profiles.team]
-model = "gpt-5-codex"
+model = "gpt-5.1-codex"
 model_reasoning_effort = "minimal"
 "#;
         assert_eq!(contents, expected);
@@ -862,7 +873,7 @@ model_reasoning_effort = "minimal"
             code_home,
             None,
             &[
-                (&[CONFIG_KEY_MODEL], Some("gpt-5-codex")),
+                (&[CONFIG_KEY_MODEL], Some("gpt-5.1-codex")),
                 (&[CONFIG_KEY_EFFORT], None),
             ],
         )
@@ -876,7 +887,7 @@ model_reasoning_effort = "minimal"
             table
                 .get(CONFIG_KEY_MODEL)
                 .and_then(|value| value.as_str()),
-            Some("gpt-5-codex")
+            Some("gpt-5.1-codex")
         );
         assert!(table.get(CONFIG_KEY_EFFORT).is_none());
     }
@@ -941,7 +952,7 @@ model_reasoning_effort = "minimal"
         let tmpdir = tempdir().expect("tmp");
         let code_home = tmpdir.path();
 
-        let seed = r#"model = "gpt-5-codex"
+        let seed = r#"model = "gpt-5.1-codex"
 model_reasoning_effort = "medium"
 "#;
         tokio::fs::write(code_home.join(CONFIG_TOML_FILE), seed)

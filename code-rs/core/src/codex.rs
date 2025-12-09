@@ -13,22 +13,34 @@ use std::sync::Mutex;
 use std::sync::RwLock;
 use std::sync::Weak;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
-use std::time::Duration;
+use std::time::{Duration, Instant};
+use time::format_description::well_known::Rfc3339;
+use time::OffsetDateTime;
 
 use async_channel::Receiver;
 use async_channel::Sender;
 use base64::Engine;
 use code_apply_patch::ApplyPatchAction;
 use code_apply_patch::MaybeApplyPatchVerified;
+use crate::bridge_client::spawn_bridge_listener;
 use code_browser::BrowserConfig as CodexBrowserConfig;
 use code_browser::BrowserManager;
-use code_otel::otel_event_manager::OtelEventManager;
-use code_otel::otel_event_manager::ToolDecisionSource;
+use code_otel::otel_event_manager::{
+    OtelEventManager,
+    ToolDecisionSource,
+    TurnLatencyPayload,
+    TurnLatencyPhase,
+};
 use code_protocol::config_types::ReasoningEffort as ProtoReasoningEffort;
 use code_protocol::config_types::ReasoningSummary as ProtoReasoningSummary;
 use code_protocol::protocol::AskForApproval as ProtoAskForApproval;
 use code_protocol::protocol::ReviewDecision as ProtoReviewDecision;
 use code_protocol::protocol::SandboxPolicy as ProtoSandboxPolicy;
+use code_protocol::protocol::BROWSER_SNAPSHOT_OPEN_TAG;
+use code_protocol::protocol::ENVIRONMENT_CONTEXT_CLOSE_TAG;
+use code_protocol::protocol::ENVIRONMENT_CONTEXT_DELTA_CLOSE_TAG;
+use code_protocol::protocol::ENVIRONMENT_CONTEXT_DELTA_OPEN_TAG;
+use code_protocol::protocol::ENVIRONMENT_CONTEXT_OPEN_TAG;
 use crate::config_types::ReasoningEffort as ReasoningEffortConfig;
 use crate::config_types::ReasoningSummary as ReasoningSummaryConfig;
 use crate::config_types::ClientTools;
@@ -38,8 +50,7 @@ use code_protocol::protocol::TurnAbortReason;
 use code_protocol::protocol::TurnAbortedEvent;
 use futures::prelude::*;
 use mcp_types::CallToolResult;
-use serde::Serialize;
-use serde_json;
+use serde::{Deserialize, Serialize};
 use serde_json::json;
 use tokio::sync::oneshot;
 use tokio::task::AbortHandle;
@@ -49,9 +60,11 @@ use tracing::info;
 use tracing::trace;
 use tracing::warn;
 use uuid::Uuid;
+use crate::EnvironmentContextEmission;
 use crate::AuthManager;
 use crate::CodexAuth;
 use crate::agent_tool::AgentStatusUpdatePayload;
+use crate::split_command_and_args;
 use crate::git_worktree;
 use crate::protocol::ApprovedCommandMatchKind;
 use crate::protocol::WebSearchBeginEvent;
@@ -59,16 +72,18 @@ use crate::protocol::WebSearchCompleteEvent;
 use code_protocol::mcp_protocol::AuthMode;
 use crate::account_usage;
 use crate::auth_accounts;
-use crate::agent_defaults::{default_agent_configs, enabled_agent_model_specs};
+use crate::agent_defaults::{agent_model_spec, default_agent_configs, enabled_agent_model_specs};
 use code_protocol::models::WebSearchAction;
 use code_protocol::protocol::RolloutItem;
 use shlex::split as shlex_split;
 use shlex::try_join as shlex_try_join;
+use chrono::Local;
 use chrono::Utc;
 
 pub mod compact;
-use self::compact::build_compacted_history;
-use self::compact::collect_user_messages;
+pub mod compact_remote;
+use self::compact::{build_compacted_history, collect_compaction_snippets};
+use self::compact_remote::run_inline_remote_auto_compact_task;
 
 /// Initial submission ID for session configuration
 pub(crate) const INITIAL_SUBMIT_ID: &str = "";
@@ -136,6 +151,7 @@ fn to_proto_reasoning_effort(effort: ReasoningEffortConfig) -> ProtoReasoningEff
         ReasoningEffortConfig::Low => ProtoReasoningEffort::Low,
         ReasoningEffortConfig::Medium => ProtoReasoningEffort::Medium,
         ReasoningEffortConfig::High => ProtoReasoningEffort::High,
+        ReasoningEffortConfig::XHigh => ProtoReasoningEffort::XHigh,
         ReasoningEffortConfig::None => ProtoReasoningEffort::Minimal,
     }
 }
@@ -206,6 +222,7 @@ pub(crate) struct TurnContext {
     pub(crate) cwd: PathBuf,
     pub(crate) base_instructions: Option<String>,
     pub(crate) user_instructions: Option<String>,
+    pub(crate) compact_prompt_override: Option<String>,
     pub(crate) approval_policy: AskForApproval,
     pub(crate) sandbox_policy: SandboxPolicy,
     pub(crate) shell_environment_policy: ShellEnvironmentPolicy,
@@ -354,6 +371,14 @@ fn maybe_update_from_model_info<T: Copy + PartialEq>(
 }
 
 async fn build_turn_status_items(sess: &Session) -> Vec<ResponseItem> {
+    if sess.env_ctx_v2 {
+        build_turn_status_items_v2(sess).await
+    } else {
+        build_turn_status_items_legacy(sess).await
+    }
+}
+
+async fn build_turn_status_items_legacy(sess: &Session) -> Vec<ResponseItem> {
     let mut jar = EphemeralJar::new();
 
     // Collect environment context
@@ -377,116 +402,125 @@ async fn build_turn_status_items(sess: &Session) -> Vec<ResponseItem> {
 
     if let Some(browser_manager) = code_browser::global::get_browser_manager().await {
         if browser_manager.is_enabled().await {
-            // Get current URL and browser info
-            let url = browser_manager
-                .get_current_url()
-                .await
-                .unwrap_or_else(|| "unknown".to_string());
-
-            // Try to get a tab title if available
-            let title = match browser_manager.get_or_create_page().await {
-                Ok(page) => page.get_title().await,
-                Err(_) => None,
-            };
-
-            // Get browser type description
-            let browser_type = browser_manager.get_browser_type().await;
-
-            // Get viewport dimensions
-            let (viewport_width, viewport_height) = browser_manager.get_viewport_size().await;
-            let viewport_info = format!(" | Viewport: {}x{}", viewport_width, viewport_height);
-
-            // Get cursor position
-            let cursor_info = match browser_manager.get_cursor_position().await {
-                Ok((x, y)) => format!(
-                    " | Mouse position: ({:.0}, {:.0}) [shown as a blue cursor in the screenshot]",
-                    x, y
-                ),
-                Err(_) => String::new(),
-            };
-
-            // Try to capture screenshot and compare with last one
-            let screenshot_status = match capture_browser_screenshot(sess).await {
-                Ok((screenshot_path, _url)) => {
-                    // Always update the UI with the latest screenshot, even if unchanged for LLM payload
-                    // This ensures the user sees that a fresh capture occurred each turn.
-                    add_pending_screenshot(sess, screenshot_path.clone(), url.clone());
-                    // Check if screenshot has changed using image hashing
-                    let mut last_screenshot_info = sess.last_screenshot_info.lock().unwrap();
-
-                    // Compute hash for current screenshot
-                    let current_hash =
-                        crate::image_comparison::compute_image_hash(&screenshot_path).ok();
-
-                    let should_include_screenshot = if let (
-                        Some((_last_path, last_phash, last_dhash)),
-                        Some((cur_phash, cur_dhash)),
-                    ) =
-                        (last_screenshot_info.as_ref(), current_hash.as_ref())
-                    {
-                        // Compare hashes to see if screenshots are similar
-                        let similar = crate::image_comparison::are_hashes_similar(
-                            last_phash, last_dhash, cur_phash, cur_dhash,
-                        );
-
-                        if !similar {
-                            // Screenshot has changed, include it
-                            *last_screenshot_info = Some((
-                                screenshot_path.clone(),
-                                cur_phash.clone(),
-                                cur_dhash.clone(),
-                            ));
-                            true
-                        } else {
-                            // Screenshot unchanged
-                            false
-                        }
-                    } else {
-                        // No previous screenshot or hash computation failed, include it
-                        if let Some((phash, dhash)) = current_hash {
-                            *last_screenshot_info = Some((screenshot_path.clone(), phash, dhash));
-                        }
-                        true
-                    };
-
-                    if should_include_screenshot {
-                        if let Ok(bytes) = std::fs::read(&screenshot_path) {
-                            let mime = mime_guess::from_path(&screenshot_path)
-                                .first()
-                                .map(|m| m.to_string())
-                                .unwrap_or_else(|| "image/png".to_string());
-                            let encoded = base64::engine::general_purpose::STANDARD.encode(bytes);
-                            screenshot_content = Some(ContentItem::InputImage {
-                                image_url: format!("data:{mime};base64,{encoded}"),
-                            });
-                            include_screenshot = true;
-                            ""
-                        } else {
-                            " [Screenshot file read failed]"
-                        }
-                    } else {
-                        " [Screenshot unchanged]"
-                    }
-                }
-                Err(err_msg) => {
-                    // Include error message so LLM knows screenshot failed
-                    format!(" [Screenshot unavailable: {}]", err_msg).leak()
-                }
-            };
-
-            let status_line = if let Some(t) = title {
-                format!(
-                    "Browser url: {} — {} ({}){}{}{}. You can interact with it using browser_* tools.",
-                    url, t, browser_type, viewport_info, cursor_info, screenshot_status
-                )
+            if let Some((_, idle_timeout)) = browser_manager.idle_elapsed_past_timeout().await {
+                let idle_text = format!(
+                    "Browser idle (timeout {:?}); screenshot capture paused until browser_* tools run again.",
+                    idle_timeout
+                );
+                current_status.push_str("\n");
+                current_status.push_str(&idle_text);
             } else {
-                format!(
-                    "Browser url: {} ({}){}{}{}. You can interact with it using browser_* tools.",
-                    url, browser_type, viewport_info, cursor_info, screenshot_status
-                )
-            };
-            current_status.push_str("\n");
-            current_status.push_str(&status_line);
+                // Get current URL and browser info
+                let url = browser_manager
+                    .get_current_url()
+                    .await
+                    .unwrap_or_else(|| "unknown".to_string());
+
+                // Try to get a tab title if available
+                let title = match browser_manager.get_or_create_page().await {
+                    Ok(page) => page.get_title().await,
+                    Err(_) => None,
+                };
+
+                // Get browser type description
+                let browser_type = browser_manager.get_browser_type().await;
+
+                // Get viewport dimensions
+                let (viewport_width, viewport_height) = browser_manager.get_viewport_size().await;
+                let viewport_info = format!(" | Viewport: {}x{}", viewport_width, viewport_height);
+
+                // Get cursor position
+                let cursor_info = match browser_manager.get_cursor_position().await {
+                    Ok((x, y)) => format!(
+                        " | Mouse position: ({:.0}, {:.0}) [shown as a blue cursor in the screenshot]",
+                        x, y
+                    ),
+                    Err(_) => String::new(),
+                };
+
+                // Try to capture screenshot and compare with last one
+                let screenshot_status = match capture_browser_screenshot(sess).await {
+                    Ok((screenshot_path, _url)) => {
+                        // Always update the UI with the latest screenshot, even if unchanged for LLM payload
+                        // This ensures the user sees that a fresh capture occurred each turn.
+                        add_pending_screenshot(sess, screenshot_path.clone(), url.clone());
+                        // Check if screenshot has changed using image hashing
+                        let mut last_screenshot_info = sess.last_screenshot_info.lock().unwrap();
+
+                        // Compute hash for current screenshot
+                        let current_hash =
+                            crate::image_comparison::compute_image_hash(&screenshot_path).ok();
+
+                        let should_include_screenshot = if let (
+                            Some((_last_path, last_phash, last_dhash)),
+                            Some((cur_phash, cur_dhash)),
+                        ) =
+                            (last_screenshot_info.as_ref(), current_hash.as_ref())
+                        {
+                            // Compare hashes to see if screenshots are similar
+                            let similar = crate::image_comparison::are_hashes_similar(
+                                last_phash, last_dhash, cur_phash, cur_dhash,
+                            );
+
+                            if !similar {
+                                // Screenshot has changed, include it
+                                *last_screenshot_info = Some((
+                                    screenshot_path.clone(),
+                                    cur_phash.clone(),
+                                    cur_dhash.clone(),
+                                ));
+                                true
+                            } else {
+                                // Screenshot unchanged
+                                false
+                            }
+                        } else {
+                            // No previous screenshot or hash computation failed, include it
+                            if let Some((phash, dhash)) = current_hash {
+                                *last_screenshot_info = Some((screenshot_path.clone(), phash, dhash));
+                            }
+                            true
+                        };
+
+                        if should_include_screenshot {
+                            if let Ok(bytes) = std::fs::read(&screenshot_path) {
+                                let mime = mime_guess::from_path(&screenshot_path)
+                                    .first()
+                                    .map(|m| m.to_string())
+                                    .unwrap_or_else(|| "image/png".to_string());
+                                let encoded = base64::engine::general_purpose::STANDARD.encode(bytes);
+                                screenshot_content = Some(ContentItem::InputImage {
+                                    image_url: format!("data:{mime};base64,{encoded}"),
+                                });
+                                include_screenshot = true;
+                                ""
+                            } else {
+                                " [Screenshot file read failed]"
+                            }
+                        } else {
+                            " [Screenshot unchanged]"
+                        }
+                    }
+                    Err(err_msg) => {
+                        // Include error message so LLM knows screenshot failed
+                        format!(" [Screenshot unavailable: {}]", err_msg).leak()
+                    }
+                };
+
+                let status_line = if let Some(t) = title {
+                    format!(
+                        "Browser url: {} — {} ({}){}{}{}. You can interact with it using browser_* tools.",
+                        url, t, browser_type, viewport_info, cursor_info, screenshot_status
+                    )
+                } else {
+                    format!(
+                        "Browser url: {} ({}){}{}{}. You can interact with it using browser_* tools.",
+                        url, browser_type, viewport_info, cursor_info, screenshot_status
+                    )
+                };
+                current_status.push_str("\n");
+                current_status.push_str(&status_line);
+            }
         }
     }
 
@@ -524,9 +558,271 @@ async fn build_turn_status_items(sess: &Session) -> Vec<ResponseItem> {
 
     jar.into_items()
 }
+
+async fn build_turn_status_items_v2(sess: &Session) -> Vec<ResponseItem> {
+    let mut items = Vec::new();
+
+    let env_context = EnvironmentContext::new(
+        Some(sess.cwd.clone()),
+        Some(sess.approval_policy),
+        Some(sess.sandbox_policy.clone()),
+        Some(sess.user_shell.clone()),
+    );
+
+    if let Some(mut env_items) = sess.maybe_emit_env_ctx_messages(
+        &env_context,
+        get_git_branch(&sess.cwd),
+        Some(format!("{:?}", sess.client.get_reasoning_effort())),
+    ) {
+        items.append(&mut env_items);
+    }
+
+    if let Some(browser_manager) = code_browser::global::get_browser_manager().await {
+        if browser_manager.is_enabled().await {
+            let browser_stream_id = {
+                let mut state = sess.state.lock().unwrap();
+                state
+                    .context_stream_ids
+                    .browser_stream_id(sess.id)
+            };
+
+            if let Some((_, timeout)) = browser_manager.idle_elapsed_past_timeout().await {
+                let idle_text = format!(
+                    "Browser idle (timeout {:?}); screenshot capture paused until browser_* tools run again.",
+                    timeout
+                );
+                items.push(ResponseItem::Message {
+                    id: Some(browser_stream_id),
+                    role: "user".to_string(),
+                    content: vec![ContentItem::InputText { text: idle_text }],
+                });
+                return items;
+            } else {
+                let url = browser_manager
+                    .get_current_url()
+                    .await
+                    .unwrap_or_else(|| "unknown".to_string());
+
+            let title = match browser_manager.get_or_create_page().await {
+                Ok(page) => page.get_title().await,
+                Err(_) => None,
+            };
+
+            let browser_type = browser_manager.get_browser_type().await.to_string();
+            let (viewport_width, viewport_height) = browser_manager.get_viewport_size().await;
+            let cursor_position = browser_manager.get_cursor_position().await.ok();
+
+            let mut metadata = HashMap::new();
+            metadata.insert("browser_type".to_string(), browser_type.clone());
+            if let Some((x, y)) = cursor_position {
+                metadata.insert("cursor_position".to_string(), format!("{:.0},{:.0}", x, y));
+            }
+
+            let viewport = if viewport_width > 0 && viewport_height > 0 {
+                Some(ViewportDimensions {
+                    width: viewport_width as u32,
+                    height: viewport_height as u32,
+                })
+            } else {
+                None
+            };
+
+            let mut screenshot_path = None;
+
+            match capture_browser_screenshot(sess).await {
+                Ok((path, _)) => {
+                    add_pending_screenshot(sess, path.clone(), url.clone());
+                    let current_hash = crate::image_comparison::compute_image_hash(&path).ok();
+                    let mut last_info = sess.last_screenshot_info.lock().unwrap();
+                    let include_screenshot = should_include_browser_screenshot(
+                        &mut last_info,
+                        &path,
+                        current_hash,
+                    );
+                    drop(last_info);
+                    if include_screenshot {
+                        screenshot_path = Some(path);
+                    }
+                }
+                Err(err_msg) => {
+                    trace!("env_ctx_v2: screenshot capture failed: {}", err_msg);
+                }
+            }
+
+                if let Some(path) = screenshot_path {
+                    let captured_at = OffsetDateTime::now_utc()
+                        .format(&Rfc3339)
+                        .unwrap_or_else(|_| "1970-01-01T00:00:00Z".to_string());
+
+                    let mut snapshot = BrowserSnapshot::new(url.clone(), captured_at);
+                snapshot.title = title.clone();
+                snapshot.viewport = viewport;
+                if !metadata.is_empty() {
+                    snapshot.metadata = Some(metadata);
+                }
+
+                match snapshot.to_response_item_with_id(Some(&browser_stream_id)) {
+                    Ok(item) => items.push(item),
+                    Err(err) => warn!("env_ctx_v2: failed to serialize browser_snapshot JSON: {err}"),
+                }
+
+                if *crate::flags::CTX_UI {
+                    sess.emit_browser_snapshot_event(&browser_stream_id, &snapshot);
+                }
+
+                match std::fs::read(&path) {
+                    Ok(bytes) => {
+                        let mime = mime_guess::from_path(&path)
+                            .first()
+                            .map(|m| m.to_string())
+                            .unwrap_or_else(|| "image/png".to_string());
+                        let encoded = base64::engine::general_purpose::STANDARD.encode(bytes);
+                        items.push(ResponseItem::Message {
+                            id: Some(browser_stream_id),
+                            role: "user".to_string(),
+                            content: vec![ContentItem::InputImage {
+                                image_url: format!("data:{mime};base64,{encoded}"),
+                            }],
+                        });
+                    }
+                    Err(err) => warn!(
+                        "env_ctx_v2: failed to read screenshot file {}: {err}",
+                        path.display()
+                    ),
+                }
+                }
+            }
+        }
+    }
+
+    items
+}
+
+fn should_include_browser_screenshot(
+    last_info: &mut Option<(PathBuf, Vec<u8>, Vec<u8>)>,
+    path: &PathBuf,
+    current_hash: Option<(Vec<u8>, Vec<u8>)>,
+) -> bool {
+    if let Some((cur_phash, cur_dhash)) = current_hash {
+        if let Some((_, last_phash, last_dhash)) = last_info.as_ref() {
+            if crate::image_comparison::are_hashes_similar(
+                last_phash,
+                last_dhash,
+                &cur_phash,
+                &cur_dhash,
+            ) {
+                return false;
+            }
+        }
+        *last_info = Some((path.clone(), cur_phash, cur_dhash));
+        true
+    } else {
+        *last_info = Some((path.clone(), Vec::new(), Vec::new()));
+        true
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use code_protocol::models::ContentItem;
+    use pretty_assertions::assert_eq;
+
+    #[test]
+    fn screenshot_dedup_tracks_changes() {
+        let mut last = None;
+        let path = PathBuf::from("/tmp/a.png");
+        let hash_one = (vec![0xAAu8; 32], vec![0x55u8; 32]);
+        let hash_two = (vec![0xABu8; 32], vec![0x56u8; 32]);
+
+        assert!(should_include_browser_screenshot(&mut last, &path, Some(hash_one.clone())));
+        assert!(!should_include_browser_screenshot(&mut last, &path, Some(hash_one.clone())));
+        assert!(should_include_browser_screenshot(&mut last, &path, Some(hash_two)));
+    }
+
+    fn make_snapshot(cwd: &str) -> EnvironmentContextSnapshot {
+        EnvironmentContextSnapshot {
+            version: EnvironmentContextSnapshot::VERSION,
+            cwd: Some(cwd.to_string()),
+            approval_policy: None,
+            sandbox_mode: None,
+            network_access: None,
+            writable_roots: Vec::new(),
+            operating_system: None,
+            common_tools: Vec::new(),
+            shell: None,
+            git_branch: Some("main".to_string()),
+            reasoning_effort: None,
+        }
+    }
+
+    #[test]
+    fn timeline_rehydrate_round_trip() {
+        let baseline = make_snapshot("/repo");
+        let delta_snapshot = make_snapshot("/repo-updated");
+        let delta = delta_snapshot.diff_from(&baseline);
+
+        let baseline_item = baseline
+            .to_response_item()
+            .expect("serialize baseline snapshot");
+        let delta_item = delta
+            .to_response_item()
+            .expect("serialize delta snapshot");
+
+        let mut ctx = TimelineReplayContext::default();
+        process_rollout_env_item(&mut ctx, &baseline_item);
+        process_rollout_env_item(&mut ctx, &delta_item);
+
+        assert!(ctx.timeline.baseline().is_some());
+        assert_eq!(ctx.timeline.delta_count(), 1);
+        assert_eq!(ctx.next_sequence, 2);
+        assert!(ctx.last_snapshot.is_some());
+    }
+
+    #[test]
+    fn timeline_rehydrate_legacy_baseline() {
+        let legacy_item = ResponseItem::Message {
+            id: None,
+            role: "user".to_string(),
+            content: vec![ContentItem::InputText {
+                text: "== System Status ==\n cwd: /legacy\n branch: main".to_string(),
+            }],
+        };
+
+        let mut ctx = TimelineReplayContext::default();
+        process_rollout_env_item(&mut ctx, &legacy_item);
+
+        assert!(ctx.timeline.is_empty());
+        assert!(ctx.legacy_baseline.is_some());
+    }
+
+    #[test]
+    fn timeline_rehydrate_delta_gap_triggers_reset() {
+        let baseline = make_snapshot("/repo");
+        let baseline_item = baseline
+            .to_response_item()
+            .expect("serialize baseline snapshot");
+
+        let mut ctx = TimelineReplayContext::default();
+        process_rollout_env_item(&mut ctx, &baseline_item);
+
+        let mut delta = make_snapshot("/other").diff_from(&baseline);
+        delta.base_fingerprint = "mismatch".to_string();
+        let delta_item = delta
+            .to_response_item()
+            .expect("serialize delta snapshot");
+
+        process_rollout_env_item(&mut ctx, &delta_item);
+
+        assert!(ctx.timeline.is_empty());
+        assert!(ctx.last_snapshot.is_none());
+        assert_eq!(ctx.next_sequence, 1);
+    }
+}
 use crate::agent_tool::AGENT_MANAGER;
 use crate::agent_tool::AgentStatus;
 use crate::agent_tool::AgentToolRequest;
+use crate::agent_defaults::model_guide_markdown_with_custom;
 use crate::agent_tool::CancelAgentParams;
 use crate::agent_tool::CheckAgentStatusParams;
 use crate::agent_tool::GetAgentResultParams;
@@ -537,15 +833,27 @@ use crate::agent_tool::WaitForAgentParams;
 use crate::apply_patch::convert_apply_patch_to_protocol;
 use crate::apply_patch::get_writable_roots;
 use crate::apply_patch::{self, ApplyPatchResult};
+use crate::bridge_client::{
+    get_effective_subscription, persist_workspace_subscription, send_bridge_control,
+    set_session_subscription, set_workspace_subscription,
+};
 use crate::client::ModelClient;
 use crate::client_common::{Prompt, ResponseEvent, TextFormat, REVIEW_PROMPT};
-use crate::environment_context::EnvironmentContext;
+use crate::context_timeline::ContextTimeline;
+use crate::environment_context::{
+    BrowserSnapshot,
+    EnvironmentContext,
+    EnvironmentContextDelta,
+    EnvironmentContextSnapshot,
+    EnvironmentContextTracker,
+    ViewportDimensions,
+};
 use crate::user_instructions::UserInstructions;
 use crate::config::{persist_model_selection, Config};
 use crate::config_types::ProjectHookEvent;
 use crate::config_types::ShellEnvironmentPolicy;
 use crate::conversation_history::ConversationHistory;
-use crate::error::CodexErr;
+use crate::error::{CodexErr, RetryAfter};
 use crate::error::Result as CodexResult;
 use crate::error::SandboxErr;
 use crate::error::get_error_message_ui;
@@ -593,6 +901,10 @@ use crate::protocol::BrowserScreenshotUpdateEvent;
 use crate::protocol::ErrorEvent;
 use crate::protocol::Event;
 use crate::protocol::EventMsg;
+use crate::protocol::ExitedReviewModeEvent;
+use crate::protocol::ReviewSnapshotInfo;
+use crate::protocol::ListCustomPromptsResponseEvent;
+use crate::protocol::{BrowserSnapshotEvent, EnvironmentContextDeltaEvent, EnvironmentContextFullEvent};
 use crate::protocol::ExecApprovalRequestEvent;
 use crate::protocol::ExecCommandBeginEvent;
 use crate::protocol::ExecCommandEndEvent;
@@ -603,6 +915,7 @@ use crate::protocol::PatchApplyBeginEvent;
 use crate::protocol::PatchApplyEndEvent;
 use crate::protocol::RateLimitSnapshotEvent;
 use crate::protocol::TokenCountEvent;
+use crate::protocol::TokenUsage;
 use crate::protocol::TokenUsageInfo;
 use crate::protocol::ReviewDecision;
 use crate::protocol::ValidationGroup;
@@ -622,7 +935,7 @@ use crate::safety::assess_safety_for_untrusted_command;
 use crate::shell;
 use crate::turn_diff_tracker::TurnDiffTracker;
 use crate::user_notification::UserNotification;
-use crate::util::backoff;
+use crate::util::{backoff, wait_for_connectivity};
 use code_protocol::protocol::SessionSource;
 use crate::rollout::recorder::SessionStateSnapshot;
 use serde_json::Value;
@@ -843,6 +1156,26 @@ enum WaitInterruptReason {
     SessionAborted,
 }
 
+#[derive(Clone, Default)]
+struct EnvironmentContextStreamRegistry {
+    env_stream_id: Option<String>,
+    browser_stream_id: Option<String>,
+}
+
+impl EnvironmentContextStreamRegistry {
+    fn env_stream_id(&mut self, session_id: Uuid) -> String {
+        self.env_stream_id
+            .get_or_insert_with(|| format!("env-context-{}", session_id))
+            .clone()
+    }
+
+    fn browser_stream_id(&mut self, session_id: Uuid) -> String {
+        self.browser_stream_id
+            .get_or_insert_with(|| format!("browser-context-{}", session_id))
+            .clone()
+    }
+}
+
 #[derive(Default)]
 struct State {
     approved_commands: HashSet<ApprovedCommandPattern>,
@@ -876,6 +1209,50 @@ struct State {
     pending_manual_compacts: VecDeque<String>,
     wait_interrupt_epoch: u64,
     wait_interrupt_reason: Option<WaitInterruptReason>,
+    context_timeline: ContextTimeline,
+    environment_context_tracker: EnvironmentContextTracker,
+    environment_context_seq: u64,
+    last_environment_snapshot: Option<EnvironmentContextSnapshot>,
+    context_stream_ids: EnvironmentContextStreamRegistry,
+    last_turn_started_at: Option<Instant>,
+    last_turn_completed_at: Option<Instant>,
+    last_turn_prompt_counts: Option<TurnPromptCounts>,
+}
+
+#[derive(Clone, Copy, Default)]
+struct TurnPromptCounts {
+    input_items: usize,
+    status_items: usize,
+}
+
+#[derive(Clone, Copy, Default)]
+struct TurnQueueMetrics {
+    pending_input_count: usize,
+    pending_user_input_count: usize,
+    pending_background_execs: usize,
+    running_exec_count: usize,
+    pending_manual_compacts: usize,
+    scratchpad_active: bool,
+}
+
+fn capture_turn_queue_metrics(state: &State) -> TurnQueueMetrics {
+    TurnQueueMetrics {
+        pending_input_count: state.pending_input.len(),
+        pending_user_input_count: state.pending_user_input.len(),
+        pending_background_execs: state.background_execs.len(),
+        running_exec_count: state.running_execs.len(),
+        pending_manual_compacts: state.pending_manual_compacts.len(),
+        scratchpad_active: state.turn_scratchpad.is_some(),
+    }
+}
+
+fn duration_to_millis(duration: Duration) -> u64 {
+    let ms = duration.as_millis();
+    if ms > u128::from(u64::MAX) {
+        u64::MAX
+    } else {
+        ms as u64
+    }
 }
 
 #[derive(Clone)]
@@ -933,6 +1310,34 @@ where
     let _ = tokio::task::spawn_blocking(task);
 }
 
+fn format_retry_eta(retry_after: &RetryAfter) -> Option<String> {
+    let resume_at = retry_after.resume_at;
+    let local = resume_at.with_timezone(&Local);
+    let now = Local::now();
+    let formatted = if local.date_naive() == now.date_naive() {
+        local.format("%-I:%M %p %Z").to_string()
+    } else {
+        local.format("%b %-d, %Y %-I:%M %p %Z").to_string()
+    };
+    Some(formatted)
+}
+
+fn is_connectivity_error(err: &CodexErr) -> bool {
+    match err {
+        CodexErr::Reqwest(e) => e.is_connect() || e.is_timeout() || e.is_request(),
+        CodexErr::Stream(msg, _, _) => {
+            let lower = msg.to_ascii_lowercase();
+            msg.starts_with("[transport]")
+                || lower.contains("network")
+                || lower.contains("connection")
+                || lower.contains("connectivity")
+                || lower.contains("timeout")
+                || lower.contains("transport")
+        }
+        _ => false,
+    }
+}
+
 #[derive(Debug)]
 struct BackgroundExecState {
     notify: std::sync::Arc<tokio::sync::Notify>,
@@ -959,6 +1364,7 @@ pub(crate) struct Session {
     cwd: PathBuf,
     base_instructions: Option<String>,
     user_instructions: Option<String>,
+    compact_prompt_override: Option<String>,
     approval_policy: AskForApproval,
     sandbox_policy: SandboxPolicy,
     shell_environment_policy: ShellEnvironmentPolicy,
@@ -974,6 +1380,9 @@ pub(crate) struct Session {
 
     /// Configuration for available agent models
     agents: Vec<crate::config_types::AgentConfig>,
+
+    /// Default reasoning effort for spawned agents and model calls in this session
+    model_reasoning_effort: ReasoningEffortConfig,
 
     /// External notifier command (will be passed as args to exec()). When
     /// `None` this feature is disabled.
@@ -1002,6 +1411,9 @@ pub(crate) struct Session {
     self_handle: Weak<Session>,
     active_review: Mutex<Option<ReviewRequest>>,
     next_turn_text_format: Mutex<Option<TextFormat>>,
+    env_ctx_v2: bool,
+    retention_config: crate::config_types::RetentionConfig,
+    model_descriptions: Option<String>,
 }
 
 struct HookGuard<'a> {
@@ -1089,6 +1501,15 @@ impl Session {
 
     pub(crate) fn get_cwd(&self) -> &Path {
         &self.cwd
+    }
+
+    pub(crate) async fn record_bridge_event(&self, text: String) {
+        let message = ResponseItem::Message {
+            id: None,
+            role: "developer".to_string(),
+            content: vec![ContentItem::InputText { text }],
+        };
+        self.record_conversation_items(&[message]).await;
     }
 
     pub(crate) fn get_sandbox_policy(&self) -> &SandboxPolicy {
@@ -1191,6 +1612,151 @@ impl Session {
         state.request_ordinal = state.request_ordinal.saturating_add(1);
     }
 
+    fn turn_latency_request_scheduled(&self, attempt_req: u64, prompt: &Prompt) {
+        let now = Instant::now();
+        let gap_and_metrics = {
+            let mut state = self.state.lock().unwrap();
+            let gap = state
+                .last_turn_completed_at
+                .map(|prev| now.saturating_duration_since(prev));
+            state.last_turn_started_at = Some(now);
+            state.last_turn_prompt_counts = Some(TurnPromptCounts {
+                input_items: prompt.input.len(),
+                status_items: prompt.status_items.len(),
+            });
+            let metrics = capture_turn_queue_metrics(&state);
+            (gap, metrics)
+        };
+
+        let pending_browser_screenshots = self.pending_browser_screenshots.lock().unwrap().len();
+        let (gap, metrics) = gap_and_metrics;
+        let payload = TurnLatencyPayload {
+            phase: TurnLatencyPhase::RequestScheduled,
+            attempt: attempt_req,
+            gap_ms: gap.map(duration_to_millis),
+            duration_ms: None,
+            pending_input_count: metrics.pending_input_count as u64,
+            pending_user_input_count: metrics.pending_user_input_count as u64,
+            pending_background_execs: metrics.pending_background_execs as u64,
+            running_exec_count: metrics.running_exec_count as u64,
+            pending_manual_compacts: metrics.pending_manual_compacts as u64,
+            pending_browser_screenshots: pending_browser_screenshots as u64,
+            scratchpad_active: metrics.scratchpad_active,
+            prompt_input_count: Some(prompt.input.len() as u64),
+            prompt_status_count: Some(prompt.status_items.len() as u64),
+            output_item_count: None,
+            token_usage_input_tokens: None,
+            token_usage_cached_input_tokens: None,
+            token_usage_output_tokens: None,
+            token_usage_reasoning_output_tokens: None,
+            token_usage_total_tokens: None,
+            note: None,
+        };
+        self.emit_turn_latency(payload);
+    }
+
+    fn turn_latency_request_completed(
+        &self,
+        attempt_req: u64,
+        output_item_count: usize,
+        token_usage: Option<&TokenUsage>,
+    ) {
+        let now = Instant::now();
+        let (duration, prompt_counts, metrics) = {
+            let mut state = self.state.lock().unwrap();
+            let duration = state
+                .last_turn_started_at
+                .map(|start| now.saturating_duration_since(start));
+            state.last_turn_started_at = None;
+            state.last_turn_completed_at = Some(now);
+            let prompt_counts = state.last_turn_prompt_counts.take();
+            let metrics = capture_turn_queue_metrics(&state);
+            (duration, prompt_counts, metrics)
+        };
+
+        let pending_browser_screenshots = self.pending_browser_screenshots.lock().unwrap().len();
+        let (token_usage_input_tokens, token_usage_cached_input_tokens, token_usage_output_tokens, token_usage_reasoning_output_tokens, token_usage_total_tokens) =
+            match token_usage {
+                Some(usage) => (
+                    Some(usage.input_tokens),
+                    Some(usage.cached_input_tokens),
+                    Some(usage.output_tokens),
+                    Some(usage.reasoning_output_tokens),
+                    Some(usage.total_tokens),
+                ),
+                None => (None, None, None, None, None),
+            };
+        let payload = TurnLatencyPayload {
+            phase: TurnLatencyPhase::RequestCompleted,
+            attempt: attempt_req,
+            gap_ms: None,
+            duration_ms: duration.map(duration_to_millis),
+            pending_input_count: metrics.pending_input_count as u64,
+            pending_user_input_count: metrics.pending_user_input_count as u64,
+            pending_background_execs: metrics.pending_background_execs as u64,
+            running_exec_count: metrics.running_exec_count as u64,
+            pending_manual_compacts: metrics.pending_manual_compacts as u64,
+            pending_browser_screenshots: pending_browser_screenshots as u64,
+            scratchpad_active: metrics.scratchpad_active,
+            prompt_input_count: prompt_counts.map(|counts| counts.input_items as u64),
+            prompt_status_count: prompt_counts.map(|counts| counts.status_items as u64),
+            output_item_count: Some(output_item_count as u64),
+            token_usage_input_tokens,
+            token_usage_cached_input_tokens,
+            token_usage_output_tokens,
+            token_usage_reasoning_output_tokens,
+            token_usage_total_tokens,
+            note: None,
+        };
+        self.emit_turn_latency(payload);
+    }
+
+    fn turn_latency_request_failed(&self, attempt_req: u64, note: Option<String>) {
+        let now = Instant::now();
+        let (duration, prompt_counts, metrics) = {
+            let mut state = self.state.lock().unwrap();
+            let duration = state
+                .last_turn_started_at
+                .map(|start| now.saturating_duration_since(start));
+            state.last_turn_started_at = None;
+            let prompt_counts = state.last_turn_prompt_counts.take();
+            let metrics = capture_turn_queue_metrics(&state);
+            (duration, prompt_counts, metrics)
+        };
+
+        let pending_browser_screenshots = self.pending_browser_screenshots.lock().unwrap().len();
+        let payload = TurnLatencyPayload {
+            phase: TurnLatencyPhase::RequestFailed,
+            attempt: attempt_req,
+            gap_ms: None,
+            duration_ms: duration.map(duration_to_millis),
+            pending_input_count: metrics.pending_input_count as u64,
+            pending_user_input_count: metrics.pending_user_input_count as u64,
+            pending_background_execs: metrics.pending_background_execs as u64,
+            running_exec_count: metrics.running_exec_count as u64,
+            pending_manual_compacts: metrics.pending_manual_compacts as u64,
+            pending_browser_screenshots: pending_browser_screenshots as u64,
+            scratchpad_active: metrics.scratchpad_active,
+            prompt_input_count: prompt_counts.map(|counts| counts.input_items as u64),
+            prompt_status_count: prompt_counts.map(|counts| counts.status_items as u64),
+            output_item_count: None,
+            token_usage_input_tokens: None,
+            token_usage_cached_input_tokens: None,
+            token_usage_output_tokens: None,
+            token_usage_reasoning_output_tokens: None,
+            token_usage_total_tokens: None,
+            note,
+        };
+        self.emit_turn_latency(payload);
+    }
+
+    fn emit_turn_latency(&self, payload: TurnLatencyPayload) {
+        if let Some(otel) = self.client.get_otel_event_manager() {
+            otel.turn_latency_event(payload.clone());
+        }
+        self.client.log_turn_latency_debug(&payload);
+    }
+
     fn scratchpad_push(&self, item: &ResponseItem, response: &Option<ResponseInputItem>, sub_id: &str) {
         let mut state = self.state.lock().unwrap();
         if let Some(sp) = &mut state.turn_scratchpad {
@@ -1257,6 +1823,32 @@ impl Session {
             current_task.abort(TurnAbortReason::Replaced);
         }
         state.current_task = Some(agent);
+    }
+
+    pub async fn start_pending_only_turn_if_idle(self: &Arc<Self>) -> bool {
+        let should_start = {
+            let state = self.state.lock().unwrap();
+            state.current_task.is_none()
+        };
+
+        if !should_start {
+            return false;
+        }
+
+        self.cleanup_old_status_items().await;
+        let turn_context = self.make_turn_context();
+        let sub_id = self.next_internal_sub_id();
+        let sentinel_input = vec![InputItem::Text {
+            text: PENDING_ONLY_SENTINEL.to_string(),
+        }];
+        let agent = AgentTask::spawn(Arc::clone(self), turn_context, sub_id, sentinel_input);
+        self.set_task(agent);
+        true
+    }
+
+    pub fn replace_history(&self, items: Vec<ResponseItem>) {
+        let mut state = self.state.lock().unwrap();
+        state.history.replace(items);
     }
 
     pub fn remove_task(&self, sub_id: &str) {
@@ -1539,12 +2131,19 @@ impl Session {
             cwd: self.cwd.clone(),
             base_instructions: self.base_instructions.clone(),
             user_instructions: self.user_instructions.clone(),
+            compact_prompt_override: self.compact_prompt_override.clone(),
             approval_policy: self.approval_policy,
             sandbox_policy: self.sandbox_policy.clone(),
             shell_environment_policy: self.shell_environment_policy.clone(),
             is_review_mode: false,
             text_format_override: self.next_turn_text_format.lock().unwrap().take(),
         })
+    }
+
+    fn compact_prompt_text(&self) -> String {
+        crate::codex::compact::resolve_compact_prompt_text(
+            self.compact_prompt_override.as_deref(),
+        )
     }
 
     pub async fn request_command_approval(
@@ -1632,123 +2231,51 @@ impl Session {
     /// This is called when a new user message arrives to keep history manageable
     async fn cleanup_old_status_items(&self) {
         let mut state = self.state.lock().unwrap();
-
-        // Get current history items
         let current_items = state.history.contents();
 
-        // Track various message types and their positions
-        let mut real_user_messages = Vec::new(); // Non-status user messages
-        let mut status_messages = Vec::new(); // Messages with screenshots or status
-
-        for (idx, item) in current_items.iter().enumerate() {
-            match item {
-                ResponseItem::Message { role, content, .. } if role == "user" => {
-                    // Check message content
-                    let has_status = content.iter().any(|c| {
-                        if let ContentItem::InputText { text } = c {
-                            text.contains("== System Status ==")
-                                || text.contains("Current working directory:")
-                                || text.contains("Git branch:")
-                        } else {
-                            false
-                        }
-                    });
-
-                    let has_screenshot = content
-                        .iter()
-                        .any(|c| matches!(c, ContentItem::InputImage { .. }));
-
-                    let has_real_text = content.iter().any(|c| {
-                        if let ContentItem::InputText { text } = c {
-                            // Real user text doesn't contain system status markers
-                            !text.contains("== System Status ==")
-                                && !text.contains("Current working directory:")
-                                && !text.contains("Git branch:")
-                                && !text.trim().is_empty()
-                        } else {
-                            false
-                        }
-                    });
-
-                    if has_real_text && !has_status && !has_screenshot {
-                        // This is a real user message
-                        real_user_messages.push(idx);
-                    } else if has_status || has_screenshot {
-                        // This is a status/screenshot message
-                        status_messages.push(idx);
-                    }
-                }
-                _ => {}
-            }
-        }
-
-        // Find screenshots to keep: last 2 that directly follow real user commands
-        let mut screenshots_to_keep = std::collections::HashSet::new();
-
-        // Work backwards through real user messages
-        for &user_idx in real_user_messages.iter().rev().take(2) {
-            // Find the first status message after this user message
-            for &status_idx in status_messages.iter() {
-                if status_idx > user_idx {
-                    // Check if this status message contains a screenshot
-                    if let Some(ResponseItem::Message { content, .. }) =
-                        current_items.get(status_idx)
-                    {
-                        let has_screenshot = content
-                            .iter()
-                            .any(|c| matches!(c, ContentItem::InputImage { .. }));
-                        if has_screenshot {
-                            screenshots_to_keep.insert(status_idx);
-                            break; // Only keep one screenshot per user message
-                        }
-                    }
-                }
-            }
-        }
-
-        // Build the filtered history
-        let mut items_to_keep = Vec::new();
-        let mut removed_screenshots = 0;
-        let mut removed_status = 0;
-
-        for (idx, item) in current_items.iter().enumerate() {
-            let should_keep = if status_messages.contains(&idx) {
-                // This is a status/screenshot message
-                if screenshots_to_keep.contains(&idx) {
-                    true // Keep this screenshot
-                } else {
-                    // Count what we're removing
-                    if let ResponseItem::Message { content, .. } = item {
-                        let has_screenshot = content
-                            .iter()
-                            .any(|c| matches!(c, ContentItem::InputImage { .. }));
-                        if has_screenshot {
-                            removed_screenshots += 1;
-                        } else {
-                            removed_status += 1;
-                        }
-                    }
-                    false // Remove this status/screenshot
-                }
-            } else {
-                true // Keep all non-status messages (real user messages, assistant messages, etc.)
+        let (items_to_keep, stats) = if self.env_ctx_v2 {
+            let policy = crate::retention::RetentionPolicy {
+                max_env_deltas: self.retention_config.max_env_deltas,
+                max_browser_snapshots: self.retention_config.max_browser_snapshots,
+                max_total_bytes: self.retention_config.max_total_bytes,
+                keep_latest_baseline: self.retention_config.keep_latest_baseline,
             };
 
-            if should_keep {
-                items_to_keep.push(item.clone());
-            }
-        }
+            let (kept, retention_stats) = crate::retention::apply_retention_policy(&current_items, &policy);
 
-        // Replace the history with cleaned items
+            crate::telemetry::global_telemetry().record_retention(&retention_stats);
+
+            let legacy_stats = CleanupStats {
+                removed_screenshots: retention_stats.removed_screenshots,
+                removed_status: retention_stats.removed_status,
+                removed_env_baselines: retention_stats.removed_env_baselines,
+                removed_env_deltas: retention_stats.removed_env_deltas,
+                removed_browser_snapshots: retention_stats.removed_browser_snapshots,
+                kept_recent_screenshots: retention_stats.kept_recent_screenshots,
+                kept_env_deltas: retention_stats.kept_env_deltas,
+                kept_browser_snapshots: retention_stats.kept_browser_snapshots,
+            };
+
+            (kept, legacy_stats)
+        } else {
+            prune_history_items(&current_items)
+        };
+
         state.history = ConversationHistory::new();
         state.history.record_items(&items_to_keep);
+        drop(state);
 
-        if removed_screenshots > 0 || removed_status > 0 {
+        if stats.any_removed() {
             info!(
-                "Cleaned up history: removed {} old screenshots and {} status messages, kept {} recent screenshots",
-                removed_screenshots,
-                removed_status,
-                screenshots_to_keep.len()
+                "Cleaned up history: removed {} old screenshots, {} status messages, {} env baselines, {} env deltas, {} browser snapshots; kept {} recent screenshots, {} env deltas, {} browser snapshots",
+                stats.removed_screenshots,
+                stats.removed_status,
+                stats.removed_env_baselines,
+                stats.removed_env_deltas,
+                stats.removed_browser_snapshots,
+                stats.kept_recent_screenshots,
+                stats.kept_env_deltas,
+                stats.kept_browser_snapshots
             );
         }
     }
@@ -2440,10 +2967,34 @@ impl Session {
             );
         }
 
+        // Helper closure to detect legacy XML environment context items
+        let is_legacy_env_context = |item: &ResponseItem| -> bool {
+            if let ResponseItem::Message { role, content, .. } = item {
+                if role == "user" {
+                    return content.iter().any(|c| {
+                        if let ContentItem::InputText { text } = c {
+                            text.contains("<environment_context>")
+                        } else {
+                            false
+                        }
+                    });
+                }
+            }
+            false
+        };
+
         // Filter out browser screenshots from historical messages
         // We identify them by the [EPHEMERAL:...] marker that precedes them
+        // When env_ctx_v2 is enabled, also suppress legacy XML environment context messages
         let filtered_history: Vec<ResponseItem> = history
             .into_iter()
+            .filter(|item| {
+                if self.env_ctx_v2 && *crate::flags::CTX_UI && is_legacy_env_context(item) {
+                    tracing::debug!("Suppressing legacy XML environment context item from history");
+                    return false;
+                }
+                true
+            })
             .map(|item| {
                 if let ResponseItem::Message { id, role, content } = item {
                     if role == "user" {
@@ -2489,8 +3040,25 @@ impl Session {
             })
             .collect();
 
-        // Concatenate filtered history with current turn's extras (which includes current ephemeral images)
-        let mut result = [filtered_history, extra].concat();
+        let filtered_extra = if self.env_ctx_v2 && *crate::flags::CTX_UI {
+            extra
+                .into_iter()
+                .filter(|item| {
+                    parse_env_snapshot_from_response(item).is_none()
+                        && parse_env_delta_from_response(item).is_none()
+                })
+                .collect::<Vec<_>>()
+        } else {
+            extra
+        };
+
+        // Concatenate timeline items (baseline + limited deltas) ahead of history
+        let mut result = Vec::new();
+        if let Some(mut timeline_items) = self.assemble_from_timeline() {
+            result.append(&mut timeline_items);
+        }
+        result.extend(filtered_history);
+        result.extend(filtered_extra);
 
         let current_auth_mode = self
             .client
@@ -2559,13 +3127,246 @@ impl Session {
         if let Some(user_instructions) = turn_context.user_instructions.as_deref() {
             items.push(UserInstructions::new(user_instructions.to_string()).into());
         }
-        items.push(ResponseItem::from(EnvironmentContext::new(
+
+        let env_context = EnvironmentContext::new(
             Some(turn_context.cwd.clone()),
             Some(turn_context.approval_policy),
             Some(turn_context.sandbox_policy.clone()),
             Some(self.user_shell.clone()),
-        )));
+        );
+
+        if let Some(mut env_ctx_items) = self.maybe_emit_env_ctx_messages(
+            &env_context,
+            get_git_branch(&turn_context.cwd),
+            Some(format!("{:?}", self.client.get_reasoning_effort())),
+        ) {
+            items.append(&mut env_ctx_items);
+        }
+
+        if !self.env_ctx_v2 {
+            // Legacy XML payload remains so behaviour is unchanged when the feature flag is off.
+            items.push(ResponseItem::from(env_context));
+        }
         items
+    }
+
+    fn maybe_emit_env_ctx_messages(
+        &self,
+        env_context: &EnvironmentContext,
+        git_branch: Option<String>,
+        reasoning_effort: Option<String>,
+    ) -> Option<Vec<ResponseItem>> {
+        if !self.env_ctx_v2 {
+            return None;
+        }
+
+        let (stream_id, result) = {
+            let mut state = self.state.lock().unwrap();
+            let stream = state.context_stream_ids.env_stream_id(self.id);
+            let result = match state.environment_context_tracker.emit_response_items(
+                env_context,
+                git_branch.clone(),
+                reasoning_effort.clone(),
+                Some(stream.as_str()),
+            ) {
+                Ok(Some((emission, items))) => {
+                    state.environment_context_seq = emission.sequence();
+                    state.last_environment_snapshot = Some(emission.snapshot().clone());
+
+                    match &emission {
+                        EnvironmentContextEmission::Full { snapshot, .. } => {
+                            if let Err(err) = state.context_timeline.add_baseline_once(snapshot.clone()) {
+                                tracing::trace!("env_ctx_v2: baseline already set in context timeline: {err}");
+                            }
+                            match state.context_timeline.record_snapshot(snapshot.clone()) {
+                                Ok(true) => {
+                                    crate::telemetry::global_telemetry().record_snapshot_commit();
+                                }
+                                Ok(false) => {
+                                    crate::telemetry::global_telemetry().record_dedup_drop();
+                                }
+                                Err(err) => {
+                                    tracing::trace!("env_ctx_v2: failed to record baseline snapshot: {err}");
+                                }
+                            }
+                        }
+                        EnvironmentContextEmission::Delta { sequence, delta, snapshot } => {
+                            if state.context_timeline.baseline().is_none() {
+                                if let Err(err) = state.context_timeline.add_baseline_once(snapshot.clone()) {
+                                    tracing::warn!("env_ctx_v2: failed to seed baseline before delta: {err}");
+                                }
+                            }
+                            if let Err(err) = state
+                                .context_timeline
+                                .apply_delta(*sequence, delta.clone())
+                            {
+                                tracing::warn!("env_ctx_v2: failed to apply delta to timeline: {err}");
+                                if matches!(err, crate::context_timeline::TimelineError::DeltaSequenceOutOfOrder { .. }) {
+                                    crate::telemetry::global_telemetry().record_delta_gap();
+                                }
+                            }
+                            match state.context_timeline.record_snapshot(snapshot.clone()) {
+                                Ok(true) => {
+                                    crate::telemetry::global_telemetry().record_snapshot_commit();
+                                }
+                                Ok(false) => {
+                                    crate::telemetry::global_telemetry().record_dedup_drop();
+                                }
+                                Err(err) => {
+                                    tracing::warn!("env_ctx_v2: failed to record snapshot: {err}");
+                                }
+                            }
+                        }
+                    }
+
+                    Ok(Some((emission, items)))
+                }
+                other => other,
+            };
+            (stream, result)
+        };
+
+        let (emission, mut items) = match result {
+            Ok(Some(pair)) => pair,
+            Ok(None) => return None,
+            Err(err) => {
+                warn!("env_ctx_v2: failed to serialize environment_context JSON: {err}");
+                if *crate::flags::CTX_UI {
+                    return Some(vec![ResponseItem::from(env_context.clone())]);
+                }
+                return None;
+            }
+        };
+
+        let suppress_legacy_status = self.env_ctx_v2 && *crate::flags::CTX_UI;
+        if suppress_legacy_status {
+            items.clear();
+        }
+
+        let sequence = emission.sequence();
+
+        let bytes_sent: usize = items
+            .iter()
+            .flat_map(|item| match item {
+                ResponseItem::Message { content, .. } => content.iter(),
+                _ => [].iter(),
+            })
+            .map(|content| match content {
+                ContentItem::InputText { text } | ContentItem::OutputText { text } => text.len(),
+                _ => 0,
+            })
+            .sum();
+
+        trace!(
+            "env_ctx_v2: emitted environment_context message (seq={}, bytes={})",
+            sequence,
+            bytes_sent
+        );
+
+        if *crate::flags::CTX_UI {
+            self.emit_env_context_event(stream_id.as_str(), &emission);
+        }
+
+        Some(items)
+    }
+
+    /// Assemble environment context items from the timeline for prompt input.
+    fn assemble_from_timeline(&self) -> Option<Vec<ResponseItem>> {
+        if !self.env_ctx_v2 {
+            return None;
+        }
+
+        let (timeline, stream_id, max_deltas) = {
+            let mut state = self.state.lock().unwrap();
+            if state.context_timeline.is_empty() {
+                return None;
+            }
+            let stream_id = state.context_stream_ids.env_stream_id(self.id);
+            (
+                state.context_timeline.clone(),
+                stream_id,
+                self.retention_config.max_env_deltas,
+            )
+        };
+
+        match timeline.assemble_prompt_items(max_deltas, Some(&stream_id)) {
+            Ok(items) if !items.is_empty() => Some(items),
+            Ok(_) => None,
+            Err(err) => {
+                warn!("env_ctx_v2: failed to assemble timeline prompt items: {err}");
+                None
+            }
+        }
+    }
+
+    fn emit_env_context_event(
+        &self,
+        stream_id: &str,
+        emission: &EnvironmentContextEmission,
+    ) {
+        use crate::protocol::OrderMeta;
+
+        let sequence = emission.sequence();
+        let order = OrderMeta {
+            request_ordinal: self.current_request_ordinal(),
+            output_index: None,
+            sequence_number: Some(sequence),
+        };
+
+        let msg = match emission {
+            EnvironmentContextEmission::Full { snapshot, .. } => {
+                let Ok(snapshot_json) = serde_json::to_value(snapshot) else {
+                    warn!("env_ctx_v2: failed to serialize environment context snapshot for event");
+                    return;
+                };
+                EventMsg::EnvironmentContextFull(EnvironmentContextFullEvent {
+                    snapshot: snapshot_json,
+                    sequence: Some(sequence),
+                })
+            }
+            EnvironmentContextEmission::Delta { delta, .. } => {
+                let Ok(delta_json) = serde_json::to_value(delta) else {
+                    warn!("env_ctx_v2: failed to serialize environment context delta for event");
+                    return;
+                };
+                EventMsg::EnvironmentContextDelta(EnvironmentContextDeltaEvent {
+                    delta: delta_json,
+                    sequence: Some(sequence),
+                    base_fingerprint: Some(delta.base_fingerprint.clone()),
+                })
+            }
+        };
+
+        let event = self.make_event_with_order(stream_id, msg, order, Some(sequence));
+        if let Err(err) = self.tx_event.try_send(event) {
+            warn!("env_ctx_v2: failed to send environment context event: {err}");
+        }
+    }
+
+    fn emit_browser_snapshot_event(&self, stream_id: &str, snapshot: &BrowserSnapshot) {
+        use crate::protocol::OrderMeta;
+
+        let Ok(snapshot_json) = serde_json::to_value(snapshot) else {
+            warn!("env_ctx_v2: failed to serialize browser snapshot for event");
+            return;
+        };
+
+        let order = OrderMeta {
+            request_ordinal: self.current_request_ordinal(),
+            output_index: None,
+            sequence_number: None,
+        };
+
+        let msg = EventMsg::BrowserSnapshot(BrowserSnapshotEvent {
+            snapshot: snapshot_json,
+            url: Some(snapshot.url.clone()),
+            captured_at: Some(snapshot.captured_at.clone()),
+        });
+
+        let event = self.make_event_with_order(stream_id, msg, order, None);
+        if let Err(err) = self.tx_event.try_send(event) {
+            warn!("env_ctx_v2: failed to send browser snapshot event: {err}");
+        }
     }
 
     pub(crate) fn reconstruct_history_from_rollout(
@@ -2574,33 +3375,72 @@ impl Session {
         rollout_items: &[RolloutItem],
     ) -> Vec<ResponseItem> {
         let mut history = self.build_initial_context(turn_context);
+        let mut replay_ctx = TimelineReplayContext::default();
+
         for item in rollout_items {
             match item {
                 RolloutItem::ResponseItem(response_item) => {
                     history.push(response_item.clone());
+                    process_rollout_env_item(&mut replay_ctx, response_item);
                 }
                 RolloutItem::Compacted(compacted) => {
-                    let user_messages = collect_user_messages(&history);
+                    let snippets = collect_compaction_snippets(&history);
                     history = build_compacted_history(
                         self.build_initial_context(turn_context),
-                        &user_messages,
+                        &snippets,
                         &compacted.message,
                     );
                 }
                 RolloutItem::Event(recorded_event) => {
                     if let code_protocol::protocol::EventMsg::UserMessage(user_msg_event) = &recorded_event.msg {
-                        history.push(ResponseItem::Message {
+                        let response_item = ResponseItem::Message {
                             id: Some(recorded_event.id.clone()),
                             role: "user".to_string(),
                             content: vec![ContentItem::InputText {
                                 text: user_msg_event.message.clone(),
                             }],
-                        });
+                        };
+                        process_rollout_env_item(&mut replay_ctx, &response_item);
+                        history.push(response_item);
                     }
                 }
                 _ => {}
             }
         }
+
+        if replay_ctx.timeline.baseline().is_none() {
+            if let Some(snapshot) = replay_ctx.legacy_baseline.clone() {
+                if let Err(err) = replay_ctx.timeline.add_baseline_once(snapshot.clone()) {
+                    tracing::warn!("env_ctx_v2: failed to map legacy status to baseline: {err}");
+                }
+                match replay_ctx.timeline.record_snapshot(snapshot.clone()) {
+                    Ok(true) => crate::telemetry::global_telemetry().record_snapshot_commit(),
+                    Ok(false) => crate::telemetry::global_telemetry().record_dedup_drop(),
+                    Err(err) => tracing::warn!("env_ctx_v2: failed to record legacy baseline snapshot: {err}"),
+                }
+                replay_ctx.last_snapshot = Some(snapshot);
+            }
+        }
+
+        let restored_snapshot = replay_ctx.last_snapshot.clone();
+        let next_seq_value = replay_ctx.next_sequence;
+        {
+            let mut state = self.state.lock().unwrap();
+            state.context_timeline = replay_ctx.timeline.clone();
+            state.environment_context_seq = next_seq_value.saturating_sub(1);
+            state.context_stream_ids = EnvironmentContextStreamRegistry::default();
+
+            if let Some(snapshot) = restored_snapshot {
+                state.last_environment_snapshot = Some(snapshot.clone());
+                state
+                    .environment_context_tracker
+                    .restore(snapshot, next_seq_value);
+            } else {
+                state.last_environment_snapshot = None;
+                state.environment_context_tracker = EnvironmentContextTracker::new();
+            }
+        }
+
         history
     }
 
@@ -2749,6 +3589,193 @@ impl Session {
     }
 }
 
+#[derive(Debug, Default, PartialEq, Eq)]
+struct CleanupStats {
+    removed_screenshots: usize,
+    removed_status: usize,
+    removed_env_baselines: usize,
+    removed_env_deltas: usize,
+    removed_browser_snapshots: usize,
+    kept_recent_screenshots: usize,
+    kept_env_deltas: usize,
+    kept_browser_snapshots: usize,
+}
+
+impl CleanupStats {
+    fn any_removed(&self) -> bool {
+        self.removed_screenshots > 0
+            || self.removed_status > 0
+            || self.removed_env_baselines > 0
+            || self.removed_env_deltas > 0
+            || self.removed_browser_snapshots > 0
+    }
+}
+
+fn prune_history_items(current_items: &[ResponseItem]) -> (Vec<ResponseItem>, CleanupStats) {
+    let mut real_user_messages = Vec::new();
+    let mut status_messages = Vec::new();
+    let mut env_baselines = Vec::new();
+    let mut env_deltas = Vec::new();
+    let mut browser_snapshot_messages = Vec::new();
+
+    const MAX_ENV_DELTAS: usize = 3;
+    const MAX_BROWSER_SNAPSHOTS: usize = 2;
+
+    for (idx, item) in current_items.iter().enumerate() {
+        if let ResponseItem::Message { role, content, .. } = item {
+            if role != "user" {
+                continue;
+            }
+
+            let has_status = content.iter().any(|c| {
+                if let ContentItem::InputText { text } = c {
+                    text.contains("== System Status ==")
+                        || text.contains("Current working directory:")
+                        || text.contains("Git branch:")
+                        || text.contains(ENVIRONMENT_CONTEXT_OPEN_TAG)
+                        || text.contains(ENVIRONMENT_CONTEXT_DELTA_OPEN_TAG)
+                        || text.contains(BROWSER_SNAPSHOT_OPEN_TAG)
+                } else {
+                    false
+                }
+            });
+
+            let has_screenshot = content
+                .iter()
+                .any(|c| matches!(c, ContentItem::InputImage { .. }));
+
+            let has_real_text = content.iter().any(|c| {
+                if let ContentItem::InputText { text } = c {
+                    !text.contains("== System Status ==")
+                        && !text.contains("Current working directory:")
+                        && !text.contains("Git branch:")
+                        && !text.trim().is_empty()
+                        && !text.contains(ENVIRONMENT_CONTEXT_OPEN_TAG)
+                        && !text.contains(ENVIRONMENT_CONTEXT_DELTA_OPEN_TAG)
+                        && !text.contains(BROWSER_SNAPSHOT_OPEN_TAG)
+                } else {
+                    false
+                }
+            });
+
+            let has_env_baseline = content.iter().any(|c| {
+                if let ContentItem::InputText { text } = c {
+                    text.contains(ENVIRONMENT_CONTEXT_OPEN_TAG)
+                        && !text.contains(ENVIRONMENT_CONTEXT_DELTA_OPEN_TAG)
+                } else {
+                    false
+                }
+            });
+
+            let has_env_delta = content.iter().any(|c| {
+                if let ContentItem::InputText { text } = c {
+                    text.contains(ENVIRONMENT_CONTEXT_DELTA_OPEN_TAG)
+                } else {
+                    false
+                }
+            });
+
+            let has_browser_snapshot = content.iter().any(|c| {
+                if let ContentItem::InputText { text } = c {
+                    text.contains(BROWSER_SNAPSHOT_OPEN_TAG)
+                } else {
+                    false
+                }
+            });
+
+            if has_real_text && !has_status && !has_screenshot {
+                real_user_messages.push(idx);
+            } else if has_status || has_screenshot {
+                status_messages.push(idx);
+            }
+
+            if has_env_baseline {
+                env_baselines.push(idx);
+            }
+            if has_env_delta {
+                env_deltas.push(idx);
+            }
+            if has_browser_snapshot {
+                browser_snapshot_messages.push(idx);
+            }
+        }
+    }
+
+    let mut screenshots_to_keep = std::collections::HashSet::new();
+    for &user_idx in real_user_messages.iter().rev().take(2) {
+        for &status_idx in status_messages.iter() {
+            if status_idx > user_idx {
+                if let Some(ResponseItem::Message { content, .. }) = current_items.get(status_idx)
+                {
+                    if content.iter().any(|c| matches!(c, ContentItem::InputImage { .. })) {
+                        screenshots_to_keep.insert(status_idx);
+                        break;
+                    }
+                }
+            }
+        }
+    }
+
+    let baseline_to_keep = env_baselines.last().copied();
+    let env_deltas_to_keep: std::collections::HashSet<usize> = env_deltas
+        .iter()
+        .rev()
+        .take(MAX_ENV_DELTAS)
+        .copied()
+        .collect();
+    let browser_snapshots_to_keep: std::collections::HashSet<usize> = browser_snapshot_messages
+        .iter()
+        .rev()
+        .take(MAX_BROWSER_SNAPSHOTS)
+        .copied()
+        .collect();
+
+    let mut items_to_keep = Vec::new();
+    let mut removed_screenshots = 0usize;
+    let mut removed_status = 0usize;
+
+    for (idx, item) in current_items.iter().enumerate() {
+        let keep = if status_messages.contains(&idx) {
+            screenshots_to_keep.contains(&idx)
+                || browser_snapshots_to_keep.contains(&idx)
+                || baseline_to_keep == Some(idx)
+                || env_deltas_to_keep.contains(&idx)
+        } else {
+            true
+        };
+
+        if keep {
+            items_to_keep.push(item.clone());
+        } else if let ResponseItem::Message { content, .. } = item {
+            if content
+                .iter()
+                .any(|c| matches!(c, ContentItem::InputImage { .. }))
+            {
+                removed_screenshots += 1;
+            } else {
+                removed_status += 1;
+            }
+        }
+    }
+
+    let stats = CleanupStats {
+        removed_screenshots,
+        removed_status,
+        removed_env_baselines: env_baselines
+            .len()
+            .saturating_sub(if baseline_to_keep.is_some() { 1 } else { 0 }),
+        removed_env_deltas: env_deltas.len().saturating_sub(env_deltas_to_keep.len()),
+        removed_browser_snapshots: browser_snapshot_messages
+            .len()
+            .saturating_sub(browser_snapshots_to_keep.len()),
+        kept_recent_screenshots: screenshots_to_keep.len(),
+        kept_env_deltas: env_deltas_to_keep.len(),
+        kept_browser_snapshots: browser_snapshots_to_keep.len(),
+    };
+
+    (items_to_keep, stats)
+}
+
 impl Drop for Session {
     fn drop(&mut self) {
         // Interrupt any running turn when the session is dropped.
@@ -2767,6 +3794,11 @@ impl State {
             background_seq_by_sub_id: self.background_seq_by_sub_id.clone(),
             dry_run_guard: self.dry_run_guard.clone(),
             next_internal_sub_id: self.next_internal_sub_id,
+            context_timeline: self.context_timeline.clone(),
+            environment_context_tracker: self.environment_context_tracker.clone(),
+            environment_context_seq: self.environment_context_seq,
+            last_environment_snapshot: self.last_environment_snapshot.clone(),
+            context_stream_ids: self.context_stream_ids.clone(),
             ..Default::default()
         }
     }
@@ -3042,7 +4074,6 @@ impl AgentTask {
         turn_context: Arc<TurnContext>,
         sub_id: String,
         input: Vec<InputItem>,
-        compact_instructions: String,
     ) -> Self {
         let handle = {
             let sess_clone = Arc::clone(&sess);
@@ -3054,7 +4085,6 @@ impl AgentTask {
                     tc_clone,
                     sub_clone,
                     input,
-                    compact_instructions,
                 )
                 .await;
             })
@@ -3390,6 +4420,27 @@ async fn submission_loop(
                             warn!("failed to initialise session usage log: {e}");
                         }
                     }
+
+                    // SAFETY: setting a process-wide env var is intentional here to
+                    // coordinate sub-agent debug behaviour launched from this session.
+                    unsafe { std::env::set_var("CODE_SUBAGENT_DEBUG", "1"); }
+                    match crate::config::find_code_home() {
+                        Ok(mut debug_root) => {
+                            debug_root.push("debug_logs");
+                            let mut manager = AGENT_MANAGER.write().await;
+                            manager.set_debug_log_root(Some(debug_root));
+                        }
+                        Err(err) => {
+                            warn!("failed to resolve debug log root: {err}");
+                            let mut manager = AGENT_MANAGER.write().await;
+                            manager.set_debug_log_root(None);
+                        }
+                    }
+                } else {
+                    // SAFETY: removing the coordination flag is safe when debug is off.
+                    unsafe { std::env::remove_var("CODE_SUBAGENT_DEBUG"); }
+                    let mut manager = AGENT_MANAGER.write().await;
+                    manager.set_debug_log_root(None);
                 }
 
                 let conversation_id = code_protocol::mcp_protocol::ConversationId::from(session_id);
@@ -3535,6 +4586,7 @@ async fn submission_loop(
                 agent_models.dedup_by(|a, b| a.eq_ignore_ascii_case(b));
                 tools_config.set_agent_models(agent_models);
 
+                let model_descriptions = model_guide_markdown_with_custom(&config.agents);
                 let mut new_session = Arc::new(Session {
                     id: session_id,
                     client,
@@ -3542,15 +4594,17 @@ async fn submission_loop(
                     tx_event: tx_event.clone(),
                     user_instructions: effective_user_instructions.clone(),
                     base_instructions,
+                    compact_prompt_override: config.compact_prompt_override.clone(),
                     approval_policy,
                     sandbox_policy,
                     shell_environment_policy: config.shell_environment_policy.clone(),
                     cwd,
                     _writable_roots: writable_roots,
-            mcp_connection_manager,
-            client_tools: config.experimental_client_tools.clone(),
-            session_manager: crate::exec_command::ExecSessionManager::default(),
+                    mcp_connection_manager,
+                    client_tools: config.experimental_client_tools.clone(),
+                    session_manager: crate::exec_command::ExecSessionManager::default(),
                     agents: config.agents.clone(),
+                    model_reasoning_effort: config.model_reasoning_effort,
                     notify,
                     state: Mutex::new(state),
                     rollout: Mutex::new(rollout_recorder),
@@ -3570,6 +4624,9 @@ async fn submission_loop(
                     self_handle: Weak::new(),
                     active_review: Mutex::new(None),
                     next_turn_text_format: Mutex::new(None),
+                    env_ctx_v2: config.env_ctx_v2,
+                    retention_config: config.retention.clone(),
+                    model_descriptions,
                 });
                 let weak_handle = Arc::downgrade(&new_session);
                 if let Some(inner) = Arc::get_mut(&mut new_session) {
@@ -3656,6 +4713,7 @@ async fn submission_loop(
                 }
 
                 if let Some(sess_arc) = &sess {
+                    spawn_bridge_listener(sess_arc.clone());
                     sess_arc.run_session_hooks(ProjectHookEvent::SessionStart).await;
                 }
 
@@ -3873,6 +4931,33 @@ async fn submission_loop(
                 });
             }
             // Upstream protocol no longer includes ListMcpTools; skip handling here.
+            Op::ListCustomPrompts => {
+                let sess = match sess.as_ref() {
+                    Some(sess) => Arc::clone(sess),
+                    None => {
+                        send_no_session_event(sub.id).await;
+                        continue;
+                    }
+                };
+
+                let custom_prompts: Vec<code_protocol::custom_prompts::CustomPrompt> =
+                    if let Some(dir) = crate::custom_prompts::default_prompts_dir() {
+                        crate::custom_prompts::discover_prompts_in(&dir).await
+                    } else {
+                        Vec::new()
+                    };
+
+                let event = Event {
+                    id: sub.id.clone(),
+                    event_seq: 0,
+                    msg: EventMsg::ListCustomPromptsResponse(ListCustomPromptsResponseEvent {
+                        custom_prompts,
+                    }),
+                    order: None,
+                };
+
+                sess.send_event(event).await;
+            }
             Op::Compact => {
                 let sess = match sess.as_ref() {
                     Some(sess) => sess,
@@ -3882,9 +4967,10 @@ async fn submission_loop(
                     }
                 };
 
+                let prompt_text = sess.compact_prompt_text();
                 // Attempt to inject input into current task
                 if let Err(items) = sess.inject_input(vec![InputItem::Text {
-                    text: compact::SUMMARIZATION_PROMPT.to_string(),
+                    text: prompt_text,
                 }]) {
                     let turn_context = sess.make_turn_context();
                     compact::spawn_compact_task(sess.clone(), turn_context, sub.id.clone(), items);
@@ -3998,7 +5084,7 @@ async fn spawn_review_thread(
     let mut review_config = (*config).clone();
     review_config.model = review_model.clone();
     review_config.model_family = review_family.clone();
-    review_config.model_reasoning_effort = ReasoningEffortConfig::Low;
+    review_config.model_reasoning_effort = config.review_model_reasoning_effort;
     review_config.model_reasoning_summary = ReasoningSummaryConfig::Detailed;
     review_config.model_text_verbosity = config.model_text_verbosity;
     review_config.user_instructions = None;
@@ -4041,6 +5127,7 @@ async fn spawn_review_thread(
         cwd: parent_turn_context.cwd.clone(),
         base_instructions: Some(REVIEW_PROMPT.to_string()),
         user_instructions: None,
+        compact_prompt_override: parent_turn_context.compact_prompt_override.clone(),
         approval_policy: parent_turn_context.approval_policy,
         sandbox_policy: parent_turn_context.sandbox_policy.clone(),
         shell_environment_policy: parent_turn_context.shell_environment_policy.clone(),
@@ -4073,7 +5160,14 @@ async fn exit_review_mode(
     task_sub_id: String,
     review_output: Option<ReviewOutputEvent>,
 ) {
-    let event = session.make_event(&task_sub_id, EventMsg::ExitedReviewMode(review_output.clone()));
+    let snapshot = capture_review_snapshot(&session).await;
+    let event = session.make_event(
+        &task_sub_id,
+        EventMsg::ExitedReviewMode(ExitedReviewModeEvent {
+            review_output: review_output.clone(),
+            snapshot,
+        }),
+    );
     session.send_event(event).await;
 
     let _active_request = session.take_active_review();
@@ -4126,6 +5220,23 @@ async fn exit_review_mode(
     session
         .record_conversation_items(&[developer_message])
         .await;
+}
+
+async fn capture_review_snapshot(session: &Session) -> Option<ReviewSnapshotInfo> {
+    let cwd = session.cwd.clone();
+    let repo_root = crate::git_info::get_git_repo_root(&cwd);
+    let branch = crate::git_info::current_branch_name(&cwd).await;
+
+    if repo_root.is_none() && branch.is_none() {
+        return None;
+    }
+
+    Some(ReviewSnapshotInfo {
+        snapshot_commit: None,
+        branch,
+        worktree_path: Some(cwd),
+        repo_root,
+    })
 }
 
 fn parse_review_output_event(text: &str) -> ReviewOutputEvent {
@@ -4225,6 +5336,11 @@ async fn run_agent(sess: Arc<Session>, turn_context: Arc<TurnContext>, sub_id: S
     // Track if this is the first iteration - if so, include the initial input
     let mut first_iteration = true;
 
+    // Track if we've done a proactive compaction in this iteration to prevent
+    // infinite loops. As long as compaction works well in getting us way below
+    // the token limit, we shouldn't need more than one compaction per iteration.
+    let mut did_proactive_compact_this_iteration = false;
+
     loop {
         // Note that pending_input would be something like a message the user
         // submitted through the UI while the model was running. Though the UI
@@ -4288,12 +5404,12 @@ async fn run_agent(sess: Arc<Session>, turn_context: Arc<TurnContext>, sub_id: S
         let turn_input_messages: Vec<String> = turn_input
             .iter()
             .filter_map(|item| match item {
-                ResponseItem::Message { content, .. } => Some(content),
+                ResponseItem::Message { role, content, .. } if role == "user" => Some(content),
                 _ => None,
             })
             .flat_map(|content| {
                 content.iter().filter_map(|item| match item {
-                    ContentItem::OutputText { text } => Some(text.clone()),
+                    ContentItem::InputText { text } => Some(text.clone()),
                     _ => None,
                 })
             })
@@ -4420,6 +5536,60 @@ async fn run_agent(sess: Arc<Session>, turn_context: Arc<TurnContext>, sub_id: S
                     }
                 }
 
+                // Check whether we should proactively compact before queuing follow-up work.
+                // Upstream codex-rs compacts as soon as usage hits the configured threshold,
+                // which keeps us from hitting hard context-window errors mid-session.
+                let limit = turn_context
+                    .client
+                    .get_auto_compact_token_limit()
+                    .unwrap_or(i64::MAX);
+                let most_recent_usage_tokens: Option<i64> = {
+                    let state = sess.state.lock().unwrap();
+                    state.token_usage_info.as_ref().and_then(|info| {
+                        info.last_token_usage.total_tokens.try_into().ok()
+                    })
+                };
+                // auto_compact_token_limit is defined relative to a single turn's
+                // token usage (input + output). Using the cumulative total caused
+                // the limit check to stay tripped permanently once crossed, even
+                // after compacting history, which spammed repeated /compact runs.
+                let token_limit_reached = most_recent_usage_tokens
+                    .map_or(false, |tokens| tokens >= limit);
+
+                // As long as compaction works well in getting us way below the token limit,
+                // we shouldn't worry about being in an infinite loop. However, guard against
+                // repeated compaction attempts within a single iteration.
+                if token_limit_reached && !did_proactive_compact_this_iteration {
+                    did_proactive_compact_this_iteration = true;
+                    sess
+                        .notify_stream_error(
+                            &sub_id,
+                            "Token limit reached; running /compact and continuing…".to_string(),
+                        )
+                        .await;
+
+                    // Choose between local and remote compact based on auth mode,
+                    // matching upstream codex-rs behavior
+                    if compact::should_use_remote_compact_task(&sess).await {
+                        let _ = run_inline_remote_auto_compact_task(
+                            Arc::clone(&sess),
+                            Arc::clone(&turn_context),
+                            Vec::new(),
+                        )
+                        .await;
+                    } else {
+                        let _ = compact::run_inline_auto_compact_task(
+                            Arc::clone(&sess),
+                            Arc::clone(&turn_context),
+                        )
+                        .await;
+                    }
+
+                    // Restart this loop with the newly compacted history so the
+                    // next turn can see the trimmed conversation state.
+                    continue;
+                }
+
                 // If there are responses, add them to pending input for the next iteration
                 if !responses.is_empty() {
                     if !is_review_mode {
@@ -4427,6 +5597,9 @@ async fn run_agent(sess: Arc<Session>, turn_context: Arc<TurnContext>, sub_id: S
                             sess.add_pending_input(response.clone());
                         }
                     }
+                    // Reset the proactive compact guard for the next iteration since we're
+                    // about to process new tool calls and may need to compact again
+                    did_proactive_compact_this_iteration = false;
                 }
 
                 if responses.is_empty() {
@@ -4492,12 +5665,13 @@ async fn run_agent(sess: Arc<Session>, turn_context: Arc<TurnContext>, sub_id: S
 
     if let Some(compact_sub_id) = sess.dequeue_manual_compact() {
         let turn_context = sess.make_turn_context();
+        let prompt_text = sess.compact_prompt_text();
         compact::spawn_compact_task(
             Arc::clone(&sess),
             turn_context,
             compact_sub_id,
             vec![InputItem::Text {
-                text: compact::SUMMARIZATION_PROMPT.to_string(),
+                text: prompt_text,
             }],
         );
         return;
@@ -4571,12 +5745,14 @@ async fn run_turn(
             status_items, // Include status items with this request
             base_instructions_override: tc.base_instructions.clone(),
             include_additional_instructions: true,
+            prepend_developer_messages: Vec::new(),
             text_format: tc.text_format_override.clone(),
             model_override: None,
             model_family_override: None,
             output_schema: None,
             log_tag: Some("codex/turn".to_string()),
             session_id_override: None,
+            model_descriptions: sess.model_descriptions.clone(),
         };
 
         // Start a new scratchpad for this HTTP attempt
@@ -4595,7 +5771,9 @@ async fn run_turn(
             }
             Err(CodexErr::Interrupted) => return Err(CodexErr::Interrupted),
             Err(CodexErr::EnvVar(var)) => return Err(CodexErr::EnvVar(var)),
-            Err(e @ (CodexErr::UsageLimitReached(_) | CodexErr::UsageNotIncluded)) => {
+            Err(e @ (CodexErr::UsageLimitReached(_)
+                | CodexErr::UsageNotIncluded
+                | CodexErr::QuotaExceeded)) => {
                 if let CodexErr::UsageLimitReached(limit_err) = &e {
                     if let Some(ctx) = account_usage_context(&sess) {
                         let usage_home = ctx.code_home.clone();
@@ -4620,7 +5798,7 @@ async fn run_turn(
             Err(e) => {
                 // Detect context-window overflow and auto-run a compact summarization once
                 if !did_auto_compact {
-                    if let CodexErr::Stream(msg, _maybe_delay) = &e {
+                    if let CodexErr::Stream(msg, _maybe_delay, _req_id) = &e {
                         let lower = msg.to_ascii_lowercase();
                         let looks_like_context_overflow =
                             lower.contains("exceeds the context window")
@@ -4644,11 +5822,20 @@ async fn run_turn(
                                 .await;
 
                             let previous_input_snapshot = input.clone();
-                            let compacted_history = compact::run_inline_auto_compact_task(
-                                Arc::clone(&sess),
-                                Arc::clone(&turn_context),
-                            )
-                            .await;
+                            let compacted_history = if compact::should_use_remote_compact_task(sess).await {
+                                run_inline_remote_auto_compact_task(
+                                    Arc::clone(&sess),
+                                    Arc::clone(&turn_context),
+                                    Vec::new(),
+                                )
+                                .await
+                            } else {
+                                compact::run_inline_auto_compact_task(
+                                    Arc::clone(&sess),
+                                    Arc::clone(&turn_context),
+                                )
+                                .await
+                            };
 
                             // Reset any partial attempt state and rebuild the request payload using the
                             // newly compacted history plus the current user turn items.
@@ -4681,29 +5868,12 @@ async fn run_turn(
 
                 // Use the configured provider-specific stream retry budget.
                 let max_retries = tc.client.get_provider().stream_max_retries();
-                if retries < max_retries {
-                    retries += 1;
-                    let delay = match e {
-                        CodexErr::Stream(_, Some(delay)) => delay,
-                        _ => backoff(retries),
-                    };
-                    warn!(
-                        "stream disconnected - retrying turn ({retries}/{max_retries} in {delay:?})...",
-                    );
-
-                    // Surface retry information to any UI/front‑end so the
-                    // user understands what is happening instead of staring
-                    // at a seemingly frozen screen.
-                    sess.notify_stream_error(
-                        &sub_id,
-                        format!(
-                            "stream error: {e}; retrying {retries}/{max_retries} in {delay:?}…"
-                        ),
-                    )
-                    .await;
-                    // Pull any partial progress from this attempt and append to
-                    // the next request's input so we do not lose tool progress
-                    // or already-finalized items.
+                let req_id = match &e {
+                    CodexErr::Stream(_, _, req) => req.clone(),
+                    _ => None,
+                };
+                let is_connectivity = is_connectivity_error(&e);
+                let drain_scratchpad_into_attempt = |attempt_input: &mut Vec<ResponseItem>| {
                     if let Some(sp) = sess.take_scratchpad() {
                         // Build a set of call_ids we have already included to avoid duplicate calls
                         let mut seen_calls: std::collections::HashSet<String> = attempt_input
@@ -4782,9 +5952,60 @@ async fn run_turn(
                             });
                         }
                     }
+                };
+
+                if is_connectivity && retries >= max_retries {
+                    let probe = tc.client.get_provider().base_url_for_probe();
+                    let wait_message = format!(
+                        "Network unavailable; waiting to reconnect to {probe} ({e})"
+                    );
+                    sess.notify_stream_error(&sub_id, wait_message).await;
+                    drain_scratchpad_into_attempt(&mut attempt_input);
+                    wait_for_connectivity(&probe).await;
+                    retries = 0;
+                    continue;
+                }
+
+                if retries < max_retries {
+                    retries += 1;
+                    let (delay, retry_eta) = match e {
+                        CodexErr::Stream(_, Some(ref retry_after), _) => {
+                            let eta = format_retry_eta(&retry_after);
+                            (retry_after.delay, eta)
+                        }
+                        _ => (backoff(retries), None),
+                    };
+                    warn!(
+                        error = %e,
+                        request_id = req_id.as_deref(),
+                        "stream disconnected - retrying turn in {delay:?} (attempt {retries}/{max_retries})",
+                    );
+
+                    // Surface retry information to any UI/front‑end so the
+                    // user understands what is happening instead of staring
+                    // at a seemingly frozen screen.
+                    let mut retry_message =
+                        format!("stream error: {e}; retrying in {delay:?}");
+                    if let Some(eta) = retry_eta {
+                        retry_message.push_str(&format!(" (next attempt at {eta})"));
+                    }
+                    retry_message.push('…');
+                    sess.notify_stream_error(&sub_id, retry_message.clone()).await;
+                    // Pull any partial progress from this attempt and append to
+                    // the next request's input so we do not lose tool progress
+                    // or already-finalized items.
+                    drain_scratchpad_into_attempt(&mut attempt_input);
 
                     tokio::time::sleep(delay).await;
                 } else {
+                    error!(
+                        retries,
+                        max_retries,
+                        auto_compact_attempted = did_auto_compact,
+                        request_id = req_id.as_deref(),
+                        error = %e,
+                        "stream disconnected - retries exhausted"
+                    );
                     return Err(e);
                 }
             }
@@ -4865,6 +6086,51 @@ struct ProcessedResponseItem {
     response: Option<ResponseInputItem>,
 }
 
+struct TurnLatencyGuard<'a> {
+    sess: &'a Session,
+    attempt_req: u64,
+    active: bool,
+}
+
+impl<'a> TurnLatencyGuard<'a> {
+    fn new(sess: &'a Session, attempt_req: u64, prompt: &Prompt) -> Self {
+        sess.turn_latency_request_scheduled(attempt_req, prompt);
+        Self {
+            sess,
+            attempt_req,
+            active: true,
+        }
+    }
+
+    fn mark_completed(&mut self, output_item_count: usize, token_usage: Option<&TokenUsage>) {
+        if !self.active {
+            return;
+        }
+        self
+            .sess
+            .turn_latency_request_completed(self.attempt_req, output_item_count, token_usage);
+        self.active = false;
+    }
+
+    fn mark_failed(&mut self, note: Option<String>) {
+        if !self.active {
+            return;
+        }
+        self.sess.turn_latency_request_failed(self.attempt_req, note);
+        self.active = false;
+    }
+}
+
+impl Drop for TurnLatencyGuard<'_> {
+    fn drop(&mut self) {
+        if self.active {
+            self
+                .sess
+                .turn_latency_request_failed(self.attempt_req, Some("dropped_without_outcome".to_string()));
+        }
+    }
+}
+
 async fn try_run_turn(
     sess: &Session,
     turn_diff_tracker: &mut TurnDiffTracker,
@@ -4927,7 +6193,20 @@ async fn try_run_turn(
         })
     };
 
-    let mut stream = sess.client.clone().stream(&prompt).await?;
+    let mut turn_latency_guard = TurnLatencyGuard::new(sess, attempt_req, prompt.as_ref());
+    let mut stream = match sess.client.clone().stream(&prompt).await {
+        Ok(stream) => stream,
+        Err(e) => {
+            turn_latency_guard.mark_failed(Some(format!("stream_init_failed: {e}")));
+            sess
+                .notify_stream_error(
+                    &sub_id,
+                    format!("[transport] failed to start stream: {e}"),
+                )
+                .await;
+            return Err(e);
+        }
+    };
 
     let mut output = Vec::new();
     loop {
@@ -4938,8 +6217,11 @@ async fn try_run_turn(
         let Some(event) = event else {
             // Channel closed without yielding a final Completed event or explicit error.
             // Treat as a disconnected stream so the caller can retry.
+            turn_latency_guard
+                .mark_failed(Some("stream_closed_before_completed".to_string()));
             return Err(CodexErr::Stream(
                 "stream closed before response.completed".into(),
+                None,
                 None,
             ));
         };
@@ -4949,6 +6231,7 @@ async fn try_run_turn(
             Err(e) => {
                 // Propagate the underlying stream error to the caller (run_turn), which
                 // will apply the configured `stream_max_retries` policy.
+                turn_latency_guard.mark_failed(Some(format!("stream_event_error: {e}")));
                 return Err(e);
             }
         };
@@ -5050,6 +6333,7 @@ async fn try_run_turn(
                     let _ = sess.tx_event.send(sess.make_event(&sub_id, msg)).await;
                 }
 
+                turn_latency_guard.mark_completed(output.len(), token_usage.as_ref());
                 return Ok(output);
             }
             ResponseEvent::OutputTextDelta { delta, item_id, sequence_number, output_index } => {
@@ -5144,6 +6428,10 @@ async fn handle_response_item(
                     sess.tx_event.send(stamped).await.ok();
                 }
             }
+            None
+        }
+        ResponseItem::CompactionSummary { .. } => {
+            // Keep compaction summaries in history; no user-visible event to emit.
             None
         }
         ResponseItem::Reasoning {
@@ -5385,6 +6673,7 @@ async fn handle_function_call(
         "web_fetch" => handle_web_fetch(sess, &ctx, arguments).await,
         "wait" => handle_wait(sess, &ctx, arguments).await,
         "kill" => handle_kill(sess, &ctx, arguments).await,
+        "code_bridge" | "code_bridge_subscription" => handle_code_bridge(sess, &ctx, arguments).await,
         _ => {
             match sess.mcp_connection_manager.parse_tool_name(&name) {
                 Some((server, tool_name)) => {
@@ -5434,6 +6723,200 @@ async fn handle_browser_cleanup(sess: &Session, ctx: &ToolCallCtx) -> ResponseIn
             }
         }
     ).await
+}
+
+#[derive(Deserialize)]
+struct BridgeControlArgs {
+    action: String,
+    #[serde(default)]
+    level: Option<String>,
+    #[serde(default)]
+    code: Option<String>,
+}
+
+fn normalise_level(level: &str) -> Option<String> {
+    let l = level.trim().to_lowercase();
+    match l.as_str() {
+        "errors" | "error" => Some("errors".to_string()),
+        "warn" | "warning" => Some("warn".to_string()),
+        "info" => Some("info".to_string()),
+        "trace" | "debug" => Some("trace".to_string()),
+        _ => None,
+    }
+}
+
+fn full_capabilities() -> Vec<String> {
+    vec![
+        "console".to_string(),
+        "error".to_string(),
+        "pageview".to_string(),
+        "screenshot".to_string(),
+        "control".to_string(),
+    ]
+}
+
+async fn handle_code_bridge(
+    sess: &Session,
+    ctx: &ToolCallCtx,
+    arguments: String,
+) -> ResponseInputItem {
+    handle_code_bridge_with_cwd(sess.get_cwd(), ctx, arguments).await
+}
+
+async fn handle_code_bridge_with_cwd(
+    cwd: &Path,
+    ctx: &ToolCallCtx,
+    arguments: String,
+) -> ResponseInputItem {
+    let parsed: Result<BridgeControlArgs, _> = serde_json::from_str(&arguments);
+    let args = match parsed {
+        Ok(a) => a,
+        Err(e) => {
+            return ResponseInputItem::FunctionCallOutput {
+                call_id: ctx.call_id.clone(),
+                output: FunctionCallOutputPayload {
+                    content: format!("invalid arguments: {e}"),
+                    success: Some(false),
+                },
+            };
+        }
+    };
+
+    let action = args.action.to_lowercase();
+
+    match action.as_str() {
+        "subscribe" => {
+            let level = match args.level.as_ref().and_then(|l| normalise_level(l)) {
+                Some(lvl) => lvl,
+                None => {
+                    return ResponseInputItem::FunctionCallOutput {
+                        call_id: ctx.call_id.clone(),
+                        output: FunctionCallOutputPayload {
+                            content: "invalid or missing level (use errors|warn|info|trace)".to_string(),
+                            success: Some(false),
+                        },
+                    }
+                }
+            };
+
+            let mut sub = get_effective_subscription();
+            sub.levels = vec![level];
+            sub.capabilities = full_capabilities();
+            sub.llm_filter = "off".to_string();
+
+            set_session_subscription(Some(sub.clone()));
+            if let Err(e) = persist_workspace_subscription(&cwd, Some(sub.clone())) {
+                return ResponseInputItem::FunctionCallOutput {
+                    call_id: ctx.call_id.clone(),
+                    output: FunctionCallOutputPayload {
+                        content: format!("persist failed: {e}"),
+                        success: Some(false),
+                    },
+                };
+            }
+            set_workspace_subscription(Some(sub));
+
+            ResponseInputItem::FunctionCallOutput {
+                call_id: ctx.call_id.clone(),
+                output: FunctionCallOutputPayload { content: "ok".to_string(), success: Some(true) },
+            }
+        }
+        "screenshot" => {
+            send_bridge_control("screenshot", serde_json::json!({}));
+            ResponseInputItem::FunctionCallOutput {
+                call_id: ctx.call_id.clone(),
+                output: FunctionCallOutputPayload { content: "requested screenshot".to_string(), success: Some(true) },
+            }
+        }
+        "javascript" => {
+            let code = match args.code.as_ref().map(|c| c.trim()).filter(|c| !c.is_empty()) {
+                Some(c) => c,
+                None => {
+                    return ResponseInputItem::FunctionCallOutput {
+                        call_id: ctx.call_id.clone(),
+                        output: FunctionCallOutputPayload {
+                            content: "missing code for javascript action".to_string(),
+                            success: Some(false),
+                        },
+                    }
+                }
+            };
+            send_bridge_control("javascript", serde_json::json!({ "code": code }));
+            ResponseInputItem::FunctionCallOutput {
+                call_id: ctx.call_id.clone(),
+                output: FunctionCallOutputPayload { content: "sent javascript".to_string(), success: Some(true) },
+            }
+        }
+        // Keep legacy actions for backward compatibility with older prompts/tools
+        "show" | "set" | "clear" => ResponseInputItem::FunctionCallOutput {
+            call_id: ctx.call_id.clone(),
+            output: FunctionCallOutputPayload {
+                content: "deprecated action; use subscribe, screenshot, or javascript".to_string(),
+                success: Some(false),
+            },
+        },
+        _ => ResponseInputItem::FunctionCallOutput {
+            call_id: ctx.call_id.clone(),
+            output: FunctionCallOutputPayload {
+                content: format!("unsupported action: {}", action),
+                success: Some(false),
+            },
+        },
+    }
+}
+
+#[cfg(test)]
+mod bridge_tool_tests {
+    use super::*;
+    use pretty_assertions::assert_eq;
+    use tempfile::TempDir;
+
+    fn call_tool_with_cwd(cwd: &Path, args: &str) -> ResponseInputItem {
+        // Build a minimal ToolCallCtx (sub_id/call_id arbitrary for tests)
+        let ctx = ToolCallCtx::new("sub".into(), "call".into(), None, None);
+        tokio::runtime::Runtime::new()
+            .unwrap()
+            .block_on(async { handle_code_bridge_with_cwd(cwd, &ctx, args.to_string()).await })
+    }
+
+    #[test]
+    fn bridge_tool_show_set_clear() {
+        let tmp = TempDir::new().unwrap();
+        let cwd = tmp.path();
+
+        // set (session-only) is now deprecated; ensure we emit a helpful failure
+        let out = call_tool_with_cwd(
+            cwd,
+            r#"{"action":"set","levels":["trace"],"capabilities":["console"],"llm_filter":"off"}"#,
+        );
+        match out {
+            ResponseInputItem::FunctionCallOutput { output, .. } => {
+                assert_eq!(output.success, Some(false));
+                assert!(output.content.contains("deprecated action"));
+            }
+            _ => panic!("unexpected output"),
+        }
+
+        // show is also deprecated; we should return the same guidance
+        let out = call_tool_with_cwd(cwd, r#"{"action":"show"}"#);
+        match out {
+            ResponseInputItem::FunctionCallOutput { output, .. } => {
+                assert_eq!(output.success, Some(false));
+                assert!(output.content.contains("deprecated action"));
+            }
+            _ => panic!("unexpected output"),
+        }
+
+        // clear
+        let out = call_tool_with_cwd(cwd, r#"{"action":"clear","persist":true}"#);
+        match out {
+            ResponseInputItem::FunctionCallOutput { output, .. } => {
+                assert_eq!(output.success, Some(false));
+                assert!(output.content.contains("deprecated action"));
+            }
+            _ => panic!("unexpected output"),
+        }
+    }
 }
 
 async fn handle_web_fetch(sess: &Session, ctx: &ToolCallCtx, arguments: String) -> ResponseInputItem {
@@ -7274,18 +8757,41 @@ pub(crate) async fn handle_run_agent(
 
             // Helper: derive the command to check for a given model/config pair.
             fn resolve_command_for_check(model: &str, cfg: Option<&crate::config_types::AgentConfig>) -> (String, bool) {
-                if let Some(c) = cfg { return (c.command.clone(), false); }
+                let spec = agent_model_spec(model)
+                    .or_else(|| cfg.and_then(|c| agent_model_spec(&c.name)))
+                    .or_else(|| cfg.and_then(|c| agent_model_spec(&c.command)));
+
+                let cfg_trimmed = cfg.map(|c| {
+                    let (base, _) = split_command_and_args(&c.command);
+                    let trimmed = base.trim();
+                    if trimmed.is_empty() { c.command.trim().to_string() } else { trimmed.to_string() }
+                });
+
+                if let Some(spec) = spec {
+                    let is_builtin_family = matches!(spec.family, "code" | "codex" | "cloud");
+                    let uses_default_cli = cfg_trimmed
+                        .as_ref()
+                        .map(|cmd| cmd.is_empty() || cmd.eq_ignore_ascii_case(spec.cli))
+                        .unwrap_or(true);
+
+                    if is_builtin_family && uses_default_cli {
+                        return (spec.cli.to_string(), true);
+                    }
+                }
+
+                if let Some(cmd) = cfg_trimmed {
+                    if !cmd.is_empty() {
+                        return (cmd, false);
+                    }
+                }
+
                 let m = model.to_lowercase();
                 match m.as_str() {
-                    // Built-in: always available via current_exe fallback.
-                    "code" | "codex" => (m, true),
-                    // External CLIs expected to be in PATH
+                    "code" | "codex" | "cloud" => ("coder".to_string(), true),
                     "claude" => ("claude".to_string(), false),
                     "gemini" => ("gemini".to_string(), false),
                     "qwen" => ("qwen".to_string(), false),
-                    // Cloud agent: treat as built-in via current executable (code cloud submit)
-                    "cloud" => ("cloud".to_string(), true),
-                    _ => (m, false),
+                    other => (other.to_string(), false),
                 }
             }
 
@@ -7375,6 +8881,7 @@ pub(crate) async fn handle_run_agent(
                             read_only,
                             Some(batch_id.clone()),
                             config.clone(),
+                            sess.model_reasoning_effort.into(),
                         )
                         .await;
                     agent_ids.push(agent_id);
@@ -7398,6 +8905,7 @@ pub(crate) async fn handle_run_agent(
                             params.files.clone().unwrap_or_default(),
                             read_only,
                             Some(batch_id.clone()),
+                            sess.model_reasoning_effort.into(),
                         )
                         .await;
                     agent_ids.push(agent_id);
@@ -7419,6 +8927,7 @@ pub(crate) async fn handle_run_agent(
                         params.files.clone().unwrap_or_default(),
                         read_only,
                         Some(batch_id.clone()),
+                        sess.model_reasoning_effort.into(),
                     )
                     .await;
                 agent_ids.push(agent_id);
@@ -9876,6 +11385,7 @@ async fn send_agent_status_update(sess: &Session) {
                 error: agent.error.clone(),
                 elapsed_ms,
                 token_count: None,
+                source_kind: agent.source_kind.clone(),
             }
         })
         .collect();
@@ -10123,6 +11633,16 @@ async fn handle_browser_open(sess: &Session, ctx: &ToolCallCtx, arguments: Strin
                         .get("url")
                         .and_then(|v| v.as_str())
                         .unwrap_or("about:blank");
+
+                    if url.trim().to_ascii_lowercase().starts_with("devtools://") {
+                        return ResponseInputItem::FunctionCallOutput {
+                            call_id: call_id_clone.clone(),
+                            output: FunctionCallOutputPayload {
+                                content: "Developer tools are disabled for this browser session. Use the browser.console tool to inspect logs instead.".to_string(),
+                                success: Some(false),
+                            },
+                        };
+                    }
 
                     // Use the global browser manager (create if needed)
                     let browser_manager = {
@@ -10588,6 +12108,20 @@ async fn handle_browser_key(sess: &Session, ctx: &ToolCallCtx, arguments: String
                 match args {
                     Ok(json) => {
                         let key = json.get("key").and_then(|v| v.as_str()).unwrap_or("");
+
+                        let normalized = key
+                            .split_whitespace()
+                            .collect::<String>()
+                            .to_ascii_lowercase();
+                        if matches!(normalized.as_str(), "f12" | "ctrl+shift+i" | "control+shift+i") {
+                            return ResponseInputItem::FunctionCallOutput {
+                                call_id: call_id_clone.clone(),
+                                output: FunctionCallOutputPayload {
+                                    content: "Developer tools are disabled for this browser session. Use the browser.console tool to inspect logs instead.".to_string(),
+                                    success: Some(false),
+                                },
+                            };
+                        }
 
                         match browser_manager.press_key(key).await {
                             Ok(_) => {
@@ -11844,6 +13378,141 @@ mod command_guard_detection_tests {
     }
 }
 
+#[cfg(test)]
+mod cleanup_tests {
+    use super::*;
+    use code_protocol::protocol::{
+        BROWSER_SNAPSHOT_CLOSE_TAG,
+        BROWSER_SNAPSHOT_OPEN_TAG,
+        ENVIRONMENT_CONTEXT_CLOSE_TAG,
+        ENVIRONMENT_CONTEXT_DELTA_CLOSE_TAG,
+        ENVIRONMENT_CONTEXT_DELTA_OPEN_TAG,
+        ENVIRONMENT_CONTEXT_OPEN_TAG,
+    };
+
+    fn make_text_message(text: &str) -> ResponseItem {
+        ResponseItem::Message {
+            id: None,
+            role: "user".to_string(),
+            content: vec![ContentItem::InputText {
+                text: text.to_string(),
+            }],
+        }
+    }
+
+    fn make_screenshot_message(tag: &str) -> ResponseItem {
+        ResponseItem::Message {
+            id: None,
+            role: "user".to_string(),
+            content: vec![ContentItem::InputImage {
+                image_url: tag.to_string(),
+            }],
+        }
+    }
+
+    #[test]
+    fn prune_history_retains_recent_env_items() {
+        let baseline1 = make_text_message(&format!(
+            "{}\n{{}}\n{}",
+            ENVIRONMENT_CONTEXT_OPEN_TAG, ENVIRONMENT_CONTEXT_CLOSE_TAG
+        ));
+        let delta1 = make_text_message(&format!(
+            "{}\n{{\"cwd\":\"/repo\"}}\n{}",
+            ENVIRONMENT_CONTEXT_DELTA_OPEN_TAG, ENVIRONMENT_CONTEXT_DELTA_CLOSE_TAG
+        ));
+        let snapshot1 = make_text_message(&format!(
+            "{}\n{{\"url\":\"https://first\"}}\n{}",
+            BROWSER_SNAPSHOT_OPEN_TAG, BROWSER_SNAPSHOT_CLOSE_TAG
+        ));
+        let screenshot1 = make_screenshot_message("data:image/png;base64,AAA");
+        let user_msg = make_text_message("Regular user message");
+        let baseline2 = make_text_message(&format!(
+            "{}\n{{\"cwd\":\"/repo2\"}}\n{}",
+            ENVIRONMENT_CONTEXT_OPEN_TAG, ENVIRONMENT_CONTEXT_CLOSE_TAG
+        ));
+        let delta2 = make_text_message(&format!(
+            "{}\n{{\"cwd\":\"/repo2\"}}\n{}",
+            ENVIRONMENT_CONTEXT_DELTA_OPEN_TAG, ENVIRONMENT_CONTEXT_DELTA_CLOSE_TAG
+        ));
+        let snapshot2 = make_text_message(&format!(
+            "{}\n{{\"url\":\"https://second\"}}\n{}",
+            BROWSER_SNAPSHOT_OPEN_TAG, BROWSER_SNAPSHOT_CLOSE_TAG
+        ));
+        let screenshot2 = make_screenshot_message("data:image/png;base64,BBB");
+        let delta3 = make_text_message(&format!(
+            "{}\n{{\"cwd\":\"/repo3\"}}\n{}",
+            ENVIRONMENT_CONTEXT_DELTA_OPEN_TAG, ENVIRONMENT_CONTEXT_DELTA_CLOSE_TAG
+        ));
+        let snapshot3 = make_text_message(&format!(
+            "{}\n{{\"url\":\"https://third\"}}\n{}",
+            BROWSER_SNAPSHOT_OPEN_TAG, BROWSER_SNAPSHOT_CLOSE_TAG
+        ));
+        let delta4 = make_text_message(&format!(
+            "{}\n{{\"cwd\":\"/repo4\"}}\n{}",
+            ENVIRONMENT_CONTEXT_DELTA_OPEN_TAG, ENVIRONMENT_CONTEXT_DELTA_CLOSE_TAG
+        ));
+        let screenshot3 = make_screenshot_message("data:image/png;base64,CCC");
+
+        let history = vec![
+            user_msg.clone(),
+            baseline1,
+            delta1.clone(),
+            snapshot1.clone(),
+            screenshot1,
+            baseline2.clone(),
+            delta2.clone(),
+            snapshot2.clone(),
+            screenshot2.clone(),
+            delta3.clone(),
+            snapshot3.clone(),
+            delta4.clone(),
+            screenshot3.clone(),
+        ];
+
+        let (pruned, stats) = prune_history_items(&history);
+
+        // Baseline 1 should be removed; only the latest baseline retained
+        assert!(pruned.contains(&baseline2));
+        assert!(!pruned.contains(&history[1]));
+
+        // Only the last three deltas should remain
+        assert!(pruned.contains(&delta2));
+        assert!(pruned.contains(&delta3));
+        assert!(pruned.contains(&delta4));
+        assert!(!pruned.contains(&delta1));
+
+        // Only the last two browser snapshots should remain
+        assert!(pruned.contains(&snapshot2));
+        assert!(pruned.contains(&snapshot3));
+        assert!(!pruned.contains(&snapshot1));
+
+        // Stats reflect removals and kept counts
+        assert_eq!(stats.removed_env_baselines, 1);
+        assert_eq!(stats.removed_env_deltas, 1);
+        assert_eq!(stats.removed_browser_snapshots, 1);
+        assert_eq!(stats.kept_env_deltas, 3);
+        assert_eq!(stats.kept_browser_snapshots, 2);
+        assert_eq!(stats.kept_recent_screenshots, 1);
+    }
+
+    #[test]
+    fn prune_history_no_env_items_is_identity() {
+        let user = make_text_message("hi");
+        let assistant = ResponseItem::Message {
+            id: None,
+            role: "assistant".to_string(),
+            content: vec![ContentItem::OutputText {
+                text: "response".to_string(),
+            }],
+        };
+        let history = vec![user.clone(), assistant.clone()];
+
+        let (pruned, stats) = prune_history_items(&history);
+        assert_eq!(pruned, history);
+        assert!(!stats.any_removed());
+    }
+}
+
 fn debug_history(label: &str, items: &[ResponseItem]) {
     let preview: Vec<String> = items
         .iter()
@@ -11870,4 +13539,208 @@ fn debug_history(label: &str, items: &[ResponseItem]) {
         eprintln!("[compact_history] {} => [{}]", label, rendered);
     }
     info!(target = "code_core::compact_history", "{} => [{}]", label, rendered);
+}
+
+#[derive(Debug)]
+struct TimelineReplayContext {
+    timeline: ContextTimeline,
+    next_sequence: u64,
+    last_snapshot: Option<EnvironmentContextSnapshot>,
+    legacy_baseline: Option<EnvironmentContextSnapshot>,
+}
+
+impl Default for TimelineReplayContext {
+    fn default() -> Self {
+        Self {
+            timeline: ContextTimeline::new(),
+            next_sequence: 1,
+            last_snapshot: None,
+            legacy_baseline: None,
+        }
+    }
+}
+
+fn process_rollout_env_item(ctx: &mut TimelineReplayContext, item: &ResponseItem) {
+    if let Some(snapshot) = parse_env_snapshot_from_response(item) {
+        if ctx.timeline.baseline().is_none() {
+            if let Err(err) = ctx.timeline.add_baseline_once(snapshot.clone()) {
+                tracing::warn!("env_ctx_v2: failed to seed baseline during replay: {err}");
+            }
+        }
+
+        match ctx.timeline.record_snapshot(snapshot.clone()) {
+            Ok(true) => crate::telemetry::global_telemetry().record_snapshot_commit(),
+            Ok(false) => crate::telemetry::global_telemetry().record_dedup_drop(),
+            Err(err) => tracing::warn!("env_ctx_v2: failed to record snapshot during replay: {err}"),
+        }
+
+        ctx.last_snapshot = Some(snapshot);
+        return;
+    }
+
+    if let Some(delta) = parse_env_delta_from_response(item) {
+        if let Some(base_snapshot) = ctx.last_snapshot.clone() {
+            if delta.base_fingerprint != base_snapshot.fingerprint() {
+                tracing::warn!(
+                    "env_ctx_v2: delta base fingerprint mismatch during replay; requesting baseline resend"
+                );
+                crate::telemetry::global_telemetry().record_baseline_resend();
+                crate::telemetry::global_telemetry().record_delta_gap();
+                ctx.timeline = ContextTimeline::new();
+                ctx.last_snapshot = None;
+                ctx.legacy_baseline = None;
+                ctx.next_sequence = 1;
+                return;
+            }
+
+            let sequence = ctx.next_sequence;
+            match ctx.timeline.apply_delta(sequence, delta.clone()) {
+                Ok(_) => {
+                    ctx.next_sequence = ctx.next_sequence.saturating_add(1);
+                }
+                Err(err) => {
+                    tracing::warn!("env_ctx_v2: failed to apply delta during replay: {err}");
+                    crate::telemetry::global_telemetry().record_delta_gap();
+                    return;
+                }
+            }
+
+            let next_snapshot = base_snapshot.apply_delta(&delta);
+            match ctx.timeline.record_snapshot(next_snapshot.clone()) {
+                Ok(true) => crate::telemetry::global_telemetry().record_snapshot_commit(),
+                Ok(false) => crate::telemetry::global_telemetry().record_dedup_drop(),
+                Err(err) => tracing::warn!("env_ctx_v2: failed to record snapshot during replay: {err}"),
+            }
+
+            ctx.last_snapshot = Some(next_snapshot);
+        } else {
+            tracing::warn!(
+                "env_ctx_v2: encountered delta before baseline while replaying rollout"
+            );
+            crate::telemetry::global_telemetry().record_delta_gap();
+        }
+        return;
+    }
+
+    if ctx.legacy_baseline.is_none() && is_legacy_system_status(item) {
+        if let Some(snapshot) = parse_legacy_status_snapshot(item) {
+            ctx.legacy_baseline = Some(snapshot);
+        }
+    }
+}
+
+fn extract_tagged_json<'a>(text: &'a str, open: &str, close: &str) -> Option<&'a str> {
+    let start = text.find(open)? + open.len();
+    let end = text.rfind(close)?;
+    if end <= start {
+        return None;
+    }
+    Some(text[start..end].trim())
+}
+
+fn parse_env_snapshot_from_response(item: &ResponseItem) -> Option<EnvironmentContextSnapshot> {
+    if let ResponseItem::Message { role, content, .. } = item {
+        if role != "user" {
+            return None;
+        }
+        for piece in content {
+            if let ContentItem::InputText { text } = piece {
+                if let Some(json) = extract_tagged_json(
+                    text,
+                    ENVIRONMENT_CONTEXT_OPEN_TAG,
+                    ENVIRONMENT_CONTEXT_CLOSE_TAG,
+                ) {
+                    if let Ok(snapshot) = serde_json::from_str::<EnvironmentContextSnapshot>(json) {
+                        return Some(snapshot);
+                    }
+                }
+            }
+        }
+    }
+    None
+}
+
+fn parse_env_delta_from_response(item: &ResponseItem) -> Option<EnvironmentContextDelta> {
+    if let ResponseItem::Message { role, content, .. } = item {
+        if role != "user" {
+            return None;
+        }
+        for piece in content {
+            if let ContentItem::InputText { text } = piece {
+                if let Some(json) = extract_tagged_json(
+                    text,
+                    ENVIRONMENT_CONTEXT_DELTA_OPEN_TAG,
+                    ENVIRONMENT_CONTEXT_DELTA_CLOSE_TAG,
+                ) {
+                    if let Ok(delta) = serde_json::from_str::<EnvironmentContextDelta>(json) {
+                        return Some(delta);
+                    }
+                }
+            }
+        }
+    }
+    None
+}
+
+fn is_legacy_system_status(item: &ResponseItem) -> bool {
+    if let ResponseItem::Message { role, content, .. } = item {
+        if role != "user" {
+            return false;
+        }
+        return content.iter().any(|c| {
+            if let ContentItem::InputText { text } = c {
+                text.contains("== System Status ==")
+            } else {
+                false
+            }
+        });
+    }
+    false
+}
+
+fn parse_legacy_status_snapshot(item: &ResponseItem) -> Option<EnvironmentContextSnapshot> {
+    if let ResponseItem::Message { role, content, .. } = item {
+        if role != "user" {
+            return None;
+        }
+        for piece in content {
+            if let ContentItem::InputText { text } = piece {
+                if !text.contains("== System Status ==") {
+                    continue;
+                }
+
+                let mut cwd: Option<String> = None;
+                let mut branch: Option<String> = None;
+                for line in text.lines() {
+                    let trimmed = line.trim();
+                    if let Some(rest) = trimmed.strip_prefix("cwd:") {
+                        let value = rest.trim();
+                        if !value.is_empty() {
+                            cwd = Some(value.to_string());
+                        }
+                    } else if let Some(rest) = trimmed.strip_prefix("branch:") {
+                        let value = rest.trim();
+                        if !value.is_empty() && value != "unknown" {
+                            branch = Some(value.to_string());
+                        }
+                    }
+                }
+
+                return Some(EnvironmentContextSnapshot {
+                    version: EnvironmentContextSnapshot::VERSION,
+                    cwd,
+                    approval_policy: None,
+                    sandbox_mode: None,
+                    network_access: None,
+                    writable_roots: Vec::new(),
+                    operating_system: None,
+                    common_tools: Vec::new(),
+                    shell: None,
+                    git_branch: branch,
+                    reasoning_effort: None,
+                });
+            }
+        }
+    }
+    None
 }

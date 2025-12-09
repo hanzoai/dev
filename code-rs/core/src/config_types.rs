@@ -703,8 +703,12 @@ pub struct Tui {
     pub alternate_screen: bool,
 
     /// Remember whether Auto Resolve is enabled for `/review` flows.
-    #[serde(default)]
+    #[serde(default = "default_true")]
     pub review_auto_resolve: bool,
+
+    /// Run a background `/review` after turns that modify code.
+    #[serde(default = "default_true")]
+    pub auto_review_enabled: bool,
 }
 
 // Important: Provide a manual Default so that when no config file exists and we
@@ -724,8 +728,55 @@ impl Default for Tui {
             spinner: SpinnerSelection::default(),
             notifications: Notifications::default(),
             alternate_screen: true,
-            review_auto_resolve: false,
+            review_auto_resolve: true,
+            auto_review_enabled: true,
         }
+    }
+}
+
+/// User acknowledgements for in-product notices (distinct from notifications).
+#[derive(Deserialize, Debug, Clone, PartialEq, Default)]
+pub struct Notice {
+    pub hide_full_access_warning: Option<bool>,
+    pub hide_gpt5_1_migration_prompt: Option<bool>,
+    #[serde(rename = "hide_gpt-5.1-codex-max_migration_prompt")]
+    pub hide_gpt_5_1_codex_max_migration_prompt: Option<bool>,
+}
+
+#[derive(Serialize, Debug, Clone, Copy, PartialEq, Eq)]
+#[serde(transparent)]
+pub struct AutoResolveAttemptLimit(u32);
+
+impl AutoResolveAttemptLimit {
+    pub const ALLOWED: [u32; 9] = [0, 1, 2, 3, 4, 5, 10, 20, 40];
+    pub const DEFAULT: u32 = 10;
+
+    pub fn get(self) -> u32 {
+        self.0
+    }
+
+    pub fn try_new(value: u32) -> Result<Self, &'static str> {
+        if Self::ALLOWED.contains(&value) {
+            Ok(Self(value))
+        } else {
+            Err("auto_resolve_review_attempts must be one of {0,1,2,3,4,5,10,20,40}")
+        }
+    }
+}
+
+impl Default for AutoResolveAttemptLimit {
+    fn default() -> Self {
+        Self(Self::DEFAULT)
+    }
+}
+
+impl<'de> Deserialize<'de> for AutoResolveAttemptLimit {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        let raw = u32::deserialize(deserializer)?;
+        Self::try_new(raw).map_err(D::Error::custom)
     }
 }
 
@@ -753,6 +804,20 @@ pub struct AutoDriveSettings {
 
     #[serde(default)]
     pub continue_mode: AutoDriveContinueMode,
+
+    /// Model used for the Auto Drive coordinator and follow-on turns.
+    #[serde(default = "default_auto_drive_model")]
+    pub model: String,
+
+    /// Reasoning effort applied to the Auto Drive model.
+    #[serde(default = "default_auto_drive_reasoning_effort")]
+    pub model_reasoning_effort: ReasoningEffort,
+
+    #[serde(default)]
+    pub auto_resolve_review_attempts: AutoResolveAttemptLimit,
+
+    #[serde(default)]
+    pub auto_review_followup_attempts: AutoResolveAttemptLimit,
 }
 
 impl Default for AutoDriveSettings {
@@ -765,8 +830,21 @@ impl Default for AutoDriveSettings {
             observer_enabled: true,
             coordinator_routing: true,
             continue_mode: AutoDriveContinueMode::TenSeconds,
+            model: default_auto_drive_model(),
+            model_reasoning_effort: default_auto_drive_reasoning_effort(),
+            auto_resolve_review_attempts: AutoResolveAttemptLimit::default(),
+            auto_review_followup_attempts: AutoResolveAttemptLimit::default(),
         }
     }
+}
+
+fn default_auto_drive_model() -> String {
+    // Keep aligned with the coordinator's preferred model fallback.
+    String::from("gpt-5.1")
+}
+
+const fn default_auto_drive_reasoning_effort() -> ReasoningEffort {
+    ReasoningEffort::High
 }
 
 #[derive(Deserialize, Debug, Clone, Copy, PartialEq, Eq)]
@@ -834,6 +912,7 @@ pub struct StreamConfig {
     /// Explicit values above still take precedence if set.
     #[serde(default)]
     pub responsive: bool,
+
 }
 
 impl Default for StreamConfig {
@@ -1179,6 +1258,7 @@ pub enum ReasoningEffort {
     #[default]
     Medium,
     High,
+    XHigh,
     /// Deprecated: previously disabled reasoning. Kept for internal use only.
     #[serde(skip)]
     None,
@@ -1308,6 +1388,47 @@ pub struct ProjectCommandConfig {
     pub timeout_ms: Option<u64>,
 }
 
+/// Retention policy configuration for env_ctx_v2 timeline management.
+#[derive(Deserialize, Debug, Clone, PartialEq, Eq)]
+#[serde(rename_all = "kebab-case")]
+pub struct RetentionConfig {
+    /// Maximum number of environment context deltas to retain (default: 3)
+    #[serde(default = "default_max_env_deltas")]
+    pub max_env_deltas: usize,
+    /// Maximum number of browser snapshots to retain (default: 2)
+    #[serde(default = "default_max_browser_snapshots")]
+    pub max_browser_snapshots: usize,
+    /// Maximum total bytes for all retained env_ctx items (default: 100KB)
+    #[serde(default = "default_max_total_bytes")]
+    pub max_total_bytes: usize,
+    /// Always keep the most recent environment baseline snapshot (default: true)
+    #[serde(default = "default_true_bool")]
+    pub keep_latest_baseline: bool,
+}
+
+fn default_max_env_deltas() -> usize {
+    3
+}
+
+fn default_max_browser_snapshots() -> usize {
+    2
+}
+
+fn default_max_total_bytes() -> usize {
+    100 * 1024
+}
+
+impl Default for RetentionConfig {
+    fn default() -> Self {
+        Self {
+            max_env_deltas: default_max_env_deltas(),
+            max_browser_snapshots: default_max_browser_snapshots(),
+            max_total_bytes: default_max_total_bytes(),
+            keep_latest_baseline: true,
+        }
+    }
+}
+
 impl From<code_protocol::config_types::ReasoningEffort> for ReasoningEffort {
     fn from(v: code_protocol::config_types::ReasoningEffort) -> Self {
         match v {
@@ -1315,6 +1436,21 @@ impl From<code_protocol::config_types::ReasoningEffort> for ReasoningEffort {
             code_protocol::config_types::ReasoningEffort::Low => ReasoningEffort::Low,
             code_protocol::config_types::ReasoningEffort::Medium => ReasoningEffort::Medium,
             code_protocol::config_types::ReasoningEffort::High => ReasoningEffort::High,
+            code_protocol::config_types::ReasoningEffort::XHigh => ReasoningEffort::XHigh,
+        }
+    }
+}
+
+impl From<ReasoningEffort> for code_protocol::config_types::ReasoningEffort {
+    fn from(v: ReasoningEffort) -> Self {
+        match v {
+            ReasoningEffort::Minimal | ReasoningEffort::None => {
+                code_protocol::config_types::ReasoningEffort::Minimal
+            }
+            ReasoningEffort::Low => code_protocol::config_types::ReasoningEffort::Low,
+            ReasoningEffort::Medium => code_protocol::config_types::ReasoningEffort::Medium,
+            ReasoningEffort::High => code_protocol::config_types::ReasoningEffort::High,
+            ReasoningEffort::XHigh => code_protocol::config_types::ReasoningEffort::XHigh,
         }
     }
 }

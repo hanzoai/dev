@@ -260,6 +260,16 @@ async fn get_default_branch(cwd: &Path) -> Option<String> {
     get_default_branch_local(cwd).await
 }
 
+/// Determine the repository's default branch name, if available.
+///
+/// This inspects remote configuration first (including the symbolic `HEAD`
+/// reference) and falls back to common local defaults such as `main` or
+/// `master`. Returns `None` when the information cannot be determined, for
+/// example when the current directory is not inside a Git repository.
+pub async fn default_branch_name(cwd: &Path) -> Option<String> {
+    get_default_branch(cwd).await
+}
+
 /// Attempt to determine the repository's default branch name from local branches.
 async fn get_default_branch_local(cwd: &Path) -> Option<String> {
     for candidate in ["main", "master"] {
@@ -815,11 +825,21 @@ mod tests {
             .await
             .expect("Should collect git info from repo");
 
+        let remote_url_output = Command::new("git")
+            .args(["remote", "get-url", "origin"])
+            .current_dir(&repo_path)
+            .output()
+            .await
+            .expect("Failed to read remote url");
+        // Some dev environments rewrite remotes (e.g., force SSH), so compare against
+        // whatever URL Git reports instead of a fixed placeholder.
+        let expected_remote = String::from_utf8(remote_url_output.stdout)
+            .unwrap()
+            .trim()
+            .to_string();
+
         // Should have repository URL
-        assert_eq!(
-            git_info.repository_url,
-            Some("https://github.com/example/repo.git".to_string())
-        );
+        assert_eq!(git_info.repository_url, Some(expected_remote));
     }
 
     #[tokio::test]

@@ -3,6 +3,7 @@ use std::time::{Duration, Instant};
 use code_common::elapsed::format_duration;
 use code_core::protocol::ReviewContextMetadata;
 use code_core::protocol::ReviewOutputEvent;
+use code_core::review_coord::{bump_snapshot_epoch, try_acquire_lock};
 use code_git_tooling::GhostCommit;
 
 use crate::AutoTurnAgentsAction;
@@ -218,19 +219,32 @@ pub struct AutoResolveState {
     pub phase: AutoResolvePhase,
     pub last_review: Option<ReviewOutputEvent>,
     pub last_fix_message: Option<String>,
+    pub last_reviewed_commit: Option<String>,
+    pub snapshot_epoch: Option<u64>,
 }
 
 impl AutoResolveState {
     pub fn new(prompt: String, hint: String, metadata: Option<ReviewContextMetadata>) -> Self {
+        Self::new_with_limit(prompt, hint, metadata, AUTO_RESOLVE_MAX_REVIEW_ATTEMPTS)
+    }
+
+    pub fn new_with_limit(
+        prompt: String,
+        hint: String,
+        metadata: Option<ReviewContextMetadata>,
+        max_attempts: u32,
+    ) -> Self {
         Self {
             prompt,
             hint,
             metadata,
             attempt: 0,
-            max_attempts: AUTO_RESOLVE_MAX_REVIEW_ATTEMPTS,
+            max_attempts,
             phase: AutoResolvePhase::WaitingForReview,
             last_review: None,
             last_fix_message: None,
+            last_reviewed_commit: None,
+            snapshot_epoch: None,
         }
     }
 }
@@ -252,7 +266,7 @@ pub const AUTO_RESOLVE_REVIEW_FOLLOWUP: &str = "This issue has been resolved. Pl
 #[derive(Debug, Clone)]
 pub enum AutoControllerEffect {
     RefreshUi,
-    StartCountdown { countdown_id: u64, seconds: u8 },
+    StartCountdown { countdown_id: u64, decision_seq: u64, seconds: u8 },
     SubmitPrompt,
     LaunchStarted { goal: String },
     LaunchFailed { goal: String, error: String },
@@ -272,10 +286,12 @@ pub enum AutoControllerEffect {
 pub struct AutoDriveController {
     pub goal: Option<String>,
     pub current_summary: Option<String>,
-    pub current_progress_past: Option<String>,
-    pub current_progress_current: Option<String>,
+    pub current_status_sent_to_user: Option<String>,
+    pub current_status_title: Option<String>,
     pub current_cli_prompt: Option<String>,
     pub current_cli_context: Option<String>,
+    pub hide_cli_context_in_ui: bool,
+    pub suppress_next_cli_display: bool,
     pub current_display_line: Option<String>,
     pub current_display_is_summary: bool,
     pub current_reasoning_title: Option<String>,
@@ -283,12 +299,13 @@ pub struct AutoDriveController {
     pub thinking_prefix_stripped: bool,
     pub current_summary_index: Option<u32>,
     pub countdown_id: u64,
+    pub countdown_decision_seq: u64,
     pub seconds_remaining: u8,
     pub countdown_override: Option<u8>,
     pub last_broadcast_summary: Option<String>,
     pub last_decision_summary: Option<String>,
-    pub last_decision_progress_past: Option<String>,
-    pub last_decision_progress_current: Option<String>,
+    pub last_decision_status_sent_to_user: Option<String>,
+    pub last_decision_status_title: Option<String>,
     pub last_decision_display: Option<String>,
     pub last_decision_display_is_summary: bool,
     pub review_enabled: bool,
@@ -311,6 +328,8 @@ pub struct AutoDriveController {
     pub pending_stop_message: Option<String>,
     pub last_completion_explanation: Option<String>,
     pub phase: AutoRunPhase,
+    // Non-cloneable guard is kept separately; controller stays Clone.
+    pub review_lock: Option<std::sync::Arc<code_core::review_coord::ReviewGuard>>, 
 }
 
 impl AutoDriveController {
@@ -363,14 +382,24 @@ impl AutoDriveController {
 
     pub fn on_resume_from_manual(&mut self) {
         self.apply_phase(AutoRunPhase::Active);
+        bump_snapshot_epoch();
     }
 
     pub fn on_begin_review(&mut self, diagnostics_pending: bool) {
         self.apply_phase(AutoRunPhase::AwaitingReview { diagnostics_pending });
+        // Acquire global review lock; if busy or error, fall back to Active to avoid overlap.
+        self.review_lock = try_acquire_lock("auto-drive-review", std::path::Path::new("."))
+            .ok()
+            .flatten()
+            .map(std::sync::Arc::new);
+        if self.review_lock.is_none() {
+            self.apply_phase(AutoRunPhase::Active);
+        }
     }
 
     pub fn on_complete_review(&mut self) {
         self.apply_phase(AutoRunPhase::Active);
+        self.review_lock = None;
     }
 
     pub fn on_transient_failure(&mut self, backoff_ms: u64) {
@@ -416,10 +445,26 @@ impl AutoDriveController {
                 self.apply_phase(AutoRunPhase::AwaitingDiagnostics { coordinator_waiting: true });
             }
             (AutoRunPhase::AwaitingDiagnostics { .. } | AutoRunPhase::Active, PhaseTransition::BeginReview { diagnostics_pending }) => {
+                if self.review_lock.is_none() {
+                    self.review_lock = code_core::review_coord::try_acquire_lock(
+                        "auto-drive-review",
+                        std::path::Path::new("."),
+                    )
+                    .ok()
+                    .flatten()
+                    .map(std::sync::Arc::new);
+                    if self.review_lock.is_none() {
+                        // Unable to secure the global lock; stay active to avoid overlapping reviews.
+                        self.apply_phase(AutoRunPhase::Active);
+                        return TransitionEffects { effects, phase_changed: old_phase != self.phase };
+                    }
+                }
+
                 self.apply_phase(AutoRunPhase::AwaitingReview { diagnostics_pending: *diagnostics_pending });
             }
             (AutoRunPhase::AwaitingReview { .. }, PhaseTransition::CompleteReview) => {
                 self.apply_phase(AutoRunPhase::Active);
+                self.review_lock = None;
             }
             (_, PhaseTransition::TransientFailure { backoff_ms }) => {
                 if self.phase.is_active() {
@@ -431,6 +476,7 @@ impl AutoDriveController {
             }
             (_, PhaseTransition::Stop) => {
                 self.apply_phase(AutoRunPhase::Idle);
+                self.review_lock = None;
             }
             _ => {
             }
@@ -479,10 +525,12 @@ impl AutoDriveController {
         self.last_completion_explanation = None;
         self.goal = Some(goal.clone());
         self.current_summary = None;
-        self.current_progress_past = None;
-        self.current_progress_current = None;
+        self.current_status_sent_to_user = None;
+        self.current_status_title = None;
         self.current_cli_prompt = None;
         self.current_cli_context = None;
+        self.hide_cli_context_in_ui = false;
+        self.suppress_next_cli_display = false;
         self.current_display_line = None;
         self.current_display_is_summary = false;
         self.current_reasoning_title = None;
@@ -491,8 +539,8 @@ impl AutoDriveController {
         self.thinking_prefix_stripped = false;
         self.last_broadcast_summary = None;
         self.countdown_override = None;
-        self.last_decision_progress_past = None;
-        self.last_decision_progress_current = None;
+        self.last_decision_status_sent_to_user = None;
+        self.last_decision_status_title = None;
         self.reset_countdown();
         self.apply_phase(AutoRunPhase::AwaitingDiagnostics { coordinator_waiting: true });
 
@@ -559,6 +607,8 @@ impl AutoDriveController {
         let truncated_reason = Self::truncate_error(&reason);
         self.current_cli_prompt = None;
         self.current_cli_context = None;
+        self.hide_cli_context_in_ui = false;
+        self.suppress_next_cli_display = false;
         self.pending_agent_actions.clear();
         self.pending_agent_timing = None;
         let delay = Self::auto_restart_delay(pending_attempt);
@@ -613,8 +663,10 @@ impl AutoDriveController {
             "Waiting for connection… retrying in {human_delay} (attempt {pending_attempt}/{AUTO_RESTART_MAX_ATTEMPTS})"
         ));
         self.current_display_is_summary = true;
-        self.current_progress_current = Some(format!("Last error: {truncated_reason}"));
-        self.current_progress_past = None;
+        self.current_status_title = Some(format!("Retrying after error"));
+        self.current_status_sent_to_user = Some(format!(
+            "Encountered an error: {truncated_reason}. Waiting before retrying."
+        ));
         self.placeholder_phrase = Some("Waiting for connection…".to_string());
         self.thinking_prefix_stripped = false;
 
@@ -640,6 +692,7 @@ impl AutoDriveController {
 
     pub fn schedule_cli_prompt(
         &mut self,
+        decision_seq: u64,
         prompt_text: String,
         countdown_override: Option<u8>,
     ) -> Vec<AutoControllerEffect> {
@@ -648,6 +701,7 @@ impl AutoDriveController {
         self.countdown_override = countdown_override;
         self.reset_countdown();
         self.countdown_id = self.countdown_id.wrapping_add(1);
+        self.countdown_decision_seq = decision_seq;
         let countdown_id = self.countdown_id;
         let countdown = self.countdown_seconds();
         self.seconds_remaining = countdown.unwrap_or(0);
@@ -656,6 +710,7 @@ impl AutoDriveController {
         if let Some(seconds) = countdown {
             effects.push(AutoControllerEffect::StartCountdown {
                 countdown_id,
+                decision_seq,
                 seconds,
             });
         }
@@ -672,10 +727,12 @@ impl AutoDriveController {
         if self.phase.awaiting_coordinator_submit() && !self.phase.is_paused_manual() {
             self.countdown_id = self.countdown_id.wrapping_add(1);
             let countdown_id = self.countdown_id;
+            let decision_seq = self.countdown_decision_seq;
             let countdown = self.countdown_seconds();
             if let Some(seconds) = countdown {
                 effects.push(AutoControllerEffect::StartCountdown {
                     countdown_id,
+                    decision_seq,
                     seconds,
                 });
             }
@@ -686,10 +743,12 @@ impl AutoDriveController {
     pub fn handle_countdown_tick(
         &mut self,
         countdown_id: u64,
+        decision_seq: u64,
         seconds_left: u8,
     ) -> Vec<AutoControllerEffect> {
         if !self.phase.is_active()
             || countdown_id != self.countdown_id
+            || decision_seq != self.countdown_decision_seq
             || !self.phase.awaiting_coordinator_submit()
             || self.phase.is_paused_manual()
         {
@@ -731,6 +790,7 @@ impl AutoDriveController {
         self.elapsed_override = elapsed_override;
         self.pending_stop_message = pending_stop_message;
         self.last_completion_explanation = last_completion_explanation;
+        self.review_lock = None;
         self.phase = if self.phase.is_active() {
             AutoRunPhase::Active
         } else {
@@ -778,6 +838,9 @@ impl AutoDriveController {
 
     pub fn reset_countdown(&mut self) {
         self.seconds_remaining = self.countdown_seconds().unwrap_or(0);
+        if self.seconds_remaining == 0 {
+            self.countdown_decision_seq = 0;
+        }
     }
 
     pub fn set_phase(&mut self, phase: AutoRunPhase) {
@@ -949,5 +1012,42 @@ mod tests {
             .any(|effect| matches!(effect, AutoControllerEffect::CancelCoordinator)));
         assert!(matches!(controller.current_phase(), AutoRunPhase::AwaitingGoalEntry));
         assert!(controller.last_run_summary.is_some());
+    }
+
+    #[test]
+    fn countdown_tick_respects_decision_seq() {
+        let mut controller = AutoDriveController::default();
+
+        let _effects = controller.schedule_cli_prompt(1, "Test prompt".to_string(), None);
+        let countdown_id = controller.countdown_id;
+
+        let effects = controller.handle_countdown_tick(countdown_id, 1, 5);
+        assert_eq!(effects.len(), 1);
+
+        let effects = controller.handle_countdown_tick(countdown_id, 2, 5);
+        assert!(effects.is_empty());
+    }
+
+    #[test]
+    fn countdown_tick_final_emits_submit() {
+        let mut controller = AutoDriveController::default();
+
+        let _effects = controller.schedule_cli_prompt(7, "Prompt".to_string(), None);
+        let countdown_id = controller.countdown_id;
+
+        let effects = controller.handle_countdown_tick(countdown_id, 7, 0);
+        assert_eq!(effects.len(), 1);
+        assert!(matches!(effects[0], AutoControllerEffect::SubmitPrompt));
+    }
+
+    #[test]
+    fn countdown_tick_ignores_stopped_phase() {
+        let mut controller = AutoDriveController::default();
+        let _effects = controller.schedule_cli_prompt(3, "Prompt".to_string(), None);
+        let countdown_id = controller.countdown_id;
+        controller.set_phase(AutoRunPhase::Idle);
+
+        let effects = controller.handle_countdown_tick(countdown_id, 3, 5);
+        assert!(effects.is_empty());
     }
 }

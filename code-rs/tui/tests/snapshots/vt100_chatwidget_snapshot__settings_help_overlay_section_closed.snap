@@ -9,17 +9,17 @@ expression: section_closed
  |                                                                                                |
  | ›  Model              + Select Model & Reasoning --------------------------------------------+ |
  |    Theme              |                                                                      | |
- |    Updates            |  Current model: gpt-5-codex                                          | |
- |    Agents             |  Reasoning effort: medium                                            | |
- |    Auto Drive         |                                                                      | |
- |    Validation         |  GPT-5-Codex                                                         | |
- |    GitHub             |     High - Deep reasoning. Useful when solving difficult problems. ( | |
- |    Chrome             |     Medium (current) - Balanced reasoning. Ideal for most tasks. (de | |
- |    MCP                |     Low - Basic reasoning. Works quickly in simple code bases. (fast | |
- |    Notifications      |                                                                      | |
- |    Limits             |  GPT-5                                                               | |
- |                       |     High - Deep reasoning. Useful when solving difficult problems. ( | |
- |                       |                                                                      | |
+ |    Updates            |  Current model: GPT-5.1-Codex                                        | |
+ |    Agents             |  Reasoning effort: Medium                                            | |
+ |    Prompts            |                                                                      | |
+ |    Auto Drive         |  GPT-5.1-Codex                                                       | |
+ |    Review             |  Optimized for Code.                                                 | |
+ |    Planning           |     High - Maximizes reasoning depth for complex or ambiguous proble | |
+ |    Validation         |     Medium (current) - Dynamically adjusts reasoning based on the ta | |
+ |    Chrome             |     Low - Fastest responses with limited reasoning                   | |
+ |    MCP                |                                                                      | |
+ |    Notifications      |  GPT-5.1-Codex-Mini                                                  | |
+ |    Limits             |                                                                      | |
  |                       +----------------------------------------------------------------------+ |
  | ↑ ↓ Move    Enter Open    Esc Close    ? Help                                                  |
  |                                                                                                |
@@ -28,4 +28,4 @@ expression: section_closed
  +------------------------------------------------------------------------------------------------+
  | What can I code for you today?                                                                 |
  +------------------------------------------------------------------------------------------------+
-   Read Only  (Shift+Tab change)                                           Ctrl+H help  •  API key
+ Read Only  (Shift+Tab change)                                            Ctrl+G guide  •  API key

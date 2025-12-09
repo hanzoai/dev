@@ -201,3 +201,29 @@ impl<'a> BottomPaneView<'a> for AgentsOverviewView {
             .render(Rect { x: inner.x.saturating_add(1), y: inner.y, width: inner.width.saturating_sub(2), height: inner.height }, buf);
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn builtin_agent_shows_enabled_status() {
+        let app_event_tx = AppEventSender::new(|_| {});
+        let mut view = AgentsOverviewView::new(
+            vec![("code".to_string(), true, true, "coder".to_string())],
+            Vec::new(),
+            0,
+            app_event_tx,
+        );
+
+        let lines = view.build_lines();
+        let combined = lines
+            .iter()
+            .map(|l| l.to_string())
+            .collect::<Vec<_>>()
+            .join("\n");
+
+        assert!(combined.contains("enabled"), "expected status text to show 'enabled', got: {combined}");
+        assert!(!combined.contains("not installed"));
+    }
+}

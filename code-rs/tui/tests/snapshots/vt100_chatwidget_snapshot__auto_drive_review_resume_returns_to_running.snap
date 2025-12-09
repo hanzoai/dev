@@ -1,41 +1,40 @@
 ---
 source: tui/tests/vt100_chatwidget_snapshot.rs
-assertion_line: 560
+assertion_line: 994
 expression: "frames.join(\"\\n---FRAME---\\n\")"
 ---
  +----------------------------------------------------------------------------+
  |                                    Code                                    |
  +----------------------------------------------------------------------------+
 
+ • I can help with various tasks including:
 
- ★ Popular commands:
-   /settings - manage all settings in one place NEW
-   /auto - work autonomously on long tasks with Auto Drive UPDATED
-   /chrome - connect to your Chrome browser
-   /plan - create a comprehensive plan (multiple agents)
-   /code - perform a coding task (multiple agents)
+   - Writing code
+   - Reading files
+   - Running commands
 
-  Auto Drive > Working  ✶ Awaiting review (Xs)
+
+
+  Auto Drive > <status redacted>                                 
  +----------------------------------------------------------------------------+
  | What can I code for you today?                                             |
  +----------------------------------------------------------------------------+
-   Agents Enabled  •  Diagnostics Enabled Ctrl+S settings • Esc stop Auto Drive
-
+ Agents Enabled  •  Diagnostics Enabled                                API key
 ---FRAME---
  +----------------------------------------------------------------------------+
  |                                    Code                                    |
  +----------------------------------------------------------------------------+
 
+ • I can help with various tasks including:
 
- ★ Popular commands:
-   /settings - manage all settings in one place NEW
-   /auto - work autonomously on long tasks with Auto Drive UPDATED
-   /chrome - connect to your Chrome browser
-   /plan - create a comprehensive plan (multiple agents)
-   /code - perform a coding task (multiple agents)
+   - Writing code
+   - Reading files
+   - Running commands
 
-  Auto Drive > Coordinator resumed the workflow.  ✶ Thinking (Xs)
+
+
+  Auto Drive > <status redacted>                                 
  +----------------------------------------------------------------------------+
  | What can I code for you today?                                             |
  +----------------------------------------------------------------------------+
-   Agents Enabled  •  Diagnostics Enabled Ctrl+S settings • Esc stop Auto Drive
+ Agents Enabled  •  Diagnostics Enabled                                API key

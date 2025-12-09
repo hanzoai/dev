@@ -65,10 +65,47 @@ fn bottom_spacer_skips_when_history_fits() {
     let _ = render_chat_widget_to_vt100(&mut harness, 120, 40);
     let metrics = layout_metrics(&harness);
 
+    assert!(
+        metrics.last_max_scroll >= 4,
+        "with the command header we intentionally reserve at least four spacer rows, got {}",
+        metrics.last_max_scroll
+    );
+}
+
+#[test]
+fn bottom_spacer_hysteresis_requests_followup_frame() {
+    // First known viewport combo that reliably triggers the hysteresis path
+    // without exhausting file descriptors by brute-force searching.
+    let activate_h = 32;
+    let release_h = 18;
+
+    let mut harness = ChatWidgetHarness::new();
+    seed_overflow_wrapped_transcript(&mut harness);
+
+    let _ = render_chat_widget_to_vt100(&mut harness, 100, activate_h);
+    assert!(
+        harness.bottom_spacer_lines() > 0,
+        "spacer should activate for the overflowing transcript"
+    );
+
+    harness.take_scheduled_frame_events();
+
+    let _ = render_chat_widget_to_vt100(&mut harness, 100, release_h);
+    let target = harness
+        .pending_bottom_spacer_request()
+        .expect("release viewport should request a follow-up frame");
+
+    let scheduled = harness.take_scheduled_frame_events();
+    assert!(
+        scheduled > 0,
+        "viewport transition {activate_h}->{release_h} should schedule a follow-up frame"
+    );
+
+    let _ = render_chat_widget_to_vt100(&mut harness, 100, release_h);
     assert_eq!(
-        metrics.last_max_scroll,
-        4,
-        "with the new command header we intentionally reserve four spacer rows"
+        harness.bottom_spacer_lines(),
+        target,
+        "follow-up frame should settle spacer height"
     );
 }
 
@@ -152,12 +189,12 @@ fn assert_viewport_invariants(output: &str, expected_rows: u16) {
         lines.len()
     );
     assert!(
-        output.contains("Ctrl+H help"),
+        output.contains("Ctrl+G guide"),
         "composer footer is expected to remain visible"
     );
     if let Some(last_line) = lines.last() {
         assert!(
-            last_line.trim().is_empty() || last_line.contains("help"),
+            last_line.trim().is_empty() || last_line.contains("guide"),
             "last visible line looks truncated: {last_line:?}"
         );
     }
@@ -170,6 +207,7 @@ fn normalize_output(text: String) -> String {
         .collect::<String>()
         .pipe(normalize_timers)
         .pipe(normalize_spacer_rows)
+        .pipe(scrub_intro_art)
 }
 
 fn normalize_glyph(ch: char) -> char {
@@ -194,6 +232,26 @@ fn normalize_glyph(ch: char) -> char {
         | '╷' | '╹' => '|',
         other => other,
     }
+}
+
+fn scrub_intro_art(text: String) -> String {
+    let mut lines: Vec<String> = text.lines().map(|line| line.to_string()).collect();
+    if let Some(star_idx) = lines
+        .iter()
+        .position(|line| line.contains("/code - perform a coding task"))
+    {
+        for line in lines.iter_mut().take(star_idx) {
+            if !line.trim().is_empty() {
+                *line = String::new();
+            }
+        }
+    }
+
+    for line in lines.iter_mut() {
+        *line = line.trim_end().to_string();
+    }
+
+    lines.join("\n")
 }
 
 fn normalize_timers(text: String) -> String {

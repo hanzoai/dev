@@ -26,7 +26,7 @@ where
         ShellEnvironmentPolicyInherit::None => HashMap::new(),
         ShellEnvironmentPolicyInherit::Core => {
             const CORE_VARS: &[&str] = &[
-                "HOME", "LOGNAME", "PATH", "SHELL", "USER", "USERNAME", "TMPDIR", "TEMP", "TMP",
+                "HOME", "LOGNAME", "PATH", "PATHEXT", "SHELL", "USER", "USERNAME", "TMPDIR", "TEMP", "TMP",
             ];
             let allow: HashSet<&str> = CORE_VARS.iter().copied().collect();
             vars.into_iter()
@@ -60,6 +60,16 @@ where
         env_map.insert(key.clone(), val.clone());
     }
 
+    // Step 4.5 – Disable interactive pagers by default so shell calls do not
+    // block on `less` (common for `gh`/`git`). Respect explicit overrides.
+    for (key, val) in [
+        ("PAGER", "cat"),
+        ("GIT_PAGER", "cat"),
+        ("GH_PAGER", "cat"),
+    ] {
+        env_map.entry(key.to_string()).or_insert_with(|| val.to_string());
+    }
+
     // Step 5 – If include_only is non-empty, keep *only* the matching vars.
     if !policy.include_only.is_empty() {
         env_map.retain(|k, _| matches_any(k, &policy.include_only));
@@ -85,6 +95,7 @@ mod tests {
     fn test_core_inherit_and_default_excludes() {
         let vars = make_vars(&[
             ("PATH", "/usr/bin"),
+            ("PATHEXT", ".EXE;.CMD"),
             ("HOME", "/home/user"),
             ("API_KEY", "secret"),
             ("SECRET_TOKEN", "t"),
@@ -95,7 +106,11 @@ mod tests {
 
         let expected: HashMap<String, String> = hashmap! {
             "PATH".to_string() => "/usr/bin".to_string(),
+            "PATHEXT".to_string() => ".EXE;.CMD".to_string(),
             "HOME".to_string() => "/home/user".to_string(),
+            "PAGER".to_string() => "cat".to_string(),
+            "GIT_PAGER".to_string() => "cat".to_string(),
+            "GH_PAGER".to_string() => "cat".to_string(),
         };
 
         assert_eq!(result, expected);
@@ -135,6 +150,9 @@ mod tests {
 
         let expected: HashMap<String, String> = hashmap! {
             "PATH".to_string() => "/usr/bin".to_string(),
+            "PAGER".to_string() => "cat".to_string(),
+            "GIT_PAGER".to_string() => "cat".to_string(),
+            "GH_PAGER".to_string() => "cat".to_string(),
             "NEW_VAR".to_string() => "42".to_string(),
         };
 
@@ -152,7 +170,10 @@ mod tests {
         };
 
         let result = populate_env(vars.clone(), &policy);
-        let expected: HashMap<String, String> = vars.into_iter().collect();
+        let mut expected: HashMap<String, String> = vars.into_iter().collect();
+        expected.insert("PAGER".to_string(), "cat".to_string());
+        expected.insert("GIT_PAGER".to_string(), "cat".to_string());
+        expected.insert("GH_PAGER".to_string(), "cat".to_string());
         assert_eq!(result, expected);
     }
 
@@ -168,6 +189,9 @@ mod tests {
         let result = populate_env(vars, &policy);
         let expected: HashMap<String, String> = hashmap! {
             "PATH".to_string() => "/usr/bin".to_string(),
+            "PAGER".to_string() => "cat".to_string(),
+            "GIT_PAGER".to_string() => "cat".to_string(),
+            "GH_PAGER".to_string() => "cat".to_string(),
         };
         assert_eq!(result, expected);
     }
@@ -188,6 +212,9 @@ mod tests {
         let result = populate_env(vars, &policy);
         let expected: HashMap<String, String> = hashmap! {
             "ONLY_VAR".to_string() => "yes".to_string(),
+            "PAGER".to_string() => "cat".to_string(),
+            "GIT_PAGER".to_string() => "cat".to_string(),
+            "GH_PAGER".to_string() => "cat".to_string(),
         };
         assert_eq!(result, expected);
     }

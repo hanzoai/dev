@@ -5,31 +5,31 @@ expression: output
  +----------------------------------------------------------------------------+
  |                                    Code                                    |
  +----------------------------------------------------------------------------+
-   /chrome - connect to your Chrome browser
-   /plan - create a comprehensive plan (multiple agents)
-   /code - perform a coding task (multiple agents)
+
+
+
+ • I can help with various tasks including:
+
+   - Writing code
+   - Reading files
+   - Running commands
+
 
  › Open docs and find login button
 
-   +- +Browser-----------------------------+
-   |  |Screenshot:                         |
-   |  |browser_session.png                 |  Actions
-   |  |                                    |   MM:SS  Opened    https://ex
-   |  |                                    |                    ample.com/
-   |  +------------------------------------+                    docs
-   |                                           MM:SS  Clicked   Sign in
-   |                                                            button
-   |                                           MM:SS  Scrolled  dy=640
-   |                                           MM:SS  Typed     docs
-   |                                                            search
+   +- Browser (headless): example.com
    |
-   |                                          Console: ⚠️  cdp warning:
-   |                                          Refused to load script from
-   |                                          cdn.example.com
+   |   Actions
+   |    MM:SS  Opened    https://example.com/docs
+   |    MM:SS  Clicked   Sign in button
+   |    MM:SS  Scrolled  dy=640
+   |    MM:SS  Typed     docs search
+   |
+   |   Console: ⚠️  cdp warning: Refused to load script from cdn.example....
    |
    +- [Ctrl+B] View · [Esc] Stop
 
  +----------------------------------------------------------------------------+
  | What can I code for you today?                                             |
  +----------------------------------------------------------------------------+
-   Read Only  (Shift+Tab change)                       Ctrl+H help  •  API key
+ Read Only  (Shift+Tab change)                        Ctrl+G guide  •  API key
