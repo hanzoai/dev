@@ -82,6 +82,9 @@ code-auto-drive-core = { path = "code-auto-drive-core" }
 mcp-types = { path = "mcp-types", package = "code-mcp-types" }
 upstream-mcp-types = { git = "https://github.com/openai/codex.git", package = "mcp-types", rev = "6c384eb9c610f9a83037d9cad120fb792e782c7c" }
 
+# External - Guard for I/O sanitization
+hanzo-guard = { git = "https://github.com/hanzoai/guard", features = ["pii", "audit"] }
+
 # External
 allocative = "0.3.3"
 ansi-to-tui = "7.0.0"
