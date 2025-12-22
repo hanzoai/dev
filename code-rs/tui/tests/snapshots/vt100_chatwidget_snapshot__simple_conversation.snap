@@ -3,14 +3,14 @@ source: tui/tests/vt100_chatwidget_snapshot.rs
 expression: output
 ---
  +----------------------------------------------------------------------------+
- |                                    Code                                    |
+ |                                 Every Code                                 |
  +----------------------------------------------------------------------------+
 
 
  › Can you help me understand the available commands?
 
 
- • Hello! How can I help you today?
+   Hello! How can I help you today?
 
 
 

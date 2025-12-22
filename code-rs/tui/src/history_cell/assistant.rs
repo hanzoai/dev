@@ -41,6 +41,14 @@ impl AssistantMarkdownCell {
         self.layout_cache.borrow_mut().clear();
     }
 
+    pub(crate) fn set_mid_turn(&mut self, mid_turn: bool) {
+        if self.state.mid_turn == mid_turn {
+            return;
+        }
+        self.state.mid_turn = mid_turn;
+        self.layout_cache.borrow_mut().clear();
+    }
+
     pub(crate) fn stream_id(&self) -> Option<&str> {
         self.state.stream_id.as_deref()
     }
@@ -93,7 +101,11 @@ impl AssistantMarkdownCell {
         buf: &mut Buffer,
         skip_rows: u16,
     ) {
-        let cell_bg = crate::colors::assistant_bg();
+        let cell_bg = if self.state.mid_turn {
+            crate::colors::assistant_mid_turn_bg()
+        } else {
+            crate::colors::assistant_bg()
+        };
         let bg_style = Style::default().bg(cell_bg);
         fill_rect(buf, area, Some(' '), bg_style);
 
@@ -165,7 +177,11 @@ impl AssistantMarkdownCell {
 
                     let temp_area = Rect::new(0, 0, card_w, full_height);
                     let mut temp_buf = Buffer::empty(temp_area);
-                    let code_bg = crate::colors::code_block_bg();
+                    let code_bg = if self.state.mid_turn {
+                        cell_bg
+                    } else {
+                        crate::colors::code_block_bg()
+                    };
                     let blk = Block::default()
                         .borders(Borders::ALL)
                         .border_style(Style::default().fg(crate::colors::border()))
@@ -254,6 +270,14 @@ impl HistoryCell for AssistantMarkdownCell {
         HistoryCellType::Assistant
     }
 
+    fn gutter_symbol(&self) -> Option<&'static str> {
+        if self.state.mid_turn {
+            None
+        } else {
+            super::gutter_symbol_for_kind(self.kind())
+        }
+    }
+
     fn display_lines(&self) -> Vec<Line<'static>> {
         assistant_markdown_lines_with_context(&self.state, self.file_opener, &self.cwd)
     }
@@ -305,11 +329,15 @@ pub(crate) fn assistant_markdown_lines_with_context(
         &mut out,
         file_opener,
         cwd,
-        true,
+        !state.mid_turn,
     );
-    let bright = crate::colors::text_bright();
+    let fg = if state.mid_turn {
+        crate::colors::text_mid()
+    } else {
+        crate::colors::text_bright()
+    };
     for line in out.iter_mut().skip(1) {
-        line.style = line.style.patch(Style::default().fg(bright));
+        line.style = line.style.patch(Style::default().fg(fg));
     }
     out.into_iter().skip(1).collect()
 }

@@ -7,6 +7,9 @@ use std::time::Duration;
 
 use crate::AuthManager;
 use crate::RefreshTokenError;
+use crate::account_usage;
+use crate::auth;
+use crate::auth_accounts;
 use bytes::Bytes;
 use code_app_server_protocol::AuthMode;
 use code_protocol::models::ResponseItem;
@@ -16,6 +19,7 @@ use httpdate::parse_http_date;
 use regex_lite::Regex;
 use reqwest::StatusCode;
 use reqwest::header::HeaderMap;
+use reqwest::header::HeaderValue;
 use serde::Deserialize;
 use serde::Serialize;
 use serde_json::Value;
@@ -26,7 +30,7 @@ use tracing::debug;
 use tracing::trace;
 use tracing::warn;
 use uuid::Uuid;
-use chrono::{DateTime, Utc};
+use chrono::{DateTime, Duration as ChronoDuration, Utc};
 
 const AUTH_REQUIRED_MESSAGE: &str = "Authentication required. Run `code login` to continue.";
 
@@ -53,7 +57,6 @@ use crate::flags::CODEX_RS_SSE_FIXTURE;
 use crate::model_family::{find_family_for_model, ModelFamily};
 use crate::model_provider_info::ModelProviderInfo;
 use crate::model_provider_info::WireApi;
-use crate::openai_model_info::get_model_info;
 use crate::openai_tools::create_tools_json_for_responses_api;
 use crate::openai_tools::ConfigShellToolType;
 use crate::openai_tools::ToolsConfig;
@@ -70,6 +73,8 @@ use std::sync::RwLock;
 
 const RESPONSES_BETA_HEADER_V1: &str = "responses=v1";
 const RESPONSES_BETA_HEADER_EXPERIMENTAL: &str = "responses=experimental";
+
+const CODE_OPENAI_SUBAGENT_ENV: &str = "CODE_OPENAI_SUBAGENT";
 
 #[derive(Default, Debug)]
 struct StreamCheckpoint {
@@ -315,12 +320,24 @@ impl ModelClient {
         &self.config.code_home
     }
 
+    pub fn debug_enabled(&self) -> bool {
+        self.config.debug
+    }
+
     pub fn build_tools_config_with_sandbox(
         &self,
         sandbox_policy: SandboxPolicy,
     ) -> ToolsConfig {
+        self.build_tools_config_with_sandbox_for_family(sandbox_policy, &self.config.model_family)
+    }
+
+    pub fn build_tools_config_with_sandbox_for_family(
+        &self,
+        sandbox_policy: SandboxPolicy,
+        model_family: &ModelFamily,
+    ) -> ToolsConfig {
         let mut tools_config = ToolsConfig::new(
-            &self.config.model_family,
+            model_family,
             self.config.approval_policy,
             sandbox_policy.clone(),
             self.config.include_plan_tool,
@@ -384,9 +401,9 @@ impl ModelClient {
     }
 
     pub fn get_auto_compact_token_limit(&self) -> Option<i64> {
-        self.config.model_auto_compact_token_limit.or_else(|| {
-            get_model_info(&self.config.model_family).and_then(|info| info.auto_compact_token_limit)
-        })
+        self.config
+            .model_auto_compact_token_limit
+            .or_else(|| self.config.model_family.auto_compact_token_limit())
     }
 
     pub fn default_model_slug(&self) -> &str {
@@ -483,10 +500,13 @@ impl ModelClient {
             .as_deref()
             .unwrap_or(self.config.model.as_str());
         let effective_effort = clamp_reasoning_effort_for_model(request_model, self.effort);
-        let request_family = find_family_for_model(request_model)
+        let request_family = prompt
+            .model_family_override
+            .clone()
+            .or_else(|| find_family_for_model(request_model))
             .unwrap_or_else(|| self.config.model_family.clone());
 
-        let full_instructions = prompt.get_full_instructions(&self.config.model_family);
+        let full_instructions = prompt.get_full_instructions(&request_family);
         let mut tools_json = create_tools_json_for_responses_api(&prompt.tools)?;
         if matches!(effective_effort, ReasoningEffortConfig::Minimal) {
             tools_json.retain(|tool| {
@@ -551,6 +571,7 @@ impl ModelClient {
         let mut attempt = 0;
         let max_retries = self.provider.request_max_retries();
         let mut request_id = String::new();
+        let mut rate_limit_switch_state = crate::account_switching::RateLimitSwitchState::default();
 
         // Compute endpoint with the latest available auth (may be None at this point).
         let endpoint = self
@@ -577,7 +598,7 @@ impl ModelClient {
                 input: &input_with_instructions,
                 tools: &tools_json,
                 tool_choice: "auto",
-                parallel_tool_calls: true,
+                parallel_tool_calls: request_family.supports_parallel_tool_calls,
                 reasoning,
                 text,
                 store: azure_workaround,
@@ -641,6 +662,9 @@ impl ModelClient {
                 };
                 req_builder = req_builder.header("OpenAI-Beta", beta_value);
             }
+
+            req_builder = attach_openai_subagent_header(req_builder);
+            req_builder = attach_codex_beta_features_header(req_builder, &self.config);
 
             req_builder = req_builder
                 // Send `conversation_id`/`session_id` so the server can hit the prompt-cache.
@@ -782,6 +806,126 @@ impl ModelClient {
                     // Read the response body once for diagnostics across error branches.
                     let body_text = res.text().await.unwrap_or_default();
                     let body = serde_json::from_str::<ErrorResponse>(&body_text).ok();
+
+                    if status == StatusCode::TOO_MANY_REQUESTS
+                        && self.config.auto_switch_accounts_on_rate_limit
+                        && auth_manager.is_some()
+                        && auth::read_code_api_key_from_env().is_none()
+                    {
+                        if let Ok(Some(current_account_id)) =
+                            auth_accounts::get_active_account_id(self.code_home())
+                        {
+                            let mut retry_after_delay = retry_after_hint.clone();
+                            if retry_after_delay.is_none() {
+                                if let Some(ErrorResponse { ref error }) = body {
+                                    retry_after_delay = try_parse_retry_after(error, now);
+                                }
+                            }
+
+                            let current_auth_mode = auth
+                                .as_ref()
+                                .map(|a| a.mode)
+                                .unwrap_or(AuthMode::ApiKey);
+
+                            let switch_reason = match body
+                                .as_ref()
+                                .and_then(|err| err.error.r#type.as_deref())
+                            {
+                                Some("usage_limit_reached") => "usage_limit_reached",
+                                Some("usage_not_included") => "usage_not_included",
+                                _ => "http_429",
+                            };
+
+                            let (blocked_until, should_record_usage_limit) = match body.as_ref() {
+                                Some(ErrorResponse { error })
+                                    if error.r#type.as_deref() == Some("usage_limit_reached") =>
+                                {
+                                    (
+                                        error
+                                            .resets_in_seconds
+                                            .map(|seconds| now + ChronoDuration::seconds(seconds as i64)),
+                                        true,
+                                    )
+                                }
+                                _ => (retry_after_delay.as_ref().map(|info| info.resume_at), false),
+                            };
+
+                            rate_limit_switch_state.mark_limited(
+                                &current_account_id,
+                                current_auth_mode,
+                                blocked_until,
+                            );
+
+                            if let Ok(Some(next_account_id)) =
+                                crate::account_switching::select_next_account_id(
+                                    self.code_home(),
+                                    &rate_limit_switch_state,
+                                    self.config.api_key_fallback_on_all_accounts_limited,
+                                    now,
+                                )
+                            {
+                                if should_record_usage_limit {
+                                    let plan_type = body
+                                        .as_ref()
+                                        .and_then(|err| err.error.plan_type.as_deref())
+                                        .map(|s| s.to_string());
+                                    let resets_in_seconds =
+                                        body.as_ref().and_then(|err| err.error.resets_in_seconds);
+                                    let code_home = self.code_home().to_path_buf();
+                                    let account_id = current_account_id.clone();
+                                    tokio::task::spawn_blocking(move || {
+                                        let observed_at = Utc::now();
+                                        if let Err(err) = account_usage::record_usage_limit_hint(
+                                            &code_home,
+                                            &account_id,
+                                            plan_type.as_deref(),
+                                            resets_in_seconds,
+                                            observed_at,
+                                        ) {
+                                            tracing::warn!("Failed to persist usage limit hint: {err}");
+                                        }
+                                    });
+                                }
+
+                                tracing::info!(
+                                    from_account_id = %current_account_id,
+                                    to_account_id = %next_account_id,
+                                    reason = switch_reason,
+                                    "rate limit hit; auto-switching active account"
+                                );
+
+                                if let Ok(logger) = self.debug_logger.lock() {
+                                    let _ = logger.append_response_event(
+                                        &request_id,
+                                        "account_switch",
+                                        &serde_json::json!({
+                                            "reason": switch_reason,
+                                            "from_account_id": current_account_id.clone(),
+                                            "to_account_id": next_account_id.clone(),
+                                            "status": status.as_u16(),
+                                        }),
+                                    );
+                                }
+
+                                if let Err(err) =
+                                    auth::activate_account(self.code_home(), &next_account_id)
+                                {
+                                    tracing::warn!(
+                                        from_account_id = %current_account_id,
+                                        to_account_id = %next_account_id,
+                                        error = %err,
+                                        "failed to activate account after rate limit"
+                                    );
+                                } else {
+                                    if let Some(manager) = auth_manager.as_ref() {
+                                        manager.reload();
+                                    }
+                                    attempt = 0;
+                                    continue;
+                                }
+                            }
+                        }
+                    }
 
                     if status == StatusCode::BAD_REQUEST {
                         if let Some(ErrorResponse { ref error }) = body {
@@ -985,6 +1129,10 @@ impl ModelClient {
         self.config.model.clone()
     }
 
+    pub fn model_explicit(&self) -> bool {
+        self.config.model_explicit
+    }
+
     /// Returns the currently configured model family.
     #[allow(dead_code)]
     pub fn get_model_family(&self) -> ModelFamily {
@@ -1007,41 +1155,20 @@ impl ModelClient {
         }
 
         let auth_manager = self.auth_manager.clone();
-        let auth = auth_manager.as_ref().and_then(|m| m.auth());
-        let mut request = self
-            .provider
-            .create_compact_request_builder(&self.client, &auth)
-            .await?;
+        let mut rate_limit_switch_state = crate::account_switching::RateLimitSwitchState::default();
 
-        // Ensure Responses API beta header is present for compact calls. Mirror the
-        // streaming path: use the public "responses=v1" header for the public OpenAI
-        // endpoint and fall back to "responses=experimental" for other providers.
-        let has_beta_header = request
-            .try_clone()
-            .and_then(|builder| builder.build().ok())
-            .map_or(false, |req| req.headers().contains_key("OpenAI-Beta"));
-
-        if !has_beta_header {
-            let beta_value = if self.provider.is_public_openai_responses_endpoint() {
-                RESPONSES_BETA_HEADER_V1
-            } else {
-                RESPONSES_BETA_HEADER_EXPERIMENTAL
-            };
-            request = request.header("OpenAI-Beta", beta_value);
-        }
-
-        if let Some(auth) = auth.as_ref()
-            && auth.mode == AuthMode::ChatGPT
-            && let Some(account_id) = auth.get_account_id()
-        {
-            request = request.header("chatgpt-account-id", account_id);
-        }
-
-        let instructions = prompt
-            .get_full_instructions(&self.config.model_family)
-            .into_owned();
+        let model_slug = prompt
+            .model_override
+            .as_deref()
+            .unwrap_or(self.config.model.as_str());
+        let family = prompt
+            .model_family_override
+            .clone()
+            .or_else(|| find_family_for_model(model_slug))
+            .unwrap_or_else(|| self.config.model_family.clone());
+        let instructions = prompt.get_full_instructions(&family).into_owned();
         let payload = CompactHistoryRequest {
-            model: &self.config.model,
+            model: model_slug,
             input: &prompt.input,
             instructions: instructions.clone(),
         };
@@ -1050,53 +1177,206 @@ impl ModelClient {
             "input": payload.input,
             "instructions": instructions,
         });
-        request = request.json(&payload);
-
-        let header_snapshot = request
-            .try_clone()
-            .and_then(|builder| builder.build().ok())
-            .map(|req| header_map_to_json(req.headers()));
-
         let mut request_id = String::new();
-        if let Ok(logger) = self.debug_logger.lock() {
-            let endpoint = self
+
+        loop {
+            let auth = auth_manager.as_ref().and_then(|m| m.auth());
+            let mut request = self
                 .provider
-                .get_compact_url(&auth)
-                .unwrap_or_else(|| self.provider.get_full_url(&auth));
-            request_id = logger
-                .start_request_log(&endpoint, &payload_json, header_snapshot.as_ref(), Some("compact_remote"))
-                .unwrap_or_default();
+                .create_compact_request_builder(&self.client, &auth)
+                .await?;
+
+            // Ensure Responses API beta header is present for compact calls. Mirror the
+            // streaming path: use the public "responses=v1" header for the public OpenAI
+            // endpoint and fall back to "responses=experimental" for other providers.
+            let has_beta_header = request
+                .try_clone()
+                .and_then(|builder| builder.build().ok())
+                .map_or(false, |req| req.headers().contains_key("OpenAI-Beta"));
+
+            if !has_beta_header {
+                let beta_value = if self.provider.is_public_openai_responses_endpoint() {
+                    RESPONSES_BETA_HEADER_V1
+                } else {
+                    RESPONSES_BETA_HEADER_EXPERIMENTAL
+                };
+                request = request.header("OpenAI-Beta", beta_value);
+            }
+
+            request = attach_openai_subagent_header(request);
+            request = attach_codex_beta_features_header(request, &self.config);
+
+            if let Some(auth) = auth.as_ref()
+                && auth.mode == AuthMode::ChatGPT
+                && let Some(account_id) = auth.get_account_id()
+            {
+                request = request.header("chatgpt-account-id", account_id);
+            }
+
+            request = request.json(&payload);
+
+            let header_snapshot = request
+                .try_clone()
+                .and_then(|builder| builder.build().ok())
+                .map(|req| header_map_to_json(req.headers()));
+
+            if request_id.is_empty() {
+                if let Ok(logger) = self.debug_logger.lock() {
+                    let endpoint = self
+                        .provider
+                        .get_compact_url(&auth)
+                        .unwrap_or_else(|| self.provider.get_full_url(&auth));
+                    request_id = logger
+                        .start_request_log(
+                            &endpoint,
+                            &payload_json,
+                            header_snapshot.as_ref(),
+                            Some("compact_remote"),
+                        )
+                        .unwrap_or_default();
+                }
+            }
+
+            let response = request.send().await?;
+            let status = response.status();
+            let body = response.text().await?;
+
+            if status == StatusCode::TOO_MANY_REQUESTS
+                && self.config.auto_switch_accounts_on_rate_limit
+                && auth_manager.is_some()
+                && auth::read_code_api_key_from_env().is_none()
+            {
+                let now = Utc::now();
+                if let Ok(Some(current_account_id)) =
+                    auth_accounts::get_active_account_id(self.code_home())
+                {
+                    let current_auth_mode = auth
+                        .as_ref()
+                        .map(|a| a.mode)
+                        .unwrap_or(AuthMode::ApiKey);
+                    rate_limit_switch_state.mark_limited(
+                        &current_account_id,
+                        current_auth_mode,
+                        None,
+                    );
+                    if let Ok(Some(next_account_id)) =
+                        crate::account_switching::select_next_account_id(
+                            self.code_home(),
+                            &rate_limit_switch_state,
+                            self.config.api_key_fallback_on_all_accounts_limited,
+                            now,
+                        )
+                    {
+                        tracing::info!(
+                            from_account_id = %current_account_id,
+                            to_account_id = %next_account_id,
+                            "rate limit hit during compact; auto-switching active account"
+                        );
+                        if let Err(err) = auth::activate_account(self.code_home(), &next_account_id) {
+                            tracing::warn!(
+                                from_account_id = %current_account_id,
+                                to_account_id = %next_account_id,
+                                error = %err,
+                                "failed to activate account after rate limit during compact"
+                            );
+                        } else {
+                            if let Some(manager) = auth_manager.as_ref() {
+                                manager.reload();
+                            }
+                            continue;
+                        }
+                    }
+                }
+            }
+
+            if let Ok(logger) = self.debug_logger.lock() {
+                let response_body: serde_json::Value = serde_json::from_str(&body)
+                    .unwrap_or_else(|_| serde_json::json!({ "raw": body }));
+                let _ = logger.append_response_event(
+                    &request_id,
+                    "compact_response",
+                    &serde_json::json!({
+                        "status_code": status.as_u16(),
+                        "body": response_body,
+                    }),
+                );
+                let _ = logger.end_request_log(&request_id);
+            }
+
+            if !status.is_success() {
+                return Err(CodexErr::UnexpectedStatus(UnexpectedResponseError {
+                    status,
+                    body,
+                    request_id: None,
+                }));
+            }
+
+            let CompactHistoryResponse { output } = serde_json::from_str(&body)?;
+            return Ok(output);
         }
-
-        let response = request.send().await?;
-        let status = response.status();
-        let body = response.text().await?;
-
-        if let Ok(logger) = self.debug_logger.lock() {
-            let response_body: serde_json::Value = serde_json::from_str(&body)
-                .unwrap_or_else(|_| serde_json::json!({ "raw": body }));
-            let _ = logger.append_response_event(
-                &request_id,
-                "compact_response",
-                &serde_json::json!({
-                    "status_code": status.as_u16(),
-                    "body": response_body,
-                }),
-            );
-            let _ = logger.end_request_log(&request_id);
-        }
-
-        if !status.is_success() {
-            return Err(CodexErr::UnexpectedStatus(UnexpectedResponseError {
-                status,
-                body,
-                request_id: None,
-            }));
-        }
-
-        let CompactHistoryResponse { output } = serde_json::from_str(&body)?;
-        Ok(output)
     }
+}
+
+fn attach_codex_beta_features_header(
+    builder: reqwest::RequestBuilder,
+    config: &Config,
+) -> reqwest::RequestBuilder {
+    let Some(value) = codex_beta_features_header_value(config) else {
+        return builder;
+    };
+
+    let has_header = builder
+        .try_clone()
+        .and_then(|builder| builder.build().ok())
+        .map_or(false, |req| req.headers().contains_key("x-codex-beta-features"));
+    if has_header {
+        return builder;
+    }
+
+    builder.header("x-codex-beta-features", value)
+}
+
+fn codex_beta_features_header_value(config: &Config) -> Option<HeaderValue> {
+    let mut enabled: Vec<&'static str> = Vec::new();
+
+    if config.skills_enabled {
+        enabled.push("skills");
+    }
+    if config.tools_web_search_request {
+        enabled.push("web_search_request");
+    }
+
+    let value = enabled.join(",");
+    if value.is_empty() {
+        return None;
+    }
+
+    HeaderValue::from_str(value.as_str()).ok()
+}
+
+fn attach_openai_subagent_header(builder: reqwest::RequestBuilder) -> reqwest::RequestBuilder {
+    let Some(value) = openai_subagent_header_value() else {
+        return builder;
+    };
+
+    let has_header = builder
+        .try_clone()
+        .and_then(|builder| builder.build().ok())
+        .map_or(false, |req| req.headers().contains_key("x-openai-subagent"));
+    if has_header {
+        return builder;
+    }
+
+    builder.header("x-openai-subagent", value)
+}
+
+fn openai_subagent_header_value() -> Option<HeaderValue> {
+    let subagent = std::env::var(CODE_OPENAI_SUBAGENT_ENV).ok()?;
+    let subagent = subagent.trim();
+    if subagent.is_empty() {
+        return None;
+    }
+    HeaderValue::from_str(subagent).ok()
 }
 
 fn clamp_text_verbosity_for_model(

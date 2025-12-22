@@ -2113,6 +2113,7 @@ impl ChatComposer {
         label_style: Style,
     ) -> Vec<Span<'static>> {
         let mut spans: Vec<Span<'static>> = Vec::new();
+        let leading_bullet = text.trim_start().starts_with('•');
         let parts: Vec<String> = text
             .split('•')
             .map(|part| part.trim())
@@ -2122,7 +2123,9 @@ impl ChatComposer {
 
         for (index, part) in parts.iter().enumerate() {
             if index > 0 {
-                spans.push(Span::from("  •  ".to_string()).style(label_style));
+                spans.push(Span::from("  • ").style(label_style));
+            } else if leading_bullet {
+                spans.push(Span::from("• ").style(label_style));
             }
             let (key, label) = Self::split_auto_drive_key_label(part);
             if let Some(key) = key {
@@ -2328,12 +2331,6 @@ impl ChatComposer {
                     left_sections.push((3, auto_review_status_spans, true));
                 }
 
-                if self.auto_review_status.is_some() && self.auto_drive_active {
-                    let spacer = Span::from("  •  ")
-                        .style(Style::default().fg(crate::colors::text_dim()));
-                    left_sections.push((6, vec![spacer], true));
-                }
-
                 if !auto_review_agent_hint.is_empty() {
                     // Keep the Auto Review hint on the right so spacing stays tight even
                     // when the status text changes; left-side padding was previously
@@ -2484,6 +2481,9 @@ impl ChatComposer {
                 let base_left_pad = Span::from("  ").style(label_style);
                 let base_left_pad_len = base_left_pad.content.chars().count();
 
+                let leading_bullet_pad = Span::from(" ").style(label_style);
+                let leading_bullet_pad_len = leading_bullet_pad.content.chars().count();
+
                 let mut include_auto_review_status = left_sections.iter().any(|(p, _, inc)| *p == 3 && *inc);
                 let mut include_auto_review_agent_hint =
                     right_sections.iter().any(|(p, _, inc)| *p == 3 && *inc);
@@ -2497,6 +2497,16 @@ impl ChatComposer {
                     spans.iter().map(|s| s.content.chars().count()).sum()
                 };
 
+                let spans_start_with_bullet = |spans: &[Span<'static>]| -> bool {
+                    spans
+                        .iter()
+                        .find_map(|span| {
+                            let trimmed = span.content.trim_start();
+                            (!trimmed.is_empty()).then(|| trimmed.starts_with('•'))
+                        })
+                        .unwrap_or(false)
+                };
+
                 let build_left = |
                     include_auto_review_status: bool,
                     include_left_misc: bool,
@@ -2504,6 +2514,19 @@ impl ChatComposer {
                 | -> (Vec<Span<'static>>, usize) {
                     let mut spans: Vec<Span<'static>> = Vec::new();
                     let mut len = 0usize;
+                    let mut last_section_was_separator = false;
+
+                    let is_separator = |section: &[Span<'static>]| {
+                        section.len() == 1 && section[0].content.trim() == "•"
+                    };
+
+                    let starts_with_bullet = |section: &[Span<'static>]| {
+                        section.iter().find_map(|span| {
+                            let trimmed = span.content.trim_start();
+                            (!trimmed.is_empty()).then(|| trimmed.starts_with('•'))
+                        })
+                        .unwrap_or(false)
+                    };
 
                     for (priority, section, included) in &left_sections {
                         let include = match *priority {
@@ -2512,15 +2535,21 @@ impl ChatComposer {
                             6 => include_left_misc && *included,
                             _ => *included,
                         };
-                        if include {
-                            if !spans.is_empty() {
-                                let pad = Span::from("   ").style(label_style);
-                                spans.push(pad.clone());
-                                len += pad.content.chars().count();
-                            }
-                            spans.extend(section.clone());
-                            len += span_len(section);
+                        if !include {
+                            continue;
                         }
+
+                        let section_is_separator = is_separator(section);
+                        if !spans.is_empty() && !last_section_was_separator && !section_is_separator {
+                            let pad_text = if starts_with_bullet(section) { "  " } else { "   " };
+                            let pad = Span::from(pad_text).style(label_style);
+                            len += pad.content.chars().count();
+                            spans.push(pad);
+                        }
+
+                        spans.extend(section.clone());
+                        len += span_len(section);
+                        last_section_was_separator = section_is_separator;
                     }
 
                     (spans, len)
@@ -2594,7 +2623,16 @@ impl ChatComposer {
                     );
 
                     let add_base_pad = include_auto_review_status && !left_spans_eval.is_empty();
-                    left_len = l_len + if add_base_pad { base_left_pad_len } else { 0 };
+                    let add_leading_bullet_pad = self.auto_drive_active
+                        && !include_auto_review_status
+                        && spans_start_with_bullet(&left_spans_eval);
+                    left_len = l_len
+                        + if add_base_pad { base_left_pad_len } else { 0 }
+                        + if add_leading_bullet_pad {
+                            leading_bullet_pad_len
+                        } else {
+                            0
+                        };
                     right_len = r_len;
                     let total_len = left_len + right_len + trailing_pad;
 
@@ -2602,6 +2640,9 @@ impl ChatComposer {
                         let mut with_pad = left_spans_eval;
                         if add_base_pad {
                             with_pad.insert(0, base_left_pad.clone());
+                        }
+                        if add_leading_bullet_pad {
+                            with_pad.insert(0, leading_bullet_pad.clone());
                         }
                         final_left = with_pad;
                         final_right = right_spans_eval;
@@ -2644,6 +2685,9 @@ impl ChatComposer {
                             let mut with_pad = left_spans_eval;
                             if add_base_pad {
                                 with_pad.insert(0, base_left_pad.clone());
+                            }
+                            if add_leading_bullet_pad {
+                                with_pad.insert(0, leading_bullet_pad.clone());
                             }
                             final_left = with_pad;
                             final_right = right_spans_eval;
@@ -2870,7 +2914,8 @@ impl WidgetRef for ChatComposer {
             .textarea
             .cursor_pos_with_state(padded_textarea_rect, *self.textarea_state.borrow())
         {
-            let cursor_bg = crate::theme::current_theme().cursor;
+            let theme = crate::theme::current_theme();
+            let cursor_bg = theme.cursor;
             if cx < buf.area.width.saturating_add(buf.area.x)
                 && cy < buf.area.height.saturating_add(buf.area.y)
             {
@@ -2880,9 +2925,28 @@ impl WidgetRef for ChatComposer {
                 // cursor while processing arrow keys; preserving the foreground color
                 // keeps the caret location visible instead of flashing blank cells.
                 cell.set_bg(cursor_bg);
+                let fg_bg_ratio = contrast_ratio(theme.background, cursor_bg);
+                let fg_text_ratio = contrast_ratio(theme.text_bright, cursor_bg);
+                let cursor_fg = if fg_text_ratio >= fg_bg_ratio {
+                    theme.text_bright
+                } else {
+                    theme.background
+                };
+                cell.set_fg(cursor_fg);
             }
         }
     }
+}
+
+fn relative_luminance(rgb: (u8, u8, u8)) -> f32 {
+    (0.2126 * rgb.0 as f32 + 0.7152 * rgb.1 as f32 + 0.0722 * rgb.2 as f32) / 255.0
+}
+
+fn contrast_ratio(foreground: Color, background: Color) -> f32 {
+    let lf = relative_luminance(crate::colors::color_to_rgb(foreground));
+    let lb = relative_luminance(crate::colors::color_to_rgb(background));
+    let (bright, dark) = if lf >= lb { (lf, lb) } else { (lb, lf) };
+    (bright + 0.05) / (dark + 0.05)
 }
 
 fn apply_auto_drive_border_gradient(

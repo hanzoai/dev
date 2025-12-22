@@ -3,7 +3,7 @@ source: tui/tests/vt100_chatwidget_snapshot.rs
 expression: "frames.join(\"\\n---FRAME---\\n\")"
 ---
  +----------------------------------------------------------------------------+
- |                                    Code                                    |
+ |                                 Every Code                                 |
  +----------------------------------------------------------------------------+
    - Running commands
 
@@ -12,11 +12,11 @@ expression: "frames.join(\"\\n---FRAME---\\n\")"
  +----------------------------------------------------------------------------+
  | What can I code for you today?                                             |
  +----------------------------------------------------------------------------+
- Agents Enabled  •  Diagnostics Enabled                                API key
+  • Agents Enabled  • Diagnostics Enabled                              API key
 
 ---FRAME---
  +----------------------------------------------------------------------------+
- |                                    Code                                    |
+ |                                 Every Code                                 |
  +----------------------------------------------------------------------------+
    - Running commands
 
@@ -25,11 +25,11 @@ expression: "frames.join(\"\\n---FRAME---\\n\")"
  +----------------------------------------------------------------------------+
  | What can I code for you today?                                             |
  +----------------------------------------------------------------------------+
- Agents Enabled  •  Diagnostics Enabled                                API key
+  • Agents Enabled  • Diagnostics Enabled                              API key
 
 ---FRAME---
  +----------------------------------------------------------------------------+
- |                                    Code                                    |
+ |                                 Every Code                                 |
  +----------------------------------------------------------------------------+
    - Running commands
 
@@ -38,4 +38,4 @@ expression: "frames.join(\"\\n---FRAME---\\n\")"
  +----------------------------------------------------------------------------+
  | What can I code for you today?                                             |
  +----------------------------------------------------------------------------+
- Agents Enabled  •  Diagnostics Enabled                                API key
+  • Agents Enabled  • Diagnostics Enabled                              API key

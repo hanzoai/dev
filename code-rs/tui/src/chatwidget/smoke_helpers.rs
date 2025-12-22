@@ -8,8 +8,10 @@ use crate::markdown_render::render_markdown_text;
 use crate::tui::TerminalInfo;
 use crate::bottom_pane::SettingsSection;
 use crossterm::event::KeyEvent;
+use code_auto_drive_core::AutoRunPhase;
 use code_core::config::{Config, ConfigOverrides, ConfigToml};
 use code_core::history::state::HistoryRecord;
+use code_core::history::state::ExecStatus;
 use code_core::protocol::{BackgroundEventEvent, Event, EventMsg, OrderMeta};
 use once_cell::sync::Lazy;
 use chrono::Utc;
@@ -214,6 +216,48 @@ impl ChatWidgetHarness {
                         .filter(|event| !matches!(event, AppEvent::RequestRedraw)),
                 );
             }
+        }
+    }
+
+    pub fn force_stream_clear(&mut self) {
+        self.chat.stream.clear_all();
+    }
+
+    pub fn running_exec_call_ids(&self) -> Vec<String> {
+        self.chat
+            .exec
+            .running_commands
+            .keys()
+            .map(|cid| cid.0.clone())
+            .collect()
+    }
+
+    pub fn ended_exec_call_ids(&self) -> Vec<String> {
+        self.chat
+            .ended_call_ids
+            .iter()
+            .map(|cid| cid.0.clone())
+            .collect()
+    }
+
+    pub fn pending_exec_end_count(&self) -> usize {
+        self.chat.exec.pending_exec_ends.len()
+    }
+
+    pub fn pending_exec_end_keys(&self) -> Vec<String> {
+        self.chat
+            .exec
+            .pending_exec_ends
+            .keys()
+            .map(|cid| cid.0.clone())
+            .collect()
+    }
+
+    pub fn exec_status_for_call(&self, call_id: &str) -> Option<ExecStatus> {
+        let id = self.chat.history_state.history_id_for_exec_call(call_id)?;
+        match self.chat.history_state.record(id).cloned() {
+            Some(HistoryRecord::Exec(exec)) => Some(exec.status),
+            _ => None,
         }
     }
 
@@ -520,8 +564,8 @@ impl ChatWidgetHarness {
                     history_index: None,
                     history_id: None,
                     explore_entry: None,
-                    stdout: String::new(),
-                    stderr: String::new(),
+                    stdout_offset: 0,
+                    stderr_offset: 0,
                     wait_total: None,
                     wait_active: false,
                     wait_notes: Vec::new(),
@@ -635,6 +679,10 @@ impl ChatWidgetHarness {
             let chat = self.chat();
             chat.auto_state.on_prompt_submitted();
             chat.auto_state.on_begin_review(summary.is_some());
+            // Ensure snapshots do not depend on global review lock availability.
+            chat.auto_state.set_phase(AutoRunPhase::AwaitingReview {
+                diagnostics_pending: summary.is_some(),
+            });
             chat.auto_state.set_coordinator_waiting(false);
             if let Some(text) = summary {
                 chat.auto_state.current_summary = Some(text.clone());

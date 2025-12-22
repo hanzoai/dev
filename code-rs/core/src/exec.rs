@@ -5,6 +5,7 @@ use std::collections::HashMap;
 use std::io;
 use std::path::Path;
 use std::path::PathBuf;
+use std::pin::Pin;
 use std::process::ExitStatus;
 use std::time::Duration;
 use std::time::Instant;
@@ -13,8 +14,10 @@ use std::sync::Arc;
 use async_channel::Sender;
 use tokio::io::AsyncRead;
 use tokio::io::AsyncReadExt;
+use tokio::io::AsyncWriteExt;
 use tokio::io::BufReader;
 use tokio::process::Child;
+use tokio::time::Sleep;
 
 use crate::codex::Session;
 use crate::error::CodexErr;
@@ -48,6 +51,8 @@ const EXEC_TIMEOUT_EXIT_CODE: i32 = 124; // conventional timeout exit code
 
 // I/O buffer sizing
 const READ_CHUNK_SIZE: usize = 8192; // bytes per read
+const EXEC_DELTA_FLUSH_BYTES: usize = 256 * 1024; // aggregate stdout/stderr deltas before emitting
+const EXEC_DELTA_FLUSH_INTERVAL: Duration = Duration::from_millis(200); // max interval between live deltas
 const AGGREGATE_BUFFER_INITIAL_CAPACITY: usize = 8 * 1024; // 8 KiB
 pub(crate) const EXEC_CAPTURE_MAX_BYTES: usize = 32 * 1024 * 1024; // 32 MiB cap per stream
 
@@ -79,7 +84,7 @@ fn append_with_cap(
 
 /// Limit the number of ExecCommandOutputDelta events emitted per exec call.
 /// Aggregation still collects full output; only the live event stream is capped.
-pub(crate) const MAX_EXEC_OUTPUT_DELTAS_PER_CALL: usize = 10_000;
+pub(crate) const MAX_EXEC_OUTPUT_DELTAS_PER_CALL: usize = 2_048;
 
 #[derive(Clone, Debug)]
 pub struct ExecParams {
@@ -122,6 +127,12 @@ pub struct StdoutStream {
     /// Optional ordering metadata so UIs can associate deltas with the correct
     /// provider attempt/output index even when `session` is not available.
     pub(crate) order: Option<OrderMeta>,
+
+    /// Optional directory to spool full stdout/stderr output for this exec.
+    ///
+    /// When set, Code writes raw stream bytes to disk while still keeping only
+    /// a bounded tail in memory.
+    pub(crate) spool_dir: Option<PathBuf>,
 }
 
 pub async fn process_exec_tool_call(
@@ -188,13 +199,16 @@ pub async fn process_exec_tool_call(
             #[allow(unused_mut)]
             let mut timed_out = raw_output.timed_out;
 
+            #[allow(unused_variables)]
+            let mut exit_signal: Option<i32> = None;
+
             #[cfg(target_family = "unix")]
             {
-                if let Some(signal) = raw_output.exit_status.signal() {
-                    if signal == TIMEOUT_CODE {
+                if let Some(sig) = raw_output.exit_status.signal() {
+                    if sig == TIMEOUT_CODE {
                         timed_out = true;
                     } else {
-                        return Err(CodexErr::Sandbox(SandboxErr::Signal(signal)));
+                        exit_signal = Some(sig);
                     }
                 }
             }
@@ -220,6 +234,16 @@ pub async fn process_exec_tool_call(
                 return Err(CodexErr::Sandbox(SandboxErr::Timeout {
                     output: Box::new(exec_output),
                 }));
+            }
+
+            if let Some(signal) = exit_signal {
+                if raw_output.oom_killed {
+                    return Err(CodexErr::Sandbox(SandboxErr::OutOfMemory {
+                        output: Box::new(exec_output),
+                        memory_max_bytes: raw_output.cgroup_memory_max_bytes,
+                    }));
+                }
+                return Err(CodexErr::Sandbox(SandboxErr::Signal(signal)));
             }
 
             if exit_code != 0 && is_likely_sandbox_denied(sandbox_type, exit_code) {
@@ -267,6 +291,8 @@ struct RawExecToolCallOutput {
     pub stderr: StreamOutput<Vec<u8>>,
     pub aggregated_output: StreamOutput<Vec<u8>>,
     pub timed_out: bool,
+    pub oom_killed: bool,
+    pub cgroup_memory_max_bytes: Option<u64>,
 }
 
 impl StreamOutput<String> {
@@ -353,20 +379,92 @@ async fn consume_truncated_output(
         ))
     })?;
 
-    let (agg_tx, agg_rx) = async_channel::unbounded::<Vec<u8>>();
+    #[allow(unused_variables)]
+    let pid = killer.as_mut().id();
+
+    let (spool_stdout, spool_stderr, spool_combined) = if let Some(stream) = stdout_stream.as_ref()
+        && let Some(root) = stream.spool_dir.as_ref()
+    {
+        let safe_sub_id = crate::fs_sanitize::safe_path_component(&stream.sub_id, "sub");
+        let safe_call_id = crate::fs_sanitize::safe_path_component(&stream.call_id, "call");
+        let base_dir = root.join(safe_sub_id).join(safe_call_id);
+        let _ = tokio::fs::create_dir_all(&base_dir).await;
+
+        let stdout_path = base_dir.join("stdout.log");
+        let stderr_path = base_dir.join("stderr.log");
+        let combined_path = base_dir.join("combined.log");
+        let stdout = tokio::fs::OpenOptions::new()
+            .create(true)
+            .truncate(true)
+            .write(true)
+            .open(stdout_path)
+            .await
+            .ok();
+        let stderr = tokio::fs::OpenOptions::new()
+            .create(true)
+            .truncate(true)
+            .write(true)
+            .open(stderr_path)
+            .await
+            .ok();
+        let combined = tokio::fs::OpenOptions::new()
+            .create(true)
+            .truncate(true)
+            .write(true)
+            .open(combined_path)
+            .await
+            .ok();
+        (stdout, stderr, combined)
+    } else {
+        (None, None, None)
+    };
+
+    let (agg_tx, agg_rx) = async_channel::bounded::<Vec<u8>>(256);
+
+    let combined_handle = tokio::spawn(async move {
+        let mut combined_buf = Vec::with_capacity(AGGREGATE_BUFFER_INITIAL_CAPACITY);
+        let mut combined_truncated = false;
+        let mut combined_truncated_lines = 0u32;
+        let mut combined_truncated_bytes = 0usize;
+        let mut combined_file = spool_combined;
+        while let Ok(chunk) = agg_rx.recv().await {
+            if let Some(file) = combined_file.as_mut() {
+                let _ = file.write_all(&chunk).await;
+            }
+            append_with_cap(
+                &mut combined_buf,
+                &chunk,
+                &mut combined_truncated,
+                &mut combined_truncated_lines,
+                &mut combined_truncated_bytes,
+            );
+        }
+        StreamOutput {
+            text: combined_buf,
+            truncated_after_lines: combined_truncated
+                .then_some(combined_truncated_lines.max(1)),
+            truncated_before_bytes: (combined_truncated_bytes > 0)
+                .then_some(combined_truncated_bytes),
+        }
+    });
 
     let stdout_handle = tokio::spawn(read_capped(
         BufReader::new(stdout_reader),
         stdout_stream.clone(),
         false,
         Some(agg_tx.clone()),
+        spool_stdout,
     ));
     let stderr_handle = tokio::spawn(read_capped(
         BufReader::new(stderr_reader),
         stdout_stream.clone(),
         true,
         Some(agg_tx.clone()),
+        spool_stderr,
     ));
+
+    let mut reap_after_kill = false;
+    let mut child_exited = false;
 
     let (exit_status, timed_out) = match timeout {
         Some(timeout) => {
@@ -375,6 +473,7 @@ async fn consume_truncated_output(
                     match result {
                         Ok(status_result) => {
                             let exit_status = status_result?;
+                            child_exited = true;
                             (exit_status, false)
                         }
                         Err(_) => {
@@ -387,6 +486,7 @@ async fn consume_truncated_output(
                                 }
                             }
                             killer.as_mut().start_kill()?;
+                            reap_after_kill = true;
                             // Debatable whether `child.wait().await` should be called here.
                             (synthetic_exit_status(EXIT_CODE_SIGNAL_BASE + TIMEOUT_CODE), true)
                         }
@@ -394,6 +494,7 @@ async fn consume_truncated_output(
                 }
                 _ = tokio::signal::ctrl_c() => {
                     killer.as_mut().start_kill()?;
+                    reap_after_kill = true;
                     (synthetic_exit_status(EXIT_CODE_SIGNAL_BASE + SIGKILL_CODE), false)
                 }
             }
@@ -403,19 +504,30 @@ async fn consume_truncated_output(
             tokio::select! {
                 status_result = killer.as_mut().wait() => {
                     let exit_status = status_result?;
+                    child_exited = true;
                     (exit_status, false)
                 }
                 _ = tokio::signal::ctrl_c() => {
                     killer.as_mut().start_kill()?;
+                    reap_after_kill = true;
                     (synthetic_exit_status(EXIT_CODE_SIGNAL_BASE + SIGKILL_CODE), false)
                 }
             }
         }
     };
 
+    if reap_after_kill {
+        let reap_timeout = Duration::from_secs(2);
+        if let Ok(Ok(_)) = tokio::time::timeout(reap_timeout, killer.as_mut().wait()).await {
+            child_exited = true;
+        }
+    }
+
     // Disarm killer now that we've observed process termination status to
     // avoid re-sending a kill signal during Drop.
-    killer.disarm();
+    if child_exited {
+        killer.disarm();
+    }
 
     // If we timed out, abort the readers after a short grace to prevent hanging when pipes
     // remain open due to orphaned grandchildren.
@@ -423,6 +535,7 @@ async fn consume_truncated_output(
         // Abort reader tasks to avoid hanging if pipes remain open.
         stdout_handle.abort();
         stderr_handle.abort();
+        combined_handle.abort();
         (
             StreamOutput {
                 text: Vec::new(),
@@ -441,26 +554,34 @@ async fn consume_truncated_output(
 
     drop(agg_tx);
 
-    let mut combined_buf = Vec::with_capacity(AGGREGATE_BUFFER_INITIAL_CAPACITY);
-    let mut combined_truncated = false;
-    let mut combined_truncated_lines = 0u32;
-    let mut combined_truncated_bytes = 0usize;
-    while let Ok(chunk) = agg_rx.recv().await {
-        append_with_cap(
-            &mut combined_buf,
-            &chunk,
-            &mut combined_truncated,
-            &mut combined_truncated_lines,
-            &mut combined_truncated_bytes,
-        );
-    }
-    let aggregated_output = StreamOutput {
-        text: combined_buf,
-        truncated_after_lines: combined_truncated
-            .then_some(combined_truncated_lines.max(1)),
-        truncated_before_bytes: (combined_truncated_bytes > 0)
-            .then_some(combined_truncated_bytes),
+    let aggregated_output = if timed_out {
+        StreamOutput {
+            text: Vec::new(),
+            truncated_after_lines: None,
+            truncated_before_bytes: None,
+        }
+    } else {
+        combined_handle.await.map_err(CodexErr::from)?
     };
+
+    let mut oom_killed = false;
+    let mut cgroup_memory_max_bytes: Option<u64> = None;
+    #[cfg(target_os = "linux")]
+    {
+        if !timed_out {
+            if let Some(pid) = pid {
+                if matches!(exit_status.signal(), Some(SIGKILL_CODE))
+                    && crate::cgroup::exec_cgroup_oom_killed(pid).unwrap_or(false)
+                {
+                    oom_killed = true;
+                    cgroup_memory_max_bytes = crate::cgroup::exec_cgroup_memory_max_bytes(pid);
+                }
+            }
+        }
+        if let Some(pid) = pid {
+            crate::cgroup::best_effort_cleanup_exec_cgroup(pid);
+        }
+    }
 
     Ok(RawExecToolCallOutput {
         exit_status,
@@ -468,7 +589,42 @@ async fn consume_truncated_output(
         stderr,
         aggregated_output,
         timed_out,
+        oom_killed,
+        cgroup_memory_max_bytes,
     })
+}
+
+async fn emit_pending_delta(
+    stream: &StdoutStream,
+    is_stderr: bool,
+    pending_delta: &mut Vec<u8>,
+    emitted_deltas: &mut usize,
+) {
+    if pending_delta.is_empty() || *emitted_deltas >= MAX_EXEC_OUTPUT_DELTAS_PER_CALL {
+        if *emitted_deltas >= MAX_EXEC_OUTPUT_DELTAS_PER_CALL {
+            pending_delta.clear();
+        }
+        return;
+    }
+
+    let chunk = std::mem::take(pending_delta);
+    let msg = EventMsg::ExecCommandOutputDelta(ExecCommandOutputDeltaEvent {
+        call_id: stream.call_id.clone(),
+        stream: if is_stderr {
+            ExecOutputStream::Stderr
+        } else {
+            ExecOutputStream::Stdout
+        },
+        chunk: ByteBuf::from(chunk),
+    });
+    let event = if let Some(sess) = &stream.session {
+        sess.make_event(&stream.sub_id, msg)
+    } else {
+        Event { id: stream.sub_id.clone(), event_seq: 0, msg, order: stream.order.clone() }
+    };
+    #[allow(clippy::let_unit_value)]
+    let _ = stream.tx_event.send(event).await;
+    *emitted_deltas = emitted_deltas.saturating_add(1);
 }
 
 async fn read_capped<R: AsyncRead + Unpin + Send + 'static>(
@@ -476,6 +632,7 @@ async fn read_capped<R: AsyncRead + Unpin + Send + 'static>(
     stream: Option<StdoutStream>,
     is_stderr: bool,
     aggregate_tx: Option<Sender<Vec<u8>>>,
+    mut spool: Option<tokio::fs::File>,
 ) -> io::Result<StreamOutput<Vec<u8>>> {
     let mut buf = Vec::with_capacity(AGGREGATE_BUFFER_INITIAL_CAPACITY);
     let mut truncated = false;
@@ -483,59 +640,79 @@ async fn read_capped<R: AsyncRead + Unpin + Send + 'static>(
     let mut truncated_bytes = 0usize;
     let mut tmp = [0u8; READ_CHUNK_SIZE];
     let mut emitted_deltas: usize = 0;
+    let mut pending_delta: Vec<u8> = Vec::with_capacity(EXEC_DELTA_FLUSH_BYTES);
+    let mut flush_deadline: Option<Pin<Box<Sleep>>> = None;
 
     loop {
-        let n = reader.read(&mut tmp).await?;
-        if n == 0 {
-            break;
-        }
+        tokio::select! {
+            read_result = reader.read(&mut tmp) => {
+                let n = read_result?;
+                if n == 0 {
+                    break;
+                }
 
-        if let Some(stream) = &stream {
-            if emitted_deltas < MAX_EXEC_OUTPUT_DELTAS_PER_CALL {
-                let chunk = tmp[..n].to_vec();
-                let msg = EventMsg::ExecCommandOutputDelta(ExecCommandOutputDeltaEvent {
-                    call_id: stream.call_id.clone(),
-                    stream: if is_stderr {
-                        ExecOutputStream::Stderr
-                    } else {
-                        ExecOutputStream::Stdout
-                    },
-                    chunk: ByteBuf::from(chunk),
-                });
-                let event = if let Some(sess) = &stream.session {
-                    sess.make_event(&stream.sub_id, msg)
-                } else {
-                    Event { id: stream.sub_id.clone(), event_seq: 0, msg, order: stream.order.clone() }
-                };
-                #[allow(clippy::let_unit_value)]
-                let _ = stream.tx_event.send(event).await;
-                emitted_deltas += 1;
+                if let Some(stream) = &stream {
+                    // Update tail buffer if present (keep last ~8 KiB)
+                    if let Some(buf_arc) = &stream.tail_buf {
+                        let mut b = buf_arc.lock().unwrap();
+                        const MAX_TAIL: usize = 8 * 1024;
+                        b.extend_from_slice(&tmp[..n]);
+                        if b.len() > MAX_TAIL {
+                            let drop_len = b.len() - MAX_TAIL;
+                            b.drain(..drop_len);
+                        }
+                    }
 
-                // Update tail buffer if present (keep last ~8 KiB)
-                if let Some(buf_arc) = &stream.tail_buf {
-                    let mut b = buf_arc.lock().unwrap();
-                    const MAX_TAIL: usize = 8 * 1024;
-                    b.extend_from_slice(&tmp[..n]);
-                    if b.len() > MAX_TAIL {
-                        let drop_len = b.len() - MAX_TAIL;
-                        b.drain(..drop_len);
+                    // Accumulate deltas and emit frequently enough to keep the UI live.
+                    pending_delta.extend_from_slice(&tmp[..n]);
+
+                    if emitted_deltas >= MAX_EXEC_OUTPUT_DELTAS_PER_CALL {
+                        // Drop buffered payload once we've hit the live-stream cap to avoid unbounded growth.
+                        pending_delta.clear();
+                        flush_deadline = None;
+                    } else if pending_delta.len() >= EXEC_DELTA_FLUSH_BYTES {
+                        emit_pending_delta(stream, is_stderr, &mut pending_delta, &mut emitted_deltas).await;
+                        flush_deadline = None;
+                    } else if flush_deadline.is_none() {
+                        flush_deadline = Some(Box::pin(tokio::time::sleep(EXEC_DELTA_FLUSH_INTERVAL)));
                     }
                 }
+
+                if let Some(file) = spool.as_mut() {
+                    let _ = file.write_all(&tmp[..n]).await;
+                }
+
+                if let Some(tx) = &aggregate_tx {
+                    let _ = tx.send(tmp[..n].to_vec()).await;
+                }
+
+                append_with_cap(
+                    &mut buf,
+                    &tmp[..n],
+                    &mut truncated,
+                    &mut truncated_lines,
+                    &mut truncated_bytes,
+                );
+                // Continue reading to EOF to avoid back-pressure
+            }
+            _ = async {
+                if let Some(deadline) = &mut flush_deadline {
+                    deadline.as_mut().await;
+                }
+            }, if flush_deadline.is_some() => {
+                if let Some(stream) = &stream {
+                    emit_pending_delta(stream, is_stderr, &mut pending_delta, &mut emitted_deltas).await;
+                } else {
+                    pending_delta.clear();
+                }
+                flush_deadline = None;
             }
         }
+    }
 
-        if let Some(tx) = &aggregate_tx {
-            let _ = tx.send(tmp[..n].to_vec()).await;
-        }
-
-        append_with_cap(
-            &mut buf,
-            &tmp[..n],
-            &mut truncated,
-            &mut truncated_lines,
-            &mut truncated_bytes,
-        );
-        // Continue reading to EOF to avoid back-pressure
+    // Emit any remaining buffered delta
+    if let Some(stream) = &stream {
+        emit_pending_delta(stream, is_stderr, &mut pending_delta, &mut emitted_deltas).await;
     }
 
     Ok(StreamOutput {

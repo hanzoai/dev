@@ -7,6 +7,8 @@ use crate::card_theme;
 use crate::card_theme::{CardThemeDefinition, GradientSpec};
 use crate::colors;
 use crate::gradient_background::GradientBackground;
+use crate::theme::{palette_mode, PaletteMode};
+use crate::util::buffer::fill_rect;
 
 #[derive(Clone, Copy)]
 pub(crate) struct CardStyle {
@@ -61,15 +63,21 @@ impl CardRow {
 pub(crate) const CARD_ACCENT_WIDTH: usize = 2;
 
 pub(crate) fn agent_card_style(_write_enabled: Option<bool>) -> CardStyle {
-    // Agent batches should share the calmer green theme regardless of write access so
-    // mixed read/write runs stay visually consistent.
+    // Agent batches share the calmer green theme in full-color terminals.
+    // In ANSI-16 mode we keep the surface transparent and rely on inverted text.
     let is_dark = is_dark_theme_active();
     let definition = if is_dark {
         card_theme::agent_read_only_dark_theme()
     } else {
         card_theme::agent_read_only_light_theme()
     };
-    style_from_theme(definition, is_dark)
+    let mut style = style_from_theme(definition, is_dark);
+
+    if palette_mode() == PaletteMode::Ansi16 {
+        strip_ansi16_background(&mut style);
+    }
+
+    style
 }
 
 pub(crate) fn browser_card_style() -> CardStyle {
@@ -79,7 +87,13 @@ pub(crate) fn browser_card_style() -> CardStyle {
     } else {
         card_theme::browser_light_theme()
     };
-    style_from_theme(definition, is_dark)
+    let mut style = style_from_theme(definition, is_dark);
+
+    if palette_mode() == PaletteMode::Ansi16 {
+        strip_ansi16_background(&mut style);
+    }
+
+    style
 }
 
 pub(crate) fn auto_drive_card_style() -> CardStyle {
@@ -89,7 +103,18 @@ pub(crate) fn auto_drive_card_style() -> CardStyle {
     } else {
         card_theme::auto_drive_light_theme()
     };
-    style_from_theme(definition, is_dark)
+    let mut style = style_from_theme(definition, is_dark);
+
+    if palette_mode() == PaletteMode::Ansi16 {
+        strip_ansi16_background(&mut style);
+        let text_color = ansi16_inverse_color();
+        style.title_text = text_color;
+        style.accent_fg = text_color;
+        style.text_primary = text_color;
+        style.text_secondary = colors::warning();
+    }
+
+    style
 }
 
 pub(crate) fn web_search_card_style() -> CardStyle {
@@ -99,7 +124,29 @@ pub(crate) fn web_search_card_style() -> CardStyle {
     } else {
         card_theme::search_light_theme()
     };
-    style_from_theme(definition, is_dark)
+    let mut style = style_from_theme(definition, is_dark);
+
+    if palette_mode() == PaletteMode::Ansi16 {
+        strip_ansi16_background(&mut style);
+    }
+
+    style
+}
+
+pub(crate) fn ansi16_inverse_color() -> Color {
+    if is_dark_theme_active() {
+        Color::White
+    } else {
+        Color::Black
+    }
+}
+
+fn strip_ansi16_background(style: &mut CardStyle) {
+    style.gradient = GradientSpec {
+        left: Color::Reset,
+        right: Color::Reset,
+        bias: 0.0,
+    };
 }
 
 fn style_from_theme(definition: CardThemeDefinition, is_dark: bool) -> CardStyle {
@@ -152,7 +199,28 @@ fn adjust_gradient(gradient: GradientSpec, _is_dark: bool) -> GradientSpec {
 }
 
 pub(crate) fn fill_card_background(buf: &mut Buffer, area: Rect, style: &CardStyle) {
-    GradientBackground::render(buf, area, &style.gradient, style.text_primary, None);
+    if palette_mode() == PaletteMode::Ansi16
+        && matches!(style.gradient.left, Color::Reset)
+        && matches!(style.gradient.right, Color::Reset)
+    {
+        return;
+    }
+
+    if palette_mode() == PaletteMode::Ansi16
+        && style.gradient.left == style.gradient.right
+        && !matches!(style.gradient.left, Color::Rgb(_, _, _))
+    {
+        fill_rect(
+            buf,
+            area,
+            Some(' '),
+            Style::default()
+                .bg(style.gradient.left)
+                .fg(style.text_primary),
+        );
+    } else {
+        GradientBackground::render(buf, area, &style.gradient, style.text_primary, None);
+    }
 }
 
 pub(crate) fn pad_icon(icon: &str, width: usize) -> String {

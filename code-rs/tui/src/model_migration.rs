@@ -1,7 +1,10 @@
 use std::io::{self, Write};
 
+use crate::colors;
 use crossterm::cursor::MoveTo;
 use crossterm::event::{self, Event, KeyCode, KeyEvent, KeyEventKind, KeyModifiers};
+use crossterm::queue;
+use crossterm::style::{Attribute as CtAttribute, Color as CtColor, Print, ResetColor, SetAttribute, SetForegroundColor};
 use crossterm::terminal::{disable_raw_mode, enable_raw_mode, Clear, ClearType};
 use crossterm::ExecutableCommand;
 
@@ -28,6 +31,24 @@ pub(crate) fn migration_copy_for_key(key: &str) -> ModelMigrationCopy {
                 "Press Enter to continue.",
             ],
             can_opt_out: false,
+        },
+        code_common::model_presets::HIDE_GPT_5_2_MIGRATION_PROMPT_CONFIG => ModelMigrationCopy {
+            heading: "Upgrade available: GPT-5.2",
+            content: &[
+                "OpenAI's latest frontier model is here! Improved knowledge, reasoning, and coding.",
+                "Switch now to get better results; you can keep your current model if you prefer.",
+                "Learn more: www.openai.com/index/gpt-5-2",
+            ],
+            can_opt_out: true,
+        },
+        code_common::model_presets::HIDE_GPT_5_2_CODEX_MIGRATION_PROMPT_CONFIG => ModelMigrationCopy {
+            heading: "Upgrade available: GPT-5.2 Codex",
+            content: &[
+                "OpenAI's latest frontier agentic coding model is here: gpt-5.2-codex.",
+                "Switch now for better coding results; you can keep your current model if you prefer.",
+                "Learn more: https://openai.com/index/introducing-gpt-5-2-codex/",
+            ],
+            can_opt_out: true,
         },
         _ => ModelMigrationCopy {
             heading: "Codex just got an upgrade: meet gpt-5.1-codex-max",
@@ -115,24 +136,73 @@ fn render_prompt(stdout: &mut io::Stdout, copy: &ModelMigrationCopy, highlighted
     stdout.execute(Clear(ClearType::All))?;
     stdout.execute(MoveTo(0, 0))?;
 
-    writeln!(stdout, "{}", copy.heading)?;
-    writeln!(stdout)?;
+    if copy.heading == "Upgrade available: GPT-5.2 Codex" {
+        let success_fg = CtColor::from(colors::success());
+        write_line_fg_bold(stdout, copy.heading, success_fg)?;
+    } else {
+        write_line(stdout, copy.heading)?;
+    }
+    write_blank(stdout)?;
     for line in copy.content {
-        writeln!(stdout, "{}", line)?;
+        write_line(stdout, line)?;
     }
 
     if copy.can_opt_out {
-        writeln!(stdout)?;
+        write_blank(stdout)?;
+        let primary_fg = CtColor::from(colors::primary());
         for (idx, label) in ["Try new model (recommended)", "Use existing model"].iter().enumerate() {
             if idx == highlighted {
-                writeln!(stdout, "> {label}")?;
+                queue!(stdout, SetForegroundColor(primary_fg), Print("> "), Print(*label), ResetColor, Print("\r\n"))?;
             } else {
-                writeln!(stdout, "  {label}")?;
+                queue!(stdout, Print("  "), Print(*label), Print("\r\n"))?;
             }
         }
-        writeln!(stdout)?;
-        writeln!(stdout, "Use ↑/↓ to move, Enter to confirm, Esc to keep current model.")?;
+        write_blank(stdout)?;
+        write_key_tip_line(stdout)?;
     }
 
     stdout.flush()
+}
+
+fn write_line(stdout: &mut io::Stdout, line: &str) -> io::Result<()> {
+    stdout.write_all(line.as_bytes())?;
+    stdout.write_all(b"\r\n")
+}
+
+fn write_line_fg_bold(stdout: &mut io::Stdout, line: &str, fg: CtColor) -> io::Result<()> {
+    queue!(
+        stdout,
+        SetForegroundColor(fg),
+        SetAttribute(CtAttribute::Bold),
+        Print(line),
+        SetAttribute(CtAttribute::NormalIntensity),
+        ResetColor,
+        Print("\r\n")
+    )?;
+    Ok(())
+}
+
+fn write_key_tip_line(stdout: &mut io::Stdout) -> io::Result<()> {
+    let tip_fg = CtColor::from(colors::function());
+    queue!(
+        stdout,
+        Print("Use "),
+        SetForegroundColor(tip_fg),
+        Print("↑/↓"),
+        ResetColor,
+        Print(" to move, "),
+        SetForegroundColor(tip_fg),
+        Print("Enter"),
+        ResetColor,
+        Print(" to confirm, "),
+        SetForegroundColor(tip_fg),
+        Print("Esc"),
+        ResetColor,
+        Print(" to keep current model.\r\n")
+    )?;
+    Ok(())
+}
+
+fn write_blank(stdout: &mut io::Stdout) -> io::Result<()> {
+    stdout.write_all(b"\r\n")
 }

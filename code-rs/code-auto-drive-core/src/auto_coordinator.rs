@@ -11,7 +11,6 @@ use code_core::config_types::{AutoDriveSettings, ReasoningEffort, TextVerbosity}
 use code_core::debug_logger::DebugLogger;
 use code_core::codex::compact::resolve_compact_prompt_text;
 use code_core::model_family::{derive_default_model_family, find_family_for_model};
-use code_core::openai_model_info::get_model_info;
 use code_core::project_doc::read_auto_drive_docs;
 use code_core::protocol::SandboxPolicy;
 use code_core::slash_commands::get_enabled_agents;
@@ -60,6 +59,7 @@ struct AutoCoordinatorCancelled;
 pub const MODEL_SLUG: &str = "gpt-5.1";
 const USER_TURN_SCHEMA_NAME: &str = "auto_coordinator_user_turn";
 const COORDINATOR_PROMPT: &str = include_str!("../../core/prompt_coordinator.md");
+const TIMEBOXED_FINISH_GUIDANCE: &str = "Time budget mode is enabled for this run. Strategy: (1) identify the smallest reliable repro or failing test, (2) apply a focused fix, (3) verify with the narrowest check that proves correctness. Avoid full test suites unless required. If a rate-limit wait would consume most remaining time, summarize progress, note the next verification step, and use finish_failed instead of waiting indefinitely. Avoid repeated 'one more check' loops: do at most one final confirmation step, then use finish_success.";
 
 const ALL_TEXT_VERBOSITY: &[TextVerbosity] = &[
     TextVerbosity::Low,
@@ -72,6 +72,88 @@ fn supported_text_verbosity_for_model(model: &str) -> &'static [TextVerbosity] {
         &[TextVerbosity::Medium]
     } else {
         ALL_TEXT_VERBOSITY
+    }
+}
+
+#[derive(Debug, Clone)]
+struct AutoTimeBudget {
+    deadline: Instant,
+    total: Duration,
+    next_nudge_at: Instant,
+}
+
+fn retry_max_elapsed(deadline: Option<Instant>) -> Duration {
+    let max = MAX_RETRY_ELAPSED;
+    let Some(deadline) = deadline else {
+        return max;
+    };
+    let remaining = deadline.saturating_duration_since(Instant::now());
+    let remaining = remaining.saturating_sub(RATE_LIMIT_BUFFER);
+    remaining.min(max)
+}
+
+impl AutoTimeBudget {
+    fn new(deadline: Instant, total: Duration) -> Self {
+        let half = total / 2;
+        let next_nudge_at = deadline.checked_sub(half).unwrap_or(deadline);
+        Self {
+            deadline,
+            total,
+            next_nudge_at,
+        }
+    }
+
+    fn maybe_nudge(&mut self) -> Option<String> {
+        let now = Instant::now();
+        if now < self.next_nudge_at {
+            return None;
+        }
+
+        let remaining = self.deadline.saturating_duration_since(now);
+        let elapsed = self.total.saturating_sub(remaining);
+
+        if elapsed < (self.total / 2) {
+            let half = self.total / 2;
+            self.next_nudge_at = self.deadline.checked_sub(half).unwrap_or(self.deadline);
+            return None;
+        }
+
+        let guidance = if remaining <= Duration::from_secs(30) {
+            "Time is nearly up: stop exploring; finish with the simplest safe path."
+        } else if remaining <= Duration::from_secs(120) {
+            "Time is tight: reduce exploration and prioritize finishing."
+        } else {
+            "Past 50% of the time budget: start converging; avoid detours."
+        };
+
+        self.next_nudge_at = now + next_budget_nudge_interval(remaining);
+
+        Some(format!(
+            "Time budget update: total={} elapsed={} remaining={}. {guidance}",
+            format_duration(self.total),
+            format_duration(elapsed),
+            format_duration(remaining)
+        ))
+    }
+}
+
+fn next_budget_nudge_interval(remaining: Duration) -> Duration {
+    if remaining >= Duration::from_secs(30 * 60) {
+        Duration::from_secs(5 * 60)
+    } else if remaining >= Duration::from_secs(10 * 60) {
+        Duration::from_secs(2 * 60)
+    } else if remaining >= Duration::from_secs(5 * 60) {
+        Duration::from_secs(60)
+    } else if remaining >= Duration::from_secs(2 * 60) {
+        Duration::from_secs(30)
+    } else if remaining >= Duration::from_secs(60) {
+        Duration::from_secs(15)
+    } else if remaining >= Duration::from_secs(30) {
+        Duration::from_secs(10)
+    } else if remaining >= Duration::from_secs(10) {
+        Duration::from_secs(5)
+    } else {
+        Duration::from_secs(2)
     }
 }
 
@@ -352,6 +434,7 @@ mod tests {
     use code_core::agent_defaults::DEFAULT_AGENT_NAMES;
     use code_core::error::RetryLimitReachedError;
     use serde_json::json;
+    use std::time::Duration;
 
     #[test]
     fn turn_descriptor_defaults_to_normal_mode() {
@@ -463,6 +546,17 @@ mod tests {
             !prompt_schema.contains_key("maxLength"),
             "schema should omit maxLength to avoid provider truncation"
         );
+    }
+
+    #[test]
+    fn retry_max_elapsed_defaults_to_global_limit() {
+        assert_eq!(retry_max_elapsed(None), MAX_RETRY_ELAPSED);
+    }
+
+    #[test]
+    fn retry_max_elapsed_zero_when_deadline_has_passed() {
+        let deadline = Instant::now();
+        assert_eq!(retry_max_elapsed(Some(deadline)), Duration::ZERO);
     }
 
     #[test]
@@ -1024,6 +1118,14 @@ fn run_auto_loop(
     let model_reasoning_summary = config.model_reasoning_summary;
     let model_text_verbosity = config.model_text_verbosity;
     let sandbox_policy = config.sandbox_policy.clone();
+    let mut time_budget = config.max_run_seconds.map(|secs| {
+        let total = Duration::from_secs(secs);
+        let deadline = config
+            .max_run_deadline
+            .unwrap_or_else(|| Instant::now() + total);
+        AutoTimeBudget::new(deadline, total)
+    });
+    let coordinator_turn_cap = config.auto_drive.coordinator_turn_cap;
     let config = Arc::new(config);
     let active_agent_names = get_enabled_agents(&config.agents);
     let client = Arc::new(ModelClient::new(
@@ -1124,6 +1226,7 @@ fn run_auto_loop(
     let mut requests_completed: u64 = 0;
     let mut consecutive_decision_failures: u32 = 0;
     let mut session_metrics = SessionMetrics::default();
+    let mut coordinator_turns_seen: u32 = 0;
     let mut active_model_slug = config.model.clone();
     let mut prev_compact_summary: Option<String> = None;
 
@@ -1171,12 +1274,18 @@ fn run_auto_loop(
             }
             let developer_intro = base_developer_intro.as_str();
             let mut retry_conversation = Some(conv.clone());
+            let time_budget_message = time_budget.as_mut().and_then(|budget| budget.maybe_nudge());
+            let time_budget_deadline = time_budget.as_ref().map(|budget| budget.deadline);
+            let loop_warning = session_metrics.loop_detection_warning();
             match request_coordinator_decision(
                 &runtime,
                 client.as_ref(),
                 developer_intro,
                 &primary_goal_message,
                 coordinator_prompt_message.as_deref(),
+                time_budget_message.as_deref(),
+                time_budget_deadline,
+                loop_warning.as_deref(),
                 &schema,
                 conv,
                 auto_instructions.as_deref(),
@@ -1197,6 +1306,7 @@ fn run_auto_loop(
                     model_slug,
                 }) => {
                     retry_conversation.take();
+                    coordinator_turns_seen = coordinator_turns_seen.saturating_add(1);
                     if let Some(usage) = token_usage.as_ref() {
                         session_metrics.record_turn(usage);
                         emit_auto_drive_metrics(&event_tx, &session_metrics);
@@ -1207,6 +1317,35 @@ fn run_auto_loop(
                         agents.clear();
                     }
                     consecutive_decision_failures = 0;
+
+                    if coordinator_turn_cap > 0
+                        && coordinator_turns_seen >= coordinator_turn_cap
+                        && matches!(status, AutoCoordinatorStatus::Continue)
+                    {
+                        warn!(
+                            "auto coordinator turn cap reached ({coordinator_turns_seen}/{coordinator_turn_cap}); stopping"
+                        );
+                        decision_seq = decision_seq.wrapping_add(1);
+                        let current_seq = decision_seq;
+                        let event = AutoCoordinatorEvent::Decision {
+                            seq: current_seq,
+                            status: AutoCoordinatorStatus::Failed,
+                            status_title: Some("Turn limit reached".to_string()),
+                            status_sent_to_user: Some(format!(
+                                "Stopped after {coordinator_turns_seen} coordinator turns (cap={coordinator_turn_cap}) to prevent a runaway session."
+                            )),
+                            goal,
+                            cli: None,
+                            agents_timing: None,
+                            agents: Vec::new(),
+                            transcript: std::mem::take(&mut response_items),
+                        };
+                        pending_ack_seq = Some(current_seq);
+                        event_tx.send(event);
+                        stopped = true;
+                        continue;
+                    }
+
                     if let Some(goal_text) = goal
                         .as_ref()
                         .map(|value| value.trim())
@@ -1399,12 +1538,16 @@ fn run_auto_loop(
                 let developer_intro = base_developer_intro.as_str();
                 let mut updated_conversation = conversation.clone();
                 let schema = user_turn_schema();
+                let time_budget_message = time_budget.as_mut().and_then(|budget| budget.maybe_nudge());
+                let time_budget_deadline = time_budget.as_ref().map(|budget| budget.deadline);
                 match request_user_turn_decision(
                     &runtime,
                     client.as_ref(),
                     developer_intro,
                     &primary_goal_message,
                     coordinator_prompt_message.as_deref(),
+                    time_budget_message.as_deref(),
+                    time_budget_deadline,
                     &schema,
                     updated_conversation.clone(),
                     auto_instructions.as_deref(),
@@ -1492,12 +1635,16 @@ fn is_popular_commands_message(item: &ResponseItem) -> bool {
         _ => false,
     }
 }
-fn read_coordinator_prompt(_config: &Config) -> Option<String> {
+fn read_coordinator_prompt(config: &Config) -> Option<String> {
     let trimmed = COORDINATOR_PROMPT.trim();
     if trimmed.is_empty() {
         None
     } else {
-        Some(trimmed.to_string())
+        if config.max_run_seconds.is_some() {
+            Some(format!("{trimmed}\n\n# Time Budget\n{TIMEBOXED_FINISH_GUIDANCE}"))
+        } else {
+            Some(trimmed.to_string())
+        }
     }
 }
 
@@ -1779,6 +1926,9 @@ fn request_coordinator_decision(
     developer_intro: &str,
     primary_goal: &str,
     coordinator_prompt: Option<&str>,
+    time_budget_message: Option<&str>,
+    time_budget_deadline: Option<Instant>,
+    loop_warning: Option<&str>,
     schema: &Value,
     conversation: Vec<ResponseItem>,
     auto_instructions: Option<&str>,
@@ -1797,6 +1947,9 @@ fn request_coordinator_decision(
         developer_intro,
         primary_goal,
         coordinator_prompt,
+        time_budget_message,
+        time_budget_deadline,
+        loop_warning,
         schema,
         &conversation,
         auto_instructions,
@@ -1827,6 +1980,9 @@ fn request_decision(
     developer_intro: &str,
     primary_goal: &str,
     coordinator_prompt: Option<&str>,
+    time_budget_message: Option<&str>,
+    time_budget_deadline: Option<Instant>,
+    loop_warning: Option<&str>,
     schema: &Value,
     conversation: &[ResponseItem],
     auto_instructions: Option<&str>,
@@ -1840,6 +1996,9 @@ fn request_decision(
         developer_intro,
         primary_goal,
         coordinator_prompt,
+        time_budget_message,
+        time_budget_deadline,
+        loop_warning,
         schema,
         conversation,
         auto_instructions,
@@ -1869,6 +2028,9 @@ fn request_decision(
                     developer_intro,
                     primary_goal,
                     coordinator_prompt.as_deref(),
+                    time_budget_message,
+                    time_budget_deadline,
+                    loop_warning,
                     schema,
                     conversation,
                     auto_instructions,
@@ -1913,6 +2075,8 @@ fn request_user_turn_decision(
     developer_intro: &str,
     primary_goal: &str,
     coordinator_prompt: Option<&str>,
+    time_budget_message: Option<&str>,
+    time_budget_deadline: Option<Instant>,
     schema: &Value,
     conversation: Vec<ResponseItem>,
     auto_instructions: Option<&str>,
@@ -1920,12 +2084,16 @@ fn request_user_turn_decision(
     cancel_token: &CancellationToken,
     preferred_model_slug: &str,
 ) -> Result<(Option<String>, Option<String>), DecisionFailure> {
+    // User turn decisions don't need loop warnings as they handle user prompts.
     let result = request_decision(
         runtime,
         client,
         developer_intro,
         primary_goal,
         coordinator_prompt,
+        time_budget_message,
+        time_budget_deadline,
+        None,
         schema,
         &conversation,
         auto_instructions,
@@ -1945,6 +2113,9 @@ fn request_decision_with_model(
     developer_intro: &str,
     primary_goal: &str,
     coordinator_prompt: Option<&str>,
+    time_budget_message: Option<&str>,
+    time_budget_deadline: Option<Instant>,
+    loop_warning: Option<&str>,
     schema: &Value,
     conversation: &[ResponseItem],
     auto_instructions: Option<&str>,
@@ -1954,6 +2125,8 @@ fn request_decision_with_model(
 ) -> Result<RequestStreamResult> {
     let developer_intro = developer_intro.to_string();
     let primary_goal = primary_goal.to_string();
+    let time_budget_message = time_budget_message.map(|text| text.to_string());
+    let loop_warning = loop_warning.map(|text| text.to_string());
     let schema = schema.clone();
     let conversation: Vec<ResponseItem> = conversation.to_vec();
     let auto_instructions = auto_instructions.map(|text| text.to_string());
@@ -1961,17 +2134,21 @@ fn request_decision_with_model(
     let tx = event_tx.clone();
     let cancel = cancel_token.clone();
     let classify = |error: &anyhow::Error| classify_model_error(error);
-    let options = RetryOptions::with_defaults(MAX_RETRY_ELAPSED);
+    let options = RetryOptions::with_defaults(retry_max_elapsed(time_budget_deadline));
 
     let result = runtime.block_on(async move {
         retry_with_backoff(
             || {
                 let instructions = auto_instructions.clone();
                 let coordinator_prompt = coordinator_prompt.clone();
+                let time_budget_message = time_budget_message.clone();
+                let loop_warning = loop_warning.clone();
                 let prompt = build_user_turn_prompt(
                     &developer_intro,
                     &primary_goal,
                     coordinator_prompt.as_deref(),
+                    time_budget_message.as_deref(),
+                    loop_warning.as_deref(),
                     &schema,
                     &conversation,
                     model_slug,
@@ -2124,6 +2301,8 @@ fn build_user_turn_prompt(
     developer_intro: &str,
     primary_goal: &str,
     coordinator_prompt: Option<&str>,
+    time_budget_message: Option<&str>,
+    loop_warning: Option<&str>,
     schema: &Value,
     conversation: &Vec<ResponseItem>,
     model_slug: &str,
@@ -2146,6 +2325,23 @@ fn build_user_turn_prompt(
             prompt
                 .prepend_developer_messages
                 .push(trimmed.to_string());
+        }
+    }
+
+    if let Some(message) = time_budget_message {
+        let trimmed = message.trim();
+        if !trimmed.is_empty() {
+            prompt
+                .input
+                .push(make_message("developer", trimmed.to_string()));
+        }
+    }
+    if let Some(warning) = loop_warning {
+        let trimmed = warning.trim();
+        if !trimmed.is_empty() {
+            prompt
+                .input
+                .push(make_message("developer", trimmed.to_string()));
         }
     }
     prompt
@@ -3069,11 +3265,12 @@ pub fn should_compact(
     let family = find_family_for_model(model_slug)
         .unwrap_or_else(|| derive_default_model_family(model_slug));
 
-    if let Some(model_info) = get_model_info(&family) {
-        let token_limit = model_info
-            .auto_compact_token_limit
-            .and_then(|limit| (limit > 0).then(|| limit as u64))
-            .unwrap_or(model_info.context_window);
+    let token_limit = family
+        .auto_compact_token_limit()
+        .and_then(|limit| (limit > 0).then(|| limit as u64))
+        .or(family.context_window);
+
+    if let Some(token_limit) = token_limit {
         if token_limit > 0 {
             let threshold = (token_limit as f64 * 0.8) as u64;
             let projected_total = transcript_tokens.saturating_add(estimated_next);

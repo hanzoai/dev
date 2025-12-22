@@ -20,6 +20,7 @@ mod llm;
 use llm::{LlmCli, run_llm};
 use code_common::CliConfigOverrides;
 use code_core::{entry_to_rollout_path, SessionCatalog, SessionQuery};
+use code_core::spawn::spawn_std_command_with_retry;
 use code_protocol::protocol::SessionSource;
 use code_cloud_tasks::Cli as CloudTasksCli;
 use code_exec::Cli as ExecCli;
@@ -86,6 +87,10 @@ struct MultitoolCli {
     /// Run Auto Drive when executing non-interactive sessions.
     #[clap(long = "auto", global = true, default_value_t = false)]
     auto_drive: bool,
+
+    /// Developer-role message to prepend to every turn for demos.
+    #[clap(long = "demo", global = true, value_name = "TEXT")]
+    demo_developer_message: Option<String>,
 
     #[clap(subcommand)]
     subcommand: Option<Subcommand>,
@@ -405,10 +410,12 @@ async fn cli_main(code_linux_sandbox_exe: Option<PathBuf>) -> anyhow::Result<()>
         config_overrides: root_config_overrides,
         mut interactive,
         auto_drive,
+        demo_developer_message,
         subcommand,
     } = MultitoolCli::parse();
 
     interactive.finalize_defaults();
+    interactive.demo_developer_message = demo_developer_message.clone();
 
     match subcommand {
         None => {
@@ -438,6 +445,7 @@ async fn cli_main(code_linux_sandbox_exe: Option<PathBuf>) -> anyhow::Result<()>
             if auto_drive {
                 exec_cli.auto_drive = true;
             }
+            exec_cli.demo_developer_message = demo_developer_message.clone();
             prepend_config_flags(
                 &mut exec_cli.config_overrides,
                 root_config_overrides.clone(),
@@ -449,6 +457,7 @@ async fn cli_main(code_linux_sandbox_exe: Option<PathBuf>) -> anyhow::Result<()>
             if !exec_cli.full_auto && !exec_cli.dangerously_bypass_approvals_and_sandbox {
                 exec_cli.full_auto = true;
             }
+            exec_cli.demo_developer_message = demo_developer_message.clone();
             prepend_config_flags(
                 &mut exec_cli.config_overrides,
                 root_config_overrides.clone(),
@@ -1082,12 +1091,15 @@ fn resolve_resume_path(session_id: Option<&str>, last: bool) -> anyhow::Result<O
         } else {
             Ok(None)
         }
-    };
+        };
 
     match TokioHandle::try_current() {
         Ok(handle) => {
             let handle = handle.clone();
-            std::thread::spawn(move || handle.block_on(fetch))
+            std::thread::Builder::new()
+                .name("resume-lookup".to_string())
+                .spawn(move || handle.block_on(fetch))
+                .map_err(|err| anyhow!("resume lookup thread spawn failed: {err}"))?
                 .join()
                 .map_err(|_| anyhow!("resume lookup thread panicked"))?
         }
@@ -1354,7 +1366,14 @@ async fn preview_main(args: PreviewArgs) -> anyhow::Result<()> {
             };
             let _ = fs::rename(&exe, &dest).or_else(|_| { fs::copy(&exe, &dest).map(|_| () ) });
             println!("Downloaded preview to {}", dest.display());
-            if !args.extra.is_empty() { let _ = std::process::Command::new(&dest).args(&args.extra).spawn(); } else { let _ = std::process::Command::new(&dest).spawn(); }
+            if !args.extra.is_empty() {
+                let mut cmd = std::process::Command::new(&dest);
+                cmd.args(&args.extra);
+                let _ = spawn_std_command_with_retry(&mut cmd);
+            } else {
+                let mut cmd = std::process::Command::new(&dest);
+                let _ = spawn_std_command_with_retry(&mut cmd);
+            }
             return Ok(());
         }
     }
@@ -1552,6 +1571,7 @@ mod tests {
             config_overrides: root_overrides,
             auto_drive: _,
             subcommand,
+            ..
         } = cli;
 
         let Subcommand::Resume(ResumeCommand {

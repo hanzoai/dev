@@ -690,6 +690,10 @@ fn retained_stream_len(chunks: &[ExecStreamChunk]) -> usize {
     stream_len(chunks).saturating_sub(first_offset)
 }
 
+fn retained_exec_record_bytes(record: &ExecRecord) -> usize {
+    retained_stream_len(&record.stdout_chunks).saturating_add(retained_stream_len(&record.stderr_chunks))
+}
+
 fn truncated_prefix_len(chunks: &[ExecStreamChunk]) -> usize {
     chunks.first().map(|chunk| chunk.offset).unwrap_or(0)
 }
@@ -849,6 +853,11 @@ pub struct AssistantMessageState {
     pub citations: Vec<String>,
     pub metadata: Option<MessageMetadata>,
     pub token_usage: Option<TokenUsage>,
+    /// True when this assistant output was emitted before the final Answer
+    /// within the same turn (e.g., mid‑turn progress update). Used by the TUI
+    /// to suppress gutter/bold styling.
+    #[serde(default)]
+    pub mid_turn: bool,
     pub created_at: SystemTime,
 }
 
@@ -1387,6 +1396,10 @@ pub struct HistoryState {
     id_index: HashMap<HistoryId, usize>,
     #[serde(skip)]
     usage_tracker: HistoryUsageTracker,
+    #[serde(skip)]
+    exec_stream_retained_total_bytes: usize,
+    #[serde(skip)]
+    exec_stream_retained_by_id: HashMap<HistoryId, usize>,
 }
 
 #[allow(dead_code)]
@@ -1400,6 +1413,8 @@ impl HistoryState {
             stream_lookup: HashMap::new(),
             id_index: HashMap::new(),
             usage_tracker: HistoryUsageTracker::default(),
+            exec_stream_retained_total_bytes: 0,
+            exec_stream_retained_by_id: HashMap::new(),
         }
     }
 
@@ -1494,6 +1509,7 @@ impl HistoryState {
             citations,
             metadata,
             token_usage,
+            mid_turn: false,
             created_at: SystemTime::now(),
         };
         let id = self.next_history_id();
@@ -1593,6 +1609,58 @@ impl HistoryState {
         for record in &self.records {
             self.usage_tracker.on_insert(record);
         }
+        self.rebuild_exec_stream_retained_totals();
+    }
+
+    fn rebuild_exec_stream_retained_totals(&mut self) {
+        let mut total = 0usize;
+        let mut by_id: HashMap<HistoryId, usize> = HashMap::new();
+
+        for record in &self.records {
+            let HistoryRecord::Exec(exec) = record else {
+                continue;
+            };
+            if exec.id == HistoryId::ZERO {
+                continue;
+            }
+            let retained = retained_exec_record_bytes(exec);
+            by_id.insert(exec.id, retained);
+            total = total.saturating_add(retained);
+        }
+
+        self.exec_stream_retained_total_bytes = total;
+        self.exec_stream_retained_by_id = by_id;
+    }
+
+    fn set_exec_stream_retained(&mut self, id: HistoryId, retained: usize) {
+        if id == HistoryId::ZERO {
+            return;
+        }
+        let prev = self.exec_stream_retained_by_id.insert(id, retained).unwrap_or(0);
+        match retained.cmp(&prev) {
+            std::cmp::Ordering::Greater => {
+                self.exec_stream_retained_total_bytes = self
+                    .exec_stream_retained_total_bytes
+                    .saturating_add(retained.saturating_sub(prev));
+            }
+            std::cmp::Ordering::Less => {
+                self.exec_stream_retained_total_bytes = self
+                    .exec_stream_retained_total_bytes
+                    .saturating_sub(prev.saturating_sub(retained));
+            }
+            std::cmp::Ordering::Equal => {}
+        }
+    }
+
+    fn remove_exec_stream_retained(&mut self, id: HistoryId) {
+        if id == HistoryId::ZERO {
+            return;
+        }
+        if let Some(prev) = self.exec_stream_retained_by_id.remove(&id) {
+            self.exec_stream_retained_total_bytes = self
+                .exec_stream_retained_total_bytes
+                .saturating_sub(prev);
+        }
     }
 
     pub fn truncate_after(&mut self, id: HistoryId) -> Vec<HistoryRecord> {
@@ -1603,6 +1671,8 @@ impl HistoryState {
             self.stream_lookup.clear();
             self.next_id = 1;
             self.usage_tracker.reset();
+            self.exec_stream_retained_total_bytes = 0;
+            self.exec_stream_retained_by_id.clear();
             return removed;
         }
 
@@ -1656,6 +1726,7 @@ impl HistoryState {
                 if let Some(call_id) = state.call_id.as_ref() {
                     self.exec_call_lookup.insert(call_id.clone(), state.id);
                 }
+                self.set_exec_stream_retained(state.id, retained_exec_record_bytes(state));
             }
             HistoryRecord::MergedExec(state) => {
                 for segment in &state.segments {
@@ -1695,6 +1766,7 @@ impl HistoryState {
                         self.exec_call_lookup.remove(call_id);
                     }
                 }
+                self.remove_exec_stream_retained(state.id);
             }
             HistoryRecord::MergedExec(state) => {
                 for segment in &state.segments {
@@ -1844,30 +1916,36 @@ impl HistoryState {
                 stdout_chunk,
                 stderr_chunk,
             } => {
-                if let Some(HistoryRecord::Exec(existing)) = self.records.get(index).cloned() {
-                    let mut updated = existing;
-                    if let Some(chunk) = stdout_chunk {
-                        let chunk_len = chunk.content.len();
+                let (id, retained) = match self.records.get_mut(index) {
+                    Some(HistoryRecord::Exec(existing)) => {
+                        if let Some(chunk) = stdout_chunk {
+                            let chunk_len = chunk.content.len();
+                            self.usage_tracker.add_exec_delta(existing.id, 1, chunk_len);
+                            append_exec_chunk(&mut existing.stdout_chunks, chunk);
+                        }
+                        if let Some(chunk) = stderr_chunk {
+                            let chunk_len = chunk.content.len();
+                            self.usage_tracker.add_exec_delta(existing.id, 1, chunk_len);
+                            append_exec_chunk(&mut existing.stderr_chunks, chunk);
+                        }
                         self.usage_tracker
-                            .add_exec_delta(updated.id, 1, chunk_len);
-                        append_exec_chunk(&mut updated.stdout_chunks, chunk);
+                            .observe_exec(existing, "domain:update-exec-stream");
+                        let retained = retained_exec_record_bytes(existing);
+                        (existing.id, retained)
                     }
-                    if let Some(chunk) = stderr_chunk {
-                        let chunk_len = chunk.content.len();
-                        self.usage_tracker
-                            .add_exec_delta(updated.id, 1, chunk_len);
-                        append_exec_chunk(&mut updated.stderr_chunks, chunk);
-                    }
-                    self.usage_tracker
-                        .observe_exec(&updated, "domain:update-exec-stream");
-                    let mutation = self.apply_event(HistoryEvent::Replace {
+                    _ => return HistoryMutation::Noop,
+                };
+
+                self.set_exec_stream_retained(id, retained);
+
+                self.enforce_exec_stream_global_limit();
+
+                if let Some(record) = self.records.get(index).cloned() {
+                    HistoryMutation::Replaced {
                         index,
-                        record: HistoryRecord::Exec(updated),
-                    });
-                    if !matches!(mutation, HistoryMutation::Noop) {
-                        self.enforce_exec_stream_global_limit();
+                        id,
+                        record,
                     }
-                    mutation
                 } else {
                     HistoryMutation::Noop
                 }
@@ -2071,14 +2149,26 @@ impl HistoryState {
 
                         self.usage_tracker
                             .observe_exec(&updated, "domain:finish-exec");
+                        let id = updated.id;
                         let mutation = self.apply_event(HistoryEvent::Replace {
                             index: idx,
                             record: HistoryRecord::Exec(updated),
                         });
-                        if !matches!(mutation, HistoryMutation::Noop) {
-                            self.enforce_exec_stream_global_limit();
+                        if matches!(mutation, HistoryMutation::Noop) {
+                            return mutation;
                         }
-                        mutation
+
+                        self.enforce_exec_stream_global_limit();
+
+                        if let Some(record) = self.records.get(idx).cloned() {
+                            HistoryMutation::Replaced {
+                                index: idx,
+                                id,
+                                record,
+                            }
+                        } else {
+                            HistoryMutation::Noop
+                        }
                     } else {
                         HistoryMutation::Noop
                     }
@@ -2094,44 +2184,52 @@ impl HistoryState {
     /// `GLOBAL_EXEC_STREAM_RETAINED_BYTES`, progressively prune the oldest exec
     /// records down to `EXEC_STREAM_PRUNE_TARGET_BYTES` per stream.
     fn enforce_exec_stream_global_limit(&mut self) {
-        let mut total_retained: usize = 0;
-        let mut exec_indices: Vec<usize> = Vec::new();
-
-        for (idx, record) in self.records.iter().enumerate() {
-            if let HistoryRecord::Exec(exec) = record {
-                let retained = retained_stream_len(&exec.stdout_chunks)
-                    .saturating_add(retained_stream_len(&exec.stderr_chunks));
-                if retained > 0 {
-                    total_retained = total_retained.saturating_add(retained);
-                    exec_indices.push(idx);
-                }
-            }
-        }
-
-        if total_retained <= GLOBAL_EXEC_STREAM_RETAINED_BYTES {
+        if self.exec_stream_retained_total_bytes <= GLOBAL_EXEC_STREAM_RETAINED_BYTES {
             return;
         }
 
-        let mut bytes_to_drop = total_retained - GLOBAL_EXEC_STREAM_RETAINED_BYTES;
+        let mut bytes_to_drop =
+            self.exec_stream_retained_total_bytes - GLOBAL_EXEC_STREAM_RETAINED_BYTES;
 
-        for idx in exec_indices {
+        let retained_by_id = &mut self.exec_stream_retained_by_id;
+        let total_retained = &mut self.exec_stream_retained_total_bytes;
+
+        for record in &mut self.records {
             if bytes_to_drop == 0 {
                 break;
             }
 
-            if let Some(HistoryRecord::Exec(exec)) = self.records.get_mut(idx) {
-                let before = retained_stream_len(&exec.stdout_chunks)
-                    .saturating_add(retained_stream_len(&exec.stderr_chunks));
+            let HistoryRecord::Exec(exec) = record else {
+                continue;
+            };
 
-                prune_exec_stream(&mut exec.stdout_chunks, EXEC_STREAM_PRUNE_TARGET_BYTES);
-                prune_exec_stream(&mut exec.stderr_chunks, EXEC_STREAM_PRUNE_TARGET_BYTES);
-
-                let after = retained_stream_len(&exec.stdout_chunks)
-                    .saturating_add(retained_stream_len(&exec.stderr_chunks));
-
-                let dropped = before.saturating_sub(after);
-                bytes_to_drop = bytes_to_drop.saturating_sub(dropped);
+            let before = retained_by_id
+                .get(&exec.id)
+                .copied()
+                .unwrap_or_else(|| retained_exec_record_bytes(exec));
+            if before == 0 {
+                continue;
             }
+
+            prune_exec_stream(&mut exec.stdout_chunks, EXEC_STREAM_PRUNE_TARGET_BYTES);
+            prune_exec_stream(&mut exec.stderr_chunks, EXEC_STREAM_PRUNE_TARGET_BYTES);
+
+            let after = retained_exec_record_bytes(exec);
+            let prev = retained_by_id.insert(exec.id, after).unwrap_or(0);
+            match after.cmp(&prev) {
+                std::cmp::Ordering::Greater => {
+                    *total_retained = (*total_retained)
+                        .saturating_add(after.saturating_sub(prev));
+                }
+                std::cmp::Ordering::Less => {
+                    *total_retained = (*total_retained)
+                        .saturating_sub(prev.saturating_sub(after));
+                }
+                std::cmp::Ordering::Equal => {}
+            }
+
+            let dropped = before.saturating_sub(after);
+            bytes_to_drop = bytes_to_drop.saturating_sub(dropped);
         }
     }
 }
@@ -2521,6 +2619,7 @@ mod tests {
             citations: Vec::new(),
             metadata: None,
             token_usage: None,
+            mid_turn: false,
             created_at: SystemTime::UNIX_EPOCH,
         });
 
@@ -2569,6 +2668,7 @@ mod tests {
             citations: Vec::new(),
             metadata: None,
             token_usage: None,
+            mid_turn: false,
             created_at: SystemTime::UNIX_EPOCH,
         });
 
@@ -2980,6 +3080,7 @@ mod tests {
             citations: vec!["cite".into()],
             metadata: Some(metadata.clone()),
             token_usage: metadata.token_usage.clone(),
+            mid_turn: false,
             created_at: now,
         }));
 

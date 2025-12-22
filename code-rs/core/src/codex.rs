@@ -64,6 +64,7 @@ use crate::EnvironmentContextEmission;
 use crate::AuthManager;
 use crate::CodexAuth;
 use crate::agent_tool::AgentStatusUpdatePayload;
+use crate::remote_models::RemoteModelsManager;
 use crate::split_command_and_args;
 use crate::git_worktree;
 use crate::protocol::ApprovedCommandMatchKind;
@@ -222,6 +223,7 @@ pub(crate) struct TurnContext {
     pub(crate) cwd: PathBuf,
     pub(crate) base_instructions: Option<String>,
     pub(crate) user_instructions: Option<String>,
+    pub(crate) demo_developer_message: Option<String>,
     pub(crate) compact_prompt_override: Option<String>,
     pub(crate) approval_policy: AskForApproval,
     pub(crate) sandbox_policy: SandboxPolicy,
@@ -368,6 +370,89 @@ fn maybe_update_from_model_info<T: Copy + PartialEq>(
             *field = new_default;
         }
     }
+}
+
+#[derive(Clone, Debug)]
+struct RunTimeBudget {
+    deadline: Instant,
+    total: Duration,
+    next_nudge_at: Instant,
+}
+
+impl RunTimeBudget {
+    fn new(deadline: Instant, total: Duration) -> Self {
+        let half = total / 2;
+        let next_nudge_at = deadline.checked_sub(half).unwrap_or(deadline);
+        Self {
+            deadline,
+            total,
+            next_nudge_at,
+        }
+    }
+
+    fn maybe_nudge(&mut self, now: Instant) -> Option<String> {
+        if now < self.next_nudge_at {
+            return None;
+        }
+
+        let remaining = self.deadline.saturating_duration_since(now);
+        let elapsed = self.total.saturating_sub(remaining);
+
+        if elapsed < (self.total / 2) {
+            // Avoid time pressure early.
+            let half = self.total / 2;
+            self.next_nudge_at = self.deadline.checked_sub(half).unwrap_or(self.deadline);
+            return None;
+        }
+
+        let guidance = if remaining <= Duration::from_secs(30) {
+            "Time is nearly up: stop exploring; finish with the simplest safe path."
+        } else if remaining <= Duration::from_secs(120) {
+            "Time is tight: reduce exploration and prioritize finishing."
+        } else {
+            "Past 50% of the time budget: start converging; avoid detours."
+        };
+
+        self.next_nudge_at = now + next_budget_nudge_interval(remaining);
+
+        let total_secs = self.total.as_secs();
+        let elapsed_secs = elapsed.as_secs();
+        let remaining_secs = remaining.as_secs();
+        Some(format!(
+            "== System Status ==\n [automatic message added by system]\n\n time_budget: {total_secs}s\n elapsed: {elapsed_secs}s\n remaining: {remaining_secs}s\n\n Guidance: {guidance}"
+        ))
+    }
+}
+
+fn next_budget_nudge_interval(remaining: Duration) -> Duration {
+    if remaining >= Duration::from_secs(30 * 60) {
+        Duration::from_secs(5 * 60)
+    } else if remaining >= Duration::from_secs(10 * 60) {
+        Duration::from_secs(2 * 60)
+    } else if remaining >= Duration::from_secs(5 * 60) {
+        Duration::from_secs(60)
+    } else if remaining >= Duration::from_secs(2 * 60) {
+        Duration::from_secs(30)
+    } else if remaining >= Duration::from_secs(60) {
+        Duration::from_secs(15)
+    } else if remaining >= Duration::from_secs(30) {
+        Duration::from_secs(10)
+    } else if remaining >= Duration::from_secs(10) {
+        Duration::from_secs(5)
+    } else {
+        Duration::from_secs(2)
+    }
+}
+
+fn maybe_time_budget_status_item(sess: &Session) -> Option<ResponseItem> {
+    let mut guard = sess.time_budget.lock().unwrap();
+    let budget = guard.as_mut()?;
+    let text = budget.maybe_nudge(Instant::now())?;
+    Some(ResponseItem::Message {
+        id: Some(format!("run-budget-{}", sess.id)),
+        role: "user".to_string(),
+        content: vec![ContentItem::InputText { text }],
+    })
 }
 
 async fn build_turn_status_items(sess: &Session) -> Vec<ResponseItem> {
@@ -556,6 +641,10 @@ async fn build_turn_status_items_legacy(sess: &Session) -> Vec<ResponseItem> {
         });
     }
 
+    if let Some(item) = maybe_time_budget_status_item(sess) {
+        jar.items.push(item);
+    }
+
     jar.into_items()
 }
 
@@ -575,6 +664,10 @@ async fn build_turn_status_items_v2(sess: &Session) -> Vec<ResponseItem> {
         Some(format!("{:?}", sess.client.get_reasoning_effort())),
     ) {
         items.append(&mut env_items);
+    }
+
+    if let Some(item) = maybe_time_budget_status_item(sess) {
+        items.push(item);
     }
 
     if let Some(browser_manager) = code_browser::global::get_browser_manager().await {
@@ -877,7 +970,7 @@ use code_protocol::models::ReasoningItemReasoningSummary;
 use code_protocol::models::ResponseInputItem;
 use code_protocol::models::ResponseItem;
 use code_protocol::models::ShellToolCallParams;
-use crate::openai_model_info::get_model_info;
+use code_protocol::models::SandboxPermissions;
 use crate::openai_tools::ToolsConfig;
 use crate::openai_tools::get_openai_tools;
 use crate::slash_commands::get_enabled_agents;
@@ -885,6 +978,7 @@ use crate::dry_run_guard::{analyze_command, DryRunAnalysis, DryRunDisposition, D
 use crate::parse_command::parse_command;
 use crate::plan_tool::handle_update_plan;
 use crate::project_doc::get_user_instructions;
+use crate::skills::load_skills;
 use crate::project_features::{ProjectCommand, ProjectHook, ProjectHooks};
 use crate::protocol::AgentMessageDeltaEvent;
 use crate::protocol::AgentMessageEvent;
@@ -904,6 +998,7 @@ use crate::protocol::EventMsg;
 use crate::protocol::ExitedReviewModeEvent;
 use crate::protocol::ReviewSnapshotInfo;
 use crate::protocol::ListCustomPromptsResponseEvent;
+use crate::protocol::ListSkillsResponseEvent;
 use crate::protocol::{BrowserSnapshotEvent, EnvironmentContextDeltaEvent, EnvironmentContextFullEvent};
 use crate::protocol::ExecApprovalRequestEvent;
 use crate::protocol::ExecCommandBeginEvent;
@@ -983,12 +1078,25 @@ impl Codex {
         let (tx_sub, rx_sub) = async_channel::unbounded();
         let (tx_event, rx_event) = async_channel::unbounded();
 
-        let user_instructions = get_user_instructions(&config).await;
+        let skills_outcome = config.skills_enabled.then(|| load_skills(&config));
+        if let Some(outcome) = &skills_outcome {
+            for err in &outcome.errors {
+                warn!("invalid skill {}: {}", err.path.display(), err.message);
+            }
+        }
+
+        let user_instructions = get_user_instructions(
+            &config,
+            skills_outcome.as_ref().map(|outcome| outcome.skills.as_slice()),
+        )
+        .await;
 
         let configure_session = Op::ConfigureSession {
             provider: config.model_provider.clone(),
             model: config.model.clone(),
+            model_explicit: config.model_explicit,
             model_reasoning_effort: config.model_reasoning_effort,
+            preferred_model_reasoning_effort: config.preferred_model_reasoning_effort,
             model_reasoning_summary: config.model_reasoning_summary,
             model_text_verbosity: config.model_text_verbosity,
             user_instructions,
@@ -999,6 +1107,7 @@ impl Codex {
             notify: config.notify.clone(),
             cwd: config.cwd.clone(),
             resume_path: resume_path.clone(),
+            demo_developer_message: config.demo_developer_message.clone(),
         };
 
         let config = Arc::new(config);
@@ -1356,6 +1465,7 @@ struct BackgroundExecState {
 pub(crate) struct Session {
     id: Uuid,
     client: ModelClient,
+    remote_models_manager: Option<Arc<RemoteModelsManager>>,
     tx_event: Sender<Event>,
 
     /// The session's current working directory. All relative paths provided by
@@ -1364,6 +1474,7 @@ pub(crate) struct Session {
     cwd: PathBuf,
     base_instructions: Option<String>,
     user_instructions: Option<String>,
+    demo_developer_message: Option<String>,
     compact_prompt_override: Option<String>,
     approval_policy: AskForApproval,
     sandbox_policy: SandboxPolicy,
@@ -1402,6 +1513,7 @@ pub(crate) struct Session {
     last_system_status: Mutex<Option<String>>,
     /// Track the last screenshot path and hash to detect changes
     last_screenshot_info: Mutex<Option<(PathBuf, Vec<u8>, Vec<u8>)>>, // (path, phash, dhash)
+    time_budget: Mutex<Option<RunTimeBudget>>,
     confirm_guard: ConfirmGuardRuntime,
     project_hooks: ProjectHooks,
     project_commands: Vec<ProjectCommand>,
@@ -1501,6 +1613,54 @@ impl Session {
 
     pub(crate) fn get_cwd(&self) -> &Path {
         &self.cwd
+    }
+
+    pub(super) async fn apply_remote_model_overrides(&self, prompt: &mut Prompt) {
+        let configured_model = self.client.get_model();
+
+        if prompt.model_override.is_none() {
+            if !self.client.model_explicit() {
+                let auth_mode = self
+                    .client
+                    .get_auth_manager()
+                    .as_ref()
+                    .and_then(|mgr| mgr.auth())
+                    .map(|auth| auth.mode);
+
+                let default_model_slug = if auth_mode == Some(code_app_server_protocol::AuthMode::ChatGPT) {
+                    crate::config::GPT_5_CODEX_MEDIUM_MODEL
+                } else {
+                    crate::config::OPENAI_DEFAULT_MODEL
+                };
+
+                if let Some(remote) = self.remote_models_manager.as_ref()
+                    && configured_model.eq_ignore_ascii_case(default_model_slug)
+                    && let Some(default_model) = remote.default_model_slug(auth_mode).await
+                {
+                    prompt.model_override = Some(default_model);
+                }
+            }
+
+            if prompt.model_override.is_none() {
+                prompt.model_override = Some(configured_model.clone());
+            }
+        }
+
+        if prompt.model_family_override.is_none() {
+            let model_slug = prompt
+                .model_override
+                .as_deref()
+                .unwrap_or(configured_model.as_str());
+            let base_family = find_family_for_model(model_slug)
+                .unwrap_or_else(|| derive_default_model_family(model_slug));
+
+            let family = if let Some(remote) = self.remote_models_manager.as_ref() {
+                remote.apply_remote_overrides(model_slug, base_family).await
+            } else {
+                base_family
+            };
+            prompt.model_family_override = Some(family);
+        }
     }
 
     pub(crate) async fn record_bridge_event(&self, text: String) {
@@ -1914,7 +2074,9 @@ impl Session {
         }
 
         let cwd = self.get_cwd().to_path_buf();
-        let filename = format!("user-message-{}-{}.txt", sub_id, Uuid::new_v4());
+        let safe_sub_id = crate::fs_sanitize::safe_path_component(sub_id, "sub");
+        let uuid = Uuid::new_v4();
+        let filename = format!("user-message-{safe_sub_id}-{uuid}.txt");
         let file_note = match ensure_user_dir(&cwd)
             .and_then(|dir| write_agent_file(&dir, &filename, &aggregated))
         {
@@ -2131,6 +2293,7 @@ impl Session {
             cwd: self.cwd.clone(),
             base_instructions: self.base_instructions.clone(),
             user_instructions: self.user_instructions.clone(),
+            demo_developer_message: self.demo_developer_message.clone(),
             compact_prompt_override: self.compact_prompt_override.clone(),
             approval_policy: self.approval_policy,
             sandbox_policy: self.sandbox_policy.clone(),
@@ -2231,7 +2394,7 @@ impl Session {
     /// This is called when a new user message arrives to keep history manageable
     async fn cleanup_old_status_items(&self) {
         let mut state = self.state.lock().unwrap();
-        let current_items = state.history.contents();
+        let current_items = state.history.take_contents();
 
         let (items_to_keep, stats) = if self.env_ctx_v2 {
             let policy = crate::retention::RetentionPolicy {
@@ -2241,7 +2404,8 @@ impl Session {
                 keep_latest_baseline: self.retention_config.keep_latest_baseline,
             };
 
-            let (kept, retention_stats) = crate::retention::apply_retention_policy(&current_items, &policy);
+            let (kept, retention_stats) =
+                crate::retention::apply_retention_policy_owned(current_items, &policy);
 
             crate::telemetry::global_telemetry().record_retention(&retention_stats);
 
@@ -2258,11 +2422,10 @@ impl Session {
 
             (kept, legacy_stats)
         } else {
-            prune_history_items(&current_items)
+            prune_history_items_owned(current_items)
         };
 
-        state.history = ConversationHistory::new();
-        state.history.record_items(&items_to_keep);
+        state.history.replace_filtered(items_to_keep);
         drop(state);
 
         if stats.any_removed() {
@@ -3583,7 +3746,7 @@ impl Session {
         command.arg(json);
 
         // Fire-and-forget – we do not wait for completion.
-        if let Err(e) = command.spawn() {
+        if let Err(e) = crate::spawn::spawn_std_command_with_retry(&mut command) {
             warn!("failed to spawn notifier '{}': {e}", notify_command[0]);
         }
     }
@@ -3611,6 +3774,7 @@ impl CleanupStats {
     }
 }
 
+#[cfg(test)]
 fn prune_history_items(current_items: &[ResponseItem]) -> (Vec<ResponseItem>, CleanupStats) {
     let mut real_user_messages = Vec::new();
     let mut status_messages = Vec::new();
@@ -3747,6 +3911,171 @@ fn prune_history_items(current_items: &[ResponseItem]) -> (Vec<ResponseItem>, Cl
         if keep {
             items_to_keep.push(item.clone());
         } else if let ResponseItem::Message { content, .. } = item {
+            if content
+                .iter()
+                .any(|c| matches!(c, ContentItem::InputImage { .. }))
+            {
+                removed_screenshots += 1;
+            } else {
+                removed_status += 1;
+            }
+        }
+    }
+
+    let stats = CleanupStats {
+        removed_screenshots,
+        removed_status,
+        removed_env_baselines: env_baselines
+            .len()
+            .saturating_sub(if baseline_to_keep.is_some() { 1 } else { 0 }),
+        removed_env_deltas: env_deltas.len().saturating_sub(env_deltas_to_keep.len()),
+        removed_browser_snapshots: browser_snapshot_messages
+            .len()
+            .saturating_sub(browser_snapshots_to_keep.len()),
+        kept_recent_screenshots: screenshots_to_keep.len(),
+        kept_env_deltas: env_deltas_to_keep.len(),
+        kept_browser_snapshots: browser_snapshots_to_keep.len(),
+    };
+
+    (items_to_keep, stats)
+}
+
+fn prune_history_items_owned(current_items: Vec<ResponseItem>) -> (Vec<ResponseItem>, CleanupStats) {
+    let mut real_user_messages = Vec::new();
+    let mut status_messages = Vec::new();
+    let mut env_baselines = Vec::new();
+    let mut env_deltas = Vec::new();
+    let mut browser_snapshot_messages = Vec::new();
+
+    const MAX_ENV_DELTAS: usize = 3;
+    const MAX_BROWSER_SNAPSHOTS: usize = 2;
+
+    for (idx, item) in current_items.iter().enumerate() {
+        if let ResponseItem::Message { role, content, .. } = item {
+            if role != "user" {
+                continue;
+            }
+
+            let has_status = content.iter().any(|c| {
+                if let ContentItem::InputText { text } = c {
+                    text.contains("== System Status ==")
+                        || text.contains("Current working directory:")
+                        || text.contains("Git branch:")
+                        || text.contains(ENVIRONMENT_CONTEXT_OPEN_TAG)
+                        || text.contains(ENVIRONMENT_CONTEXT_DELTA_OPEN_TAG)
+                        || text.contains(BROWSER_SNAPSHOT_OPEN_TAG)
+                } else {
+                    false
+                }
+            });
+
+            let has_screenshot = content
+                .iter()
+                .any(|c| matches!(c, ContentItem::InputImage { .. }));
+
+            let has_real_text = content.iter().any(|c| {
+                if let ContentItem::InputText { text } = c {
+                    !text.contains("== System Status ==")
+                        && !text.contains("Current working directory:")
+                        && !text.contains("Git branch:")
+                        && !text.trim().is_empty()
+                        && !text.contains(ENVIRONMENT_CONTEXT_OPEN_TAG)
+                        && !text.contains(ENVIRONMENT_CONTEXT_DELTA_OPEN_TAG)
+                        && !text.contains(BROWSER_SNAPSHOT_OPEN_TAG)
+                } else {
+                    false
+                }
+            });
+
+            let has_env_baseline = content.iter().any(|c| {
+                if let ContentItem::InputText { text } = c {
+                    text.contains(ENVIRONMENT_CONTEXT_OPEN_TAG)
+                        && !text.contains(ENVIRONMENT_CONTEXT_DELTA_OPEN_TAG)
+                } else {
+                    false
+                }
+            });
+
+            let has_env_delta = content.iter().any(|c| {
+                if let ContentItem::InputText { text } = c {
+                    text.contains(ENVIRONMENT_CONTEXT_DELTA_OPEN_TAG)
+                } else {
+                    false
+                }
+            });
+
+            let has_browser_snapshot = content.iter().any(|c| {
+                if let ContentItem::InputText { text } = c {
+                    text.contains(BROWSER_SNAPSHOT_OPEN_TAG)
+                } else {
+                    false
+                }
+            });
+
+            if has_real_text && !has_status && !has_screenshot {
+                real_user_messages.push(idx);
+            } else if has_status || has_screenshot {
+                status_messages.push(idx);
+            }
+
+            if has_env_baseline {
+                env_baselines.push(idx);
+            }
+            if has_env_delta {
+                env_deltas.push(idx);
+            }
+            if has_browser_snapshot {
+                browser_snapshot_messages.push(idx);
+            }
+        }
+    }
+
+    let mut screenshots_to_keep = std::collections::HashSet::new();
+    for &user_idx in real_user_messages.iter().rev().take(2) {
+        for &status_idx in status_messages.iter() {
+            if status_idx > user_idx {
+                if let Some(ResponseItem::Message { content, .. }) = current_items.get(status_idx)
+                {
+                    if content.iter().any(|c| matches!(c, ContentItem::InputImage { .. })) {
+                        screenshots_to_keep.insert(status_idx);
+                        break;
+                    }
+                }
+            }
+        }
+    }
+
+    let baseline_to_keep = env_baselines.last().copied();
+    let env_deltas_to_keep: std::collections::HashSet<usize> = env_deltas
+        .iter()
+        .rev()
+        .take(MAX_ENV_DELTAS)
+        .copied()
+        .collect();
+    let browser_snapshots_to_keep: std::collections::HashSet<usize> = browser_snapshot_messages
+        .iter()
+        .rev()
+        .take(MAX_BROWSER_SNAPSHOTS)
+        .copied()
+        .collect();
+
+    let mut items_to_keep = Vec::new();
+    let mut removed_screenshots = 0usize;
+    let mut removed_status = 0usize;
+
+    for (idx, item) in current_items.into_iter().enumerate() {
+        let keep = if status_messages.contains(&idx) {
+            screenshots_to_keep.contains(&idx)
+                || browser_snapshots_to_keep.contains(&idx)
+                || baseline_to_keep == Some(idx)
+                || env_deltas_to_keep.contains(&idx)
+        } else {
+            true
+        };
+
+        if keep {
+            items_to_keep.push(item);
+        } else if let ResponseItem::Message { content, .. } = &item {
             if content
                 .iter()
                 .any(|c| matches!(c, ContentItem::InputImage { .. }))
@@ -4251,7 +4580,9 @@ async fn submission_loop(
             Op::ConfigureSession {
                 provider,
                 model,
+                model_explicit,
                 model_reasoning_effort,
+                preferred_model_reasoning_effort,
                 model_reasoning_summary,
                 model_text_verbosity,
                 user_instructions: provided_user_instructions,
@@ -4262,6 +4593,7 @@ async fn submission_loop(
                 notify,
                 cwd,
                 resume_path,
+                demo_developer_message,
             } => {
                 debug!(
                     "Configuring session: model={model}; provider={provider:?}; resume={resume_path:?}"
@@ -4280,13 +4612,20 @@ async fn submission_loop(
 
                 let model_changed = !updated_config.model.eq_ignore_ascii_case(&model);
                 let effort_changed = updated_config.model_reasoning_effort != model_reasoning_effort;
+                let preferred_effort_changed = preferred_model_reasoning_effort
+                    .as_ref()
+                    .map(|preferred| updated_config.preferred_model_reasoning_effort != Some(*preferred))
+                    .unwrap_or(false);
 
                 let old_model_family = updated_config.model_family.clone();
-                let old_model_info = get_model_info(&old_model_family);
 
                 updated_config.model = model.clone();
+                updated_config.model_explicit = model_explicit;
                 updated_config.model_provider = provider.clone();
                 updated_config.model_reasoning_effort = model_reasoning_effort;
+                if let Some(preferred) = preferred_model_reasoning_effort {
+                    updated_config.preferred_model_reasoning_effort = Some(preferred);
+                }
                 updated_config.model_reasoning_summary = model_reasoning_summary;
                 updated_config.model_text_verbosity = model_text_verbosity;
                 updated_config.user_instructions = provided_user_instructions.clone();
@@ -4300,18 +4639,12 @@ async fn submission_loop(
                 updated_config.model_family = find_family_for_model(&updated_config.model)
                     .unwrap_or_else(|| derive_default_model_family(&updated_config.model));
 
-                let new_model_info = get_model_info(&updated_config.model_family);
-
-                let old_context_window = old_model_info.as_ref().map(|info| info.context_window);
-                let new_context_window = new_model_info.as_ref().map(|info| info.context_window);
-                let old_max_tokens = old_model_info.as_ref().map(|info| info.max_output_tokens);
-                let new_max_tokens = new_model_info.as_ref().map(|info| info.max_output_tokens);
-                let old_auto_compact = old_model_info
-                    .as_ref()
-                    .and_then(|info| info.auto_compact_token_limit);
-                let new_auto_compact = new_model_info
-                    .as_ref()
-                    .and_then(|info| info.auto_compact_token_limit);
+                let old_context_window = old_model_family.context_window;
+                let new_context_window = updated_config.model_family.context_window;
+                let old_max_tokens = old_model_family.max_output_tokens;
+                let new_max_tokens = updated_config.model_family.max_output_tokens;
+                let old_auto_compact = old_model_family.auto_compact_token_limit();
+                let new_auto_compact = updated_config.model_family.auto_compact_token_limit();
 
                 maybe_update_from_model_info(
                     &mut updated_config.model_context_window,
@@ -4329,8 +4662,19 @@ async fn submission_loop(
                     new_auto_compact,
                 );
 
-                let computed_user_instructions =
-                    get_user_instructions(&updated_config).await;
+                let skills_outcome =
+                    updated_config.skills_enabled.then(|| load_skills(&updated_config));
+                if let Some(outcome) = &skills_outcome {
+                    for err in &outcome.errors {
+                        warn!("invalid skill {}: {}", err.path.display(), err.message);
+                    }
+                }
+
+                let computed_user_instructions = get_user_instructions(
+                    &updated_config,
+                    skills_outcome.as_ref().map(|outcome| outcome.skills.as_slice()),
+                )
+                .await;
                 updated_config.user_instructions = computed_user_instructions.clone();
 
                 let effective_user_instructions = computed_user_instructions.clone();
@@ -4365,12 +4709,13 @@ async fn submission_loop(
 
                 let new_config = Arc::new(updated_config);
 
-                if model_changed || effort_changed {
+                if new_config.model_explicit && (model_changed || effort_changed || preferred_effort_changed) {
                     if let Err(err) = persist_model_selection(
                         &new_config.code_home,
                         new_config.active_profile.as_deref(),
                         &new_config.model,
                         Some(new_config.model_reasoning_effort),
+                        new_config.preferred_model_reasoning_effort,
                     )
                     .await
                     {
@@ -4530,7 +4875,6 @@ async fn submission_loop(
 
                 let (mcp_connection_manager, failed_clients) = match McpConnectionManager::new(
                     config.mcp_servers.clone(),
-                    config.use_experimental_use_rmcp_client,
                     excluded_tools,
                 )
                 .await
@@ -4587,13 +4931,28 @@ async fn submission_loop(
                 tools_config.set_agent_models(agent_models);
 
                 let model_descriptions = model_guide_markdown_with_custom(&config.agents);
+                let remote_models_manager = auth_manager.as_ref().map(|mgr| {
+                    Arc::new(RemoteModelsManager::new(
+                        Arc::clone(mgr),
+                        provider.clone(),
+                        config.code_home.clone(),
+                    ))
+                });
+                if let Some(remote) = remote_models_manager.as_ref() {
+                    let remote = Arc::clone(remote);
+                    tokio::spawn(async move {
+                        remote.refresh_remote_models().await;
+                    });
+                }
                 let mut new_session = Arc::new(Session {
                     id: session_id,
                     client,
+                    remote_models_manager,
                     tools_config,
                     tx_event: tx_event.clone(),
                     user_instructions: effective_user_instructions.clone(),
                     base_instructions,
+                    demo_developer_message: demo_developer_message.clone(),
                     compact_prompt_override: config.compact_prompt_override.clone(),
                     approval_policy,
                     sandbox_policy,
@@ -4615,6 +4974,13 @@ async fn submission_loop(
                     pending_browser_screenshots: Mutex::new(Vec::new()),
                     last_system_status: Mutex::new(None),
                     last_screenshot_info: Mutex::new(None),
+                    time_budget: Mutex::new(config.max_run_seconds.map(|secs| {
+                        let total = Duration::from_secs(secs);
+                        let deadline = config
+                            .max_run_deadline
+                            .unwrap_or_else(|| Instant::now() + total);
+                        RunTimeBudget::new(deadline, total)
+                    })),
                     confirm_guard: ConfirmGuardRuntime::from_config(&config.confirm_guard),
                     project_hooks: config.project_hooks.clone(),
                     project_commands: config.project_commands.clone(),
@@ -4958,6 +5324,47 @@ async fn submission_loop(
 
                 sess.send_event(event).await;
             }
+            Op::ListSkills => {
+                let sess = match sess.as_ref() {
+                    Some(sess) => Arc::clone(sess),
+                    None => {
+                        send_no_session_event(sub.id).await;
+                        continue;
+                    }
+                };
+
+                let config_for_skills = Arc::clone(&config);
+                let skill_load_outcome = tokio::task::spawn_blocking(move || {
+                    crate::skills::load_skills(&config_for_skills)
+                })
+                .await
+                .unwrap_or_default();
+
+                let skills: Vec<code_protocol::skills::Skill> = skill_load_outcome
+                    .skills
+                    .into_iter()
+                    .map(|skill| code_protocol::skills::Skill {
+                        name: skill.name,
+                        description: skill.description,
+                        path: skill.path,
+                        scope: match skill.scope {
+                            crate::skills::model::SkillScope::Repo => code_protocol::skills::SkillScope::Repo,
+                            crate::skills::model::SkillScope::User => code_protocol::skills::SkillScope::User,
+                            crate::skills::model::SkillScope::System => code_protocol::skills::SkillScope::System,
+                        },
+                        content: skill.content,
+                    })
+                    .collect();
+
+                let event = Event {
+                    id: sub.id.clone(),
+                    event_seq: 0,
+                    msg: EventMsg::ListSkillsResponse(ListSkillsResponseEvent { skills }),
+                    order: None,
+                };
+
+                sess.send_event(event).await;
+            }
             Op::Compact => {
                 let sess = match sess.as_ref() {
                     Some(sess) => sess,
@@ -5089,9 +5496,11 @@ async fn spawn_review_thread(
     review_config.model_text_verbosity = config.model_text_verbosity;
     review_config.user_instructions = None;
     review_config.base_instructions = Some(REVIEW_PROMPT.to_string());
-    if let Some(info) = get_model_info(&review_family) {
-        review_config.model_context_window = Some(info.context_window);
-        review_config.model_max_output_tokens = Some(info.max_output_tokens);
+    if let Some(cw) = review_family.context_window {
+        review_config.model_context_window = Some(cw);
+    }
+    if let Some(max) = review_family.max_output_tokens {
+        review_config.model_max_output_tokens = Some(max);
     }
     let review_config = Arc::new(review_config);
 
@@ -5127,6 +5536,7 @@ async fn spawn_review_thread(
         cwd: parent_turn_context.cwd.clone(),
         base_instructions: Some(REVIEW_PROMPT.to_string()),
         user_instructions: None,
+        demo_developer_message: parent_turn_context.demo_developer_message.clone(),
         compact_prompt_override: parent_turn_context.compact_prompt_override.clone(),
         approval_policy: parent_turn_context.approval_policy,
         sandbox_policy: parent_turn_context.sandbox_policy.clone(),
@@ -5708,13 +6118,6 @@ async fn run_turn(
         manager.has_active_agents()
     };
 
-    let tools = get_openai_tools(
-        &sess.tools_config,
-        Some(sess.mcp_connection_manager.list_all_tools()),
-        browser_enabled,
-        agents_active,
-    );
-
     let mut retries = 0;
     // Ensure we only auto-compact once per turn to avoid loops
     let mut did_auto_compact = false;
@@ -5731,7 +6134,16 @@ async fn run_turn(
         // Build status items (screenshots, system status) fresh for each attempt
         let status_items = build_turn_status_items(sess).await;
 
-        let prompt = Prompt {
+        let mut prepend_developer_messages: Vec<String> = tc
+            .demo_developer_message
+            .clone()
+            .into_iter()
+            .collect();
+        if should_inject_html_sanitizer_guardrails(&attempt_input) {
+            prepend_developer_messages.push(HTML_SANITIZER_GUARDRAILS_MESSAGE.to_string());
+        }
+
+        let mut prompt = Prompt {
             input: attempt_input.clone(),
             store: !sess.disable_response_storage,
             user_instructions: tc.user_instructions.clone(),
@@ -5741,11 +6153,11 @@ async fn run_turn(
                 Some(tc.sandbox_policy.clone()),
                 Some(sess.user_shell.clone()),
             )),
-            tools: tools.clone(),
+            tools: Vec::new(),
             status_items, // Include status items with this request
             base_instructions_override: tc.base_instructions.clone(),
             include_additional_instructions: true,
-            prepend_developer_messages: Vec::new(),
+            prepend_developer_messages,
             text_format: tc.text_format_override.clone(),
             model_override: None,
             model_family_override: None,
@@ -5754,6 +6166,23 @@ async fn run_turn(
             session_id_override: None,
             model_descriptions: sess.model_descriptions.clone(),
         };
+
+        sess.apply_remote_model_overrides(&mut prompt).await;
+
+        let effective_family = prompt
+            .model_family_override
+            .as_ref()
+            .unwrap_or_else(|| tc.client.default_model_family());
+        let tools_config = tc.client.build_tools_config_with_sandbox_for_family(
+            tc.sandbox_policy.clone(),
+            effective_family,
+        );
+        prompt.tools = get_openai_tools(
+            &tools_config,
+            Some(sess.mcp_connection_manager.list_all_tools()),
+            browser_enabled,
+            agents_active,
+        );
 
         // Start a new scratchpad for this HTTP attempt
         sess.begin_attempt_scratchpad();
@@ -5771,30 +6200,42 @@ async fn run_turn(
             }
             Err(CodexErr::Interrupted) => return Err(CodexErr::Interrupted),
             Err(CodexErr::EnvVar(var)) => return Err(CodexErr::EnvVar(var)),
-            Err(e @ (CodexErr::UsageLimitReached(_)
-                | CodexErr::UsageNotIncluded
-                | CodexErr::QuotaExceeded)) => {
-                if let CodexErr::UsageLimitReached(limit_err) = &e {
-                    if let Some(ctx) = account_usage_context(&sess) {
-                        let usage_home = ctx.code_home.clone();
-                        let usage_account = ctx.account_id.clone();
-                        let usage_plan = ctx.plan.clone();
-                        let resets = limit_err.resets_in_seconds;
-                        spawn_usage_task(move || {
-                            if let Err(err) = account_usage::record_usage_limit_hint(
-                                &usage_home,
-                                &usage_account,
-                                usage_plan.as_deref(),
-                                resets,
-                                Utc::now(),
-                            ) {
-                                warn!("Failed to persist usage limit hint: {err}");
-                            }
-                        });
-                    }
+            Err(CodexErr::UsageLimitReached(limit_err)) => {
+                if let Some(ctx) = account_usage_context(sess) {
+                    let usage_home = ctx.code_home.clone();
+                    let usage_account = ctx.account_id.clone();
+                    let usage_plan = ctx.plan.clone();
+                    let resets = limit_err.resets_in_seconds;
+                    spawn_usage_task(move || {
+                        if let Err(err) = account_usage::record_usage_limit_hint(
+                            &usage_home,
+                            &usage_account,
+                            usage_plan.as_deref(),
+                            resets,
+                            Utc::now(),
+                        ) {
+                            warn!("Failed to persist usage limit hint: {err}");
+                        }
+                    });
                 }
-                return Err(e);
+
+                let now = Utc::now();
+                let retry_after = limit_err
+                    .retry_after(now)
+                    .unwrap_or_else(|| RetryAfter::from_duration(std::time::Duration::from_secs(5 * 60), now));
+                let eta = format_retry_eta(&retry_after);
+                let mut retry_message = format!("{limit_err} Auto-retrying");
+                if let Some(eta) = eta {
+                    retry_message.push_str(&format!(" at {eta}"));
+                }
+                retry_message.push('…');
+                sess.notify_stream_error(&sub_id, retry_message).await;
+                tokio::time::sleep(retry_after.delay).await;
+                retries = 0;
+                continue;
             }
+            Err(CodexErr::UsageNotIncluded) => return Err(CodexErr::UsageNotIncluded),
+            Err(CodexErr::QuotaExceeded) => return Err(CodexErr::QuotaExceeded),
             Err(e) => {
                 // Detect context-window overflow and auto-run a compact summarization once
                 if !did_auto_compact {
@@ -6011,6 +6452,56 @@ async fn run_turn(
             }
         }
     }
+}
+
+const HTML_SANITIZER_GUARDRAILS_MESSAGE: &str =
+    "TB2 HTML/XSS guardrails:\n- Do NOT use DOTALL/full-document regex (e.g. `<script.*?>.*?</script>`); catastrophic backtracking risk.\n- Prefer linear-time scanning with quote/state tracking; if using regex, only on bounded substrings (single tags).\n- Perf smoke test: write malformed `/tmp/stress.html` and run `timeout 5s python3 /app/filter.py /tmp/stress.html` (or equivalent). If it times out, rewrite for linear-time behavior.";
+
+fn should_inject_html_sanitizer_guardrails(input: &[ResponseItem]) -> bool {
+    let mut user_messages_seen = 0u32;
+    let mut text = String::new();
+    for item in input.iter().rev() {
+        if user_messages_seen >= 6 || text.len() >= 1_200 {
+            break;
+        }
+        let ResponseItem::Message { role, content, .. } = item else {
+            continue;
+        };
+        if role != "user" {
+            continue;
+        }
+        user_messages_seen = user_messages_seen.saturating_add(1);
+        for entry in content {
+            let ContentItem::InputText { text: piece } = entry else {
+                continue;
+            };
+            if piece.trim().is_empty() {
+                continue;
+            }
+            text.push_str(piece);
+            text.push('\n');
+            if text.len() >= 1_200 {
+                break;
+            }
+        }
+    }
+
+    if text.is_empty() {
+        return false;
+    }
+
+    let lower = text.to_ascii_lowercase();
+    let has_xss = lower.contains("xss");
+    let has_sanitize = lower.contains("sanitize") || lower.contains("sanitiz");
+    let has_filter_js_from_html =
+        lower.contains("filter-js-from-html") || lower.contains("break-filter-js-from-html");
+    let has_html = lower.contains("html");
+    let has_script_tag =
+        lower.contains("<script") || lower.contains("script tag") || lower.contains("script-tag");
+    let has_filtering =
+        lower.contains("filter") || lower.contains("strip") || lower.contains("remove");
+
+    has_xss || has_sanitize || has_filter_js_from_html || (has_html && has_script_tag && has_filtering)
 }
 
 fn reconcile_pending_tool_outputs(
@@ -6503,7 +6994,7 @@ async fn handle_response_item(
                 command: action.command,
                 workdir: action.working_directory,
                 timeout_ms: action.timeout_ms,
-                with_escalated_permissions: None,
+                sandbox_permissions: None,
                 justification: None,
             };
             let effective_call_id = match (call_id, id) {
@@ -6569,7 +7060,8 @@ async fn handle_response_item(
 
 // Helper utilities for agent output/progress management
 fn ensure_agent_dir(cwd: &Path, agent_id: &str) -> Result<PathBuf, String> {
-    let dir = cwd.join(".code").join("agents").join(agent_id);
+    let safe_agent_id = crate::fs_sanitize::safe_path_component(agent_id, "agent");
+    let dir = cwd.join(".code").join("agents").join(safe_agent_id);
     std::fs::create_dir_all(&dir)
         .map_err(|e| format!("Failed to create agent dir {}: {}", dir.display(), e))?;
     Ok(dir)
@@ -6583,7 +7075,25 @@ fn ensure_user_dir(cwd: &Path) -> Result<PathBuf, String> {
 }
 
 fn write_agent_file(dir: &Path, filename: &str, content: &str) -> Result<PathBuf, String> {
-    let path = dir.join(filename);
+    if filename
+        .chars()
+        .any(|ch| matches!(ch, '/' | '\\' | '\0'))
+    {
+        return Err(format!("Refusing to write invalid filename: {filename}"));
+    }
+    let candidate = Path::new(filename);
+    if candidate.is_absolute() || candidate.components().count() != 1 {
+        return Err(format!("Refusing to write non-file component: {filename}"));
+    }
+    let Some(file_name) = candidate.file_name() else {
+        return Err(format!("Refusing to write invalid filename: {filename}"));
+    };
+    let file_name = file_name.to_string_lossy();
+    if file_name.is_empty() || file_name == "." || file_name == ".." {
+        return Err(format!("Refusing to write invalid filename: {filename}"));
+    }
+
+    let path = dir.join(file_name.as_ref());
     std::fs::write(&path, content)
         .map_err(|e| format!("Failed to write {}: {}", path.display(), e))?;
     Ok(path)
@@ -7931,6 +8441,7 @@ async fn handle_wait(
                 let default_ms: u64 = 600_000; // 10 minutes default
                 let timeout_ms = parsed.timeout_ms.unwrap_or(default_ms).min(max_ms);
                 use std::sync::atomic::Ordering;
+                let (initial_wait_epoch, _) = sess.wait_interrupt_snapshot();
                 let (notify_opt, done_opt, tail, suppress_flag) = {
                     let st = sess.state.lock().unwrap();
                     match st.background_execs.get(&call_id) {
@@ -7943,23 +8454,55 @@ async fn handle_wait(
                         None => (None, None, None, None),
                     }
                 };
-                if let Some(flag) = &suppress_flag {
-                    flag.store(true, Ordering::Relaxed);
+
+                struct WaitSuppressGuard {
+                    flag: Option<std::sync::Arc<std::sync::atomic::AtomicBool>>,
                 }
-                if let Some(done) = done_opt {
-                    let content = format_exec_output_with_limit(sess, &ctx_inner.sub_id, &ctx_inner.call_id, &done);
-                    if let Some(flag) = &suppress_flag {
-                        flag.store(true, Ordering::Relaxed);
+
+                impl WaitSuppressGuard {
+                    fn new(flag: Option<std::sync::Arc<std::sync::atomic::AtomicBool>>) -> Self {
+                        if let Some(flag) = flag.as_ref() {
+                            flag.store(true, Ordering::Relaxed);
+                        }
+                        Self { flag }
                     }
+
+                    fn disarm(mut self) {
+                        self.flag = None;
+                    }
+                }
+
+                impl Drop for WaitSuppressGuard {
+                    fn drop(&mut self) {
+                        if let Some(flag) = self.flag.as_ref() {
+                            flag.store(false, Ordering::Relaxed);
+                        }
+                    }
+                }
+
+                let suppress_guard = WaitSuppressGuard::new(suppress_flag.clone());
+
+                if let Some(done) = done_opt {
+                    {
+                        let mut st = sess.state.lock().unwrap();
+                        st.background_execs.remove(&call_id);
+                    }
+                    let content = format_exec_output_with_limit(
+                        sess,
+                        &ctx_inner.sub_id,
+                        &ctx_inner.call_id,
+                        &done,
+                    );
+                    suppress_guard.disarm();
                     return ResponseInputItem::FunctionCallOutput {
                         call_id: ctx_inner.call_id.clone(),
-                        output: FunctionCallOutputPayload { content, success: Some(done.exit_code == 0) },
+                        output: FunctionCallOutputPayload {
+                            content,
+                            success: Some(done.exit_code == 0),
+                        },
                     };
                 }
                 let Some(spec_notify) = notify_opt else {
-                    if let Some(flag) = &suppress_flag {
-                        flag.store(false, Ordering::Relaxed);
-                    }
                     return ResponseInputItem::FunctionCallOutput {
                         call_id: ctx_inner.call_id.clone(),
                         output: FunctionCallOutputPayload {
@@ -7969,29 +8512,110 @@ async fn handle_wait(
                     };
                 };
                 let any_notify = ANY_BG_NOTIFY.get().cloned().unwrap();
-                let raced = tokio::time::timeout(std::time::Duration::from_millis(timeout_ms), async move {
+
+                let deadline = tokio::time::Instant::now()
+                    + std::time::Duration::from_millis(timeout_ms);
+
+                loop {
+                    let (known_done, known_missing) = {
+                        let st = sess.state.lock().unwrap();
+                        match st.background_execs.get(&call_id) {
+                            Some(bg) => (
+                                bg.result_cell.lock().unwrap().is_some(),
+                                false,
+                            ),
+                            None => (false, true),
+                        }
+                    };
+
+                    if known_missing {
+                        return ResponseInputItem::FunctionCallOutput {
+                            call_id: ctx_inner.call_id.clone(),
+                            output: FunctionCallOutputPayload {
+                                content: format!("No background job found for call_id={call_id}"),
+                                success: Some(false),
+                            },
+                        };
+                    }
+
+                    if known_done {
+                        break;
+                    }
+
+                    let time_budget_message = {
+                        let mut guard = sess.time_budget.lock().unwrap();
+                        guard
+                            .as_mut()
+                            .and_then(|budget| budget.maybe_nudge(Instant::now()))
+                    };
+
+                    if let Some(budget_text) = time_budget_message {
+                        let msg = format!(
+                            "{budget_text}\n\nWait interrupted so the assistant can adapt. Background job {call_id} still running.\n\nContinue by calling wait(call_id=\"{call_id}\")."
+                        );
+                        return ResponseInputItem::FunctionCallOutput {
+                            call_id: ctx_inner.call_id.clone(),
+                            output: FunctionCallOutputPayload {
+                                content: msg,
+                                success: Some(false),
+                            },
+                        };
+                    }
+
+                    let (current_epoch, reason) = sess.wait_interrupt_snapshot();
+                    if current_epoch != initial_wait_epoch {
+                        let message = match reason {
+                            Some(WaitInterruptReason::UserMessage) => {
+                                format!(
+                                    "wait ended due to new user message (background job {call_id} still running)"
+                                )
+                            }
+                            _ => format!(
+                                "wait ended because the session was interrupted (background job {call_id} still running)"
+                            ),
+                        };
+                        return ResponseInputItem::FunctionCallOutput {
+                            call_id: ctx_inner.call_id.clone(),
+                            output: FunctionCallOutputPayload {
+                                content: message,
+                                success: Some(false),
+                            },
+                        };
+                    }
+
+                    let now = tokio::time::Instant::now();
+                    if now >= deadline {
+                        let tail_text = tail
+                            .as_ref()
+                            .map(|arc| String::from_utf8_lossy(&arc.lock().unwrap()).to_string())
+                            .unwrap_or_default();
+                        let msg = if tail_text.is_empty() {
+                            format!("Background job {call_id} still running...")
+                        } else {
+                            format!(
+                                "Background job {call_id} still running...\n\nOutput so far (tail):\n{tail_text}"
+                            )
+                        };
+                        return ResponseInputItem::FunctionCallOutput {
+                            call_id: ctx_inner.call_id.clone(),
+                            output: FunctionCallOutputPayload {
+                                content: msg,
+                                success: Some(false),
+                            },
+                        };
+                    }
+
+                    let remaining = deadline - now;
+                    let poll = std::time::Duration::from_millis(200);
+                    let sleep_for = std::cmp::min(poll, remaining);
+
                     tokio::select! {
-                        _ = spec_notify.notified() => (),
-                        _ = any_notify.notified() => (),
+                        _ = spec_notify.notified() => {},
+                        _ = any_notify.notified() => {},
+                        _ = tokio::time::sleep(sleep_for) => {},
                     }
-                }).await;
-                if raced.is_err() {
-                    let tail_text = tail
-                        .map(|arc| String::from_utf8_lossy(&arc.lock().unwrap()).to_string())
-                        .unwrap_or_default();
-                    let msg = if tail_text.is_empty() {
-                        format!("Background job {call_id} still running...")
-                    } else {
-                        format!("Background job {call_id} still running...\n\nOutput so far (tail):\n{tail_text}")
-                    };
-                    if let Some(flag) = &suppress_flag {
-                        flag.store(false, Ordering::Relaxed);
-                    }
-                    return ResponseInputItem::FunctionCallOutput {
-                        call_id: ctx_inner.call_id.clone(),
-                        output: FunctionCallOutputPayload { content: msg, success: Some(false) },
-                    };
                 }
+
                 let done = {
                     let mut st = sess.state.lock().unwrap();
                     if let Some(bg) = st.background_execs.remove(&call_id) {
@@ -8008,14 +8632,12 @@ async fn handle_wait(
                 };
                 if let Some(done) = done {
                     let content = format_exec_output_with_limit(sess, &ctx_inner.sub_id, &ctx_inner.call_id, &done);
+                    suppress_guard.disarm();
                     ResponseInputItem::FunctionCallOutput {
                         call_id: ctx_inner.call_id.clone(),
                         output: FunctionCallOutputPayload { content, success: Some(done.exit_code == 0) },
                     }
                 } else {
-                    if let Some(flag) = &suppress_flag {
-                        flag.store(false, Ordering::Relaxed);
-                    }
                     ResponseInputItem::FunctionCallOutput {
                         call_id: ctx_inner.call_id.clone(),
                         output: FunctionCallOutputPayload {
@@ -8178,12 +8800,15 @@ fn to_exec_params(params: ShellToolCallParams, sess: &Session) -> ExecParams {
     let timeout_ms = params
         .timeout_ms
         .map(|ms| ms.max(MIN_SHELL_TIMEOUT_MS));
+    let with_escalated_permissions = params
+        .sandbox_permissions
+        .and_then(|p| p.requires_escalated_permissions().then_some(true));
     ExecParams {
         command: params.command,
         cwd: sess.resolve_path(params.workdir.clone()),
         timeout_ms,
         env: create_env(&sess.shell_environment_policy),
-        with_escalated_permissions: params.with_escalated_permissions,
+        with_escalated_permissions,
         justification: params.justification,
     }
 }
@@ -8261,8 +8886,26 @@ fn parse_container_exec_arguments(
     sess: &Session,
     call_id: &str,
 ) -> Result<ExecParams, Box<ResponseInputItem>> {
-    // parse command
-    match serde_json::from_str::<ShellToolCallParams>(&arguments) {
+    // Parse command.
+    //
+    // Newer prompts use `sandbox_permissions` ("use_default" | "require_escalated");
+    // older ones used `with_escalated_permissions: bool`. Accept both.
+    let parsed: std::result::Result<serde_json::Value, serde_json::Error> =
+        serde_json::from_str(&arguments);
+
+    match parsed
+        .and_then(|mut value| {
+            if value.get("sandbox_permissions").is_none() {
+                let needs_escalated = value
+                    .get("with_escalated_permissions")
+                    .and_then(|v| v.as_bool())
+                    .unwrap_or(false);
+                if needs_escalated {
+                    value["sandbox_permissions"] = serde_json::json!(SandboxPermissions::RequireEscalated);
+                }
+            }
+            serde_json::from_value::<ShellToolCallParams>(value)
+        }) {
         Ok(shell_tool_call_params) => Ok(to_exec_params(shell_tool_call_params, sess)),
         Err(e) => {
             // allow model to re-sample
@@ -8287,16 +8930,46 @@ pub struct ExecInvokeArgs<'a> {
     pub stdout_stream: Option<StdoutStream>,
 }
 
-fn maybe_run_with_user_profile(params: ExecParams, sess: &Session) -> ExecParams {
+fn maybe_run_with_user_profile(mut params: ExecParams, sess: &Session) -> ExecParams {
     if sess.shell_environment_policy.use_profile {
         let maybe_command = sess
             .user_shell
             .format_default_shell_invocation(params.command.clone());
         if let Some(command) = maybe_command {
-            return ExecParams { command, ..params };
+            params.command = command;
         }
     }
+
+    suppress_bash_job_control(&mut params.command);
+
     params
+}
+
+fn suppress_bash_job_control(command: &mut [String]) {
+    let [program, flag, script] = command else {
+        return;
+    };
+    if !is_bash_executable(program) || flag != "-lc" {
+        return;
+    }
+
+    let trimmed = script.trim_start();
+    if trimmed.starts_with("set +m") {
+        return;
+    }
+
+    let original = script.clone();
+    *script = format!("set +m; {original}");
+}
+
+fn is_bash_executable(token: &str) -> bool {
+    let trimmed = token.trim_matches('"').trim_matches('\'');
+    let name = std::path::Path::new(trimmed)
+        .file_name()
+        .and_then(|s| s.to_str())
+        .unwrap_or(trimmed)
+        .to_ascii_lowercase();
+    matches!(name.as_str(), "bash" | "bash.exe")
 }
 
 fn agent_tool_failure(ctx: &ToolCallCtx, message: impl Into<String>) -> ResponseInputItem {
@@ -9777,6 +10450,31 @@ async fn handle_wait_for_agent(
                 }
 
                 drop(manager);
+
+                let time_budget_message = {
+                    let mut guard = sess.time_budget.lock().unwrap();
+                    guard
+                        .as_mut()
+                        .and_then(|budget| budget.maybe_nudge(Instant::now()))
+                };
+
+                if let Some(budget_text) = time_budget_message {
+                    let response = serde_json::json!({
+                        "batch_id": batch_id,
+                        "status": "time_budget_update",
+                        "wait_time_seconds": start.elapsed().as_secs(),
+                        "time_budget_message": budget_text,
+                        "message": "Wait interrupted so the assistant can adapt. Agents may still be running; call agent wait again to continue.",
+                    });
+                    return ResponseInputItem::FunctionCallOutput {
+                        call_id: call_id_clone,
+                        output: FunctionCallOutputPayload {
+                            content: response.to_string(),
+                            success: Some(false),
+                        },
+                    };
+                }
+
                 let (current_epoch, reason) = sess.wait_interrupt_snapshot();
                 if current_epoch != initial_wait_epoch {
                     let message = match reason {
@@ -10552,8 +11250,34 @@ async fn handle_container_exec_with_params(
                     };
                 }
             }
+
             let changes = convert_apply_patch_to_protocol(&action);
             turn_diff_tracker.on_patch_begin(&changes);
+
+            let mut hook_ctx = ExecCommandContext {
+                sub_id: sub_id.clone(),
+                call_id: call_id.clone(),
+                command_for_display: params.command.clone(),
+                cwd: params.cwd.clone(),
+                apply_patch: Some(ApplyPatchCommandContext {
+                    user_explicitly_approved_this_action: false,
+                    changes: changes.clone(),
+                }),
+            };
+
+            // FileBeforeWrite hook for apply_patch
+            sess
+                .run_hooks_for_exec_event(
+                    turn_diff_tracker,
+                    ProjectHookEvent::FileBeforeWrite,
+                    &hook_ctx,
+                    &params,
+                    None,
+                    attempt_req,
+                )
+                .await;
+
+            let patch_start = std::time::Instant::now();
 
             match apply_patch::apply_patch(
                 sess,
@@ -10567,6 +11291,10 @@ async fn handle_container_exec_with_params(
             {
                 ApplyPatchResult::Reply(item) => return item,
                 ApplyPatchResult::Applied(run) => {
+                    hook_ctx.apply_patch.as_mut().map(|ctx| {
+                        ctx.user_explicitly_approved_this_action = !run.auto_approved;
+                    });
+
                     let order_begin = crate::protocol::OrderMeta {
                         request_ordinal: attempt_req,
                         output_index,
@@ -10598,6 +11326,34 @@ async fn handle_container_exec_with_params(
                         seq_hint.map(|h| h.saturating_add(1)),
                     );
                     let _ = sess.tx_event.send(event).await;
+
+                    let hook_output = ExecToolCallOutput {
+                        exit_code: if run.success { 0 } else { 1 },
+                        stdout: StreamOutput::new(run.stdout.clone()),
+                        stderr: StreamOutput::new(run.stderr.clone()),
+                        aggregated_output: StreamOutput::new({
+                            if run.stdout.is_empty() {
+                                run.stderr.clone()
+                            } else if run.stderr.is_empty() {
+                                run.stdout.clone()
+                            } else {
+                                format!("{}\n{}", run.stdout, run.stderr)
+                            }
+                        }),
+                        duration: patch_start.elapsed(),
+                        timed_out: false,
+                    };
+
+                    sess
+                        .run_hooks_for_exec_event(
+                            turn_diff_tracker,
+                            ProjectHookEvent::FileAfterWrite,
+                            &hook_ctx,
+                            &params,
+                            Some(&hook_output),
+                            attempt_req,
+                        )
+                        .await;
 
                     if let Ok(Some(unified_diff)) = turn_diff_tracker.get_unified_diff() {
                         let diff_event = sess.make_event(
@@ -10752,6 +11508,19 @@ async fn handle_container_exec_with_params(
     let display_label = crate::util::strip_bash_lc_and_escape(&exec_command_context.command_for_display);
     let params = maybe_run_with_user_profile(params, sess);
 
+    // ToolBefore hook for shell/container.exec commands
+    let params_for_hooks = params.clone();
+    sess
+        .run_hooks_for_exec_event(
+            turn_diff_tracker,
+            ProjectHookEvent::ToolBefore,
+            &exec_command_context,
+            &params_for_hooks,
+            None,
+            attempt_req,
+        )
+        .await;
+
     // Prepare tail buffer and background registry entry
     let tail_buf = std::sync::Arc::new(std::sync::Mutex::new(Vec::<u8>::new()));
     let notify = std::sync::Arc::new(tokio::sync::Notify::new());
@@ -10785,6 +11554,12 @@ async fn handle_container_exec_with_params(
         );
     }
 
+    let sess_for_hooks = sess.self_handle.upgrade();
+    let params_for_after_hooks = params_for_hooks.clone();
+    let exec_ctx_for_hooks = exec_command_context.clone();
+    let exec_ctx_for_task = exec_command_context.clone();
+    let attempt_req_for_task = attempt_req;
+
     // Emit BEGIN event using the normal path so the TUI shows a running cell
     sess
         .on_exec_command_begin(
@@ -10803,6 +11578,16 @@ async fn handle_container_exec_with_params(
     let sandbox_policy = sess.sandbox_policy.clone();
     let sandbox_cwd = sess.get_cwd().to_path_buf();
     let code_linux_sandbox_exe = sess.code_linux_sandbox_exe.clone();
+    let exec_spool_dir_for_task = if sess.client.debug_enabled() {
+        Some(
+            sess.client
+                .code_home()
+                .join("debug_logs")
+                .join("exec"),
+        )
+    } else {
+        None
+    };
     let result_cell_for_task = result_cell.clone();
     let notify_task = notify.clone();
     let tail_buf_task = tail_buf.clone();
@@ -10812,7 +11597,7 @@ async fn handle_container_exec_with_params(
     let task_handle = tokio::spawn(async move {
         // Build stdout stream with tail capture. We cannot stamp via `Session` here,
         // but deltas will be delivered with neutral ordering which the UI tolerates.
-        let stdout_stream = if exec_command_context.apply_patch.is_some() {
+        let stdout_stream = if exec_ctx_for_task.apply_patch.is_some() {
             None
         } else {
             Some(StdoutStream {
@@ -10822,6 +11607,7 @@ async fn handle_container_exec_with_params(
                 session: None,
                 tail_buf: Some(tail_buf_task.clone()),
                 order: Some(order_meta_for_deltas.clone()),
+                spool_dir: exec_spool_dir_for_task.clone(),
             })
         };
 
@@ -10871,6 +11657,22 @@ async fn handle_container_exec_with_params(
         {
             let mut slot = result_cell_for_task.lock().unwrap();
             *slot = Some(out.clone());
+        }
+
+        if backgrounded_task.load(std::sync::atomic::Ordering::Relaxed) {
+            if let Some(sess_arc) = sess_for_hooks.clone() {
+                let mut hook_tracker = TurnDiffTracker::new();
+                sess_arc
+                    .run_hooks_for_exec_event(
+                        &mut hook_tracker,
+                        ProjectHookEvent::ToolAfter,
+                        &exec_ctx_for_hooks,
+                        &params_for_after_hooks,
+                        Some(&out),
+                        attempt_req_for_task,
+                    )
+                    .await;
+            }
         }
         // Only emit background completion notifications if the command actually backgrounded
         if backgrounded_task.load(std::sync::atomic::Ordering::Relaxed) {
@@ -10944,6 +11746,18 @@ async fn handle_container_exec_with_params(
                     content.push_str(harness);
                 }
             }
+
+            sess
+                .run_hooks_for_exec_event(
+                    turn_diff_tracker,
+                    ProjectHookEvent::ToolAfter,
+                    &exec_command_context,
+                    &params_for_hooks,
+                    Some(&done),
+                    attempt_req,
+                )
+                .await;
+
             return ResponseInputItem::FunctionCallOutput { call_id: call_id.clone(), output: FunctionCallOutputPayload { content, success: Some(is_success) } };
         } else {
             // Fallback (should not happen): indicate completion without detail
@@ -10983,6 +11797,28 @@ async fn handle_sandbox_error(
     let cwd = exec_command_context.cwd.clone();
     let otel_event_manager = sess.client.get_otel_event_manager();
     let tool_name = "local_shell";
+
+    if let SandboxErr::OutOfMemory {
+        output,
+        memory_max_bytes,
+    } = &error
+    {
+        let limit_note = memory_max_bytes
+            .as_ref()
+            .map(|bytes| format!(" (memory.max={bytes} bytes)"))
+            .unwrap_or_default();
+        let tail = format_exec_output_with_limit(sess, &sub_id, &call_id, output.as_ref());
+        let content = format!(
+            "command exceeded memory limit{limit_note}. Try reducing parallelism (e.g. fewer jobs) and retry.\n\n{tail}"
+        );
+        return ResponseInputItem::FunctionCallOutput {
+            call_id,
+            output: FunctionCallOutputPayload {
+                content,
+                success: Some(false),
+            },
+        };
+    }
 
     // Early out if either the user never wants to be asked for approval, or
     // we're letting the model manage escalation requests. Otherwise, continue
@@ -11106,6 +11942,11 @@ async fn handle_sandbox_error(
                         session: None,
                         tail_buf: None,
                         order: Some(crate::protocol::OrderMeta { request_ordinal: attempt_req, output_index: None, sequence_number: None }),
+                        spool_dir: if sess.client.debug_enabled() {
+                            Some(sess.client.code_home().join("debug_logs").join("exec"))
+                        } else {
+                            None
+                        },
                     })
                 },
             },
@@ -11189,6 +12030,8 @@ fn truncate_middle_bytes(s: &str, max_bytes: usize) -> (String, bool, usize, usi
 fn format_exec_output_str(exec_output: &ExecToolCallOutput) -> String {
     let ExecToolCallOutput {
         aggregated_output,
+        duration,
+        timed_out,
         ..
     } = exec_output;
 
@@ -11202,6 +12045,12 @@ fn format_exec_output_str(exec_output: &ExecToolCallOutput) -> String {
             format_bytes(EXEC_CAPTURE_MAX_BYTES),
         );
         formatted_output = format!("{note}{formatted_output}");
+    }
+
+    if *timed_out {
+        let timeout_ms = duration.as_millis();
+        formatted_output =
+            format!("command timed out after {timeout_ms} milliseconds\n{formatted_output}");
     }
     if let Some(truncated_after_lines) = aggregated_output.truncated_after_lines {
         formatted_output.push_str(&format!(
@@ -11223,8 +12072,10 @@ fn truncate_exec_output_for_storage(
         return maybe_truncated;
     }
 
+    let safe_call_id = crate::fs_sanitize::safe_path_component(call_id, "exec");
+    let filename = format!("exec-{safe_call_id}.txt");
     let file_note = match ensure_agent_dir(cwd, sub_id)
-        .and_then(|dir| write_agent_file(&dir, &format!("exec-{call_id}.txt"), full))
+        .and_then(|dir| write_agent_file(&dir, &filename, full))
     {
         Ok(path) => format!("\n\n[Full output saved to: {}]", path.display()),
         Err(e) => format!("\n\n[Full output was too large and truncation applied; failed to save file: {e}]")
@@ -11385,6 +12236,18 @@ async fn send_agent_status_update(sess: &Session) {
                 error: agent.error.clone(),
                 elapsed_ms,
                 token_count: None,
+                last_activity_at: matches!(agent.status, AgentStatus::Pending | AgentStatus::Running)
+                    .then(|| agent.last_activity.to_rfc3339()),
+                seconds_since_last_activity: matches!(
+                    agent.status,
+                    AgentStatus::Pending | AgentStatus::Running
+                )
+                .then(|| {
+                    Utc::now()
+                        .signed_duration_since(agent.last_activity)
+                        .num_seconds()
+                        .max(0) as u64
+                }),
                 source_kind: agent.source_kind.clone(),
             }
         })

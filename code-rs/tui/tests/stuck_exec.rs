@@ -1,6 +1,9 @@
 use code_core::protocol::{
+    AgentMessageEvent,
+    AgentMessageDeltaEvent,
     Event,
     EventMsg,
+    ErrorEvent,
     ExecCommandBeginEvent,
     ExecCommandEndEvent,
     TaskCompleteEvent,
@@ -15,6 +18,7 @@ use code_tui::test_helpers::{render_chat_widget_to_vt100, ChatWidgetHarness};
 use std::collections::HashMap;
 use std::path::PathBuf;
 use std::time::Duration;
+use std::time::Instant;
 
 fn next_order_meta(request_ordinal: u64, seq: &mut u64) -> OrderMeta {
     let order = OrderMeta {
@@ -91,8 +95,6 @@ fn exec_cell_clears_after_patch_flow() {
 
 #[test]
 fn exec_spinner_clears_after_final_answer() {
-    use code_core::protocol::AgentMessageEvent;
-
     let mut harness = ChatWidgetHarness::new();
     let mut seq = 0_u64;
     let call_id = "call_spinner".to_string();
@@ -123,6 +125,54 @@ fn exec_spinner_clears_after_final_answer() {
     assert!(
         !output.contains("running command"),
         "spinner should clear after final answer, but output was:\n{}",
+        output
+    );
+}
+
+#[test]
+fn exec_cell_clears_after_task_started_final_answer_without_task_complete() {
+    let mut harness = ChatWidgetHarness::new();
+    let mut seq = 0_u64;
+    let call_id = "call_final".to_string();
+    let cwd = PathBuf::from("/tmp");
+
+    harness.handle_event(Event {
+        id: "task-start".to_string(),
+        event_seq: 0,
+        msg: EventMsg::TaskStarted,
+        order: Some(next_order_meta(1, &mut seq)),
+    });
+
+    harness.handle_event(Event {
+        id: "exec-begin".to_string(),
+        event_seq: 1,
+        msg: EventMsg::ExecCommandBegin(ExecCommandBeginEvent {
+            call_id: call_id.clone(),
+            command: vec!["bash".into(), "-lc".into(), "echo pending".into()],
+            cwd: cwd.clone(),
+            parsed_cmd: Vec::new(),
+        }),
+        order: Some(next_order_meta(1, &mut seq)),
+    });
+
+    harness.handle_event(Event {
+        id: "answer-final".to_string(),
+        event_seq: 2,
+        msg: EventMsg::AgentMessage(AgentMessageEvent {
+            message: "done".into(),
+        }),
+        order: Some(next_order_meta(1, &mut seq)),
+    });
+
+    let output = render_chat_widget_to_vt100(&mut harness, 80, 14);
+    assert!(
+        !output.contains("Running"),
+        "exec should finalize after final answer even without TaskComplete:\n{}",
+        output
+    );
+    assert!(
+        output.contains("done"),
+        "final answer should be visible in output:\n{}",
         output
     );
 }
@@ -329,6 +379,182 @@ fn exec_interrupts_flush_when_stream_idles() {
     assert!(
         output.contains("Thinking through the next steps"),
         "stream flush should still render the latest output:\n{}",
+        output
+    );
+}
+
+#[test]
+fn queued_exec_end_flushes_after_stream_clears() {
+    let mut harness = ChatWidgetHarness::new();
+    let mut seq = 0_u64;
+    let call_id = "call_flush".to_string();
+    let cwd = PathBuf::from("/tmp");
+
+    harness.handle_event(Event {
+        id: "exec-begin-flush".to_string(),
+        event_seq: 0,
+        msg: EventMsg::ExecCommandBegin(ExecCommandBeginEvent {
+            call_id: call_id.clone(),
+            command: vec!["bash".into(), "-lc".into(), "echo queued".into()],
+            cwd: cwd.clone(),
+            parsed_cmd: Vec::new(),
+        }),
+        order: Some(next_order_meta(1, &mut seq)),
+    });
+
+    // Start a stream so ExecEnd defers into the interrupt queue.
+    harness.handle_event(Event {
+        id: "answer-delta-active".to_string(),
+        event_seq: 1,
+        msg: EventMsg::AgentMessageDelta(AgentMessageDeltaEvent {
+            delta: "streaming answer".into(),
+        }),
+        order: Some(next_order_meta(1, &mut seq)),
+    });
+
+    // Exec end arrives while the stream is active; it is deferred behind the flush timer.
+    harness.handle_event(Event {
+        id: "exec-end-flush".to_string(),
+        event_seq: 2,
+        msg: EventMsg::ExecCommandEnd(ExecCommandEndEvent {
+            call_id: call_id.clone(),
+            stdout: "queued\n".into(),
+            stderr: String::new(),
+            exit_code: 0,
+            duration: Duration::from_millis(5),
+        }),
+        order: Some(next_order_meta(1, &mut seq)),
+    });
+
+    // Stream finishes before the idle-flush callback fires; pending ExecEnd should still flush.
+    harness.force_stream_clear();
+
+    // Give the flush timers enough headroom under nextest parallelism.
+    std::thread::sleep(Duration::from_millis(400));
+    harness.flush_into_widget();
+    std::thread::sleep(Duration::from_millis(200));
+    harness.flush_into_widget();
+
+    let output = render_chat_widget_to_vt100(&mut harness, 80, 14);
+    assert!(
+        output.contains("queued"),
+        "exec output should render after the deferred end is delivered:\n{}",
+        output
+    );
+    assert!(
+        !output.contains("Running..."),
+        "exec should not stay running after stream clears and the flush timer fires:\n{}",
+        output
+    );
+}
+
+#[test]
+fn background_style_exec_end_with_zero_seq_does_not_get_stuck() {
+    let mut harness = ChatWidgetHarness::new();
+    let mut seq = 0_u64;
+    let call_id = "call_zero_seq".to_string();
+    let cwd = PathBuf::from("/tmp");
+
+    // Simulate streaming so interrupts queue defers begin/end.
+    harness.handle_event(Event {
+        id: "reasoning-delta".to_string(),
+        event_seq: 0,
+        msg: EventMsg::AgentReasoningDelta(AgentReasoningDeltaEvent {
+            delta: "thinking".into(),
+        }),
+        order: Some(next_order_meta(1, &mut seq)),
+    });
+
+    // Exec begin uses a normal monotonic seq (matches live code path).
+    harness.handle_event(Event {
+        id: "exec-begin-zero".to_string(),
+        event_seq: 1,
+        msg: EventMsg::ExecCommandBegin(ExecCommandBeginEvent {
+            call_id: call_id.clone(),
+            command: vec!["bash".into(), "-lc".into(), "echo bg".into()],
+            cwd: cwd.clone(),
+            parsed_cmd: Vec::new(),
+        }),
+        order: Some(next_order_meta(1, &mut seq)),
+    });
+
+    // Exec end arrives while stream still active and (like background runner) reports seq 0.
+    harness.handle_event(Event {
+        id: "exec-end-zero".to_string(),
+        event_seq: 0,
+        msg: EventMsg::ExecCommandEnd(ExecCommandEndEvent {
+            call_id: call_id.clone(),
+            stdout: "bg\n".into(),
+            stderr: String::new(),
+            exit_code: 0,
+            duration: Duration::from_millis(5),
+        }),
+        order: Some(next_order_meta(1, &mut seq)),
+    });
+
+    // Stream finishes before the idle-flush callback fires; pending begin/end should still flush.
+    harness.force_stream_clear();
+
+    // Flush queued interrupts to deliver begin/end.
+    let deadline = Instant::now() + Duration::from_secs(2);
+    let mut output;
+    loop {
+        std::thread::sleep(Duration::from_millis(100));
+        harness.flush_into_widget();
+        output = render_chat_widget_to_vt100(&mut harness, 80, 12);
+        if output.contains("bg") && !output.contains("Running...") {
+            break;
+        }
+        if Instant::now() >= deadline {
+            panic!("exec with zero seq end should complete after flush:\n{}", output);
+        }
+    }
+}
+
+#[test]
+fn running_exec_is_finalized_when_error_event_arrives() {
+    let mut harness = ChatWidgetHarness::new();
+    let mut seq = 0_u64;
+    let call_id = "call_error".to_string();
+    let cwd = PathBuf::from("/tmp");
+
+    harness.handle_event(Event {
+        id: "task-start".to_string(),
+        event_seq: 0,
+        msg: EventMsg::TaskStarted,
+        order: Some(next_order_meta(1, &mut seq)),
+    });
+
+    harness.handle_event(Event {
+        id: "exec-begin-error".to_string(),
+        event_seq: 1,
+        msg: EventMsg::ExecCommandBegin(ExecCommandBeginEvent {
+            call_id: call_id.clone(),
+            command: vec!["bash".into(), "-lc".into(), "pgrep something".into()],
+            cwd: cwd.clone(),
+            parsed_cmd: Vec::new(),
+        }),
+        order: Some(next_order_meta(1, &mut seq)),
+    });
+
+    harness.handle_event(Event {
+        id: "fatal-error".to_string(),
+        event_seq: 2,
+        msg: EventMsg::Error(ErrorEvent {
+            message: "fatal: provider crashed".into(),
+        }),
+        order: None,
+    });
+
+    let output = render_chat_widget_to_vt100(&mut harness, 80, 14);
+    assert!(
+        !output.contains("Running"),
+        "exec cell should not linger after fatal error:\n{}",
+        output
+    );
+    assert!(
+        output.contains("fatal: provider crashed") || output.contains("Cancelled by user."),
+        "error context should be visible after fatal error:\n{}",
         output
     );
 }

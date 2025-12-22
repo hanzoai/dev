@@ -3,11 +3,11 @@ source: tui/tests/vt100_chatwidget_snapshot.rs
 expression: open
 ---
  +------------------------------------------------------------------------------------------------+
- |                                              Code                                              |
+ |                                           Every Code                                           |
  +------------------------------------------------------------------------------------------------+
  +Settings ▸ Overview-----------------------------------------------------------------------------+
  |                                                                                                |
- | › Model              Model: GPT-5.1-Codex (Medium)                                             |
+ | › Model              Model: GPT-5.1-Codex-Max (Medium)                                         |
  |   + Choose the language model used for new completions.                                        |
  |                           +----------------------------------------+                           |
  |   Theme              Theme|Settings Overview                       |mond                       |
@@ -18,8 +18,8 @@ expression: open
  |                           |• Esc    Close settings                 |                           |
  |   ------------------------|• ?      Toggle this help               |-------------------------- |
  |                           |                                        |                           |
- |   Agents             Enabl|Press Esc to close                      |                           |
- |   + Configure linked agent+----------------------------------------+                           |
+ |   Accounts           Auto-|Press Esc to close                      |                           |
+ |   + Configure account swit+----------------------------------------+.                          |
  |                                                                                                |
  | ↑ ↓ Move    Enter Open    Esc Close    ? Help                                                  |
  |                                                                                                |

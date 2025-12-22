@@ -741,6 +741,8 @@ pub struct Notice {
     pub hide_gpt5_1_migration_prompt: Option<bool>,
     #[serde(rename = "hide_gpt-5.1-codex-max_migration_prompt")]
     pub hide_gpt_5_1_codex_max_migration_prompt: Option<bool>,
+    pub hide_gpt5_2_migration_prompt: Option<bool>,
+    pub hide_gpt5_2_codex_migration_prompt: Option<bool>,
 }
 
 #[derive(Serialize, Debug, Clone, Copy, PartialEq, Eq)]
@@ -818,6 +820,10 @@ pub struct AutoDriveSettings {
 
     #[serde(default)]
     pub auto_review_followup_attempts: AutoResolveAttemptLimit,
+
+    /// Maximum number of coordinator turns before stopping the session (0 = unlimited).
+    #[serde(default = "default_auto_drive_coordinator_turn_cap")]
+    pub coordinator_turn_cap: u32,
 }
 
 impl Default for AutoDriveSettings {
@@ -834,8 +840,13 @@ impl Default for AutoDriveSettings {
             model_reasoning_effort: default_auto_drive_reasoning_effort(),
             auto_resolve_review_attempts: AutoResolveAttemptLimit::default(),
             auto_review_followup_attempts: AutoResolveAttemptLimit::default(),
+            coordinator_turn_cap: default_auto_drive_coordinator_turn_cap(),
         }
     }
+}
+
+const fn default_auto_drive_coordinator_turn_cap() -> u32 {
+    0
 }
 
 fn default_auto_drive_model() -> String {
@@ -1193,7 +1204,7 @@ pub type EnvironmentVariablePattern = WildMatchPattern<'*', '?'>;
 /// 3. If `exclude` is not empty, filter the map using the provided patterns.
 /// 4. Insert any entries from `r#set` into the map.
 /// 5. If non-empty, filter the map using the `include_only` patterns.
-#[derive(Debug, Clone, PartialEq, Default)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct ShellEnvironmentPolicy {
     /// Starting point when building the environment.
     pub inherit: ShellEnvironmentPolicyInherit,
@@ -1215,11 +1226,24 @@ pub struct ShellEnvironmentPolicy {
     pub use_profile: bool,
 }
 
+impl Default for ShellEnvironmentPolicy {
+    fn default() -> Self {
+        Self {
+            inherit: ShellEnvironmentPolicyInherit::All,
+            ignore_default_excludes: true,
+            exclude: Vec::new(),
+            r#set: HashMap::new(),
+            include_only: Vec::new(),
+            use_profile: false,
+        }
+    }
+}
+
 impl From<ShellEnvironmentPolicyToml> for ShellEnvironmentPolicy {
     fn from(toml: ShellEnvironmentPolicyToml) -> Self {
         // Default to inheriting the full environment when not specified.
         let inherit = toml.inherit.unwrap_or(ShellEnvironmentPolicyInherit::All);
-        let ignore_default_excludes = toml.ignore_default_excludes.unwrap_or(false);
+        let ignore_default_excludes = toml.ignore_default_excludes.unwrap_or(true);
         let exclude = toml
             .exclude
             .unwrap_or_default()
@@ -1247,7 +1271,7 @@ impl From<ShellEnvironmentPolicyToml> for ShellEnvironmentPolicy {
 }
 
 /// See https://platform.openai.com/docs/guides/reasoning?api-mode=responses#get-started-with-reasoning
-#[derive(Debug, Serialize, Deserialize, Default, Clone, Copy, PartialEq, Eq, Display)]
+#[derive(Debug, Serialize, Deserialize, Default, Clone, Copy, PartialEq, Eq, Display, Hash)]
 #[serde(rename_all = "lowercase")]
 #[strum(serialize_all = "lowercase")]
 pub enum ReasoningEffort {

@@ -7,6 +7,80 @@
 
 - (none)
 
+## [0.6.13] - 2025-12-22
+
+- TUI: add account switching and skills settings in the core UI. (bcf7614a)
+- TUI2: normalize wheel and trackpad scrolling for consistent transcript navigation. (63942b88)
+- Auto-drive: improve ansi16 styling, contrast, and ghost snapshot timing for clearer prompts. (ffac25b4, 82ce5915, 6e333af8, 70e1b9f6)
+- Auto-drive: respect retry budgets and loop hints to avoid runaway retries. (f5c56198)
+- Stability: prevent panics on alpha builds. (aa83d7da)
+
+## [0.6.12] - 2025-12-20
+
+- TUI: coalesce transcript redraws, keep spinners live, and shorten status directory labels so streams stay smooth. (1d4463ba, 734dd0ee, e6794b7b)
+- Exec: reduce long-session stalls and collapse waiting time in unified exec so commands finish faster. (5cfb8309, 6c76d177)
+- CLI: add `/ps` and apply terminal-aware scroll scaling for clearer process visibility. (4fb0b547, df46ea48)
+- Config/Skills: backport requirements updates, add ExternalSandbox policy, and support `/etc/codex/requirements.toml` for tighter governance. (f2750fd6, 3429de21, 2f048f20)
+
+## [0.6.10] - 2025-12-18
+
+- TUI: keep bulk command processing responsive during heavy redraw bursts. (9cf56083)
+- Performance: prevent redraw loops from starving queued work so outputs stay timely. (9cf56083)
+
+## [0.6.9] - 2025-12-18
+
+- TUI/cards: set ANSI-16 card backgrounds for consistent styling. (820991e9)
+- TUI/status: restore the Every Code header title in the status view. (455ed636)
+
+## [0.6.8] - 2025-12-18
+
+- Agents: default frontline automation to gemini-3-flash for faster runs. (bfc41e28)
+- TUI/Auto Drive: normalize footer hint spacing so prompts align cleanly. (8da0bda7)
+
+## [0.6.7] - 2025-12-17
+
+- Core/TUI: add remote model support and harden exec memory handling for safer runs. (db385786)
+- Auto Drive: summarize the last session on completion so users get a quick recap. (86f691d)
+- Exec: add a max-seconds budget with countdown nudges and clean up log paths for killed children. (0c323447, f1835d5)
+- Reliability: auto-retry turns after usage limits and avoid cloning large histories during retention cleanup. (220414d, b91e303)
+
+## [0.6.6] - 2025-12-15
+
+- TUI: show Every Code title and stabilize header rendering so status bar and snapshots stay consistent. (1f77f7ac, a8b8beeb)
+- Skills: reimplement loading via SkillsManager and add skills/list op for more reliable discovery. (5d77d4db)
+- Config: clean config loading/API, expand safe commands, and refresh disk status using latest values for MCP servers. (92098d36, 49bf49c2, 163a7e31)
+- Windows: locate pwsh.exe/powershell.exe reliably and parse PowerShell output with PowerShell for sturdier scripts. (4312cae0, 90094903)
+- MCP/TUI: restore startup progress messages and show xhigh reasoning warnings for gpt-5.2 to keep users informed. (c978b6e2, 9287be76)
+
+## [0.6.4] - 2025-12-13
+
+- TUI: default hidden-preface injections to silent and allow silent submissions to reduce demo noise. (b1ae6f4, a086a46)
+- CLI demo: add a --demo developer message injection flag for scripted demos. (6b2e61b)
+- TUI: dim mid-turn assistant output and improve plan/cursor contrast in dark mode for clearer streams. (b688046, 1b8c8fd)
+- Exec: add a grace delay before shutdown when auto-review is enabled to avoid abrupt stops. (c6d6f49)
+- TUI: hide the directory label in demo mode for cleaner status displays. (c03b3e9)
+
+## [0.6.3] - 2025-12-12
+
+- Build: prevent concurrent tmp-bin races in build-fast to keep artifacts isolated. (e3ae904)
+- TUI history: handle background wait call_id to avoid orphaned exec entries. (c4c4ed6)
+- Onboarding: align trust directory prompt styling with the rest of the flow. (9de6df6)
+
+## [0.6.2] - 2025-12-12
+
+- Models: add a guided gpt-5.2 upgrade flow so users can move to the latest model smoothly. (ee9fc1f)
+- TUI history: keep mid-turn answers ordered, hide stray gutters, and collapse duplicate reasoning streams for cleaner transcripts. (89e485d, 0991bf2, fe40d37, d79442a)
+- Exec: guard process spawns, pair early exec ends with begins, and keep live output flowing while capping previews to avoid hangs. (1e66674, 66e650c, d1a36f0, e780d82)
+- TUI: allow user input to interrupt wait-only execs and force redraws after backpressure stalls for more responsive UI. (bcbcb95e, 5780d0d)
+- Snapshots: warn when snapshots run long and add a shell command snapshot path. (b2280d6, 29381ba)
+
+## [0.6.1] - 2025-12-10
+
+- Auto Review: Harden locks, fallback worktrees, zero-count status, and pending-fix isolation so automated reviews stay reliable. (44234af, a62eaa3, 609432e, ae4b4ec)
+- Models: Introduce ModelsManager across app server and TUI, add a remote models flag, and cache disk-loaded presets with TTL/ETag for faster selection. (00cc00e, 8da91d1, 53a486f, 222a491)
+- Shell & Exec: Detect mutating commands, snapshot shell state, and clear lingering execs so automation captures side effects cleanly. (da983c1, 7836aed, cf15065)
+- TUI UX: Add vim-style pager keys, Ctrl+N/P list shortcuts, tighter shell output limits, and aligned auto-review footers for smoother navigation. (9df70a0, 4a3e9ed, 3395ebd, 9e2b68b)
+
 ## [0.5.15] - 2025-11-28
 
 - CLI: bump npm metadata to 0.5.15 so fresh installs pull the latest binaries. (0e5d3f9)
@@ -188,7 +262,7 @@
 - Settings overlay: consolidate every `/settings` pane into a two-level overlay so limits, themes, and automation toggles sit in one place with quick navigation.
 - TUI cards: introduce card-based history entries for Agents, Browser sessions, Web Search, and Auto Drive with grouped actions and overlays for deep detail.
 - Performance: tighten CPU and memory usage discovered in heavy automation scenarios to keep scrolling and rendering smooth.
-- Agents: let `/plan`, `/code`, and related commands target specific CLIs (e.g., `gemini-2.5-flash`, `claude-sonnet-4.5`) with future expansion handled from the new settings hub.
+- Agents: let `/plan`, `/code`, and related commands target specific CLIs (e.g., `gemini-3-flash`, `claude-sonnet-4.5`) with future expansion handled from the new settings hub.
 
 ## [0.2.188] - 2025-10-06
 

@@ -9,6 +9,7 @@ use code_core::protocol::TokenUsage;
 use code_core::git_info::CommitLogEntry;
 use code_core::protocol::ReviewContextMetadata;
 use code_file_search::FileMatch;
+use code_common::model_presets::ModelPreset;
 use crossterm::event::KeyEvent;
 use crossterm::event::MouseEvent;
 use ratatui::text::Line;
@@ -106,6 +107,17 @@ pub(crate) enum AppEvent {
 
     /// Request a redraw which will be debounced by the [`App`].
     RequestRedraw,
+
+    /// Update the model preset list used by the TUI model picker.
+    ///
+    /// The picker boots with built-in presets; when a remote-merged list arrives
+    /// asynchronously, the in-memory list is swapped and any open model
+    /// selection view is updated in-place.
+    #[allow(dead_code)]
+    ModelPresetsUpdated {
+        presets: Vec<ModelPreset>,
+        default_model: Option<String>,
+    },
 
     /// Actually draw the next frame.
     Redraw,
@@ -331,8 +343,14 @@ pub(crate) enum AppEvent {
     /// Submit a message with hidden preface instructions
     SubmitTextWithPreface { visible: String, preface: String },
 
-    /// Submit a hidden message that is not rendered in history but still sent to the LLM
-    SubmitHiddenTextWithPreface { agent_text: String, preface: String },
+    /// Submit a hidden message that is not rendered in history but still sent to the LLM.
+    /// When `surface_notice` is true, the TUI shows a developer-style notice with the
+    /// injected text; when false, the injection is silent.
+    SubmitHiddenTextWithPreface {
+        agent_text: String,
+        preface: String,
+        surface_notice: bool,
+    },
 
     /// Run a review with an explicit prompt/hint pair (used by TUI selections)
     RunReviewWithScope {
@@ -606,6 +624,8 @@ pub(crate) enum AppEvent {
         latest_version: Option<String>,
     },
     SetAutoUpgradeEnabled(bool),
+    SetAutoSwitchAccountsOnRateLimit(bool),
+    SetApiKeyFallbackOnAllAccountsLimited(bool),
     RequestAgentInstall { name: String, selected_index: usize },
     AgentsOverviewSelectionChanged { index: usize },
     /// Add or update an agent's settings (enabled, params, instructions)

@@ -10,7 +10,6 @@ use std::collections::BTreeMap;
 use std::collections::HashMap;
 use std::path::PathBuf;
 use std::process::Stdio;
-use std::sync::Arc;
 use tokio::process::Command;
 use tokio::io::{AsyncBufReadExt, AsyncRead, AsyncWriteExt, BufReader};
 use tokio::runtime::Builder as TokioRuntimeBuilder;
@@ -18,8 +17,11 @@ use tokio::sync::RwLock;
 use tokio::sync::mpsc;
 use tokio::task::JoinHandle;
 use tokio::time::Duration as TokioDuration;
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::Arc;
 use std::thread;
 use std::time::{Duration as StdDuration, Instant};
+use crate::spawn::spawn_tokio_command_with_retry;
 use crate::protocol::AgentSourceKind;
 use tracing::warn;
 
@@ -96,9 +98,88 @@ use crate::protocol::AgentInfo;
 
 fn current_code_binary_path() -> Result<std::path::PathBuf, String> {
     if let Ok(path) = std::env::var("CODE_BINARY_PATH") {
-        return Ok(std::path::PathBuf::from(path));
+        let p = std::path::PathBuf::from(path);
+        if !p.exists() {
+            return Err(format!(
+                "CODE_BINARY_PATH points to '{}' but that file is missing. Rebuild with ./build-fast.sh or update CODE_BINARY_PATH.",
+                p.display()
+            ));
+        }
+        return Ok(p);
     }
-    std::env::current_exe().map_err(|e| format!("Failed to resolve current executable: {}", e))
+    let exe = std::env::current_exe().map_err(|e| format!("Failed to resolve current executable: {}", e))?;
+
+    // If the kernel reports the path as "(deleted)", strip the suffix and prefer the live file
+    // at the same location (common when a rebuild replaces the inode under a long-running process).
+    let cleaned = strip_deleted_suffix(&exe);
+    if cleaned.exists() {
+        return Ok(cleaned);
+    }
+
+    if let Some(fallback) = fallback_code_binary_path() {
+        return Ok(fallback);
+    }
+
+    Err(format!(
+        "Current code binary is missing on disk ({}). It may have been deleted while running. Rebuild with ./build-fast.sh or reinstall 'code' to continue.",
+        exe.display()
+    ))
+}
+
+fn strip_deleted_suffix(path: &std::path::Path) -> std::path::PathBuf {
+    const DELETED_SUFFIX: &str = " (deleted)";
+    let s = path.to_string_lossy();
+    if let Some(stripped) = s.strip_suffix(DELETED_SUFFIX) {
+        return std::path::PathBuf::from(stripped);
+    }
+    path.to_path_buf()
+}
+
+fn fallback_code_binary_path() -> Option<std::path::PathBuf> {
+    // If the running binary was pruned (e.g., shared target cache rotation), try to locate
+    // a fresh dev build in the repository, and if missing, trigger a quick rebuild.
+    let repo_root = find_repo_root(std::env::current_dir().ok()?)?;
+    let workspace = repo_root.join("code-rs");
+
+    // Probe likely build outputs in priority order.
+    let mut candidates = vec![
+        workspace.join("target/dev-fast/code"),
+        workspace.join("target/debug/code"),
+        workspace.join("target/release-prod/code"),
+        workspace.join("target/release/code"),
+        workspace.join("bin/code"),
+    ];
+
+    if let Some(found) = candidates.iter().find(|p| p.exists()).cloned() {
+        return Some(found);
+    }
+
+    // Best-effort rebuild; swallow errors so caller can surface the original message.
+    let status = std::process::Command::new("bash")
+        .current_dir(&repo_root)
+        .args(["-lc", "./build-fast.sh >/dev/null 2>&1"])
+        .status()
+        .ok();
+
+    if status.map(|s| s.success()).unwrap_or(false) {
+        candidates.retain(|p| p.exists());
+        if let Some(found) = candidates.first().cloned() {
+            return Some(found);
+        }
+    }
+
+    None
+}
+
+fn find_repo_root(start: std::path::PathBuf) -> Option<std::path::PathBuf> {
+    let mut dir = Some(start.as_path());
+    while let Some(path) = dir {
+        if path.join(".git").exists() {
+            return Some(path.to_path_buf());
+        }
+        dir = path.parent();
+    }
+    None
 }
 
 /// Format a helpful error message when an agent command is not found.
@@ -183,6 +264,8 @@ pub struct Agent {
     #[allow(dead_code)]
     pub config: Option<AgentConfig>,
     pub reasoning_effort: code_protocol::config_types::ReasoningEffort,
+    #[serde(skip)]
+    pub last_activity: DateTime<Utc>,
 }
 
 // Global agent manager
@@ -195,6 +278,8 @@ pub struct AgentManager {
     handles: HashMap<String, JoinHandle<()>>,
     event_sender: Option<mpsc::UnboundedSender<AgentStatusUpdatePayload>>,
     debug_log_root: Option<PathBuf>,
+    watchdog_handle: Option<JoinHandle<()>>,
+    inactivity_timeout: Duration,
 }
 
 #[derive(Debug, Clone)]
@@ -211,15 +296,80 @@ impl AgentManager {
             handles: HashMap::new(),
             event_sender: None,
             debug_log_root: None,
+            watchdog_handle: None,
+            inactivity_timeout: Duration::minutes(30),
         }
     }
 
     pub fn set_event_sender(&mut self, sender: mpsc::UnboundedSender<AgentStatusUpdatePayload>) {
         self.event_sender = Some(sender);
+        self.start_watchdog();
+    }
+
+    fn start_watchdog(&mut self) {
+        if self.watchdog_handle.is_some() {
+            return;
+        }
+
+        let timeout = self.inactivity_timeout;
+        let manager = Arc::downgrade(&AGENT_MANAGER);
+        self.watchdog_handle = Some(tokio::spawn(async move {
+            let mut ticker = tokio::time::interval(TokioDuration::from_secs(60));
+            loop {
+                ticker.tick().await;
+
+                let Some(manager_arc) = manager.upgrade() else { break; };
+
+                let mut mgr = manager_arc.write().await;
+                let now = Utc::now();
+                let timeout_ids: Vec<String> = mgr
+                    .agents
+                    .iter()
+                    .filter(|(_, agent)| matches!(agent.status, AgentStatus::Pending | AgentStatus::Running))
+                    .filter(|(_, agent)| now - agent.last_activity > timeout)
+                    .map(|(id, _)| id.clone())
+                    .collect();
+
+                if timeout_ids.is_empty() {
+                    continue;
+                }
+
+                for agent_id in timeout_ids.iter() {
+                    if let Some(handle) = mgr.handles.remove(agent_id) {
+                        handle.abort();
+                    }
+                    if let Some(agent) = mgr.agents.get_mut(agent_id) {
+                        agent.status = AgentStatus::Failed;
+                        agent.error = Some(format!(
+                            "Agent timed out after {} minutes of inactivity.",
+                            timeout.num_minutes()
+                        ));
+                        agent.completed_at = Some(now);
+                        Self::record_activity(agent);
+                    }
+                }
+
+                // Notify listeners once per sweep.
+                mgr.send_agent_status_update().await;
+            }
+        }));
     }
 
     pub fn set_debug_log_root(&mut self, root: Option<PathBuf>) {
         self.debug_log_root = root;
+    }
+
+    async fn touch_agent(agent_id: &str) {
+        if let Some(manager) = Arc::downgrade(&AGENT_MANAGER).upgrade() {
+            let mut mgr = manager.write().await;
+            if let Some(agent) = mgr.agents.get_mut(agent_id) {
+                Self::record_activity(agent);
+            }
+        }
+    }
+
+    fn record_activity(agent: &mut Agent) {
+        agent.last_activity = Utc::now();
     }
 
     fn append_agent_log(&self, log_tag: &str, line: &str) {
@@ -272,6 +422,21 @@ impl AgentManager {
                         error: agent.error.clone(),
                         elapsed_ms,
                         token_count: None,
+                        last_activity_at: match agent.status {
+                            AgentStatus::Pending | AgentStatus::Running => {
+                                Some(agent.last_activity.to_rfc3339())
+                            }
+                            _ => None,
+                        },
+                        seconds_since_last_activity: match agent.status {
+                            AgentStatus::Pending | AgentStatus::Running => Some(
+                                Utc::now()
+                                    .signed_duration_since(agent.last_activity)
+                                    .num_seconds()
+                                    .max(0) as u64,
+                            ),
+                            _ => None,
+                        },
                         source_kind: agent.source_kind.clone(),
                     }
                 })
@@ -450,6 +615,7 @@ impl AgentManager {
             log_tag,
             config: config.clone(),
             reasoning_effort,
+            last_activity: Utc::now(),
         };
 
         self.agents.insert(agent_id.clone(), agent.clone());
@@ -560,6 +726,7 @@ impl AgentManager {
             ) {
                 agent.completed_at = Some(Utc::now());
             }
+            Self::record_activity(agent);
             // Send status update event
             self.send_agent_status_update().await;
         }
@@ -599,6 +766,7 @@ impl AgentManager {
                 }
             }
             agent.completed_at = Some(Utc::now());
+            Self::record_activity(agent);
 
             (log_tag, log_lines)
         }) {
@@ -619,6 +787,7 @@ impl AgentManager {
             let entry = format!("{}: {}", Utc::now().format("%H:%M:%S"), message);
             let log_tag = if debug_enabled { agent.log_tag.clone() } else { None };
             agent.progress.push(entry.clone());
+            Self::record_activity(agent);
             (log_tag, entry)
         }) {
             if let Some(tag) = log_tag {
@@ -1054,7 +1223,7 @@ fn command_exists(cmd: &str) -> bool {
     let model_lower = model.to_lowercase();
     let command_lower = command_for_spawn.to_ascii_lowercase();
     fn is_known_family(s: &str) -> bool {
-        matches!(s, "claude" | "gemini" | "qwen" | "codex" | "code" | "cloud")
+        matches!(s, "claude" | "gemini" | "qwen" | "codex" | "code" | "cloud" | "coder")
     }
 
     let slug_for_defaults = spec_opt.map(|spec| spec.slug).unwrap_or(model);
@@ -1075,7 +1244,11 @@ fn command_exists(cmd: &str) -> bool {
     let mut cmd = if use_current_exe {
         match current_code_binary_path() {
             Ok(path) => Command::new(path),
-            Err(e) => return Err(e),
+            Err(e) => {
+                return Err(format!(
+                    "Current code binary is unavailable (deleted or moved): {e}. Rebuild with ./build-fast.sh or reinstall 'code' to continue."
+                ));
+            }
         }
     } else {
         Command::new(command_for_spawn.clone())
@@ -1255,6 +1428,17 @@ fn command_exists(cmd: &str) -> bool {
         }
     }
 
+    // Tag OpenAI requests originating from agent runs so server-side telemetry
+    // can distinguish subagent traffic.
+    if use_current_exe || family == "codex" || family == "code" {
+        let subagent = match source_kind {
+            Some(AgentSourceKind::AutoReview) => "review",
+            _ => "agent",
+        };
+        env.entry("CODE_OPENAI_SUBAGENT".to_string())
+            .or_insert_with(|| subagent.to_string());
+    }
+
     // Convenience: map common key names so external CLIs "just work".
     if let Some(google_key) = env.get("GOOGLE_API_KEY").cloned() {
         env.entry("GEMINI_API_KEY".to_string()).or_insert(google_key);
@@ -1338,7 +1522,10 @@ fn command_exists(cmd: &str) -> bool {
             cmd.env(k, v);
         }
 
-        match cmd.spawn() {
+        // Ensure the child is terminated if this process dies unexpectedly.
+        cmd.kill_on_drop(true);
+
+        match spawn_tokio_command_with_retry(&mut cmd).await {
             Ok(child) => stream_child_output(agent_id, child).await?,
             Err(e) => {
                 if e.kind() == std::io::ErrorKind::NotFound {
@@ -1375,6 +1562,20 @@ async fn stream_child_output(
     agent_id: &str,
     mut child: tokio::process::Child,
 ) -> Result<(std::process::ExitStatus, String, String), String> {
+    let agent_id_owned = agent_id.to_string();
+    let stop_flag = Arc::new(AtomicBool::new(false));
+    let stop_clone = stop_flag.clone();
+    let heartbeat = tokio::spawn(async move {
+        let mut ticker = tokio::time::interval(TokioDuration::from_secs(30));
+        loop {
+            ticker.tick().await;
+            if stop_clone.load(Ordering::Relaxed) {
+                break;
+            }
+            AgentManager::touch_agent(&agent_id_owned).await;
+        }
+    });
+
     let stdout_task = child.stdout.take().map(|stdout| {
         let agent = agent_id.to_string();
         tokio::spawn(async move { stream_reader_to_progress(agent, "stdout", stdout).await })
@@ -1403,6 +1604,9 @@ async fn stream_child_output(
             .map_err(|e| format!("Failed to read agent stderr: {e}"))?,
         None => String::new(),
     };
+
+    stop_flag.store(true, Ordering::Relaxed);
+    heartbeat.abort();
 
     Ok((status, stdout_buf, stderr_buf))
 }
@@ -1477,7 +1681,7 @@ pub(crate) fn should_use_current_exe_for_agent(
     command_missing: bool,
     config: Option<&AgentConfig>,
 ) -> bool {
-    if !matches!(family, "code" | "codex" | "cloud") {
+    if !matches!(family, "code" | "codex" | "cloud" | "coder") {
         return false;
     }
 
@@ -1744,8 +1948,8 @@ async fn execute_cloud_built_in_streaming(
                 apply.current_dir(dir);
                 apply.stdin(Stdio::piped());
 
-                let mut child = apply
-                    .spawn()
+                let mut child = spawn_tokio_command_with_retry(&mut apply)
+                    .await
                     .map_err(|e| format!("Failed to spawn git apply: {}", e))?;
 
                 if let Some(mut stdin) = child.stdin.take() {
@@ -1837,7 +2041,7 @@ pub fn create_agent_tool(allowed_models: &[String]) -> OpenAiTool {
                 },
             }),
                 description: Some(
-                    "Optional array of model names (e.g., ['claude-sonnet-4.5','code-gpt-5.1-codex-max','code-gpt-5.1-codex-mini','gemini-3-pro'])".to_string(),
+                    "Optional array of model names (e.g., ['code-gpt-5.2','claude-sonnet-4.5','code-gpt-5.1-codex-max','gemini-3-flash'])".to_string(),
                 ),
         },
     );

@@ -55,16 +55,62 @@ pub const APPLY_PATCH_TOOL_INSTRUCTIONS: &str = include_str!("../apply_patch_too
 
 const APPLY_PATCH_COMMANDS: [&str; 2] = ["apply_patch", "applypatch"];
 
-fn looks_like_bash(cmd: &str) -> bool {
-    let trimmed = cmd.trim_matches('"').trim_matches('\'');
-    if trimmed.eq_ignore_ascii_case("bash") || trimmed.eq_ignore_ascii_case("bash.exe") {
-        return true;
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum ApplyPatchShell {
+    Unix,
+    PowerShell,
+    Cmd,
+}
+
+fn classify_shell_name(shell: &str) -> Option<String> {
+    Path::new(shell)
+        .file_stem()
+        .and_then(|name| name.to_str())
+        .map(str::to_ascii_lowercase)
+}
+
+fn classify_shell(shell: &str, flag: &str) -> Option<ApplyPatchShell> {
+    classify_shell_name(shell).and_then(|name| match name.as_str() {
+        "bash" | "zsh" | "sh" if matches!(flag, "-lc" | "-c") => Some(ApplyPatchShell::Unix),
+        "pwsh" | "powershell" if flag.eq_ignore_ascii_case("-command") => {
+            Some(ApplyPatchShell::PowerShell)
+        }
+        "cmd" if flag.eq_ignore_ascii_case("/c") => Some(ApplyPatchShell::Cmd),
+        _ => None,
+    })
+}
+
+fn can_skip_flag(shell: &str, flag: &str) -> bool {
+    classify_shell_name(shell).is_some_and(|name| {
+        matches!(name.as_str(), "pwsh" | "powershell") && flag.eq_ignore_ascii_case("-noprofile")
+    })
+}
+
+fn parse_shell_script(argv: &[String]) -> Option<(ApplyPatchShell, &str)> {
+    match argv {
+        [shell, flag, script] => classify_shell(shell, flag).map(|shell_type| {
+            let script = script.as_str();
+            (shell_type, script)
+        }),
+        [shell, skip_flag, flag, script] if can_skip_flag(shell, skip_flag) => {
+            classify_shell(shell, flag).map(|shell_type| {
+                let script = script.as_str();
+                (shell_type, script)
+            })
+        }
+        _ => None,
     }
-    Path::new(trimmed)
-        .file_name()
-        .and_then(|s| s.to_str())
-        .map(|name| name.eq_ignore_ascii_case("bash") || name.eq_ignore_ascii_case("bash.exe"))
-        .unwrap_or(false)
+}
+
+fn extract_apply_patch_from_shell(
+    shell: ApplyPatchShell,
+    script: &str,
+) -> std::result::Result<(String, Option<String>), ExtractHeredocError> {
+    match shell {
+        ApplyPatchShell::Unix | ApplyPatchShell::PowerShell | ApplyPatchShell::Cmd => {
+            extract_apply_patch_from_bash(script)
+        }
+    }
 }
 
 #[derive(Debug, Error, PartialEq)]
@@ -139,9 +185,9 @@ pub fn maybe_parse_apply_patch(argv: &[String]) -> MaybeApplyPatch {
             Ok(source) => MaybeApplyPatch::Body(source),
             Err(e) => MaybeApplyPatch::PatchParseError(e),
         },
-        // Bash heredoc form: (optional `cd <path> &&`) apply_patch <<'EOF' ...
-        [bash, flag, script] if looks_like_bash(bash) && flag == "-lc" => {
-            match extract_apply_patch_from_bash(script) {
+        // Shell heredoc form: (optional `cd <path> &&`) apply_patch <<'EOF' ...
+        _ => match parse_shell_script(argv) {
+            Some((shell, script)) => match extract_apply_patch_from_shell(shell, script) {
                 Ok((body, workdir)) => match parse_patch(&body) {
                     Ok(mut source) => {
                         source.workdir = workdir;
@@ -153,9 +199,9 @@ pub fn maybe_parse_apply_patch(argv: &[String]) -> MaybeApplyPatch {
                     MaybeApplyPatch::NotApplyPatch
                 }
                 Err(e) => MaybeApplyPatch::ShellParseError(e),
-            }
-        }
-        _ => MaybeApplyPatch::NotApplyPatch,
+            },
+            None => MaybeApplyPatch::NotApplyPatch,
+        },
     }
 }
 
@@ -250,24 +296,19 @@ impl ApplyPatchAction {
 /// cwd must be an absolute path so that we can resolve relative paths in the
 /// patch.
 pub fn maybe_parse_apply_patch_verified(argv: &[String], cwd: &Path) -> MaybeApplyPatchVerified {
-    // Detect a raw patch body passed directly as the command or as the body of a bash -lc
+    // Detect a raw patch body passed directly as the command or as the body of a shell
     // script. In these cases, report an explicit error rather than applying the patch.
-    match argv {
-        [body] => {
-            if parse_patch(body).is_ok() {
-                return MaybeApplyPatchVerified::CorrectnessError(
-                    ApplyPatchError::ImplicitInvocation,
-                );
-            }
+    if argv.len() == 1 {
+        let body = &argv[0];
+        if parse_patch(body).is_ok() {
+            return MaybeApplyPatchVerified::CorrectnessError(ApplyPatchError::ImplicitInvocation);
         }
-        [bash, flag, script] if looks_like_bash(bash) && flag == "-lc" => {
-            if parse_patch(script).is_ok() {
-                return MaybeApplyPatchVerified::CorrectnessError(
-                    ApplyPatchError::ImplicitInvocation,
-                );
-            }
+    }
+
+    if let Some((_, script)) = parse_shell_script(argv) {
+        if parse_patch(script).is_ok() {
+            return MaybeApplyPatchVerified::CorrectnessError(ApplyPatchError::ImplicitInvocation);
         }
-        _ => {}
     }
 
     match maybe_parse_apply_patch(argv) {
@@ -324,7 +365,7 @@ pub fn maybe_parse_apply_patch_verified(argv: &[String], cwd: &Path) -> MaybeApp
                             path,
                             ApplyPatchFileChange::Update {
                                 unified_diff,
-                                move_path: move_path.map(|p| cwd.join(p)),
+                                move_path: move_path.map(|p| effective_cwd.join(p)),
                                 new_content: contents,
                             },
                         );
@@ -668,6 +709,33 @@ struct AppliedPatch {
     new_contents: String,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum LineEnding {
+    Lf,
+    Crlf,
+}
+
+impl LineEnding {
+    fn detect(contents: &str) -> Self {
+        if contents.contains("\r\n") {
+            Self::Crlf
+        } else {
+            Self::Lf
+        }
+    }
+
+    fn joiner(self) -> &'static str {
+        match self {
+            Self::Lf => "\n",
+            Self::Crlf => "\r\n",
+        }
+    }
+}
+
+fn normalize_line_ending(line: &str) -> &str {
+    line.strip_suffix('\r').unwrap_or(line)
+}
+
 /// Return *only* the new file contents (joined into a single `String`) after
 /// applying the chunks to the file at `path`.
 fn derive_new_contents_from_chunks(
@@ -684,7 +752,11 @@ fn derive_new_contents_from_chunks(
         }
     };
 
-    let mut original_lines: Vec<String> = original_contents.split('\n').map(String::from).collect();
+    let line_ending = LineEnding::detect(&original_contents);
+    let mut original_lines: Vec<String> = original_contents
+        .split('\n')
+        .map(|line| normalize_line_ending(line).to_string())
+        .collect();
 
     // Drop the trailing empty element that results from the final newline so
     // that line counts match the behaviour of standard `diff`.
@@ -698,7 +770,7 @@ fn derive_new_contents_from_chunks(
     if !new_lines.last().is_some_and(String::is_empty) {
         new_lines.push(String::new());
     }
-    let new_contents = new_lines.join("\n");
+    let new_contents = new_lines.join(line_ending.joiner());
     Ok(AppliedPatch {
         original_contents,
         new_contents,
@@ -744,7 +816,12 @@ fn compute_replacements(
             } else {
                 original_lines.len()
             };
-            replacements.push((insertion_idx, 0, chunk.new_lines.clone()));
+            let normalized_new_lines: Vec<String> = chunk
+                .new_lines
+                .iter()
+                .map(|line| normalize_line_ending(line).to_string())
+                .collect();
+            replacements.push((insertion_idx, 0, normalized_new_lines));
             continue;
         }
 
@@ -759,11 +836,22 @@ fn compute_replacements(
         // final element so that modifications touching the end‑of‑file can be
         // located reliably.
 
-        let mut pattern: &[String] = &chunk.old_lines;
+        let normalized_old_lines: Vec<String> = chunk
+            .old_lines
+            .iter()
+            .map(|line| normalize_line_ending(line).to_string())
+            .collect();
+        let normalized_new_lines: Vec<String> = chunk
+            .new_lines
+            .iter()
+            .map(|line| normalize_line_ending(line).to_string())
+            .collect();
+
+        let mut pattern: &[String] = &normalized_old_lines;
         let mut found =
             seek_sequence::seek_sequence(original_lines, pattern, line_index, chunk.is_end_of_file);
 
-        let mut new_slice: &[String] = &chunk.new_lines;
+        let mut new_slice: &[String] = &normalized_new_lines;
 
         if found.is_none() && pattern.last().is_some_and(String::is_empty) {
             // Retry without the trailing empty line which represents the final
@@ -788,7 +876,7 @@ fn compute_replacements(
             return Err(ApplyPatchError::ComputeReplacements(format!(
                 "Failed to find expected lines in {}:\n{}",
                 path.display(),
-                chunk.old_lines.join("\n"),
+                normalized_old_lines.join("\n"),
             )));
         }
     }
@@ -1202,6 +1290,36 @@ PATCH"#,
         assert_eq!(stderr_str, "");
         let contents = fs::read_to_string(&path).unwrap();
         assert_eq!(contents, "foo\nbaz\n");
+    }
+
+    #[test]
+    fn test_update_file_hunk_preserves_crlf_line_endings() {
+        let dir = tempdir().unwrap();
+        let path = dir.path().join("update_crlf.txt");
+        fs::write(&path, "foo\r\nbar\r\n").unwrap();
+
+        let patch = wrap_patch(&format!(
+            r#"*** Update File: {}
+@@
+ foo
+-bar
++baz
+"#,
+            path.display()
+        ));
+
+        let mut stdout = Vec::new();
+        let mut stderr = Vec::new();
+        apply_patch(&patch, &mut stdout, &mut stderr).unwrap();
+
+        let bytes = fs::read(&path).unwrap();
+        assert!(bytes.ends_with(b"\r\n"), "file should end with CRLF");
+        for (idx, byte) in bytes.iter().enumerate() {
+            if *byte == b'\n' {
+                assert!(idx > 0 && bytes[idx - 1] == b'\r', "found bare LF at index {idx}");
+            }
+        }
+        assert_eq!(String::from_utf8_lossy(&bytes), "foo\r\nbaz\r\n");
     }
 
     #[test]
