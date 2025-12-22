@@ -1,5 +1,5 @@
 {
-  "name": "@just-every/code",
+  "name": "@hanzo/dev",
   "version": "0.6.0",
   "license": "Apache-2.0",
   "description": "Lightweight coding agent that runs in your terminal - fork of OpenAI Codex",
@@ -35,10 +35,10 @@
     "prettier": "^3.3.3"
   },
   "optionalDependencies": {
-    "@just-every/code-darwin-arm64": "0.6.0",
-    "@just-every/code-darwin-x64": "0.6.0",
-    "@just-every/code-linux-x64-musl": "0.6.0",
-    "@just-every/code-linux-arm64-musl": "0.6.0",
-    "@just-every/code-win32-x64": "0.6.0"
+    "@hanzo/dev-darwin-arm64": "0.6.0",
+    "@hanzo/dev-darwin-x64": "0.6.0",
+    "@hanzo/dev-linux-x64-musl": "0.6.0",
+    "@hanzo/dev-linux-arm64-musl": "0.6.0",
+    "@hanzo/dev-win32-x64": "0.6.0"
   }
 }
