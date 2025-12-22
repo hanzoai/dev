@@ -23,8 +23,8 @@ use code_core::CodexConversation;
 use code_core::config::set_default_originator;
 use code_core::config::Config;
 use code_core::config::ConfigOverrides;
+use code_core::config_types::AutoDriveContinueMode;
 use code_core::model_family::{derive_default_model_family, find_family_for_model};
-use code_core::openai_model_info::get_model_info;
 use code_core::git_info::get_git_repo_root;
 use code_core::git_info::recent_commits;
 use code_core::review_coord::{
@@ -34,10 +34,13 @@ use code_core::review_coord::{
     try_acquire_lock,
 };
 use code_core::protocol::AskForApproval;
+use code_core::protocol::AgentSourceKind;
+use code_core::protocol::AgentStatusUpdateEvent;
 use code_core::protocol::Event;
 use code_core::protocol::EventMsg;
 use code_core::protocol::InputItem;
 use code_core::protocol::Op;
+use code_core::protocol::ReviewOutputEvent;
 use code_core::protocol::ReviewRequest;
 use code_core::protocol::TaskCompleteEvent;
 use code_core::protocol::ReviewContextMetadata;
@@ -53,11 +56,13 @@ use code_git_tooling::GhostCommit;
 use code_git_tooling::CreateGhostCommitOptions;
 use code_git_tooling::create_ghost_commit;
 use serde_json::Value;
+use std::collections::HashSet;
 use std::io::IsTerminal;
 use std::io::Read;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use supports_color::Stream;
+use tokio::time::{Duration, Instant};
 use tracing::debug;
 use tracing::error;
 use tracing::info;
@@ -76,6 +81,10 @@ use code_core::protocol::SandboxPolicy;
 use code_core::git_info::current_branch_name;
 
 const AUTO_DRIVE_TEST_SUFFIX: &str = "After planning, but before you start, please ensure you can test the outcome of your changes. Test first to ensure it's failing, then again at the end to ensure it passes. Do not use work arounds or mock code to pass - solve the underlying issue. Create new tests as you work if needed. Once done, clean up your tests unless added to an existing test suite.";
+
+/// How long exec waits after task completion before sending Shutdown when Auto Review
+/// may be about to start. Guarded so sub-agents are not delayed.
+const AUTO_REVIEW_SHUTDOWN_GRACE_MS: u64 = 1_500;
 
 pub async fn run_main(cli: Cli, code_linux_sandbox_exe: Option<PathBuf>) -> anyhow::Result<()> {
     if let Err(err) = set_default_originator("code_exec") {
@@ -102,9 +111,14 @@ pub async fn run_main(cli: Cli, code_linux_sandbox_exe: Option<PathBuf>) -> anyh
         config_overrides,
         auto_drive,
         auto_review,
+        max_seconds,
+        turn_cap,
         review_output_json,
         ..
     } = cli;
+
+    let run_deadline = max_seconds.map(|seconds| Instant::now() + Duration::from_secs(seconds));
+    let run_deadline_std = run_deadline.map(|deadline| deadline.into_std());
 
     // Determine the prompt source (parent or subcommand) and read from stdin if needed.
     let prompt_arg = match &command {
@@ -273,6 +287,16 @@ pub async fn run_main(cli: Cli, code_linux_sandbox_exe: Option<PathBuf>) -> anyh
     };
 
     let mut config = Config::load_with_cli_overrides(cli_kv_overrides, overrides)?;
+    config.max_run_seconds = max_seconds;
+    config.max_run_deadline = run_deadline_std;
+    config.demo_developer_message = cli.demo_developer_message.clone();
+    if auto_drive_goal.is_some() {
+        // Exec is non-interactive; don't burn time on countdown delays between Auto Drive turns.
+        config.auto_drive.continue_mode = AutoDriveContinueMode::Immediate;
+        if let Some(turn_cap) = turn_cap {
+            config.auto_drive.coordinator_turn_cap = turn_cap;
+        }
+    }
     let slash_context = SlashContext {
         agents: &config.agents,
         subagent_commands: &config.subagent_commands,
@@ -402,11 +426,13 @@ pub async fn run_main(cli: Cli, code_linux_sandbox_exe: Option<PathBuf>) -> anyh
         config.model = resolve_model_for_auto_resolve.clone();
         config.model_family = resolve_family.clone();
         config.model_reasoning_effort = resolve_effort_for_auto_resolve;
-        if let Some(info) = get_model_info(&resolve_family) {
-            config.model_context_window = Some(info.context_window);
-            config.model_max_output_tokens = Some(info.max_output_tokens);
-            config.model_auto_compact_token_limit = info.auto_compact_token_limit;
+        if let Some(cw) = resolve_family.context_window {
+            config.model_context_window = Some(cw);
         }
+        if let Some(max) = resolve_family.max_output_tokens {
+            config.model_max_output_tokens = Some(max);
+        }
+        config.model_auto_compact_token_limit = resolve_family.auto_compact_token_limit();
     }
     let stop_on_task_complete = auto_drive_goal.is_none() && auto_resolve_state.is_none();
     let mut event_processor: Box<dyn EventProcessor> = if json_mode {
@@ -480,6 +506,7 @@ pub async fn run_main(cli: Cli, code_linux_sandbox_exe: Option<PathBuf>) -> anyh
             conversation,
             event_processor,
             last_message_file,
+            run_deadline,
         )
         .await;
     }
@@ -615,7 +642,22 @@ pub async fn run_main(cli: Cli, code_linux_sandbox_exe: Option<PathBuf>) -> anyh
             .collect();
         let initial_images_event_id = conversation.submit(Op::UserInput { items }).await?;
         info!("Sent images with event ID: {initial_images_event_id}");
-        while let Ok(event) = conversation.next_event().await {
+        loop {
+            let event = if let Some(deadline) = run_deadline {
+                let remaining = deadline.saturating_duration_since(Instant::now());
+                match tokio::time::timeout(remaining, conversation.next_event()).await {
+                    Ok(event) => event?,
+                    Err(_) => {
+                        eprintln!("Time budget exceeded (--max-seconds={})", max_seconds.unwrap_or_default());
+                        let _ = conversation.submit(Op::Interrupt).await;
+                        let _ = conversation.submit(Op::Shutdown).await;
+                        return Err(anyhow::anyhow!("Time budget exceeded"));
+                    }
+                }
+            } else {
+                conversation.next_event().await?
+            };
+
             if event.id == initial_images_event_id
                 && matches!(
                     event.msg,
@@ -635,16 +677,22 @@ pub async fn run_main(cli: Cli, code_linux_sandbox_exe: Option<PathBuf>) -> anyh
     // Clear stale review lock in case a prior process crashed.
     let _ = clear_stale_lock_if_dead(Some(&config.cwd));
 
+    let skip_review_lock = std::env::var("CODE_REVIEW_LOCK_LEASE")
+        .map(|v| v == "1")
+        .unwrap_or(false);
+
     let _initial_prompt_task_id = if let Some(mut review_request) = review_request.clone() {
         // Cross-process review coordination
-        match try_acquire_lock("review", &config.cwd) {
-            Ok(Some(g)) => _review_guard = Some(g),
-            Ok(None) => {
-                eprintln!("Another review is already running; skipping this /review.");
-                return Ok(());
-            }
-            Err(err) => {
-                eprintln!("Warning: could not acquire review lock: {err}");
+        if !skip_review_lock {
+            match try_acquire_lock("review", &config.cwd) {
+                Ok(Some(g)) => _review_guard = Some(g),
+                Ok(None) => {
+                    eprintln!("Another review is already running; skipping this /review.");
+                    return Ok(());
+                }
+                Err(err) => {
+                    eprintln!("Warning: could not acquire review lock: {err}");
+                }
             }
         }
 
@@ -694,8 +742,36 @@ pub async fn run_main(cli: Cli, code_linux_sandbox_exe: Option<PathBuf>) -> anyh
     // Track whether a fatal error was reported by the server so we can
     // exit with a non-zero status for automation-friendly signaling.
     let mut error_seen = false;
-    let mut shutdown_requested = false;
-    while let Some(event) = rx.recv().await {
+    let mut shutdown_pending = false;
+    let mut shutdown_sent = false;
+    let mut shutdown_deadline: Option<Instant> = None;
+    let auto_review_grace_enabled = config.tui.auto_review_enabled;
+    let mut auto_review_tracker = AutoReviewTracker::new(&config.cwd);
+    loop {
+        tokio::select! {
+            _ = async {
+                if let Some(deadline) = run_deadline {
+                    tokio::time::sleep_until(deadline).await;
+                } else {
+                    std::future::pending::<()>().await;
+                }
+            } => {
+                eprintln!("Time budget exceeded (--max-seconds={})", max_seconds.unwrap_or_default());
+                error_seen = true;
+                let _ = conversation.submit(Op::Interrupt).await;
+                let _ = conversation.submit(Op::Shutdown).await;
+                break;
+            }
+            maybe_event = rx.recv() => {
+                let Some(event) = maybe_event else {
+                    break;
+                };
+        if let EventMsg::AgentStatusUpdate(status) = &event.msg {
+            let completions = auto_review_tracker.update(status);
+            for completion in completions {
+                emit_auto_review_completion(&completion);
+            }
+        }
         if matches!(event.msg, EventMsg::Error(_)) {
             error_seen = true;
         }
@@ -812,6 +888,15 @@ pub async fn run_main(cli: Cli, code_linux_sandbox_exe: Option<PathBuf>) -> anyh
                                 auto_resolve_base_snapshot = None;
                                 auto_resolve_fix_guard = None;
                                 auto_resolve_followup_guard = None;
+                                request_shutdown(
+                                    &conversation,
+                                    &auto_review_tracker,
+                                    &mut shutdown_pending,
+                                    &mut shutdown_sent,
+                                    &mut shutdown_deadline,
+                                    auto_review_grace_enabled,
+                                )
+                                .await?;
                                 continue;
                             }
                             if let Some(state) = auto_resolve_state.as_mut() {
@@ -840,6 +925,15 @@ pub async fn run_main(cli: Cli, code_linux_sandbox_exe: Option<PathBuf>) -> anyh
                                 auto_resolve_base_snapshot = None;
                                 auto_resolve_fix_guard = None;
                                 auto_resolve_followup_guard = None;
+                                request_shutdown(
+                                    &conversation,
+                                    &auto_review_tracker,
+                                    &mut shutdown_pending,
+                                    &mut shutdown_sent,
+                                    &mut shutdown_deadline,
+                                    auto_review_grace_enabled,
+                                )
+                                .await?;
                                 continue;
                             }
                             if let Some(base) = auto_resolve_base_snapshot.as_ref() {
@@ -849,6 +943,15 @@ pub async fn run_main(cli: Cli, code_linux_sandbox_exe: Option<PathBuf>) -> anyh
                                     auto_resolve_base_snapshot = None;
                                     auto_resolve_followup_guard = None;
                                     auto_resolve_fix_guard = None;
+                                    request_shutdown(
+                                        &conversation,
+                                        &auto_review_tracker,
+                                        &mut shutdown_pending,
+                                        &mut shutdown_sent,
+                                        &mut shutdown_deadline,
+                                        auto_review_grace_enabled,
+                                    )
+                                    .await?;
                                     continue;
                                 }
                                 // stale epoch check
@@ -860,6 +963,15 @@ pub async fn run_main(cli: Cli, code_linux_sandbox_exe: Option<PathBuf>) -> anyh
                                             auto_resolve_base_snapshot = None;
                                             auto_resolve_followup_guard = None;
                                             auto_resolve_fix_guard = None;
+                                            request_shutdown(
+                                                &conversation,
+                                                &auto_review_tracker,
+                                                &mut shutdown_pending,
+                                                &mut shutdown_sent,
+                                                &mut shutdown_deadline,
+                                                auto_review_grace_enabled,
+                                            )
+                                            .await?;
                                             continue;
                                         }
                                     }
@@ -869,6 +981,15 @@ pub async fn run_main(cli: Cli, code_linux_sandbox_exe: Option<PathBuf>) -> anyh
                                         eprintln!("Auto-resolve: snapshot epoch advanced; aborting follow-up review.");
                                         auto_resolve_state = None;
                                         auto_resolve_base_snapshot = None;
+                                        request_shutdown(
+                                            &conversation,
+                                            &auto_review_tracker,
+                                            &mut shutdown_pending,
+                                            &mut shutdown_sent,
+                                            &mut shutdown_deadline,
+                                            auto_review_grace_enabled,
+                                        )
+                                        .await?;
                                         continue;
                                     }
                                 }
@@ -887,6 +1008,15 @@ pub async fn run_main(cli: Cli, code_linux_sandbox_exe: Option<PathBuf>) -> anyh
                                             auto_resolve_base_snapshot = None;
                                             auto_resolve_followup_guard = None;
                                             auto_resolve_fix_guard = None;
+                                            request_shutdown(
+                                                &conversation,
+                                                &auto_review_tracker,
+                                                &mut shutdown_pending,
+                                                &mut shutdown_sent,
+                                                &mut shutdown_deadline,
+                                                auto_review_grace_enabled,
+                                            )
+                                            .await?;
                                             continue;
                                         }
 
@@ -917,6 +1047,15 @@ pub async fn run_main(cli: Cli, code_linux_sandbox_exe: Option<PathBuf>) -> anyh
                                         auto_resolve_base_snapshot = None;
                                         auto_resolve_followup_guard = None;
                                         auto_resolve_fix_guard = None;
+                                        request_shutdown(
+                                            &conversation,
+                                            &auto_review_tracker,
+                                            &mut shutdown_pending,
+                                            &mut shutdown_sent,
+                                            &mut shutdown_deadline,
+                                            auto_review_grace_enabled,
+                                        )
+                                        .await?;
                                     }
                                 }
                             }
@@ -932,6 +1071,15 @@ pub async fn run_main(cli: Cli, code_linux_sandbox_exe: Option<PathBuf>) -> anyh
                                     eprintln!("Auto-resolve: base snapshot no longer matches current HEAD; stopping to avoid stale review.");
                                     auto_resolve_state = None;
                                     auto_resolve_base_snapshot = None;
+                                    request_shutdown(
+                                        &conversation,
+                                        &auto_review_tracker,
+                                        &mut shutdown_pending,
+                                        &mut shutdown_sent,
+                                        &mut shutdown_deadline,
+                                        auto_review_grace_enabled,
+                                    )
+                                    .await?;
                                     continue;
                                 }
                                 let current_epoch = current_snapshot_epoch_for(&config.cwd);
@@ -946,6 +1094,15 @@ pub async fn run_main(cli: Cli, code_linux_sandbox_exe: Option<PathBuf>) -> anyh
                                         eprintln!("Auto-resolve: snapshot epoch advanced; aborting follow-up review.");
                                         auto_resolve_state = None;
                                         auto_resolve_base_snapshot = None;
+                                        request_shutdown(
+                                            &conversation,
+                                            &auto_review_tracker,
+                                            &mut shutdown_pending,
+                                            &mut shutdown_sent,
+                                            &mut shutdown_deadline,
+                                            auto_review_grace_enabled,
+                                        )
+                                        .await?;
                                         continue;
                                     }
                                 }
@@ -962,6 +1119,15 @@ pub async fn run_main(cli: Cli, code_linux_sandbox_exe: Option<PathBuf>) -> anyh
                                             eprintln!("Auto-resolve: follow-up snapshot is identical to last reviewed commit; ending loop to avoid duplicate review.");
                                             auto_resolve_state = None;
                                             auto_resolve_base_snapshot = None;
+                                            request_shutdown(
+                                                &conversation,
+                                                &auto_review_tracker,
+                                                &mut shutdown_pending,
+                                                &mut shutdown_sent,
+                                                &mut shutdown_deadline,
+                                                auto_review_grace_enabled,
+                                            )
+                                            .await?;
                                             continue;
                                         }
 
@@ -1000,10 +1166,17 @@ pub async fn run_main(cli: Cli, code_linux_sandbox_exe: Option<PathBuf>) -> anyh
                     }
                 }
 
-                if auto_resolve_state.is_none() && !shutdown_requested {
-                    shutdown_requested = true;
+                if auto_resolve_state.is_none() && !shutdown_sent {
                     auto_resolve_base_snapshot = None;
-                    conversation.submit(Op::Shutdown).await?;
+                    request_shutdown(
+                        &conversation,
+                        &auto_review_tracker,
+                        &mut shutdown_pending,
+                        &mut shutdown_sent,
+                        &mut shutdown_deadline,
+                        auto_review_grace_enabled,
+                    )
+                    .await?;
                 }
             }
             _ => {}
@@ -1011,15 +1184,47 @@ pub async fn run_main(cli: Cli, code_linux_sandbox_exe: Option<PathBuf>) -> anyh
 
         let shutdown: CodexStatus = event_processor.process_event(event);
         match shutdown {
-            CodexStatus::Running => continue,
+            CodexStatus::Running => {}
             CodexStatus::InitiateShutdown => {
-                if !shutdown_requested {
-                    shutdown_requested = true;
-                    conversation.submit(Op::Shutdown).await?;
-                }
+                request_shutdown(
+                    &conversation,
+                    &auto_review_tracker,
+                    &mut shutdown_pending,
+                    &mut shutdown_sent,
+                    &mut shutdown_deadline,
+                    auto_review_grace_enabled,
+                )
+                .await?;
             }
             CodexStatus::Shutdown => {
                 break;
+            }
+        }
+
+        if shutdown_pending {
+            request_shutdown(
+                &conversation,
+                &auto_review_tracker,
+                &mut shutdown_pending,
+                &mut shutdown_sent,
+                &mut shutdown_deadline,
+                auto_review_grace_enabled,
+            )
+            .await?;
+        }
+            }
+            _ = tokio::time::sleep_until(shutdown_deadline.unwrap_or_else(Instant::now)),
+                if shutdown_pending && shutdown_deadline.is_some() && auto_review_grace_enabled =>
+            {
+                request_shutdown(
+                    &conversation,
+                    &auto_review_tracker,
+                    &mut shutdown_pending,
+                    &mut shutdown_sent,
+                    &mut shutdown_deadline,
+                    auto_review_grace_enabled,
+                )
+                .await?;
             }
         }
     }
@@ -1086,9 +1291,12 @@ async fn run_auto_drive_session(
     conversation: Arc<CodexConversation>,
     mut event_processor: Box<dyn EventProcessor>,
     last_message_path: Option<PathBuf>,
+    run_deadline: Option<Instant>,
 ) -> anyhow::Result<()> {
     let mut final_last_message: Option<String> = None;
     let mut error_seen = false;
+    let mut auto_review_tracker = AutoReviewTracker::new(&config.cwd);
+    let mut shutdown_sent = false;
 
     if !images.is_empty() {
         let items: Vec<InputItem> = images
@@ -1096,7 +1304,25 @@ async fn run_auto_drive_session(
             .map(|path| InputItem::LocalImage { path })
             .collect();
         let initial_images_event_id = conversation.submit(Op::UserInput { items }).await?;
-        while let Ok(event) = conversation.next_event().await {
+        loop {
+            let event = if let Some(deadline) = run_deadline {
+                let remaining = deadline.saturating_duration_since(Instant::now());
+                match tokio::time::timeout(remaining, conversation.next_event()).await {
+                    Ok(event) => event?,
+                    Err(_) => {
+                        eprintln!(
+                            "Time budget exceeded (--max-seconds={})",
+                            config.max_run_seconds.unwrap_or_default()
+                        );
+                        let _ = conversation.submit(Op::Interrupt).await;
+                        let _ = conversation.submit(Op::Shutdown).await;
+                        return Err(anyhow::anyhow!("Time budget exceeded"));
+                    }
+                }
+            } else {
+                conversation.next_event().await?
+            };
+
             let is_complete = event.id == initial_images_event_id
                 && matches!(
                     event.msg,
@@ -1137,7 +1363,27 @@ async fn run_auto_drive_session(
         false,
     )?;
 
-    while let Some(event) = auto_rx.recv().await {
+    loop {
+        let maybe_event = if let Some(deadline) = run_deadline {
+            let remaining = deadline.saturating_duration_since(Instant::now());
+            match tokio::time::timeout(remaining, auto_rx.recv()).await {
+                Ok(event) => event,
+                Err(_) => {
+                    let _ = handle.send(AutoCoordinatorCommand::Stop);
+                    handle.cancel();
+                    let _ = conversation.submit(Op::Interrupt).await;
+                    let _ = conversation.submit(Op::Shutdown).await;
+                    return Err(anyhow::anyhow!("Time budget exceeded"));
+                }
+            }
+        } else {
+            auto_rx.recv().await
+        };
+
+        let Some(event) = maybe_event else {
+            break;
+        };
+
         match event {
             AutoCoordinatorEvent::Thinking { delta, .. } => {
                 println!("[auto] {delta}");
@@ -1177,7 +1423,22 @@ async fn run_auto_drive_session(
                         let TurnResult {
                             last_agent_message,
                             error_seen: turn_error,
-                        } = submit_and_wait(&conversation, event_processor.as_mut(), prompt_text.to_string()).await?;
+                        } = match submit_and_wait(
+                            &conversation,
+                            event_processor.as_mut(),
+                            &mut auto_review_tracker,
+                            prompt_text.to_string(),
+                            run_deadline,
+                        )
+                        .await
+                        {
+                            Ok(result) => result,
+                            Err(err) => {
+                                let _ = handle.send(AutoCoordinatorCommand::Stop);
+                                handle.cancel();
+                                return Err(err);
+                            }
+                        };
                         error_seen |= turn_error;
                         if let Some(text) = last_agent_message {
                             history.append_raw(&[make_assistant_message(text.clone())]);
@@ -1226,7 +1487,22 @@ async fn run_auto_drive_session(
                 let TurnResult {
                     last_agent_message,
                     error_seen: turn_error,
-                } = submit_and_wait(&conversation, event_processor.as_mut(), prompt_text).await?;
+                } = match submit_and_wait(
+                    &conversation,
+                    event_processor.as_mut(),
+                    &mut auto_review_tracker,
+                    prompt_text,
+                    run_deadline,
+                )
+                .await
+                {
+                    Ok(result) => result,
+                    Err(err) => {
+                        let _ = handle.send(AutoCoordinatorCommand::Stop);
+                        handle.cancel();
+                        return Err(err);
+                    }
+                };
                 error_seen |= turn_error;
                 if let Some(text) = last_agent_message {
                     history.append_raw(&[make_assistant_message(text.clone())]);
@@ -1247,8 +1523,100 @@ async fn run_auto_drive_session(
     }
 
     handle.cancel();
-    let _ = conversation.submit(Op::Shutdown).await;
-    while let Ok(event) = conversation.next_event().await {
+
+    if !auto_review_tracker.is_running() {
+        let grace_deadline = Instant::now() + Duration::from_millis(AUTO_REVIEW_SHUTDOWN_GRACE_MS);
+        while Instant::now() < grace_deadline {
+            let remaining = grace_deadline.saturating_duration_since(Instant::now());
+            match tokio::time::timeout(remaining, conversation.next_event()).await {
+                Ok(Ok(event)) => {
+                    if let EventMsg::AgentStatusUpdate(status) = &event.msg {
+                        let completions = auto_review_tracker.update(status);
+                        for completion in completions {
+                            emit_auto_review_completion(&completion);
+                        }
+                    }
+
+                    let processor_status = event_processor.process_event(event);
+                    if matches!(processor_status, CodexStatus::Shutdown)
+                        || auto_review_tracker.is_running()
+                    {
+                        break;
+                    }
+                }
+                Ok(Err(err)) => return Err(err.into()),
+                Err(_) => break,
+            }
+        }
+    }
+
+    if auto_review_tracker.is_running() {
+        loop {
+            let event = if let Some(deadline) = run_deadline {
+                let remaining = deadline.saturating_duration_since(Instant::now());
+                match tokio::time::timeout(remaining, conversation.next_event()).await {
+                    Ok(event) => event?,
+                    Err(_) => {
+                        eprintln!(
+                            "Time budget exceeded (--max-seconds={})",
+                            config.max_run_seconds.unwrap_or_default()
+                        );
+                        let _ = conversation.submit(Op::Interrupt).await;
+                        let _ = conversation.submit(Op::Shutdown).await;
+                        return Err(anyhow::anyhow!("Time budget exceeded"));
+                    }
+                }
+            } else {
+                conversation.next_event().await?
+            };
+
+            if let EventMsg::AgentStatusUpdate(status) = &event.msg {
+                let completions = auto_review_tracker.update(status);
+                for completion in completions {
+                    emit_auto_review_completion(&completion);
+                }
+            }
+
+            let status = event_processor.process_event(event);
+
+            if !auto_review_tracker.is_running() {
+                break;
+            }
+
+            if matches!(status, CodexStatus::Shutdown) {
+                break;
+            }
+        }
+    }
+
+    let _ = send_shutdown_if_ready(&conversation, &auto_review_tracker, &mut shutdown_sent).await?;
+
+    loop {
+        let event = if let Some(deadline) = run_deadline {
+            let remaining = deadline.saturating_duration_since(Instant::now());
+            match tokio::time::timeout(remaining, conversation.next_event()).await {
+                Ok(event) => event?,
+                Err(_) => {
+                    eprintln!(
+                        "Time budget exceeded (--max-seconds={})",
+                        config.max_run_seconds.unwrap_or_default()
+                    );
+                    let _ = conversation.submit(Op::Interrupt).await;
+                    let _ = conversation.submit(Op::Shutdown).await;
+                    return Err(anyhow::anyhow!("Time budget exceeded"));
+                }
+            }
+        } else {
+            conversation.next_event().await?
+        };
+
+        if let EventMsg::AgentStatusUpdate(status) = &event.msg {
+            let completions = auto_review_tracker.update(status);
+            for completion in completions {
+                emit_auto_review_completion(&completion);
+            }
+        }
+
         if matches!(event.msg, EventMsg::ShutdownComplete) {
             break;
         }
@@ -1279,6 +1647,371 @@ fn append_auto_drive_test_suffix(goal: &str) -> String {
     }
 
     format!("{trimmed_goal}\n\n{AUTO_DRIVE_TEST_SUFFIX}")
+}
+
+#[derive(Default, Debug, Clone)]
+struct AutoReviewSummary {
+    has_findings: bool,
+    findings: usize,
+    summary: Option<String>,
+}
+
+#[derive(Debug, Clone)]
+struct AutoReviewCompletion {
+    branch: Option<String>,
+    worktree_path: Option<PathBuf>,
+    summary: AutoReviewSummary,
+    error: Option<String>,
+}
+
+#[derive(Default)]
+struct AutoReviewTracker {
+    running: HashSet<String>,
+    processed: HashSet<String>,
+    git_root: PathBuf,
+}
+
+impl AutoReviewTracker {
+    fn new(cwd: &Path) -> Self {
+        let git_root = get_git_repo_root(cwd).unwrap_or_else(|| cwd.to_path_buf());
+
+        Self {
+            running: HashSet::new(),
+            processed: HashSet::new(),
+            git_root,
+        }
+    }
+
+    fn update(&mut self, event: &AgentStatusUpdateEvent) -> Vec<AutoReviewCompletion> {
+        let mut completions: Vec<AutoReviewCompletion> = Vec::new();
+
+        for agent in event.agents.iter() {
+            if !matches!(agent.source_kind, Some(AgentSourceKind::AutoReview)) {
+                continue;
+            }
+
+            let status = agent.status.to_ascii_lowercase();
+            if status == "pending" || status == "running" {
+                self.running.insert(agent.id.clone());
+                continue;
+            }
+
+            let is_terminal = matches!(
+                status.as_str(),
+                "completed" | "failed" | "cancelled"
+            );
+            if !is_terminal || self.processed.contains(&agent.id) {
+                continue;
+            }
+
+            self.running.remove(&agent.id);
+            self.processed.insert(agent.id.clone());
+
+            let summary = agent
+                .result
+                .as_deref()
+                .map(parse_auto_review_summary)
+                .unwrap_or_default();
+
+            completions.push(AutoReviewCompletion {
+                branch: agent.batch_id.clone(),
+                worktree_path: agent
+                    .batch_id
+                    .as_deref()
+                    .and_then(|branch| resolve_auto_review_worktree_path(&self.git_root, branch)),
+                summary,
+                error: agent.error.clone(),
+            });
+        }
+
+        completions
+    }
+
+    fn is_running(&self) -> bool {
+        !self.running.is_empty()
+    }
+}
+
+fn emit_auto_review_completion(completion: &AutoReviewCompletion) {
+    let branch = completion.branch.as_deref().unwrap_or("auto-review");
+
+    if let Some(err) = completion.error.as_deref() {
+        eprintln!("[auto-review] {branch}: failed: {err}");
+        return;
+    }
+
+    let summary_text = completion
+        .summary
+        .summary
+        .as_deref()
+        .filter(|s| !s.trim().is_empty())
+        .unwrap_or("No issues reported.");
+
+    if completion.summary.has_findings {
+        let count = completion.summary.findings.max(1);
+        if let Some(path) = completion.worktree_path.as_ref() {
+            eprintln!(
+                "[auto-review] {branch}: {count} issue(s) found. Merge {} to apply fixes. Summary: {summary_text}",
+                path.display()
+            );
+        } else {
+            eprintln!(
+                "[auto-review] {branch}: {count} issue(s) found. Summary: {summary_text}"
+            );
+        }
+    } else if summary_text == "No issues reported." {
+        eprintln!("[auto-review] {branch}: no issues found.");
+    } else {
+        eprintln!("[auto-review] {branch}: no issues found. {summary_text}");
+    }
+}
+
+fn parse_auto_review_summary(raw: &str) -> AutoReviewSummary {
+    let trimmed = raw.trim();
+    if trimmed.is_empty() {
+        return AutoReviewSummary::default();
+    }
+
+    #[derive(serde::Deserialize)]
+    struct MultiRun {
+        #[serde(flatten)]
+        latest: ReviewOutputEvent,
+        #[serde(default)]
+        runs: Vec<ReviewOutputEvent>,
+    }
+
+    if let Ok(wrapper) = serde_json::from_str::<MultiRun>(trimmed) {
+        let mut runs = wrapper.runs;
+        if runs.is_empty() {
+            runs.push(wrapper.latest);
+        }
+        return summary_from_runs(&runs);
+    }
+
+    if let Ok(output) = serde_json::from_str::<ReviewOutputEvent>(trimmed) {
+        return summary_from_output(&output);
+    }
+
+    if let Some(start) = trimmed.find("```") {
+        if let Some((body, _)) = trimmed[start + 3..].split_once("```") {
+            let candidate = body.trim_start_matches("json").trim();
+            if let Ok(output) = serde_json::from_str::<ReviewOutputEvent>(candidate) {
+                return summary_from_output(&output);
+            }
+        }
+    }
+
+    let lowered = trimmed.to_ascii_lowercase();
+    let clean_phrases = [
+        "no issues",
+        "no findings",
+        "clean",
+        "looks good",
+        "nothing to fix",
+    ];
+    let skip_phrases = [
+        "already running",
+        "another review",
+        "skipping this",
+        "skip this",
+    ];
+    let issue_markers = [
+        "issue",
+        "issues",
+        "finding",
+        "findings",
+        "bug",
+        "bugs",
+        "problem",
+        "problems",
+        "error",
+        "errors",
+    ];
+
+    if skip_phrases.iter().any(|p| lowered.contains(p)) {
+        return AutoReviewSummary {
+            has_findings: false,
+            findings: 0,
+            summary: Some(trimmed.to_string()),
+        };
+    }
+
+    if clean_phrases.iter().any(|p| lowered.contains(p)) {
+        return AutoReviewSummary {
+            has_findings: false,
+            findings: 0,
+            summary: Some(trimmed.to_string()),
+        };
+    }
+
+    let has_findings = issue_markers.iter().any(|p| lowered.contains(p));
+
+    AutoReviewSummary {
+        has_findings,
+        findings: 0,
+        summary: Some(trimmed.to_string()),
+    }
+}
+
+fn summary_from_runs(outputs: &[ReviewOutputEvent]) -> AutoReviewSummary {
+    if outputs.is_empty() {
+        return AutoReviewSummary::default();
+    }
+
+    let latest = outputs.last().unwrap();
+    let mut summary = summary_from_output(latest);
+
+    if let Some(idx) = outputs.iter().rposition(|o| !o.findings.is_empty()) {
+        let with_findings = summary_from_output(&outputs[idx]);
+        if with_findings.has_findings {
+            summary.has_findings = true;
+            summary.findings = with_findings.findings;
+            summary.summary = with_findings.summary.or(summary.summary);
+
+            if latest.findings.is_empty() {
+                let tail = "Final pass reported no issues after auto-resolve.";
+                summary.summary = match summary.summary {
+                    Some(ref existing) if existing.contains(tail) => Some(existing.clone()),
+                    Some(existing) => Some(format!("{existing} \n{tail}")),
+                    None => Some(tail.to_string()),
+                };
+            }
+        }
+    }
+
+    summary
+}
+
+fn summary_from_output(output: &ReviewOutputEvent) -> AutoReviewSummary {
+    let findings = output.findings.len();
+    let has_findings = findings > 0;
+
+    let mut parts: Vec<String> = Vec::new();
+    if !output.overall_explanation.trim().is_empty() {
+        parts.push(output.overall_explanation.trim().to_string());
+    }
+    if has_findings {
+        let titles: Vec<String> = output
+            .findings
+            .iter()
+            .filter_map(|f| {
+                let title = f.title.trim();
+                (!title.is_empty()).then_some(title.to_string())
+            })
+            .collect();
+        if !titles.is_empty() {
+            parts.push(format!("Findings: {}", titles.join("; ")));
+        }
+    }
+
+    let summary = (!parts.is_empty()).then(|| parts.join(" \n"));
+
+    AutoReviewSummary {
+        has_findings,
+        findings,
+        summary,
+    }
+}
+
+fn auto_review_branches_dir(git_root: &Path) -> Option<PathBuf> {
+    let repo_name = git_root.file_name()?.to_str()?;
+    let mut code_home = code_core::config::find_code_home().ok()?;
+    code_home = code_home.join("working").join(repo_name).join("branches");
+    std::fs::create_dir_all(&code_home).ok()?;
+    Some(code_home)
+}
+
+fn resolve_auto_review_worktree_path(git_root: &Path, branch: &str) -> Option<PathBuf> {
+    if branch.is_empty() {
+        return None;
+    }
+
+    let branches_dir = auto_review_branches_dir(git_root)?;
+    let candidate = branches_dir.join(branch);
+    candidate.exists().then_some(candidate)
+}
+
+async fn send_shutdown_if_ready(
+    conversation: &Arc<CodexConversation>,
+    auto_review_tracker: &AutoReviewTracker,
+    shutdown_sent: &mut bool,
+) -> anyhow::Result<bool> {
+    if *shutdown_sent || auto_review_tracker.is_running() {
+        return Ok(false);
+    }
+
+    conversation.submit(Op::Shutdown).await?;
+    *shutdown_sent = true;
+    Ok(true)
+}
+
+async fn request_shutdown(
+    conversation: &Arc<CodexConversation>,
+    auto_review_tracker: &AutoReviewTracker,
+    shutdown_pending: &mut bool,
+    shutdown_sent: &mut bool,
+    shutdown_deadline: &mut Option<Instant>,
+    auto_review_grace_enabled: bool,
+) -> anyhow::Result<()> {
+    if *shutdown_sent {
+        *shutdown_pending = false;
+        *shutdown_deadline = None;
+        return Ok(());
+    }
+
+    let now = Instant::now();
+    let (attempt_send, new_pending, new_deadline) = shutdown_state_after_request(
+        auto_review_tracker.is_running(),
+        *shutdown_pending,
+        *shutdown_deadline,
+        now,
+        auto_review_grace_enabled,
+    );
+    *shutdown_pending = new_pending;
+    *shutdown_deadline = new_deadline;
+
+    if !attempt_send {
+        return Ok(());
+    }
+
+    if send_shutdown_if_ready(conversation, auto_review_tracker, shutdown_sent).await? {
+        *shutdown_pending = false;
+        *shutdown_deadline = None;
+    } else {
+        *shutdown_pending = true;
+        *shutdown_deadline = None;
+    }
+
+    Ok(())
+}
+
+fn shutdown_state_after_request(
+    auto_review_running: bool,
+    shutdown_pending: bool,
+    shutdown_deadline: Option<Instant>,
+    now: Instant,
+    grace_enabled: bool,
+) -> (bool, bool, Option<Instant>) {
+    if auto_review_running {
+        return (false, true, None);
+    }
+
+    if !grace_enabled {
+        return (true, true, None);
+    }
+
+    if !shutdown_pending && shutdown_deadline.is_none() {
+        let deadline = now + Duration::from_millis(AUTO_REVIEW_SHUTDOWN_GRACE_MS);
+        return (false, true, Some(deadline));
+    }
+
+    if let Some(deadline) = shutdown_deadline {
+        if deadline > now {
+            return (false, true, Some(deadline));
+        }
+    }
+
+    (true, true, None)
 }
 
 fn build_auto_prompt(
@@ -1779,7 +2512,9 @@ fn write_review_json(
 async fn submit_and_wait(
     conversation: &Arc<CodexConversation>,
     event_processor: &mut dyn EventProcessor,
+    auto_review_tracker: &mut AutoReviewTracker,
     prompt_text: String,
+    run_deadline: Option<Instant>,
 ) -> anyhow::Result<TurnResult> {
     let mut error_seen = false;
 
@@ -1790,40 +2525,67 @@ async fn submit_and_wait(
         .await?;
 
     loop {
-        tokio::select! {
-            _ = tokio::signal::ctrl_c() => {
-                let _ = conversation.submit(Op::Interrupt).await;
-                return Err(anyhow::anyhow!("Interrupted"));
-            }
-            res = conversation.next_event() => {
-                let event = res?;
-                let event_id = event.id.clone();
-                if matches!(event.msg, EventMsg::Error(_)) {
-                    error_seen = true;
+        let res = if let Some(deadline) = run_deadline {
+            let remaining = deadline.saturating_duration_since(Instant::now());
+            tokio::select! {
+                _ = tokio::signal::ctrl_c() => {
+                    let _ = conversation.submit(Op::Interrupt).await;
+                    return Err(anyhow::anyhow!("Interrupted"));
                 }
-
-                let last_agent_message = if let EventMsg::TaskComplete(TaskCompleteEvent { last_agent_message }) = &event.msg {
-                    last_agent_message.clone()
-                } else {
-                    None
-                };
-
-                let status = event_processor.process_event(event);
-
-                if matches!(status, CodexStatus::Shutdown) {
-                    return Ok(TurnResult {
-                        last_agent_message: None,
-                        error_seen,
-                    });
-                }
-
-                if last_agent_message.is_some() && event_id == submit_id {
-                    return Ok(TurnResult {
-                        last_agent_message,
-                        error_seen,
-                    });
+                res = tokio::time::timeout(remaining, conversation.next_event()) => {
+                    match res {
+                        Ok(event) => event,
+                        Err(_) => {
+                            let _ = conversation.submit(Op::Interrupt).await;
+                            let _ = conversation.submit(Op::Shutdown).await;
+                            return Err(anyhow::anyhow!("Time budget exceeded"));
+                        }
+                    }
                 }
             }
+        } else {
+            tokio::select! {
+                _ = tokio::signal::ctrl_c() => {
+                    let _ = conversation.submit(Op::Interrupt).await;
+                    return Err(anyhow::anyhow!("Interrupted"));
+                }
+                res = conversation.next_event() => res,
+            }
+        };
+
+        let event = res?;
+        let event_id = event.id.clone();
+        if matches!(event.msg, EventMsg::Error(_)) {
+            error_seen = true;
+        }
+
+        if let EventMsg::AgentStatusUpdate(status) = &event.msg {
+            let completions = auto_review_tracker.update(status);
+            for completion in completions {
+                emit_auto_review_completion(&completion);
+            }
+        }
+
+        let last_agent_message = if let EventMsg::TaskComplete(TaskCompleteEvent { last_agent_message }) = &event.msg {
+            last_agent_message.clone()
+        } else {
+            None
+        };
+
+        let status = event_processor.process_event(event);
+
+        if matches!(status, CodexStatus::Shutdown) {
+            return Ok(TurnResult {
+                last_agent_message: None,
+                error_seen,
+            });
+        }
+
+        if last_agent_message.is_some() && event_id == submit_id {
+            return Ok(TurnResult {
+                last_agent_message,
+                error_seen,
+            });
         }
     }
 }
@@ -1864,13 +2626,75 @@ mod tests {
     use code_core::config::{ConfigOverrides, ConfigToml};
     use code_protocol::models::{ContentItem, ResponseItem};
     use code_protocol::mcp_protocol::ConversationId;
-    use code_protocol::protocol::{
-        EventMsg as ProtoEventMsg, RecordedEvent, RolloutItem, RolloutLine, SessionMeta,
-        SessionMetaLine, SessionSource, UserMessageEvent,
-    };
-    use filetime::{set_file_mtime, FileTime};
-    use tempfile::TempDir;
-use uuid::Uuid;
+	    use code_protocol::protocol::{
+	        EventMsg as ProtoEventMsg, RecordedEvent, RolloutItem, RolloutLine, SessionMeta,
+	        SessionMetaLine, SessionSource, UserMessageEvent,
+	    };
+	    use filetime::{set_file_mtime, FileTime};
+	    use tempfile::TempDir;
+	    use uuid::Uuid;
+
+	    #[test]
+	    fn shutdown_state_schedules_grace_on_first_request() {
+	        let now = Instant::now();
+	        let (attempt_send, pending, deadline) = shutdown_state_after_request(
+	            false,
+	            false,
+	            None,
+	            now,
+	            true,
+	        );
+	        assert!(!attempt_send);
+	        assert!(pending);
+	        assert!(deadline.expect("deadline").gt(&now));
+	    }
+
+	    #[test]
+	    fn shutdown_state_waits_until_deadline() {
+	        let now = Instant::now();
+	        let future_deadline = now + tokio::time::Duration::from_millis(100);
+	        let (attempt_send, pending, deadline) = shutdown_state_after_request(
+	            false,
+	            true,
+	            Some(future_deadline),
+	            now,
+	            true,
+	        );
+	        assert!(!attempt_send);
+	        assert!(pending);
+	        assert_eq!(deadline, Some(future_deadline));
+	    }
+
+	    #[test]
+	    fn shutdown_state_attempts_send_after_grace_elapses() {
+	        let now = Instant::now();
+	        let expired_deadline = now - tokio::time::Duration::from_millis(1);
+	        let (attempt_send, pending, deadline) = shutdown_state_after_request(
+	            false,
+	            true,
+	            Some(expired_deadline),
+	            now,
+	            true,
+	        );
+	        assert!(attempt_send);
+	        assert!(pending);
+	        assert!(deadline.is_none());
+	    }
+
+	    #[test]
+	    fn shutdown_state_sends_immediately_without_grace() {
+	        let now = Instant::now();
+	        let (attempt_send, pending, deadline) = shutdown_state_after_request(
+	            false,
+	            false,
+	            None,
+	            now,
+	            false,
+	        );
+	        assert!(attempt_send);
+	        assert!(pending);
+	        assert!(deadline.is_none());
+	    }
 
     #[test]
     fn write_review_json_includes_snapshot() {
@@ -2249,4 +3073,5 @@ use uuid::Uuid;
             path_str
         );
     }
+
 }

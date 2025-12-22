@@ -7,9 +7,11 @@
 #![deny(clippy::print_stdout, clippy::print_stderr)]
 
 mod apply_patch;
+mod fs_sanitize;
 pub mod auth;
 pub mod auth_accounts;
 pub mod account_usage;
+mod account_switching;
 pub mod bash;
 mod auto_drive_pid;
 mod chat_completions;
@@ -22,6 +24,7 @@ pub mod token_data;
 pub use code_conversation::CodexConversation;
 mod command_safety;
 pub mod config;
+mod config_constraint;
 pub mod config_edit;
 pub mod config_profile;
 pub mod config_types;
@@ -57,6 +60,9 @@ pub mod mcp_connection_manager;
 mod mcp_tool_call;
 mod message_history;
 mod model_provider_info;
+pub mod remote_models;
+// Remote model discovery caches its own on-disk state within the module.
+mod cgroup;
 pub mod agent_defaults;
 mod agent_tool;
 pub use agent_tool::AGENT_MANAGER;
@@ -69,6 +75,7 @@ pub mod history;
 mod truncate;
 mod unified_exec;
 mod user_instructions;
+mod skills;
 pub use model_provider_info::BUILT_IN_OSS_MODEL_PROVIDER_ID;
 pub use model_provider_info::ModelProviderInfo;
 pub use model_provider_info::OpenRouterConfig;
@@ -90,9 +97,9 @@ pub use auth::AuthManager;
 pub use auth::CodexAuth;
 pub use auth::RefreshTokenError;
 pub use auth::RefreshTokenErrorKind;
+pub use tool_apply_patch::ApplyPatchToolType;
 pub mod default_client;
 pub mod model_family;
-pub mod openai_model_info;
 mod openai_tools;
 mod patch_harness;
 pub mod plan_tool;

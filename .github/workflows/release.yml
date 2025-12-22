@@ -30,8 +30,42 @@ permissions:
   statuses: write
 
 jobs:
+  npm-auth-check:
+    name: Validate npm auth
+    runs-on: ubuntu-latest
+    if: "!contains(github.event.head_commit.message, '[skip ci]')"
+    timeout-minutes: 5
+    # Fail fast if npm auth is not usable; downstream jobs should not continue.
+    env:
+      NPM_TOKEN: ${{ secrets.NPM_TOKEN }}
+    steps:
+      - name: Setup Node.js for auth check
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          registry-url: 'https://registry.npmjs.org'
+      - name: Validate npm authentication (must fail fast if missing/invalid)
+        env:
+          NODE_AUTH_TOKEN: ${{ env.NPM_TOKEN }}
+        run: |
+          set -euo pipefail
+          if [ -z "${NODE_AUTH_TOKEN:-}" ]; then
+            echo "::error::NPM_TOKEN is missing. Create a granular automation token with publish + bypass-2FA: https://docs.npmjs.com/creating-and-viewing-access-tokens#creating-access-tokens ; add/update the secret: https://github.com/organizations/just-every/settings/secrets/actions/NPM_TOKEN" >&2
+            exit 1
+          fi
+
+          echo "//registry.npmjs.org/:_authToken=${NODE_AUTH_TOKEN}" > ~/.npmrc
+
+          if npm whoami >/dev/null 2>&1; then
+            echo "npm auth ok"
+          else
+            echo "::error::npm auth failed (npm whoami). Ensure NPM_TOKEN is a granular/automation token with publish rights to @hanzo/*, bypass 2FA enabled: https://docs.npmjs.com/creating-and-viewing-access-tokens#creating-access-tokens ; update the secret: https://github.com/organizations/hanzoai/settings/secrets/actions/NPM_TOKEN" >&2
+            exit 1
+          fi
+
   preflight-tests:
     name: Preflight Tests (Linux fast E2E)
+    needs: [npm-auth-check]
     runs-on: ubuntu-24.04
     env:
       CARGO_TARGET_DIR: /mnt/cargo-target
@@ -128,6 +162,7 @@ jobs:
 
   determine-version:
     name: Determine Version
+    needs: [npm-auth-check]
     runs-on: ubuntu-latest
     outputs:
       version: ${{ steps.version.outputs.version }}
@@ -999,12 +1034,15 @@ jobs:
           git push -u origin HEAD:main
 
       - name: Publish per-target npm binary packages (last)
-        if: ${{ env.NPM_TOKEN != '' }}
         env:
           NODE_AUTH_TOKEN: ${{ env.NPM_TOKEN }}
         shell: bash
         run: |
           set -euo pipefail
+          config_path="${NPM_CONFIG_USERCONFIG:-$HOME/.npmrc}"
+          mkdir -p "$(dirname "$config_path")"
+          echo "//registry.npmjs.org/:_authToken=${NODE_AUTH_TOKEN}" > "$config_path"
+          npm whoami >/dev/null 2>&1 || { echo "npm auth failed (npm whoami). Ensure NPM_TOKEN is a granular/automation token with publish rights to @hanzo/* and bypass 2FA enabled; update the secret via npmjs.com." >&2; exit 1; }
           shopt -s nullglob
           for dir in npm-binaries/*; do
             name=$(jq -r '.name' "$dir/package.json")
@@ -1027,6 +1065,10 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
+          config_path="${NPM_CONFIG_USERCONFIG:-$HOME/.npmrc}"
+          mkdir -p "$(dirname "$config_path")"
+          echo "//registry.npmjs.org/:_authToken=${NODE_AUTH_TOKEN}" > "$config_path"
+          npm whoami >/dev/null 2>&1 || { echo "npm auth failed (npm whoami). Ensure NPM_TOKEN is a granular/automation token with publish rights to @hanzo/* and bypass 2FA enabled; update the secret via npmjs.com." >&2; exit 1; }
           name="@hanzo/dev"
           version=$(jq -r '.version' package.json)
           echo "Preparing to publish $name@$version"

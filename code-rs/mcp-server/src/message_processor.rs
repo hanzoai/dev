@@ -1493,7 +1493,7 @@ fn session_models_from_config(config: &Config) -> Option<acp::SessionModelState>
     let mut current_model_id: Option<acp::ModelId> = None;
 
     for preset in presets.iter() {
-        let id = acp::ModelId(Arc::from(preset.id));
+        let id = acp::ModelId(Arc::from(preset.id.as_str()));
         let description = if preset.description.is_empty() {
             None
         } else {
@@ -1616,7 +1616,9 @@ fn configure_session_op_from_config(config: &Config) -> Op {
     Op::ConfigureSession {
         provider: config.model_provider.clone(),
         model: config.model.clone(),
+        model_explicit: config.model_explicit,
         model_reasoning_effort: config.model_reasoning_effort,
+        preferred_model_reasoning_effort: config.preferred_model_reasoning_effort,
         model_reasoning_summary: config.model_reasoning_summary,
         model_text_verbosity: config.model_text_verbosity,
         user_instructions: config.user_instructions.clone(),
@@ -1627,6 +1629,7 @@ fn configure_session_op_from_config(config: &Config) -> Op {
         notify: config.notify.clone(),
         cwd: config.cwd.clone(),
         resume_path: None,
+        demo_developer_message: config.demo_developer_message.clone(),
     }
 }
 

@@ -39,8 +39,10 @@ Notes
 - `/merge`: merge the current worktree branch back into the default branch and
   remove the worktree. Run this from inside the worktree created by `/branch`.
 - `/push`: tell Code to commit, push, and monitor workflows with guarded
-  instructions. Skips cleanup or GitHub monitoring steps automatically when the
-  workspace is already clean or required tooling/files are missing.
+  instructions. If no workflows appear right away, wait briefly and check again
+  before concluding none were triggered. Skips cleanup or GitHub monitoring
+  steps automatically when the workspace is already clean or required
+  tooling/files are missing.
 - `/review [focus]`: without arguments, opens a review picker so you can audit
   the workspace, a specific commit, compare against another branch, or enter
   custom instructions. With a focus argument, skips the picker and uses your
@@ -99,6 +101,8 @@ typically start multiple agents. They require a task/problem description.
 
 - `/demo`: populate the chat history with assorted sample cells (available in
   dev and perf builds for UI testing).
+- `/demo auto drive card`: render the Auto Drive card once for each ANSI-16
+  background color so you can compare theme contrast.
 - `/test-approval`: test approval request (available in debug builds only).
 
 Implementation Notes
@@ -109,9 +113,10 @@ Implementation Notes
 - Prompt formatting for `/plan`, `/solve`, and `/code` lives in
   `code-rs/core/src/slash_commands.rs`.
   When no `[[agents]]` are configured, the orchestrator advertises the
-  following model slugs to the LLM for multi-agent runs: `code-gpt-5.1`,
-  `claude-sonnet-4.5`, `claude-opus-4.1`, `gemini-3-pro`,
-  `gemini-2.5-pro`, `gemini-2.5-flash`, `qwen-3-coder`, `code-gpt-5.1-codex`, and
-  `code-gpt-5.1-codex-mini` (with `cloud-gpt-5.1-codex` gated by
-  `CODE_ENABLE_CLOUD_AGENT_MODEL`). You can replace or pin this set via
+  following model slugs to the LLM for multi-agent runs: `code-gpt-5.2`,
+  `code-gpt-5.1-codex-max`, `claude-opus-4.5`, `gemini-3-pro`,
+  `code-gpt-5.1-codex-mini`, `claude-sonnet-4.5`, `gemini-3-flash`,
+  `code-gpt-5.1`, `claude-haiku-4.5`, and `qwen-3-coder` (with
+  `cloud-gpt-5.1-codex-max` gated by `CODE_ENABLE_CLOUD_AGENT_MODEL`). (`gemini`
+  resolves to `gemini-3-flash`.) You can replace or pin this set via
   `[[agents]]` or per-command `[[subagents.commands]].agents`.

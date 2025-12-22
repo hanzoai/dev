@@ -9,6 +9,7 @@ use code_common::model_presets::{
     ModelPreset,
     HIDE_GPT5_1_MIGRATION_PROMPT_CONFIG,
     HIDE_GPT_5_1_CODEX_MAX_MIGRATION_PROMPT_CONFIG,
+    HIDE_GPT_5_2_MIGRATION_PROMPT_CONFIG,
 };
 use code_core::config_edit::{self, CONFIG_KEY_EFFORT, CONFIG_KEY_MODEL};
 use code_core::config_types::Notice;
@@ -77,6 +78,7 @@ pub mod live_wrap;
 mod markdown;
 mod markdown_render;
 mod markdown_renderer;
+mod remote_model_presets;
 mod markdown_stream;
 mod syntax_highlight;
 pub mod onboarding;
@@ -320,22 +322,37 @@ fn empty_exit_summary() -> ExitSummary {
     }
 }
 
-pub fn resume_command_name() -> &'static str {
-    static COMMAND: OnceLock<&'static str> = OnceLock::new();
-    COMMAND.get_or_init(|| {
-        let arg0 = std::env::args().next();
-        let invoked = arg0
-            .as_ref()
-            .and_then(|value| std::path::Path::new(value).file_name())
-            .and_then(|name| name.to_str())
-            .unwrap_or("");
-
-        if invoked.eq_ignore_ascii_case("coder") {
-            "coder"
-        } else {
-            "code"
+fn derive_resume_command_name(arg0: Option<std::ffi::OsString>) -> String {
+    if let Some(raw) = arg0 {
+        if let Some(name) = std::path::Path::new(&raw)
+            .file_name()
+            .and_then(|value| value.to_str())
+            .filter(|value| !value.is_empty())
+        {
+            return name.to_string();
         }
-    })
+
+        let lossy = raw.to_string_lossy();
+        if !lossy.is_empty() {
+            return lossy.into_owned();
+        }
+    }
+
+    std::env::current_exe()
+        .ok()
+        .and_then(|path| {
+            path.file_name()
+                .and_then(|value| value.to_str())
+                .map(str::to_owned)
+        })
+        .unwrap_or_else(|| "code".to_string())
+}
+
+pub fn resume_command_name() -> &'static str {
+    static COMMAND: OnceLock<String> = OnceLock::new();
+    COMMAND
+        .get_or_init(|| derive_resume_command_name(std::env::args_os().next()))
+        .as_str()
 }
 
 pub async fn run_main(
@@ -464,6 +481,8 @@ pub async fn run_main(
         }
     };
 
+    config.demo_developer_message = cli.demo_developer_message.clone();
+
     let cli_model_override = cli.model.is_some()
         || cli_kv_overrides
             .iter()
@@ -475,7 +494,15 @@ pub async fn run_main(
             AuthMode::ApiKey
         };
         if let Some(plan) = determine_migration_plan(&config, auth_mode) {
-            if matches!(auth_mode, AuthMode::ChatGPT) {
+            let should_auto_accept = matches!(auth_mode, AuthMode::ChatGPT)
+                && (plan.hide_key != code_common::model_presets::HIDE_GPT_5_2_CODEX_MIGRATION_PROMPT_CONFIG
+                    || (plan.current.id.eq_ignore_ascii_case("gpt-5.1-codex")
+                        && plan
+                            .target
+                            .id
+                            .eq_ignore_ascii_case("gpt-5.2-codex")));
+
+            if should_auto_accept {
                 if let Err(err) = persist_migration_acceptance(
                     &code_home,
                     cli.config_profile.as_deref(),
@@ -489,7 +516,10 @@ pub async fn run_main(
                         cli_kv_overrides.clone(),
                         overrides.clone(),
                     ) {
-                        Ok(updated) => config = updated,
+                        Ok(updated) => {
+                            config = updated;
+                            config.demo_developer_message = cli.demo_developer_message.clone();
+                        }
                         Err(err) => {
                             eprintln!("Error reloading configuration: {err}");
                             std::process::exit(1);
@@ -513,7 +543,10 @@ pub async fn run_main(
                                 cli_kv_overrides.clone(),
                                 overrides.clone(),
                             ) {
-                                Ok(updated) => config = updated,
+                                Ok(updated) => {
+                                    config = updated;
+                                    config.demo_developer_message = cli.demo_developer_message.clone();
+                                }
                                 Err(err) => {
                                     eprintln!("Error reloading configuration: {err}");
                                     std::process::exit(1);
@@ -993,6 +1026,7 @@ fn maybe_apply_terminal_theme_detection(config: &mut Config, theme_configured_ex
 
 #[derive(Clone, Copy)]
 struct MigrationPlan {
+    current: &'static ModelPreset,
     target: &'static ModelPreset,
     hide_key: &'static str,
     new_effort: Option<ReasoningEffort>,
@@ -1001,25 +1035,62 @@ struct MigrationPlan {
 fn determine_migration_plan(config: &Config, auth_mode: AuthMode) -> Option<MigrationPlan> {
     let current_slug = config.model.to_ascii_lowercase();
     let presets = all_model_presets();
-    let current = presets
-        .iter()
-        .find(|preset| preset.id.eq_ignore_ascii_case(&current_slug))?;
+    let current = find_migration_preset(presets, &current_slug)?;
     let upgrade = current.upgrade.as_ref()?;
-    if notice_hidden(&config.notices, upgrade.migration_config_key) {
+    if notice_hidden(&config.notices, upgrade.migration_config_key.as_str()) {
         return None;
     }
     let target = presets
         .iter()
-        .find(|preset| preset.id.eq_ignore_ascii_case(upgrade.id))?;
+        .find(|preset| preset.id.eq_ignore_ascii_case(&upgrade.id))?;
     if !auth_allows_target(auth_mode, target) {
         return None;
     }
     let new_effort = None;
     Some(MigrationPlan {
+        current,
         target,
-        hide_key: upgrade.migration_config_key,
+        hide_key: upgrade.migration_config_key.as_str(),
         new_effort,
     })
+}
+
+fn find_migration_preset<'a>(presets: &'a [ModelPreset], slug_lower: &str) -> Option<&'a ModelPreset> {
+    let slug_no_prefix = slug_lower
+        .rsplit_once(':')
+        .map(|(_, rest)| rest)
+        .unwrap_or(slug_lower);
+    let slug_no_prefix = slug_no_prefix
+        .rsplit_once('/')
+        .map(|(_, rest)| rest)
+        .unwrap_or(slug_no_prefix);
+    let slug_no_test = slug_no_prefix.strip_prefix("test-").unwrap_or(slug_no_prefix);
+
+    if let Some(preset) = presets.iter().find(|preset| {
+        preset.id.eq_ignore_ascii_case(slug_no_test)
+            || preset.model.eq_ignore_ascii_case(slug_no_test)
+            || preset.display_name.eq_ignore_ascii_case(slug_no_test)
+    }) {
+        return Some(preset);
+    }
+
+    let mut best: Option<&ModelPreset> = None;
+    let mut best_len = 0usize;
+    for preset in presets.iter() {
+        for candidate in [&preset.id, &preset.model, &preset.display_name] {
+            let candidate_lower = candidate.to_ascii_lowercase();
+            if slug_no_test.starts_with(candidate_lower.as_str()) {
+                let candidate_len = candidate.len();
+                if candidate_len > best_len {
+                    best = Some(preset);
+                    best_len = candidate_len;
+                }
+                break;
+            }
+        }
+    }
+
+    best
 }
 
 const NOTICE_TABLE: &str = "notice";
@@ -1064,36 +1135,33 @@ async fn persist_notice_hide(
 }
 
 fn set_notice_flag(notices: &mut Notice, key: &str) {
-    match key {
-        HIDE_GPT5_1_MIGRATION_PROMPT_CONFIG => {
-            notices.hide_gpt5_1_migration_prompt = Some(true);
-        }
-        HIDE_GPT_5_1_CODEX_MAX_MIGRATION_PROMPT_CONFIG => {
-            notices.hide_gpt_5_1_codex_max_migration_prompt = Some(true);
-        }
-        _ => {}
+    if key == HIDE_GPT5_1_MIGRATION_PROMPT_CONFIG {
+        notices.hide_gpt5_1_migration_prompt = Some(true);
+    } else if key == HIDE_GPT_5_1_CODEX_MAX_MIGRATION_PROMPT_CONFIG {
+        notices.hide_gpt_5_1_codex_max_migration_prompt = Some(true);
+    } else if key == HIDE_GPT_5_2_MIGRATION_PROMPT_CONFIG {
+        notices.hide_gpt5_2_migration_prompt = Some(true);
+    } else if key == code_common::model_presets::HIDE_GPT_5_2_CODEX_MIGRATION_PROMPT_CONFIG {
+        notices.hide_gpt5_2_codex_migration_prompt = Some(true);
     }
 }
 
 fn notice_hidden(notices: &Notice, key: &str) -> bool {
-    match key {
-        HIDE_GPT5_1_MIGRATION_PROMPT_CONFIG => {
-            notices.hide_gpt5_1_migration_prompt.unwrap_or(false)
-        }
-        HIDE_GPT_5_1_CODEX_MAX_MIGRATION_PROMPT_CONFIG => {
-            notices.hide_gpt_5_1_codex_max_migration_prompt.unwrap_or(false)
-        }
-        _ => false,
+    if key == HIDE_GPT5_1_MIGRATION_PROMPT_CONFIG {
+        notices.hide_gpt5_1_migration_prompt.unwrap_or(false)
+    } else if key == HIDE_GPT_5_1_CODEX_MAX_MIGRATION_PROMPT_CONFIG {
+        notices.hide_gpt_5_1_codex_max_migration_prompt.unwrap_or(false)
+    } else if key == HIDE_GPT_5_2_MIGRATION_PROMPT_CONFIG {
+        notices.hide_gpt5_2_migration_prompt.unwrap_or(false)
+    } else if key == code_common::model_presets::HIDE_GPT_5_2_CODEX_MIGRATION_PROMPT_CONFIG {
+        notices.hide_gpt5_2_codex_migration_prompt.unwrap_or(false)
+    } else {
+        false
     }
 }
 
 fn auth_allows_target(auth_mode: AuthMode, target: &ModelPreset) -> bool {
-    if matches!(auth_mode, AuthMode::ApiKey)
-        && target.id.eq_ignore_ascii_case("gpt-5.1-codex-max")
-    {
-        return false;
-    }
-    true
+    !(matches!(auth_mode, AuthMode::ApiKey) && target.id.eq_ignore_ascii_case("gpt-5.2-codex"))
 }
 
 fn reasoning_effort_to_str(effort: ReasoningEffort) -> &'static str {
@@ -1365,5 +1433,27 @@ mod tests {
         }
 
         Ok(())
+    }
+
+    #[test]
+    fn resume_command_uses_invocation_basename() {
+        let derived = derive_resume_command_name(Some(std::ffi::OsString::from(
+            "/usr/local/bin/coder",
+        )));
+        assert_eq!(derived, "coder");
+    }
+
+    #[test]
+    fn resume_command_falls_back_to_current_exe() {
+        let expected = std::env::current_exe()
+            .ok()
+            .and_then(|path| {
+                path.file_name()
+                    .and_then(|value| value.to_str())
+                    .map(str::to_owned)
+            })
+            .unwrap_or_else(|| "code".to_string());
+
+        assert_eq!(derive_resume_command_name(None), expected);
     }
 }

@@ -39,6 +39,8 @@ pub use code_protocol::protocol::RolloutItem;
 pub use code_protocol::protocol::RolloutLine;
 pub use code_protocol::protocol::ConversationPathResponseEvent;
 pub use code_protocol::protocol::ListCustomPromptsResponseEvent;
+pub use code_protocol::protocol::ListSkillsResponseEvent;
+pub use code_protocol::skills::Skill;
 pub use code_protocol::protocol::ENVIRONMENT_CONTEXT_OPEN_TAG;
 pub use code_protocol::protocol::ExitedReviewModeEvent;
 pub use code_protocol::protocol::ReviewSnapshotInfo;
@@ -74,7 +76,19 @@ pub enum Op {
         /// If not specified, server will use its default model.
         model: String,
 
+        /// True when the model choice is explicitly set by the user.
+        ///
+        /// When false, the core may adopt a server-provided default model
+        /// (e.g. "codex-auto-balanced") when available.
+        #[serde(default)]
+        model_explicit: bool,
+
         model_reasoning_effort: ReasoningEffortConfig,
+        /// Optional user-preferred reasoning effort for the chat model.
+        /// When present, the core will persist it separately from the effective clamped effort.
+        #[serde(skip_serializing_if = "Option::is_none")]
+        #[serde(default)]
+        preferred_model_reasoning_effort: Option<ReasoningEffortConfig>,
         model_reasoning_summary: ReasoningSummaryConfig,
         model_text_verbosity: TextVerbosityConfig,
 
@@ -111,6 +125,12 @@ pub enum Op {
         /// Path to a rollout file to resume from.
         #[serde(skip_serializing_if = "Option::is_none")]
         resume_path: Option<std::path::PathBuf>,
+
+        /// Optional developer-role message to prepend to every turn for demos.
+        /// This is a CLI-only knob; it is not persisted in config files.
+        #[serde(skip_serializing_if = "Option::is_none")]
+        #[serde(default)]
+        demo_developer_message: Option<String>,
     },
 
     /// Abort current task.
@@ -213,6 +233,10 @@ pub enum Op {
     /// Request the list of available custom prompts.
     /// Reply is delivered via `EventMsg::ListCustomPromptsResponse`.
     ListCustomPrompts,
+
+    /// Request the list of available skills.
+    /// Reply is delivered via `EventMsg::ListSkillsResponse`.
+    ListSkills,
 
     /// Request the agent to summarize the current conversation context.
     /// The agent will use its existing context (either conversation history or previous response id)
@@ -777,6 +801,9 @@ pub enum EventMsg {
     /// List of custom prompts available to the agent.
     ListCustomPromptsResponse(ListCustomPromptsResponseEvent),
 
+    /// List of skills available to the agent.
+    ListSkillsResponse(ListSkillsResponseEvent),
+
     PlanUpdate(UpdatePlanArgs),
 
     /// Browser screenshot has been captured and is ready for display
@@ -1288,6 +1315,16 @@ pub struct AgentInfo {
     #[serde(skip_serializing_if = "Option::is_none")]
     #[serde(default)]
     pub token_count: Option<u64>,
+
+    /// Last time the agent reported activity (RFC3339). Only populated for active agents.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(default)]
+    pub last_activity_at: Option<String>,
+
+    /// Seconds since last activity, computed at emission time. Only for active agents.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(default)]
+    pub seconds_since_last_activity: Option<u64>,
 
     /// Source category for this agent (e.g., auto_review) to support UI filtering.
     #[serde(skip_serializing_if = "Option::is_none")]

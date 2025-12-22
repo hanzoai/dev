@@ -169,6 +169,60 @@ impl ModelSelectionView {
         }
     }
 
+    pub(crate) fn update_presets(&mut self, presets: Vec<ModelPreset>) {
+        let include_follow_chat = self.target.supports_follow_chat();
+        let previous_entries = self.entries();
+        let previous_selected = previous_entries.get(self.selected_index).copied();
+        let previous_flat = self.flat_presets.clone();
+
+        self.flat_presets = presets
+            .iter()
+            .flat_map(FlatPreset::from_model_preset)
+            .collect();
+
+        let mut next_selected: Option<usize> = None;
+        match previous_selected {
+            Some(EntryKind::FollowChat) => {
+                if include_follow_chat {
+                    next_selected = Some(0);
+                }
+            }
+            Some(EntryKind::Preset(idx)) => {
+                if let Some(old) = previous_flat.get(idx) {
+                    if let Some((new_idx, _)) = self
+                        .flat_presets
+                        .iter()
+                        .enumerate()
+                        .find(|(_, preset)| {
+                            preset.model.eq_ignore_ascii_case(&old.model)
+                                && preset.effort == old.effort
+                        })
+                    {
+                        next_selected = Some(new_idx + if include_follow_chat { 1 } else { 0 });
+                    }
+                }
+            }
+            None => {}
+        }
+
+        self.selected_index = next_selected.unwrap_or_else(|| {
+            Self::initial_selection(
+                include_follow_chat,
+                self.use_chat_model,
+                &self.flat_presets,
+                &self.current_model,
+                self.current_effort,
+            )
+        });
+
+        let total = self.entries().len();
+        if total == 0 {
+            self.selected_index = 0;
+        } else if self.selected_index >= total {
+            self.selected_index = total - 1;
+        }
+    }
+
     fn initial_selection(
         include_follow_chat: bool,
         use_chat_model: bool,
@@ -431,21 +485,29 @@ impl ModelSelectionView {
     }
 
     fn model_rank(model: &str) -> u8 {
-        if model.eq_ignore_ascii_case("gpt-5.1-codex-max") {
+        if model.eq_ignore_ascii_case("gpt-5.2-codex") {
             0
-        } else if model.eq_ignore_ascii_case("gpt-5.1-codex") {
+        } else if model.eq_ignore_ascii_case("gpt-5.2") {
             1
-        } else if model.eq_ignore_ascii_case("gpt-5.1-codex-mini") {
+        } else if model.eq_ignore_ascii_case("gpt-5.1-codex-max") {
             2
-        } else if model.eq_ignore_ascii_case("gpt-5.1") {
+        } else if model.eq_ignore_ascii_case("gpt-5.1-codex") {
             3
-        } else {
+        } else if model.eq_ignore_ascii_case("gpt-5.1-codex-mini") {
             4
+        } else if model.eq_ignore_ascii_case("gpt-5.1") {
+            5
+        } else {
+            6
         }
     }
 
     fn model_description(model: &str) -> Option<&'static str> {
-        if model.eq_ignore_ascii_case("gpt-5.1-codex-max") {
+        if model.eq_ignore_ascii_case("gpt-5.2-codex") {
+            Some("Latest frontier agentic coding model.")
+        } else if model.eq_ignore_ascii_case("gpt-5.2") {
+            Some("Latest frontier model with improvements across knowledge, reasoning, and coding.")
+        } else if model.eq_ignore_ascii_case("gpt-5.1-codex-max") {
             Some("Latest Codex-optimized flagship for deep and fast reasoning.")
         } else if model.eq_ignore_ascii_case("gpt-5.1-codex") {
             Some("Optimized for Code.")

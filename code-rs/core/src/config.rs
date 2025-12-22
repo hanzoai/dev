@@ -40,7 +40,6 @@ use crate::model_family::derive_default_model_family;
 use crate::model_family::find_family_for_model;
 use crate::model_provider_info::ModelProviderInfo;
 use crate::model_provider_info::built_in_model_providers;
-use crate::openai_model_info::get_model_info;
 use crate::reasoning::clamp_reasoning_effort_for_model;
 use crate::protocol::AskForApproval;
 use crate::protocol::SandboxPolicy;
@@ -52,6 +51,7 @@ use crate::project_features::{load_project_commands, ProjectCommand, ProjectHook
 use code_app_server_protocol::AuthMode;
 use code_protocol::config_types::SandboxMode;
 use std::time::Duration;
+use std::time::Instant;
 use dirs::home_dir;
 use serde::Deserialize;
 use serde::de::{self, Unexpected};
@@ -68,9 +68,13 @@ use toml_edit::Item as TomlItem;
 use toml_edit::Table as TomlTable;
 use which::which;
 
-const OPENAI_DEFAULT_MODEL: &str = "gpt-5.1-codex";
-const OPENAI_DEFAULT_REVIEW_MODEL: &str = "gpt-5.1-codex-mini";
-pub const GPT_5_CODEX_MEDIUM_MODEL: &str = "gpt-5.1-codex-max";
+pub use crate::config_constraint::Constrained;
+pub use crate::config_constraint::ConstraintError;
+pub use crate::config_constraint::ConstraintResult;
+
+pub(crate) const OPENAI_DEFAULT_MODEL: &str = "gpt-5.1-codex-max";
+const OPENAI_DEFAULT_REVIEW_MODEL: &str = "gpt-5.1-codex-max";
+pub const GPT_5_CODEX_MEDIUM_MODEL: &str = "gpt-5.2-codex";
 
 const fn default_true_local() -> bool {
     true
@@ -164,6 +168,11 @@ pub struct Config {
     /// Optional override of model selection.
     pub model: String,
 
+    /// True if the model was explicitly chosen by the user (via CLI args,
+    /// config.toml, or a profile). When false, Code may adopt a server-provided
+    /// default model (e.g. "codex-auto-balanced") when available.
+    pub model_explicit: bool,
+
     /// Planning model (used when in Plan mode / Read Only access preset). Falls back to `model`.
     pub planning_model: String,
 
@@ -173,7 +182,7 @@ pub struct Config {
     /// Whether planning should inherit the chat model instead of using a dedicated override.
     pub planning_use_chat_model: bool,
 
-    /// Model used specifically for review sessions. Defaults to "gpt-5.1-codex-mini".
+    /// Model used specifically for review sessions. Defaults to "gpt-5.1-codex-max".
     pub review_model: String,
 
     /// Reasoning effort used when running review sessions.
@@ -273,6 +282,10 @@ pub struct Config {
     /// User-provided instructions from AGENTS.md.
     pub user_instructions: Option<String>,
 
+    /// Optional developer-role message to prepend to every turn for demos.
+    /// Set by the CLI via `--demo`; not loaded from disk.
+    pub demo_developer_message: Option<String>,
+
     /// Base instructions override.
     pub base_instructions: Option<String>,
 
@@ -364,8 +377,13 @@ pub struct Config {
     pub code_linux_sandbox_exe: Option<PathBuf>,
 
     /// The value to use for `reasoning.effort` when making a
-    /// request using the Responses API. Allowed values: `minimal`, `low`, `medium`, `high`.
+    /// request using the Responses API. Allowed values: `minimal`, `low`, `medium`, `high`, `xhigh`.
     pub model_reasoning_effort: ReasoningEffort,
+
+    /// Optional preferred reasoning effort for the chat model. When the active model
+    /// does not support this level, Code will clamp the effective effort but keep
+    /// the preference so switching back restores it.
+    pub preferred_model_reasoning_effort: Option<ReasoningEffort>,
 
     /// If not "none", the value to use for `reasoning.summary` when making a
     /// request using the Responses API.
@@ -389,10 +407,11 @@ pub struct Config {
     pub tools_web_search_allowed_domains: Option<Vec<String>>,
     /// Experimental: enable streamable shell tool selection (off by default).
     pub use_experimental_streamable_shell_tool: bool,
-    /// Experimental: opt into the RMCP client implementation for MCP servers.
-    pub use_experimental_use_rmcp_client: bool,
     /// Enable the `view_image` tool that lets the agent attach local images.
     pub include_view_image_tool: bool,
+
+    /// Experimental: enable discovery and injection of skills.
+    pub skills_enabled: bool,
     /// Experimental: enable JSON-based environment context snapshots and deltas (phase gated).
     pub env_ctx_v2: bool,
     /// Retention policy for env_ctx_v2 timeline management (gated by env_ctx_v2).
@@ -405,6 +424,14 @@ pub struct Config {
     
     /// Whether we're using ChatGPT authentication (affects feature availability)
     pub using_chatgpt_auth: bool,
+
+    /// When true, automatically switch to another connected account when the
+    /// current account hits a rate/usage limit.
+    pub auto_switch_accounts_on_rate_limit: bool,
+
+    /// When true, fall back to an API key account only if every connected
+    /// ChatGPT account is rate/usage limited.
+    pub api_key_fallback_on_all_accounts_limited: bool,
 
     /// GitHub integration configuration.
     pub github: GithubConfig,
@@ -420,6 +447,19 @@ pub struct Config {
     /// When set, the core will send this path in the initial ConfigureSession
     /// so the backend can attempt to resume.
     pub experimental_resume: Option<PathBuf>,
+
+    /// Optional wall-clock time budget (seconds) for the current run.
+    ///
+    /// Intended for `code exec` / benchmarks where the CLI must finish within
+    /// a hard deadline. This value is not loaded from `config.toml`; callers
+    /// should set it explicitly.
+    pub max_run_seconds: Option<u64>,
+
+    /// Optional wall-clock deadline for the current run.
+    ///
+    /// When present, countdown nudges are anchored to this deadline instead of
+    /// the session creation time so startup work doesn't delay warnings.
+    pub max_run_deadline: Option<Instant>,
 }
 
 impl Config {
@@ -442,19 +482,30 @@ impl Config {
         let mut root_value = load_config_as_toml(&code_home)?;
 
         // Step 2: apply the `-c` overrides.
+        let cli_paths: Vec<String> = cli_overrides.iter().map(|(path, _)| path.clone()).collect();
         for (path, value) in cli_overrides.into_iter() {
             apply_toml_override(&mut root_value, &path, value);
         }
 
         // Step 3: deserialize into `ConfigToml` so that Serde can enforce the
         // correct types.
-        let cfg: ConfigToml = root_value.try_into().map_err(|e| {
-            tracing::error!("Failed to deserialize overridden config: {e}");
-            std::io::Error::new(std::io::ErrorKind::InvalidData, e)
-        })?;
+        let cfg = deserialize_config_toml_with_cli_warnings(&root_value, &cli_paths)?;
 
         // Step 4: merge with the strongly-typed overrides.
-        Self::load_from_base_config_with_overrides(cfg, overrides, code_home)
+        let mut config = Self::load_from_base_config_with_overrides(cfg, overrides, code_home)?;
+
+        let requirements = crate::config_loader::load_config_requirements_blocking(
+            &config.code_home,
+            LoaderOverrides::default(),
+        )?;
+
+        let mut constrained_approval_policy = requirements.approval_policy;
+        constrained_approval_policy
+            .set(config.approval_policy)
+            .map_err(|err| std::io::Error::new(std::io::ErrorKind::InvalidInput, err))?;
+        config.approval_policy = constrained_approval_policy.value();
+
+        Ok(config)
     }
 }
 
@@ -464,14 +515,12 @@ pub fn load_config_as_toml_with_cli_overrides(
 ) -> std::io::Result<ConfigToml> {
     let mut root_value = load_config_as_toml(code_home)?;
 
+    let cli_paths: Vec<String> = cli_overrides.iter().map(|(path, _)| path.clone()).collect();
     for (path, value) in cli_overrides.into_iter() {
         apply_toml_override(&mut root_value, &path, value);
     }
 
-    let cfg: ConfigToml = root_value.try_into().map_err(|e| {
-        tracing::error!("Failed to deserialize overridden config: {e}");
-        std::io::Error::new(std::io::ErrorKind::InvalidData, e)
-    })?;
+    let cfg = deserialize_config_toml_with_cli_warnings(&root_value, &cli_paths)?;
 
     Ok(cfg)
 }
@@ -597,6 +646,7 @@ pub async fn persist_model_selection(
     profile: Option<&str>,
     model: &str,
     effort: Option<ReasoningEffort>,
+    preferred_effort: Option<ReasoningEffort>,
 ) -> anyhow::Result<()> {
     use tokio::fs;
 
@@ -651,6 +701,13 @@ pub async fn persist_model_selection(
             } else {
                 profile_table.remove("model_reasoning_effort");
             }
+
+            if let Some(preferred) = preferred_effort {
+                profile_table["preferred_model_reasoning_effort"] =
+                    toml_edit::value(preferred.to_string());
+            } else {
+                profile_table.remove("preferred_model_reasoning_effort");
+            }
         } else {
             root["model"] = toml_edit::value(model.to_string());
             match effort {
@@ -660,6 +717,16 @@ pub async fn persist_model_selection(
                 }
                 None => {
                     root.remove("model_reasoning_effort");
+                }
+            }
+
+            match preferred_effort {
+                Some(preferred) => {
+                    root["preferred_model_reasoning_effort"] =
+                        toml_edit::value(preferred.to_string());
+                }
+                None => {
+                    root.remove("preferred_model_reasoning_effort");
                 }
             }
         }
@@ -1321,6 +1388,8 @@ pub fn set_auto_drive_settings(
         toml_edit::value(settings.auto_resolve_review_attempts.get() as i64);
     doc["auto_drive"]["auto_review_followup_attempts"] =
         toml_edit::value(settings.auto_review_followup_attempts.get() as i64);
+    doc["auto_drive"]["coordinator_turn_cap"] =
+        toml_edit::value(settings.coordinator_turn_cap as i64);
 
     let mode_str = match settings.continue_mode {
         AutoDriveContinueMode::Immediate => "immediate",
@@ -1933,6 +2002,87 @@ fn apply_toml_override(root: &mut TomlValue, path: &str, value: TomlValue) {
     }
 }
 
+fn warn_on_suspicious_cli_overrides(cli_paths: &[String]) {
+    if cli_paths.is_empty() {
+        return;
+    }
+
+    for cli_path in cli_paths {
+        if cli_path == "auto_drive.use_chat_model"
+            || (cli_path.starts_with("auto_drive.") && cli_path.ends_with(".use_chat_model"))
+        {
+            eprintln!(
+                "Warning: unknown config override `{cli_path}` (ignored). Did you mean `auto_drive_use_chat_model`?"
+            );
+        }
+
+        if cli_path == "auto_review_enabled" {
+            eprintln!(
+                "Warning: unknown config override `{cli_path}` (ignored). Did you mean `tui.auto_review_enabled`?"
+            );
+        }
+    }
+}
+
+fn warn_on_unknown_cli_overrides(cli_paths: &[String], ignored_paths: &[String]) {
+    if cli_paths.is_empty() || ignored_paths.is_empty() {
+        return;
+    }
+
+    for cli_path in cli_paths {
+        let mut ignored = false;
+        for ignored_path in ignored_paths {
+            if cli_path == ignored_path
+                || cli_path.starts_with(&format!("{ignored_path}."))
+                || ignored_path.starts_with(&format!("{cli_path}."))
+            {
+                ignored = true;
+                break;
+            }
+        }
+        if !ignored {
+            continue;
+        }
+
+        // Avoid duplicate warnings for known common confusions.
+        if cli_path == "auto_review_enabled"
+            || cli_path == "auto_drive.use_chat_model"
+            || (cli_path.starts_with("auto_drive.") && cli_path.ends_with(".use_chat_model"))
+        {
+            continue;
+        }
+
+        eprintln!("Warning: unknown config override `{cli_path}` (ignored). See `code exec --help` for valid keys.");
+    }
+}
+
+fn deserialize_config_toml_with_cli_warnings(
+    root_value: &TomlValue,
+    cli_paths: &[String],
+) -> std::io::Result<ConfigToml> {
+    // Note: We intentionally deserialize via `serde_json::Value` so that we can
+    // reliably detect unknown fields via `serde_ignored`. Some deserializers
+    // (including TOML implementations) may filter unknown struct fields before
+    // they reach Serde's ignored-field machinery.
+    let deserializer = serde_json::to_value(root_value).map_err(|e| {
+        tracing::error!("Failed to convert overridden config for deserialization: {e}");
+        std::io::Error::new(std::io::ErrorKind::InvalidData, e)
+    })?;
+    let mut ignored_paths: Vec<String> = Vec::new();
+
+    let cfg: ConfigToml = serde_ignored::deserialize(deserializer, |path| {
+        ignored_paths.push(path.to_string());
+    })
+    .map_err(|e| {
+        tracing::error!("Failed to deserialize overridden config: {e}");
+        std::io::Error::new(std::io::ErrorKind::InvalidData, e)
+    })?;
+
+    warn_on_suspicious_cli_overrides(cli_paths);
+    warn_on_unknown_cli_overrides(cli_paths, &ignored_paths);
+    Ok(cfg)
+}
+
 /// Base config deserialized from ~/.code/config.toml (legacy ~/.codex/config.toml is still read).
 #[derive(Deserialize, Debug, Clone, Default)]
 pub struct ConfigToml {
@@ -2002,9 +2152,6 @@ pub struct ConfigToml {
 
     #[serde(default)]
     pub confirm_guard: Option<ConfirmGuardConfig>,
-
-    #[serde(default)]
-    pub experimental_use_rmcp_client: Option<bool>,
 
     /// Disable server-side response storage (sends the full conversation
     /// context with every request). Currently necessary for OpenAI customers
@@ -2090,6 +2237,7 @@ pub struct ConfigToml {
     pub show_raw_agent_reasoning: Option<bool>,
 
     pub model_reasoning_effort: Option<ReasoningEffort>,
+    pub preferred_model_reasoning_effort: Option<ReasoningEffort>,
     pub model_reasoning_summary: Option<ReasoningSummary>,
     pub model_text_verbosity: Option<TextVerbosity>,
 
@@ -2120,8 +2268,21 @@ pub struct ConfigToml {
     /// If set to `true`, the API key will be signed with the `originator` header.
     pub preferred_auth_method: Option<AuthMode>,
 
+    /// When true, automatically switch to another connected account when the
+    /// current account hits a rate/usage limit.
+    #[serde(default)]
+    pub auto_switch_accounts_on_rate_limit: Option<bool>,
+
+    /// When true, fall back to an API key account only if every connected
+    /// ChatGPT account is rate/usage limited.
+    #[serde(default)]
+    pub api_key_fallback_on_all_accounts_limited: Option<bool>,
+
     /// Nested tools section for feature toggles
     pub tools: Option<ToolsToml>,
+
+    /// Experimental feature toggles.
+    pub features: Option<FeaturesToml>,
 
     /// When true, disables burst-paste detection for typed input entirely.
     /// All characters are inserted as they are received, and no buffering
@@ -2202,6 +2363,13 @@ pub struct ToolsToml {
     /// Enable the `view_image` tool that lets the agent attach local images.
     #[serde(default)]
     pub view_image: Option<bool>,
+}
+
+#[derive(Deserialize, Debug, Clone, Default)]
+pub struct FeaturesToml {
+    /// Enable discovery and injection of skills.
+    #[serde(default)]
+    pub skills: Option<bool>,
 }
 
 impl ConfigToml {
@@ -2306,8 +2474,16 @@ fn upgrade_legacy_model_slugs(cfg: &mut ConfigToml) {
 }
 
 fn upgrade_legacy_model_slug(slug: &str) -> Option<String> {
-    if slug.starts_with("gpt-5.1") || slug.starts_with("test-gpt-5.1") {
+    if slug.starts_with("gpt-5.2") || slug.starts_with("test-gpt-5.2") {
         return None;
+    }
+
+    if let Some(rest) = slug.strip_prefix("test-gpt-5-codex") {
+        return Some(format!("test-gpt-5.1-codex{rest}"));
+    }
+
+    if let Some(rest) = slug.strip_prefix("gpt-5-codex") {
+        return Some(format!("gpt-5.1-codex{rest}"));
     }
 
     // Upgrade Anthropic Opus 4.1 to 4.5
@@ -2320,20 +2496,31 @@ fn upgrade_legacy_model_slug(slug: &str) -> Option<String> {
         return Some("gemini-3-pro".to_string());
     }
 
-    if let Some(rest) = slug.strip_prefix("test-gpt-5-codex") {
-        return Some(format!("test-gpt-5.1-codex{rest}"));
+    // Upgrade Gemini 2.5 Flash to Gemini 3 Flash
+    if slug.eq_ignore_ascii_case("gemini-2.5-flash") {
+        return Some("gemini-3-flash".to_string());
+    }
+
+    // Keep codex variants on their existing line; upgrades are surfaced via the
+    // migration prompt instead of silently rewriting explicit config.
+    if slug.starts_with("gpt-5.1-codex") || slug.starts_with("test-gpt-5.1-codex") {
+        return None;
+    }
+
+    if let Some(rest) = slug.strip_prefix("test-gpt-5.1") {
+        return Some(format!("test-gpt-5.2{rest}"));
+    }
+
+    if let Some(rest) = slug.strip_prefix("gpt-5.1") {
+        return Some(format!("gpt-5.2{rest}"));
     }
 
     if let Some(rest) = slug.strip_prefix("test-gpt-5") {
-        return Some(format!("test-gpt-5.1{rest}"));
-    }
-
-    if let Some(rest) = slug.strip_prefix("gpt-5-codex") {
-        return Some(format!("gpt-5.1-codex{rest}"));
+        return Some(format!("test-gpt-5.2{rest}"));
     }
 
     if let Some(rest) = slug.strip_prefix("gpt-5") {
-        return Some(format!("gpt-5.1{rest}"));
+        return Some(format!("gpt-5.2{rest}"));
     }
 
     None
@@ -2563,16 +2750,34 @@ impl Config {
             .or(cfg.tools.as_ref().and_then(|t| t.view_image))
             .unwrap_or(true);
 
+        let skills_enabled = cfg
+            .features
+            .as_ref()
+            .and_then(|features| features.skills)
+            .unwrap_or(true);
+
         let env_ctx_v2_flag = *crate::flags::CTX_UI;
 
         // Determine auth mode early so defaults like model selection can depend on it.
         let using_chatgpt_auth = Self::is_using_chatgpt_auth(&code_home);
+
+        let auto_switch_accounts_on_rate_limit = config_profile
+            .auto_switch_accounts_on_rate_limit
+            .or(cfg.auto_switch_accounts_on_rate_limit)
+            .unwrap_or(true);
+
+        let api_key_fallback_on_all_accounts_limited = config_profile
+            .api_key_fallback_on_all_accounts_limited
+            .or(cfg.api_key_fallback_on_all_accounts_limited)
+            .unwrap_or(false);
 
         let default_model_slug = if using_chatgpt_auth {
             GPT_5_CODEX_MEDIUM_MODEL
         } else {
             OPENAI_DEFAULT_MODEL
         };
+
+        let model_explicit = model.is_some() || config_profile.model.is_some() || cfg.model.is_some();
 
         let model = model
             .or(config_profile.model)
@@ -2583,27 +2788,26 @@ impl Config {
             find_family_for_model(&model).unwrap_or_else(|| derive_default_model_family(&model));
 
         // Chat model reasoning effort (used when other flows follow the chat model).
-        let chat_reasoning_effort = config_profile
-            .model_reasoning_effort
-            .or(cfg.model_reasoning_effort)
-            .unwrap_or(ReasoningEffort::Medium);
-        let chat_reasoning_effort =
-            clamp_reasoning_effort_for_model(&model, chat_reasoning_effort);
+        let preferred_model_reasoning_effort = config_profile
+            .preferred_model_reasoning_effort
+            .or(cfg.preferred_model_reasoning_effort)
+            .or(config_profile.model_reasoning_effort)
+            .or(cfg.model_reasoning_effort);
 
-        let openai_model_info = get_model_info(&model_family);
+        let requested_chat_effort =
+            preferred_model_reasoning_effort.unwrap_or(ReasoningEffort::Medium);
+        let chat_reasoning_effort =
+            clamp_reasoning_effort_for_model(&model, requested_chat_effort);
+
         let model_context_window = cfg
             .model_context_window
-            .or_else(|| openai_model_info.as_ref().map(|info| info.context_window));
-        let model_max_output_tokens = cfg.model_max_output_tokens.or_else(|| {
-            openai_model_info
-                .as_ref()
-                .map(|info| info.max_output_tokens)
-        });
-        let model_auto_compact_token_limit = cfg.model_auto_compact_token_limit.or_else(|| {
-            openai_model_info
-                .as_ref()
-                .and_then(|info| info.auto_compact_token_limit)
-        });
+            .or(model_family.context_window);
+        let model_max_output_tokens = cfg
+            .model_max_output_tokens
+            .or(model_family.max_output_tokens);
+        let model_auto_compact_token_limit = cfg
+            .model_auto_compact_token_limit
+            .or_else(|| model_family.auto_compact_token_limit());
 
         // Load base instructions override from a file if specified. If the
         // path is relative, resolve it against the effective cwd so the
@@ -2825,6 +3029,7 @@ impl Config {
 
         let config = Self {
             model,
+            model_explicit,
             planning_model,
             planning_model_reasoning_effort,
             planning_use_chat_model,
@@ -2863,6 +3068,7 @@ impl Config {
             notify: cfg.notify,
             notices: cfg.notice.unwrap_or_default(),
             user_instructions,
+            demo_developer_message: None,
             base_instructions,
             compact_prompt_override,
             mcp_servers: cfg.mcp_servers,
@@ -2898,6 +3104,7 @@ impl Config {
                 .or(show_raw_agent_reasoning)
                 .unwrap_or(false),
             model_reasoning_effort: chat_reasoning_effort,
+            preferred_model_reasoning_effort,
             model_reasoning_summary: config_profile
                 .model_reasoning_summary
                 .or(cfg.model_reasoning_summary)
@@ -2919,16 +3126,16 @@ impl Config {
             use_experimental_streamable_shell_tool: cfg
                 .experimental_use_exec_command_tool
                 .unwrap_or(false),
-            use_experimental_use_rmcp_client: cfg
-                .experimental_use_rmcp_client
-                .unwrap_or(false),
             include_view_image_tool: include_view_image_tool_flag,
+            skills_enabled,
             env_ctx_v2: env_ctx_v2_flag,
             retention: crate::config_types::RetentionConfig::default(),
             responses_originator_header,
             debug: debug.unwrap_or(false),
             // Already computed before moving code_home
             using_chatgpt_auth,
+            auto_switch_accounts_on_rate_limit,
+            api_key_fallback_on_all_accounts_limited,
             github: cfg.github.unwrap_or_default(),
             validation: cfg.validation.unwrap_or_default(),
             subagent_commands: cfg
@@ -2936,6 +3143,8 @@ impl Config {
                 .map(|s| s.commands)
                 .unwrap_or_default(),
             experimental_resume: cfg.experimental_resume,
+            max_run_seconds: None,
+            max_run_deadline: None,
             // Surface TUI notifications preference from config when present.
             tui_notifications: cfg
                 .tui
@@ -3457,6 +3666,7 @@ args = ["-y", "@upstash/context7-mcp"]
             None,
             "gpt-5.1-codex",
             Some(ReasoningEffort::High),
+            None,
         )
         .await?;
 
@@ -3492,6 +3702,7 @@ model = "gpt-4.1"
             None,
             "o4-mini",
             Some(ReasoningEffort::High),
+            None,
         )
         .await?;
 
@@ -3520,6 +3731,7 @@ model = "gpt-4.1"
             Some("dev"),
             "gpt-5.1-codex",
             Some(ReasoningEffort::Medium),
+            None,
         )
         .await?;
 
@@ -3563,6 +3775,7 @@ model = "gpt-5.1-codex"
             Some("dev"),
             "o4-high",
             Some(ReasoningEffort::Medium),
+            None,
         )
         .await?;
 
@@ -3898,14 +4111,14 @@ model_verbosity = "high"
             gpt5_profile_overrides,
             fixture.code_home(),
         )?;
-        assert_eq!("gpt-5.1", gpt5_profile_config.model);
+        assert_eq!("gpt-5.2", gpt5_profile_config.model);
         assert_eq!(OPENAI_DEFAULT_REVIEW_MODEL, gpt5_profile_config.review_model);
         assert_eq!(
             ReasoningEffort::High,
             gpt5_profile_config.review_model_reasoning_effort
         );
         assert_eq!(
-            find_family_for_model("gpt-5.1").expect("known model slug"),
+            find_family_for_model("gpt-5.2").expect("known model slug"),
             gpt5_profile_config.model_family
         );
         assert!(gpt5_profile_config.model_context_window.is_some());
@@ -4099,7 +4312,7 @@ model_verbosity = "high"
         upgrade_legacy_model_slugs(&mut cfg);
 
         assert_eq!(cfg.model.as_deref(), Some("gpt-5.1-codex"));
-        assert_eq!(cfg.review_model.as_deref(), Some("gpt-5.1"));
+        assert_eq!(cfg.review_model.as_deref(), Some("gpt-5.2"));
     }
 
     #[test]

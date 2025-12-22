@@ -1,8 +1,10 @@
 pub mod config_types;
 pub mod custom_prompts;
+pub mod skills;
 pub mod mcp_protocol;
 pub mod message_history;
 pub mod models;
+pub mod openai_models;
 pub mod num_format;
 pub mod parse_command;
 pub mod plan_tool;

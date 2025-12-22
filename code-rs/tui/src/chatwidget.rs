@@ -15,6 +15,7 @@ use std::sync::atomic::AtomicU64;
 use std::sync::atomic::Ordering;
 use std::sync::OnceLock;
 use std::time::{Duration, Instant, SystemTime};
+use std::fs;
 use std::process::{Command, Output};
 use std::str::FromStr;
 use base64::prelude::{Engine as _, BASE64_STANDARD};
@@ -39,6 +40,7 @@ use code_core::config_types::AutoDriveContinueMode;
 use code_core::config_types::Notifications;
 use code_core::config_types::ReasoningEffort;
 use code_core::config_types::TextVerbosity;
+use code_core::spawn::spawn_std_command_with_retry;
 use code_core::plan_tool::{PlanItemArg, StepStatus, UpdatePlanArgs};
 use code_core::model_family::derive_default_model_family;
 use code_core::model_family::find_family_for_model;
@@ -262,6 +264,7 @@ use crate::bottom_pane::{
     CountdownState,
     AgentHintLabel, AutoReviewFooterStatus, AutoReviewPhase,
     prompts_settings_view::PromptsSettingsView,
+    skills_settings_view::SkillsSettingsView,
     McpSettingsView,
     ModelSelectionView,
     NotificationsMode,
@@ -294,6 +297,9 @@ const AUTO_ESC_EXIT_HINT: &str = "Press Esc again to exit Auto Drive";
 const AUTO_COMPLETION_CELEBRATION_DURATION: Duration = Duration::from_secs(5);
 const HISTORY_ANIMATION_FRAME_INTERVAL: Duration = Duration::from_millis(120);
 const AUTO_BOOTSTRAP_GOAL_PLACEHOLDER: &str = "Deriving goal from recent conversation";
+const AUTO_DRIVE_SESSION_SUMMARY_NOTICE: &str = "Summarizing session";
+const AUTO_DRIVE_SESSION_SUMMARY_PROMPT: &str =
+    include_str!("../prompt_for_auto_drive_session_summary.md");
 const CONTEXT_DELTA_HISTORY: usize = 10;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -1196,8 +1202,8 @@ struct RunningCommand {
     history_id: Option<HistoryId>,
     // Aggregated exploration entry (history index, entry index) when grouped
     explore_entry: Option<(usize, usize)>,
-    stdout: String,
-    stderr: String,
+    stdout_offset: usize,
+    stderr_offset: usize,
     wait_total: Option<Duration>,
     wait_active: bool,
     wait_notes: Vec<(String, bool)>,
@@ -1207,7 +1213,7 @@ const RATE_LIMIT_WARNING_THRESHOLDS: [f64; 3] = [50.0, 75.0, 90.0];
 const RATE_LIMIT_REFRESH_INTERVAL: chrono::Duration = chrono::Duration::minutes(10);
 
 const MAX_TRACKED_GHOST_COMMITS: usize = 20;
-const GHOST_SNAPSHOT_NOTICE_THRESHOLD: Duration = Duration::from_secs(1);
+const GHOST_SNAPSHOT_NOTICE_THRESHOLD: Duration = Duration::from_secs(4);
 const GHOST_SNAPSHOT_TIMEOUT: Duration = Duration::from_secs(30);
 
 #[derive(Clone)]
@@ -1376,7 +1382,7 @@ struct BackgroundReviewState {
     agent_id: Option<String>,
     snapshot: Option<String>,
     base: Option<GhostCommit>,
-    started_at: std::time::Instant,
+    last_seen: std::time::Instant,
 }
 
 #[derive(Clone, Debug)]
@@ -1414,6 +1420,145 @@ fn detect_auto_review_phase(progress: Option<&str>) -> AutoReviewPhase {
 }
 
 const SKIP_REVIEW_PROGRESS_SENTINEL: &str = "Another review is already running; skipping this /review.";
+const AUTO_REVIEW_SHARED_WORKTREE: &str = "auto-review";
+const AUTO_REVIEW_FALLBACK_PREFIX: &str = "auto-review-";
+const AUTO_REVIEW_FALLBACK_MAX: usize = 3;
+const AUTO_REVIEW_FALLBACK_MAX_AGE_SECS: u64 = 12 * 60 * 60; // 12h
+const AUTO_REVIEW_STALE_SECS: u64 = 5 * 60;
+
+fn auto_review_branches_dir(git_root: &Path) -> Result<PathBuf, String> {
+    let repo_name = git_root
+        .file_name()
+        .and_then(|s| s.to_str())
+        .unwrap_or("repo");
+    let mut code_home = code_core::config::find_code_home()
+        .map_err(|e| format!("failed to locate code home: {e}"))?;
+    code_home = code_home.join("working").join(repo_name).join("branches");
+    std::fs::create_dir_all(&code_home)
+        .map_err(|e| format!("failed to create branches dir: {e}"))?;
+    Ok(code_home)
+}
+
+fn resolve_auto_review_worktree_path(git_root: &Path, branch: &str) -> Option<PathBuf> {
+    if branch.is_empty() {
+        return None;
+    }
+
+    let branches_dir = auto_review_branches_dir(git_root).ok()?;
+    let candidate = branches_dir.join(branch);
+    candidate.exists().then_some(candidate)
+}
+
+async fn remove_worktree_path(git_root: &Path, path: &Path) -> Result<(), String> {
+    let path_str = path
+        .to_str()
+        .ok_or_else(|| "invalid worktree path".to_string())?;
+    let remove = tokio::process::Command::new("git")
+        .current_dir(git_root)
+        .args(["worktree", "remove", "-f", path_str])
+        .output()
+        .await
+        .map_err(|e| format!("failed to remove worktree: {e}"))?;
+    if !remove.status.success() {
+        let stderr = String::from_utf8_lossy(&remove.stderr);
+        tracing::warn!("failed to remove fallback worktree via git: {}", stderr.trim());
+    }
+    if path.exists() {
+        if let Err(e) = tokio::fs::remove_dir_all(path).await {
+            tracing::warn!("failed to delete fallback worktree dir {:?}: {}", path, e);
+        }
+    }
+    Ok(())
+}
+
+async fn cleanup_fallback_worktrees(git_root: &Path) -> Result<(), String> {
+    let branches_dir = auto_review_branches_dir(git_root)?;
+    let mut entries: Vec<(PathBuf, SystemTime)> = Vec::new();
+    if let Ok(read_dir) = fs::read_dir(&branches_dir) {
+        for entry in read_dir.flatten() {
+            let path = entry.path();
+            let name = entry
+                .file_name()
+                .into_string()
+                .unwrap_or_default();
+            if !name.starts_with(AUTO_REVIEW_FALLBACK_PREFIX) || name == AUTO_REVIEW_SHARED_WORKTREE {
+                continue;
+            }
+            let meta = entry.metadata().ok();
+            let mtime = meta
+                .and_then(|m| m.modified().ok())
+                .unwrap_or(SystemTime::UNIX_EPOCH);
+            entries.push((path, mtime));
+        }
+    }
+
+    // Age-based prune
+    let now = SystemTime::now();
+    for (path, mtime) in entries.iter() {
+        if let Ok(elapsed) = now.duration_since(*mtime) {
+            if elapsed.as_secs() > AUTO_REVIEW_FALLBACK_MAX_AGE_SECS {
+                if let Ok(Some(g)) = try_acquire_lock("review-fallback", path) {
+                    drop(g);
+                    let _ = remove_worktree_path(git_root, path).await;
+                }
+            }
+        }
+    }
+
+    // Count-based prune
+    let mut remaining: Vec<(PathBuf, SystemTime)> = entries
+        .into_iter()
+        .filter(|(p, _)| p.exists())
+        .collect();
+    remaining.sort_by_key(|(_, t)| *t);
+    while remaining.len() > AUTO_REVIEW_FALLBACK_MAX {
+        if let Some((path, _)) = remaining.first().cloned() {
+            if let Ok(Some(g)) = try_acquire_lock("review-fallback", &path) {
+                drop(g);
+                let _ = remove_worktree_path(git_root, &path).await;
+                remaining.remove(0);
+            } else {
+                // Busy; skip pruning this one
+                break;
+            }
+        }
+    }
+
+    Ok(())
+}
+
+async fn allocate_fallback_auto_review_worktree(
+    git_root: &Path,
+    snapshot_id: &str,
+) -> Result<(PathBuf, String, ReviewGuard), String> {
+    cleanup_fallback_worktrees(git_root).await?;
+    let branches_dir = auto_review_branches_dir(git_root)?;
+    let short = snapshot_id.chars().take(8).collect::<String>();
+
+    for attempt in 0..AUTO_REVIEW_FALLBACK_MAX {
+        let suffix = if attempt == 0 { String::new() } else { format!("-{}", attempt + 1) };
+        let name = format!("{}{}{}", AUTO_REVIEW_FALLBACK_PREFIX, short, suffix);
+        let path = branches_dir.join(&name);
+
+        match try_acquire_lock("review-fallback", &path) {
+            Ok(Some(guard)) => {
+                let worktree_path = code_core::git_worktree::prepare_reusable_worktree(
+                    git_root,
+                    &name,
+                    snapshot_id,
+                    true,
+                )
+                .await
+                .map_err(|e| format!("failed to prepare fallback worktree: {e}"))?;
+                return Ok((worktree_path, name, guard));
+            }
+            Ok(None) => continue, // in use, try next suffix
+            Err(err) => return Err(format!("could not acquire fallback review lock: {err}")),
+        }
+    }
+
+    Err("Auto review fallback pool is busy; try again soon.".to_string())
+}
 
 #[derive(Clone, Debug)]
 struct AutoReviewNotice {
@@ -1446,6 +1591,16 @@ pub(crate) struct ChatWidget<'a> {
     context_last_sequence: Option<u64>,
     context_browser_sequence: Option<u64>,
     config: Config,
+
+    /// Optional remote-merged presets list delivered asynchronously.
+    /// When absent, the TUI falls back to built-in presets.
+    remote_model_presets: Option<Vec<ModelPreset>>,
+    /// Whether remote defaults may be applied to this session.
+    /// Captured at startup so later config changes don't retroactively enable it.
+    allow_remote_default_at_startup: bool,
+    /// Tracks whether the user explicitly selected a chat model in this session.
+    chat_model_selected_explicitly: bool,
+
     planning_restore: Option<(String, ReasoningEffort)>,
     history_debug_events: Option<RefCell<Vec<String>>>,
     latest_upgrade_version: Option<String>,
@@ -1465,6 +1620,16 @@ pub(crate) struct ChatWidget<'a> {
     // at once into scrollback so the history contains a single message.
     // Cache of the last finalized assistant message to suppress immediate duplicates
     last_assistant_message: Option<String>,
+    // Track the most recent finalized Answer output item within the current turn.
+    // When a new Answer stream id arrives, we retroactively mark the previous
+    // assistant message as a mid-turn update for styling.
+    last_answer_stream_id_in_turn: Option<String>,
+    last_answer_history_id_in_turn: Option<HistoryId>,
+    // Track the most recent Answer stream id we've *seen* in this turn (delta or final).
+    // Used to label earlier answers as mid-turn even if their final cell hasn't
+    // been inserted yet.
+    last_seen_answer_stream_id_in_turn: Option<String>,
+    mid_turn_answer_ids_in_turn: HashSet<String>,
     // Cache of the last user text we submitted (for context passing to review/resolve agents)
     last_user_message: Option<String>,
     // Cache of the last developer/system note we injected (hidden messages)
@@ -2425,6 +2590,7 @@ use self::diff_ui::DiffConfirm;
 use self::diff_ui::DiffOverlay;
 use self::settings_overlay::{
     AgentOverviewRow,
+    AccountsSettingsContent,
     AutoDriveSettingsContent,
     AgentsSettingsContent,
     LimitsSettingsContent,
@@ -2434,6 +2600,7 @@ use self::settings_overlay::{
     PlanningSettingsContent,
     NotificationsSettingsContent,
     PromptsSettingsContent,
+    SkillsSettingsContent,
     ReviewSettingsContent,
     ThemeSettingsContent,
     UpdatesSettingsContent,
@@ -2973,6 +3140,18 @@ impl ChatWidget<'_> {
             self.auto_state.last_completion_explanation = None;
         }
         auto_drive_cards::clear(self);
+    }
+
+    fn auto_request_session_summary(&mut self) {
+        let prompt = AUTO_DRIVE_SESSION_SUMMARY_PROMPT.trim();
+        if prompt.is_empty() {
+            tracing::warn!("Auto Drive session summary prompt is empty");
+            return;
+        }
+
+        self.push_background_tail(AUTO_DRIVE_SESSION_SUMMARY_NOTICE.to_string());
+        self.request_redraw();
+        self.submit_hidden_text_message_with_preface(prompt.to_string(), String::new());
     }
 
     fn spawn_conversation_runtime(
@@ -3618,6 +3797,23 @@ impl ChatWidget<'_> {
         }
     }
 
+    /// Ensure we show progress when work is visible but the spinner state drifted.
+    fn ensure_spinner_for_activity(&mut self, reason: &'static str) {
+        if self.bottom_pane.auto_drive_style_active()
+            && !self.bottom_pane.auto_drive_view_active()
+            && !self.bottom_pane.has_active_modal_view()
+        {
+            tracing::debug!(
+                "Auto Drive style active without view; releasing style (reason: {reason})"
+            );
+            self.bottom_pane.release_auto_drive_style();
+        }
+        if !self.bottom_pane.is_task_running() {
+            tracing::debug!("Activity without spinner; re-enabling (reason: {reason})");
+            self.bottom_pane.set_task_running(true);
+        }
+    }
+
     #[inline]
     fn stop_spinner(&mut self) {
         self.bottom_pane.set_task_running(false);
@@ -3651,6 +3847,7 @@ impl ChatWidget<'_> {
                 citations: Vec::new(),
                 metadata: None,
                 token_usage: None,
+                mid_turn: false,
                 created_at: SystemTime::now(),
             };
             let greeting_cell =
@@ -3795,6 +3992,10 @@ impl ChatWidget<'_> {
     pub(crate) fn flush_interrupts_if_stream_idle(&mut self) {
         self.interrupt_flush_scheduled = false;
         if !self.stream.is_write_cycle_active() {
+            if self.interrupts.has_queued() {
+                self.flush_interrupt_queue();
+                self.request_redraw();
+            }
             return;
         }
         if self.stream.is_current_stream_idle() {
@@ -4338,17 +4539,6 @@ impl ChatWidget<'_> {
         }
     }
 
-    fn is_reasoning_anchor(cell: &Box<dyn history_cell::HistoryCell>) -> bool {
-        cell
-            .as_any()
-            .downcast_ref::<history_cell::ExploreAggregationCell>()
-            .is_some()
-            || cell
-                .as_any()
-                .downcast_ref::<history_cell::AgentRunCell>()
-                .is_some()
-    }
-
     fn reasoning_preview(lines: &[Line<'static>]) -> String {
         const MAX_LINES: usize = 3;
         const MAX_CHARS: usize = 120;
@@ -4388,16 +4578,25 @@ impl ChatWidget<'_> {
                 }
             }
         } else {
+            // When reasoning is hidden (collapsed), we still show a single summary
+            // line for the most recent reasoning in any consecutive run. Earlier
+            // reasoning cells in the run are hidden entirely.
             use std::collections::HashSet;
             let mut hide_indices: HashSet<usize> = HashSet::new();
             let len = self.history_cells.len();
             let mut idx = 0usize;
             while idx < len {
-                if !Self::is_reasoning_anchor(&self.history_cells[idx]) {
+                let cell = &self.history_cells[idx];
+                let is_reasoning = cell
+                    .as_any()
+                    .downcast_ref::<history_cell::CollapsibleReasoningCell>()
+                    .is_some();
+                if !is_reasoning {
                     idx += 1;
                     continue;
                 }
-                let mut reasoning_indices: Vec<usize> = Vec::new();
+
+                let mut reasoning_indices: Vec<usize> = vec![idx];
                 let mut j = idx + 1;
                 while j < len {
                     let cell = &self.history_cells[j];
@@ -4442,11 +4641,13 @@ impl ChatWidget<'_> {
 
                     break;
                 }
+
                 if reasoning_indices.len() > 1 {
                     for &ri in &reasoning_indices[..reasoning_indices.len() - 1] {
                         hide_indices.insert(ri);
                     }
                 }
+
                 idx = j;
             }
 
@@ -4455,11 +4656,8 @@ impl ChatWidget<'_> {
                     .as_any()
                     .downcast_ref::<history_cell::CollapsibleReasoningCell>()
                 {
-                    if hide_indices.contains(&i) {
-                        if reasoning_cell.set_hide_when_collapsed(true) {
-                            needs_invalidate = true;
-                        }
-                    } else if reasoning_cell.set_hide_when_collapsed(false) {
+                    let hide = hide_indices.contains(&i);
+                    if reasoning_cell.set_hide_when_collapsed(hide) {
                         needs_invalidate = true;
                     }
                 }
@@ -4648,6 +4846,33 @@ impl ChatWidget<'_> {
         exec_tools::handle_exec_begin_now(self, ev, order);
     }
 
+    /// Common exec-begin handling used for both immediate and deferred paths.
+    /// Ensures we finalize any active stream, create the running cell, and
+    /// immediately apply a pending end if it arrived first.
+    fn handle_exec_begin_ordered(
+        &mut self,
+        ev: ExecCommandBeginEvent,
+        order: code_core::protocol::OrderMeta,
+        seq: u64,
+    ) {
+        self.finalize_active_stream();
+        tracing::info!(
+            "[order] ExecCommandBegin call_id={} seq={}",
+            ev.call_id,
+            seq
+        );
+        self.handle_exec_begin_now(ev.clone(), &order);
+        self.ensure_spinner_for_activity("exec-begin");
+        if let Some((pending_end, order2, _ts)) = self
+            .exec
+            .pending_exec_ends
+            .remove(&ExecCallId(ev.call_id.clone()))
+        {
+            self.handle_exec_end_now(pending_end, &order2);
+        }
+        self.flush_interrupt_queue();
+    }
+
     /// Handle exec command end immediately
     fn handle_exec_end_now(
         &mut self,
@@ -4655,6 +4880,48 @@ impl ChatWidget<'_> {
         order: &code_core::protocol::OrderMeta,
     ) {
         exec_tools::handle_exec_end_now(self, ev, order);
+    }
+
+    /// Handle or defer an exec end based on whether the matching begin has
+    /// already been seen. When no running entry exists yet, stash the end so
+    /// it can be paired once the begin arrives, falling back to a timed flush.
+    fn enqueue_or_handle_exec_end(
+        &mut self,
+        ev: ExecCommandEndEvent,
+        order: code_core::protocol::OrderMeta,
+    ) {
+        let call_id = ExecCallId(ev.call_id.clone());
+        let has_running = self.exec.running_commands.contains_key(&call_id);
+        if has_running {
+            self.handle_exec_end_now(ev, &order);
+            return;
+        }
+
+        // If the history already knows about this call_id (e.g., Begin was handled
+        // but running_commands was cleared), finish it immediately to avoid leaving
+        // the cell stuck in a running state.
+        if self
+            .history_state
+            .history_id_for_exec_call(call_id.as_ref())
+            .is_some()
+        {
+            self.handle_exec_end_now(ev, &order);
+            return;
+        }
+
+        self.exec
+            .pending_exec_ends
+            .insert(call_id, (ev, order.clone(), std::time::Instant::now()));
+        let tx = self.app_event_tx.clone();
+        let fallback_tx = tx.clone();
+        if thread_spawner::spawn_lightweight("exec-flush", move || {
+            std::thread::sleep(std::time::Duration::from_millis(120));
+            tx.send(crate::app_event::AppEvent::FlushPendingExecEnds);
+        })
+        .is_none()
+        {
+            let _ = fallback_tx.send(crate::app_event::AppEvent::FlushPendingExecEnds);
+        }
     }
 
     fn build_patch_failure_metadata(stdout: &str, stderr: &str) -> PatchFailureMetadata {
@@ -5392,7 +5659,9 @@ impl ChatWidget<'_> {
             Some(HistoryDomainRecord::Plain(state)),
         );
         self.bottom_pane.set_task_running(false);
-        self.exec.running_commands.clear();
+        // Ensure any running exec/tool cells are finalized so spinners don't linger
+        // after fatal errors.
+        self.finalize_all_running_as_interrupted();
         self.stream.clear_all();
         self.stream_state.drop_streaming = false;
         self.agents_ready_to_start = false;
@@ -5404,14 +5673,11 @@ impl ChatWidget<'_> {
     fn mark_reconnecting(&mut self, message: String) {
         // Keep task running and surface a concise status in the input header.
         self.bottom_pane.set_task_running(true);
-        self.bottom_pane.update_status_text("Reconnecting...".to_string());
+        self.bottom_pane.update_status_text("Retrying...".to_string());
 
         if !self.reconnect_notice_active {
             self.reconnect_notice_active = true;
-            self.push_background_tail(format!(
-                "Connection lost. Auto-retrying… ({})",
-                message
-            ));
+            self.push_background_tail(format!("Auto-retrying… ({message})"));
         }
 
         // Do NOT clear running state or streams; the retry will resume them.
@@ -5425,7 +5691,7 @@ impl ChatWidget<'_> {
         self.reconnect_notice_active = false;
         self.bottom_pane.update_status_text(String::new());
         self.bottom_pane
-            .flash_footer_notice_for("Reconnected, resuming".to_string(), Duration::from_secs(2));
+            .flash_footer_notice_for("Resuming".to_string(), Duration::from_secs(2));
         self.request_redraw();
     }
 
@@ -5603,6 +5869,9 @@ impl ChatWidget<'_> {
             active_exec_cell: None,
             history_cells,
             config: config.clone(),
+            remote_model_presets: None,
+            allow_remote_default_at_startup: !config.model_explicit,
+            chat_model_selected_explicitly: false,
             planning_restore: None,
             history_debug_events: if history_cell_logging_enabled() {
                 Some(RefCell::new(Vec::new()))
@@ -5625,6 +5894,10 @@ impl ChatWidget<'_> {
             rate_limit_secondary_next_reset_at: None,
             content_buffer: String::new(),
             last_assistant_message: None,
+            last_answer_stream_id_in_turn: None,
+            last_answer_history_id_in_turn: None,
+            last_seen_answer_stream_id_in_turn: None,
+            mid_turn_answer_ids_in_turn: HashSet::new(),
             last_user_message: None,
             last_developer_message: None,
             pending_turn_origin: None,
@@ -5940,6 +6213,9 @@ impl ChatWidget<'_> {
             active_exec_cell: None,
             history_cells,
             config: config.clone(),
+            remote_model_presets: None,
+            allow_remote_default_at_startup: !config.model_explicit,
+            chat_model_selected_explicitly: false,
             planning_restore: None,
             history_debug_events: if history_cell_logging_enabled() {
                 Some(RefCell::new(Vec::new()))
@@ -5959,6 +6235,10 @@ impl ChatWidget<'_> {
             rate_limit_secondary_next_reset_at: None,
             content_buffer: String::new(),
             last_assistant_message: None,
+            last_answer_stream_id_in_turn: None,
+            last_answer_history_id_in_turn: None,
+            last_seen_answer_stream_id_in_turn: None,
+            mid_turn_answer_ids_in_turn: HashSet::new(),
             last_user_message: None,
             last_developer_message: None,
             pending_turn_origin: None,
@@ -7114,7 +7394,15 @@ impl ChatWidget<'_> {
             }
         }
 
+        let composer_was_empty = self.bottom_pane.composer_is_empty();
         let input_result = self.bottom_pane.handle_key_event(key_event);
+        let composer_is_empty = self.bottom_pane.composer_is_empty();
+        if composer_was_empty && !composer_is_empty {
+            for cell in &self.history_cells {
+                cell.trigger_fade();
+            }
+            self.request_redraw();
+        }
         self.auto_sync_goal_escape_state_from_composer();
 
         match input_result {
@@ -7123,6 +7411,9 @@ impl ChatWidget<'_> {
                 let cleaned = Self::strip_context_sections(&text);
                 self.last_user_message = (!cleaned.trim().is_empty()).then_some(cleaned);
                 if self.auto_state.should_show_goal_entry() {
+                    for cell in &self.history_cells {
+                        cell.trigger_fade();
+                    }
                     let trimmed = text.trim();
                     if trimmed.is_empty() {
                         self.bottom_pane.set_task_running(true);
@@ -8451,13 +8742,22 @@ impl ChatWidget<'_> {
             }
         }
 
-        // Determine insertion position across the entire history
+        // Determine insertion position across the entire history.
+        // Most ordered inserts are monotonic tail-appends (we bump non-background
+        // keys to keep them strictly increasing), so avoid an O(n) scan in the
+        // common case.
+        //
+        // Exception: some early, non-background system cells (e.g. the context
+        // summary) are inserted with a low order key before any ordering state
+        // has been established. In that phase, we must still respect the order.
         let mut pos = self.history_cells.len();
-        for i in 0..self.history_cells.len() {
-            if let Some(existing) = self.cell_order_seq.get(i) {
-                if *existing > key {
-                    pos = i;
-                    break;
+        if is_background_cell || self.last_assigned_order.is_none() {
+            for i in 0..self.history_cells.len() {
+                if let Some(existing) = self.cell_order_seq.get(i) {
+                    if *existing > key {
+                        pos = i;
+                        break;
+                    }
                 }
             }
         }
@@ -8539,8 +8839,12 @@ impl ChatWidget<'_> {
 
         let mut cell = cell;
 
-        let record_index = self.record_index_for_position(pos);
         let mutation = if let Some(domain_record) = record {
+            let record_index = if pos == self.history_cells.len() {
+                self.history_state.records.len()
+            } else {
+                self.record_index_for_position(pos)
+            };
             let event = match domain_record {
                 HistoryDomainRecord::Exec(ref exec_record) => {
                     HistoryDomainEvent::StartExec {
@@ -8562,6 +8866,11 @@ impl ChatWidget<'_> {
             };
             Some(self.history_state.apply_domain_event(event))
         } else if let Some(record) = history_cell::record_from_cell(cell.as_ref()) {
+            let record_index = if pos == self.history_cells.len() {
+                self.history_state.records.len()
+            } else {
+                self.record_index_for_position(pos)
+            };
             let event = match HistoryDomainRecord::from(record) {
                 HistoryDomainRecord::Exec(exec_record) => HistoryDomainEvent::StartExec {
                     index: record_index,
@@ -8591,8 +8900,14 @@ impl ChatWidget<'_> {
             }
         }
 
-        self.history_cells.insert(pos, cell);
-        self.history_cell_ids.insert(pos, maybe_id);
+        let append = pos == self.history_cells.len();
+        if append {
+            self.history_cells.push(cell);
+            self.history_cell_ids.push(maybe_id);
+        } else {
+            self.history_cells.insert(pos, cell);
+            self.history_cell_ids.insert(pos, maybe_id);
+        }
         // In terminal mode, App mirrors history lines into the native buffer.
         // Ensure order vector is also long enough for position after cell insert
         if self.cell_order_seq.len() < pos {
@@ -8605,7 +8920,11 @@ impl ChatWidget<'_> {
                 },
             );
         }
-        self.cell_order_seq.insert(pos, key);
+        if append {
+            self.cell_order_seq.push(key);
+        } else {
+            self.cell_order_seq.insert(pos, key);
+        }
         if key_bumped {
             if let Some(stream) = self.history_cells[pos]
                 .as_any()
@@ -8646,7 +8965,11 @@ impl ChatWidget<'_> {
         if self.cell_order_dbg.len() < pos {
             self.cell_order_dbg.resize(pos, None);
         }
-        self.cell_order_dbg.insert(pos, Some(dbg));
+        if append {
+            self.cell_order_dbg.push(Some(dbg));
+        } else {
+            self.cell_order_dbg.insert(pos, Some(dbg));
+        }
         self.invalidate_height_cache();
         self.autoscroll_if_near_bottom();
         self.bottom_pane.set_has_chat_history(true);
@@ -8701,11 +9024,13 @@ impl ChatWidget<'_> {
         }
 
         let mut pos = self.history_cells.len();
-        for i in 0..self.history_cells.len() {
-            if let Some(existing) = self.cell_order_seq.get(i) {
-                if *existing > key {
-                    pos = i;
-                    break;
+        if is_background_cell || self.last_assigned_order.is_none() {
+            for i in 0..self.history_cells.len() {
+                if let Some(existing) = self.cell_order_seq.get(i) {
+                    if *existing > key {
+                        pos = i;
+                        break;
+                    }
                 }
             }
         }
@@ -8775,8 +9100,14 @@ impl ChatWidget<'_> {
 
         Self::assign_history_id_inner(&mut cell, id);
 
-        self.history_cells.insert(pos, cell);
-        self.history_cell_ids.insert(pos, Some(id));
+        let append = pos == self.history_cells.len();
+        if append {
+            self.history_cells.push(cell);
+            self.history_cell_ids.push(Some(id));
+        } else {
+            self.history_cells.insert(pos, cell);
+            self.history_cell_ids.insert(pos, Some(id));
+        }
         if self.cell_order_seq.len() < pos {
             self.cell_order_seq.resize(
                 pos,
@@ -8787,7 +9118,11 @@ impl ChatWidget<'_> {
                 },
             );
         }
-        self.cell_order_seq.insert(pos, key);
+        if append {
+            self.cell_order_seq.push(key);
+        } else {
+            self.cell_order_seq.insert(pos, key);
+        }
         if key_bumped {
             if let Some(stream) = self.history_cells[pos]
                 .as_any()
@@ -8827,7 +9162,11 @@ impl ChatWidget<'_> {
         if self.cell_order_dbg.len() < pos {
             self.cell_order_dbg.resize(pos, None);
         }
-        self.cell_order_dbg.insert(pos, Some(dbg));
+        if append {
+            self.cell_order_dbg.push(Some(dbg));
+        } else {
+            self.cell_order_dbg.insert(pos, Some(dbg));
+        }
         self.invalidate_height_cache();
         self.autoscroll_if_near_bottom();
         self.bottom_pane.set_has_chat_history(true);
@@ -10877,7 +11216,7 @@ impl ChatWidget<'_> {
 
     fn mark_history_dirty(&mut self) {
         self.history_snapshot_dirty = true;
-        self.flush_history_snapshot_if_needed(true);
+        self.flush_history_snapshot_if_needed(false);
     }
 
     fn flush_history_snapshot_if_needed(&mut self, force: bool) {
@@ -11932,6 +12271,7 @@ impl ChatWidget<'_> {
 
                 // Ask core for custom prompts so the slash menu can show them.
                 self.submit_op(Op::ListCustomPrompts);
+                self.submit_op(Op::ListSkills);
 
                 if self.resume_placeholder_visible && event.history_entry_count == 0 {
                     self.replace_resume_placeholder_with_notice(RESUME_NO_HISTORY_NOTICE);
@@ -11941,6 +12281,7 @@ impl ChatWidget<'_> {
                 self.flush_history_snapshot_if_needed(true);
             }
             EventMsg::WebSearchBegin(ev) => {
+                self.ensure_spinner_for_activity("web-search-begin");
                 // Enforce order presence (tool events should carry it)
                 let ok = match event.order.as_ref() {
                     Some(om) => self.provider_order_key_from_order_meta(om),
@@ -11964,9 +12305,20 @@ impl ChatWidget<'_> {
                     return;
                 }
 
+                // Allow a fresh lingering-exec sweep even if the per-turn guard
+                // was tripped before any commands started.
+                self.cleared_lingering_execs_this_turn = false;
                 self.ensure_lingering_execs_cleared();
 
                 self.stream_state.seq_answer_final = Some(event.event_seq);
+                if !id.trim().is_empty() {
+                    self.note_answer_stream_seen(&id);
+                    // Any Answer item that completes before TaskComplete is considered
+                    // mid‑turn until we later determine it was the final Answer.
+                    if !self.active_task_ids.is_empty() {
+                        self.mid_turn_answer_ids_in_turn.insert(id.clone());
+                    }
+                }
                 // Strict order for the stream id
                 let ok = match event.order.as_ref() {
                     Some(om) => self.provider_order_key_from_order_meta(om),
@@ -12000,12 +12352,10 @@ impl ChatWidget<'_> {
                 self.stream_state
                     .closed_answer_ids
                     .insert(StreamId(id.clone()));
-                // Receiving a final answer means this task has finished even if we have not yet
-                // observed the corresponding TaskComplete event. Clear the active marker now so
-                // the status spinner can hide promptly when nothing else is running.
-                self.active_task_ids.remove(&id);
-                self.finalize_agent_activity();
-                self.stop_spinner();
+                // Do not quiesce the global spinner here. `AgentMessage` is emitted for every
+                // completed assistant output item, and modern models may send multiple assistant
+                // messages mid-turn (progress updates, tool interleavings, etc.). We only clear
+                // the turn spinner on `TaskComplete` or when all other activity drains.
                 // Important: do not advance Auto Drive here. The StreamController will emit
                 // AppEvent::InsertFinalAnswer, and the App thread will finalize the assistant
                 // cell slightly later. Advancing at this point can start the next Auto Drive
@@ -12084,6 +12434,7 @@ impl ChatWidget<'_> {
                     tracing::debug!("Ignoring Answer delta for closed id={}", id);
                     return;
                 }
+                self.note_answer_stream_seen(&id);
                 // Seed/refresh order key for this Answer stream id (must have OrderMeta)
                 let ok = match event.order.as_ref() {
                     Some(om) => self.provider_order_key_from_order_meta(om),
@@ -12103,6 +12454,7 @@ impl ChatWidget<'_> {
                     delta,
                     event.order.as_ref().and_then(|o| o.sequence_number),
                 );
+                self.ensure_spinner_for_activity("assistant-delta");
                 // Show responding state while assistant streams
                 self.bottom_pane
                     .update_status_text("responding".to_string());
@@ -12207,6 +12559,7 @@ impl ChatWidget<'_> {
                     delta,
                     event.order.as_ref().and_then(|o| o.sequence_number),
                 );
+                self.ensure_spinner_for_activity("reasoning-delta");
                 // Show thinking state while reasoning streams
                 self.bottom_pane.update_status_text("thinking".to_string());
             }
@@ -12216,6 +12569,22 @@ impl ChatWidget<'_> {
                 self.stream.insert_reasoning_section_break(&sink);
             }
             EventMsg::TaskStarted => {
+                // Defensive: if the previous turn never emitted TaskComplete (e.g. dropped event
+                // due to reconnect), `active_task_ids` can stay non-empty. That makes every
+                // subsequent Answer look like "mid-turn" forever and keeps the footer spinner
+                // stuck.
+                if !self.active_task_ids.is_empty() {
+                    tracing::warn!(
+                        "TaskStarted id={} while {} task(s) still active; assuming stale turn state",
+                        id,
+                        self.active_task_ids.len()
+                    );
+                    if let Some(last_id) = self.last_seen_answer_stream_id_in_turn.clone() {
+                        self.mid_turn_answer_ids_in_turn.remove(&last_id);
+                        self.maybe_clear_mid_turn_for_last_answer(&last_id);
+                    }
+                    self.active_task_ids.clear();
+                }
                 // Reset per-turn cleanup guard and clear any lingering running
                 // exec/tool cells if the prior turn never sent TaskComplete.
                 // This runs once per turn and is intentionally later than
@@ -12234,6 +12603,10 @@ impl ChatWidget<'_> {
                 // Reset stream headers for new turn
                 self.stream.reset_headers_for_new_turn();
                 self.stream_state.current_kind = None;
+                self.last_answer_stream_id_in_turn = None;
+                self.last_answer_history_id_in_turn = None;
+                self.last_seen_answer_stream_id_in_turn = None;
+                self.mid_turn_answer_ids_in_turn.clear();
                 // New turn: clear closed id guards
                 self.stream_state.closed_answer_ids.clear();
                 self.stream_state.closed_reasoning_ids.clear();
@@ -12248,6 +12621,7 @@ impl ChatWidget<'_> {
                 self.bottom_pane.set_task_running(true);
                 self.bottom_pane
                     .update_status_text("waiting for model".to_string());
+                self.ensure_spinner_for_activity("task-started");
                 tracing::info!("[order] EventMsg::TaskStarted id={}", id);
 
                 // Capture a baseline snapshot for this turn so background auto review only
@@ -12269,13 +12643,20 @@ impl ChatWidget<'_> {
                 self.clear_reconnecting();
                 let had_running_execs = !self.exec.running_commands.is_empty();
                 // Finalize any active streams
-                if self.stream.is_write_cycle_active() {
+                let finalizing_streams = self.stream.is_write_cycle_active();
+                if finalizing_streams {
                     // Finalize both streams via streaming facade
                     streaming::finalize(self, StreamKind::Reasoning, true);
                     streaming::finalize(self, StreamKind::Answer, true);
                 }
                 // Remove this id from the active set (it may be a sub‑agent)
                 self.active_task_ids.remove(&id);
+                if !finalizing_streams && self.active_task_ids.is_empty() {
+                    if let Some(last_id) = self.last_seen_answer_stream_id_in_turn.clone() {
+                        self.mid_turn_answer_ids_in_turn.remove(&last_id);
+                        self.maybe_clear_mid_turn_for_last_answer(&last_id);
+                    }
+                }
                 if self.auto_resolve_enabled() {
                     self.auto_resolve_on_task_complete(last_agent_message.clone());
                 }
@@ -12565,55 +12946,38 @@ impl ChatWidget<'_> {
                 self.defer_or_handle(
                     move |interrupts| interrupts.push_exec_begin(seq, ev, Some(om_begin)),
                     move |this| {
-                        // Finalize any active streaming sections, then establish
-                        // the running Exec cell before flushing queued interrupts.
-                        // This prevents an out‑of‑order ExecCommandEnd from being
-                        // applied first (which would fall back to showing call_id).
-                        this.finalize_active_stream();
-                        tracing::info!(
-                            "[order] ExecCommandBegin call_id={} seq={}",
-                            ev2.call_id,
-                            seq
-                        );
-                        this.handle_exec_begin_now(ev2.clone(), &om_begin_for_handler);
-                        // If an ExecEnd for this call_id arrived earlier and is waiting,
-                        // apply it immediately now that we have a matching Begin.
-                        if let Some((pending_end, order2, _ts)) = this
-                            .exec
-                            .pending_exec_ends
-                            .remove(&ExecCallId(ev2.call_id.clone()))
-                        {
-                            // Use the same order for the pending end
-                            this.handle_exec_end_now(pending_end, &order2);
-                        }
-                        this.flush_interrupt_queue();
+                        this.handle_exec_begin_ordered(ev2, om_begin_for_handler, seq);
                     },
                 );
             }
             EventMsg::ExecCommandOutputDelta(ev) => {
                 let call_id = ExecCallId(ev.call_id.clone());
+                if self.exec.running_commands.contains_key(&call_id) {
+                    self.ensure_spinner_for_activity("exec-output");
+                }
                 if let Some(running) = self.exec.running_commands.get_mut(&call_id) {
                     let chunk = String::from_utf8_lossy(&ev.chunk).to_string();
+                    let chunk_len = chunk.len();
                     let (stdout_chunk, stderr_chunk) = match ev.stream {
                         ExecOutputStream::Stdout => {
-                            let offset = running.stdout.len();
-                            running.stdout.push_str(&chunk);
+                            let offset = running.stdout_offset;
+                            running.stdout_offset = running.stdout_offset.saturating_add(chunk_len);
                             (
                                 Some(crate::history::state::ExecStreamChunk {
                                     offset,
-                                    content: chunk.clone(),
+                                    content: chunk,
                                 }),
                                 None,
                             )
                         }
                         ExecOutputStream::Stderr => {
-                            let offset = running.stderr.len();
-                            running.stderr.push_str(&chunk);
+                            let offset = running.stderr_offset;
+                            running.stderr_offset = running.stderr_offset.saturating_add(chunk_len);
                             (
                                 None,
                                 Some(crate::history::state::ExecStreamChunk {
                                     offset,
-                                    content: chunk.clone(),
+                                    content: chunk,
                                 }),
                             )
                         }
@@ -12733,7 +13097,6 @@ impl ChatWidget<'_> {
                     .clone()
                     .expect("missing OrderMeta for ExecCommandEnd");
                 let om_for_send = order_meta_end.clone();
-                let om_for_insert = order_meta_end.clone();
                 self.defer_or_handle(
                     move |interrupts| interrupts.push_exec_end(seq, ev, Some(om_for_send)),
                     move |this| {
@@ -12742,33 +13105,7 @@ impl ChatWidget<'_> {
                             ev2.call_id,
                             seq
                         );
-                        // If we already have a running command for this call_id, finish it now.
-                        let has_running = this
-                            .exec
-                            .running_commands
-                            .contains_key(&ExecCallId(ev2.call_id.clone()));
-                        if has_running {
-                            this.handle_exec_end_now(ev2, &order_meta_end);
-                        } else {
-                            // Otherwise, stash it briefly and schedule a flush in case the
-                            // matching Begin arrives shortly. This avoids rendering a fallback
-                            // "call_<id>" cell when events are slightly out of order.
-                            this.exec.pending_exec_ends.insert(
-                                ExecCallId(ev2.call_id.clone()),
-                                (ev2, om_for_insert, std::time::Instant::now()),
-                            );
-                            let tx = this.app_event_tx.clone();
-                            let fallback_tx = tx.clone();
-                            if thread_spawner::spawn_lightweight("exec-flush", move || {
-                                std::thread::sleep(std::time::Duration::from_millis(120));
-                                tx.send(crate::app_event::AppEvent::FlushPendingExecEnds);
-                            })
-                            .is_none()
-                            {
-                                let _ = fallback_tx
-                                    .send(crate::app_event::AppEvent::FlushPendingExecEnds);
-                            }
-                        }
+                        this.enqueue_or_handle_exec_end(ev2, order_meta_end);
                     },
                 );
             }
@@ -12792,6 +13129,7 @@ impl ChatWidget<'_> {
                             ev2.call_id,
                             seq
                         );
+                        this.ensure_spinner_for_activity("mcp-begin");
                         tools::mcp_begin(this, ev2, order_ok);
                     },
                 );
@@ -12818,11 +13156,13 @@ impl ChatWidget<'_> {
                     },
                 );
             }
+
             EventMsg::CustomToolCallBegin(CustomToolCallBeginEvent {
                 call_id,
                 tool_name,
                 parameters,
             }) => {
+                self.ensure_spinner_for_activity("tool-begin");
                 // Any custom tool invocation should fade out the welcome animation
                 for cell in &self.history_cells {
                     cell.trigger_fade();
@@ -12859,56 +13199,63 @@ impl ChatWidget<'_> {
                         return;
                     }
                 }
-                if tool_name == "wait" {
-                    if let Some(exec_call_id) =
-                        wait_exec_call_id_from_params(params_string.as_ref())
-                    {
-                        self.tools_state
-                            .running_wait_tools
-                            .insert(ToolCallId(call_id.clone()), exec_call_id.clone());
 
-                        let mut wait_update: Option<(
-                            HistoryId,
-                            Option<Duration>,
-                            Vec<(String, bool)>,
-                        )> = None;
-                        if let Some(running) = self.exec.running_commands.get_mut(&exec_call_id) {
-                            running.wait_active = true;
-                            running.wait_notes.clear();
-                            let history_id = running.history_id.or_else(|| {
-                                running.history_index.and_then(|idx| {
-                                    self.history_cell_ids
-                                        .get(idx)
-                                        .and_then(|slot| *slot)
-                                })
-                            });
-                            running.history_id = history_id;
-                            if let Some(id) = history_id {
-                                wait_update = Some((id, running.wait_total, running.wait_notes.clone()));
+                if tool_name == "wait" {
+
+                    if let Some(exec_call_id) = wait_exec_call_id_from_params(params_string.as_ref()) {
+                        // Only treat this as an exec-scoped wait when the target exec is still running.
+                        // Background waits (e.g., waiting on a shell call_id) also carry `call_id`.
+                        if self.exec.running_commands.contains_key(&exec_call_id) {
+                            self.tools_state
+                                .running_wait_tools
+                                .insert(ToolCallId(call_id.clone()), exec_call_id.clone());
+
+
+                            let mut wait_update: Option<(
+                                HistoryId,
+                                Option<Duration>,
+                                Vec<(String, bool)>,
+                            )> = None;
+                            if let Some(running) = self.exec.running_commands.get_mut(&exec_call_id) {
+                                running.wait_active = true;
+                                running.wait_notes.clear();
+                                let history_id = running.history_id.or_else(|| {
+                                    running.history_index.and_then(|idx| {
+                                        self.history_cell_ids
+                                            .get(idx)
+                                            .and_then(|slot| *slot)
+                                    })
+                                });
+                                running.history_id = history_id;
+                                if let Some(id) = history_id {
+                                    wait_update = Some((id, running.wait_total, running.wait_notes.clone()));
+                                }
                             }
+                            if let Some((history_id, total, notes)) = wait_update {
+                                let _ = self.update_exec_wait_state_with_pairs(history_id, total, true, &notes);
+                            }
+                            self.bottom_pane
+                                .update_status_text("waiting for command".to_string());
+                            self.invalidate_height_cache();
+                            self.request_redraw();
+                            return;
                         }
-                        if let Some((history_id, total, notes)) = wait_update {
-                            let _ = self.update_exec_wait_state_with_pairs(history_id, total, true, &notes);
-                        }
-                        self.bottom_pane
-                            .update_status_text("waiting for command".to_string());
-                        self.invalidate_height_cache();
-                        self.request_redraw();
-                        return;
                     }
                 }
+
                 if tool_name == "kill" {
-                    if let Some(exec_call_id) =
-                        wait_exec_call_id_from_params(params_string.as_ref())
-                    {
-                        self.tools_state
-                            .running_kill_tools
-                            .insert(ToolCallId(call_id.clone()), exec_call_id);
-                        self.bottom_pane
-                            .update_status_text("cancelling command".to_string());
-                        self.invalidate_height_cache();
-                        self.request_redraw();
-                        return;
+
+                    if let Some(exec_call_id) = wait_exec_call_id_from_params(params_string.as_ref()) {
+                        if self.exec.running_commands.contains_key(&exec_call_id) {
+                            self.tools_state
+                                .running_kill_tools
+                                .insert(ToolCallId(call_id.clone()), exec_call_id);
+                            self.bottom_pane
+                                .update_status_text("cancelling command".to_string());
+                            self.invalidate_height_cache();
+                            self.request_redraw();
+                            return;
+                        }
                     }
                 }
                 // Animated running cell with live timer and formatted args
@@ -13330,6 +13677,12 @@ impl ChatWidget<'_> {
                 debug!("received {len} custom prompts");
                 self.bottom_pane.set_custom_prompts(ev.custom_prompts);
             }
+            EventMsg::ListSkillsResponse(ev) => {
+                let len = ev.skills.len();
+                debug!("received {len} skills");
+                self.bottom_pane.set_skills(ev.skills);
+                self.refresh_settings_overview_rows();
+            }
             EventMsg::ShutdownComplete => {
                 self.push_background_tail("🟡 ShutdownComplete".to_string());
                 self.app_event_tx.send(AppEvent::ExitRequest);
@@ -13729,7 +14082,21 @@ impl ChatWidget<'_> {
         self.request_redraw();
     }
 
-    pub(crate) fn handle_demo_command(&mut self) {
+    pub(crate) fn handle_demo_command(&mut self, command_args: String) {
+        let trimmed_args = command_args.trim();
+        if !trimmed_args.is_empty() {
+            if self.handle_demo_auto_drive_card_background_palette(trimmed_args) {
+                self.request_redraw();
+                return;
+            }
+
+            self.history_push_plain_state(history_cell::new_warning_event(format!(
+                "demo: unknown args '{trimmed_args}' (try: /demo auto drive card)",
+            )));
+            self.request_redraw();
+            return;
+        }
+
         use ratatui::style::Modifier as RtModifier;
         use ratatui::style::Style as RtStyle;
         use ratatui::text::Span;
@@ -13911,6 +14278,7 @@ impl ChatWidget<'_> {
                 citations: Vec::new(),
                 metadata: None,
                 token_usage: None,
+                mid_turn: false,
                 created_at: SystemTime::now(),
             };
             let assistant_cell =
@@ -14165,6 +14533,96 @@ impl ChatWidget<'_> {
         self.schedule_auto_drive_card_celebration(Duration::from_secs(2), Some(celebration_message));
 
         self.request_redraw();
+    }
+
+    fn handle_demo_auto_drive_card_background_palette(&mut self, args: &str) -> bool {
+        if !Self::demo_command_is_auto_drive_card_backgrounds(args) {
+            return false;
+        }
+
+        let (r, g, b) = crate::colors::color_to_rgb(crate::colors::background());
+        let luminance = (0.2126 * r as f32 + 0.7152 * g as f32 + 0.0722 * b as f32) / 255.0;
+        let theme_label = if luminance < 0.5 { "dark" } else { "light" };
+
+        self.history_push_plain_state(history_cell::plain_message_state_from_lines(
+            vec![
+                ratatui::text::Line::from("Auto Drive card — ANSI-16 background palette"),
+                ratatui::text::Line::from(format!(
+                    "Theme context: {theme_label} (based on current /theme background)",
+                )),
+                ratatui::text::Line::from(
+                    "Tip: switch /theme (dark/light) and rerun to compare.".to_string(),
+                ),
+            ],
+            HistoryCellType::Notice,
+        ));
+
+        use ratatui::style::Color;
+        const PALETTE: &[(Color, &str)] = &[
+            (Color::Black, "Black"),
+            (Color::Red, "Red"),
+            (Color::Green, "Green"),
+            (Color::Yellow, "Yellow"),
+            (Color::Blue, "Blue"),
+            (Color::Magenta, "Magenta"),
+            (Color::Cyan, "Cyan"),
+            (Color::Gray, "Gray"),
+            (Color::DarkGray, "DarkGray"),
+            (Color::LightRed, "LightRed"),
+            (Color::LightGreen, "LightGreen"),
+            (Color::LightYellow, "LightYellow"),
+            (Color::LightBlue, "LightBlue"),
+            (Color::LightMagenta, "LightMagenta"),
+            (Color::LightCyan, "LightCyan"),
+            (Color::White, "White"),
+        ];
+
+        for (idx, (bg, name)) in PALETTE.iter().enumerate() {
+            let ordinal = idx + 1;
+            let goal = format!("ANSI-16 bg {ordinal:02}: {name}");
+            let mut auto_drive_card = history_cell::AutoDriveCardCell::new(Some(goal));
+            auto_drive_card.disable_reveal();
+            auto_drive_card.set_background_override(Some(*bg));
+            auto_drive_card.push_action(
+                "Queued smoke tests across agents",
+                AutoDriveActionKind::Info,
+            );
+            auto_drive_card.push_action(
+                "Warning: macOS shard flaked",
+                AutoDriveActionKind::Warning,
+            );
+            auto_drive_card.push_action(
+                "Action required: retry or pause run",
+                AutoDriveActionKind::Error,
+            );
+            auto_drive_card.set_status(AutoDriveStatus::Paused);
+            self.history_push(auto_drive_card);
+        }
+
+        true
+    }
+
+    fn demo_command_is_auto_drive_card_backgrounds(args: &str) -> bool {
+        let normalized = args.trim().to_ascii_lowercase();
+        let simplified = normalized.replace(['-', '_'], " ");
+        let tokens: std::collections::HashSet<&str> = simplified.split_whitespace().collect();
+        if tokens.is_empty() {
+            return false;
+        }
+
+        let wants_auto_drive = (tokens.contains("auto") && tokens.contains("drive"))
+            || tokens.contains("autodrive")
+            || tokens.contains("auto-drive");
+        let wants_card = tokens.contains("card") || tokens.contains("cards");
+        let wants_background = tokens.contains("bg")
+            || tokens.contains("background")
+            || tokens.contains("backgrounds")
+            || tokens.contains("color")
+            || tokens.contains("colors")
+            || tokens.contains("colour")
+            || tokens.contains("colours");
+
+        wants_auto_drive && (wants_card || wants_background)
     }
 
     fn add_perf_output(&mut self, text: String) {
@@ -14803,6 +15261,15 @@ impl ChatWidget<'_> {
             .map(UpdatesSettingsContent::new)
     }
 
+    fn build_accounts_settings_content(&self) -> AccountsSettingsContent {
+        let view = crate::bottom_pane::AccountSwitchSettingsView::new(
+            self.app_event_tx.clone(),
+            self.config.auto_switch_accounts_on_rate_limit,
+            self.config.api_key_fallback_on_all_accounts_limited,
+        );
+        AccountsSettingsContent::new(view)
+    }
+
     fn build_validation_settings_content(&mut self) -> ValidationSettingsContent {
         let groups = vec![
             (
@@ -15188,8 +15655,16 @@ impl ChatWidget<'_> {
             );
 
             if is_terminal {
-                let (has_findings, findings_count, summary) =
+                let (mut has_findings, findings_count, summary) =
                     Self::parse_agent_review_result(entry.result.as_deref());
+
+                // Avoid showing a warning when we didn't get an explicit findings list.
+                // Some heuristic parses can claim "issues" but provide a zero count; treat those as clean
+                // to keep the UI consistent with successful, issue-free reviews.
+                if has_findings && findings_count == 0 {
+                    has_findings = false;
+                }
+
                 let mut label = if has_findings {
                     let plural = if findings_count == 1 { "issue" } else { "issues" };
                     format!("Auto Review: {findings_count} {plural} found")
@@ -17173,6 +17648,7 @@ Have we met every part of this goal and is there no further work to do?"#
                         AutoDriveStatus::Failed,
                         AutoDriveActionKind::Error,
                     );
+                    self.auto_request_session_summary();
                 }
                 AutoControllerEffect::StopCompleted { summary, message } => {
                     if let Some(handle) = self.auto_handle.take() {
@@ -17201,6 +17677,7 @@ Have we met every part of this goal and is there no further work to do?"#
                     if ENABLE_WARP_STRIPES {
                         self.header_wave.set_enabled(false, Instant::now());
                     }
+                    self.auto_request_session_summary();
                 }
                 AutoControllerEffect::TransientPause {
                     attempt,
@@ -17911,6 +18388,14 @@ Have we met every part of this goal and is there no further work to do?"#
 
         if review_pending || auto_resolve_blocking {
             self.auto_state.on_begin_review(false);
+            #[cfg(any(test, feature = "test-helpers"))]
+            if !self.auto_state.awaiting_review() {
+                // Tests can run in parallel, so the shared review lock may already be held.
+                // Force the state into AwaitingReview so assertions stay deterministic.
+                self.auto_state.set_phase(AutoRunPhase::AwaitingReview {
+                    diagnostics_pending: false,
+                });
+            }
         } else {
             self.auto_state.on_complete_review();
         }
@@ -18391,7 +18876,7 @@ Have we met every part of this goal and is there no further work to do?"#
             "Diagnostics Disabled"
         };
 
-        let left = format!("{}  •  {}", agents_label, diagnostics_label);
+        let left = format!("• {agents_label}  • {diagnostics_label}");
 
         let hint = left.to_string();
         self.bottom_pane
@@ -20076,12 +20561,51 @@ Have we met every part of this goal and is there no further work to do?"#
     }
 
     fn available_model_presets(&self) -> Vec<ModelPreset> {
+        if let Some(presets) = self.remote_model_presets.as_ref() {
+            return presets.clone();
+        }
         let auth_mode = if self.config.using_chatgpt_auth {
             Some(McpAuthMode::ChatGPT)
         } else {
             Some(McpAuthMode::ApiKey)
         };
         builtin_model_presets(auth_mode)
+    }
+
+    pub(crate) fn update_model_presets(
+        &mut self,
+        presets: Vec<ModelPreset>,
+        default_model: Option<String>,
+    ) {
+        if presets.is_empty() {
+            return;
+        }
+
+        self.remote_model_presets = Some(presets.clone());
+        self.bottom_pane.update_model_selection_presets(presets);
+
+        if let Some(default_model) = default_model {
+            self.maybe_apply_remote_default_model(default_model);
+        }
+
+        self.request_redraw();
+    }
+
+    fn maybe_apply_remote_default_model(&mut self, default_model: String) {
+        if !self.allow_remote_default_at_startup {
+            return;
+        }
+        if self.chat_model_selected_explicitly {
+            return;
+        }
+        if self.config.model_explicit {
+            return;
+        }
+        if self.config.model.eq_ignore_ascii_case(&default_model) {
+            return;
+        }
+
+        self.apply_model_selection_inner(default_model, None, false, false);
     }
 
     fn preset_effort_for_model(preset: &ModelPreset) -> ReasoningEffort {
@@ -20366,9 +20890,68 @@ Have we met every part of this goal and is there no further work to do?"#
     }
 
     pub(crate) fn apply_model_selection(&mut self, model: String, effort: Option<ReasoningEffort>) {
+        self.apply_model_selection_inner(model, effort, true, true);
+    }
+
+    fn clamp_reasoning_for_model_from_presets(
+        model: &str,
+        requested: ReasoningEffort,
+        presets: &[ModelPreset],
+    ) -> ReasoningEffort {
+        fn rank(effort: ReasoningEffort) -> u8 {
+            match effort {
+                ReasoningEffort::Minimal => 0,
+                ReasoningEffort::Low => 1,
+                ReasoningEffort::Medium => 2,
+                ReasoningEffort::High => 3,
+                ReasoningEffort::XHigh => 4,
+                ReasoningEffort::None => 5,
+            }
+        }
+
+        let model_lower = model.to_ascii_lowercase();
+        let Some(preset) = presets.iter().find(|preset| {
+            preset.model.eq_ignore_ascii_case(&model_lower)
+                || preset.id.eq_ignore_ascii_case(&model_lower)
+                || preset.display_name.eq_ignore_ascii_case(&model_lower)
+        }) else {
+            return Self::clamp_reasoning_for_model(model, requested);
+        };
+
+        let supported: Vec<ReasoningEffort> = preset
+            .supported_reasoning_efforts
+            .iter()
+            .map(|opt| ReasoningEffort::from(opt.effort))
+            .collect();
+        if supported.iter().any(|effort| *effort == requested) {
+            return requested;
+        }
+
+        let requested_rank = rank(requested);
+        supported
+            .into_iter()
+            .min_by_key(|effort| {
+                let effort_rank = rank(*effort);
+                (requested_rank.abs_diff(effort_rank), u8::MAX - effort_rank)
+            })
+            .unwrap_or(requested)
+    }
+
+    fn apply_model_selection_inner(
+        &mut self,
+        model: String,
+        effort: Option<ReasoningEffort>,
+        mark_explicit: bool,
+        announce: bool,
+    ) {
         let trimmed = model.trim();
         if trimmed.is_empty() {
             return;
+        }
+
+        if mark_explicit {
+            self.chat_model_selected_explicitly = true;
+            self.config.model_explicit = true;
         }
 
         let mut updated = false;
@@ -20380,8 +20963,18 @@ Have we met every part of this goal and is there no further work to do?"#
             updated = true;
         }
 
-        let requested_effort = effort.unwrap_or(self.config.model_reasoning_effort);
-        let clamped_effort = Self::clamp_reasoning_for_model(trimmed, requested_effort);
+        if let Some(explicit) = effort {
+            if self.config.preferred_model_reasoning_effort != Some(explicit) {
+                self.config.preferred_model_reasoning_effort = Some(explicit);
+                updated = true;
+            }
+        }
+
+        let requested_effort = effort
+            .or(self.config.preferred_model_reasoning_effort)
+            .unwrap_or(self.config.model_reasoning_effort);
+        let presets = self.available_model_presets();
+        let clamped_effort = Self::clamp_reasoning_for_model_from_presets(trimmed, requested_effort, &presets);
 
         if self.config.model_reasoning_effort != clamped_effort {
             self.config.model_reasoning_effort = clamped_effort;
@@ -20392,7 +20985,9 @@ Have we met every part of this goal and is there no further work to do?"#
             let op = Op::ConfigureSession {
                 provider: self.config.model_provider.clone(),
                 model: self.config.model.clone(),
+                model_explicit: self.config.model_explicit,
                 model_reasoning_effort: self.config.model_reasoning_effort,
+                preferred_model_reasoning_effort: self.config.preferred_model_reasoning_effort,
                 model_reasoning_summary: self.config.model_reasoning_summary,
                 model_text_verbosity: self.config.model_text_verbosity,
                 user_instructions: self.config.user_instructions.clone(),
@@ -20403,6 +20998,7 @@ Have we met every part of this goal and is there no further work to do?"#
                 notify: self.config.notify.clone(),
                 cwd: self.config.cwd.clone(),
                 resume_path: None,
+                demo_developer_message: self.config.demo_developer_message.clone(),
             };
             self.submit_op(op);
 
@@ -20410,17 +21006,19 @@ Have we met every part of this goal and is there no further work to do?"#
             self.refresh_settings_overview_rows();
         }
 
-        let placement = self.ui_placement_for_now();
-        let state = history_cell::new_model_output(&self.config.model, self.config.model_reasoning_effort);
-        let cell = crate::history_cell::PlainHistoryCell::from_state(state.clone());
-        self.push_system_cell(
-            Box::new(cell),
-            placement,
-            Some("ui:model".to_string()),
-            None,
-            "system",
-            Some(HistoryDomainRecord::Plain(state)),
-        );
+        if announce {
+            let placement = self.ui_placement_for_now();
+            let state = history_cell::new_model_output(&self.config.model, self.config.model_reasoning_effort);
+            let cell = crate::history_cell::PlainHistoryCell::from_state(state.clone());
+            self.push_system_cell(
+                Box::new(cell),
+                placement,
+                Some("ui:model".to_string()),
+                None,
+                "system",
+                Some(HistoryDomainRecord::Plain(state)),
+            );
+        }
 
         self.request_redraw();
     }
@@ -21017,7 +21615,9 @@ Have we met every part of this goal and is there no further work to do?"#
         let op = Op::ConfigureSession {
             provider: self.config.model_provider.clone(),
             model: self.config.model.clone(),
+            model_explicit: self.config.model_explicit,
             model_reasoning_effort: self.config.model_reasoning_effort,
+            preferred_model_reasoning_effort: self.config.preferred_model_reasoning_effort,
             model_reasoning_summary: self.config.model_reasoning_summary,
             model_text_verbosity: self.config.model_text_verbosity,
             user_instructions: self.config.user_instructions.clone(),
@@ -21028,6 +21628,7 @@ Have we met every part of this goal and is there no further work to do?"#
             notify: self.config.notify.clone(),
             cwd: self.config.cwd.clone(),
             resume_path: None,
+            demo_developer_message: self.config.demo_developer_message.clone(),
         };
         self.submit_op(op);
     }
@@ -21040,7 +21641,9 @@ Have we met every part of this goal and is there no further work to do?"#
             let op = Op::ConfigureSession {
                 provider: self.config.model_provider.clone(),
                 model: self.config.model.clone(),
+                model_explicit: self.config.model_explicit,
                 model_reasoning_effort: self.config.model_reasoning_effort,
+                preferred_model_reasoning_effort: self.config.preferred_model_reasoning_effort,
                 model_reasoning_summary: self.config.model_reasoning_summary,
                 model_text_verbosity: self.config.model_text_verbosity,
                 user_instructions: self.config.user_instructions.clone(),
@@ -21051,6 +21654,7 @@ Have we met every part of this goal and is there no further work to do?"#
                 notify: self.config.notify.clone(),
                 cwd: self.config.cwd.clone(),
                 resume_path: None,
+                demo_developer_message: self.config.demo_developer_message.clone(),
             };
             self.submit_op(op);
         }
@@ -21243,7 +21847,9 @@ Have we met every part of this goal and is there no further work to do?"#
             let op = Op::ConfigureSession {
                 provider: self.config.model_provider.clone(),
                 model: self.config.model.clone(),
+                model_explicit: self.config.model_explicit,
                 model_reasoning_effort: self.config.model_reasoning_effort,
+                preferred_model_reasoning_effort: self.config.preferred_model_reasoning_effort,
                 model_reasoning_summary: self.config.model_reasoning_summary,
                 model_text_verbosity: self.config.model_text_verbosity,
                 user_instructions: self.config.user_instructions.clone(),
@@ -21254,6 +21860,7 @@ Have we met every part of this goal and is there no further work to do?"#
                 notify: self.config.notify.clone(),
                 cwd: self.config.cwd.clone(),
                 resume_path: None,
+                demo_developer_message: self.config.demo_developer_message.clone(),
             };
             let _ = self.code_op_tx.send(op);
         } else {
@@ -21377,13 +21984,16 @@ Have we met every part of this goal and is there no further work to do?"#
         }
 
         // Update the config
+        self.config.preferred_model_reasoning_effort = Some(new_effort);
         self.config.model_reasoning_effort = clamped_effort;
 
         // Send ConfigureSession op to update the backend
         let op = Op::ConfigureSession {
             provider: self.config.model_provider.clone(),
             model: self.config.model.clone(),
+            model_explicit: self.config.model_explicit,
             model_reasoning_effort: clamped_effort,
+            preferred_model_reasoning_effort: self.config.preferred_model_reasoning_effort,
             model_reasoning_summary: self.config.model_reasoning_summary,
             model_text_verbosity: self.config.model_text_verbosity,
             user_instructions: self.config.user_instructions.clone(),
@@ -21394,6 +22004,7 @@ Have we met every part of this goal and is there no further work to do?"#
             notify: self.config.notify.clone(),
             cwd: self.config.cwd.clone(),
             resume_path: None,
+            demo_developer_message: self.config.demo_developer_message.clone(),
         };
 
         self.submit_op(op);
@@ -21421,7 +22032,9 @@ Have we met every part of this goal and is there no further work to do?"#
         let op = Op::ConfigureSession {
             provider: self.config.model_provider.clone(),
             model: self.config.model.clone(),
+            model_explicit: self.config.model_explicit,
             model_reasoning_effort: self.config.model_reasoning_effort,
+            preferred_model_reasoning_effort: self.config.preferred_model_reasoning_effort,
             model_reasoning_summary: self.config.model_reasoning_summary,
             model_text_verbosity: new_verbosity,
             user_instructions: self.config.user_instructions.clone(),
@@ -21432,6 +22045,7 @@ Have we met every part of this goal and is there no further work to do?"#
             notify: self.config.notify.clone(),
             cwd: self.config.cwd.clone(),
             resume_path: None,
+            demo_developer_message: self.config.demo_developer_message.clone(),
         };
 
         self.submit_op(op);
@@ -21487,6 +22101,96 @@ Have we met every part of this goal and is there no further work to do?"#
         self.request_redraw();
     }
 
+    pub(crate) fn set_auto_switch_accounts_on_rate_limit(&mut self, enabled: bool) {
+        if self.config.auto_switch_accounts_on_rate_limit == enabled {
+            return;
+        }
+        self.config.auto_switch_accounts_on_rate_limit = enabled;
+
+        let code_home = self.config.code_home.clone();
+        let profile = self.config.active_profile.clone();
+        tokio::spawn(async move {
+            if let Err(err) = code_core::config_edit::persist_overrides(
+                &code_home,
+                profile.as_deref(),
+                &[(&["auto_switch_accounts_on_rate_limit"], if enabled { "true" } else { "false" })],
+            )
+            .await
+            {
+                tracing::warn!("failed to persist account auto-switch setting: {err}");
+            }
+        });
+
+        let notice = if enabled {
+            "Auto-switch accounts enabled"
+        } else {
+            "Auto-switch accounts disabled"
+        };
+        self.bottom_pane.flash_footer_notice(notice.to_string());
+
+        let should_refresh_accounts = matches!(
+            self.settings
+                .overlay
+                .as_ref()
+                .map(|overlay| overlay.active_section()),
+            Some(SettingsSection::Accounts)
+        );
+        if should_refresh_accounts {
+            let content = self.build_accounts_settings_content();
+            if let Some(overlay) = self.settings.overlay.as_mut() {
+                overlay.set_accounts_content(content);
+            }
+        }
+
+        self.refresh_settings_overview_rows();
+        self.request_redraw();
+    }
+
+    pub(crate) fn set_api_key_fallback_on_all_accounts_limited(&mut self, enabled: bool) {
+        if self.config.api_key_fallback_on_all_accounts_limited == enabled {
+            return;
+        }
+        self.config.api_key_fallback_on_all_accounts_limited = enabled;
+
+        let code_home = self.config.code_home.clone();
+        let profile = self.config.active_profile.clone();
+        tokio::spawn(async move {
+            if let Err(err) = code_core::config_edit::persist_overrides(
+                &code_home,
+                profile.as_deref(),
+                &[(&["api_key_fallback_on_all_accounts_limited"], if enabled { "true" } else { "false" })],
+            )
+            .await
+            {
+                tracing::warn!("failed to persist API key fallback setting: {err}");
+            }
+        });
+
+        let notice = if enabled {
+            "API key fallback enabled"
+        } else {
+            "API key fallback disabled"
+        };
+        self.bottom_pane.flash_footer_notice(notice.to_string());
+
+        let should_refresh_accounts = matches!(
+            self.settings
+                .overlay
+                .as_ref()
+                .map(|overlay| overlay.active_section()),
+            Some(SettingsSection::Accounts)
+        );
+        if should_refresh_accounts {
+            let content = self.build_accounts_settings_content();
+            if let Some(overlay) = self.settings.overlay.as_mut() {
+                overlay.set_accounts_content(content);
+            }
+        }
+
+        self.refresh_settings_overview_rows();
+        self.request_redraw();
+    }
+
     /// Forward file-search results to the bottom pane.
     pub(crate) fn apply_file_search_result(&mut self, query: String, matches: Vec<FileMatch>) {
         self.bottom_pane.on_file_search_result(query, matches);
@@ -21520,8 +22224,10 @@ Have we met every part of this goal and is there no further work to do?"#
         if let Some(update_content) = self.build_updates_settings_content() {
             overlay.set_updates_content(update_content);
         }
+        overlay.set_accounts_content(self.build_accounts_settings_content());
         overlay.set_notifications_content(self.build_notifications_settings_content());
         overlay.set_prompts_content(self.build_prompts_settings_content());
+        overlay.set_skills_content(self.build_skills_settings_content());
         if let Some(mcp_content) = self.build_mcp_settings_content() {
             overlay.set_mcp_content(mcp_content);
         }
@@ -21603,6 +22309,12 @@ Have we met every part of this goal and is there no further work to do?"#
         let prompts = self.bottom_pane.custom_prompts().to_vec();
         let view = PromptsSettingsView::new(prompts, self.app_event_tx.clone());
         PromptsSettingsContent::new(view)
+    }
+
+    fn build_skills_settings_content(&mut self) -> SkillsSettingsContent {
+        let skills = self.bottom_pane.skills().to_vec();
+        let view = SkillsSettingsView::new(skills, self.app_event_tx.clone());
+        SkillsSettingsContent::new(view)
     }
 
     fn build_chrome_settings_content(&self, port: Option<u16>) -> ChromeSettingsContent {
@@ -21888,8 +22600,10 @@ Have we met every part of this goal and is there no further work to do?"#
                     SettingsSection::Theme => self.settings_summary_theme(),
                     SettingsSection::Planning => self.settings_summary_planning(),
                     SettingsSection::Updates => self.settings_summary_updates(),
+                    SettingsSection::Accounts => self.settings_summary_accounts(),
                     SettingsSection::Agents => self.settings_summary_agents(),
                     SettingsSection::Prompts => self.settings_summary_prompts(),
+                    SettingsSection::Skills => self.settings_summary_skills(),
                     SettingsSection::AutoDrive => self.settings_summary_auto_drive(),
                     SettingsSection::Review => self.settings_summary_review(),
                     SettingsSection::Validation => self.settings_summary_validation(),
@@ -21968,6 +22682,22 @@ Have we met every part of this goal and is there no further work to do?"#
             parts.push(format!("Latest available: {}", latest));
         }
         Some(parts.join(" · "))
+    }
+
+    fn settings_summary_accounts(&self) -> Option<String> {
+        let auto_switch = if self.config.auto_switch_accounts_on_rate_limit {
+            "Auto-switch: On"
+        } else {
+            "Auto-switch: Off"
+        };
+
+        let api_key_fallback = if self.config.api_key_fallback_on_all_accounts_limited {
+            "API key fallback: On"
+        } else {
+            "API key fallback: Off"
+        };
+
+        Some(format!("{auto_switch} · {api_key_fallback}"))
     }
 
     fn settings_summary_agents(&self) -> Option<String> {
@@ -22112,6 +22842,11 @@ Have we met every part of this goal and is there no further work to do?"#
     fn settings_summary_prompts(&self) -> Option<String> {
         let count = self.bottom_pane.custom_prompts().len();
         Some(format!("Prompts enabled: {}", count))
+    }
+
+    fn settings_summary_skills(&self) -> Option<String> {
+        let count = self.bottom_pane.skills().len();
+        Some(format!("Skills loaded: {count}"))
     }
 
     fn refresh_settings_overview_rows(&mut self) {
@@ -22260,7 +22995,9 @@ Have we met every part of this goal and is there no further work to do?"#
             | SettingsSection::AutoDrive
             | SettingsSection::Mcp
             | SettingsSection::Notifications
-            | SettingsSection::Prompts => false,
+            | SettingsSection::Prompts
+            | SettingsSection::Accounts
+            | SettingsSection::Skills => false,
             SettingsSection::Agents => {
                 self.show_agents_overview_ui();
                 false
@@ -22470,7 +23207,9 @@ Have we met every part of this goal and is there no further work to do?"#
         let op = Op::ConfigureSession {
             provider: self.config.model_provider.clone(),
             model: self.config.model.clone(),
+            model_explicit: self.config.model_explicit,
             model_reasoning_effort: self.config.model_reasoning_effort,
+            preferred_model_reasoning_effort: self.config.preferred_model_reasoning_effort,
             model_reasoning_summary: self.config.model_reasoning_summary,
             model_text_verbosity: self.config.model_text_verbosity,
             user_instructions: self.config.user_instructions.clone(),
@@ -22481,6 +23220,7 @@ Have we met every part of this goal and is there no further work to do?"#
             notify: self.config.notify.clone(),
             cwd: self.config.cwd.clone(),
             resume_path: None,
+            demo_developer_message: self.config.demo_developer_message.clone(),
         };
         self.submit_op(op);
 
@@ -22811,9 +23551,14 @@ Have we met every part of this goal and is there no further work to do?"#
             #[cfg(test)]
             {
                 let tx = self.app_event_tx.clone();
-                std::thread::spawn(move || {
-                    tx.send(event);
-                });
+                if let Err(err) = std::thread::Builder::new()
+                    .name("delayed-app-event".to_string())
+                    .spawn(move || {
+                        tx.send(event);
+                    })
+                {
+                    tracing::warn!("failed to spawn delayed app event: {err}");
+                }
             }
             #[cfg(not(test))]
             {
@@ -23039,12 +23784,34 @@ Have we met every part of this goal and is there no further work to do?"#
 
     /// True when the only ongoing activity is a wait/kill tool (no exec/stream/agents/tasks),
     /// meaning we can safely unlock the composer without cancelling the work.
+    ///
+    /// Historically this returned false whenever any exec was running, which caused user input
+    /// submitted during a `wait` tool to be queued instead of interrupting the wait. That meant
+    /// the core never received `Op::UserInput`, so waits could not be cancelled mid-flight.
+    /// We treat execs that are only being observed by a wait tool as "wait-only" so input can
+    /// flow through immediately and interrupt the wait.
     fn wait_only_activity(&self) -> bool {
         if !self.wait_running() {
             return false;
         }
 
-        self.exec.running_commands.is_empty()
+        // Consider execs "wait-only" when every running command is being waited on and marked
+        // as such. Any other exec activity keeps the composer blocked.
+        let execs_wait_only = self.exec.running_commands.is_empty()
+            || self
+                .exec
+                .running_commands
+                .iter()
+                .all(|(id, cmd)| {
+                    cmd.wait_active
+                        && self
+                            .tools_state
+                            .running_wait_tools
+                            .values()
+                            .any(|wait_id| wait_id == id)
+                });
+
+        execs_wait_only
             && self.tools_state.running_custom_tools.is_empty()
             && self.tools_state.web_search_sessions.is_empty()
             && !self.stream.is_write_cycle_active()
@@ -23588,6 +24355,106 @@ Have we met every part of this goal and is there no further work to do?"#
         }
     }
 
+    fn note_answer_stream_seen(&mut self, new_stream_id: &str) {
+        let prev = self.last_seen_answer_stream_id_in_turn.clone();
+        if let Some(prev) = prev {
+            if prev != new_stream_id {
+                self.mid_turn_answer_ids_in_turn.insert(prev.clone());
+                self.maybe_mark_finalized_answer_mid_turn(&prev);
+            }
+        }
+        self.last_seen_answer_stream_id_in_turn = Some(new_stream_id.to_string());
+    }
+
+    fn maybe_mark_finalized_answer_mid_turn(&mut self, prev_stream_id: &str) {
+        let Some(last_final_id) = self.last_answer_stream_id_in_turn.as_deref() else {
+            return;
+        };
+        if last_final_id != prev_stream_id {
+            return;
+        }
+        let Some(prev_history_id) = self.last_answer_history_id_in_turn else {
+            return;
+        };
+
+        let mut changed = false;
+        if let Some(idx) = self
+            .history_cell_ids
+            .iter()
+            .rposition(|hid| *hid == Some(prev_history_id))
+        {
+            if let Some(cell) = self.history_cells[idx]
+                .as_any_mut()
+                .downcast_mut::<history_cell::AssistantMarkdownCell>()
+            {
+                if !cell.state().mid_turn {
+                    cell.set_mid_turn(true);
+                    changed = true;
+                }
+            }
+        }
+
+        if let Some(record) = self.history_state.record_mut(prev_history_id) {
+            if let HistoryRecord::AssistantMessage(state) = record {
+                if !state.mid_turn {
+                    state.mid_turn = true;
+                    changed = true;
+                }
+            }
+        }
+
+        if changed {
+            self.mark_history_dirty();
+            self.request_redraw();
+        }
+    }
+
+    fn apply_mid_turn_flag(&self, stream_id: Option<&str>, state: &mut AssistantMessageState) {
+        if let Some(sid) = stream_id {
+            if self.mid_turn_answer_ids_in_turn.contains(sid) {
+                state.mid_turn = true;
+            }
+        }
+    }
+
+    fn maybe_clear_mid_turn_for_last_answer(&mut self, stream_id: &str) {
+        let Some(last_history_id) = self.last_answer_history_id_in_turn else {
+            return;
+        };
+
+        let mut changed = false;
+
+        if let Some(record) = self.history_state.record_mut(last_history_id) {
+            if let HistoryRecord::AssistantMessage(state) = record {
+                if state.stream_id.as_deref() == Some(stream_id) && state.mid_turn {
+                    state.mid_turn = false;
+                    changed = true;
+                }
+            }
+        }
+
+        if let Some(idx) = self
+            .history_cell_ids
+            .iter()
+            .rposition(|hid| *hid == Some(last_history_id))
+        {
+            if let Some(cell) = self.history_cells[idx]
+                .as_any_mut()
+                .downcast_mut::<history_cell::AssistantMarkdownCell>()
+            {
+                if cell.stream_id() == Some(stream_id) && cell.state().mid_turn {
+                    cell.set_mid_turn(false);
+                    changed = true;
+                }
+            }
+        }
+
+        if changed {
+            self.mark_history_dirty();
+            self.request_redraw();
+        }
+    }
+
     fn finalize_answer_stream_state(
         &mut self,
         stream_id: Option<&str>,
@@ -23718,7 +24585,7 @@ Have we met every part of this goal and is there no further work to do?"#
                 }
             }
         }
-        if self.is_review_flow_active() {
+            if self.is_review_flow_active() {
             if let Some(ref want) = id {
                 if !self
                     .stream_state
@@ -23730,7 +24597,7 @@ Have we met every part of this goal and is there no further work to do?"#
                         want
                     );
                     self.last_assistant_message = Some(final_source.clone());
-                    self.stop_spinner();
+                    self.maybe_hide_spinner();
                     return;
                 }
                 if let Some(idx) = self.history_cells.iter().rposition(|c| {
@@ -23750,7 +24617,8 @@ Have we met every part of this goal and is there no further work to do?"#
                 self.history_remove_at(idx);
             }
             self.last_assistant_message = Some(final_source.clone());
-            let state = self.finalize_answer_stream_state(id.as_deref(), &final_source);
+            let mut state = self.finalize_answer_stream_state(id.as_deref(), &final_source);
+            self.apply_mid_turn_flag(id.as_deref(), &mut state);
             let history_id = state.id;
             let mut key = match id.as_deref() {
                 Some(rid) => self.try_stream_order_key(StreamKind::Answer, rid).unwrap_or_else(|| {
@@ -23778,9 +24646,11 @@ Have we met every part of this goal and is there no further work to do?"#
 
             let cell = history_cell::AssistantMarkdownCell::from_state(state, &self.config);
             self.history_insert_existing_record(Box::new(cell), key, "answer-review", history_id);
+            self.last_answer_stream_id_in_turn = id.clone();
+            self.last_answer_history_id_in_turn = Some(history_id);
             // Advance Auto Drive after the assistant message has been finalized.
             self.auto_on_assistant_final();
-            self.stop_spinner();
+            self.maybe_hide_spinner();
             return;
         }
         // Debug: list last few history cell kinds so we can see what's present
@@ -23854,7 +24724,7 @@ Have we met every part of this goal and is there no further work to do?"#
                                 "InsertFinalAnswer: dropping duplicate final for id={}",
                                 want
                             );
-                            self.stop_spinner();
+                            self.maybe_hide_spinner();
                             return;
                         }
                     }
@@ -23901,7 +24771,9 @@ Have we met every part of this goal and is there no further work to do?"#
                 "final-answer: replacing StreamingContentCell at idx={} by id match",
                 idx
             );
-            let state = self.finalize_answer_stream_state(id.as_deref(), &final_source);
+            let mut state = self.finalize_answer_stream_state(id.as_deref(), &final_source);
+            self.apply_mid_turn_flag(id.as_deref(), &mut state);
+            let history_id = state.id;
             let cell = history_cell::AssistantMarkdownCell::from_state(state, &self.config);
             self.history_replace_at(idx, Box::new(cell));
             if let Some(ref want) = id {
@@ -23910,9 +24782,11 @@ Have we met every part of this goal and is there no further work to do?"#
                     .insert(StreamId(want.clone()));
             }
             self.autoscroll_if_near_bottom();
+            self.last_answer_stream_id_in_turn = id.clone();
+            self.last_answer_history_id_in_turn = Some(history_id);
             // Final cell committed via replacement; now advance Auto Drive.
             self.auto_on_assistant_final();
-            self.stop_spinner();
+            self.maybe_hide_spinner();
             return;
         }
 
@@ -23934,17 +24808,21 @@ Have we met every part of this goal and is there no further work to do?"#
                     "final-answer: replacing existing AssistantMarkdownCell at idx={} by id match",
                     idx
                 );
-                let state =
+                let mut state =
                     self.finalize_answer_stream_state(id.as_deref(), &final_source);
+                self.apply_mid_turn_flag(id.as_deref(), &mut state);
+                let history_id = state.id;
                 let cell = history_cell::AssistantMarkdownCell::from_state(state, &self.config);
                 self.history_replace_at(idx, Box::new(cell));
                 self.stream_state
                     .closed_answer_ids
                     .insert(StreamId(want.clone()));
                 self.autoscroll_if_near_bottom();
+                self.last_answer_stream_id_in_turn = id.clone();
+                self.last_answer_history_id_in_turn = Some(history_id);
                 // Final cell replaced in-place; advance Auto Drive now.
                 self.auto_on_assistant_final();
-                self.stop_spinner();
+                self.maybe_hide_spinner();
                 return;
             }
         }
@@ -23981,14 +24859,18 @@ Have we met every part of this goal and is there no further work to do?"#
                 tracing::debug!(
                     "final-answer: replacing tail AssistantMarkdownCell via heuristic identical/expansion"
                 );
-                let state =
+                let mut state =
                     self.finalize_answer_stream_state(id.as_deref(), &final_source);
+                self.apply_mid_turn_flag(id.as_deref(), &mut state);
+                let history_id = state.id;
                 let cell = history_cell::AssistantMarkdownCell::from_state(state, &self.config);
                 self.history_replace_at(idx, Box::new(cell));
                 self.autoscroll_if_near_bottom();
+                self.last_answer_stream_id_in_turn = id.clone();
+                self.last_answer_history_id_in_turn = Some(history_id);
                 // Final assistant content revised; advance Auto Drive now.
                 self.auto_on_assistant_final();
-                self.stop_spinner();
+                self.maybe_hide_spinner();
                 return;
             }
         }
@@ -24030,18 +24912,27 @@ Have we met every part of this goal and is there no further work to do?"#
             id,
             Self::debug_fmt_order_key(key)
         );
-        let state = self.finalize_answer_stream_state(id.as_deref(), &final_source);
+        let mut state = self.finalize_answer_stream_state(id.as_deref(), &final_source);
+        self.apply_mid_turn_flag(id.as_deref(), &mut state);
+        let history_id = state.id;
         let cell = history_cell::AssistantMarkdownCell::from_state(state, &self.config);
-        let _ = self.history_insert_with_key_global(Box::new(cell), key);
+        self.history_insert_existing_record(
+            Box::new(cell),
+            key,
+            "answer-final",
+            history_id,
+        );
         if let Some(ref want) = id {
             self.stream_state
                 .closed_answer_ids
                 .insert(StreamId(want.clone()));
         }
+        self.last_answer_stream_id_in_turn = id.clone();
+        self.last_answer_history_id_in_turn = Some(history_id);
         // Ordered insert completed; advance Auto Drive now that the assistant
         // message is present in history.
         self.auto_on_assistant_final();
-        self.stop_spinner();
+        self.maybe_hide_spinner();
     }
 
     // Assign or fetch a stable sequence for a stream kind+id within its originating turn
@@ -24249,7 +25140,9 @@ Have we met every part of this goal and is there no further work to do?"#
                 .stdout(Stdio::null())
                 .stderr(Stdio::null())
                 .stdin(Stdio::null());
-            let _ = cmd.spawn();
+            if let Err(err) = spawn_std_command_with_retry(&mut cmd) {
+                tracing::warn!("failed to launch Chrome with profile: {err}");
+            }
         }
 
         #[cfg(target_os = "linux")]
@@ -24272,7 +25165,9 @@ Have we met every part of this goal and is there no further work to do?"#
                 .stdout(Stdio::null())
                 .stderr(Stdio::null())
                 .stdin(Stdio::null());
-            let _ = cmd.spawn();
+            if let Err(err) = spawn_std_command_with_retry(&mut cmd) {
+                tracing::warn!("failed to launch Chrome with profile: {err}");
+            }
         }
 
         #[cfg(target_os = "windows")]
@@ -24306,7 +25201,9 @@ Have we met every part of this goal and is there no further work to do?"#
                         .stdout(Stdio::null())
                         .stderr(Stdio::null())
                         .stdin(Stdio::null());
-                    let _ = cmd.spawn();
+                    if let Err(err) = spawn_std_command_with_retry(&mut cmd) {
+                        tracing::warn!("failed to launch Chrome with profile: {err}");
+                    }
                     break;
                 }
             }
@@ -24890,7 +25787,9 @@ Have we met every part of this goal and is there no further work to do?"#
                 .stdout(Stdio::null())
                 .stderr(Stdio::null())
                 .stdin(Stdio::null());
-            let _ = cmd.spawn();
+            if let Err(err) = spawn_std_command_with_retry(&mut cmd) {
+                tracing::warn!("failed to launch Chrome with temp profile: {err}");
+            }
         }
 
         #[cfg(target_os = "linux")]
@@ -24914,7 +25813,9 @@ Have we met every part of this goal and is there no further work to do?"#
                 .stdout(Stdio::null())
                 .stderr(Stdio::null())
                 .stdin(Stdio::null());
-            let _ = cmd.spawn();
+            if let Err(err) = spawn_std_command_with_retry(&mut cmd) {
+                tracing::warn!("failed to launch Chrome with temp profile: {err}");
+            }
         }
 
         #[cfg(target_os = "windows")]
@@ -24949,7 +25850,9 @@ Have we met every part of this goal and is there no further work to do?"#
                         .stdout(Stdio::null())
                         .stderr(Stdio::null())
                         .stdin(Stdio::null());
-                    let _ = cmd.spawn();
+                    if let Err(err) = spawn_std_command_with_retry(&mut cmd) {
+                        tracing::warn!("failed to launch Chrome with temp profile: {err}");
+                    }
                     break;
                 }
             }
@@ -26385,6 +27288,18 @@ Have we met every part of this goal and is there no further work to do?"#
         agent_text: String,
         preface: String,
     ) {
+        self.submit_hidden_text_message_with_preface_and_notice(agent_text, preface, false);
+    }
+
+    /// Submit a hidden message with optional notice surfacing.
+    /// When `surface_notice` is true, the injected text is also shown in history
+    /// as a developer-style notice; when false, the injection is silent.
+    pub(crate) fn submit_hidden_text_message_with_preface_and_notice(
+        &mut self,
+        agent_text: String,
+        preface: String,
+        surface_notice: bool,
+    ) {
         if agent_text.trim().is_empty() && preface.trim().is_empty() {
             return;
         }
@@ -26405,16 +27320,18 @@ Have we met every part of this goal and is there no further work to do?"#
             return;
         }
 
-        // Surface immediately in the TUI as a notice (developer-style message).
-        let mut notice_lines = Vec::new();
-        if !preface_cache.trim().is_empty() {
-            notice_lines.push(preface_cache.trim().to_string());
-        }
-        if !agent_cache.trim().is_empty() {
-            notice_lines.push(agent_cache.trim().to_string());
-        }
-        if !notice_lines.is_empty() {
-            self.history_push_plain_paragraphs(PlainMessageKind::Notice, notice_lines);
+        if surface_notice {
+            // Surface immediately in the TUI as a notice (developer-style message).
+            let mut notice_lines = Vec::new();
+            if !preface_cache.trim().is_empty() {
+                notice_lines.push(preface_cache.trim().to_string());
+            }
+            if !agent_cache.trim().is_empty() {
+                notice_lines.push(agent_cache.trim().to_string());
+            }
+            if !notice_lines.is_empty() {
+                self.history_push_plain_paragraphs(PlainMessageKind::Notice, notice_lines);
+            }
         }
 
         let msg = UserMessage {
@@ -26754,6 +27671,12 @@ Have we met every part of this goal and is there no further work to do?"#
             None => self.config.cwd.display().to_string(),
         };
 
+        let cwd_short_str = cwd_str
+            .rsplit(|c| c == '/' || c == '\\')
+            .find(|segment| !segment.is_empty())
+            .unwrap_or(cwd_str.as_str())
+            .to_string();
+
         // Build status line spans with dynamic elision based on width.
         // Removal priority when space is tight:
         //   1) Reasoning level
@@ -26766,11 +27689,12 @@ Have we met every part of this goal and is there no further work to do?"#
         let build_spans = |include_reasoning: bool,
                            include_model: bool,
                            include_branch: bool,
-                           include_dir: bool| {
+                           include_dir: bool,
+                           dir_display: &str| {
             let mut spans: Vec<Span> = Vec::new();
             // Title follows theme text color
             spans.push(Span::styled(
-                "Code",
+                "Every Code",
                 Style::default()
                     .fg(crate::colors::text())
                     .add_modifier(Modifier::BOLD),
@@ -26816,7 +27740,7 @@ Have we met every part of this goal and is there no further work to do?"#
                     Style::default().fg(crate::colors::text_dim()),
                 ));
                 spans.push(Span::styled(
-                    cwd_str.clone(),
+                    dir_display.to_string(),
                     Style::default().fg(crate::colors::info()),
                 ));
             }
@@ -26845,15 +27769,18 @@ Have we met every part of this goal and is there no further work to do?"#
 
         // Start with all items in production; tests can opt-in to a minimal header via env flag.
         let minimal_header = std::env::var_os("CODEX_TUI_FORCE_MINIMAL_HEADER").is_some();
+        let demo_mode = self.config.demo_developer_message.is_some();
         let mut include_reasoning = !minimal_header;
         let mut include_model = !minimal_header;
         let mut include_branch = !minimal_header && branch_opt.is_some();
-        let mut include_dir = !minimal_header;
+        let mut include_dir = !minimal_header && !demo_mode;
+        let mut use_short_dir = false;
         let mut status_spans = build_spans(
             include_reasoning,
             include_model,
             include_branch,
             include_dir,
+            &cwd_str,
         );
 
         // Now recompute exact available width inside the border + padding before measuring
@@ -26873,6 +27800,17 @@ Have we met every part of this goal and is there no further work to do?"#
         let measure =
             |spans: &Vec<Span>| -> usize { spans.iter().map(|s| s.content.chars().count()).sum() };
 
+        if include_dir && !use_short_dir && measure(&status_spans) > inner_width {
+            use_short_dir = true;
+            status_spans = build_spans(
+                include_reasoning,
+                include_model,
+                include_branch,
+                include_dir,
+                &cwd_short_str,
+            );
+        }
+
         // Elide items in priority order until content fits
         while measure(&status_spans) > inner_width {
             if include_reasoning {
@@ -26891,6 +27829,7 @@ Have we met every part of this goal and is there no further work to do?"#
                 include_model,
                 include_branch,
                 include_dir,
+                if use_short_dir { &cwd_short_str } else { &cwd_str },
             );
         }
 
@@ -27107,46 +28046,39 @@ async fn run_background_review(
     app_event_tx: AppEventSender,
     base_snapshot: Option<GhostCommit>,
     turn_context: Option<String>,
+    prefer_fallback: bool,
 ) {
     // Best-effort: clean up any stale lock left by a cancelled review process.
     let _ = code_core::review_coord::clear_stale_lock_if_dead(Some(&config.cwd));
 
-    // Share the same global review lock as `/review` so we never collide with
-    // foreground/manual runs. This prevents spawning a background agent that
-    // immediately exits with "already running".
-    let review_guard = match try_acquire_lock("review", &config.cwd) {
-        Ok(Some(g)) => g,
-        Ok(None) => {
+    // Prevent duplicate auto-reviews within this process: if any AutoReview agent
+    // is already pending/running, bail early with a benign notice.
+    {
+        let mgr = code_core::AGENT_MANAGER.read().await;
+        let busy = mgr
+            .list_agents(None, Some("auto-review".to_string()), false)
+            .into_iter()
+            .any(|agent| {
+                let status = format!("{:?}", agent.status).to_ascii_lowercase();
+                status == "running" || status == "pending"
+            });
+        if busy {
             app_event_tx.send(AppEvent::BackgroundReviewFinished {
                 worktree_path: std::path::PathBuf::new(),
                 branch: String::new(),
                 has_findings: false,
                 findings: 0,
-                summary: Some("Auto review skipped: another review is already running.".to_string()),
+                summary: Some("Auto review skipped: another auto review is already running.".to_string()),
                 error: None,
                 agent_id: None,
                 snapshot: None,
             });
             return;
         }
-        Err(err) => {
-            app_event_tx.send(AppEvent::BackgroundReviewFinished {
-                worktree_path: std::path::PathBuf::new(),
-                branch: String::new(),
-                has_findings: false,
-                findings: 0,
-                summary: None,
-                error: Some(format!("could not acquire review lock: {err}")),
-                agent_id: None,
-                snapshot: None,
-            });
-            return;
-        }
-    };
+    }
 
     let app_event_tx_clone = app_event_tx.clone();
     let outcome = async move {
-        let guard = review_guard;
         let git_root = code_core::git_worktree::get_git_root_from(&config.cwd)
             .await
             .map_err(|e| format!("failed to detect git root: {e}"))?;
@@ -27171,22 +28103,37 @@ async fn run_background_review(
 
         let snapshot_id = snapshot.id().to_string();
         bump_snapshot_epoch_for(&config.cwd);
-        // Reuse a single detached worktree for auto-review to avoid churn; keep
-        // gitignored build outputs for faster incremental builds.
-        let worktree_path = code_core::git_worktree::prepare_reusable_worktree(
-            &git_root,
-            "auto-review",
-            snapshot_id.as_str(),
-            true,
-        )
-        .await
-        .map_err(|e| format!("failed to prepare worktree: {e}"))?;
-        let branch = "auto-review".to_string();
 
-        // Release the review lock before spawning the agent so the downstream
-        // /review invocation inside the agent can acquire it. This prevents the
-        // CLI from emitting "Another review is already running" and skipping.
-        drop(guard);
+        // Attempt to hold the shared review lock; if busy or a previous review
+        // with findings is still surfaced, fall back to a per-request
+        // auto-review worktree to avoid clobbering pending fixes.
+        let (worktree_path, branch, worktree_guard) = if prefer_fallback {
+            let (path, name, guard) =
+                allocate_fallback_auto_review_worktree(&git_root, &snapshot_id).await?;
+            (path, name, guard)
+        } else {
+            match try_acquire_lock("review", &config.cwd) {
+                Ok(Some(g)) => {
+                    let path = code_core::git_worktree::prepare_reusable_worktree(
+                        &git_root,
+                        AUTO_REVIEW_SHARED_WORKTREE,
+                        snapshot_id.as_str(),
+                        true,
+                    )
+                    .await
+                    .map_err(|e| format!("failed to prepare worktree: {e}"))?;
+                    (path, AUTO_REVIEW_SHARED_WORKTREE.to_string(), g)
+                }
+                Ok(None) => {
+                    let (path, name, guard) =
+                        allocate_fallback_auto_review_worktree(&git_root, &snapshot_id).await?;
+                    (path, name, guard)
+                }
+                Err(err) => {
+                    return Err(format!("could not acquire review lock: {err}"));
+                }
+            }
+        };
 
         // Ensure Codex models are invoked via the `code-` CLI shim so they exist on PATH.
         fn ensure_code_prefix(model: &str) -> String {
@@ -27199,6 +28146,22 @@ async fn run_background_review(
         }
 
         let review_model = ensure_code_prefix(&config.auto_review_model);
+
+        // Allow the spawned agent to reuse the parent's review lock without blocking.
+        let mut env: std::collections::HashMap<String, String> = std::collections::HashMap::new();
+        env.insert("CODE_REVIEW_LOCK_LEASE".to_string(), "1".to_string());
+        let agent_config = code_core::config_types::AgentConfig {
+            name: review_model.clone(),
+            command: String::new(),
+            args: Vec::new(),
+            read_only: false,
+            enabled: true,
+            description: None,
+            env: Some(env),
+            args_read_only: None,
+            args_write: None,
+            instructions: None,
+        };
 
         // Use the /review entrypoint so upstream wiring (model defaults, review formatting) stays intact.
         let mut review_prompt = format!(
@@ -27221,13 +28184,14 @@ async fn run_background_review(
                 Vec::new(),
                 false,
                 Some(branch.clone()),
-                None,
+                Some(agent_config.clone()),
                 Some(branch.clone()),
                 Some(snapshot_id.clone()),
                 Some(code_core::protocol::AgentSourceKind::AutoReview),
                 config.auto_review_model_reasoning_effort.into(),
             )
             .await;
+        insert_background_lock(&agent_id, worktree_guard);
         drop(manager);
 
         app_event_tx_clone.send(AppEvent::BackgroundReviewStarted {
@@ -27236,7 +28200,7 @@ async fn run_background_review(
             agent_id: Some(agent_id.clone()),
             snapshot: Some(snapshot_id.clone()),
         });
-        Ok((worktree_path, branch, agent_id, snapshot_id))
+        Ok::<(PathBuf, String, String, String), String>((worktree_path, branch, agent_id, snapshot_id))
     }
     .await;
 
@@ -27489,7 +28453,7 @@ use code_core::protocol::OrderMeta;
             agent_id: Some("agent-123".to_string()),
             snapshot: Some("ghost123".to_string()),
             base: None,
-            started_at: std::time::Instant::now(),
+            last_seen: std::time::Instant::now(),
         });
 
         chat.on_background_review_finished(
@@ -27544,7 +28508,7 @@ use code_core::protocol::OrderMeta;
             agent_id: Some("agent-123".to_string()),
             snapshot: Some("ghost123".to_string()),
             base: None,
-            started_at: std::time::Instant::now(),
+            last_seen: std::time::Instant::now(),
         });
 
         // Agent.result will be parsed; provide structured JSON with findings
@@ -27590,7 +28554,7 @@ use code_core::protocol::OrderMeta;
             agent_id: None,
             snapshot: Some("ghost123".to_string()),
             base: None,
-            started_at: std::time::Instant::now(),
+            last_seen: std::time::Instant::now(),
         });
 
         let agent = code_core::protocol::AgentInfo {
@@ -27612,6 +28576,8 @@ use code_core::protocol::OrderMeta;
             error: None,
             elapsed_ms: None,
             token_count: None,
+            last_activity_at: None,
+            seconds_since_last_activity: None,
             source_kind: Some(AgentSourceKind::AutoReview),
         };
 
@@ -27639,7 +28605,7 @@ use code_core::protocol::OrderMeta;
             agent_id: None,
             snapshot: Some("ghost123".to_string()),
             base: None,
-            started_at: std::time::Instant::now(),
+            last_seen: std::time::Instant::now(),
         });
 
         let agent = code_core::protocol::AgentInfo {
@@ -27661,6 +28627,8 @@ use code_core::protocol::OrderMeta;
             error: None,
             elapsed_ms: None,
             token_count: None,
+            last_activity_at: None,
+            seconds_since_last_activity: None,
             source_kind: Some(AgentSourceKind::AutoReview),
         };
 
@@ -27698,7 +28666,7 @@ use code_core::protocol::OrderMeta;
             agent_id: Some("agent-running".to_string()),
             snapshot: Some("ghost-running".to_string()),
             base: Some(GhostCommit::new("running-base".to_string(), None)),
-            started_at: Instant::now(),
+            last_seen: Instant::now(),
         });
 
         chat.maybe_trigger_auto_review();
@@ -27769,7 +28737,7 @@ use code_core::protocol::OrderMeta;
             agent_id: Some("agent-running".to_string()),
             snapshot: Some("ghost-running".to_string()),
             base: Some(GhostCommit::new("running-base".to_string(), None)),
-            started_at: Instant::now(),
+            last_seen: Instant::now(),
         });
 
         chat.maybe_trigger_auto_review();
@@ -27821,7 +28789,7 @@ use code_core::protocol::OrderMeta;
             agent_id: Some("agent-running".to_string()),
             snapshot: Some("ghost-running".to_string()),
             base: Some(GhostCommit::new("running-base".to_string(), None)),
-            started_at: Instant::now(),
+            last_seen: Instant::now(),
         });
 
         chat.maybe_trigger_auto_review();
@@ -27885,7 +28853,7 @@ use code_core::protocol::OrderMeta;
             agent_id: Some("agent-running".to_string()),
             snapshot: Some("ghost-running".to_string()),
             base: Some(base.clone()),
-            started_at: stale_started,
+            last_seen: stale_started,
         });
 
         chat.maybe_trigger_auto_review();
@@ -28391,8 +29359,8 @@ use code_core::protocol::OrderMeta;
                 history_index: None,
                 history_id: None,
                 explore_entry: None,
-                stdout: String::new(),
-                stderr: String::new(),
+                stdout_offset: 0,
+                stderr_offset: 0,
                 wait_total: None,
                 wait_active: false,
                 wait_notes: Vec::new(),
@@ -28441,8 +29409,8 @@ use code_core::protocol::OrderMeta;
                 history_index: None,
                 history_id: None,
                 explore_entry: None,
-                stdout: String::new(),
-                stderr: String::new(),
+                stdout_offset: 0,
+                stderr_offset: 0,
                 wait_total: None,
                 wait_active: false,
                 wait_notes: Vec::new(),
@@ -28803,8 +29771,8 @@ use code_core::protocol::OrderMeta;
                 history_index: None,
                 history_id: None,
                 explore_entry: None,
-                stdout: String::new(),
-                stderr: String::new(),
+                stdout_offset: 0,
+                stderr_offset: 0,
                 wait_total: None,
                 wait_active: false,
                 wait_notes: Vec::new(),
@@ -28855,8 +29823,8 @@ use code_core::protocol::OrderMeta;
                 history_index: None,
                 history_id: None,
                 explore_entry: None,
-                stdout: String::new(),
-                stderr: String::new(),
+                stdout_offset: 0,
+                stderr_offset: 0,
                 wait_total: None,
                 wait_active: false,
                 wait_notes: Vec::new(),
@@ -28932,7 +29900,7 @@ use code_core::protocol::OrderMeta;
     }
 
     #[test]
-    fn reasoning_collapse_hides_intermediate_titles_after_agent_anchor() {
+    fn reasoning_collapse_hides_intermediate_titles_in_consecutive_runs() {
         let mut harness = ChatWidgetHarness::new();
         let chat = harness.chat();
 
@@ -28969,6 +29937,48 @@ use code_core::protocol::OrderMeta;
         assert!(
             reasoning_cells[0].display_lines().is_empty(),
             "intermediate reasoning should hide when collapsed after agent anchor",
+        );
+        assert!(
+            !reasoning_cells[1].display_lines().is_empty(),
+            "last reasoning should remain visible",
+        );
+    }
+
+    #[test]
+    fn reasoning_collapse_applies_without_anchor_cells() {
+        let mut harness = ChatWidgetHarness::new();
+        let chat = harness.chat();
+
+        chat.config.tui.show_reasoning = false;
+
+        let reasoning_one = history_cell::CollapsibleReasoningCell::new_with_id(
+            vec![Line::from("First reasoning".to_string())],
+            Some("r1".to_string()),
+        );
+        let reasoning_two = history_cell::CollapsibleReasoningCell::new_with_id(
+            vec![Line::from("Second reasoning".to_string())],
+            Some("r2".to_string()),
+        );
+
+        chat.history_push(reasoning_one);
+        chat.history_push(reasoning_two);
+
+        chat.refresh_reasoning_collapsed_visibility();
+
+        let reasoning_cells: Vec<&history_cell::CollapsibleReasoningCell> = chat
+            .history_cells
+            .iter()
+            .filter_map(|cell| {
+                cell.as_any()
+                    .downcast_ref::<history_cell::CollapsibleReasoningCell>()
+            })
+            .collect();
+
+        assert_eq!(reasoning_cells.len(), 2, "expected exactly two reasoning cells");
+
+        assert!(
+            reasoning_cells[0].display_lines().is_empty(),
+            "intermediate reasoning should hide when collapsed without an anchor",
         );
         assert!(
             !reasoning_cells[1].display_lines().is_empty(),
@@ -29768,6 +30778,8 @@ use code_core::protocol::OrderMeta;
                     error: None,
                     elapsed_ms: None,
                     token_count: None,
+                    last_activity_at: None,
+                    seconds_since_last_activity: None,
                     source_kind: None,
                 }],
                 context: None,
@@ -29789,8 +30801,24 @@ use code_core::protocol::OrderMeta;
             order: None,
         });
         assert!(
+            chat.bottom_pane.is_task_running(),
+            "spinner should remain active after an assistant message until TaskComplete"
+        );
+
+        assert_eq!(chat.overall_task_status, "running".to_string());
+
+        chat.handle_code_event(Event {
+            id: turn_id.clone(),
+            event_seq: 3,
+            msg: EventMsg::TaskComplete(TaskCompleteEvent {
+                last_agent_message: None,
+            }),
+            order: None,
+        });
+
+        assert!(
             !chat.bottom_pane.is_task_running(),
-            "spinner should clear once the final answer arrives even without a terminal status update"
+            "spinner should clear on TaskComplete even when agent runtime is missing"
         );
 
         assert_eq!(chat.overall_task_status, "complete".to_string());
@@ -29842,6 +30870,8 @@ use code_core::protocol::OrderMeta;
                     error: None,
                     elapsed_ms: None,
                     token_count: None,
+                    last_activity_at: None,
+                    seconds_since_last_activity: None,
                     source_kind: None,
                 }],
                 context: None,
@@ -29861,14 +30891,25 @@ use code_core::protocol::OrderMeta;
             order: None,
         });
 
-        assert!(
-            !chat.bottom_pane.is_task_running(),
-            "final answer should clear the spinner when no terminal update arrives"
-        );
+        assert!(chat.bottom_pane.is_task_running(), "spinner stays running after assistant message");
 
         chat.handle_code_event(Event {
             id: turn_id.clone(),
             event_seq: 3,
+            msg: EventMsg::TaskComplete(TaskCompleteEvent {
+                last_agent_message: None,
+            }),
+            order: None,
+        });
+
+        assert!(
+            !chat.bottom_pane.is_task_running(),
+            "TaskComplete should clear the spinner"
+        );
+
+        chat.handle_code_event(Event {
+            id: turn_id.clone(),
+            event_seq: 4,
             msg: EventMsg::AgentStatusUpdate(AgentStatusUpdateEvent {
                 agents: vec![CoreAgentInfo {
                     id: "agent-1".to_string(),
@@ -29881,6 +30922,8 @@ use code_core::protocol::OrderMeta;
                     error: None,
                     elapsed_ms: None,
                     token_count: None,
+                    last_activity_at: None,
+                    seconds_since_last_activity: None,
                     source_kind: None,
                 }],
                 context: None,
@@ -31393,24 +32436,29 @@ impl ChatWidget<'_> {
     }
 
     fn recover_stuck_background_review(&mut self) {
-        const STALE_REVIEW_SECS: u64 = 300;
         let Some(state) = self.background_review.as_ref() else {
             return;
         };
 
-        if state.started_at.elapsed() < Duration::from_secs(STALE_REVIEW_SECS) {
+        let elapsed = state.last_seen.elapsed();
+        if elapsed.as_secs() < AUTO_REVIEW_STALE_SECS {
             return;
         }
 
-        let base = state.base.clone();
-        let agent_id = state.agent_id.clone();
-        release_background_lock(&agent_id);
-        self.background_review = None;
+        let stale = self.background_review.take();
         self.background_review_guard = None;
-        self.clear_auto_review_indicator();
 
-        if let Some(base_commit) = base {
-            self.queue_skipped_auto_review(base_commit);
+        let Some(stale) = stale else {
+            return;
+        };
+
+        if self.pending_auto_review_range.is_none() {
+            if let Some(base) = stale.base {
+                self.pending_auto_review_range = Some(PendingAutoReviewRange {
+                    base,
+                    defer_until_turn: None,
+                });
+            }
         }
     }
 
@@ -31418,13 +32466,18 @@ impl ChatWidget<'_> {
         // Record state immediately to avoid duplicate launches when multiple
         // TaskComplete events fire in quick succession.
         self.turn_had_code_edits = false;
+        let had_notice = self.auto_review_notice.is_some();
+        let had_fixed_indicator = matches!(
+            self.auto_review_status,
+            Some(AutoReviewStatus { status: AutoReviewIndicatorStatus::Fixed, .. })
+        );
         self.background_review = Some(BackgroundReviewState {
             worktree_path: std::path::PathBuf::new(),
             branch: String::new(),
             agent_id: None,
             snapshot: None,
             base: base_snapshot.clone(),
-            started_at: std::time::Instant::now(),
+            last_seen: std::time::Instant::now(),
         });
         self.auto_review_status = None;
         self.bottom_pane.set_auto_review_status(None);
@@ -31445,12 +32498,21 @@ impl ChatWidget<'_> {
         let app_event_tx = self.app_event_tx.clone();
         let base_snapshot_for_task = base_snapshot.clone();
         let turn_context = self.turn_context_block();
+        let prefer_fallback = had_notice || had_fixed_indicator;
         tokio::spawn(async move {
-            run_background_review(config, app_event_tx, base_snapshot_for_task, turn_context).await;
+            run_background_review(
+                config,
+                app_event_tx,
+                base_snapshot_for_task,
+                turn_context,
+                prefer_fallback,
+            )
+            .await;
         });
     }
 
     fn observe_auto_review_status(&mut self, agents: &[code_core::protocol::AgentInfo]) {
+        let now = Instant::now();
         for agent in agents {
             if !Self::is_auto_review_agent(agent) {
                 continue;
@@ -31468,6 +32530,7 @@ impl ChatWidget<'_> {
             }
 
             if let Some(state) = self.background_review.as_mut() {
+                state.last_seen = now;
                 if state.agent_id.is_none() {
                     state.agent_id = Some(agent.id.clone());
                 }
@@ -31519,11 +32582,10 @@ impl ChatWidget<'_> {
                     state.snapshot.clone(),
                 )
             } else {
-                (
-                    std::path::PathBuf::new(),
-                    agent.batch_id.clone().unwrap_or_default(),
-                    None,
-                )
+                let branch = agent.batch_id.clone().unwrap_or_default();
+                let worktree_path = resolve_auto_review_worktree_path(&self.config.cwd, &branch)
+                    .unwrap_or_default();
+                (worktree_path, branch, None)
             };
 
             let (has_findings, findings, summary) = Self::parse_agent_review_result(agent.result.as_deref());
@@ -31707,33 +32769,36 @@ impl ChatWidget<'_> {
         summary: Option<&str>,
         findings: usize,
     ) {
-        let mut message_lines = vec![MessageLine {
+        let path_text = format!("{}", worktree_path.display());
+        let has_path = !path_text.is_empty();
+
+        let summary_text = summary.and_then(|text| {
+            let trimmed = text.trim();
+            (!trimmed.is_empty()).then_some(trimmed.to_string())
+        });
+
+        let mut line = format!("Auto Review: {findings} issue(s) found");
+        if let Some(summary_text) = summary_text {
+            line.push_str(". ");
+            line.push_str(&summary_text);
+        } else {
+            line.push_str(&format!(" in '{branch}'"));
+        }
+        if has_path {
+            line.push(' ');
+            line.push_str(&format!("Merge {path_text} to apply fixes."));
+        }
+        line.push_str(" [Ctrl+A] Show");
+
+        let message_lines = vec![MessageLine {
             kind: MessageLineKind::Paragraph,
             spans: vec![InlineSpan {
-                text: format!(
-                    "Auto Review: {findings} issue(s) found in '{branch}'. Merge {path} to apply fixes. [Ctrl+A] Show",
-                    path = worktree_path.display()
-                ),
+                text: line,
                 tone: TextTone::Default,
                 emphasis: TextEmphasis::default(),
                 entity: None,
             }],
         }];
-
-        if let Some(text) = summary {
-            let trimmed = text.trim();
-            if !trimmed.is_empty() {
-                message_lines.push(MessageLine {
-                    kind: MessageLineKind::Paragraph,
-                    spans: vec![InlineSpan {
-                        text: format!("Auto Review: {trimmed}"),
-                        tone: TextTone::Dim,
-                        emphasis: TextEmphasis::default(),
-                        entity: None,
-                    }],
-                });
-            }
-        }
 
         let state = PlainMessageState {
             id: HistoryId::ZERO,
@@ -31786,6 +32851,7 @@ impl ChatWidget<'_> {
             state.branch = branch.clone();
             state.agent_id = agent_id;
             state.snapshot = snapshot;
+            state.last_seen = Instant::now();
         }
         if self.auto_review_status.is_none() {
             self.set_auto_review_indicator(
@@ -31813,6 +32879,14 @@ impl ChatWidget<'_> {
         agent_id: Option<String>,
         snapshot: Option<String>,
     ) {
+        // Normalize zero-count "issues" so the indicator and developer notes stay
+        // aligned with the overlay: if the parser could not produce a findings list,
+        // treat the run as clean instead of "fixed".
+        let mut has_findings = has_findings;
+        if has_findings && findings == 0 {
+            has_findings = false;
+        }
+
         let inflight_base = self
             .background_review
             .as_ref()
@@ -31828,35 +32902,43 @@ impl ChatWidget<'_> {
         release_background_lock(&agent_id);
         let mut developer_note: Option<String> = None;
         let snapshot_note = inflight_snapshot
-            .as_ref()
-            .map(|s| format!(" Snapshot {s}."))
-            .unwrap_or_default();
+            .as_deref()
+            .map(str::trim)
+            .filter(|s| !s.is_empty())
+            .map(|s| format!("Snapshot: {s} (review target)"))
+            .unwrap_or_else(|| "Snapshot: (unknown)".to_string());
         let agent_note = agent_id
-            .as_ref()
-            .map(|id| format!(" Agent #{:.8}.", id))
-            .unwrap_or_default();
+            .as_deref()
+            .map(str::trim)
+            .filter(|s| !s.is_empty())
+            .map(|id| {
+                let short = id.chars().take(8).collect::<String>();
+                format!("Agent: #{short} (auto-review)")
+            })
+            .unwrap_or_else(|| "Agent: (unknown)".to_string());
+        let summary_note = summary
+            .as_deref()
+            .map(str::trim)
+            .filter(|s| !s.is_empty())
+            .map(|s| s.replace('\n', " "))
+            .map(|s| format!("Summary: {s}"));
         let errored = error.is_some();
         let indicator_status = if let Some(err) = error {
             developer_note = Some(format!(
-                "[developer] Background auto-review failed in worktree '{branch}'. Error: {err}. Worktree path: {}.{snapshot_note}{agent_note}",
-                worktree_path.display()
+                "[developer] Background auto-review failed.\n\nThis auto-review ran in an isolated git worktree and did not modify your current workspace.\n\nWorktree: '{branch}'\nWorktree path: {}\n{snapshot_note}\n{agent_note}\nError: {err}",
+                worktree_path.display(),
             ));
             AutoReviewIndicatorStatus::Failed
         } else if has_findings {
-            let summary_text = summary.as_ref().and_then(|s| {
-                let trimmed = s.trim();
-                if trimmed.is_empty() { None } else { Some(trimmed) }
-            });
-            developer_note = Some(match summary_text {
-                Some(text) => format!(
-                    "[developer] Background auto-review found issues in worktree '{branch}'. Summary: {text}. Merge the worktree at {} if you want the fixes.{snapshot_note}{agent_note}",
-                    worktree_path.display()
-                ),
-                None => format!(
-                    "[developer] Background auto-review found issues in worktree '{branch}'. Merge the worktree at {} if you want the fixes.{snapshot_note}{agent_note}",
-                    worktree_path.display()
-                ),
-            });
+            let mut note = format!(
+                "[developer] Background auto-review completed and reported {findings} issue(s).\n\nA separate LLM ran /review (and may have run auto-resolve) in an isolated git worktree. Any proposed fixes live only in that worktree until you merge them.\n\nNext: Decide if the findings are genuine. If yes, Merge the worktree '{branch}' to apply the changes (or cherry-pick selectively). If not, do not merge.\n\nWorktree path: {}\n{snapshot_note}\n{agent_note}",
+                worktree_path.display(),
+            );
+            if let Some(summary_note) = summary_note {
+                note.push('\n');
+                note.push_str(&summary_note);
+            }
+            developer_note = Some(note);
             AutoReviewIndicatorStatus::Fixed
         } else {
             AutoReviewIndicatorStatus::Clean
@@ -31882,10 +32964,7 @@ impl ChatWidget<'_> {
             // Immediately inject as a developer message so the user sees it in the
             // transcript, even if tasks/streams are still running. Do not defer to
             // pending_agent_notes; that path can be lost if the session ends.
-            self.submit_hidden_text_message_with_preface(
-                "Auto review follow-up".to_string(),
-                note,
-            );
+            self.submit_hidden_text_message_with_preface(String::new(), note);
         }
 
         // Auto review completion should never leave the composer spinner active.
@@ -32588,6 +33667,7 @@ impl ChatWidget<'_> {
             citations: Vec::new(),
             metadata: None,
             token_usage: None,
+            mid_turn: false,
             created_at: SystemTime::now(),
         };
         history_cell::AssistantMarkdownCell::from_state(state, &self.config)
@@ -33481,6 +34561,7 @@ impl ChatWidget<'_> {
             tx.send(AppEvent::SubmitHiddenTextWithPreface {
                 agent_text: message,
                 preface: String::new(),
+                surface_notice: false,
             });
         });
     }
@@ -33624,7 +34705,9 @@ impl ChatWidget<'_> {
         let op = Op::ConfigureSession {
             provider: self.config.model_provider.clone(),
             model: self.config.model.clone(),
+            model_explicit: self.config.model_explicit,
             model_reasoning_effort: self.config.model_reasoning_effort,
+            preferred_model_reasoning_effort: self.config.preferred_model_reasoning_effort,
             model_reasoning_summary: self.config.model_reasoning_summary,
             model_text_verbosity: self.config.model_text_verbosity,
             user_instructions: self.config.user_instructions.clone(),
@@ -33635,6 +34718,7 @@ impl ChatWidget<'_> {
             notify: self.config.notify.clone(),
             cwd: self.config.cwd.clone(),
             resume_path: None,
+            demo_developer_message: self.config.demo_developer_message.clone(),
         };
         self.submit_op(op);
 

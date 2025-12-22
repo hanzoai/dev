@@ -70,6 +70,25 @@ where
         env_map.entry(key.to_string()).or_insert_with(|| val.to_string());
     }
 
+    // Step 4.6 – Non-interactive defaults to reduce hangs and environment
+    // variance in headless runs. Respect explicit overrides.
+    for (key, val) in [
+        ("GIT_TERMINAL_PROMPT", "0"),
+        ("CI", "1"),
+        ("DEBIAN_FRONTEND", "noninteractive"),
+        ("LANG", "C.UTF-8"),
+        ("LC_ALL", "C.UTF-8"),
+    ] {
+        env_map.entry(key.to_string()).or_insert_with(|| val.to_string());
+    }
+
+    #[cfg(unix)]
+    {
+        env_map
+            .entry("GIT_ASKPASS".to_string())
+            .or_insert_with(|| "true".to_string());
+    }
+
     // Step 5 – If include_only is non-empty, keep *only* the matching vars.
     if !policy.include_only.is_empty() {
         env_map.retain(|k, _| matches_any(k, &policy.include_only));
@@ -92,7 +111,7 @@ mod tests {
     }
 
     #[test]
-    fn test_core_inherit_and_default_excludes() {
+    fn test_core_inherit_default_policy_skips_filters() {
         let vars = make_vars(&[
             ("PATH", "/usr/bin"),
             ("PATHEXT", ".EXE;.CMD"),
@@ -101,17 +120,28 @@ mod tests {
             ("SECRET_TOKEN", "t"),
         ]);
 
-        let policy = ShellEnvironmentPolicy::default(); // inherit Core, default excludes on
+        let policy = ShellEnvironmentPolicy::default(); // inherit Core, default excludes disabled
         let result = populate_env(vars, &policy);
 
-        let expected: HashMap<String, String> = hashmap! {
+        let mut expected: HashMap<String, String> = hashmap! {
             "PATH".to_string() => "/usr/bin".to_string(),
             "PATHEXT".to_string() => ".EXE;.CMD".to_string(),
             "HOME".to_string() => "/home/user".to_string(),
             "PAGER".to_string() => "cat".to_string(),
             "GIT_PAGER".to_string() => "cat".to_string(),
             "GH_PAGER".to_string() => "cat".to_string(),
+            "GIT_TERMINAL_PROMPT".to_string() => "0".to_string(),
+            "CI".to_string() => "1".to_string(),
+            "DEBIAN_FRONTEND".to_string() => "noninteractive".to_string(),
+            "LANG".to_string() => "C.UTF-8".to_string(),
+            "LC_ALL".to_string() => "C.UTF-8".to_string(),
         };
+
+        expected.insert("API_KEY".to_string(), "secret".to_string());
+        expected.insert("SECRET_TOKEN".to_string(), "t".to_string());
+
+        #[cfg(unix)]
+        expected.insert("GIT_ASKPASS".to_string(), "true".to_string());
 
         assert_eq!(result, expected);
     }
@@ -148,13 +178,21 @@ mod tests {
 
         let result = populate_env(vars, &policy);
 
-        let expected: HashMap<String, String> = hashmap! {
+        let mut expected: HashMap<String, String> = hashmap! {
             "PATH".to_string() => "/usr/bin".to_string(),
             "PAGER".to_string() => "cat".to_string(),
             "GIT_PAGER".to_string() => "cat".to_string(),
             "GH_PAGER".to_string() => "cat".to_string(),
             "NEW_VAR".to_string() => "42".to_string(),
+            "GIT_TERMINAL_PROMPT".to_string() => "0".to_string(),
+            "CI".to_string() => "1".to_string(),
+            "DEBIAN_FRONTEND".to_string() => "noninteractive".to_string(),
+            "LANG".to_string() => "C.UTF-8".to_string(),
+            "LC_ALL".to_string() => "C.UTF-8".to_string(),
         };
+
+        #[cfg(unix)]
+        expected.insert("GIT_ASKPASS".to_string(), "true".to_string());
 
         assert_eq!(result, expected);
     }
@@ -174,6 +212,13 @@ mod tests {
         expected.insert("PAGER".to_string(), "cat".to_string());
         expected.insert("GIT_PAGER".to_string(), "cat".to_string());
         expected.insert("GH_PAGER".to_string(), "cat".to_string());
+        expected.insert("GIT_TERMINAL_PROMPT".to_string(), "0".to_string());
+        expected.insert("CI".to_string(), "1".to_string());
+        expected.insert("DEBIAN_FRONTEND".to_string(), "noninteractive".to_string());
+        expected.insert("LANG".to_string(), "C.UTF-8".to_string());
+        expected.insert("LC_ALL".to_string(), "C.UTF-8".to_string());
+        #[cfg(unix)]
+        expected.insert("GIT_ASKPASS".to_string(), "true".to_string());
         assert_eq!(result, expected);
     }
 
@@ -183,16 +228,24 @@ mod tests {
 
         let policy = ShellEnvironmentPolicy {
             inherit: ShellEnvironmentPolicyInherit::All,
+            ignore_default_excludes: false,
             ..Default::default()
         };
 
         let result = populate_env(vars, &policy);
-        let expected: HashMap<String, String> = hashmap! {
+        let mut expected: HashMap<String, String> = hashmap! {
             "PATH".to_string() => "/usr/bin".to_string(),
             "PAGER".to_string() => "cat".to_string(),
             "GIT_PAGER".to_string() => "cat".to_string(),
             "GH_PAGER".to_string() => "cat".to_string(),
+            "GIT_TERMINAL_PROMPT".to_string() => "0".to_string(),
+            "CI".to_string() => "1".to_string(),
+            "DEBIAN_FRONTEND".to_string() => "noninteractive".to_string(),
+            "LANG".to_string() => "C.UTF-8".to_string(),
+            "LC_ALL".to_string() => "C.UTF-8".to_string(),
         };
+        #[cfg(unix)]
+        expected.insert("GIT_ASKPASS".to_string(), "true".to_string());
         assert_eq!(result, expected);
     }
 
@@ -210,12 +263,20 @@ mod tests {
             .insert("ONLY_VAR".to_string(), "yes".to_string());
 
         let result = populate_env(vars, &policy);
-        let expected: HashMap<String, String> = hashmap! {
+        let mut expected: HashMap<String, String> = hashmap! {
             "ONLY_VAR".to_string() => "yes".to_string(),
             "PAGER".to_string() => "cat".to_string(),
             "GIT_PAGER".to_string() => "cat".to_string(),
             "GH_PAGER".to_string() => "cat".to_string(),
+            "GIT_TERMINAL_PROMPT".to_string() => "0".to_string(),
+            "CI".to_string() => "1".to_string(),
+            "DEBIAN_FRONTEND".to_string() => "noninteractive".to_string(),
+            "LANG".to_string() => "C.UTF-8".to_string(),
+            "LC_ALL".to_string() => "C.UTF-8".to_string(),
         };
+
+        #[cfg(unix)]
+        expected.insert("GIT_ASKPASS".to_string(), "true".to_string());
         assert_eq!(result, expected);
     }
 }
