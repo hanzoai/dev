@@ -15,6 +15,9 @@ use code_core::project_doc::read_auto_drive_docs;
 use code_core::protocol::SandboxPolicy;
 use code_core::slash_commands::get_enabled_agents;
 use code_core::{AuthManager, ModelClient, Prompt, ResponseEvent, TextFormat};
+use code_core::{RateLimitSwitchState, switch_active_account_on_rate_limit};
+use code_core::auth;
+use code_core::auth_accounts;
 use code_core::error::CodexErr;
 use code_common::model_presets::clamp_reasoning_effort_for_model;
 use code_protocol::models::{ContentItem, ReasoningItemContent, ResponseItem};
@@ -59,7 +62,7 @@ struct AutoCoordinatorCancelled;
 pub const MODEL_SLUG: &str = "gpt-5.1";
 const USER_TURN_SCHEMA_NAME: &str = "auto_coordinator_user_turn";
 const COORDINATOR_PROMPT: &str = include_str!("../../core/prompt_coordinator.md");
-const TIMEBOXED_FINISH_GUIDANCE: &str = "Time budget mode is enabled for this run. Strategy: (1) identify the smallest reliable repro or failing test, (2) apply a focused fix, (3) verify with the narrowest check that proves correctness. Avoid full test suites unless required. If a rate-limit wait would consume most remaining time, summarize progress, note the next verification step, and use finish_failed instead of waiting indefinitely. Avoid repeated 'one more check' loops: do at most one final confirmation step, then use finish_success.";
+const TIMEBOXED_EXEC_COORDINATOR_GUIDANCE: &str = "SYSTEM: Time-boxed autonomous exec is enabled.\n\nYou are coordinating a non-interactive coding run. Optimize for verifier success, not exploration.\n\nContract-first and evidence-led:\n- In the first 3 minutes, force a concrete failing signal by running the most authoritative acceptance check available. Prefer (in order): `/tests/verify.sh` (read it, then run it) > a task-provided verifier script > the narrowest relevant test (e.g. `pytest -q /tests/test_outputs.py`).\n- Treat that check as the contract: exact paths, ports, formats, exit codes, and stated constraints.\n\nConverge with small diffs:\n- Ship a minimal first-pass fix quickly, then iterate against the same check.\n- Avoid speculative redesigns, broad refactors, or dependency churn unless forced by the contract.\n\nDelegate by outcomes only:\n- Each turn: give one short directive phrased as an outcome (\"make X pass\", \"produce file Y at path Z\", \"ensure binary at /path is executable\"). Let the CLI pick tactics.\n\nTime discipline:\n- Prefer cheap proofs before expensive steps (long builds/downloads/services).\n- Prefer local files and official libraries over scraping web UIs/config endpoints.\n\nFinish standard:\n- finish_success only with proof (acceptance check green + required artifacts present exactly where asserted).\n- Otherwise finish_failed with the last check, its output/error, what changed, and the single next verification step.";
 
 const ALL_TEXT_VERBOSITY: &[TextVerbosity] = &[
     TextVerbosity::Low,
@@ -119,11 +122,11 @@ impl AutoTimeBudget {
         }
 
         let guidance = if remaining <= Duration::from_secs(30) {
-            "Time is nearly up: stop exploring; finish with the simplest safe path."
+            "Time is nearly up: stop exploring; take the simplest safe path and do one cheap verification before finishing."
         } else if remaining <= Duration::from_secs(120) {
-            "Time is tight: reduce exploration and prioritize finishing."
+            "Time is tight: parallelize any remaining scouting/verification (agents or tool-call batching) and finish with the cheapest proof."
         } else {
-            "Past 50% of the time budget: start converging; avoid detours."
+            "Past 50% of the time budget: start converging; parallelize remaining scouting/verification and avoid detours."
         };
 
         self.next_nudge_at = now + next_budget_nudge_interval(remaining);
@@ -1641,7 +1644,7 @@ fn read_coordinator_prompt(config: &Config) -> Option<String> {
         None
     } else {
         if config.max_run_seconds.is_some() {
-            Some(format!("{trimmed}\n\n# Time Budget\n{TIMEBOXED_FINISH_GUIDANCE}"))
+            Some(format!("{trimmed}\n\n# Time Budget\n{TIMEBOXED_EXEC_COORDINATOR_GUIDANCE}"))
         } else {
             Some(trimmed.to_string())
         }
@@ -1686,17 +1689,21 @@ fn build_initial_planning_seed(goal_text: &str, include_agents: bool) -> Option<
     }
 
     let cli_prompt = if include_agents {
-        "Please provide a clear plan to best achieve the Primary Goal. If this is not a trival task, launch agents and use your tools to research the best approach. If this is a trival task, or the plan is already in the conversation history, just imediately provide the plan. Judge the length of research and planning you perform based on the complexity of the task. For more complex tasks, you could break the plan into workstreams which can be performed at the same time."
+        "Please provide a clear plan to best achieve the Primary Goal. If this is not a trivial task, launch agents and use your tools to research the best approach. If this is a trivial task, or the plan is already in the conversation history, immediately provide the plan. Judge the length of research and planning you perform based on the complexity of the task. For more complex tasks, you can break the plan into workstreams that can be performed at the same time."
+            .to_string()
     } else {
-        "Please provide a clear plan to best achieve the Primary Goal. If this is not a trival task, use your tools to research the best approach. If this is a trival task, or the plan is already in the conversation history, just imediately provide the plan. Judge the length of research and planning you perform based on the complexity of the task."
+        "Please provide a clear plan to best achieve the Primary Goal. If this is not a trivial task, use your tools to research the best approach. If this is a trivial task, or the plan is already in the conversation history, immediately provide the plan. Judge the length of research and planning you perform based on the complexity of the task."
+            .to_string()
     };
 
+    let response_json = format!(
+        "{{\"finish_status\":\"continue\",\"status_title\":\"Planning\",\"status_sent_to_user\":\"Started initial planning phase\",\"prompt_sent_to_cli\":\"{cli_prompt}\"}}"
+    );
+
     Some(InitialPlanningSeed {
-        response_json: format!(
-            "{{\"finish_status\":\"continue\",\"status_title\":\"Planning\",\"status_sent_to_user\":\"Started initial planning phase\",\"prompt_sent_to_cli\":\"{cli_prompt}\"}}"
-        ),
-        cli_prompt: cli_prompt.to_string(),
-        goal_message: format!("Primary Goal: {}", goal),
+        response_json,
+        cli_prompt,
+        goal_message: format!("Primary Goal: {goal}"),
         status_title: "Planning route".to_string(),
         status_sent_to_user: "Planning best route to reach the goal.".to_string(),
         agents_timing: if include_agents {
@@ -2133,7 +2140,10 @@ fn request_decision_with_model(
     let coordinator_prompt = coordinator_prompt.map(|text| text.to_string());
     let tx = event_tx.clone();
     let cancel = cancel_token.clone();
-    let classify = |error: &anyhow::Error| classify_model_error(error);
+    let mut rate_limit_switch_state = RateLimitSwitchState::default();
+    let classify = |error: &anyhow::Error| {
+        classify_model_error_with_auto_switch(client, &mut rate_limit_switch_state, event_tx, error)
+    };
     let options = RetryOptions::with_defaults(retry_max_elapsed(time_budget_deadline));
 
     let result = runtime.block_on(async move {
@@ -2490,6 +2500,104 @@ pub(crate) fn classify_model_error(error: &anyhow::Error) -> RetryDecision {
     }
 
     RetryDecision::Fatal(anyhow!(error.to_string()))
+}
+
+fn classify_model_error_with_auto_switch(
+    client: &ModelClient,
+    state: &mut RateLimitSwitchState,
+    event_tx: &AutoCoordinatorEventSender,
+    error: &anyhow::Error,
+) -> RetryDecision {
+    if let Some(code_err) = find_in_chain::<CodexErr>(error) {
+        if let CodexErr::UsageLimitReached(limit) = code_err {
+            if client.auto_switch_accounts_on_rate_limit()
+                && auth::read_code_api_key_from_env().is_none()
+            {
+                if let Some(auth_manager) = client.get_auth_manager() {
+                    let auth = auth_manager.auth();
+                    let current_account_id = auth
+                        .as_ref()
+                        .and_then(|current| current.get_account_id())
+                        .or_else(|| {
+                            auth_accounts::get_active_account_id(client.code_home())
+                                .ok()
+                                .flatten()
+                        });
+                    if let Some(current_account_id) = current_account_id {
+                        let now = Utc::now();
+                        let blocked_until = limit
+                            .resets_in_seconds
+                            .map(|seconds| now + chrono::Duration::seconds(seconds as i64));
+                        let current_auth_mode = auth
+                            .as_ref()
+                            .map(|current| current.mode)
+                            .or_else(|| {
+                                auth_accounts::find_account(
+                                    client.code_home(),
+                                    current_account_id.as_str(),
+                                )
+                                .ok()
+                                .flatten()
+                                .map(|account| account.mode)
+                            });
+                        if let Some(current_auth_mode) = current_auth_mode {
+                            match switch_active_account_on_rate_limit(
+                                client.code_home(),
+                                state,
+                                client.api_key_fallback_on_all_accounts_limited(),
+                                now,
+                                current_account_id.as_str(),
+                                current_auth_mode,
+                                blocked_until,
+                            ) {
+                                Ok(Some(next_account_id)) => {
+                                    let next_label = auth_accounts::find_account(
+                                        client.code_home(),
+                                        &next_account_id,
+                                    )
+                                    .ok()
+                                    .flatten()
+                                    .and_then(|account| account.label)
+                                    .unwrap_or_else(|| next_account_id.clone());
+                                    tracing::info!(
+                                        from_account_id = %current_account_id,
+                                        to_account_id = %next_account_id,
+                                        reason = "usage_limit_reached",
+                                        "rate limit hit; auto-switching active account"
+                                    );
+                                    auth_manager.reload();
+                                    event_tx.send(AutoCoordinatorEvent::Action {
+                                        message: format!(
+                                            "Auto-switch: now using {next_label} due to usage limit."
+                                        ),
+                                    });
+                                    return RetryDecision::RateLimited {
+                                        wait_until: Instant::now(),
+                                        reason: "usage limit reached; switched accounts".to_string(),
+                                    };
+                                }
+                                Ok(None) => {}
+                                Err(err) => {
+                                    warn!(
+                                        from_account_id = %current_account_id,
+                                        error = %err,
+                                        "failed to activate account after usage limit"
+                                    );
+                                }
+                            }
+                        } else {
+                            warn!(
+                                from_account_id = %current_account_id,
+                                "skipping account switch after usage limit: missing auth mode"
+                            );
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    classify_model_error(error)
 }
 
 fn classify_reqwest_error(err: &reqwest::Error) -> RetryDecision {

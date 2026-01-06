@@ -49,17 +49,14 @@ model_verbosity = "medium"
 # Force-enable reasoning summaries for current model (default: false)
 model_supports_reasoning_summaries = false
 
-# Force reasoning summary format: none | experimental (default: none)
-model_reasoning_summary_format = "none"
-
 ################################################################################
 # Instruction Overrides
 ################################################################################
 
-# Additional user instructions appended after AGENTS.md. Default: unset.
+# Additional user instructions inject before AGENTS.md. Default: unset.
 # developer_instructions = ""
 
-# Optional legacy base instructions override (prefer AGENTS.md). Default: unset.
+# (Ignored) Optional legacy base instructions override (prefer AGENTS.md). Default: unset.
 # instructions = ""
 
 # Inline override for the history compaction prompt. Default: unset.
@@ -201,7 +198,7 @@ project_doc_fallback_filenames = []
 # Enable web search tool (alias: web_search_request). Default: false
 web_search = false
 
-# Enable the view_image tool so the agent can attach local images. Default: true
+# Enable the image_view tool so the agent can attach local images. Default: true
 view_image = true
 
 # (Alias accepted) You can also write:
@@ -217,7 +214,6 @@ unified_exec = false
 apply_patch_freeform = false
 view_image_tool = true
 web_search_request = false
-ghost_commit = false
 enable_experimental_windows_sandbox = false
 skills = true
 

@@ -364,6 +364,35 @@ fn create_shell_tool() -> OpenAiTool {
     })
 }
 
+fn create_image_view_tool() -> OpenAiTool {
+    let mut properties = BTreeMap::new();
+    properties.insert(
+        "path".to_string(),
+        JsonSchema::String {
+            description: Some("Local filesystem path to an image file.".to_string()),
+            allowed_values: None,
+        },
+    );
+    properties.insert(
+        "alt_text".to_string(),
+        JsonSchema::String {
+            description: Some("Optional label for the image.".to_string()),
+            allowed_values: None,
+        },
+    );
+
+    OpenAiTool::Function(ResponsesApiTool {
+        name: "image_view".to_string(),
+        description: "Attach a local image so the model can view it.".to_string(),
+        strict: false,
+        parameters: JsonSchema::Object {
+            properties,
+            required: Some(vec!["path".to_string()]),
+            additional_properties: Some(false.into()),
+        },
+    })
+}
+
 fn create_shell_tool_for_sandbox(sandbox_policy: &SandboxPolicy) -> OpenAiTool {
     let mut properties = BTreeMap::new();
     properties.insert(
@@ -696,6 +725,10 @@ pub fn get_openai_tools(
         }
     }
 
+    if config.include_view_image_tool {
+        tools.push(create_image_view_tool());
+    }
+
     if let Some(apply_patch_tool_type) = &config.apply_patch_tool_type {
         let apply_patch_tool = match apply_patch_tool_type {
             ApplyPatchToolType::Function => create_apply_patch_json_tool(),
@@ -716,6 +749,7 @@ pub fn get_openai_tools(
     // Add general wait tool for background completions
     tools.push(create_wait_tool());
     tools.push(create_kill_tool());
+    tools.push(create_gh_run_wait_tool());
     tools.push(create_bridge_tool());
 
     if config.web_search_request {
@@ -801,6 +835,61 @@ pub fn create_kill_tool() -> OpenAiTool {
         parameters: JsonSchema::Object {
             properties,
             required: Some(vec!["call_id".to_string()]),
+            additional_properties: Some(false.into()),
+        },
+    })
+}
+
+pub fn create_gh_run_wait_tool() -> OpenAiTool {
+    let mut properties = BTreeMap::new();
+    properties.insert(
+        "run_id".to_string(),
+        JsonSchema::String {
+            description: Some("GitHub Actions run id to wait for.".to_string()),
+            allowed_values: None,
+        },
+    );
+    properties.insert(
+        "repo".to_string(),
+        JsonSchema::String {
+            description: Some("Repository in OWNER/REPO form (optional).".to_string()),
+            allowed_values: None,
+        },
+    );
+    properties.insert(
+        "workflow".to_string(),
+        JsonSchema::String {
+            description: Some(
+                "Workflow name or filename (used to select latest run when run_id is omitted)."
+                    .to_string(),
+            ),
+            allowed_values: None,
+        },
+    );
+    properties.insert(
+        "branch".to_string(),
+        JsonSchema::String {
+            description: Some(
+                "Branch to filter when selecting latest run (default: current branch, falling back to main)."
+                    .to_string(),
+            ),
+            allowed_values: None,
+        },
+    );
+    properties.insert(
+        "interval_seconds".to_string(),
+        JsonSchema::Number {
+            description: Some("Polling interval in seconds (default 8).".to_string()),
+        },
+    );
+    OpenAiTool::Function(ResponsesApiTool {
+        name: "gh_run_wait".to_string(),
+        description: "Wait for a GitHub Actions run to finish, using gh run view polling. If run_id is omitted, selects the latest run for the workflow/branch; if both are omitted, selects the latest run on the current branch."
+            .to_string(),
+        strict: false,
+        parameters: JsonSchema::Object {
+            properties,
+            required: None,
             additional_properties: Some(false.into()),
         },
     })
@@ -933,6 +1022,7 @@ mod tests {
                 "agent",
                 "wait",
                 "kill",
+                "gh_run_wait",
                 "code_bridge",
                 "web_search",
             ],
@@ -965,6 +1055,7 @@ mod tests {
                 "agent",
                 "wait",
                 "kill",
+                "gh_run_wait",
                 "code_bridge",
                 "web_search",
             ],
@@ -996,6 +1087,7 @@ mod tests {
                 "agent",
                 "wait",
                 "kill",
+                "gh_run_wait",
                 "code_bridge",
                 "web_search",
             ],
@@ -1064,6 +1156,7 @@ mod tests {
                 "agent",
                 "wait",
                 "kill",
+                "gh_run_wait",
                 "code_bridge",
                 "web_search",
                 "test_server/do_something_cool",
@@ -1071,7 +1164,7 @@ mod tests {
         );
 
         assert_eq!(
-            tools[7],
+            tools[8],
             OpenAiTool::Function(ResponsesApiTool {
                 name: "test_server/do_something_cool".to_string(),
                 parameters: JsonSchema::Object {
@@ -1181,10 +1274,12 @@ mod tests {
             &tools,
             &[
                 "shell",
+                "image_view",
                 "browser",
                 "agent",
                 "wait",
                 "kill",
+                "gh_run_wait",
                 "code_bridge",
                 "web_search",
                 "test_server/do_something_cool",
@@ -1192,7 +1287,7 @@ mod tests {
         );
 
         assert_eq!(
-            tools[7],
+            tools[9],
             OpenAiTool::Function(ResponsesApiTool {
                 name: "test_server/do_something_cool".to_string(),
                 parameters: JsonSchema::Object {
@@ -1304,10 +1399,12 @@ mod tests {
             &tools,
             &[
                 "shell",
+                "image_view",
                 "browser",
                 "agent",
                 "wait",
                 "kill",
+                "gh_run_wait",
                 "code_bridge",
                 "web_search",
                 "dash/search",
@@ -1315,7 +1412,7 @@ mod tests {
         );
 
         assert_eq!(
-            tools[7],
+            tools[9],
             OpenAiTool::Function(ResponsesApiTool {
                 name: "dash/search".to_string(),
                 parameters: JsonSchema::Object {
@@ -1381,6 +1478,7 @@ mod tests {
                 "agent",
                 "wait",
                 "kill",
+                "gh_run_wait",
                 "code_bridge",
                 "web_search",
                 "dash/paginate",
@@ -1455,13 +1553,14 @@ mod tests {
                 "agent",
                 "wait",
                 "kill",
+                "gh_run_wait",
                 "code_bridge",
                 "web_search",
                 "dash/tags",
             ],
         );
         assert_eq!(
-            tools[7],
+            tools[8],
             OpenAiTool::Function(ResponsesApiTool {
                 name: "dash/tags".to_string(),
                 parameters: JsonSchema::Object {
@@ -1527,13 +1626,14 @@ mod tests {
                 "agent",
                 "wait",
                 "kill",
+                "gh_run_wait",
                 "code_bridge",
                 "web_search",
                 "dash/value",
             ],
         );
         assert_eq!(
-            tools[7],
+            tools[8],
             OpenAiTool::Function(ResponsesApiTool {
                 name: "dash/value".to_string(),
                 parameters: JsonSchema::Object {

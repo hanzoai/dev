@@ -88,6 +88,9 @@ playwright-report/
 .tmp/
 tmp/
 temp/
+.merge-backup
+.target-test/
+.target-test-pre/
 
 # logs
 *.log
@@ -140,6 +143,7 @@ CHANGELOG.ignore.md
 # git worktrees
 branches/
 /.wt-*/
+.worktrees/
 
 # coder directories
 .coder/

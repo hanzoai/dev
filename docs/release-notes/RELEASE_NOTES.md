@@ -1,13 +1,10 @@
-## @just-every/code v0.6.13
+## @just-every/code v0.6.38
 
-Sharper TUI ergonomics with account switching, smoother scrolling, and auto-drive polish.
+Small docs update clarifying model provider requirements and proxy usage.
 
 ### Changes
-- TUI: add account switching and skills settings in the core UI.
-- TUI2: normalize wheel and trackpad scrolling for consistent transcript navigation.
-- Auto-drive: improve ansi16 styling, contrast, and ghost snapshot timing for clearer prompts.
-- Auto-drive: respect retry budgets and loop hints to avoid runaway retries.
-- Stability: prevent panics on alpha builds.
+- Docs/Config: clarify `--model` applies to the active provider and call out OpenAI-compatible requirements for custom providers.
+- Docs/Config: add a proxy example for routing OpenAI-style requests to other vendors.
 
 ### Install
 ```
@@ -15,4 +12,4 @@ npm install -g @just-every/code@latest
 code
 ```
 
-Compare: https://github.com/just-every/code/compare/v0.6.12...v0.6.13
+Compare: https://github.com/just-every/code/compare/v0.6.37...v0.6.38

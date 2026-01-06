@@ -5,11 +5,12 @@ use std::path::Path;
 use chrono::{DateTime, Utc};
 use code_app_server_protocol::AuthMode;
 
+use crate::auth;
 use crate::account_usage;
 use crate::auth_accounts;
 
 #[derive(Debug, Default)]
-pub(crate) struct RateLimitSwitchState {
+pub struct RateLimitSwitchState {
     tried_accounts: HashSet<String>,
     limited_chatgpt_accounts: HashSet<String>,
     blocked_until: HashMap<String, DateTime<Utc>>,
@@ -93,8 +94,12 @@ pub(crate) fn select_next_account_id(
     state: &RateLimitSwitchState,
     allow_api_key_fallback: bool,
     now: DateTime<Utc>,
+    current_account_id: Option<&str>,
 ) -> io::Result<Option<String>> {
-    let current = auth_accounts::get_active_account_id(code_home)?;
+    let current = match current_account_id {
+        Some(id) => Some(id.to_string()),
+        None => auth_accounts::get_active_account_id(code_home)?,
+    };
     let accounts = auth_accounts::list_accounts(code_home)?;
 
     let snapshots = account_usage::list_rate_limit_snapshots(code_home).unwrap_or_default();
@@ -192,6 +197,32 @@ pub(crate) fn select_next_account_id(
     Ok(None)
 }
 
+pub fn switch_active_account_on_rate_limit(
+    code_home: &Path,
+    state: &mut RateLimitSwitchState,
+    allow_api_key_fallback: bool,
+    now: DateTime<Utc>,
+    current_account_id: &str,
+    current_mode: AuthMode,
+    blocked_until: Option<DateTime<Utc>>,
+) -> io::Result<Option<String>> {
+    state.mark_limited(current_account_id, current_mode, blocked_until);
+
+    let next_account_id = select_next_account_id(
+        code_home,
+        state,
+        allow_api_key_fallback,
+        now,
+        Some(current_account_id),
+    )?;
+
+    if let Some(next_account_id) = next_account_id.as_deref() {
+        auth::activate_account(code_home, next_account_id)?;
+    }
+
+    Ok(next_account_id)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -268,8 +299,14 @@ mod tests {
 
         let mut state = RateLimitSwitchState::default();
         state.mark_limited(&a.id, AuthMode::ChatGPT, None);
-        let next = select_next_account_id(home.path(), &state, false, fixed_now())
-            .expect("select");
+        let next = select_next_account_id(
+            home.path(),
+            &state,
+            false,
+            fixed_now(),
+            Some(a.id.as_str()),
+        )
+        .expect("select");
         assert_eq!(next.as_deref(), Some(b.id.as_str()));
     }
 
@@ -300,7 +337,9 @@ mod tests {
 
         let mut state = RateLimitSwitchState::default();
         state.mark_limited(&a.id, AuthMode::ChatGPT, None);
-        let next = select_next_account_id(home.path(), &state, false, now).expect("select");
+        let next =
+            select_next_account_id(home.path(), &state, false, now, Some(a.id.as_str()))
+                .expect("select");
         assert!(next.is_none());
     }
 
@@ -335,12 +374,90 @@ mod tests {
         let mut state = RateLimitSwitchState::default();
         state.mark_limited(&a.id, AuthMode::ChatGPT, None);
 
-        let next = select_next_account_id(home.path(), &state, true, now).expect("select");
+        let next = select_next_account_id(home.path(), &state, true, now, Some(a.id.as_str()))
+            .expect("select");
         assert_eq!(next.as_deref(), Some(b.id.as_str()));
 
         // After both ChatGPT accounts are exhausted, allow API key fallback.
         state.mark_limited(&b.id, AuthMode::ChatGPT, None);
-        let next = select_next_account_id(home.path(), &state, true, now).expect("select");
+        let next = select_next_account_id(home.path(), &state, true, now, Some(b.id.as_str()))
+            .expect("select");
         assert_eq!(next.as_deref(), Some(api.id.as_str()));
+    }
+
+    #[test]
+    fn prefers_current_account_override_over_active_account() {
+        let home = tempdir().expect("tmp");
+        let a = auth_accounts::upsert_chatgpt_account(
+            home.path(),
+            chatgpt_tokens("acct-a", "a@example.com"),
+            Utc::now(),
+            None,
+            true,
+        )
+        .expect("insert a");
+        let b = auth_accounts::upsert_chatgpt_account(
+            home.path(),
+            chatgpt_tokens("acct-b", "b@example.com"),
+            Utc::now(),
+            None,
+            false,
+        )
+        .expect("insert b");
+
+        let mut state = RateLimitSwitchState::default();
+        state.mark_limited(&b.id, AuthMode::ChatGPT, None);
+
+        let next = select_next_account_id(
+            home.path(),
+            &state,
+            false,
+            fixed_now(),
+            Some(b.id.as_str()),
+        )
+        .expect("select");
+
+        assert_eq!(next.as_deref(), Some(a.id.as_str()));
+    }
+
+    #[test]
+    fn switches_active_account_on_usage_limit() {
+        let home = tempdir().expect("tmp");
+        let a = auth_accounts::upsert_chatgpt_account(
+            home.path(),
+            chatgpt_tokens("acct-a", "a@example.com"),
+            Utc::now(),
+            None,
+            true,
+        )
+        .expect("insert a");
+        let b = auth_accounts::upsert_chatgpt_account(
+            home.path(),
+            chatgpt_tokens("acct-b", "b@example.com"),
+            Utc::now(),
+            None,
+            false,
+        )
+        .expect("insert b");
+
+        let mut state = RateLimitSwitchState::default();
+        let now = fixed_now();
+        let next = switch_active_account_on_rate_limit(
+            home.path(),
+            &mut state,
+            false,
+            now,
+            a.id.as_str(),
+            AuthMode::ChatGPT,
+            None,
+        )
+        .expect("switch");
+
+        assert_eq!(next.as_deref(), Some(b.id.as_str()));
+
+        let active = auth_accounts::get_active_account_id(home.path())
+            .expect("active account")
+            .expect("active account id");
+        assert_eq!(active, b.id);
     }
 }

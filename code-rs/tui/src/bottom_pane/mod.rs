@@ -358,9 +358,10 @@ impl BottomPane<'_> {
                 x: area.x + horizontal_padding,
                 y: area.y + y_offset,
                 width: area.width.saturating_sub(horizontal_padding * 2),
-                height: (area.height.saturating_sub(y_offset))
-                    - BottomPane::BOTTOM_PAD_LINES
+                height: (area.height.saturating_sub(y_offset)).saturating_sub(
+                    BottomPane::BOTTOM_PAD_LINES
                         .min((area.height.saturating_sub(y_offset)).saturating_sub(1)),
+                ),
             };
             self.composer.cursor_pos(composer_rect)
         }
@@ -1220,8 +1221,10 @@ fn compute_composer_rect(area: Rect, top_spacer_enabled: bool) -> Rect {
     if top_spacer_enabled {
         y_offset = y_offset.saturating_add(1);
     }
-    let height = (area.height - y_offset)
-        - BottomPane::BOTTOM_PAD_LINES.min((area.height - y_offset).saturating_sub(1));
+    let available = area.height.saturating_sub(y_offset);
+    let height = available.saturating_sub(
+        BottomPane::BOTTOM_PAD_LINES.min(available.saturating_sub(1)),
+    );
     Rect {
         x: area.x + horizontal_padding,
         y: area.y + y_offset,

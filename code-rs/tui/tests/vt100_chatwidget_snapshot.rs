@@ -1525,7 +1525,7 @@ fn browser_session_grouped_desired_layout() {
         &mut event_seq,
         &mut order_seq,
         EventMsg::BackgroundEvent(BackgroundEventEvent {
-            message: "cdp warning: Refused to load script from cdn.example.com".into(),
+            message: "[browser console] cdp warning: Refused to load script from cdn.example.com".into(),
         }),
     );
 
@@ -1592,7 +1592,7 @@ fn browser_session_grouped_with_unordered_actions() {
         &mut harness,
         &mut event_seq,
         EventMsg::BackgroundEvent(BackgroundEventEvent {
-            message: "Encountering captcha block".into(),
+            message: "[browser console] Encountering captcha block".into(),
         }),
     );
     push_unordered_event(
@@ -1673,7 +1673,7 @@ fn browser_session_skips_foreign_background_events() {
         &mut event_seq,
         &mut order_seq,
         EventMsg::BackgroundEvent(BackgroundEventEvent {
-            message: "Encountering captcha challenge on checkout".into(),
+            message: "[browser console] Encountering captcha challenge on checkout".into(),
         }),
     );
 
@@ -2322,6 +2322,16 @@ fn agent_status_missing_batch_displays_error() {
     let output = render_chat_widget_to_vt100(&mut harness, 80, 20);
     let output = normalize_output(output);
     insta::assert_snapshot!("agent_status_missing_batch_displays_error", output);
+}
+
+#[test]
+fn agents_overlay_narrow_terminal_does_not_panic() {
+    let mut harness = ChatWidgetHarness::new();
+    harness.send_key(make_key(KeyCode::Char('a'), KeyModifiers::CONTROL));
+
+    let output = render_chat_widget_to_vt100(&mut harness, 52, 18);
+    let output = normalize_output(output);
+    assert!(output.contains("Agents"), "Agents overlay did not render");
 }
 
 #[test]

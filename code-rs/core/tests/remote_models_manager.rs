@@ -27,7 +27,6 @@ fn remote_model(slug: &str, display: &str, priority: i32) -> ModelInfo {
         ],
         "shell_type": "shell_command",
         "visibility": "list",
-        "minimal_client_version": [0, 1, 0],
         "supported_in_api": true,
         "priority": priority,
         "upgrade": null,
@@ -39,7 +38,6 @@ fn remote_model(slug: &str, display: &str, priority: i32) -> ModelInfo {
         "truncation_policy": {"mode": "bytes", "limit": 10_000},
         "supports_parallel_tool_calls": false,
         "context_window": null,
-        "reasoning_summary_format": "none",
         "experimental_supported_tools": [],
     }))
     .expect("valid model")
@@ -76,12 +74,15 @@ async fn refresh_remote_models_uses_cache_when_fresh() {
     let server = MockServer::start().await;
     let response = ModelsResponse {
         models: vec![remote_model("cached", "Cached", 1)],
-        etag: "etag-1".to_string(),
     };
 
     Mock::given(method("GET"))
         .and(path("/models"))
-        .respond_with(ResponseTemplate::new(200).set_body_json(&response))
+        .respond_with(
+            ResponseTemplate::new(200)
+                .set_body_json(&response)
+                .insert_header("ETag", "etag-1"),
+        )
         .up_to_n_times(1)
         .mount(&server)
         .await;
@@ -121,12 +122,15 @@ async fn refresh_remote_models_refetches_when_cache_stale() {
     let server = MockServer::start().await;
     let initial = ModelsResponse {
         models: vec![remote_model("stale", "Stale", 1)],
-        etag: "etag-stale".to_string(),
     };
 
     Mock::given(method("GET"))
         .and(path("/models"))
-        .respond_with(ResponseTemplate::new(200).set_body_json(&initial))
+        .respond_with(
+            ResponseTemplate::new(200)
+                .set_body_json(&initial)
+                .insert_header("ETag", "etag-stale"),
+        )
         .up_to_n_times(1)
         .mount(&server)
         .await;
@@ -152,13 +156,16 @@ async fn refresh_remote_models_refetches_when_cache_stale() {
 
     let updated = ModelsResponse {
         models: vec![remote_model("fresh", "Fresh", 0)],
-        etag: "etag-fresh".to_string(),
     };
 
     server.reset().await;
     Mock::given(method("GET"))
         .and(path("/models"))
-        .respond_with(ResponseTemplate::new(200).set_body_json(&updated))
+        .respond_with(
+            ResponseTemplate::new(200)
+                .set_body_json(&updated)
+                .insert_header("ETag", "etag-fresh"),
+        )
         .up_to_n_times(1)
         .mount(&server)
         .await;
@@ -188,12 +195,15 @@ async fn refresh_remote_models_sends_if_none_match_and_handles_304() {
     let server = MockServer::start().await;
     let initial = ModelsResponse {
         models: vec![remote_model("cached", "Cached", 1)],
-        etag: "etag-304".to_string(),
     };
 
     Mock::given(method("GET"))
         .and(path("/models"))
-        .respond_with(ResponseTemplate::new(200).set_body_json(&initial))
+        .respond_with(
+            ResponseTemplate::new(200)
+                .set_body_json(&initial)
+                .insert_header("ETag", "etag-304"),
+        )
         .up_to_n_times(1)
         .mount(&server)
         .await;
@@ -250,7 +260,6 @@ async fn construct_model_family_applies_remote_overrides() {
         "supported_reasoning_levels": [],
         "shell_type": "shell_command",
         "visibility": "list",
-        "minimal_client_version": [0, 1, 0],
         "supported_in_api": true,
         "priority": 0,
         "upgrade": null,
@@ -262,14 +271,12 @@ async fn construct_model_family_applies_remote_overrides() {
         "truncation_policy": {"mode": "bytes", "limit": 10_000},
         "supports_parallel_tool_calls": false,
         "context_window": 12345,
-        "reasoning_summary_format": "experimental",
         "experimental_supported_tools": [],
     }))
     .expect("model info");
 
     let response = ModelsResponse {
         models: vec![info],
-        etag: String::new(),
     };
 
     Mock::given(method("GET"))
@@ -300,9 +307,4 @@ async fn construct_model_family_applies_remote_overrides() {
         family.default_reasoning_effort,
         Some(code_core::config_types::ReasoningEffort::High)
     );
-    assert_eq!(
-        family.reasoning_summary_format,
-        code_core::config_types::ReasoningSummaryFormat::Experimental
-    );
 }
-

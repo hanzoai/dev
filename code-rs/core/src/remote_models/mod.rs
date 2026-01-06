@@ -8,7 +8,6 @@ use code_protocol::openai_models::ApplyPatchToolType as ProtocolApplyPatchToolTy
 use code_protocol::openai_models::ModelInfo;
 use code_protocol::openai_models::ModelsResponse;
 use code_protocol::openai_models::ReasoningEffort as ProtocolReasoningEffort;
-use code_protocol::openai_models::ReasoningSummaryFormat as ProtocolReasoningSummaryFormat;
 use reqwest::header;
 use reqwest::Method;
 use reqwest::Url;
@@ -98,6 +97,10 @@ impl RemoteModelsManager {
     ///
     /// Never errors: on failures the in-memory snapshot remains unchanged.
     pub async fn refresh_remote_models(&self) {
+        self.refresh_remote_models_with_cache().await;
+    }
+
+    pub async fn refresh_remote_models_with_cache(&self) {
         self.ensure_loaded_from_disk().await;
 
         let (stale_etag, should_fetch) = {
@@ -113,6 +116,28 @@ impl RemoteModelsManager {
             return;
         }
 
+        self.refresh_remote_models_inner(stale_etag).await;
+    }
+
+    pub async fn refresh_remote_models_no_cache(&self) {
+        self.ensure_loaded_from_disk().await;
+        let stale_etag = self.state.read().await.etag.clone();
+        self.refresh_remote_models_inner(stale_etag).await;
+    }
+
+    pub async fn refresh_if_new_etag(&self, etag: String) {
+        let current_etag = self.get_etag().await;
+        if current_etag.clone().is_some() && current_etag.as_deref() == Some(etag.as_str()) {
+            return;
+        }
+        self.refresh_remote_models_no_cache().await;
+    }
+
+    async fn get_etag(&self) -> Option<String> {
+        self.state.read().await.etag.clone()
+    }
+
+    async fn refresh_remote_models_inner(&self, stale_etag: Option<String>) {
         let auth = self.auth_manager.auth();
         let auth_mode = auth.as_ref().map(|a| a.mode);
         if auth_mode != Some(AuthMode::ChatGPT) {
@@ -201,9 +226,7 @@ impl RemoteModelsManager {
             }
         };
 
-        let etag = (!parsed.etag.trim().is_empty())
-            .then(|| parsed.etag)
-            .or(header_etag);
+        let etag = header_etag.filter(|value| !value.trim().is_empty());
 
         let fetched_at = Utc::now();
         {
@@ -330,9 +353,6 @@ pub fn apply_model_info_overrides(info: &ModelInfo, mut family: ModelFamily) -> 
     family.supports_reasoning_summaries = info.supports_reasoning_summaries;
     family.supports_parallel_tool_calls = info.supports_parallel_tool_calls;
     family.default_reasoning_effort = Some(map_reasoning_effort(info.default_reasoning_level));
-    family.reasoning_summary_format =
-        map_reasoning_summary_format(info.reasoning_summary_format.clone());
-
     family
 }
 
@@ -356,45 +376,12 @@ fn map_reasoning_effort(effort: ProtocolReasoningEffort) -> crate::config_types:
     }
 }
 
-fn map_reasoning_summary_format(
-    format: ProtocolReasoningSummaryFormat,
-) -> crate::config_types::ReasoningSummaryFormat {
-    match format {
-        ProtocolReasoningSummaryFormat::None => crate::config_types::ReasoningSummaryFormat::None,
-        ProtocolReasoningSummaryFormat::Experimental => {
-            crate::config_types::ReasoningSummaryFormat::Experimental
-        }
-    }
-}
-
 /// Convert the build's version triple into a whole semver string.
 fn format_client_version_to_whole() -> String {
-    format_client_version_from_parts(
+    format!(
+        "{}.{}.{}",
         env!("CARGO_PKG_VERSION_MAJOR"),
         env!("CARGO_PKG_VERSION_MINOR"),
-        env!("CARGO_PKG_VERSION_PATCH"),
+        env!("CARGO_PKG_VERSION_PATCH")
     )
-}
-
-fn format_client_version_from_parts(major: &str, minor: &str, patch: &str) -> String {
-    const DEV_VERSION: &str = "0.0.0";
-    const FALLBACK_VERSION: &str = "99.99.99";
-
-    let normalized = format!("{major}.{minor}.{patch}");
-    if normalized == DEV_VERSION {
-        FALLBACK_VERSION.to_string()
-    } else {
-        normalized
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn version_formatter_strips_dev_version() {
-        assert_eq!(format_client_version_from_parts("0", "0", "0"), "99.99.99");
-        assert_eq!(format_client_version_from_parts("1", "2", "3"), "1.2.3");
-    }
 }
