@@ -13,6 +13,7 @@ use once_cell::sync::Lazy;
 use reqwest::Client;
 use serde::Deserialize;
 use serde_json::Value;
+use std::path::PathBuf;
 use std::sync::Arc;
 use tokio::sync::Mutex;
 use tokio::sync::RwLock;
@@ -83,6 +84,74 @@ fn is_temporary_internal_launch_error_message(message: &str) -> bool {
         || message.contains("cannot allocate memory")
         || message.contains("too many open files")
         || message.contains("os error 24")
+}
+
+fn chrome_logging_enabled() -> bool {
+    env_truthy("CODE_SUBAGENT_DEBUG") || env_truthy("CODEX_BROWSER_LOG")
+}
+
+fn env_truthy(key: &str) -> bool {
+    std::env::var(key)
+        .map(|value| matches!(value.as_str(), "1" | "true" | "TRUE" | "yes" | "YES"))
+        .unwrap_or(false)
+}
+
+fn resolve_chrome_log_path() -> Option<PathBuf> {
+    if !chrome_logging_enabled() {
+        return None;
+    }
+
+    if let Ok(path) = std::env::var("CODEX_BROWSER_LOG_PATH") {
+        let trimmed = path.trim();
+        if !trimmed.is_empty() {
+            return Some(PathBuf::from(trimmed));
+        }
+    }
+
+    let base = if let Ok(home) = std::env::var("CODE_HOME").or_else(|_| std::env::var("CODEX_HOME")) {
+        PathBuf::from(home).join("debug_logs")
+    } else if let Ok(home) = std::env::var("HOME") {
+        PathBuf::from(home).join(".code").join("debug_logs")
+    } else {
+        return Some(std::env::temp_dir().join("code-chrome.log"));
+    };
+
+    let path = base.join("code-chrome.log");
+    if let Some(parent) = path.parent() {
+        let _ = std::fs::create_dir_all(parent);
+    }
+    Some(path)
+}
+
+const HANDLER_ERROR_LIMIT: u32 = 3;
+
+fn should_restart_handler(consecutive_errors: u32) -> bool {
+    consecutive_errors >= HANDLER_ERROR_LIMIT
+}
+
+fn should_stop_handler<E: std::fmt::Display>(
+    label: &'static str,
+    result: std::result::Result<(), E>,
+    consecutive_errors: &mut u32,
+) -> bool {
+    match result {
+        Ok(()) => {
+            *consecutive_errors = 0;
+            false
+        }
+        Err(err) => {
+            *consecutive_errors = consecutive_errors.saturating_add(1);
+            let count = *consecutive_errors;
+            if count <= HANDLER_ERROR_LIMIT {
+                debug!("{label} event handler error: {err} (count: {count})");
+            }
+            if should_restart_handler(count) {
+                warn!("{label} event handler errors exceeded limit; restarting browser connection");
+                return true;
+            }
+            false
+        }
+    }
 }
 
 async fn discover_ws_via_host_port(host: &str, port: u16) -> Result<String> {
@@ -300,7 +369,12 @@ impl BrowserManager {
                 let page_arc = self.page.clone();
                 let background_page_arc = self.background_page.clone();
                 let task = tokio::spawn(async move {
-                    while let Some(_evt) = handler.next().await {}
+                    let mut consecutive_errors = 0u32;
+                    while let Some(result) = handler.next().await {
+                        if should_stop_handler("[cdp/bm]", result, &mut consecutive_errors) {
+                            break;
+                        }
+                    }
                     warn!("[cdp/bm] event handler ended; clearing browser state so it can restart");
                     *browser_arc.lock().await = None;
                     *page_arc.lock().await = None;
@@ -425,7 +499,12 @@ impl BrowserManager {
                             let page_arc = self.page.clone();
                             let background_page_arc = self.background_page.clone();
                             let task = tokio::spawn(async move {
-                                while let Some(_evt) = handler.next().await {}
+                                let mut consecutive_errors = 0u32;
+                                while let Some(result) = handler.next().await {
+                                    if should_stop_handler("[cdp/bm]", result, &mut consecutive_errors) {
+                                        break;
+                                    }
+                                }
                                 warn!("[cdp/bm] event handler ended; clearing browser state so it can restart");
                                 *browser_arc.lock().await = None;
                                 *page_arc.lock().await = None;
@@ -529,7 +608,12 @@ impl BrowserManager {
                     let page_arc = self.page.clone();
                     let background_page_arc = self.background_page.clone();
                     let task = tokio::spawn(async move {
-                        while let Some(_evt) = handler.next().await {}
+                        let mut consecutive_errors = 0u32;
+                        while let Some(result) = handler.next().await {
+                            if should_stop_handler("[cdp/bm]", result, &mut consecutive_errors) {
+                                break;
+                            }
+                        }
                         warn!("[cdp/bm] event handler ended; clearing browser state so it can restart");
                         *browser_arc.lock().await = None;
                         *page_arc.lock().await = None;
@@ -652,7 +736,12 @@ impl BrowserManager {
                             let page_arc = self.page.clone();
                             let background_page_arc = self.background_page.clone();
                             let task = tokio::spawn(async move {
-                                while let Some(_evt) = handler.next().await {}
+                                let mut consecutive_errors = 0u32;
+                                while let Some(result) = handler.next().await {
+                                    if should_stop_handler("[cdp/bm]", result, &mut consecutive_errors) {
+                                        break;
+                                    }
+                                }
                                 warn!("[cdp/bm] event handler ended; clearing browser state so it can restart");
                                 *browser_arc.lock().await = None;
                                 *page_arc.lock().await = None;
@@ -720,7 +809,7 @@ impl BrowserManager {
         let max_attempts = INTERNAL_LAUNCH_RETRY_DELAYS_MS.len() + 1;
 
         // Add browser launch flags (keep minimal set for screenshot functionality)
-        let log_file = format!("{}/code-chrome.log", std::env::temp_dir().display());
+        let log_file = resolve_chrome_log_path();
 
         let (browser, mut handler, user_data_path) = {
             let mut attempt = 1usize;
@@ -763,14 +852,17 @@ impl BrowserManager {
                     // Disable timeout for slow networks/pages
                     .arg("--disable-hang-monitor")
                     .arg("--disable-background-timer-throttling")
-                    // Redirect Chrome logging to a file to keep terminal clean
-                    .arg("--enable-logging")
-                    .arg("--log-level=1") // 0 = INFO, 1 = WARNING, 2 = ERROR, 3 = FATAL (1 to reduce verbosity)
-                    .arg(format!("--log-file={log_file}"))
                     // Suppress console output
                     .arg("--silent-launch")
                     // Set a longer timeout for CDP requests (60 seconds instead of default 30)
                     .request_timeout(Duration::from_secs(60));
+
+                if let Some(ref log_file) = log_file {
+                    builder = builder
+                        .arg("--enable-logging")
+                        .arg("--log-level=1")
+                        .arg(format!("--log-file={}", log_file.display()));
+                }
 
                 let browser_config = builder
                     .build()
@@ -808,8 +900,12 @@ impl BrowserManager {
                         #[cfg(not(any(target_os = "macos", target_os = "linux", target_os = "windows")))]
                         let hint = "Ensure Chrome/Chromium is installed and available on PATH.";
 
+                        let log_note = log_file
+                            .as_ref()
+                            .map(|path| format!(" Chrome log: {}", path.display()))
+                            .unwrap_or_default();
                         return Err(BrowserError::CdpError(format!(
-                            "Failed to launch internal browser: {message}. Hint: {hint}. Chrome log: {log_file}"
+                            "Failed to launch internal browser: {message}. Hint: {hint}.{log_note}"
                         )));
                     }
                 }
@@ -821,8 +917,11 @@ impl BrowserManager {
         let page_arc = self.page.clone();
         let background_page_arc = self.background_page.clone();
         let task = tokio::spawn(async move {
-            while let Some(event) = handler.next().await {
-                debug!("Browser event: {:?}", event);
+            let mut consecutive_errors = 0u32;
+            while let Some(result) = handler.next().await {
+                if should_stop_handler("[cdp/bm]", result, &mut consecutive_errors) {
+                    break;
+                }
             }
             warn!("[cdp/bm] event handler ended; clearing browser state so it can restart");
             *browser_arc.lock().await = None;
@@ -2232,4 +2331,17 @@ pub struct BrowserStatus {
     pub current_url: Option<String>,
     pub viewport: crate::config::ViewportConfig,
     pub fullpage: bool,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::should_restart_handler;
+
+    #[test]
+    fn handler_restarts_after_repeated_errors() {
+        assert!(!should_restart_handler(0));
+        assert!(!should_restart_handler(1));
+        assert!(!should_restart_handler(2));
+        assert!(should_restart_handler(3));
+    }
 }

@@ -324,6 +324,14 @@ impl ModelClient {
         self.config.debug
     }
 
+    pub fn auto_switch_accounts_on_rate_limit(&self) -> bool {
+        self.config.auto_switch_accounts_on_rate_limit
+    }
+
+    pub fn api_key_fallback_on_all_accounts_limited(&self) -> bool {
+        self.config.api_key_fallback_on_all_accounts_limited
+    }
+
     pub fn build_tools_config_with_sandbox(
         &self,
         sandbox_policy: SandboxPolicy,
@@ -749,6 +757,21 @@ impl ModelClient {
                         }
                     }
 
+                    let models_etag = resp
+                        .headers()
+                        .get("X-Models-Etag")
+                        .and_then(|value| value.to_str().ok())
+                        .map(ToString::to_string);
+                    if let Some(etag) = models_etag {
+                        if tx_event
+                            .send(Ok(ResponseEvent::ModelsEtag(etag)))
+                            .await
+                            .is_err()
+                        {
+                            debug!("receiver dropped models etag event");
+                        }
+                    }
+
                     // spawn task to process SSE
                     let stream = resp.bytes_stream().map_err(CodexErr::Reqwest);
                     let debug_logger = Arc::clone(&self.debug_logger);
@@ -812,9 +835,15 @@ impl ModelClient {
                         && auth_manager.is_some()
                         && auth::read_code_api_key_from_env().is_none()
                     {
-                        if let Ok(Some(current_account_id)) =
-                            auth_accounts::get_active_account_id(self.code_home())
-                        {
+                        let current_account_id = auth
+                            .as_ref()
+                            .and_then(|current| current.get_account_id())
+                            .or_else(|| {
+                                auth_accounts::get_active_account_id(self.code_home())
+                                    .ok()
+                                    .flatten()
+                            });
+                        if let Some(current_account_id) = current_account_id {
                             let mut retry_after_delay = retry_after_hint.clone();
                             if retry_after_delay.is_none() {
                                 if let Some(ErrorResponse { ref error }) = body {
@@ -862,6 +891,7 @@ impl ModelClient {
                                     &rate_limit_switch_state,
                                     self.config.api_key_fallback_on_all_accounts_limited,
                                     now,
+                                    Some(current_account_id.as_str()),
                                 )
                             {
                                 if should_record_usage_limit {
@@ -1247,9 +1277,15 @@ impl ModelClient {
                 && auth::read_code_api_key_from_env().is_none()
             {
                 let now = Utc::now();
-                if let Ok(Some(current_account_id)) =
-                    auth_accounts::get_active_account_id(self.code_home())
-                {
+                let current_account_id = auth
+                    .as_ref()
+                    .and_then(|current| current.get_account_id())
+                    .or_else(|| {
+                        auth_accounts::get_active_account_id(self.code_home())
+                            .ok()
+                            .flatten()
+                    });
+                if let Some(current_account_id) = current_account_id {
                     let current_auth_mode = auth
                         .as_ref()
                         .map(|a| a.mode)
@@ -1265,6 +1301,7 @@ impl ModelClient {
                             &rate_limit_switch_state,
                             self.config.api_key_fallback_on_all_accounts_limited,
                             now,
+                            Some(current_account_id.as_str()),
                         )
                     {
                         tracing::info!(

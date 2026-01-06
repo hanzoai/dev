@@ -7,6 +7,136 @@
 
 - (none)
 
+## [0.6.38] - 2026-01-06
+
+- Docs/Config: clarify `--model` applies to the active provider and call out OpenAI-compatible requirements for custom providers. (fa6c482)
+- Docs/Config: add a proxy example for routing OpenAI-style requests to other vendors. (fa6c482)
+
+## [0.6.37] - 2026-01-06
+
+- TUI/Image: render view image cards so attached visuals show inline. (658ddfb)
+- TUI/Browser: scope console logs to each browser card to avoid spillover. (e1d8f12)
+- TUI/Resume: prevent footer underflow in resume layouts. (deef15a)
+- TUI/Composer: guard composer height to keep the input stable. (041dff4)
+- Core/Config: allow tool output size override to honor config limits. (c3782ba)
+
+## [0.6.36] - 2026-01-05
+
+- TUI: prioritize task cancellation on Esc before agent input to make stopping runs reliable. (76e3dd8)
+- Tests: reduce linux sandbox and TUI timeout flakes for steadier CI runs. (9d5dbfc)
+
+## [0.6.35] - 2026-01-05
+
+- Core/Agent: keep packaged code executable available for read-only agents to avoid missing-binary failures. (d1557c5)
+- Core/Agent: fall back to local dev build when the running binary disappears to keep agent commands working. (d1557c5)
+
+## [0.6.34] - 2026-01-05
+
+- Core/Auth: auto-switch to another account when usage limits hit to keep runs moving. (590f46be)
+- UX: show notices when accounts auto-switch due to rate limits so users stay informed. (590f46be)
+
+## [0.6.33] - 2026-01-05
+
+- TUI: keep cancelable agents prioritized when Esc is pressed. (195c768)
+- TUI: prompt to init git before git-dependent actions run. (6d693c3f)
+- Logging: overhaul debug log handling for clearer diagnostics. (afba3b9c)
+
+## [0.6.32] - 2026-01-04
+
+- TUI: prevent Esc undo priming from sticking and stabilize word-motion shortcuts. (d90b0f9)
+- TUI: refactor Esc handling into a dedicated module for clearer behavior. (d90b0f9)
+
+## [0.6.31] - 2026-01-04
+
+- Core/Config: add missing test imports to keep config checks stable. (97672cc7)
+- TUI/Logging: throttle frame timer spam to reduce noisy redraw logs. (3eeef61c)
+- Core/TUI: split large modules to improve stability and maintainability. (5c9d9743)
+
+## [0.6.30] - 2026-01-04
+
+- TUI/Auto Drive: avoid full render rebuilds to cut redraw overhead during runs. (6db1e0b)
+- TUI/History: cache patch summary layout to reduce churn and flicker. (845d63e)
+- TUI/Logs: throttle thread spawn errors to prevent repeated warnings. (e91ce8c)
+
+## [0.6.29] - 2026-01-02
+
+- TUI/Markdown: wrap wide code graphemes to avoid overflow in rendered blocks. (8519507)
+- TUI/Markdown: flush wrapped code rows so virtualized views stay aligned. (b4d8264)
+
+## [0.6.27] - 2026-01-02
+
+- Auto-review: skip re-reviews when files are unchanged to cut noise. (0dddef81)
+- Core/GH: auto-resolve gh_run_wait defaults for smoother release checks. (a865bee5)
+
+## [0.6.26] - 2026-01-01
+
+- Image view: render local image attachments in transcripts and tools. (71a68a2)
+- Core/Tools: align image_view tool coverage to match supported sources. (fcb3afb)
+
+## [0.6.25] - 2026-01-01
+
+- CLI/GH: use GitHub run URLs when waiting on Actions to avoid stale links. (a7f6402a)
+- CLI/GH: show wait details while following GitHub Actions runs for clarity. (a7f6402a)
+
+## [0.6.24] - 2026-01-01
+
+- TUI: keep virtualization frozen for tail-only views to avoid redraw churn. (77f37f33)
+- TUI: defer virtualization sync until the view is ready to prevent flicker. (6c11ec70)
+- Core/GH: allow gh_run_wait to target specific repos for release monitoring. (a83514b4)
+
+## [0.6.23] - 2025-12-31
+
+- TUI: align welcome layout height with width to keep the intro balanced. (36aef09f)
+- TUI: stabilize welcome intro sizing across resolutions to avoid jitter. (6b4cebed, 117863e2)
+
+## [0.6.22] - 2025-12-31
+
+- Agents: wake on batch completion to avoid stalled automation runs. (0c461689)
+- Core: refresh codex-rs mirror to upstream main to stay aligned with engine updates. (92641d9f)
+- Deps: bump tokio, tracing-subscriber, toml_edit, regex-lite in codex-rs for stability. (a48904de, 4313e0a7, ce3ff299, 13c42a07)
+
+## [0.6.20] - 2025-12-30
+
+- Auto Drive: keep retrying after errors so runs recover instead of stopping early. (7f6c12e8)
+- Auto Drive: schedule restarts without depending on Tokio to avoid stalled recoveries. (bae785e9)
+
+## [0.6.19] - 2025-12-29
+
+- Agents: default built-in slugs to code-gpt-5.2-codex for faster, higher-quality automation. (8afe9b8c)
+- Agents: expand GPT-5 alias coverage and docs so configs map cleanly to the new defaults. (8afe9b8c)
+
+## [0.6.18] - 2025-12-28
+
+- TUI: add `/skills` slash command to list available skills inline. (7087feb)
+- Exec: handle missing wait output to keep execution results consistent. (d1cc1a2)
+- Auto Drive: stop runs after fatal errors to avoid hanging sessions. (a481b54)
+
+## [0.6.17] - 2025-12-28
+
+- TUI2: improve transcript selection with multi-click, drag start, copy shortcut, and corruption fixes when copying offscreen text. (0130a2fa, 28285493, 414fbe0d, 310f2114, 7d0c5c7b)
+- Auto Drive: keep agent runs alive and clamp overlays to avoid misaligned prompts. (eafae4bc, 7b28c36b)
+- Config: honor /etc/codex/config.toml, in-repo config sources, and project_root_markers for workspace detection. (e27d9bd8, 8ff16a77, 314937fb)
+- Exec/CLI: limit unified exec output size and improve ripgrep download diagnostics for clearer failures. (fb24c47b, f2b740c9)
+- Performance: cache history render requests and cap redraw scheduling to 60fps to reduce TUI CPU usage. (72b6650f, 96a65ff0)
+
+## [0.6.16] - 2025-12-25
+
+- Auto Drive: tighten timeboxed coordinator guidance so runs lead with authoritative verifiers and outcome-only directives. (d3efecb)
+- CLI: expand timeboxed exec guidance to force early acceptance checks and proof before finishing. (d3efecb)
+
+## [0.6.15] - 2025-12-24
+
+- Exec: add timeboxed auto-exec guidance to keep runs bounded. (8dbfdbba)
+- Auto Drive: tighten time budget guidance and drop unused seed to reduce noise. (376fc8ff, 736e6cf0)
+
+## [0.6.14] - 2025-12-23
+
+- TUI: clear stale mid-turn output when starting a new task so history stays accurate. (dd610fe2)
+- TUI: clear exec spinners when a TaskComplete event is missing to avoid stuck indicators. (e047feb4)
+- Core/Auth: switch the active account based on session context to honor workspace permissions. (ac958448)
+- Browser: restart the navigation handler after repeated errors to restore browsing. (940dcc44)
+- Auto-review: defer baseline capture to keep automated review diffs stable. (6818c0b5)
+
 ## [0.6.13] - 2025-12-22
 
 - TUI: add account switching and skills settings in the core UI. (bcf7614a)

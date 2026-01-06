@@ -27,7 +27,7 @@ model = "o3"  # overrides the default of "gpt-5.1-codex"
 
 ## model_providers
 
-This option lets you override and amend the default set of model providers bundled with Code. This value is a map where the key is the value to use with `model_provider` to select the corresponding provider.
+This option lets you override and amend the default set of model providers bundled with Code. This value is a map where the key is the value to use with `model_provider` to select the corresponding provider. Providers must expose an OpenAI-compatible HTTP API (Chat Completions or Responses); native Anthropic/Gemini APIs are not supported directly without a proxy.
 
 For example, if you wanted to add a provider that uses the OpenAI 4o model via the chat completions API, then you could add the following configuration:
 
@@ -68,6 +68,20 @@ Or a third-party provider (using a distinct environment variable for the API key
 name = "Mistral"
 base_url = "https://api.mistral.ai/v1"
 env_key = "MISTRAL_API_KEY"
+```
+
+Or a proxy that converts OpenAI-compatible requests to another vendor (e.g., Anthropic or Gemini):
+
+```toml
+model = "claude-opus-4.5"
+model_provider = "claude-proxy"
+
+[model_providers.claude-proxy]
+name = "Claude (proxy)"
+base_url = "http://127.0.0.1:8000/v1"
+env_key = "ANTHROPIC_API_KEY"
+wire_api = "responses"  # or "chat" if your proxy only supports chat-completions
+requires_openai_auth = false
 ```
 
 It is also possible to configure a provider to include extra HTTP headers with a request. These can be hardcoded values (`http_headers`) or values read from environment variables (`env_http_headers`):
@@ -184,7 +198,7 @@ approval_policy = "never"
 
 Use `[[agents]]` blocks to register additional CLI programs that Code can launch as peers. Each block maps a short `name` (referenced elsewhere in the config) to the command to execute, optional default flags, and environment variables.
 
-> **Note:** Built-in model slugs (for example `code-gpt-5.1-codex`, `claude-sonnet-4.5`) automatically inject the correct `--model` or `-m` flag. To avoid conflicting arguments, Code strips any `--model`/`-m` flags you place in `args`, `args_read_only`, or `args_write` before launching the agent. If you need a new model variant, add a slug in `code-rs/core/src/agent_defaults.rs` (or set an environment variable consumed by the CLI) rather than pinning the flag here.
+> **Note:** Built-in model slugs (for example `code-gpt-5.2-codex`, `claude-sonnet-4.5`) automatically inject the correct `--model` or `-m` flag. To avoid conflicting arguments, Code strips any `--model`/`-m` flags you place in `args`, `args_read_only`, or `args_write` before launching the agent. If you need a new model variant, add a slug in `code-rs/core/src/agent_defaults.rs` (or set an environment variable consumed by the CLI) rather than pinning the flag here.
 
 ```toml
 [[agents]]
@@ -435,13 +449,13 @@ tool_timeout_sec = 30
 
 Sub-agents are orchestrated helper workflows you can trigger with slash commands (for example `/plan`, `/solve`, `/code`). Each entry under `[[subagents.commands]]` defines the slash command name, whether spawned agents run in read-only mode, which `agents` to launch, and extra guidance for both the orchestrator (Code) and the individual agents.
 
-By default (when no `[[agents]]` are configured) Code advertises these model slugs for multi-agent runs: `code-gpt-5.2`, `code-gpt-5.1-codex-max`, `claude-opus-4.5`, `gemini-3-pro`, `code-gpt-5.1-codex-mini`, `claude-sonnet-4.5`, `gemini-3-flash`, `code-gpt-5.1`, `claude-haiku-4.5`, and `qwen-3-coder`. The cloud counterpart, `cloud-gpt-5.1-codex-max`, only appears when `CODE_ENABLE_CLOUD_AGENT_MODEL=1` is set. (`gemini` resolves to `gemini-3-flash`.) You can override the list by defining `[[agents]]` entries or by specifying `agents = [ … ]` on a given `[[subagents.commands]]` entry.
+By default (when no `[[agents]]` are configured) Code advertises these model slugs for multi-agent runs: `code-gpt-5.2`, `code-gpt-5.2-codex`, `claude-opus-4.5`, `gemini-3-pro`, `code-gpt-5.1-codex-mini`, `claude-sonnet-4.5`, `gemini-3-flash`, `claude-haiku-4.5`, and `qwen-3-coder`. The cloud counterpart, `cloud-gpt-5.1-codex-max`, only appears when `CODE_ENABLE_CLOUD_AGENT_MODEL=1` is set. (`gemini` resolves to `gemini-3-flash`.) You can override the list by defining `[[agents]]` entries or by specifying `agents = [ … ]` on a given `[[subagents.commands]]` entry.
 
 ```toml
 [[subagents.commands]]
 name = "context"
 read-only = true
-agents = ["context-collector", "code-gpt-5.1"]
+agents = ["context-collector", "code-gpt-5.2"]
 orchestrator-instructions = "Coordinate a context sweep before coding. Ask each agent to emit concise, linked summaries of relevant files and tooling the primary task might need."
 agent-instructions = "Summarize the repository areas most relevant to the user's request. List file paths, rationale, and suggested follow-up scripts to run. Keep the reply under 2,000 tokens."
 ```
@@ -855,6 +869,10 @@ In general, Code knows the context window for the most common OpenAI models, but
 ## model_max_output_tokens
 
 This is analogous to `model_context_window`, but for the maximum number of output tokens for the model.
+
+## tool_output_max_bytes
+
+Maximum number of bytes of tool output (including shell command output and file reads) to include in a model request. Defaults to 32 KiB. Increase this if you need to send larger outputs to the model (note the exec capture cap remains 32 MiB per stream).
 
 ## project_doc_max_bytes
 
