@@ -136,7 +136,7 @@ pub(crate) async fn spawn_child_async(
             StdioPolicy::Inherit => None,
         };
         #[cfg(not(target_os = "linux"))]
-        let exec_memory_max_bytes: Option<u64> = None;
+        let _exec_memory_max_bytes: Option<u64> = None;
         cmd.pre_exec(move || {
             // Start a new process group
             let _ = libc::setpgid(0, 0);
