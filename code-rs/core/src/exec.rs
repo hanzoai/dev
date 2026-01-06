@@ -564,7 +564,13 @@ async fn consume_truncated_output(
         combined_handle.await.map_err(CodexErr::from)?
     };
 
+    #[cfg(not(target_os = "linux"))]
+    let oom_killed = false;
+    #[cfg(not(target_os = "linux"))]
+    let cgroup_memory_max_bytes: Option<u64> = None;
+    #[cfg(target_os = "linux")]
     let mut oom_killed = false;
+    #[cfg(target_os = "linux")]
     let mut cgroup_memory_max_bytes: Option<u64> = None;
     #[cfg(target_os = "linux")]
     {

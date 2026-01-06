@@ -1,3 +1,30 @@
+# @hanzo/dev CLI
+
+## Claude CLI Integration (No API Keys)
+
+Use Claude Code CLI as a backend for @hanzo/dev without API keys:
+
+```bash
+# Start proxy
+cd cli-proxy && PORT=9999 node claude-proxy.js
+
+# Use @hanzo/dev with Claude
+code   # Interactive
+echo "What is 2+2?" | code exec --full-auto  # Non-interactive
+```
+
+Config in `~/.code/config.toml`:
+```toml
+model_provider = "claude-cli"
+[model_providers.claude-cli]
+base_url = "http://localhost:9999/v1"
+wire_api = "chat"
+```
+
+See `cli-proxy/README.md` for full documentation.
+
+---
+
 # Rust/codex-rs
 
 In the codex-rs folder where the rust code lives:

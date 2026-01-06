@@ -6,6 +6,7 @@ members = [
     "app-server-protocol",
     "apply-patch",
     "arg0",
+    "cli-proxy",
     "code-auto-drive-core",
     "code-auto-drive-diagnostics",
     "code-backend-openapi-models",
