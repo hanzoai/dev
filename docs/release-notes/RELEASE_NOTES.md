@@ -1,10 +1,10 @@
-## @just-every/code v0.6.38
+## @just-every/code v0.6.40
 
-Small docs update clarifying model provider requirements and proxy usage.
+Small fixes to keep TUI image workflows and Linux builds stable.
 
 ### Changes
-- Docs/Config: clarify `--model` applies to the active provider and call out OpenAI-compatible requirements for custom providers.
-- Docs/Config: add a proxy example for routing OpenAI-style requests to other vendors.
+- TUI/Image: initialize picker state for image cards so selection works reliably.
+- Core: gate cgroup helpers on Linux to avoid non-Linux builds invoking them.
 
 ### Install
 ```
@@ -12,4 +12,4 @@ npm install -g @just-every/code@latest
 code
 ```
 
-Compare: https://github.com/just-every/code/compare/v0.6.37...v0.6.38
+Compare: https://github.com/just-every/code/compare/v0.6.39...v0.6.40

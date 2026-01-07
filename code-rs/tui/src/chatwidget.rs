@@ -9251,6 +9251,17 @@ impl ChatWidget<'_> {
         layout_scroll::flash_scrollbar(self);
     }
 
+    fn ensure_image_cell_picker(&self, cell: &dyn HistoryCell) {
+        if let Some(image) = cell
+            .as_any()
+            .downcast_ref::<crate::history_cell::ImageOutputCell>()
+        {
+            let picker = self.terminal_info.picker.clone();
+            let font_size = self.terminal_info.font_size;
+            image.ensure_picker_initialized(picker, font_size);
+        }
+    }
+
     fn history_insert_with_key_global(
         &mut self,
         cell: Box<dyn HistoryCell>,
@@ -9278,6 +9289,7 @@ impl ChatWidget<'_> {
                 );
             }
         }
+        self.ensure_image_cell_picker(cell.as_ref());
         // Any ordered insert of a non-reasoning cell means reasoning is no longer the
         // bottom-most active block; drop the in-progress ellipsis on collapsed titles.
         let is_reasoning_cell = cell
@@ -10006,9 +10018,11 @@ impl ChatWidget<'_> {
             HistoryRecord::BackgroundEvent(state) => {
                 Some(Box::new(history_cell::BackgroundEventCell::new(state.clone())))
             }
-            HistoryRecord::Image(state) => Some(Box::new(
-                history_cell::ImageOutputCell::from_record(state.clone()),
-            )),
+            HistoryRecord::Image(state) => {
+                let cell = history_cell::ImageOutputCell::from_record(state.clone());
+                self.ensure_image_cell_picker(&cell);
+                Some(Box::new(cell))
+            }
             HistoryRecord::Context(state) => Some(Box::new(
                 history_cell::ContextCell::new(state.clone()),
             )),
@@ -10397,6 +10411,7 @@ impl ChatWidget<'_> {
             }
         }
 
+        self.ensure_image_cell_picker(cell.as_ref());
         self.history_cells[idx] = cell;
         self.invalidate_height_cache();
         self.request_redraw();
@@ -10445,6 +10460,7 @@ impl ChatWidget<'_> {
             (None, None) => {}
         }
 
+        self.ensure_image_cell_picker(cell.as_ref());
         self.history_cells[idx] = cell;
         if idx < self.history_cell_ids.len() {
             self.history_cell_ids[idx] = maybe_id;
@@ -11502,6 +11518,7 @@ impl ChatWidget<'_> {
                 .code_op_tx
                 .send(Op::UserInput {
                     items: combined_items,
+                    final_output_json_schema: None,
                 })
             {
                 tracing::error!("failed to send Op::UserInput: {e}");
@@ -18002,12 +18019,12 @@ fi\n\
         if !self.auto_state.is_paused_manual() {
             self.auto_state.clear_bypass_coordinator_flag();
         }
-        let conversation = self.current_auto_history();
+        let conversation = std::sync::Arc::<[ResponseItem]>::from(self.current_auto_history());
         let Some(handle) = self.auto_handle.as_ref() else {
             return;
         };
         if handle
-            .send(AutoCoordinatorCommand::UpdateConversation(conversation))
+            .send(AutoCoordinatorCommand::UpdateConversation(conversation.into()))
             .is_err()
         {
             self.auto_stop(Some("Coordinator stopped unexpectedly.".to_string()));
@@ -18041,12 +18058,12 @@ fi\n\
         if !self.auto_state.is_paused_manual() {
             self.auto_state.clear_bypass_coordinator_flag();
         }
-        let conversation = self.current_auto_history();
+        let conversation = std::sync::Arc::<[ResponseItem]>::from(self.current_auto_history());
         let Some(handle) = self.auto_handle.as_ref() else {
             return;
         };
         if handle
-            .send(AutoCoordinatorCommand::UpdateConversation(conversation))
+            .send(AutoCoordinatorCommand::UpdateConversation(conversation.into()))
             .is_err()
         {
             self.auto_stop(Some("Coordinator stopped unexpectedly.".to_string()));
@@ -18083,7 +18100,7 @@ fi\n\
         };
         let command = AutoCoordinatorCommand::HandleUserPrompt {
             _prompt: prompt,
-            conversation,
+            conversation: conversation.into(),
         };
         match handle.send(command) {
             Ok(()) => {
@@ -18439,13 +18456,14 @@ Have we met every part of this goal and is there no further work to do?"#
 
     pub(crate) fn auto_handle_compacted_history(
         &mut self,
-        conversation: Vec<ResponseItem>,
+        conversation: std::sync::Arc<[ResponseItem]>,
         show_notice: bool,
     ) {
         let (previous_items, previous_indices) = self.export_auto_drive_items_with_indices();
-        self.auto_history.replace_all(conversation.clone());
-        self.auto_compaction_overlay =
-            self.derive_compaction_overlay(&previous_items, &previous_indices, &conversation);
+        let conversation = conversation.as_ref().to_vec();
+        self.auto_compaction_overlay = self
+            .derive_compaction_overlay(&previous_items, &previous_indices, &conversation);
+        self.auto_history.replace_all(conversation);
         if show_notice {
             self.history_push_plain_paragraphs(
                 PlainMessageKind::Notice,
@@ -28080,7 +28098,10 @@ Have we met every part of this goal and is there no further work to do?"#
         }
 
         let items = message.ordered_items.clone();
-        if let Err(e) = self.code_op_tx.send(Op::UserInput { items }) {
+        if let Err(e) = self.code_op_tx.send(Op::UserInput {
+            items,
+            final_output_json_schema: None,
+        }) {
             tracing::error!("failed to send immediate UserInput: {e}");
         }
 
@@ -30510,7 +30531,7 @@ use code_core::protocol::OrderMeta;
                 .expect("assistant message"),
         ];
 
-        chat.auto_handle_compacted_history(conversation, false);
+        chat.auto_handle_compacted_history(std::sync::Arc::from(conversation), false);
 
         let has_checkpoint = chat.history_cells.iter().any(|cell| {
             cell.display_lines_trimmed().iter().any(|line| {
