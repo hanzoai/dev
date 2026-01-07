@@ -173,7 +173,6 @@ pub(crate) fn best_effort_cleanup_exec_cgroup(pid: u32) {
     // Only remove the per-pid directory. The parent container stays.
     let _ = std::fs::remove_dir(&dir);
 }
-
 #[cfg(not(target_os = "linux"))]
 #[allow(dead_code)]
 pub(crate) fn default_exec_memory_max_bytes() -> Option<u64> {
