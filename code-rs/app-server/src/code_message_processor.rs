@@ -3,20 +3,20 @@ use std::path::PathBuf;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 
-use code_core::AuthManager;
-use code_core::CodexConversation;
-use code_core::ConversationManager;
-use code_core::NewConversation;
-use code_core::config::Config;
-use code_core::config::ConfigOverrides;
-use code_core::git_info::git_diff_to_remote;
-use code_core::protocol::ApplyPatchApprovalRequestEvent;
-use code_core::protocol::Event;
-use code_core::protocol::EventMsg;
-use code_core::protocol::ExecApprovalRequestEvent;
-use code_protocol::mcp_protocol::FuzzyFileSearchParams;
-use code_protocol::mcp_protocol::FuzzyFileSearchResponse;
-use code_protocol::protocol::ReviewDecision;
+use hanzo_core::AuthManager;
+use hanzo_core::CodexConversation;
+use hanzo_core::ConversationManager;
+use hanzo_core::NewConversation;
+use hanzo_core::config::Config;
+use hanzo_core::config::ConfigOverrides;
+use hanzo_core::git_info::git_diff_to_remote;
+use hanzo_core::protocol::ApplyPatchApprovalRequestEvent;
+use hanzo_core::protocol::Event;
+use hanzo_core::protocol::EventMsg;
+use hanzo_core::protocol::ExecApprovalRequestEvent;
+use hanzo_protocol::mcp_protocol::FuzzyFileSearchParams;
+use hanzo_protocol::mcp_protocol::FuzzyFileSearchResponse;
+use hanzo_protocol::protocol::ReviewDecision;
 use mcp_types::JSONRPCErrorError;
 use mcp_types::RequestId;
 use tokio::sync::Mutex;
@@ -26,37 +26,37 @@ use uuid::Uuid;
 
 use crate::error_code::INTERNAL_ERROR_CODE;
 use crate::error_code::INVALID_REQUEST_ERROR_CODE;
-use code_utils_json_to_toml::json_to_toml;
+use hanzo_utils_json_to_toml::json_to_toml;
 use crate::outgoing_message::OutgoingMessageSender;
 use crate::outgoing_message::OutgoingNotification;
 use crate::fuzzy_file_search::run_fuzzy_file_search;
-use code_protocol::protocol::TurnAbortReason;
-use code_core::protocol::InputItem as CoreInputItem;
-use code_core::protocol::Op;
-use code_core::protocol as core_protocol;
-use code_protocol::mcp_protocol::APPLY_PATCH_APPROVAL_METHOD;
-use code_protocol::mcp_protocol::AddConversationListenerParams;
-use code_protocol::mcp_protocol::AddConversationSubscriptionResponse;
-use code_protocol::mcp_protocol::ApplyPatchApprovalParams;
-use code_protocol::mcp_protocol::ApplyPatchApprovalResponse;
-use code_protocol::mcp_protocol::ClientRequest;
-use code_protocol::mcp_protocol::ConversationId;
-use code_protocol::mcp_protocol::EXEC_COMMAND_APPROVAL_METHOD;
-use code_protocol::mcp_protocol::ExecCommandApprovalParams;
-use code_protocol::mcp_protocol::ExecCommandApprovalResponse;
-use code_protocol::mcp_protocol::InputItem as WireInputItem;
-use code_protocol::mcp_protocol::InterruptConversationParams;
-use code_protocol::mcp_protocol::InterruptConversationResponse;
+use hanzo_protocol::protocol::TurnAbortReason;
+use hanzo_core::protocol::InputItem as CoreInputItem;
+use hanzo_core::protocol::Op;
+use hanzo_core::protocol as core_protocol;
+use hanzo_protocol::mcp_protocol::APPLY_PATCH_APPROVAL_METHOD;
+use hanzo_protocol::mcp_protocol::AddConversationListenerParams;
+use hanzo_protocol::mcp_protocol::AddConversationSubscriptionResponse;
+use hanzo_protocol::mcp_protocol::ApplyPatchApprovalParams;
+use hanzo_protocol::mcp_protocol::ApplyPatchApprovalResponse;
+use hanzo_protocol::mcp_protocol::ClientRequest;
+use hanzo_protocol::mcp_protocol::ConversationId;
+use hanzo_protocol::mcp_protocol::EXEC_COMMAND_APPROVAL_METHOD;
+use hanzo_protocol::mcp_protocol::ExecCommandApprovalParams;
+use hanzo_protocol::mcp_protocol::ExecCommandApprovalResponse;
+use hanzo_protocol::mcp_protocol::InputItem as WireInputItem;
+use hanzo_protocol::mcp_protocol::InterruptConversationParams;
+use hanzo_protocol::mcp_protocol::InterruptConversationResponse;
 // Unused login-related and diff param imports removed
-use code_protocol::mcp_protocol::GitDiffToRemoteResponse;
-use code_protocol::mcp_protocol::NewConversationParams;
-use code_protocol::mcp_protocol::NewConversationResponse;
-use code_protocol::mcp_protocol::RemoveConversationListenerParams;
-use code_protocol::mcp_protocol::RemoveConversationSubscriptionResponse;
-use code_protocol::mcp_protocol::SendUserMessageParams;
-use code_protocol::mcp_protocol::SendUserMessageResponse;
-use code_protocol::mcp_protocol::SendUserTurnParams;
-use code_protocol::mcp_protocol::SendUserTurnResponse;
+use hanzo_protocol::mcp_protocol::GitDiffToRemoteResponse;
+use hanzo_protocol::mcp_protocol::NewConversationParams;
+use hanzo_protocol::mcp_protocol::NewConversationResponse;
+use hanzo_protocol::mcp_protocol::RemoveConversationListenerParams;
+use hanzo_protocol::mcp_protocol::RemoveConversationSubscriptionResponse;
+use hanzo_protocol::mcp_protocol::SendUserMessageParams;
+use hanzo_protocol::mcp_protocol::SendUserMessageResponse;
+use hanzo_protocol::mcp_protocol::SendUserTurnParams;
+use hanzo_protocol::mcp_protocol::SendUserTurnResponse;
 
 // Removed deprecated ChatGPT login support scaffolding
 
@@ -554,23 +554,23 @@ async fn apply_bespoke_event_handling(
             grant_root,
         }) => {
             // Map core FileChange to wire FileChange
-            let file_changes: HashMap<PathBuf, code_protocol::protocol::FileChange> = changes
+            let file_changes: HashMap<PathBuf, hanzo_protocol::protocol::FileChange> = changes
                 .into_iter()
                 .map(|(p, c)| {
                     let mapped = match c {
-                        code_core::protocol::FileChange::Add { content } => {
-                            code_protocol::protocol::FileChange::Add { content }
+                        hanzo_core::protocol::FileChange::Add { content } => {
+                            hanzo_protocol::protocol::FileChange::Add { content }
                         }
-                        code_core::protocol::FileChange::Delete => {
-                            code_protocol::protocol::FileChange::Delete { content: String::new() }
+                        hanzo_core::protocol::FileChange::Delete => {
+                            hanzo_protocol::protocol::FileChange::Delete { content: String::new() }
                         }
-                        code_core::protocol::FileChange::Update {
+                        hanzo_core::protocol::FileChange::Update {
                             unified_diff,
                             move_path,
                             original_content,
                             new_content,
                         } => {
-                            code_protocol::protocol::FileChange::Update {
+                            hanzo_protocol::protocol::FileChange::Update {
                                 unified_diff,
                                 move_path,
                                 original_content,
@@ -754,21 +754,21 @@ async fn on_exec_approval_response(
     }
 }
 
-fn map_review_decision_from_wire(d: code_protocol::protocol::ReviewDecision) -> core_protocol::ReviewDecision {
+fn map_review_decision_from_wire(d: hanzo_protocol::protocol::ReviewDecision) -> core_protocol::ReviewDecision {
     match d {
-        code_protocol::protocol::ReviewDecision::Approved => core_protocol::ReviewDecision::Approved,
-        code_protocol::protocol::ReviewDecision::ApprovedForSession => core_protocol::ReviewDecision::ApprovedForSession,
-        code_protocol::protocol::ReviewDecision::Denied => core_protocol::ReviewDecision::Denied,
-        code_protocol::protocol::ReviewDecision::Abort => core_protocol::ReviewDecision::Abort,
+        hanzo_protocol::protocol::ReviewDecision::Approved => core_protocol::ReviewDecision::Approved,
+        hanzo_protocol::protocol::ReviewDecision::ApprovedForSession => core_protocol::ReviewDecision::ApprovedForSession,
+        hanzo_protocol::protocol::ReviewDecision::Denied => core_protocol::ReviewDecision::Denied,
+        hanzo_protocol::protocol::ReviewDecision::Abort => core_protocol::ReviewDecision::Abort,
     }
 }
 
-fn map_ask_for_approval_from_wire(a: code_protocol::protocol::AskForApproval) -> core_protocol::AskForApproval {
+fn map_ask_for_approval_from_wire(a: hanzo_protocol::protocol::AskForApproval) -> core_protocol::AskForApproval {
     match a {
-        code_protocol::protocol::AskForApproval::UnlessTrusted => core_protocol::AskForApproval::UnlessTrusted,
-        code_protocol::protocol::AskForApproval::OnFailure => core_protocol::AskForApproval::OnFailure,
-        code_protocol::protocol::AskForApproval::OnRequest => core_protocol::AskForApproval::OnRequest,
-        code_protocol::protocol::AskForApproval::Never => core_protocol::AskForApproval::Never,
+        hanzo_protocol::protocol::AskForApproval::UnlessTrusted => core_protocol::AskForApproval::UnlessTrusted,
+        hanzo_protocol::protocol::AskForApproval::OnFailure => core_protocol::AskForApproval::OnFailure,
+        hanzo_protocol::protocol::AskForApproval::OnRequest => core_protocol::AskForApproval::OnRequest,
+        hanzo_protocol::protocol::AskForApproval::Never => core_protocol::AskForApproval::Never,
     }
 }
 

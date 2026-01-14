@@ -1,11 +1,11 @@
-#[cfg(feature = "code-fork")]
+#[cfg(feature = "hanzo-fork")]
 use crate::foundation::palette as colors;
-#[cfg(not(feature = "code-fork"))]
+#[cfg(not(feature = "hanzo-fork"))]
 use crate::colors;
 use chrono::{DateTime, Datelike, Local, Utc};
-use code_common::elapsed::format_duration;
-use code_core::protocol::RateLimitSnapshotEvent;
-use code_protocol::num_format::format_with_separators;
+use hanzo_common::elapsed::format_duration;
+use hanzo_core::protocol::RateLimitSnapshotEvent;
+use hanzo_protocol::num_format::format_with_separators;
 use ratatui::prelude::*;
 use ratatui::style::Stylize;
 use std::time::Duration;

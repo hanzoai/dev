@@ -6,14 +6,14 @@ use crate::openai_tools::JsonSchema;
 use crate::openai_tools::OpenAiTool;
 use crate::openai_tools::ResponsesApiTool;
 use crate::protocol::EventMsg;
-use code_protocol::models::FunctionCallOutputPayload;
-use code_protocol::models::ResponseInputItem;
+use hanzo_protocol::models::FunctionCallOutputPayload;
+use hanzo_protocol::models::ResponseInputItem;
 
 // Use the canonical plan tool types from the protocol crate to ensure
-// type-identity matches events transported via `code_protocol`.
-pub use code_protocol::plan_tool::PlanItemArg;
-pub use code_protocol::plan_tool::StepStatus;
-pub use code_protocol::plan_tool::UpdatePlanArgs;
+// type-identity matches events transported via `hanzo_protocol`.
+pub use hanzo_protocol::plan_tool::PlanItemArg;
+pub use hanzo_protocol::plan_tool::StepStatus;
+pub use hanzo_protocol::plan_tool::UpdatePlanArgs;
 
 // Types for the TODO tool arguments matching codex-vscode/todo-mcp/src/main.rs
 

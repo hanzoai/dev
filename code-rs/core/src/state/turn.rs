@@ -6,7 +6,7 @@ use std::sync::Arc;
 use tokio::sync::Mutex;
 use tokio::task::AbortHandle;
 
-use code_protocol::models::ResponseInputItem;
+use hanzo_protocol::models::ResponseInputItem;
 use tokio::sync::oneshot;
 
 use crate::protocol::ReviewDecision;

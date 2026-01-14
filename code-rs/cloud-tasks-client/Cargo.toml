@@ -1,10 +1,10 @@
 [package]
-name = "code-cloud-tasks-client"
+name = "hanzo-cloud-tasks-client"
 version = { workspace = true }
 edition = "2024"
 
 [lib]
-name = "code_cloud_tasks_client"
+name = "hanzo_cloud_tasks_client"
 path = "src/lib.rs"
 
 [lints]
@@ -12,7 +12,7 @@ workspace = true
 
 [features]
 default = ["online"]
-online = ["dep:code-backend-client"]
+online = ["dep:hanzo-backend-client"]
 mock = []
 
 [dependencies]
@@ -23,5 +23,5 @@ diffy = { workspace = true }
 serde = { workspace = true, features = ["derive"] }
 serde_json = { workspace = true }
 thiserror = { workspace = true }
-code-backend-client = { workspace = true, optional = true }
-code-git-apply = { workspace = true }
+hanzo-backend-client = { workspace = true, optional = true }
+hanzo-git-apply = { workspace = true }

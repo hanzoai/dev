@@ -1,4 +1,4 @@
-use code_core::config::Config;
+use hanzo_core::config::Config;
 
 use crate::chatgpt_token::get_chatgpt_token_data;
 use crate::chatgpt_token::init_chatgpt_token_from_auth;
@@ -15,7 +15,7 @@ pub(crate) async fn chatgpt_get_request<T: DeserializeOwned>(
     init_chatgpt_token_from_auth(&config.code_home, &config.responses_originator_header).await?;
 
     // Make direct HTTP request to ChatGPT backend API with the token
-    let client = code_core::http_client::build_http_client();
+    let client = hanzo_core::http_client::build_http_client();
     let url = format!("{chatgpt_base_url}{path}");
 
     let token =

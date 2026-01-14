@@ -7,7 +7,7 @@ use crate::history::state::{
     ExploreRecord,
     ExploreSummary,
 };
-use code_core::parse_command::ParsedCommand;
+use hanzo_core::parse_command::ParsedCommand;
 use shlex::Shlex;
 use std::path::{Component, Path};
 

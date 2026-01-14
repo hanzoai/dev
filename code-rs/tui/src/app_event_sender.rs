@@ -3,7 +3,7 @@ use std::sync::mpsc::Sender;
 use crate::app_event::{AppEvent, BackgroundPlacement};
 use crate::chatwidget::BackgroundOrderTicket;
 use crate::session_log;
-use code_core::protocol::OrderMeta;
+use hanzo_core::protocol::OrderMeta;
 
 #[derive(Clone, Debug)]
 pub(crate) struct AppEventSender {

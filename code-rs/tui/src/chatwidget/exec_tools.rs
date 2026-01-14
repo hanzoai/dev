@@ -26,8 +26,8 @@ use crate::history::state::{
 };
 use crate::history_cell::CommandOutput;
 use crate::history_cell::{self, HistoryCell};
-use code_core::parse_command::ParsedCommand;
-use code_core::protocol::{ExecCommandBeginEvent, ExecCommandEndEvent, OrderMeta};
+use hanzo_core::parse_command::ParsedCommand;
+use hanzo_core::protocol::{ExecCommandBeginEvent, ExecCommandEndEvent, OrderMeta};
 use std::path::PathBuf;
 use std::time::SystemTime;
 

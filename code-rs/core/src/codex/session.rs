@@ -471,7 +471,7 @@ impl Session {
                     .and_then(|mgr| mgr.auth())
                     .map(|auth| auth.mode);
 
-                let default_model_slug = if auth_mode == Some(code_app_server_protocol::AuthMode::ChatGPT) {
+                let default_model_slug = if auth_mode == Some(hanzo_app_server_protocol::AuthMode::ChatGPT) {
                     crate::config::GPT_5_CODEX_MEDIUM_MODEL
                 } else {
                     crate::config::OPENAI_DEFAULT_MODEL
@@ -598,7 +598,7 @@ impl Session {
     ) -> MaybeApplyPatchVerified {
         // Upstream parser no longer needs a filesystem; it is pure and sync.
         let _ = self.client_tools.as_ref();
-        code_apply_patch::maybe_parse_apply_patch_verified(argv, cwd)
+        hanzo_apply_patch::maybe_parse_apply_patch_verified(argv, cwd)
     }
 
     // ────────────────────────────
@@ -1683,7 +1683,7 @@ impl Session {
                     );
                 }
                 RolloutItem::Event(recorded_event) => {
-                    if let code_protocol::protocol::EventMsg::UserMessage(user_msg_event) = &recorded_event.msg {
+                    if let hanzo_protocol::protocol::EventMsg::UserMessage(user_msg_event) = &recorded_event.msg {
                         let response_item = ResponseItem::Message {
                             id: Some(recorded_event.id.clone()),
                             role: "user".to_string(),

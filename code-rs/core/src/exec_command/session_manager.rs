@@ -21,7 +21,7 @@ use crate::exec_command::exec_command_params::ExecCommandParams;
 use crate::exec_command::exec_command_params::WriteStdinParams;
 use crate::exec_command::exec_command_session::ExecCommandSession;
 use crate::exec_command::session_id::SessionId;
-use code_protocol::models::FunctionCallOutputPayload;
+use hanzo_protocol::models::FunctionCallOutputPayload;
 
 #[derive(Debug, Default)]
 pub struct SessionManager {

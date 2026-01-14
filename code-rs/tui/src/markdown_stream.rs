@@ -2,7 +2,7 @@
 
 use std::collections::VecDeque;
 
-use code_core::config::Config;
+use hanzo_core::config::Config;
 use ratatui::text::Line;
 
 use crate::markdown;

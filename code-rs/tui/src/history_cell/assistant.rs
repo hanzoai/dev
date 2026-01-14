@@ -1,7 +1,7 @@
 use super::*;
 use crate::history::state::AssistantMessageState;
-use code_core::config::Config;
-use code_core::config_types::UriBasedFileOpener;
+use hanzo_core::config::Config;
+use hanzo_core::config_types::UriBasedFileOpener;
 use std::cell::RefCell;
 use std::collections::HashMap;
 use std::path::PathBuf;
@@ -20,7 +20,7 @@ pub(crate) struct AssistantMarkdownCell {
 impl AssistantMarkdownCell {
     pub(crate) fn from_state(
         state: AssistantMessageState,
-        cfg: &code_core::config::Config,
+        cfg: &hanzo_core::config::Config,
     ) -> Self {
         Self {
             state,
@@ -33,7 +33,7 @@ impl AssistantMarkdownCell {
     pub(crate) fn update_state(
         &mut self,
         state: AssistantMessageState,
-        cfg: &code_core::config::Config,
+        cfg: &hanzo_core::config::Config,
     ) {
         self.state = state;
         self.file_opener = cfg.file_opener;

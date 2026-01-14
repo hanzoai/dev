@@ -1,10 +1,10 @@
 [package]
 edition = "2024"
-name = "code-apply-patch"
+name = "hanzo-apply-patch"
 version = { workspace = true }
 
 [lib]
-name = "code_apply_patch"
+name = "hanzo_apply_patch"
 path = "src/lib.rs"
 
 [[bin]]

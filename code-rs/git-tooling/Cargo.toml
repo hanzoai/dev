@@ -1,11 +1,11 @@
 [package]
-name = "code-git-tooling"
+name = "hanzo-git-tooling"
 version.workspace = true
 edition.workspace = true
 readme = "README.md"
 
 [lib]
-name = "code_git_tooling"
+name = "hanzo_git_tooling"
 path = "src/lib.rs"
 
 [dependencies]

@@ -1,10 +1,10 @@
 use ratatui::buffer::Buffer;
 use ratatui::layout::Rect;
 use ratatui::widgets::{Clear, Widget, WidgetRef};
-use code_core::git_info::get_git_repo_root;
+use hanzo_core::git_info::get_git_repo_root;
 use crossterm::event::KeyEvent;
 
-use code_login::AuthMode;
+use hanzo_login::AuthMode;
 
 use crate::LoginStatus;
 use crate::app::ChatWidgetArgs;
@@ -82,7 +82,7 @@ impl OnboardingScreen {
                 sign_in_state: SignInState::PickMode,
                 code_home: code_home.clone(),
                 login_status,
-                preferred_auth_method: code_login::AuthMode::ApiKey,
+                preferred_auth_method: hanzo_login::AuthMode::ApiKey,
                 chat_widget_args: shared_chat_args.clone(),
             }))
         }

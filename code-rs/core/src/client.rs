@@ -11,8 +11,8 @@ use crate::account_usage;
 use crate::auth;
 use crate::auth_accounts;
 use bytes::Bytes;
-use code_app_server_protocol::AuthMode;
-use code_protocol::models::ResponseItem;
+use hanzo_app_server_protocol::AuthMode;
+use hanzo_protocol::models::ResponseItem;
 use eventsource_stream::Eventsource;
 use futures::prelude::*;
 use httpdate::parse_http_date;
@@ -53,7 +53,7 @@ use crate::error::Result;
 use crate::error::RetryLimitReachedError;
 use crate::error::UnexpectedResponseError;
 use crate::error::UsageLimitReachedError;
-use crate::flags::CODEX_RS_SSE_FIXTURE;
+use crate::flags::HANZO_RS_SSE_FIXTURE;
 use crate::model_family::{find_family_for_model, ModelFamily};
 use crate::model_provider_info::ModelProviderInfo;
 use crate::model_provider_info::WireApi;
@@ -66,7 +66,7 @@ use crate::protocol::TokenUsage;
 use crate::reasoning::clamp_reasoning_effort_for_model;
 use crate::slash_commands::get_enabled_agents;
 use crate::util::backoff;
-use code_otel::otel_event_manager::{OtelEventManager, TurnLatencyPayload};
+use hanzo_otel::otel_event_manager::{OtelEventManager, TurnLatencyPayload};
 use std::sync::Arc;
 use std::sync::Mutex;
 use std::sync::RwLock;
@@ -485,7 +485,7 @@ impl ModelClient {
 
     /// Implementation for the OpenAI *Responses* experimental API.
     async fn stream_responses(&self, prompt: &Prompt, log_tag: Option<&str>) -> Result<ResponseStream> {
-        if let Some(path) = &*CODEX_RS_SSE_FIXTURE {
+        if let Some(path) = &*HANZO_RS_SSE_FIXTURE {
             // short circuit for tests
             warn!(path, "Streaming from fixture");
             return stream_from_fixture(path, self.provider.clone(), self.otel_event_manager.clone())

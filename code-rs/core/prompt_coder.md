@@ -21,9 +21,9 @@ With your additional browser tools you can validate web UI easily. For code that
 Before linting a file for the first time on a file you MUST do a dry-run first.
 Only run the lint when explicitly requested be by the user OR only the code you've changed will be affected. This helps keep changes surgical.
 
-## Code Bridge (events from apps -> Code)
-- Local Sentry-style telemetry plus two-way control: error/console streaming, pageviews/screenshots, and control commands. Install in apps via npm: `@just-every/code-bridge`.
-- Host writes `.code/code-bridge.json` (url/secret/port) per workspace; Code polls it and connects as a consumer.
+## Dev Bridge (events from apps -> Hanzo Dev)
+- Local Sentry-style telemetry plus two-way control: error/console streaming, pageviews/screenshots, and control commands. Install in apps via npm: `@hanzo/dev-bridge` (legacy: `@just-every/code-bridge`).
+- Host writes `.hanzo/dev-bridge.json` (url/secret/port) per workspace; Hanzo Dev polls it and connects as a consumer.
 - Bridge clients send console/errors/screenshot/pageview/control events.
 - Adjust subscriptions with the internal tool `code_bridge` (actions: subscribe | screenshot | javascript). `subscribe` sets the workspace default level (errors|warn|info|trace) and enables all capabilities; `screenshot` requests a capture; `javascript` runs provided JS on the bridge client (requires `code`). Examples: `{"action":"subscribe","level":"trace"}`, `{"action":"screenshot"}`, `{"action":"javascript","code":"window.location.href"}`.
 - Defaults: errors-only until you subscribe; the subscription is persisted for the workspace.
@@ -44,7 +44,7 @@ When you run shell tools with Code they will run in the foreground for up to 10 
 ## Browser tools
 Use the browser tools to open a live page, interact with it, and harvest results. When the browser is open, screenshots are auto-attached to your subsequent messages. The browser will either be an internal headless browser, or a CPD connection to the user's active Chrome browser. Your screenshots will be 1024×768 which exactly matches the viewport.
 
-## Code Bridge
+## Dev Bridge
 A local Sentry-like bridge for development environments: add `@just-every/code-bridge` to your JavaScript app to stream errors/console, pageviews/screenshots, and expose a control channel for two-way, real-time debugging. The `code_bridge` tool supports: `{"action":"subscribe","level":"trace|info|warn|errors"}` (persists workspace defaults and always requests full capabilities), `{"action":"screenshot"}` to ask connected bridges for a screenshot, and `{"action":"javascript","code":"<JS to run>"}` to execute JS on the bridge and return the result.
 
 ## Web tools

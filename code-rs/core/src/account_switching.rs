@@ -3,7 +3,7 @@ use std::io;
 use std::path::Path;
 
 use chrono::{DateTime, Utc};
-use code_app_server_protocol::AuthMode;
+use hanzo_app_server_protocol::AuthMode;
 
 use crate::auth;
 use crate::account_usage;

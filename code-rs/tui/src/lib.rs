@@ -4,40 +4,40 @@
 #![deny(clippy::print_stdout, clippy::print_stderr)]
 #![deny(clippy::disallowed_methods)]
 use app::App;
-use code_common::model_presets::{
+use hanzo_common::model_presets::{
     all_model_presets,
     ModelPreset,
     HIDE_GPT5_1_MIGRATION_PROMPT_CONFIG,
     HIDE_GPT_5_1_CODEX_MAX_MIGRATION_PROMPT_CONFIG,
     HIDE_GPT_5_2_MIGRATION_PROMPT_CONFIG,
 };
-use code_core::config_edit::{self, CONFIG_KEY_EFFORT, CONFIG_KEY_MODEL};
-use code_core::config_types::Notice;
-use code_core::config_types::ReasoningEffort;
-use code_core::BUILT_IN_OSS_MODEL_PROVIDER_ID;
-use code_core::config::set_cached_terminal_background;
-use code_core::config::Config;
-use code_core::config::ConfigOverrides;
-use code_core::config::ConfigToml;
-use code_core::config::find_code_home;
-use code_core::config::load_config_as_toml;
-use code_core::config::load_config_as_toml_with_cli_overrides;
-use code_core::protocol::AskForApproval;
-use code_core::protocol::SandboxPolicy;
-use code_core::config_types::CachedTerminalBackground;
-use code_core::config_types::ThemeColors;
-use code_core::config_types::ThemeConfig;
-use code_core::config_types::ThemeName;
+use hanzo_core::config_edit::{self, CONFIG_KEY_EFFORT, CONFIG_KEY_MODEL};
+use hanzo_core::config_types::Notice;
+use hanzo_core::config_types::ReasoningEffort;
+use hanzo_core::BUILT_IN_OSS_MODEL_PROVIDER_ID;
+use hanzo_core::config::set_cached_terminal_background;
+use hanzo_core::config::Config;
+use hanzo_core::config::ConfigOverrides;
+use hanzo_core::config::ConfigToml;
+use hanzo_core::config::find_code_home;
+use hanzo_core::config::load_config_as_toml;
+use hanzo_core::config::load_config_as_toml_with_cli_overrides;
+use hanzo_core::protocol::AskForApproval;
+use hanzo_core::protocol::SandboxPolicy;
+use hanzo_core::config_types::CachedTerminalBackground;
+use hanzo_core::config_types::ThemeColors;
+use hanzo_core::config_types::ThemeConfig;
+use hanzo_core::config_types::ThemeName;
 use regex_lite::Regex;
-use code_login::AuthMode;
-use code_login::CodexAuth;
+use hanzo_login::AuthMode;
+use hanzo_login::CodexAuth;
 use model_migration::{migration_copy_for_key, run_model_migration_prompt, ModelMigrationOutcome};
-use code_ollama::DEFAULT_OSS_MODEL;
-use code_protocol::config_types::SandboxMode;
+use hanzo_ollama::DEFAULT_OSS_MODEL;
+use hanzo_protocol::config_types::SandboxMode;
 use std::fs::OpenOptions;
 use std::io;
 use std::path::{Path, PathBuf};
-use code_core::review_coord::{
+use hanzo_core::review_coord::{
     bump_snapshot_epoch, clear_stale_lock_if_dead, read_lock_info, try_acquire_lock,
 };
 use std::sync::Once;
@@ -106,9 +106,9 @@ mod util {
 }
 mod spinner;
 mod tui;
-#[cfg(feature = "code-fork")]
+#[cfg(feature = "hanzo-fork")]
 mod tui_event_extensions;
-#[cfg(feature = "code-fork")]
+#[cfg(feature = "hanzo-fork")]
 mod foundation;
 mod ui_consts;
 mod user_approval_widget;
@@ -175,7 +175,7 @@ pub mod test_helpers {
     pub use crate::test_backend::VT100Backend;
 
     use crate::app_event::AppEvent;
-    use code_core::history::state::HistoryRecord;
+    use hanzo_core::history::state::HistoryRecord;
     use std::time::Duration;
 
     use std::io::Write;
@@ -346,13 +346,13 @@ fn theme_configured_in_config_file(code_home: &std::path::Path) -> bool {
 
 #[derive(Debug)]
 pub struct ExitSummary {
-    pub token_usage: code_core::protocol::TokenUsage,
+    pub token_usage: hanzo_core::protocol::TokenUsage,
     pub session_id: Option<Uuid>,
 }
 
 fn empty_exit_summary() -> ExitSummary {
     ExitSummary {
-        token_usage: code_core::protocol::TokenUsage::default(),
+        token_usage: hanzo_core::protocol::TokenUsage::default(),
         session_id: None,
     }
 }
@@ -478,12 +478,12 @@ pub async fn run_main(
         }
     };
 
-    code_core::config::migrate_legacy_log_dirs(&code_home);
+    hanzo_core::config::migrate_legacy_log_dirs(&code_home);
 
     let housekeeping_home = code_home.clone();
     let housekeeping_handle = thread_spawner::spawn_lightweight("housekeeping", move || {
-        if let Err(err) = code_core::run_housekeeping_if_due(&housekeeping_home) {
-            tracing::warn!("code home housekeeping failed: {err}");
+        if let Err(err) = hanzo_core::run_housekeeping_if_due(&housekeeping_home) {
+            tracing::warn!("hanzo home housekeeping failed: {err}");
         }
     });
 
@@ -532,7 +532,7 @@ pub async fn run_main(
         };
         if let Some(plan) = determine_migration_plan(&config, auth_mode) {
             let should_auto_accept = matches!(auth_mode, AuthMode::ChatGPT)
-                && (plan.hide_key != code_common::model_presets::HIDE_GPT_5_2_CODEX_MIGRATION_PROMPT_CONFIG
+                && (plan.hide_key != hanzo_common::model_presets::HIDE_GPT_5_2_CODEX_MIGRATION_PROMPT_CONFIG
                     || (plan.current.id.eq_ignore_ascii_case("gpt-5.1-codex")
                         && plan
                             .target
@@ -639,7 +639,7 @@ pub async fn run_main(
         workspace_write_network_access_explicit,
     )?;
 
-    let log_dir = code_core::config::log_dir(&config)?;
+    let log_dir = hanzo_core::config::log_dir(&config)?;
     std::fs::create_dir_all(&log_dir)?;
 
     let (env_layer, _log_guard) = if cli.debug {
@@ -663,7 +663,7 @@ pub async fn run_main(
         // Wrap file in non‑blocking writer.
         let (log_writer, log_guard) = non_blocking(log_file);
 
-        let default_filter = "code_core=info,code_tui=info,code_browser=warn,code_auto_drive_core=info";
+        let default_filter = "hanzo_core=info,hanzo_tui=info,hanzo_browser=warn,hanzo_auto_drive_core=info";
 
         // use RUST_LOG env var, defaulting based on debug flag.
         let env_filter = || {
@@ -700,12 +700,12 @@ pub async fn run_main(
         .try_init();
 
     if cli.oss {
-        code_ollama::ensure_oss_ready(&config)
+        hanzo_ollama::ensure_oss_ready(&config)
             .await
             .map_err(|e| std::io::Error::other(format!("OSS setup failed: {e}")))?;
     }
 
-    let _otel = code_core::otel_init::build_provider(&config, env!("CARGO_PKG_VERSION"));
+    let _otel = hanzo_core::otel_init::build_provider(&config, env!("CARGO_PKG_VERSION"));
 
     let latest_upgrade_version = if crate::updates::upgrade_ui_enabled() {
         updates::get_upgrade_version(&config)
@@ -724,7 +724,7 @@ pub async fn run_main(
 
     if let Some(handle) = housekeeping_handle {
         if let Err(err) = handle.join() {
-            tracing::warn!("code home housekeeping task panicked: {err:?}");
+            tracing::warn!("hanzo home housekeeping task panicked: {err:?}");
         }
     } else {
         tracing::warn!("housekeeping thread spawn skipped: background thread limit reached");
@@ -884,7 +884,7 @@ fn print_timing_summary(summary: &str) {
 fn cleanup_session_worktrees_and_print() {
     let pid = std::process::id();
     let home = match std::env::var_os("HOME") { Some(h) => std::path::PathBuf::from(h), None => return };
-    let session_dir = home.join(".code").join("working").join("_session");
+    let session_dir = home.join(".hanzo").join("working").join("_session");
     let file = session_dir.join(format!("pid-{}.txt", pid));
     reclaim_worktrees_from_file(&file, "current session");
 }
@@ -1177,7 +1177,7 @@ fn set_notice_flag(notices: &mut Notice, key: &str) {
         notices.hide_gpt_5_1_codex_max_migration_prompt = Some(true);
     } else if key == HIDE_GPT_5_2_MIGRATION_PROMPT_CONFIG {
         notices.hide_gpt5_2_migration_prompt = Some(true);
-    } else if key == code_common::model_presets::HIDE_GPT_5_2_CODEX_MIGRATION_PROMPT_CONFIG {
+    } else if key == hanzo_common::model_presets::HIDE_GPT_5_2_CODEX_MIGRATION_PROMPT_CONFIG {
         notices.hide_gpt5_2_codex_migration_prompt = Some(true);
     }
 }
@@ -1189,7 +1189,7 @@ fn notice_hidden(notices: &Notice, key: &str) -> bool {
         notices.hide_gpt_5_1_codex_max_migration_prompt.unwrap_or(false)
     } else if key == HIDE_GPT_5_2_MIGRATION_PROMPT_CONFIG {
         notices.hide_gpt5_2_migration_prompt.unwrap_or(false)
-    } else if key == code_common::model_presets::HIDE_GPT_5_2_CODEX_MIGRATION_PROMPT_CONFIG {
+    } else if key == hanzo_common::model_presets::HIDE_GPT_5_2_CODEX_MIGRATION_PROMPT_CONFIG {
         notices.hide_gpt5_2_codex_migration_prompt.unwrap_or(false)
     } else {
         false
@@ -1339,9 +1339,9 @@ fn determine_repo_trust_state(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use code_core::config::ProjectConfig;
-    use code_core::config_types::SandboxWorkspaceWrite;
-    use code_core::protocol::AskForApproval;
+    use hanzo_core::config::ProjectConfig;
+    use hanzo_core::config_types::SandboxWorkspaceWrite;
+    use hanzo_core::protocol::AskForApproval;
     use std::collections::HashMap;
     use tempfile::TempDir;
 

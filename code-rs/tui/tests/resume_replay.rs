@@ -1,15 +1,15 @@
 #![cfg(test)]
 #![allow(clippy::unwrap_used, clippy::expect_used)]
 
-use code_core::history::{
+use hanzo_core::history::{
     ExploreEntry, ExploreEntryStatus, ExploreRecord, ExploreSummary, HistoryId, HistoryRecord,
     HistorySnapshot, InlineSpan, OrderKeySnapshot, PlanIcon, PlanProgress, PlanStep, PlanUpdateState,
     ReasoningBlock, ReasoningSection, ReasoningState, TextEmphasis, TextTone,
 };
-use code_core::plan_tool::StepStatus;
-use code_core::protocol::{Event, EventMsg, ReplayHistoryEvent};
-use code_protocol::models::{ContentItem, ResponseItem};
-use code_tui::test_helpers::{render_chat_widget_to_vt100, ChatWidgetHarness};
+use hanzo_core::plan_tool::StepStatus;
+use hanzo_core::protocol::{Event, EventMsg, ReplayHistoryEvent};
+use hanzo_protocol::models::{ContentItem, ResponseItem};
+use hanzo_tui::test_helpers::{render_chat_widget_to_vt100, ChatWidgetHarness};
 use serde_json::to_value;
 
 fn assistant_cell_count(screen: &str) -> usize {
@@ -82,7 +82,7 @@ fn explore_record(id: u64) -> HistoryRecord {
     HistoryRecord::Explore(ExploreRecord {
         id: HistoryId(id),
         entries: vec![ExploreEntry {
-            action: code_core::history::ExecAction::List,
+            action: hanzo_core::history::ExecAction::List,
             summary: ExploreSummary::Command {
                 display: "ls workspace".to_string(),
                 annotation: None,

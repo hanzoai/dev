@@ -1,6 +1,6 @@
 [package]
 edition = "2024"
-name = "code-mcp-types"
+name = "hanzo-mcp-types"
 version = { workspace = true }
 
 [lib]

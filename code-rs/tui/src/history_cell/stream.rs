@@ -1,8 +1,8 @@
 use super::*;
 use crate::history::{AssistantMessageState, AssistantStreamState};
-use code_core::history::state::MAX_ASSISTANT_STREAM_RETAINED_BYTES;
-use code_core::config::Config;
-use code_core::config_types::UriBasedFileOpener;
+use hanzo_core::history::state::MAX_ASSISTANT_STREAM_RETAINED_BYTES;
+use hanzo_core::config::Config;
+use hanzo_core::config_types::UriBasedFileOpener;
 use ratatui::style::Style;
 use ratatui::text::Line;
 use std::path::Path;
@@ -81,7 +81,7 @@ impl StreamingContentCell {
 
 pub(crate) fn stream_lines_from_state(
     state: &AssistantStreamState,
-    cfg: &code_core::config::Config,
+    cfg: &hanzo_core::config::Config,
     show_ellipsis: bool,
 ) -> Vec<Line<'static>> {
     stream_lines_from_state_with_context(state, cfg.file_opener, &cfg.cwd, show_ellipsis)

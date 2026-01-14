@@ -34,13 +34,13 @@ pub struct SubagentEditorView {
 impl SubagentEditorView {
     fn build_with(
         available_agents: Vec<String>,
-        existing: Vec<code_core::config_types::SubagentCommandConfig>,
+        existing: Vec<hanzo_core::config_types::SubagentCommandConfig>,
         app_event_tx: AppEventSender,
         name: &str,
     ) -> Self {
         let mut me = Self {
             name_field: FormTextField::new_single_line(),
-            read_only: if name.is_empty() { false } else { code_core::slash_commands::default_read_only_for(name) },
+            read_only: if name.is_empty() { false } else { hanzo_core::slash_commands::default_read_only_for(name) },
             selected_agent_indices: Vec::new(),
             agent_cursor: 0,
             orch_field: FormTextField::new_multi_line(),
@@ -67,8 +67,8 @@ impl SubagentEditorView {
         } else {
             // No user config yet; provide sensible defaults from core for built-ins
             if !name.is_empty() {
-                me.read_only = code_core::slash_commands::default_read_only_for(name);
-                if let Some(instr) = code_core::slash_commands::default_instructions_for(name) {
+                me.read_only = hanzo_core::slash_commands::default_read_only_for(name);
+                if let Some(instr) = hanzo_core::slash_commands::default_instructions_for(name) {
                     me.orch_field.set_text(&instr);
                     // Start cursor at the top so the first lines are visible.
                     me.orch_field.move_cursor_to_start();
@@ -85,7 +85,7 @@ impl SubagentEditorView {
     pub fn new_with_data(
         name: String,
         available_agents: Vec<String>,
-        existing: Vec<code_core::config_types::SubagentCommandConfig>,
+        existing: Vec<hanzo_core::config_types::SubagentCommandConfig>,
         is_new: bool,
         app_event_tx: AppEventSender,
     ) -> Self {
@@ -108,7 +108,7 @@ impl SubagentEditorView {
         } else {
             self.selected_agent_indices.iter().filter_map(|i| self.available_agents.get(*i).cloned()).collect()
         };
-        let cfg = code_core::config_types::SubagentCommandConfig {
+        let cfg = hanzo_core::config_types::SubagentCommandConfig {
             name: self.name_field.text().to_string(),
             read_only: self.read_only,
             agents,
@@ -119,10 +119,10 @@ impl SubagentEditorView {
             agent_instructions: None,
         };
         // Persist to disk asynchronously to avoid blocking the TUI runtime
-        if let Ok(home) = code_core::config::find_code_home() {
+        if let Ok(home) = hanzo_core::config::find_code_home() {
             let cfg_clone = cfg.clone();
             tokio::spawn(async move {
-                let _ = code_core::config_edit::upsert_subagent_command(&home, &cfg_clone).await;
+                let _ = hanzo_core::config_edit::upsert_subagent_command(&home, &cfg_clone).await;
             });
         }
         // Update in-memory config
@@ -261,10 +261,10 @@ impl SubagentEditorView {
             KeyEvent { code: KeyCode::Enter, .. } if self.confirm_delete && self.field == 4 => {
                 let id = self.name_field.text().to_string();
                 if !id.trim().is_empty() {
-                    if let Ok(home) = code_core::config::find_code_home() {
+                    if let Ok(home) = hanzo_core::config::find_code_home() {
                         let idc = id.clone();
                         tokio::spawn(async move {
-                            let _ = code_core::config_edit::delete_subagent_command(&home, &idc).await;
+                            let _ = hanzo_core::config_edit::delete_subagent_command(&home, &idc).await;
                         });
                     }
                     self.app_event_tx.send(AppEvent::DeleteSubagentCommand(id));

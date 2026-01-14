@@ -1,6 +1,6 @@
 #![cfg(target_os = "windows")]
 
-use code_tui::public_widgets::ComposerInput;
+use hanzo_tui::public_widgets::ComposerInput;
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 
 #[test]

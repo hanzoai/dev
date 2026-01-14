@@ -1,5 +1,5 @@
-pub use code_backend_openapi_models::models::PaginatedListTaskListItem;
-pub use code_backend_openapi_models::models::TaskListItem;
+pub use hanzo_backend_openapi_models::models::PaginatedListTaskListItem;
+pub use hanzo_backend_openapi_models::models::TaskListItem;
 
 use serde::Deserialize;
 use serde::de::Deserializer;

@@ -1,12 +1,12 @@
 use std::future::Future;
 use std::pin::Pin;
 
-use code_core::protocol::Event;
+use hanzo_core::protocol::Event;
 use mcp_types::RequestId;
 use serde::Serialize;
 use tracing::warn;
 
-pub use code_app_server::outgoing_message::{
+pub use hanzo_app_server::outgoing_message::{
     OutgoingMessage, OutgoingMessageSender, OutgoingNotification,
 };
 
@@ -19,7 +19,7 @@ pub struct OutgoingNotificationParams {
     pub event: serde_json::Value,
 }
 
-// Additional MCP-specific data to be added to a [`code_core::protocol::Event`] as notification.params._meta
+// Additional MCP-specific data to be added to a [`hanzo_core::protocol::Event`] as notification.params._meta
 // MCP Spec: https://modelcontextprotocol.io/specification/2025-06-18/basic#meta
 // Typescript Schema: https://github.com/modelcontextprotocol/modelcontextprotocol/blob/0695a497eb50a804fc0e88c18a93a21a675d6b3e/schema/2025-06-18/schema.ts
 #[derive(Debug, Clone, PartialEq, Serialize)]
@@ -73,9 +73,9 @@ impl OutgoingMessageSenderExt for OutgoingMessageSender {
 
 #[cfg(test)]
 mod tests {
-    use code_core::protocol::EventMsg;
-    use code_core::protocol::SessionConfiguredEvent;
-    use code_protocol::ConversationId;
+    use hanzo_core::protocol::EventMsg;
+    use hanzo_core::protocol::SessionConfiguredEvent;
+    use hanzo_protocol::ConversationId;
     use pretty_assertions::assert_eq;
     use serde_json::json;
     use tokio::sync::mpsc;

@@ -5,8 +5,8 @@ use std::path::PathBuf;
 use std::sync::Arc;
 use std::sync::atomic::AtomicBool;
 
-use code_file_search as file_search;
-use code_protocol::mcp_protocol::FuzzyFileSearchResult;
+use hanzo_file_search as file_search;
+use hanzo_protocol::mcp_protocol::FuzzyFileSearchResult;
 use tokio::task::JoinSet;
 use tracing::warn;
 

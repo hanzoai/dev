@@ -1,10 +1,10 @@
 [package]
 edition = "2024"
-name = "code-ansi-escape"
+name = "hanzo-ansi-escape"
 version = { workspace = true }
 
 [lib]
-name = "code_ansi_escape"
+name = "hanzo_ansi_escape"
 path = "src/lib.rs"
 
 [lints]

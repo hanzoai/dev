@@ -1,5 +1,5 @@
-use code_core::config_types::{validation_tool_category, ValidationCategory};
-use code_core::protocol::ValidationGroup;
+use hanzo_core::config_types::{validation_tool_category, ValidationCategory};
+use hanzo_core::protocol::ValidationGroup;
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 use ratatui::buffer::Buffer;
 use ratatui::layout::{Alignment, Rect};

@@ -4,9 +4,9 @@ use std::path::PathBuf;
 use std::rc::{Rc, Weak};
 
 use chrono::{DateTime, Utc};
-use code_core::auth;
-use code_core::auth_accounts::{self, StoredAccount};
-use code_login::AuthMode;
+use hanzo_core::auth;
+use hanzo_core::auth_accounts::{self, StoredAccount};
+use hanzo_login::AuthMode;
 use crossterm::event::{KeyCode, KeyEvent};
 use ratatui::buffer::Buffer;
 use ratatui::layout::{Alignment, Rect};

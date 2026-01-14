@@ -1,4 +1,4 @@
-use code_tui::ComposerInput;
+use hanzo_tui::ComposerInput;
 
 pub struct NewTaskPage {
     pub composer: ComposerInput,

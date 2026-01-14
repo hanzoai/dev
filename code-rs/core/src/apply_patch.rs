@@ -7,20 +7,20 @@ use crate::protocol::FileChange;
 use crate::protocol::ReviewDecision;
 use crate::safety::assess_patch_safety;
 use crate::safety::SafetyCheck;
-use code_apply_patch::AffectedPaths;
-use code_apply_patch::ApplyPatchAction;
-use code_apply_patch::ApplyPatchFileChange;
-use code_apply_patch::FileSystem;
-use code_apply_patch::StdFileSystem;
-use code_apply_patch::print_summary;
-use code_protocol::models::FunctionCallOutputPayload;
-use code_protocol::models::ResponseInputItem;
+use hanzo_apply_patch::AffectedPaths;
+use hanzo_apply_patch::ApplyPatchAction;
+use hanzo_apply_patch::ApplyPatchFileChange;
+use hanzo_apply_patch::FileSystem;
+use hanzo_apply_patch::StdFileSystem;
+use hanzo_apply_patch::print_summary;
+use hanzo_protocol::models::FunctionCallOutputPayload;
+use hanzo_protocol::models::ResponseInputItem;
 use serde_json::json;
 use std::collections::HashMap;
 use std::path::Path;
 use std::path::PathBuf;
 
-pub const CODEX_APPLY_PATCH_ARG1: &str = "--codex-run-as-apply-patch";
+pub const HANZO_APPLY_PATCH_ARG1: &str = "--hanzo-run-as-apply-patch";
 
 pub(crate) struct ApplyPatchRun {
     pub auto_approved: bool,

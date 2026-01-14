@@ -617,7 +617,7 @@ mod tests {
 
     #[test]
     fn renders_large_art_pixel_perfect() {
-        let version = format!("v{}", code_version::version());
+        let version = format!("v{}", hanzo_version::version());
         let expected = expected_large(&version);
         let width = expected.iter().map(|l| l.chars().count()).max().unwrap() as u16;
         let height = expected.len() as u16;
@@ -640,7 +640,7 @@ mod tests {
 
     #[test]
     fn renders_medium_art_pixel_perfect() {
-        let version = format!("v{}", code_version::version());
+        let version = format!("v{}", hanzo_version::version());
         let expected = expected_medium(&version);
         let width = expected.iter().map(|l| l.chars().count()).max().unwrap() as u16;
         let height = expected.len() as u16;
@@ -663,7 +663,7 @@ mod tests {
 
     #[test]
     fn renders_small_art_pixel_perfect() {
-        let version = format!("v{}", code_version::version());
+        let version = format!("v{}", hanzo_version::version());
         let expected = vec!["██████╗██╗   ██╗█".to_string()];
         let width = expected[0].chars().count() as u16;
         let rect = Rect::new(0, 0, width, 1);

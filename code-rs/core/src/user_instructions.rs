@@ -1,10 +1,10 @@
 use serde::Deserialize;
 use serde::Serialize;
 
-use code_protocol::models::ContentItem;
-use code_protocol::models::ResponseItem;
-use code_protocol::protocol::USER_INSTRUCTIONS_CLOSE_TAG;
-use code_protocol::protocol::USER_INSTRUCTIONS_OPEN_TAG;
+use hanzo_protocol::models::ContentItem;
+use hanzo_protocol::models::ResponseItem;
+use hanzo_protocol::protocol::USER_INSTRUCTIONS_CLOSE_TAG;
+use hanzo_protocol::protocol::USER_INSTRUCTIONS_OPEN_TAG;
 
 /// Wraps user instructions in a tag so the model can classify them easily.
 

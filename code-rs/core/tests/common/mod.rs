@@ -3,10 +3,10 @@
 use std::path::Path;
 use std::sync::{Arc, Mutex};
 
-use code_core::config::{Config, ConfigOverrides, ConfigToml};
-use code_core::protocol::EventMsg;
-use code_core::spawn::CODEX_SANDBOX_NETWORK_DISABLED_ENV_VAR;
-use code_core::CodexConversation;
+use hanzo_core::config::{Config, ConfigOverrides, ConfigToml};
+use hanzo_core::protocol::EventMsg;
+use hanzo_core::spawn::HANZO_SANDBOX_NETWORK_DISABLED_ENV_VAR;
+use hanzo_core::CodexConversation;
 use serde_json::Value;
 use tempfile::TempDir;
 use tokio::time::{timeout, Duration};
@@ -15,7 +15,7 @@ use wiremock::{Match, Mock, MockServer, Request, ResponseTemplate};
 
 /// Returns a default `Config` whose on-disk state is confined to the provided
 /// temporary directory. Using a per-test directory keeps tests hermetic and
-/// avoids clobbering a developer's real `~/.code` directory.
+/// avoids clobbering a developer's real `~/.hanzo` directory.
 pub fn load_default_config_for_test(code_home: &TempDir) -> Config {
     Config::load_from_base_config_with_overrides(
         ConfigToml::default(),
@@ -36,11 +36,11 @@ fn default_test_overrides() -> ConfigOverrides {
             target_dir.pop();
         }
         let exe_suffix = std::env::consts::EXE_SUFFIX;
-        let candidate = target_dir.join(format!("code-linux-sandbox{exe_suffix}"));
+        let candidate = target_dir.join(format!("dev-linux-sandbox{exe_suffix}"));
         candidate.exists().then_some(candidate)
     };
 
-    let sandbox_path = std::env::var_os("CARGO_BIN_EXE_code-linux-sandbox")
+    let sandbox_path = std::env::var_os("CARGO_BIN_EXE_dev-linux-sandbox")
         .map(PathBuf::from)
         .or_else(infer_sandbox_path);
 
@@ -51,7 +51,7 @@ fn default_test_overrides() -> ConfigOverrides {
         },
         None => {
             eprintln!(
-                "code-linux-sandbox binary missing; running tests without linux sandbox overrides"
+                "dev-linux-sandbox binary missing; running tests without linux sandbox overrides"
             );
             ConfigOverrides::default()
         }
@@ -108,7 +108,7 @@ where
 
 /// Returns true when network-dependent tests should be skipped.
 pub fn skip_if_no_network() -> bool {
-    if std::env::var(CODEX_SANDBOX_NETWORK_DISABLED_ENV_VAR).is_ok() {
+    if std::env::var(HANZO_SANDBOX_NETWORK_DISABLED_ENV_VAR).is_ok() {
         println!(
             "Skipping test because network access is disabled inside the sandbox."
         );

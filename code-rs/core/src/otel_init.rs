@@ -1,10 +1,10 @@
 use crate::config::Config;
 use crate::config_types::OtelExporterKind as Kind;
 use crate::config_types::OtelHttpProtocol as Protocol;
-use code_otel::config::OtelExporter;
-use code_otel::config::OtelHttpProtocol;
-use code_otel::config::OtelSettings;
-use code_otel::otel_provider::OtelProvider;
+use hanzo_otel::config::OtelExporter;
+use hanzo_otel::config::OtelHttpProtocol;
+use hanzo_otel::config::OtelSettings;
+use hanzo_otel::otel_provider::OtelProvider;
 use std::error::Error;
 
 /// Build an OpenTelemetry provider from the app Config.
@@ -54,7 +54,7 @@ pub fn build_provider(
 }
 
 /// Filter predicate for exporting only Codex-owned events via OTEL.
-/// Keeps events that originated from code_otel module
+/// Keeps events that originated from hanzo_otel module
 pub fn code_export_filter(meta: &tracing::Metadata<'_>) -> bool {
-    meta.target().starts_with("code_otel")
+    meta.target().starts_with("hanzo_otel")
 }

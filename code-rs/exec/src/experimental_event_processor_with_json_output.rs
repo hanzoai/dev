@@ -30,24 +30,24 @@ use crate::exec_events::TurnFailedEvent;
 use crate::exec_events::TurnStartedEvent;
 use crate::exec_events::Usage;
 use crate::exec_events::WebSearchItem;
-use code_core::config::Config;
-use code_core::plan_tool::StepStatus;
-use code_core::plan_tool::UpdatePlanArgs;
-use code_core::protocol::AgentMessageEvent;
-use code_core::protocol::AgentReasoningEvent;
-use code_core::protocol::Event;
-use code_core::protocol::EventMsg;
-use code_core::protocol::ExecCommandBeginEvent;
-use code_core::protocol::ExecCommandEndEvent;
-use code_core::protocol::FileChange;
-use code_core::protocol::McpToolCallBeginEvent;
-use code_core::protocol::McpToolCallEndEvent;
-use code_core::protocol::PatchApplyBeginEvent;
-use code_core::protocol::PatchApplyEndEvent;
-use code_core::protocol::SessionConfiguredEvent;
-use code_core::protocol::TaskCompleteEvent;
-use code_core::protocol::TaskStartedEvent;
-use code_core::protocol::WebSearchEndEvent;
+use hanzo_core::config::Config;
+use hanzo_core::plan_tool::StepStatus;
+use hanzo_core::plan_tool::UpdatePlanArgs;
+use hanzo_core::protocol::AgentMessageEvent;
+use hanzo_core::protocol::AgentReasoningEvent;
+use hanzo_core::protocol::Event;
+use hanzo_core::protocol::EventMsg;
+use hanzo_core::protocol::ExecCommandBeginEvent;
+use hanzo_core::protocol::ExecCommandEndEvent;
+use hanzo_core::protocol::FileChange;
+use hanzo_core::protocol::McpToolCallBeginEvent;
+use hanzo_core::protocol::McpToolCallEndEvent;
+use hanzo_core::protocol::PatchApplyBeginEvent;
+use hanzo_core::protocol::PatchApplyEndEvent;
+use hanzo_core::protocol::SessionConfiguredEvent;
+use hanzo_core::protocol::TaskCompleteEvent;
+use hanzo_core::protocol::TaskStartedEvent;
+use hanzo_core::protocol::WebSearchEndEvent;
 use tracing::error;
 use tracing::warn;
 
@@ -59,7 +59,7 @@ pub struct ExperimentalEventProcessorWithJsonOutput {
     running_patch_applies: HashMap<String, PatchApplyBeginEvent>,
     // Tracks the todo list for the current turn (at most one per turn).
     running_todo_list: Option<RunningTodoList>,
-    last_total_token_usage: Option<code_core::protocol::TokenUsage>,
+    last_total_token_usage: Option<hanzo_core::protocol::TokenUsage>,
     running_mcp_tool_calls: HashMap<String, RunningMcpToolCall>,
     last_critical_error: Option<ThreadErrorEvent>,
 }

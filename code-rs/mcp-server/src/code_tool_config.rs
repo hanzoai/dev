@@ -1,10 +1,10 @@
 //! Configuration object accepted by the `codex` MCP tool-call.
 
 use agent_client_protocol as acp;
-use code_core::config_types::ClientTools;
-use code_core::protocol::AskForApproval;
-use code_protocol::config_types::SandboxMode;
-use code_utils_json_to_toml::json_to_toml;
+use hanzo_core::config_types::ClientTools;
+use hanzo_core::protocol::AskForApproval;
+use hanzo_protocol::config_types::SandboxMode;
+use hanzo_utils_json_to_toml::json_to_toml;
 use mcp_types::Tool;
 use mcp_types::ToolInputSchema;
 use mcp_types::ToolOutputSchema;
@@ -46,7 +46,7 @@ pub struct CodexToolCallParam {
     pub sandbox: Option<CodexToolCallSandboxMode>,
 
     /// Individual config settings that will override what is in
-    /// CODEX_HOME/config.toml.
+    /// HANZO_HOME/config.toml.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub config: Option<HashMap<String, serde_json::Value>>,
 
@@ -237,7 +237,7 @@ impl CodexToolCallParam {
     pub fn into_config(
         self,
         code_linux_sandbox_exe: Option<PathBuf>,
-    ) -> std::io::Result<(String, code_core::config::Config)> {
+    ) -> std::io::Result<(String, hanzo_core::config::Config)> {
         let Self {
             prompt,
             model,
@@ -251,7 +251,7 @@ impl CodexToolCallParam {
         } = self;
 
         // Build the `ConfigOverrides` recognized by codex-core.
-        let overrides = code_core::config::ConfigOverrides {
+        let overrides = hanzo_core::config::ConfigOverrides {
             model,
             review_model: None,
             config_profile: profile,
@@ -280,7 +280,7 @@ impl CodexToolCallParam {
             .map(|(k, v)| (k, json_to_toml(v)))
             .collect();
 
-        let cfg = code_core::config::Config::load_with_cli_overrides(cli_overrides, overrides)?;
+        let cfg = hanzo_core::config::Config::load_with_cli_overrides(cli_overrides, overrides)?;
 
         Ok((prompt, cfg))
     }
@@ -375,7 +375,7 @@ mod tests {
                 "type": "string"
               },
               "config": {
-                "description": "Individual config settings that will override what is in CODEX_HOME/config.toml.",
+                "description": "Individual config settings that will override what is in HANZO_HOME/config.toml.",
                 "additionalProperties": true,
                 "type": "object"
               },

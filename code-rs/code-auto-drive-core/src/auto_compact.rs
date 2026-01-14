@@ -3,14 +3,14 @@ use futures::StreamExt;
 use std::time::Duration;
 use tokio::time::timeout;
 
-use code_core::codex::compact::{
+use hanzo_core::codex::compact::{
     collect_compaction_snippets,
     make_compaction_summary_message,
     sanitize_items_for_compact,
 };
-use code_core::model_family::{derive_default_model_family, find_family_for_model};
-use code_core::{content_items_to_text, ModelClient, Prompt, ResponseEvent, TextFormat};
-use code_protocol::models::{ContentItem, ResponseItem};
+use hanzo_core::model_family::{derive_default_model_family, find_family_for_model};
+use hanzo_core::{content_items_to_text, ModelClient, Prompt, ResponseEvent, TextFormat};
+use hanzo_protocol::models::{ContentItem, ResponseItem};
 
 
 const BYTES_PER_TOKEN: usize = 4;
@@ -411,7 +411,7 @@ fn flatten_items(items: &[ResponseItem]) -> String {
             ResponseItem::Reasoning { summary, .. } => {
                 for item in summary {
                     match item {
-                        code_protocol::models::ReasoningItemReasoningSummary::SummaryText { text } => {
+                        hanzo_protocol::models::ReasoningItemReasoningSummary::SummaryText { text } => {
                             buf.push_str(&format!("reasoning: {text}\n"));
                         }
                     }
@@ -488,7 +488,7 @@ pub(crate) fn estimate_item_tokens(item: &ResponseItem) -> usize {
             summary
                 .iter()
                 .map(|s| match s {
-                    code_protocol::models::ReasoningItemReasoningSummary::SummaryText { text } => text.len(),
+                    hanzo_protocol::models::ReasoningItemReasoningSummary::SummaryText { text } => text.len(),
                 })
                 .sum::<usize>()
                 + content
@@ -497,8 +497,8 @@ pub(crate) fn estimate_item_tokens(item: &ResponseItem) -> usize {
                         segments
                             .iter()
                             .map(|segment| match segment {
-                                code_protocol::models::ReasoningItemContent::ReasoningText { text }
-                                | code_protocol::models::ReasoningItemContent::Text { text } => text.len(),
+                                hanzo_protocol::models::ReasoningItemContent::ReasoningText { text }
+                                | hanzo_protocol::models::ReasoningItemContent::Text { text } => text.len(),
                             })
                             .sum::<usize>()
                     })
@@ -526,8 +526,8 @@ fn push_compaction_prompt(prompt: &mut Prompt, compact_prompt: &str) {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use code_core::codex::compact::CompactionSnippet;
-    use code_core::content_items_to_text;
+    use hanzo_core::codex::compact::CompactionSnippet;
+    use hanzo_core::content_items_to_text;
 
     fn user_message(text: &str) -> ResponseItem {
         plain_message("user", text.to_string())

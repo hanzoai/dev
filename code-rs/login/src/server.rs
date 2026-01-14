@@ -14,10 +14,10 @@ use crate::pkce::PkceCodes;
 use crate::pkce::generate_pkce;
 use base64::Engine;
 use chrono::Utc;
-use code_core::auth::AuthDotJson;
-use code_core::auth::get_auth_file;
-use code_core::token_data::TokenData;
-use code_core::token_data::parse_id_token;
+use hanzo_core::auth::AuthDotJson;
+use hanzo_core::auth::get_auth_file;
+use hanzo_core::token_data::TokenData;
+use hanzo_core::token_data::parse_id_token;
 use rand::RngCore;
 use serde_json::Value as JsonValue;
 use tiny_http::Header;
@@ -423,7 +423,7 @@ pub(crate) async fn exchange_code_for_tokens(
         refresh_token: String,
     }
 
-    let client = code_core::http_client::build_http_client();
+    let client = hanzo_core::http_client::build_http_client();
     let resp = client
         .post(format!("{issuer}/oauth/token"))
         .header("Content-Type", "application/x-www-form-urlencoded")
@@ -489,9 +489,9 @@ pub(crate) async fn persist_tokens_async(
             tokens: Some(tokens),
             last_refresh: Some(last_refresh),
         };
-        code_core::auth::write_auth_json(&auth_file, &auth)?;
+        hanzo_core::auth::write_auth_json(&auth_file, &auth)?;
         let email_for_store = tokens_for_store.id_token.email.clone();
-        let _ = code_core::auth_accounts::upsert_chatgpt_account(
+        let _ = hanzo_core::auth_accounts::upsert_chatgpt_account(
             &code_home,
             tokens_for_store,
             last_refresh,
@@ -593,7 +593,7 @@ pub(crate) async fn obtain_api_key(
     struct ExchangeResp {
         access_token: String,
     }
-    let client = code_core::http_client::build_http_client();
+    let client = hanzo_core::http_client::build_http_client();
     let resp = client
         .post(format!("{issuer}/oauth/token"))
         .header("Content-Type", "application/x-www-form-urlencoded")

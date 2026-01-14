@@ -91,7 +91,7 @@ mod event_mapping;
 pub mod review_format;
 #[cfg(test)]
 mod prompt_assembly_tests;
-pub use code_protocol::protocol::InitialHistory;
+pub use hanzo_protocol::protocol::InitialHistory;
 pub use conversation_manager::ConversationManager;
 pub use conversation_manager::NewConversation;
 // Re-export common auth types for workspace consumers
@@ -136,7 +136,7 @@ mod function_tool;
 mod user_notification;
 pub mod util;
 
-pub use apply_patch::CODEX_APPLY_PATCH_ARG1;
+pub use apply_patch::HANZO_APPLY_PATCH_ARG1;
 pub use command_safety::is_safe_command;
 pub use agent_tool::smoke_test_agent_blocking;
 pub use agent_tool::split_command_and_args;
@@ -147,9 +147,9 @@ pub use housekeeping::CleanupOutcome;
 // External callers should rely on specific re-exports below.
 // Re-export protocol config enums to ensure call sites can use the same types
 // as those in the protocol crate when constructing protocol messages.
-pub use code_protocol::config_types as protocol_config_types;
-// Preserve `code_core::models::...` imports as an alias to the protocol models.
-pub use code_protocol::models as models;
+pub use hanzo_protocol::config_types as protocol_config_types;
+// Preserve `hanzo_core::models::...` imports as an alias to the protocol models.
+pub use hanzo_protocol::models as models;
 
 pub use client::ModelClient;
 pub use client_common::Prompt;
@@ -161,12 +161,12 @@ pub use codex::Codex;
 pub use codex::CodexSpawnOk;
 pub use codex::compact::content_items_to_text;
 pub use codex::compact::is_session_prefix_message;
-pub use code_protocol::models::ContentItem;
-pub use code_protocol::models::LocalShellAction;
-pub use code_protocol::models::LocalShellExecAction;
-pub use code_protocol::models::LocalShellStatus;
-pub use code_protocol::models::ReasoningItemContent;
-pub use code_protocol::models::ResponseItem;
+pub use hanzo_protocol::models::ContentItem;
+pub use hanzo_protocol::models::LocalShellAction;
+pub use hanzo_protocol::models::LocalShellExecAction;
+pub use hanzo_protocol::models::LocalShellStatus;
+pub use hanzo_protocol::models::ReasoningItemContent;
+pub use hanzo_protocol::models::ResponseItem;
 pub use environment_context::ToolCandidate;
 pub use environment_context::TOOL_CANDIDATES;
 pub use openai_tools::{get_openai_tools, OpenAiTool, ToolsConfig};

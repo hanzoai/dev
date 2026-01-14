@@ -7,7 +7,7 @@ use std::path::PathBuf;
 use tokio::process::Child;
 
 /// Spawn a shell tool command under the Linux Landlock+seccomp sandbox helper
-/// (codex-linux-sandbox).
+/// (dev-linux-sandbox).
 ///
 /// Unlike macOS Seatbelt where we directly embed the policy text, the Linux
 /// helper accepts a list of `--sandbox-permission`/`-s` flags mirroring the
@@ -26,7 +26,7 @@ where
     P: AsRef<Path>,
 {
     let args = create_linux_sandbox_command_args(command, sandbox_policy, sandbox_policy_cwd);
-    let arg0 = Some("codex-linux-sandbox");
+    let arg0 = Some("dev-linux-sandbox");
     spawn_child_async(
         code_linux_sandbox_exe.as_ref().to_path_buf(),
         args,
@@ -39,7 +39,7 @@ where
     .await
 }
 
-/// Converts the sandbox policy into the CLI invocation for `codex-linux-sandbox`.
+/// Converts the sandbox policy into the CLI invocation for `dev-linux-sandbox`.
 fn create_linux_sandbox_command_args(
     command: Vec<String>,
     sandbox_policy: &SandboxPolicy,

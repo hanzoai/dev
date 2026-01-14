@@ -5,11 +5,11 @@ use crate::outgoing_message::OutgoingMessageSender;
 use crate::outgoing_message::OutgoingMessageSenderExt;
 use crate::outgoing_message::OutgoingNotificationMeta;
 use crate::patch_approval::handle_patch_approval_request;
-use code_core::CodexConversation;
-use code_core::protocol::AgentMessageEvent;
-use code_core::protocol::ApplyPatchApprovalRequestEvent;
-use code_core::protocol::EventMsg;
-use code_core::protocol::ExecApprovalRequestEvent;
+use hanzo_core::CodexConversation;
+use hanzo_core::protocol::AgentMessageEvent;
+use hanzo_core::protocol::ApplyPatchApprovalRequestEvent;
+use hanzo_core::protocol::EventMsg;
+use hanzo_core::protocol::ExecApprovalRequestEvent;
 use mcp_types::RequestId;
 use tracing::error;
 

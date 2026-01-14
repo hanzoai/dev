@@ -6,10 +6,10 @@ use std::io::Error as IoError;
 use std::path::Path;
 use std::path::PathBuf;
 
-use code_protocol::ConversationId;
-use code_protocol::models::{ContentItem, ResponseItem};
-use code_protocol::protocol::EventMsg as ProtoEventMsg;
-use code_protocol::protocol::SessionSource;
+use hanzo_protocol::ConversationId;
+use hanzo_protocol::models::{ContentItem, ResponseItem};
+use hanzo_protocol::protocol::EventMsg as ProtoEventMsg;
+use hanzo_protocol::protocol::SessionSource;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use time::OffsetDateTime;
@@ -32,12 +32,12 @@ use crate::default_client::DEFAULT_ORIGINATOR;
 use crate::git_info::collect_git_info;
 use crate::history::HistorySnapshot;
 use crate::protocol::event_msg_from_protocol;
-use code_protocol::protocol::InitialHistory;
-use code_protocol::protocol::ResumedHistory;
-use code_protocol::protocol::RolloutItem;
-use code_protocol::protocol::RolloutLine;
-use code_protocol::protocol::SessionMeta;
-use code_protocol::protocol::SessionMetaLine;
+use hanzo_protocol::protocol::InitialHistory;
+use hanzo_protocol::protocol::ResumedHistory;
+use hanzo_protocol::protocol::RolloutItem;
+use hanzo_protocol::protocol::RolloutLine;
+use hanzo_protocol::protocol::SessionMeta;
+use hanzo_protocol::protocol::SessionMetaLine;
 
 #[derive(Serialize, Deserialize, Default, Clone)]
 pub struct SessionStateSnapshot {}
@@ -59,8 +59,8 @@ pub struct SavedSession {
 /// Rollouts are recorded as JSONL and can be inspected with tools such as:
 ///
 /// ```ignore
-/// $ jq -C . ~/.code/sessions/rollout-2025-05-07T17-24-21-5973b6c0-94b8-487b-a530-2aeb6098ae0e.jsonl
-/// $ fx ~/.code/sessions/rollout-2025-05-07T17-24-21-5973b6c0-94b8-487b-a530-2aeb6098ae0e.jsonl
+/// $ jq -C . ~/.hanzo/sessions/rollout-2025-05-07T17-24-21-5973b6c0-94b8-487b-a530-2aeb6098ae0e.jsonl
+/// $ fx ~/.hanzo/sessions/rollout-2025-05-07T17-24-21-5973b6c0-94b8-487b-a530-2aeb6098ae0e.jsonl
 /// ```
 #[derive(Clone)]
 pub struct RolloutRecorder {
@@ -239,7 +239,7 @@ impl RolloutRecorder {
 
     pub(crate) async fn record_events(
         &self,
-        events: &[code_protocol::protocol::RecordedEvent],
+        events: &[hanzo_protocol::protocol::RecordedEvent],
     ) -> std::io::Result<()> {
         if events.is_empty() {
             return Ok(());
@@ -439,8 +439,8 @@ fn create_log_file(
     config: &Config,
     conversation_id: ConversationId,
 ) -> std::io::Result<LogFileInfo> {
-    // Resolve ~/.code/sessions/YYYY/MM/DD and create it if missing (Code still
-    // reads legacy ~/.codex/sessions/ paths).
+    // Resolve ~/.hanzo/sessions/YYYY/MM/DD and create it if missing (Hanzo Dev still
+    // reads legacy ~/.code/sessions/ and ~/.codex/sessions/ paths).
     let timestamp = OffsetDateTime::now_local()
         .map_err(|e| IoError::other(format!("failed to get local time: {e}")))?;
     let mut dir = config.code_home.clone();

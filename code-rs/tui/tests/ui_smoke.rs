@@ -7,7 +7,7 @@
 #![cfg(test)]
 #![allow(clippy::unwrap_used, clippy::expect_used)]
 
-use code_core::history::state::{
+use hanzo_core::history::state::{
     AssistantStreamDelta,
     HistoryId,
     HistoryRecord,
@@ -15,7 +15,7 @@ use code_core::history::state::{
     MessageMetadata,
     PatchEventType,
 };
-use code_core::protocol::{
+use hanzo_core::protocol::{
     AgentMessageDeltaEvent,
     AgentMessageEvent,
     ApplyPatchApprovalRequestEvent,
@@ -37,8 +37,8 @@ use code_core::protocol::{
     TokenUsage,
 };
 use uuid::Uuid;
-use code_tui::test_helpers::{render_chat_widget_to_vt100, ChatWidgetHarness};
-use code_tui::{Cli, ComposerAction, ComposerInput};
+use hanzo_tui::test_helpers::{render_chat_widget_to_vt100, ChatWidgetHarness};
+use hanzo_tui::{Cli, ComposerAction, ComposerInput};
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 use mcp_types::CallToolResult;
 use serde_bytes::ByteBuf;
@@ -416,7 +416,7 @@ fn composer_input_custom_hints_reset() {
 
 #[test]
 fn render_markdown_text_handles_simple_lists() {
-    let rendered = code_tui::render_markdown_text("- item one\n- item two");
+    let rendered = hanzo_tui::render_markdown_text("- item one\n- item two");
     let text = rendered
         .lines
         .iter()
@@ -680,7 +680,7 @@ fn smoke_exec_command_stream() {
         }),
     });
 
-    let records = code_tui::test_helpers::history_records(&mut harness);
+    let records = hanzo_tui::test_helpers::history_records(&mut harness);
     let exec_record = records
         .into_iter()
         .find_map(|record| match record {
@@ -725,7 +725,7 @@ fn smoke_approval_flow() {
         }),
     });
 
-    let records = code_tui::test_helpers::history_records(&mut harness);
+    let records = hanzo_tui::test_helpers::history_records(&mut harness);
     let patch_record = records
         .into_iter()
         .find_map(|record| match record {
@@ -909,5 +909,5 @@ fn smoke_streaming_assistant_message() {
         }),
     });
 
-    code_tui::test_helpers::assert_has_insert_history(&mut harness);
+    hanzo_tui::test_helpers::assert_has_insert_history(&mut harness);
 }

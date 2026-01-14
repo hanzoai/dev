@@ -214,15 +214,17 @@ if [ "$WORKSPACE_CHOICE" = "both" ]; then
   exit 0
 fi
 
-if [ -n "${CODE_HOME:-}" ] && [ -n "${CODE_HOME}" ]; then
+if [ -n "${HANZO_HOME:-}" ] && [ -n "${HANZO_HOME}" ]; then
+  CACHE_HOME="${HANZO_HOME%/}"
+elif [ -n "${CODE_HOME:-}" ] && [ -n "${CODE_HOME}" ]; then
   CACHE_HOME="${CODE_HOME%/}"
 elif [ -n "${CODEX_HOME:-}" ] && [ -n "${CODEX_HOME}" ]; then
   CACHE_HOME="${CODEX_HOME%/}"
 else
   if [ -d "/mnt/data" ] && [ -w "/mnt/data" ]; then
-    CACHE_HOME="/mnt/data/.code"
+    CACHE_HOME="/mnt/data/.hanzo"
   else
-    CACHE_HOME="${REPO_ROOT}/.code"
+    CACHE_HOME="${REPO_ROOT}/.hanzo"
   fi
 fi
 case "${CACHE_HOME}" in
@@ -578,8 +580,8 @@ if [ "${TRACE_BUILD:-}" = "1" ]; then
     rustup run "$TOOLCHAIN" cargo -vV || true
   fi
   echo "CANONICAL_ENV_APPLIED: ${CANONICAL_ENV_APPLIED} (KEEP_ENV=${KEEP_ENV})"
-  echo "Filtered env (CARGO|RUST*|PROFILE|CODE_HOME|CODEX_HOME):"
-  env | egrep '^(CARGO|RUST|RUSTUP|PROFILE|CODE_HOME|CODEX_HOME)=' | sort || true
+  echo "Filtered env (CARGO|RUST*|PROFILE|HANZO_HOME|CODE_HOME|CODEX_HOME):"
+  env | egrep '^(CARGO|RUST|RUSTUP|PROFILE|HANZO_HOME|CODE_HOME|CODEX_HOME)=' | sort || true
   echo "--------------------------------"
 fi
 
@@ -612,6 +614,7 @@ SCCACHE=${SCCACHE:-}
 SCCACHE_BIN=${SCCACHE_BIN:-}
 CARGO_INCREMENTAL=${CARGO_INCREMENTAL:-}
 MACOSX_DEPLOYMENT_TARGET=${MACOSX_DEPLOYMENT_TARGET:-}
+HANZO_HOME=${HANZO_HOME:-}
 CODE_HOME=${CODE_HOME:-}
 CODEX_HOME=${CODEX_HOME:-}
 FP

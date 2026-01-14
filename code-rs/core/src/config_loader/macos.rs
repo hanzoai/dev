@@ -48,7 +48,7 @@ mod native {
             ) -> *mut c_void;
         }
 
-        const MANAGED_PREFERENCES_APPLICATION_ID: &str = "com.openai.codex";
+        const MANAGED_PREFERENCES_APPLICATION_ID: &str = "com.hanzo.dev";
         const MANAGED_PREFERENCES_CONFIG_KEY: &str = "config_toml_base64";
 
         let application_id = CFString::new(MANAGED_PREFERENCES_APPLICATION_ID);

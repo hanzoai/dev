@@ -13,7 +13,7 @@ pub const DEFAULT_ORIGINATOR: &str = "code_cli_rs";
 pub static USER_AGENT_SUFFIX: LazyLock<Mutex<Option<String>>> = LazyLock::new(|| Mutex::new(None));
 
 pub fn get_code_user_agent(originator: Option<&str>) -> String {
-    let build_version = code_version::version();
+    let build_version = hanzo_version::version();
     let os_info = os_info::get();
     let prefix = format!(
         "{}/{build_version} ({} {}; {}) {}",

@@ -1,6 +1,6 @@
 //! Connection manager for Model Context Protocol (MCP) servers.
 //!
-//! The [`McpConnectionManager`] owns one [`code_rmcp_client::RmcpClient`] per
+//! The [`McpConnectionManager`] owns one [`hanzo_rmcp_client::RmcpClient`] per
 //! configured server (keyed by the *server name*). It offers convenience
 //! helpers to query the available tools across *all* servers and returns them
 //! in a single aggregated map using the fully-qualified tool name
@@ -15,12 +15,12 @@ use std::time::Duration;
 use anyhow::Context;
 use anyhow::Result;
 use anyhow::anyhow;
-use code_rmcp_client::RmcpClient;
+use hanzo_rmcp_client::RmcpClient;
 use mcp_types::ClientCapabilities;
 use mcp_types::Implementation;
 use mcp_types::Tool;
-
 use serde_json::json;
+
 use sha1::Digest;
 use sha1::Sha1;
 use tokio::sync::RwLock;

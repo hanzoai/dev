@@ -1,14 +1,14 @@
 [package]
 edition = "2024"
-name = "code-file-search"
+name = "hanzo-file-search"
 version = { workspace = true }
 
 [[bin]]
-name = "code-file-search"
+name = "hanzo-file-search"
 path = "src/main.rs"
 
 [lib]
-name = "code_file_search"
+name = "hanzo_file_search"
 path = "src/lib.rs"
 
 [dependencies]

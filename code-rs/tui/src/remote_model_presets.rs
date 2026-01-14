@@ -1,13 +1,13 @@
 use std::collections::HashSet;
 
-use code_common::model_presets::ModelPreset;
-use code_common::model_presets::ModelUpgrade;
-use code_common::model_presets::ReasoningEffortPreset;
-use code_core::config_types::TextVerbosity as TextVerbosityConfig;
-use code_core::protocol_config_types::ReasoningEffort as ProtocolReasoningEffort;
-use code_protocol::openai_models::ModelInfo;
-use code_protocol::openai_models::ModelVisibility;
-use code_protocol::openai_models::ReasoningEffort as RemoteReasoningEffort;
+use hanzo_common::model_presets::ModelPreset;
+use hanzo_common::model_presets::ModelUpgrade;
+use hanzo_common::model_presets::ReasoningEffortPreset;
+use hanzo_core::config_types::TextVerbosity as TextVerbosityConfig;
+use hanzo_core::protocol_config_types::ReasoningEffort as ProtocolReasoningEffort;
+use hanzo_protocol::openai_models::ModelInfo;
+use hanzo_protocol::openai_models::ModelVisibility;
+use hanzo_protocol::openai_models::ReasoningEffort as RemoteReasoningEffort;
 
 const REMOTE_TEXT_VERBOSITY_ALL: &[TextVerbosityConfig] = &[
     TextVerbosityConfig::Low,

@@ -22,7 +22,7 @@ impl AnimatedWelcomeCell {
             faded_out: Cell::new(false),
             available_height: Cell::new(None),
             variant: Cell::new(None),
-            version_label: format!("v{}", code_version::version()),
+            version_label: format!("v{}", hanzo_version::version()),
             hidden: Cell::new(false),
         }
     }

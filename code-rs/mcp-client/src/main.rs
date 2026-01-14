@@ -3,7 +3,7 @@
 //! Example usage:
 //!
 //! ```bash
-//! cargo run -p codex-mcp-client -- `code-mcp-server`
+//! cargo run -p hanzo-mcp-client -- `dev-mcp-server`
 //! ```
 //!
 //! Any additional arguments after the first one are forwarded to the spawned
@@ -15,7 +15,7 @@ use std::time::Duration;
 
 use anyhow::Context;
 use anyhow::Result;
-use code_mcp_client::McpClient;
+use hanzo_mcp_client::McpClient;
 use mcp_types::ClientCapabilities;
 use mcp_types::Implementation;
 use mcp_types::InitializeRequestParams;
@@ -41,7 +41,7 @@ async fn main() -> Result<()> {
     let mut args: Vec<OsString> = std::env::args_os().skip(1).collect();
 
     if args.is_empty() || args[0] == "--help" || args[0] == "-h" {
-        eprintln!("Usage: mcp-client <program> [args..]\n\nExample: mcp-client code-mcp-server");
+        eprintln!("Usage: mcp-client <program> [args..]\n\nExample: mcp-client dev-mcp-server");
         std::process::exit(1);
     }
     let original_args = args.clone();
@@ -61,11 +61,11 @@ async fn main() -> Result<()> {
             elicitation: None,
         },
         client_info: Implementation {
-            name: "codex-mcp-client".to_owned(),
+            name: "hanzo-mcp-client".to_owned(),
             version: env!("CARGO_PKG_VERSION").to_owned(),
-            title: Some("Codex".to_string()),
-            // This field is used by Codex when it is an MCP server: it should
-            // not be used when Codex is an MCP client.
+            title: Some("Hanzo Dev".to_string()),
+            // This field is used by Hanzo Dev when it is an MCP server: it should
+            // not be used when Hanzo Dev is an MCP client.
             user_agent: None,
         },
         protocol_version: MCP_SCHEMA_VERSION.to_owned(),

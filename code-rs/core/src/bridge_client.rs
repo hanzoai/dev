@@ -36,7 +36,8 @@ struct BridgeMeta {
 }
 
 const HEARTBEAT_STALE_MS: i64 = 20_000;
-const SUBSCRIPTION_OVERRIDE_FILE: &str = "code-bridge.subscription.json";
+const SUBSCRIPTION_OVERRIDE_FILE: &str = "dev-bridge.subscription.json";
+const LEGACY_SUBSCRIPTION_OVERRIDE_FILE: &str = "code-bridge.subscription.json";
 const BATCH_WINDOW: Duration = Duration::from_secs(3);
 const MAX_EVENTS_PER_BATCH: usize = 50;
 const MAX_EVENT_SUMMARY_CHARS: usize = 1200;
@@ -246,10 +247,10 @@ fn format_batch_message(batch: &CoalescedBatch) -> String {
 
     let mut lines = Vec::new();
     let header = if batch.total_events == 1 {
-        "Code Bridge event".to_string()
+        "Dev Bridge event".to_string()
     } else {
         format!(
-            "Code Bridge events ({} in last {}s)",
+            "Dev Bridge events ({} in last {}s)",
             batch.total_events,
             BATCH_WINDOW.as_secs()
         )
@@ -372,7 +373,7 @@ pub(crate) fn send_bridge_control(action: &str, args: serde_json::Value) {
     }
 }
 
-/// Spawn a background task that watches `.code/code-bridge.json` and
+/// Spawn a background task that watches `.hanzo/dev-bridge.json` and
 /// connects as a consumer to the external bridge host when available.
 pub(crate) fn spawn_bridge_listener(session: std::sync::Arc<Session>) {
     let cwd = session.get_cwd().to_path_buf();
@@ -393,7 +394,7 @@ pub(crate) fn spawn_bridge_listener(session: std::sync::Arc<Session>) {
                             }));
                             session
                                 .record_bridge_event(format!(
-                                    "Code Bridge subscription updated from {} (levels: [{}], capabilities: [{}], filter: {})",
+                                    "Dev Bridge subscription updated from {} (levels: [{}], capabilities: [{}], filter: {})",
                                     path.display(),
                                     sub.levels.join(", "),
                                     sub.capabilities.join(", "),
@@ -408,7 +409,7 @@ pub(crate) fn spawn_bridge_listener(session: std::sync::Arc<Session>) {
                         if last_override_seen.is_some() {
                             set_workspace_subscription(None);
                             session
-                                .record_bridge_event("Code Bridge subscription override removed or invalid; reverted to defaults (errors only).".to_string())
+                                .record_bridge_event("Dev Bridge subscription override removed or invalid; reverted to defaults (errors only).".to_string())
                                 .await;
                             *LAST_OVERRIDE_FINGERPRINT.lock().unwrap() = None;
                             last_override_seen = None;
@@ -419,7 +420,7 @@ pub(crate) fn spawn_bridge_listener(session: std::sync::Arc<Session>) {
                 set_workspace_subscription(None);
                 session
                     .record_bridge_event(
-                        "Code Bridge subscription override removed; reverted to defaults (errors only)."
+                        "Dev Bridge subscription override removed; reverted to defaults (errors only)."
                             .to_string(),
                     )
                     .await;
@@ -443,7 +444,7 @@ pub(crate) fn spawn_bridge_listener(session: std::sync::Arc<Session>) {
                         if last_notice != Some("stale") {
                             session
                                 .record_bridge_event(format!(
-                                    "Code Bridge metadata is stale at {} ({err}); waiting for a fresh host...",
+                                    "Dev Bridge metadata is stale at {} ({err}); waiting for a fresh host...",
                                     meta_path.display()
                                 ))
                                 .await;
@@ -551,9 +552,11 @@ fn maybe_resubscribe(state: &mut SubscriptionState) {
 fn find_meta_path(start: &Path) -> Option<PathBuf> {
     let mut current = Some(start);
     while let Some(dir) = current {
-        let candidate = dir.join(".code/code-bridge.json");
-        if candidate.exists() {
-            return Some(candidate);
+        for name in ["dev-bridge.json", "code-bridge.json"] {
+            let candidate = dir.join(".hanzo").join(name);
+            if candidate.exists() {
+                return Some(candidate);
+            }
         }
         current = dir.parent();
     }
@@ -572,9 +575,11 @@ fn subscription_override_path(start: &Path) -> Option<PathBuf> {
 
     let mut current = Some(start);
     while let Some(dir) = current {
-        let candidate = dir.join(".code").join(SUBSCRIPTION_OVERRIDE_FILE);
-        if candidate.exists() {
-            return Some(candidate);
+        for name in [SUBSCRIPTION_OVERRIDE_FILE, LEGACY_SUBSCRIPTION_OVERRIDE_FILE] {
+            let candidate = dir.join(".hanzo").join(name);
+            if candidate.exists() {
+                return Some(candidate);
+            }
         }
         current = dir.parent();
     }
@@ -594,7 +599,7 @@ fn resolve_subscription_override_path(start: &Path) -> PathBuf {
         return dir.join(SUBSCRIPTION_OVERRIDE_FILE);
     }
 
-    start.join(".code").join(SUBSCRIPTION_OVERRIDE_FILE)
+    start.join(".hanzo").join(SUBSCRIPTION_OVERRIDE_FILE)
 }
 
 fn find_meta_dir(start: &Path) -> Option<PathBuf> {
@@ -604,7 +609,7 @@ fn find_meta_dir(start: &Path) -> Option<PathBuf> {
 fn find_code_dir(start: &Path) -> Option<PathBuf> {
     let mut current = Some(start);
     while let Some(dir) = current {
-        let candidate = dir.join(".code");
+        let candidate = dir.join(".hanzo");
         if candidate.is_dir() {
             return Some(candidate);
         }
@@ -641,7 +646,7 @@ fn workspace_has_code_bridge(start: &Path) -> bool {
     let contains_dep = |section: &str| -> bool {
         json.get(section)
             .and_then(|v| v.as_object())
-            .map(|map| map.contains_key("@just-every/code-bridge"))
+            .map(|map| map.contains_key("@hanzo/dev-bridge") || map.contains_key("@just-every/code-bridge"))
             .unwrap_or(false)
     };
 
@@ -676,7 +681,7 @@ async fn connect_and_listen(meta: BridgeMeta, session: Arc<Session>, cwd: &Path)
         "type": "auth",
         "role": "consumer",
         "secret": meta.secret,
-        "clientId": format!("code-consumer-{}", session.session_uuid()),
+        "clientId": format!("dev-consumer-{}", session.session_uuid()),
     })
     .to_string();
     tx.send(Message::Text(auth)).await?;
@@ -720,7 +725,7 @@ async fn connect_and_listen(meta: BridgeMeta, session: Arc<Session>, cwd: &Path)
 
     // announce developer message
     let announce = format!(
-        "Code Bridge host available.\n- url: {url}\n- secret: {secret}\n",
+        "Dev Bridge host available.\n- url: {url}\n- secret: {secret}\n",
         url = meta.url,
         secret = meta.secret
     );
@@ -729,7 +734,7 @@ async fn connect_and_listen(meta: BridgeMeta, session: Arc<Session>, cwd: &Path)
     if !BRIDGE_HINT_EMITTED.swap(true, Ordering::SeqCst) && workspace_has_code_bridge(cwd) {
         session
             .record_bridge_event(
-                "Code Bridge is a local, real-time debug stream (errors/console like Sentry, plus pageviews/screenshots and a control channel). Use the `code_bridge` tool: `action=subscribe` with level (errors|warn|info|trace) to persist full-capability logging, `action=screenshot` to request a capture, or `action=javascript` with `code` to run JS on the bridge client."
+                "Dev Bridge is a local, real-time debug stream (errors/console like Sentry, plus pageviews/screenshots and a control channel). Use the `code_bridge` tool: `action=subscribe` with level (errors|warn|info|trace) to persist full-capability logging, `action=screenshot` to request a capture, or `action=javascript` with `code` to run JS on the bridge client."
                     .to_string(),
             )
             .await;
@@ -959,7 +964,7 @@ mod tests {
         };
 
         let text = format_batch_message(&batch);
-        assert!(text.contains("Code Bridge events (4 in last"));
+        assert!(text.contains("Dev Bridge events (4 in last"));
         assert!(text.contains("- one"));
         assert!(text.contains("- [3x] two"));
     }

@@ -1,11 +1,11 @@
-use code_protocol::custom_prompts::CustomPrompt;
+use hanzo_protocol::custom_prompts::CustomPrompt;
 use std::collections::HashSet;
 use std::path::Path;
 use std::path::PathBuf;
 use tokio::fs;
 
-/// Return the default prompts directory: `$CODEX_HOME/prompts`.
-/// If `CODEX_HOME` cannot be resolved, returns `None`.
+/// Return the default prompts directory: `$HANZO_HOME/prompts`.
+/// If `HANZO_HOME` cannot be resolved, returns `None`.
 pub fn default_prompts_dir() -> Option<PathBuf> {
     crate::config::find_code_home()
         .ok()

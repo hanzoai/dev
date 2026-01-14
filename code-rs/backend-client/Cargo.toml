@@ -1,5 +1,5 @@
 [package]
-name = "code-backend-client"
+name = "hanzo-backend-client"
 version = "0.0.0"
 edition = "2024"
 publish = false
@@ -15,7 +15,7 @@ anyhow = { workspace = true }
 serde = { workspace = true, features = ["derive"] }
 serde_json = { workspace = true }
 reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"] }
-code-backend-openapi-models = { workspace = true }
+hanzo-backend-openapi-models = { workspace = true }
 
 [dev-dependencies]
 pretty_assertions = { workspace = true }

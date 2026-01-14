@@ -68,7 +68,7 @@ where
         }
     }
 
-    let thread_name = format!("code-{name}");
+    let thread_name = format!("dev-{name}");
     let builder = std::thread::Builder::new()
         .name(thread_name)
         .stack_size(STACK_SIZE_BYTES);

@@ -2,7 +2,7 @@ use crossterm::event::{KeyCode, KeyEvent, MouseEvent};
 
 use crate::app_event::AppEvent;
 use crate::onboarding::onboarding_screen::KeyboardHandler;
-use code_core::protocol::Event;
+use hanzo_core::protocol::Event;
 
 use super::state::{App, AppState};
 

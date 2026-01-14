@@ -5,7 +5,7 @@ use std::io::stdout;
 use std::io::BufWriter;
 use std::io::Write;
 
-use code_core::config::Config;
+use hanzo_core::config::Config;
 use crossterm::cursor::MoveTo;
 use crossterm::event::DisableBracketedPaste;
 use crossterm::event::DisableMouseCapture;
@@ -16,7 +16,7 @@ use crossterm::event::KeyboardEnhancementFlags;
 use crossterm::event::PopKeyboardEnhancementFlags;
 use crossterm::event::PushKeyboardEnhancementFlags;
 use crossterm::style::SetColors;
-use crossterm::style::{Color as CtColor, SetBackgroundColor, SetForegroundColor};
+use crossterm::style::{SetBackgroundColor, SetForegroundColor};
 use crossterm::style::Print;
 use crossterm::style::ResetColor;
 use crossterm::cursor::MoveToNextLine;
@@ -28,6 +28,7 @@ use ratatui::crossterm::execute;
 use ratatui::crossterm::terminal::disable_raw_mode;
 use ratatui::crossterm::terminal::enable_raw_mode;
 use crossterm::terminal::supports_keyboard_enhancement;
+use ratatui::prelude::IntoCrossterm;
 use ratatui_image::picker::Picker;
 #[cfg(unix)]
 use std::os::fd::AsRawFd;
@@ -131,8 +132,8 @@ pub fn init(config: &Config) -> Result<(Tui, TerminalInfo)> {
     execute!(
         stdout(),
         SetColors(crossterm::style::Colors::new(
-            theme_fg.into(),
-            theme_bg.into()
+            theme_fg.into_crossterm(),
+            theme_bg.into_crossterm()
         )),
         Clear(ClearType::All),
         MoveTo(0, 0),
@@ -165,14 +166,18 @@ pub fn init(config: &Config) -> Result<(Tui, TerminalInfo)> {
             // Build a single line of spaces once to reduce allocations.
             let blank = " ".repeat(cols as usize);
             // Set explicit fg/bg to the theme's colors while painting.
-            execute!(stdout(), SetForegroundColor(CtColor::from(theme_fg)), SetBackgroundColor(CtColor::from(theme_bg)))?;
+            execute!(
+                stdout(),
+                SetForegroundColor(theme_fg.into_crossterm()),
+                SetBackgroundColor(theme_bg.into_crossterm())
+            )?;
             for y in 0..rows {
                 execute!(stdout(), MoveTo(0, y), Print(&blank))?;
             }
             // Restore cursor to home and keep our colors configured for subsequent drawing.
             // Avoid ResetColor here to prevent some terminals from flashing to their
             // profile default background (e.g., white) between frames.
-            execute!(stdout(), MoveTo(0, 0), SetColors(crossterm::style::Colors::new(theme_fg.into(), theme_bg.into())))?;
+            execute!(stdout(), MoveTo(0, 0), SetColors(crossterm::style::Colors::new(theme_fg.into_crossterm(), theme_bg.into_crossterm())))?;
         }
     }
 
@@ -291,7 +296,7 @@ pub fn enter_alt_screen_only(theme_fg: ratatui::style::Color, theme_bg: ratatui:
     execute!(
         stdout(),
         crossterm::terminal::EnterAlternateScreen,
-        SetColors(crossterm::style::Colors::new(theme_fg.into(), theme_bg.into())),
+        SetColors(crossterm::style::Colors::new(theme_fg.into_crossterm(), theme_bg.into_crossterm())),
         Clear(ClearType::All),
         MoveTo(0, 0),
         crossterm::terminal::SetTitle("Code"),

@@ -8,7 +8,7 @@ use tokio::process::Command;
 
 use crate::review_coord::bump_snapshot_epoch_for;
 
-/// Returns the `/.../.code/branches/<worktree>` root when `path` resides inside a branch worktree.
+/// Returns the `/.../.hanzo/branches/<worktree>` root when `path` resides inside a branch worktree.
 pub fn branch_worktree_root(path: &Path) -> Option<PathBuf> {
     use std::ffi::OsStr;
 
@@ -24,7 +24,7 @@ pub fn branch_worktree_root(path: &Path) -> Option<PathBuf> {
             while let Some(dir) = higher {
                 if dir
                     .file_name()
-                    .map(|name| name == OsStr::new(".code"))
+                    .map(|name| name == OsStr::new(".hanzo") || name == OsStr::new(".code"))
                     .unwrap_or(false)
                 {
                     candidate = Some(ancestor.to_path_buf());
@@ -38,7 +38,7 @@ pub fn branch_worktree_root(path: &Path) -> Option<PathBuf> {
     candidate
 }
 
-/// Returns true when `path` resides inside a `/.../.code/branches/<worktree>` directory.
+/// Returns true when `path` resides inside a `/.../.hanzo/branches/<worktree>` directory.
 pub fn is_branch_worktree_path(path: &Path) -> bool {
     branch_worktree_root(path).is_some()
 }
@@ -81,12 +81,12 @@ pub fn generate_branch_name_from_task(task: Option<&str>) -> String {
                 slug = slug.trim_matches('-').to_string();
                 if slug.is_empty() { slug = "branch".to_string(); }
             }
-            return format!("code-branch-{}", slug);
+            return format!("dev-branch-{}", slug);
         }
     }
     // Fallback: timestamped id
     let ts = Utc::now().format("%Y%m%d-%H%M%S");
-    format!("code-branch-{}", ts)
+    format!("dev-branch-{}", ts)
 }
 
 pub const LOCAL_DEFAULT_REMOTE: &str = "local-default";
@@ -122,7 +122,7 @@ pub async fn get_git_root_from(cwd: &Path) -> Result<PathBuf, String> {
     }
 }
 
-/// Create a new worktree for `branch_id` under `<git_root>/.code/branches/<branch_id>`.
+/// Create a new worktree for `branch_id` under `<git_root>/.hanzo/branches/<branch_id>`.
 /// When `base_ref` is provided, the worktree is created from that commit/ref so
 /// subsequent mutations in the primary working tree cannot affect the agent's
 /// view. If `base_ref` is `None`, the worktree is created from the current
@@ -133,20 +133,20 @@ pub async fn setup_worktree(
     branch_id: &str,
     base_ref: Option<&str>,
 ) -> Result<(PathBuf, String), String> {
-    // Global location: ~/.code/working/<repo_name>/branches
+    // Global location: ~/.hanzo/working/<repo_name>/branches
     let repo_name = git_root
         .file_name()
         .and_then(|s| s.to_str())
         .unwrap_or("repo");
     let mut code_dir = dirs::home_dir().unwrap_or_else(|| PathBuf::from("."));
     code_dir = code_dir
-        .join(".code")
+        .join(".hanzo")
         .join("working")
         .join(repo_name)
         .join("branches");
     tokio::fs::create_dir_all(&code_dir)
         .await
-        .map_err(|e| format!("Failed to create .code/branches directory: {}", e))?;
+        .map_err(|e| format!("Failed to create .hanzo/branches directory: {}", e))?;
 
     let mut effective_branch = branch_id.to_string();
     let mut worktree_path = code_dir.join(&effective_branch);
@@ -319,20 +319,20 @@ pub async fn prepare_reusable_worktree(
     base_ref: &str,
     keep_gitignored: bool,
 ) -> Result<PathBuf, String> {
-    // Global location: ~/.code/working/<repo_name>/branches
+    // Global location: ~/.hanzo/working/<repo_name>/branches
     let repo_name = git_root
         .file_name()
         .and_then(|s| s.to_str())
         .unwrap_or("repo");
     let mut code_dir = dirs::home_dir().unwrap_or_else(|| PathBuf::from("."));
     code_dir = code_dir
-        .join(".code")
+        .join(".hanzo")
         .join("working")
         .join(repo_name)
         .join("branches");
     tokio::fs::create_dir_all(&code_dir)
         .await
-        .map_err(|e| format!("Failed to create .code/branches directory: {}", e))?;
+        .map_err(|e| format!("Failed to create .hanzo/branches directory: {}", e))?;
 
     let worktree_path = code_dir.join(worktree_name);
 
@@ -449,8 +449,8 @@ async fn prune_stale_worktrees(git_root: &Path) -> Result<(), String> {
 async fn record_worktree_in_session(git_root: &Path, worktree_path: &Path) {
     let pid = std::process::id();
     let mut base = dirs::home_dir().unwrap_or_else(|| PathBuf::from("."));
-    // Global session registry: ~/.code/working/_session
-    base = base.join(".code").join("working").join("_session");
+    // Global session registry: ~/.hanzo/working/_session
+    base = base.join(".hanzo").join("working").join("_session");
     if let Err(_e) = tokio::fs::create_dir_all(&base).await { return; }
     let file = base.join(format!("pid-{}.txt", pid));
     // Store git_root and worktree_path separated by a tab; one entry per line.
@@ -562,7 +562,7 @@ fn metadata_file_path(worktree_path: &Path) -> Option<PathBuf> {
     let canonical = canonical_worktree_path(worktree_path)?;
     let mut base = dirs::home_dir()?;
     base = base
-        .join(".code")
+        .join(".hanzo")
         .join("working")
         .join(BRANCH_METADATA_DIR);
     let key = canonical.to_string_lossy();
@@ -740,8 +740,8 @@ pub async fn copy_uncommitted_to_worktree(src_root: &Path, worktree_path: &Path)
     }
 
     // Opt-in: mirror modified submodule pointers into the worktree index (no checkout/network).
-    // Enable via CODEX_BRANCH_INCLUDE_SUBMODULES=1|true|yes.
-    let include_submods = std::env::var("CODEX_BRANCH_INCLUDE_SUBMODULES")
+    // Enable via HANZO_BRANCH_INCLUDE_SUBMODULES=1|true|yes.
+    let include_submods = std::env::var("HANZO_BRANCH_INCLUDE_SUBMODULES")
         .ok()
         .map(|v| v.to_ascii_lowercase())
         .map(|v| v == "1" || v == "true" || v == "yes")

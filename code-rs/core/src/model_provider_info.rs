@@ -2,13 +2,13 @@
 //!
 //! Providers can be defined in two places:
 //!   1. Built-in defaults compiled into the binary so Codex works out-of-the-box.
-//!   2. User-defined entries inside `~/.code/config.toml` under the `model_providers`
-//!      table (Code also reads legacy `~/.codex/config.toml`).
+//!   2. User-defined entries inside `~/.hanzo/config.toml` under the `model_providers`
+//!      table (Hanzo Dev also reads legacy `~/.code/config.toml` / `~/.codex/config.toml`).
 //!      key. These override or extend the defaults at runtime.
 
 use crate::CodexAuth;
 use crate::error::CodexErr;
-use code_app_server_protocol::AuthMode;
+use hanzo_app_server_protocol::AuthMode;
 use serde::Deserialize;
 use serde::Serialize;
 use serde_json::Value;
@@ -494,7 +494,7 @@ pub fn built_in_model_providers() -> HashMap<String, ModelProviderInfo> {
                     [
                         (
                             "version".to_string(),
-                            code_version::version().to_string(),
+                            hanzo_version::version().to_string(),
                         ),
                     ]
                     .into_iter()
@@ -527,16 +527,16 @@ pub fn built_in_model_providers() -> HashMap<String, ModelProviderInfo> {
 }
 
 pub fn create_oss_provider() -> ModelProviderInfo {
-    // These CODEX_OSS_ environment variables are experimental: we may
+    // These HANZO_OSS_ environment variables are experimental: we may
     // switch to reading values from config.toml instead.
-    let code_oss_base_url = match std::env::var("CODEX_OSS_BASE_URL")
+    let code_oss_base_url = match std::env::var("HANZO_OSS_BASE_URL")
         .ok()
         .filter(|v| !v.trim().is_empty())
     {
         Some(url) => url,
         None => format!(
             "http://localhost:{port}/v1",
-            port = std::env::var("CODEX_OSS_PORT")
+            port = std::env::var("HANZO_OSS_PORT")
                 .ok()
                 .filter(|v| !v.trim().is_empty())
                 .and_then(|v| v.parse::<u32>().ok())

@@ -1,7 +1,7 @@
 #![cfg(test)]
 #![allow(clippy::unwrap_used, clippy::expect_used)]
 
-use code_core::protocol::{
+use hanzo_core::protocol::{
     AgentMessageDeltaEvent,
     AgentMessageEvent,
     AgentReasoningDeltaEvent,
@@ -15,7 +15,7 @@ use code_core::protocol::{
     ExecOutputStream,
     OrderMeta,
 };
-use code_tui::test_helpers::{layout_metrics, render_chat_widget_to_vt100, ChatWidgetHarness};
+use hanzo_tui::test_helpers::{layout_metrics, render_chat_widget_to_vt100, ChatWidgetHarness};
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 use serde_bytes::ByteBuf;
 use serde_json::json;

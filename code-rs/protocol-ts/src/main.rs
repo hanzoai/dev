@@ -16,5 +16,5 @@ struct Args {
 
 fn main() -> Result<()> {
     let args = Args::parse();
-    code_protocol_ts::generate_ts(&args.out_dir, args.prettier.as_deref())
+    hanzo_protocol_ts::generate_ts(&args.out_dir, args.prettier.as_deref())
 }

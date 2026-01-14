@@ -27,37 +27,37 @@ use crate::auto_drive_style::AutoDriveVariant;
 use crate::spinner;
 use crate::thread_spawner;
 
-use code_common::elapsed::format_duration;
-use code_common::model_presets::builtin_model_presets;
-use code_common::model_presets::clamp_reasoning_effort_for_model;
-use code_common::model_presets::ModelPreset;
-use code_core::agent_defaults::{agent_model_spec, enabled_agent_model_specs};
-use code_core::smoke_test_agent_blocking;
-use code_core::config::Config;
-use code_core::git_info::CommitLogEntry;
-use code_core::config_types::AgentConfig;
-use code_core::config_types::AutoDriveContinueMode;
-use code_core::config_types::Notifications;
-use code_core::config_types::ReasoningEffort;
-use code_core::config_types::TextVerbosity;
-use code_core::spawn::spawn_std_command_with_retry;
-use code_core::plan_tool::{PlanItemArg, StepStatus, UpdatePlanArgs};
-use code_core::model_family::derive_default_model_family;
-use code_core::model_family::find_family_for_model;
-use code_core::account_usage::{
+use hanzo_common::elapsed::format_duration;
+use hanzo_common::model_presets::builtin_model_presets;
+use hanzo_common::model_presets::clamp_reasoning_effort_for_model;
+use hanzo_common::model_presets::ModelPreset;
+use hanzo_core::agent_defaults::{agent_model_spec, enabled_agent_model_specs};
+use hanzo_core::smoke_test_agent_blocking;
+use hanzo_core::config::Config;
+use hanzo_core::git_info::CommitLogEntry;
+use hanzo_core::config_types::AgentConfig;
+use hanzo_core::config_types::AutoDriveContinueMode;
+use hanzo_core::config_types::Notifications;
+use hanzo_core::config_types::ReasoningEffort;
+use hanzo_core::config_types::TextVerbosity;
+use hanzo_core::spawn::spawn_std_command_with_retry;
+use hanzo_core::plan_tool::{PlanItemArg, StepStatus, UpdatePlanArgs};
+use hanzo_core::model_family::derive_default_model_family;
+use hanzo_core::model_family::find_family_for_model;
+use hanzo_core::account_usage::{
     self,
     RateLimitWarningScope,
     StoredRateLimitSnapshot,
     StoredUsageSummary,
     TokenTotals,
 };
-use code_core::auth_accounts::{self, StoredAccount};
-use code_login::AuthManager;
-use code_login::AuthMode;
-use code_protocol::mcp_protocol::AuthMode as McpAuthMode;
-use code_protocol::protocol::SessionSource;
-use code_protocol::num_format::format_with_separators;
-use code_core::split_command_and_args;
+use hanzo_core::auth_accounts::{self, StoredAccount};
+use hanzo_login::AuthManager;
+use hanzo_login::AuthMode;
+use hanzo_protocol::mcp_protocol::AuthMode as McpAuthMode;
+use hanzo_protocol::protocol::SessionSource;
+use hanzo_protocol::num_format::format_with_separators;
+use hanzo_core::split_command_and_args;
 use serde_json::Value as JsonValue;
 
 
@@ -103,7 +103,7 @@ use self::agent_install::{
     start_upgrade_terminal_session,
     wrap_command,
 };
-use code_auto_drive_core::{
+use hanzo_auto_drive_core::{
     start_auto_coordinator,
     AutoCoordinatorCommand,
     AutoCoordinatorEvent,
@@ -138,51 +138,51 @@ use self::rate_limit_refresh::{
 use self::history_render::{
     CachedLayout, HistoryRenderState, RenderRequest, RenderRequestKind, RenderSettings, VisibleCell,
 };
-use code_core::parse_command::ParsedCommand;
-use code_core::{AutoDriveMode, AutoDrivePidFile};
-use code_core::TextFormat;
-use code_core::protocol::AgentMessageDeltaEvent;
-use code_core::protocol::ApprovedCommandMatchKind;
-use code_core::protocol::AskForApproval;
-use code_core::protocol::SandboxPolicy;
-use code_core::protocol::AgentSourceKind;
-use code_core::protocol::AgentMessageEvent;
-use code_core::protocol::AgentReasoningDeltaEvent;
-use code_core::protocol::AgentReasoningEvent;
-use code_core::protocol::AgentReasoningRawContentDeltaEvent;
-use code_core::protocol::AgentReasoningRawContentEvent;
-use code_core::protocol::AgentReasoningSectionBreakEvent;
-use code_core::protocol::AgentStatusUpdateEvent;
-use code_core::protocol::ApplyPatchApprovalRequestEvent;
-use code_core::protocol::BackgroundEventEvent;
-use code_core::protocol::BrowserScreenshotUpdateEvent;
-use code_core::protocol::BrowserSnapshotEvent;
-use code_core::protocol::CustomToolCallBeginEvent;
-use code_core::protocol::CustomToolCallEndEvent;
-use code_core::protocol::ErrorEvent;
-use code_core::protocol::Event;
-use code_core::protocol::EventMsg;
-use code_core::protocol::ExecApprovalRequestEvent;
-use code_core::protocol::ExecCommandBeginEvent;
-use code_core::protocol::ExecCommandEndEvent;
-use code_core::protocol::ExecOutputStream;
-use code_core::protocol::EnvironmentContextDeltaEvent;
-use code_core::protocol::EnvironmentContextFullEvent;
-use code_core::protocol::InputItem;
-use code_core::protocol::SessionConfiguredEvent;
+use hanzo_core::parse_command::ParsedCommand;
+use hanzo_core::{AutoDriveMode, AutoDrivePidFile};
+use hanzo_core::TextFormat;
+use hanzo_core::protocol::AgentMessageDeltaEvent;
+use hanzo_core::protocol::ApprovedCommandMatchKind;
+use hanzo_core::protocol::AskForApproval;
+use hanzo_core::protocol::SandboxPolicy;
+use hanzo_core::protocol::AgentSourceKind;
+use hanzo_core::protocol::AgentMessageEvent;
+use hanzo_core::protocol::AgentReasoningDeltaEvent;
+use hanzo_core::protocol::AgentReasoningEvent;
+use hanzo_core::protocol::AgentReasoningRawContentDeltaEvent;
+use hanzo_core::protocol::AgentReasoningRawContentEvent;
+use hanzo_core::protocol::AgentReasoningSectionBreakEvent;
+use hanzo_core::protocol::AgentStatusUpdateEvent;
+use hanzo_core::protocol::ApplyPatchApprovalRequestEvent;
+use hanzo_core::protocol::BackgroundEventEvent;
+use hanzo_core::protocol::BrowserScreenshotUpdateEvent;
+use hanzo_core::protocol::BrowserSnapshotEvent;
+use hanzo_core::protocol::CustomToolCallBeginEvent;
+use hanzo_core::protocol::CustomToolCallEndEvent;
+use hanzo_core::protocol::ErrorEvent;
+use hanzo_core::protocol::Event;
+use hanzo_core::protocol::EventMsg;
+use hanzo_core::protocol::ExecApprovalRequestEvent;
+use hanzo_core::protocol::ExecCommandBeginEvent;
+use hanzo_core::protocol::ExecCommandEndEvent;
+use hanzo_core::protocol::ExecOutputStream;
+use hanzo_core::protocol::EnvironmentContextDeltaEvent;
+use hanzo_core::protocol::EnvironmentContextFullEvent;
+use hanzo_core::protocol::InputItem;
+use hanzo_core::protocol::SessionConfiguredEvent;
 // MCP tool call handlers moved into chatwidget::tools
-use code_core::protocol::Op;
-use code_core::protocol::ReviewOutputEvent;
-use code_core::protocol::{ReviewContextMetadata, ReviewRequest};
-use code_core::protocol::PatchApplyBeginEvent;
-use code_core::protocol::PatchApplyEndEvent;
-use code_core::protocol::TaskCompleteEvent;
-use code_core::protocol::TokenUsage;
-use code_core::protocol::TurnDiffEvent;
-use code_core::protocol::ViewImageToolCallEvent;
-use code_core::review_coord::{bump_snapshot_epoch_for, try_acquire_lock, ReviewGuard};
-use code_core::ConversationManager;
-use code_core::codex::compact::COMPACTION_CHECKPOINT_MESSAGE;
+use hanzo_core::protocol::Op;
+use hanzo_core::protocol::ReviewOutputEvent;
+use hanzo_core::protocol::{ReviewContextMetadata, ReviewRequest};
+use hanzo_core::protocol::PatchApplyBeginEvent;
+use hanzo_core::protocol::PatchApplyEndEvent;
+use hanzo_core::protocol::TaskCompleteEvent;
+use hanzo_core::protocol::TokenUsage;
+use hanzo_core::protocol::TurnDiffEvent;
+use hanzo_core::protocol::ViewImageToolCallEvent;
+use hanzo_core::review_coord::{bump_snapshot_epoch_for, try_acquire_lock, ReviewGuard};
+use hanzo_core::ConversationManager;
+use hanzo_core::codex::compact::COMPACTION_CHECKPOINT_MESSAGE;
 use crate::bottom_pane::{
     AutoActiveViewModel,
     AutoCoordinatorButton,
@@ -208,7 +208,7 @@ use crate::bottom_pane::{
 use crate::bottom_pane::agents_settings_view::SubagentEditorView;
 use crate::bottom_pane::mcp_settings_view::{McpServerRow, McpServerRows};
 use crate::exec_command::strip_bash_lc_and_escape;
-#[cfg(feature = "code-fork")]
+#[cfg(feature = "hanzo-fork")]
 use crate::tui_event_extensions::handle_browser_screenshot;
 use crate::chatwidget::message::UserMessage;
 use crate::history::compat::{
@@ -295,12 +295,12 @@ impl MergeRepoState {
             None
         };
 
-        let branch_metadata = code_core::git_worktree::load_branch_metadata(&worktree_path);
+        let branch_metadata = hanzo_core::git_worktree::load_branch_metadata(&worktree_path);
         let mut default_branch = branch_metadata
             .as_ref()
             .and_then(|meta| meta.base_branch.clone());
         if default_branch.is_none() {
-            default_branch = code_core::git_worktree::detect_default_branch(&git_root).await;
+            default_branch = hanzo_core::git_worktree::detect_default_branch(&git_root).await;
         }
 
         let repo_status_raw = ChatWidget::git_short_status(&git_root).await;
@@ -653,7 +653,7 @@ fn describe_command_failure(out: &Output, fallback: &str) -> String {
 }
 
 impl ChatWidget<'_> {
-    fn is_auto_review_agent(agent: &code_core::protocol::AgentInfo) -> bool {
+    fn is_auto_review_agent(agent: &hanzo_core::protocol::AgentInfo) -> bool {
         if matches!(agent.source_kind, Some(AgentSourceKind::AutoReview)) {
             return true;
         }
@@ -666,7 +666,7 @@ impl ChatWidget<'_> {
     }
     fn format_code_bridge_call(&self, args: &JsonValue) -> Option<String> {
         let action = args.get("action")?.as_str()?.to_lowercase();
-        let mut out = String::from("Code Bridge\n");
+        let mut out = String::from("Dev Bridge\n");
         match action.as_str() {
             "subscribe" => {
                 out.push_str("└ Subscribe");
@@ -791,7 +791,7 @@ impl ChatWidget<'_> {
         label.to_string()
     }
 }
-use code_git_tooling::{
+use hanzo_git_tooling::{
     create_ghost_commit,
     restore_ghost_commit,
     CreateGhostCommitOptions,
@@ -817,7 +817,7 @@ use uuid::Uuid;
 
 fn history_cell_logging_enabled() -> bool {
     static ENABLED: OnceLock<bool> = OnceLock::new();
-    if let Ok(value) = std::env::var("CODEX_TRACE_HISTORY") {
+    if let Ok(value) = std::env::var("HANZO_TRACE_HISTORY") {
         let trimmed = value.trim();
         if !matches!(trimmed, "" | "0") {
             return true;
@@ -1003,7 +1003,7 @@ use crate::streaming::StreamKind;
 use crate::streaming::controller::AppEventHistorySink;
 use crate::util::buffer::fill_rect;
 use crate::user_approval_widget::ApprovalRequest;
-use code_ansi_escape::ansi_escape_line;
+use hanzo_ansi_escape::ansi_escape_line;
 pub(crate) use self::terminal::{
     PendingCommand,
     PendingCommandAction,
@@ -1011,25 +1011,25 @@ pub(crate) use self::terminal::{
     TerminalOverlay,
     TerminalState,
 };
-use code_browser::BrowserManager;
-use code_core::config::find_code_home;
-use code_core::config::resolve_code_path_for_read;
-use code_core::config::set_github_actionlint_on_patch;
-use code_core::config::set_validation_group_enabled;
-use code_core::config::set_validation_tool_enabled;
-use code_file_search::FileMatch;
-use code_cloud_tasks_client::{ApplyOutcome, CloudTaskError, CreatedTask, TaskSummary};
-use code_protocol::models::ContentItem;
-use code_protocol::models::ResponseItem;
-use code_core::config_types::{validation_tool_category, ValidationCategory};
-use code_core::protocol::RateLimitSnapshotEvent;
-use code_core::protocol::ValidationGroup;
+use hanzo_browser::BrowserManager;
+use hanzo_core::config::find_code_home;
+use hanzo_core::config::resolve_code_path_for_read;
+use hanzo_core::config::set_github_actionlint_on_patch;
+use hanzo_core::config::set_validation_group_enabled;
+use hanzo_core::config::set_validation_tool_enabled;
+use hanzo_file_search::FileMatch;
+use hanzo_cloud_tasks_client::{ApplyOutcome, CloudTaskError, CreatedTask, TaskSummary};
+use hanzo_protocol::models::ContentItem;
+use hanzo_protocol::models::ResponseItem;
+use hanzo_core::config_types::{validation_tool_category, ValidationCategory};
+use hanzo_core::protocol::RateLimitSnapshotEvent;
+use hanzo_core::protocol::ValidationGroup;
 use crate::rate_limits_view::{
     build_limits_view, RateLimitDisplayConfig, RateLimitResetInfo, DEFAULT_DISPLAY_CONFIG,
     DEFAULT_GRID_CONFIG,
 };
 use crate::session_log;
-use code_core::review_format::format_review_findings_block;
+use hanzo_core::review_format::format_review_findings_block;
 use chrono::{DateTime, Datelike, Duration as ChronoDuration, Local, TimeZone, Timelike, Utc};
 use crossterm::event::KeyCode;
 use crossterm::event::KeyModifiers;
@@ -1318,8 +1318,8 @@ fn auto_review_branches_dir(git_root: &Path) -> Result<PathBuf, String> {
         .file_name()
         .and_then(|s| s.to_str())
         .unwrap_or("repo");
-    let mut code_home = code_core::config::find_code_home()
-        .map_err(|e| format!("failed to locate code home: {e}"))?;
+    let mut code_home = hanzo_core::config::find_code_home()
+        .map_err(|e| format!("failed to locate hanzo home: {e}"))?;
     code_home = code_home.join("working").join(repo_name).join("branches");
     std::fs::create_dir_all(&code_home)
         .map_err(|e| format!("failed to create branches dir: {e}"))?;
@@ -1429,7 +1429,7 @@ async fn allocate_fallback_auto_review_worktree(
 
         match try_acquire_lock("review-fallback", &path) {
             Ok(Some(guard)) => {
-                let worktree_path = code_core::git_worktree::prepare_reusable_worktree(
+                let worktree_path = hanzo_core::git_worktree::prepare_reusable_worktree(
                     git_root,
                     &name,
                     snapshot_id,
@@ -1789,7 +1789,7 @@ struct AutoCompactionOverlay {
     /// Snapshot of the conversation prefix (including the latest compact summary)
     /// that should be injected ahead of any history-derived tail when exporting
     /// the next Auto Drive request.
-    prefix_items: Vec<code_protocol::models::ResponseItem>,
+    prefix_items: Vec<hanzo_protocol::models::ResponseItem>,
     /// History cell index that marks the beginning of the still-live tail that
     /// we continue to mirror directly from the UI.
     tail_start_cell: usize,
@@ -1802,9 +1802,9 @@ pub(crate) struct BackgroundOrderTicket {
 }
 
 impl BackgroundOrderTicket {
-    pub(crate) fn next_order(&self) -> code_core::protocol::OrderMeta {
+    pub(crate) fn next_order(&self) -> hanzo_core::protocol::OrderMeta {
         let seq = self.seq_counter.fetch_add(1, Ordering::SeqCst);
-        code_core::protocol::OrderMeta {
+        hanzo_core::protocol::OrderMeta {
             request_ordinal: self.request_ordinal,
             output_index: Some(i32::MAX as u32),
             sequence_number: Some(seq),
@@ -2389,7 +2389,7 @@ struct BrowserSessionOrderKey {
 }
 
 impl BrowserSessionOrderKey {
-    fn from_order_meta(meta: &code_core::protocol::OrderMeta) -> Self {
+    fn from_order_meta(meta: &hanzo_core::protocol::OrderMeta) -> Self {
         let out = meta
             .output_index
             .map(|value| {
@@ -2449,7 +2449,7 @@ impl From<OrderKey> for OrderKeySnapshot {
 
 // Global guard to prevent overlapping background screenshot captures and to rate-limit them
 static BG_SHOT_IN_FLIGHT: Lazy<AtomicBool> = Lazy::new(|| AtomicBool::new(false));
-static BACKGROUND_REVIEW_LOCKS: Lazy<Mutex<HashMap<String, code_core::review_coord::ReviewGuard>>> =
+static BACKGROUND_REVIEW_LOCKS: Lazy<Mutex<HashMap<String, hanzo_core::review_coord::ReviewGuard>>> =
     Lazy::new(|| Mutex::new(HashMap::new()));
 static BG_SHOT_LAST_START_MS: Lazy<AtomicU64> = Lazy::new(|| AtomicU64::new(0));
 static MERGE_LOCKS: Lazy<Mutex<HashMap<PathBuf, Arc<tokio::sync::Mutex<()>>>>> =
@@ -2849,7 +2849,10 @@ impl ChatWidget<'_> {
                 while let Some(dir) = higher {
                     if dir
                         .file_name()
-                        .map(|name| name == std::ffi::OsStr::new(".code"))
+                        .map(|name| {
+                            name == std::ffi::OsStr::new(".hanzo")
+                                || name == std::ffi::OsStr::new(".code")
+                        })
                         .unwrap_or(false)
                     {
                         return true;
@@ -2933,7 +2936,7 @@ impl ChatWidget<'_> {
     fn system_order_key(
         &mut self,
         placement: SystemPlacement,
-        order: Option<&code_core::protocol::OrderMeta>,
+        order: Option<&hanzo_core::protocol::OrderMeta>,
     ) -> OrderKey {
         // If the provider supplied OrderMeta, honor it strictly.
         if let Some(om) = order {
@@ -3176,7 +3179,7 @@ impl ChatWidget<'_> {
                     app_event_tx_clone.send_background_event_with_ticket(
                         &ticket,
                         format!(
-                            "❌ Failed to initialize model session: {}.\n• Ensure an OpenAI API key is set (CODE_OPENAI_API_KEY / OPENAI_API_KEY) or run `code login`.\n• Also verify config.cwd is an absolute path.",
+                            "❌ Failed to initialize model session: {}.\n• Ensure an OpenAI API key is set (HANZO_OPENAI_API_KEY / OPENAI_API_KEY) or run `dev login`.\n• Also verify config.cwd is an absolute path.",
                             e
                         ),
                     );
@@ -3225,7 +3228,7 @@ impl ChatWidget<'_> {
         }
     }
 
-    fn background_tail_order_meta(&mut self) -> code_core::protocol::OrderMeta {
+    fn background_tail_order_meta(&mut self) -> hanzo_core::protocol::OrderMeta {
         self.background_tail_order_ticket_internal().next_order()
     }
 
@@ -3258,7 +3261,7 @@ impl ChatWidget<'_> {
         cell: Box<dyn HistoryCell>,
         placement: SystemPlacement,
         id_for_replace: Option<String>,
-        order: Option<&code_core::protocol::OrderMeta>,
+        order: Option<&hanzo_core::protocol::OrderMeta>,
         tag: &'static str,
         record: Option<HistoryDomainRecord>,
     ) {
@@ -3297,7 +3300,7 @@ impl ChatWidget<'_> {
     }
     // Build an ordered key from model-provided OrderMeta. Callers must
     // guarantee presence by passing a concrete reference (compile-time guard).
-    fn raw_order_key_from_order_meta(om: &code_core::protocol::OrderMeta) -> OrderKey {
+    fn raw_order_key_from_order_meta(om: &hanzo_core::protocol::OrderMeta) -> OrderKey {
         // sequence_number can be None on some terminal events; treat as 0 for stable placement
         OrderKey {
             req: om.request_ordinal,
@@ -3306,7 +3309,7 @@ impl ChatWidget<'_> {
         }
     }
 
-    fn provider_order_key_from_order_meta(&mut self, om: &code_core::protocol::OrderMeta) -> OrderKey {
+    fn provider_order_key_from_order_meta(&mut self, om: &hanzo_core::protocol::OrderMeta) -> OrderKey {
         let mut key = Self::raw_order_key_from_order_meta(om);
         key.req = self.apply_request_bias(key.req);
         key
@@ -3328,7 +3331,7 @@ impl ChatWidget<'_> {
     }
 
     // Track latest request index observed from provider so internal inserts can anchor to it.
-    fn note_order(&mut self, order: Option<&code_core::protocol::OrderMeta>) {
+    fn note_order(&mut self, order: Option<&hanzo_core::protocol::OrderMeta>) {
         if let Some(om) = order {
             let is_background_sentinel = om.output_index == Some(i32::MAX as u32);
             let is_initial_session = self.last_seen_request_index == 0;
@@ -3381,7 +3384,7 @@ impl ChatWidget<'_> {
     //     latest key in this request (req = last_seen, out/seq bumped).
     //   * If no cells exist for this request yet, place near the top of this
     //     request (after headers/prompts) so provider output can follow.
-    fn near_time_key(&mut self, order: Option<&code_core::protocol::OrderMeta>) -> OrderKey {
+    fn near_time_key(&mut self, order: Option<&hanzo_core::protocol::OrderMeta>) -> OrderKey {
         if let Some(om) = order {
             return self.provider_order_key_from_order_meta(om);
         }
@@ -3441,7 +3444,7 @@ impl ChatWidget<'_> {
     /// so they remain attached to the current/last request instead of jumping forward.
     fn near_time_key_current_req(
         &mut self,
-        order: Option<&code_core::protocol::OrderMeta>,
+        order: Option<&hanzo_core::protocol::OrderMeta>,
     ) -> OrderKey {
         if let Some(om) = order {
             return self.provider_order_key_from_order_meta(om);
@@ -4312,7 +4315,7 @@ impl ChatWidget<'_> {
             }
             ResponseItem::Reasoning { summary, .. } => {
                 for s in summary {
-                    let code_protocol::models::ReasoningItemReasoningSummary::SummaryText { text } =
+                    let hanzo_protocol::models::ReasoningItemReasoningSummary::SummaryText { text } =
                         s;
                     // Reasoning cell – use the existing reasoning output styling
                     let sink = crate::streaming::controller::AppEventHistorySink(
@@ -5236,7 +5239,7 @@ impl ChatWidget<'_> {
         if let Some(last) = self.diffs.session_patch_sets.last() {
             for (src_path, chg) in last.iter() {
                 match chg {
-                    code_core::protocol::FileChange::Update {
+                    hanzo_core::protocol::FileChange::Update {
                         move_path: Some(dest_path),
                         ..
                     } => {
@@ -5284,7 +5287,7 @@ impl ChatWidget<'_> {
     fn handle_exec_begin_now(
         &mut self,
         ev: ExecCommandBeginEvent,
-        order: &code_core::protocol::OrderMeta,
+        order: &hanzo_core::protocol::OrderMeta,
     ) {
         exec_tools::handle_exec_begin_now(self, ev, order);
     }
@@ -5295,7 +5298,7 @@ impl ChatWidget<'_> {
     fn handle_exec_begin_ordered(
         &mut self,
         ev: ExecCommandBeginEvent,
-        order: code_core::protocol::OrderMeta,
+        order: hanzo_core::protocol::OrderMeta,
         seq: u64,
     ) {
         self.finalize_active_stream();
@@ -5320,7 +5323,7 @@ impl ChatWidget<'_> {
     fn handle_exec_end_now(
         &mut self,
         ev: ExecCommandEndEvent,
-        order: &code_core::protocol::OrderMeta,
+        order: &hanzo_core::protocol::OrderMeta,
     ) {
         exec_tools::handle_exec_end_now(self, ev, order);
     }
@@ -5331,7 +5334,7 @@ impl ChatWidget<'_> {
     fn enqueue_or_handle_exec_end(
         &mut self,
         ev: ExecCommandEndEvent,
-        order: code_core::protocol::OrderMeta,
+        order: hanzo_core::protocol::OrderMeta,
     ) {
         let call_id = ExecCallId(ev.call_id.clone());
         let has_running = self.exec.running_commands.contains_key(&call_id);
@@ -5915,7 +5918,7 @@ impl ChatWidget<'_> {
 
     /// Get or create the global browser manager
     async fn get_browser_manager() -> Arc<BrowserManager> {
-        code_browser::global::get_or_create_browser_manager().await
+        hanzo_browser::global::get_or_create_browser_manager().await
     }
 
     pub(crate) fn insert_str(&mut self, s: &str) {
@@ -6611,7 +6614,7 @@ impl ChatWidget<'_> {
     /// Construct a ChatWidget from an existing conversation (forked session).
     pub(crate) fn new_from_existing(
         config: Config,
-        conversation: std::sync::Arc<code_core::CodexConversation>,
+        conversation: std::sync::Arc<hanzo_core::CodexConversation>,
         session_configured: SessionConfiguredEvent,
         app_event_tx: AppEventSender,
         enhanced_keys_supported: bool,
@@ -6998,11 +7001,11 @@ impl ChatWidget<'_> {
 
     fn auto_drive_make_user_message(
         text: String,
-    ) -> Option<code_protocol::models::ResponseItem> {
+    ) -> Option<hanzo_protocol::models::ResponseItem> {
         if text.trim().is_empty() {
             return None;
         }
-        use code_protocol::models::{ContentItem, ResponseItem};
+        use hanzo_protocol::models::{ContentItem, ResponseItem};
         Some(ResponseItem::Message {
             id: None,
             role: "user".to_string(),
@@ -7012,8 +7015,8 @@ impl ChatWidget<'_> {
 
     fn auto_drive_browser_screenshot_items(
         cell: &BrowserSessionCell,
-    ) -> Option<Vec<code_protocol::models::ContentItem>> {
-        use code_protocol::models::ContentItem;
+    ) -> Option<Vec<hanzo_protocol::models::ContentItem>> {
+        use hanzo_protocol::models::ContentItem;
 
         let record = cell.screenshot_history().last()?;
         let bytes = match std::fs::read(&record.path) {
@@ -7080,11 +7083,11 @@ impl ChatWidget<'_> {
 
     fn auto_drive_make_assistant_message(
         text: String,
-    ) -> Option<code_protocol::models::ResponseItem> {
+    ) -> Option<hanzo_protocol::models::ResponseItem> {
         if text.trim().is_empty() {
             return None;
         }
-        use code_protocol::models::{ContentItem, ResponseItem};
+        use hanzo_protocol::models::{ContentItem, ResponseItem};
         Some(ResponseItem::Message {
             id: None,
             role: "assistant".to_string(),
@@ -7171,7 +7174,7 @@ impl ChatWidget<'_> {
         Some(lines.join("\n"))
     }
 
-    pub(crate) fn export_auto_drive_items(&self) -> Vec<code_protocol::models::ResponseItem> {
+    pub(crate) fn export_auto_drive_items(&self) -> Vec<hanzo_protocol::models::ResponseItem> {
         let (items, _) = self.export_auto_drive_items_with_indices();
         items
     }
@@ -7179,7 +7182,7 @@ impl ChatWidget<'_> {
     fn export_auto_drive_items_with_indices(
         &self,
     ) -> (
-        Vec<code_protocol::models::ResponseItem>,
+        Vec<hanzo_protocol::models::ResponseItem>,
         Vec<Option<usize>>,
     ) {
         if let Some(overlay) = &self.auto_compaction_overlay {
@@ -7206,7 +7209,7 @@ impl ChatWidget<'_> {
     fn export_auto_drive_items_from_index_with_indices(
         &self,
         start_idx: usize,
-    ) -> Vec<(usize, code_protocol::models::ResponseItem)> {
+    ) -> Vec<(usize, hanzo_protocol::models::ResponseItem)> {
         let mut items = Vec::new();
         for (idx, cell) in self.history_cells.iter().enumerate().skip(start_idx) {
             let Some(role) = Self::auto_drive_role_for_kind(cell.kind()) else {
@@ -7280,10 +7283,10 @@ impl ChatWidget<'_> {
             }
 
             let mut item = if is_reasoning {
-                code_protocol::models::ResponseItem::Message {
+                hanzo_protocol::models::ResponseItem::Message {
                     id: Some("auto-drive-reasoning".to_string()),
                     role: "user".to_string(),
-                    content: vec![code_protocol::models::ContentItem::InputText { text }],
+                    content: vec![hanzo_protocol::models::ContentItem::InputText { text }],
                 }
             } else {
                 match role {
@@ -7299,7 +7302,7 @@ impl ChatWidget<'_> {
             };
 
             if let Some(extra) = extra_content {
-                if let code_protocol::models::ResponseItem::Message { content, .. } = &mut item {
+                if let hanzo_protocol::models::ResponseItem::Message { content, .. } = &mut item {
                     content.extend(extra);
                 }
             }
@@ -7311,9 +7314,9 @@ impl ChatWidget<'_> {
 
     fn derive_compaction_overlay(
         &self,
-        previous_items: &[code_protocol::models::ResponseItem],
+        previous_items: &[hanzo_protocol::models::ResponseItem],
         previous_indices: &[Option<usize>],
-        new_items: &[code_protocol::models::ResponseItem],
+        new_items: &[hanzo_protocol::models::ResponseItem],
     ) -> Option<AutoCompactionOverlay> {
         if previous_items == new_items {
             return self.auto_compaction_overlay.clone();
@@ -7370,7 +7373,7 @@ impl ChatWidget<'_> {
         })
     }
 
-    fn rebuild_auto_history(&mut self) -> Vec<code_protocol::models::ResponseItem> {
+    fn rebuild_auto_history(&mut self) -> Vec<hanzo_protocol::models::ResponseItem> {
         let conversation = self.export_auto_drive_items();
         let tail = self
             .auto_history
@@ -7381,7 +7384,7 @@ impl ChatWidget<'_> {
         self.auto_history.raw_snapshot()
     }
 
-    fn current_auto_history(&mut self) -> Vec<code_protocol::models::ResponseItem> {
+    fn current_auto_history(&mut self) -> Vec<hanzo_protocol::models::ResponseItem> {
         if self.auto_history.converted_is_empty() {
             return self.rebuild_auto_history();
         }
@@ -7389,9 +7392,9 @@ impl ChatWidget<'_> {
     }
 
     /// Export current user/assistant messages into ResponseItem list for forking.
-    pub(crate) fn export_response_items(&self) -> Vec<code_protocol::models::ResponseItem> {
-        use code_protocol::models::ContentItem;
-        use code_protocol::models::ResponseItem;
+    pub(crate) fn export_response_items(&self) -> Vec<hanzo_protocol::models::ResponseItem> {
+        use hanzo_protocol::models::ContentItem;
+        use hanzo_protocol::models::ResponseItem;
         let mut items = Vec::new();
         for (idx, cell) in self.history_cells.iter().enumerate() {
             match cell.kind() {
@@ -10290,7 +10293,7 @@ impl ChatWidget<'_> {
         &mut self,
         message: String,
         placement: BackgroundPlacement,
-        order: Option<code_core::protocol::OrderMeta>,
+        order: Option<hanzo_core::protocol::OrderMeta>,
     ) {
         let order = order;
         if order.is_none() {
@@ -10805,7 +10808,9 @@ impl ChatWidget<'_> {
                 }
             }
             let missing_s = missing.display().to_string();
-            if fallback.is_none() && missing_s.contains("/.code/branches/") {
+            if fallback.is_none()
+                && (missing_s.contains("/.hanzo/branches/") || missing_s.contains("/.code/branches/"))
+            {
                 let mut current = missing.as_path();
                 let mut first_existing: Option<PathBuf> = None;
                 while let Some(parent) = current.parent() {
@@ -10817,7 +10822,7 @@ impl ChatWidget<'_> {
                         first_existing = Some(current.to_path_buf());
                     }
                     if let Some(repo_root) =
-                        code_core::git_info::resolve_root_git_project_for_trust(current)
+                        hanzo_core::git_info::resolve_root_git_project_for_trust(current)
                     {
                         fallback = Some((repo_root, "repository root"));
                         break;
@@ -11021,7 +11026,7 @@ impl ChatWidget<'_> {
                     "plan" | "solve" | "code"
                 );
                 if has_custom && !is_builtin {
-                    let res = code_core::slash_commands::format_subagent_command(
+                    let res = hanzo_core::slash_commands::format_subagent_command(
                         cmd_name,
                         &args,
                         Some(&self.config.agents),
@@ -11081,7 +11086,7 @@ impl ChatWidget<'_> {
                 };
 
                 if let Some(task) = args_opt {
-                    let res = code_core::slash_commands::format_subagent_command(
+                    let res = hanzo_core::slash_commands::format_subagent_command(
                         cmd_name,
                         &task,
                         Some(&self.config.agents),
@@ -11179,7 +11184,7 @@ impl ChatWidget<'_> {
                 // Short settle to allow page to reach a stable state; keep it small
                 tokio::time::sleep(tokio::time::Duration::from_millis(800)).await;
 
-                let Some(browser_manager) = code_browser::global::get_browser_manager().await else {
+                let Some(browser_manager) = hanzo_browser::global::get_browser_manager().await else {
                     tracing::info!("Skipping background screenshot: browser manager unavailable");
                     return;
                 };
@@ -13001,7 +13006,7 @@ impl ChatWidget<'_> {
             }
             EventMsg::ReplayHistory(ev) => {
                 self.clear_resume_placeholder();
-                let code_core::protocol::ReplayHistoryEvent { items, history_snapshot } = ev;
+                let hanzo_core::protocol::ReplayHistoryEvent { items, history_snapshot } = ev;
                 self.replay_history_depth = self.replay_history_depth.saturating_add(1);
                 let max_req = self.last_seen_request_index;
                 let mut processed_snapshot = false;
@@ -13671,7 +13676,7 @@ impl ChatWidget<'_> {
                 if let Some(last) = self.diffs.session_patch_sets.last() {
                     for (src_path, chg) in last.iter() {
                         match chg {
-                            code_core::protocol::FileChange::Update {
+                            hanzo_core::protocol::FileChange::Update {
                                 move_path: Some(dest_path),
                                 ..
                             } => {
@@ -14376,7 +14381,7 @@ impl ChatWidget<'_> {
                 }
             }
             EventMsg::GetHistoryEntryResponse(event) => {
-                let code_core::protocol::GetHistoryEntryResponseEvent {
+                let hanzo_core::protocol::GetHistoryEntryResponseEvent {
                     offset,
                     log_id,
                     entry,
@@ -14613,7 +14618,7 @@ impl ChatWidget<'_> {
                 self.request_redraw();
             }
             EventMsg::BrowserScreenshotUpdate(payload) => {
-                #[cfg(feature = "code-fork")]
+                #[cfg(feature = "hanzo-fork")]
                 handle_browser_screenshot(&payload, &self.app_event_tx);
 
                 let BrowserScreenshotUpdateEvent { screenshot_path, url } = payload;
@@ -15001,7 +15006,7 @@ impl ChatWidget<'_> {
 
             for (command_tokens, stdout) in execs {
                 let cmd_vec: Vec<String> = command_tokens.iter().map(|s| s.to_string()).collect();
-                let parsed = code_core::parse_command::parse_command(&cmd_vec);
+                let parsed = hanzo_core::parse_command::parse_command(&cmd_vec);
                 self.history_push(history_cell::new_active_exec_command(
                     cmd_vec.clone(),
                     parsed.clone(),
@@ -15030,7 +15035,7 @@ impl ChatWidget<'_> {
                     DemoPatch::Add { path, content } => {
                         patch_changes.insert(
                             PathBuf::from(path),
-                            code_core::protocol::FileChange::Add {
+                            hanzo_core::protocol::FileChange::Add {
                                 content: (*content).to_string(),
                             },
                         );
@@ -15044,7 +15049,7 @@ impl ChatWidget<'_> {
                     } => {
                         patch_changes.insert(
                             PathBuf::from(path),
-                            code_core::protocol::FileChange::Update {
+                            hanzo_core::protocol::FileChange::Update {
                                 unified_diff: (*unified_diff).to_string(),
                                 move_path: None,
                                 original_content: (*original).to_string(),
@@ -15740,7 +15745,7 @@ impl ChatWidget<'_> {
                             entries.join(", ")
                         };
                         self.push_background_tail(format!(
-                            "TUI notifications use custom filters ([{}]); edit ~/.code/config.toml to change them.",
+                            "TUI notifications use custom filters ([{}]); edit ~/.hanzo/config.toml to change them.",
                             filters
                         ));
                     }
@@ -15823,7 +15828,7 @@ impl ChatWidget<'_> {
             "  • CWD: {}",
             self.config.cwd.display()
         )));
-        let in_git = code_core::git_info::get_git_repo_root(&self.config.cwd).is_some();
+        let in_git = hanzo_core::git_info::get_git_repo_root(&self.config.cwd).is_some();
         lines.push(Line::from(format!(
             "  • Git repo: {}",
             if in_git { "yes" } else { "no" }
@@ -15896,14 +15901,14 @@ impl ChatWidget<'_> {
                 } else {
                     a.command.clone()
                 };
-                let builtin = matches!(cmd.as_str(), "code" | "codex" | "cloud");
+                let builtin = matches!(cmd.as_str(), "dev" | "code" | "codex" | "cloud");
                 to_check.push((name, cmd, builtin));
             }
         } else {
             for spec in enabled_agent_model_specs() {
                 let name = spec.slug.to_string();
                 let cmd = spec.cli.to_string();
-                let builtin = matches!(spec.cli, "code" | "codex" | "cloud");
+                let builtin = matches!(spec.cli, "dev" | "code" | "codex" | "cloud");
                 to_check.push((name, cmd, builtin));
             }
         }
@@ -16120,7 +16125,7 @@ impl ChatWidget<'_> {
         let view = UpdateSettingsView::new(
             self.app_event_tx.clone(),
             self.make_background_tail_ticket(),
-            code_version::version().to_string(),
+            hanzo_version::version().to_string(),
             self.config.auto_upgrade_enabled,
             command,
             display,
@@ -16867,7 +16872,7 @@ impl ChatWidget<'_> {
 
     fn update_agents_terminal_state(
         &mut self,
-        agents: &[code_core::protocol::AgentInfo],
+        agents: &[hanzo_core::protocol::AgentInfo],
         context: Option<String>,
         task: Option<String>,
     ) {
@@ -17825,7 +17830,7 @@ fi\n\
         let mut auto_config = self.config.clone();
         auto_config.model = self.config.auto_drive.model.trim().to_string();
         if auto_config.model.is_empty() {
-            auto_config.model = code_auto_drive_core::MODEL_SLUG.to_string();
+            auto_config.model = hanzo_auto_drive_core::MODEL_SLUG.to_string();
         }
         auto_config.model_reasoning_effort = self.config.auto_drive.model_reasoning_effort;
 
@@ -17993,8 +17998,8 @@ fi\n\
         self.config.auto_drive.continue_mode = auto_continue_to_config(continue_mode);
         self.restore_auto_resolve_attempts_if_lost();
 
-        if let Ok(home) = code_core::config::find_code_home() {
-            if let Err(err) = code_core::config::set_auto_drive_settings(
+        if let Ok(home) = hanzo_core::config::find_code_home() {
+            if let Err(err) = hanzo_core::config::set_auto_drive_settings(
                 &home,
                 &self.config.auto_drive,
                 self.config.auto_drive_use_chat_model,
@@ -18184,11 +18189,11 @@ fi\n\
         cli: Option<AutoTurnCliAction>,
         agents_timing: Option<AutoTurnAgentsTiming>,
         agents: Vec<AutoTurnAgentsAction>,
-        transcript: Vec<code_protocol::models::ResponseItem>,
+        transcript: Vec<hanzo_protocol::models::ResponseItem>,
     ) {
         if !self.auto_state.is_active() {
             if let Some(handle) = self.auto_handle.as_ref() {
-                let _ = handle.send(code_auto_drive_core::AutoCoordinatorCommand::AckDecision { seq });
+                let _ = handle.send(hanzo_auto_drive_core::AutoCoordinatorCommand::AckDecision { seq });
             }
             return;
         }
@@ -18212,7 +18217,7 @@ fi\n\
         }
 
         if let Some(handle) = self.auto_handle.as_ref() {
-            let _ = handle.send(code_auto_drive_core::AutoCoordinatorCommand::AckDecision { seq });
+            let _ = handle.send(hanzo_auto_drive_core::AutoCoordinatorCommand::AckDecision { seq });
         }
 
         self.auto_state.current_status_sent_to_user = status_sent_to_user.clone();
@@ -18361,7 +18366,7 @@ Have we met every part of this goal and is there no further work to do?"#
                     r#type: "json_schema".to_string(),
                     name: Some("auto_drive_diagnostics".to_string()),
                     strict: Some(true),
-                    schema: Some(code_auto_drive_diagnostics::AutoDriveDiagnostics::completion_schema()),
+                    schema: Some(hanzo_auto_drive_diagnostics::AutoDriveDiagnostics::completion_schema()),
                 };
                 self.submit_op(Op::SetNextTextFormat { format: tf.clone() });
                 self.next_cli_text_format = Some(tf);
@@ -19310,7 +19315,7 @@ Have we met every part of this goal and is there no further work to do?"#
     }
 
     fn auto_agents_can_write(&self) -> bool {
-        if code_core::git_info::get_git_repo_root(&self.config.cwd).is_none() {
+        if hanzo_core::git_info::get_git_repo_root(&self.config.cwd).is_none() {
             return false;
         }
         matches!(
@@ -20908,7 +20913,7 @@ Have we met every part of this goal and is there no further work to do?"#
             } else if !cfg.args.is_empty() {
                 Some(cfg.args.clone())
             } else {
-                let d = code_core::agent_defaults::default_params_for(
+                let d = hanzo_core::agent_defaults::default_params_for(
                     &cfg.name, true, /*read_only*/
                 );
                 if d.is_empty() { None } else { Some(d) }
@@ -20918,7 +20923,7 @@ Have we met every part of this goal and is there no further work to do?"#
             } else if !cfg.args.is_empty() {
                 Some(cfg.args.clone())
             } else {
-                let d = code_core::agent_defaults::default_params_for(
+                let d = hanzo_core::agent_defaults::default_params_for(
                     &cfg.name, false, /*read_only*/
                 );
                 if d.is_empty() { None } else { Some(d) }
@@ -20963,9 +20968,9 @@ Have we met every part of this goal and is there no further work to do?"#
         } else {
             // Fallback: synthesize defaults
             let cmd = Self::resolve_agent_command(&name, None, None);
-            let ro = code_core::agent_defaults::default_params_for(&name, true /*read_only*/);
+            let ro = hanzo_core::agent_defaults::default_params_for(&name, true /*read_only*/);
             let wr =
-                code_core::agent_defaults::default_params_for(&name, false /*read_only*/);
+                hanzo_core::agent_defaults::default_params_for(&name, false /*read_only*/);
             let app_event_tx = self.app_event_tx.clone();
             let description = Self::agent_description_for(&name, Some(&cmd), None);
             let builtin = Self::is_builtin_agent(&name, &cmd);
@@ -21023,7 +21028,7 @@ Have we met every part of this goal and is there no further work to do?"#
 
     pub(crate) fn apply_subagent_update(
         &mut self,
-        cmd: code_core::config_types::SubagentCommandConfig,
+        cmd: hanzo_core::config_types::SubagentCommandConfig,
     ) {
         if let Some(slot) = self
             .config
@@ -21187,7 +21192,7 @@ Have we met every part of this goal and is there no further work to do?"#
     }
 
     fn persist_agent_config(&self, cfg: &AgentConfig) {
-        if let Ok(home) = code_core::config::find_code_home() {
+        if let Ok(home) = hanzo_core::config::find_code_home() {
             let name = cfg.name.clone();
             let enabled = cfg.enabled;
             let ro = cfg.args_read_only.clone();
@@ -21196,7 +21201,7 @@ Have we met every part of this goal and is there no further work to do?"#
             let desc = cfg.description.clone();
             let command = cfg.command.clone();
             tokio::spawn(async move {
-                let _ = code_core::config_edit::upsert_agent_config(
+                let _ = hanzo_core::config_edit::upsert_agent_config(
                     &home,
                     &name,
                     Some(enabled),
@@ -21271,7 +21276,7 @@ Have we met every part of this goal and is there no further work to do?"#
     fn normalize_agent_command(
         candidate: &str,
         name: &str,
-        spec: Option<&code_core::agent_defaults::AgentModelSpec>,
+        spec: Option<&hanzo_core::agent_defaults::AgentModelSpec>,
     ) -> Option<String> {
         if candidate.trim().is_empty() {
             return None;
@@ -21296,7 +21301,7 @@ Have we met every part of this goal and is there no further work to do?"#
             for (path, change) in changes.iter() {
                 // If this change represents a move/rename, show the destination path in the tabs
                 let display_path: PathBuf = match change {
-                    code_core::protocol::FileChange::Update {
+                    hanzo_core::protocol::FileChange::Update {
                         move_path: Some(dest),
                         ..
                     } => dest.clone(),
@@ -21324,7 +21329,7 @@ Have we met every part of this goal and is there no further work to do?"#
             let mut single = HashMap::new();
             single.insert(
                 path.clone(),
-                code_core::protocol::FileChange::Update {
+                hanzo_core::protocol::FileChange::Update {
                     unified_diff: unified.clone(),
                     move_path: None,
                     original_content: baseline.clone(),
@@ -21589,7 +21594,7 @@ Have we met every part of this goal and is there no further work to do?"#
     }
 
     fn clamp_reasoning_for_model(model: &str, requested: ReasoningEffort) -> ReasoningEffort {
-        let protocol_effort: code_protocol::config_types::ReasoningEffort = requested.into();
+        let protocol_effort: hanzo_protocol::config_types::ReasoningEffort = requested.into();
         let clamped = clamp_reasoning_effort_for_model(model, protocol_effort);
         ReasoningEffort::from(clamped)
     }
@@ -22068,8 +22073,8 @@ Have we met every part of this goal and is there no further work to do?"#
             return;
         }
 
-        let message = if let Ok(home) = code_core::config::find_code_home() {
-            match code_core::config::set_review_model(
+        let message = if let Ok(home) = hanzo_core::config::find_code_home() {
+            match hanzo_core::config::set_review_model(
                 &home,
                 &self.config.review_model,
                 self.config.review_model_reasoning_effort,
@@ -22137,8 +22142,8 @@ Have we met every part of this goal and is there no further work to do?"#
             return;
         }
 
-        let message = if let Ok(home) = code_core::config::find_code_home() {
-            match code_core::config::set_review_resolve_model(
+        let message = if let Ok(home) = hanzo_core::config::find_code_home() {
+            match hanzo_core::config::set_review_resolve_model(
                 &home,
                 &self.config.review_resolve_model,
                 self.config.review_resolve_model_reasoning_effort,
@@ -22181,8 +22186,8 @@ Have we met every part of this goal and is there no further work to do?"#
             self.config.review_model_reasoning_effort = self.config.model_reasoning_effort;
         }
 
-        if let Ok(home) = code_core::config::find_code_home() {
-            if let Err(err) = code_core::config::set_review_model(
+        if let Ok(home) = hanzo_core::config::find_code_home() {
+            if let Err(err) = hanzo_core::config::set_review_model(
                 &home,
                 &self.config.review_model,
                 self.config.review_model_reasoning_effort,
@@ -22217,8 +22222,8 @@ Have we met every part of this goal and is there no further work to do?"#
             self.config.review_resolve_model_reasoning_effort = self.config.model_reasoning_effort;
         }
 
-        if let Ok(home) = code_core::config::find_code_home() {
-            if let Err(err) = code_core::config::set_review_resolve_model(
+        if let Ok(home) = hanzo_core::config::find_code_home() {
+            if let Err(err) = hanzo_core::config::set_review_resolve_model(
                 &home,
                 &self.config.review_resolve_model,
                 self.config.review_resolve_model_reasoning_effort,
@@ -22277,8 +22282,8 @@ Have we met every part of this goal and is there no further work to do?"#
             return;
         }
 
-        let notice = if let Ok(home) = code_core::config::find_code_home() {
-            match code_core::config::set_auto_review_model(
+        let notice = if let Ok(home) = hanzo_core::config::find_code_home() {
+            match hanzo_core::config::set_auto_review_model(
                 &home,
                 &self.config.auto_review_model,
                 self.config.auto_review_model_reasoning_effort,
@@ -22321,8 +22326,8 @@ Have we met every part of this goal and is there no further work to do?"#
             self.config.auto_review_model_reasoning_effort = self.config.model_reasoning_effort;
         }
 
-        if let Ok(home) = code_core::config::find_code_home() {
-            if let Err(err) = code_core::config::set_auto_review_model(
+        if let Ok(home) = hanzo_core::config::find_code_home() {
+            if let Err(err) = hanzo_core::config::set_auto_review_model(
                 &home,
                 &self.config.auto_review_model,
                 self.config.auto_review_model_reasoning_effort,
@@ -22381,8 +22386,8 @@ Have we met every part of this goal and is there no further work to do?"#
             return;
         }
 
-        let notice = if let Ok(home) = code_core::config::find_code_home() {
-            match code_core::config::set_auto_review_resolve_model(
+        let notice = if let Ok(home) = hanzo_core::config::find_code_home() {
+            match hanzo_core::config::set_auto_review_resolve_model(
                 &home,
                 &self.config.auto_review_resolve_model,
                 self.config.auto_review_resolve_model_reasoning_effort,
@@ -22426,8 +22431,8 @@ Have we met every part of this goal and is there no further work to do?"#
                 self.config.model_reasoning_effort;
         }
 
-        if let Ok(home) = code_core::config::find_code_home() {
-            if let Err(err) = code_core::config::set_auto_review_resolve_model(
+        if let Ok(home) = hanzo_core::config::find_code_home() {
+            if let Err(err) = hanzo_core::config::set_auto_review_resolve_model(
                 &home,
                 &self.config.auto_review_resolve_model,
                 self.config.auto_review_resolve_model_reasoning_effort,
@@ -22464,8 +22469,8 @@ Have we met every part of this goal and is there no further work to do?"#
 
         self.restore_auto_resolve_attempts_if_lost();
 
-        if let Ok(home) = code_core::config::find_code_home() {
-            if let Err(err) = code_core::config::set_auto_drive_settings(
+        if let Ok(home) = hanzo_core::config::find_code_home() {
+            if let Err(err) = hanzo_core::config::set_auto_drive_settings(
                 &home,
                 &self.config.auto_drive,
                 use_chat,
@@ -22541,8 +22546,8 @@ Have we met every part of this goal and is there no further work to do?"#
             return;
         }
 
-        if let Ok(home) = code_core::config::find_code_home() {
-            if let Err(err) = code_core::config::set_planning_model(
+        if let Ok(home) = hanzo_core::config::find_code_home() {
+            if let Err(err) = hanzo_core::config::set_planning_model(
                 &home,
                 &self.config.planning_model,
                 self.config.planning_model_reasoning_effort,
@@ -22560,7 +22565,7 @@ Have we met every part of this goal and is there no further work to do?"#
         self.refresh_settings_overview_rows();
         self.update_planning_settings_model_row();
         // If we're currently in plan mode, switch the session model immediately.
-        if matches!(self.config.sandbox_policy, code_core::protocol::SandboxPolicy::ReadOnly) {
+        if matches!(self.config.sandbox_policy, hanzo_core::protocol::SandboxPolicy::ReadOnly) {
             self.apply_planning_session_model();
         }
         self.request_redraw();
@@ -22642,8 +22647,8 @@ Have we met every part of this goal and is there no further work to do?"#
         }
         self.config.planning_use_chat_model = use_chat;
 
-        if let Ok(home) = code_core::config::find_code_home() {
-            if let Err(err) = code_core::config::set_planning_model(
+        if let Ok(home) = hanzo_core::config::find_code_home() {
+            if let Err(err) = hanzo_core::config::set_planning_model(
                 &home,
                 &self.config.planning_model,
                 self.config.planning_model_reasoning_effort,
@@ -22667,7 +22672,7 @@ Have we met every part of this goal and is there no further work to do?"#
         self.update_planning_settings_model_row();
         self.refresh_settings_overview_rows();
 
-        if matches!(self.config.sandbox_policy, code_core::protocol::SandboxPolicy::ReadOnly) {
+        if matches!(self.config.sandbox_policy, hanzo_core::protocol::SandboxPolicy::ReadOnly) {
             self.apply_planning_session_model();
         }
         self.request_redraw();
@@ -22704,8 +22709,8 @@ Have we met every part of this goal and is there no further work to do?"#
             return;
         }
 
-        let message = if let Ok(home) = code_core::config::find_code_home() {
-            match code_core::config::set_auto_drive_settings(
+        let message = if let Ok(home) = hanzo_core::config::find_code_home() {
+            match hanzo_core::config::set_auto_drive_settings(
                 &home,
                 &self.config.auto_drive,
                 self.config.auto_drive_use_chat_model,
@@ -23040,7 +23045,7 @@ Have we met every part of this goal and is there no further work to do?"#
         let code_home = self.config.code_home.clone();
         let profile = self.config.active_profile.clone();
         tokio::spawn(async move {
-            if let Err(err) = code_core::config_edit::persist_overrides(
+            if let Err(err) = hanzo_core::config_edit::persist_overrides(
                 &code_home,
                 profile.as_deref(),
                 &[(&["auto_upgrade_enabled"], if enabled { "true" } else { "false" })],
@@ -23086,7 +23091,7 @@ Have we met every part of this goal and is there no further work to do?"#
         let code_home = self.config.code_home.clone();
         let profile = self.config.active_profile.clone();
         tokio::spawn(async move {
-            if let Err(err) = code_core::config_edit::persist_overrides(
+            if let Err(err) = hanzo_core::config_edit::persist_overrides(
                 &code_home,
                 profile.as_deref(),
                 &[(&["auto_switch_accounts_on_rate_limit"], if enabled { "true" } else { "false" })],
@@ -23131,7 +23136,7 @@ Have we met every part of this goal and is there no further work to do?"#
         let code_home = self.config.code_home.clone();
         let profile = self.config.active_profile.clone();
         tokio::spawn(async move {
-            if let Err(err) = code_core::config_edit::persist_overrides(
+            if let Err(err) = hanzo_core::config_edit::persist_overrides(
                 &code_home,
                 profile.as_deref(),
                 &[(&["api_key_fallback_on_all_accounts_limited"], if enabled { "true" } else { "false" })],
@@ -23298,16 +23303,16 @@ Have we met every part of this goal and is there no further work to do?"#
     }
 
     fn build_mcp_server_rows(&mut self) -> Option<McpServerRows> {
-        let home = match code_core::config::find_code_home() {
+        let home = match hanzo_core::config::find_code_home() {
             Ok(home) => home,
             Err(e) => {
-                let msg = format!("Failed to locate CODE_HOME: {}", e);
+                let msg = format!("Failed to locate HANZO_HOME: {}", e);
                 self.history_push_plain_state(history_cell::new_error_event(msg));
                 return None;
             }
         };
 
-        let (enabled, disabled) = match code_core::config::list_mcp_servers(&home) {
+        let (enabled, disabled) = match hanzo_core::config::list_mcp_servers(&home) {
             Ok(result) => result,
             Err(e) => {
                 let msg = format!("Failed to read MCP config: {}", e);
@@ -23343,13 +23348,15 @@ Have we met every part of this goal and is there no further work to do?"#
 
     fn is_builtin_agent(name: &str, command: &str) -> bool {
         if let Some(spec) = agent_model_spec(name).or_else(|| agent_model_spec(command)) {
-            return matches!(spec.family, "code" | "codex" | "cloud");
+            return matches!(spec.family, "dev" | "code" | "codex" | "cloud");
         }
 
-        name.eq_ignore_ascii_case("code")
+        name.eq_ignore_ascii_case("dev")
+            || name.eq_ignore_ascii_case("code")
             || name.eq_ignore_ascii_case("codex")
             || name.eq_ignore_ascii_case("cloud")
             || name.eq_ignore_ascii_case("coder")
+            || command.eq_ignore_ascii_case("dev")
             || command.eq_ignore_ascii_case("code")
             || command.eq_ignore_ascii_case("codex")
             || command.eq_ignore_ascii_case("cloud")
@@ -23886,45 +23893,45 @@ Have we met every part of this goal and is there no further work to do?"#
         if value { "On" } else { "Off" }
     }
 
-    fn theme_display_name(theme: code_core::config_types::ThemeName) -> String {
+    fn theme_display_name(theme: hanzo_core::config_types::ThemeName) -> String {
         match theme {
-            code_core::config_types::ThemeName::LightPhoton => "Light - Photon".to_string(),
-            code_core::config_types::ThemeName::LightPhotonAnsi16 => {
+            hanzo_core::config_types::ThemeName::LightPhoton => "Light - Photon".to_string(),
+            hanzo_core::config_types::ThemeName::LightPhotonAnsi16 => {
                 "Light - Photon (16-color)".to_string()
             }
-            code_core::config_types::ThemeName::LightPrismRainbow => {
+            hanzo_core::config_types::ThemeName::LightPrismRainbow => {
                 "Light - Prism Rainbow".to_string()
             }
-            code_core::config_types::ThemeName::LightVividTriad => {
+            hanzo_core::config_types::ThemeName::LightVividTriad => {
                 "Light - Vivid Triad".to_string()
             }
-            code_core::config_types::ThemeName::LightPorcelain => "Light - Porcelain".to_string(),
-            code_core::config_types::ThemeName::LightSandbar => "Light - Sandbar".to_string(),
-            code_core::config_types::ThemeName::LightGlacier => "Light - Glacier".to_string(),
-            code_core::config_types::ThemeName::DarkCarbonNight => {
+            hanzo_core::config_types::ThemeName::LightPorcelain => "Light - Porcelain".to_string(),
+            hanzo_core::config_types::ThemeName::LightSandbar => "Light - Sandbar".to_string(),
+            hanzo_core::config_types::ThemeName::LightGlacier => "Light - Glacier".to_string(),
+            hanzo_core::config_types::ThemeName::DarkCarbonNight => {
                 "Dark - Carbon Night".to_string()
             }
-            code_core::config_types::ThemeName::DarkCarbonAnsi16 => {
+            hanzo_core::config_types::ThemeName::DarkCarbonAnsi16 => {
                 "Dark - Carbon (16-color)".to_string()
             }
-            code_core::config_types::ThemeName::DarkShinobiDusk => {
+            hanzo_core::config_types::ThemeName::DarkShinobiDusk => {
                 "Dark - Shinobi Dusk".to_string()
             }
-            code_core::config_types::ThemeName::DarkOledBlackPro => {
+            hanzo_core::config_types::ThemeName::DarkOledBlackPro => {
                 "Dark - OLED Black Pro".to_string()
             }
-            code_core::config_types::ThemeName::DarkAmberTerminal => {
+            hanzo_core::config_types::ThemeName::DarkAmberTerminal => {
                 "Dark - Amber Terminal".to_string()
             }
-            code_core::config_types::ThemeName::DarkAuroraFlux => "Dark - Aurora Flux".to_string(),
-            code_core::config_types::ThemeName::DarkCharcoalRainbow => {
+            hanzo_core::config_types::ThemeName::DarkAuroraFlux => "Dark - Aurora Flux".to_string(),
+            hanzo_core::config_types::ThemeName::DarkCharcoalRainbow => {
                 "Dark - Charcoal Rainbow".to_string()
             }
-            code_core::config_types::ThemeName::DarkZenGarden => "Dark - Zen Garden".to_string(),
-            code_core::config_types::ThemeName::DarkPaperLightPro => {
+            hanzo_core::config_types::ThemeName::DarkZenGarden => "Dark - Zen Garden".to_string(),
+            hanzo_core::config_types::ThemeName::DarkPaperLightPro => {
                 "Dark - Paper Light Pro".to_string()
             }
-            code_core::config_types::ThemeName::Custom => {
+            hanzo_core::config_types::ThemeName::Custom => {
                 let mut label =
                     crate::theme::custom_theme_label().unwrap_or_else(|| "Custom".to_string());
                 for pref in ["Light - ", "Dark - ", "Light ", "Dark "] {
@@ -24036,8 +24043,8 @@ Have we met every part of this goal and is there no further work to do?"#
         });
     }
 
-    pub(crate) fn set_theme(&mut self, new_theme: code_core::config_types::ThemeName) {
-        let custom_hint = if matches!(new_theme, code_core::config_types::ThemeName::Custom) {
+    pub(crate) fn set_theme(&mut self, new_theme: hanzo_core::config_types::ThemeName) {
+        let custom_hint = if matches!(new_theme, hanzo_core::config_types::ThemeName::Custom) {
             self.config
                 .tui
                 .theme
@@ -24050,7 +24057,7 @@ Have we met every part of this goal and is there no further work to do?"#
 
         // Update the config
         self.config.tui.theme.name = mapped_theme;
-        if matches!(new_theme, code_core::config_types::ThemeName::Custom) {
+        if matches!(new_theme, hanzo_core::config_types::ThemeName::Custom) {
             self.config.tui.theme.is_dark = custom_hint;
         } else {
             self.config.tui.theme.is_dark = None;
@@ -24083,8 +24090,8 @@ Have we met every part of this goal and is there no further work to do?"#
         // Update the config
         self.config.tui.spinner.name = spinner_name.clone();
         // Persist selection to config file
-        if let Ok(home) = code_core::config::find_code_home() {
-            if let Err(e) = code_core::config::set_tui_spinner_name(&home, &spinner_name) {
+        if let Ok(home) = hanzo_core::config::find_code_home() {
+            if let Err(e) = hanzo_core::config::set_tui_spinner_name(&home, &spinner_name) {
                 tracing::warn!("Failed to persist spinner to config.toml: {}", e);
             } else {
                 tracing::info!("Persisted TUI spinner selection to config.toml");
@@ -24112,8 +24119,8 @@ Have we met every part of this goal and is there no further work to do?"#
     }
 
     fn apply_access_mode_indicator_from_config(&mut self) {
-        use code_core::protocol::AskForApproval;
-        use code_core::protocol::SandboxPolicy;
+        use hanzo_core::protocol::AskForApproval;
+        use hanzo_core::protocol::SandboxPolicy;
         let label = match (&self.config.sandbox_policy, self.config.approval_policy) {
             (SandboxPolicy::ReadOnly, _) => Some("Read Only".to_string()),
             (
@@ -24130,9 +24137,9 @@ Have we met every part of this goal and is there no further work to do?"#
 
     /// Rotate the access preset: Read Only (Plan Mode) → Write with Approval → Full Access
     pub(crate) fn cycle_access_mode(&mut self) {
-        use code_core::config::set_project_access_mode;
-        use code_core::protocol::AskForApproval;
-        use code_core::protocol::SandboxPolicy;
+        use hanzo_core::config::set_project_access_mode;
+        use hanzo_core::protocol::AskForApproval;
+        use hanzo_core::protocol::SandboxPolicy;
 
         // Determine current index
         let idx = match (&self.config.sandbox_policy, self.config.approval_policy) {
@@ -24200,18 +24207,18 @@ Have we met every part of this goal and is there no further work to do?"#
         };
         self.submit_op(op);
 
-        // Persist selection into CODEX_HOME/config.toml for this project directory so it sticks.
+        // Persist selection into HANZO_HOME/config.toml for this project directory so it sticks.
         let _ = set_project_access_mode(
             &self.config.code_home,
             &self.config.cwd,
             self.config.approval_policy,
             match &self.config.sandbox_policy {
-                SandboxPolicy::ReadOnly => code_protocol::config_types::SandboxMode::ReadOnly,
+                SandboxPolicy::ReadOnly => hanzo_protocol::config_types::SandboxMode::ReadOnly,
                 SandboxPolicy::WorkspaceWrite { .. } => {
-                    code_protocol::config_types::SandboxMode::WorkspaceWrite
+                    hanzo_protocol::config_types::SandboxMode::WorkspaceWrite
                 }
                 SandboxPolicy::DangerFullAccess => {
-                    code_protocol::config_types::SandboxMode::DangerFullAccess
+                    hanzo_protocol::config_types::SandboxMode::DangerFullAccess
                 }
             },
         );
@@ -24354,11 +24361,11 @@ Have we met every part of this goal and is there no further work to do?"#
         self.restyle_history_after_theme_change();
     }
 
-    fn save_theme_to_config(&self, new_theme: code_core::config_types::ThemeName) {
-        // Persist the theme selection to CODE_HOME/CODEX_HOME config.toml
-        match code_core::config::find_code_home() {
+    fn save_theme_to_config(&self, new_theme: hanzo_core::config_types::ThemeName) {
+        // Persist the theme selection to HANZO_HOME config.toml (legacy CODE_HOME/CODEX_HOME)
+        match hanzo_core::config::find_code_home() {
             Ok(home) => {
-                if let Err(e) = code_core::config::set_tui_theme_name(&home, new_theme) {
+                if let Err(e) = hanzo_core::config::set_tui_theme_name(&home, new_theme) {
                     tracing::warn!("Failed to persist theme to config.toml: {}", e);
                 } else {
                     tracing::info!("Persisted TUI theme selection to config.toml");
@@ -25247,7 +25254,7 @@ Have we met every part of this goal and is there no further work to do?"#
         let final_source = source.clone();
 
         if self.auto_state.pending_stop_message.is_some() {
-            match serde_json::from_str::<code_auto_drive_diagnostics::CompletionCheck>(&final_source)
+            match serde_json::from_str::<hanzo_auto_drive_diagnostics::CompletionCheck>(&final_source)
             {
                 Ok(check) => {
                     if check.complete {
@@ -25946,8 +25953,8 @@ Have we met every part of this goal and is there no further work to do?"#
         if !self.config.debug {
             return None;
         }
-        let log_dir = code_core::config::log_dir(&self.config).ok()?;
-        Some(log_dir.join("code-chrome.log").display().to_string())
+        let log_dir = hanzo_core::config::log_dir(&self.config).ok()?;
+        Some(log_dir.join("dev-chrome.log").display().to_string())
     }
 
     fn apply_chrome_logging(&self, cmd: &mut std::process::Command, log_path: Option<&str>) {
@@ -26017,7 +26024,7 @@ Have we met every part of this goal and is there no further work to do?"#
                 // Load persisted cache from disk (if any), then fall back to in-memory
                 let (cached_port, cached_ws) = match read_cached_connection().await {
                     Some(v) => v,
-                    None => code_browser::global::get_last_connection().await,
+                    None => hanzo_browser::global::get_last_connection().await,
                 };
                 cached_port_for_fallback = cached_port;
                 if let Some(ws) = cached_ws {
@@ -26069,7 +26076,7 @@ Have we met every part of this goal and is there no further work to do?"#
 
                     // Build a detailed success message including CDP port and current URL when available
                     let (detected_port, detected_ws) =
-                        code_browser::global::get_last_connection().await;
+                        hanzo_browser::global::get_last_connection().await;
                     // Prefer explicit port; otherwise try to parse from ws URL
                     let mut port_num: Option<u16> = detected_port;
                     if port_num.is_none() {
@@ -26107,7 +26114,7 @@ Have we met every part of this goal and is there no further work to do?"#
 
                     // Persist last connection cache to disk (best-effort)
                     tokio::spawn(async move {
-                        let (p, ws) = code_browser::global::get_last_connection().await;
+                        let (p, ws) = hanzo_browser::global::get_last_connection().await;
                         let _ = write_cached_connection(p, ws).await;
                     });
 
@@ -26147,7 +26154,7 @@ Have we met every part of this goal and is there no further work to do?"#
                                                     ));
                                                 }
 
-                                                use code_core::protocol::{
+                                                use hanzo_core::protocol::{
                                                     BrowserScreenshotUpdateEvent, Event, EventMsg,
                                                 };
                                                 let _ = app_event_tx_inner.send(
@@ -26190,7 +26197,7 @@ Have we met every part of this goal and is there no further work to do?"#
                         .await;
 
                     // Set as global manager
-                    code_browser::global::set_global_browser_manager(browser_manager.clone())
+                    hanzo_browser::global::set_global_browser_manager(browser_manager.clone())
                         .await;
 
                     // Capture initial screenshot in background (don't block connect feedback)
@@ -26218,9 +26225,9 @@ Have we met every part of this goal and is there no further work to do?"#
                                                         .unwrap_or_else(|| "Chrome".to_string()),
                                                 ));
                                             }
-                                            use code_core::protocol::BrowserScreenshotUpdateEvent;
-                                            use code_core::protocol::Event;
-                                            use code_core::protocol::EventMsg;
+                                            use hanzo_core::protocol::BrowserScreenshotUpdateEvent;
+                                            use hanzo_core::protocol::Event;
+                                            use hanzo_core::protocol::EventMsg;
                                             let _ =
                                                 app_event_tx_bg.send(AppEvent::CodexEvent(Event {
                                                     id: uuid::Uuid::new_v4().to_string(),
@@ -26265,7 +26272,7 @@ Have we met every part of this goal and is there no further work to do?"#
                         );
                         let port_to_keep = cached_port_for_fallback;
                         // Clear WS in-memory and on-disk
-                        code_browser::global::set_last_connection(port_to_keep, None).await;
+                        hanzo_browser::global::set_last_connection(port_to_keep, None).await;
                         let _ = write_cached_connection(port_to_keep, None).await;
 
                         // Reconfigure to use port (prefer cached port, else auto-detect)
@@ -26291,7 +26298,7 @@ Have we met every part of this goal and is there no further work to do?"#
                                 );
                                 // Emit success event and set up callbacks, mirroring the success path above
                                 let (detected_port, detected_ws) =
-                                    code_browser::global::get_last_connection().await;
+                                    hanzo_browser::global::get_last_connection().await;
                                 let mut port_num: Option<u16> = detected_port;
                                 if port_num.is_none() {
                                     if let Some(ws) = &detected_ws {
@@ -26328,7 +26335,7 @@ Have we met every part of this goal and is there no further work to do?"#
                                 // Persist last connection cache
                                 tokio::spawn(async move {
                                     let (p, ws) =
-                                        code_browser::global::get_last_connection().await;
+                                        hanzo_browser::global::get_last_connection().await;
                                     let _ = write_cached_connection(p, ws).await;
                                 });
 
@@ -26355,7 +26362,7 @@ Have we met every part of this goal and is there no further work to do?"#
                                                             if let Ok(mut latest) = latest_screenshot_inner.lock() {
                                                                 *latest = Some((first_path.clone(), url_inner.clone()));
                                                             }
-                                                            use code_core::protocol::{BrowserScreenshotUpdateEvent, Event, EventMsg};
+                                                            use hanzo_core::protocol::{BrowserScreenshotUpdateEvent, Event, EventMsg};
                                                             let _ = app_event_tx_inner.send(AppEvent::CodexEvent(Event {
                                                                 id: uuid::Uuid::new_v4().to_string(),
                                                                 event_seq: 0,
@@ -26379,7 +26386,7 @@ Have we met every part of this goal and is there no further work to do?"#
                                     })
                                     .await;
                                 // Set as global manager like success path
-                                code_browser::global::set_global_browser_manager(
+                                hanzo_browser::global::set_global_browser_manager(
                                     browser_manager.clone(),
                                 )
                                 .await;
@@ -26417,9 +26424,9 @@ Have we met every part of this goal and is there no further work to do?"#
                                                                 }),
                                                             ));
                                                         }
-                                                        use code_core::protocol::BrowserScreenshotUpdateEvent;
-                                                        use code_core::protocol::Event;
-                                                        use code_core::protocol::EventMsg;
+                                                        use hanzo_core::protocol::BrowserScreenshotUpdateEvent;
+                                                        use hanzo_core::protocol::Event;
+                                                        use hanzo_core::protocol::EventMsg;
                                                         let _ = app_event_tx_bg.send(AppEvent::CodexEvent(Event {
                                                             id: uuid::Uuid::new_v4().to_string(),
                                                             event_seq: 0,
@@ -26504,7 +26511,7 @@ Have we met every part of this goal and is there no further work to do?"#
         use std::process::Stdio;
 
         let temp_dir = std::env::temp_dir();
-        let profile_dir = temp_dir.join(format!("code-chrome-temp-{}", port));
+        let profile_dir = temp_dir.join(format!("dev-chrome-temp-{}", port));
         let log_path = self.chrome_log_path();
 
         #[cfg(target_os = "macos")]
@@ -26724,7 +26731,7 @@ Have we met every part of this goal and is there no further work to do?"#
                     browser_autofix_flag.store(false, Ordering::SeqCst);
 
                     // Set as global manager so core/session share the same instance
-                    code_browser::global::set_global_browser_manager(browser_manager.clone())
+                    hanzo_browser::global::set_global_browser_manager(browser_manager.clone())
                         .await;
 
                     // Navigate to about:blank explicitly
@@ -26852,7 +26859,7 @@ Have we met every part of this goal and is there no further work to do?"#
                                                 }
 
                                                 // Send update event
-                                                use code_core::protocol::{
+                                                use hanzo_core::protocol::{
                                                     BrowserScreenshotUpdateEvent, EventMsg,
                                                 };
                                                 let _ = app_event_tx_inner.send(
@@ -26883,11 +26890,11 @@ Have we met every part of this goal and is there no further work to do?"#
                     }
 
                     // Set the browser manager as the global manager so both TUI and Session use the same instance
-                    code_browser::global::set_global_browser_manager(browser_manager.clone())
+                    hanzo_browser::global::set_global_browser_manager(browser_manager.clone())
                         .await;
 
                     // Ensure the navigation callback is also set on the global manager
-                    let global_manager = code_browser::global::get_browser_manager().await;
+                    let global_manager = hanzo_browser::global::get_browser_manager().await;
                     if let Some(global_manager) = global_manager {
                         let latest_screenshot_global = latest_screenshot.clone();
                         let app_event_tx_global = app_event_tx.clone();
@@ -26903,7 +26910,7 @@ Have we met every part of this goal and is there no further work to do?"#
                                 tokio::time::sleep(tokio::time::Duration::from_millis(1000)).await;
 
                                 // Capture screenshot after navigation
-                                let browser_manager = code_browser::global::get_browser_manager().await;
+                                let browser_manager = hanzo_browser::global::get_browser_manager().await;
                                 if let Some(browser_manager) = browser_manager {
                                     match browser_manager.capture_screenshot_with_url().await {
                                         Ok((paths, _url)) => {
@@ -26916,7 +26923,7 @@ Have we met every part of this goal and is there no further work to do?"#
                                                 }
 
                                                 // Send update event
-                                                use code_core::protocol::{BrowserScreenshotUpdateEvent, EventMsg};
+                                                use hanzo_core::protocol::{BrowserScreenshotUpdateEvent, EventMsg};
                                                 let _ = app_event_tx_inner.send(AppEvent::CodexEvent(Event { id: uuid::Uuid::new_v4().to_string(), event_seq: 0, msg: EventMsg::BrowserScreenshotUpdate(BrowserScreenshotUpdateEvent {
                                                         screenshot_path: first_path.clone(),
                                                         url: url_inner,
@@ -26966,8 +26973,8 @@ Have we met every part of this goal and is there no further work to do?"#
                                         }
 
                                         // Send update event
-                                        use code_core::protocol::BrowserScreenshotUpdateEvent;
-                                        use code_core::protocol::EventMsg;
+                                        use hanzo_core::protocol::BrowserScreenshotUpdateEvent;
+                                        use hanzo_core::protocol::EventMsg;
                                         let _ = app_event_tx.send(AppEvent::CodexEvent(Event {
                                             id: uuid::Uuid::new_v4().to_string(),
                                             event_seq: 0,
@@ -27393,8 +27400,8 @@ Have we met every part of this goal and is there no further work to do?"#
         self.ensure_validation_settings_overlay();
     }
 
-    fn format_mcp_summary(cfg: &code_core::config_types::McpServerConfig) -> String {
-        use code_core::config_types::McpServerTransportConfig;
+    fn format_mcp_summary(cfg: &hanzo_core::config_types::McpServerConfig) -> String {
+        use hanzo_core::config_types::McpServerTransportConfig;
 
         match &cfg.transport {
             McpServerTransportConfig::Stdio { command, args, .. } => {
@@ -27421,7 +27428,7 @@ Have we met every part of this goal and is there no further work to do?"#
 
         match sub {
             "status" => match find_code_home() {
-                Ok(home) => match code_core::config::list_mcp_servers(&home) {
+                Ok(home) => match hanzo_core::config::list_mcp_servers(&home) {
                     Ok((enabled, disabled)) => {
                         let mut lines = String::new();
                         if enabled.is_empty() && disabled.is_empty() {
@@ -27452,7 +27459,7 @@ Have we met every part of this goal and is there no further work to do?"#
                     }
                 },
                 Err(e) => {
-                    let msg = format!("Failed to locate CODEX_HOME: {}", e);
+                    let msg = format!("Failed to locate HANZO_HOME: {}", e);
                     self.history_push_plain_state(history_cell::new_error_event(msg));
                 }
             },
@@ -27465,7 +27472,7 @@ Have we met every part of this goal and is there no further work to do?"#
                 }
                 match find_code_home() {
                     Ok(home) => {
-                        match code_core::config::set_mcp_server_enabled(&home, name, sub == "on") {
+                        match hanzo_core::config::set_mcp_server_enabled(&home, name, sub == "on") {
                             Ok(changed) => {
                                 if changed {
                                     // Keep ChatWidget's in-memory config roughly in sync for new sessions.
@@ -27475,7 +27482,7 @@ Have we met every part of this goal and is there no further work to do?"#
                                     if sub == "on" {
                                         // If enabling, try to load its config from disk and add to in-memory map.
                                         if let Ok((enabled, _)) =
-                                            code_core::config::list_mcp_servers(&home)
+                                            hanzo_core::config::list_mcp_servers(&home)
                                         {
                                             if let Some((_, cfg)) =
                                                 enabled.into_iter().find(|(n, _)| n == name)
@@ -27508,7 +27515,7 @@ Have we met every part of this goal and is there no further work to do?"#
                         }
                     }
                     Err(e) => {
-                        let msg = format!("Failed to locate CODEX_HOME: {}", e);
+                        let msg = format!("Failed to locate HANZO_HOME: {}", e);
                         self.history_push_plain_state(history_cell::new_error_event(msg));
                     }
                 }
@@ -27618,17 +27625,17 @@ Have we met every part of this goal and is there no further work to do?"#
                 }
                 match find_code_home() {
                     Ok(home) => {
-                        let transport = code_core::config_types::McpServerTransportConfig::Stdio {
+                        let transport = hanzo_core::config_types::McpServerTransportConfig::Stdio {
                             command: command.to_string(),
                             args: args.clone(),
                             env: if env.is_empty() { None } else { Some(env.clone()) },
                         };
-                        let cfg = code_core::config_types::McpServerConfig {
+                        let cfg = hanzo_core::config_types::McpServerConfig {
                             transport,
                             startup_timeout_sec: None,
                             tool_timeout_sec: None,
                         };
-                        match code_core::config::add_mcp_server(&home, &name, cfg.clone()) {
+                        match hanzo_core::config::add_mcp_server(&home, &name, cfg.clone()) {
                             Ok(()) => {
                                 let summary = Self::format_mcp_summary(&cfg);
                                 // Update in-memory config for future sessions
@@ -27643,7 +27650,7 @@ Have we met every part of this goal and is there no further work to do?"#
                         }
                     }
                     Err(e) => {
-                        let msg = format!("Failed to locate CODEX_HOME: {}", e);
+                        let msg = format!("Failed to locate HANZO_HOME: {}", e);
                         self.history_push_plain_state(history_cell::new_error_event(msg));
                     }
                 }
@@ -27700,7 +27707,7 @@ Have we met every part of this goal and is there no further work to do?"#
             }
 
             // Set as global manager so core/session share the same instance
-            code_browser::global::set_global_browser_manager(browser_manager.clone()).await;
+            hanzo_browser::global::set_global_browser_manager(browser_manager.clone()).await;
 
             // Notify about successful switch/reconnect
             app_event_tx.send_background_event_with_ticket(
@@ -27726,8 +27733,8 @@ Have we met every part of this goal and is there no further work to do?"#
                                 url.clone().unwrap_or_else(|| "Browser".to_string()),
                             ));
                         }
-                        use code_core::protocol::BrowserScreenshotUpdateEvent;
-                        use code_core::protocol::EventMsg;
+                        use hanzo_core::protocol::BrowserScreenshotUpdateEvent;
+                        use hanzo_core::protocol::EventMsg;
                         let _ = app_event_tx.send(AppEvent::CodexEvent(Event {
                             id: uuid::Uuid::new_v4().to_string(),
                             event_seq: 0,
@@ -27915,8 +27922,8 @@ Have we met every part of this goal and is there no further work to do?"#
                                     url.clone().unwrap_or_else(|| "Browser".to_string()),
                                 ));
                             }
-                            use code_core::protocol::BrowserScreenshotUpdateEvent;
-                            use code_core::protocol::EventMsg;
+                            use hanzo_core::protocol::BrowserScreenshotUpdateEvent;
+                            use hanzo_core::protocol::EventMsg;
                             let _ = app_event_tx.send(AppEvent::CodexEvent(Event {
                                 id: uuid::Uuid::new_v4().to_string(),
                                 event_seq: 0,
@@ -27980,7 +27987,7 @@ Have we met every part of this goal and is there no further work to do?"#
             return;
         }
         use crate::chatwidget::message::UserMessage;
-        use code_core::protocol::InputItem;
+        use hanzo_core::protocol::InputItem;
         let mut ordered = Vec::new();
         if !prompt.trim().is_empty() {
             ordered.push(InputItem::Text { text: prompt });
@@ -28001,7 +28008,7 @@ Have we met every part of this goal and is there no further work to do?"#
             return;
         }
         use crate::chatwidget::message::UserMessage;
-        use code_core::protocol::InputItem;
+        use hanzo_core::protocol::InputItem;
         let mut ordered = Vec::new();
         if !preface.trim().is_empty() {
             ordered.push(InputItem::Text { text: preface });
@@ -28038,7 +28045,7 @@ Have we met every part of this goal and is there no further work to do?"#
             return;
         }
         use crate::chatwidget::message::UserMessage;
-        use code_core::protocol::InputItem;
+        use hanzo_core::protocol::InputItem;
 
         let mut ordered = Vec::new();
         let preface_cache = preface.clone();
@@ -28506,7 +28513,7 @@ Have we met every part of this goal and is there no further work to do?"#
         };
 
         // Start with all items in production; tests can opt-in to a minimal header via env flag.
-        let minimal_header = std::env::var_os("CODEX_TUI_FORCE_MINIMAL_HEADER").is_some();
+        let minimal_header = std::env::var_os("HANZO_TUI_FORCE_MINIMAL_HEADER").is_some();
         let demo_mode = self.config.demo_developer_message.is_some();
         let mut include_reasoning = !minimal_header;
         let mut include_model = !minimal_header;
@@ -28631,8 +28638,7 @@ Have we met every part of this goal and is there no further work to do?"#
         let mut cached_picker = self.cached_picker.borrow_mut();
         if cached_picker.is_none() {
             // If we didn't get a picker from terminal query at startup, create one from font size
-            let (fw, fh) = self.measured_font_size();
-            let p = Picker::from_fontsize((fw, fh));
+            let p = Picker::from_query_stdio().unwrap_or_else(|_| Picker::halfblocks());
 
             *cached_picker = Some(p);
         }
@@ -28787,12 +28793,12 @@ async fn run_background_review(
     prefer_fallback: bool,
 ) {
     // Best-effort: clean up any stale lock left by a cancelled review process.
-    let _ = code_core::review_coord::clear_stale_lock_if_dead(Some(&config.cwd));
+    let _ = hanzo_core::review_coord::clear_stale_lock_if_dead(Some(&config.cwd));
 
     // Prevent duplicate auto-reviews within this process: if any AutoReview agent
     // is already pending/running, bail early with a benign notice.
     {
-        let mgr = code_core::AGENT_MANAGER.read().await;
+        let mgr = hanzo_core::AGENT_MANAGER.read().await;
         let busy = mgr
             .list_agents(None, Some("auto-review".to_string()), false)
             .into_iter()
@@ -28817,7 +28823,7 @@ async fn run_background_review(
 
     let app_event_tx_clone = app_event_tx.clone();
     let outcome = async move {
-        let git_root = code_core::git_worktree::get_git_root_from(&config.cwd)
+        let git_root = hanzo_core::git_worktree::get_git_root_from(&config.cwd)
             .await
             .map_err(|e| format!("failed to detect git root: {e}"))?;
 
@@ -28852,7 +28858,7 @@ async fn run_background_review(
         } else {
             match try_acquire_lock("review", &config.cwd) {
                 Ok(Some(g)) => {
-                    let path = code_core::git_worktree::prepare_reusable_worktree(
+                    let path = hanzo_core::git_worktree::prepare_reusable_worktree(
                         &git_root,
                         AUTO_REVIEW_SHARED_WORKTREE,
                         snapshot_id.as_str(),
@@ -28873,13 +28879,13 @@ async fn run_background_review(
             }
         };
 
-        // Ensure Codex models are invoked via the `code-` CLI shim so they exist on PATH.
+        // Ensure Codex models are invoked via the `dev-` CLI shim so they exist on PATH.
         fn ensure_code_prefix(model: &str) -> String {
             let lower = model.to_ascii_lowercase();
-            if lower.starts_with("code-") {
+            if lower.starts_with("dev-") || lower.starts_with("code-") {
                 model.to_string()
             } else {
-                format!("code-{}", model)
+                format!("dev-{}", model)
             }
         }
 
@@ -28887,8 +28893,8 @@ async fn run_background_review(
 
         // Allow the spawned agent to reuse the parent's review lock without blocking.
         let mut env: std::collections::HashMap<String, String> = std::collections::HashMap::new();
-        env.insert("CODE_REVIEW_LOCK_LEASE".to_string(), "1".to_string());
-        let agent_config = code_core::config_types::AgentConfig {
+        env.insert("HANZO_REVIEW_LOCK_LEASE".to_string(), "1".to_string());
+        let agent_config = hanzo_core::config_types::AgentConfig {
             name: review_model.clone(),
             command: String::new(),
             args: Vec::new(),
@@ -28911,7 +28917,7 @@ async fn run_background_review(
             review_prompt.push_str(&context);
         }
 
-        let mut manager = code_core::AGENT_MANAGER.write().await;
+        let mut manager = hanzo_core::AGENT_MANAGER.write().await;
         let agent_id = manager
             .create_agent_with_options(
                 review_model,
@@ -28925,7 +28931,7 @@ async fn run_background_review(
                 Some(agent_config.clone()),
                 Some(branch.clone()),
                 Some(snapshot_id.clone()),
-                Some(code_core::protocol::AgentSourceKind::AutoReview),
+                Some(hanzo_core::protocol::AgentSourceKind::AutoReview),
                 config.auto_review_model_reasoning_effort.into(),
             )
             .await;
@@ -28957,7 +28963,7 @@ async fn run_background_review(
 }
 
 #[allow(dead_code)]
-fn insert_background_lock(agent_id: &str, guard: code_core::review_coord::ReviewGuard) {
+fn insert_background_lock(agent_id: &str, guard: hanzo_core::review_coord::ReviewGuard) {
     if let Ok(mut map) = BACKGROUND_REVIEW_LOCKS.lock() {
         map.insert(agent_id.to_string(), guard);
     }
@@ -29007,7 +29013,7 @@ impl Drop for AutoReviewStubGuard {
     use crate::chatwidget::message::UserMessage;
     use crate::chatwidget::smoke_helpers::{enter_test_runtime_guard, ChatWidgetHarness};
     use crate::history_cell::{self, ExploreAggregationCell, HistoryCellType};
-    use code_auto_drive_core::{
+    use hanzo_auto_drive_core::{
         AutoContinueMode,
         AutoRunPhase,
         AutoRunSummary,
@@ -29016,8 +29022,8 @@ impl Drop for AutoReviewStubGuard {
         AUTO_RESOLVE_MAX_REVIEW_ATTEMPTS,
     };
     use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
-    use code_core::config_types::AutoResolveAttemptLimit;
-    use code_core::history::state::{
+    use hanzo_core::config_types::AutoResolveAttemptLimit;
+    use hanzo_core::history::state::{
         AssistantStreamDelta,
         AssistantStreamState,
         HistoryId,
@@ -29034,9 +29040,9 @@ impl Drop for AutoReviewStubGuard {
         TextEmphasis,
         TextTone,
     };
-use code_core::parse_command::ParsedCommand;
-use code_core::protocol::OrderMeta;
-    use code_core::protocol::{
+use hanzo_core::parse_command::ParsedCommand;
+use hanzo_core::protocol::OrderMeta;
+    use hanzo_core::protocol::{
         AskForApproval,
         AgentMessageEvent,
         AgentStatusUpdateEvent,
@@ -29046,7 +29052,7 @@ use code_core::protocol::OrderMeta;
         ExecCommandBeginEvent,
         TaskCompleteEvent,
     };
-    use code_core::protocol::AgentInfo as CoreAgentInfo;
+    use hanzo_core::protocol::AgentInfo as CoreAgentInfo;
     use std::sync::atomic::{AtomicUsize, Ordering};
     use std::process::Command;
     use tempfile::tempdir;
@@ -29368,7 +29374,7 @@ use code_core::protocol::OrderMeta;
             last_seen: std::time::Instant::now(),
         });
 
-        let agent = code_core::protocol::AgentInfo {
+        let agent = hanzo_core::protocol::AgentInfo {
             id: "agent-1".to_string(),
             name: "Auto Review".to_string(),
             status: "completed".to_string(),
@@ -29419,7 +29425,7 @@ use code_core::protocol::OrderMeta;
             last_seen: std::time::Instant::now(),
         });
 
-        let agent = code_core::protocol::AgentInfo {
+        let agent = hanzo_core::protocol::AgentInfo {
             id: "agent-1".to_string(),
             name: "Auto Review".to_string(),
             status: "completed".to_string(),
@@ -29737,7 +29743,7 @@ use code_core::protocol::OrderMeta;
     use std::collections::HashMap;
     use std::time::{Duration, Instant, SystemTime};
 
-    use code_core::protocol::{ReviewFinding, ReviewCodeLocation, ReviewLineRange};
+    use hanzo_core::protocol::{ReviewFinding, ReviewCodeLocation, ReviewLineRange};
 
     struct CaptureCommitStubGuard;
 
@@ -29834,7 +29840,7 @@ use code_core::protocol::OrderMeta;
     }
 
     fn insert_plain_cell(chat: &mut ChatWidget<'_>, lines: &[&str]) {
-        use code_core::history::state::{
+        use hanzo_core::history::state::{
             InlineSpan,
             MessageLine,
             MessageLineKind,
@@ -33244,8 +33250,8 @@ impl ChatWidget<'_> {
             self.auto_resolve_clear();
         }
 
-        let message = if let Ok(home) = code_core::config::find_code_home() {
-            match code_core::config::set_tui_review_auto_resolve(&home, enabled) {
+        let message = if let Ok(home) = hanzo_core::config::find_code_home() {
+            match hanzo_core::config::set_tui_review_auto_resolve(&home, enabled) {
                 Ok(_) => {
                     tracing::info!("Persisted review auto resolve toggle: {}", enabled);
                     if enabled {
@@ -33285,8 +33291,8 @@ impl ChatWidget<'_> {
 
         self.config.tui.auto_review_enabled = enabled;
 
-        let message = if let Ok(home) = code_core::config::find_code_home() {
-            match code_core::config::set_tui_auto_review_enabled(&home, enabled) {
+        let message = if let Ok(home) = hanzo_core::config::find_code_home() {
+            match hanzo_core::config::set_tui_auto_review_enabled(&home, enabled) {
                 Ok(_) => {
                     tracing::info!("Persisted auto review toggle: {}", enabled);
                     if enabled {
@@ -33536,7 +33542,7 @@ impl ChatWidget<'_> {
         });
     }
 
-    fn observe_auto_review_status(&mut self, agents: &[code_core::protocol::AgentInfo]) {
+    fn observe_auto_review_status(&mut self, agents: &[hanzo_core::protocol::AgentInfo]) {
         let now = Instant::now();
         for agent in agents {
             if !Self::is_auto_review_agent(agent) {
@@ -34048,7 +34054,7 @@ impl ChatWidget<'_> {
     }
 
     pub(crate) fn set_review_auto_resolve_attempts(&mut self, attempts: u32) {
-        use code_core::config_types::AutoResolveAttemptLimit;
+        use hanzo_core::config_types::AutoResolveAttemptLimit;
 
         let Ok(limit) = AutoResolveAttemptLimit::try_new(attempts) else {
             tracing::warn!("Ignoring invalid auto-resolve attempt value: {}", attempts);
@@ -34076,8 +34082,8 @@ impl ChatWidget<'_> {
             }
         }
 
-        let message = if let Ok(home) = code_core::config::find_code_home() {
-            match code_core::config::set_auto_drive_settings(
+        let message = if let Ok(home) = hanzo_core::config::find_code_home() {
+            match hanzo_core::config::set_auto_drive_settings(
                 &home,
                 &self.config.auto_drive,
                 self.config.auto_drive_use_chat_model,
@@ -34109,7 +34115,7 @@ impl ChatWidget<'_> {
     }
 
     pub(crate) fn set_auto_review_followup_attempts(&mut self, attempts: u32) {
-        use code_core::config_types::AutoResolveAttemptLimit;
+        use hanzo_core::config_types::AutoResolveAttemptLimit;
 
         let Ok(limit) = AutoResolveAttemptLimit::try_new(attempts) else {
             tracing::warn!("Ignoring invalid auto-review follow-up value: {}", attempts);
@@ -34128,8 +34134,8 @@ impl ChatWidget<'_> {
 
         self.config.auto_drive.auto_review_followup_attempts = limit;
 
-        if let Ok(home) = code_core::config::find_code_home() {
-            match code_core::config::set_auto_drive_settings(
+        if let Ok(home) = hanzo_core::config::find_code_home() {
+            match hanzo_core::config::set_auto_drive_settings(
                 &home,
                 &self.config.auto_drive,
                 self.config.auto_drive_use_chat_model,
@@ -34169,7 +34175,7 @@ impl ChatWidget<'_> {
             .auto_resolve_review_attempts
             .get();
         if current == 0 {
-            if let Ok(limit) = code_core::config_types::AutoResolveAttemptLimit::try_new(
+            if let Ok(limit) = hanzo_core::config_types::AutoResolveAttemptLimit::try_new(
                 self.auto_resolve_attempts_baseline,
             ) {
                 self.config.auto_drive.auto_resolve_review_attempts = limit;
@@ -34474,14 +34480,14 @@ impl ChatWidget<'_> {
         if trimmed.is_empty() {
             if Self::is_branch_worktree_path(&self.config.cwd) {
                 if let Some(git_root) =
-                    code_core::git_info::resolve_root_git_project_for_trust(&self.config.cwd)
+                    hanzo_core::git_info::resolve_root_git_project_for_trust(&self.config.cwd)
                 {
                     let worktree_cwd = self.config.cwd.clone();
                     let tx = self.app_event_tx.clone();
                     let auto_flag = auto_resolve;
                     tokio::spawn(async move {
                     let branch_metadata =
-                        code_core::git_worktree::load_branch_metadata(&worktree_cwd);
+                        hanzo_core::git_worktree::load_branch_metadata(&worktree_cwd);
                     let metadata_base = branch_metadata.as_ref().and_then(|meta| {
                         meta.remote_ref.clone().or_else(|| {
                             if let (Some(remote_name), Some(base_branch)) =
@@ -34496,12 +34502,12 @@ impl ChatWidget<'_> {
                     });
                     let default_branch = match metadata_base {
                         Some(value) => Some(value),
-                        None => code_core::git_worktree::detect_default_branch(&git_root)
+                        None => hanzo_core::git_worktree::detect_default_branch(&git_root)
                             .await
                             .map(|name| name.trim().to_string())
                             .filter(|name| !name.is_empty()),
                     };
-                    let current_branch = code_core::git_info::current_branch_name(&worktree_cwd)
+                    let current_branch = hanzo_core::git_info::current_branch_name(&worktree_cwd)
                         .await
                         .map(|name| name.trim().to_string())
                         .filter(|name| !name.is_empty());
@@ -34700,7 +34706,7 @@ impl ChatWidget<'_> {
         history_cell::AssistantMarkdownCell::from_state(state, &self.config)
     }
 
-    /// Handle `/branch [task]` command. Creates a worktree under `.code/branches`,
+    /// Handle `/branch [task]` command. Creates a worktree under `.hanzo/branches`,
     /// optionally copies current uncommitted changes, then switches the session cwd
     /// into the worktree. If `task` is non-empty, submits it immediately.
     pub(crate) fn handle_cloud_command(&mut self, args: String) {
@@ -35210,7 +35216,7 @@ impl ChatWidget<'_> {
     }
 
     fn ensure_git_repo_for_action(&mut self, resume: GitInitResume, reason: &str) -> bool {
-        if code_core::git_info::get_git_repo_root(&self.config.cwd).is_some() {
+        if hanzo_core::git_info::get_git_repo_root(&self.config.cwd).is_some() {
             if self.git_init_declined {
                 self.git_init_declined = false;
             }
@@ -35442,7 +35448,7 @@ impl ChatWidget<'_> {
             use tokio::process::Command;
             let ticket = branch_tail_ticket;
             // Resolve git root
-            let git_root = match code_core::git_worktree::get_git_root_from(&cwd).await {
+            let git_root = match hanzo_core::git_worktree::get_git_root_from(&cwd).await {
                 Ok(p) => p,
                 Err(e) => {
                     tx.send_background_event_with_ticket(
@@ -35469,10 +35475,10 @@ impl ChatWidget<'_> {
             } else {
                 Some(args.trim())
             };
-            let branch_name = code_core::git_worktree::generate_branch_name_from_task(task_opt);
+            let branch_name = hanzo_core::git_worktree::generate_branch_name_from_task(task_opt);
             // Create worktree
             let (worktree, used_branch) =
-                match code_core::git_worktree::setup_worktree(&git_root, &branch_name, None).await {
+                match hanzo_core::git_worktree::setup_worktree(&git_root, &branch_name, None).await {
                     Ok((p, b)) => (p, b),
                     Err(e) => {
                         tx.send_background_event_with_ticket(
@@ -35485,7 +35491,7 @@ impl ChatWidget<'_> {
             remember_worktree_root_hint(&worktree, &git_root);
             // Copy uncommitted changes from the source root into the new worktree
             let copied =
-                match code_core::git_worktree::copy_uncommitted_to_worktree(&git_root, &worktree)
+                match hanzo_core::git_worktree::copy_uncommitted_to_worktree(&git_root, &worktree)
                     .await
                 {
                     Ok(n) => n,
@@ -35499,8 +35505,8 @@ impl ChatWidget<'_> {
                     }
                 };
 
-            let mut branch_metadata: Option<code_core::git_worktree::BranchMetadata> = None;
-            match code_core::git_worktree::ensure_local_default_remote(
+            let mut branch_metadata: Option<hanzo_core::git_worktree::BranchMetadata> = None;
+            match hanzo_core::git_worktree::ensure_local_default_remote(
                 &git_root,
                 current_base_branch.as_deref(),
             )
@@ -35508,7 +35514,7 @@ impl ChatWidget<'_> {
             {
                 Ok(meta_option) => {
                     if let Some(meta) = meta_option.clone() {
-                        if let Err(e) = code_core::git_worktree::write_branch_metadata(&worktree, &meta).await
+                        if let Err(e) = hanzo_core::git_worktree::write_branch_metadata(&worktree, &meta).await
                         {
                             tx.send_background_event_with_ticket(
                                 &ticket,
@@ -35551,7 +35557,7 @@ impl ChatWidget<'_> {
                 .output()
                 .await;
             // Compute fallback remote default
-            let fallback_remote = code_core::git_worktree::detect_default_branch(&git_root)
+            let fallback_remote = hanzo_core::git_worktree::detect_default_branch(&git_root)
                 .await
                 .map(|d| format!("origin/{}", d));
             let target_upstream = src_upstream.clone().or(fallback_remote);
@@ -35635,7 +35641,7 @@ impl ChatWidget<'_> {
             return;
         }
         let Some(git_root) =
-            code_core::git_info::resolve_root_git_project_for_trust(&self.config.cwd)
+            hanzo_core::git_info::resolve_root_git_project_for_trust(&self.config.cwd)
         else {
             self.push_background_tail("`/push` — run this command inside a git repository.".to_string());
             self.request_redraw();
@@ -35891,7 +35897,7 @@ impl ChatWidget<'_> {
             new_cwd.display()
         );
         let branch_note = if Self::is_branch_worktree_path(&new_cwd) {
-            if let Some(meta) = code_core::git_worktree::load_branch_metadata(&new_cwd) {
+            if let Some(meta) = hanzo_core::git_worktree::load_branch_metadata(&new_cwd) {
                 let branch_name = new_cwd
                     .file_name()
                     .and_then(|n| n.to_str())
@@ -35910,7 +35916,7 @@ impl ChatWidget<'_> {
                         }
                     })
                     .or(meta.base_branch.clone())
-                    .unwrap_or_else(|| code_core::git_worktree::LOCAL_DEFAULT_REMOTE.to_string());
+                    .unwrap_or_else(|| hanzo_core::git_worktree::LOCAL_DEFAULT_REMOTE.to_string());
                 let mut note = format!(
                     "System: Working directory changed from {} to {}{}. You are now working on branch '{}' checked out at {}. Compare against '{}' for the parent branch and run all commands from this directory.",
                     previous_cwd.display(),
@@ -36040,7 +36046,7 @@ impl ChatWidget<'_> {
                 let _ = tx.send(AppEvent::SubmitTextWithPreface { visible, preface });
             }
 
-            let git_root = match code_core::git_info::resolve_root_git_project_for_trust(&work_cwd) {
+            let git_root = match hanzo_core::git_info::resolve_root_git_project_for_trust(&work_cwd) {
                 Some(p) => p,
                 None => {
                     send_background(&tx, &ticket, "`/merge` — not a git repo".to_string());
@@ -37964,7 +37970,7 @@ impl WidgetRef for &ChatWidget<'_> {
             self.history_render
                 .set_bottom_spacer_range(Some((base_total_height, total_height)));
             tracing::debug!(
-                target: "code_tui::history_render",
+                target: "hanzo_tui::history_render",
                 lines = spacer_lines,
                 base_height = base_total_height,
                 padded_height = total_height,
@@ -38008,7 +38014,7 @@ impl WidgetRef for &ChatWidget<'_> {
             }
 
             tracing::debug!(
-                target: "code_tui::scrollback",
+                target: "hanzo_tui::scrollback",
                 total_height,
                 base_total_height,
                 viewport = content_area.height,
@@ -38041,7 +38047,7 @@ impl WidgetRef for &ChatWidget<'_> {
                     .history_render
                     .adjust_scroll_to_content(scroll_from_top);
                 tracing::debug!(
-                    target: "code_tui::scrollback",
+                    target: "hanzo_tui::scrollback",
                     adjusted_scroll_from_top = adjusted,
                     scroll_from_top,
                     "scrollback adjusted scroll position",
@@ -38344,7 +38350,7 @@ impl WidgetRef for &ChatWidget<'_> {
                         .saturating_sub(1);
                     let cache_hit = layout_for_render.is_some();
                     tracing::info!(
-                        target: "code_tui::history_cells",
+                        target: "hanzo_tui::history_cells",
                         idx,
                         kind = ?item.kind(),
                         row_start,
@@ -38627,7 +38633,7 @@ impl WidgetRef for &ChatWidget<'_> {
                 let viewport_top = content_area.y;
                 let viewport_bottom = content_area.y.saturating_add(content_area.height);
                 tracing::debug!(
-                    target: "code_tui::scrollback",
+                    target: "hanzo_tui::scrollback",
                     idx,
                     request_count,
                     content_y,
@@ -38681,7 +38687,7 @@ impl WidgetRef for &ChatWidget<'_> {
         if let Some(first) = height_mismatches.first() {
             for mismatch in &height_mismatches {
                 tracing::error!(
-                    target: "code_tui::history_cells",
+                    target: "hanzo_tui::history_cells",
                     history_id = ?mismatch.history_id,
                     idx = mismatch.idx,
                     cached = mismatch.cached,
@@ -38796,7 +38802,7 @@ impl WidgetRef for &ChatWidget<'_> {
         } else {
             // Render the bottom pane directly without a border for now
             // The composer has its own layout with hints at the bottom
-            (&self.bottom_pane).render(bottom_pane_area, buf);
+            (&self.bottom_pane).render_ref(bottom_pane_area, buf);
         }
 
         if let Some(overlay) = self.terminal.overlay() {
@@ -39661,7 +39667,7 @@ struct ExecState {
         ExecCallId,
         (
             ExecCommandEndEvent,
-            code_core::protocol::OrderMeta,
+            hanzo_core::protocol::OrderMeta,
             std::time::Instant,
         ),
     >,
@@ -39765,7 +39771,7 @@ struct LayoutState {
 
 #[derive(Default)]
 struct DiffsState {
-    session_patch_sets: Vec<HashMap<PathBuf, code_core::protocol::FileChange>>,
+    session_patch_sets: Vec<HashMap<PathBuf, hanzo_core::protocol::FileChange>>,
     baseline_file_contents: HashMap<PathBuf, String>,
     overlay: Option<DiffOverlay>,
     confirm: Option<DiffConfirm>,
@@ -40095,7 +40101,7 @@ impl ChatWidget<'_> {
 
         match find_code_home() {
             Ok(home) => {
-                match code_core::config::set_tui_notifications(&home, new_state) {
+                match hanzo_core::config::set_tui_notifications(&home, new_state) {
                     Ok(()) => {
                         let msg = format!(
                             "✅ {} TUI notifications",
@@ -40114,7 +40120,7 @@ impl ChatWidget<'_> {
             }
             Err(_) => {
                 let msg = format!(
-                    "✅ {} TUI notifications (not persisted: CODE_HOME/CODEX_HOME not found)",
+                    "✅ {} TUI notifications (not persisted: HANZO_HOME not found)",
                     if enabled { "Enabled" } else { "Disabled" }
                 );
                 self.push_background_tail(msg);
@@ -40181,12 +40187,12 @@ impl ChatWidget<'_> {
     }
 
     pub(crate) fn toggle_mcp_server(&mut self, name: &str, enable: bool) {
-        match code_core::config::find_code_home() {
-            Ok(home) => match code_core::config::set_mcp_server_enabled(&home, name, enable) {
+        match hanzo_core::config::find_code_home() {
+            Ok(home) => match hanzo_core::config::set_mcp_server_enabled(&home, name, enable) {
                 Ok(changed) => {
                     if changed {
                         if enable {
-                            if let Ok((enabled, _)) = code_core::config::list_mcp_servers(&home) {
+                            if let Ok((enabled, _)) = hanzo_core::config::list_mcp_servers(&home) {
                                 if let Some((_, cfg)) = enabled.into_iter().find(|(n, _)| n == name)
                                 {
                                     self.config.mcp_servers.insert(name.to_string(), cfg);
@@ -40209,7 +40215,7 @@ impl ChatWidget<'_> {
                 }
             },
             Err(e) => {
-                let msg = format!("Failed to locate CODEX_HOME: {}", e);
+                let msg = format!("Failed to locate HANZO_HOME: {}", e);
                 self.history_push_plain_state(history_cell::new_error_event(msg));
             }
         }

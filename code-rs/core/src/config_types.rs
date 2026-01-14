@@ -448,7 +448,7 @@ fn default_true() -> bool {
 pub struct GithubConfig {
     /// When true, Codex watches for GitHub Actions workflow runs after a
     /// successful `git push` and reports failures as background messages.
-    /// Enabled by default; can be disabled via `~/.code/config.toml` under
+    /// Enabled by default; can be disabled via `~/.hanzo/config.toml` under
     /// `[github]` with `check_workflows_on_push = false`.
     #[serde(default = "default_true")]
     pub check_workflows_on_push: bool,
@@ -607,8 +607,8 @@ impl UriBasedFileOpener {
     }
 }
 
-/// Settings that govern if and what will be written to `~/.code/history.jsonl`
-/// (Code still reads legacy `~/.codex/history.jsonl`).
+/// Settings that govern if and what will be written to `~/.hanzo/history.jsonl`
+/// (Hanzo Dev still reads legacy `~/.code/history.jsonl` and `~/.codex/history.jsonl`).
 #[derive(Deserialize, Debug, Clone, PartialEq, Default)]
 pub struct History {
     /// If true, history entries will not be written to disk.
@@ -714,7 +714,7 @@ pub struct Tui {
 // Important: Provide a manual Default so that when no config file exists and we
 // construct `Config` via `unwrap_or_default()`, we still honor the intended
 // default of `alternate_screen = true`. Deriving `Default` would set booleans to
-// `false`, which caused fresh installs (or a temporary CODEX_HOME) to start in
+// `false`, which caused fresh installs (or a temporary HANZO_HOME) to start in
 // standard-terminal mode until the user pressed Ctrl+T.
 impl Default for Tui {
     fn default() -> Self {
@@ -1445,39 +1445,39 @@ impl Default for RetentionConfig {
     }
 }
 
-impl From<code_protocol::config_types::ReasoningEffort> for ReasoningEffort {
-    fn from(v: code_protocol::config_types::ReasoningEffort) -> Self {
+impl From<hanzo_protocol::config_types::ReasoningEffort> for ReasoningEffort {
+    fn from(v: hanzo_protocol::config_types::ReasoningEffort) -> Self {
         match v {
-            code_protocol::config_types::ReasoningEffort::Minimal => ReasoningEffort::Minimal,
-            code_protocol::config_types::ReasoningEffort::Low => ReasoningEffort::Low,
-            code_protocol::config_types::ReasoningEffort::Medium => ReasoningEffort::Medium,
-            code_protocol::config_types::ReasoningEffort::High => ReasoningEffort::High,
-            code_protocol::config_types::ReasoningEffort::XHigh => ReasoningEffort::XHigh,
+            hanzo_protocol::config_types::ReasoningEffort::Minimal => ReasoningEffort::Minimal,
+            hanzo_protocol::config_types::ReasoningEffort::Low => ReasoningEffort::Low,
+            hanzo_protocol::config_types::ReasoningEffort::Medium => ReasoningEffort::Medium,
+            hanzo_protocol::config_types::ReasoningEffort::High => ReasoningEffort::High,
+            hanzo_protocol::config_types::ReasoningEffort::XHigh => ReasoningEffort::XHigh,
         }
     }
 }
 
-impl From<ReasoningEffort> for code_protocol::config_types::ReasoningEffort {
+impl From<ReasoningEffort> for hanzo_protocol::config_types::ReasoningEffort {
     fn from(v: ReasoningEffort) -> Self {
         match v {
             ReasoningEffort::Minimal | ReasoningEffort::None => {
-                code_protocol::config_types::ReasoningEffort::Minimal
+                hanzo_protocol::config_types::ReasoningEffort::Minimal
             }
-            ReasoningEffort::Low => code_protocol::config_types::ReasoningEffort::Low,
-            ReasoningEffort::Medium => code_protocol::config_types::ReasoningEffort::Medium,
-            ReasoningEffort::High => code_protocol::config_types::ReasoningEffort::High,
-            ReasoningEffort::XHigh => code_protocol::config_types::ReasoningEffort::XHigh,
+            ReasoningEffort::Low => hanzo_protocol::config_types::ReasoningEffort::Low,
+            ReasoningEffort::Medium => hanzo_protocol::config_types::ReasoningEffort::Medium,
+            ReasoningEffort::High => hanzo_protocol::config_types::ReasoningEffort::High,
+            ReasoningEffort::XHigh => hanzo_protocol::config_types::ReasoningEffort::XHigh,
         }
     }
 }
 
-impl From<code_protocol::config_types::ReasoningSummary> for ReasoningSummary {
-    fn from(v: code_protocol::config_types::ReasoningSummary) -> Self {
+impl From<hanzo_protocol::config_types::ReasoningSummary> for ReasoningSummary {
+    fn from(v: hanzo_protocol::config_types::ReasoningSummary) -> Self {
         match v {
-            code_protocol::config_types::ReasoningSummary::Auto => ReasoningSummary::Auto,
-            code_protocol::config_types::ReasoningSummary::Concise => ReasoningSummary::Concise,
-            code_protocol::config_types::ReasoningSummary::Detailed => ReasoningSummary::Detailed,
-            code_protocol::config_types::ReasoningSummary::None => ReasoningSummary::None,
+            hanzo_protocol::config_types::ReasoningSummary::Auto => ReasoningSummary::Auto,
+            hanzo_protocol::config_types::ReasoningSummary::Concise => ReasoningSummary::Concise,
+            hanzo_protocol::config_types::ReasoningSummary::Detailed => ReasoningSummary::Detailed,
+            hanzo_protocol::config_types::ReasoningSummary::None => ReasoningSummary::None,
         }
     }
 }

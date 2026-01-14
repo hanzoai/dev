@@ -1,4 +1,4 @@
-use code_core::protocol::{
+use hanzo_core::protocol::{
     AgentMessageEvent,
     AgentMessageDeltaEvent,
     CustomToolCallBeginEvent,
@@ -16,8 +16,8 @@ use code_core::protocol::{
     PatchApplyBeginEvent,
     PatchApplyEndEvent,
 };
-use code_core::parse_command::ParsedCommand as CoreParsedCommand;
-use code_tui::test_helpers::{render_chat_widget_to_vt100, ChatWidgetHarness};
+use hanzo_core::parse_command::ParsedCommand as CoreParsedCommand;
+use hanzo_tui::test_helpers::{render_chat_widget_to_vt100, ChatWidgetHarness};
 use std::collections::HashMap;
 use std::path::PathBuf;
 use std::time::Duration;

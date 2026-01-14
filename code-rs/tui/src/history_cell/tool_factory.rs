@@ -2,9 +2,9 @@ use std::io::Cursor;
 use std::time::{Duration, SystemTime};
 
 use base64::Engine;
-use code_common::elapsed::format_duration;
-use code_core::config::Config;
-use code_core::protocol::McpInvocation;
+use hanzo_common::elapsed::format_duration;
+use hanzo_core::config::Config;
+use hanzo_core::protocol::McpInvocation;
 use mcp_types::{EmbeddedResourceResource, ResourceLink};
 use ratatui::prelude::{Buffer, Rect};
 use ratatui::style::{Modifier, Style, Stylize};

@@ -1,7 +1,7 @@
 use serde::Deserialize;
 use serde::Serialize;
 
-use code_protocol::models::SandboxPermissions;
+use hanzo_protocol::models::SandboxPermissions;
 
 use crate::exec_command::session_id::SessionId;
 

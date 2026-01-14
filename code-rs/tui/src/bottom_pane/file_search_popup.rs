@@ -1,9 +1,8 @@
-use code_file_search::FileMatch;
+use hanzo_file_search::FileMatch;
 use ratatui::buffer::Buffer;
 use ratatui::layout::Rect;
 use ratatui::layout::Margin;
 use ratatui::widgets::WidgetRef;
-use ratatui::prelude::Stylize;
 
 use super::popup_consts::MAX_POPUP_ROWS;
 use super::scroll_state::ScrollState;

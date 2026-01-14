@@ -5,23 +5,23 @@ use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant, SystemTime};
 
 use anyhow::{anyhow, Context, Result};
-use code_core::config::Config;
-use code_core::agent_defaults::build_model_guide_description;
-use code_core::config_types::{AutoDriveSettings, ReasoningEffort, TextVerbosity};
-use code_core::debug_logger::DebugLogger;
-use code_core::codex::compact::resolve_compact_prompt_text;
-use code_core::model_family::{derive_default_model_family, find_family_for_model};
-use code_core::project_doc::read_auto_drive_docs;
-use code_core::protocol::SandboxPolicy;
-use code_core::slash_commands::get_enabled_agents;
-use code_core::{AuthManager, ModelClient, Prompt, ResponseEvent, TextFormat};
-use code_core::{RateLimitSwitchState, switch_active_account_on_rate_limit};
-use code_core::auth;
-use code_core::auth_accounts;
-use code_core::error::CodexErr;
-use code_common::model_presets::clamp_reasoning_effort_for_model;
-use code_protocol::models::{ContentItem, ReasoningItemContent, ResponseItem};
-use code_core::protocol::TokenUsage;
+use hanzo_core::config::Config;
+use hanzo_core::agent_defaults::build_model_guide_description;
+use hanzo_core::config_types::{AutoDriveSettings, ReasoningEffort, TextVerbosity};
+use hanzo_core::debug_logger::DebugLogger;
+use hanzo_core::codex::compact::resolve_compact_prompt_text;
+use hanzo_core::model_family::{derive_default_model_family, find_family_for_model};
+use hanzo_core::project_doc::read_auto_drive_docs;
+use hanzo_core::protocol::SandboxPolicy;
+use hanzo_core::slash_commands::get_enabled_agents;
+use hanzo_core::{AuthManager, ModelClient, Prompt, ResponseEvent, TextFormat};
+use hanzo_core::{RateLimitSwitchState, switch_active_account_on_rate_limit};
+use hanzo_core::auth;
+use hanzo_core::auth_accounts;
+use hanzo_core::error::CodexErr;
+use hanzo_common::model_presets::clamp_reasoning_effort_for_model;
+use hanzo_protocol::models::{ContentItem, ReasoningItemContent, ResponseItem};
+use hanzo_core::protocol::TokenUsage;
 use futures::StreamExt;
 use reqwest::StatusCode;
 use serde::Deserialize;
@@ -42,7 +42,7 @@ use crate::session_metrics::SessionMetrics;
 use crate::retry::{retry_with_backoff, RetryDecision, RetryError, RetryOptions};
 #[cfg(feature = "dev-faults")]
 use crate::faults::{fault_to_error, next_fault, FaultScope, InjectedFault};
-use code_common::elapsed::format_duration;
+use hanzo_common::elapsed::format_duration;
 use chrono::{DateTime, Local, Utc};
 use rand::Rng;
 
@@ -336,7 +336,7 @@ pub struct TurnConfig {
     #[allow(dead_code)]
     pub complexity: Option<TurnComplexity>,
     #[serde(default)]
-    pub text_format_override: Option<code_core::TextFormat>,
+    pub text_format_override: Option<hanzo_core::TextFormat>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
@@ -414,7 +414,7 @@ pub struct TurnDescriptor {
     #[serde(default)]
     pub review_strategy: Option<ReviewStrategy>,
     #[serde(default)]
-    pub text_format_override: Option<code_core::TextFormat>,
+    pub text_format_override: Option<hanzo_core::TextFormat>,
 }
 
 impl Default for TurnDescriptor {
@@ -434,8 +434,8 @@ impl Default for TurnDescriptor {
 mod tests {
     use super::*;
     use anyhow::anyhow;
-    use code_core::agent_defaults::DEFAULT_AGENT_NAMES;
-    use code_core::error::RetryLimitReachedError;
+    use hanzo_core::agent_defaults::DEFAULT_AGENT_NAMES;
+    use hanzo_core::error::RetryLimitReachedError;
     use serde_json::json;
     use std::time::Duration;
 
@@ -1028,7 +1028,7 @@ pub fn start_auto_coordinator(
     debug_enabled: bool,
     derive_goal_from_history: bool,
 ) -> Result<AutoCoordinatorHandle> {
-    if std::env::var_os("CODEX_DEBUG_AUTO_COORDINATOR").is_some() {
+    if std::env::var_os("HANZO_DEBUG_AUTO_COORDINATOR").is_some() {
         eprintln!(
             "start_auto_coordinator invoked\n{:?}",
             std::backtrace::Backtrace::force_capture()
@@ -1090,7 +1090,7 @@ fn run_auto_loop(
     if matches!(config.model_reasoning_effort, ReasoningEffort::None) {
         config.model_reasoning_effort = ReasoningEffort::High;
     }
-    let requested_effort: code_protocol::config_types::ReasoningEffort =
+    let requested_effort: hanzo_protocol::config_types::ReasoningEffort =
         config.model_reasoning_effort.into();
     let clamped_effort =
         clamp_reasoning_effort_for_model(&config.model, requested_effort);
@@ -1106,9 +1106,9 @@ fn run_auto_loop(
         resolve_compact_prompt_text(config.compact_prompt_override.as_deref());
 
     let preferred_auth = if config.using_chatgpt_auth {
-        code_protocol::mcp_protocol::AuthMode::ChatGPT
+        hanzo_protocol::mcp_protocol::AuthMode::ChatGPT
     } else {
-        code_protocol::mcp_protocol::AuthMode::ApiKey
+        hanzo_protocol::mcp_protocol::AuthMode::ApiKey
     };
     let code_home = config.code_home.clone();
     let responses_originator_header = config.responses_originator_header.clone();
@@ -1754,7 +1754,7 @@ fn run_git_command<const N: usize>(args: [&str; N]) -> Option<String> {
         return None;
     }
     if args.iter().any(|arg| matches!(*arg, "pull" | "checkout" | "merge" | "apply")) {
-        code_core::review_coord::bump_snapshot_epoch();
+        hanzo_core::review_coord::bump_snapshot_epoch();
     }
     String::from_utf8(output.stdout)
         .ok()

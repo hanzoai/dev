@@ -1,6 +1,6 @@
 [package]
 edition = "2024"
-name = "code-exec"
+name = "hanzo-exec"
 version = { workspace = true }
 
 [[bin]]
@@ -8,7 +8,7 @@ name = "dev-exec"
 path = "src/main.rs"
 
 [lib]
-name = "code_exec"
+name = "hanzo_exec"
 path = "src/lib.rs"
 
 [lints]
@@ -17,18 +17,18 @@ workspace = true
 [dependencies]
 anyhow = { workspace = true }
 clap = { workspace = true, features = ["derive"] }
-code-arg0 = { workspace = true }
-code-common = { workspace = true, features = [
+hanzo-arg0 = { workspace = true }
+hanzo-common = { workspace = true, features = [
     "cli",
     "elapsed",
     "sandbox_summary",
 ] }
-code-core = { workspace = true }
-code-ollama = { workspace = true }
-code-protocol = { workspace = true }
-code-app-server-protocol = { workspace = true }
-code-auto-drive-core = { workspace = true }
-code-git-tooling = { workspace = true }
+hanzo-core = { workspace = true }
+hanzo-ollama = { workspace = true }
+hanzo-protocol = { workspace = true }
+hanzo-app-server-protocol = { workspace = true }
+hanzo-auto-drive-core = { workspace = true }
+hanzo-git-tooling = { workspace = true }
 chrono = { workspace = true }
 opentelemetry-appender-tracing = { workspace = true }
 owo-colors = { workspace = true }

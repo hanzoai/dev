@@ -4,30 +4,30 @@ use clap::CommandFactory;
 use clap::Parser;
 use clap_complete::Shell;
 use clap_complete::generate;
-use code_arg0::arg0_dispatch_or_else;
-use code_chatgpt::apply_command::ApplyCommand;
-use code_chatgpt::apply_command::run_apply_command;
-use code_cli::LandlockCommand;
-use code_cli::SeatbeltCommand;
-use code_cli::login::read_api_key_from_stdin;
-use code_cli::login::run_login_status;
-use code_cli::login::run_login_with_api_key;
-use code_cli::login::run_login_with_chatgpt;
-use code_cli::login::run_login_with_device_code;
-use code_cli::login::run_logout;
+use hanzo_arg0::arg0_dispatch_or_else;
+use hanzo_chatgpt::apply_command::ApplyCommand;
+use hanzo_chatgpt::apply_command::run_apply_command;
+use hanzo_cli::LandlockCommand;
+use hanzo_cli::SeatbeltCommand;
+use hanzo_cli::login::read_api_key_from_stdin;
+use hanzo_cli::login::run_login_status;
+use hanzo_cli::login::run_login_with_api_key;
+use hanzo_cli::login::run_login_with_chatgpt;
+use hanzo_cli::login::run_login_with_device_code;
+use hanzo_cli::login::run_logout;
 mod bridge;
 mod llm;
 use llm::{LlmCli, run_llm};
-use code_common::CliConfigOverrides;
-use code_core::{entry_to_rollout_path, SessionCatalog, SessionQuery};
-use code_core::spawn::spawn_std_command_with_retry;
-use code_protocol::protocol::SessionSource;
-use code_cloud_tasks::Cli as CloudTasksCli;
-use code_exec::Cli as ExecCli;
-use code_responses_api_proxy::Args as ResponsesApiProxyArgs;
-use code_tui::Cli as TuiCli;
-use code_tui::ExitSummary;
-use code_tui::resume_command_name;
+use hanzo_common::CliConfigOverrides;
+use hanzo_core::{entry_to_rollout_path, SessionCatalog, SessionQuery};
+use hanzo_core::spawn::spawn_std_command_with_retry;
+use hanzo_protocol::protocol::SessionSource;
+use hanzo_cloud_tasks::Cli as CloudTasksCli;
+use hanzo_exec::Cli as ExecCli;
+use hanzo_responses_api_proxy::Args as ResponsesApiProxyArgs;
+use hanzo_tui::Cli as TuiCli;
+use hanzo_tui::ExitSummary;
+use hanzo_tui::resume_command_name;
 use serde::{Deserialize, Serialize};
 use serde_json;
 use std::fs;
@@ -40,42 +40,42 @@ mod mcp_cmd;
 
 use crate::mcp_cmd::McpCli;
 
-const CLI_COMMAND_NAME: &str = "code";
-pub(crate) const CODEX_SECURE_MODE_ENV_VAR: &str = "CODEX_SECURE_MODE";
+const CLI_COMMAND_NAME: &str = "dev";
+pub(crate) const HANZO_SECURE_MODE_ENV_VAR: &str = "HANZO_SECURE_MODE";
 
 /// As early as possible in the process lifecycle, apply hardening measures
-/// if the CODEX_SECURE_MODE environment variable is set to "1".
+/// if the HANZO_SECURE_MODE environment variable is set to "1".
 #[ctor::ctor]
 fn pre_main_hardening() {
-    let secure_mode = match std::env::var(CODEX_SECURE_MODE_ENV_VAR) {
+    let secure_mode = match std::env::var(HANZO_SECURE_MODE_ENV_VAR) {
         Ok(value) => value,
         Err(_) => return,
     };
 
     if secure_mode == "1" {
-        code_process_hardening::pre_main_hardening();
+        hanzo_process_hardening::pre_main_hardening();
     }
 
     // Always clear this env var so child processes don't inherit it.
     unsafe {
-        std::env::remove_var(CODEX_SECURE_MODE_ENV_VAR);
+        std::env::remove_var(HANZO_SECURE_MODE_ENV_VAR);
     }
 }
 
-/// Codex CLI
+/// Hanzo Dev CLI
 ///
 /// If no subcommand is specified, options will be forwarded to the interactive CLI.
 #[derive(Debug, Parser)]
 #[clap(
     author,
-    name = "code",
-    version = code_version::version(),
+    name = "dev",
+    version = hanzo_version::version(),
     // If a sub‑command is given, ignore requirements of the default args.
     subcommand_negates_reqs = true,
     // The executable is sometimes invoked via a platform‑specific name like
-    // `codex-x86_64-unknown-linux-musl`, but the help output should always use
-    // the generic `code` command name that users run.
-    bin_name = "code"
+    // `dev-x86_64-unknown-linux-musl`, but the help output should always use
+    // the generic `dev` command name that users run.
+    bin_name = "dev"
 )]
 struct MultitoolCli {
     #[clap(flatten)]
@@ -98,7 +98,7 @@ struct MultitoolCli {
 
 #[derive(Debug, clap::Subcommand)]
 enum Subcommand {
-    /// Run Codex non-interactively.
+    /// Run Hanzo Dev non-interactively.
     #[clap(visible_alias = "e")]
     Exec(ExecCli),
 
@@ -112,11 +112,11 @@ enum Subcommand {
     /// Remove stored authentication credentials.
     Logout(LogoutCommand),
 
-    /// [experimental] Run Codex as an MCP server and manage MCP servers.
+    /// [experimental] Run Hanzo Dev as an MCP server and manage MCP servers.
     #[clap(visible_alias = "acp")]
     Mcp(McpCli),
 
-    /// [experimental] Run the Codex MCP server (stdio transport).
+    /// [experimental] Run the Hanzo Dev MCP server (stdio transport).
     McpServer,
 
     /// [experimental] Run the app server.
@@ -128,11 +128,11 @@ enum Subcommand {
     /// Internal debugging commands.
     Debug(DebugArgs),
 
-    /// Debug: replay ordering from response.json and codex-tui.log
+    /// Debug: replay ordering from response.json and dev-tui.log
     #[clap(hide = false)]
     OrderReplay(OrderReplayArgs),
 
-    /// Apply the latest diff produced by Codex agent as a `git apply` to your local working tree.
+    /// Apply the latest diff produced by Hanzo Dev agent as a `git apply` to your local working tree.
     #[clap(visible_alias = "a")]
     Apply(ApplyCommand),
 
@@ -142,7 +142,7 @@ enum Subcommand {
     /// Internal: generate TypeScript protocol bindings.
     #[clap(hide = true)]
     GenerateTs(GenerateTsCommand),
-    /// [EXPERIMENTAL] Browse tasks from Codex Cloud and apply changes locally.
+    /// [EXPERIMENTAL] Browse tasks from Hanzo Dev Cloud and apply changes locally.
     #[clap(name = "cloud", alias = "cloud-tasks")]
     Cloud(CloudTasksCli),
 
@@ -159,7 +159,7 @@ enum Subcommand {
     /// Side-channel LLM utilities (no TUI events).
     Llm(LlmCli),
 
-    /// Manage Code Bridge subscription for this workspace.
+    /// Manage Dev Bridge subscription for this workspace.
     Bridge(BridgeCommand),
 }
 
@@ -294,7 +294,8 @@ struct SubscriptionOverride {
     llm_filter: String,
 }
 
-const SUBSCRIPTION_OVERRIDE_FILE: &str = "code-bridge.subscription.json";
+const SUBSCRIPTION_OVERRIDE_FILE: &str = "dev-bridge.subscription.json";
+const LEGACY_SUBSCRIPTION_OVERRIDE_FILE: &str = "code-bridge.subscription.json";
 
 fn default_levels() -> Vec<String> {
     vec!["errors".to_string()]
@@ -320,7 +321,7 @@ struct LoginCommand {
 
     #[arg(
         long = "with-api-key",
-        help = "Read the API key from stdin (e.g. `printenv OPENAI_API_KEY | codex login --with-api-key`)"
+        help = "Read the API key from stdin (e.g. `printenv OPENAI_API_KEY | dev login --with-api-key`)"
     )]
     with_api_key: bool,
 
@@ -375,10 +376,10 @@ struct GenerateTsCommand {
 
 #[derive(Debug, Parser)]
 struct OrderReplayArgs {
-    /// Path to a response.json captured under ~/.code/debug_logs/*_response.json
-    /// (legacy ~/.codex/debug_logs/ is still read).
+    /// Path to a response.json captured under ~/.hanzo/debug_logs/*_response.json
+    /// (legacy ~/.dev/debug_logs/ is still read).
     response_json: std::path::PathBuf,
-    /// Path to codex-tui.log (typically ~/.code/debug_logs/codex-tui.log).
+    /// Path to dev-tui.log (typically ~/.hanzo/debug_logs/dev-tui.log).
     tui_log: std::path::PathBuf,
 }
 
@@ -425,11 +426,11 @@ async fn cli_main(code_linux_sandbox_exe: Option<PathBuf>) -> anyhow::Result<()>
             let ExitSummary {
                 token_usage,
                 session_id,
-            } = code_tui::run_main(interactive, code_linux_sandbox_exe).await?;
+            } = hanzo_tui::run_main(interactive, code_linux_sandbox_exe).await?;
             if !token_usage.is_zero() {
                 println!(
                     "{}",
-                    code_core::protocol::FinalOutput::from(token_usage.clone())
+                    hanzo_core::protocol::FinalOutput::from(token_usage.clone())
                 );
             }
             if let Some(session_id) = session_id {
@@ -449,7 +450,7 @@ async fn cli_main(code_linux_sandbox_exe: Option<PathBuf>) -> anyhow::Result<()>
                 &mut exec_cli.config_overrides,
                 root_config_overrides.clone(),
             );
-            code_exec::run_main(exec_cli, code_linux_sandbox_exe).await?;
+            hanzo_exec::run_main(exec_cli, code_linux_sandbox_exe).await?;
         }
         Some(Subcommand::Auto(mut exec_cli)) => {
             exec_cli.auto_drive = true;
@@ -461,10 +462,10 @@ async fn cli_main(code_linux_sandbox_exe: Option<PathBuf>) -> anyhow::Result<()>
                 &mut exec_cli.config_overrides,
                 root_config_overrides.clone(),
             );
-            code_exec::run_main(exec_cli, code_linux_sandbox_exe).await?;
+            hanzo_exec::run_main(exec_cli, code_linux_sandbox_exe).await?;
         }
         Some(Subcommand::McpServer) => {
-            code_mcp_server::run_main(code_linux_sandbox_exe, root_config_overrides).await?;
+            hanzo_mcp_server::run_main(code_linux_sandbox_exe, root_config_overrides).await?;
         }
         Some(Subcommand::Mcp(mut mcp_cli)) => {
             // Propagate any root-level config overrides (e.g. `-c key=value`).
@@ -472,7 +473,7 @@ async fn cli_main(code_linux_sandbox_exe: Option<PathBuf>) -> anyhow::Result<()>
             mcp_cli.run().await?;
         }
         Some(Subcommand::AppServer) => {
-            code_app_server::run_main(code_linux_sandbox_exe, root_config_overrides).await?;
+            hanzo_app_server::run_main(code_linux_sandbox_exe, root_config_overrides).await?;
         }
         Some(Subcommand::Resume(ResumeCommand {
             session_id,
@@ -490,11 +491,11 @@ async fn cli_main(code_linux_sandbox_exe: Option<PathBuf>) -> anyhow::Result<()>
             let ExitSummary {
                 token_usage,
                 session_id,
-            } = code_tui::run_main(interactive, code_linux_sandbox_exe).await?;
+            } = hanzo_tui::run_main(interactive, code_linux_sandbox_exe).await?;
             if !token_usage.is_zero() {
                 println!(
                     "{}",
-                    code_core::protocol::FinalOutput::from(token_usage.clone())
+                    hanzo_core::protocol::FinalOutput::from(token_usage.clone())
                 );
             }
             if let Some(session_id) = session_id {
@@ -524,7 +525,7 @@ async fn cli_main(code_linux_sandbox_exe: Option<PathBuf>) -> anyhow::Result<()>
                         .await;
                     } else if login_cli.api_key.is_some() {
                         eprintln!(
-                            "The --api-key flag is no longer supported. Pipe the key instead, e.g. `printenv OPENAI_API_KEY | codex login --with-api-key`."
+                            "The --api-key flag is no longer supported. Pipe the key instead, e.g. `printenv OPENAI_API_KEY | dev login --with-api-key`."
                         );
                         std::process::exit(1);
                     } else if login_cli.with_api_key {
@@ -551,7 +552,7 @@ async fn cli_main(code_linux_sandbox_exe: Option<PathBuf>) -> anyhow::Result<()>
                 &mut cloud_cli.config_overrides,
                 root_config_overrides.clone(),
             );
-            code_cloud_tasks::run_main(cloud_cli, code_linux_sandbox_exe).await?;
+            hanzo_cloud_tasks::run_main(cloud_cli, code_linux_sandbox_exe).await?;
         }
         Some(Subcommand::Debug(debug_args)) => match debug_args.cmd {
             DebugCommand::Seatbelt(mut seatbelt_cli) => {
@@ -559,7 +560,7 @@ async fn cli_main(code_linux_sandbox_exe: Option<PathBuf>) -> anyhow::Result<()>
                     &mut seatbelt_cli.config_overrides,
                     root_config_overrides.clone(),
                 );
-                code_cli::debug_sandbox::run_command_under_seatbelt(
+                hanzo_cli::debug_sandbox::run_command_under_seatbelt(
                     seatbelt_cli,
                     code_linux_sandbox_exe,
                 )
@@ -570,7 +571,7 @@ async fn cli_main(code_linux_sandbox_exe: Option<PathBuf>) -> anyhow::Result<()>
                     &mut landlock_cli.config_overrides,
                     root_config_overrides.clone(),
                 );
-                code_cli::debug_sandbox::run_command_under_landlock(
+                hanzo_cli::debug_sandbox::run_command_under_landlock(
                     landlock_cli,
                     code_linux_sandbox_exe,
                 )
@@ -585,11 +586,11 @@ async fn cli_main(code_linux_sandbox_exe: Option<PathBuf>) -> anyhow::Result<()>
             run_apply_command(apply_cli, None).await?;
         }
         Some(Subcommand::ResponsesApiProxy(args)) => {
-            tokio::task::spawn_blocking(move || code_responses_api_proxy::run_main(args))
+            tokio::task::spawn_blocking(move || hanzo_responses_api_proxy::run_main(args))
                 .await??;
         }
         Some(Subcommand::GenerateTs(gen_cli)) => {
-            code_protocol_ts::generate_ts(&gen_cli.out_dir, gen_cli.prettier.as_deref())?;
+            hanzo_protocol_ts::generate_ts(&gen_cli.out_dir, gen_cli.prettier.as_deref())?;
         }
         Some(Subcommand::OrderReplay(args)) => {
             order_replay_main(args)?;
@@ -644,7 +645,7 @@ fn run_bridge_subscription(cmd: BridgeSubscriptionCommand) -> anyhow::Result<()>
         if override_path.exists() {
             fs::remove_file(&override_path).context("failed to remove subscription override")?;
             println!(
-                "Removed {}. The running Code session will revert to defaults (errors only) within a few seconds.",
+                "Removed {}. The running Hanzo Dev session will revert to defaults (errors only) within a few seconds.",
                 override_path.display()
             );
         } else {
@@ -659,7 +660,7 @@ fn run_bridge_subscription(cmd: BridgeSubscriptionCommand) -> anyhow::Result<()>
         println!("levels       : {}", sub.levels.join(", "));
         println!("capabilities : {}", sub.capabilities.join(", "));
         println!("llm_filter   : {}", sub.llm_filter);
-        println!("(Running Code picks up changes every ~5s.)");
+        println!("(Running Hanzo Dev picks up changes every ~5s.)");
         return Ok(());
     }
 
@@ -676,7 +677,7 @@ fn run_bridge_subscription(cmd: BridgeSubscriptionCommand) -> anyhow::Result<()>
     }
 
     if let Some(parent) = override_path.parent() {
-        fs::create_dir_all(parent).context("failed to create .code dir")?;
+        fs::create_dir_all(parent).context("failed to create .hanzo dir")?;
     }
     let data = serde_json::to_string_pretty(&sub).context("serialize subscription")?;
     fs::write(&override_path, data).context("write subscription override")?;
@@ -685,7 +686,7 @@ fn run_bridge_subscription(cmd: BridgeSubscriptionCommand) -> anyhow::Result<()>
     println!("levels       : {}", sub.levels.join(", "));
     println!("capabilities : {}", sub.capabilities.join(", "));
     println!("llm_filter   : {}", sub.llm_filter);
-    println!("Running Code session will resubscribe within ~5s.");
+    println!("Running Hanzo Dev session will resubscribe within ~5s.");
     Ok(())
 }
 
@@ -694,7 +695,7 @@ async fn run_bridge_list(_cmd: BridgeListCommand) -> anyhow::Result<()> {
     let targets = bridge::discover_bridge_targets(&cwd)?;
     if targets.is_empty() {
         println!(
-            "No Code Bridge metadata found. Start `code-bridge-host` in this workspace and try again."
+            "No Dev Bridge metadata found. Start `dev-bridge-host` in this workspace and try again."
         );
         return Ok(());
     }
@@ -730,7 +731,7 @@ async fn run_bridge_list(_cmd: BridgeListCommand) -> anyhow::Result<()> {
         println!("{}heartbeat       : {hb}", indent);
         println!("{}stale           : {}", indent, if target.stale { "yes" } else { "no" });
         if target.stale {
-            println!("{}⚠ metadata looks stale; restart code-bridge-host if this persists.", indent);
+            println!("{}⚠ metadata looks stale; restart dev-bridge-host if this persists.", indent);
         }
 
         match bridge::list_control_capable(target).await {
@@ -828,7 +829,7 @@ fn select_bridge_target(selector: Option<&str>) -> anyhow::Result<bridge::Bridge
     let targets = bridge::discover_bridge_targets(&cwd)?;
     if targets.is_empty() {
         return Err(anyhow!(
-            "No Code Bridge metadata found. Start `code-bridge-host` in this workspace and try again."
+            "No Dev Bridge metadata found. Start `dev-bridge-host` in this workspace and try again."
         ));
     }
 
@@ -901,9 +902,13 @@ fn normalise_cli_vec(values: Vec<String>, fallback: Vec<String>) -> Vec<String> 
 fn find_subscription_override_path(start: &Path) -> Option<PathBuf> {
     let mut current = Some(start);
     while let Some(dir) = current {
-        let candidate = dir.join(".code").join(SUBSCRIPTION_OVERRIDE_FILE);
-        if candidate.exists() {
-            return Some(candidate);
+        for root in [".hanzo", ".code"] {
+            for name in [SUBSCRIPTION_OVERRIDE_FILE, LEGACY_SUBSCRIPTION_OVERRIDE_FILE] {
+                let candidate = dir.join(root).join(name);
+                if candidate.exists() {
+                    return Some(candidate);
+                }
+            }
         }
         current = dir.parent();
     }
@@ -923,15 +928,19 @@ fn resolve_subscription_override_path(start: &Path) -> PathBuf {
         return dir.join(SUBSCRIPTION_OVERRIDE_FILE);
     }
 
-    start.join(".code").join(SUBSCRIPTION_OVERRIDE_FILE)
+    start.join(".hanzo").join(SUBSCRIPTION_OVERRIDE_FILE)
 }
 
 fn find_meta_dir(start: &Path) -> Option<PathBuf> {
     let mut current = Some(start);
     while let Some(dir) = current {
-        let candidate = dir.join(".code").join("code-bridge.json");
-        if candidate.exists() {
-            return candidate.parent().map(Path::to_path_buf);
+        for root in [".hanzo", ".code"] {
+            for name in ["dev-bridge.json", "code-bridge.json"] {
+                let candidate = dir.join(root).join(name);
+                if candidate.exists() {
+                    return candidate.parent().map(Path::to_path_buf);
+                }
+            }
         }
         current = dir.parent();
     }
@@ -941,16 +950,18 @@ fn find_meta_dir(start: &Path) -> Option<PathBuf> {
 fn find_code_dir(start: &Path) -> Option<PathBuf> {
     let mut current = Some(start);
     while let Some(dir) = current {
-        let candidate = dir.join(".code");
-        if candidate.is_dir() {
-            return Some(candidate);
+        for root in [".hanzo", ".code"] {
+            let candidate = dir.join(root);
+            if candidate.is_dir() {
+                return Some(candidate);
+            }
         }
         current = dir.parent();
     }
     None
 }
 
-/// Build the final `TuiCli` for a `codex resume` invocation.
+/// Build the final `TuiCli` for a `dev resume` invocation.
 fn finalize_resume_interactive(
     mut interactive: TuiCli,
     root_config_overrides: CliConfigOverrides,
@@ -978,7 +989,7 @@ fn finalize_resume_interactive(
     interactive
 }
 
-/// Merge flags provided to `codex resume` so they take precedence over any
+/// Merge flags provided to `dev resume` so they take precedence over any
 /// root-level flags. Only overrides fields explicitly set on the resume-scoped
 /// CLI. Also appends `-c key=value` overrides with highest precedence.
 fn merge_resume_cli_flags(interactive: &mut TuiCli, resume_cli: TuiCli) {
@@ -1060,8 +1071,8 @@ fn resolve_resume_path(session_id: Option<&str>, last: bool) -> anyhow::Result<O
         return Ok(None);
     }
 
-    let code_home = code_core::config::find_code_home()
-        .context("failed to locate Codex home directory")?;
+    let code_home = hanzo_core::config::find_code_home()
+        .context("failed to locate Hanzo Dev home directory")?;
 
     let sess = session_id.map(|s| s.to_string());
     let fetch = async move {
@@ -1235,7 +1246,7 @@ async fn preview_main(args: PreviewArgs) -> anyhow::Result<()> {
         _ => bail!(format!("Unsupported platform: {}/{}", os, arch)),
     };
 
-    let client = reqwest::Client::builder().user_agent("codex-preview/1").build()?;
+    let client = reqwest::Client::builder().user_agent("dev-preview/1").build()?;
 
     // Resolve slug/tag from id
     let id = args.slug.trim().to_string();
@@ -1274,11 +1285,11 @@ async fn preview_main(args: PreviewArgs) -> anyhow::Result<()> {
     // Try to download the best asset for this platform; prefer .tar.gz on Unix and .zip on Windows; fallback to .zst.
     let mut urls: Vec<String> = vec![];
     if cfg!(windows) {
-        urls.push(format!("{base}/code-x86_64-pc-windows-msvc.exe.zip"));
+        urls.push(format!("{base}/dev-x86_64-pc-windows-msvc.exe.zip"));
     } else {
         // tar.gz first, then zst
-        urls.push(format!("{base}/code-{target}.tar.gz"));
-        urls.push(format!("{base}/code-{target}.zst"));
+        urls.push(format!("{base}/dev-{target}.tar.gz"));
+        urls.push(format!("{base}/dev-{target}.zst"));
     }
 
     let tmp = tempdir()?;
@@ -1308,7 +1319,7 @@ async fn preview_main(args: PreviewArgs) -> anyhow::Result<()> {
     }
 
     // Determine output directory
-    // Default: ~/.code/bin
+    // Default: ~/.hanzo/bin
     let out_dir = if let Some(dir) = args.out_dir {
         dir
     } else {
@@ -1320,7 +1331,7 @@ async fn preview_main(args: PreviewArgs) -> anyhow::Result<()> {
         let base = home
             .map(PathBuf::from)
             .unwrap_or_else(|| PathBuf::from("."));
-        base.join(".code").join("bin")
+        base.join(".hanzo").join("bin")
     };
     let _ = fs::create_dir_all(&out_dir);
 
@@ -1338,8 +1349,8 @@ async fn preview_main(args: PreviewArgs) -> anyhow::Result<()> {
             let mut ar = tar::Archive::new(gz);
             ar.unpack(&out_dir)?;
             // Find extracted binary
-            let bin = first_match(&out_dir, "code-").unwrap_or(out_dir.join("code"));
-            let dest_name = format!("{}-{}", bin.file_name().and_then(|s| s.to_str()).unwrap_or("code"), slug);
+            let bin = first_match(&out_dir, "dev-").unwrap_or(out_dir.join("dev"));
+            let dest_name = format!("{}-{}", bin.file_name().and_then(|s| s.to_str()).unwrap_or("dev"), slug);
             let dest = out_dir.join(dest_name);
             // Rename/move to include PR number suffix
             let _ = fs::rename(&bin, &dest).or_else(|_| { fs::copy(&bin, &dest).map(|_| () ) });
@@ -1354,14 +1365,14 @@ async fn preview_main(args: PreviewArgs) -> anyhow::Result<()> {
             let f = fs::File::open(&path)?;
             let mut z = ZipArchive::new(f)?;
             z.extract(&out_dir)?;
-            let exe = first_match(&out_dir, "code-").unwrap_or(out_dir.join("code.exe"));
+            let exe = first_match(&out_dir, "dev-").unwrap_or(out_dir.join("dev.exe"));
             // Append slug before extension if present
             let dest = match exe.extension().and_then(|e| e.to_str()) {
                 Some(ext) => {
-                    let stem = exe.file_stem().and_then(|s| s.to_str()).unwrap_or("code");
+                    let stem = exe.file_stem().and_then(|s| s.to_str()).unwrap_or("dev");
                     out_dir.join(format!("{}-{}.{}", stem, slug, ext))
                 }
-                None => out_dir.join(format!("{}-{}", exe.file_name().and_then(|s| s.to_str()).unwrap_or("code"), slug)),
+                None => out_dir.join(format!("{}-{}", exe.file_name().and_then(|s| s.to_str()).unwrap_or("dev"), slug)),
             };
             let _ = fs::rename(&exe, &dest).or_else(|_| { fs::copy(&exe, &dest).map(|_| () ) });
             println!("Downloaded preview to {}", dest.display());
@@ -1377,15 +1388,15 @@ async fn preview_main(args: PreviewArgs) -> anyhow::Result<()> {
         }
     }
 
-    // Fallback: raw 'code' file (after .zst) if present
+    // Fallback: raw 'dev' file (after .zst) if present
     if path.file_name().and_then(|s| s.to_str()).map(|n| n.ends_with(".zst")).unwrap_or(false) {
-        // Try to decompress .zst to 'code'
+        // Try to decompress .zst to 'dev'
         if which::which("zstd").is_ok() {
-            // Derive base name from archive (e.g., code-aarch64-apple-darwin.zst -> code-aarch64-apple-darwin-<slug>.{exe?})
+            // Derive base name from archive (e.g., dev-aarch64-apple-darwin.zst -> dev-aarch64-apple-darwin-<slug>.{exe?})
             let stem = path
                 .file_stem()
                 .and_then(|s| s.to_str())
-                .unwrap_or("code");
+                .unwrap_or("dev");
             let dest = if cfg!(windows) { out_dir.join(format!("{}-{}.exe", stem, slug)) } else { out_dir.join(format!("{}-{}", stem, slug)) };
             let status = std::process::Command::new("zstd").arg("-d").arg(&path).arg("-o").arg(&dest).status()?;
             if status.success() {
@@ -1418,7 +1429,7 @@ async fn doctor_main() -> anyhow::Result<()> {
     let exe = std::env::current_exe()
         .map(|p| p.display().to_string())
         .unwrap_or_else(|_| "<unknown>".to_string());
-    println!("code version: {}", code_version::version());
+    println!("code version: {}", hanzo_version::version());
     println!("current_exe: {}", exe);
 
     // PATH
@@ -1543,16 +1554,16 @@ mod tests {
     use tempfile::TempDir;
     use uuid::Uuid;
 
-    use code_protocol::mcp_protocol::ConversationId;
-    use code_protocol::models::{ContentItem, ResponseItem};
-    use code_protocol::protocol::EventMsg as ProtoEventMsg;
-    use code_protocol::protocol::RecordedEvent;
-    use code_protocol::protocol::RolloutItem;
-    use code_protocol::protocol::RolloutLine;
-    use code_protocol::protocol::SessionMeta;
-    use code_protocol::protocol::SessionMetaLine;
-    use code_protocol::protocol::SessionSource;
-    use code_protocol::protocol::UserMessageEvent;
+    use hanzo_protocol::mcp_protocol::ConversationId;
+    use hanzo_protocol::models::{ContentItem, ResponseItem};
+    use hanzo_protocol::protocol::EventMsg as ProtoEventMsg;
+    use hanzo_protocol::protocol::RecordedEvent;
+    use hanzo_protocol::protocol::RolloutItem;
+    use hanzo_protocol::protocol::RolloutLine;
+    use hanzo_protocol::protocol::SessionMeta;
+    use hanzo_protocol::protocol::SessionMetaLine;
+    use hanzo_protocol::protocol::SessionSource;
+    use hanzo_protocol::protocol::UserMessageEvent;
 
     #[test]
     fn bash_completion_uses_code_command_name() {
@@ -1560,7 +1571,7 @@ mod tests {
         write_completion(Shell::Bash, &mut buf);
         let script = String::from_utf8(buf).expect("completion output should be valid UTF-8");
         assert!(script.contains("_code()"), "expected bash completion function to be named _code");
-        assert!(!script.contains("_codex()"), "bash completion output should not use legacy codex prefix");
+        assert!(!script.contains("_dev()"), "bash completion output should not use legacy dev prefix");
     }
 
     fn finalize_from_args(args: &[&str]) -> TuiCli {
@@ -1587,7 +1598,7 @@ mod tests {
 
     #[test]
     fn resume_model_flag_applies_when_no_root_flags() {
-        let interactive = finalize_from_args(["codex", "resume", "-m", "gpt-5.1-test"].as_ref());
+        let interactive = finalize_from_args(["dev", "resume", "-m", "gpt-5.1-test"].as_ref());
 
         assert_eq!(interactive.model.as_deref(), Some("gpt-5.1-test"));
         assert!(interactive.resume_picker);
@@ -1597,7 +1608,7 @@ mod tests {
 
     #[test]
     fn resume_picker_logic_none_and_not_last() {
-        let interactive = finalize_from_args(["codex", "resume"].as_ref());
+        let interactive = finalize_from_args(["dev", "resume"].as_ref());
         assert!(interactive.resume_picker);
         assert!(!interactive.resume_last);
         assert_eq!(interactive.resume_session_id, None);
@@ -1614,9 +1625,9 @@ where
         .unwrap_or_else(|poison| poison.into_inner());
         let temp_home = TempDir::new().expect("temp code home");
         let prev_code_home = std::env::var("CODE_HOME").ok();
-        let prev_codex_home = std::env::var("CODEX_HOME").ok();
+        let prev_dev_home = std::env::var("HANZO_HOME").ok();
         set_env_var("CODE_HOME", temp_home.path());
-        remove_env_var("CODEX_HOME");
+        remove_env_var("HANZO_HOME");
 
         let result = f(temp_home.path());
 
@@ -1624,9 +1635,9 @@ where
             Some(val) => set_env_var("CODE_HOME", val),
             None => remove_env_var("CODE_HOME"),
         }
-        match prev_codex_home {
-            Some(val) => set_env_var("CODEX_HOME", val),
-            None => remove_env_var("CODEX_HOME"),
+        match prev_dev_home {
+            Some(val) => set_env_var("HANZO_HOME", val),
+            None => remove_env_var("HANZO_HOME"),
         }
 
         result
@@ -1749,7 +1760,7 @@ where
             let session_id = Uuid::new_v4();
             create_session_fixture(code_home, &session_id);
 
-            let interactive = finalize_from_args(["codex", "resume", "--last"].as_ref());
+            let interactive = finalize_from_args(["dev", "resume", "--last"].as_ref());
             assert!(!interactive.resume_picker);
             assert!(interactive.resume_last);
             assert_eq!(interactive.resume_session_id, None);
@@ -1764,7 +1775,7 @@ where
             create_session_fixture(code_home, &session_id);
 
             let args = vec![
-                "codex".to_string(),
+                "dev".to_string(),
                 "resume".to_string(),
                 session_id_str.clone(),
             ];
@@ -1888,7 +1899,7 @@ where
             create_session_fixture(code_home, &session_id);
 
             let args = vec![
-                "codex".to_string(),
+                "dev".to_string(),
                 "resume".to_string(),
                 session_id_str.clone(),
                 "--oss".to_string(),
@@ -1916,11 +1927,11 @@ where
             assert_eq!(interactive.config_profile.as_deref(), Some("my-profile"));
             assert!(matches!(
                 interactive.sandbox_mode,
-                Some(code_common::SandboxModeCliArg::WorkspaceWrite)
+                Some(hanzo_common::SandboxModeCliArg::WorkspaceWrite)
             ));
             assert!(matches!(
                 interactive.approval_policy,
-                Some(code_common::ApprovalModeCliArg::OnRequest)
+                Some(hanzo_common::ApprovalModeCliArg::OnRequest)
             ));
             assert!(interactive.full_auto);
             assert_eq!(
@@ -1950,7 +1961,7 @@ where
     fn resume_merges_dangerously_bypass_flag() {
         let interactive = finalize_from_args(
             [
-                "codex",
+                "dev",
                 "resume",
                 "--dangerously-bypass-approvals-and-sandbox",
             ]

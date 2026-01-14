@@ -16,8 +16,8 @@ use std::borrow::Cow;
 use std::path::Path;
 use std::path::PathBuf;
 
-use code_backend_client as backend;
-use code_backend_client::CodeTaskDetailsResponseExt;
+use hanzo_backend_client as backend;
+use hanzo_backend_client::CodeTaskDetailsResponseExt;
 
 #[derive(Clone)]
 pub struct HttpClient {
@@ -234,7 +234,7 @@ mod api {
                 "content": [{ "content_type": "text", "text": prompt }]
             }));
 
-            if let Ok(diff) = std::env::var("CODEX_STARTING_DIFF")
+            if let Ok(diff) = std::env::var("HANZO_STARTING_DIFF")
                 && !diff.is_empty()
             {
                 input_items.push(serde_json::json!({
@@ -365,13 +365,13 @@ mod api {
                 });
             }
 
-            let req = code_git_apply::ApplyGitRequest {
+            let req = hanzo_git_apply::ApplyGitRequest {
                 cwd: std::env::current_dir().unwrap_or_else(|_| std::env::temp_dir()),
                 diff: diff.clone(),
                 revert: false,
                 preflight,
             };
-            let r = code_git_apply::apply_git_patch(&req)
+            let r = hanzo_git_apply::apply_git_patch(&req)
                 .map_err(|e| CloudTaskError::Io(format!("git apply failed to run: {e}")))?;
 
             let status = if r.exit_code == 0 {
@@ -773,7 +773,7 @@ enum CloudLogLevel {
 }
 
 fn log_level_from_env() -> CloudLogLevel {
-    if let Ok(raw) = std::env::var("CODEX_CLOUD_TASKS_LOG_LEVEL") {
+    if let Ok(raw) = std::env::var("HANZO_CLOUD_TASKS_LOG_LEVEL") {
         let value = raw.trim().to_ascii_lowercase();
         return match value.as_str() {
             "off" | "none" | "0" => CloudLogLevel::Off,
@@ -784,7 +784,7 @@ fn log_level_from_env() -> CloudLogLevel {
         };
     }
 
-    if env_truthy("CODE_SUBAGENT_DEBUG") || env_truthy("CODEX_CLOUD_TASKS_DEBUG") {
+    if env_truthy("CODE_SUBAGENT_DEBUG") || env_truthy("HANZO_CLOUD_TASKS_DEBUG") {
         return CloudLogLevel::Debug;
     }
 
@@ -813,19 +813,22 @@ fn user_home_dir() -> Option<PathBuf> {
 }
 
 fn resolve_log_path() -> Option<PathBuf> {
-    if let Ok(path) = std::env::var("CODEX_CLOUD_TASKS_LOG_PATH") {
+    if let Ok(path) = std::env::var("HANZO_CLOUD_TASKS_LOG_PATH") {
         let trimmed = path.trim();
         if !trimmed.is_empty() {
             return Some(PathBuf::from(trimmed));
         }
     }
 
-    let base = if let Ok(dir) = std::env::var("CODEX_CLOUD_TASKS_LOG_DIR") {
+    let base = if let Ok(dir) = std::env::var("HANZO_CLOUD_TASKS_LOG_DIR") {
         PathBuf::from(dir)
-    } else if let Ok(home) = std::env::var("CODE_HOME").or_else(|_| std::env::var("CODEX_HOME")) {
+    } else if let Ok(home) = std::env::var("HANZO_HOME")
+        .or_else(|_| std::env::var("CODE_HOME"))
+        .or_else(|_| std::env::var("CODEX_HOME"))
+    {
         PathBuf::from(home).join("debug_logs")
     } else if let Some(home) = user_home_dir() {
-        home.join(".code").join("debug_logs")
+        home.join(".hanzo").join("debug_logs")
     } else {
         return None;
     };

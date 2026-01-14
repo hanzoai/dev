@@ -5,21 +5,21 @@ use std::path::{Path, PathBuf};
 const CGROUP_MOUNT: &str = "/sys/fs/cgroup";
 
 #[cfg(target_os = "linux")]
-const EXEC_CGROUP_SUBDIR: &str = "code-exec";
+const EXEC_CGROUP_SUBDIR: &str = "dev-exec";
 
 #[cfg(target_os = "linux")]
 const EXEC_CGROUP_OOM_SCORE_ADJ: &str = "500";
 
 #[cfg(target_os = "linux")]
 pub(crate) fn default_exec_memory_max_bytes() -> Option<u64> {
-    if let Ok(raw) = std::env::var("CODEX_EXEC_MEMORY_MAX_BYTES") {
+    if let Ok(raw) = std::env::var("HANZO_EXEC_MEMORY_MAX_BYTES") {
         if let Ok(value) = raw.trim().parse::<u64>() {
             if value > 0 {
                 return Some(value);
             }
         }
     }
-    if let Ok(raw) = std::env::var("CODEX_EXEC_MEMORY_MAX_MB") {
+    if let Ok(raw) = std::env::var("HANZO_EXEC_MEMORY_MAX_MB") {
         if let Ok(value) = raw.trim().parse::<u64>() {
             if value > 0 {
                 return Some(value.saturating_mul(1024 * 1024));

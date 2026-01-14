@@ -1,8 +1,8 @@
 use std::collections::HashMap;
 
-use code_app_server_protocol::AuthMode;
-use code_core::config_types::TextVerbosity as TextVerbosityConfig;
-use code_core::protocol_config_types::ReasoningEffort;
+use hanzo_app_server_protocol::AuthMode;
+use hanzo_core::config_types::TextVerbosity as TextVerbosityConfig;
+use hanzo_core::protocol_config_types::ReasoningEffort;
 use once_cell::sync::Lazy;
 
 pub const HIDE_GPT5_1_MIGRATION_PROMPT_CONFIG: &str = "hide_gpt5_1_migration_prompt";

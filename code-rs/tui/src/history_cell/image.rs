@@ -17,7 +17,7 @@ use super::*;
 use crate::colors;
 use crate::history::state::ImageRecord;
 use crate::theme::{palette_mode, PaletteMode};
-use code_protocol::num_format::format_with_separators;
+use hanzo_protocol::num_format::format_with_separators;
 use ::image::ImageReader;
 use ::image::image_dimensions;
 use ratatui::widgets::{Paragraph, Wrap};
@@ -75,7 +75,7 @@ impl ImageOutputCell {
     pub(crate) fn ensure_picker_initialized(
         &self,
         picker: Option<Picker>,
-        font_size: (u16, u16),
+        _font_size: (u16, u16),
     ) {
         let mut slot = self.cached_picker.borrow_mut();
         let needs_init = match slot.as_ref() {
@@ -85,12 +85,14 @@ impl ImageOutputCell {
                     existing.font_size() != provided.font_size()
                         || existing.protocol_type() != provided.protocol_type()
                 } else {
-                    existing.font_size() != font_size
+                    false
                 }
             }
         };
         if needs_init {
-            *slot = Some(picker.unwrap_or_else(|| Picker::from_fontsize(font_size)));
+            *slot = Some(picker.unwrap_or_else(|| {
+                Picker::from_query_stdio().unwrap_or_else(|_| Picker::halfblocks())
+            }));
             self.cached_image_protocol.borrow_mut().take();
         }
     }
@@ -110,7 +112,7 @@ impl ImageOutputCell {
     fn ensure_picker(&self) -> Picker {
         let mut picker_ref = self.cached_picker.borrow_mut();
         if picker_ref.is_none() {
-            *picker_ref = Some(Picker::from_fontsize((8, 16)));
+            *picker_ref = Some(Picker::from_query_stdio().unwrap_or_else(|_| Picker::halfblocks()));
         }
         picker_ref.as_ref().unwrap().clone()
     }

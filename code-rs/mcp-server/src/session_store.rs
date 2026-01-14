@@ -1,8 +1,8 @@
 use std::collections::HashMap;
 use std::sync::Arc;
 
-use code_core::config::Config;
-use code_core::CodexConversation;
+use hanzo_core::config::Config;
+use hanzo_core::CodexConversation;
 use tokio::sync::Mutex;
 use uuid::Uuid;
 

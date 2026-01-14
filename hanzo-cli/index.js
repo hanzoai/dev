@@ -1,9 +1,9 @@
 #!/usr/bin/env node
 
 /**
- * Hanzo CLI - AI-powered development assistant
- * 
- * This CLI wraps the underlying codex/code functionality with Hanzo branding
+ * Hanzo Dev CLI - AI-powered development assistant
+ *
+ * This CLI wraps the underlying dev functionality with Hanzo branding
  * and additional AI-powered features.
  */
 
@@ -15,7 +15,7 @@ const os = require('os');
 // Configuration
 const HANZO_VERSION = '0.3.0';
 const HANZO_CONFIG_DIR = path.join(os.homedir(), '.hanzo');
-const CODEX_CONFIG_DIR = path.join(os.homedir(), '.codex');
+const LEGACY_CODEX_CONFIG_DIR = path.join(os.homedir(), '.codex');
 
 // ASCII art logo
 const HANZO_LOGO = `
@@ -107,14 +107,12 @@ function ensureConfigDir() {
 function findExecutable() {
   // Check for Rust binary first
   const possiblePaths = [
-    path.join(__dirname, '..', 'target', 'release', 'hanzo'),
-    path.join(__dirname, '..', 'target', 'debug', 'hanzo'),
-    path.join(__dirname, '..', 'codex-rs', 'target', 'release', 'codex-cli'),
-    path.join(__dirname, '..', 'codex-rs', 'target', 'debug', 'codex-cli'),
+    path.join(__dirname, '..', 'bin', 'dev'),
+    path.join(__dirname, '..', 'code-rs', 'target', 'release', 'dev'),
+    path.join(__dirname, '..', 'code-rs', 'target', 'debug', 'dev'),
     // Fallback to system paths
-    '/usr/local/bin/codex',
-    '/usr/local/bin/code',
-    '/opt/homebrew/bin/codex',
+    '/usr/local/bin/dev',
+    '/opt/homebrew/bin/dev',
   ];
 
   for (const p of possiblePaths) {
@@ -126,9 +124,9 @@ function findExecutable() {
   // Try to find in PATH
   const pathDirs = process.env.PATH?.split(':') || [];
   for (const dir of pathDirs) {
-    const codexPath = path.join(dir, 'codex');
-    if (fs.existsSync(codexPath)) {
-      return codexPath;
+    const devPath = path.join(dir, 'dev');
+    if (fs.existsSync(devPath)) {
+      return devPath;
     }
   }
   
@@ -205,7 +203,7 @@ async function main() {
       console.log(`Command: ${command}`);
       console.log(`Description: ${COMMAND_ALIASES[command]}`);
       console.log('\nThis command will be available once the Rust binary is built.');
-      console.log('Run: cd codex-rs && cargo build --release');
+      console.log('Run: ./build-fast.sh');
     } else {
       showHelp();
     }

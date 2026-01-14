@@ -1,6 +1,6 @@
 ---
 name: skill-creator
-description: Guide for creating effective skills. This skill should be used when users want to create a new skill (or update an existing skill) that extends Codex's capabilities with specialized knowledge, workflows, or tool integrations.
+description: Guide for creating effective skills. This skill should be used when users want to create a new skill (or update an existing skill) that extends Hanzo Dev's capabilities with specialized knowledge, workflows, or tool integrations.
 metadata:
   short-description: Create or update a skill
 ---
@@ -11,7 +11,7 @@ This skill provides guidance for creating effective skills.
 
 ## What is a skill?
 
-A skill is a bundle of instructions and resources that Codex can load on demand to complete a specific task. Skills are stored on disk and referenced in project documentation, allowing Codex to access specialized workflows without bloating the global prompt.
+A skill is a bundle of instructions and resources that Hanzo Dev can load on demand to complete a specific task. Skills are stored on disk and referenced in project documentation, allowing Hanzo Dev to access specialized workflows without bloating the global prompt.
 
 Every skill consists of a required SKILL.md file and optional bundled resources:
 
@@ -33,7 +33,7 @@ skill-name/
 
 ## When to create a new skill
 
-- The user wants Codex to perform a specialized or recurring workflow.
+- The user wants Hanzo Dev to perform a specialized or recurring workflow.
 - The task requires detailed domain knowledge or step-by-step instructions.
 - The workflow involves reusable scripts or templates.
 

@@ -16,7 +16,7 @@ use std::sync::Arc;
 use std::sync::Mutex;
 use std::time::Duration;
 
-use code_app_server_protocol::AuthMode;
+use hanzo_app_server_protocol::AuthMode;
 
 use crate::token_data::TokenData;
 use crate::token_data::{parse_id_token, PlanType};
@@ -313,7 +313,7 @@ impl CodexAuth {
 }
 
 pub const OPENAI_API_KEY_ENV_VAR: &str = "OPENAI_API_KEY";
-pub const CODEX_API_KEY_ENV_VAR: &str = "CODEX_API_KEY";
+pub const HANZO_API_KEY_ENV_VAR: &str = "HANZO_API_KEY";
 
 fn read_openai_api_key_from_env() -> Option<String> {
     env::var(OPENAI_API_KEY_ENV_VAR)
@@ -322,7 +322,7 @@ fn read_openai_api_key_from_env() -> Option<String> {
 }
 
 pub fn read_code_api_key_from_env() -> Option<String> {
-    env::var(CODEX_API_KEY_ENV_VAR)
+    env::var(HANZO_API_KEY_ENV_VAR)
         .ok()
         .map(|value| value.trim().to_string())
         .filter(|value| !value.is_empty())
@@ -569,7 +569,7 @@ fn load_auth(
     }))
 }
 
-/// Attempt to read and refresh the `auth.json` file in the given `CODEX_HOME` directory.
+/// Attempt to read and refresh the `auth.json` file in the given `HANZO_HOME` directory.
 /// Returns the full AuthDotJson structure after refreshing if necessary.
 pub fn try_read_auth_json(auth_file: &Path) -> std::io::Result<AuthDotJson> {
     let mut file = File::open(auth_file)?;
@@ -782,7 +782,7 @@ fn summarize_body(body: &str) -> String {
     }
 }
 
-/// Expected structure for $CODEX_HOME/auth.json.
+/// Expected structure for $HANZO_HOME/auth.json.
 #[derive(Deserialize, Serialize, Clone, Debug, PartialEq)]
 pub struct AuthDotJson {
     #[serde(rename = "OPENAI_API_KEY")]

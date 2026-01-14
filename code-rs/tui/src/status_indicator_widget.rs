@@ -5,13 +5,14 @@ use std::cell::Cell;
 use std::time::Duration;
 use std::time::Instant;
 
-use code_core::protocol::Op;
+use hanzo_core::protocol::Op;
 use ratatui::buffer::Buffer;
 use ratatui::layout::Rect;
-use ratatui::style::{Style, Stylize};
+use ratatui::style::Style;
 use ratatui::text::Line;
 use ratatui::widgets::Paragraph;
 use ratatui::widgets::WidgetRef;
+use ratatui::widgets::Widget;
 
 use crate::app_event::AppEvent;
 use crate::app_event_sender::AppEventSender;
@@ -194,7 +195,6 @@ impl WidgetRef for StatusIndicatorWidget {
 
         // Ensure background/foreground reflect theme
         let paragraph = Paragraph::new(lines).style(Style::default().bg(bg).fg(text));
-        paragraph.render_ref(area, buf);
+        paragraph.render(area, buf);
     }
 }
-

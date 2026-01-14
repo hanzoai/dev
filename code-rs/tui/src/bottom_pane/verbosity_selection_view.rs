@@ -1,4 +1,4 @@
-use code_core::config_types::TextVerbosity;
+use hanzo_core::config_types::TextVerbosity;
 use crossterm::event::KeyCode;
 use crossterm::event::KeyEvent;
 use crossterm::event::KeyModifiers;

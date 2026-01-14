@@ -1,5 +1,5 @@
 [package]
-name = "code-version"
+name = "hanzo-version"
 version = { workspace = true }
 edition = { workspace = true }
 build = "build.rs"

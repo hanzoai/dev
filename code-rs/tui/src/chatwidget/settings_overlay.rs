@@ -32,7 +32,7 @@ use crate::chrome_launch::{ChromeLaunchOption, CHROME_LAUNCH_CHOICES};
 use super::limits_overlay::{LimitsOverlay, LimitsOverlayContent};
 use crate::live_wrap::take_prefix_by_width;
 use crate::util::buffer::fill_rect;
-use code_core::config_types::ReasoningEffort;
+use hanzo_core::config_types::ReasoningEffort;
 
 const LABEL_COLUMN_WIDTH: usize = 18;
 

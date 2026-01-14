@@ -16,7 +16,7 @@ use super::card_style::{
 use super::{HistoryCell, HistoryCellType, ToolCellStatus};
 use crate::colors;
 use crate::theme::{palette_mode, PaletteMode};
-use code_common::elapsed::format_duration_digital;
+use hanzo_common::elapsed::format_duration_digital;
 use ratatui::buffer::Buffer;
 use ratatui::layout::Rect;
 use ratatui::style::{Modifier, Style};

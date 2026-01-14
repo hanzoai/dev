@@ -31,7 +31,7 @@ struct AutoDrivePidMetadata {
     command: Option<String>,
 }
 
-/// Small RAII helper that writes `~/.code/auto-drive/pid-<pid>.json` and
+/// Small RAII helper that writes `~/.hanzo/auto-drive/pid-<pid>.json` and
 /// removes it when dropped or explicitly cleaned up.
 pub struct AutoDrivePidFile {
     path: PathBuf,

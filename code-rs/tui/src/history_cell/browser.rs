@@ -16,7 +16,7 @@ use super::card_style::{
 use super::{HistoryCell, HistoryCellType, ToolCellStatus};
 use crate::colors;
 use crate::theme::{palette_mode, PaletteMode};
-use code_common::elapsed::format_duration_digital;
+use hanzo_common::elapsed::format_duration_digital;
 use ratatui::buffer::Buffer;
 use ratatui::layout::Rect;
 use ratatui::prelude::Style;
@@ -153,7 +153,7 @@ impl BrowserSessionCell {
     pub(crate) fn ensure_picker_initialized(
         &self,
         picker: Option<Picker>,
-        font_size: (u16, u16),
+        _font_size: (u16, u16),
     ) {
         let mut slot = self.cached_picker.borrow_mut();
         if slot.is_some() {
@@ -162,7 +162,7 @@ impl BrowserSessionCell {
         if let Some(p) = picker {
             *slot = Some(p);
         } else {
-            *slot = Some(Picker::from_fontsize(font_size));
+            *slot = Some(Picker::from_query_stdio().unwrap_or_else(|_| Picker::halfblocks()));
         }
     }
 
@@ -942,7 +942,7 @@ impl BrowserSessionCell {
     fn ensure_picker(&self) -> Picker {
         let mut picker_ref = self.cached_picker.borrow_mut();
         if picker_ref.is_none() {
-            *picker_ref = Some(Picker::from_fontsize((8, 16)));
+            *picker_ref = Some(Picker::from_query_stdio().unwrap_or_else(|_| Picker::halfblocks()));
         }
         picker_ref.as_ref().unwrap().clone()
     }

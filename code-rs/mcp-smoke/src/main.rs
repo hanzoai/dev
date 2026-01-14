@@ -4,18 +4,18 @@ use std::time::Duration;
 
 use anyhow::Result;
 use assert_cmd::cargo::cargo_bin;
-use code_core::config_types::{McpServerConfig, McpServerTransportConfig};
-use code_core::mcp_connection_manager::McpConnectionManager;
+use hanzo_core::config_types::{McpServerConfig, McpServerTransportConfig};
+use hanzo_core::mcp_connection_manager::McpConnectionManager;
 
 fn server_bin_path() -> PathBuf {
-    cargo_bin("code-mcp-test-server")
+    cargo_bin("dev-mcp-test-server")
 }
 
 #[tokio::main]
 async fn main() -> Result<()> {
     let server = server_bin_path();
     if !server.exists() {
-        eprintln!("Build the test server first: cargo build -p code-mcp-test-server");
+        eprintln!("Build the test server first: cargo build -p hanzo-mcp-test-server");
         std::process::exit(2);
     }
 

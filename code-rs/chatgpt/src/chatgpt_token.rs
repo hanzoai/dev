@@ -1,10 +1,10 @@
-use code_core::CodexAuth;
-use code_app_server_protocol::AuthMode;
+use hanzo_core::CodexAuth;
+use hanzo_app_server_protocol::AuthMode;
 use std::path::Path;
 use std::sync::LazyLock;
 use std::sync::RwLock;
 
-use code_core::token_data::TokenData;
+use hanzo_core::token_data::TokenData;
 
 static CHATGPT_TOKEN: LazyLock<RwLock<Option<TokenData>>> = LazyLock::new(|| RwLock::new(None));
 

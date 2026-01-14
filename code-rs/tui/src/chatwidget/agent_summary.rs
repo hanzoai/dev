@@ -1,6 +1,6 @@
 use std::collections::HashMap;
 
-use code_core::config_types::AgentConfig;
+use hanzo_core::config_types::AgentConfig;
 
 pub(super) fn agent_summary_counts(config_agents: &[AgentConfig]) -> (usize, usize) {
     let mut enabled = 0usize;
@@ -11,7 +11,7 @@ pub(super) fn agent_summary_counts(config_agents: &[AgentConfig]) -> (usize, usi
         config_by_name.insert(cfg.name.to_ascii_lowercase(), cfg);
     }
 
-    for spec in code_core::agent_defaults::agent_model_specs() {
+    for spec in hanzo_core::agent_defaults::agent_model_specs() {
         total += 1;
         let key = spec.slug.to_ascii_lowercase();
         if let Some(cfg) = config_by_name.get(&key) {
@@ -23,7 +23,7 @@ pub(super) fn agent_summary_counts(config_agents: &[AgentConfig]) -> (usize, usi
 
     for cfg in config_agents {
         let key = cfg.name.to_ascii_lowercase();
-        if code_core::agent_defaults::agent_model_spec(&key).is_some() {
+        if hanzo_core::agent_defaults::agent_model_spec(&key).is_some() {
             continue;
         }
         total += 1;
@@ -38,7 +38,7 @@ pub(super) fn agent_summary_counts(config_agents: &[AgentConfig]) -> (usize, usi
 #[cfg(test)]
 mod agent_summary_counts_tests {
     use super::agent_summary_counts;
-    use code_core::config_types::AgentConfig;
+    use hanzo_core::config_types::AgentConfig;
 
     fn make_agent(name: &str, enabled: bool) -> AgentConfig {
         AgentConfig {
@@ -63,7 +63,7 @@ mod agent_summary_counts_tests {
         ];
 
         let (enabled, total) = agent_summary_counts(&agents);
-        let builtins = code_core::agent_defaults::agent_model_specs().len();
+        let builtins = hanzo_core::agent_defaults::agent_model_specs().len();
 
         assert_eq!(enabled, 2);
         assert_eq!(total, builtins);
@@ -77,7 +77,7 @@ mod agent_summary_counts_tests {
         ];
 
         let (enabled, total) = agent_summary_counts(&agents);
-        let builtins = code_core::agent_defaults::agent_model_specs().len();
+        let builtins = hanzo_core::agent_defaults::agent_model_specs().len();
 
         assert_eq!(enabled, 1);
         assert_eq!(total, builtins + 1);

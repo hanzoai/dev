@@ -4,7 +4,7 @@ pub mod login;
 pub mod proto;
 
 use clap::Parser;
-use code_common::CliConfigOverrides;
+use hanzo_common::CliConfigOverrides;
 
 #[derive(Debug, Parser)]
 pub struct SeatbeltCommand {

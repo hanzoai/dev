@@ -1,5 +1,5 @@
 [package]
-name = "code-cli-proxy"
+name = "hanzo-cli-proxy"
 version = "0.1.0"
 edition = "2021"
 description = "Multi-CLI to OpenAI-compatible API proxy for subscription-based AI CLIs"
@@ -7,7 +7,7 @@ license = "MIT"
 authors = ["Hanzo AI <dev@hanzo.ai>"]
 
 [[bin]]
-name = "cli-proxy"
+name = "dev-cli-proxy"
 path = "src/main.rs"
 
 [dependencies]

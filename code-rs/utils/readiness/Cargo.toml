@@ -1,5 +1,5 @@
 [package]
-name = "code-utils-readiness"
+name = "hanzo-utils-readiness"
 version.workspace = true
 edition.workspace = true
 

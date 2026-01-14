@@ -22,9 +22,9 @@ use crate::rollout::list::Cursor;
 use crate::rollout::list::get_conversation;
 use crate::rollout::list::get_conversations;
 use std::time::{Duration, SystemTime};
-use code_protocol::models::{ContentItem, ResponseItem};
-use code_protocol::ConversationId;
-use code_protocol::protocol::{
+use hanzo_protocol::models::{ContentItem, ResponseItem};
+use hanzo_protocol::ConversationId;
+use hanzo_protocol::protocol::{
     EventMsg as ProtoEventMsg,
     RecordedEvent,
     RolloutItem,

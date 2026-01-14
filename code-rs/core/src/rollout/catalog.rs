@@ -6,8 +6,8 @@ use std::fs;
 use std::io::{self, BufRead, BufReader};
 use std::path::{Path, PathBuf};
 
-use code_protocol::models::{ContentItem, ResponseItem};
-use code_protocol::protocol::{RolloutItem, RolloutLine, SessionSource};
+use hanzo_protocol::models::{ContentItem, ResponseItem};
+use hanzo_protocol::protocol::{RolloutItem, RolloutLine, SessionSource};
 use serde::{Deserialize, Serialize};
 use tracing::warn;
 use uuid::Uuid;

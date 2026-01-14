@@ -1,7 +1,7 @@
 use crate::app_event_sender::AppEventSender;
 use crate::chatwidget::BackgroundOrderTicket;
-use code_core::config::Config;
-use code_core::git_info::collect_git_info;
+use hanzo_core::config::Config;
+use hanzo_core::git_info::collect_git_info;
 use std::process::Command;
 
 /// Source of a GitHub API token used by the watcher.
@@ -59,7 +59,7 @@ pub(super) fn maybe_watch_after_push(
         let api_base = format!("https://api.github.com/repos/{owner}/{repo}/actions/runs");
         let token = get_github_token().map(|(t, _)| t);
         let client = reqwest::Client::builder()
-            .user_agent("codex-cli-rs/github-monitor")
+            .user_agent("dev-cli-rs/github-monitor")
             .build()
             .unwrap_or_else(|_| reqwest::Client::new());
 

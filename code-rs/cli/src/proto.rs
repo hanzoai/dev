@@ -1,16 +1,16 @@
 use std::io::IsTerminal;
 
 use clap::Parser;
-use code_common::CliConfigOverrides;
-use code_core::AuthManager;
-use code_core::ConversationManager;
-use code_core::NewConversation;
-use code_core::config::Config;
-use code_core::config::ConfigOverrides;
-use code_core::protocol::Event;
-use code_core::protocol::EventMsg;
-use code_core::protocol::Submission;
-use code_protocol::protocol::SessionSource;
+use hanzo_common::CliConfigOverrides;
+use hanzo_core::AuthManager;
+use hanzo_core::ConversationManager;
+use hanzo_core::NewConversation;
+use hanzo_core::config::Config;
+use hanzo_core::config::ConfigOverrides;
+use hanzo_core::protocol::Event;
+use hanzo_core::protocol::EventMsg;
+use hanzo_core::protocol::Submission;
+use hanzo_protocol::protocol::SessionSource;
 use tokio::io::AsyncBufReadExt;
 use tokio::io::BufReader;
 use tracing::error;
@@ -40,7 +40,7 @@ pub async fn run_main(opts: ProtoCli) -> anyhow::Result<()> {
     // Use conversation_manager API to start a conversation
     let auth_manager = AuthManager::shared_with_mode_and_originator(
         config.code_home.clone(),
-        code_login::AuthMode::ApiKey,
+        hanzo_login::AuthMode::ApiKey,
         config.responses_originator_header.clone(),
     );
     let conversation_manager = ConversationManager::new(auth_manager.clone(), SessionSource::Cli);

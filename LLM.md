@@ -5,6 +5,10 @@ Hanzo Dev is a powerful fork of OpenAI's Codex CLI, enhanced with enterprise fea
 
 ## Recent Updates (December 2025)
 
+### Branding + Tooling Refresh (January 2026)
+- Updated docs and CLI guidance to use Hanzo Dev branding, `dev` command, and `~/.hanzo` as primary config home (legacy `~/.code`/`~/.codex` still read).
+- MCP Rust crate moved to Rust 2024 edition with a `rust-toolchain.toml` pinned to `stable`.
+
 ### Major Architecture Improvements
 
 1. **Compilation Fixes and Code Quality**

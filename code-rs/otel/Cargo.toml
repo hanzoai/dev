@@ -1,11 +1,11 @@
 [package]
 edition = "2024"
-name = "code-otel"
+name = "hanzo-otel"
 version = { workspace = true }
 
 [lib]
 doctest = false
-name = "code_otel"
+name = "hanzo_otel"
 path = "src/lib.rs"
 
 [lints]
@@ -25,8 +25,8 @@ otel-shim = []
 
 [dependencies]
 chrono = { workspace = true }
-code-app-server-protocol = { workspace = true }
-code-protocol = { workspace = true }
+hanzo-app-server-protocol = { workspace = true }
+hanzo-protocol = { workspace = true }
 eventsource-stream = { workspace = true }
 opentelemetry = { workspace = true, features = ["logs"], optional = true }
 opentelemetry-otlp = { workspace = true, features = [

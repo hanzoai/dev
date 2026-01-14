@@ -9,8 +9,8 @@ use std::time::Instant;
 
 use crate::pkce::PkceCodes;
 use crate::server::{persist_tokens_async, exchange_code_for_tokens, ServerOptions};
-use code_browser::global as browser_global;
-use code_core::default_client;
+use hanzo_browser::global as browser_global;
+use hanzo_core::default_client;
 use std::io::Write;
 use std::io::{self};
 

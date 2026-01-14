@@ -1,7 +1,7 @@
 use std::path::Path;
 
-use code_core::config::Config;
-use code_core::protocol::Event;
+use hanzo_core::config::Config;
+use hanzo_core::protocol::Event;
 
 pub(crate) enum CodexStatus {
     Running,

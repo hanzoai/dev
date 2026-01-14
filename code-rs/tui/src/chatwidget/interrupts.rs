@@ -1,12 +1,12 @@
 // (none)
 
-use code_core::protocol::ApplyPatchApprovalRequestEvent;
-use code_core::protocol::ExecApprovalRequestEvent;
-use code_core::protocol::ExecCommandBeginEvent;
-use code_core::protocol::ExecCommandEndEvent;
-use code_core::protocol::McpToolCallBeginEvent;
-use code_core::protocol::McpToolCallEndEvent;
-use code_core::protocol::PatchApplyEndEvent;
+use hanzo_core::protocol::ApplyPatchApprovalRequestEvent;
+use hanzo_core::protocol::ExecApprovalRequestEvent;
+use hanzo_core::protocol::ExecCommandBeginEvent;
+use hanzo_core::protocol::ExecCommandEndEvent;
+use hanzo_core::protocol::McpToolCallBeginEvent;
+use hanzo_core::protocol::McpToolCallEndEvent;
+use hanzo_core::protocol::PatchApplyEndEvent;
 
 use super::ChatWidget;
 use super::tools;
@@ -15,10 +15,10 @@ use super::tools;
 pub(crate) enum QueuedInterrupt {
     ExecApproval { seq: u64, id: String, ev: ExecApprovalRequestEvent },
     ApplyPatchApproval { seq: u64, id: String, ev: ApplyPatchApprovalRequestEvent },
-    ExecBegin { seq: u64, ev: ExecCommandBeginEvent, order: Option<code_core::protocol::OrderMeta> },
-    ExecEnd { seq: u64, ev: ExecCommandEndEvent, order: Option<code_core::protocol::OrderMeta> },
-    McpBegin { seq: u64, ev: McpToolCallBeginEvent, order: Option<code_core::protocol::OrderMeta> },
-    McpEnd { seq: u64, ev: McpToolCallEndEvent, order: Option<code_core::protocol::OrderMeta> },
+    ExecBegin { seq: u64, ev: ExecCommandBeginEvent, order: Option<hanzo_core::protocol::OrderMeta> },
+    ExecEnd { seq: u64, ev: ExecCommandEndEvent, order: Option<hanzo_core::protocol::OrderMeta> },
+    McpBegin { seq: u64, ev: McpToolCallBeginEvent, order: Option<hanzo_core::protocol::OrderMeta> },
+    McpEnd { seq: u64, ev: McpToolCallEndEvent, order: Option<hanzo_core::protocol::OrderMeta> },
     PatchEnd { seq: u64, ev: PatchApplyEndEvent },
 }
 
@@ -48,19 +48,19 @@ impl InterruptManager {
         self.queue.push(QueuedInterrupt::ApplyPatchApproval { seq, id, ev });
     }
 
-    pub(crate) fn push_exec_begin(&mut self, seq: u64, ev: ExecCommandBeginEvent, order: Option<code_core::protocol::OrderMeta>) {
+    pub(crate) fn push_exec_begin(&mut self, seq: u64, ev: ExecCommandBeginEvent, order: Option<hanzo_core::protocol::OrderMeta>) {
         self.queue.push(QueuedInterrupt::ExecBegin { seq, ev, order });
     }
 
-    pub(crate) fn push_exec_end(&mut self, seq: u64, ev: ExecCommandEndEvent, order: Option<code_core::protocol::OrderMeta>) {
+    pub(crate) fn push_exec_end(&mut self, seq: u64, ev: ExecCommandEndEvent, order: Option<hanzo_core::protocol::OrderMeta>) {
         self.queue.push(QueuedInterrupt::ExecEnd { seq, ev, order });
     }
 
-    pub(crate) fn push_mcp_begin(&mut self, seq: u64, ev: McpToolCallBeginEvent, order: Option<code_core::protocol::OrderMeta>) {
+    pub(crate) fn push_mcp_begin(&mut self, seq: u64, ev: McpToolCallBeginEvent, order: Option<hanzo_core::protocol::OrderMeta>) {
         self.queue.push(QueuedInterrupt::McpBegin { seq, ev, order });
     }
 
-    pub(crate) fn push_mcp_end(&mut self, seq: u64, ev: McpToolCallEndEvent, order: Option<code_core::protocol::OrderMeta>) {
+    pub(crate) fn push_mcp_end(&mut self, seq: u64, ev: McpToolCallEndEvent, order: Option<hanzo_core::protocol::OrderMeta>) {
         self.queue.push(QueuedInterrupt::McpEnd { seq, ev, order });
     }
 
@@ -88,7 +88,7 @@ impl InterruptManager {
                         Some(ord) => chat.handle_exec_begin_ordered(ev, ord.clone(), seq),
                         None => {
                             tracing::warn!("missing OrderMeta in queued ExecBegin; rendering with synthetic order");
-                            let synthetic = code_core::protocol::OrderMeta {
+                            let synthetic = hanzo_core::protocol::OrderMeta {
                                 request_ordinal: chat.last_seen_request_index,
                                 output_index: Some(i32::MAX as u32),
                                 sequence_number: Some(0),
@@ -102,7 +102,7 @@ impl InterruptManager {
                         Some(ord) => chat.enqueue_or_handle_exec_end(ev, ord.clone()),
                         None => {
                             tracing::warn!("missing OrderMeta in queued ExecEnd; rendering with synthetic order");
-                            let synthetic = code_core::protocol::OrderMeta {
+                            let synthetic = hanzo_core::protocol::OrderMeta {
                                 request_ordinal: chat.last_seen_request_index,
                                 output_index: Some(i32::MAX as u32),
                                 sequence_number: Some(1),

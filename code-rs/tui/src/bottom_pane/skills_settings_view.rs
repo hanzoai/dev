@@ -1,7 +1,7 @@
 use std::fs;
-use code_core::config::find_code_home;
-use code_core::protocol::Op;
-use code_protocol::skills::{Skill, SkillScope};
+use hanzo_core::config::find_code_home;
+use hanzo_core::protocol::Op;
+use hanzo_protocol::skills::{Skill, SkillScope};
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 use ratatui::buffer::Buffer;
 use ratatui::layout::{Alignment, Constraint, Direction, Layout, Rect};
@@ -393,7 +393,7 @@ impl SkillsSettingsView {
             Ok(path) => path,
             Err(err) => {
                 self.status = Some((
-                    format!("CODE_HOME unavailable: {err}"),
+                    format!("HANZO_HOME unavailable: {err}"),
                     Style::default().fg(colors::error()),
                 ));
                 return;

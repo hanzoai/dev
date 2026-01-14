@@ -8,7 +8,7 @@
 //! This backend is only available when the `test-helpers` feature is enabled:
 //!
 //! ```rust,ignore
-//! use code_tui::test_backend::VT100Backend;
+//! use hanzo_tui::test_backend::VT100Backend;
 //! use ratatui::Terminal;
 //!
 //! let backend = VT100Backend::new(80, 24);

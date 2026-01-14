@@ -18,7 +18,7 @@
 //! 4. If there is a in-flight search that is not a prefix of the latest thing
 //!    the user typed, it is cancelled.
 
-use code_file_search as file_search;
+use hanzo_file_search as file_search;
 use std::num::NonZeroUsize;
 use std::path::PathBuf;
 use std::sync::Arc;

@@ -18,7 +18,7 @@ use crate::gradient_background::{GradientBackground, RevealRender};
 use crate::util::buffer::fill_rect;
 use crate::colors;
 use crate::theme::{palette_mode, PaletteMode};
-use code_common::elapsed::format_duration_digital;
+use hanzo_common::elapsed::format_duration_digital;
 use ratatui::buffer::Buffer;
 use ratatui::layout::Rect;
 use ratatui::style::{Color, Modifier, Style};

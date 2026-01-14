@@ -559,12 +559,12 @@ mod tests_windows {
                     bash_exe_fallback: Some(PathBuf::from("bash.exe")),
                 }),
                 vec![
-                    "code-mcp-server.exe",
+                    "dev-mcp-server.exe",
                     "--codex-run-as-apply-patch",
                     "*** Begin Patch\n*** Update File: C:\\Users\\person\\destination_file.txt\n-original content\n+modified content\n*** End Patch",
                 ],
                 vec![
-                    "code-mcp-server.exe",
+                    "dev-mcp-server.exe",
                     "--codex-run-as-apply-patch",
                     "*** Begin Patch\n*** Update File: C:\\Users\\person\\destination_file.txt\n-original content\n+modified content\n*** End Patch",
                 ],

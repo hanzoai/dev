@@ -1,18 +1,18 @@
 use chrono::Utc;
-use code_core::AuthManager;
-use code_core::CodexAuth;
-use code_core::ModelProviderInfo;
-use code_core::WireApi;
-use code_core::remote_models::RemoteModelsManager;
-use code_protocol::openai_models::ModelInfo;
-use code_protocol::openai_models::ModelsResponse;
+use hanzo_core::AuthManager;
+use hanzo_core::CodexAuth;
+use hanzo_core::ModelProviderInfo;
+use hanzo_core::WireApi;
+use hanzo_core::remote_models::RemoteModelsManager;
+use hanzo_protocol::openai_models::ModelInfo;
+use hanzo_protocol::openai_models::ModelsResponse;
 use pretty_assertions::assert_eq;
 use tempfile::tempdir;
 use wiremock::matchers::{header, method, path};
 use wiremock::{Mock, MockServer, ResponseTemplate};
 
 fn skip_if_no_network() -> bool {
-    std::env::var(code_core::spawn::CODEX_SANDBOX_NETWORK_DISABLED_ENV_VAR).is_ok()
+    std::env::var(hanzo_core::spawn::HANZO_SANDBOX_NETWORK_DISABLED_ENV_VAR).is_ok()
 }
 
 fn remote_model(slug: &str, display: &str, priority: i32) -> ModelInfo {
@@ -300,11 +300,11 @@ async fn construct_model_family_applies_remote_overrides() {
     assert_eq!(family.base_instructions, "REMOTE INSTRUCTIONS");
     assert_eq!(
         family.apply_patch_tool_type,
-        Some(code_core::ApplyPatchToolType::Function)
+        Some(hanzo_core::ApplyPatchToolType::Function)
     );
     assert_eq!(family.supports_reasoning_summaries, true);
     assert_eq!(
         family.default_reasoning_effort,
-        Some(code_core::config_types::ReasoningEffort::High)
+        Some(hanzo_core::config_types::ReasoningEffort::High)
     );
 }

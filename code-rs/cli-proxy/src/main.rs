@@ -28,8 +28,8 @@ const DEFAULT_HANZO_ENGINE_URL: &str = "http://localhost:8080";
 
 /// CLI proxy server arguments
 #[derive(Parser, Debug)]
-#[command(name = "cli-proxy")]
-#[command(about = "Multi-CLI to OpenAI-compatible API proxy")]
+#[command(name = "dev-cli-proxy")]
+#[command(about = "Hanzo Dev multi-CLI to OpenAI-compatible API proxy")]
 struct Args {
     /// Port to listen on
     #[arg(short, long, default_value = "9999")]
@@ -65,7 +65,7 @@ impl Backend {
                 args
             }
             "codex" => {
-                let mut args = vec!["-q".to_string(), "--full-auto".to_string()];
+                let mut args = vec!["exec".to_string(), "--full-auto".to_string()];
                 if !model.is_empty() && model != "codex" && model.starts_with("codex-") {
                     args.push("-m".to_string());
                     args.push(model.to_string());

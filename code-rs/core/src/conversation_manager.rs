@@ -11,11 +11,11 @@ use crate::protocol::Event;
 use crate::protocol::EventMsg;
 use crate::protocol::SessionConfiguredEvent;
 use crate::rollout::RolloutRecorder;
-use code_protocol::ConversationId;
-use code_protocol::protocol::SessionSource;
-use code_protocol::models::ResponseItem;
-use code_protocol::protocol::InitialHistory;
-use code_protocol::protocol::RolloutItem;
+use hanzo_protocol::ConversationId;
+use hanzo_protocol::protocol::SessionSource;
+use hanzo_protocol::models::ResponseItem;
+use hanzo_protocol::protocol::InitialHistory;
+use hanzo_protocol::protocol::RolloutItem;
 use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -77,7 +77,7 @@ impl ConversationManager {
             init_id: _,
             session_id,
         } = Codex::spawn_with_auth_manager(config, Some(auth_manager.clone())).await?;
-        let conversation_id: code_protocol::ConversationId = session_id.into();
+        let conversation_id: hanzo_protocol::ConversationId = session_id.into();
         self.finalize_spawn(codex, conversation_id).await
     }
 
@@ -138,7 +138,7 @@ impl ConversationManager {
             init_id: _,
             session_id,
         } = Codex::spawn_with_auth_manager(config, Some(auth_manager.clone())).await?;
-        let conversation_id: code_protocol::ConversationId = session_id.into();
+        let conversation_id: hanzo_protocol::ConversationId = session_id.into();
         self.finalize_spawn(codex, conversation_id).await
     }
 
@@ -173,7 +173,7 @@ impl ConversationManager {
         }
 
         // Otherwise, create a temporary rollout with the truncated items and resume from it.
-        let convo_id = code_protocol::ConversationId::new();
+        let convo_id = hanzo_protocol::ConversationId::new();
         let instructions = config.user_instructions.clone();
         let recorder = RolloutRecorder::new(
             &config,
@@ -204,7 +204,7 @@ impl ConversationManager {
             init_id: _,
             session_id,
         } = Codex::spawn_with_auth_manager(config, Some(self.auth_manager.clone())).await?;
-        let conversation_id: code_protocol::ConversationId = session_id.into();
+        let conversation_id: hanzo_protocol::ConversationId = session_id.into();
         self.finalize_spawn(codex, conversation_id).await
     }
 }
@@ -248,9 +248,9 @@ fn truncate_after_dropping_last_messages(history: InitialHistory, n: usize) -> I
 #[cfg(test)]
 mod tests {
     use super::*;
-    use code_protocol::models::ContentItem;
-    use code_protocol::models::ReasoningItemReasoningSummary;
-    use code_protocol::models::ResponseItem;
+    use hanzo_protocol::models::ContentItem;
+    use hanzo_protocol::models::ReasoningItemReasoningSummary;
+    use hanzo_protocol::models::ResponseItem;
 
     fn user_msg(text: &str) -> ResponseItem {
         ResponseItem::Message {

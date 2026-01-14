@@ -1,10 +1,10 @@
 [package]
 edition = "2024"
-name = "code-ollama"
+name = "hanzo-ollama"
 version = { workspace = true }
 
 [lib]
-name = "code_ollama"
+name = "hanzo_ollama"
 path = "src/lib.rs"
 
 [lints]
@@ -13,7 +13,7 @@ workspace = true
 [dependencies]
 async-stream = { workspace = true }
 bytes = { workspace = true }
-code-core = { workspace = true }
+hanzo-core = { workspace = true }
 futures = { workspace = true }
 reqwest = { version = "0.12", default-features = false, features = ["json", "stream", "rustls-tls"] }
 serde_json = { workspace = true }

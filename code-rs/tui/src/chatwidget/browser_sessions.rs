@@ -6,8 +6,8 @@ use crate::history_cell::{
     HistoryCellType,
     plain_message_state_from_lines,
 };
-use code_core::protocol::OrderMeta;
-use ratatui::style::{Style, Stylize};
+use hanzo_core::protocol::OrderMeta;
+use ratatui::style::Style;
 use ratatui::text::{Line, Span};
 use serde_json::Value;
 use std::path::PathBuf;

@@ -1,5 +1,5 @@
 use chrono::{DateTime, Utc};
-use code_app_server_protocol::AuthMode;
+use hanzo_app_server_protocol::AuthMode;
 use serde::{Deserialize, Serialize};
 use std::fs::File;
 use std::fs::OpenOptions;

@@ -7,10 +7,10 @@
 
 #[cfg(test)]
 mod tests {
-    use code_protocol::models::{ContentItem, ResponseItem};
+    use hanzo_protocol::models::{ContentItem, ResponseItem};
     use crate::environment_context::{EnvironmentContext, EnvironmentContextTracker};
     use crate::shell::{Shell, BashShell};
-    use code_protocol::protocol::ENVIRONMENT_CONTEXT_OPEN_TAG;
+    use hanzo_protocol::protocol::ENVIRONMENT_CONTEXT_OPEN_TAG;
 
     /// Helper to create a legacy XML environment context item
     fn legacy_env_context_item() -> ResponseItem {

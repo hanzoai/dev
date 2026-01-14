@@ -21,9 +21,9 @@ use crate::app::App;
 use crate::app::AttemptView;
 use chrono::Local;
 use chrono::Utc;
-use code_cloud_tasks_client::AttemptStatus;
-use code_cloud_tasks_client::TaskStatus;
-use code_tui::render_markdown_text;
+use hanzo_cloud_tasks_client::AttemptStatus;
+use hanzo_cloud_tasks_client::TaskStatus;
+use hanzo_tui::render_markdown_text;
 
 pub fn draw(frame: &mut Frame, app: &mut App) {
     let area = frame.area();
@@ -61,7 +61,7 @@ static ROUNDED: OnceLock<bool> = OnceLock::new();
 
 fn rounded_enabled() -> bool {
     *ROUNDED.get_or_init(|| {
-        std::env::var("CODEX_TUI_ROUNDED")
+        std::env::var("HANZO_TUI_ROUNDED")
             .ok()
             .map(|v| v == "1")
             .unwrap_or(true)
@@ -777,7 +777,7 @@ fn style_diff_line(raw: &str) -> Line<'static> {
     Line::from(vec![Span::raw(raw.to_string())])
 }
 
-fn render_task_item(_app: &App, t: &code_cloud_tasks_client::TaskSummary) -> ListItem<'static> {
+fn render_task_item(_app: &App, t: &hanzo_cloud_tasks_client::TaskSummary) -> ListItem<'static> {
     let status = match t.status {
         TaskStatus::Ready => "READY".green(),
         TaskStatus::Pending => "PENDING".magenta(),

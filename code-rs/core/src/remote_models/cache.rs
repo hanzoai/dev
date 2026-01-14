@@ -1,5 +1,5 @@
 use chrono::{DateTime, Utc};
-use code_protocol::openai_models::ModelInfo;
+use hanzo_protocol::openai_models::ModelInfo;
 use serde::{Deserialize, Serialize};
 use std::io;
 use std::io::ErrorKind;

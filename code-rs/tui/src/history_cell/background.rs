@@ -2,7 +2,7 @@
 
 use super::*;
 use crate::history::state::{BackgroundEventRecord, HistoryId};
-use code_ansi_escape::ansi_escape_line;
+use hanzo_ansi_escape::ansi_escape_line;
 use ratatui::style::Style;
 use ratatui::text::{Line, Span};
 

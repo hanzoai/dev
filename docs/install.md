@@ -10,14 +10,14 @@
 
 ### DotSlash
 
-GitHub Releases also contain a [DotSlash](https://dotslash-cli.com/) shim named `code`. Checking the DotSlash file into your repo pins contributors to the same binary across platforms.
+GitHub Releases also contain a [DotSlash](https://dotslash-cli.com/) shim named `dev`. Checking the DotSlash file into your repo pins contributors to the same binary across platforms.
 
 ### Build from source
 
 ```bash
 # Clone the repository and navigate to the workspace root.
-git clone https://github.com/just-every/code.git
-cd code
+git clone https://github.com/hanzoai/dev.git
+cd dev
 
 # Install the Rust toolchain, if necessary.
 curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y
@@ -27,7 +27,7 @@ source "$HOME/.cargo/env"
 ./build-fast.sh
 
 # Launch the TUI with a sample prompt.
-./target/debug/code -- "explain this codebase to me"
+./target/debug/dev -- "explain this codebase to me"
 ```
 
 > [!NOTE]

@@ -15,6 +15,7 @@ use crossterm::style::SetColors;
 use crossterm::style::SetForegroundColor;
 // No terminal clears in terminal-mode insertion; preserve user's theme.
 use ratatui::layout::Size;
+use ratatui::prelude::IntoCrossterm;
 use ratatui::style::Color;
 use ratatui::style::Modifier;
 use ratatui::text::Line;
@@ -157,7 +158,7 @@ pub fn insert_history_lines_to_writer_above<B, W>(
     let wrapped_count = wrapped.len();
 
     tracing::debug!(
-        target: "code_tui::scrollback",
+        target: "hanzo_tui::scrollback",
         screen_h,
         reserved_bottom_rows,
         reserved,
@@ -168,7 +169,7 @@ pub fn insert_history_lines_to_writer_above<B, W>(
 
     if region_bottom <= 1 {
         tracing::debug!(
-            target: "code_tui::scrollback",
+            target: "hanzo_tui::scrollback",
             screen_h,
             reserved_bottom_rows,
             reserved,
@@ -202,7 +203,7 @@ pub fn insert_history_lines_to_writer_above<B, W>(
     }
 
     tracing::debug!(
-        target: "code_tui::scrollback",
+        target: "hanzo_tui::scrollback",
         screen_h,
         reserved_bottom_rows,
         reserved,
@@ -376,7 +377,7 @@ where
         if next_fg != fg || next_bg != bg {
             queue!(
                 writer,
-                SetColors(Colors::new(next_fg.into(), next_bg.into()))
+                SetColors(Colors::new(next_fg.into_crossterm(), next_bg.into_crossterm()))
             )?;
             fg = next_fg;
             bg = next_bg;

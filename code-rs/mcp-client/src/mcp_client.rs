@@ -27,11 +27,12 @@ use mcp_types::CallToolRequestParams;
 use mcp_types::InitializeRequest;
 use mcp_types::InitializeRequestParams;
 use mcp_types::InitializedNotification;
-use mcp_types::JSONRPC_VERSION;
+use mcp_types::JSONRPCError;
 use mcp_types::JSONRPCMessage;
 use mcp_types::JSONRPCNotification;
 use mcp_types::JSONRPCRequest;
 use mcp_types::JSONRPCResponse;
+use mcp_types::JSONRPC_VERSION;
 use mcp_types::ListToolsRequest;
 use mcp_types::ListToolsRequestParams;
 use mcp_types::ListToolsResult;
@@ -56,7 +57,6 @@ use tracing::warn;
 /// Capacity of the bounded channels used for transporting messages between the
 /// client API and the IO tasks.
 const CHANNEL_CAPACITY: usize = 128;
-
 /// Internal representation of a pending request sender.
 type PendingSender = oneshot::Sender<JSONRPCMessage>;
 
@@ -397,7 +397,7 @@ impl McpClient {
 
     /// Internal helper: route a JSON-RPC *error* object to the pending map.
     async fn dispatch_error(
-        err: mcp_types::JSONRPCError,
+        err: JSONRPCError,
         pending: &Arc<Mutex<HashMap<i64, PendingSender>>>,
     ) {
         let id = match err.id {

@@ -4,10 +4,10 @@
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 use regex_lite::Regex;
 use std::sync::OnceLock;
-use code_core::protocol::{
+use hanzo_core::protocol::{
     AgentReasoningDeltaEvent, AgentReasoningEvent, Event, EventMsg, OrderMeta,
 };
-use code_tui::test_helpers::{layout_metrics, render_chat_widget_to_vt100, ChatWidgetHarness};
+use hanzo_tui::test_helpers::{layout_metrics, render_chat_widget_to_vt100, ChatWidgetHarness};
 
 #[test]
 fn bottom_spacer_short_wrapped_content_80x24() {

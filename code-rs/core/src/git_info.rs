@@ -2,8 +2,8 @@ use std::collections::HashSet;
 use std::path::Path;
 use std::path::PathBuf;
 
-use code_app_server_protocol::GitSha;
-use code_protocol::protocol::GitInfo;
+use hanzo_app_server_protocol::GitSha;
+use hanzo_protocol::protocol::GitInfo;
 use futures::future::join_all;
 use serde::Deserialize;
 use serde::Serialize;

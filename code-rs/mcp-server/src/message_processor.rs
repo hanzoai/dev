@@ -1,7 +1,7 @@
 use std::collections::HashMap;
 use std::path::PathBuf;
 
-use code_app_server::code_message_processor::CodexMessageProcessor;
+use hanzo_app_server::code_message_processor::CodexMessageProcessor;
 use crate::code_tool_config::create_tool_for_acp_new_session;
 use crate::code_tool_config::create_tool_for_acp_prompt;
 use crate::code_tool_config::create_tool_for_acp_set_model;
@@ -19,21 +19,21 @@ use crate::session_store::SessionMap;
 use agent_client_protocol as acp;
 use anyhow::anyhow;
 use anyhow::Context as _;
-use code_app_server_protocol::ClientRequest;
-use code_protocol::ConversationId;
-use code_protocol::protocol::SessionSource;
+use hanzo_app_server_protocol::ClientRequest;
+use hanzo_protocol::ConversationId;
+use hanzo_protocol::protocol::SessionSource;
 
-use code_common::model_presets::{builtin_model_presets, clamp_reasoning_effort_for_model, ModelPreset};
-use code_core::AuthManager;
-use code_core::ConversationManager;
-use code_core::config_types::{ClientTools, McpServerConfig, McpServerTransportConfig, ReasoningEffort};
-use code_core::config::Config;
-use code_core::default_client::USER_AGENT_SUFFIX;
-use code_core::default_client::get_code_user_agent_default;
-use code_core::model_family::{derive_default_model_family, find_family_for_model};
-use code_core::protocol::Submission;
-use code_core::protocol::Op;
-use code_app_server_protocol::AuthMode;
+use hanzo_common::model_presets::{builtin_model_presets, clamp_reasoning_effort_for_model, ModelPreset};
+use hanzo_core::AuthManager;
+use hanzo_core::ConversationManager;
+use hanzo_core::config_types::{ClientTools, McpServerConfig, McpServerTransportConfig, ReasoningEffort};
+use hanzo_core::config::Config;
+use hanzo_core::default_client::USER_AGENT_SUFFIX;
+use hanzo_core::default_client::get_code_user_agent_default;
+use hanzo_core::model_family::{derive_default_model_family, find_family_for_model};
+use hanzo_core::protocol::Submission;
+use hanzo_core::protocol::Op;
+use hanzo_app_server_protocol::AuthMode;
 use mcp_types::CallToolRequestParams;
 use mcp_types::CallToolResult;
 use mcp_types::ClientRequest as McpClientRequest;
@@ -399,9 +399,9 @@ impl MessageProcessor {
 
         // Build a minimal InitializeResult. Fill with placeholders.
         let server_info = serde_json::json!({
-            "name": "code-mcp-server",
+            "name": "dev-mcp-server",
             "version": env!("CARGO_PKG_VERSION"),
-            "title": "Codex",
+            "title": "Hanzo Dev",
             "user_agent": get_code_user_agent_default(),
         });
 
@@ -418,9 +418,9 @@ impl MessageProcessor {
         });
 
         let auth_methods = serde_json::json!([{
-            "id": "code-login",
-            "name": "Use Code login",
-            "description": "Run `code login` (ChatGPT or API key) before connecting."
+            "id": "dev-login",
+            "name": "Use Hanzo Dev login",
+            "description": "Run `dev login` (ChatGPT or API key) before connecting."
         }]);
 
         let result = serde_json::json!({
@@ -448,7 +448,7 @@ impl MessageProcessor {
     async fn handle_ping(
         &self,
         id: RequestId,
-        params: <mcp_types::PingRequest as mcp_types::ModelContextProtocolRequest>::Params,
+        params: <mcp_types::PingRequest as ModelContextProtocolRequest>::Params,
     ) {
         tracing::info!("ping -> params: {:?}", params);
         let result = json!({});
@@ -458,7 +458,7 @@ impl MessageProcessor {
 
     fn handle_list_resources(
         &self,
-        params: <mcp_types::ListResourcesRequest as mcp_types::ModelContextProtocolRequest>::Params,
+        params: <mcp_types::ListResourcesRequest as ModelContextProtocolRequest>::Params,
     ) {
         tracing::info!("resources/list -> params: {:?}", params);
     }
@@ -466,42 +466,42 @@ impl MessageProcessor {
     fn handle_list_resource_templates(
         &self,
         params:
-            <mcp_types::ListResourceTemplatesRequest as mcp_types::ModelContextProtocolRequest>::Params,
+            <mcp_types::ListResourceTemplatesRequest as ModelContextProtocolRequest>::Params,
     ) {
         tracing::info!("resources/templates/list -> params: {:?}", params);
     }
 
     fn handle_read_resource(
         &self,
-        params: <mcp_types::ReadResourceRequest as mcp_types::ModelContextProtocolRequest>::Params,
+        params: <mcp_types::ReadResourceRequest as ModelContextProtocolRequest>::Params,
     ) {
         tracing::info!("resources/read -> params: {:?}", params);
     }
 
     fn handle_subscribe(
         &self,
-        params: <mcp_types::SubscribeRequest as mcp_types::ModelContextProtocolRequest>::Params,
+        params: <mcp_types::SubscribeRequest as ModelContextProtocolRequest>::Params,
     ) {
         tracing::info!("resources/subscribe -> params: {:?}", params);
     }
 
     fn handle_unsubscribe(
         &self,
-        params: <mcp_types::UnsubscribeRequest as mcp_types::ModelContextProtocolRequest>::Params,
+        params: <mcp_types::UnsubscribeRequest as ModelContextProtocolRequest>::Params,
     ) {
         tracing::info!("resources/unsubscribe -> params: {:?}", params);
     }
 
     fn handle_list_prompts(
         &self,
-        params: <mcp_types::ListPromptsRequest as mcp_types::ModelContextProtocolRequest>::Params,
+        params: <mcp_types::ListPromptsRequest as ModelContextProtocolRequest>::Params,
     ) {
         tracing::info!("prompts/list -> params: {:?}", params);
     }
 
     fn handle_get_prompt(
         &self,
-        params: <mcp_types::GetPromptRequest as mcp_types::ModelContextProtocolRequest>::Params,
+        params: <mcp_types::GetPromptRequest as ModelContextProtocolRequest>::Params,
     ) {
         tracing::info!("prompts/get -> params: {:?}", params);
     }
@@ -509,7 +509,7 @@ impl MessageProcessor {
     async fn handle_list_tools(
         &self,
         id: RequestId,
-        params: <mcp_types::ListToolsRequest as mcp_types::ModelContextProtocolRequest>::Params,
+        params: <mcp_types::ListToolsRequest as ModelContextProtocolRequest>::Params,
     ) {
         tracing::trace!("tools/list -> {params:?}");
         let result = ListToolsResult {
@@ -530,7 +530,7 @@ impl MessageProcessor {
     async fn handle_call_tool(
         &self,
         id: RequestId,
-        params: <mcp_types::CallToolRequest as mcp_types::ModelContextProtocolRequest>::Params,
+        params: <mcp_types::CallToolRequest as ModelContextProtocolRequest>::Params,
     ) {
         tracing::info!("tools/call -> params: {:?}", params);
         let CallToolRequestParams { name, arguments } = params;
@@ -747,14 +747,14 @@ impl MessageProcessor {
 
     fn handle_set_level(
         &self,
-        params: <mcp_types::SetLevelRequest as mcp_types::ModelContextProtocolRequest>::Params,
+        params: <mcp_types::SetLevelRequest as ModelContextProtocolRequest>::Params,
     ) {
         tracing::info!("logging/setLevel -> params: {:?}", params);
     }
 
     fn handle_complete(
         &self,
-        params: <mcp_types::CompleteRequest as mcp_types::ModelContextProtocolRequest>::Params,
+        params: <mcp_types::CompleteRequest as ModelContextProtocolRequest>::Params,
     ) {
         tracing::info!("completion/complete -> params: {:?}", params);
     }
@@ -808,7 +808,7 @@ impl MessageProcessor {
         let err = code_arc
             .submit_with_id(Submission {
                 id: request_id_string,
-                op: code_core::protocol::Op::Interrupt,
+                op: hanzo_core::protocol::Op::Interrupt,
             })
             .await;
         if let Err(e) = err {
@@ -976,7 +976,7 @@ impl MessageProcessor {
         let client_tools = override_tools
             .or_else(|| self.base_config.experimental_client_tools.clone());
 
-        let overrides = code_core::config::ConfigOverrides {
+        let overrides = hanzo_core::config::ConfigOverrides {
             cwd: Some(request.cwd),
             mcp_servers: Some(mcp_servers),
             experimental_client_tools: client_tools,
@@ -1520,7 +1520,7 @@ fn session_models_from_config(config: &Config) -> Option<acp::SessionModelState>
         available_models.push(acp::ModelInfo {
             model_id: id.clone(),
             name: config.model.clone(),
-            description: Some("Configured via CODEX_HOME/config.toml".to_string()),
+            description: Some("Configured via HANZO_HOME/config.toml".to_string()),
             meta: None,
         });
         return Some(acp::SessionModelState {
@@ -1536,7 +1536,7 @@ fn session_models_from_config(config: &Config) -> Option<acp::SessionModelState>
         available_models.push(acp::ModelInfo {
             model_id: id.clone(),
             name: config.model.clone(),
-            description: Some("Configured via CODEX_HOME/config.toml".to_string()),
+            description: Some("Configured via HANZO_HOME/config.toml".to_string()),
             meta: None,
         });
         current_model_id = Some(id);
@@ -1592,7 +1592,7 @@ fn resolve_model_selection(model_id: &acp::ModelId, config: &Config) -> Option<M
 }
 
 fn apply_model_selection(config: &mut Config, model: &str, effort: ReasoningEffort) -> bool {
-    let requested_effort: code_protocol::config_types::ReasoningEffort = effort.into();
+    let requested_effort: hanzo_protocol::config_types::ReasoningEffort = effort.into();
     let clamped_effort: ReasoningEffort =
         clamp_reasoning_effort_for_model(model, requested_effort).into();
 

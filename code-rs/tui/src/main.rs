@@ -1,10 +1,10 @@
 use clap::Parser;
-use code_arg0::arg0_dispatch_or_else;
-use code_common::CliConfigOverrides;
-use code_tui::Cli;
-use code_tui::ExitSummary;
-use code_tui::run_main;
-use code_tui::resume_command_name;
+use hanzo_arg0::arg0_dispatch_or_else;
+use hanzo_common::CliConfigOverrides;
+use hanzo_tui::Cli;
+use hanzo_tui::ExitSummary;
+use hanzo_tui::run_main;
+use hanzo_tui::resume_command_name;
 
 #[derive(Parser, Debug)]
 struct TopCli {
@@ -31,7 +31,7 @@ fn main() -> anyhow::Result<()> {
         if !token_usage.is_zero() {
             println!(
                 "{}",
-                code_core::protocol::FinalOutput::from(token_usage.clone())
+                hanzo_core::protocol::FinalOutput::from(token_usage.clone())
             );
         }
         if let Some(session_id) = session_id {

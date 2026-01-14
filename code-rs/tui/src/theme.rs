@@ -1,6 +1,6 @@
-use code_core::config_types::ThemeColors;
-use code_core::config_types::ThemeConfig;
-use code_core::config_types::ThemeName;
+use hanzo_core::config_types::ThemeColors;
+use hanzo_core::config_types::ThemeConfig;
+use hanzo_core::config_types::ThemeName;
 use lazy_static::lazy_static;
 use ratatui::style::Color;
 use std::cmp::Ordering;
@@ -11,7 +11,7 @@ lazy_static! {
     static ref CURRENT_THEME: RwLock<Theme> = RwLock::new(Theme::default());
     static ref CURRENT_THEME_NAME: RwLock<ThemeName> = RwLock::new(ThemeName::LightPhoton);
     static ref CUSTOM_THEME_LABEL: RwLock<Option<String>> = RwLock::new(None);
-    static ref CUSTOM_THEME_COLORS: RwLock<Option<code_core::config_types::ThemeColors>> = RwLock::new(None);
+    static ref CUSTOM_THEME_COLORS: RwLock<Option<hanzo_core::config_types::ThemeColors>> = RwLock::new(None);
     static ref CUSTOM_THEME_IS_DARK: RwLock<Option<bool>> = RwLock::new(None);
 }
 
@@ -110,12 +110,12 @@ pub fn set_custom_theme_label(label: String) {
 
 /// Set/update the custom theme's colors at runtime
 #[allow(dead_code)]
-pub fn set_custom_theme_colors(colors: code_core::config_types::ThemeColors) {
+pub fn set_custom_theme_colors(colors: hanzo_core::config_types::ThemeColors) {
     *CUSTOM_THEME_COLORS.write().unwrap() = Some(colors);
 }
 
 /// Return the custom theme colors, if known in this session
-pub fn custom_theme_colors() -> Option<code_core::config_types::ThemeColors> {
+pub fn custom_theme_colors() -> Option<hanzo_core::config_types::ThemeColors> {
     CUSTOM_THEME_COLORS.read().unwrap().clone()
 }
 

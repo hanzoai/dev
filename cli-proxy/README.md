@@ -1,6 +1,6 @@
 # Claude CLI to OpenAI-compatible API Proxy
 
-This proxy enables **@hanzo/dev** (and other OpenAI-compatible clients) to use your authenticated **Claude Code CLI** as a backend, without needing API keys.
+This proxy enables **@hanzo/dev** (and other OpenAI-compatible clients) to use your authenticated **Claude Hanzo Dev CLI** as a backend, without needing API keys.
 
 ## How It Works
 
@@ -22,7 +22,7 @@ PORT=9999 node claude-proxy.js
 
 ### 2. Configure @hanzo/dev
 
-Add to `~/.code/config.toml`:
+Add to `~/.hanzo/config.toml`:
 
 ```toml
 model_provider = "claude-cli"
@@ -38,10 +38,10 @@ wire_api = "chat"
 
 ```bash
 # Interactive mode
-code
+dev
 
 # Exec mode
-echo "What is 2+2?" | code exec --full-auto
+echo "What is 2+2?" | dev exec --full-auto
 ```
 
 ## Testing
@@ -88,7 +88,7 @@ Expected response:
 
 ## Features
 
-- **Zero API Keys**: Uses your authenticated Claude Code CLI
+- **Zero API Keys**: Uses your authenticated Claude Hanzo Dev CLI
 - **OpenAI Compatible**: Works with any OpenAI-compatible client
 - **Multi-Message Support**: Handles system/user/assistant roles
 - **Telemetry Filtering**: Cleans JSON artifacts from CLI output
@@ -97,7 +97,7 @@ Expected response:
 ## Requirements
 
 - Node.js 16+
-- Claude Code CLI installed and authenticated (`claude --version`)
+- Claude Hanzo Dev CLI installed and authenticated (`claude --version`)
 
 ## Troubleshooting
 
@@ -109,9 +109,9 @@ PORT=8080 node claude-proxy.js  # Use different port
 
 ### Claude CLI Not Found
 
-Ensure Claude Code CLI is installed:
+Ensure Claude Hanzo Dev CLI is installed:
 ```bash
-npm install -g @anthropic-ai/claude-code
+npm install -g @anthropic-ai/claude-dev
 claude auth login
 ```
 

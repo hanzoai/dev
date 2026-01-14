@@ -1,7 +1,7 @@
 #![cfg(test)]
 #![allow(clippy::unwrap_used, clippy::expect_used)]
 
-use code_tui::test_helpers::{
+use hanzo_tui::test_helpers::{
     render_chat_widget_to_vt100, AutoContinueModeFixture, ChatWidgetHarness,
 };
 

@@ -1,6 +1,6 @@
 #![allow(dead_code)]
 
-use code_core::config_types::ThemeName;
+use hanzo_core::config_types::ThemeName;
 use crossterm::event::KeyCode;
 use crossterm::event::KeyEvent;
 use crossterm::event::KeyModifiers;
@@ -348,7 +348,7 @@ impl ThemeSelectionView {
             };
             let _ = rt.block_on(async move {
                 // Load current config (CLI-style) and construct a one-off ModelClient
-                let cfg = match code_core::config::Config::load_with_cli_overrides(vec![], code_core::config::ConfigOverrides::default()) {
+                let cfg = match hanzo_core::config::Config::load_with_cli_overrides(vec![], hanzo_core::config::ConfigOverrides::default()) {
                     Ok(c) => c,
                     Err(e) => {
                         tx.send_background_before_next_output_with_ticket(
@@ -361,33 +361,33 @@ impl ThemeSelectionView {
                 // Use the same auth preference as the active Codex session.
                 // When logged in with ChatGPT, prefer ChatGPT auth; otherwise fall back to API key.
                 let preferred_auth = if cfg.using_chatgpt_auth {
-                    code_protocol::mcp_protocol::AuthMode::ChatGPT
+                    hanzo_protocol::mcp_protocol::AuthMode::ChatGPT
                 } else {
-                    code_protocol::mcp_protocol::AuthMode::ApiKey
+                    hanzo_protocol::mcp_protocol::AuthMode::ApiKey
                 };
-                let auth_mgr = code_core::AuthManager::shared_with_mode_and_originator(
+                let auth_mgr = hanzo_core::AuthManager::shared_with_mode_and_originator(
                     cfg.code_home.clone(),
                     preferred_auth,
                     cfg.responses_originator_header.clone(),
                 );
-                let client = code_core::ModelClient::new(
+                let client = hanzo_core::ModelClient::new(
                     std::sync::Arc::new(cfg.clone()),
                     Some(auth_mgr),
                     None,
                     cfg.model_provider.clone(),
-                    code_core::config_types::ReasoningEffort::Low,
+                    hanzo_core::config_types::ReasoningEffort::Low,
                     cfg.model_reasoning_summary,
                     cfg.model_text_verbosity,
                     uuid::Uuid::new_v4(),
                     // Enable debug logs for targeted triage of stream issues
-                    std::sync::Arc::new(std::sync::Mutex::new(code_core::debug_logger::DebugLogger::new(true).unwrap_or_else(|_| code_core::debug_logger::DebugLogger::new(false).expect("debug logger")))),
+                    std::sync::Arc::new(std::sync::Mutex::new(hanzo_core::debug_logger::DebugLogger::new(true).unwrap_or_else(|_| hanzo_core::debug_logger::DebugLogger::new(false).expect("debug logger")))),
                 );
 
                 // Build developer guidance and input
                 let developer = "You are performing a custom task to create a terminal spinner.\n\nRequirements:\n- Output JSON ONLY, no prose.\n- `interval` is the delay in milliseconds between frames; MUST be between 50 and 300 inclusive.\n- `frames` is an array of strings; each element is a frame displayed sequentially at the given interval.\n- The spinner SHOULD have between 2 and 60 frames.\n- Each frame SHOULD be between 1 and 30 characters wide. ALL frames MUST be the SAME width (same number of characters). If you propose frames with varying widths, PAD THEM ON THE LEFT with spaces so they are uniform.\n- You MAY use both ASCII and Unicode characters (e.g., box drawing, braille, arrows). Use EMOJIS ONLY if the user explicitly requests emojis in their prompt.\n- Be creative! You have the full range of Unicode to play with!\n".to_string();
-                let mut input: Vec<code_protocol::models::ResponseItem> = Vec::new();
-                input.push(code_protocol::models::ResponseItem::Message { id: None, role: "developer".to_string(), content: vec![code_protocol::models::ContentItem::InputText { text: developer }] });
-                input.push(code_protocol::models::ResponseItem::Message { id: None, role: "user".to_string(), content: vec![code_protocol::models::ContentItem::InputText { text: user_prompt }] });
+                let mut input: Vec<hanzo_protocol::models::ResponseItem> = Vec::new();
+                input.push(hanzo_protocol::models::ResponseItem::Message { id: None, role: "developer".to_string(), content: vec![hanzo_protocol::models::ContentItem::InputText { text: developer }] });
+                input.push(hanzo_protocol::models::ResponseItem::Message { id: None, role: "user".to_string(), content: vec![hanzo_protocol::models::ContentItem::InputText { text: user_prompt }] });
 
                 // JSON schema for structured output
                 let schema = serde_json::json!({
@@ -406,9 +406,9 @@ impl ThemeSelectionView {
                     "required": ["name", "interval", "frames"],
                     "additionalProperties": false
                 });
-                let format = code_core::TextFormat { r#type: "json_schema".to_string(), name: Some("custom_spinner".to_string()), strict: Some(true), schema: Some(schema) };
+                let format = hanzo_core::TextFormat { r#type: "json_schema".to_string(), name: Some("custom_spinner".to_string()), strict: Some(true), schema: Some(schema) };
 
-                let mut prompt = code_core::Prompt::default();
+                let mut prompt = hanzo_core::Prompt::default();
                 prompt.input = input;
                 prompt.store = true;
                 prompt.text_format = Some(format);
@@ -434,17 +434,17 @@ impl ThemeSelectionView {
                 let mut last_err: Option<String> = None;
                 while let Some(ev) = stream.next().await {
                     match ev {
-                        Ok(code_core::ResponseEvent::Created) => { tracing::info!("LLM: created"); let _ = progress_tx.send(ProgressMsg::SetStatus("(starting generation)".to_string())); }
-                        Ok(code_core::ResponseEvent::ReasoningSummaryDelta { delta, .. }) => { tracing::info!(target: "spinner", "LLM[thinking]: {}", delta); let _ = progress_tx.send(ProgressMsg::ThinkingDelta(delta.clone())); think_sum.push_str(&delta); }
-                        Ok(code_core::ResponseEvent::ReasoningContentDelta { delta, .. }) => { tracing::info!(target: "spinner", "LLM[reasoning]: {}", delta); }
-                        Ok(code_core::ResponseEvent::OutputTextDelta { delta, .. }) => { tracing::info!(target: "spinner", "LLM[delta]: {}", delta); let _ = progress_tx.send(ProgressMsg::OutputDelta(delta.clone())); out.push_str(&delta); }
-                        Ok(code_core::ResponseEvent::OutputItemDone { item, .. }) => {
-                            if let code_protocol::models::ResponseItem::Message { content, .. } = item {
-                                for c in content { if let code_protocol::models::ContentItem::OutputText { text } = c { out.push_str(&text); } }
+                        Ok(hanzo_core::ResponseEvent::Created) => { tracing::info!("LLM: created"); let _ = progress_tx.send(ProgressMsg::SetStatus("(starting generation)".to_string())); }
+                        Ok(hanzo_core::ResponseEvent::ReasoningSummaryDelta { delta, .. }) => { tracing::info!(target: "spinner", "LLM[thinking]: {}", delta); let _ = progress_tx.send(ProgressMsg::ThinkingDelta(delta.clone())); think_sum.push_str(&delta); }
+                        Ok(hanzo_core::ResponseEvent::ReasoningContentDelta { delta, .. }) => { tracing::info!(target: "spinner", "LLM[reasoning]: {}", delta); }
+                        Ok(hanzo_core::ResponseEvent::OutputTextDelta { delta, .. }) => { tracing::info!(target: "spinner", "LLM[delta]: {}", delta); let _ = progress_tx.send(ProgressMsg::OutputDelta(delta.clone())); out.push_str(&delta); }
+                        Ok(hanzo_core::ResponseEvent::OutputItemDone { item, .. }) => {
+                            if let hanzo_protocol::models::ResponseItem::Message { content, .. } = item {
+                                for c in content { if let hanzo_protocol::models::ContentItem::OutputText { text } = c { out.push_str(&text); } }
                             }
                             tracing::info!(target: "spinner", "LLM[item_done]");
                         }
-                        Ok(code_core::ResponseEvent::Completed { .. }) => { tracing::info!("LLM: completed"); break; }
+                        Ok(hanzo_core::ResponseEvent::Completed { .. }) => { tracing::info!("LLM: completed"); break; }
                         Err(e) => {
                             let msg = format!("{}", e);
                             tracing::info!("LLM stream error: {}", msg);
@@ -681,7 +681,7 @@ impl ThemeSelectionView {
                 }
             };
             let _ = rt.block_on(async move {
-                let cfg = match code_core::config::Config::load_with_cli_overrides(vec![], code_core::config::ConfigOverrides::default()) {
+                let cfg = match hanzo_core::config::Config::load_with_cli_overrides(vec![], hanzo_core::config::ConfigOverrides::default()) {
                     Ok(c) => c,
                     Err(e) => {
                         tx.send_background_before_next_output_with_ticket(
@@ -691,12 +691,12 @@ impl ThemeSelectionView {
                         return;
                     }
                 };
-                let auth_mgr = code_core::AuthManager::shared_with_mode_and_originator(
+                let auth_mgr = hanzo_core::AuthManager::shared_with_mode_and_originator(
                     cfg.code_home.clone(),
-                    code_protocol::mcp_protocol::AuthMode::ApiKey,
+                    hanzo_protocol::mcp_protocol::AuthMode::ApiKey,
                     cfg.responses_originator_header.clone(),
                 );
-                let client = code_core::ModelClient::new(
+                let client = hanzo_core::ModelClient::new(
                     std::sync::Arc::new(cfg.clone()),
                     Some(auth_mgr),
                     None,
@@ -705,7 +705,7 @@ impl ThemeSelectionView {
                     cfg.model_reasoning_summary,
                     cfg.model_text_verbosity,
                     uuid::Uuid::new_v4(),
-                    std::sync::Arc::new(std::sync::Mutex::new(code_core::debug_logger::DebugLogger::new(false).unwrap_or_else(|_| code_core::debug_logger::DebugLogger::new(false).expect("debug logger")))),
+                    std::sync::Arc::new(std::sync::Mutex::new(hanzo_core::debug_logger::DebugLogger::new(false).unwrap_or_else(|_| hanzo_core::debug_logger::DebugLogger::new(false).expect("debug logger")))),
                 );
 
                 // Prompt with example and detailed field usage to help the model choose appropriate colors
@@ -713,9 +713,9 @@ impl ThemeSelectionView {
                     "You are designing a TUI color theme for a terminal UI.\n\nOutput: Strict JSON only. Include fields: `name` (string), `is_dark` (boolean), and `colors` (object of hex strings #RRGGBB).\n\nImportant rules:\n- Include EVERY `colors` key below. If you are not changing a value, copy it from the Current example.\n- Ensure strong contrast and readability for text vs background and for dim/bright variants.\n- Favor accessible color contrast (WCAG-ish) where possible.\n\nColor semantics (how the UI uses them):\n- background: main screen background.\n- foreground: primary foreground accents for widgets.\n- text: normal body text; must be readable on background.\n- text_dim: secondary/description text; slightly lower contrast than text.\n- text_bright: headings/emphasis; higher contrast than text.\n- primary: primary action/highlight color for selected items/buttons.\n- secondary: secondary accents (less prominent than primary).\n- border: container borders/dividers; should be visible but subtle against background.\n- border_focused: border when focused/active; slightly stronger than border.\n- selection: background for selected list rows; must contrast with text.\n- cursor: text caret color in input fields; must contrast with background.\n- success/warning/error/info: status badges and notices.\n- keyword/string/comment/function: syntax highlight accents in code blocks.\n- spinner: glyph color for loading animations; should be visible on background.\n- progress: progress-bar foreground color.\n\nCurrent theme example (copy unchanged values from here):\n{}",
                     example.to_string()
                 );
-                let mut input: Vec<code_protocol::models::ResponseItem> = Vec::new();
-                input.push(code_protocol::models::ResponseItem::Message { id: None, role: "developer".to_string(), content: vec![code_protocol::models::ContentItem::InputText { text: developer }] });
-                input.push(code_protocol::models::ResponseItem::Message { id: None, role: "user".to_string(), content: vec![code_protocol::models::ContentItem::InputText { text: user_prompt }] });
+                let mut input: Vec<hanzo_protocol::models::ResponseItem> = Vec::new();
+                input.push(hanzo_protocol::models::ResponseItem::Message { id: None, role: "developer".to_string(), content: vec![hanzo_protocol::models::ContentItem::InputText { text: developer }] });
+                input.push(hanzo_protocol::models::ResponseItem::Message { id: None, role: "user".to_string(), content: vec![hanzo_protocol::models::ContentItem::InputText { text: user_prompt }] });
 
                 let schema = serde_json::json!({
                     "type": "object",
@@ -759,9 +759,9 @@ impl ThemeSelectionView {
                     "required": ["name", "is_dark", "colors"],
                     "additionalProperties": false
                 });
-                let format = code_core::TextFormat { r#type: "json_schema".to_string(), name: Some("custom_theme".to_string()), strict: Some(true), schema: Some(schema) };
+                let format = hanzo_core::TextFormat { r#type: "json_schema".to_string(), name: Some("custom_theme".to_string()), strict: Some(true), schema: Some(schema) };
 
-                let mut prompt = code_core::Prompt::default();
+                let mut prompt = hanzo_core::Prompt::default();
                 prompt.input = input;
                 prompt.store = true;
                 prompt.text_format = Some(format);
@@ -784,29 +784,29 @@ impl ThemeSelectionView {
                 let mut last_err: Option<String> = None;
                 while let Some(ev) = stream.next().await {
                     match ev {
-                        Ok(code_core::ResponseEvent::Created) => {
+                        Ok(hanzo_core::ResponseEvent::Created) => {
                             let _ = progress_tx.send(ProgressMsg::SetStatus("(starting generation)".to_string()));
                         }
-                        Ok(code_core::ResponseEvent::ReasoningSummaryDelta { delta, .. }) => {
+                        Ok(hanzo_core::ResponseEvent::ReasoningSummaryDelta { delta, .. }) => {
                             let _ = progress_tx.send(ProgressMsg::ThinkingDelta(delta));
                         }
-                        Ok(code_core::ResponseEvent::ReasoningContentDelta { delta, .. }) => {
+                        Ok(hanzo_core::ResponseEvent::ReasoningContentDelta { delta, .. }) => {
                             let _ = progress_tx.send(ProgressMsg::ThinkingDelta(delta));
                         }
-                        Ok(code_core::ResponseEvent::OutputTextDelta { delta, .. }) => {
+                        Ok(hanzo_core::ResponseEvent::OutputTextDelta { delta, .. }) => {
                             let _ = progress_tx.send(ProgressMsg::OutputDelta(delta.clone()));
                             out.push_str(&delta);
                         }
-                        Ok(code_core::ResponseEvent::OutputItemDone { item, .. }) => {
-                            if let code_protocol::models::ResponseItem::Message { content, .. } = item {
+                        Ok(hanzo_core::ResponseEvent::OutputItemDone { item, .. }) => {
+                            if let hanzo_protocol::models::ResponseItem::Message { content, .. } = item {
                                 for c in content {
-                                    if let code_protocol::models::ContentItem::OutputText { text } = c {
+                                    if let hanzo_protocol::models::ContentItem::OutputText { text } = c {
                                         out.push_str(&text);
                                     }
                                 }
                             }
                         }
-                        Ok(code_core::ResponseEvent::Completed { .. }) => break,
+                        Ok(hanzo_core::ResponseEvent::Completed { .. }) => break,
                         Err(e) => {
                             let msg = format!("{}", e);
                             let _ = progress_tx.send(ProgressMsg::ThinkingDelta(format!("(stream error: {})", msg)));
@@ -881,7 +881,7 @@ impl ThemeSelectionView {
                 };
                 let name = v.get("name").and_then(|x| x.as_str()).unwrap_or("Custom").trim().to_string();
                 let is_dark = v.get("is_dark").and_then(|x| x.as_bool());
-                let mut colors = code_core::config_types::ThemeColors::default();
+                let mut colors = hanzo_core::config_types::ThemeColors::default();
                 if let Some(map) = v.get("colors").and_then(|x| x.as_object()) {
                     let get = |k: &str| map.get(k).and_then(|x| x.as_str()).map(|s| s.trim().to_string());
                     colors.primary = get("primary");
@@ -962,7 +962,7 @@ struct CreateThemeState {
     thinking_lines: std::cell::RefCell<Vec<String>>,
     thinking_current: std::cell::RefCell<String>,
     proposed_name: std::cell::RefCell<Option<String>>,
-    proposed_colors: std::cell::RefCell<Option<code_core::config_types::ThemeColors>>,
+    proposed_colors: std::cell::RefCell<Option<hanzo_core::config_types::ThemeColors>>,
     preview_on: std::cell::Cell<bool>,
     review_focus_is_toggle: std::cell::Cell<bool>,
     last_raw_output: std::cell::RefCell<Option<String>>,
@@ -986,7 +986,7 @@ enum ProgressMsg {
         interval: u64,
         frames: Vec<String>,
     },
-    CompletedThemeOk(String, code_core::config_types::ThemeColors, Option<bool>),
+    CompletedThemeOk(String, hanzo_core::config_types::ThemeColors, Option<bool>),
     // `_raw_snippet` is captured for potential future display/debugging
     CompletedErr {
         error: String,
@@ -1273,8 +1273,8 @@ impl ThemeSelectionView {
                                             .as_ref()
                                             .cloned()
                                             .unwrap_or_else(|| "Custom".to_string());
-                                        if let Ok(home) = code_core::config::find_code_home() {
-                                            let _ = code_core::config::set_custom_spinner(
+                                        if let Ok(home) = hanzo_core::config::find_code_home() {
+                                            let _ = hanzo_core::config::set_custom_spinner(
                                                 &home,
                                                 "custom",
                                                 &display_name,
@@ -1357,7 +1357,7 @@ impl ThemeSelectionView {
                                             crate::theme::set_custom_theme_colors(colors.clone());
                                             crate::theme::set_custom_theme_label(name.clone());
                                             crate::theme::init_theme(
-                                                &code_core::config_types::ThemeConfig {
+                                                &hanzo_core::config_types::ThemeConfig {
                                                     name: ThemeName::Custom,
                                                     colors,
                                                     label: Some(name),
@@ -1379,8 +1379,8 @@ impl ThemeSelectionView {
                                         s.proposed_name.borrow().clone(),
                                         s.proposed_colors.borrow().clone(),
                                     ) {
-                                        if let Ok(home) = code_core::config::find_code_home() {
-                                            let _ = code_core::config::set_custom_theme(
+                                        if let Ok(home) = hanzo_core::config::find_code_home() {
+                                            let _ = hanzo_core::config::set_custom_theme(
                                                 &home,
                                                 &name,
                                                 &colors,
@@ -1395,7 +1395,7 @@ impl ThemeSelectionView {
                                         );
                                         if s.preview_on.get() {
                                         crate::theme::init_theme(
-                                            &code_core::config_types::ThemeConfig {
+                                            &hanzo_core::config_types::ThemeConfig {
                                                 name: ThemeName::Custom,
                                                 colors: colors.clone(),
                                                 label: Some(name.clone()),
@@ -1896,8 +1896,8 @@ impl<'a> BottomPaneView<'a> for ThemeSelectionView {
                                             .as_ref()
                                             .cloned()
                                             .unwrap_or_else(|| "Custom".to_string());
-                                        if let Ok(home) = code_core::config::find_code_home() {
-                                            let _ = code_core::config::set_custom_spinner(
+                                        if let Ok(home) = hanzo_core::config::find_code_home() {
+                                            let _ = hanzo_core::config::set_custom_spinner(
                                                 &home,
                                                 "custom",
                                                 &display_name,
@@ -1984,7 +1984,7 @@ impl<'a> BottomPaneView<'a> for ThemeSelectionView {
                                             crate::theme::set_custom_theme_colors(colors.clone());
                                             crate::theme::set_custom_theme_label(name.clone());
                                             crate::theme::init_theme(
-                                                &code_core::config_types::ThemeConfig {
+                                                &hanzo_core::config_types::ThemeConfig {
                                                     name: ThemeName::Custom,
                                                     colors,
                                                     label: Some(name),
@@ -2009,8 +2009,8 @@ impl<'a> BottomPaneView<'a> for ThemeSelectionView {
                                         s.proposed_name.borrow().clone(),
                                         s.proposed_colors.borrow().clone(),
                                     ) {
-                                        if let Ok(home) = code_core::config::find_code_home() {
-                                            let _ = code_core::config::set_custom_theme(
+                                        if let Ok(home) = hanzo_core::config::find_code_home() {
+                                            let _ = hanzo_core::config::set_custom_theme(
                                                 &home,
                                                 &name,
                                                 &colors,
@@ -2026,7 +2026,7 @@ impl<'a> BottomPaneView<'a> for ThemeSelectionView {
                                         if s.preview_on.get() {
                                             // Keep preview and set active in UI if chosen
                                             crate::theme::init_theme(
-                                                &code_core::config_types::ThemeConfig {
+                                                &hanzo_core::config_types::ThemeConfig {
                                                     name: ThemeName::Custom,
                                                     colors: colors.clone(),
                                                     label: Some(name.clone()),
@@ -2850,7 +2850,7 @@ impl<'a> BottomPaneView<'a> for ThemeSelectionView {
                                     crate::theme::set_custom_theme_label(name.clone());
                                     crate::theme::set_custom_theme_is_dark(is_dark);
                                     crate::theme::init_theme(
-                                        &code_core::config_types::ThemeConfig {
+                                        &hanzo_core::config_types::ThemeConfig {
                                             name: ThemeName::Custom,
                                             colors: colors.clone(),
                                             label: Some(name),

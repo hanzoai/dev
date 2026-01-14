@@ -1,3 +1,3 @@
 pub fn main() -> ! {
-    code_apply_patch::main()
+    hanzo_apply_patch::main()
 }

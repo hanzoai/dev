@@ -24,7 +24,7 @@ impl Session {
                 .order
                 .as_ref()
                 .map(crate::protocol::order_meta_to_protocol);
-            let protocol_event = code_protocol::protocol::RecordedEvent {
+            let protocol_event = hanzo_protocol::protocol::RecordedEvent {
                 id: event.id.clone(),
                 event_seq: event.event_seq,
                 order,
