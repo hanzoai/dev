@@ -7,6 +7,7 @@
 &ensp;
 ## What's new in v0.6.0 (December 2025)
 
+- **GitHub Copilot Integration** – Complete CLI integration with GitHub Copilot for code suggestions, review, documentation, and shell commands. Use `dev copilot` for AI-powered assistance directly from the command line.
 - **Auto Review** – background ghost-commit watcher runs reviews in a separate worktree whenever a turn changes files; uses `dev-5.1-mini-high` and reports issues plus ready-to-apply fixes without blocking the main thread.
 - **Dev Bridge** – Sentry-style local bridge that streams errors, console, screenshots, and control from running apps into Hanzo Dev; ships an MCP server; install by asking Hanzo Dev to pull `https://github.com/hanzoai/dev-bridge` (legacy: `@just-every/code-bridge`).
 - **Plays well with Auto Drive** – reviews run in parallel with long Auto Drive tasks so quality checks land while the flow keeps moving.
@@ -21,6 +22,7 @@
 - 🚀 **Auto Drive orchestration** – Multi-agent automation that now self-heals and ships complete tasks.
 - 🌐 **Browser Integration** – CDP support, headless browsing, screenshots captured inline.
 - 🤖 **Multi-agent commands** – `/plan`, `/dev` and `/solve` coordinate multiple CLI agents.
+- 🔧 **GitHub Copilot Integration** – Complete CLI integration for code suggestions, review, documentation generation, and shell command assistance.
 - 🧭 **Unified settings hub** – `/settings` overlay for limits, theming, approvals, and provider wiring.
 - 🎨 **Theme system** – Switch between accessible presets, customize accents, and preview live via `/themes`.
 - 🔌 **MCP support** – Extend with filesystem, DBs, APIs, or your own tools.

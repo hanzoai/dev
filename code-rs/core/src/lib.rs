@@ -34,6 +34,8 @@ mod conversation_history;
 pub mod context_timeline;
 pub mod acp;
 pub mod custom_prompts;
+// GitHub Copilot integration
+pub mod copilot_integration;
 pub mod debug_logger;
 pub mod review_coord;
 mod environment_context;
