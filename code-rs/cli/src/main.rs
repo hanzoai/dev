@@ -18,6 +18,8 @@ use hanzo_cli::login::run_logout;
 mod bridge;
 mod llm;
 use llm::{LlmCli, run_llm};
+mod copilot_cmd;
+use copilot_cmd::{CopilotArgs, execute_copilot_command};
 use hanzo_common::CliConfigOverrides;
 use hanzo_core::{entry_to_rollout_path, SessionCatalog, SessionQuery};
 use hanzo_core::spawn::spawn_std_command_with_retry;
@@ -158,6 +160,10 @@ enum Subcommand {
 
     /// Side-channel LLM utilities (no TUI events).
     Llm(LlmCli),
+
+    /// GitHub Copilot integration for code assistance.
+    #[clap(visible_alias = "gh")]
+    Copilot(CopilotArgs),
 
     /// Manage Dev Bridge subscription for this workspace.
     Bridge(BridgeCommand),
@@ -610,6 +616,11 @@ async fn cli_main(code_linux_sandbox_exe: Option<PathBuf>) -> anyhow::Result<()>
                 root_config_overrides.clone(),
             );
             run_llm(llm_cli).await?;
+        }
+        Some(Subcommand::Copilot(copilot_args)) => {
+            // Simple default config for Copilot, similar to other simple commands
+            let config = hanzo_core::config::Config::load_with_cli_overrides(vec![], Default::default())?;
+            execute_copilot_command(copilot_args, &config).await?;
         }
     }
 
