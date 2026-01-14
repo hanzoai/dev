@@ -65,7 +65,7 @@ impl NotificationsSettingsView {
                 );
                 self.app_event_tx.send_background_event_with_ticket(
                     &self.ticket,
-                    "Edit ~/.code/config.toml [tui].notifications to change filters.".to_string(),
+                    "Edit ~/.hanzo/config.toml [tui].notifications to change filters.".to_string(),
                 );
             }
         }
@@ -235,7 +235,7 @@ impl<'a> BottomPaneView<'a> for NotificationsSettingsView {
             NotificationsMode::Custom { .. } => Line::from(vec![
                 Span::styled("Edit ", Style::default().fg(crate::colors::text_dim())),
                 Span::styled("[tui].notifications", Style::default().fg(crate::colors::info())),
-                Span::styled(" in ~/.code/config.toml to adjust filters.", Style::default().fg(crate::colors::text_dim())),
+                Span::styled(" in ~/.hanzo/config.toml to adjust filters.", Style::default().fg(crate::colors::text_dim())),
             ]),
         };
         lines.push(footer);

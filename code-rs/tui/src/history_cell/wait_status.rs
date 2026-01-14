@@ -1,7 +1,7 @@
 use super::*;
 use crate::history::state::{HistoryId, TextTone, WaitStatusDetail, WaitStatusHeader, WaitStatusState};
 use crate::theme::{current_theme, Theme};
-use code_common::elapsed::format_duration;
+use hanzo_common::elapsed::format_duration;
 use ratatui::style::{Modifier, Style};
 use ratatui::text::{Line, Span};
 use std::time::Duration;

@@ -2,7 +2,7 @@
 
 use std::collections::HashSet;
 
-use code_protocol::models::ResponseItem;
+use hanzo_protocol::models::ResponseItem;
 
 use crate::conversation_history::ConversationHistory;
 use crate::protocol::RateLimitSnapshot;

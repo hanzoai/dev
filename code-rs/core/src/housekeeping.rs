@@ -39,20 +39,20 @@ struct HousekeepingConfig {
 
 impl HousekeepingConfig {
     fn from_env() -> Self {
-        let disabled = std::env::var("CODE_CLEANUP_DISABLE")
+        let disabled = std::env::var("HANZO_CLEANUP_DISABLE")
             .map(|value| matches_ignore_case(&value, &["1", "true", "on", "yes"]))
             .unwrap_or(false);
 
         let session_retention_days = parse_days_env(
-            "CODE_CLEANUP_SESSION_RETENTION_DAYS",
+            "HANZO_CLEANUP_SESSION_RETENTION_DAYS",
             DEFAULT_SESSION_RETENTION_DAYS,
         );
         let worktree_retention_days = parse_days_env(
-            "CODE_CLEANUP_WORKTREE_RETENTION_DAYS",
+            "HANZO_CLEANUP_WORKTREE_RETENTION_DAYS",
             DEFAULT_WORKTREE_RETENTION_DAYS,
         );
         let min_interval_hours = parse_positive_i64_env(
-            "CODE_CLEANUP_MIN_INTERVAL_HOURS",
+            "HANZO_CLEANUP_MIN_INTERVAL_HOURS",
             DEFAULT_MIN_INTERVAL_HOURS,
         );
 
@@ -88,14 +88,14 @@ pub fn run_housekeeping_if_due(code_home: &Path) -> io::Result<Option<CleanupOut
     let config = HousekeepingConfig::from_env();
 
     if config.disabled {
-        debug!("code home housekeeping disabled via CODE_CLEANUP_DISABLE");
+        debug!("hanzo home housekeeping disabled via HANZO_CLEANUP_DISABLE");
         return Ok(None);
     }
 
     let lock_path = code_home.join(LOCK_FILE_NAME);
     let maybe_lock = acquire_lock(&lock_path)?;
     let Some(lock_file) = maybe_lock else {
-        debug!("code home housekeeping skipped; another process holds the lock");
+        debug!("hanzo home housekeeping skipped; another process holds the lock");
         return Ok(None);
     };
     let _lock_guard = HeldLock::new(lock_file);
@@ -111,7 +111,7 @@ pub fn run_housekeeping_if_due(code_home: &Path) -> io::Result<Option<CleanupOut
     {
         let min_interval = time::Duration::hours(config.min_interval_hours.max(0));
         if !min_interval.is_zero() && now - last_run < min_interval {
-            debug!("code home housekeeping skipped; ran recently");
+            debug!("hanzo home housekeeping skipped; ran recently");
             return Ok(None);
         }
     }
@@ -124,7 +124,7 @@ pub fn run_housekeeping_if_due(code_home: &Path) -> io::Result<Option<CleanupOut
 
     if outcome.errors > 0 {
         warn!(
-            "code home housekeeping completed with {} error(s)",
+            "hanzo home housekeeping completed with {} error(s)",
             outcome.errors
         );
     }
@@ -136,10 +136,10 @@ pub fn run_housekeeping_if_due(code_home: &Path) -> io::Result<Option<CleanupOut
             worktrees_pruned = outcome.worktrees_removed,
             worktree_bytes_reclaimed = outcome.worktree_bytes_reclaimed,
             skipped_active_worktrees = outcome.worktrees_skipped_active,
-            "code home housekeeping pruned stale artifacts"
+            "hanzo home housekeeping pruned stale artifacts"
         );
     } else {
-        debug!("code home housekeeping completed; nothing to prune");
+        debug!("hanzo home housekeeping completed; nothing to prune");
     }
 
     Ok(Some(outcome))

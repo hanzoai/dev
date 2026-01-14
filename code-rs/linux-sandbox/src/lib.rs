@@ -10,5 +10,5 @@ pub fn run_main() -> ! {
 
 #[cfg(not(target_os = "linux"))]
 pub fn run_main() -> ! {
-    panic!("code-linux-sandbox is only supported on Linux");
+    panic!("dev-linux-sandbox is only supported on Linux");
 }

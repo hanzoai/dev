@@ -2,17 +2,17 @@ use std::io::{BufWriter, Write};
 use std::path::PathBuf;
 use std::time::{Duration, SystemTime};
 
-use code_protocol::models::{ContentItem, ResponseItem};
-use code_protocol::protocol::{
+use hanzo_protocol::models::{ContentItem, ResponseItem};
+use hanzo_protocol::protocol::{
     EventMsg as ProtoEventMsg, RecordedEvent, RolloutItem, RolloutLine, SessionMeta,
     SessionMetaLine, SessionSource, UserMessageEvent,
 };
-use code_protocol::ConversationId;
+use hanzo_protocol::ConversationId;
 use filetime::{set_file_mtime, FileTime};
 use tempfile::TempDir;
 use uuid::Uuid;
 
-use code_tui::resume::discovery::list_sessions_for_cwd;
+use hanzo_tui::resume::discovery::list_sessions_for_cwd;
 
 fn write_rollout(
     code_home: &std::path::Path,

@@ -1,7 +1,7 @@
 use clap::ArgAction;
 use clap::Parser;
-use code_common::ApprovalModeCliArg;
-use code_common::CliConfigOverrides;
+use hanzo_common::ApprovalModeCliArg;
+use hanzo_common::CliConfigOverrides;
 use std::path::PathBuf;
 
 #[derive(Parser, Debug)]
@@ -37,7 +37,7 @@ pub struct Cli {
     /// Select the sandbox policy to use when executing model-generated shell
     /// commands.
     #[arg(long = "sandbox", short = 's')]
-    pub sandbox_mode: Option<code_common::SandboxModeCliArg>,
+    pub sandbox_mode: Option<hanzo_common::SandboxModeCliArg>,
 
     /// Configure when the model requires human approval before executing a command.
     #[arg(long = "ask-for-approval", short = 'a')]

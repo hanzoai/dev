@@ -1,5 +1,5 @@
 use clap::Parser;
-use code_common::CliConfigOverrides;
+use hanzo_common::CliConfigOverrides;
 
 #[derive(Debug, Clone, clap::Subcommand)]
 pub enum Command {

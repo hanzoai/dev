@@ -40,7 +40,7 @@ struct BrowserLaunchLockFile {
 
 impl BrowserLaunchLockFile {
     async fn acquire(timeout: Duration) -> Result<Self> {
-        let lock_path = std::env::temp_dir().join("code-browser-launch.lock");
+        let lock_path = std::env::temp_dir().join("dev-browser-launch.lock");
         let file = std::fs::OpenOptions::new()
             .create(true)
             .read(true)
@@ -88,7 +88,7 @@ fn is_temporary_internal_launch_error_message(message: &str) -> bool {
 }
 
 fn chrome_logging_enabled() -> bool {
-    env_truthy("CODE_SUBAGENT_DEBUG") || env_truthy("CODEX_BROWSER_LOG")
+    env_truthy("CODE_SUBAGENT_DEBUG") || env_truthy("HANZO_BROWSER_LOG")
 }
 
 fn env_truthy(key: &str) -> bool {
@@ -102,22 +102,22 @@ fn resolve_chrome_log_path() -> Option<PathBuf> {
         return None;
     }
 
-    if let Ok(path) = std::env::var("CODEX_BROWSER_LOG_PATH") {
+    if let Ok(path) = std::env::var("HANZO_BROWSER_LOG_PATH") {
         let trimmed = path.trim();
         if !trimmed.is_empty() {
             return Some(PathBuf::from(trimmed));
         }
     }
 
-    let base = if let Ok(home) = std::env::var("CODE_HOME").or_else(|_| std::env::var("CODEX_HOME")) {
+    let base = if let Ok(home) = std::env::var("CODE_HOME").or_else(|_| std::env::var("HANZO_HOME")) {
         PathBuf::from(home).join("debug_logs")
     } else if let Ok(home) = std::env::var("HOME") {
-        PathBuf::from(home).join(".code").join("debug_logs")
+        PathBuf::from(home).join(".hanzo").join("debug_logs")
     } else {
-        return Some(std::env::temp_dir().join("code-chrome.log"));
+        return Some(std::env::temp_dir().join("dev-chrome.log"));
     };
 
-    let path = base.join("code-chrome.log");
+    let path = base.join("dev-chrome.log");
     if let Some(parent) = path.parent() {
         let _ = std::fs::create_dir_all(parent);
     }
@@ -840,7 +840,7 @@ impl BrowserManager {
                         .duration_since(std::time::UNIX_EPOCH)
                         .unwrap_or_default()
                         .as_millis();
-                    let temp_path = format!("/tmp/code-browser-{pid}-{timestamp}-{attempt}");
+                    let temp_path = format!("/tmp/dev-browser-{pid}-{timestamp}-{attempt}");
                     if tokio::fs::metadata(&temp_path).await.is_ok() {
                         let _ = tokio::fs::remove_dir_all(&temp_path).await;
                     }

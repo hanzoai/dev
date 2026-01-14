@@ -5,56 +5,56 @@ mod event_processor_with_json_output;
 mod slash;
 
 pub use cli::Cli;
-use code_auto_drive_core::start_auto_coordinator;
-use code_auto_drive_core::AutoCoordinatorCommand;
-use code_auto_drive_core::AutoCoordinatorEvent;
-use code_auto_drive_core::AutoCoordinatorEventSender;
-use code_auto_drive_core::AutoCoordinatorStatus;
-use code_auto_drive_core::AutoDriveHistory;
-use code_auto_drive_core::AutoTurnAgentsAction;
-use code_auto_drive_core::AutoTurnAgentsTiming;
-use code_auto_drive_core::AutoTurnCliAction;
-use code_auto_drive_core::MODEL_SLUG;
-use code_core::AuthManager;
-use code_core::BUILT_IN_OSS_MODEL_PROVIDER_ID;
-use code_core::ConversationManager;
-use code_core::NewConversation;
-use code_core::CodexConversation;
-use code_core::config::set_default_originator;
-use code_core::config::Config;
-use code_core::config::ConfigOverrides;
-use code_core::config_types::AutoDriveContinueMode;
-use code_core::model_family::{derive_default_model_family, find_family_for_model};
-use code_core::git_info::get_git_repo_root;
-use code_core::git_info::recent_commits;
-use code_core::review_coord::{
+use hanzo_auto_drive_core::start_auto_coordinator;
+use hanzo_auto_drive_core::AutoCoordinatorCommand;
+use hanzo_auto_drive_core::AutoCoordinatorEvent;
+use hanzo_auto_drive_core::AutoCoordinatorEventSender;
+use hanzo_auto_drive_core::AutoCoordinatorStatus;
+use hanzo_auto_drive_core::AutoDriveHistory;
+use hanzo_auto_drive_core::AutoTurnAgentsAction;
+use hanzo_auto_drive_core::AutoTurnAgentsTiming;
+use hanzo_auto_drive_core::AutoTurnCliAction;
+use hanzo_auto_drive_core::MODEL_SLUG;
+use hanzo_core::AuthManager;
+use hanzo_core::BUILT_IN_OSS_MODEL_PROVIDER_ID;
+use hanzo_core::ConversationManager;
+use hanzo_core::NewConversation;
+use hanzo_core::CodexConversation;
+use hanzo_core::config::set_default_originator;
+use hanzo_core::config::Config;
+use hanzo_core::config::ConfigOverrides;
+use hanzo_core::config_types::AutoDriveContinueMode;
+use hanzo_core::model_family::{derive_default_model_family, find_family_for_model};
+use hanzo_core::git_info::get_git_repo_root;
+use hanzo_core::git_info::recent_commits;
+use hanzo_core::review_coord::{
     bump_snapshot_epoch_for,
     clear_stale_lock_if_dead,
     current_snapshot_epoch_for,
     try_acquire_lock,
 };
-use code_core::protocol::AskForApproval;
-use code_core::protocol::AgentSourceKind;
-use code_core::protocol::AgentStatusUpdateEvent;
-use code_core::protocol::Event;
-use code_core::protocol::EventMsg;
-use code_core::protocol::InputItem;
-use code_core::protocol::Op;
-use code_core::protocol::ReviewOutputEvent;
-use code_core::protocol::ReviewRequest;
-use code_core::protocol::TaskCompleteEvent;
-use code_core::protocol::ReviewContextMetadata;
-use code_protocol::models::ContentItem;
-use code_protocol::models::ResponseItem;
-use code_protocol::protocol::SessionSource;
-use code_ollama::DEFAULT_OSS_MODEL;
-use code_protocol::config_types::SandboxMode;
+use hanzo_core::protocol::AskForApproval;
+use hanzo_core::protocol::AgentSourceKind;
+use hanzo_core::protocol::AgentStatusUpdateEvent;
+use hanzo_core::protocol::Event;
+use hanzo_core::protocol::EventMsg;
+use hanzo_core::protocol::InputItem;
+use hanzo_core::protocol::Op;
+use hanzo_core::protocol::ReviewOutputEvent;
+use hanzo_core::protocol::ReviewRequest;
+use hanzo_core::protocol::TaskCompleteEvent;
+use hanzo_core::protocol::ReviewContextMetadata;
+use hanzo_protocol::models::ContentItem;
+use hanzo_protocol::models::ResponseItem;
+use hanzo_protocol::protocol::SessionSource;
+use hanzo_ollama::DEFAULT_OSS_MODEL;
+use hanzo_protocol::config_types::SandboxMode;
 use event_processor_with_human_output::EventProcessorWithHumanOutput;
 use event_processor_with_json_output::EventProcessorWithJsonOutput;
 use event_processor::handle_last_message;
-use code_git_tooling::GhostCommit;
-use code_git_tooling::CreateGhostCommitOptions;
-use code_git_tooling::create_ghost_commit;
+use hanzo_git_tooling::GhostCommit;
+use hanzo_git_tooling::CreateGhostCommitOptions;
+use hanzo_git_tooling::create_ghost_commit;
 use serde_json::Value;
 use std::collections::HashSet;
 use std::io::IsTerminal;
@@ -73,13 +73,13 @@ use crate::cli::Command as ExecCommand;
 use crate::event_processor::CodexStatus;
 use crate::event_processor::EventProcessor;
 use crate::slash::{process_exec_slash_command, SlashContext, SlashDispatch};
-use code_auto_drive_core::AUTO_RESOLVE_REVIEW_FOLLOWUP;
-use code_auto_drive_core::AutoResolvePhase;
-use code_auto_drive_core::AutoResolveState;
-use code_core::{entry_to_rollout_path, AutoDriveMode, AutoDrivePidFile, SessionCatalog, SessionQuery};
-use code_core::protocol::SandboxPolicy;
-use code_core::git_info::current_branch_name;
-use code_core::timeboxed_exec_guidance::{
+use hanzo_auto_drive_core::AUTO_RESOLVE_REVIEW_FOLLOWUP;
+use hanzo_auto_drive_core::AutoResolvePhase;
+use hanzo_auto_drive_core::AutoResolveState;
+use hanzo_core::{entry_to_rollout_path, AutoDriveMode, AutoDrivePidFile, SessionCatalog, SessionQuery};
+use hanzo_core::protocol::SandboxPolicy;
+use hanzo_core::git_info::current_branch_name;
+use hanzo_core::timeboxed_exec_guidance::{
     AUTO_EXEC_TIMEBOXED_CLI_GUIDANCE,
     AUTO_EXEC_TIMEBOXED_GOAL_SUFFIX,
 };
@@ -89,7 +89,7 @@ use code_core::timeboxed_exec_guidance::{
 const AUTO_REVIEW_SHUTDOWN_GRACE_MS: u64 = 1_500;
 
 pub async fn run_main(cli: Cli, code_linux_sandbox_exe: Option<PathBuf>) -> anyhow::Result<()> {
-    if let Err(err) = set_default_originator("code_exec") {
+    if let Err(err) = set_default_originator("hanzo_exec") {
         tracing::warn!(?err, "Failed to set codex exec originator override {err:?}");
     }
 
@@ -382,8 +382,8 @@ pub async fn run_main(cli: Cli, code_linux_sandbox_exe: Option<PathBuf>) -> anyh
         );
     }
 
-    let mut review_outputs: Vec<code_core::protocol::ReviewOutputEvent> = Vec::new();
-    let mut final_review_snapshot: Option<code_core::protocol::ReviewSnapshotInfo> = None;
+    let mut review_outputs: Vec<hanzo_core::protocol::ReviewOutputEvent> = Vec::new();
+    let mut final_review_snapshot: Option<hanzo_core::protocol::ReviewSnapshotInfo> = None;
     let mut review_runs: u32 = 0;
     let mut last_review_epoch: Option<u64> = None;
     let max_auto_resolve_attempts: u32 = if is_auto_review {
@@ -403,8 +403,8 @@ pub async fn run_main(cli: Cli, code_linux_sandbox_exe: Option<PathBuf>) -> anyh
             None
         }
     });
-    let mut auto_resolve_fix_guard: Option<code_core::review_coord::ReviewGuard> = None;
-    let mut auto_resolve_followup_guard: Option<code_core::review_coord::ReviewGuard> = None;
+    let mut auto_resolve_fix_guard: Option<hanzo_core::review_coord::ReviewGuard> = None;
+    let mut auto_resolve_followup_guard: Option<hanzo_core::review_coord::ReviewGuard> = None;
     // Base snapshot captured at the start of auto-resolve; each review snapshot is parented to this.
     let mut auto_resolve_base_snapshot: Option<GhostCommit> = None;
     let resolve_model_for_auto_resolve = if is_auto_review {
@@ -459,7 +459,7 @@ pub async fn run_main(cli: Cli, code_linux_sandbox_exe: Option<PathBuf>) -> anyh
     };
 
     if oss {
-        code_ollama::ensure_oss_ready(&config)
+        hanzo_ollama::ensure_oss_ready(&config)
             .await
             .map_err(|e| anyhow::anyhow!("OSS setup failed: {e}"))?;
     }
@@ -480,7 +480,7 @@ pub async fn run_main(cli: Cli, code_linux_sandbox_exe: Option<PathBuf>) -> anyh
 
     let auth_manager = AuthManager::shared_with_mode_and_originator(
         config.code_home.clone(),
-        code_protocol::mcp_protocol::AuthMode::ApiKey,
+        hanzo_protocol::mcp_protocol::AuthMode::ApiKey,
         config.responses_originator_header.clone(),
     );
     let conversation_manager = ConversationManager::new(auth_manager.clone(), SessionSource::Exec);
@@ -689,12 +689,13 @@ pub async fn run_main(cli: Cli, code_linux_sandbox_exe: Option<PathBuf>) -> anyh
     }
 
     // Send the prompt.
-    let mut _review_guard: Option<code_core::review_coord::ReviewGuard> = None;
+    let mut _review_guard: Option<hanzo_core::review_coord::ReviewGuard> = None;
 
     // Clear stale review lock in case a prior process crashed.
     let _ = clear_stale_lock_if_dead(Some(&config.cwd));
 
-    let skip_review_lock = std::env::var("CODE_REVIEW_LOCK_LEASE")
+    let skip_review_lock = std::env::var("HANZO_REVIEW_LOCK_LEASE")
+        .or_else(|_| std::env::var("CODE_REVIEW_LOCK_LEASE"))
         .map(|v| v == "1")
         .unwrap_or(false);
 
@@ -1962,7 +1963,7 @@ fn summary_from_output(output: &ReviewOutputEvent) -> AutoReviewSummary {
 
 fn auto_review_branches_dir(git_root: &Path) -> Option<PathBuf> {
     let repo_name = git_root.file_name()?.to_str()?;
-    let mut code_home = code_core::config::find_code_home().ok()?;
+    let mut code_home = hanzo_core::config::find_code_home().ok()?;
     code_home = code_home.join("working").join(repo_name).join("branches");
     std::fs::create_dir_all(&code_home).ok()?;
     Some(code_home)
@@ -2132,7 +2133,7 @@ fn build_auto_prompt(
 
 async fn dispatch_auto_fix(
     conversation: &Arc<CodexConversation>,
-    review: &code_core::protocol::ReviewOutputEvent,
+    review: &hanzo_core::protocol::ReviewOutputEvent,
 ) -> anyhow::Result<()> {
     let fix_prompt = build_fix_prompt(review);
     let items: Vec<InputItem> = vec![InputItem::Text { text: fix_prompt }];
@@ -2426,7 +2427,7 @@ async fn build_followup_review_request(
     }
 }
 
-fn build_fix_prompt(review: &code_core::protocol::ReviewOutputEvent) -> String {
+fn build_fix_prompt(review: &hanzo_core::protocol::ReviewOutputEvent) -> String {
     let summary = format_review_findings(review);
     let raw_json = serde_json::to_string_pretty(review).unwrap_or_else(|_| "{}".to_string());
     let mut preface = String::from(
@@ -2443,7 +2444,7 @@ fn build_fix_prompt(review: &code_core::protocol::ReviewOutputEvent) -> String {
     )
 }
 
-fn format_review_findings(output: &code_core::protocol::ReviewOutputEvent) -> String {
+fn format_review_findings(output: &hanzo_core::protocol::ReviewOutputEvent) -> String {
     if output.findings.is_empty() {
         return String::new();
     }
@@ -2469,7 +2470,7 @@ fn format_review_findings(output: &code_core::protocol::ReviewOutputEvent) -> St
     parts.join("\n\n")
 }
 
-fn review_summary_line(output: &code_core::protocol::ReviewOutputEvent) -> Option<String> {
+fn review_summary_line(output: &hanzo_core::protocol::ReviewOutputEvent) -> Option<String> {
     let mut parts: Vec<String> = Vec::new();
     let explanation = output.overall_explanation.trim();
     if !explanation.is_empty() {
@@ -2515,8 +2516,8 @@ fn make_assistant_message(text: String) -> ResponseItem {
 
 fn write_review_json(
     path: PathBuf,
-    outputs: &[code_core::protocol::ReviewOutputEvent],
-    snapshot: Option<&code_core::protocol::ReviewSnapshotInfo>,
+    outputs: &[hanzo_core::protocol::ReviewOutputEvent],
+    snapshot: Option<&hanzo_core::protocol::ReviewSnapshotInfo>,
 ) -> std::io::Result<()> {
     if outputs.is_empty() {
         return Ok(());
@@ -2526,17 +2527,17 @@ fn write_review_json(
     struct ReviewRun<'a> {
         index: usize,
         #[serde(flatten)]
-        output: &'a code_core::protocol::ReviewOutputEvent,
+        output: &'a hanzo_core::protocol::ReviewOutputEvent,
     }
 
     #[derive(serde::Serialize)]
     struct ReviewJsonOutput<'a> {
         #[serde(flatten)]
-        latest: &'a code_core::protocol::ReviewOutputEvent,
+        latest: &'a hanzo_core::protocol::ReviewOutputEvent,
         #[serde(skip_serializing_if = "Vec::is_empty")]
         runs: Vec<ReviewRun<'a>>,
         #[serde(flatten, skip_serializing_if = "Option::is_none")]
-        snapshot: Option<&'a code_core::protocol::ReviewSnapshotInfo>,
+        snapshot: Option<&'a hanzo_core::protocol::ReviewSnapshotInfo>,
     }
 
     let latest = outputs
@@ -2676,10 +2677,10 @@ mod tests {
     use std::path::{Path, PathBuf};
     use std::time::{Duration, SystemTime};
 
-    use code_core::config::{ConfigOverrides, ConfigToml};
-    use code_protocol::models::{ContentItem, ResponseItem};
-    use code_protocol::mcp_protocol::ConversationId;
-	    use code_protocol::protocol::{
+    use hanzo_core::config::{ConfigOverrides, ConfigToml};
+    use hanzo_protocol::models::{ContentItem, ResponseItem};
+    use hanzo_protocol::mcp_protocol::ConversationId;
+	    use hanzo_protocol::protocol::{
 	        EventMsg as ProtoEventMsg, RecordedEvent, RolloutItem, RolloutLine, SessionMeta,
 	        SessionMetaLine, SessionSource, UserMessageEvent,
 	    };
@@ -2754,15 +2755,15 @@ mod tests {
         let dir = TempDir::new().unwrap();
         let path = dir.path().join("out.json");
 
-        let output = code_core::protocol::ReviewOutputEvent {
-            findings: vec![code_core::protocol::ReviewFinding {
+        let output = hanzo_core::protocol::ReviewOutputEvent {
+            findings: vec![hanzo_core::protocol::ReviewFinding {
                 title: "bug".into(),
                 body: "details".into(),
                 confidence_score: 0.5,
                 priority: 1,
-                code_location: code_core::protocol::ReviewCodeLocation {
+                code_location: hanzo_core::protocol::ReviewCodeLocation {
                     absolute_file_path: PathBuf::from("src/lib.rs"),
-                    line_range: code_core::protocol::ReviewLineRange { start: 1, end: 2 },
+                    line_range: hanzo_core::protocol::ReviewLineRange { start: 1, end: 2 },
                 },
             }],
             overall_correctness: "incorrect".into(),
@@ -2770,7 +2771,7 @@ mod tests {
             overall_confidence_score: 0.7,
         };
 
-        let snapshot = code_core::protocol::ReviewSnapshotInfo {
+        let snapshot = hanzo_core::protocol::ReviewSnapshotInfo {
             snapshot_commit: Some("abc123".into()),
             branch: Some("auto-review-branch".into()),
             worktree_path: Some(PathBuf::from("/tmp/wt")),
@@ -2795,15 +2796,15 @@ mod tests {
         let dir = TempDir::new().unwrap();
         let path = dir.path().join("multi.json");
 
-        let first = code_core::protocol::ReviewOutputEvent {
-            findings: vec![code_core::protocol::ReviewFinding {
+        let first = hanzo_core::protocol::ReviewOutputEvent {
+            findings: vec![hanzo_core::protocol::ReviewFinding {
                 title: "bug".into(),
                 body: "details".into(),
                 confidence_score: 0.6,
                 priority: 1,
-                code_location: code_core::protocol::ReviewCodeLocation {
+                code_location: hanzo_core::protocol::ReviewCodeLocation {
                     absolute_file_path: PathBuf::from("src/lib.rs"),
-                    line_range: code_core::protocol::ReviewLineRange { start: 1, end: 2 },
+                    line_range: hanzo_core::protocol::ReviewLineRange { start: 1, end: 2 },
                 },
             }],
             overall_correctness: "incorrect".into(),
@@ -2811,7 +2812,7 @@ mod tests {
             overall_confidence_score: 0.7,
         };
 
-        let second = code_core::protocol::ReviewOutputEvent {
+        let second = hanzo_core::protocol::ReviewOutputEvent {
             findings: Vec::new(),
             overall_correctness: "correct".into(),
             overall_explanation: "clean".into(),

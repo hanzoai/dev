@@ -17,10 +17,10 @@ use crate::protocol::AgentMessageEvent;
 use crate::protocol::ErrorEvent;
 use crate::protocol::EventMsg;
 use crate::protocol::InputItem;
-use code_protocol::models::ResponseInputItem;
-use code_protocol::models::ResponseItem;
-use code_protocol::protocol::CompactedItem;
-use code_protocol::protocol::RolloutItem;
+use hanzo_protocol::models::ResponseInputItem;
+use hanzo_protocol::models::ResponseItem;
+use hanzo_protocol::protocol::CompactedItem;
+use hanzo_protocol::protocol::RolloutItem;
 use crate::util::backoff;
 use std::time::Duration;
 

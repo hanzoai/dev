@@ -1,12 +1,12 @@
 use anyhow::Result;
 use clap::Parser;
 use clap::Subcommand;
-use codex_execpolicy::ExecCall;
-use codex_execpolicy::MatchedExec;
-use codex_execpolicy::Policy;
-use codex_execpolicy::PolicyParser;
-use codex_execpolicy::ValidExec;
-use codex_execpolicy::get_default_policy;
+use hanzo_execpolicy::ExecCall;
+use hanzo_execpolicy::MatchedExec;
+use hanzo_execpolicy::Policy;
+use hanzo_execpolicy::PolicyParser;
+use hanzo_execpolicy::ValidExec;
+use hanzo_execpolicy::get_default_policy;
 use serde::Deserialize;
 use serde::Serialize;
 use serde::de;
@@ -140,12 +140,12 @@ pub enum Output {
     #[serde(rename = "forbidden")]
     Forbidden {
         reason: String,
-        cause: codex_execpolicy::Forbidden,
+        cause: hanzo_execpolicy::Forbidden,
     },
 
     /// The safety of the command could not be verified.
     #[serde(rename = "unverified")]
-    Unverified { error: codex_execpolicy::Error },
+    Unverified { error: hanzo_execpolicy::Error },
 }
 
 fn deserialize_from_json<'de, D>(deserializer: D) -> Result<ExecArg, D::Error>

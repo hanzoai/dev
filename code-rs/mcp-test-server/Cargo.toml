@@ -1,5 +1,5 @@
 [package]
-name = "code-mcp-test-server"
+name = "hanzo-mcp-test-server"
 version = { workspace = true }
 edition = "2024"
 

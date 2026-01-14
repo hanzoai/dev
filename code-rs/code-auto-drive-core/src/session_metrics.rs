@@ -1,6 +1,6 @@
 use std::collections::VecDeque;
 
-use code_core::protocol::TokenUsage;
+use hanzo_core::protocol::TokenUsage;
 
 const DEFAULT_PROMPT_ESTIMATE: u64 = 4_000;
 

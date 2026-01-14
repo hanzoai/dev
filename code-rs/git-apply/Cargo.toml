@@ -1,10 +1,10 @@
 [package]
-name = "code-git-apply"
+name = "hanzo-git-apply"
 version = { workspace = true }
 edition = "2024"
 
 [lib]
-name = "code_git_apply"
+name = "hanzo_git_apply"
 path = "src/lib.rs"
 
 [lints]

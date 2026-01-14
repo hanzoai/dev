@@ -5,7 +5,7 @@ use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 
 use anyhow::{Context, Result};
-use code_protocol::protocol::SessionSource;
+use hanzo_protocol::protocol::SessionSource;
 use once_cell::sync::OnceCell;
 use tokio::task;
 use tokio::sync::Mutex as AsyncMutex;

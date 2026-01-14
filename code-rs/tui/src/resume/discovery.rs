@@ -1,5 +1,5 @@
-use code_core::{entry_to_rollout_path, SessionCatalog, SessionIndexEntry, SessionQuery};
-use code_protocol::protocol::SessionSource;
+use hanzo_core::{entry_to_rollout_path, SessionCatalog, SessionIndexEntry, SessionQuery};
+use hanzo_protocol::protocol::SessionSource;
 use std::path::{Path, PathBuf};
 use std::thread;
 use tokio::runtime::{Builder, Handle};

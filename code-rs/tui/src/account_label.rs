@@ -1,5 +1,5 @@
-use code_core::auth_accounts::StoredAccount;
-use code_protocol::mcp_protocol::AuthMode;
+use hanzo_core::auth_accounts::StoredAccount;
+use hanzo_protocol::mcp_protocol::AuthMode;
 
 const KEY_SUFFIX_LEN: usize = 8;
 

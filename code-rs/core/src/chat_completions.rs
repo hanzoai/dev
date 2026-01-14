@@ -2,7 +2,7 @@ use std::collections::BTreeMap;
 use std::time::Duration;
 
 use bytes::Bytes;
-use code_otel::otel_event_manager::OtelEventManager;
+use hanzo_otel::otel_event_manager::OtelEventManager;
 use eventsource_stream::Eventsource;
 use futures::Stream;
 use futures::StreamExt;
@@ -33,10 +33,10 @@ use crate::model_family::ModelFamily;
 use crate::openai_tools::create_tools_json_for_chat_completions_api;
 use crate::util::backoff;
 use std::sync::{Arc, Mutex};
-use code_app_server_protocol::AuthMode;
-use code_protocol::models::ContentItem;
-use code_protocol::models::ReasoningItemContent;
-use code_protocol::models::ResponseItem;
+use hanzo_app_server_protocol::AuthMode;
+use hanzo_protocol::models::ContentItem;
+use hanzo_protocol::models::ReasoningItemContent;
+use hanzo_protocol::models::ResponseItem;
 
 /// Implementation for the classic Chat Completions API.
 pub(crate) async fn stream_chat_completions(
@@ -316,7 +316,7 @@ pub(crate) async fn stream_chat_completions(
     // If an Ollama context override is present, propagate it. Some Ollama
     // builds honor `num_ctx` directly in OpenAI-compatible Chat Completions,
     // and others accept it under an `options` object – include both.
-    if let Ok(val) = std::env::var("CODEX_OLLAMA_NUM_CTX") {
+    if let Ok(val) = std::env::var("HANZO_OLLAMA_NUM_CTX") {
         if let Ok(n) = val.parse::<u64>() {
             if let Some(obj) = payload.as_object_mut() {
                 obj.insert("num_ctx".to_string(), json!(n));
@@ -979,7 +979,7 @@ where
                     // do NOT emit yet. Forward any other item (e.g. FunctionCall) right
                     // away so downstream consumers see it.
 
-                    let is_assistant_delta = matches!(&item, code_protocol::models::ResponseItem::Message { role, .. } if role == "assistant");
+                    let is_assistant_delta = matches!(&item, hanzo_protocol::models::ResponseItem::Message { role, .. } if role == "assistant");
 
                     if is_assistant_delta {
                         // Only use the final assistant message if we have not
@@ -1052,7 +1052,7 @@ where
                         let aggregated_message = ResponseItem::Message {
                             id: this.cumulative_item_id.clone(),
                             role: "assistant".to_string(),
-                            content: vec![code_protocol::models::ContentItem::OutputText {
+                            content: vec![hanzo_protocol::models::ContentItem::OutputText {
                                 text: std::mem::take(&mut this.cumulative),
                             }],
                         };

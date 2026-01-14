@@ -53,7 +53,7 @@ impl AutoDriveVariant {
     }
 
     pub fn from_env() -> Self {
-        env::var("CODEX_AUTO_DRIVE_VARIANT")
+        env::var("HANZO_AUTO_DRIVE_VARIANT")
             .ok()
             .and_then(|raw| raw.trim().parse::<usize>().ok())
             .map(Self::from_index)

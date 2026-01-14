@@ -1,9 +1,9 @@
 use std::fs;
 use std::path::PathBuf;
 
-use code_core::config::find_code_home;
-use code_core::protocol::Op;
-use code_protocol::custom_prompts::CustomPrompt;
+use hanzo_core::config::find_code_home;
+use hanzo_core::protocol::Op;
+use hanzo_protocol::custom_prompts::CustomPrompt;
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 use ratatui::buffer::Buffer;
 use ratatui::layout::{Alignment, Constraint, Direction, Layout, Rect};
@@ -383,7 +383,7 @@ impl PromptsSettingsView {
         let code_home = match find_code_home() {
             Ok(path) => path,
             Err(e) => {
-                self.status = Some((format!("CODE_HOME unavailable: {e}"), Style::default().fg(colors::error())));
+                self.status = Some((format!("HANZO_HOME unavailable: {e}"), Style::default().fg(colors::error())));
                 return;
             }
         };

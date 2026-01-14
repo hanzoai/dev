@@ -3,7 +3,7 @@
 
 use clap::ValueEnum;
 
-use code_core::protocol::AskForApproval;
+use hanzo_core::protocol::AskForApproval;
 
 #[derive(Clone, Copy, Debug, ValueEnum)]
 #[value(rename_all = "kebab-case")]

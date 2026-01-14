@@ -39,8 +39,8 @@ use crate::protocol::SandboxPolicy;
 use crate::config_types::ReasoningEffort;
 use crate::config_types::ReasoningSummary;
 use crate::project_features::{load_project_commands, ProjectCommand, ProjectHooks};
-use code_app_server_protocol::AuthMode;
-use code_protocol::config_types::SandboxMode;
+use hanzo_app_server_protocol::AuthMode;
+use hanzo_protocol::config_types::SandboxMode;
 use std::time::Instant;
 use serde::Deserialize;
 use serde::de::{self, Unexpected};
@@ -253,8 +253,8 @@ pub struct Config {
     /// appends one extra argument containing a JSON payload describing the
     /// event.
     ///
-    /// Example `~/.code/config.toml` snippet (Code also reads legacy
-    /// `~/.codex/config.toml`):
+    /// Example `~/.hanzo/config.toml` snippet (Hanzo Dev also reads legacy
+    /// `~/.code/config.toml` and `~/.codex/config.toml`):
     ///
     /// ```toml
     /// notify = ["notify-send", "Codex"]
@@ -305,12 +305,12 @@ pub struct Config {
     /// Ordered list of fallback filenames to consider when loading project docs.
     pub project_doc_fallback_filenames: Vec<String>,
 
-    /// Directory containing all Codex state (defaults to `~/.code`; can be
-    /// overridden by the `CODE_HOME` or `CODEX_HOME` environment variables).
+    /// Directory containing all Hanzo Dev state (defaults to `~/.hanzo`; can be
+    /// overridden by the `HANZO_HOME` environment variable).
     pub code_home: PathBuf,
 
-    /// Settings that govern if and what will be written to `~/.code/history.jsonl`
-    /// (Code still reads legacy `~/.codex/history.jsonl`).
+    /// Settings that govern if and what will be written to `~/.hanzo/history.jsonl`
+    /// (Hanzo Dev still reads legacy `~/.code/history.jsonl` and `~/.codex/history.jsonl`).
     pub history: History,
 
     /// Optional URI-based file opener. If set, citations to files in the model
@@ -325,12 +325,12 @@ pub struct Config {
     /// Whether Auto Drive should inherit the chat model instead of a dedicated override.
     pub auto_drive_use_chat_model: bool,
 
-    /// Path to the `codex-linux-sandbox` executable. This must be set if
+    /// Path to the `dev-linux-sandbox` executable. This must be set if
     /// [`crate::exec::SandboxType::LinuxSeccomp`] is used. Note that this
     /// cannot be set in the config file: it must be set in code via
     /// [`ConfigOverrides`].
     ///
-    /// When this program is invoked, arg0 will be set to `codex-linux-sandbox`.
+    /// When this program is invoked, arg0 will be set to `dev-linux-sandbox`.
     pub code_linux_sandbox_exe: Option<PathBuf>,
 
     /// The value to use for `reasoning.effort` when making a
@@ -452,7 +452,8 @@ pub fn load_config_as_toml_with_cli_overrides(
         .load_toml()
 }
 
-/// Base config deserialized from ~/.code/config.toml (legacy ~/.codex/config.toml is still read).
+/// Base config deserialized from ~/.hanzo/config.toml (legacy ~/.code/config.toml and
+/// ~/.codex/config.toml are still read).
 #[derive(Deserialize, Debug, Clone, Default)]
 pub struct ConfigToml {
     /// Optional override of model selection.
@@ -576,8 +577,8 @@ pub struct ConfigToml {
     #[serde(default)]
     pub profiles: HashMap<String, ConfigProfile>,
 
-    /// Settings that govern if and what will be written to `~/.code/history.jsonl`
-    /// (Code still reads legacy `~/.codex/history.jsonl`).
+    /// Settings that govern if and what will be written to `~/.hanzo/history.jsonl`
+    /// (Hanzo Dev still reads legacy `~/.code/history.jsonl` and `~/.codex/history.jsonl`).
     #[serde(default)]
     pub history: Option<History>,
 
@@ -1470,7 +1471,7 @@ impl Config {
 
     /// Check if we're using ChatGPT authentication
     fn is_using_chatgpt_auth(code_home: &Path) -> bool {
-        use code_app_server_protocol::AuthMode;
+        use hanzo_app_server_protocol::AuthMode;
         use crate::CodexAuth;
         
         // Prefer ChatGPT when both ChatGPT tokens and an API key are present.
@@ -1697,11 +1698,13 @@ persistence = "none"
         std::fs::write(legacy_codex.join("AGENTS.md"), " legacy guidance \n")?;
 
         let _home_guard = EnvVarGuard::new("HOME");
+        let _hanzo_home_guard = EnvVarGuard::new("HANZO_HOME");
         let _code_home_guard = EnvVarGuard::new("CODE_HOME");
         let _codex_home_guard = EnvVarGuard::new("CODEX_HOME");
 
         unsafe {
             std::env::set_var("HOME", legacy_home.path());
+            std::env::remove_var("HANZO_HOME");
             std::env::remove_var("CODE_HOME");
             std::env::remove_var("CODEX_HOME");
         }

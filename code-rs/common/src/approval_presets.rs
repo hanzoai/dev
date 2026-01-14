@@ -1,5 +1,5 @@
-use code_core::protocol::AskForApproval;
-use code_core::protocol::SandboxPolicy;
+use hanzo_core::protocol::AskForApproval;
+use hanzo_core::protocol::SandboxPolicy;
 
 /// A simple preset pairing an approval policy with a sandbox policy.
 #[derive(Debug, Clone)]

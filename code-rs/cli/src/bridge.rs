@@ -20,7 +20,8 @@ use uuid::Uuid;
 type WsStream =
     tokio_tungstenite::WebSocketStream<tokio_tungstenite::MaybeTlsStream<tokio::net::TcpStream>>;
 
-const META_FILE: &str = "code-bridge.json";
+const META_FILE: &str = "dev-bridge.json";
+const LEGACY_META_FILE: &str = "code-bridge.json";
 const HEARTBEAT_STALE_MS: i64 = 20_000;
 const DEFAULT_CAPABILITIES: &[&str] = &[
     "error",
@@ -68,18 +69,22 @@ pub fn discover_bridge_targets(cwd: &Path) -> Result<Vec<BridgeTarget>> {
     let mut current = Some(cwd);
 
     while let Some(dir) = current {
-        let candidate = dir.join(".code").join(META_FILE);
-        if candidate.exists() && seen.insert(candidate.clone()) {
-            let raw = fs::read_to_string(&candidate).context("read bridge metadata")?;
-            let meta: BridgeMeta = serde_json::from_str(&raw).context("parse bridge metadata")?;
-            let (stale, heartbeat_age_ms) = compute_staleness(&meta, &candidate);
+        for root in [".hanzo", ".code"] {
+            for name in [META_FILE, LEGACY_META_FILE] {
+                let candidate = dir.join(root).join(name);
+                if candidate.exists() && seen.insert(candidate.clone()) {
+                    let raw = fs::read_to_string(&candidate).context("read bridge metadata")?;
+                    let meta: BridgeMeta = serde_json::from_str(&raw).context("parse bridge metadata")?;
+                    let (stale, heartbeat_age_ms) = compute_staleness(&meta, &candidate);
 
-            targets.push(BridgeTarget {
-                meta_path: candidate,
-                meta,
-                stale,
-                heartbeat_age_ms,
-            });
+                    targets.push(BridgeTarget {
+                        meta_path: candidate,
+                        meta,
+                        stale,
+                        heartbeat_age_ms,
+                    });
+                }
+            }
         }
 
         current = dir.parent();
@@ -90,7 +95,7 @@ pub fn discover_bridge_targets(cwd: &Path) -> Result<Vec<BridgeTarget>> {
 
 pub async fn list_control_capable(target: &BridgeTarget) -> Result<usize> {
     let (mut tx, mut rx) = connect_and_subscribe(target, &default_levels(), &[]).await?;
-    let id = format!("code-cli-list-{}", Uuid::new_v4());
+    let id = format!("dev-cli-list-{}", Uuid::new_v4());
     let payload = serde_json::json!({
         "type": "control_request",
         "id": id,
@@ -178,7 +183,7 @@ pub async fn request_screenshot(
     let caps = vec!["screenshot".to_string(), "control".to_string()];
     let (mut tx, mut rx) = connect_and_subscribe(target, &levels, &caps).await?;
 
-    let id = format!("code-cli-screenshot-{}", Uuid::new_v4());
+    let id = format!("dev-cli-screenshot-{}", Uuid::new_v4());
     let payload = serde_json::json!({
         "type": "control_request",
         "id": id,
@@ -224,7 +229,7 @@ pub async fn run_javascript(
     let caps = vec!["control".to_string()];
     let (mut tx, mut rx) = connect_and_subscribe(target, &levels, &caps).await?;
 
-    let id = format!("code-cli-js-{}", Uuid::new_v4());
+    let id = format!("dev-cli-js-{}", Uuid::new_v4());
     let payload = serde_json::json!({
         "type": "control_request",
         "id": id,
@@ -296,7 +301,7 @@ async fn connect_and_subscribe(
     let (mut tx, mut rx) = ws.split();
 
     let client_id = format!(
-        "code-cli-{}",
+        "dev-cli-{}",
         target
             .meta
             .workspace_path

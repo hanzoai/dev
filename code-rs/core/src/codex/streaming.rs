@@ -18,7 +18,7 @@ use super::session::{
 use crate::auth;
 use crate::auth_accounts;
 use crate::account_switching::RateLimitSwitchState;
-use code_app_server_protocol::AuthMode as AppAuthMode;
+use hanzo_app_server_protocol::AuthMode as AppAuthMode;
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 enum AgentTaskKind {
@@ -392,7 +392,7 @@ pub(super) async fn submission_loop(
                         match RolloutRecorder::new(
                             &config,
                             crate::rollout::recorder::RolloutRecorderParams::new(
-                                code_protocol::mcp_protocol::ConversationId::from(session_id),
+                                hanzo_protocol::mcp_protocol::ConversationId::from(session_id),
                                 effective_user_instructions.clone(),
                                 SessionSource::Cli,
                             ),
@@ -449,7 +449,7 @@ pub(super) async fn submission_loop(
                     manager.set_debug_log_root(None);
                 }
 
-                let conversation_id = code_protocol::mcp_protocol::ConversationId::from(session_id);
+                let conversation_id = hanzo_protocol::mcp_protocol::ConversationId::from(session_id);
                 let auth_snapshot = auth_manager.as_ref().and_then(|mgr| mgr.auth());
                 let otel_event_manager = {
                     let manager = OtelEventManager::new(
@@ -982,7 +982,7 @@ pub(super) async fn submission_loop(
                     }
                 };
 
-                let custom_prompts: Vec<code_protocol::custom_prompts::CustomPrompt> =
+                let custom_prompts: Vec<hanzo_protocol::custom_prompts::CustomPrompt> =
                     if let Some(dir) = crate::custom_prompts::default_prompts_dir() {
                         crate::custom_prompts::discover_prompts_in(&dir).await
                     } else {
@@ -1016,17 +1016,17 @@ pub(super) async fn submission_loop(
                 .await
                 .unwrap_or_default();
 
-                let skills: Vec<code_protocol::skills::Skill> = skill_load_outcome
+                let skills: Vec<hanzo_protocol::skills::Skill> = skill_load_outcome
                     .skills
                     .into_iter()
-                    .map(|skill| code_protocol::skills::Skill {
+                    .map(|skill| hanzo_protocol::skills::Skill {
                         name: skill.name,
                         description: skill.description,
                         path: skill.path,
                         scope: match skill.scope {
-                            crate::skills::model::SkillScope::Repo => code_protocol::skills::SkillScope::Repo,
-                            crate::skills::model::SkillScope::User => code_protocol::skills::SkillScope::User,
-                            crate::skills::model::SkillScope::System => code_protocol::skills::SkillScope::System,
+                            crate::skills::model::SkillScope::Repo => hanzo_protocol::skills::SkillScope::Repo,
+                            crate::skills::model::SkillScope::User => hanzo_protocol::skills::SkillScope::User,
+                            crate::skills::model::SkillScope::System => hanzo_protocol::skills::SkillScope::System,
                         },
                         content: skill.content,
                     })
@@ -1822,7 +1822,7 @@ async fn run_turn(
     mut input: Vec<ResponseItem>,
 ) -> CodexResult<Vec<ProcessedResponseItem>> {
     // Check if browser is enabled
-    let browser_enabled = code_browser::global::get_browser_manager().await.is_some();
+    let browser_enabled = hanzo_browser::global::get_browser_manager().await.is_some();
 
     let tc = &**turn_context;
     let agents_active = {
@@ -2144,7 +2144,7 @@ async fn run_turn(
 
                         // If we have partial deltas, include a short ephemeral hint so the model can resume.
                         if !sp.partial_assistant_text.is_empty() || !sp.partial_reasoning_summary.is_empty() {
-                            use code_protocol::models::ContentItem;
+                            use hanzo_protocol::models::ContentItem;
                             let mut hint = String::from(
                                 "[EPHEMERAL:RETRY_HINT]\nPrevious attempt aborted mid-stream. Continue without repeating.\n",
                             );
@@ -2858,14 +2858,14 @@ async fn handle_response_item(
 // Helper utilities for agent output/progress management
 fn ensure_agent_dir(cwd: &Path, agent_id: &str) -> Result<PathBuf, String> {
     let safe_agent_id = crate::fs_sanitize::safe_path_component(agent_id, "agent");
-    let dir = cwd.join(".code").join("agents").join(safe_agent_id);
+    let dir = cwd.join(".hanzo").join("agents").join(safe_agent_id);
     std::fs::create_dir_all(&dir)
         .map_err(|e| format!("Failed to create agent dir {}: {}", dir.display(), e))?;
     Ok(dir)
 }
 
 pub(super) fn ensure_user_dir(cwd: &Path) -> Result<PathBuf, String> {
-    let dir = cwd.join(".code").join("users");
+    let dir = cwd.join(".hanzo").join("users");
     std::fs::create_dir_all(&dir)
         .map_err(|e| format!("Failed to create user dir {}: {}", dir.display(), e))?;
     Ok(dir)
@@ -3386,7 +3386,7 @@ async fn handle_web_fetch(sess: &Session, ctx: &ToolCallCtx, arguments: String) 
 })()"#;
 
                 if prefer_global {
-                    if let Some(manager) = code_browser::global::get_browser_manager().await {
+                    if let Some(manager) = hanzo_browser::global::get_browser_manager().await {
                         if manager.is_enabled_sync() {
                             match tokio::time::timeout(timeout, manager.goto(url)).await {
                                 Ok(Ok(res)) => {
@@ -8524,7 +8524,7 @@ pub(super) fn get_last_assistant_message_from_turn(responses: &[ResponseItem]) -
 pub(super) async fn capture_browser_screenshot(
     _sess: &Session,
 ) -> Result<(PathBuf, String), String> {
-    let browser_manager = code_browser::global::get_browser_manager()
+    let browser_manager = hanzo_browser::global::get_browser_manager()
         .await
         .ok_or_else(|| "No browser manager available".to_string())?;
 
@@ -9048,14 +9048,14 @@ async fn handle_browser_open(sess: &Session, ctx: &ToolCallCtx, arguments: Strin
 
                     // Use the global browser manager (create if needed)
                     let browser_manager = {
-                        let existing_global = code_browser::global::get_browser_manager().await;
+                        let existing_global = hanzo_browser::global::get_browser_manager().await;
                         if let Some(existing) = existing_global {
                             tracing::info!("Using existing global browser manager");
                             Some(existing)
                         } else {
                             tracing::info!("Creating new browser manager");
                             let new_manager =
-                                code_browser::global::get_or_create_browser_manager().await;
+                                hanzo_browser::global::get_or_create_browser_manager().await;
                             Some(new_manager)
                         }
                     };
@@ -9150,9 +9150,9 @@ async fn handle_browser_open(sess: &Session, ctx: &ToolCallCtx, arguments: Strin
 /// Get the browser manager for the session (always uses global)
 async fn get_browser_manager_for_session(
     _sess: &Session,
-) -> Option<Arc<code_browser::BrowserManager>> {
+) -> Option<Arc<hanzo_browser::BrowserManager>> {
     // Always use the global browser manager
-    code_browser::global::get_browser_manager().await
+    hanzo_browser::global::get_browser_manager().await
 }
 
 async fn handle_browser_close(sess: &Session, ctx: &ToolCallCtx) -> ResponseInputItem {
@@ -9174,7 +9174,7 @@ async fn handle_browser_close(sess: &Session, ctx: &ToolCallCtx) -> ResponseInpu
                 match browser_manager.stop().await {
                     Ok(_) => {
                         // Clear the browser manager from global
-                        code_browser::global::clear_browser_manager().await;
+                        hanzo_browser::global::clear_browser_manager().await;
                         ResponseInputItem::FunctionCallOutput {
                             call_id: call_id_clone.clone(),
                             output: FunctionCallOutputPayload {
@@ -10812,7 +10812,7 @@ mod command_guard_detection_tests {
 mod cleanup_tests {
     use super::*;
     use super::super::session::prune_history_items;
-    use code_protocol::protocol::{
+    use hanzo_protocol::protocol::{
         BROWSER_SNAPSHOT_CLOSE_TAG,
         BROWSER_SNAPSHOT_OPEN_TAG,
         ENVIRONMENT_CONTEXT_CLOSE_TAG,
@@ -10966,10 +10966,10 @@ pub(super) fn debug_history(label: &str, items: &[ResponseItem]) {
         })
         .collect();
     let rendered = preview.join(" | ");
-    if std::env::var_os("CODEX_COMPACT_TRACE").is_some() {
+    if std::env::var_os("HANZO_COMPACT_TRACE").is_some() {
         eprintln!("[compact_history] {} => [{}]", label, rendered);
     }
-    info!(target = "code_core::compact_history", "{} => [{}]", label, rendered);
+    info!(target = "hanzo_core::compact_history", "{} => [{}]", label, rendered);
 }
 
 #[derive(Debug)]

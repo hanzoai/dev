@@ -3,8 +3,8 @@
 use agent_client_protocol as acp;
 use anyhow::Context as _;
 use anyhow::Result;
-use code_apply_patch::FileSystem;
-use code_apply_patch::StdFileSystem;
+use hanzo_apply_patch::FileSystem;
+use hanzo_apply_patch::StdFileSystem;
 use mcp_types::CallToolResult;
 use std::collections::HashMap;
 use std::path::Path;

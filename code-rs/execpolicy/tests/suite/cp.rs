@@ -1,15 +1,15 @@
-extern crate codex_execpolicy;
+extern crate hanzo_execpolicy;
 
-use codex_execpolicy::ArgMatcher;
-use codex_execpolicy::ArgType;
-use codex_execpolicy::Error;
-use codex_execpolicy::ExecCall;
-use codex_execpolicy::MatchedArg;
-use codex_execpolicy::MatchedExec;
-use codex_execpolicy::Policy;
-use codex_execpolicy::Result;
-use codex_execpolicy::ValidExec;
-use codex_execpolicy::get_default_policy;
+use hanzo_execpolicy::ArgMatcher;
+use hanzo_execpolicy::ArgType;
+use hanzo_execpolicy::Error;
+use hanzo_execpolicy::ExecCall;
+use hanzo_execpolicy::MatchedArg;
+use hanzo_execpolicy::MatchedExec;
+use hanzo_execpolicy::Policy;
+use hanzo_execpolicy::Result;
+use hanzo_execpolicy::ValidExec;
+use hanzo_execpolicy::get_default_policy;
 
 #[expect(clippy::expect_used)]
 fn setup() -> Policy {

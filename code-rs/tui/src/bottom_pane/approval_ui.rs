@@ -1,4 +1,4 @@
-#![cfg(feature = "code-fork")]
+#![cfg(feature = "hanzo-fork")]
 
 use crate::app_event_sender::AppEventSender;
 use crate::chatwidget::BackgroundOrderTicket;

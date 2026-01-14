@@ -175,7 +175,7 @@ pub(crate) fn new_upgrade_prelude(latest_version: Option<&str>) -> Option<Upgrad
         return None;
     }
 
-    let current = code_version::version();
+    let current = hanzo_version::version();
     if latest == current {
         return None;
     }

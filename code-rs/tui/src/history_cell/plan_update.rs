@@ -2,7 +2,7 @@
 
 use super::*;
 use crate::history::state::{HistoryId, PlanIcon, PlanProgress, PlanStep, PlanUpdateState};
-use code_core::plan_tool::{PlanItemArg, StepStatus, UpdatePlanArgs};
+use hanzo_core::plan_tool::{PlanItemArg, StepStatus, UpdatePlanArgs};
 
 pub(crate) struct PlanUpdateCell {
     state: PlanUpdateState,

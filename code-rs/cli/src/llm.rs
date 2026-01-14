@@ -1,17 +1,17 @@
 use std::path::PathBuf;
 
 use clap::Parser;
-use code_common::CliConfigOverrides;
-use code_core::config::Config;
-use code_core::config::ConfigOverrides;
-use code_core::ModelClient;
-use code_core::ModelProviderInfo;
-use code_core::agent_defaults::model_guide_markdown_with_custom;
-use code_core::AuthManager;
-use code_core::Prompt;
-use code_core::TextFormat;
-use code_app_server_protocol::AuthMode;
-use code_protocol::models::{ContentItem, ResponseItem};
+use hanzo_common::CliConfigOverrides;
+use hanzo_core::config::Config;
+use hanzo_core::config::ConfigOverrides;
+use hanzo_core::ModelClient;
+use hanzo_core::ModelProviderInfo;
+use hanzo_core::agent_defaults::model_guide_markdown_with_custom;
+use hanzo_core::AuthManager;
+use hanzo_core::Prompt;
+use hanzo_core::TextFormat;
+use hanzo_app_server_protocol::AuthMode;
+use hanzo_protocol::models::{ContentItem, ResponseItem};
 use futures::StreamExt;
 
 #[derive(Debug, Parser)]
@@ -147,7 +147,7 @@ async fn run_llm_request(
         config.model_reasoning_summary,
         config.model_text_verbosity,
         uuid::Uuid::new_v4(),
-        std::sync::Arc::new(std::sync::Mutex::new(code_core::debug_logger::DebugLogger::new(false)?)),
+        std::sync::Arc::new(std::sync::Mutex::new(hanzo_core::debug_logger::DebugLogger::new(false)?)),
     );
 
     // Collect the assistant message text from the stream (no TUI events)
@@ -157,9 +157,9 @@ async fn run_llm_request(
     while let Some(ev) = stream.next().await {
         let ev = ev?;
         match ev {
-            code_core::ResponseEvent::ReasoningSummaryDelta { delta, .. } => { tracing::info!(target: "llm", "thinking: {}", delta); }
-            code_core::ResponseEvent::ReasoningContentDelta { delta, .. } => { tracing::info!(target: "llm", "reasoning: {}", delta); }
-            code_core::ResponseEvent::OutputItemDone { item, .. } => {
+            hanzo_core::ResponseEvent::ReasoningSummaryDelta { delta, .. } => { tracing::info!(target: "llm", "thinking: {}", delta); }
+            hanzo_core::ResponseEvent::ReasoningContentDelta { delta, .. } => { tracing::info!(target: "llm", "reasoning: {}", delta); }
+            hanzo_core::ResponseEvent::OutputItemDone { item, .. } => {
                 if let ResponseItem::Message { content, .. } = item {
                     for c in content {
                         if let ContentItem::OutputText { text } = c {
@@ -168,12 +168,12 @@ async fn run_llm_request(
                     }
                 }
             }
-            code_core::ResponseEvent::OutputTextDelta { delta, .. } => {
+            hanzo_core::ResponseEvent::OutputTextDelta { delta, .. } => {
                 tracing::info!(target: "llm", "delta: {}", delta);
                 // For completeness, but we only print at the end to stay simple
                 final_text.push_str(&delta);
             }
-            code_core::ResponseEvent::Completed { .. } => { tracing::info!("LLM: completed"); break; }
+            hanzo_core::ResponseEvent::Completed { .. } => { tracing::info!("LLM: completed"); break; }
             _ => {}
         }
     }

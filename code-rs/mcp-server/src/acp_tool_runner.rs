@@ -5,14 +5,14 @@ use std::sync::Arc;
 use agent_client_protocol as acp;
 use agent_client_protocol::ToolCallUpdateFields;
 use anyhow::{Context as _, Result};
-use code_core::CodexConversation;
-use code_core::ConversationManager;
-use code_core::NewConversation;
-use code_core::config::Config as CodexConfig;
-use code_core::protocol::EventMsg;
-use code_core::protocol::InputItem;
-use code_core::protocol::Op;
-use code_protocol::protocol::TurnAbortReason;
+use hanzo_core::CodexConversation;
+use hanzo_core::ConversationManager;
+use hanzo_core::NewConversation;
+use hanzo_core::config::Config as CodexConfig;
+use hanzo_core::protocol::EventMsg;
+use hanzo_core::protocol::InputItem;
+use hanzo_core::protocol::Op;
+use hanzo_protocol::protocol::TurnAbortReason;
 use mcp_types::CallToolResult;
 use mcp_types::ContentBlock;
 use mcp_types::RequestId;
@@ -144,7 +144,7 @@ pub async fn prompt(
             }
             EventMsg::ExecApprovalRequest(_) | EventMsg::ApplyPatchApprovalRequest(_) => None,
             EventMsg::ExecCommandBegin(event) => Some(acp::SessionUpdate::ToolCall(
-                code_core::acp::new_execute_tool_call(
+                hanzo_core::acp::new_execute_tool_call(
                     &event.call_id,
                     &event.command,
                     acp::ToolCallStatus::InProgress,
@@ -167,7 +167,7 @@ pub async fn prompt(
                 }))
             }
             EventMsg::PatchApplyBegin(event) => Some(acp::SessionUpdate::ToolCall(
-                code_core::acp::new_patch_tool_call(
+                hanzo_core::acp::new_patch_tool_call(
                     &event.call_id,
                     &event.changes,
                     acp::ToolCallStatus::InProgress,

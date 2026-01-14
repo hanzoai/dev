@@ -1,10 +1,10 @@
 [package]
 edition = "2024"
-name = "code-browser"
+name = "hanzo-browser"
 version = { workspace = true }
 
 [lib]
-name = "code_browser"
+name = "hanzo_browser"
 path = "src/lib.rs"
 
 [lints]

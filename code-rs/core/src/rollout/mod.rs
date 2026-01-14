@@ -1,6 +1,6 @@
 //! Rollout module: persistence and discovery of session rollout files.
 
-use code_protocol::protocol::SessionSource;
+use hanzo_protocol::protocol::SessionSource;
 
 pub const SESSIONS_SUBDIR: &str = "sessions";
 #[allow(dead_code)]
@@ -13,7 +13,7 @@ pub mod list;
 pub(crate) mod policy;
 pub mod recorder;
 
-pub use code_protocol::protocol::SessionMeta;
+pub use hanzo_protocol::protocol::SessionMeta;
 #[allow(unused_imports)]
 pub use list::find_conversation_path_by_id_str;
 pub use recorder::RolloutRecorder;

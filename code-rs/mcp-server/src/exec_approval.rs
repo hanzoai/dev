@@ -1,9 +1,9 @@
 use std::path::PathBuf;
 use std::sync::Arc;
 
-use code_core::CodexConversation;
-use code_core::protocol::Op;
-use code_core::protocol::ReviewDecision;
+use hanzo_core::CodexConversation;
+use hanzo_core::protocol::Op;
+use hanzo_core::protocol::ReviewDecision;
 use mcp_types::ElicitRequest;
 use mcp_types::ElicitRequestParamsRequestedSchema;
 use mcp_types::JSONRPCErrorError;

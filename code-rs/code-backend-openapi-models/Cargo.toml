@@ -1,10 +1,10 @@
 [package]
-name = "code-backend-openapi-models"
+name = "hanzo-backend-openapi-models"
 version = { workspace = true }
 edition = "2024"
 
 [lib]
-name = "code_backend_openapi_models"
+name = "hanzo_backend_openapi_models"
 path = "src/lib.rs"
 
 # Important: generated code often violates our workspace lints.

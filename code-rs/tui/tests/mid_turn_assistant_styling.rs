@@ -3,8 +3,8 @@
 #![cfg(test)]
 #![allow(clippy::unwrap_used, clippy::expect_used)]
 
-use code_core::protocol::{AgentMessageEvent, Event, EventMsg, OrderMeta};
-use code_tui::test_helpers::{render_chat_widget_to_vt100, ChatWidgetHarness};
+use hanzo_core::protocol::{AgentMessageEvent, Event, EventMsg, OrderMeta};
+use hanzo_tui::test_helpers::{render_chat_widget_to_vt100, ChatWidgetHarness};
 
 #[test]
 fn mid_turn_answer_suppresses_bullet_gutter() {
@@ -53,7 +53,7 @@ fn mid_turn_answer_suppresses_bullet_gutter() {
     harness.handle_event(Event {
         id: "task-1".into(),
         event_seq: 3,
-        msg: EventMsg::TaskComplete(code_core::protocol::TaskCompleteEvent {
+        msg: EventMsg::TaskComplete(hanzo_core::protocol::TaskCompleteEvent {
             last_agent_message: None,
         }),
         order: None,
@@ -127,7 +127,7 @@ fn missing_task_complete_does_not_stick_mid_turn_across_turns() {
     harness.handle_event(Event {
         id: "task-2".into(),
         event_seq: 2,
-        msg: EventMsg::TaskComplete(code_core::protocol::TaskCompleteEvent {
+        msg: EventMsg::TaskComplete(hanzo_core::protocol::TaskCompleteEvent {
             last_agent_message: None,
         }),
         order: None,

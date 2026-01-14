@@ -1,8 +1,8 @@
-//! Fork-specific TUI event helpers kept behind the `code-fork` feature flag.
-#![cfg(feature = "code-fork")]
+//! Fork-specific TUI event helpers kept behind the `hanzo-fork` feature flag.
+#![cfg(feature = "hanzo-fork")]
 
 use crate::app_event_sender::AppEventSender;
-use code_core::protocol::{BrowserScreenshotUpdateEvent, RateLimitSnapshotEvent};
+use hanzo_core::protocol::{BrowserScreenshotUpdateEvent, RateLimitSnapshotEvent};
 
 /// Forward a rate-limit snapshot into the main event loop.
 #[inline]

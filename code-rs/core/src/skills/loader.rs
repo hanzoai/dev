@@ -26,7 +26,7 @@ struct SkillFrontmatter {
 
 const SKILLS_FILENAME: &str = "SKILL.md";
 const SKILLS_DIR_NAME: &str = "skills";
-const REPO_ROOT_CONFIG_DIR_NAME: &str = ".codex";
+const REPO_ROOT_CONFIG_DIR_NAME: &str = ".hanzo";
 const MAX_NAME_LEN: usize = 64;
 const MAX_DESCRIPTION_LEN: usize = 1024;
 

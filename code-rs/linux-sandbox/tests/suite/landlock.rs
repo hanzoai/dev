@@ -1,12 +1,12 @@
 #![cfg(target_os = "linux")]
-use code_core::config_types::ShellEnvironmentPolicy;
-use code_core::error::CodexErr;
-use code_core::error::SandboxErr;
-use code_core::exec::ExecParams;
-use code_core::exec::SandboxType;
-use code_core::exec::process_exec_tool_call;
-use code_core::exec_env::create_env;
-use code_core::protocol::SandboxPolicy;
+use hanzo_core::config_types::ShellEnvironmentPolicy;
+use hanzo_core::error::CodexErr;
+use hanzo_core::error::SandboxErr;
+use hanzo_core::exec::ExecParams;
+use hanzo_core::exec::SandboxType;
+use hanzo_core::exec::process_exec_tool_call;
+use hanzo_core::exec_env::create_env;
+use hanzo_core::protocol::SandboxPolicy;
 use std::collections::HashMap;
 use std::path::PathBuf;
 use tempfile::NamedTempFile;
@@ -56,7 +56,7 @@ async fn run_cmd(cmd: &[&str], writable_roots: &[PathBuf], timeout_ms: u64) {
         exclude_slash_tmp: true,
         allow_git_writes: true,
     };
-    let sandbox_program = env!("CARGO_BIN_EXE_code-linux-sandbox");
+    let sandbox_program = env!("CARGO_BIN_EXE_dev-linux-sandbox");
     let codex_linux_sandbox_exe = Some(PathBuf::from(sandbox_program));
     let res = process_exec_tool_call(
         params,
@@ -150,7 +150,7 @@ async fn assert_network_blocked(cmd: &[&str]) {
     };
 
     let sandbox_policy = SandboxPolicy::new_read_only_policy();
-    let sandbox_program = env!("CARGO_BIN_EXE_code-linux-sandbox");
+    let sandbox_program = env!("CARGO_BIN_EXE_dev-linux-sandbox");
     let codex_linux_sandbox_exe: Option<PathBuf> = Some(PathBuf::from(sandbox_program));
     let result = process_exec_tool_call(
         params,

@@ -1,10 +1,10 @@
 [package]
 edition = "2024"
-name = "code-protocol"
+name = "hanzo-protocol"
 version = { workspace = true }
 
 [lib]
-name = "code_protocol"
+name = "hanzo_protocol"
 path = "src/lib.rs"
 
 [lints]

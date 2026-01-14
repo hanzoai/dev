@@ -13,8 +13,8 @@ use crate::history::compat::{
     PatchEventType as HistoryPatchEventType,
     PatchRecord,
 };
-use code_ansi_escape::ansi_escape_line;
-use code_core::protocol::FileChange;
+use hanzo_ansi_escape::ansi_escape_line;
+use hanzo_core::protocol::FileChange;
 
 use super::core::{HistoryCell, HistoryCellType, PatchEventType, PatchKind};
 use super::formatting::{normalize_overwrite_sequences, trim_empty_lines};
@@ -375,8 +375,8 @@ pub(crate) fn new_patch_apply_failure(stderr: String) -> PlainMessageState {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use code_core::history::state::{HistoryId, PatchEventType, PatchRecord};
-    use code_core::protocol::FileChange;
+    use hanzo_core::history::state::{HistoryId, PatchEventType, PatchRecord};
+    use hanzo_core::protocol::FileChange;
     use std::collections::HashMap;
     use std::path::PathBuf;
 

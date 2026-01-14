@@ -10,7 +10,7 @@ use crate::config_types::{
     ThemeName,
 };
 use crate::protocol::{ApprovedCommandMatchKind, AskForApproval};
-use code_protocol::config_types::SandboxMode;
+use hanzo_protocol::config_types::SandboxMode;
 use dirs::home_dir;
 use std::collections::{BTreeMap, HashMap};
 use std::io::ErrorKind;
@@ -240,7 +240,7 @@ pub async fn persist_model_selection(
     Ok(())
 }
 
-/// Patch `CODEX_HOME/config.toml` project state.
+/// Patch `HANZO_HOME/config.toml` project state.
 /// Use with caution.
 pub fn set_project_trusted(code_home: &Path, project_path: &Path) -> anyhow::Result<()> {
     let config_path = code_home.join(CONFIG_TOML_FILE);
@@ -327,7 +327,7 @@ fn set_project_trusted_inner(doc: &mut DocumentMut, project_path: &Path) -> anyh
     Ok(())
 }
 
-/// Persist the selected TUI theme into `CODEX_HOME/config.toml` at `[tui.theme].name`.
+/// Persist the selected TUI theme into `HANZO_HOME/config.toml` at `[tui.theme].name`.
 pub fn set_tui_theme_name(code_home: &Path, theme: ThemeName) -> anyhow::Result<()> {
     let config_path = code_home.join(CONFIG_TOML_FILE);
 
@@ -431,7 +431,7 @@ pub fn set_cached_terminal_background(
     Ok(())
 }
 
-/// Persist the selected spinner into `CODEX_HOME/config.toml` at `[tui.spinner].name`.
+/// Persist the selected spinner into `HANZO_HOME/config.toml` at `[tui.spinner].name`.
 pub fn set_tui_spinner_name(code_home: &Path, spinner_name: &str) -> anyhow::Result<()> {
     let config_path = code_home.join(CONFIG_TOML_FILE);
 
@@ -563,7 +563,7 @@ pub fn set_custom_theme(
     Ok(())
 }
 
-/// Persist the alternate screen preference into `CODEX_HOME/config.toml` at `[tui].alternate_screen`.
+/// Persist the alternate screen preference into `HANZO_HOME/config.toml` at `[tui].alternate_screen`.
 pub fn set_tui_alternate_screen(code_home: &Path, enabled: bool) -> anyhow::Result<()> {
     let config_path = code_home.join(CONFIG_TOML_FILE);
 
@@ -591,7 +591,7 @@ pub fn set_tui_alternate_screen(code_home: &Path, enabled: bool) -> anyhow::Resu
     Ok(())
 }
 
-/// Persist the TUI notifications preference into `CODEX_HOME/config.toml` at `[tui].notifications`.
+/// Persist the TUI notifications preference into `HANZO_HOME/config.toml` at `[tui].notifications`.
 pub fn set_tui_notifications(
     code_home: &Path,
     notifications: crate::config_types::Notifications,
@@ -627,7 +627,7 @@ pub fn set_tui_notifications(
     Ok(())
 }
 
-/// Persist the review auto-resolve preference into `CODEX_HOME/config.toml` at `[tui].review_auto_resolve`.
+/// Persist the review auto-resolve preference into `HANZO_HOME/config.toml` at `[tui].review_auto_resolve`.
 pub fn set_tui_review_auto_resolve(code_home: &Path, enabled: bool) -> anyhow::Result<()> {
     let config_path = code_home.join(CONFIG_TOML_FILE);
     let read_path = resolve_code_path_for_read(code_home, Path::new(CONFIG_TOML_FILE));
@@ -648,7 +648,7 @@ pub fn set_tui_review_auto_resolve(code_home: &Path, enabled: bool) -> anyhow::R
     Ok(())
 }
 
-/// Persist the auto review preference into `CODEX_HOME/config.toml` at `[tui].auto_review_enabled`.
+/// Persist the auto review preference into `HANZO_HOME/config.toml` at `[tui].auto_review_enabled`.
 pub fn set_tui_auto_review_enabled(code_home: &Path, enabled: bool) -> anyhow::Result<()> {
     let config_path = code_home.join(CONFIG_TOML_FILE);
     let read_path = resolve_code_path_for_read(code_home, Path::new(CONFIG_TOML_FILE));
@@ -669,7 +669,7 @@ pub fn set_tui_auto_review_enabled(code_home: &Path, enabled: bool) -> anyhow::R
     Ok(())
 }
 
-/// Persist the review model + reasoning effort into `CODEX_HOME/config.toml`.
+/// Persist the review model + reasoning effort into `HANZO_HOME/config.toml`.
 pub fn set_review_model(
     code_home: &Path,
     model: &str,
@@ -739,7 +739,7 @@ pub fn set_review_resolve_model(
     Ok(())
 }
 
-/// Persist the planning model + reasoning effort into `CODEX_HOME/config.toml`.
+/// Persist the planning model + reasoning effort into `HANZO_HOME/config.toml`.
 pub fn set_planning_model(
     code_home: &Path,
     model: &str,
@@ -1190,7 +1190,7 @@ pub fn add_project_allowed_command(
     Ok(())
 }
 
-/// List MCP servers from `CODEX_HOME/config.toml`.
+/// List MCP servers from `HANZO_HOME/config.toml`.
 /// Returns `(enabled, disabled)` lists of `(name, McpServerConfig)`.
 pub fn list_mcp_servers(code_home: &Path) -> anyhow::Result<(
     Vec<(String, McpServerConfig)>,
@@ -1472,13 +1472,14 @@ fn env_path(var: &str) -> std::io::Result<Option<PathBuf>> {
 }
 
 fn env_overrides_present() -> bool {
-    matches!(std::env::var("CODE_HOME"), Ok(ref v) if !v.trim().is_empty())
+    matches!(std::env::var("HANZO_HOME"), Ok(ref v) if !v.trim().is_empty())
+        || matches!(std::env::var("CODE_HOME"), Ok(ref v) if !v.trim().is_empty())
         || matches!(std::env::var("CODEX_HOME"), Ok(ref v) if !v.trim().is_empty())
 }
 
 fn default_code_home_dir() -> Option<PathBuf> {
     let mut path = home_dir()?;
-    path.push(".code");
+    path.push(".hanzo");
     Some(path)
 }
 
@@ -1489,12 +1490,13 @@ fn compute_legacy_code_home_dir() -> Option<PathBuf> {
     let Some(home) = home_dir() else {
         return None;
     };
-    let candidate = home.join(".codex");
-    if path_exists(&candidate) {
-        Some(candidate)
-    } else {
-        None
+    let candidates = [home.join(".code"), home.join(".codex")];
+    for candidate in candidates {
+        if path_exists(&candidate) {
+            return Some(candidate);
+        }
     }
+    None
 }
 
 fn legacy_code_home_dir() -> Option<PathBuf> {
@@ -1516,8 +1518,8 @@ fn path_exists(path: &Path) -> bool {
     std::fs::metadata(path).is_ok()
 }
 
-/// Resolve the filesystem path used for *reading* Codex state that may live in
-/// a legacy `~/.codex` directory. Writes should continue targeting `code_home`.
+/// Resolve the filesystem path used for *reading* Hanzo Dev state that may live in
+/// a legacy `~/.code` or `~/.codex` directory. Writes should continue targeting `code_home`.
 pub fn resolve_code_path_for_read(code_home: &Path, relative: &Path) -> PathBuf {
     let default_path = code_home.join(relative);
 
@@ -1545,14 +1547,18 @@ pub fn resolve_code_path_for_read(code_home: &Path, relative: &Path) -> PathBuf 
     default_path
 }
 
-/// Returns the path to the Code/Codex configuration directory, which can be
-/// specified by the `CODE_HOME` or `CODEX_HOME` environment variables. If not set,
-/// defaults to `~/.code` for the fork.
+/// Returns the path to the Hanzo configuration directory, which can be
+/// specified by the `HANZO_HOME` environment variable (legacy `CODE_HOME`/`HANZO_HOME`).
+/// If not set, defaults to `~/.hanzo`.
 ///
-/// - If `CODE_HOME` or `CODEX_HOME` is set, the value will be canonicalized and this
+/// - If `HANZO_HOME`/`CODE_HOME`/`CODEX_HOME` is set, the value will be canonicalized and this
 ///   function will Err if the path does not exist.
 /// - If neither is set, this function does not verify that the directory exists.
 pub fn find_code_home() -> std::io::Result<PathBuf> {
+    if let Some(path) = env_path("HANZO_HOME")? {
+        return Ok(path);
+    }
+
     if let Some(path) = env_path("CODE_HOME")? {
         return Ok(path);
     }
@@ -1569,7 +1575,7 @@ pub fn find_code_home() -> std::io::Result<PathBuf> {
     })?;
 
     let mut write_path = home;
-    write_path.push(".code");
+    write_path.push(".hanzo");
     Ok(write_path)
 }
 

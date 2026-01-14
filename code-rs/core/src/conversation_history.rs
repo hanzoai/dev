@@ -1,4 +1,4 @@
-use code_protocol::models::ResponseItem;
+use hanzo_protocol::models::ResponseItem;
 
 /// Transcript of conversation history
 #[derive(Debug, Clone, Default)]
@@ -82,7 +82,7 @@ fn is_api_message(message: &ResponseItem) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use code_protocol::models::ContentItem;
+    use hanzo_protocol::models::ContentItem;
 
     fn assistant_msg(text: &str) -> ResponseItem {
         ResponseItem::Message {

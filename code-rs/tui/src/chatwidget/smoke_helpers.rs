@@ -8,11 +8,11 @@ use crate::markdown_render::render_markdown_text;
 use crate::tui::TerminalInfo;
 use crate::bottom_pane::SettingsSection;
 use crossterm::event::KeyEvent;
-use code_auto_drive_core::AutoRunPhase;
-use code_core::config::{Config, ConfigOverrides, ConfigToml};
-use code_core::history::state::HistoryRecord;
-use code_core::history::state::ExecStatus;
-use code_core::protocol::{BackgroundEventEvent, Event, EventMsg, OrderMeta};
+use hanzo_auto_drive_core::AutoRunPhase;
+use hanzo_core::config::{Config, ConfigOverrides, ConfigToml};
+use hanzo_core::history::state::HistoryRecord;
+use hanzo_core::history::state::ExecStatus;
+use hanzo_core::protocol::{BackgroundEventEvent, Event, EventMsg, OrderMeta};
 use once_cell::sync::Lazy;
 use chrono::Utc;
 use ratatui::text::Line;
@@ -72,10 +72,10 @@ impl ChatWidgetHarness {
     pub fn new() -> Self {
         // Stabilize time-of-day dependent greeting so VT100 snapshots remain deterministic.
         // Safe: tests run single-threaded by design.
-        unsafe { std::env::set_var("CODEX_TUI_FAKE_HOUR", "12"); }
+        unsafe { std::env::set_var("HANZO_TUI_FAKE_HOUR", "12"); }
 
         unsafe {
-            std::env::set_var("CODEX_TUI_FORCE_MINIMAL_HEADER", "1");
+            std::env::set_var("HANZO_TUI_FORCE_MINIMAL_HEADER", "1");
         }
 
         unsafe {

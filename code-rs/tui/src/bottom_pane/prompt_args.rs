@@ -1,5 +1,5 @@
-use code_protocol::custom_prompts::CustomPrompt;
-use code_protocol::custom_prompts::PROMPTS_CMD_PREFIX;
+use hanzo_protocol::custom_prompts::CustomPrompt;
+use hanzo_protocol::custom_prompts::PROMPTS_CMD_PREFIX;
 use lazy_static::lazy_static;
 use regex_lite::Regex;
 use shlex::Shlex;

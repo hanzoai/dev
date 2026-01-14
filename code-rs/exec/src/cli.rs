@@ -1,6 +1,6 @@
 use clap::Parser;
 use clap::ValueEnum;
-use code_common::CliConfigOverrides;
+use hanzo_common::CliConfigOverrides;
 use std::path::PathBuf;
 
 #[derive(Parser, Debug)]
@@ -37,7 +37,7 @@ pub struct Cli {
     /// Select the sandbox policy to use when executing model-generated shell
     /// commands.
     #[arg(long = "sandbox", short = 's', value_enum)]
-    pub sandbox_mode: Option<code_common::SandboxModeCliArg>,
+    pub sandbox_mode: Option<hanzo_common::SandboxModeCliArg>,
 
     /// Configuration profile from config.toml to specify default options.
     #[arg(long = "profile", short = 'p')]
@@ -65,7 +65,7 @@ pub struct Cli {
     #[clap(long = "debug", short = 'd', default_value_t = false)]
     pub debug: bool,
 
-    /// Allow running Codex outside a Git repository.
+    /// Allow running Hanzo Dev outside a Git repository.
     #[arg(long = "skip-git-repo-check", default_value_t = false)]
     pub skip_git_repo_check: bool,
 

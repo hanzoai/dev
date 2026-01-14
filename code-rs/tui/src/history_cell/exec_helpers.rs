@@ -1,8 +1,8 @@
 use std::path::Path;
 use std::time::{Duration, Instant};
 
-use code_common::elapsed::format_duration;
-use code_core::parse_command::ParsedCommand;
+use hanzo_common::elapsed::format_duration;
+use hanzo_core::parse_command::ParsedCommand;
 use ratatui::style::{Modifier, Style};
 use ratatui::text::{Line, Span};
 use shlex::Shlex;
@@ -15,9 +15,9 @@ use super::exec::ParsedExecMetadata;
 use super::formatting::output_lines;
 
 pub(crate) fn action_enum_from_parsed(
-    parsed: &[code_core::parse_command::ParsedCommand],
+    parsed: &[hanzo_core::parse_command::ParsedCommand],
 ) -> ExecAction {
-    use code_core::parse_command::ParsedCommand;
+    use hanzo_core::parse_command::ParsedCommand;
     for p in parsed {
         match p {
             ParsedCommand::Read { .. } => return ExecAction::Read,

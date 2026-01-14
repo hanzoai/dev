@@ -442,7 +442,7 @@ mod tests {
                 session_id: Some(session_id),
                 input_chunks: &[
                     "export".to_string(),
-                    "CODEX_INTERACTIVE_SHELL_VAR=codex\n".to_string(),
+                    "HANZO_INTERACTIVE_SHELL_VAR=dev\n".to_string(),
                 ],
                 timeout_ms: Some(2_500),
             })
@@ -451,7 +451,7 @@ mod tests {
         let out_2 = manager
             .handle_request(UnifiedExecRequest {
                 session_id: Some(session_id),
-                input_chunks: &["echo $CODEX_INTERACTIVE_SHELL_VAR\n".to_string()],
+                input_chunks: &["echo $HANZO_INTERACTIVE_SHELL_VAR\n".to_string()],
                 timeout_ms: Some(2_500),
             })
             .await?;
@@ -477,7 +477,7 @@ mod tests {
         manager
             .handle_request(UnifiedExecRequest {
                 session_id: Some(session_a),
-                input_chunks: &["export CODEX_INTERACTIVE_SHELL_VAR=codex\n".to_string()],
+                input_chunks: &["export HANZO_INTERACTIVE_SHELL_VAR=dev\n".to_string()],
                 timeout_ms: Some(2_500),
             })
             .await?;
@@ -487,7 +487,7 @@ mod tests {
                 session_id: None,
                 input_chunks: &[
                     "echo".to_string(),
-                    "$CODEX_INTERACTIVE_SHELL_VAR\n".to_string(),
+                    "$HANZO_INTERACTIVE_SHELL_VAR\n".to_string(),
                 ],
                 timeout_ms: Some(2_500),
             })
@@ -497,7 +497,7 @@ mod tests {
         let out_3 = manager
             .handle_request(UnifiedExecRequest {
                 session_id: Some(session_a),
-                input_chunks: &["echo $CODEX_INTERACTIVE_SHELL_VAR\n".to_string()],
+                input_chunks: &["echo $HANZO_INTERACTIVE_SHELL_VAR\n".to_string()],
                 timeout_ms: Some(2_500),
             })
             .await?;
@@ -525,7 +525,7 @@ mod tests {
                 session_id: Some(session_id),
                 input_chunks: &[
                     "export".to_string(),
-                    "CODEX_INTERACTIVE_SHELL_VAR=codex\n".to_string(),
+                    "HANZO_INTERACTIVE_SHELL_VAR=dev\n".to_string(),
                 ],
                 timeout_ms: Some(2_500),
             })
@@ -534,7 +534,7 @@ mod tests {
         let out_2 = manager
             .handle_request(UnifiedExecRequest {
                 session_id: Some(session_id),
-                input_chunks: &["sleep 5 && echo $CODEX_INTERACTIVE_SHELL_VAR\n".to_string()],
+                input_chunks: &["sleep 5 && echo $HANZO_INTERACTIVE_SHELL_VAR\n".to_string()],
                 timeout_ms: Some(10),
             })
             .await?;

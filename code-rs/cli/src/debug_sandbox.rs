@@ -1,13 +1,13 @@
 use std::path::PathBuf;
 
-use code_common::CliConfigOverrides;
-use code_core::config::Config;
-use code_core::config::ConfigOverrides;
-use code_core::exec_env::create_env;
-use code_core::landlock::spawn_command_under_linux_sandbox;
-use code_core::seatbelt::spawn_command_under_seatbelt;
-use code_core::spawn::StdioPolicy;
-use code_protocol::config_types::SandboxMode;
+use hanzo_common::CliConfigOverrides;
+use hanzo_core::config::Config;
+use hanzo_core::config::ConfigOverrides;
+use hanzo_core::exec_env::create_env;
+use hanzo_core::landlock::spawn_command_under_linux_sandbox;
+use hanzo_core::seatbelt::spawn_command_under_seatbelt;
+use hanzo_core::spawn::StdioPolicy;
+use hanzo_protocol::config_types::SandboxMode;
 
 use crate::LandlockCommand;
 use crate::SeatbeltCommand;
@@ -104,7 +104,7 @@ async fn run_command_under_sandbox(
             #[expect(clippy::expect_used)]
             let code_linux_sandbox_exe = config
                 .code_linux_sandbox_exe
-                .expect("codex-linux-sandbox executable not found");
+                .expect("dev-linux-sandbox executable not found");
             spawn_command_under_linux_sandbox(
                 code_linux_sandbox_exe,
                 command,

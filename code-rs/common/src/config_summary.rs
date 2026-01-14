@@ -1,5 +1,5 @@
-use code_core::WireApi;
-use code_core::config::Config;
+use hanzo_core::WireApi;
+use hanzo_core::config::Config;
 
 use crate::sandbox_summary::summarize_sandbox_policy;
 

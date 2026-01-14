@@ -14,9 +14,9 @@ use std::time::Duration;
 use std::time::SystemTime;
 use std::time::UNIX_EPOCH;
 
-use code_core::config::resolve_code_path_for_read;
-use code_core::config::Config;
-use code_core::default_client::create_client;
+use hanzo_core::config::resolve_code_path_for_read;
+use hanzo_core::config::Config;
+use hanzo_core::default_client::create_client;
 use once_cell::sync::Lazy;
 use tokio::process::Command;
 use tokio::sync::Mutex as AsyncMutex;
@@ -99,7 +99,7 @@ pub fn get_upgrade_version(config: &Config) -> Option<String> {
     }
 
     cached_info.and_then(|info| {
-        let current_version = code_version::version();
+        let current_version = hanzo_version::version();
         if is_newer(&info.latest_version, current_version).unwrap_or(false) {
             Some(info.latest_version)
         } else {
@@ -117,7 +117,7 @@ pub async fn check_for_updates_now(config: &Config) -> anyhow::Result<UpdateChec
     let version_file = version_filepath(config);
     let originator = config.responses_originator_header.clone();
     let info = check_for_update(&version_file, &originator).await?;
-    let current_version = code_version::version().to_string();
+    let current_version = hanzo_version::version().to_string();
     let latest_version = if is_newer(&info.latest_version, &current_version).unwrap_or(false) {
         Some(info.latest_version)
     } else {
@@ -179,7 +179,7 @@ fn version_filepath(config: &Config) -> PathBuf {
 }
 
 pub fn resolve_upgrade_resolution() -> UpgradeResolution {
-    if std::env::var_os("CODEX_MANAGED_BY_NPM").is_some() {
+    if std::env::var_os("HANZO_MANAGED_BY_NPM").is_some() {
         return UpgradeResolution::Command {
             command: vec![
                 "npm".to_string(),

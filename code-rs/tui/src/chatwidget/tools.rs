@@ -2,7 +2,7 @@
 
 use super::{running_tools, web_search_sessions, ChatWidget, OrderKey};
 use crate::history_cell;
-use code_core::protocol::{McpToolCallBeginEvent, McpToolCallEndEvent, OrderMeta};
+use hanzo_core::protocol::{McpToolCallBeginEvent, McpToolCallEndEvent, OrderMeta};
 
 pub(super) fn web_search_begin(
     chat: &mut ChatWidget<'_>,

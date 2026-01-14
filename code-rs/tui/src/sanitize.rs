@@ -36,7 +36,7 @@ pub fn sanitize_for_tui(input: &str, mode: Mode, opts: Options) -> String {
 fn ascii_only_enabled() -> bool {
     static ASCII_ONLY: OnceLock<bool> = OnceLock::new();
     *ASCII_ONLY.get_or_init(|| {
-        std::env::var("CODEX_TUI_ASCII")
+        std::env::var("HANZO_TUI_ASCII")
             .map(|value| matches!(value.as_str(), "1" | "true" | "TRUE" | "yes" | "YES"))
             .unwrap_or(false)
     })

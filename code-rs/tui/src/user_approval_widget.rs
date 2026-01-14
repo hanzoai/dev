@@ -8,8 +8,8 @@
 
 use std::path::Path;
 use std::path::PathBuf;
-use code_core::protocol::Op;
-use code_core::protocol::ReviewDecision;
+use hanzo_core::protocol::Op;
+use hanzo_core::protocol::ReviewDecision;
 use crossterm::event::KeyCode;
 use crossterm::event::KeyEvent;
 use crossterm::event::KeyEventKind;
@@ -18,10 +18,10 @@ use ratatui::layout::Rect;
 use ratatui::prelude::*;
 use ratatui::text::{Line, Span};
 use ratatui::widgets::Block;
+use ratatui::widgets::WidgetRef;
 use ratatui::widgets::BorderType;
 use ratatui::widgets::Borders;
 use ratatui::widgets::Paragraph;
-use ratatui::widgets::WidgetRef;
 use ratatui::widgets::Wrap;
 use shlex::split as shlex_split;
 
@@ -29,7 +29,7 @@ use crate::app_event::AppEvent;
 use crate::app_event_sender::AppEventSender;
 use crate::chatwidget::BackgroundOrderTicket;
 use crate::exec_command::strip_bash_lc_and_escape;
-use code_core::protocol::ApprovedCommandMatchKind;
+use hanzo_core::protocol::ApprovedCommandMatchKind;
 
 /// Request coming from the agent that needs user approval.
 pub(crate) enum ApprovalRequest {
@@ -406,7 +406,7 @@ impl WidgetRef for &UserApprovalWidget<'_> {
             .border_type(BorderType::QuadrantOutside)
             .border_style(Style::default().fg(crate::colors::light_blue()))
             .borders(Borders::LEFT)
-            .render_ref(Rect::new(0, options_chunk.y, 1, options_chunk.height), buf);
+            .render(Rect::new(0, options_chunk.y, 1, options_chunk.height), buf);
     }
 }
 
@@ -559,4 +559,3 @@ fn hotkey_suffix(key: KeyCode) -> String {
         _ => String::new(),
     }
 }
-

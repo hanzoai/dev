@@ -1,7 +1,7 @@
 use std::collections::VecDeque;
 
-use code_core::protocol::TokenUsage;
-use code_protocol::models::{ContentItem, ResponseItem};
+use hanzo_core::protocol::TokenUsage;
+use hanzo_protocol::models::{ContentItem, ResponseItem};
 
 use crate::session_metrics::SessionMetrics;
 
@@ -359,11 +359,11 @@ fn estimate_item_tokens(item: &ResponseItem) -> usize {
         ResponseItem::CustomToolCallOutput { output, .. } => output.len(),
         ResponseItem::Reasoning { summary, content, .. } => {
             summary.iter().map(|s| match s {
-                code_protocol::models::ReasoningItemReasoningSummary::SummaryText { text } => text.len(),
+                hanzo_protocol::models::ReasoningItemReasoningSummary::SummaryText { text } => text.len(),
             }).sum::<usize>()
                 + content.as_ref().map(|c| c.iter().map(|item| match item {
-                    code_protocol::models::ReasoningItemContent::ReasoningText { text } |
-                    code_protocol::models::ReasoningItemContent::Text { text } => text.len(),
+                    hanzo_protocol::models::ReasoningItemContent::ReasoningText { text } |
+                    hanzo_protocol::models::ReasoningItemContent::Text { text } => text.len(),
                 }).sum()).unwrap_or(0)
         }
         // Catch-all for other types: Other, LocalShellCall, WebSearchCall, etc.

@@ -30,9 +30,9 @@ pub enum ParsedCommand {
 
 // Convert core's parsed command enum into the protocol's simplified type so
 // events can carry the canonical representation across process boundaries.
-impl From<ParsedCommand> for code_protocol::parse_command::ParsedCommand {
+impl From<ParsedCommand> for hanzo_protocol::parse_command::ParsedCommand {
     fn from(v: ParsedCommand) -> Self {
-        use code_protocol::parse_command::ParsedCommand as P;
+        use hanzo_protocol::parse_command::ParsedCommand as P;
         match v {
             ParsedCommand::Read { cmd, name } => P::Read { cmd, name },
             ParsedCommand::ListFiles { cmd, path } => P::ListFiles { cmd, path },
@@ -516,10 +516,10 @@ mod tests {
     #[test]
     fn supports_grep_recursive_current_dir() {
         assert_parsed(
-            &vec_str(&["grep", "-R", "CODEX_SANDBOX_ENV_VAR", "-n", "."]),
+            &vec_str(&["grep", "-R", "HANZO_SANDBOX_ENV_VAR", "-n", "."]),
             vec![ParsedCommand::Search {
-                cmd: "grep -R CODEX_SANDBOX_ENV_VAR -n .".to_string(),
-                query: Some("CODEX_SANDBOX_ENV_VAR".to_string()),
+                cmd: "grep -R HANZO_SANDBOX_ENV_VAR -n .".to_string(),
+                query: Some("HANZO_SANDBOX_ENV_VAR".to_string()),
                 path: Some(".".to_string()),
             }],
         );
@@ -531,13 +531,13 @@ mod tests {
             &vec_str(&[
                 "grep",
                 "-R",
-                "CODEX_SANDBOX_ENV_VAR",
+                "HANZO_SANDBOX_ENV_VAR",
                 "-n",
                 "core/src/spawn.rs",
             ]),
             vec![ParsedCommand::Search {
-                cmd: "grep -R CODEX_SANDBOX_ENV_VAR -n core/src/spawn.rs".to_string(),
-                query: Some("CODEX_SANDBOX_ENV_VAR".to_string()),
+                cmd: "grep -R HANZO_SANDBOX_ENV_VAR -n core/src/spawn.rs".to_string(),
+                query: Some("HANZO_SANDBOX_ENV_VAR".to_string()),
                 path: Some("spawn.rs".to_string()),
             }],
         );

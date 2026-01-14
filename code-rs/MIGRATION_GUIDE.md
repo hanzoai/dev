@@ -8,7 +8,7 @@ The `code-rs` repository currently contains thin wrapper crates that re-export f
 
 ## Case Study: linux-sandbox Migration
 
-We successfully migrated `code-linux-sandbox` as a representative example. This crate had:
+We successfully migrated `dev-linux-sandbox` as a representative example. This crate had:
 - Multiple source modules (landlock.rs, linux_run_main.rs)
 - A binary entry point (main.rs)
 - Integration tests
@@ -51,7 +51,7 @@ Replace the wrapper dependency with actual implementation dependencies.
 **Before (wrapper):**
 ```toml
 [dependencies]
-codex-linux-sandbox = { workspace = true }
+dev-linux-sandbox = { workspace = true }
 ```
 
 **After (independent):**
@@ -81,7 +81,7 @@ Replace the wrapper re-export with the actual module structure.
 
 **Before (wrapper):**
 ```rust
-//! Thin wrapper around the upstream `codex-linux-sandbox` crate.
+//! Thin wrapper around the upstream `dev-linux-sandbox` crate.
 pub use codex_linux_sandbox::*;
 ```
 
@@ -99,7 +99,7 @@ pub fn run_main() -> ! {
 
 #[cfg(not(target_os = "linux"))]
 pub fn run_main() -> ! {
-    panic!("code-linux-sandbox is only supported on Linux");
+    panic!("dev-linux-sandbox is only supported on Linux");
 }
 ```
 
@@ -162,7 +162,7 @@ Remove the cross-repository dependency reference.
 ```toml
 [workspace.dependencies]
 # ...
-codex-linux-sandbox = { path = "../codex-rs/linux-sandbox" }
+dev-linux-sandbox = { path = "../codex-rs/linux-sandbox" }
 # ...
 ```
 
@@ -182,7 +182,7 @@ cargo build -p code-<crate-name>
 # Run tests
 cargo test -p code-<crate-name>
 
-# Build dependent crates (e.g., code-arg0 depends on code-linux-sandbox)
+# Build dependent crates (e.g., code-arg0 depends on dev-linux-sandbox)
 cargo build -p <dependent-crate>
 ```
 
@@ -260,7 +260,7 @@ mod landlock;
 
 #[cfg(not(target_os = "linux"))]
 pub fn run_main() -> ! {
-    panic!("code-linux-sandbox is only supported on Linux");
+    panic!("dev-linux-sandbox is only supported on Linux");
 }
 ```
 
@@ -304,7 +304,7 @@ name = "code_linux_sandbox"  # Note: underscores
 path = "src/lib.rs"
 
 [[bin]]
-name = "code-linux-sandbox"  # Note: hyphens
+name = "dev-linux-sandbox"  # Note: hyphens
 path = "src/main.rs"
 ```
 
@@ -316,7 +316,7 @@ Crates should be migrated in dependency order. Dependencies must be migrated bef
 
 **Already migrated:**
 - ✅ `code-core` (was `codex-core`)
-- ✅ `code-linux-sandbox` (was `codex-linux-sandbox`)
+- ✅ `dev-linux-sandbox` (was `dev-linux-sandbox`)
 
 **Remaining wrappers (identified order):**
 1. Low-level utilities (no codex dependencies):
@@ -375,8 +375,8 @@ The result is a crate that owns its implementation and no longer depends on `../
 
 ## linux-sandbox Migration Results
 
-The `code-linux-sandbox` crate was successfully migrated:
-- **Build status:** ✅ Success (`cargo build -p code-linux-sandbox` in 1m 50s)
+The `dev-linux-sandbox` crate was successfully migrated:
+- **Build status:** ✅ Success (`cargo build -p dev-linux-sandbox` in 1m 50s)
 - **Files migrated:** 7 files (lib.rs, main.rs, landlock.rs, linux_run_main.rs, + 3 test files)
 - **Dependencies:** 5 external + 1 internal (code-core)
 - **Namespace changes:** 4 occurrences (codex_core → code_core, codex_linux_sandbox → code_linux_sandbox)

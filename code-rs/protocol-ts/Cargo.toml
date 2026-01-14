@@ -1,23 +1,23 @@
 [package]
 edition = "2024"
-name = "code-protocol-ts"
+name = "hanzo-protocol-ts"
 version = { workspace = true }
 
 [lints]
 workspace = true
 
 [lib]
-name = "code_protocol_ts"
+name = "hanzo_protocol_ts"
 path = "src/lib.rs"
 
 [[bin]]
-name = "code-protocol-ts"
+name = "hanzo-protocol-ts"
 path = "src/main.rs"
 
 [dependencies]
 anyhow = { workspace = true }
 clap = { workspace = true, features = ["derive"] }
-code-app-server-protocol = { workspace = true }
-code-protocol = { workspace = true }
+hanzo-app-server-protocol = { workspace = true }
+hanzo-protocol = { workspace = true }
 ts-rs = { workspace = true }
 mcp-types = { workspace = true }

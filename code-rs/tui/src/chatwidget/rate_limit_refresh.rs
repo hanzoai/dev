@@ -1,21 +1,21 @@
 use std::sync::{Arc, Mutex};
 
 use anyhow::{Context, Result};
-use code_core::auth::auth_for_stored_account;
-use code_core::auth_accounts::{self, StoredAccount};
-use code_core::{AuthManager, ModelClient, Prompt, ResponseEvent};
-use code_core::account_usage;
-use code_core::config::Config;
-use code_core::config_types::ReasoningEffort;
-use code_core::debug_logger::DebugLogger;
-use code_core::protocol::{Event, EventMsg, RateLimitSnapshotEvent, TokenCountEvent};
-use code_protocol::models::{ContentItem, ResponseItem};
+use hanzo_core::auth::auth_for_stored_account;
+use hanzo_core::auth_accounts::{self, StoredAccount};
+use hanzo_core::{AuthManager, ModelClient, Prompt, ResponseEvent};
+use hanzo_core::account_usage;
+use hanzo_core::config::Config;
+use hanzo_core::config_types::ReasoningEffort;
+use hanzo_core::debug_logger::DebugLogger;
+use hanzo_core::protocol::{Event, EventMsg, RateLimitSnapshotEvent, TokenCountEvent};
+use hanzo_protocol::models::{ContentItem, ResponseItem};
 use chrono::Utc;
 use futures::StreamExt;
 use tokio::runtime::Runtime;
 use uuid::Uuid;
 
-#[cfg(feature = "code-fork")]
+#[cfg(feature = "hanzo-fork")]
 use crate::tui_event_extensions::handle_rate_limit;
 
 use crate::app_event::AppEvent;
@@ -124,9 +124,9 @@ fn run_refresh(
             }
             None => {
                 let auth_mode = if config.using_chatgpt_auth {
-                    code_protocol::mcp_protocol::AuthMode::ChatGPT
+                    hanzo_protocol::mcp_protocol::AuthMode::ChatGPT
                 } else {
-                    code_protocol::mcp_protocol::AuthMode::ApiKey
+                    hanzo_protocol::mcp_protocol::AuthMode::ApiKey
                 };
                 (
                     AuthManager::shared_with_mode_and_originator(
@@ -211,7 +211,7 @@ fn run_refresh(
             }
         }
 
-        #[cfg(feature = "code-fork")]
+        #[cfg(feature = "hanzo-fork")]
         handle_rate_limit(&snapshot, &app_event_tx);
 
         if emit_ui {

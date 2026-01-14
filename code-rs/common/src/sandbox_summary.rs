@@ -1,4 +1,4 @@
-use code_core::protocol::SandboxPolicy;
+use hanzo_core::protocol::SandboxPolicy;
 
 pub fn summarize_sandbox_policy(sandbox_policy: &SandboxPolicy) -> String {
     match sandbox_policy {

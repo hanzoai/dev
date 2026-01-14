@@ -98,7 +98,7 @@ pub fn create_ghost_commit(
         .collect::<Result<Vec<_>, _>>()?;
     let force_include =
         apply_repo_prefix_to_force_include(repo_prefix.as_deref(), &normalized_force);
-    let index_tempdir = Builder::new().prefix("code-git-index-").tempdir()?;
+        let index_tempdir = Builder::new().prefix("dev-git-index-").tempdir()?;
     let index_path = index_tempdir.path().join("index");
     let base_env = vec![(
         OsString::from("GIT_INDEX_FILE"),

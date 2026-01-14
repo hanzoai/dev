@@ -20,9 +20,9 @@ use crate::history::state::HistorySnapshot;
 use crate::onboarding::onboarding_screen::OnboardingScreen;
 use crate::thread_spawner;
 use crate::tui::TerminalInfo;
-use code_core::config::Config;
-use code_core::ConversationManager;
-use code_login::ShutdownHandle;
+use hanzo_core::config::Config;
+use hanzo_core::ConversationManager;
+use hanzo_login::ShutdownHandle;
 use tokio::sync::oneshot;
 use tokio::task::JoinHandle;
 
@@ -306,10 +306,10 @@ impl App<'_> {
         self.sigterm_guard.take();
     }
 
-    pub(crate) fn token_usage(&self) -> code_core::protocol::TokenUsage {
+    pub(crate) fn token_usage(&self) -> hanzo_core::protocol::TokenUsage {
         let usage = match &self.app_state {
             AppState::Chat { widget } => widget.token_usage().clone(),
-            AppState::Onboarding { .. } => code_core::protocol::TokenUsage::default(),
+            AppState::Onboarding { .. } => hanzo_core::protocol::TokenUsage::default(),
         };
         // ensure background helpers stop before returning
         self.commit_anim_running.store(false, Ordering::Release);
@@ -402,7 +402,7 @@ impl BufferDiffProfiler {
             if self.should_log_frame() {
                 if prev_buffer.area != current_buffer.area {
                     tracing::info!(
-                        target: "code_tui::buffer_diff",
+                        target: "hanzo_tui::buffer_diff",
                         frame = self.frame_seq,
                         prev_width = prev_buffer.area.width,
                         prev_height = prev_buffer.area.height,
@@ -481,7 +481,7 @@ impl BufferDiffProfiler {
                     };
                     let skipped_cells = current_buffer.content.iter().filter(|cell| cell.skip).count();
                     tracing::info!(
-                        target: "code_tui::buffer_diff",
+                        target: "hanzo_tui::buffer_diff",
                         frame = self.frame_seq,
                         inspected,
                         changed,

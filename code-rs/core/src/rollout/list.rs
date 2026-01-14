@@ -3,7 +3,7 @@ use std::io::{self};
 use std::path::Path;
 use std::path::PathBuf;
 
-use code_file_search as file_search;
+use hanzo_file_search as file_search;
 use std::num::NonZero;
 use std::sync::Arc;
 use std::sync::atomic::AtomicBool;
@@ -18,9 +18,9 @@ use super::SESSIONS_SUBDIR;
 use crate::config::resolve_code_path_for_read;
 use crate::protocol::event_msg_from_protocol;
 use crate::protocol::EventMsg;
-use code_protocol::protocol::RolloutItem;
-use code_protocol::protocol::RolloutLine;
-use code_protocol::protocol::SessionSource;
+use hanzo_protocol::protocol::RolloutItem;
+use hanzo_protocol::protocol::RolloutLine;
+use hanzo_protocol::protocol::SessionSource;
 
 /// Returned page of conversation summaries.
 #[derive(Debug, Default, PartialEq)]
@@ -142,7 +142,7 @@ pub(crate) async fn get_conversation(path: &Path) -> io::Result<String> {
 
 /// Load conversation file paths from disk using directory traversal.
 ///
-/// Directory layout: `~/.codex/sessions/YYYY/MM/DD/rollout-YYYY-MM-DDThh-mm-ss-<uuid>.jsonl`
+/// Directory layout: `~/.hanzo/sessions/YYYY/MM/DD/rollout-YYYY-MM-DDThh-mm-ss-<uuid>.jsonl`
 /// Returned newest (latest) first.
 async fn traverse_directories_for_paths(
     root: PathBuf,

@@ -2,7 +2,7 @@
 
 use std::collections::{BTreeMap, HashMap};
 
-use code_protocol::models::ResponseItem;
+use hanzo_protocol::models::ResponseItem;
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 

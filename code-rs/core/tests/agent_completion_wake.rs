@@ -4,11 +4,11 @@ mod common;
 
 use common::load_default_config_for_test;
 
-use code_core::config_types::AgentConfig;
-use code_core::protocol::{AskForApproval, EventMsg, Op, SandboxPolicy};
-use code_core::{built_in_model_providers, CodexAuth, ConversationManager};
-use code_core::AGENT_MANAGER;
-use code_protocol::config_types::ReasoningEffort;
+use hanzo_core::config_types::AgentConfig;
+use hanzo_core::protocol::{AskForApproval, EventMsg, Op, SandboxPolicy};
+use hanzo_core::{built_in_model_providers, CodexAuth, ConversationManager};
+use hanzo_core::AGENT_MANAGER;
+use hanzo_protocol::config_types::ReasoningEffort;
 use serde_json::json;
 use serial_test::serial;
 use tempfile::TempDir;

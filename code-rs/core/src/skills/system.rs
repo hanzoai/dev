@@ -9,7 +9,7 @@ use thiserror::Error;
 
 const SYSTEM_SKILLS_DIR_NAME: &str = ".system";
 const SKILLS_DIR_NAME: &str = "skills";
-const SYSTEM_SKILLS_MARKER_FILENAME: &str = ".codex-system-skills.marker";
+const SYSTEM_SKILLS_MARKER_FILENAME: &str = ".hanzo-system-skills.marker";
 
 const EMBEDDED_SYSTEM_SKILLS: &[(&str, &[u8])] = &[
     (
@@ -80,12 +80,12 @@ const EMBEDDED_SYSTEM_SKILLS: &[(&str, &[u8])] = &[
 
 /// Returns the on-disk cache location for embedded system skills.
 ///
-/// This is typically located at `CODEX_HOME/skills/.system`.
+/// This is typically located at `HANZO_HOME/skills/.system`.
 pub(crate) fn system_cache_root_dir(code_home: &Path) -> PathBuf {
     code_home.join(SKILLS_DIR_NAME).join(SYSTEM_SKILLS_DIR_NAME)
 }
 
-/// Installs embedded system skills into `CODEX_HOME/skills/.system`.
+/// Installs embedded system skills into `HANZO_HOME/skills/.system`.
 ///
 /// Clears any existing system skills directory first and then writes the embedded
 /// skills directory into place.

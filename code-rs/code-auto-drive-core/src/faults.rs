@@ -2,7 +2,7 @@
 
 use anyhow::anyhow;
 use chrono::{Duration as ChronoDuration, Utc};
-use code_core::error::{CodexErr, UnexpectedResponseError, UsageLimitReachedError};
+use hanzo_core::error::{CodexErr, UnexpectedResponseError, UsageLimitReachedError};
 use once_cell::sync::OnceCell;
 use rand::Rng;
 use std::collections::HashMap;
@@ -34,14 +34,14 @@ enum FaultReset {
 static CONFIG: OnceCell<HashMap<FaultScope, FaultConfig>> = OnceCell::new();
 
 fn parse_fault_scope() -> Option<FaultScope> {
-    match std::env::var("CODEX_FAULTS_SCOPE").ok().as_deref() {
+    match std::env::var("HANZO_FAULTS_SCOPE").ok().as_deref() {
         Some("auto_drive") => Some(FaultScope::AutoDrive),
         _ => None,
     }
 }
 
 fn parse_reset_hint() -> Option<FaultReset> {
-    if let Some(seconds) = std::env::var("CODEX_FAULTS_429_RESET").ok() {
+    if let Some(seconds) = std::env::var("HANZO_FAULTS_429_RESET").ok() {
         if let Ok(value) = seconds.parse::<u64>() {
             return Some(FaultReset::Seconds(value));
         }
@@ -62,7 +62,7 @@ fn parse_reset_hint() -> Option<FaultReset> {
 fn init_config() -> HashMap<FaultScope, FaultConfig> {
     let mut map = HashMap::new();
     if let Some(scope) = parse_fault_scope() {
-        if let Ok(spec) = std::env::var("CODEX_FAULTS") {
+        if let Ok(spec) = std::env::var("HANZO_FAULTS") {
             let cfg = FaultConfig::default();
             for entry in spec.split(',').map(str::trim).filter(|s| !s.is_empty()) {
                 if let Some((label, count)) = entry.split_once(':') {

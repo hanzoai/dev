@@ -12,10 +12,10 @@ use signal_hook::consts::signal::SIGTERM;
 #[cfg(unix)]
 use signal_hook::flag;
 
-use code_core::config::Config;
-use code_core::ConversationManager;
-use code_login::{AuthManager, AuthMode};
-use code_protocol::protocol::SessionSource;
+use hanzo_core::config::Config;
+use hanzo_core::ConversationManager;
+use hanzo_login::{AuthManager, AuthMode};
+use hanzo_protocol::protocol::SessionSource;
 
 use crate::app_event::AppEvent;
 use crate::app_event_sender::AppEventSender;
@@ -65,7 +65,7 @@ impl App<'_> {
             let remote_using_chatgpt_hint = config.using_chatgpt_auth;
             if !crate::chatwidget::is_test_mode() {
                 tokio::spawn(async move {
-                    let remote_manager = code_core::remote_models::RemoteModelsManager::new(
+                    let remote_manager = hanzo_core::remote_models::RemoteModelsManager::new(
                         remote_auth_manager.clone(),
                         remote_provider,
                         remote_code_home,
@@ -81,12 +81,12 @@ impl App<'_> {
                     .map(|auth| auth.mode)
                     .or_else(|| {
                         if remote_using_chatgpt_hint {
-                            Some(code_protocol::mcp_protocol::AuthMode::ChatGPT)
+                            Some(hanzo_protocol::mcp_protocol::AuthMode::ChatGPT)
                         } else {
-                            Some(code_protocol::mcp_protocol::AuthMode::ApiKey)
+                            Some(hanzo_protocol::mcp_protocol::AuthMode::ApiKey)
                         }
                     });
-                let presets = code_common::model_presets::builtin_model_presets(auth_mode);
+                let presets = hanzo_common::model_presets::builtin_model_presets(auth_mode);
                 let presets = crate::remote_model_presets::merge_remote_models(remote_models, presets);
                 let default_model = remote_manager.default_model_slug(auth_mode).await;
                 remote_tx.send(AppEvent::ModelPresetsUpdated {

@@ -13,15 +13,15 @@ use which::which;
 use crate::protocol::AskForApproval;
 use crate::protocol::SandboxPolicy;
 use crate::shell::Shell;
-use code_protocol::config_types::SandboxMode;
-use code_protocol::models::ContentItem;
-use code_protocol::models::ResponseItem;
-use code_protocol::protocol::BROWSER_SNAPSHOT_CLOSE_TAG;
-use code_protocol::protocol::BROWSER_SNAPSHOT_OPEN_TAG;
-use code_protocol::protocol::ENVIRONMENT_CONTEXT_CLOSE_TAG;
-use code_protocol::protocol::ENVIRONMENT_CONTEXT_DELTA_CLOSE_TAG;
-use code_protocol::protocol::ENVIRONMENT_CONTEXT_DELTA_OPEN_TAG;
-use code_protocol::protocol::ENVIRONMENT_CONTEXT_OPEN_TAG;
+use hanzo_protocol::config_types::SandboxMode;
+use hanzo_protocol::models::ContentItem;
+use hanzo_protocol::models::ResponseItem;
+use hanzo_protocol::protocol::BROWSER_SNAPSHOT_CLOSE_TAG;
+use hanzo_protocol::protocol::BROWSER_SNAPSHOT_OPEN_TAG;
+use hanzo_protocol::protocol::ENVIRONMENT_CONTEXT_CLOSE_TAG;
+use hanzo_protocol::protocol::ENVIRONMENT_CONTEXT_DELTA_CLOSE_TAG;
+use hanzo_protocol::protocol::ENVIRONMENT_CONTEXT_DELTA_OPEN_TAG;
+use hanzo_protocol::protocol::ENVIRONMENT_CONTEXT_OPEN_TAG;
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, DeriveDisplay)]
 #[serde(rename_all = "kebab-case")]

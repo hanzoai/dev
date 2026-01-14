@@ -150,7 +150,7 @@ pub(crate) use agent::{AgentDetail, AgentRunCell, AgentStatusKind, AgentStatusPr
 pub(crate) use crate::history::state::ExploreEntryStatus;
 pub(crate) use crate::insert_history::word_wrap_lines;
 pub(crate) use crate::util::buffer::{fill_rect, write_line};
-pub(crate) use code_common::elapsed::format_duration;
+pub(crate) use hanzo_common::elapsed::format_duration;
 pub(crate) use crate::history::compat::{ContextRecord, ExecStatus};
 pub(crate) use ratatui::prelude::Alignment;
 pub(crate) use ratatui::prelude::{Buffer, Rect, Stylize};

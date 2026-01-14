@@ -1,6 +1,6 @@
 fn main() {
     if let Ok(profile) = std::env::var("PROFILE") {
-        println!("cargo:rustc-env=CODEX_PROFILE={profile}");
+        println!("cargo:rustc-env=HANZO_PROFILE={profile}");
     }
     use std::collections::BTreeMap;
     use std::fs;

@@ -1,6 +1,6 @@
 [package]
 edition = "2024"
-name = "code-cli"
+name = "hanzo-cli"
 version = { workspace = true }
 
 [[bin]]
@@ -8,7 +8,7 @@ name = "dev"
 path = "src/main.rs"
 
 [lib]
-name = "code_cli"
+name = "hanzo_cli"
 path = "src/lib.rs"
 
 [lints]
@@ -19,22 +19,22 @@ anyhow = { workspace = true }
 chrono = { workspace = true }
 clap = { workspace = true, features = ["derive"] }
 clap_complete = { workspace = true }
-code-app-server = { workspace = true }
-code-arg0 = { workspace = true }
-code-chatgpt = { workspace = true }
-code-common = { workspace = true, features = ["cli"] }
-code-core = { workspace = true }
-code-exec = { workspace = true }
-code-login = { workspace = true }
-code-mcp-server = { workspace = true }
-code-process-hardening = { workspace = true }
-code-protocol = { workspace = true }
-code-app-server-protocol = { workspace = true }
-code-protocol-ts = { workspace = true }
-code-responses-api-proxy = { workspace = true }
-code-tui = { workspace = true }
-code-version = { path = "../code-version" }
-code-cloud-tasks = { workspace = true }
+hanzo-app-server = { workspace = true }
+hanzo-arg0 = { workspace = true }
+hanzo-chatgpt = { workspace = true }
+hanzo-common = { workspace = true, features = ["cli"] }
+hanzo-core = { workspace = true }
+hanzo-exec = { workspace = true }
+hanzo-login = { workspace = true }
+hanzo-mcp-server = { workspace = true }
+hanzo-process-hardening = { workspace = true }
+hanzo-protocol = { workspace = true }
+hanzo-app-server-protocol = { workspace = true }
+hanzo-protocol-ts = { workspace = true }
+hanzo-responses-api-proxy = { workspace = true }
+hanzo-tui = { workspace = true }
+hanzo-version = { path = "../code-version" }
+hanzo-cloud-tasks = { workspace = true }
 ctor = { workspace = true }
 futures = { workspace = true }
 reqwest = { version = "0.12", default-features = false, features = ["rustls-tls", "gzip", "json"] }

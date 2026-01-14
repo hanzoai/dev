@@ -7,8 +7,8 @@ use std::path::Path;
 use tempfile::TempDir;
 use uuid::Uuid;
 
-use code_protocol::ConversationId;
-use code_protocol::protocol::{
+use hanzo_protocol::ConversationId;
+use hanzo_protocol::protocol::{
     EventMsg as ProtoEventMsg,
     RecordedEvent,
     RolloutItem,

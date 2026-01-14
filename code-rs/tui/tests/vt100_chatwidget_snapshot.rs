@@ -7,7 +7,7 @@
 #![cfg(test)]
 #![allow(clippy::unwrap_used, clippy::expect_used)]
 
-use code_core::protocol::{
+use hanzo_core::protocol::{
     AgentInfo,
     AgentSourceKind,
     AgentMessageDeltaEvent,
@@ -26,15 +26,15 @@ use code_core::protocol::{
     WebSearchBeginEvent,
     WebSearchCompleteEvent,
 };
-use code_tui::test_helpers::{
+use hanzo_tui::test_helpers::{
     force_scroll_offset as harness_force_scroll_offset,
     layout_metrics as harness_layout_metrics,
     render_chat_widget_to_vt100,
     AutoContinueModeFixture,
     ChatWidgetHarness,
 };
-use code_core::codex::compact::COMPACTION_CHECKPOINT_MESSAGE;
-use code_protocol::protocol::CompactionCheckpointWarningEvent;
+use hanzo_core::codex::compact::COMPACTION_CHECKPOINT_MESSAGE;
+use hanzo_protocol::protocol::CompactionCheckpointWarningEvent;
 use crossterm::event::{KeyCode, KeyEvent, KeyEventKind, KeyEventState, KeyModifiers};
 use regex_lite::{Captures, Regex};
 use serde_json::json;
@@ -483,7 +483,7 @@ fn push_unordered_event(
 #[test]
 fn baseline_empty_chat() {
     let mut harness = ChatWidgetHarness::new();
-    code_tui::test_helpers::set_standard_terminal_mode(&mut harness, false);
+    hanzo_tui::test_helpers::set_standard_terminal_mode(&mut harness, false);
 
     let output = normalize_output(render_chat_widget_to_vt100(&mut harness, 80, 24));
     insta::assert_snapshot!("empty_chat", output);
@@ -2337,12 +2337,12 @@ fn agents_overlay_narrow_terminal_does_not_panic() {
 #[test]
 fn agents_toggle_claude_opus_persists_via_slash_command() {
     let _lock = ENV_LOCK.lock().unwrap();
-    let env = EnvGuard::new(&["HOME", "CODE_HOME", "CODEX_HOME"]);
+    let env = EnvGuard::new(&["HOME", "HANZO_HOME", "HANZO_HOME"]);
     let home_dir = TempDir::new().expect("temp home");
     let code_home = TempDir::new().expect("code home");
     env.set_path("HOME", home_dir.path());
-    env.set_path("CODE_HOME", code_home.path());
-    env.remove("CODEX_HOME");
+    env.set_path("HANZO_HOME", code_home.path());
+    env.remove("HANZO_HOME");
 
     let mut harness = ChatWidgetHarness::new();
 

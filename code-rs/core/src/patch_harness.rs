@@ -1,6 +1,6 @@
 use crate::config_types::{validation_tool_category, GithubConfig, ValidationCategory, ValidationConfig};
 use crate::workflow_validation::maybe_run_actionlint;
-use code_apply_patch::{ApplyPatchAction, ApplyPatchFileChange};
+use hanzo_apply_patch::{ApplyPatchAction, ApplyPatchFileChange};
 use serde_json as json;
 use std::collections::{BTreeSet, HashMap, HashSet};
 use std::fs;

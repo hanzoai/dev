@@ -1,4 +1,4 @@
-use code_apply_patch::{ApplyPatchAction, ApplyPatchFileChange};
+use hanzo_apply_patch::{ApplyPatchAction, ApplyPatchFileChange};
 use crate::config_types::GithubConfig;
 use std::fs;
 use std::io::Write;

@@ -4,15 +4,15 @@ use std::sync::Arc;
 use anyhow::{anyhow, Context, Result};
 use base64::engine::general_purpose::URL_SAFE_NO_PAD;
 use base64::Engine as _;
-use code_cloud_tasks_client::ApplyOutcome;
-use code_cloud_tasks_client::CloudBackend;
-use code_cloud_tasks_client::CreatedTask;
-use code_cloud_tasks_client::HttpClient;
-use code_cloud_tasks_client::MockClient;
-use code_cloud_tasks_client::TaskId;
-use code_cloud_tasks_client::TaskSummary;
-use code_login::AuthManager;
-use code_login::AuthMode;
+use hanzo_cloud_tasks_client::ApplyOutcome;
+use hanzo_cloud_tasks_client::CloudBackend;
+use hanzo_cloud_tasks_client::CreatedTask;
+use hanzo_cloud_tasks_client::HttpClient;
+use hanzo_cloud_tasks_client::MockClient;
+use hanzo_cloud_tasks_client::TaskId;
+use hanzo_cloud_tasks_client::TaskSummary;
+use hanzo_login::AuthManager;
+use hanzo_login::AuthMode;
 use reqwest::header::HeaderMap;
 use reqwest::header::HeaderName;
 use reqwest::header::HeaderValue;
@@ -106,7 +106,7 @@ pub async fn fetch_environments() -> Result<Vec<CloudEnvironment>> {
         .build()
         .context("build reqwest client")?;
     let mut headers = HeaderMap::new();
-    let ua = code_core::default_client::get_code_user_agent(None);
+    let ua = hanzo_core::default_client::get_code_user_agent(None);
     headers.insert(
         USER_AGENT,
         HeaderValue::from_str(&ua).unwrap_or(HeaderValue::from_static("codex-cli")),
@@ -179,7 +179,7 @@ fn environments_url(base_url: &str) -> String {
 
 async fn detect_git_ref() -> Option<String> {
     let cwd = std::env::current_dir().ok()?;
-    code_core::git_info::current_branch_name(&cwd).await
+    hanzo_core::git_info::current_branch_name(&cwd).await
 }
 
 fn build_backend(config: &CloudTasksConfig) -> Result<Arc<dyn CloudBackend>> {
@@ -187,7 +187,7 @@ fn build_backend(config: &CloudTasksConfig) -> Result<Arc<dyn CloudBackend>> {
         return Ok(Arc::new(MockClient));
     }
 
-    let ua = code_core::default_client::get_code_user_agent(None);
+    let ua = hanzo_core::default_client::get_code_user_agent(None);
     let mut client = HttpClient::new(config.base_url.clone()).context("create cloud http client")?;
     client = client.with_user_agent(ua);
     if let Some(token) = &config.token {
@@ -200,10 +200,10 @@ fn build_backend(config: &CloudTasksConfig) -> Result<Arc<dyn CloudBackend>> {
 }
 
 async fn load_config() -> Result<CloudTasksConfig> {
-    let base_url_env = std::env::var("CODEX_CLOUD_TASKS_BASE_URL")
+    let base_url_env = std::env::var("HANZO_CLOUD_TASKS_BASE_URL")
         .unwrap_or_else(|_| "https://chatgpt.com/backend-api".to_string());
     let base_url = normalize_base_url(&base_url_env);
-    let use_mock = std::env::var("CODEX_CLOUD_TASKS_MODE")
+    let use_mock = std::env::var("HANZO_CLOUD_TASKS_MODE")
         .ok()
         .map(|mode| mode.eq_ignore_ascii_case("mock"))
         .unwrap_or(false);
@@ -216,12 +216,12 @@ async fn load_config() -> Result<CloudTasksConfig> {
         });
     }
 
-    let code_home = code_core::config::find_code_home()
+    let code_home = hanzo_core::config::find_code_home()
         .context("determine codex home directory")?;
     let auth_manager = AuthManager::new(
         code_home,
         AuthMode::ChatGPT,
-        code_core::default_client::DEFAULT_ORIGINATOR.to_string(),
+        hanzo_core::default_client::DEFAULT_ORIGINATOR.to_string(),
     );
     let auth = auth_manager
         .auth()

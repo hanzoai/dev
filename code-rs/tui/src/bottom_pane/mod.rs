@@ -10,10 +10,10 @@ use crate::thread_spawner;
 pub(crate) use bottom_pane_view::BottomPaneView;
 pub(crate) use bottom_pane_view::ConditionalUpdate;
 use crate::util::buffer::fill_rect;
-use code_protocol::custom_prompts::CustomPrompt;
-use code_protocol::skills::Skill;
-use code_core::protocol::TokenUsage;
-use code_file_search::FileMatch;
+use hanzo_protocol::custom_prompts::CustomPrompt;
+use hanzo_protocol::skills::Skill;
+use hanzo_core::protocol::TokenUsage;
+use hanzo_file_search::FileMatch;
 use crossterm::event::{KeyCode, KeyEvent, KeyEventKind};
 use ratatui::buffer::Buffer;
 use ratatui::layout::Rect;
@@ -21,7 +21,7 @@ use ratatui::widgets::WidgetRef;
 use std::time::Duration;
 
 mod approval_modal_view;
-#[cfg(feature = "code-fork")]
+#[cfg(feature = "hanzo-fork")]
 mod approval_ui;
 mod auto_coordinator_view;
 mod auto_drive_settings_view;
@@ -96,12 +96,12 @@ pub(crate) use validation_settings_view::ValidationSettingsView;
 pub(crate) use review_settings_view::ReviewSettingsView;
 pub(crate) use planning_settings_view::PlanningSettingsView;
 use approval_modal_view::ApprovalModalView;
-#[cfg(feature = "code-fork")]
+#[cfg(feature = "hanzo-fork")]
 use approval_ui::ApprovalUi;
-use code_common::model_presets::ModelPreset;
-use code_core::config_types::ReasoningEffort;
-use code_core::config_types::TextVerbosity;
-use code_core::config_types::ThemeName;
+use hanzo_common::model_presets::ModelPreset;
+use hanzo_core::config_types::ReasoningEffort;
+use hanzo_core::config_types::TextVerbosity;
+use hanzo_core::config_types::ThemeName;
 pub(crate) use model_selection_view::{ModelSelectionTarget, ModelSelectionView};
 pub(crate) use mcp_settings_view::McpSettingsView;
 pub(crate) use theme_selection_view::ThemeSelectionView;
@@ -1097,7 +1097,7 @@ impl BottomPane<'_> {
     // Removed restart_live_status_with_text – no longer used by the current streaming UI.
 }
 
-#[cfg(feature = "code-fork")]
+#[cfg(feature = "hanzo-fork")]
 fn build_user_approval_widget<'a>(
     request: ApprovalRequest,
     ticket: BackgroundOrderTicket,
@@ -1106,7 +1106,7 @@ fn build_user_approval_widget<'a>(
     <UserApprovalWidget<'a> as ApprovalUi>::build(request, ticket, app_event_tx)
 }
 
-#[cfg(not(feature = "code-fork"))]
+#[cfg(not(feature = "hanzo-fork"))]
 fn build_user_approval_widget<'a>(
     request: ApprovalRequest,
     ticket: BackgroundOrderTicket,

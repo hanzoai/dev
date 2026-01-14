@@ -516,7 +516,7 @@ impl App<'_> {
             );
             self.alt_screen_active = false;
             // Persist preference
-            let _ = code_core::config::set_tui_alternate_screen(&self.config.code_home, false);
+            let _ = hanzo_core::config::set_tui_alternate_screen(&self.config.code_home, false);
             // Immediately mirror the entire transcript into the terminal scrollback so
             // the user sees full history when entering standard mode.
             if let AppState::Chat { widget } = &self.app_state {
@@ -538,7 +538,7 @@ impl App<'_> {
             self.clear_on_first_frame = true;
             self.alt_screen_active = true;
             // Persist preference
-            let _ = code_core::config::set_tui_alternate_screen(&self.config.code_home, true);
+            let _ = hanzo_core::config::set_tui_alternate_screen(&self.config.code_home, true);
             // Request immediate redraw
             self.schedule_redraw();
         }

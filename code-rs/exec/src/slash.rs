@@ -1,7 +1,7 @@
-use code_core::config_types::{AgentConfig, SubagentCommandConfig};
-use code_core::protocol::{ReviewContextMetadata, ReviewRequest};
+use hanzo_core::config_types::{AgentConfig, SubagentCommandConfig};
+use hanzo_core::protocol::{ReviewContextMetadata, ReviewRequest};
 
-use code_core::slash_commands::format_subagent_command;
+use hanzo_core::slash_commands::format_subagent_command;
 
 #[derive(Clone, Copy)]
 pub struct SlashContext<'a> {
@@ -131,7 +131,7 @@ fn handle_review(args_raw: &str) -> Result<SlashDispatch, String> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use code_core::config_types::{AgentConfig, SubagentCommandConfig};
+    use hanzo_core::config_types::{AgentConfig, SubagentCommandConfig};
 
     fn ctx<'a>(agents: &'a [AgentConfig], subagents: &'a [SubagentCommandConfig]) -> SlashContext<'a> {
         SlashContext { agents, subagent_commands: subagents }

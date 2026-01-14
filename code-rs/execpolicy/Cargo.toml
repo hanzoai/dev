@@ -1,14 +1,14 @@
 [package]
 edition = "2024"
-name = "code-execpolicy"
+name = "hanzo-execpolicy"
 version = { workspace = true }
 
 [[bin]]
-name = "code-execpolicy"
+name = "hanzo-execpolicy"
 path = "src/main.rs"
 
 [lib]
-name = "codex_execpolicy"
+name = "hanzo_execpolicy"
 path = "src/lib.rs"
 
 [lints]

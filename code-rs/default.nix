@@ -13,7 +13,6 @@ rec {
       lockFile = ./Cargo.lock;
       outputHashes = {
         "mcp-types-0.0.0" = "sha256-BGpEuNXky7neVIQQHqyqRjoa/wemfp6zj+usJlkRN+g=";
-        "ratatui-0.29.0" = "sha256-HBvT5c8GsiCxMffNjJGLmHnvG77A6cqEL+1ARurBXho=";
       };
     };
 

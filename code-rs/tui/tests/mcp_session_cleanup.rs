@@ -9,9 +9,9 @@ use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::time::Duration;
 
-use code_core::config::{Config, ConfigOverrides, ConfigToml};
-use code_core::config_types::{McpServerConfig, McpServerTransportConfig};
-use code_core::mcp_connection_manager::McpConnectionManager;
+use hanzo_core::config::{Config, ConfigOverrides, ConfigToml};
+use hanzo_core::config_types::{McpServerConfig, McpServerTransportConfig};
+use hanzo_core::mcp_connection_manager::McpConnectionManager;
 
 const WRAPPER_SOURCE: &str = r#"
 use std::env;

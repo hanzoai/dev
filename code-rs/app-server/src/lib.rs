@@ -4,9 +4,9 @@ use std::io::ErrorKind;
 use std::io::Result as IoResult;
 use std::path::PathBuf;
 
-use code_common::CliConfigOverrides;
-use code_core::config::Config;
-use code_core::config::ConfigOverrides;
+use hanzo_common::CliConfigOverrides;
+use hanzo_core::config::Config;
+use hanzo_core::config::ConfigOverrides;
 
 use mcp_types::JSONRPCMessage;
 use tokio::io::AsyncBufReadExt;

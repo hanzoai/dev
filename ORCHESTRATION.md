@@ -29,7 +29,7 @@ npm install -g @hanzo/dev
 │  ┌──────────────────────────────────────────────────────────────┐   │
 │  │                    Orchestration Layer                         │   │
 │  │  ┌────────┐ ┌────────┐ ┌────────┐ ┌────────┐ ┌────────┐      │   │
-│  │  │ Claude │ │ Codex  │ │ Qwen   │ │ Gemini │ │ Ollama │      │   │
+│  │  │ Claude │ │ Hanzo Dev  │ │ Qwen   │ │ Gemini │ │ Ollama │      │   │
 │  │  │  CLI   │ │  CLI   │ │  CLI   │ │  CLI   │ │ (local)│      │   │
 │  │  └────────┘ └────────┘ └────────┘ └────────┘ └────────┘      │   │
 │  │                                                                │   │
@@ -78,8 +78,8 @@ dev "fix the bug in auth.ts"
 
 # Explicit provider selection
 dev --provider claude "refactor this function"
-dev --provider codex "write tests for utils.ts"
-dev --provider qwen "explain this code"
+dev --provider dev "write tests for utils.ts"
+dev --provider qwen "explain this dev"
 dev --provider gemini "optimize performance"
 dev --provider ollama "local inference"
 
@@ -122,7 +122,7 @@ dev providers status
 
 # Install provider CLI
 dev providers install claude
-dev providers install codex
+dev providers install dev
 dev providers install qwen
 dev providers install gemini
 ```
@@ -194,8 +194,8 @@ interface ProviderCapabilities {
 
 | Provider | Package | CLI Tool | Status |
 |----------|---------|----------|--------|
-| Claude | `@anthropic-ai/claude-code` | `claude` | ✅ |
-| Codex | `@openai/codex` | `codex` | ✅ |
+| Claude | `@anthropic-ai/claude-dev` | `claude` | ✅ |
+| Hanzo Dev | `@hanzo/dev` | `dev` | ✅ |
 | Qwen | `qwen-cli` | `qwen` | 🔜 |
 | Gemini | `@google/gemini-cli` | `gemini` | 🔜 |
 | Ollama | `ollama` | `ollama` | 🔜 |
@@ -296,7 +296,7 @@ providers:
   claude:
     model: claude-sonnet-4-20250514
     api_key: ${ANTHROPIC_API_KEY}
-  codex:
+  dev:
     model: gpt-4
     api_key: ${OPENAI_API_KEY}
   qwen:
@@ -314,10 +314,10 @@ providers:
 
 ### Phase 1: Core Orchestration (Week 1-2)
 
-- [ ] Create orchestration layer in `codex-cli/src/orchestrator/`
+- [ ] Create orchestration layer in `dev-cli/src/orchestrator/`
 - [ ] Implement provider adapter interface
 - [ ] Add Claude adapter (primary)
-- [ ] Add Codex adapter
+- [ ] Add Hanzo Dev adapter
 - [ ] Integrate hanzo-guard for I/O sanitization
 - [ ] Add configuration management
 

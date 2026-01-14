@@ -11,20 +11,20 @@ you can generate and publish the formula like so:
 scripts/generate-homebrew-formula.sh
 ```
 
-2) Copy the generated `Code.rb` into your tap repo under `Formula/Code.rb`
+2) Copy the generated `Hanzo Dev.rb` into your tap repo under `Formula/Hanzo Dev.rb`
 and update the `url`/`sha256` if needed.
 
 3) Users can then install with:
 
 ```
 brew tap just-every/tap
-brew install code
+brew install dev
 ```
 
 Notes
 
 - The formula expects release assets named like:
-  - `code-aarch64-apple-darwin.tar.gz`
-  - `code-x86_64-apple-darwin.tar.gz`
-- The CLI is installed as `code` and `coder` shims for compatibility.
+  - `dev-aarch64-apple-darwin.tar.gz`
+  - `dev-x86_64-apple-darwin.tar.gz`
+- The CLI is installed as `dev` and `coder` shims for compatibility.
 

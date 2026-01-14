@@ -2,11 +2,11 @@
 
 use crate::citation_regex::CITATION_REGEX;
 use crate::markdown_renderer::MarkdownRenderer;
-use code_core::config::Config;
+use hanzo_core::config::Config;
 use ratatui::style::Style;
 use ratatui::text::Span;
 use unicode_width::UnicodeWidthStr;
-use code_core::config_types::UriBasedFileOpener;
+use hanzo_core::config_types::UriBasedFileOpener;
 use ratatui::text::Line;
 use std::borrow::Cow;
 use std::path::Path;

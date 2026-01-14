@@ -13,10 +13,10 @@ use common::{
     wait_for_event,
 };
 
-use code_core::built_in_model_providers;
-use code_core::model_family::find_family_for_model;
-use code_core::protocol::{EventMsg, InputItem, Op};
-use code_core::{CodexAuth, ConversationManager, ModelProviderInfo};
+use hanzo_core::built_in_model_providers;
+use hanzo_core::model_family::find_family_for_model;
+use hanzo_core::protocol::{EventMsg, InputItem, Op};
+use hanzo_core::{CodexAuth, ConversationManager, ModelProviderInfo};
 use serde_json::Value;
 use tempfile::TempDir;
 use wiremock::MockServer;
@@ -95,8 +95,8 @@ async fn model_selects_expected_tools() {
     if skip_if_no_network() {
         return;
     }
-    if std::env::var_os("CARGO_BIN_EXE_code-linux-sandbox").is_none() {
-        eprintln!("Skipping tool selection test; code-linux-sandbox binary missing");
+    if std::env::var_os("CARGO_BIN_EXE_dev-linux-sandbox").is_none() {
+        eprintln!("Skipping tool selection test; dev-linux-sandbox binary missing");
         return;
     }
 

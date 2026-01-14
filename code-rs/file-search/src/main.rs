@@ -2,10 +2,10 @@ use std::io::IsTerminal;
 use std::path::Path;
 
 use clap::Parser;
-use code_file_search::Cli;
-use code_file_search::FileMatch;
-use code_file_search::Reporter;
-use code_file_search::run_main;
+use hanzo_file_search::Cli;
+use hanzo_file_search::FileMatch;
+use hanzo_file_search::Reporter;
+use hanzo_file_search::run_main;
 use serde_json::json;
 
 #[tokio::main]

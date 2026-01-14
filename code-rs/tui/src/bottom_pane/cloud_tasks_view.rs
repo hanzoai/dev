@@ -1,7 +1,7 @@
 use chrono::DateTime;
 use chrono::Utc;
-use code_cloud_tasks_client::TaskStatus;
-use code_cloud_tasks_client::TaskSummary;
+use hanzo_cloud_tasks_client::TaskStatus;
+use hanzo_cloud_tasks_client::TaskSummary;
 
 use crate::app_event::AppEvent;
 use crate::app_event_sender::AppEventSender;
@@ -241,7 +241,7 @@ fn format_status(status: &TaskStatus) -> (&'static str, Option<ratatui::style::C
     }
 }
 
-fn format_diff_summary(summary: &code_cloud_tasks_client::DiffSummary) -> String {
+fn format_diff_summary(summary: &hanzo_cloud_tasks_client::DiffSummary) -> String {
     format!(
         "Δ {} files · +{} / -{}",
         summary.files_changed,

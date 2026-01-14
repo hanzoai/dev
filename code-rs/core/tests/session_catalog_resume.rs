@@ -3,13 +3,13 @@ use std::io::{BufWriter, Write};
 use std::path::{Path, PathBuf};
 use std::time::{Duration, SystemTime};
 
-use code_core::session_catalog::{SessionCatalog, SessionQuery};
-use code_protocol::models::{ContentItem, ResponseItem};
-use code_protocol::protocol::{
+use hanzo_core::session_catalog::{SessionCatalog, SessionQuery};
+use hanzo_protocol::models::{ContentItem, ResponseItem};
+use hanzo_protocol::protocol::{
     EventMsg as ProtoEventMsg, RecordedEvent, RolloutItem, RolloutLine, SessionMeta,
     SessionMetaLine, SessionSource, UserMessageEvent,
 };
-use code_protocol::ConversationId;
+use hanzo_protocol::ConversationId;
 use filetime::{set_file_mtime, FileTime};
 use tempfile::TempDir;
 use uuid::Uuid;

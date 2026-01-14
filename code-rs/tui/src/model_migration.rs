@@ -7,6 +7,7 @@ use crossterm::queue;
 use crossterm::style::{Attribute as CtAttribute, Color as CtColor, Print, ResetColor, SetAttribute, SetForegroundColor};
 use crossterm::terminal::{disable_raw_mode, enable_raw_mode, Clear, ClearType};
 use crossterm::ExecutableCommand;
+use ratatui::prelude::IntoCrossterm;
 
 pub(crate) enum ModelMigrationOutcome {
     Accepted,
@@ -22,7 +23,7 @@ pub(crate) struct ModelMigrationCopy {
 
 pub(crate) fn migration_copy_for_key(key: &str) -> ModelMigrationCopy {
     match key {
-        code_common::model_presets::HIDE_GPT5_1_MIGRATION_PROMPT_CONFIG => ModelMigrationCopy {
+        hanzo_common::model_presets::HIDE_GPT5_1_MIGRATION_PROMPT_CONFIG => ModelMigrationCopy {
             heading: "Introducing our gpt-5.1 models",
             content: &[
                 "We've upgraded Codex to gpt-5.1, gpt-5.1-codex, and gpt-5.1-codex-mini.",
@@ -32,7 +33,7 @@ pub(crate) fn migration_copy_for_key(key: &str) -> ModelMigrationCopy {
             ],
             can_opt_out: false,
         },
-        code_common::model_presets::HIDE_GPT_5_2_MIGRATION_PROMPT_CONFIG => ModelMigrationCopy {
+        hanzo_common::model_presets::HIDE_GPT_5_2_MIGRATION_PROMPT_CONFIG => ModelMigrationCopy {
             heading: "Upgrade available: GPT-5.2",
             content: &[
                 "OpenAI's latest frontier model is here! Improved knowledge, reasoning, and coding.",
@@ -41,7 +42,7 @@ pub(crate) fn migration_copy_for_key(key: &str) -> ModelMigrationCopy {
             ],
             can_opt_out: true,
         },
-        code_common::model_presets::HIDE_GPT_5_2_CODEX_MIGRATION_PROMPT_CONFIG => ModelMigrationCopy {
+        hanzo_common::model_presets::HIDE_GPT_5_2_CODEX_MIGRATION_PROMPT_CONFIG => ModelMigrationCopy {
             heading: "Upgrade available: GPT-5.2 Codex",
             content: &[
                 "OpenAI's latest frontier agentic coding model is here: gpt-5.2-codex.",
@@ -137,7 +138,7 @@ fn render_prompt(stdout: &mut io::Stdout, copy: &ModelMigrationCopy, highlighted
     stdout.execute(MoveTo(0, 0))?;
 
     if copy.heading == "Upgrade available: GPT-5.2 Codex" {
-        let success_fg = CtColor::from(colors::success());
+        let success_fg = colors::success().into_crossterm();
         write_line_fg_bold(stdout, copy.heading, success_fg)?;
     } else {
         write_line(stdout, copy.heading)?;
@@ -149,7 +150,7 @@ fn render_prompt(stdout: &mut io::Stdout, copy: &ModelMigrationCopy, highlighted
 
     if copy.can_opt_out {
         write_blank(stdout)?;
-        let primary_fg = CtColor::from(colors::primary());
+        let primary_fg = colors::primary().into_crossterm();
         for (idx, label) in ["Try new model (recommended)", "Use existing model"].iter().enumerate() {
             if idx == highlighted {
                 queue!(stdout, SetForegroundColor(primary_fg), Print("> "), Print(*label), ResetColor, Print("\r\n"))?;
@@ -183,7 +184,7 @@ fn write_line_fg_bold(stdout: &mut io::Stdout, line: &str, fg: CtColor) -> io::R
 }
 
 fn write_key_tip_line(stdout: &mut io::Stdout) -> io::Result<()> {
-    let tip_fg = CtColor::from(colors::function());
+    let tip_fg = colors::function().into_crossterm();
     queue!(
         stdout,
         Print("Use "),

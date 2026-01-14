@@ -8,13 +8,13 @@ This file has moved. Please see the latest configuration documentation here:
   - Values can contain objects, such as `--config shell_environment_policy.include_only=["PATH", "HOME", "USER"]`.
   - For consistency with `config.toml`, values are in TOML format rather than JSON format, so use `{a = 1, b = 2}` rather than `{"a": 1, "b": 2}`.
   - If `value` cannot be parsed as a valid TOML value, it is treated as a string value. This means that both `-c model="o3"` and `-c model=o3` are equivalent.
-- The `$CODE_HOME/config.toml` configuration file. `CODE_HOME` defaults to `~/.code`; Code also reads from `$CODEX_HOME`/`~/.codex` for backwards compatibility but only writes to `~/.code`. (Logs and other state use the same directory.)
+- The `$HANZO_HOME/config.toml` configuration file. `HANZO_HOME` defaults to `~/.hanzo`; Dev also reads from `$HANZO_HOME`/`~/.hanzox` for backwards compatibility but only writes to `~/.hanzo`. (Logs and other state use the same directory.)
 
 Both the `--config` flag and the `config.toml` file support the following options:
 
 ## model
 
-The model that Codex should use.
+The model that Hanzo Dev should use.
 
 ```toml
 model = "o3"  # overrides the default of "gpt-5.1"
@@ -22,7 +22,7 @@ model = "o3"  # overrides the default of "gpt-5.1"
 
 ## model_providers
 
-This option lets you override and amend the default set of model providers bundled with Codex. This value is a map where the key is the value to use with `model_provider` to select the corresponding provider. Providers must expose an OpenAI-compatible HTTP API (Chat Completions or Responses); native Anthropic/Gemini APIs are not supported directly without a proxy.
+This option lets you override and amend the default set of model providers bundled with Hanzo Dev. This value is a map where the key is the value to use with `model_provider` to select the corresponding provider. Providers must expose an OpenAI-compatible HTTP API (Chat Completions or Responses); native Anthropic/Gemini APIs are not supported directly without a proxy.
 
 For example, if you wanted to add a provider that uses the OpenAI 4o model via the chat completions API, then you could add the following configuration:
 
@@ -32,13 +32,13 @@ model = "gpt-4o"
 model_provider = "openai-chat-completions"
 
 [model_providers.openai-chat-completions]
-# Name of the provider that will be displayed in the Codex UI.
+# Name of the provider that will be displayed in the Hanzo Dev UI.
 name = "OpenAI using Chat Completions"
 # The path `/chat/completions` will be amended to this URL to make the POST
 # request for the chat completions.
 base_url = "https://api.openai.com/v1"
 # If `env_key` is set, identifies an environment variable that must be set when
-# using Codex with this provider. The value of the environment variable must be
+# using Hanzo Dev with this provider. The value of the environment variable must be
 # non-empty and will be used in the `Bearer TOKEN` HTTP header for the POST request.
 env_key = "OPENAI_API_KEY"
 # Valid values for wire_api are "chat" and "responses". Defaults to "chat" if omitted.
@@ -48,7 +48,7 @@ wire_api = "chat"
 query_params = {}
 ```
 
-Note this makes it possible to use Codex CLI with non-OpenAI models, so long as they use a wire API that is compatible with the OpenAI chat completions API. For example, you could define the following provider to use Codex CLI with Ollama running locally:
+Note this makes it possible to use Hanzo Dev CLI with non-OpenAI models, so long as they use a wire API that is compatible with the OpenAI chat completions API. For example, you could define the following provider to use Hanzo Dev CLI with Ollama running locally:
 
 ```toml
 [model_providers.ollama]
@@ -111,15 +111,15 @@ stream_idle_timeout_ms = 300000    # 5m idle timeout
 
 #### request_max_retries
 
-How many times Codex will retry a failed HTTP request to the model provider. Defaults to `4`.
+How many times Hanzo Dev will retry a failed HTTP request to the model provider. Defaults to `4`.
 
 #### stream_max_retries
 
-Number of times Codex will attempt to reconnect when a streaming response is interrupted. Defaults to `10`.
+Number of times Hanzo Dev will attempt to reconnect when a streaming response is interrupted. Defaults to `10`.
 
 #### stream_idle_timeout_ms
 
-How long Codex will wait for activity on a streaming response before treating the connection as lost. Defaults to `300_000` (5 minutes).
+How long Hanzo Dev will wait for activity on a streaming response before treating the connection as lost. Defaults to `300_000` (5 minutes).
 
 ## model_provider
 
@@ -136,11 +136,11 @@ model = "mistral"
 
 ## approval_policy
 
-Determines when the user should be prompted to approve whether Codex can execute a command:
+Determines when the user should be prompted to approve whether Hanzo Dev can execute a command:
 
 ```toml
-# Codex has hardcoded logic that defines a set of "trusted" commands.
-# Setting the approval_policy to `untrusted` means that Codex will prompt the
+# Hanzo Dev has hardcoded logic that defines a set of "trusted" commands.
+# Setting the approval_policy to `untrusted` means that Hanzo Dev will prompt the
 # user before running a command not in the "trusted" set.
 #
 # See https://github.com/openai/codex/issues/1260 for the plan to enable
@@ -151,7 +151,7 @@ approval_policy = "untrusted"
 If you want to be notified whenever a command fails, use "on-failure":
 
 ```toml
-# If the command fails when run in the sandbox, Codex asks for permission to
+# If the command fails when run in the sandbox, Hanzo Dev asks for permission to
 # retry the command outside the sandbox.
 approval_policy = "on-failure"
 ```
@@ -166,14 +166,14 @@ approval_policy = "on-request"
 Alternatively, you can have the model run until it is done, and never ask to run a command with escalated permissions:
 
 ```toml
-# User is never prompted: if the command fails, Codex will automatically try
+# User is never prompted: if the command fails, Hanzo Dev will automatically try
 # something out. Note the `exec` subcommand always uses this mode.
 approval_policy = "never"
 ```
 
 ## confirm_guard
 
-Adds custom regular-expression based guards for commands that should require an explicit `confirm:` prefix before running. Each pattern is checked against the raw command string (`argv` joined with spaces or the `bash -lc` script body). When a pattern matches, Codex blocks the command and instructs the model to resend it with `confirm:`.
+Adds custom regular-expression based guards for commands that should require an explicit `confirm:` prefix before running. Each pattern is checked against the raw command string (`argv` joined with spaces or the `bash -lc` script body). When a pattern matches, Hanzo Dev blocks the command and instructs the model to resend it with `confirm:`.
 
 ```toml
 [[confirm_guard.patterns]]
@@ -185,7 +185,7 @@ regex = "rm\s+-rf\s+node_modules"
 # message is optional; a default explanation referencing the regex is shown when omitted.
 ```
 
-Codex ships with built-in guards for destructive Git operations that can wipe working tree changes (`git reset`, `git checkout -- <paths>`, `git clean`, `git push --force`) and for common shell helpers that can recursively delete large portions of the workspace (`rm -rf` against `.`, `..`, `/`, or `*`, `find . … -delete`, `find . … -exec rm`, `trash -rf`, and `fd … --exec rm`). The snippet above shows how to add extra patterns or override the default messaging when needed.
+Hanzo Dev ships with built-in guards for destructive Git operations that can wipe working tree changes (`git reset`, `git checkout -- <paths>`, `git clean`, `git push --force`) and for common shell helpers that can recursively delete large portions of the workspace (`rm -rf` against `.`, `..`, `/`, or `*`, `find . … -delete`, `find . … -exec rm`, `trash -rf`, and `fd … --exec rm`). The snippet above shows how to add extra patterns or override the default messaging when needed.
 
 Patterns use the same syntax as the `regex` crate (via `regex-lite`). Invalid regexes cause config loading to fail with an explicit error so they can be corrected quickly.
 
@@ -234,7 +234,7 @@ Users can specify config values at multiple levels. Order of precedence is as fo
 1. custom command-line argument, e.g., `--model o3`
 2. as part of a profile, where the `--profile` is specified via a CLI (or in the config file itself)
 3. as an entry in `config.toml`, e.g., `model = "o3"`
-4. the default value that comes with Codex CLI (i.e., Codex CLI defaults to `gpt-5.1`)
+4. the default value that comes with Hanzo Dev CLI (i.e., Hanzo Dev CLI defaults to `gpt-5.1`)
 
 ## model_reasoning_effort
 
@@ -269,7 +269,7 @@ Controls output length/detail on GPT‑5 family models when using the Responses 
 - `"medium"` (default when omitted)
 - `"high"`
 
-When set, Codex includes a `text` object in the request payload with the configured verbosity, for example: `"text": { "verbosity": "low" }`.
+When set, Hanzo Dev includes a `text` object in the request payload with the configured verbosity, for example: `"text": { "verbosity": "low" }`.
 
 Example:
 
@@ -290,7 +290,7 @@ model_supports_reasoning_summaries = true
 
 ## sandbox_mode
 
-Codex executes model-generated shell commands inside an OS-level sandbox.
+Hanzo Dev executes model-generated shell commands inside an OS-level sandbox.
 
 In most cases you can pick the desired behaviour with a single option:
 
@@ -302,9 +302,9 @@ sandbox_mode = "read-only"
 The default policy is `read-only`, which means commands can read any file on
 disk, but attempts to write a file or access the network will be blocked.
 
-A more relaxed policy is `workspace-write`. When specified, the current working directory for the Codex task will be writable (as well as `$TMPDIR` on macOS). Note that the CLI defaults to using the directory where it was spawned as `cwd`, though this can be overridden using `--cwd/-C`.
+A more relaxed policy is `workspace-write`. When specified, the current working directory for the Hanzo Dev task will be writable (as well as `$TMPDIR` on macOS). Note that the CLI defaults to using the directory where it was spawned as `cwd`, though this can be overridden using `--cwd/-C`.
 
-On macOS (and soon Linux), all writable roots (including `cwd`) that contain a `.git/` folder _as an immediate child_ will configure the `.git/` folder to be read-only while the rest of the Git repository will be writable. This means that commands like `git commit` will fail, by default (as it entails writing to `.git/`), and will require Codex to ask for permission.
+On macOS (and soon Linux), all writable roots (including `cwd`) that contain a `.git/` folder _as an immediate child_ will configure the `.git/` folder to be read-only while the rest of the Git repository will be writable. This means that commands like `git commit` will fail, by default (as it entails writing to `.git/`), and will require Hanzo Dev to ask for permission.
 
 ```toml
 # same as `--sandbox workspace-write`
@@ -312,7 +312,7 @@ sandbox_mode = "workspace-write"
 
 # Extra settings that only apply when `sandbox = "workspace-write"`.
 [sandbox_workspace_write]
-# By default, the cwd for the Codex session will be writable as well as $TMPDIR
+# By default, the cwd for the Hanzo Dev session will be writable as well as $TMPDIR
 # (if set) and /tmp (if it exists). Setting the respective options to `true`
 # will override those defaults.
 exclude_tmpdir_env_var = false
@@ -333,27 +333,27 @@ To disable sandboxing altogether, specify `danger-full-access` like so:
 sandbox_mode = "danger-full-access"
 ```
 
-This is reasonable to use if Codex is running in an environment that provides its own sandboxing (such as a Docker container) such that further sandboxing is unnecessary.
+This is reasonable to use if Hanzo Dev is running in an environment that provides its own sandboxing (such as a Docker container) such that further sandboxing is unnecessary.
 
-Though using this option may also be necessary if you try to use Codex in environments where its native sandboxing mechanisms are unsupported, such as older Linux kernels or on Windows.
+Though using this option may also be necessary if you try to use Hanzo Dev in environments where its native sandboxing mechanisms are unsupported, such as older Linux kernels or on Windows.
 
 ## Approval presets
 
-Codex provides three main Approval Presets:
+Hanzo Dev provides three main Approval Presets:
 
-- Read Only: Codex can read files and answer questions; edits, running commands, and network access require approval.
-- Auto: Codex can read files, make edits, and run commands in the workspace without approval; asks for approval outside the workspace or for network access.
+- Read Only: Hanzo Dev can read files and answer questions; edits, running commands, and network access require approval.
+- Auto: Hanzo Dev can read files, make edits, and run commands in the workspace without approval; asks for approval outside the workspace or for network access.
 - Full Access: Full disk and network access without prompts; extremely risky.
 
-You can further customize how Codex runs at the command line using the `--ask-for-approval` and `--sandbox` options.
+You can further customize how Hanzo Dev runs at the command line using the `--ask-for-approval` and `--sandbox` options.
 
 ## mcp_servers
 
-Defines the list of MCP servers that Codex can consult for tool use. Currently, only servers that are launched by executing a program that communicate over stdio are supported. For servers that use the SSE transport, consider an adapter like [mcp-proxy](https://github.com/sparfenyuk/mcp-proxy).
+Defines the list of MCP servers that Hanzo Dev can consult for tool use. Currently, only servers that are launched by executing a program that communicate over stdio are supported. For servers that use the SSE transport, consider an adapter like [mcp-proxy](https://github.com/sparfenyuk/mcp-proxy).
 
-**Note:** Codex may cache the list of tools and resources from an MCP server so that Codex can include this information in context at startup without spawning all the servers. This is designed to save resources by loading MCP servers lazily.
+**Note:** Hanzo Dev may cache the list of tools and resources from an MCP server so that Hanzo Dev can include this information in context at startup without spawning all the servers. This is designed to save resources by loading MCP servers lazily.
 
-This config option is comparable to how Claude and Cursor define `mcpServers` in their respective JSON config files, though because Codex uses TOML for its config language, the format is slightly different. For example, the following config in JSON:
+This config option is comparable to how Claude and Cursor define `mcpServers` in their respective JSON config files, though because Hanzo Dev uses TOML for its config language, the format is slightly different. For example, the following config in JSON:
 
 ```json
 {
@@ -369,7 +369,7 @@ This config option is comparable to how Claude and Cursor define `mcpServers` in
 }
 ```
 
-Should be represented as follows in `~/.code/config.toml` (Code will also read the legacy `~/.codex/config.toml` if it exists):
+Should be represented as follows in `~/.hanzo/config.toml` (Dev will also read the legacy `~/.hanzox/config.toml` if it exists):
 
 ```toml
 # IMPORTANT: the top-level key is `mcp_servers` rather than `mcpServers`.
@@ -381,7 +381,7 @@ env = { "API_KEY" = "value" }
 
 ## agents
 
-Agents are external CLI programs that Code can invoke to handle subtasks. Code includes built-in support for several agents (Claude, Gemini, Qwen, etc.) and allows you to configure custom agents as well.
+Agents are external CLI programs that Dev can invoke to handle subtasks. Dev includes built-in support for several agents (Claude, Gemini, Qwen, etc.) and allows you to configure custom agents as well.
 
 Each agent is configured using an `[[agents]]` section in your `config.toml`. Here's the basic structure:
 
@@ -398,13 +398,13 @@ env = { API_KEY = "value" }  # Environment variables
 
 ### Configuring agent commands
 
-The `command` field specifies how to invoke the agent. Code supports three approaches:
+The `command` field specifies how to invoke the agent. Dev supports three approaches:
 
 **1. Command name (PATH lookup):**
 ```toml
 [[agents]]
 name = "claude"
-command = "claude"  # Code will search for "claude" in your PATH
+command = "claude"  # Dev will search for "claude" in your PATH
 ```
 
 **2. Absolute path (recommended for Windows):**
@@ -425,7 +425,7 @@ command = "./bin/custom-agent"  # Relative to working directory
 
 On Windows, agent command discovery follows these rules:
 
-1. Code checks the `PATHEXT` environment variable for valid executable extensions (`.exe`, `.cmd`, `.bat`, `.com`)
+1. Dev checks the `PATHEXT` environment variable for valid executable extensions (`.exe`, `.cmd`, `.bat`, `.com`)
 2. If using PATH lookup, ensure the agent's directory is in your `PATH` environment variable
 3. For npm-installed agents, the typical location is `C:\Users\YourUser\AppData\Roaming\npm\`
 4. **Recommended:** Use absolute paths to avoid PATH issues:
@@ -466,16 +466,16 @@ command = "gemini"
 env = { GEMINI_API_KEY = "your-key-here" }
 ```
 
-Code automatically mirrors common API key environment variables for convenience:
+Dev automatically mirrors common API key environment variables for convenience:
 - `GOOGLE_API_KEY` ↔ `GEMINI_API_KEY`
 - `CLAUDE_API_KEY` ↔ `ANTHROPIC_API_KEY`
 - `QWEN_API_KEY` ↔ `DASHSCOPE_API_KEY`
 
 ### Built-in agents
 
-Code includes built-in support for these agents:
+Dev includes built-in support for these agents:
 
-- **code/codex** - Built-in Code CLI agents (use current executable)
+- **code/codex** - Built-in Dev CLI agents (use current executable)
 - **claude** - Claude AI assistant (requires `claude` CLI)
 - **gemini** - Google Gemini (requires `gemini` CLI)
 - **qwen** - Qwen AI assistant (requires `qwen` CLI)
@@ -521,14 +521,14 @@ If you see errors like `Agent 'xyz' could not be found`, try these steps:
 
 If subagents can't detect Git, ensure:
 1. Git is in your PATH
-2. You're running Code from a Git repository
+2. You're running Dev from a Git repository
 3. The `.git` directory is accessible
 
 For more details, see the [FAQ](https://github.com/just-every/code/blob/main/docs/faq.md).
 
 ## disable_response_storage
 
-Currently, customers whose accounts are set to use Zero Data Retention (ZDR) must set `disable_response_storage` to `true` so that Codex uses an alternative to the Responses API that works with ZDR:
+Currently, customers whose accounts are set to use Zero Data Retention (ZDR) must set `disable_response_storage` to `true` so that Hanzo Dev uses an alternative to the Responses API that works with ZDR:
 
 ```toml
 disable_response_storage = true
@@ -536,7 +536,7 @@ disable_response_storage = true
 
 ## shell_environment_policy
 
-Codex spawns subprocesses (e.g. when executing a `local_shell` tool-call suggested by the assistant). By default it now passes **your full environment** to those subprocesses. You can tune this behavior via the **`shell_environment_policy`** block in `config.toml`:
+Hanzo Dev spawns subprocesses (e.g. when executing a `local_shell` tool-call suggested by the assistant). By default it now passes **your full environment** to those subprocesses. You can tune this behavior via the **`shell_environment_policy`** block in `config.toml`:
 
 ```toml
 [shell_environment_policy]
@@ -555,7 +555,7 @@ include_only = ["PATH", "HOME"]
 | Field                     | Type                       | Default | Description                                                                                                                                     |
 | ------------------------- | -------------------------- | ------- | ----------------------------------------------------------------------------------------------------------------------------------------------- |
 | `inherit`                 | string                     | `all`   | Starting template for the environment:<br>`all` (clone full parent env), `core` (`HOME`, `PATH`, `USER`, …), or `none` (start empty).           |
-| `ignore_default_excludes` | boolean                    | `true`  | When `false`, Codex removes any var whose **name** contains `KEY`, `SECRET`, or `TOKEN` (case-insensitive) before other rules run; defaults to `true` so this filter is disabled by default.              |
+| `ignore_default_excludes` | boolean                    | `true`  | When `false`, Hanzo Dev removes any var whose **name** contains `KEY`, `SECRET`, or `TOKEN` (case-insensitive) before other rules run; defaults to `true` so this filter is disabled by default.              |
 | `exclude`                 | array&lt;string&gt;        | `[]`    | Case-insensitive glob patterns to drop after the default filter.<br>Examples: `"AWS_*"`, `"AZURE_*"`.                                           |
 | `set`                     | table&lt;string,string&gt; | `{}`    | Explicit key/value overrides or additions – always win over inherited values.                                                                   |
 | `include_only`            | array&lt;string&gt;        | `[]`    | If non-empty, a whitelist of patterns; only variables that match _one_ pattern survive the final step. (Generally used with `inherit = "all"`.) |
@@ -578,7 +578,7 @@ Currently, `CODEX_SANDBOX_NETWORK_DISABLED=1` is also added to the environment, 
 
 ## notify
 
-Specify a program that will be executed to get notified about events generated by Codex. Note that the program will receive the notification argument as a string of JSON, e.g.:
+Specify a program that will be executed to get notified about events generated by Hanzo Dev. Note that the program will receive the notification argument as a string of JSON, e.g.:
 
 ```json
 {
@@ -615,9 +615,9 @@ def main() -> int:
         case "agent-turn-complete":
             assistant_message = notification.get("last-assistant-message")
             if assistant_message:
-                title = f"Codex: {assistant_message}"
+                title = f"Hanzo Dev: {assistant_message}"
             else:
-                title = "Codex: Turn Complete!"
+                title = "Hanzo Dev: Turn Complete!"
             input_messages = notification.get("input_messages", [])
             message = " ".join(input_messages)
             title += message
@@ -647,7 +647,7 @@ if __name__ == "__main__":
     sys.exit(main())
 ```
 
-To have Codex use this script for notifications, you would configure it via `notify` in `~/.code/config.toml` (legacy `~/.codex/config.toml` is still read) using the appropriate path to `notify.py` on your computer:
+To have Hanzo Dev use this script for notifications, you would configure it via `notify` in `~/.hanzo/config.toml` (legacy `~/.hanzox/config.toml` is still read) using the appropriate path to `notify.py` on your computer:
 
 ```toml
 notify = ["python3", "/Users/mbolin/.codex/notify.py"]
@@ -655,7 +655,7 @@ notify = ["python3", "/Users/mbolin/.codex/notify.py"]
 
 ## history
 
-By default, Codex CLI records messages sent to the model in `$CODEX_HOME/history.jsonl`. Note that on UNIX, the file permissions are set to `o600`, so it should only be readable and writable by the owner.
+By default, Hanzo Dev CLI records messages sent to the model in `$HANZO_HOME/history.jsonl`. Note that on UNIX, the file permissions are set to `o600`, so it should only be readable and writable by the owner.
 
 To disable this behavior, configure `[history]` as follows:
 
@@ -678,11 +678,11 @@ Note this is **not** a general editor setting (like `$EDITOR`), as it only accep
 - `"cursor"`
 - `"none"` to explicitly disable this feature
 
-Currently, `"vscode"` is the default, though Codex does not verify VS Code is installed. As such, `file_opener` may default to `"none"` or something else in the future.
+Currently, `"vscode"` is the default, though Hanzo Dev does not verify VS Dev is installed. As such, `file_opener` may default to `"none"` or something else in the future.
 
 ## hide_agent_reasoning
 
-Codex intermittently emits "reasoning" events that show the model's internal "thinking" before it produces a final answer. Some users may find these events distracting, especially in CI logs or minimal terminal output.
+Hanzo Dev intermittently emits "reasoning" events that show the model's internal "thinking" before it produces a final answer. Some users may find these events distracting, especially in CI logs or minimal terminal output.
 
 Setting `hide_agent_reasoning` to `true` suppresses these events in **both** the TUI as well as the headless `exec` sub-command:
 
@@ -709,7 +709,7 @@ show_raw_agent_reasoning = true  # defaults to false
 
 The size of the context window for the model, in tokens.
 
-In general, Codex knows the context window for the most common OpenAI models, but if you are using a new model with an old version of the Codex CLI, then you can use `model_context_window` to tell Codex what value to use to determine how much context is left during a conversation.
+In general, Hanzo Dev knows the context window for the most common OpenAI models, but if you are using a new model with an old version of the Hanzo Dev CLI, then you can use `model_context_window` to tell Hanzo Dev what value to use to determine how much context is left during a conversation.
 
 ## model_max_output_tokens
 

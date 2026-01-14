@@ -20,12 +20,12 @@ use crate::sanitize::Options as SanitizeOptions;
 use crate::sanitize::sanitize_for_tui;
 use crate::slash_command::SlashCommand;
 use crate::theme::{current_theme, Theme};
-use code_ansi_escape::ansi_escape_line;
-use code_common::create_config_summary_entries;
-use code_core::config::Config;
-use code_core::config_types::ReasoningEffort;
-use code_core::protocol::{SessionConfiguredEvent, TokenUsage};
-use code_protocol::num_format::format_with_separators;
+use hanzo_ansi_escape::ansi_escape_line;
+use hanzo_common::create_config_summary_entries;
+use hanzo_core::config::Config;
+use hanzo_core::config_types::ReasoningEffort;
+use hanzo_core::protocol::{SessionConfiguredEvent, TokenUsage};
+use hanzo_protocol::num_format::format_with_separators;
 use ratatui::buffer::Buffer;
 use ratatui::layout::Rect;
 use ratatui::style::{Modifier, Style};
@@ -822,10 +822,10 @@ pub(crate) fn new_status_output(
     // 🔐 Authentication
     lines.push(Line::from(vec!["🔐 ".into(), "Authentication".bold()]));
     {
-        use code_login::AuthMode;
-        use code_login::CodexAuth;
-        use code_login::OPENAI_API_KEY_ENV_VAR;
-        use code_login::try_read_auth_json;
+        use hanzo_login::AuthMode;
+        use hanzo_login::CodexAuth;
+        use hanzo_login::OPENAI_API_KEY_ENV_VAR;
+        use hanzo_login::try_read_auth_json;
 
         // Determine effective auth mode the core would choose
         let auth_result = CodexAuth::from_code_home(
@@ -839,7 +839,7 @@ pub(crate) fn new_status_output(
                 AuthMode::ApiKey => {
                     // Prefer suffix from auth.json; fall back to env var if needed
                     let suffix =
-                        try_read_auth_json(&code_login::get_auth_file(&config.code_home))
+                        try_read_auth_json(&hanzo_login::get_auth_file(&config.code_home))
                             .ok()
                             .and_then(|a| a.openai_api_key)
                             .or_else(|| std::env::var(OPENAI_API_KEY_ENV_VAR).ok())

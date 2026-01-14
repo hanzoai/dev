@@ -1,4 +1,4 @@
-use code_core::agent_defaults::agent_model_spec;
+use hanzo_core::agent_defaults::agent_model_spec;
 
 #[test]
 fn gemini_specs_use_long_model_flag() {

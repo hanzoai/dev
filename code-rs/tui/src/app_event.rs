@@ -1,15 +1,15 @@
-use code_core::config_types::ReasoningEffort;
-use code_core::config_types::TextVerbosity;
-use code_core::config_types::ThemeName;
-use code_core::protocol::Event;
-use code_core::protocol::OrderMeta;
-use code_core::protocol::ValidationGroup;
-use code_core::protocol::ApprovedCommandMatchKind;
-use code_core::protocol::TokenUsage;
-use code_core::git_info::CommitLogEntry;
-use code_core::protocol::ReviewContextMetadata;
-use code_file_search::FileMatch;
-use code_common::model_presets::ModelPreset;
+use hanzo_core::config_types::ReasoningEffort;
+use hanzo_core::config_types::TextVerbosity;
+use hanzo_core::config_types::ThemeName;
+use hanzo_core::protocol::Event;
+use hanzo_core::protocol::OrderMeta;
+use hanzo_core::protocol::ValidationGroup;
+use hanzo_core::protocol::ApprovedCommandMatchKind;
+use hanzo_core::protocol::TokenUsage;
+use hanzo_core::git_info::CommitLogEntry;
+use hanzo_core::protocol::ReviewContextMetadata;
+use hanzo_file_search::FileMatch;
+use hanzo_common::model_presets::ModelPreset;
 use crossterm::event::KeyEvent;
 use crossterm::event::MouseEvent;
 use ratatui::text::Line;
@@ -29,13 +29,13 @@ use crate::history::state::HistorySnapshot;
 use std::time::Duration;
 use uuid::Uuid;
 
-use code_git_tooling::{GhostCommit, GitToolingError};
-use code_cloud_tasks_client::{ApplyOutcome, CloudTaskError, CreatedTask, TaskSummary};
+use hanzo_git_tooling::{GhostCommit, GitToolingError};
+use hanzo_cloud_tasks_client::{ApplyOutcome, CloudTaskError, CreatedTask, TaskSummary};
 
 use crate::app::ChatWidgetArgs;
 use crate::chrome_launch::ChromeLaunchOption;
 use crate::slash_command::SlashCommand;
-use code_protocol::models::ResponseItem;
+use hanzo_protocol::models::ResponseItem;
 use std::fmt;
 use std::path::PathBuf;
 use std::sync::mpsc::Sender as StdSender;
@@ -98,7 +98,7 @@ pub(crate) enum BackgroundPlacement {
     BeforeNextOutput,
 }
 
-pub(crate) use code_auto_drive_core::{
+pub(crate) use hanzo_auto_drive_core::{
     AutoContinueMode,
     AutoCoordinatorStatus,
     AutoTurnAgentsAction,
@@ -173,7 +173,7 @@ pub(crate) enum AppEvent {
 
     /// Forward an `Op` to the Agent. Using an `AppEvent` for this avoids
     /// bubbling channels through layers of widgets.
-    CodexOp(code_core::protocol::Op),
+    CodexOp(hanzo_core::protocol::Op),
 
     AutoCoordinatorDecision {
         seq: u64,
@@ -458,7 +458,7 @@ pub(crate) enum AppEvent {
     #[allow(dead_code)]
     UpdateTheme(ThemeName),
     /// Add or update a subagent command in memory (UI already persisted to config.toml)
-    UpdateSubagentCommand(code_core::config_types::SubagentCommandConfig),
+    UpdateSubagentCommand(hanzo_core::config_types::SubagentCommandConfig),
     /// Remove a subagent command from memory (UI already deleted from config.toml)
     DeleteSubagentCommand(String),
     /// Return to the Agents settings list view
@@ -575,8 +575,8 @@ pub(crate) enum AppEvent {
     /// Result of an async jump-back fork operation performed off the UI thread.
     /// Carries the forked conversation, trimmed prefix to replay, and composer prefill.
     JumpBackForked {
-        cfg: code_core::config::Config,
-        new_conv: Redacted<code_core::NewConversation>,
+        cfg: hanzo_core::config::Config,
+        new_conv: Redacted<hanzo_core::NewConversation>,
         prefix_items: Vec<ResponseItem>,
         prefill: String,
     },

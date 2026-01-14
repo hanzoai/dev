@@ -1,5 +1,5 @@
 use chrono::Local;
-use code_otel::otel_event_manager::TurnLatencyPayload;
+use hanzo_otel::otel_event_manager::TurnLatencyPayload;
 use serde_json::Value;
 use std::collections::HashMap;
 use std::fs::{self, OpenOptions};

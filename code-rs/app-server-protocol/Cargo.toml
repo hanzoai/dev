@@ -1,5 +1,5 @@
 [package]
-name = "code-app-server-protocol"
+name = "hanzo-app-server-protocol"
 version = { workspace = true }
 edition = "2024"
 
@@ -7,5 +7,5 @@ edition = "2024"
 workspace = true
 
 [dependencies]
-code-protocol = { workspace = true }
+hanzo-protocol = { workspace = true }
 mcp-types = { workspace = true }

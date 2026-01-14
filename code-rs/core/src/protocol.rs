@@ -29,23 +29,23 @@ use crate::parse_command::ParsedCommand;
 use crate::plan_tool::UpdatePlanArgs;
 
 // Re-export review types from the shared protocol crate so callers can use
-// `code_core::protocol::ReviewFinding` and friends.
-pub use code_protocol::protocol::ReviewCodeLocation;
-pub use code_protocol::protocol::ReviewFinding;
-pub use code_protocol::protocol::ReviewLineRange;
-pub use code_protocol::protocol::ReviewOutputEvent;
-pub use code_protocol::protocol::{ReviewContextMetadata, ReviewRequest};
-pub use code_protocol::protocol::GitInfo;
-pub use code_protocol::protocol::RolloutItem;
-pub use code_protocol::protocol::RolloutLine;
-pub use code_protocol::protocol::ConversationPathResponseEvent;
-pub use code_protocol::protocol::ListCustomPromptsResponseEvent;
-pub use code_protocol::protocol::ListSkillsResponseEvent;
-pub use code_protocol::protocol::ViewImageToolCallEvent;
-pub use code_protocol::skills::Skill;
-pub use code_protocol::protocol::ENVIRONMENT_CONTEXT_OPEN_TAG;
-pub use code_protocol::protocol::ExitedReviewModeEvent;
-pub use code_protocol::protocol::ReviewSnapshotInfo;
+// `hanzo_core::protocol::ReviewFinding` and friends.
+pub use hanzo_protocol::protocol::ReviewCodeLocation;
+pub use hanzo_protocol::protocol::ReviewFinding;
+pub use hanzo_protocol::protocol::ReviewLineRange;
+pub use hanzo_protocol::protocol::ReviewOutputEvent;
+pub use hanzo_protocol::protocol::{ReviewContextMetadata, ReviewRequest};
+pub use hanzo_protocol::protocol::GitInfo;
+pub use hanzo_protocol::protocol::RolloutItem;
+pub use hanzo_protocol::protocol::RolloutLine;
+pub use hanzo_protocol::protocol::ConversationPathResponseEvent;
+pub use hanzo_protocol::protocol::ListCustomPromptsResponseEvent;
+pub use hanzo_protocol::protocol::ListSkillsResponseEvent;
+pub use hanzo_protocol::protocol::ViewImageToolCallEvent;
+pub use hanzo_protocol::skills::Skill;
+pub use hanzo_protocol::protocol::ENVIRONMENT_CONTEXT_OPEN_TAG;
+pub use hanzo_protocol::protocol::ExitedReviewModeEvent;
+pub use hanzo_protocol::protocol::ReviewSnapshotInfo;
 
 /// Submission Queue Entry - requests from user
 #[derive(Debug, Clone, Deserialize, Serialize)]
@@ -526,7 +526,7 @@ pub struct RecordedEvent {
     pub msg: EventMsg,
 }
 
-pub fn event_msg_to_protocol(msg: &EventMsg) -> Option<code_protocol::protocol::EventMsg> {
+pub fn event_msg_to_protocol(msg: &EventMsg) -> Option<hanzo_protocol::protocol::EventMsg> {
     match msg {
         EventMsg::ReplayHistory(_) => None,
         EventMsg::TokenCount(payload) => {
@@ -535,8 +535,8 @@ pub fn event_msg_to_protocol(msg: &EventMsg) -> Option<code_protocol::protocol::
                 .rate_limits
                 .as_ref()
                 .map(rate_limit_snapshot_to_protocol);
-            Some(code_protocol::protocol::EventMsg::TokenCount(
-                code_protocol::protocol::TokenCountEvent { info, rate_limits },
+            Some(hanzo_protocol::protocol::EventMsg::TokenCount(
+                hanzo_protocol::protocol::TokenCountEvent { info, rate_limits },
             ))
         }
         _ => convert_value(msg),
@@ -544,9 +544,9 @@ pub fn event_msg_to_protocol(msg: &EventMsg) -> Option<code_protocol::protocol::
 }
 
 
-pub fn event_msg_from_protocol(msg: &code_protocol::protocol::EventMsg) -> Option<EventMsg> {
+pub fn event_msg_from_protocol(msg: &hanzo_protocol::protocol::EventMsg) -> Option<EventMsg> {
     match msg {
-        code_protocol::protocol::EventMsg::TokenCount(payload) => {
+        hanzo_protocol::protocol::EventMsg::TokenCount(payload) => {
             let info = convert_value(&payload.info).unwrap_or(None);
             let rate_limits = payload
                 .rate_limits
@@ -567,8 +567,8 @@ pub fn event_msg_from_protocol(msg: &code_protocol::protocol::EventMsg) -> Optio
 
 pub fn order_meta_to_protocol(
     order: &OrderMeta,
-) -> code_protocol::protocol::OrderMeta {
-    code_protocol::protocol::OrderMeta {
+) -> hanzo_protocol::protocol::OrderMeta {
+    hanzo_protocol::protocol::OrderMeta {
         request_ordinal: order.request_ordinal,
         output_index: order.output_index,
         sequence_number: order.sequence_number,
@@ -576,7 +576,7 @@ pub fn order_meta_to_protocol(
 }
 
 pub fn order_meta_from_protocol(
-    order: &code_protocol::protocol::OrderMeta,
+    order: &hanzo_protocol::protocol::OrderMeta,
 ) -> OrderMeta {
     OrderMeta {
         request_ordinal: order.request_ordinal,
@@ -588,13 +588,13 @@ pub fn order_meta_from_protocol(
 
 pub fn recorded_event_to_protocol(
     event: &RecordedEvent,
-) -> Option<code_protocol::protocol::RecordedEvent> {
+) -> Option<hanzo_protocol::protocol::RecordedEvent> {
     let msg = event_msg_to_protocol(&event.msg)?;
     let order = event
         .order
         .as_ref()
         .map(order_meta_to_protocol);
-    Some(code_protocol::protocol::RecordedEvent {
+    Some(hanzo_protocol::protocol::RecordedEvent {
         id: event.id.clone(),
         event_seq: event.event_seq,
         order,
@@ -604,7 +604,7 @@ pub fn recorded_event_to_protocol(
 
 
 pub fn recorded_event_from_protocol(
-    src: code_protocol::protocol::RecordedEvent,
+    src: hanzo_protocol::protocol::RecordedEvent,
 ) -> Option<RecordedEvent> {
     let msg = event_msg_from_protocol(&src.msg)?;
     let order = src.order.as_ref().map(order_meta_from_protocol);
@@ -629,25 +629,25 @@ where
 
 fn rate_limit_snapshot_to_protocol(
     snapshot: &RateLimitSnapshotEvent,
-) -> code_protocol::protocol::RateLimitSnapshot {
-    let primary = code_protocol::protocol::RateLimitWindow {
+) -> hanzo_protocol::protocol::RateLimitSnapshot {
+    let primary = hanzo_protocol::protocol::RateLimitWindow {
         used_percent: snapshot.primary_used_percent,
         window_minutes: Some(snapshot.primary_window_minutes),
         resets_in_seconds: snapshot.primary_reset_after_seconds,
     };
-    let secondary = code_protocol::protocol::RateLimitWindow {
+    let secondary = hanzo_protocol::protocol::RateLimitWindow {
         used_percent: snapshot.secondary_used_percent,
         window_minutes: Some(snapshot.secondary_window_minutes),
         resets_in_seconds: snapshot.secondary_reset_after_seconds,
     };
-    code_protocol::protocol::RateLimitSnapshot {
+    hanzo_protocol::protocol::RateLimitSnapshot {
         primary: Some(primary),
         secondary: Some(secondary),
     }
 }
 
 fn rate_limit_snapshot_from_protocol(
-    snapshot: &code_protocol::protocol::RateLimitSnapshot,
+    snapshot: &hanzo_protocol::protocol::RateLimitSnapshot,
 ) -> RateLimitSnapshotEvent {
     let primary_used = snapshot
         .primary
@@ -759,7 +759,7 @@ pub enum EventMsg {
     BrowserSnapshot(BrowserSnapshotEvent),
 
     /// Warning that the platform compacted conversation history to stay within limits.
-    CompactionCheckpointWarning(code_protocol::protocol::CompactionCheckpointWarningEvent),
+    CompactionCheckpointWarning(hanzo_protocol::protocol::CompactionCheckpointWarningEvent),
 
     /// Ack the client's configure message.
     SessionConfigured(SessionConfiguredEvent),
@@ -821,22 +821,22 @@ pub enum EventMsg {
     AgentStatusUpdate(AgentStatusUpdateEvent),
 
     /// User/system input message (what was sent to the model)
-    UserMessage(code_protocol::protocol::UserMessageEvent),
+    UserMessage(hanzo_protocol::protocol::UserMessageEvent),
 
     /// Notification that the agent is shutting down.
     ShutdownComplete,
 
     /// The system aborted the current turn (e.g., due to interruption).
-    TurnAborted(code_protocol::protocol::TurnAbortedEvent),
+    TurnAborted(hanzo_protocol::protocol::TurnAbortedEvent),
 
     /// Response to a conversation path request.
-    ConversationPath(code_protocol::protocol::ConversationPathResponseEvent),
+    ConversationPath(hanzo_protocol::protocol::ConversationPathResponseEvent),
 
     /// Entered review mode with the provided request.
-    EnteredReviewMode(code_protocol::protocol::ReviewRequest),
+    EnteredReviewMode(hanzo_protocol::protocol::ReviewRequest),
 
     /// Exited review mode with an optional final result to apply.
-    ExitedReviewMode(code_protocol::protocol::ExitedReviewModeEvent),
+    ExitedReviewMode(hanzo_protocol::protocol::ExitedReviewModeEvent),
 
     /// Replay a previously recorded transcript into the UI.
     /// Used after resuming from a rollout file so the user sees the full
@@ -998,7 +998,7 @@ pub struct FinalOutput {
 pub struct ReplayHistoryEvent {
     /// Items to render in order. Front-ends should render these as static
     /// history without triggering any tool execution.
-    pub items: Vec<code_protocol::models::ResponseItem>,
+    pub items: Vec<hanzo_protocol::models::ResponseItem>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub history_snapshot: Option<serde_json::Value>,
 }

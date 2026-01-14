@@ -1,10 +1,10 @@
 use std::time::{Duration, Instant};
 
-use code_common::elapsed::format_duration;
-use code_core::protocol::ReviewContextMetadata;
-use code_core::protocol::ReviewOutputEvent;
-use code_core::review_coord::{bump_snapshot_epoch, try_acquire_lock};
-use code_git_tooling::GhostCommit;
+use hanzo_common::elapsed::format_duration;
+use hanzo_core::protocol::ReviewContextMetadata;
+use hanzo_core::protocol::ReviewOutputEvent;
+use hanzo_core::review_coord::{bump_snapshot_epoch, try_acquire_lock};
+use hanzo_git_tooling::GhostCommit;
 
 use crate::AutoTurnAgentsAction;
 use crate::AutoTurnAgentsTiming;
@@ -328,7 +328,7 @@ pub struct AutoDriveController {
     pub last_completion_explanation: Option<String>,
     pub phase: AutoRunPhase,
     // Non-cloneable guard is kept separately; controller stays Clone.
-    pub review_lock: Option<std::sync::Arc<code_core::review_coord::ReviewGuard>>, 
+    pub review_lock: Option<std::sync::Arc<hanzo_core::review_coord::ReviewGuard>>, 
 }
 
 impl AutoDriveController {
@@ -445,7 +445,7 @@ impl AutoDriveController {
             }
             (AutoRunPhase::AwaitingDiagnostics { .. } | AutoRunPhase::Active, PhaseTransition::BeginReview { diagnostics_pending }) => {
                 if self.review_lock.is_none() {
-                    self.review_lock = code_core::review_coord::try_acquire_lock(
+                    self.review_lock = hanzo_core::review_coord::try_acquire_lock(
                         "auto-drive-review",
                         std::path::Path::new("."),
                     )

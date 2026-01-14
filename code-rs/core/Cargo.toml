@@ -1,11 +1,11 @@
 [package]
 edition = "2024"
-name = "code-core"
+name = "hanzo-core"
 version = { workspace = true }
 
 [lib]
 doctest = false
-name = "code_core"
+name = "hanzo_core"
 path = "src/lib.rs"
 
 [lints]
@@ -21,14 +21,14 @@ base64 = { workspace = true }
 bytes = { workspace = true }
 chrono = { workspace = true, features = ["serde"] }
 chardetng = { workspace = true }
-code-apply-patch = { workspace = true }
-code-file-search = { workspace = true }
-code-protocol = { workspace = true }
-code-rmcp-client = { workspace = true }
-code-app-server-protocol = { workspace = true }
-code-otel = { workspace = true, features = ["otel"] }
-code-browser = { path = "../browser" }
-code-version = { path = "../code-version" }
+hanzo-apply-patch = { workspace = true }
+hanzo-file-search = { workspace = true }
+hanzo-protocol = { workspace = true }
+hanzo-rmcp-client = { workspace = true }
+hanzo-app-server-protocol = { workspace = true }
+hanzo-otel = { workspace = true, features = ["otel"] }
+hanzo-browser = { path = "../browser" }
+hanzo-version = { path = "../code-version" }
 agent-client-protocol = "0.4.3"
 dirs = { workspace = true }
 dunce = { workspace = true }
@@ -121,7 +121,7 @@ serial_test = "3.2.0"
 pretty_assertions = { workspace = true }
 tokio-test = { workspace = true }
 wiremock = { workspace = true }
-code-git-tooling = { path = "../git-tooling" }
+hanzo-git-tooling = { path = "../git-tooling" }
 walkdir = { workspace = true }
 
 [package.metadata.cargo-shear]

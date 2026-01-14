@@ -6,7 +6,7 @@ use strum_macros::EnumIter;
 use strum_macros::EnumString;
 use strum_macros::IntoStaticStr;
 
-const BUILD_PROFILE: Option<&str> = option_env!("CODEX_PROFILE");
+const BUILD_PROFILE: Option<&str> = option_env!("HANZO_PROFILE");
 
 fn demo_command_enabled() -> bool {
     static ENABLED: OnceLock<bool> = OnceLock::new();
@@ -195,13 +195,13 @@ impl SlashCommand {
         // Note: We pass None for agents here as the TUI doesn't have access to the session config
         // The actual agents will be determined when the agent tool is invoked
         match self {
-            SlashCommand::Plan => Some(code_core::slash_commands::format_plan_command(
+            SlashCommand::Plan => Some(hanzo_core::slash_commands::format_plan_command(
                 args, None, None,
             )),
-            SlashCommand::Solve => Some(code_core::slash_commands::format_solve_command(
+            SlashCommand::Solve => Some(hanzo_core::slash_commands::format_solve_command(
                 args, None, None,
             )),
-            SlashCommand::Code => Some(code_core::slash_commands::format_code_command(
+            SlashCommand::Code => Some(hanzo_core::slash_commands::format_code_command(
                 args, None, None,
             )),
             _ => None,

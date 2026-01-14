@@ -263,7 +263,7 @@ pub struct Agent {
     #[serde(skip)]
     #[allow(dead_code)]
     pub config: Option<AgentConfig>,
-    pub reasoning_effort: code_protocol::config_types::ReasoningEffort,
+    pub reasoning_effort: hanzo_protocol::config_types::ReasoningEffort,
     #[serde(skip)]
     pub last_activity: DateTime<Utc>,
 }
@@ -479,7 +479,7 @@ impl AgentManager {
         files: Vec<String>,
         read_only: bool,
         batch_id: Option<String>,
-        reasoning_effort: code_protocol::config_types::ReasoningEffort,
+        reasoning_effort: hanzo_protocol::config_types::ReasoningEffort,
     ) -> String {
         self.create_agent_internal(
             model,
@@ -510,7 +510,7 @@ impl AgentManager {
         read_only: bool,
         batch_id: Option<String>,
         config: AgentConfig,
-        reasoning_effort: code_protocol::config_types::ReasoningEffort,
+        reasoning_effort: hanzo_protocol::config_types::ReasoningEffort,
     ) -> String {
         self.create_agent_internal(
             model,
@@ -545,7 +545,7 @@ impl AgentManager {
         worktree_branch: Option<String>,
         worktree_base: Option<String>,
         source_kind: Option<AgentSourceKind>,
-        reasoning_effort: code_protocol::config_types::ReasoningEffort,
+        reasoning_effort: hanzo_protocol::config_types::ReasoningEffort,
     ) -> String {
         self
             .create_agent_internal(
@@ -580,7 +580,7 @@ impl AgentManager {
         worktree_branch: Option<String>,
         worktree_base: Option<String>,
         source_kind: Option<AgentSourceKind>,
-        reasoning_effort: code_protocol::config_types::ReasoningEffort,
+        reasoning_effort: hanzo_protocol::config_types::ReasoningEffort,
     ) -> String {
         let agent_id = Uuid::new_v4().to_string();
 
@@ -1094,7 +1094,7 @@ async fn execute_model_with_permissions(
     read_only: bool,
     working_dir: Option<PathBuf>,
     config: Option<AgentConfig>,
-    reasoning_effort: code_protocol::config_types::ReasoningEffort,
+    reasoning_effort: hanzo_protocol::config_types::ReasoningEffort,
     review_output_json_path: Option<&PathBuf>,
     source_kind: Option<AgentSourceKind>,
     log_tag: Option<&str>,
@@ -1269,12 +1269,12 @@ fn command_exists(cmd: &str) -> bool {
 
     // Clamp reasoning effort to what the target model supports.
     let clamped_effort = match reasoning_effort {
-        code_protocol::config_types::ReasoningEffort::XHigh => {
+        hanzo_protocol::config_types::ReasoningEffort::XHigh => {
             let lower = slug_for_defaults.to_ascii_lowercase();
             if lower.contains("max") {
                 reasoning_effort
             } else {
-                code_protocol::config_types::ReasoningEffort::High
+                hanzo_protocol::config_types::ReasoningEffort::High
             }
         }
         other => other,
@@ -1759,7 +1759,7 @@ async fn run_agent_smoke_test(cfg: AgentConfig) -> Result<String, String> {
             read_only,
             None,
             Some(cfg),
-            code_protocol::config_types::ReasoningEffort::High,
+            hanzo_protocol::config_types::ReasoningEffort::High,
             None,
             None,
             None,
@@ -2416,7 +2416,7 @@ mod tests {
     use super::prefer_json_result;
     use super::current_code_binary_path;
     use crate::config_types::AgentConfig;
-    use code_protocol::config_types::ReasoningEffort;
+    use hanzo_protocol::config_types::ReasoningEffort;
     use std::collections::HashMap;
     use std::ffi::OsString;
     use tempfile::tempdir;

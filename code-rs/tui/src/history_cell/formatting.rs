@@ -2,7 +2,7 @@ use crate::sanitize::Mode as SanitizeMode;
 use crate::sanitize::Options as SanitizeOptions;
 use crate::sanitize::sanitize_for_tui;
 use crate::text_formatting::format_json_compact;
-use code_ansi_escape::ansi_escape_line;
+use hanzo_ansi_escape::ansi_escape_line;
 use ratatui::style::{Style, Stylize};
 use ratatui::text::Line;
 

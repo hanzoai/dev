@@ -213,8 +213,8 @@ mod tests {
     use tempfile::TempDir;
 
     fn set_code_home(path: &Path) {
-        // SAFETY: tests run serially and isolate CODE_HOME within a temp dir per test.
-        unsafe { std::env::set_var("CODE_HOME", path); }
+        // SAFETY: tests run serially and isolate HANZO_HOME within a temp dir per test.
+        unsafe { std::env::set_var("HANZO_HOME", path); }
     }
 
     #[test]

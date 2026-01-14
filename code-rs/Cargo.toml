@@ -48,47 +48,47 @@ edition = "2024"
 
 [workspace.dependencies]
 # Internal
-code-ansi-escape = { path = "ansi-escape" }
-code-app-server = { path = "app-server" }
-code-app-server-protocol = { path = "app-server-protocol" }
-code-apply-patch = { path = "apply-patch" }
-code-arg0 = { path = "arg0" }
-code-browser = { path = "browser" }
-code-chatgpt = { path = "chatgpt" }
-code-common = { path = "common" }
-code-core = { path = "core" }
-code-backend-client = { path = "backend-client" }
-code-backend-openapi-models = { path = "code-backend-openapi-models" }
-code-cloud-tasks = { path = "cloud-tasks" }
-code-cloud-tasks-client = { path = "cloud-tasks-client" }
-code-exec = { path = "exec" }
-code-file-search = { path = "file-search" }
-code-git-tooling = { path = "git-tooling" }
-code-git-apply = { path = "git-apply" }
-code-linux-sandbox = { path = "linux-sandbox" }
-code-login = { path = "login" }
-code-mcp-client = { path = "mcp-client" }
-code-mcp-server = { path = "mcp-server" }
-code-ollama = { path = "ollama" }
-code-process-hardening = { path = "process-hardening" }
-code-protocol = { path = "protocol" }
-code-protocol-ts = { path = "protocol-ts" }
-code-responses-api-proxy = { path = "responses-api-proxy" }
-code-rmcp-client = { path = "rmcp-client" }
-code-otel = { path = "otel" }
-code-tui = { path = "tui" }
-code-utils-json-to-toml = { path = "utils/json-to-toml" }
-code-utils-readiness = { path = "utils/readiness" }
-code-auto-drive-core = { path = "code-auto-drive-core" }
-mcp-types = { path = "mcp-types", package = "code-mcp-types" }
-upstream-mcp-types = { git = "https://github.com/openai/codex.git", package = "mcp-types", rev = "6c384eb9c610f9a83037d9cad120fb792e782c7c" }
+hanzo-ansi-escape = { path = "ansi-escape" }
+hanzo-app-server = { path = "app-server" }
+hanzo-app-server-protocol = { path = "app-server-protocol" }
+hanzo-apply-patch = { path = "apply-patch" }
+hanzo-arg0 = { path = "arg0" }
+hanzo-browser = { path = "browser" }
+hanzo-chatgpt = { path = "chatgpt" }
+hanzo-common = { path = "common" }
+hanzo-core = { path = "core" }
+hanzo-backend-client = { path = "backend-client" }
+hanzo-backend-openapi-models = { path = "code-backend-openapi-models" }
+hanzo-cloud-tasks = { path = "cloud-tasks" }
+hanzo-cloud-tasks-client = { path = "cloud-tasks-client" }
+hanzo-exec = { path = "exec" }
+hanzo-file-search = { path = "file-search" }
+hanzo-git-tooling = { path = "git-tooling" }
+hanzo-git-apply = { path = "git-apply" }
+hanzo-linux-sandbox = { path = "linux-sandbox" }
+hanzo-login = { path = "login" }
+hanzo-mcp-client = { path = "mcp-client" }
+hanzo-mcp-server = { path = "mcp-server" }
+hanzo-ollama = { path = "ollama" }
+hanzo-process-hardening = { path = "process-hardening" }
+hanzo-protocol = { path = "protocol" }
+hanzo-protocol-ts = { path = "protocol-ts" }
+hanzo-responses-api-proxy = { path = "responses-api-proxy" }
+hanzo-rmcp-client = { path = "rmcp-client" }
+hanzo-otel = { path = "otel" }
+hanzo-tui = { path = "tui" }
+hanzo-utils-json-to-toml = { path = "utils/json-to-toml" }
+hanzo-utils-readiness = { path = "utils/readiness" }
+hanzo-auto-drive-core = { path = "code-auto-drive-core" }
+mcp-types = { path = "mcp-types", package = "hanzo-mcp-types" }
+upstream-mcp-types = { package = "codex-mcp-types", version = "0.63.0" }
 
 # External - Guard for I/O sanitization
-hanzo-guard = { git = "https://github.com/hanzoai/guard", features = ["pii", "audit"] }
+hanzo-guard = { version = "0.1.3", features = ["pii", "audit"] }
 
 # External
 allocative = "0.3.3"
-ansi-to-tui = "7.0.0"
+ansi-to-tui = "8.0.0"
 anyhow = "1"
 arboard = "3"
 askama = "0.12"
@@ -150,7 +150,7 @@ predicates = "3"
 pretty_assertions = "1.4.1"
 pulldown-cmark = "0.10"
 rand = "0.9"
-ratatui = "0.29.0"
+ratatui = "0.30.0"
 regex = "1"
 regex-lite = "0.1.7"
 reqwest = "0.12"
@@ -241,7 +241,7 @@ unwrap_used = "deny"
 # cargo-shear cannot see the platform-specific openssl-sys usage, so we
 # silence the false positive here instead of deleting a real dependency.
 [workspace.metadata.cargo-shear]
-ignored = ["openssl-sys", "code-utils-readiness"]
+ignored = ["openssl-sys", "hanzo-utils-readiness"]
 
 [profile.release]
 lto = "fat"
@@ -251,10 +251,6 @@ strip = "symbols"
 
 # See https://github.com/openai/codex/issues/1411 for details.
 codegen-units = 1
-
-[patch.crates-io]
-# ratatui = { path = "../../ratatui" }
-ratatui = { git = "https://github.com/nornagon/ratatui", branch = "nornagon-v0.29.0-patch" }
 
 # Custom build profiles used by build-fast.sh
 [profile.dev-fast]

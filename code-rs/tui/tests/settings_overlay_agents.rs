@@ -1,4 +1,4 @@
-use code_tui::test_helpers::{render_chat_widget_to_vt100, ChatWidgetHarness};
+use hanzo_tui::test_helpers::{render_chat_widget_to_vt100, ChatWidgetHarness};
 
 #[test]
 fn agents_overlay_editor_stays_in_overlay() {

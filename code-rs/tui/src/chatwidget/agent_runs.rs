@@ -12,11 +12,11 @@ use crate::history_cell::{
     plain_message_state_from_paragraphs,
 };
 use crate::history::state::{PlainMessageKind, PlainMessageRole};
-use code_core::protocol::{AgentInfo, AgentSourceKind, AgentStatusUpdateEvent, OrderMeta};
+use hanzo_core::protocol::{AgentInfo, AgentSourceKind, AgentStatusUpdateEvent, OrderMeta};
 use serde_json::Value;
 use std::collections::{HashMap, HashSet};
 use std::time::{Duration, Instant};
-use ratatui::style::{Style, Stylize};
+use ratatui::style::Style;
 use ratatui::text::{Line, Span};
 use tracing::error;
 

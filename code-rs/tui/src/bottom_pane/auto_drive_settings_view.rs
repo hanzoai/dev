@@ -1,7 +1,7 @@
 use crate::app_event::{AppEvent, AutoContinueMode};
 use crate::app_event_sender::AppEventSender;
 use crate::colors;
-use code_core::config_types::ReasoningEffort;
+use hanzo_core::config_types::ReasoningEffort;
 use crossterm::event::{KeyCode, KeyEvent, KeyEventKind, KeyModifiers};
 use ratatui::buffer::Buffer;
 use ratatui::layout::Rect;

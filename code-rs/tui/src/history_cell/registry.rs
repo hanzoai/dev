@@ -1,5 +1,5 @@
 use crate::history::compat::HistoryRecord;
-use code_core::config::Config;
+use hanzo_core::config::Config;
 use ratatui::text::Line;
 
 use super::assistant::AssistantMarkdownCell;

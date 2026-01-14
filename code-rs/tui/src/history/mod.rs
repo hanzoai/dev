@@ -1,8 +1,8 @@
-pub use code_core::history::*;
+pub use hanzo_core::history::*;
 
-#[cfg(feature = "code-fork")]
+#[cfg(feature = "hanzo-fork")]
 pub mod compat;
 
 pub mod state {
-    pub use code_core::history::*;
+    pub use hanzo_core::history::*;
 }

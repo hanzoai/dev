@@ -3,11 +3,11 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use chrono::Utc;
-use code_app_server_protocol::AuthMode;
-use code_protocol::openai_models::ApplyPatchToolType as ProtocolApplyPatchToolType;
-use code_protocol::openai_models::ModelInfo;
-use code_protocol::openai_models::ModelsResponse;
-use code_protocol::openai_models::ReasoningEffort as ProtocolReasoningEffort;
+use hanzo_app_server_protocol::AuthMode;
+use hanzo_protocol::openai_models::ApplyPatchToolType as ProtocolApplyPatchToolType;
+use hanzo_protocol::openai_models::ModelInfo;
+use hanzo_protocol::openai_models::ModelsResponse;
+use hanzo_protocol::openai_models::ReasoningEffort as ProtocolReasoningEffort;
 use reqwest::header;
 use reqwest::Method;
 use reqwest::Url;

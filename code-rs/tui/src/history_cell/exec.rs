@@ -1,9 +1,9 @@
 use std::collections::HashSet;
 use std::time::{Duration, Instant, SystemTime};
 
-use code_common::elapsed::format_duration;
-use code_core::history::state::MAX_EXEC_STREAM_RETAINED_BYTES;
-use code_core::parse_command::ParsedCommand;
+use hanzo_common::elapsed::format_duration;
+use hanzo_core::history::state::MAX_EXEC_STREAM_RETAINED_BYTES;
+use hanzo_core::parse_command::ParsedCommand;
 use ratatui::prelude::{Buffer, Rect};
 use ratatui::style::{Modifier, Style};
 use ratatui::text::{Line, Span};

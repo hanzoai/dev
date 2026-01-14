@@ -107,68 +107,81 @@ pub enum AuthMode {
 pub enum ClientRequest {
     Initialize {
         #[serde(rename = "id")]
+        #[ts(type = "string | number")]
         request_id: RequestId,
         params: InitializeParams,
     },
     NewConversation {
         #[serde(rename = "id")]
+        #[ts(type = "string | number")]
         request_id: RequestId,
         params: NewConversationParams,
     },
     /// List recorded Codex conversations (rollouts) with optional pagination and search.
     ListConversations {
         #[serde(rename = "id")]
+        #[ts(type = "string | number")]
         request_id: RequestId,
         params: ListConversationsParams,
     },
     /// Resume a recorded Codex conversation from a rollout file.
     ResumeConversation {
         #[serde(rename = "id")]
+        #[ts(type = "string | number")]
         request_id: RequestId,
         params: ResumeConversationParams,
     },
     ArchiveConversation {
         #[serde(rename = "id")]
+        #[ts(type = "string | number")]
         request_id: RequestId,
         params: ArchiveConversationParams,
     },
     SendUserMessage {
         #[serde(rename = "id")]
+        #[ts(type = "string | number")]
         request_id: RequestId,
         params: SendUserMessageParams,
     },
     SendUserTurn {
         #[serde(rename = "id")]
+        #[ts(type = "string | number")]
         request_id: RequestId,
         params: SendUserTurnParams,
     },
     InterruptConversation {
         #[serde(rename = "id")]
+        #[ts(type = "string | number")]
         request_id: RequestId,
         params: InterruptConversationParams,
     },
     AddConversationListener {
         #[serde(rename = "id")]
+        #[ts(type = "string | number")]
         request_id: RequestId,
         params: AddConversationListenerParams,
     },
     RemoveConversationListener {
         #[serde(rename = "id")]
+        #[ts(type = "string | number")]
         request_id: RequestId,
         params: RemoveConversationListenerParams,
     },
     GitDiffToRemote {
         #[serde(rename = "id")]
+        #[ts(type = "string | number")]
         request_id: RequestId,
         params: GitDiffToRemoteParams,
     },
     LoginApiKey {
         #[serde(rename = "id")]
+        #[ts(type = "string | number")]
         request_id: RequestId,
         params: LoginApiKeyParams,
     },
     LoginChatGpt {
         #[serde(rename = "id")]
+        #[ts(type = "string | number")]
         request_id: RequestId,
 
         #[ts(type = "undefined")]
@@ -177,11 +190,13 @@ pub enum ClientRequest {
     },
     CancelLoginChatGpt {
         #[serde(rename = "id")]
+        #[ts(type = "string | number")]
         request_id: RequestId,
         params: CancelLoginChatGptParams,
     },
     LogoutChatGpt {
         #[serde(rename = "id")]
+        #[ts(type = "string | number")]
         request_id: RequestId,
 
         #[ts(type = "undefined")]
@@ -190,11 +205,13 @@ pub enum ClientRequest {
     },
     GetAuthStatus {
         #[serde(rename = "id")]
+        #[ts(type = "string | number")]
         request_id: RequestId,
         params: GetAuthStatusParams,
     },
     GetUserSavedConfig {
         #[serde(rename = "id")]
+        #[ts(type = "string | number")]
         request_id: RequestId,
 
         #[ts(type = "undefined")]
@@ -203,11 +220,13 @@ pub enum ClientRequest {
     },
     SetDefaultModel {
         #[serde(rename = "id")]
+        #[ts(type = "string | number")]
         request_id: RequestId,
         params: SetDefaultModelParams,
     },
     GetUserAgent {
         #[serde(rename = "id")]
+        #[ts(type = "string | number")]
         request_id: RequestId,
 
         #[ts(type = "undefined")]
@@ -216,6 +235,7 @@ pub enum ClientRequest {
     },
     UserInfo {
         #[serde(rename = "id")]
+        #[ts(type = "string | number")]
         request_id: RequestId,
 
         #[ts(type = "undefined")]
@@ -224,12 +244,14 @@ pub enum ClientRequest {
     },
     FuzzyFileSearch {
         #[serde(rename = "id")]
+        #[ts(type = "string | number")]
         request_id: RequestId,
         params: FuzzyFileSearchParams,
     },
     /// Execute a command (argv vector) under the server's sandbox.
     ExecOneOffCommand {
         #[serde(rename = "id")]
+        #[ts(type = "string | number")]
         request_id: RequestId,
         params: ExecOneOffCommandParams,
     },
@@ -282,7 +304,7 @@ pub struct NewConversationParams {
     pub sandbox: Option<SandboxMode>,
 
     /// Individual config settings that will override what is in
-    /// CODEX_HOME/config.toml.
+    /// HANZO_HOME/config.toml.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub config: Option<HashMap<String, serde_json::Value>>,
 
@@ -555,7 +577,7 @@ pub struct UserSavedConfig {
     pub profiles: HashMap<String, Profile>,
 }
 
-/// MCP representation of a [`code_core::config_profile::ConfigProfile`].
+/// MCP representation of a [`hanzo_core::config_profile::ConfigProfile`].
 #[derive(Deserialize, Debug, Clone, PartialEq, Serialize, TS)]
 #[serde(rename_all = "camelCase")]
 pub struct Profile {
@@ -569,7 +591,7 @@ pub struct Profile {
     pub model_verbosity: Option<Verbosity>,
     pub chatgpt_base_url: Option<String>,
 }
-/// MCP representation of a [`code_core::config::ToolsToml`].
+/// MCP representation of a [`hanzo_core::config::ToolsToml`].
 #[derive(Deserialize, Debug, Clone, PartialEq, Serialize, TS)]
 #[serde(rename_all = "camelCase")]
 pub struct Tools {
@@ -579,7 +601,7 @@ pub struct Tools {
     pub view_image: Option<bool>,
 }
 
-/// MCP representation of a [`code_core::config_types::SandboxWorkspaceWrite`].
+/// MCP representation of a [`hanzo_core::config_types::SandboxWorkspaceWrite`].
 #[derive(Deserialize, Debug, Clone, PartialEq, Serialize, TS)]
 #[serde(rename_all = "camelCase")]
 pub struct SandboxSettings {
@@ -677,12 +699,14 @@ pub enum ServerRequest {
     /// Request to approve a patch.
     ApplyPatchApproval {
         #[serde(rename = "id")]
+        #[ts(type = "string | number")]
         request_id: RequestId,
         params: ApplyPatchApprovalParams,
     },
     /// Request to exec a command.
     ExecCommandApproval {
         #[serde(rename = "id")]
+        #[ts(type = "string | number")]
         request_id: RequestId,
         params: ExecCommandApprovalParams,
     },
@@ -691,8 +715,8 @@ pub enum ServerRequest {
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq, TS)]
 pub struct ApplyPatchApprovalParams {
     pub conversation_id: ConversationId,
-    /// Use to correlate this with [code_core::protocol::PatchApplyBeginEvent]
-    /// and [code_core::protocol::PatchApplyEndEvent].
+    /// Use to correlate this with [hanzo_core::protocol::PatchApplyBeginEvent]
+    /// and [hanzo_core::protocol::PatchApplyEndEvent].
     pub call_id: String,
     pub file_changes: HashMap<PathBuf, FileChange>,
     /// Optional explanatory reason (e.g. request for extra write access).
@@ -707,8 +731,8 @@ pub struct ApplyPatchApprovalParams {
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq, TS)]
 pub struct ExecCommandApprovalParams {
     pub conversation_id: ConversationId,
-    /// Use to correlate this with [code_core::protocol::ExecCommandBeginEvent]
-    /// and [code_core::protocol::ExecCommandEndEvent].
+    /// Use to correlate this with [hanzo_core::protocol::ExecCommandBeginEvent]
+    /// and [hanzo_core::protocol::ExecCommandEndEvent].
     pub call_id: String,
     pub command: Vec<String>,
     pub cwd: PathBuf,
@@ -737,7 +761,7 @@ pub struct FuzzyFileSearchParams {
     pub cancellation_token: Option<String>,
 }
 
-/// Superset of [`code_file_search::FileMatch`]
+/// Superset of [`hanzo_file_search::FileMatch`]
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq, TS)]
 pub struct FuzzyFileSearchResult {
     pub root: String,

@@ -1,7 +1,7 @@
 use super::*;
 use crate::history::state::{RateLimitLegendEntry, RateLimitsRecord, TextTone};
-use code_common::elapsed::format_duration;
-use code_core::protocol::RateLimitSnapshotEvent;
+use hanzo_common::elapsed::format_duration;
+use hanzo_core::protocol::RateLimitSnapshotEvent;
 use ratatui::style::Color;
 use time::{
     format_description::FormatItem,

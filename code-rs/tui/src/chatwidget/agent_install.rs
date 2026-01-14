@@ -3,13 +3,13 @@ use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use anyhow::{anyhow, Context, Result};
-use code_core::config::Config;
-use code_core::config::ConfigOverrides;
-use code_core::config_types::ReasoningEffort;
-use code_core::debug_logger::DebugLogger;
-use code_core::protocol::SandboxPolicy;
-use code_core::{AuthManager, ModelClient, Prompt, ResponseEvent, TextFormat};
-use code_protocol::models::{ContentItem, ResponseItem};
+use hanzo_core::config::Config;
+use hanzo_core::config::ConfigOverrides;
+use hanzo_core::config_types::ReasoningEffort;
+use hanzo_core::debug_logger::DebugLogger;
+use hanzo_core::protocol::SandboxPolicy;
+use hanzo_core::{AuthManager, ModelClient, Prompt, ResponseEvent, TextFormat};
+use hanzo_protocol::models::{ContentItem, ResponseItem};
 use futures::StreamExt;
 use serde::Deserialize;
 use serde_json::{self, json, Value};
@@ -249,9 +249,9 @@ fn run_guided_loop(
             .context("loading config")?,
     };
     let preferred_auth = if cfg.using_chatgpt_auth {
-        code_protocol::mcp_protocol::AuthMode::ChatGPT
+        hanzo_protocol::mcp_protocol::AuthMode::ChatGPT
     } else {
-        code_protocol::mcp_protocol::AuthMode::ApiKey
+        hanzo_protocol::mcp_protocol::AuthMode::ApiKey
     };
     let auth_mgr = AuthManager::shared_with_mode_and_originator(
         cfg.code_home.clone(),

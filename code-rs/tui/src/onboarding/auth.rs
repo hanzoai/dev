@@ -1,7 +1,7 @@
-use code_login::CLIENT_ID;
-use code_login::ServerOptions;
-use code_login::ShutdownHandle;
-use code_login::run_login_server;
+use hanzo_login::CLIENT_ID;
+use hanzo_login::ServerOptions;
+use hanzo_login::ShutdownHandle;
+use hanzo_login::run_login_server;
 use crossterm::event::KeyCode;
 use crossterm::event::KeyEvent;
 use ratatui::buffer::Buffer;
@@ -16,10 +16,10 @@ use ratatui::widgets::Paragraph;
 use ratatui::widgets::WidgetRef;
 use ratatui::widgets::Wrap;
 
-use code_login::AuthMode;
+use hanzo_login::AuthMode;
 
-use code_core::config::GPT_5_CODEX_MEDIUM_MODEL;
-use code_core::model_family::{derive_default_model_family, find_family_for_model};
+use hanzo_core::config::GPT_5_CODEX_MEDIUM_MODEL;
+use hanzo_core::model_family::{derive_default_model_family, find_family_for_model};
 
 use crate::LoginStatus;
 use crate::app::ChatWidgetArgs;
@@ -340,7 +340,7 @@ impl AuthModeWidget {
         let opts = ServerOptions::new(
             self.code_home.clone(),
             CLIENT_ID.to_string(),
-            code_core::default_client::DEFAULT_ORIGINATOR.to_string(),
+            hanzo_core::default_client::DEFAULT_ORIGINATOR.to_string(),
         );
         let server = run_login_server(opts);
         match server {
@@ -402,7 +402,7 @@ impl AuthModeWidget {
 }
 
 async fn spawn_completion_poller(
-    child: code_login::LoginServer,
+    child: hanzo_login::LoginServer,
     event_tx: AppEventSender,
 ) -> tokio::task::JoinHandle<()> {
     tokio::spawn(async move {

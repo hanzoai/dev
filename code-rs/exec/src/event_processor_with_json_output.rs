@@ -1,16 +1,16 @@
 use std::collections::HashMap;
 use std::path::PathBuf;
 
-use code_core::config::Config;
-use code_core::protocol::Event;
-use code_core::protocol::EventMsg;
-use code_core::protocol::TaskCompleteEvent;
+use hanzo_core::config::Config;
+use hanzo_core::protocol::Event;
+use hanzo_core::protocol::EventMsg;
+use hanzo_core::protocol::TaskCompleteEvent;
 use serde_json::json;
 
 use crate::event_processor::CodexStatus;
 use crate::event_processor::EventProcessor;
 use crate::event_processor::handle_last_message;
-use code_common::create_config_summary_entries;
+use hanzo_common::create_config_summary_entries;
 
 pub(crate) struct EventProcessorWithJsonOutput {
     last_message_path: Option<PathBuf>,

@@ -1,7 +1,7 @@
 use super::{tool_cards, ChatWidget, OrderKey};
 use super::tool_cards::ToolCardSlot;
 use crate::history_cell::{WebSearchSessionCell, WebSearchStatus};
-use code_core::protocol::OrderMeta;
+use hanzo_core::protocol::OrderMeta;
 use std::collections::HashSet;
 use std::mem;
 use std::time::Instant;

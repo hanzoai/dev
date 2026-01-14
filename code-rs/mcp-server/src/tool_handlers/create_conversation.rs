@@ -1,8 +1,8 @@
 use std::path::PathBuf;
 
-use code_core::NewConversation;
-use code_core::config::Config as CodexConfig;
-use code_core::config::ConfigOverrides;
+use hanzo_core::NewConversation;
+use hanzo_core::config::Config as CodexConfig;
+use hanzo_core::config::ConfigOverrides;
 use mcp_types::RequestId;
 
 use crate::conversation_loop::run_conversation_loop;

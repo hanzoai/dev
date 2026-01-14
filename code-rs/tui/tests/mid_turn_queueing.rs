@@ -17,14 +17,14 @@
 
 use std::sync::Once;
 
-use code_core::protocol::{
+use hanzo_core::protocol::{
     AgentMessageDeltaEvent,
     AgentMessageEvent,
     Event,
     EventMsg,
     OrderMeta,
 };
-use code_tui::test_helpers::{
+use hanzo_tui::test_helpers::{
     render_chat_widget_to_vt100,
     ChatWidgetHarness,
 };

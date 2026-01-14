@@ -8,8 +8,8 @@
 //! - Byte cap budgeting across all retained items
 //! - Telemetry for tracking bytes saved, delta counts, and deduplication
 
-use code_protocol::models::ResponseItem;
-use code_protocol::models::ContentItem;
+use hanzo_protocol::models::ResponseItem;
+use hanzo_protocol::models::ContentItem;
 use serde::{Deserialize, Serialize};
 
 /// Retention policy configuration for env_ctx_v2 timeline items.
@@ -510,7 +510,7 @@ pub fn apply_retention_policy_owned(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use code_protocol::protocol::{
+    use hanzo_protocol::protocol::{
         BROWSER_SNAPSHOT_CLOSE_TAG, BROWSER_SNAPSHOT_OPEN_TAG,
         ENVIRONMENT_CONTEXT_CLOSE_TAG, ENVIRONMENT_CONTEXT_DELTA_CLOSE_TAG,
         ENVIRONMENT_CONTEXT_DELTA_OPEN_TAG, ENVIRONMENT_CONTEXT_OPEN_TAG,

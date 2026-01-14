@@ -3,8 +3,8 @@ use std::path::Component;
 use std::path::Path;
 use std::path::PathBuf;
 
-use code_apply_patch::ApplyPatchAction;
-use code_apply_patch::ApplyPatchFileChange;
+use hanzo_apply_patch::ApplyPatchAction;
+use hanzo_apply_patch::ApplyPatchFileChange;
 
 use crate::codex::ApprovedCommandPattern;
 use crate::exec::SandboxType;

@@ -1,8 +1,8 @@
-//! Compatibility shim for the legacy `code_app_server_protocol` crate.
+//! Compatibility shim for the legacy `hanzo_app_server_protocol` crate.
 //! This crate re-exports the MCP protocol surface that downstream crates
 //! still depend on while the fork finishes migrating to the new structure.
 
-pub use code_protocol::mcp_protocol::{
+pub use hanzo_protocol::mcp_protocol::{
     self,
     AddConversationListenerParams,
     AddConversationSubscriptionResponse,

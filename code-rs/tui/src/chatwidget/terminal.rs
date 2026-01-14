@@ -3,7 +3,7 @@ use std::collections::VecDeque;
 use std::sync::mpsc::Sender;
 use std::time::{Duration, Instant};
 
-use code_ansi_escape::ansi_escape_line;
+use hanzo_ansi_escape::ansi_escape_line;
 use ratatui::text::Line as RtLine;
 use unicode_segmentation::UnicodeSegmentation;
 use vt100::Parser as VtParser;

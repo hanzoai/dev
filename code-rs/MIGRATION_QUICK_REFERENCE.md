@@ -35,7 +35,7 @@ cargo test -p code-<crate-name>
 **Cargo.toml:**
 ```toml
 [dependencies]
-codex-linux-sandbox = { workspace = true }
+dev-linux-sandbox = { workspace = true }
 ```
 
 **lib.rs:**
@@ -123,7 +123,7 @@ cargo build -p <dependent-crate>
 Migrate in this order to avoid dependency issues:
 
 1. ✅ `code-core` (already done)
-2. ✅ `code-linux-sandbox` (just completed)
+2. ✅ `dev-linux-sandbox` (just completed)
 3. Next candidates:
    - `ansi-escape` (no codex deps)
    - `git-apply` (minimal deps)

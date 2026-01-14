@@ -19,7 +19,7 @@ enum CloudLogLevel {
 }
 
 fn log_level_from_env() -> CloudLogLevel {
-    if let Ok(raw) = std::env::var("CODEX_CLOUD_TASKS_LOG_LEVEL") {
+    if let Ok(raw) = std::env::var("HANZO_CLOUD_TASKS_LOG_LEVEL") {
         let value = raw.trim().to_ascii_lowercase();
         return match value.as_str() {
             "off" | "none" | "0" => CloudLogLevel::Off,
@@ -30,7 +30,7 @@ fn log_level_from_env() -> CloudLogLevel {
         };
     }
 
-    if env_truthy("CODE_SUBAGENT_DEBUG") || env_truthy("CODEX_CLOUD_TASKS_DEBUG") {
+    if env_truthy("CODE_SUBAGENT_DEBUG") || env_truthy("HANZO_CLOUD_TASKS_DEBUG") {
         return CloudLogLevel::Debug;
     }
 
@@ -59,19 +59,22 @@ fn user_home_dir() -> Option<PathBuf> {
 }
 
 fn resolve_log_path() -> Option<PathBuf> {
-    if let Ok(path) = std::env::var("CODEX_CLOUD_TASKS_LOG_PATH") {
+    if let Ok(path) = std::env::var("HANZO_CLOUD_TASKS_LOG_PATH") {
         let trimmed = path.trim();
         if !trimmed.is_empty() {
             return Some(PathBuf::from(trimmed));
         }
     }
 
-    let base = if let Ok(dir) = std::env::var("CODEX_CLOUD_TASKS_LOG_DIR") {
+    let base = if let Ok(dir) = std::env::var("HANZO_CLOUD_TASKS_LOG_DIR") {
         PathBuf::from(dir)
-    } else if let Ok(home) = std::env::var("CODE_HOME").or_else(|_| std::env::var("CODEX_HOME")) {
+    } else if let Ok(home) = std::env::var("HANZO_HOME")
+        .or_else(|_| std::env::var("CODE_HOME"))
+        .or_else(|_| std::env::var("CODEX_HOME"))
+    {
         PathBuf::from(home).join("debug_logs")
     } else if let Some(home) = user_home_dir() {
-        home.join(".code").join("debug_logs")
+        home.join(".hanzo").join("debug_logs")
     } else {
         return None;
     };
@@ -209,7 +212,7 @@ fn append_cloud_log(level: CloudLogLevel, message: &str) {
 }
 
 pub fn set_user_agent_suffix(suffix: &str) {
-    if let Ok(mut guard) = code_core::default_client::USER_AGENT_SUFFIX.lock() {
+    if let Ok(mut guard) = hanzo_core::default_client::USER_AGENT_SUFFIX.lock() {
         guard.replace(suffix.to_string());
     }
 }
@@ -257,17 +260,17 @@ pub async fn build_chatgpt_headers() -> HeaderMap {
     use reqwest::header::USER_AGENT;
 
     set_user_agent_suffix("code_cloud_tasks_tui");
-    let ua = code_core::default_client::get_code_user_agent(None);
+    let ua = hanzo_core::default_client::get_code_user_agent(None);
     let mut headers = HeaderMap::new();
     headers.insert(
         USER_AGENT,
         HeaderValue::from_str(&ua).unwrap_or(HeaderValue::from_static("codex-cli")),
     );
-    if let Ok(home) = code_core::config::find_code_home() {
-        let am = code_login::AuthManager::new(
+    if let Ok(home) = hanzo_core::config::find_code_home() {
+        let am = hanzo_login::AuthManager::new(
             home,
-            code_login::AuthMode::ChatGPT,
-            code_core::default_client::DEFAULT_ORIGINATOR.to_string(),
+            hanzo_login::AuthMode::ChatGPT,
+            hanzo_core::default_client::DEFAULT_ORIGINATOR.to_string(),
         );
         if let Some(auth) = am.auth()
             && let Ok(tok) = auth.get_token().await

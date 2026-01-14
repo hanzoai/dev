@@ -4,11 +4,11 @@ mod common;
 
 use common::load_default_config_for_test;
 
-use code_core::built_in_model_providers;
-use code_core::config_types::{ProjectHookConfig, ProjectHookEvent};
-use code_core::project_features::ProjectHooks;
-use code_core::protocol::{AskForApproval, EventMsg, InputItem, Op, SandboxPolicy};
-use code_core::{CodexAuth, ConversationManager, ModelProviderInfo};
+use hanzo_core::built_in_model_providers;
+use hanzo_core::config_types::{ProjectHookConfig, ProjectHookEvent};
+use hanzo_core::project_features::ProjectHooks;
+use hanzo_core::protocol::{AskForApproval, EventMsg, InputItem, Op, SandboxPolicy};
+use hanzo_core::{CodexAuth, ConversationManager, ModelProviderInfo};
 use serde_json::json;
 use std::fs::{self, File};
 use tempfile::TempDir;

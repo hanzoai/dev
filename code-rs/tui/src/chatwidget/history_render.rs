@@ -20,10 +20,10 @@ use crate::history_cell::{
     AssistantMarkdownCell,
     HistoryCell,
 };
-use code_core::config::Config;
-#[cfg(feature = "code-fork")]
+use hanzo_core::config::Config;
+#[cfg(feature = "hanzo-fork")]
 use crate::foundation::wrapping::word_wrap_lines;
-#[cfg(not(feature = "code-fork"))]
+#[cfg(not(feature = "hanzo-fork"))]
 use crate::insert_history::word_wrap_lines;
 use unicode_segmentation::UnicodeSegmentation;
 use unicode_width::UnicodeWidthStr;

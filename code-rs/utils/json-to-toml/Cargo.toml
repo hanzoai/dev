@@ -1,6 +1,6 @@
 [package]
 edition.workspace = true
-name = "code-utils-json-to-toml"
+name = "hanzo-utils-json-to-toml"
 version.workspace = true
 
 [dependencies]

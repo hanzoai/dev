@@ -1,4 +1,4 @@
-use std::sync::OnceLock;
+use std::cell::OnceCell;
 
 use icu_decimal::input::Decimal;
 use icu_decimal::options::DecimalFormatterOptions;
@@ -17,15 +17,21 @@ fn make_en_us_formatter() -> DecimalFormatter {
         .expect("en-US wasn't a valid locale")
 }
 
-fn formatter() -> &'static DecimalFormatter {
-    static FORMATTER: OnceLock<DecimalFormatter> = OnceLock::new();
-    FORMATTER.get_or_init(|| make_local_formatter().unwrap_or_else(make_en_us_formatter))
+fn with_formatter<T>(f: impl FnOnce(&DecimalFormatter) -> T) -> T {
+    thread_local! {
+        static FORMATTER: OnceCell<DecimalFormatter> = OnceCell::new();
+    }
+
+    FORMATTER.with(|cell| {
+        let formatter = cell.get_or_init(|| make_local_formatter().unwrap_or_else(make_en_us_formatter));
+        f(formatter)
+    })
 }
 
 /// Format a u64 with locale-aware digit separators (e.g. "12345" -> "12,345"
 /// for en-US).
 pub fn format_with_separators(n: u64) -> String {
-    formatter().format(&Decimal::from(n)).to_string()
+    with_formatter(|formatter| formatter.format(&Decimal::from(n)).to_string())
 }
 
 fn format_si_suffix_with_formatter(n: u64, formatter: &DecimalFormatter) -> String {
@@ -68,7 +74,7 @@ fn format_si_suffix_with_formatter(n: u64, formatter: &DecimalFormatter) -> Stri
 ///   - 1200 -> "1.20K"
 ///   - 123456789 -> "123M"
 pub fn format_si_suffix(n: u64) -> String {
-    format_si_suffix_with_formatter(n, formatter())
+    with_formatter(|formatter| format_si_suffix_with_formatter(n, formatter))
 }
 
 #[cfg(test)]
@@ -96,4 +102,3 @@ mod tests {
         assert_eq!(fmt(1_234_000_000_000), "1,234G");
     }
 }
-

@@ -1,5 +1,5 @@
-use code_cloud_tasks_client::CloudBackend;
-use code_cloud_tasks_client::MockClient;
+use hanzo_cloud_tasks_client::CloudBackend;
+use hanzo_cloud_tasks_client::MockClient;
 
 #[tokio::test]
 async fn mock_backend_varies_by_env() {

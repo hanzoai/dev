@@ -9,9 +9,9 @@ use super::selection_popup_common::GenericDisplayRow;
 use super::selection_popup_common::render_rows;
 use crate::slash_command::SlashCommand;
 use crate::slash_command::built_in_slash_commands;
-use code_common::fuzzy_match::fuzzy_match;
-use code_protocol::custom_prompts::CustomPrompt;
-use code_protocol::custom_prompts::PROMPTS_CMD_PREFIX;
+use hanzo_common::fuzzy_match::fuzzy_match;
+use hanzo_protocol::custom_prompts::CustomPrompt;
+use hanzo_protocol::custom_prompts::PROMPTS_CMD_PREFIX;
 use std::collections::HashSet;
 
 /// A selectable item in the popup: either a built-in command or a user prompt.

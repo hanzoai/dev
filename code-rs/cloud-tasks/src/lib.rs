@@ -16,7 +16,7 @@ use unicode_segmentation::UnicodeSegmentation;
 use tokio::sync::mpsc::UnboundedSender;
 use tracing::info;
 use tracing_subscriber::EnvFilter;
-use code_tui::public_widgets::composer_input::ComposerAction;
+use hanzo_tui::public_widgets::composer_input::ComposerAction;
 use util::append_debug_log;
 use util::append_error_log;
 use util::append_info_log;
@@ -24,21 +24,21 @@ use util::log_path_hint;
 use util::set_user_agent_suffix;
 
 struct ApplyJob {
-    task_id: code_cloud_tasks_client::TaskId,
+    task_id: hanzo_cloud_tasks_client::TaskId,
     diff_override: Option<String>,
 }
 
-fn level_from_status(status: code_cloud_tasks_client::ApplyStatus) -> app::ApplyResultLevel {
+fn level_from_status(status: hanzo_cloud_tasks_client::ApplyStatus) -> app::ApplyResultLevel {
     match status {
-        code_cloud_tasks_client::ApplyStatus::Success => app::ApplyResultLevel::Success,
-        code_cloud_tasks_client::ApplyStatus::Partial => app::ApplyResultLevel::Partial,
-        code_cloud_tasks_client::ApplyStatus::Error => app::ApplyResultLevel::Error,
+        hanzo_cloud_tasks_client::ApplyStatus::Success => app::ApplyResultLevel::Success,
+        hanzo_cloud_tasks_client::ApplyStatus::Partial => app::ApplyResultLevel::Partial,
+        hanzo_cloud_tasks_client::ApplyStatus::Error => app::ApplyResultLevel::Error,
     }
 }
 
 fn spawn_preflight(
     app: &mut app::App,
-    backend: &Arc<dyn code_cloud_tasks_client::CloudBackend>,
+    backend: &Arc<dyn hanzo_cloud_tasks_client::CloudBackend>,
     tx: &UnboundedSender<app::AppEvent>,
     frame_tx: &UnboundedSender<Instant>,
     title: String,
@@ -63,7 +63,7 @@ fn spawn_preflight(
             task_id,
             diff_override,
         } = job;
-        let result = code_cloud_tasks_client::CloudBackend::apply_task_preflight(
+        let result = hanzo_cloud_tasks_client::CloudBackend::apply_task_preflight(
             &*backend,
             task_id.clone(),
             diff_override,
@@ -100,7 +100,7 @@ fn spawn_preflight(
 
 fn spawn_apply(
     app: &mut app::App,
-    backend: &Arc<dyn code_cloud_tasks_client::CloudBackend>,
+    backend: &Arc<dyn hanzo_cloud_tasks_client::CloudBackend>,
     tx: &UnboundedSender<app::AppEvent>,
     frame_tx: &UnboundedSender<Instant>,
     job: ApplyJob,
@@ -124,7 +124,7 @@ fn spawn_apply(
             task_id,
             diff_override,
         } = job;
-        let result = code_cloud_tasks_client::CloudBackend::apply_task(
+        let result = hanzo_cloud_tasks_client::CloudBackend::apply_task(
             &*backend,
             task_id.clone(),
             diff_override,
@@ -176,19 +176,19 @@ pub async fn run_main(cli: Cli, _code_linux_sandbox_exe: Option<PathBuf>) -> any
 
     // Default to online unless explicitly configured to use mock.
     let use_mock = matches!(
-        std::env::var("CODEX_CLOUD_TASKS_MODE").ok().as_deref(),
+        std::env::var("HANZO_CLOUD_TASKS_MODE").ok().as_deref(),
         Some("mock") | Some("MOCK")
     );
 
-    let backend: Arc<dyn code_cloud_tasks_client::CloudBackend> = if use_mock {
-        Arc::new(code_cloud_tasks_client::MockClient)
+    let backend: Arc<dyn hanzo_cloud_tasks_client::CloudBackend> = if use_mock {
+        Arc::new(hanzo_cloud_tasks_client::MockClient)
     } else {
         // Build an HTTP client against the configured (or default) base URL.
-        let base_url = std::env::var("CODEX_CLOUD_TASKS_BASE_URL")
+        let base_url = std::env::var("HANZO_CLOUD_TASKS_BASE_URL")
             .unwrap_or_else(|_| "https://chatgpt.com/backend-api".to_string());
-        let ua = code_core::default_client::get_code_user_agent(None);
+        let ua = hanzo_core::default_client::get_code_user_agent(None);
         let mut http =
-            code_cloud_tasks_client::HttpClient::new(base_url.clone())?.with_user_agent(ua);
+            hanzo_cloud_tasks_client::HttpClient::new(base_url.clone())?.with_user_agent(ua);
         // Log which base URL and path style we're going to use.
         let style = if base_url.contains("/backend-api") {
             "wham"
@@ -198,13 +198,13 @@ pub async fn run_main(cli: Cli, _code_linux_sandbox_exe: Option<PathBuf>) -> any
         append_info_log(format!("startup: base_url={base_url} path_style={style}"));
 
         // Require ChatGPT login (SWIC). Exit with a clear message if missing.
-        let _token = match code_core::config::find_code_home()
+        let _token = match hanzo_core::config::find_code_home()
             .ok()
             .map(|home| {
-                code_login::AuthManager::new(
+                hanzo_login::AuthManager::new(
                     home,
-                    code_login::AuthMode::ChatGPT,
-                    code_core::default_client::DEFAULT_ORIGINATOR.to_string(),
+                    hanzo_login::AuthMode::ChatGPT,
+                    hanzo_core::default_client::DEFAULT_ORIGINATOR.to_string(),
                 )
             })
             .and_then(|am| am.auth())
@@ -280,7 +280,7 @@ pub async fn run_main(cli: Cli, _code_linux_sandbox_exe: Option<PathBuf>) -> any
     let mut app = app::App::new();
     // Initial load
     let force_internal = matches!(
-        std::env::var("CODEX_CLOUD_TASKS_FORCE_INTERNAL")
+        std::env::var("HANZO_CLOUD_TASKS_FORCE_INTERNAL")
             .ok()
             .as_deref(),
         Some("1") | Some("true") | Some("TRUE")
@@ -288,7 +288,7 @@ pub async fn run_main(cli: Cli, _code_linux_sandbox_exe: Option<PathBuf>) -> any
     append_info_log(format!(
         "startup: wham_force_internal={} ua={}",
         force_internal,
-        code_core::default_client::get_code_user_agent(None)
+        hanzo_core::default_client::get_code_user_agent(None)
     ));
     // Non-blocking initial load so the in-box spinner can animate
     app.status = "Loading tasks…".to_string();
@@ -327,7 +327,7 @@ pub async fn run_main(cli: Cli, _code_linux_sandbox_exe: Option<PathBuf>) -> any
         let tx = tx.clone();
         tokio::spawn(async move {
             let base_url = util::normalize_base_url(
-                &std::env::var("CODEX_CLOUD_TASKS_BASE_URL")
+                &std::env::var("HANZO_CLOUD_TASKS_BASE_URL")
                     .unwrap_or_else(|_| "https://chatgpt.com/backend-api".to_string()),
             );
             let headers = util::build_chatgpt_headers().await;
@@ -342,7 +342,7 @@ pub async fn run_main(cli: Cli, _code_linux_sandbox_exe: Option<PathBuf>) -> any
         let tx = tx.clone();
         tokio::spawn(async move {
             let base_url = util::normalize_base_url(
-                &std::env::var("CODEX_CLOUD_TASKS_BASE_URL")
+                &std::env::var("HANZO_CLOUD_TASKS_BASE_URL")
                     .unwrap_or_else(|_| "https://chatgpt.com/backend-api".to_string()),
             );
             // Build headers: UA + ChatGPT auth if available
@@ -413,7 +413,7 @@ pub async fn run_main(cli: Cli, _code_linux_sandbox_exe: Option<PathBuf>) -> any
                 if let Some(page) = app.new_task.as_mut() {
                     if page.composer.flush_paste_burst_if_due() { needs_redraw = true; }
                     if page.composer.is_in_paste_burst() {
-                        let _ = frame_tx.send(Instant::now() + code_tui::ComposerInput::recommended_flush_delay());
+                        let _ = frame_tx.send(Instant::now() + hanzo_tui::ComposerInput::recommended_flush_delay());
                     }
                 }
                 // Advance throbber only while loading.
@@ -565,7 +565,7 @@ pub async fn run_main(cli: Cli, _code_linux_sandbox_exe: Option<PathBuf>) -> any
                                         let tx = tx.clone();
                                         tokio::spawn(async move {
                                             let base_url = crate::util::normalize_base_url(
-                                                &std::env::var("CODEX_CLOUD_TASKS_BASE_URL")
+                                                &std::env::var("HANZO_CLOUD_TASKS_BASE_URL")
                                                     .unwrap_or_else(|_| "https://chatgpt.com/backend-api".to_string()),
                                             );
                                             let headers = crate::util::build_chatgpt_headers().await;
@@ -647,7 +647,7 @@ pub async fn run_main(cli: Cli, _code_linux_sandbox_exe: Option<PathBuf>) -> any
                                         let tx = tx.clone();
                                         let task_id = id.clone();
                                         tokio::spawn(async move {
-                                            match code_cloud_tasks_client::CloudBackend::list_sibling_attempts(
+                                            match hanzo_cloud_tasks_client::CloudBackend::list_sibling_attempts(
                                                 &*backend,
                                                 task_id.clone(),
                                                 turn_id,
@@ -776,7 +776,7 @@ pub async fn run_main(cli: Cli, _code_linux_sandbox_exe: Option<PathBuf>) -> any
                             match result {
                                 Ok(outcome) => {
                                     app.status = outcome.message.clone();
-                                    if matches!(outcome.status, code_cloud_tasks_client::ApplyStatus::Success) {
+                                    if matches!(outcome.status, hanzo_cloud_tasks_client::ApplyStatus::Success) {
                                         app.apply_modal = None;
                                         app.diff_overlay = None;
                                         // Refresh tasks after successful apply
@@ -950,7 +950,7 @@ pub async fn run_main(cli: Cli, _code_linux_sandbox_exe: Option<PathBuf>) -> any
                             if should_fetch {
                                     let tx = tx.clone();
                                     tokio::spawn(async move {
-            let base_url = crate::util::normalize_base_url(&std::env::var("CODEX_CLOUD_TASKS_BASE_URL").unwrap_or_else(|_| "https://chatgpt.com/backend-api".to_string()));
+            let base_url = crate::util::normalize_base_url(&std::env::var("HANZO_CLOUD_TASKS_BASE_URL").unwrap_or_else(|_| "https://chatgpt.com/backend-api".to_string()));
             let headers = crate::util::build_chatgpt_headers().await;
                                         let res = crate::env_detect::list_environments(&base_url, &headers).await;
                                         let _ = tx.send(app::AppEvent::EnvironmentsLoaded(res));
@@ -989,7 +989,7 @@ pub async fn run_main(cli: Cli, _code_linux_sandbox_exe: Option<PathBuf>) -> any
                                                 let backend = Arc::clone(&backend);
                                                 let best_of_n = page.best_of_n;
                                                 tokio::spawn(async move {
-                                                    let result = code_cloud_tasks_client::CloudBackend::create_task(&*backend, &env, &text, "main", false, best_of_n).await;
+                                                    let result = hanzo_cloud_tasks_client::CloudBackend::create_task(&*backend, &env, &text, "main", false, best_of_n).await;
                                                     let evt = match result {
                                                         Ok(ok) => app::AppEvent::NewTaskSubmitted(Ok(ok)),
                                                         Err(e) => app::AppEvent::NewTaskSubmitted(Err(format!("{e}"))),
@@ -1003,7 +1003,7 @@ pub async fn run_main(cli: Cli, _code_linux_sandbox_exe: Option<PathBuf>) -> any
                                     needs_redraw = true;
                                     // If paste‑burst is active, schedule a micro‑flush frame.
                                     if page.composer.is_in_paste_burst() {
-                                        let _ = frame_tx.send(Instant::now() + code_tui::ComposerInput::recommended_flush_delay());
+                                        let _ = frame_tx.send(Instant::now() + hanzo_tui::ComposerInput::recommended_flush_delay());
                                     }
                                     // Always schedule an immediate redraw for key edits in the composer.
                                     let _ = frame_tx.send(Instant::now());
@@ -1130,7 +1130,7 @@ pub async fn run_main(cli: Cli, _code_linux_sandbox_exe: Option<PathBuf>) -> any
                                         let tx = tx.clone();
                                         tokio::spawn(async move {
                                             let base_url = crate::util::normalize_base_url(
-                                                &std::env::var("CODEX_CLOUD_TASKS_BASE_URL")
+                                                &std::env::var("HANZO_CLOUD_TASKS_BASE_URL")
                                                     .unwrap_or_else(|_| "https://chatgpt.com/backend-api".to_string()),
                                             );
                                             let headers = crate::util::build_chatgpt_headers().await;
@@ -1201,7 +1201,7 @@ pub async fn run_main(cli: Cli, _code_linux_sandbox_exe: Option<PathBuf>) -> any
                                     let _ = frame_tx.send(Instant::now() + Duration::from_millis(100));
                                     let tx = tx.clone();
                                     tokio::spawn(async move {
-            let base_url = crate::util::normalize_base_url(&std::env::var("CODEX_CLOUD_TASKS_BASE_URL").unwrap_or_else(|_| "https://chatgpt.com/backend-api".to_string()));
+            let base_url = crate::util::normalize_base_url(&std::env::var("HANZO_CLOUD_TASKS_BASE_URL").unwrap_or_else(|_| "https://chatgpt.com/backend-api".to_string()));
             let headers = crate::util::build_chatgpt_headers().await;
                                         let res = crate::env_detect::list_environments(&base_url, &headers).await;
                                         let _ = tx.send(app::AppEvent::EnvironmentsLoaded(res));
@@ -1329,7 +1329,7 @@ pub async fn run_main(cli: Cli, _code_linux_sandbox_exe: Option<PathBuf>) -> any
                                     if should_fetch {
                                     let tx = tx.clone();
                                     tokio::spawn(async move {
-                                        let base_url = crate::util::normalize_base_url(&std::env::var("CODEX_CLOUD_TASKS_BASE_URL").unwrap_or_else(|_| "https://chatgpt.com/backend-api".to_string()));
+                                        let base_url = crate::util::normalize_base_url(&std::env::var("HANZO_CLOUD_TASKS_BASE_URL").unwrap_or_else(|_| "https://chatgpt.com/backend-api".to_string()));
                                         let headers = crate::util::build_chatgpt_headers().await;
                                         let res = crate::env_detect::list_environments(&base_url, &headers).await;
                                         let _ = tx.send(app::AppEvent::EnvironmentsLoaded(res));
@@ -1363,12 +1363,12 @@ pub async fn run_main(cli: Cli, _code_linux_sandbox_exe: Option<PathBuf>) -> any
                                             let diff_id = id.clone();
                                             let diff_title = title.clone();
                                             tokio::spawn(async move {
-                                                match code_cloud_tasks_client::CloudBackend::get_task_diff(&*backend, diff_id.clone()).await {
+                                                match hanzo_cloud_tasks_client::CloudBackend::get_task_diff(&*backend, diff_id.clone()).await {
                                                     Ok(Some(diff)) => {
                                                         let _ = tx.send(app::AppEvent::DetailsDiffLoaded { id: diff_id, title: diff_title, diff });
                                                     }
                                                     Ok(None) => {
-                                                        match code_cloud_tasks_client::CloudBackend::get_task_text(&*backend, diff_id.clone()).await {
+                                                        match hanzo_cloud_tasks_client::CloudBackend::get_task_text(&*backend, diff_id.clone()).await {
                                                             Ok(text) => {
                                                                 let evt = app::AppEvent::DetailsMessagesLoaded {
                                                                     id: diff_id,
@@ -1389,7 +1389,7 @@ pub async fn run_main(cli: Cli, _code_linux_sandbox_exe: Option<PathBuf>) -> any
                                                     }
                                                     Err(e) => {
                                                         append_error_log(format!("get_task_diff failed for {}: {e}", diff_id.0));
-                                                        match code_cloud_tasks_client::CloudBackend::get_task_text(&*backend, diff_id.clone()).await {
+                                                        match hanzo_cloud_tasks_client::CloudBackend::get_task_text(&*backend, diff_id.clone()).await {
                                                             Ok(text) => {
                                                                 let evt = app::AppEvent::DetailsMessagesLoaded {
                                                                     id: diff_id,
@@ -1418,7 +1418,7 @@ pub async fn run_main(cli: Cli, _code_linux_sandbox_exe: Option<PathBuf>) -> any
                                             let msg_id = id;
                                             let msg_title = title;
                                             tokio::spawn(async move {
-                                                if let Ok(text) = code_cloud_tasks_client::CloudBackend::get_task_text(&*backend, msg_id.clone()).await {
+                                                if let Ok(text) = hanzo_cloud_tasks_client::CloudBackend::get_task_text(&*backend, msg_id.clone()).await {
                                                     let evt = app::AppEvent::DetailsMessagesLoaded {
                                                         id: msg_id,
                                                         title: msg_title,
@@ -1445,7 +1445,7 @@ pub async fn run_main(cli: Cli, _code_linux_sandbox_exe: Option<PathBuf>) -> any
                                     }
 
                                     if let Some(task) = app.tasks.get(app.selected).cloned() {
-                                        match code_cloud_tasks_client::CloudBackend::get_task_diff(&*backend, task.id.clone()).await {
+                                        match hanzo_cloud_tasks_client::CloudBackend::get_task_diff(&*backend, task.id.clone()).await {
                                             Ok(Some(diff)) => {
                                                 let diff_override = Some(diff.clone());
                                                 let task_id = task.id.clone();
@@ -1521,27 +1521,27 @@ async fn run_submit(args: crate::cli::SubmitArgs) -> anyhow::Result<()> {
     set_user_agent_suffix("code_cloud_tasks_submit");
 
     let use_mock = matches!(
-        std::env::var("CODEX_CLOUD_TASKS_MODE").ok().as_deref(),
+        std::env::var("HANZO_CLOUD_TASKS_MODE").ok().as_deref(),
         Some("mock") | Some("MOCK")
     );
 
-    let backend: Arc<dyn code_cloud_tasks_client::CloudBackend> = if use_mock {
-        Arc::new(code_cloud_tasks_client::MockClient)
+    let backend: Arc<dyn hanzo_cloud_tasks_client::CloudBackend> = if use_mock {
+        Arc::new(hanzo_cloud_tasks_client::MockClient)
     } else {
-        let base_url = std::env::var("CODEX_CLOUD_TASKS_BASE_URL")
+        let base_url = std::env::var("HANZO_CLOUD_TASKS_BASE_URL")
             .unwrap_or_else(|_| "https://chatgpt.com/backend-api".to_string());
-        let ua = code_core::default_client::get_code_user_agent(None);
-        let mut http = code_cloud_tasks_client::HttpClient::new(base_url.clone())?
+        let ua = hanzo_core::default_client::get_code_user_agent(None);
+        let mut http = hanzo_cloud_tasks_client::HttpClient::new(base_url.clone())?
             .with_user_agent(ua);
 
         // Attach ChatGPT auth (required in production)
-        let _token = match code_core::config::find_code_home()
+        let _token = match hanzo_core::config::find_code_home()
             .ok()
             .map(|home| {
-                code_login::AuthManager::new(
+                hanzo_login::AuthManager::new(
                     home,
-                    code_login::AuthMode::ChatGPT,
-                    code_core::default_client::DEFAULT_ORIGINATOR.to_string(),
+                    hanzo_login::AuthMode::ChatGPT,
+                    hanzo_core::default_client::DEFAULT_ORIGINATOR.to_string(),
                 )
             })
             .and_then(|am| am.auth())
@@ -1573,7 +1573,7 @@ async fn run_submit(args: crate::cli::SubmitArgs) -> anyhow::Result<()> {
     // Resolve target environment id
     let env_id = if let Some(e) = args.env.clone() { e } else {
         let base_url = util::normalize_base_url(
-            &std::env::var("CODEX_CLOUD_TASKS_BASE_URL")
+            &std::env::var("HANZO_CLOUD_TASKS_BASE_URL")
                 .unwrap_or_else(|_| "https://chatgpt.com/backend-api".to_string()),
         );
         let headers = util::build_chatgpt_headers().await;
@@ -1587,7 +1587,7 @@ async fn run_submit(args: crate::cli::SubmitArgs) -> anyhow::Result<()> {
     };
 
     // Create the task
-    let created = code_cloud_tasks_client::CloudBackend::create_task(
+    let created = hanzo_cloud_tasks_client::CloudBackend::create_task(
         &*backend,
         &env_id,
         &args.prompt,
@@ -1610,7 +1610,7 @@ async fn run_submit(args: crate::cli::SubmitArgs) -> anyhow::Result<()> {
     let task_id = created.id;
     let mut seen_msgs = 0usize;
     loop {
-        let text = code_cloud_tasks_client::CloudBackend::get_task_text(&*backend, task_id.clone())
+        let text = hanzo_cloud_tasks_client::CloudBackend::get_task_text(&*backend, task_id.clone())
             .await
             .unwrap_or_default();
 
@@ -1621,11 +1621,11 @@ async fn run_submit(args: crate::cli::SubmitArgs) -> anyhow::Result<()> {
             eprintln!("progress: +{} message(s)", new);
         }
 
-        use code_cloud_tasks_client::AttemptStatus as S;
+        use hanzo_cloud_tasks_client::AttemptStatus as S;
         match text.attempt_status {
             S::Completed => {
                 // Try to get a diff snapshot if available
-                let diff_opt = code_cloud_tasks_client::CloudBackend::get_task_diff(&*backend, task_id.clone())
+                let diff_opt = hanzo_cloud_tasks_client::CloudBackend::get_task_diff(&*backend, task_id.clone())
                     .await
                     .ok()
                     .flatten();
@@ -1783,8 +1783,8 @@ fn pretty_lines_from_error(raw: &str) -> Vec<String> {
 
 #[cfg(test)]
 mod tests {
-    use code_tui::public_widgets::composer_input::ComposerAction;
-    use code_tui::ComposerInput;
+    use hanzo_tui::public_widgets::composer_input::ComposerAction;
+    use hanzo_tui::ComposerInput;
     use crossterm::event::KeyCode;
     use crossterm::event::KeyEvent;
     use crossterm::event::KeyModifiers;

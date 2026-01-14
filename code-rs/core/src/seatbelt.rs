@@ -4,7 +4,7 @@ use std::path::PathBuf;
 use tokio::process::Child;
 
 use crate::protocol::SandboxPolicy;
-use crate::spawn::CODEX_SANDBOX_ENV_VAR;
+use crate::spawn::HANZO_SANDBOX_ENV_VAR;
 use crate::spawn::StdioPolicy;
 use crate::spawn::spawn_child_async;
 
@@ -26,7 +26,7 @@ pub async fn spawn_command_under_seatbelt(
 ) -> std::io::Result<Child> {
     let args = create_seatbelt_command_args(command, sandbox_policy, sandbox_policy_cwd);
     let arg0 = None;
-    env.insert(CODEX_SANDBOX_ENV_VAR.to_string(), "seatbelt".to_string());
+    env.insert(HANZO_SANDBOX_ENV_VAR.to_string(), "seatbelt".to_string());
     spawn_child_async(
         PathBuf::from(MACOS_PATH_TO_SEATBELT_EXECUTABLE),
         args,
@@ -119,7 +119,7 @@ fn create_seatbelt_command_args(
         "{MACOS_SEATBELT_BASE_POLICY}\n{file_read_policy}\n{file_write_policy}\n{network_policy}"
     );
 
-    if std::env::var("CODEX_DEBUG_PRINT_SEATBELT").is_ok() {
+    if std::env::var("HANZO_DEBUG_PRINT_SEATBELT").is_ok() {
         eprintln!("--- Codex Seatbelt Policy ---\n{}\n------------------------------", full_policy);
     }
 

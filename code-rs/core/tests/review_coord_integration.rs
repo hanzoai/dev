@@ -1,16 +1,16 @@
-use code_core::review_coord::{
+use hanzo_core::review_coord::{
     bump_snapshot_epoch_for,
     current_snapshot_epoch_for,
     read_lock_info,
     try_acquire_lock,
 };
-use code_git_tooling::{create_ghost_commit, CreateGhostCommitOptions};
+use hanzo_git_tooling::{create_ghost_commit, CreateGhostCommitOptions};
 use std::process::Command;
 use tempfile::TempDir;
 
 fn set_code_home(path: &std::path::Path) {
-    // SAFETY: tests run in a single thread and isolate CODE_HOME per test case.
-    unsafe { std::env::set_var("CODE_HOME", path); }
+    // SAFETY: tests run in a single thread and isolate HANZO_HOME per test case.
+    unsafe { std::env::set_var("HANZO_HOME", path); }
 }
 
 // Integration-style coverage of lock contention and stale-epoch handling across components.
