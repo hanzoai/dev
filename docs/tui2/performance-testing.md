@@ -30,7 +30,7 @@ Key invariants:
 Build from a clean checkout:
 
 ```sh
-cd code-rs
+cd hanzo-dev
 cargo build -p dev-tui2
 ```
 
@@ -89,9 +89,9 @@ After implementing a transcript rasterization cache, re-run the same scenarios a
 
 ## Hanzo Dev pointers
 
-- `code-rs/tui2/src/transcript_view_cache.rs`: wrapped transcript memoization + per-line
+- `hanzo-dev/tui2/src/transcript_view_cache.rs`: wrapped transcript memoization + per-line
   rasterization cache (cached `Cell` rows).
-- `code-rs/tui2/src/transcript_render.rs`: incremental helper used by the wrapped-line cache
+- `hanzo-dev/tui2/src/transcript_render.rs`: incremental helper used by the wrapped-line cache
   (`append_wrapped_transcript_cell`).
-- `code-rs/tui2/src/app.rs`: wiring in `App::render_transcript_cells` (uses cached rows instead of
+- `hanzo-dev/tui2/src/app.rs`: wiring in `App::render_transcript_cells` (uses cached rows instead of
   calling `Line::render_ref` every frame).

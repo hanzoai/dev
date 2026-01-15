@@ -2,6 +2,14 @@
 edition = "2024"
 name = "hanzo-tui"
 version = { workspace = true }
+description = "Terminal user interface for Hanzo Dev - AI-powered development assistant"
+license = "MIT"
+repository = "https://github.com/hanzoai/dev"
+homepage = "https://hanzo.ai/dev"
+authors = ["Hanzo AI <dev@hanzo.ai>"]
+keywords = ["ai", "tui", "terminal", "development"]
+categories = ["command-line-utilities", "development-tools"]
+publish = true
 
 [[bin]]
 name = "dev-tui"

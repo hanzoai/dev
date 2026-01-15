@@ -109,10 +109,10 @@ typically start multiple agents. They require a task/problem description.
 Implementation Notes
 
 - The authoritative list of commands is defined in
-  `code-rs/tui/src/slash_command.rs` (the `SlashCommand` enum). When adding a
+  `hanzo-dev/tui/src/slash_command.rs` (the `SlashCommand` enum). When adding a
   new command, please update this document to keep the UI and docs in sync.
 - Prompt formatting for `/plan`, `/solve`, and `/dev` lives in
-  `code-rs/core/src/slash_commands.rs`.
+  `hanzo-dev/core/src/slash_commands.rs`.
   When no `[[agents]]` are configured, the orchestrator advertises the
   following model slugs to the LLM for multi-agent runs: `dev-gpt-5.2`,
   `dev-gpt-5.2-dev`, `claude-opus-4.5`, `gemini-3-pro`,

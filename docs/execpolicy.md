@@ -37,13 +37,13 @@ In this example rule, if Hanzo Dev wants to run commands with the prefix `git pu
 
 ## Preview decisions
 
-Use the `dev execpolicy check` subcommand to preview decisions before you save a rule (see the [`dev-execpolicy` README](../code-rs/execpolicy/README.md) for syntax details):
+Use the `dev execpolicy check` subcommand to preview decisions before you save a rule (see the [`dev-execpolicy` README](../hanzo-dev/execpolicy/README.md) for syntax details):
 
 ```shell
 dev execpolicy check --policy ~/.hanzo/policy/default.codexpolicy git push origin main
 ```
 
-Pass multiple `--policy` flags to test how several files combine, and use `--pretty` for formatted JSON output. See the [`code-rs/execpolicy` README](../code-rs/execpolicy/README.md) for a more detailed walkthrough of the available syntax.
+Pass multiple `--policy` flags to test how several files combine, and use `--pretty` for formatted JSON output. See the [`hanzo-dev/execpolicy` README](../hanzo-dev/execpolicy/README.md) for a more detailed walkthrough of the available syntax.
 
 Example output when a rule matches:
 
