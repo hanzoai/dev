@@ -7,9 +7,11 @@
 //! - Snapshot deduplication drops
 //! - Budget constraint enforcement
 
-use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
 use std::sync::Arc;
 use std::sync::OnceLock;
+use std::sync::atomic::AtomicU64;
+use std::sync::atomic::AtomicUsize;
+use std::sync::atomic::Ordering;
 
 /// Global telemetry counters for retention operations.
 #[derive(Debug, Default)]
@@ -71,7 +73,8 @@ impl RetentionTelemetry {
     pub fn record_dedup_drop(&self) {
         self.total_dedup_drops.fetch_add(1, Ordering::Relaxed);
         self.total_snapshot_attempts.fetch_add(1, Ordering::Relaxed);
-        self.total_snapshot_dedup_hits.fetch_add(1, Ordering::Relaxed);
+        self.total_snapshot_dedup_hits
+            .fetch_add(1, Ordering::Relaxed);
     }
 
     /// Records a successfully stored snapshot (non-deduplicated).

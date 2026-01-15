@@ -1,12 +1,15 @@
 //! Core timeline data structure and operations.
 
-use std::collections::{BTreeMap, HashMap};
+use std::collections::BTreeMap;
+use std::collections::HashMap;
 
 use hanzo_protocol::models::ResponseItem;
-use serde::{Deserialize, Serialize};
+use serde::Deserialize;
+use serde::Serialize;
 use thiserror::Error;
 
-use crate::{EnvironmentContextDelta, EnvironmentContextSnapshot};
+use crate::EnvironmentContextDelta;
+use crate::EnvironmentContextSnapshot;
 
 #[derive(Debug, Error)]
 pub enum TimelineError {
@@ -99,7 +102,11 @@ impl ContextTimeline {
     ///
     /// - Returns `TimelineError::BaselineNotSet` if baseline hasn't been set.
     /// - Returns `TimelineError::DeltaSequenceOutOfOrder` if sequence doesn't match expected.
-    pub fn apply_delta(&mut self, sequence: u64, delta: EnvironmentContextDelta) -> Result<(), TimelineError> {
+    pub fn apply_delta(
+        &mut self,
+        sequence: u64,
+        delta: EnvironmentContextDelta,
+    ) -> Result<(), TimelineError> {
         if self.baseline.is_none() {
             return Err(TimelineError::BaselineNotSet);
         }
@@ -127,7 +134,10 @@ impl ContextTimeline {
     ///
     /// If a snapshot with the same fingerprint already exists, returns `Ok(false)`.
     /// Otherwise, records the snapshot and returns `Ok(true)`.
-    pub fn record_snapshot(&mut self, snapshot: EnvironmentContextSnapshot) -> Result<bool, TimelineError> {
+    pub fn record_snapshot(
+        &mut self,
+        snapshot: EnvironmentContextSnapshot,
+    ) -> Result<bool, TimelineError> {
         let fingerprint = snapshot.fingerprint();
 
         if self.snapshots.contains_key(&fingerprint) {
@@ -208,12 +218,8 @@ impl ContextTimeline {
         }
 
         if max_deltas > 0 {
-            let mut recent: Vec<&DeltaEntry> = self
-                .deltas
-                .values()
-                .rev()
-                .take(max_deltas)
-                .collect();
+            let mut recent: Vec<&DeltaEntry> =
+                self.deltas.values().rev().take(max_deltas).collect();
             recent.reverse();
 
             for entry in recent {
@@ -234,7 +240,11 @@ impl ContextTimeline {
 
         let deltas_bytes: usize = self.deltas.values().map(estimate_delta_bytes).sum();
 
-        let snapshots_bytes: usize = self.snapshots.values().map(|entry| estimate_snapshot_bytes(&entry.snapshot)).sum();
+        let snapshots_bytes: usize = self
+            .snapshots
+            .values()
+            .map(|entry| estimate_snapshot_bytes(&entry.snapshot))
+            .sum();
 
         baseline_bytes + deltas_bytes + snapshots_bytes
     }
@@ -243,12 +253,16 @@ impl ContextTimeline {
 /// Rough estimate of snapshot size in bytes.
 fn estimate_snapshot_bytes(snapshot: &EnvironmentContextSnapshot) -> usize {
     // Very rough estimate based on JSON serialization
-    serde_json::to_string(snapshot).map(|s| s.len()).unwrap_or(0)
+    serde_json::to_string(snapshot)
+        .map(|s| s.len())
+        .unwrap_or(0)
 }
 
 /// Rough estimate of delta entry size in bytes.
 fn estimate_delta_bytes(entry: &DeltaEntry) -> usize {
-    serde_json::to_string(&entry.delta).map(|s| s.len()).unwrap_or(0)
+    serde_json::to_string(&entry.delta)
+        .map(|s| s.len())
+        .unwrap_or(0)
         + entry.recorded_at.len()
         + 8 // sequence u64
 }

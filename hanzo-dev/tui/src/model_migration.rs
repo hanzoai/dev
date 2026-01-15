@@ -1,12 +1,26 @@
-use std::io::{self, Write};
+use std::io::Write;
+use std::io::{self};
 
 use crate::colors;
-use crossterm::cursor::MoveTo;
-use crossterm::event::{self, Event, KeyCode, KeyEvent, KeyEventKind, KeyModifiers};
-use crossterm::queue;
-use crossterm::style::{Attribute as CtAttribute, Color as CtColor, Print, ResetColor, SetAttribute, SetForegroundColor};
-use crossterm::terminal::{disable_raw_mode, enable_raw_mode, Clear, ClearType};
 use crossterm::ExecutableCommand;
+use crossterm::cursor::MoveTo;
+use crossterm::event::Event;
+use crossterm::event::KeyCode;
+use crossterm::event::KeyEvent;
+use crossterm::event::KeyEventKind;
+use crossterm::event::KeyModifiers;
+use crossterm::event::{self};
+use crossterm::queue;
+use crossterm::style::Attribute as CtAttribute;
+use crossterm::style::Color as CtColor;
+use crossterm::style::Print;
+use crossterm::style::ResetColor;
+use crossterm::style::SetAttribute;
+use crossterm::style::SetForegroundColor;
+use crossterm::terminal::Clear;
+use crossterm::terminal::ClearType;
+use crossterm::terminal::disable_raw_mode;
+use crossterm::terminal::enable_raw_mode;
 use ratatui::prelude::IntoCrossterm;
 
 pub(crate) enum ModelMigrationOutcome {
@@ -42,15 +56,17 @@ pub(crate) fn migration_copy_for_key(key: &str) -> ModelMigrationCopy {
             ],
             can_opt_out: true,
         },
-        hanzo_common::model_presets::HIDE_GPT_5_2_CODEX_MIGRATION_PROMPT_CONFIG => ModelMigrationCopy {
-            heading: "Upgrade available: GPT-5.2 Codex",
-            content: &[
-                "OpenAI's latest frontier agentic coding model is here: gpt-5.2-codex.",
-                "Switch now for better coding results; you can keep your current model if you prefer.",
-                "Learn more: https://openai.com/index/introducing-gpt-5-2-codex/",
-            ],
-            can_opt_out: true,
-        },
+        hanzo_common::model_presets::HIDE_GPT_5_2_CODEX_MIGRATION_PROMPT_CONFIG => {
+            ModelMigrationCopy {
+                heading: "Upgrade available: GPT-5.2 Codex",
+                content: &[
+                    "OpenAI's latest frontier agentic coding model is here: gpt-5.2-codex.",
+                    "Switch now for better coding results; you can keep your current model if you prefer.",
+                    "Learn more: https://openai.com/index/introducing-gpt-5-2-codex/",
+                ],
+                can_opt_out: true,
+            }
+        }
         _ => ModelMigrationCopy {
             heading: "Codex just got an upgrade: meet gpt-5.1-codex-max",
             content: &[
@@ -64,7 +80,9 @@ pub(crate) fn migration_copy_for_key(key: &str) -> ModelMigrationCopy {
     }
 }
 
-pub(crate) fn run_model_migration_prompt(copy: &ModelMigrationCopy) -> io::Result<ModelMigrationOutcome> {
+pub(crate) fn run_model_migration_prompt(
+    copy: &ModelMigrationCopy,
+) -> io::Result<ModelMigrationOutcome> {
     struct RawModeGuard;
     impl RawModeGuard {
         fn new() -> io::Result<Self> {
@@ -86,7 +104,13 @@ pub(crate) fn run_model_migration_prompt(copy: &ModelMigrationCopy) -> io::Resul
 
     loop {
         let event = event::read()?;
-        if let Event::Key(KeyEvent { code, modifiers, kind, .. }) = event {
+        if let Event::Key(KeyEvent {
+            code,
+            modifiers,
+            kind,
+            ..
+        }) = event
+        {
             if matches!(kind, KeyEventKind::Release) {
                 continue;
             }
@@ -133,7 +157,11 @@ pub(crate) fn run_model_migration_prompt(copy: &ModelMigrationCopy) -> io::Resul
     }
 }
 
-fn render_prompt(stdout: &mut io::Stdout, copy: &ModelMigrationCopy, highlighted: usize) -> io::Result<()> {
+fn render_prompt(
+    stdout: &mut io::Stdout,
+    copy: &ModelMigrationCopy,
+    highlighted: usize,
+) -> io::Result<()> {
     stdout.execute(Clear(ClearType::All))?;
     stdout.execute(MoveTo(0, 0))?;
 
@@ -151,9 +179,19 @@ fn render_prompt(stdout: &mut io::Stdout, copy: &ModelMigrationCopy, highlighted
     if copy.can_opt_out {
         write_blank(stdout)?;
         let primary_fg = colors::primary().into_crossterm();
-        for (idx, label) in ["Try new model (recommended)", "Use existing model"].iter().enumerate() {
+        for (idx, label) in ["Try new model (recommended)", "Use existing model"]
+            .iter()
+            .enumerate()
+        {
             if idx == highlighted {
-                queue!(stdout, SetForegroundColor(primary_fg), Print("> "), Print(*label), ResetColor, Print("\r\n"))?;
+                queue!(
+                    stdout,
+                    SetForegroundColor(primary_fg),
+                    Print("> "),
+                    Print(*label),
+                    ResetColor,
+                    Print("\r\n")
+                )?;
             } else {
                 queue!(stdout, Print("  "), Print(*label), Print("\r\n"))?;
             }

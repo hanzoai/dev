@@ -21,7 +21,10 @@ use crate::flags;
 mod storage;
 mod timeline;
 
-pub use timeline::{ContextTimeline, DeltaEntry, SnapshotEntry, TimelineError};
+pub use timeline::ContextTimeline;
+pub use timeline::DeltaEntry;
+pub use timeline::SnapshotEntry;
+pub use timeline::TimelineError;
 
 /// Returns true if delta tracking is enabled.
 pub fn is_deltas_enabled() -> bool {

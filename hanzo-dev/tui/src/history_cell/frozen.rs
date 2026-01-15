@@ -4,7 +4,8 @@ use ratatui::style::Style;
 use ratatui::text::Line;
 
 use crate::history::state::HistoryId;
-use crate::history_cell::{HistoryCell, HistoryCellType};
+use crate::history_cell::HistoryCell;
+use crate::history_cell::HistoryCellType;
 use crate::util::buffer::fill_rect;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

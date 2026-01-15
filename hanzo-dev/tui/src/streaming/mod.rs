@@ -146,7 +146,7 @@ impl HeaderEmitter {
             false
         }
     }
-    
+
     pub(crate) fn consume_header_flag(&mut self) -> bool {
         let was_just_emitted = self.just_emitted_header;
         self.just_emitted_header = false;

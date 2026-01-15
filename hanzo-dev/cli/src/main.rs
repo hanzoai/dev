@@ -1,5 +1,5 @@
-use anyhow::anyhow;
 use anyhow::Context;
+use anyhow::anyhow;
 use clap::CommandFactory;
 use clap::Parser;
 use clap_complete::Shell;
@@ -17,26 +17,32 @@ use hanzo_dev::login::run_login_with_device_code;
 use hanzo_dev::login::run_logout;
 mod bridge;
 mod llm;
-use llm::{LlmCli, run_llm};
+use llm::LlmCli;
+use llm::run_llm;
 mod copilot_cmd;
-use copilot_cmd::{CopilotArgs, execute_copilot_command};
-use hanzo_common::CliConfigOverrides;
-use hanzo_core::{entry_to_rollout_path, SessionCatalog, SessionQuery};
-use hanzo_core::spawn::spawn_std_command_with_retry;
-use hanzo_protocol::protocol::SessionSource;
+use copilot_cmd::CopilotArgs;
+use copilot_cmd::execute_copilot_command;
 use hanzo_cloud_tasks::Cli as CloudTasksCli;
+use hanzo_common::CliConfigOverrides;
+use hanzo_core::SessionCatalog;
+use hanzo_core::SessionQuery;
+use hanzo_core::entry_to_rollout_path;
+use hanzo_core::spawn::spawn_std_command_with_retry;
 use hanzo_exec::Cli as ExecCli;
+use hanzo_protocol::protocol::SessionSource;
 use hanzo_responses_api_proxy::Args as ResponsesApiProxyArgs;
 use hanzo_tui::Cli as TuiCli;
 use hanzo_tui::ExitSummary;
 use hanzo_tui::resume_command_name;
-use serde::{Deserialize, Serialize};
+use serde::Deserialize;
+use serde::Serialize;
 use serde_json;
 use std::fs;
 use std::path::Path;
 use std::path::PathBuf;
 use std::process;
-use tokio::runtime::{Builder as TokioRuntimeBuilder, Handle as TokioHandle};
+use tokio::runtime::Builder as TokioRuntimeBuilder;
+use tokio::runtime::Handle as TokioHandle;
 
 mod mcp_cmd;
 
@@ -630,15 +636,13 @@ async fn cli_main(code_linux_sandbox_exe: Option<PathBuf>) -> anyhow::Result<()>
             run_bridge_command(bridge_cli).await?;
         }
         Some(Subcommand::Llm(mut llm_cli)) => {
-            prepend_config_flags(
-                &mut llm_cli.config_overrides,
-                root_config_overrides.clone(),
-            );
+            prepend_config_flags(&mut llm_cli.config_overrides, root_config_overrides.clone());
             run_llm(llm_cli).await?;
         }
         Some(Subcommand::Copilot(copilot_args)) => {
             // Simple default config for Copilot, similar to other simple commands
-            let config = hanzo_core::config::Config::load_with_cli_overrides(vec![], Default::default())?;
+            let config =
+                hanzo_core::config::Config::load_with_cli_overrides(vec![], Default::default())?;
             execute_copilot_command(copilot_args, &config).await?;
         }
     }
@@ -763,9 +767,16 @@ async fn run_bridge_list(_cmd: BridgeListCommand) -> anyhow::Result<()> {
             None => "unknown".to_string(),
         };
         println!("{}heartbeat       : {hb}", indent);
-        println!("{}stale           : {}", indent, if target.stale { "yes" } else { "no" });
+        println!(
+            "{}stale           : {}",
+            indent,
+            if target.stale { "yes" } else { "no" }
+        );
         if target.stale {
-            println!("{}⚠ metadata looks stale; restart dev-bridge-host if this persists.", indent);
+            println!(
+                "{}⚠ metadata looks stale; restart dev-bridge-host if this persists.",
+                indent
+            );
         }
 
         match bridge::list_control_capable(target).await {
@@ -817,7 +828,9 @@ async fn run_bridge_screenshot(cmd: BridgeScreenshotCommand) -> anyhow::Result<(
 
     if let Some(bytes) = outcome.screenshot_bytes {
         let kb = bytes / 1024;
-        let mime = outcome.screenshot_mime.unwrap_or_else(|| "unknown".to_string());
+        let mime = outcome
+            .screenshot_mime
+            .unwrap_or_else(|| "unknown".to_string());
         println!("Screenshot      : {kb} KB ({mime})");
     } else {
         println!("Screenshot      : no screenshot event received");
@@ -908,7 +921,8 @@ fn paths_match(left: &Path, right: &Path) -> bool {
 fn read_subscription_file(path: &Path) -> anyhow::Result<SubscriptionOverride> {
     if path.exists() {
         let data = fs::read_to_string(path).context("read subscription override")?;
-        let sub: SubscriptionOverride = serde_json::from_str(&data).context("parse subscription override")?;
+        let sub: SubscriptionOverride =
+            serde_json::from_str(&data).context("parse subscription override")?;
         Ok(sub)
     } else {
         Ok(SubscriptionOverride {
@@ -937,7 +951,10 @@ fn find_subscription_override_path(start: &Path) -> Option<PathBuf> {
     let mut current = Some(start);
     while let Some(dir) = current {
         for root in [".hanzo", ".code"] {
-            for name in [SUBSCRIPTION_OVERRIDE_FILE, LEGACY_SUBSCRIPTION_OVERRIDE_FILE] {
+            for name in [
+                SUBSCRIPTION_OVERRIDE_FILE,
+                LEGACY_SUBSCRIPTION_OVERRIDE_FILE,
+            ] {
                 let candidate = dir.join(root).join(name);
                 if candidate.exists() {
                     return Some(candidate);
@@ -1087,8 +1104,9 @@ fn apply_resume_directives(
             push_experimental_resume_override(interactive, &path);
         }
         (None, true) => {
-            let path = resolve_resume_path(None, true)?
-                .ok_or_else(|| anyhow!("No recent sessions found to resume. Start a session with `code` first."))?;
+            let path = resolve_resume_path(None, true)?.ok_or_else(|| {
+                anyhow!("No recent sessions found to resume. Start a session with `code` first.")
+            })?;
             interactive.resume_last = true;
             push_experimental_resume_override(interactive, &path);
         }
@@ -1117,16 +1135,20 @@ fn resolve_resume_path(session_id: Option<&str>, last: bool) -> anyhow::Result<O
                 .await
                 .context("failed to look up session by id")?;
             Ok(entry.map(|entry| entry_to_rollout_path(&code_home, &entry)))
-    } else if last {
-        let query = SessionQuery {
-            cwd: None,
-            git_root: None,
-            sources: vec![SessionSource::Cli, SessionSource::VSCode, SessionSource::Exec],
-            min_user_messages: 1,
-            include_archived: false,
-            include_deleted: false,
-            limit: Some(1),
-        };
+        } else if last {
+            let query = SessionQuery {
+                cwd: None,
+                git_root: None,
+                sources: vec![
+                    SessionSource::Cli,
+                    SessionSource::VSCode,
+                    SessionSource::Exec,
+                ],
+                min_user_messages: 1,
+                include_archived: false,
+                include_deleted: false,
+                limit: Some(1),
+            };
             let entry = catalog
                 .get_latest(&query)
                 .await
@@ -1135,7 +1157,7 @@ fn resolve_resume_path(session_id: Option<&str>, last: bool) -> anyhow::Result<O
         } else {
             Ok(None)
         }
-        };
+    };
 
     match TokioHandle::try_current() {
         Ok(handle) => {
@@ -1174,7 +1196,8 @@ fn print_completion(cmd: CompletionCommand) {
 }
 
 fn order_replay_main(args: OrderReplayArgs) -> anyhow::Result<()> {
-    use anyhow::{Context, Result};
+    use anyhow::Context;
+    use anyhow::Result;
     use regex::Regex;
     use serde_json::Value;
     use std::fs;
@@ -1182,7 +1205,11 @@ fn order_replay_main(args: OrderReplayArgs) -> anyhow::Result<()> {
     fn parse_response_expected(path: &std::path::Path) -> Result<Vec<(u64, u64)>> {
         let data = fs::read_to_string(path).with_context(|| format!("read {}", path.display()))?;
         let v: Value = serde_json::from_str(&data)?;
-        let events = v.get("events").and_then(|e| e.as_array()).cloned().unwrap_or_default();
+        let events = v
+            .get("events")
+            .and_then(|e| e.as_array())
+            .cloned()
+            .unwrap_or_default();
         let mut items: Vec<(u64, u64)> = Vec::new();
         for ev in events {
             let data = ev.get("data");
@@ -1199,7 +1226,13 @@ fn order_replay_main(args: OrderReplayArgs) -> anyhow::Result<()> {
     }
 
     #[derive(Debug)]
-    struct InsertLog { ordered: bool, req: u64, out: u64, item_seq: u64, raw: u64 }
+    struct InsertLog {
+        ordered: bool,
+        req: u64,
+        out: u64,
+        item_seq: u64,
+        raw: u64,
+    }
 
     fn parse_tui_inserts(path: &std::path::Path) -> Result<Vec<InsertLog>> {
         let text = fs::read_to_string(path).with_context(|| format!("read {}", path.display()))?;
@@ -1215,9 +1248,19 @@ fn order_replay_main(args: OrderReplayArgs) -> anyhow::Result<()> {
                     let iseq = caps.name("iseq").unwrap().as_str().parse().unwrap_or(0);
                     (req, out_idx, iseq)
                 } else {
-                    (0, 0, caps.name("uval").unwrap().as_str().parse().unwrap_or(0))
+                    (
+                        0,
+                        0,
+                        caps.name("uval").unwrap().as_str().parse().unwrap_or(0),
+                    )
                 };
-                out.push(InsertLog { ordered, req, out: out_idx, item_seq, raw: seq });
+                out.push(InsertLog {
+                    ordered,
+                    req,
+                    out: out_idx,
+                    item_seq,
+                    raw: seq,
+                });
             }
         }
         Ok(out)
@@ -1234,25 +1277,40 @@ fn order_replay_main(args: OrderReplayArgs) -> anyhow::Result<()> {
     println!("\nActual inserts (first 40):");
     for (i, log) in actual.iter().take(40).enumerate() {
         if log.ordered {
-            println!("  {:>3}: O:req={} out={} seq={} (raw={})", i, log.req, log.out, log.item_seq, log.raw);
+            println!(
+                "  {:>3}: O:req={} out={} seq={} (raw={})",
+                i, log.req, log.out, log.item_seq, log.raw
+            );
         } else {
             println!("  {:>3}: U:{}", i, log.item_seq);
         }
     }
 
     // Simple check: assistant (out=1) should appear before tool (out=2) within same req
-    let pos_out1 = actual.iter().position(|l| l.ordered && l.req == 1 && l.out == 1);
-    let pos_out2 = actual.iter().position(|l| l.ordered && l.req == 1 && l.out == 2);
-    println!("\nCheck (req=1): first out=1 at {:?}, first out=2 at {:?}", pos_out1, pos_out2);
+    let pos_out1 = actual
+        .iter()
+        .position(|l| l.ordered && l.req == 1 && l.out == 1);
+    let pos_out2 = actual
+        .iter()
+        .position(|l| l.ordered && l.req == 1 && l.out == 2);
+    println!(
+        "\nCheck (req=1): first out=1 at {:?}, first out=2 at {:?}",
+        pos_out1, pos_out2
+    );
     if let (Some(p1), Some(p2)) = (pos_out1, pos_out2) {
-        if p1 < p2 { println!("Result: OK (assistant precedes tool)"); } else { println!("Result: WRONG (tool precedes assistant)"); }
+        if p1 < p2 {
+            println!("Result: OK (assistant precedes tool)");
+        } else {
+            println!("Result: WRONG (tool precedes assistant)");
+        }
     }
 
     Ok(())
 }
 
 async fn preview_main(args: PreviewArgs) -> anyhow::Result<()> {
-    use anyhow::{bail, Context};
+    use anyhow::Context;
+    use anyhow::bail;
     use flate2::read::GzDecoder;
     use std::env;
     use std::fs;
@@ -1280,7 +1338,9 @@ async fn preview_main(args: PreviewArgs) -> anyhow::Result<()> {
         _ => bail!(format!("Unsupported platform: {}/{}", os, arch)),
     };
 
-    let client = reqwest::Client::builder().user_agent("dev-preview/1").build()?;
+    let client = reqwest::Client::builder()
+        .user_agent("dev-preview/1")
+        .build()?;
 
     // Resolve slug/tag from id
     let id = args.slug.trim().to_string();
@@ -1288,10 +1348,17 @@ async fn preview_main(args: PreviewArgs) -> anyhow::Result<()> {
         let r = client.get(url).send().await?;
         let s = r.status();
         let t = r.text().await?;
-        if !s.is_success() { anyhow::bail!(format!("GET {} -> {} {}", url, s.as_u16(), t)); }
+        if !s.is_success() {
+            anyhow::bail!(format!("GET {} -> {} {}", url, s.as_u16(), t));
+        }
         Ok(serde_json::from_str(&t).unwrap_or(serde_json::Value::Null))
     }
-    async fn latest_tag_for_slug(client: &reqwest::Client, owner: &str, name: &str, slug: &str) -> anyhow::Result<String> {
+    async fn latest_tag_for_slug(
+        client: &reqwest::Client,
+        owner: &str,
+        name: &str,
+        slug: &str,
+    ) -> anyhow::Result<String> {
         let base = format!("preview-{}", slug);
         let url = format!("https://api.github.com/repos/{owner}/{name}/releases?per_page=100");
         let v = fetch_json(client, &url).await?;
@@ -1301,10 +1368,17 @@ async fn preview_main(args: PreviewArgs) -> anyhow::Result<()> {
             let re = regex::Regex::new(&format!(r"^{}-(\\d+)$", regex::escape(&base))).unwrap();
             for it in arr {
                 if let Some(tag) = it.get("tag_name").and_then(|x| x.as_str()) {
-                    if tag == base { if max_n < 1 { max_n = 1; latest = base.clone(); } }
-                    else if let Some(c) = re.captures(tag) {
+                    if tag == base {
+                        if max_n < 1 {
+                            max_n = 1;
+                            latest = base.clone();
+                        }
+                    } else if let Some(c) = re.captures(tag) {
                         let n: u64 = c.get(1).unwrap().as_str().parse().unwrap_or(0);
-                        if n > max_n { max_n = n; latest = tag.to_string(); }
+                        if n > max_n {
+                            max_n = n;
+                            latest = tag.to_string();
+                        }
                     }
                 }
             }
@@ -1346,7 +1420,9 @@ async fn preview_main(args: PreviewArgs) -> anyhow::Result<()> {
         for entry in fs::read_dir(dir).ok()? {
             let p = entry.ok()?.path();
             if let Some(name) = p.file_name().and_then(|s| s.to_str()) {
-                if name.starts_with(pat) { return Some(p); }
+                if name.starts_with(pat) {
+                    return Some(p);
+                }
             }
         }
         None
@@ -1370,9 +1446,12 @@ async fn preview_main(args: PreviewArgs) -> anyhow::Result<()> {
     let _ = fs::create_dir_all(&out_dir);
 
     #[cfg(target_family = "unix")]
-    fn make_exec(p: &Path) { use std::os::unix::fs::PermissionsExt; let _ = fs::set_permissions(p, fs::Permissions::from_mode(0o755)); }
+    fn make_exec(p: &Path) {
+        use std::os::unix::fs::PermissionsExt;
+        let _ = fs::set_permissions(p, fs::Permissions::from_mode(0o755));
+    }
     #[cfg(target_family = "windows")]
-    fn make_exec(_p: &Path) { }
+    fn make_exec(_p: &Path) {}
 
     if os != "windows" {
         // If we downloaded a tar.gz, extract
@@ -1384,13 +1463,21 @@ async fn preview_main(args: PreviewArgs) -> anyhow::Result<()> {
             ar.unpack(&out_dir)?;
             // Find extracted binary
             let bin = first_match(&out_dir, "dev-").unwrap_or(out_dir.join("dev"));
-            let dest_name = format!("{}-{}", bin.file_name().and_then(|s| s.to_str()).unwrap_or("dev"), slug);
+            let dest_name = format!(
+                "{}-{}",
+                bin.file_name().and_then(|s| s.to_str()).unwrap_or("dev"),
+                slug
+            );
             let dest = out_dir.join(dest_name);
             // Rename/move to include PR number suffix
-            let _ = fs::rename(&bin, &dest).or_else(|_| { fs::copy(&bin, &dest).map(|_| () ) });
+            let _ = fs::rename(&bin, &dest).or_else(|_| fs::copy(&bin, &dest).map(|_| ()));
             make_exec(&dest);
             println!("Downloaded preview to {}", dest.display());
-            if !args.extra.is_empty() { let _ = std::process::Command::new(&dest).args(&args.extra).status(); } else { let _ = std::process::Command::new(&dest).status(); }
+            if !args.extra.is_empty() {
+                let _ = std::process::Command::new(&dest).args(&args.extra).status();
+            } else {
+                let _ = std::process::Command::new(&dest).status();
+            }
             return Ok(());
         }
     } else {
@@ -1406,9 +1493,13 @@ async fn preview_main(args: PreviewArgs) -> anyhow::Result<()> {
                     let stem = exe.file_stem().and_then(|s| s.to_str()).unwrap_or("dev");
                     out_dir.join(format!("{}-{}.{}", stem, slug, ext))
                 }
-                None => out_dir.join(format!("{}-{}", exe.file_name().and_then(|s| s.to_str()).unwrap_or("dev"), slug)),
+                None => out_dir.join(format!(
+                    "{}-{}",
+                    exe.file_name().and_then(|s| s.to_str()).unwrap_or("dev"),
+                    slug
+                )),
             };
-            let _ = fs::rename(&exe, &dest).or_else(|_| { fs::copy(&exe, &dest).map(|_| () ) });
+            let _ = fs::rename(&exe, &dest).or_else(|_| fs::copy(&exe, &dest).map(|_| ()));
             println!("Downloaded preview to {}", dest.display());
             if !args.extra.is_empty() {
                 let mut cmd = std::process::Command::new(&dest);
@@ -1423,31 +1514,52 @@ async fn preview_main(args: PreviewArgs) -> anyhow::Result<()> {
     }
 
     // Fallback: raw 'dev' file (after .zst) if present
-    if path.file_name().and_then(|s| s.to_str()).map(|n| n.ends_with(".zst")).unwrap_or(false) {
+    if path
+        .file_name()
+        .and_then(|s| s.to_str())
+        .map(|n| n.ends_with(".zst"))
+        .unwrap_or(false)
+    {
         // Try to decompress .zst to 'dev'
         if which::which("zstd").is_ok() {
             // Derive base name from archive (e.g., dev-aarch64-apple-darwin.zst -> dev-aarch64-apple-darwin-<slug>.{exe?})
-            let stem = path
-                .file_stem()
-                .and_then(|s| s.to_str())
-                .unwrap_or("dev");
-            let dest = if cfg!(windows) { out_dir.join(format!("{}-{}.exe", stem, slug)) } else { out_dir.join(format!("{}-{}", stem, slug)) };
-            let status = std::process::Command::new("zstd").arg("-d").arg(&path).arg("-o").arg(&dest).status()?;
+            let stem = path.file_stem().and_then(|s| s.to_str()).unwrap_or("dev");
+            let dest = if cfg!(windows) {
+                out_dir.join(format!("{}-{}.exe", stem, slug))
+            } else {
+                out_dir.join(format!("{}-{}", stem, slug))
+            };
+            let status = std::process::Command::new("zstd")
+                .arg("-d")
+                .arg(&path)
+                .arg("-o")
+                .arg(&dest)
+                .status()?;
             if status.success() {
                 make_exec(&dest);
                 println!("Downloaded preview from {} to {}", url_used, dest.display());
-                if !args.extra.is_empty() { let _ = std::process::Command::new(&dest).args(&args.extra).status(); } else { let _ = std::process::Command::new(&dest).status(); }
+                if !args.extra.is_empty() {
+                    let _ = std::process::Command::new(&dest).args(&args.extra).status();
+                } else {
+                    let _ = std::process::Command::new(&dest).status();
+                }
                 return Ok(());
             }
         }
         // If zstd missing, tell the user
-        bail!("Downloaded .zst but 'zstd' is not installed. Install zstd or download the .tar.gz/.zip asset instead.");
+        bail!(
+            "Downloaded .zst but 'zstd' is not installed. Install zstd or download the .tar.gz/.zip asset instead."
+        );
     } else if let Some(bin) = first_match(tmp.path(), "code") {
         let dest = out_dir.join(bin.file_name().unwrap_or_default());
         fs::copy(&bin, &dest)?;
         make_exec(&dest);
         println!("Downloaded preview to {}", dest.display());
-        if !args.extra.is_empty() { let _ = std::process::Command::new(&dest).args(&args.extra).status(); } else { let _ = std::process::Command::new(&dest).status(); }
+        if !args.extra.is_empty() {
+            let _ = std::process::Command::new(&dest).args(&args.extra).status();
+        } else {
+            let _ = std::process::Command::new(&dest).status();
+        }
         return Ok(());
     }
 
@@ -1484,8 +1596,15 @@ async fn doctor_main() -> anyhow::Result<()> {
     let which_all = |name: &str| {
         let name = name.to_string();
         async move {
-            let out = run_cmd("/bin/bash", &["-lc", &format!("which -a {} 2>/dev/null || true", name)]).await;
-            out.split('\n').filter(|s| !s.is_empty()).map(|s| s.to_string()).collect::<Vec<_>>()
+            let out = run_cmd(
+                "/bin/bash",
+                &["-lc", &format!("which -a {} 2>/dev/null || true", name)],
+            )
+            .await;
+            out.split('\n')
+                .filter(|s| !s.is_empty())
+                .map(|s| s.to_string())
+                .collect::<Vec<_>>()
         }
     };
     #[cfg(target_family = "windows")]
@@ -1493,7 +1612,10 @@ async fn doctor_main() -> anyhow::Result<()> {
         let name = name.to_string();
         async move {
             let out = run_cmd("where", &[&name]).await;
-            out.split('\n').filter(|s| !s.is_empty()).map(|s| s.to_string()).collect::<Vec<_>>()
+            out.split('\n')
+                .filter(|s| !s.is_empty())
+                .map(|s| s.to_string())
+                .collect::<Vec<_>>()
         }
     };
 
@@ -1505,13 +1627,17 @@ async fn doctor_main() -> anyhow::Result<()> {
     if code_paths.is_empty() {
         println!("  <none>");
     } else {
-        for p in &code_paths { println!("  {}", p); }
+        for p in &code_paths {
+            println!("  {}", p);
+        }
     }
     println!("\nFound 'coder' on PATH (in order):");
     if coder_paths.is_empty() {
         println!("  <none>");
     } else {
-        for p in &coder_paths { println!("  {}", p); }
+        for p in &coder_paths {
+            println!("  {}", p);
+        }
     }
 
     // Try to run --version for each resolved binary to show where mismatches come from
@@ -1530,9 +1656,9 @@ async fn doctor_main() -> anyhow::Result<()> {
     show_versions("coder --version by path", &coder_paths).await;
 
     // Detect Bun shims
-    let bun_home = env::var("BUN_INSTALL").ok().or_else(|| {
-        env::var("HOME").ok().map(|h| format!("{}/.bun", h))
-    });
+    let bun_home = env::var("BUN_INSTALL")
+        .ok()
+        .or_else(|| env::var("HOME").ok().map(|h| format!("{}/.bun", h)));
     if let Some(bun) = bun_home {
         let bun_bin = format!("{}/bin", bun);
         let bun_coder = format!("{}/coder", bun_bin);
@@ -1550,11 +1676,17 @@ async fn doctor_main() -> anyhow::Result<()> {
     // Detect Homebrew overshadow of VS Code
     #[cfg(target_os = "macos")]
     {
-        let brew_code = code_paths.iter().find(|p| p.contains("/homebrew/bin/code") || p.contains("/Cellar/code/"));
-        let vscode_code = code_paths.iter().find(|p| p.contains("/Applications/Visual Studio Code.app/Contents/Resources/app/bin/code"));
+        let brew_code = code_paths
+            .iter()
+            .find(|p| p.contains("/homebrew/bin/code") || p.contains("/Cellar/code/"));
+        let vscode_code = code_paths.iter().find(|p| {
+            p.contains("/Applications/Visual Studio Code.app/Contents/Resources/app/bin/code")
+        });
         if brew_code.is_some() && vscode_code.is_some() {
             println!("\nHomebrew 'code' precedes VS Code CLI in PATH.");
-            println!("Suggestion: uninstall Homebrew formula 'code' (brew uninstall code) or reorder PATH so /usr/local/bin comes before /usr/local/homebrew/bin.");
+            println!(
+                "Suggestion: uninstall Homebrew formula 'code' (brew uninstall code) or reorder PATH so /usr/local/bin comes before /usr/local/homebrew/bin."
+            );
         }
     }
 
@@ -1580,16 +1712,20 @@ async fn doctor_main() -> anyhow::Result<()> {
 mod tests {
     use super::*;
     use std::io::Write;
-    use std::path::{Path, PathBuf};
+    use std::path::Path;
+    use std::path::PathBuf;
     use std::sync::Mutex;
-    use std::time::{Duration, SystemTime};
+    use std::time::Duration;
+    use std::time::SystemTime;
 
-    use filetime::{set_file_mtime, FileTime};
+    use filetime::FileTime;
+    use filetime::set_file_mtime;
     use tempfile::TempDir;
     use uuid::Uuid;
 
     use hanzo_protocol::mcp_protocol::ConversationId;
-    use hanzo_protocol::models::{ContentItem, ResponseItem};
+    use hanzo_protocol::models::ContentItem;
+    use hanzo_protocol::models::ResponseItem;
     use hanzo_protocol::protocol::EventMsg as ProtoEventMsg;
     use hanzo_protocol::protocol::RecordedEvent;
     use hanzo_protocol::protocol::RolloutItem;
@@ -1604,8 +1740,14 @@ mod tests {
         let mut buf = Vec::new();
         write_completion(Shell::Bash, &mut buf);
         let script = String::from_utf8(buf).expect("completion output should be valid UTF-8");
-        assert!(script.contains("_code()"), "expected bash completion function to be named _code");
-        assert!(!script.contains("_dev()"), "bash completion output should not use legacy dev prefix");
+        assert!(
+            script.contains("_code()"),
+            "expected bash completion function to be named _code"
+        );
+        assert!(
+            !script.contains("_dev()"),
+            "bash completion output should not use legacy dev prefix"
+        );
     }
 
     fn finalize_from_args(args: &[&str]) -> TuiCli {
@@ -1650,13 +1792,13 @@ mod tests {
 
     static CODE_HOME_MUTEX: Mutex<()> = Mutex::new(());
 
-fn with_temp_code_home<F, R>(f: F) -> R
-where
-    F: FnOnce(&Path) -> R,
-{
-    let _guard = CODE_HOME_MUTEX
-        .lock()
-        .unwrap_or_else(|poison| poison.into_inner());
+    fn with_temp_code_home<F, R>(f: F) -> R
+    where
+        F: FnOnce(&Path) -> R,
+    {
+        let _guard = CODE_HOME_MUTEX
+            .lock()
+            .unwrap_or_else(|poison| poison.into_inner());
         let temp_home = TempDir::new().expect("temp code home");
         let prev_code_home = std::env::var("CODE_HOME").ok();
         let prev_dev_home = std::env::var("HANZO_HOME").ok();
@@ -1713,11 +1855,7 @@ where
             .join("06");
         std::fs::create_dir_all(&sessions_dir).expect("create sessions dir");
 
-        let filename = format!(
-            "rollout-{}-{}.jsonl",
-            created_at.replace(':', "-"),
-            id
-        );
+        let filename = format!("rollout-{}-{}.jsonl", created_at.replace(':', "-"), id);
         let path = sessions_dir.join(filename);
 
         let session_meta = SessionMeta {
@@ -1774,7 +1912,8 @@ where
             }),
         };
 
-        let mut writer = std::io::BufWriter::new(std::fs::File::create(&path).expect("open session file"));
+        let mut writer =
+            std::io::BufWriter::new(std::fs::File::create(&path).expect("open session file"));
         serde_json::to_writer(&mut writer, &session_line).expect("write session meta");
         writer.write_all(b"\n").expect("newline");
         serde_json::to_writer(&mut writer, &event_line).expect("write event");
@@ -1818,7 +1957,10 @@ where
             let interactive = finalize_from_args(&arg_refs);
             assert!(!interactive.resume_picker);
             assert!(!interactive.resume_last);
-            assert_eq!(interactive.resume_session_id.as_deref(), Some(session_id_str.as_str()));
+            assert_eq!(
+                interactive.resume_session_id.as_deref(),
+                Some(session_id_str.as_str())
+            );
         });
     }
 
@@ -1848,7 +1990,9 @@ where
                 "newer",
             );
 
-            let path = resolve_resume_path(None, true).expect("query").expect("path");
+            let path = resolve_resume_path(None, true)
+                .expect("query")
+                .expect("path");
             let path_str = path.to_string_lossy();
             assert!(
                 path_str.contains("22222222-2222-4222-8222-222222222222"),
@@ -1912,10 +2056,20 @@ where
             );
 
             let base = SystemTime::now();
-            set_file_mtime(&older_path, FileTime::from_system_time(base + Duration::from_secs(300))).unwrap();
-            set_file_mtime(&newer_path, FileTime::from_system_time(base + Duration::from_secs(60))).unwrap();
+            set_file_mtime(
+                &older_path,
+                FileTime::from_system_time(base + Duration::from_secs(300)),
+            )
+            .unwrap();
+            set_file_mtime(
+                &newer_path,
+                FileTime::from_system_time(base + Duration::from_secs(60)),
+            )
+            .unwrap();
 
-            let path = resolve_resume_path(None, true).expect("query").expect("path");
+            let path = resolve_resume_path(None, true)
+                .expect("query")
+                .expect("path");
             let path_str = path.to_string_lossy();
             assert!(
                 path_str.contains("55555555-5555-4555-8555-555555555555"),

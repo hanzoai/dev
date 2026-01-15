@@ -78,8 +78,7 @@ impl PasteBurst {
     /// Return true when a recent burst suggests Enter should insert a newline
     /// instead of submitting the composer.
     pub fn enter_should_insert_newline(&self, now: Instant) -> bool {
-        self.burst_window_until
-            .is_some_and(|until| now <= until)
+        self.burst_window_until.is_some_and(|until| now <= until)
     }
 
     /// True when the most recent plain char arrived within the burst interval.

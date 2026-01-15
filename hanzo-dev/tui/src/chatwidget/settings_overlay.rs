@@ -1,35 +1,51 @@
-use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
+use crossterm::event::KeyCode;
+use crossterm::event::KeyEvent;
+use crossterm::event::KeyModifiers;
 use ratatui::buffer::Buffer;
-use ratatui::layout::{Alignment, Constraint, Direction, Layout, Margin, Rect};
-use ratatui::style::{Modifier, Style};
-use ratatui::text::{Line, Span};
-use ratatui::widgets::{Block, Borders, Clear, Paragraph, Widget, Wrap};
-use unicode_width::{UnicodeWidthChar, UnicodeWidthStr};
+use ratatui::layout::Alignment;
+use ratatui::layout::Constraint;
+use ratatui::layout::Direction;
+use ratatui::layout::Layout;
+use ratatui::layout::Margin;
+use ratatui::layout::Rect;
+use ratatui::style::Modifier;
+use ratatui::style::Style;
+use ratatui::text::Line;
+use ratatui::text::Span;
+use ratatui::widgets::Block;
+use ratatui::widgets::Borders;
+use ratatui::widgets::Clear;
+use ratatui::widgets::Paragraph;
+use ratatui::widgets::Widget;
+use ratatui::widgets::Wrap;
+use unicode_width::UnicodeWidthChar;
+use unicode_width::UnicodeWidthStr;
 
+use super::limits_overlay::LimitsOverlay;
+use super::limits_overlay::LimitsOverlayContent;
 use crate::app_event::AppEvent;
 use crate::app_event_sender::AppEventSender;
-use crate::bottom_pane::{
-    agent_editor_view::AgentEditorView,
-    agents_settings_view::SubagentEditorView,
-    AccountSwitchSettingsView,
-    AutoDriveSettingsView,
-    BottomPaneView,
-    ConditionalUpdate,
-    settings_panel::{render_panel, PanelFrameStyle},
-    McpSettingsView,
-    ModelSelectionView,
-    NotificationsSettingsView,
-    prompts_settings_view::PromptsSettingsView,
-    skills_settings_view::SkillsSettingsView,
-    PlanningSettingsView,
-    SettingsSection,
-    ThemeSelectionView,
-    UpdateSettingsView,
-    ReviewSettingsView,
-    ValidationSettingsView,
-};
-use crate::chrome_launch::{ChromeLaunchOption, CHROME_LAUNCH_CHOICES};
-use super::limits_overlay::{LimitsOverlay, LimitsOverlayContent};
+use crate::bottom_pane::AccountSwitchSettingsView;
+use crate::bottom_pane::AutoDriveSettingsView;
+use crate::bottom_pane::BottomPaneView;
+use crate::bottom_pane::ConditionalUpdate;
+use crate::bottom_pane::McpSettingsView;
+use crate::bottom_pane::ModelSelectionView;
+use crate::bottom_pane::NotificationsSettingsView;
+use crate::bottom_pane::PlanningSettingsView;
+use crate::bottom_pane::ReviewSettingsView;
+use crate::bottom_pane::SettingsSection;
+use crate::bottom_pane::ThemeSelectionView;
+use crate::bottom_pane::UpdateSettingsView;
+use crate::bottom_pane::ValidationSettingsView;
+use crate::bottom_pane::agent_editor_view::AgentEditorView;
+use crate::bottom_pane::agents_settings_view::SubagentEditorView;
+use crate::bottom_pane::prompts_settings_view::PromptsSettingsView;
+use crate::bottom_pane::settings_panel::PanelFrameStyle;
+use crate::bottom_pane::settings_panel::render_panel;
+use crate::bottom_pane::skills_settings_view::SkillsSettingsView;
+use crate::chrome_launch::CHROME_LAUNCH_CHOICES;
+use crate::chrome_launch::ChromeLaunchOption;
 use crate::live_wrap::take_prefix_by_width;
 use crate::util::buffer::fill_rect;
 use hanzo_core::config_types::ReasoningEffort;
@@ -113,7 +129,10 @@ impl SettingsHelpOverlay {
             .fg(crate::colors::text())
             .add_modifier(Modifier::BOLD);
         let hint = Style::default().fg(crate::colors::text_dim());
-        let mut lines = vec![Line::from(vec![Span::styled("Settings Overview", title)]), Line::default()];
+        let mut lines = vec![
+            Line::from(vec![Span::styled("Settings Overview", title)]),
+            Line::default(),
+        ];
         for text in [
             "• ↑/↓  Move between sections",
             "• Enter  Open selected section",
@@ -158,7 +177,10 @@ impl SettingsHelpOverlay {
                 hint,
             )]));
         }
-        lines.push(Line::from(vec![Span::styled("• ?      Toggle this help", hint)]));
+        lines.push(Line::from(vec![Span::styled(
+            "• ?      Toggle this help",
+            hint,
+        )]));
         lines.push(Line::default());
         lines.push(Line::from(vec![Span::styled(
             "Press Esc to close",
@@ -478,7 +500,12 @@ impl AutoDriveSettingsContent {
         self.view.set_model(model, effort);
     }
 
-    pub(crate) fn set_use_chat_model(&mut self, use_chat: bool, model: String, effort: ReasoningEffort) {
+    pub(crate) fn set_use_chat_model(
+        &mut self,
+        use_chat: bool,
+        model: String,
+        effort: ReasoningEffort,
+    ) {
         self.view.set_use_chat_model(use_chat, model, effort);
     }
 }
@@ -539,7 +566,10 @@ struct AgentsOverviewState {
 
 impl AgentsOverviewState {
     fn total_rows(&self) -> usize {
-        self.rows.len().saturating_add(self.commands.len()).saturating_add(2)
+        self.rows
+            .len()
+            .saturating_add(self.commands.len())
+            .saturating_add(2)
     }
 
     fn clamp_selection(&mut self) {
@@ -570,9 +600,16 @@ impl AgentsSettingsContent {
         selected: usize,
         app_event_tx: AppEventSender,
     ) -> Self {
-        let mut overview = AgentsOverviewState { rows, commands, selected };
+        let mut overview = AgentsOverviewState {
+            rows,
+            commands,
+            selected,
+        };
         overview.clamp_selection();
-        Self { pane: AgentsPane::Overview(overview), app_event_tx }
+        Self {
+            pane: AgentsPane::Overview(overview),
+            app_event_tx,
+        }
     }
 
     pub(crate) fn set_overview(
@@ -581,7 +618,11 @@ impl AgentsSettingsContent {
         commands: Vec<String>,
         selected: usize,
     ) {
-        let mut overview = AgentsOverviewState { rows, commands, selected };
+        let mut overview = AgentsOverviewState {
+            rows,
+            commands,
+            selected,
+        };
         overview.clamp_selection();
         self.pane = AgentsPane::Overview(overview);
     }
@@ -611,11 +652,18 @@ impl AgentsSettingsContent {
 
         let lines = Self::build_overview_lines(state, Some(area.width as usize));
         Paragraph::new(lines)
-            .style(Style::default().bg(crate::colors::background()).fg(crate::colors::text()))
+            .style(
+                Style::default()
+                    .bg(crate::colors::background())
+                    .fg(crate::colors::text()),
+            )
             .render(area, buf);
     }
 
-    fn build_overview_lines(state: &AgentsOverviewState, available_width: Option<usize>) -> Vec<Line<'static>> {
+    fn build_overview_lines(
+        state: &AgentsOverviewState,
+        available_width: Option<usize>,
+    ) -> Vec<Line<'static>> {
         let mut lines: Vec<Line<'static>> = Vec::new();
         lines.push(Line::from(Span::styled(
             "Agents",
@@ -667,7 +715,10 @@ impl AgentsSettingsContent {
             spans.push(Span::raw("  "));
             spans.push(Span::styled("•", Style::default().fg(status.1)));
             spans.push(Span::raw(" "));
-            spans.push(Span::styled(status.0.to_string(), Style::default().fg(status.1)));
+            spans.push(Span::styled(
+                status.0.to_string(),
+                Style::default().fg(status.1),
+            ));
 
             let mut showed_desc = false;
             if let Some(desc) = row
@@ -703,7 +754,10 @@ impl AgentsSettingsContent {
                 } else {
                     "Enter to configure"
                 };
-                spans.push(Span::styled(hint, Style::default().fg(crate::colors::text_dim())));
+                spans.push(Span::styled(
+                    hint,
+                    Style::default().fg(crate::colors::text_dim()),
+                ));
             }
 
             lines.push(Line::from(spans));
@@ -812,7 +866,10 @@ impl AgentsSettingsContent {
         lines.push(Line::from(""));
         lines.push(Line::from(vec![
             Span::styled("↑↓", Style::default().fg(crate::colors::function())),
-            Span::styled(" Navigate  ", Style::default().fg(crate::colors::text_dim())),
+            Span::styled(
+                " Navigate  ",
+                Style::default().fg(crate::colors::text_dim()),
+            ),
             Span::styled("Enter", Style::default().fg(crate::colors::success())),
             Span::styled(" Open", Style::default().fg(crate::colors::text_dim())),
             Span::styled("  Esc", Style::default().fg(crate::colors::error())),
@@ -857,8 +914,9 @@ impl AgentsSettingsContent {
                 } else {
                     state.selected -= 1;
                 }
-                app_event_tx
-                    .send(AppEvent::AgentsOverviewSelectionChanged { index: state.selected });
+                app_event_tx.send(AppEvent::AgentsOverviewSelectionChanged {
+                    index: state.selected,
+                });
                 true
             }
             KeyCode::Down => {
@@ -867,28 +925,32 @@ impl AgentsSettingsContent {
                     return true;
                 }
                 state.selected = (state.selected + 1) % total;
-                app_event_tx
-                    .send(AppEvent::AgentsOverviewSelectionChanged { index: state.selected });
+                app_event_tx.send(AppEvent::AgentsOverviewSelectionChanged {
+                    index: state.selected,
+                });
                 true
             }
             KeyCode::Enter => {
-            let idx = state.selected;
-            let add_agent_idx = state.rows.len();
-            if idx == add_agent_idx {
-                app_event_tx.send(AppEvent::ShowAgentEditorNew);
-            } else if idx < add_agent_idx {
-                let row = &state.rows[idx];
-                if !row.installed {
-                    app_event_tx
-                        .send(AppEvent::RequestAgentInstall { name: row.name.clone(), selected_index: idx });
-                } else {
-                    app_event_tx
-                        .send(AppEvent::ShowAgentEditor { name: row.name.clone() });
+                let idx = state.selected;
+                let add_agent_idx = state.rows.len();
+                if idx == add_agent_idx {
+                    app_event_tx.send(AppEvent::ShowAgentEditorNew);
+                } else if idx < add_agent_idx {
+                    let row = &state.rows[idx];
+                    if !row.installed {
+                        app_event_tx.send(AppEvent::RequestAgentInstall {
+                            name: row.name.clone(),
+                            selected_index: idx,
+                        });
+                    } else {
+                        app_event_tx.send(AppEvent::ShowAgentEditor {
+                            name: row.name.clone(),
+                        });
                     }
                 } else {
-                let cmd_idx = idx.saturating_sub(state.rows.len() + 1);
-                if cmd_idx < state.commands.len() {
-                    if let Some(name) = state.commands.get(cmd_idx) {
+                    let cmd_idx = idx.saturating_sub(state.rows.len() + 1);
+                    if cmd_idx < state.commands.len() {
+                        if let Some(name) = state.commands.get(cmd_idx) {
                             app_event_tx
                                 .send(AppEvent::ShowSubagentEditorForName { name: name.clone() });
                         }
@@ -948,7 +1010,9 @@ pub(crate) struct LimitsSettingsContent {
 
 impl LimitsSettingsContent {
     pub(crate) fn new(content: LimitsOverlayContent) -> Self {
-        Self { overlay: LimitsOverlay::new(content) }
+        Self {
+            overlay: LimitsOverlay::new(content),
+        }
     }
 
     pub(crate) fn set_content(&mut self, content: LimitsOverlayContent) {
@@ -1008,7 +1072,11 @@ impl LimitsSettingsContent {
 
         Paragraph::new(viewport)
             .wrap(Wrap { trim: false })
-            .style(Style::default().bg(crate::colors::background()).fg(crate::colors::text()))
+            .style(
+                Style::default()
+                    .bg(crate::colors::background())
+                    .fg(crate::colors::text()),
+            )
             .render(area, buf);
     }
 
@@ -1032,7 +1100,11 @@ impl LimitsSettingsContent {
 
         Paragraph::new(line)
             .alignment(Alignment::Left)
-            .style(Style::default().bg(crate::colors::background()).fg(crate::colors::text_dim()))
+            .style(
+                Style::default()
+                    .bg(crate::colors::background())
+                    .fg(crate::colors::text_dim()),
+            )
             .render(area, buf);
     }
 }
@@ -1054,7 +1126,11 @@ impl SettingsContent for LimitsSettingsContent {
 
         let has_tabs = self.overlay.tab_count() > 1;
         let constraints = if has_tabs {
-            vec![Constraint::Length(1), Constraint::Length(2), Constraint::Fill(1)]
+            vec![
+                Constraint::Length(1),
+                Constraint::Length(2),
+                Constraint::Fill(1),
+            ]
         } else {
             vec![Constraint::Length(1), Constraint::Fill(1)]
         };
@@ -1202,7 +1278,11 @@ impl SettingsContent for ChromeSettingsContent {
             .borders(Borders::ALL)
             .title(Line::from(" Chrome Launch Options "))
             .title_alignment(Alignment::Center)
-            .style(Style::default().bg(crate::colors::background()).fg(crate::colors::text()))
+            .style(
+                Style::default()
+                    .bg(crate::colors::background())
+                    .fg(crate::colors::text()),
+            )
             .border_style(Style::default().fg(crate::colors::border()));
         let inner = block.inner(area);
         block.render(area, buf);
@@ -1264,7 +1344,11 @@ impl SettingsContent for ChromeSettingsContent {
 
         Paragraph::new(lines)
             .alignment(Alignment::Left)
-            .style(Style::default().bg(crate::colors::background()).fg(crate::colors::text()))
+            .style(
+                Style::default()
+                    .bg(crate::colors::background())
+                    .fg(crate::colors::text()),
+            )
             .render(content_area, buf);
     }
 
@@ -1388,7 +1472,10 @@ impl SettingsOverlayView {
     }
 
     pub(crate) fn set_overview_rows(&mut self, rows: Vec<SettingsOverviewRow>) {
-        let fallback = rows.first().map(|row| row.section).unwrap_or(self.last_section);
+        let fallback = rows
+            .first()
+            .map(|row| row.section)
+            .unwrap_or(self.last_section);
         if let SettingsOverlayMode::Menu(state) = &mut self.mode {
             if !rows.iter().any(|row| row.section == state.selected()) {
                 state.set_selected(fallback);
@@ -1673,14 +1760,21 @@ impl SettingsOverlayView {
                 Style::default().fg(crate::colors::text_mid())
             };
 
-            let label_text = format!("{:<width$}", row.section.label(), width = LABEL_COLUMN_WIDTH);
+            let label_text = format!(
+                "{:<width$}",
+                row.section.label(),
+                width = LABEL_COLUMN_WIDTH
+            );
 
             let summary_src = row.summary.as_deref().unwrap_or("—");
             let base_width = 1 + 1 + LABEL_COLUMN_WIDTH;
             let available_tail = content_width.saturating_sub(base_width);
 
             let mut summary_line = Line::from(vec![
-                Span::styled(indicator.to_string(), Style::default().fg(crate::colors::text())),
+                Span::styled(
+                    indicator.to_string(),
+                    Style::default().fg(crate::colors::text()),
+                ),
                 Span::raw(" "),
                 Span::styled(label_text, label_style),
             ]);
@@ -1749,9 +1843,7 @@ impl SettingsOverlayView {
         if visible_lines > 0 && total_lines > visible_lines {
             if let Some((start, end)) = selected_range {
                 let max_scroll = total_lines.saturating_sub(visible_lines);
-                let mut candidate = end
-                    .saturating_add(1)
-                    .saturating_sub(visible_lines);
+                let mut candidate = end.saturating_add(1).saturating_sub(visible_lines);
                 if candidate > max_scroll {
                     candidate = max_scroll;
                 }
@@ -1805,21 +1897,17 @@ impl SettingsOverlayView {
                 continue;
             }
             if !first {
-                line.spans
-                    .push(Span::styled(" · ".to_string(), dim_style));
+                line.spans.push(Span::styled(" · ".to_string(), dim_style));
             }
             first = false;
 
             if let Some((label, value)) = segment.split_once(':') {
                 let label_trim = label.trim_end();
                 let value_trim = value.trim_start();
-                line.spans.push(Span::styled(
-                    format!("{}:", label_trim),
-                    label_style,
-                ));
+                line.spans
+                    .push(Span::styled(format!("{}:", label_trim), label_style));
                 if !value_trim.is_empty() {
-                    line.spans
-                        .push(Span::styled(" ".to_string(), dim_style));
+                    line.spans.push(Span::styled(" ".to_string(), dim_style));
                     let value_style = self.summary_value_style(value_trim);
                     line.spans
                         .push(Span::styled(value_trim.to_string(), value_style));
@@ -1876,7 +1964,8 @@ impl SettingsOverlayView {
         let (main_area, hint_area) = if area.height <= 1 {
             (area, None)
         } else {
-            let [main, hint] = Layout::vertical([Constraint::Fill(1), Constraint::Length(1)]).areas(area);
+            let [main, hint] =
+                Layout::vertical([Constraint::Fill(1), Constraint::Length(1)]).areas(area);
             (main, Some(hint))
         };
 
@@ -1941,7 +2030,9 @@ impl SettingsOverlayView {
             return;
         }
 
-        let background = Style::default().bg(crate::colors::background()).fg(crate::colors::text());
+        let background = Style::default()
+            .bg(crate::colors::background())
+            .fg(crate::colors::text());
         let end_x = area.x + area.width - 1;
         let end_y = area.y + area.height - 1;
 
@@ -1950,8 +2041,10 @@ impl SettingsOverlayView {
         let bottom_left_symbol = buf[(area.x, end_y)].symbol();
         let bottom_right_symbol = buf[(end_x, end_y)].symbol();
 
-        let top_has_corners = Self::is_corner_symbol(top_left_symbol) && Self::is_corner_symbol(top_right_symbol);
-        let bottom_has_corners = Self::is_corner_symbol(bottom_left_symbol) && Self::is_corner_symbol(bottom_right_symbol);
+        let top_has_corners =
+            Self::is_corner_symbol(top_left_symbol) && Self::is_corner_symbol(top_right_symbol);
+        let bottom_has_corners = Self::is_corner_symbol(bottom_left_symbol)
+            && Self::is_corner_symbol(bottom_right_symbol);
 
         let top_is_frame = top_has_corners
             && (area.x..=end_x).all(|x| {
@@ -1970,8 +2063,10 @@ impl SettingsOverlayView {
             None
         };
 
-        let left_has_corners = Self::is_corner_symbol(top_left_symbol) && Self::is_corner_symbol(bottom_left_symbol);
-        let right_has_corners = Self::is_corner_symbol(top_right_symbol) && Self::is_corner_symbol(bottom_right_symbol);
+        let left_has_corners =
+            Self::is_corner_symbol(top_left_symbol) && Self::is_corner_symbol(bottom_left_symbol);
+        let right_has_corners =
+            Self::is_corner_symbol(top_right_symbol) && Self::is_corner_symbol(bottom_right_symbol);
 
         let left_is_frame = left_has_corners
             && (area.y..=end_y).all(|y| {
@@ -2026,9 +2121,31 @@ impl SettingsOverlayView {
     fn is_border_symbol(symbol: &str) -> bool {
         matches!(
             symbol,
-            "│" | "┃" | "║" | "╎" | "┆" | "┊" | "┇" | "╏" | "╿"
-                | "─" | "━" | "═" | "╼" | "╾" | "┄" | "┈" | "╍"
-                | "┬" | "┴" | "├" | "┤" | "┼" | "╞" | "╡" | "╪" | "╫"
+            "│" | "┃"
+                | "║"
+                | "╎"
+                | "┆"
+                | "┊"
+                | "┇"
+                | "╏"
+                | "╿"
+                | "─"
+                | "━"
+                | "═"
+                | "╼"
+                | "╾"
+                | "┄"
+                | "┈"
+                | "╍"
+                | "┬"
+                | "┴"
+                | "├"
+                | "┤"
+                | "┼"
+                | "╞"
+                | "╡"
+                | "╪"
+                | "╫"
         )
     }
 
@@ -2041,14 +2158,14 @@ impl SettingsOverlayView {
             return;
         }
 
-        fill_rect(buf, area, None, Style::default().bg(crate::colors::overlay_scrim()));
+        fill_rect(
+            buf,
+            area,
+            None,
+            Style::default().bg(crate::colors::overlay_scrim()),
+        );
 
-        let content_width = help
-            .lines
-            .iter()
-            .map(Line::width)
-            .max()
-            .unwrap_or(0);
+        let content_width = help.lines.iter().map(Line::width).max().unwrap_or(0);
         let content_height = help.lines.len() as u16;
 
         let max_box_width = area.width.saturating_sub(2);
@@ -2094,7 +2211,11 @@ impl SettingsOverlayView {
 
         Paragraph::new(help.lines.clone())
             .alignment(Alignment::Left)
-            .style(Style::default().bg(crate::colors::background()).fg(crate::colors::text()))
+            .style(
+                Style::default()
+                    .bg(crate::colors::background())
+                    .fg(crate::colors::text()),
+            )
             .wrap(Wrap { trim: true })
             .render(inner, buf);
     }

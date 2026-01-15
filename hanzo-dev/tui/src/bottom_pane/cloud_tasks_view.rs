@@ -7,13 +7,18 @@ use crate::app_event::AppEvent;
 use crate::app_event_sender::AppEventSender;
 use crate::bottom_pane::bottom_pane_view::BottomPaneView;
 use crate::bottom_pane::scroll_state::ScrollState;
-use crate::bottom_pane::selection_popup_common::{render_rows, GenericDisplayRow};
+use crate::bottom_pane::selection_popup_common::GenericDisplayRow;
+use crate::bottom_pane::selection_popup_common::render_rows;
 
 use ratatui::buffer::Buffer;
 use ratatui::layout::Rect;
 use ratatui::style::Style;
-use ratatui::text::{Line, Span};
-use ratatui::widgets::{Block, Borders, Paragraph, Widget};
+use ratatui::text::Line;
+use ratatui::text::Span;
+use ratatui::widgets::Block;
+use ratatui::widgets::Borders;
+use ratatui::widgets::Paragraph;
+use ratatui::widgets::Widget;
 
 const MAX_VISIBLE_ROWS: usize = 8;
 
@@ -46,7 +51,9 @@ impl CloudTasksView {
             state,
             env_label: env_label.unwrap_or_else(|| "All environments".to_string()),
             env_filter,
-            footer_hint: "↑↓ select · Enter actions · r refresh · n new · e environments · Esc close".to_string(),
+            footer_hint:
+                "↑↓ select · Enter actions · r refresh · n new · e environments · Esc close"
+                    .to_string(),
             app_event_tx,
             complete: false,
         };
@@ -67,7 +74,11 @@ impl CloudTasksView {
 }
 
 impl BottomPaneView<'_> for CloudTasksView {
-    fn handle_key_event(&mut self, _pane: &mut super::BottomPane<'_>, key: crossterm::event::KeyEvent) {
+    fn handle_key_event(
+        &mut self,
+        _pane: &mut super::BottomPane<'_>,
+        key: crossterm::event::KeyEvent,
+    ) {
         use crossterm::event::KeyCode;
         match key.code {
             KeyCode::Up => {
@@ -80,8 +91,9 @@ impl BottomPaneView<'_> for CloudTasksView {
             }
             KeyCode::Enter => {
                 if let Some(task_id) = self.selected_task_id() {
-                    self.app_event_tx
-                        .send(AppEvent::ShowCloudTaskActions { task_id: task_id.to_string() });
+                    self.app_event_tx.send(AppEvent::ShowCloudTaskActions {
+                        task_id: task_id.to_string(),
+                    });
                 }
             }
             KeyCode::Esc => {
@@ -130,7 +142,9 @@ impl BottomPaneView<'_> for CloudTasksView {
         let inner = block.inner(area);
         block.render(area, buf);
 
-        if inner.height == 0 { return; }
+        if inner.height == 0 {
+            return;
+        }
 
         // Header line (environment info)
         let header_area = Rect {
@@ -244,9 +258,7 @@ fn format_status(status: &TaskStatus) -> (&'static str, Option<ratatui::style::C
 fn format_diff_summary(summary: &hanzo_cloud_tasks_client::DiffSummary) -> String {
     format!(
         "Δ {} files · +{} / -{}",
-        summary.files_changed,
-        summary.lines_added,
-        summary.lines_removed
+        summary.files_changed, summary.lines_added, summary.lines_removed
     )
 }
 

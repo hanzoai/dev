@@ -2,7 +2,8 @@
 #![cfg(feature = "hanzo-fork")]
 
 use crate::app_event_sender::AppEventSender;
-use hanzo_core::protocol::{BrowserScreenshotUpdateEvent, RateLimitSnapshotEvent};
+use hanzo_core::protocol::BrowserScreenshotUpdateEvent;
+use hanzo_core::protocol::RateLimitSnapshotEvent;
 
 /// Forward a rate-limit snapshot into the main event loop.
 #[inline]

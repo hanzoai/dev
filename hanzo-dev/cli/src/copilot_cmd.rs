@@ -1,14 +1,19 @@
 //! GitHub Copilot CLI commands for Hanzo Dev
-//! 
+//!
 //! This module provides command-line interface for GitHub Copilot integration,
 //! allowing users to interact with Copilot directly from the dev CLI.
 
-use clap::{Parser, Subcommand};
-use hanzo_core::copilot_integration::{CopilotIntegration, CopilotConfig};
+use clap::Parser;
+use clap::Subcommand;
 use hanzo_core::config::Config;
-use hanzo_core::error::{Result, CodexErr};
+use hanzo_core::copilot_integration::CopilotConfig;
+use hanzo_core::copilot_integration::CopilotIntegration;
+use hanzo_core::error::CodexErr;
+use hanzo_core::error::Result;
 use std::collections::HashMap;
-use std::io::{self, Read, Write};
+use std::io::Read;
+use std::io::Write;
+use std::io::{self};
 use std::path::Path;
 
 #[derive(Parser, Debug)]
@@ -136,33 +141,47 @@ pub async fn execute_copilot_command(args: CopilotArgs, config: &Config) -> Resu
     let copilot = CopilotIntegration::new(copilot_config)?;
 
     match args.command {
-        CopilotCommand::Chat { message, file, continue_session } => {
-            handle_chat_command(&copilot, message, file, continue_session).await
-        }
-        CopilotCommand::Suggest { context, language, file, count } => {
-            handle_suggest_command(&copilot, context, language, file, count).await
-        }
+        CopilotCommand::Chat {
+            message,
+            file,
+            continue_session,
+        } => handle_chat_command(&copilot, message, file, continue_session).await,
+        CopilotCommand::Suggest {
+            context,
+            language,
+            file,
+            count,
+        } => handle_suggest_command(&copilot, context, language, file, count).await,
         CopilotCommand::Review { file, diff, format } => {
             handle_review_command(&copilot, file, diff, format).await
         }
-        CopilotCommand::Docs { input, doc_type, output } => {
-            handle_docs_command(&copilot, input, doc_type, output).await
-        }
+        CopilotCommand::Docs {
+            input,
+            doc_type,
+            output,
+        } => handle_docs_command(&copilot, input, doc_type, output).await,
         CopilotCommand::Explain { code, file, level } => {
             handle_explain_command(&copilot, code, file, level).await
         }
         CopilotCommand::Shell { task, os, explain } => {
             handle_shell_command(&copilot, task, os, explain).await
         }
-        CopilotCommand::Commit { staged, diff, style } => {
-            handle_commit_command(&copilot, staged, diff, style).await
-        }
-        CopilotCommand::Setup { install, auth, check } => {
-            handle_setup_command(&copilot, install, auth, check).await
-        }
-        CopilotCommand::Complete { file, line, column, context } => {
-            handle_complete_command(&copilot, file, line, column, context).await
-        }
+        CopilotCommand::Commit {
+            staged,
+            diff,
+            style,
+        } => handle_commit_command(&copilot, staged, diff, style).await,
+        CopilotCommand::Setup {
+            install,
+            auth,
+            check,
+        } => handle_setup_command(&copilot, install, auth, check).await,
+        CopilotCommand::Complete {
+            file,
+            line,
+            column,
+            context,
+        } => handle_complete_command(&copilot, file, line, column, context).await,
     }
 }
 
@@ -234,12 +253,15 @@ async fn handle_suggest_command(
 
     let context_text = match (context, file) {
         (Some(ctx), None) => ctx,
-        (None, Some(file_path)) => {
-            match std::fs::read_to_string(&file_path) {
-                Ok(content) => content,
-                Err(_e) => return Err(CodexErr::UnsupportedOperation(format!("Failed to read file {}", file_path))),
+        (None, Some(file_path)) => match std::fs::read_to_string(&file_path) {
+            Ok(content) => content,
+            Err(_e) => {
+                return Err(CodexErr::UnsupportedOperation(format!(
+                    "Failed to read file {}",
+                    file_path
+                )));
             }
-        }
+        },
         (Some(ctx), Some(_)) => {
             eprintln!("Warning: Both context and file provided. Using context.");
             ctx
@@ -253,11 +275,9 @@ async fn handle_suggest_command(
         }
     };
 
-    let suggestions = copilot.get_code_suggestions(
-        &context_text,
-        language.as_deref(),
-        None,
-    ).await?;
+    let suggestions = copilot
+        .get_code_suggestions(&context_text, language.as_deref(), None)
+        .await?;
 
     if suggestions.is_empty() {
         println!("No suggestions available.");
@@ -292,16 +312,23 @@ async fn handle_review_command(
         let output = std::process::Command::new("git")
             .args(["diff", &file])
             .output();
-        
+
         let output = match output {
             Ok(output) => output,
-            Err(_e) => return Err(CodexErr::UnsupportedOperation("Failed to get git diff".to_string())),
+            Err(_e) => {
+                return Err(CodexErr::UnsupportedOperation(
+                    "Failed to get git diff".to_string(),
+                ));
+            }
         };
-        
+
         if !output.status.success() {
-            return Err(CodexErr::UnsupportedOperation(format!("Git diff failed: {}", String::from_utf8_lossy(&output.stderr))));
+            return Err(CodexErr::UnsupportedOperation(format!(
+                "Git diff failed: {}",
+                String::from_utf8_lossy(&output.stderr)
+            )));
         }
-        
+
         Some(String::from_utf8_lossy(&output.stdout).to_string())
     } else {
         None
@@ -345,7 +372,12 @@ async fn handle_docs_command(
     let code = if Path::new(&input).exists() {
         match std::fs::read_to_string(&input) {
             Ok(content) => content,
-            Err(_e) => return Err(CodexErr::UnsupportedOperation(format!("Failed to read file {}", input))),
+            Err(_e) => {
+                return Err(CodexErr::UnsupportedOperation(format!(
+                    "Failed to read file {}",
+                    input
+                )));
+            }
         }
     } else {
         input
@@ -354,12 +386,15 @@ async fn handle_docs_command(
     let documentation = copilot.generate_documentation(&code, &doc_type).await?;
 
     match output {
-        Some(output_file) => {
-            match std::fs::write(&output_file, &documentation) {
-                Ok(_) => println!("Documentation written to {}", output_file),
-                Err(_e) => return Err(CodexErr::UnsupportedOperation(format!("Failed to write to {}", output_file))),
+        Some(output_file) => match std::fs::write(&output_file, &documentation) {
+            Ok(_) => println!("Documentation written to {}", output_file),
+            Err(_e) => {
+                return Err(CodexErr::UnsupportedOperation(format!(
+                    "Failed to write to {}",
+                    output_file
+                )));
             }
-        }
+        },
         None => {
             println!("{}", documentation);
         }
@@ -380,12 +415,15 @@ async fn handle_explain_command(
     }
 
     let code_content = match file {
-        Some(file_path) => {
-            match std::fs::read_to_string(&file_path) {
-                Ok(content) => content,
-                Err(_e) => return Err(CodexErr::UnsupportedOperation(format!("Failed to read file {}", file_path))),
+        Some(file_path) => match std::fs::read_to_string(&file_path) {
+            Ok(content) => content,
+            Err(_e) => {
+                return Err(CodexErr::UnsupportedOperation(format!(
+                    "Failed to read file {}",
+                    file_path
+                )));
             }
-        }
+        },
         None => {
             if code == "-" {
                 let mut input = String::new();
@@ -398,7 +436,7 @@ async fn handle_explain_command(
     };
 
     let explanation = copilot.explain_code(&code_content).await?;
-    
+
     println!("Code Explanation ({} level):", level);
     println!("{}", explanation);
 
@@ -428,10 +466,12 @@ async fn handle_shell_command(
 
     for (i, command) in commands.iter().enumerate() {
         println!("{}. {}", i + 1, command);
-        
+
         if explain {
             // Get explanation for the command
-            let explanation = copilot.explain_code(&format!("Shell command: {}", command)).await?;
+            let explanation = copilot
+                .explain_code(&format!("Shell command: {}", command))
+                .await?;
             println!("   → {}", explanation);
         }
         println!();
@@ -454,21 +494,30 @@ async fn handle_commit_command(
     let diff_content = match diff {
         Some(d) => d,
         None => {
-            let git_args = if staged { vec!["diff", "--cached"] } else { vec!["diff"] };
-            
-            let output = std::process::Command::new("git")
-                .args(&git_args)
-                .output();
-            
+            let git_args = if staged {
+                vec!["diff", "--cached"]
+            } else {
+                vec!["diff"]
+            };
+
+            let output = std::process::Command::new("git").args(&git_args).output();
+
             let output = match output {
                 Ok(output) => output,
-                Err(_e) => return Err(CodexErr::UnsupportedOperation("Failed to get git diff".to_string())),
+                Err(_e) => {
+                    return Err(CodexErr::UnsupportedOperation(
+                        "Failed to get git diff".to_string(),
+                    ));
+                }
             };
-            
+
             if !output.status.success() {
-                return Err(CodexErr::UnsupportedOperation(format!("Git diff failed: {}", String::from_utf8_lossy(&output.stderr))));
+                return Err(CodexErr::UnsupportedOperation(format!(
+                    "Git diff failed: {}",
+                    String::from_utf8_lossy(&output.stderr)
+                )));
             }
-            
+
             String::from_utf8_lossy(&output.stdout).to_string()
         }
     };
@@ -479,8 +528,15 @@ async fn handle_commit_command(
     }
 
     let commit_message = copilot.generate_commit_message(&diff_content).await?;
-    
-    println!("Suggested commit message ({}style):", if style == "conventional" { "conventional " } else { "" });
+
+    println!(
+        "Suggested commit message ({}style):",
+        if style == "conventional" {
+            "conventional "
+        } else {
+            ""
+        }
+    );
     println!("{}", commit_message);
 
     Ok(())
@@ -494,7 +550,7 @@ async fn handle_setup_command(
 ) -> Result<()> {
     if check || (!install && !auth) {
         println!("Checking GitHub Copilot setup...");
-        
+
         if copilot.check_gh_cli().await {
             println!("✓ GitHub CLI is installed and authenticated");
         } else {
@@ -548,22 +604,35 @@ async fn handle_complete_command(
 
     let content = match std::fs::read_to_string(&file) {
         Ok(content) => content,
-        Err(_e) => return Err(CodexErr::UnsupportedOperation(format!("Failed to read file {}", file))),
+        Err(_e) => {
+            return Err(CodexErr::UnsupportedOperation(format!(
+                "Failed to read file {}",
+                file
+            )));
+        }
     };
-    
+
     let lines: Vec<&str> = content.lines().collect();
-    
+
     if line == 0 || line > lines.len() {
-        return Err(CodexErr::UnsupportedOperation(format!("Invalid line number: {} (file has {} lines)", line, lines.len())));
+        return Err(CodexErr::UnsupportedOperation(format!(
+            "Invalid line number: {} (file has {} lines)",
+            line,
+            lines.len()
+        )));
     }
 
     let line_content = lines[line - 1];
     if column > line_content.len() {
-        return Err(CodexErr::UnsupportedOperation(format!("Invalid column: {} (line has {} characters)", column, line_content.len())));
+        return Err(CodexErr::UnsupportedOperation(format!(
+            "Invalid column: {} (line has {} characters)",
+            column,
+            line_content.len()
+        )));
     }
 
     let prefix = &line_content[..column - 1];
-    
+
     // Get surrounding context
     let start_line = line.saturating_sub(context);
     let end_line = std::cmp::min(lines.len(), line + context);
@@ -572,15 +641,14 @@ async fn handle_complete_command(
         .map(|s| s.to_string())
         .collect();
 
-    let file_ext = Path::new(&file).extension()
+    let file_ext = Path::new(&file)
+        .extension()
         .and_then(|ext| ext.to_str())
         .map(|ext| ext.to_string());
 
-    let completions = copilot.auto_complete(
-        prefix,
-        file_ext.as_deref(),
-        context_lines,
-    ).await?;
+    let completions = copilot
+        .auto_complete(prefix, file_ext.as_deref(), context_lines)
+        .await?;
 
     if completions.is_empty() {
         println!("No completions available.");

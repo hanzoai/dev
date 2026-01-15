@@ -3,25 +3,27 @@ use chrono::Duration as ChronoDuration;
 use chrono::Utc;
 use serde::Deserialize;
 use serde::Serialize;
-use std::sync::atomic::{AtomicU8, Ordering};
 use std::fs;
 use std::io::ErrorKind;
 use std::io::Write;
 use std::path::Path;
 use std::path::PathBuf;
 use std::process::Stdio;
+use std::sync::atomic::AtomicU8;
+use std::sync::atomic::Ordering;
 use std::time::Duration;
 use std::time::SystemTime;
 use std::time::UNIX_EPOCH;
 
-use hanzo_core::config::resolve_code_path_for_read;
 use hanzo_core::config::Config;
+use hanzo_core::config::resolve_code_path_for_read;
 use hanzo_core::default_client::create_client;
 use once_cell::sync::Lazy;
 use tokio::process::Command;
 use tokio::sync::Mutex as AsyncMutex;
 use tokio::task;
-use tracing::{info, warn};
+use tracing::info;
+use tracing::warn;
 
 #[cfg(test)]
 use futures::future::BoxFuture;
@@ -124,9 +126,7 @@ pub async fn check_for_updates_now(config: &Config) -> anyhow::Result<UpdateChec
         None
     };
 
-    Ok(UpdateCheckInfo {
-        latest_version,
-    })
+    Ok(UpdateCheckInfo { latest_version })
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
@@ -155,7 +155,8 @@ const MAX_CLOCK_SKEW_MINUTES: i64 = 5;
 static REFRESH_LOCK: Lazy<AsyncMutex<()>> = Lazy::new(|| AsyncMutex::new(()));
 
 #[cfg(test)]
-type FetchOverrideFn = Arc<dyn Fn(&str) -> BoxFuture<'static, anyhow::Result<VersionInfo>> + Send + Sync>;
+type FetchOverrideFn =
+    Arc<dyn Fn(&str) -> BoxFuture<'static, anyhow::Result<VersionInfo>> + Send + Sync>;
 
 #[cfg(test)]
 static FETCH_OVERRIDE: Lazy<std::sync::Mutex<Option<FetchOverrideFn>>> =
@@ -170,8 +171,13 @@ const AUTO_UPGRADE_LOCK_TTL: Duration = Duration::from_secs(900); // 15 minutes
 
 #[derive(Debug, Clone)]
 pub enum UpgradeResolution {
-    Command { command: Vec<String>, display: String },
-    Manual { instructions: String },
+    Command {
+        command: Vec<String>,
+        display: String,
+    },
+    Manual {
+        instructions: String,
+    },
 }
 
 fn version_filepath(config: &Config) -> PathBuf {
@@ -298,7 +304,7 @@ pub async fn auto_upgrade_if_enabled(config: &Config) -> anyhow::Result<AutoUpgr
                             if sudo_requires_manual_intervention(&fallback.stderr, fallback.status)
                             {
                                 outcome.user_notice = Some(format!(
-                                "Automatic upgrade needs your attention. Run `/update` to finish with `{}`.",
+                                    "Automatic upgrade needs your attention. Run `/update` to finish with `{}`.",
                                     command_display
                                 ));
                             }
@@ -413,7 +419,10 @@ impl Drop for AutoUpgradeLock {
     fn drop(&mut self) {
         if let Err(err) = fs::remove_file(&self.path) {
             if err.kind() != ErrorKind::NotFound {
-                warn!("auto-upgrade: failed to remove lock file {}: {err}", self.path.display());
+                warn!(
+                    "auto-upgrade: failed to remove lock file {}: {err}",
+                    self.path.display()
+                );
             }
         }
     }
@@ -502,7 +511,6 @@ fn truncate_for_log(text: &str) -> String {
     truncated.replace('\n', " ")
 }
 
-
 fn read_version_info(version_file: &Path) -> anyhow::Result<Option<VersionInfo>> {
     let contents = match std::fs::read_to_string(version_file) {
         Ok(contents) => contents,
@@ -522,10 +530,7 @@ fn read_version_info(version_file: &Path) -> anyhow::Result<Option<VersionInfo>>
         }
     };
 
-    let repo = info
-        .release_repo
-        .as_deref()
-        .unwrap_or(LEGACY_RELEASE_REPO);
+    let repo = info.release_repo.as_deref().unwrap_or(LEGACY_RELEASE_REPO);
     if repo != CURRENT_RELEASE_REPO {
         warn!(
             path = %version_file.display(),
@@ -535,8 +540,7 @@ fn read_version_info(version_file: &Path) -> anyhow::Result<Option<VersionInfo>>
         return Ok(None);
     }
 
-    info
-        .release_repo
+    info.release_repo
         .get_or_insert_with(|| CURRENT_RELEASE_REPO.to_string());
     Ok(Some(info))
 }
@@ -653,9 +657,7 @@ where
     let wrapped: FetchOverrideFn = Arc::new(move |originator: &str| Box::pin(fetch(originator)));
     let lock = FETCH_OVERRIDE_TEST_LOCK.lock().unwrap();
     *FETCH_OVERRIDE.lock().unwrap() = Some(wrapped);
-    FetchOverrideGuard {
-        lock: Some(lock),
-    }
+    FetchOverrideGuard { lock: Some(lock) }
 }
 
 #[cfg(test)]
@@ -696,7 +698,8 @@ mod tests {
     use std::sync::Arc;
     use tempfile::tempdir;
     use tokio::sync::Mutex as TokioMutex;
-    use tokio::time::{sleep, Duration as TokioDuration};
+    use tokio::time::Duration as TokioDuration;
+    use tokio::time::sleep;
 
     fn write_cache(path: &Path, info: &serde_json::Value) {
         fs::write(path, format!("{}\n", info)).expect("write version cache");
@@ -763,14 +766,19 @@ mod tests {
             }
         });
 
-        let info = check_for_update(&version_file, "test-originator").await.unwrap();
+        let info = check_for_update(&version_file, "test-originator")
+            .await
+            .unwrap();
         assert_eq!(info.latest_version, expected_version);
         assert!(is_cache_fresh(&info));
         let persisted = read_version_info(&version_file)
             .unwrap()
             .expect("updated cache present");
         assert_eq!(persisted.latest_version, expected_version);
-        assert_eq!(persisted.release_repo.as_deref(), Some(CURRENT_RELEASE_REPO));
+        assert_eq!(
+            persisted.release_repo.as_deref(),
+            Some(CURRENT_RELEASE_REPO)
+        );
         assert_eq!(*counter.lock().await, 1);
     }
 
@@ -800,7 +808,9 @@ mod tests {
             }
         });
 
-        let info = check_for_update(&version_file, "test-originator").await.unwrap();
+        let info = check_for_update(&version_file, "test-originator")
+            .await
+            .unwrap();
         assert_eq!(info.latest_version, "0.4.7");
         assert_eq!(*counter.lock().await, 0, "no network call expected");
     }
@@ -859,7 +869,9 @@ mod tests {
             }
         });
 
-        let info = check_for_update(&version_file, "test-originator").await.unwrap();
+        let info = check_for_update(&version_file, "test-originator")
+            .await
+            .unwrap();
         assert_eq!(info.latest_version, "0.5.1");
         assert_eq!(*counter.lock().await, 1);
         let persisted = read_version_info(&version_file)
@@ -901,6 +913,10 @@ mod tests {
             io_err.kind(),
             ErrorKind::AlreadyExists | ErrorKind::PermissionDenied | ErrorKind::NotADirectory
         ));
-        assert_eq!(*counter.lock().await, 0, "fetch should not run on path errors");
+        assert_eq!(
+            *counter.lock().await,
+            0,
+            "fetch should not run on path errors"
+        );
     }
 }

@@ -4,7 +4,8 @@ use std::collections::BTreeMap;
 
 use pretty_assertions::assert_eq;
 
-use crate::{EnvironmentContextDelta, EnvironmentContextSnapshot};
+use crate::EnvironmentContextDelta;
+use crate::EnvironmentContextSnapshot;
 
 use super::*;
 
@@ -84,7 +85,10 @@ fn test_apply_delta_validates_sequence() {
     let result = timeline.apply_delta(5, delta);
     assert!(matches!(
         result,
-        Err(TimelineError::DeltaSequenceOutOfOrder { expected: 1, actual: 5 })
+        Err(TimelineError::DeltaSequenceOutOfOrder {
+            expected: 1,
+            actual: 5
+        })
     ));
 }
 
@@ -128,9 +132,15 @@ fn test_delta_sequences() {
     let baseline = create_test_snapshot("/repo", Some("main"));
     timeline.add_baseline_once(baseline).unwrap();
 
-    timeline.apply_delta(1, create_test_delta("fp1", "/repo-1")).unwrap();
-    timeline.apply_delta(2, create_test_delta("fp2", "/repo-2")).unwrap();
-    timeline.apply_delta(3, create_test_delta("fp3", "/repo-3")).unwrap();
+    timeline
+        .apply_delta(1, create_test_delta("fp1", "/repo-1"))
+        .unwrap();
+    timeline
+        .apply_delta(2, create_test_delta("fp2", "/repo-2"))
+        .unwrap();
+    timeline
+        .apply_delta(3, create_test_delta("fp3", "/repo-3"))
+        .unwrap();
 
     let sequences = timeline.delta_sequences();
     assert_eq!(sequences, vec![1, 2, 3]);
@@ -201,10 +211,14 @@ fn test_delta_count() {
 
     assert_eq!(timeline.delta_count(), 0);
 
-    timeline.apply_delta(1, create_test_delta("fp1", "/repo-1")).unwrap();
+    timeline
+        .apply_delta(1, create_test_delta("fp1", "/repo-1"))
+        .unwrap();
     assert_eq!(timeline.delta_count(), 1);
 
-    timeline.apply_delta(2, create_test_delta("fp2", "/repo-2")).unwrap();
+    timeline
+        .apply_delta(2, create_test_delta("fp2", "/repo-2"))
+        .unwrap();
     assert_eq!(timeline.delta_count(), 2);
 }
 
@@ -224,12 +238,16 @@ fn test_estimated_bytes() {
     assert!(baseline_size > 0);
 
     // With delta
-    timeline.apply_delta(1, create_test_delta("fp", "/new-repo")).unwrap();
+    timeline
+        .apply_delta(1, create_test_delta("fp", "/new-repo"))
+        .unwrap();
     let with_delta_size = timeline.estimated_bytes();
     assert!(with_delta_size > baseline_size);
 
     // With snapshot
-    timeline.record_snapshot(create_test_snapshot("/snap", Some("feature"))).unwrap();
+    timeline
+        .record_snapshot(create_test_snapshot("/snap", Some("feature")))
+        .unwrap();
     let with_snapshot_size = timeline.estimated_bytes();
     assert!(with_snapshot_size > with_delta_size);
 }
@@ -322,7 +340,9 @@ fn test_timeline_serialization() {
     let mut timeline = ContextTimeline::new();
     let baseline = create_test_snapshot("/repo", Some("main"));
     timeline.add_baseline_once(baseline).unwrap();
-    timeline.apply_delta(1, create_test_delta("fp", "/new")).unwrap();
+    timeline
+        .apply_delta(1, create_test_delta("fp", "/new"))
+        .unwrap();
 
     // Serialize
     let json = serde_json::to_string(&timeline).unwrap();

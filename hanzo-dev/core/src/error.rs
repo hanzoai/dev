@@ -1,5 +1,7 @@
 use crate::exec::ExecToolCallOutput;
-use chrono::{DateTime, Duration as ChronoDuration, Utc};
+use chrono::DateTime;
+use chrono::Duration as ChronoDuration;
+use chrono::Utc;
 use reqwest::StatusCode;
 use serde_json;
 use std::io;
@@ -62,9 +64,8 @@ pub struct RetryAfter {
 
 impl RetryAfter {
     pub fn from_duration(delay: Duration, now: DateTime<Utc>) -> Self {
-        let resume_at = now
-            + ChronoDuration::from_std(delay)
-                .unwrap_or_else(|_| ChronoDuration::zero());
+        let resume_at =
+            now + ChronoDuration::from_std(delay).unwrap_or_else(|_| ChronoDuration::zero());
         Self { delay, resume_at }
     }
 
@@ -342,7 +343,10 @@ pub fn get_error_message_ui(e: &CodexErr) -> String {
             let limit_note = memory_max_bytes
                 .map(|bytes| format!(" (memory.max={bytes} bytes)"))
                 .unwrap_or_default();
-            format!("error: command exceeded memory limit{limit_note}\n{}", output.stderr.text)
+            format!(
+                "error: command exceeded memory limit{limit_note}\n{}",
+                output.stderr.text
+            )
         }
         // Timeouts are not sandbox errors from a UX perspective; present them plainly
         CodexErr::Sandbox(SandboxErr::Timeout { output }) => format!(
@@ -356,7 +360,7 @@ pub fn get_error_message_ui(e: &CodexErr) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-    
+
     #[test]
     fn usage_limit_reached_error_formats_plus_plan() {
         let err = UsageLimitReachedError {

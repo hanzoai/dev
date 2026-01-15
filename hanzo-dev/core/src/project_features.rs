@@ -1,7 +1,10 @@
 use std::collections::HashMap;
-use std::path::{Path, PathBuf};
+use std::path::Path;
+use std::path::PathBuf;
 
-use crate::config_types::{ProjectCommandConfig, ProjectHookConfig, ProjectHookEvent};
+use crate::config_types::ProjectCommandConfig;
+use crate::config_types::ProjectHookConfig;
+use crate::config_types::ProjectHookEvent;
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct ProjectHook {
@@ -86,7 +89,10 @@ impl ProjectCommand {
     }
 }
 
-pub fn load_project_commands(configs: &[ProjectCommandConfig], project_root: &Path) -> Vec<ProjectCommand> {
+pub fn load_project_commands(
+    configs: &[ProjectCommandConfig],
+    project_root: &Path,
+) -> Vec<ProjectCommand> {
     let mut commands: Vec<ProjectCommand> = Vec::new();
     for cfg in configs {
         let name = cfg.name.trim();

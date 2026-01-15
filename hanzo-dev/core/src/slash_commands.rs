@@ -54,7 +54,11 @@ pub fn get_enabled_agents(agents: &[AgentConfig]) -> Vec<String> {
         }
 
         let cmd = agent.command.trim();
-        let cmd = if cmd.is_empty() { agent.name.trim() } else { cmd };
+        let cmd = if cmd.is_empty() {
+            agent.name.trim()
+        } else {
+            cmd
+        };
         let cmd = command_for_check(cmd);
         if !cmd.is_empty() && command_exists(cmd) {
             return true;

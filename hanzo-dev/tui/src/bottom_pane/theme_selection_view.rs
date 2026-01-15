@@ -1,10 +1,9 @@
 #![allow(dead_code)]
 
-use hanzo_core::config_types::ThemeName;
 use crossterm::event::KeyCode;
 use crossterm::event::KeyEvent;
 use crossterm::event::KeyModifiers;
-use unicode_segmentation::UnicodeSegmentation;
+use hanzo_core::config_types::ThemeName;
 use ratatui::buffer::Buffer;
 use ratatui::layout::Alignment;
 use ratatui::layout::Rect;
@@ -15,6 +14,7 @@ use ratatui::text::Span;
 use ratatui::widgets::Block;
 use ratatui::widgets::Borders;
 use ratatui::widgets::Paragraph;
+use unicode_segmentation::UnicodeSegmentation;
 // Cleanup: remove unused imports to satisfy warning-as-error policy
 use ratatui::widgets::Clear;
 use ratatui::widgets::Widget;
@@ -22,7 +22,10 @@ use ratatui::widgets::Widget;
 use crate::app_event::AppEvent;
 use crate::app_event_sender::AppEventSender;
 use crate::chatwidget::BackgroundOrderTicket;
-use crate::theme::{custom_theme_is_dark, map_theme_for_palette, palette_mode, PaletteMode};
+use crate::theme::PaletteMode;
+use crate::theme::custom_theme_is_dark;
+use crate::theme::map_theme_for_palette;
+use crate::theme::palette_mode;
 use crate::thread_spawner;
 
 use super::BottomPane;
@@ -315,10 +318,8 @@ impl ThemeSelectionView {
     }
 
     fn send_before_next_output(&self, message: impl Into<String>) {
-        self.app_event_tx.send_background_before_next_output_with_ticket(
-            &self.before_ticket,
-            message,
-        );
+        self.app_event_tx
+            .send_background_before_next_output_with_ticket(&self.before_ticket, message);
     }
 
     /// Spawn a background task that creates a custom spinner using the LLM with a JSON schema
@@ -997,7 +998,11 @@ enum ProgressMsg {
 impl ThemeSelectionView {
     fn process_key_event(&mut self, key_event: KeyEvent) {
         match key_event {
-            KeyEvent { code: KeyCode::Up, modifiers: KeyModifiers::NONE, .. } => {
+            KeyEvent {
+                code: KeyCode::Up,
+                modifiers: KeyModifiers::NONE,
+                ..
+            } => {
                 if let Mode::CreateSpinner(ref mut s) = self.mode {
                     let new_step = match s.step.get() {
                         CreateStep::Prompt => CreateStep::Action,
@@ -1037,7 +1042,11 @@ impl ThemeSelectionView {
                     }
                 }
             }
-            KeyEvent { code: KeyCode::Down, modifiers: KeyModifiers::NONE, .. } => {
+            KeyEvent {
+                code: KeyCode::Down,
+                modifiers: KeyModifiers::NONE,
+                ..
+            } => {
                 if let Mode::CreateSpinner(ref mut s) = self.mode {
                     let new_step = match s.step.get() {
                         CreateStep::Prompt => CreateStep::Action,
@@ -1076,7 +1085,11 @@ impl ThemeSelectionView {
                     }
                 }
             }
-            KeyEvent { code: KeyCode::Left, modifiers: KeyModifiers::NONE, .. } => {
+            KeyEvent {
+                code: KeyCode::Left,
+                modifiers: KeyModifiers::NONE,
+                ..
+            } => {
                 if let Mode::CreateSpinner(ref mut s) = self.mode {
                     let new_step = match s.step.get() {
                         CreateStep::Prompt => CreateStep::Action,
@@ -1116,7 +1129,11 @@ impl ThemeSelectionView {
                     }
                 }
             }
-            KeyEvent { code: KeyCode::Right, modifiers: KeyModifiers::NONE, .. } => {
+            KeyEvent {
+                code: KeyCode::Right,
+                modifiers: KeyModifiers::NONE,
+                ..
+            } => {
                 if let Mode::CreateSpinner(ref mut s) = self.mode {
                     let new_step = match s.step.get() {
                         CreateStep::Prompt => CreateStep::Action,
@@ -1155,30 +1172,32 @@ impl ThemeSelectionView {
                     }
                 }
             }
-            KeyEvent { code: KeyCode::Enter, modifiers: KeyModifiers::NONE, .. } => {
+            KeyEvent {
+                code: KeyCode::Enter,
+                modifiers: KeyModifiers::NONE,
+                ..
+            } => {
                 let current_mode = std::mem::replace(&mut self.mode, Mode::Overview);
                 match current_mode {
-                    Mode::Overview => {
-                        match self.overview_selected_index {
-                            0 => {
-                                self.revert_theme_on_back = self.current_theme;
-                                self.mode = Mode::Themes;
-                                self.just_entered_themes = true;
-                            }
-                            1 => {
-                                self.revert_spinner_on_back = self.current_spinner.clone();
-                                self.mode = Mode::Spinner;
-                                self.app_event_tx.send(AppEvent::ScheduleFrameIn(
-                                    std::time::Duration::from_millis(120),
-                                ));
-                                self.just_entered_spinner = true;
-                            }
-                            _ => {
-                                self.is_complete = true;
-                                self.mode = Mode::Overview;
-                            }
+                    Mode::Overview => match self.overview_selected_index {
+                        0 => {
+                            self.revert_theme_on_back = self.current_theme;
+                            self.mode = Mode::Themes;
+                            self.just_entered_themes = true;
                         }
-                    }
+                        1 => {
+                            self.revert_spinner_on_back = self.current_spinner.clone();
+                            self.mode = Mode::Spinner;
+                            self.app_event_tx.send(AppEvent::ScheduleFrameIn(
+                                std::time::Duration::from_millis(120),
+                            ));
+                            self.just_entered_spinner = true;
+                        }
+                        _ => {
+                            self.is_complete = true;
+                            self.mode = Mode::Overview;
+                        }
+                    },
                     Mode::Themes => {
                         let count = Self::get_theme_options().len();
                         if Self::allow_custom_theme_generation()
@@ -1366,11 +1385,12 @@ impl ThemeSelectionView {
                                             );
                                         }
                                     } else {
-                                        let fallback = if self.revert_theme_on_back == ThemeName::Custom {
-                                            ThemeName::LightPhoton
-                                        } else {
-                                            self.revert_theme_on_back
-                                        };
+                                        let fallback =
+                                            if self.revert_theme_on_back == ThemeName::Custom {
+                                                ThemeName::LightPhoton
+                                            } else {
+                                                self.revert_theme_on_back
+                                            };
                                         self.app_event_tx.send(AppEvent::PreviewTheme(fallback));
                                     }
                                     self.app_event_tx.send(AppEvent::RequestRedraw);
@@ -1394,21 +1414,22 @@ impl ThemeSelectionView {
                                             s.proposed_is_dark.get(),
                                         );
                                         if s.preview_on.get() {
-                                        crate::theme::init_theme(
-                                            &hanzo_core::config_types::ThemeConfig {
-                                                name: ThemeName::Custom,
-                                                colors: colors.clone(),
-                                                label: Some(name.clone()),
-                                                is_dark: s.proposed_is_dark.get(),
-                                            },
-                                        );
+                                            crate::theme::init_theme(
+                                                &hanzo_core::config_types::ThemeConfig {
+                                                    name: ThemeName::Custom,
+                                                    colors: colors.clone(),
+                                                    label: Some(name.clone()),
+                                                    is_dark: s.proposed_is_dark.get(),
+                                                },
+                                            );
                                             self.revert_theme_on_back = ThemeName::Custom;
                                             self.current_theme = ThemeName::Custom;
                                             self.app_event_tx
                                                 .send(AppEvent::UpdateTheme(ThemeName::Custom));
                                         } else {
-                                            self.app_event_tx
-                                                .send(AppEvent::PreviewTheme(self.revert_theme_on_back));
+                                            self.app_event_tx.send(AppEvent::PreviewTheme(
+                                                self.revert_theme_on_back,
+                                            ));
                                         }
                                         if s.preview_on.get() {
                                             self.send_before_next_output(format!(
@@ -1443,7 +1464,11 @@ impl ThemeSelectionView {
                     }
                 }
             }
-            KeyEvent { code: KeyCode::Esc, modifiers: KeyModifiers::NONE, .. } => match self.mode {
+            KeyEvent {
+                code: KeyCode::Esc,
+                modifiers: KeyModifiers::NONE,
+                ..
+            } => match self.mode {
                 Mode::Overview => self.is_complete = true,
                 Mode::CreateSpinner(_) => {
                     self.mode = Mode::Spinner;
@@ -1455,7 +1480,11 @@ impl ThemeSelectionView {
                 }
                 _ => self.cancel_detail(),
             },
-            KeyEvent { code: KeyCode::Char(c), modifiers, .. } => {
+            KeyEvent {
+                code: KeyCode::Char(c),
+                modifiers,
+                ..
+            } => {
                 if let Mode::CreateSpinner(ref mut s) = self.mode {
                     if s.is_loading.get() {
                         return;
@@ -1478,7 +1507,10 @@ impl ThemeSelectionView {
                     }
                 }
             }
-            KeyEvent { code: KeyCode::Backspace, .. } => {
+            KeyEvent {
+                code: KeyCode::Backspace,
+                ..
+            } => {
                 if let Mode::CreateSpinner(ref mut s) = self.mode {
                     if s.is_loading.get() {
                         return;
@@ -1520,11 +1552,25 @@ impl ThemeSelectionView {
     pub(crate) fn handle_key_event_direct(&mut self, key_event: KeyEvent) -> bool {
         let handled = matches!(
             key_event,
-            KeyEvent { code: KeyCode::Up | KeyCode::Down | KeyCode::Left | KeyCode::Right | KeyCode::Enter | KeyCode::Esc, .. }
-                | KeyEvent { code: KeyCode::Backspace, .. }
+            KeyEvent {
+                code: KeyCode::Up
+                    | KeyCode::Down
+                    | KeyCode::Left
+                    | KeyCode::Right
+                    | KeyCode::Enter
+                    | KeyCode::Esc,
+                ..
+            } | KeyEvent {
+                code: KeyCode::Backspace,
+                ..
+            }
         ) || matches!(
             key_event,
-            KeyEvent { code: KeyCode::Char(_), modifiers: KeyModifiers::NONE | KeyModifiers::SHIFT, .. }
+            KeyEvent {
+                code: KeyCode::Char(_),
+                modifiers: KeyModifiers::NONE | KeyModifiers::SHIFT,
+                ..
+            }
         );
         self.process_key_event(key_event);
         handled
@@ -1564,7 +1610,11 @@ impl<'a> BottomPaneView<'a> for ThemeSelectionView {
             Mode::Overview => 8,
             // Detail lists: fixed 9 visible rows (max), shrink if fewer
             Mode::Themes => {
-                let extra = if Self::allow_custom_theme_generation() { 1 } else { 0 };
+                let extra = if Self::allow_custom_theme_generation() {
+                    1
+                } else {
+                    0
+                };
                 let n = (Self::get_theme_options().len() as u16) + extra;
                 // Border(2) + padding(2) + title(1)+space(1) + list
                 6 + n.min(9)

@@ -1,20 +1,26 @@
-use anyhow::{bail, Context, Result};
-use chrono::{DateTime, Utc};
-use futures::stream::{SplitSink, SplitStream};
-use futures::{SinkExt, StreamExt};
+use anyhow::Context;
+use anyhow::Result;
+use anyhow::bail;
+use chrono::DateTime;
+use chrono::Utc;
+use futures::SinkExt;
+use futures::StreamExt;
+use futures::stream::SplitSink;
+use futures::stream::SplitStream;
 use serde::Deserialize;
 use serde_json::Value;
 use std::collections::HashSet;
 use std::fs;
-use std::path::{Path, PathBuf};
+use std::path::Path;
+use std::path::PathBuf;
 use std::time::Duration;
 use tokio::time::timeout;
 use tokio_tungstenite::connect_async;
-use tokio_tungstenite::tungstenite::error::ProtocolError;
-use tokio_tungstenite::tungstenite::protocol::frame::coding::CloseCode;
-use tokio_tungstenite::tungstenite::protocol::CloseFrame;
 use tokio_tungstenite::tungstenite::Error as WsError;
 use tokio_tungstenite::tungstenite::Message;
+use tokio_tungstenite::tungstenite::error::ProtocolError;
+use tokio_tungstenite::tungstenite::protocol::CloseFrame;
+use tokio_tungstenite::tungstenite::protocol::frame::coding::CloseCode;
 use uuid::Uuid;
 
 type WsStream =
@@ -74,7 +80,8 @@ pub fn discover_bridge_targets(cwd: &Path) -> Result<Vec<BridgeTarget>> {
                 let candidate = dir.join(root).join(name);
                 if candidate.exists() && seen.insert(candidate.clone()) {
                     let raw = fs::read_to_string(&candidate).context("read bridge metadata")?;
-                    let meta: BridgeMeta = serde_json::from_str(&raw).context("parse bridge metadata")?;
+                    let meta: BridgeMeta =
+                        serde_json::from_str(&raw).context("parse bridge metadata")?;
                     let (stale, heartbeat_age_ms) = compute_staleness(&meta, &candidate);
 
                     targets.push(BridgeTarget {
@@ -274,7 +281,10 @@ fn compute_staleness(meta: &BridgeMeta, path: &Path) -> (bool, Option<i64>) {
     if let Some(hb) = &meta.heartbeat_at {
         if let Ok(ts) = DateTime::parse_from_rfc3339(hb) {
             let age = Utc::now().signed_duration_since(ts.with_timezone(&Utc));
-            return (age.num_milliseconds() > HEARTBEAT_STALE_MS, Some(age.num_milliseconds()));
+            return (
+                age.num_milliseconds() > HEARTBEAT_STALE_MS,
+                Some(age.num_milliseconds()),
+            );
         }
     }
 
@@ -282,7 +292,10 @@ fn compute_staleness(meta: &BridgeMeta, path: &Path) -> (bool, Option<i64>) {
         if let Ok(modified) = stat.modified() {
             let modified: DateTime<Utc> = modified.into();
             let age = Utc::now().signed_duration_since(modified);
-            return (age.num_milliseconds() > HEARTBEAT_STALE_MS, Some(age.num_milliseconds()));
+            return (
+                age.num_milliseconds() > HEARTBEAT_STALE_MS,
+                Some(age.num_milliseconds()),
+            );
         }
     }
 
@@ -402,7 +415,10 @@ async fn wait_for_forwarded(
                         if val.get("type").and_then(|t| t.as_str()) == Some("control_forwarded")
                             && val.get("id").and_then(|v| v.as_str()) == Some(id)
                         {
-                            return val.get("delivered").and_then(|v| v.as_u64()).map(|v| v as usize);
+                            return val
+                                .get("delivered")
+                                .and_then(|v| v.as_u64())
+                                .map(|v| v as usize);
                         }
                     }
                 }
@@ -433,17 +449,19 @@ async fn wait_for_control_and_screenshot(
                 Ok(Message::Text(text)) => {
                     if let Ok(val) = serde_json::from_str::<Value>(&text) {
                         match val.get("type").and_then(|t| t.as_str()) {
-                            Some("control_result") if val.get("id").and_then(|v| v.as_str()) == Some(id) => {
+                            Some("control_result")
+                                if val.get("id").and_then(|v| v.as_str()) == Some(id) =>
+                            {
                                 result = Some(val.clone());
                                 if screenshot.is_some() {
                                     break;
                                 }
                             }
-                            Some("screenshot") if val.get("id").and_then(|v| v.as_str()) == Some(id) => {
-                                let data_len = val
-                                    .get("data")
-                                    .and_then(|v| v.as_str())
-                                    .map(|s| s.len());
+                            Some("screenshot")
+                                if val.get("id").and_then(|v| v.as_str()) == Some(id) =>
+                            {
+                                let data_len =
+                                    val.get("data").and_then(|v| v.as_str()).map(|s| s.len());
                                 let mime = val
                                     .get("mime")
                                     .and_then(|v| v.as_str())

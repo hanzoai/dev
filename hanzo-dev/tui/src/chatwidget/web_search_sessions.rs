@@ -1,6 +1,9 @@
-use super::{tool_cards, ChatWidget, OrderKey};
+use super::ChatWidget;
+use super::OrderKey;
+use super::tool_cards;
 use super::tool_cards::ToolCardSlot;
-use crate::history_cell::{WebSearchSessionCell, WebSearchStatus};
+use crate::history_cell::WebSearchSessionCell;
+use crate::history_cell::WebSearchStatus;
 use hanzo_core::protocol::OrderMeta;
 use std::collections::HashSet;
 use std::mem;
@@ -83,16 +86,13 @@ pub(super) fn handle_begin(
         tracker.ensure_insert(chat);
     }
 
-    chat
-        .tools_state
+    chat.tools_state
         .web_search_sessions
         .insert(key.clone(), tracker);
-    chat
-        .tools_state
+    chat.tools_state
         .web_search_by_call
         .insert(call_id, key.clone());
-    chat
-        .tools_state
+    chat.tools_state
         .web_search_by_order
         .insert(request_ordinal, key);
     chat.bottom_pane.update_status_text("Search".to_string());
@@ -112,7 +112,14 @@ pub(super) fn handle_complete(
         .tools_state
         .web_search_by_call
         .remove(&call_id)
-        .or_else(|| order.and_then(|meta| chat.tools_state.web_search_by_order.get(&meta.request_ordinal).cloned()))
+        .or_else(|| {
+            order.and_then(|meta| {
+                chat.tools_state
+                    .web_search_by_order
+                    .get(&meta.request_ordinal)
+                    .cloned()
+            })
+        })
         .unwrap_or(fallback_key.clone());
 
     let (mut tracker, existed) = match chat.tools_state.web_search_sessions.remove(&key) {
@@ -146,22 +153,20 @@ pub(super) fn handle_complete(
     }
 
     if !tracker.active_calls.is_empty() {
-        chat
-            .tools_state
+        chat.tools_state
             .web_search_sessions
             .insert(key.clone(), tracker);
-        chat
-            .tools_state
+        chat.tools_state
             .web_search_by_order
             .insert(request_ordinal, key);
     } else {
-        chat
-            .tools_state
+        chat.tools_state
             .web_search_by_order
             .remove(&request_ordinal);
     }
 
-    chat.bottom_pane.update_status_text("responding".to_string());
+    chat.bottom_pane
+        .update_status_text("responding".to_string());
     chat.maybe_hide_spinner();
 }
 
@@ -175,9 +180,7 @@ pub(super) fn finalize_all_failed(chat: &mut ChatWidget<'_>, message: &str) {
     for (_, mut tracker) in trackers.drain() {
         tracker.slot.set_order_key(chat.next_internal_key());
         let elapsed = tracker.started_at.elapsed();
-        tracker
-            .cell
-            .record_error(elapsed, message.to_string());
+        tracker.cell.record_error(elapsed, message.to_string());
         tracker.cell.set_status(WebSearchStatus::Failed);
         tracker.replace(chat);
     }
@@ -193,18 +196,14 @@ pub(super) fn finalize_all_completed(chat: &mut ChatWidget<'_>, message: &str) {
     for (_, mut tracker) in trackers.drain() {
         tracker.slot.set_order_key(chat.next_internal_key());
         let elapsed = tracker.started_at.elapsed();
-        tracker
-            .cell
-            .record_success(elapsed, message.to_string());
+        tracker.cell.record_success(elapsed, message.to_string());
         tracker.cell.set_status(WebSearchStatus::Completed);
         tracker.replace(chat);
     }
 }
 
 fn resolve_request_ordinal(order: Option<&OrderMeta>, fallback: u64) -> u64 {
-    order
-        .map(|meta| meta.request_ordinal)
-        .unwrap_or(fallback)
+    order.map(|meta| meta.request_ordinal).unwrap_or(fallback)
 }
 
 fn web_search_key(request_ordinal: u64) -> String {

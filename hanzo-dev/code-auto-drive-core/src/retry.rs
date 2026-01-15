@@ -1,7 +1,10 @@
-use std::time::{Duration, Instant};
+use std::time::Duration;
+use std::time::Instant;
 
 use anyhow::Error;
-use rand::{rngs::StdRng, Rng, SeedableRng};
+use rand::Rng;
+use rand::SeedableRng;
+use rand::rngs::StdRng;
 use tokio::time;
 use tokio_util::sync::CancellationToken;
 use tracing::warn;
@@ -49,7 +52,10 @@ pub(crate) enum RetryError {
     #[error("retry aborted")]
     Aborted,
     #[error("retry timed out after {elapsed:?}")]
-    Timeout { elapsed: Duration, last_error: Error },
+    Timeout {
+        elapsed: Duration,
+        last_error: Error,
+    },
     #[error(transparent)]
     Fatal(Error),
 }
@@ -196,7 +202,10 @@ fn compute_delay(options: &RetryOptions, attempt: u32, rng: &mut StdRng) -> Dura
     Duration::from_secs_f64(jitter)
 }
 
-async fn wait_with_cancel(cancel: &CancellationToken, duration: Duration) -> Result<(), RetryError> {
+async fn wait_with_cancel(
+    cancel: &CancellationToken,
+    duration: Duration,
+) -> Result<(), RetryError> {
     if duration.is_zero() {
         return Ok(());
     }

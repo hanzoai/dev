@@ -1,6 +1,9 @@
 // Use img_hash's re-exported image module for compatibility
-use img_hash::image::{DynamicImage, io::Reader as ImageReader};
-use img_hash::{HashAlg, HasherConfig, ImageHash};
+use img_hash::HashAlg;
+use img_hash::HasherConfig;
+use img_hash::ImageHash;
+use img_hash::image::DynamicImage;
+use img_hash::image::io::Reader as ImageReader;
 use std::path::Path;
 
 fn phash_256(img: &DynamicImage) -> ImageHash<[u8; 32]> {

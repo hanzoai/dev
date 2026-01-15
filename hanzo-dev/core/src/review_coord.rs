@@ -1,9 +1,15 @@
-use serde::{Deserialize, Serialize};
-use std::fs::{self, File, OpenOptions};
-use std::io::{Read, Write};
-use std::path::{Path, PathBuf};
+use serde::Deserialize;
+use serde::Serialize;
+use std::fs::File;
+use std::fs::OpenOptions;
+use std::fs::{self};
+use std::io::Read;
+use std::io::Write;
+use std::path::Path;
+use std::path::PathBuf;
 use std::process::Command;
-use std::time::{SystemTime, UNIX_EPOCH};
+use std::time::SystemTime;
+use std::time::UNIX_EPOCH;
 
 const LOCK_FILENAME: &str = "review.lock";
 const EPOCH_FILENAME: &str = "snapshot.epoch";
@@ -32,9 +38,7 @@ fn state_dir() -> std::io::Result<PathBuf> {
 fn scoped_dir(scope: Option<&Path>) -> std::io::Result<PathBuf> {
     let mut dir = state_dir()?;
     if let Some(scope) = scope {
-        let normalized_scope = scope
-            .canonicalize()
-            .unwrap_or_else(|_| scope.to_path_buf());
+        let normalized_scope = scope.canonicalize().unwrap_or_else(|_| scope.to_path_buf());
         let key = crc32fast::hash(normalized_scope.to_string_lossy().as_bytes());
         dir.push(format!("repo-{key:08x}"));
         fs::create_dir_all(&dir)?;
@@ -208,13 +212,15 @@ impl Drop for ReviewGuard {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::path::Path;
     use serial_test::serial;
+    use std::path::Path;
     use tempfile::TempDir;
 
     fn set_code_home(path: &Path) {
         // SAFETY: tests run serially and isolate HANZO_HOME within a temp dir per test.
-        unsafe { std::env::set_var("HANZO_HOME", path); }
+        unsafe {
+            std::env::set_var("HANZO_HOME", path);
+        }
     }
 
     #[test]
@@ -255,7 +261,9 @@ mod tests {
 
         bump_snapshot_epoch_for(cwd);
         let current = current_snapshot_epoch_for(cwd);
-        let guard = try_acquire_lock("first", cwd).unwrap().expect("lock available");
+        let guard = try_acquire_lock("first", cwd)
+            .unwrap()
+            .expect("lock available");
         let info = read_lock_info(Some(cwd)).expect("lock info present");
         assert_eq!(info.snapshot_epoch, current);
         drop(guard);
@@ -263,7 +271,9 @@ mod tests {
         bump_snapshot_epoch_for(cwd);
         let next = current_snapshot_epoch_for(cwd);
         assert!(next > current);
-        let guard2 = try_acquire_lock("second", cwd).unwrap().expect("lock reacquired");
+        let guard2 = try_acquire_lock("second", cwd)
+            .unwrap()
+            .expect("lock reacquired");
         let info2 = read_lock_info(Some(cwd)).expect("lock info present");
         assert_eq!(info2.snapshot_epoch, next);
         drop(guard2);
@@ -276,7 +286,9 @@ mod tests {
         set_code_home(dir.path());
         let cwd = dir.path();
 
-        let guard = try_acquire_lock("stale-check", cwd).unwrap().expect("lock available");
+        let guard = try_acquire_lock("stale-check", cwd)
+            .unwrap()
+            .expect("lock available");
         let initial = read_lock_info(Some(cwd)).expect("lock info present");
         bump_snapshot_epoch_for(cwd);
         let now = current_snapshot_epoch_for(cwd);
@@ -299,7 +311,10 @@ mod tests {
         let exec_lock = try_acquire_lock("exec-review", cwd).unwrap();
         assert!(exec_lock.is_some());
         let tui_lock = try_acquire_lock("tui-review", cwd).unwrap();
-        assert!(tui_lock.is_none(), "TUI should be blocked while exec holds lock");
+        assert!(
+            tui_lock.is_none(),
+            "TUI should be blocked while exec holds lock"
+        );
         drop(exec_lock);
         let auto_lock = try_acquire_lock("auto-drive-review", cwd).unwrap();
         assert!(auto_lock.is_some());

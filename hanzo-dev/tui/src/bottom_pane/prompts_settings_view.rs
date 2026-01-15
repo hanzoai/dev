@@ -1,23 +1,35 @@
 use std::fs;
 use std::path::PathBuf;
 
+use crossterm::event::KeyCode;
+use crossterm::event::KeyEvent;
+use crossterm::event::KeyModifiers;
 use hanzo_core::config::find_code_home;
 use hanzo_core::protocol::Op;
 use hanzo_protocol::custom_prompts::CustomPrompt;
-use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 use ratatui::buffer::Buffer;
-use ratatui::layout::{Alignment, Constraint, Direction, Layout, Rect};
-use ratatui::style::{Modifier, Style};
-use ratatui::text::{Line, Span};
+use ratatui::layout::Alignment;
+use ratatui::layout::Constraint;
+use ratatui::layout::Direction;
+use ratatui::layout::Layout;
+use ratatui::layout::Rect;
 use ratatui::prelude::Widget;
-use ratatui::widgets::{Block, Borders, Paragraph, Wrap};
+use ratatui::style::Modifier;
+use ratatui::style::Style;
+use ratatui::text::Line;
+use ratatui::text::Span;
+use ratatui::widgets::Block;
+use ratatui::widgets::Borders;
+use ratatui::widgets::Paragraph;
+use ratatui::widgets::Wrap;
 
 use crate::app_event::AppEvent;
 use crate::app_event_sender::AppEventSender;
 use crate::colors;
 use crate::slash_command::built_in_slash_commands;
 
-use super::form_text_field::{FormTextField, InputFilter};
+use super::form_text_field::FormTextField;
+use super::form_text_field::InputFilter;
 // Panel helpers unused now that we render inline
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -73,38 +85,57 @@ impl PromptsSettingsView {
         }
         match self.mode {
             Mode::List => match key {
-                KeyEvent { code: KeyCode::Esc, .. } => {
+                KeyEvent {
+                    code: KeyCode::Esc, ..
+                } => {
                     self.is_complete = true;
                     true
                 }
-                KeyEvent { code: KeyCode::Enter, modifiers: KeyModifiers::NONE, .. } => {
+                KeyEvent {
+                    code: KeyCode::Enter,
+                    modifiers: KeyModifiers::NONE,
+                    ..
+                } => {
                     self.enter_editor();
                     true
                 }
-                KeyEvent { code: KeyCode::Char('n'), modifiers, .. }
-                    if modifiers.contains(KeyModifiers::CONTROL) =>
-                {
+                KeyEvent {
+                    code: KeyCode::Char('n'),
+                    modifiers,
+                    ..
+                } if modifiers.contains(KeyModifiers::CONTROL) => {
                     self.start_new_prompt();
                     true
                 }
                 other => self.handle_list_key(other),
             },
             Mode::Edit => match key {
-                KeyEvent { code: KeyCode::Esc, .. } => {
+                KeyEvent {
+                    code: KeyCode::Esc, ..
+                } => {
                     self.mode = Mode::List;
                     self.focus = Focus::List;
                     self.status = None;
                     true
                 }
-                KeyEvent { code: KeyCode::Tab, .. } => {
+                KeyEvent {
+                    code: KeyCode::Tab, ..
+                } => {
                     self.cycle_focus(true);
                     true
                 }
-                KeyEvent { code: KeyCode::BackTab, .. } => {
+                KeyEvent {
+                    code: KeyCode::BackTab,
+                    ..
+                } => {
                     self.cycle_focus(false);
                     true
                 }
-                KeyEvent { code: KeyCode::Enter, modifiers: KeyModifiers::NONE, .. } => {
+                KeyEvent {
+                    code: KeyCode::Enter,
+                    modifiers: KeyModifiers::NONE,
+                    ..
+                } => {
                     match self.focus {
                         Focus::Save => self.save_current(),
                         Focus::Delete => self.delete_current(),
@@ -117,9 +148,11 @@ impl PromptsSettingsView {
                     }
                     true
                 }
-                KeyEvent { code: KeyCode::Char('n'), modifiers, .. }
-                    if modifiers.contains(KeyModifiers::CONTROL) =>
-                {
+                KeyEvent {
+                    code: KeyCode::Char('n'),
+                    modifiers,
+                    ..
+                } if modifiers.contains(KeyModifiers::CONTROL) => {
                     self.start_new_prompt();
                     true
                 }
@@ -139,10 +172,14 @@ impl PromptsSettingsView {
         }
     }
 
-    pub fn is_complete(&self) -> bool { self.is_complete }
+    pub fn is_complete(&self) -> bool {
+        self.is_complete
+    }
 
     pub fn render(&self, area: Rect, buf: &mut Buffer) {
-        if area.width == 0 || area.height == 0 { return; }
+        if area.width == 0 || area.height == 0 {
+            return;
+        }
         self.render_body(area, buf);
     }
 
@@ -152,19 +189,23 @@ impl PromptsSettingsView {
                 self.render_list(area, buf);
             }
             Mode::Edit => {
-            self.render_form(area, buf);
+                self.render_form(area, buf);
+            }
         }
-    }
     }
 
     fn render_list(&self, area: Rect, buf: &mut Buffer) {
-        if area.width == 0 || area.height == 0 { return; }
+        if area.width == 0 || area.height == 0 {
+            return;
+        }
         let mut lines: Vec<Line> = Vec::new();
         for (idx, p) in self.prompts.iter().enumerate() {
             let preview = p.content.lines().next().unwrap_or("").trim();
             let arrow = if idx == self.selected { "›" } else { " " };
             let name_style = if idx == self.selected {
-                Style::default().fg(colors::primary()).add_modifier(Modifier::BOLD)
+                Style::default()
+                    .fg(colors::primary())
+                    .add_modifier(Modifier::BOLD)
             } else {
                 Style::default().fg(colors::text())
             };
@@ -174,7 +215,9 @@ impl PromptsSettingsView {
                 Style::default().fg(colors::text_dim()),
             );
             let mut spans = vec![name_span];
-            if !preview.is_empty() { spans.push(preview_span); }
+            if !preview.is_empty() {
+                spans.push(preview_span);
+            }
             let line = Line::from(spans);
             lines.push(line);
         }
@@ -183,13 +226,24 @@ impl PromptsSettingsView {
         }
 
         // Add new row
-        let add_arrow = if self.selected == self.prompts.len() { "›" } else { " " };
-        let add_style = if self.selected == self.prompts.len() {
-            Style::default().fg(colors::primary()).add_modifier(Modifier::BOLD)
+        let add_arrow = if self.selected == self.prompts.len() {
+            "›"
         } else {
-            Style::default().fg(colors::success()).add_modifier(Modifier::BOLD)
+            " "
         };
-        let add_line = Line::from(vec![Span::styled(format!("{add_arrow} Add new…"), add_style)]);
+        let add_style = if self.selected == self.prompts.len() {
+            Style::default()
+                .fg(colors::primary())
+                .add_modifier(Modifier::BOLD)
+        } else {
+            Style::default()
+                .fg(colors::success())
+                .add_modifier(Modifier::BOLD)
+        };
+        let add_line = Line::from(vec![Span::styled(
+            format!("{add_arrow} Add new…"),
+            add_style,
+        )]);
         lines.push(add_line);
 
         let title = Paragraph::new(vec![Line::from(Span::styled(
@@ -204,15 +258,14 @@ impl PromptsSettingsView {
             .alignment(Alignment::Left)
             .style(Style::default().bg(colors::background()));
 
-        let outer = Block::default().borders(Borders::ALL).style(Style::default().bg(colors::background()));
+        let outer = Block::default()
+            .borders(Borders::ALL)
+            .style(Style::default().bg(colors::background()));
         let inner = outer.inner(area);
         outer.render(area, buf);
         let chunks = Layout::default()
             .direction(Direction::Vertical)
-            .constraints([
-                Constraint::Length(3),
-                Constraint::Min(1),
-            ])
+            .constraints([Constraint::Length(3), Constraint::Min(1)])
             .split(inner);
 
         title.render(chunks[0], buf);
@@ -220,7 +273,9 @@ impl PromptsSettingsView {
     }
 
     fn render_form(&self, area: Rect, buf: &mut Buffer) {
-        if area.width == 0 || area.height == 0 { return; }
+        if area.width == 0 || area.height == 0 {
+            return;
+        }
         let vertical = Layout::default()
             .direction(Direction::Vertical)
             .constraints([
@@ -232,43 +287,86 @@ impl PromptsSettingsView {
             .split(area);
 
         // Name field with border
-        let name_title = if matches!(self.focus, Focus::Name) { "Name (slug) • Enter to save" } else { "Name (slug)" };
+        let name_title = if matches!(self.focus, Focus::Name) {
+            "Name (slug) • Enter to save"
+        } else {
+            "Name (slug)"
+        };
         let mut name_block = Block::default().borders(Borders::ALL).title(name_title);
         if matches!(self.focus, Focus::Name) {
             name_block = name_block.border_style(Style::default().fg(colors::primary()));
         }
         let name_inner = name_block.inner(vertical[0]);
         name_block.render(vertical[0], buf);
-        self.name_field.render(name_inner, buf, matches!(self.focus, Focus::Name));
+        self.name_field
+            .render(name_inner, buf, matches!(self.focus, Focus::Name));
 
         // Body field with border
-        let body_title = if matches!(self.focus, Focus::Body) { "Content (multiline)" } else { "Content" };
+        let body_title = if matches!(self.focus, Focus::Body) {
+            "Content (multiline)"
+        } else {
+            "Content"
+        };
         let mut body_block = Block::default().borders(Borders::ALL).title(body_title);
         if matches!(self.focus, Focus::Body) {
             body_block = body_block.border_style(Style::default().fg(colors::primary()));
         }
         let body_inner = body_block.inner(vertical[1]);
         body_block.render(vertical[1], buf);
-        self.body_field.render(body_inner, buf, matches!(self.focus, Focus::Body));
+        self.body_field
+            .render(body_inner, buf, matches!(self.focus, Focus::Body));
 
         // Buttons
         let buttons_area = vertical[2];
-        let save_label = if matches!(self.focus, Focus::Save) { "[Save]" } else { "Save" };
-        let delete_label = if matches!(self.focus, Focus::Delete) { "[Delete]" } else { "Delete" };
-        let cancel_label = if matches!(self.focus, Focus::Cancel) { "[Cancel]" } else { "Cancel" };
+        let save_label = if matches!(self.focus, Focus::Save) {
+            "[Save]"
+        } else {
+            "Save"
+        };
+        let delete_label = if matches!(self.focus, Focus::Delete) {
+            "[Delete]"
+        } else {
+            "Delete"
+        };
+        let cancel_label = if matches!(self.focus, Focus::Cancel) {
+            "[Cancel]"
+        } else {
+            "Cancel"
+        };
         let btn_span = |label: &str, focus: Focus, color: Style| {
             if self.focus == focus {
-                Span::styled(label.to_string(), color.bg(colors::primary()).fg(colors::background()))
+                Span::styled(
+                    label.to_string(),
+                    color.bg(colors::primary()).fg(colors::background()),
+                )
             } else {
                 Span::styled(label.to_string(), color)
             }
         };
         let line = Line::from(vec![
-            btn_span(save_label, Focus::Save, Style::default().fg(colors::success()).add_modifier(Modifier::BOLD)),
+            btn_span(
+                save_label,
+                Focus::Save,
+                Style::default()
+                    .fg(colors::success())
+                    .add_modifier(Modifier::BOLD),
+            ),
             Span::raw("   "),
-            btn_span(delete_label, Focus::Delete, Style::default().fg(colors::error()).add_modifier(Modifier::BOLD)),
+            btn_span(
+                delete_label,
+                Focus::Delete,
+                Style::default()
+                    .fg(colors::error())
+                    .add_modifier(Modifier::BOLD),
+            ),
             Span::raw("   "),
-            btn_span(cancel_label, Focus::Cancel, Style::default().fg(colors::text_dim()).add_modifier(Modifier::BOLD)),
+            btn_span(
+                cancel_label,
+                Focus::Cancel,
+                Style::default()
+                    .fg(colors::text_dim())
+                    .add_modifier(Modifier::BOLD),
+            ),
             Span::raw("    Tab cycle • Enter activates"),
         ]);
         Paragraph::new(line).render(buttons_area, buf);
@@ -284,12 +382,16 @@ impl PromptsSettingsView {
     fn handle_list_key(&mut self, key: KeyEvent) -> bool {
         match key.code {
             KeyCode::Up => {
-                if self.selected > 0 { self.selected -= 1; }
+                if self.selected > 0 {
+                    self.selected -= 1;
+                }
                 return true;
             }
             KeyCode::Down => {
                 let max = self.prompts.len();
-                if self.selected < max { self.selected += 1; }
+                if self.selected < max {
+                    self.selected += 1;
+                }
                 return true;
             }
             KeyCode::Char('n') if key.modifiers.contains(KeyModifiers::CONTROL) => {
@@ -306,7 +408,10 @@ impl PromptsSettingsView {
         self.name_field.set_text("");
         self.body_field.set_text("");
         self.focus = Focus::Name;
-        self.status = Some(("New prompt".to_string(), Style::default().fg(colors::info())));
+        self.status = Some((
+            "New prompt".to_string(),
+            Style::default().fg(colors::info()),
+        ));
         self.mode = Mode::Edit;
     }
 
@@ -328,7 +433,14 @@ impl PromptsSettingsView {
     }
 
     fn cycle_focus(&mut self, forward: bool) {
-        let order = [Focus::List, Focus::Name, Focus::Body, Focus::Save, Focus::Delete, Focus::Cancel];
+        let order = [
+            Focus::List,
+            Focus::Name,
+            Focus::Body,
+            Focus::Save,
+            Focus::Delete,
+            Focus::Cancel,
+        ];
         let mut idx = order.iter().position(|f| *f == self.focus).unwrap_or(0);
         if forward {
             idx = (idx + 1) % order.len();
@@ -383,26 +495,41 @@ impl PromptsSettingsView {
         let code_home = match find_code_home() {
             Ok(path) => path,
             Err(e) => {
-                self.status = Some((format!("HANZO_HOME unavailable: {e}"), Style::default().fg(colors::error())));
+                self.status = Some((
+                    format!("HANZO_HOME unavailable: {e}"),
+                    Style::default().fg(colors::error()),
+                ));
                 return;
             }
         };
         let mut dir = code_home;
         dir.push("prompts");
         if let Err(e) = fs::create_dir_all(&dir) {
-            self.status = Some((format!("Failed to create prompts dir: {e}"), Style::default().fg(colors::error())));
+            self.status = Some((
+                format!("Failed to create prompts dir: {e}"),
+                Style::default().fg(colors::error()),
+            ));
             return;
         }
         let mut path = PathBuf::from(&dir);
         path.push(format!("{name}.md"));
         if let Err(e) = fs::write(&path, &body) {
-            self.status = Some((format!("Failed to save: {e}"), Style::default().fg(colors::error())));
+            self.status = Some((
+                format!("Failed to save: {e}"),
+                Style::default().fg(colors::error()),
+            ));
             return;
         }
 
         // Update local list
         let mut updated = self.prompts.clone();
-        let new_entry = CustomPrompt { name: name.clone(), path, content: body.clone(), description: None, argument_hint: None };
+        let new_entry = CustomPrompt {
+            name: name.clone(),
+            path,
+            content: body.clone(),
+            description: None,
+            argument_hint: None,
+        };
         if self.selected < updated.len() {
             updated[self.selected] = new_entry;
         } else {
@@ -413,12 +540,16 @@ impl PromptsSettingsView {
         self.status = Some(("Saved.".to_string(), Style::default().fg(colors::success())));
 
         // Trigger reload so composer autocomplete picks it up.
-        self.app_event_tx.send(AppEvent::CodexOp(Op::ListCustomPrompts));
+        self.app_event_tx
+            .send(AppEvent::CodexOp(Op::ListCustomPrompts));
     }
 
     fn delete_current(&mut self) {
         if self.selected >= self.prompts.len() {
-            self.status = Some(("Nothing to delete".to_string(), Style::default().fg(colors::warning())));
+            self.status = Some((
+                "Nothing to delete".to_string(),
+                Style::default().fg(colors::warning()),
+            ));
             self.mode = Mode::List;
             self.focus = Focus::List;
             return;
@@ -427,7 +558,10 @@ impl PromptsSettingsView {
         if let Err(e) = fs::remove_file(&prompt.path) {
             // Ignore missing file but surface other errors
             if e.kind() != std::io::ErrorKind::NotFound {
-                self.status = Some((format!("Delete failed: {e}"), Style::default().fg(colors::error())));
+                self.status = Some((
+                    format!("Delete failed: {e}"),
+                    Style::default().fg(colors::error()),
+                ));
                 return;
             }
         }
@@ -437,7 +571,11 @@ impl PromptsSettingsView {
         }
         self.mode = Mode::List;
         self.focus = Focus::List;
-        self.status = Some(("Deleted.".to_string(), Style::default().fg(colors::success())));
-        self.app_event_tx.send(AppEvent::CodexOp(Op::ListCustomPrompts));
+        self.status = Some((
+            "Deleted.".to_string(),
+            Style::default().fg(colors::success()),
+        ));
+        self.app_event_tx
+            .send(AppEvent::CodexOp(Op::ListCustomPrompts));
     }
 }

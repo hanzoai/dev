@@ -50,8 +50,7 @@ pub fn escape_command(command: &[String]) -> String {
 pub fn strip_bash_lc_and_escape(command: &[String]) -> String {
     match command {
         [first, second, third]
-            if is_shell_like_executable(first)
-                && (second == "-lc" || second == "-c") =>
+            if is_shell_like_executable(first) && (second == "-lc" || second == "-c") =>
         {
             third.clone()
         }

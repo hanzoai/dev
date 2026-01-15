@@ -10,7 +10,9 @@ use std::path::PathBuf;
 use hanzo_core::protocol::FileChange;
 
 use crate::history_cell::PatchEventType;
-use crate::sanitize::{sanitize_for_tui, Mode as SanitizeMode, Options as SanitizeOptions};
+use crate::sanitize::Mode as SanitizeMode;
+use crate::sanitize::Options as SanitizeOptions;
+use crate::sanitize::sanitize_for_tui;
 
 // Sanitize diff content so tabs and control characters don’t break terminal layout.
 // Mirrors the behavior we use for user input and command output:
@@ -169,7 +171,11 @@ fn sanitize_diff_text(s: &str) -> String {
     sanitize_for_tui(
         s,
         SanitizeMode::Plain,
-        SanitizeOptions { expand_tabs: true, tabstop: 4, debug_markers: false },
+        SanitizeOptions {
+            expand_tabs: true,
+            tabstop: 4,
+            debug_markers: false,
+        },
     )
 }
 
@@ -214,8 +220,12 @@ pub(super) fn create_diff_summary_with_width(
     }
 
     enum FileSummaryKind {
-        Add { empty: bool },
-        Delete { removed_unknown: bool },
+        Add {
+            empty: bool,
+        },
+        Delete {
+            removed_unknown: bool,
+        },
         Update {
             rename_only: bool,
             no_content_change: bool,
@@ -238,15 +248,16 @@ pub(super) fn create_diff_summary_with_width(
         }
         let mut metadata_marker = diff_contains_metadata_markers(diff);
         if let Ok(patch) = diffy::Patch::from_str(diff) {
-            let (added, removed) = patch
-                .hunks()
-                .iter()
-                .flat_map(|h| h.lines())
-                .fold((0, 0), |(a, d), l| match l {
-                    diffy::Line::Insert(_) => (a + 1, d),
-                    diffy::Line::Delete(_) => (a, d + 1),
-                    _ => (a, d),
-                });
+            let (added, removed) =
+                patch
+                    .hunks()
+                    .iter()
+                    .flat_map(|h| h.lines())
+                    .fold((0, 0), |(a, d), l| match l {
+                        diffy::Line::Insert(_) => (a + 1, d),
+                        diffy::Line::Delete(_) => (a, d + 1),
+                        _ => (a, d),
+                    });
             DiffTally {
                 added,
                 removed,
@@ -316,11 +327,11 @@ pub(super) fn create_diff_summary_with_width(
                 ..
             } => {
                 let tally = count_from_unified(unified_diff);
-                let rename_target = move_path.as_ref().map(|new_path| new_path.display().to_string());
+                let rename_target = move_path
+                    .as_ref()
+                    .map(|new_path| new_path.display().to_string());
                 let binary_change = tally.binary_marker;
-                let metadata_only = tally.metadata_marker
-                    && tally.added == 0
-                    && tally.removed == 0;
+                let metadata_only = tally.metadata_marker && tally.added == 0 && tally.removed == 0;
                 let rename_only = rename_target.is_some()
                     && tally.added == 0
                     && tally.removed == 0
@@ -399,8 +410,7 @@ pub(super) fn create_diff_summary_with_width(
         let dim_style = Style::default().fg(crate::colors::text_dim());
 
         if let FileSummaryKind::Update {
-            rename_only: true,
-            ..
+            rename_only: true, ..
         } = &f.change
         {
             if let Some(rename_target) = &f.rename_target {
@@ -441,10 +451,7 @@ pub(super) fn create_diff_summary_with_width(
                 annotation = Some(" (no changes)".to_string());
                 skip_counts = true;
             }
-            FileSummaryKind::Update {
-                binary: true,
-                ..
-            } => {
+            FileSummaryKind::Update { binary: true, .. } => {
                 annotation = Some(" (binary change)".to_string());
                 skip_counts = true;
             }
@@ -472,7 +479,10 @@ pub(super) fn create_diff_summary_with_width(
         }
 
         if !skip_counts {
-            if let FileSummaryKind::Delete { removed_unknown: false } = &f.change {
+            if let FileSummaryKind::Delete {
+                removed_unknown: false,
+            } = &f.change
+            {
                 spans.push(RtSpan::styled(" (".to_string(), dim_style));
                 spans.push(RtSpan::styled(
                     format!("-{}", f.removed),
@@ -503,8 +513,7 @@ pub(super) fn create_diff_summary_with_width(
         event_type,
         PatchEventType::ApplyBegin {
             auto_approved: true
-        }
-            | PatchEventType::ApplySuccess
+        } | PatchEventType::ApplySuccess
             | PatchEventType::ApprovalRequest
     );
 
@@ -612,32 +621,32 @@ fn render_patch_details_with_width(
                             match l {
                                 diffy::Line::Insert(text) => {
                                     let s = sanitize_diff_text(text.trim_end_matches('\n'));
-                    out.extend(push_wrapped_diff_line_with_width(
-                        new_ln,
-                        DiffLineType::Insert,
-                        &s,
-                        term_cols,
-                    ));
+                                    out.extend(push_wrapped_diff_line_with_width(
+                                        new_ln,
+                                        DiffLineType::Insert,
+                                        &s,
+                                        term_cols,
+                                    ));
                                     new_ln += 1;
                                 }
                                 diffy::Line::Delete(text) => {
                                     let s = sanitize_diff_text(text.trim_end_matches('\n'));
-                    out.extend(push_wrapped_diff_line_with_width(
-                        old_ln,
-                        DiffLineType::Delete,
-                        &s,
-                        term_cols,
-                    ));
+                                    out.extend(push_wrapped_diff_line_with_width(
+                                        old_ln,
+                                        DiffLineType::Delete,
+                                        &s,
+                                        term_cols,
+                                    ));
                                     old_ln += 1;
                                 }
                                 diffy::Line::Context(text) => {
                                     let s = sanitize_diff_text(text.trim_end_matches('\n'));
-                    out.extend(push_wrapped_diff_line_with_width(
-                        new_ln,
-                        DiffLineType::Context,
-                        &s,
-                        term_cols,
-                    ));
+                                    out.extend(push_wrapped_diff_line_with_width(
+                                        new_ln,
+                                        DiffLineType::Context,
+                                        &s,
+                                        term_cols,
+                                    ));
                                     old_ln += 1;
                                     new_ln += 1;
                                 }
@@ -706,10 +715,12 @@ fn push_wrapped_diff_line_with_width(
         // First line reserves 1 col for the sign ('+'/'-') and 1 space after it.
         // Continuation lines must reserve BOTH columns as well (sign column + its trailing space)
         // before applying the hanging indent equal to the content's leading spaces.
-        let base_prefix = if first { prefix_cols + 2 } else { prefix_cols + 2 + continuation_indent };
-        let available_content_cols = term_cols
-            .saturating_sub(base_prefix)
-            .max(1);
+        let base_prefix = if first {
+            prefix_cols + 2
+        } else {
+            prefix_cols + 2 + continuation_indent
+        };
+        let available_content_cols = term_cols.saturating_sub(base_prefix).max(1);
         let split_at_byte_index = remaining_text
             .char_indices()
             .nth(available_content_cols)

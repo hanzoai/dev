@@ -348,10 +348,13 @@ impl McpConnectionManager {
 
         let tools = qualify_tools(all_tools);
 
-        Ok((Self {
-            clients: RwLock::new(clients),
-            tools,
-        }, errors))
+        Ok((
+            Self {
+                clients: RwLock::new(clients),
+                tools,
+            },
+            errors,
+        ))
     }
 
     /// Returns a single map that contains **all** tools. Each key is the
@@ -401,7 +404,6 @@ impl McpConnectionManager {
             managed.shutdown().await;
         }
     }
-
 }
 
 impl ManagedClient {
@@ -457,9 +459,7 @@ async fn list_all_tools(
                 }
             }
             Err(err) => {
-                warn!(
-                    "Failed to list tools for MCP server '{server_name}': {err:#?}"
-                );
+                warn!("Failed to list tools for MCP server '{server_name}': {err:#?}");
                 errors.insert(server_name, err.into());
             }
         }
@@ -615,7 +615,10 @@ mod tests {
             .expect("missing executable should be reported under server name");
         let msg = format!("{err:#}");
 
-        assert!(msg.contains("context7-mcp"), "error should mention the server name");
+        assert!(
+            msg.contains("context7-mcp"),
+            "error should mention the server name"
+        );
         assert!(
             msg.contains("nonexistent-cmd"),
             "error should include the missing command, got: {msg}"

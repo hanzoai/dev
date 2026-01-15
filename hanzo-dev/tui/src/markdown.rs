@@ -3,13 +3,13 @@
 use crate::citation_regex::CITATION_REGEX;
 use crate::markdown_renderer::MarkdownRenderer;
 use hanzo_core::config::Config;
-use ratatui::style::Style;
-use ratatui::text::Span;
-use unicode_width::UnicodeWidthStr;
 use hanzo_core::config_types::UriBasedFileOpener;
+use ratatui::style::Style;
 use ratatui::text::Line;
+use ratatui::text::Span;
 use std::borrow::Cow;
 use std::path::Path;
+use unicode_width::UnicodeWidthStr;
 
 pub(crate) fn append_markdown(
     markdown_source: &str,
@@ -24,7 +24,13 @@ pub(crate) fn append_markdown_with_bold_first(
     lines: &mut Vec<Line<'static>>,
     config: &Config,
 ) {
-    append_markdown_with_opener_and_cwd_and_bold(markdown_source, lines, config.file_opener, &config.cwd, true);
+    append_markdown_with_opener_and_cwd_and_bold(
+        markdown_source,
+        lines,
+        config.file_opener,
+        &config.cwd,
+        true,
+    );
 }
 
 fn append_markdown_with_opener_and_cwd(
@@ -74,7 +80,11 @@ pub(crate) fn append_markdown_with_opener_and_cwd_and_bold(
                 };
                 lines.extend(rendered);
             }
-            Segment::Code { _lang, content, fenced } => {
+            Segment::Code {
+                _lang,
+                content,
+                fenced,
+            } => {
                 // Use syntect-based syntax highlighting when available, preserving exact text.
                 let lang = _lang.as_deref();
                 // Apply a solid background and pad trailing spaces so the block forms
@@ -84,7 +94,12 @@ pub(crate) fn append_markdown_with_opener_and_cwd_and_bold(
                 // Compute max display width (in terminal cells) across lines
                 let max_w: usize = highlighted
                     .iter()
-                    .map(|l| l.spans.iter().map(|s| UnicodeWidthStr::width(s.content.as_ref())).sum::<usize>())
+                    .map(|l| {
+                        l.spans
+                            .iter()
+                            .map(|s| UnicodeWidthStr::width(s.content.as_ref()))
+                            .sum::<usize>()
+                    })
                     .max()
                     .unwrap_or(0);
                 // No extra horizontal padding; use exact content width.
@@ -95,7 +110,10 @@ pub(crate) fn append_markdown_with_opener_and_cwd_and_bold(
                 if fenced {
                     let label = _lang.clone().unwrap_or_else(|| "text".to_string());
                     let sentinel = format!("⟦LANG:{}⟧", label);
-                    lines.push(Line::from(Span::styled(sentinel, Style::default().fg(code_bg).bg(code_bg))));
+                    lines.push(Line::from(Span::styled(
+                        sentinel,
+                        Style::default().fg(code_bg).bg(code_bg),
+                    )));
                 }
 
                 if fenced {
@@ -112,10 +130,12 @@ pub(crate) fn append_markdown_with_opener_and_cwd_and_bold(
                             .sum();
                         if target_w > w {
                             let pad = " ".repeat(target_w - w);
-                            l.spans.push(Span::styled(pad, Style::default().bg(code_bg)));
+                            l.spans
+                                .push(Span::styled(pad, Style::default().bg(code_bg)));
                         } else if w == 0 {
                             // Defensive: paint at least one cell so background shows
-                            l.spans.push(Span::styled(" ", Style::default().bg(code_bg)));
+                            l.spans
+                                .push(Span::styled(" ", Style::default().bg(code_bg)));
                         }
                     }
                     lines.extend(highlighted);
@@ -183,25 +203,30 @@ fn rewrite_web_citations<'a>(src: &'a str) -> Cow<'a, str> {
     use once_cell::sync::OnceCell;
     use regex_lite::Regex;
     static WEB_CITE_RE: OnceCell<Regex> = OnceCell::new();
-    let re = WEB_CITE_RE.get_or_init(|| Regex::new(r"cite([^]+)").expect("failed to compile web cite regex"));
+    let re = WEB_CITE_RE
+        .get_or_init(|| Regex::new(r"cite([^]+)").expect("failed to compile web cite regex"));
     if !re.is_match(src) {
         return Cow::Borrowed(src);
     }
-    Cow::Owned(re.replace_all(src, |caps: &regex_lite::Captures<'_>| {
-        let inner = &caps[1];
-        let parts = inner.split('').filter(|s| !s.is_empty());
-        let mut out = String::new();
-        for (i, id) in parts.enumerate() {
-            if i > 0 { out.push(' '); }
-            // Use a stable placeholder target. Our renderer will show "label (target)".
-            out.push_str(&format!("[{id}](ref:{id})"));
-        }
-        // Add a trailing space for readability between adjacent citations and text
-        out.push(' ');
-        out
-    }).into_owned())
+    Cow::Owned(
+        re.replace_all(src, |caps: &regex_lite::Captures<'_>| {
+            let inner = &caps[1];
+            let parts = inner.split('').filter(|s| !s.is_empty());
+            let mut out = String::new();
+            for (i, id) in parts.enumerate() {
+                if i > 0 {
+                    out.push(' ');
+                }
+                // Use a stable placeholder target. Our renderer will show "label (target)".
+                out.push_str(&format!("[{id}](ref:{id})"));
+            }
+            // Add a trailing space for readability between adjacent citations and text
+            out.push(' ');
+            out
+        })
+        .into_owned(),
+    )
 }
-
 
 // Minimal code block splitting.
 // - Recognizes fenced blocks opened by ``` or ~~~ (allowing leading whitespace).
@@ -297,7 +322,10 @@ fn split_text_and_fences(src: &str) -> Vec<Segment> {
                 let mut chars = after_indent.chars();
                 let mut saw_digit = false;
                 while let Some(c) = chars.next() {
-                    if c.is_ascii_digit() { saw_digit = true; continue; }
+                    if c.is_ascii_digit() {
+                        saw_digit = true;
+                        continue;
+                    }
                     if (c == '.' || c == ')') && chars.next().is_some_and(|n| n == ' ') {
                         break;
                     }
@@ -311,7 +339,8 @@ fn split_text_and_fences(src: &str) -> Vec<Segment> {
                 || after_indent.starts_with("* ")
                 || after_indent.starts_with("+ ");
             let looks_like_list = is_unordered_list || is_ordered_list;
-            let starts_indented_code = ((leading_spaces >= 4) || starts_with_tab) && !looks_like_list;
+            let starts_indented_code =
+                ((leading_spaces >= 4) || starts_with_tab) && !looks_like_list;
             if starts_indented_code {
                 // Flush pending text and begin an indented code block.
                 if !curr_text.is_empty() {
@@ -391,4 +420,3 @@ fn split_text_and_fences(src: &str) -> Vec<Segment> {
 
     segments
 }
-

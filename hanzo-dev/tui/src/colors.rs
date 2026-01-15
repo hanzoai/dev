@@ -1,5 +1,8 @@
+use crate::theme::PaletteMode;
+use crate::theme::current_theme;
+use crate::theme::palette_mode;
+use crate::theme::quantize_color_for_palette;
 use ratatui::style::Color;
-use crate::theme::{current_theme, palette_mode, quantize_color_for_palette, PaletteMode};
 
 // Legacy color constants - now redirect to theme
 pub(crate) fn light_blue() -> Color {
@@ -54,7 +57,8 @@ pub(crate) fn border_dim() -> Color {
             let (br, bg_g, bb) = color_to_rgb(b);
             let (rr, rg, rb) = color_to_rgb(bg);
             let t: f32 = 0.30; // 30% toward background
-            let mix = |a: u8, b: u8| -> u8 { ((a as f32) * (1.0 - t) + (b as f32) * t).round() as u8 };
+            let mix =
+                |a: u8, b: u8| -> u8 { ((a as f32) * (1.0 - t) + (b as f32) * t).round() as u8 };
             let r = mix(br, rr);
             let g = mix(bg_g, rg);
             let bl = mix(bb, rb);

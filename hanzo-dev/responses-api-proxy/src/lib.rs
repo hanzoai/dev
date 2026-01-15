@@ -78,15 +78,16 @@ pub fn run_main(args: Args) -> Result<()> {
         if let Err(err) = std::thread::Builder::new()
             .name("responses-api-proxy-worker".to_string())
             .spawn(move || {
-            if http_shutdown && request.method() == &Method::Get && request.url() == "/shutdown" {
-                let _ = request.respond(Response::new_empty(StatusCode(200)));
-                std::process::exit(0);
-            }
+                if http_shutdown && request.method() == &Method::Get && request.url() == "/shutdown"
+                {
+                    let _ = request.respond(Response::new_empty(StatusCode(200)));
+                    std::process::exit(0);
+                }
 
-            if let Err(e) = forward_request(&client, auth_header, request) {
-                eprintln!("forwarding error: {e}");
-            }
-        })
+                if let Err(e) = forward_request(&client, auth_header, request) {
+                    eprintln!("forwarding error: {e}");
+                }
+            })
         {
             eprintln!("failed to spawn request handler: {err}");
         }

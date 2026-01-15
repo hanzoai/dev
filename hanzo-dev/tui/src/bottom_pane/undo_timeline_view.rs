@@ -1,17 +1,30 @@
 use std::cmp::max;
 
-use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
+use crossterm::event::KeyCode;
+use crossterm::event::KeyEvent;
+use crossterm::event::KeyModifiers;
 use ratatui::buffer::Buffer;
-use ratatui::layout::{Alignment, Constraint, Layout, Rect};
-use ratatui::style::{Modifier, Style};
-use ratatui::text::{Line, Span};
-use ratatui::widgets::{Block, Borders, Clear, Paragraph, Widget};
+use ratatui::layout::Alignment;
+use ratatui::layout::Constraint;
+use ratatui::layout::Layout;
+use ratatui::layout::Rect;
+use ratatui::style::Modifier;
+use ratatui::style::Style;
+use ratatui::text::Line;
+use ratatui::text::Span;
+use ratatui::widgets::Block;
+use ratatui::widgets::Borders;
+use ratatui::widgets::Clear;
+use ratatui::widgets::Paragraph;
+use ratatui::widgets::Widget;
 
 use crate::app_event::AppEvent;
 use crate::app_event_sender::AppEventSender;
 
-use super::bottom_pane_view::{BottomPaneView, ConditionalUpdate};
-use super::{BottomPane, CancellationEvent};
+use super::BottomPane;
+use super::CancellationEvent;
+use super::bottom_pane_view::BottomPaneView;
+use super::bottom_pane_view::ConditionalUpdate;
 
 const MAX_VISIBLE_LIST_ROWS: usize = 12;
 
@@ -68,7 +81,11 @@ pub(crate) struct UndoTimelineView {
 }
 
 impl UndoTimelineView {
-    pub fn new(entries: Vec<UndoTimelineEntry>, initial_selected: usize, app_event_tx: AppEventSender) -> Self {
+    pub fn new(
+        entries: Vec<UndoTimelineEntry>,
+        initial_selected: usize,
+        app_event_tx: AppEventSender,
+    ) -> Self {
         let selected = initial_selected.min(entries.len().saturating_sub(1));
         let mut view = Self {
             entries,
@@ -235,7 +252,8 @@ impl UndoTimelineView {
                     self.app_event_tx.send(AppEvent::PerformUndoRestore {
                         commit: Some(commit.clone()),
                         restore_files: self.restore_files && entry.files_available,
-                        restore_conversation: self.restore_conversation && entry.conversation_available,
+                        restore_conversation: self.restore_conversation
+                            && entry.conversation_available,
                     });
                     self.is_complete = true;
                 }
@@ -247,7 +265,10 @@ impl UndoTimelineView {
     }
 
     fn total_list_height(&self) -> usize {
-        self.entries.iter().map(|entry| entry.list_line_count()).sum()
+        self.entries
+            .iter()
+            .map(|entry| entry.list_line_count())
+            .sum()
     }
 
     fn visible_range(&self) -> (usize, usize) {
@@ -258,7 +279,9 @@ impl UndoTimelineView {
 
         let mut start_entry = 0usize;
         let mut spent = 0usize;
-        while start_entry < self.entries.len() && spent + self.entries[start_entry].list_line_count() <= self.top_row {
+        while start_entry < self.entries.len()
+            && spent + self.entries[start_entry].list_line_count() <= self.top_row
+        {
             spent = spent.saturating_add(self.entries[start_entry].list_line_count());
             start_entry += 1;
         }
@@ -311,7 +334,10 @@ impl UndoTimelineView {
 
             let marker = if selected { "›" } else { " " };
             let mut title_spans = vec![
-                Span::styled(format!("{marker} "), Style::default().fg(crate::colors::primary())),
+                Span::styled(
+                    format!("{marker} "),
+                    Style::default().fg(crate::colors::primary()),
+                ),
                 Span::styled(
                     entry.label.clone(),
                     if selected {
@@ -365,7 +391,10 @@ impl UndoTimelineView {
                 } else {
                     Style::default().fg(crate::colors::text_dim())
                 };
-                lines.push(Line::from(Span::styled(format!("  {}", parts.join(" • ")), style)));
+                lines.push(Line::from(Span::styled(
+                    format!("  {}", parts.join(" • ")),
+                    style,
+                )));
             }
 
             if let Some(stats) = &entry.stats_line {
@@ -391,7 +420,11 @@ impl UndoTimelineView {
 
         let paragraph = Paragraph::new(lines)
             .alignment(Alignment::Left)
-            .style(Style::default().bg(crate::colors::background()).fg(crate::colors::text()))
+            .style(
+                Style::default()
+                    .bg(crate::colors::background())
+                    .fg(crate::colors::text()),
+            )
             .wrap(ratatui::widgets::Wrap { trim: true });
         paragraph.render(area, buf);
     }
@@ -412,7 +445,11 @@ impl UndoTimelineView {
             .borders(Borders::ALL)
             .title(" Conversation preview ")
             .border_style(Style::default().fg(crate::colors::border()))
-            .style(Style::default().bg(crate::colors::background()).fg(crate::colors::text()));
+            .style(
+                Style::default()
+                    .bg(crate::colors::background())
+                    .fg(crate::colors::text()),
+            );
         let conversation_inner = conversation_block.inner(conversation_area);
         conversation_block.render(conversation_area, buf);
         let conversation = Paragraph::new(entry.conversation_lines.clone())
@@ -425,7 +462,11 @@ impl UndoTimelineView {
             .borders(Borders::ALL)
             .title(" File changes ")
             .border_style(Style::default().fg(crate::colors::border()))
-            .style(Style::default().bg(crate::colors::background()).fg(crate::colors::text()));
+            .style(
+                Style::default()
+                    .bg(crate::colors::background())
+                    .fg(crate::colors::text()),
+            );
         let files_inner = files_block.inner(files_area);
         files_block.render(files_area, buf);
         let file_lines = if entry.file_lines.is_empty() {
@@ -444,7 +485,11 @@ impl UndoTimelineView {
 
         let footer_lines = self.footer_lines(entry);
         Paragraph::new(footer_lines)
-            .style(Style::default().bg(crate::colors::background()).fg(crate::colors::text()))
+            .style(
+                Style::default()
+                    .bg(crate::colors::background())
+                    .fg(crate::colors::text()),
+            )
             .wrap(ratatui::widgets::Wrap { trim: true })
             .render(footer_area, buf);
     }
@@ -462,18 +507,30 @@ impl UndoTimelineView {
 
         let convo_status = if entry.conversation_available {
             if self.restore_conversation {
-                Span::styled("[x] Conversation", Style::default().fg(crate::colors::success()))
+                Span::styled(
+                    "[x] Conversation",
+                    Style::default().fg(crate::colors::success()),
+                )
             } else {
-                Span::styled("[ ] Conversation", Style::default().fg(crate::colors::text_dim()))
+                Span::styled(
+                    "[ ] Conversation",
+                    Style::default().fg(crate::colors::text_dim()),
+                )
             }
         } else {
-            Span::styled("[ ] Conversation", Style::default().fg(crate::colors::text_dim()))
+            Span::styled(
+                "[ ] Conversation",
+                Style::default().fg(crate::colors::text_dim()),
+            )
         };
 
         vec![
             Line::from(vec![files_status, Span::raw("  "), convo_status]),
             Line::from(vec![
-                Span::styled("↑↓ PgUp PgDn", Style::default().fg(crate::colors::light_blue())),
+                Span::styled(
+                    "↑↓ PgUp PgDn",
+                    Style::default().fg(crate::colors::light_blue()),
+                ),
                 Span::raw(" Navigate  "),
                 Span::styled("Space", Style::default().fg(crate::colors::success())),
                 Span::raw(" Toggle files  "),
@@ -517,8 +574,12 @@ impl<'a> BottomPaneView<'a> for UndoTimelineView {
                     }
                 }
             }
-            KeyCode::Right if key_event.modifiers.contains(KeyModifiers::CONTROL) => self.toggle_conversation(),
-            KeyCode::Left if key_event.modifiers.contains(KeyModifiers::CONTROL) => self.toggle_files(),
+            KeyCode::Right if key_event.modifiers.contains(KeyModifiers::CONTROL) => {
+                self.toggle_conversation()
+            }
+            KeyCode::Left if key_event.modifiers.contains(KeyModifiers::CONTROL) => {
+                self.toggle_files()
+            }
             _ => {}
         }
     }
@@ -550,21 +611,26 @@ impl<'a> BottomPaneView<'a> for UndoTimelineView {
             .borders(Borders::ALL)
             .title(" Restore workspace snapshot ")
             .border_style(Style::default().fg(crate::colors::border()))
-            .style(Style::default().bg(crate::colors::background()).fg(crate::colors::text()))
+            .style(
+                Style::default()
+                    .bg(crate::colors::background())
+                    .fg(crate::colors::text()),
+            )
             .title_alignment(Alignment::Center);
         let inner = block.inner(area);
         block.render(area, buf);
-        let [list_area, preview_area] = Layout::horizontal([
-            Constraint::Percentage(38),
-            Constraint::Fill(1),
-        ])
-        .areas(inner);
+        let [list_area, preview_area] =
+            Layout::horizontal([Constraint::Percentage(38), Constraint::Fill(1)]).areas(inner);
 
         let list_block = Block::default()
             .borders(Borders::ALL)
             .title(" Snapshots ")
             .border_style(Style::default().fg(crate::colors::border()))
-            .style(Style::default().bg(crate::colors::background()).fg(crate::colors::text()));
+            .style(
+                Style::default()
+                    .bg(crate::colors::background())
+                    .fg(crate::colors::text()),
+            );
         let list_inner = list_block.inner(list_area);
         list_block.render(list_area, buf);
         self.render_list(list_inner, buf);

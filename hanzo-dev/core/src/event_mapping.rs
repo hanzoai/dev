@@ -39,8 +39,12 @@ pub(crate) fn map_response_item_to_event_messages(
             for content_item in content.iter() {
                 match content_item {
                     ContentItem::InputText { text } => {
-                        if let Some(snapshot) = extract_tagged_json(text, ENVIRONMENT_CONTEXT_OPEN_TAG, ENVIRONMENT_CONTEXT_CLOSE_TAG)
-                            .and_then(parse_json)
+                        if let Some(snapshot) = extract_tagged_json(
+                            text,
+                            ENVIRONMENT_CONTEXT_OPEN_TAG,
+                            ENVIRONMENT_CONTEXT_CLOSE_TAG,
+                        )
+                        .and_then(parse_json)
                         {
                             events.push(EventMsg::EnvironmentContextFull(
                                 EnvironmentContextFullEvent {
@@ -234,7 +238,10 @@ mod tests {
         let events = map_response_item_to_event_messages(&item, false);
         assert_eq!(events.len(), 1);
         match &events[0] {
-            EventMsg::EnvironmentContextFull(EnvironmentContextFullEvent { snapshot, sequence }) => {
+            EventMsg::EnvironmentContextFull(EnvironmentContextFullEvent {
+                snapshot,
+                sequence,
+            }) => {
                 assert_eq!(snapshot, &payload);
                 assert_eq!(*sequence, None);
             }

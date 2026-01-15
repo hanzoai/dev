@@ -1,13 +1,19 @@
 //! Help overlay key handling similar to the diff overlay, but simpler.
 
 use super::ChatWidget;
-use crossterm::event::{KeyCode, KeyEvent};
+use crossterm::event::KeyCode;
+use crossterm::event::KeyEvent;
 
 // Returns true if the key was handled by the guide overlay (or toggled it closed).
 pub(super) fn handle_help_key(chat: &mut ChatWidget<'_>, key_event: KeyEvent) -> bool {
     // If no guide overlay, only intercept Ctrl+G to open it.
     if chat.help.overlay.is_none() {
-        if let KeyEvent { code: KeyCode::Char('g'), modifiers: crossterm::event::KeyModifiers::CONTROL, .. } = key_event {
+        if let KeyEvent {
+            code: KeyCode::Char('g'),
+            modifiers: crossterm::event::KeyModifiers::CONTROL,
+            ..
+        } = key_event
+        {
             chat.toggle_help_popup();
             return true;
         }
@@ -15,7 +21,9 @@ pub(super) fn handle_help_key(chat: &mut ChatWidget<'_>, key_event: KeyEvent) ->
     }
 
     // Overlay active: process navigation + close
-    let Some(ref mut overlay) = chat.help.overlay else { return false };
+    let Some(ref mut overlay) = chat.help.overlay else {
+        return false;
+    };
     match key_event.code {
         KeyCode::Up => {
             overlay.scroll = overlay.scroll.saturating_sub(1);

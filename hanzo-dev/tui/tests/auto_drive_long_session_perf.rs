@@ -1,9 +1,9 @@
 #![cfg(test)]
 #![allow(clippy::unwrap_used, clippy::expect_used)]
 
-use hanzo_tui::test_helpers::{
-    render_chat_widget_to_vt100, AutoContinueModeFixture, ChatWidgetHarness,
-};
+use hanzo_tui::test_helpers::AutoContinueModeFixture;
+use hanzo_tui::test_helpers::ChatWidgetHarness;
+use hanzo_tui::test_helpers::render_chat_widget_to_vt100;
 
 #[test]
 fn auto_drive_countdown_keeps_render_requests_local() {
@@ -25,11 +25,7 @@ fn auto_drive_countdown_keeps_render_requests_local() {
         false,
         AutoContinueModeFixture::TenSeconds,
     );
-    harness.auto_drive_set_awaiting_submission(
-        "Continue",
-        "Waiting for coordinator",
-        None,
-    );
+    harness.auto_drive_set_awaiting_submission("Continue", "Waiting for coordinator", None);
 
     let _ = render_chat_widget_to_vt100(&mut harness, 120, 40);
     let before = harness.perf_stats_snapshot();

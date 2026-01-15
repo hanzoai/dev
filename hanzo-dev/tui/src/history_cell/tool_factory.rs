@@ -1,44 +1,56 @@
 use std::io::Cursor;
-use std::time::{Duration, SystemTime};
+use std::time::Duration;
+use std::time::SystemTime;
 
 use base64::Engine;
 use hanzo_common::elapsed::format_duration;
 use hanzo_core::config::Config;
 use hanzo_core::protocol::McpInvocation;
-use mcp_types::{EmbeddedResourceResource, ResourceLink};
-use ratatui::prelude::{Buffer, Rect};
-use ratatui::style::{Modifier, Style, Stylize};
-use ratatui::text::{Line, Span, Text};
-use ratatui::widgets::{Block, Borders, Padding, Paragraph, Widget, Wrap};
-use sha2::{Digest, Sha256};
+use mcp_types::EmbeddedResourceResource;
+use mcp_types::ResourceLink;
+use ratatui::prelude::Buffer;
+use ratatui::prelude::Rect;
+use ratatui::style::Modifier;
+use ratatui::style::Style;
+use ratatui::style::Stylize;
+use ratatui::text::Line;
+use ratatui::text::Span;
+use ratatui::text::Text;
+use ratatui::widgets::Block;
+use ratatui::widgets::Borders;
+use ratatui::widgets::Padding;
+use ratatui::widgets::Paragraph;
+use ratatui::widgets::Widget;
+use ratatui::widgets::Wrap;
+use sha2::Digest;
+use sha2::Sha256;
 use tracing::error;
 
-use super::core::{HistoryCell, HistoryCellType, ToolCellStatus};
-use super::formatting::{
-    build_preview_lines,
-    clean_wait_command,
-    line_to_plain_text,
-    lines_to_plain_text,
-    pretty_provider_name,
-    select_preview_from_lines,
-    select_preview_from_plain_text,
-    trim_empty_lines,
-};
+use super::core::HistoryCell;
+use super::core::HistoryCellType;
+use super::core::ToolCellStatus;
+use super::formatting::build_preview_lines;
+use super::formatting::clean_wait_command;
+use super::formatting::line_to_plain_text;
+use super::formatting::lines_to_plain_text;
+use super::formatting::pretty_provider_name;
+use super::formatting::select_preview_from_lines;
+use super::formatting::select_preview_from_plain_text;
+use super::formatting::trim_empty_lines;
 use super::image::ImageOutputCell;
-use super::tool::{RunningToolCallCell, ToolCallCell};
+use super::tool::RunningToolCallCell;
+use super::tool::ToolCallCell;
 
-use crate::history::compat::{
-    ArgumentValue,
-    HistoryId,
-    ImageRecord,
-    RunningToolState,
-    ToolArgument,
-    ToolCallState,
-    ToolResultPreview,
-    ToolStatus as HistoryToolStatus,
-};
-use ::image::ImageReader;
+use crate::history::compat::ArgumentValue;
+use crate::history::compat::HistoryId;
+use crate::history::compat::ImageRecord;
+use crate::history::compat::RunningToolState;
+use crate::history::compat::ToolArgument;
+use crate::history::compat::ToolCallState;
+use crate::history::compat::ToolResultPreview;
+use crate::history::compat::ToolStatus as HistoryToolStatus;
 use crate::util::buffer::fill_rect;
+use ::image::ImageReader;
 
 #[allow(dead_code)]
 pub(crate) fn new_active_mcp_tool_call(invocation: McpInvocation) -> ToolCallCell {
@@ -118,10 +130,7 @@ fn arguments_from_json(value: &serde_json::Value) -> Vec<ToolArgument> {
     arguments_from_json_excluding(value, &[])
 }
 
-fn arguments_from_json_excluding(
-    value: &serde_json::Value,
-    exclude: &[&str],
-) -> Vec<ToolArgument> {
+fn arguments_from_json_excluding(value: &serde_json::Value, exclude: &[&str]) -> Vec<ToolArgument> {
     match value {
         serde_json::Value::Object(map) => map
             .iter()
@@ -990,15 +999,14 @@ fn try_new_completed_mcp_tool_call_with_image_output(
     match result {
         Ok(mcp_types::CallToolResult { content, .. }) => {
             if let Some(mcp_types::ContentBlock::ImageContent(image_block)) = content.first() {
-                let raw_data = match base64::engine::general_purpose::STANDARD
-                    .decode(&image_block.data)
-                {
-                    Ok(data) => data,
-                    Err(e) => {
-                        error!("Failed to decode image data: {e}");
-                        return None;
-                    }
-                };
+                let raw_data =
+                    match base64::engine::general_purpose::STANDARD.decode(&image_block.data) {
+                        Ok(data) => data,
+                        Err(e) => {
+                            error!("Failed to decode image data: {e}");
+                            return None;
+                        }
+                    };
                 let reader = match ImageReader::new(Cursor::new(&raw_data)).with_guessed_format() {
                     Ok(reader) => reader,
                     Err(e) => {

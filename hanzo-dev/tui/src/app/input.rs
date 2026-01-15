@@ -1,10 +1,13 @@
-use crossterm::event::{KeyCode, KeyEvent, MouseEvent};
+use crossterm::event::KeyCode;
+use crossterm::event::KeyEvent;
+use crossterm::event::MouseEvent;
 
 use crate::app_event::AppEvent;
 use crate::onboarding::onboarding_screen::KeyboardHandler;
 use hanzo_core::protocol::Event;
 
-use super::state::{App, AppState};
+use super::state::App;
+use super::state::AppState;
 
 impl App<'_> {
     /// Dispatch a KeyEvent to the current view and let it decide what to do

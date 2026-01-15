@@ -1,7 +1,9 @@
 use std::cell::Cell;
 
-use ratatui::style::{Style, Stylize};
-use ratatui::text::{Line as RtLine, Span};
+use ratatui::style::Style;
+use ratatui::style::Stylize;
+use ratatui::text::Line as RtLine;
+use ratatui::text::Span;
 
 use crate::colors;
 use crate::rate_limits_view::LimitsView;
@@ -90,7 +92,9 @@ impl LimitsOverlay {
     }
 
     pub(crate) fn selected_tab(&self) -> usize {
-        self.selected_tab.get().min(self.tab_count().saturating_sub(1))
+        self.selected_tab
+            .get()
+            .min(self.tab_count().saturating_sub(1))
     }
 
     pub(crate) fn select_next_tab(&self) -> bool {
@@ -220,28 +224,27 @@ fn placeholder_lines() -> Vec<RtLine<'static>> {
 }
 
 fn loading_lines() -> Vec<RtLine<'static>> {
-    vec![
-        RtLine::from(Span::styled(
-            "Loading...",
-            Style::default().fg(colors::text_dim()),
-        )),
-    ]
+    vec![RtLine::from(Span::styled(
+        "Loading...",
+        Style::default().fg(colors::text_dim()),
+    ))]
 }
 
 fn error_lines(message: &str) -> Vec<RtLine<'static>> {
-    vec![
-        RtLine::from(Span::styled(
-            message.to_string(),
-            Style::default().fg(colors::error()),
-        )),
-    ]
+    vec![RtLine::from(Span::styled(
+        message.to_string(),
+        Style::default().fg(colors::error()),
+    ))]
 }
 
 fn strip_header(lines: &mut Vec<RtLine<'static>>) {
     if let Some(first) = lines.first() {
         if line_text(first).trim() == "/limits" {
             lines.remove(0);
-            while lines.first().map_or(false, |line| line_text(line).trim().is_empty()) {
+            while lines
+                .first()
+                .map_or(false, |line| line_text(line).trim().is_empty())
+            {
                 lines.remove(0);
             }
         }
@@ -275,8 +278,7 @@ fn is_status_line(text: &str) -> bool {
 }
 
 fn line_text(line: &RtLine<'static>) -> String {
-    line
-        .spans
+    line.spans
         .iter()
         .map(|span| span.content.as_ref())
         .collect::<String>()

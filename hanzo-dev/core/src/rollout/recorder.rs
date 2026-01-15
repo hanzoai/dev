@@ -7,10 +7,12 @@ use std::path::Path;
 use std::path::PathBuf;
 
 use hanzo_protocol::ConversationId;
-use hanzo_protocol::models::{ContentItem, ResponseItem};
+use hanzo_protocol::models::ContentItem;
+use hanzo_protocol::models::ResponseItem;
 use hanzo_protocol::protocol::EventMsg as ProtoEventMsg;
 use hanzo_protocol::protocol::SessionSource;
-use serde::{Deserialize, Serialize};
+use serde::Deserialize;
+use serde::Serialize;
 use serde_json::Value;
 use time::OffsetDateTime;
 use time::format_description::FormatItem;
@@ -23,10 +25,11 @@ use tracing::info;
 use tracing::warn;
 
 use super::SESSIONS_SUBDIR;
-use super::list::get_conversations;
 use super::list::ConversationsPage;
 use super::list::Cursor;
-use super::policy::{should_persist_response_item, should_persist_rollout_item};
+use super::list::get_conversations;
+use super::policy::should_persist_response_item;
+use super::policy::should_persist_rollout_item;
 use crate::config::Config;
 use crate::default_client::DEFAULT_ORIGINATOR;
 use crate::git_info::collect_git_info;
@@ -278,7 +281,13 @@ impl RolloutRecorder {
 
     /// Compatibility wrapper for older resume API used by codex.rs
     pub async fn resume(config: &Config, path: &Path) -> std::io::Result<(Self, SavedSession)> {
-        let recorder = Self::new(config, RolloutRecorderParams::Resume { path: path.to_path_buf() }).await?;
+        let recorder = Self::new(
+            config,
+            RolloutRecorderParams::Resume {
+                path: path.to_path_buf(),
+            },
+        )
+        .await?;
         let history = Self::get_rollout_history(path).await?;
         let (session_id, items) = match history {
             InitialHistory::Resumed(resumed) => {
@@ -291,13 +300,19 @@ impl RolloutRecorder {
             Ok(json) => match serde_json::from_str::<crate::history::HistorySnapshot>(&json) {
                 Ok(snapshot) => Some(snapshot),
                 Err(e) => {
-                    warn!("failed to parse history snapshot from {:?}: {}", snapshot_path, e);
+                    warn!(
+                        "failed to parse history snapshot from {:?}: {}",
+                        snapshot_path, e
+                    );
                     None
                 }
             },
             Err(err) => {
                 if err.kind() != std::io::ErrorKind::NotFound {
-                    warn!("failed to read history snapshot from {:?}: {}", snapshot_path, err);
+                    warn!(
+                        "failed to read history snapshot from {:?}: {}",
+                        snapshot_path, err
+                    );
                 }
                 None
             }
@@ -347,30 +362,28 @@ impl RolloutRecorder {
                     RolloutItem::ResponseItem(item) => {
                         items.push(RolloutItem::ResponseItem(item));
                     }
-                    RolloutItem::Event(ev) => {
-                        match &ev.msg {
-                            ProtoEventMsg::UserMessage(user_msg) => {
-                                let mut content = Vec::new();
-                                content.push(ContentItem::InputText {
-                                    text: user_msg.message.clone(),
-                                });
-                                if let Some(images) = &user_msg.images {
-                                    for image_url in images {
-                                        content.push(ContentItem::InputImage {
-                                            image_url: image_url.clone(),
-                                        });
-                                    }
+                    RolloutItem::Event(ev) => match &ev.msg {
+                        ProtoEventMsg::UserMessage(user_msg) => {
+                            let mut content = Vec::new();
+                            content.push(ContentItem::InputText {
+                                text: user_msg.message.clone(),
+                            });
+                            if let Some(images) = &user_msg.images {
+                                for image_url in images {
+                                    content.push(ContentItem::InputImage {
+                                        image_url: image_url.clone(),
+                                    });
                                 }
-                                items.push(RolloutItem::ResponseItem(ResponseItem::Message {
-                                    id: Some(ev.id.clone()),
-                                    role: "user".to_string(),
-                                    content,
-                                }));
                             }
-                            ProtoEventMsg::AgentMessage(_) => items.push(RolloutItem::Event(ev)),
-                            _ => items.push(RolloutItem::Event(ev)),
+                            items.push(RolloutItem::ResponseItem(ResponseItem::Message {
+                                id: Some(ev.id.clone()),
+                                role: "user".to_string(),
+                                content,
+                            }));
                         }
-                    }
+                        ProtoEventMsg::AgentMessage(_) => items.push(RolloutItem::Event(ev)),
+                        _ => items.push(RolloutItem::Event(ev)),
+                    },
                     RolloutItem::Compacted(compacted) => {
                         items.push(RolloutItem::Compacted(compacted));
                     }

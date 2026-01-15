@@ -51,7 +51,9 @@ pub struct ItemStat {
 }
 
 impl PerfStats {
-    pub fn reset(&mut self) { *self = PerfStats::default(); }
+    pub fn reset(&mut self) {
+        *self = PerfStats::default();
+    }
 
     pub fn summary(&self) -> String {
         let ms_total_height = (self.ns_total_height as f64) / 1_000_000.0;
@@ -106,9 +108,7 @@ impl PerfStats {
             };
             out.push_str(&format!(
                 "\n  undo_restore: events={} total={:.2}ms avg={:.2}ms",
-                self.undo_restore_events,
-                ms_total,
-                avg,
+                self.undo_restore_events, ms_total, avg,
             ));
         }
 

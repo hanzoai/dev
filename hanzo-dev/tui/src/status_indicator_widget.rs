@@ -11,8 +11,8 @@ use ratatui::layout::Rect;
 use ratatui::style::Style;
 use ratatui::text::Line;
 use ratatui::widgets::Paragraph;
-use ratatui::widgets::WidgetRef;
 use ratatui::widgets::Widget;
+use ratatui::widgets::WidgetRef;
 
 use crate::app_event::AppEvent;
 use crate::app_event_sender::AppEventSender;
@@ -154,8 +154,13 @@ impl WidgetRef for StatusIndicatorWidget {
         spans.extend(vec![
             ratatui::text::Span::raw(" "),
             // (12s • Esc to interrupt)
-            ratatui::text::Span::raw(format!("({elapsed}s • ")).style(Style::default().fg(text_dim)),
-            ratatui::text::Span::raw("Esc").style(Style::default().fg(accent).add_modifier(ratatui::style::Modifier::BOLD)),
+            ratatui::text::Span::raw(format!("({elapsed}s • "))
+                .style(Style::default().fg(text_dim)),
+            ratatui::text::Span::raw("Esc").style(
+                Style::default()
+                    .fg(accent)
+                    .add_modifier(ratatui::style::Modifier::BOLD),
+            ),
             ratatui::text::Span::raw(")").style(Style::default().fg(text_dim)),
         ]);
 

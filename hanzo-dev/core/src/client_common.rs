@@ -8,12 +8,13 @@ use crate::model_family::ModelFamily;
 use crate::openai_tools::OpenAiTool;
 use crate::protocol::RateLimitSnapshotEvent;
 use crate::protocol::TokenUsage;
+use futures::Stream;
 use hanzo_apply_patch::APPLY_PATCH_TOOL_INSTRUCTIONS;
 use hanzo_protocol::models::ContentItem;
 use hanzo_protocol::models::ResponseItem;
-use futures::Stream;
 use once_cell::sync::Lazy;
-use serde::{Deserialize, Serialize};
+use serde::Deserialize;
+use serde::Serialize;
 use serde_json::Value;
 use std::borrow::Cow;
 use std::ops::Deref;
@@ -26,9 +27,8 @@ use uuid::Uuid;
 /// Additional prompt for Code. Can not edit Codex instructions.
 const PROMPT_CODER_TEMPLATE: &str = include_str!("../prompt_coder.md");
 static BASE_MODEL_DESCRIPTIONS: Lazy<String> = Lazy::new(|| model_guide_markdown());
-static DEFAULT_DEVELOPER_PROMPT: Lazy<String> = Lazy::new(|| {
-    PROMPT_CODER_TEMPLATE.replace("{MODEL_DESCRIPTIONS}", &BASE_MODEL_DESCRIPTIONS)
-});
+static DEFAULT_DEVELOPER_PROMPT: Lazy<String> =
+    Lazy::new(|| PROMPT_CODER_TEMPLATE.replace("{MODEL_DESCRIPTIONS}", &BASE_MODEL_DESCRIPTIONS));
 
 /// wraps environment context message in a tag for the model to parse more easily.
 const ENVIRONMENT_CONTEXT_START: &str = "<environment_context>\n\n";
@@ -160,7 +160,9 @@ impl Prompt {
             input_with_instructions.push(ResponseItem::Message {
                 id: None,
                 role: "developer".to_string(),
-                content: vec![ContentItem::InputText { text: developer_text }],
+                content: vec![ContentItem::InputText {
+                    text: developer_text,
+                }],
             });
             for message in &self.prepend_developer_messages {
                 let trimmed = message.trim();
@@ -256,7 +258,11 @@ impl Prompt {
 #[derive(Debug)]
 pub enum ResponseEvent {
     Created,
-    OutputItemDone { item: ResponseItem, sequence_number: Option<u64>, output_index: Option<u32> },
+    OutputItemDone {
+        item: ResponseItem,
+        sequence_number: Option<u64>,
+        output_index: Option<u32>,
+    },
     Completed {
         response_id: String,
         token_usage: Option<TokenUsage>,
@@ -362,7 +368,7 @@ pub struct TextFormat {
 fn limit_screenshots_in_input(input: &mut Vec<ResponseItem>) {
     // Find all screenshot positions
     let mut screenshot_positions = Vec::new();
-    
+
     for (idx, item) in input.iter().enumerate() {
         if let ResponseItem::Message { content, .. } = item {
             let has_screenshot = content
@@ -373,26 +379,26 @@ fn limit_screenshots_in_input(input: &mut Vec<ResponseItem>) {
             }
         }
     }
-    
+
     // If we have 5 or fewer screenshots, no action needed
     if screenshot_positions.len() <= 5 {
         return;
     }
-    
+
     // Determine which screenshots to keep
     let mut positions_to_keep = std::collections::HashSet::new();
-    
+
     // Keep the first screenshot
     if let Some(&first) = screenshot_positions.first() {
         positions_to_keep.insert(first);
     }
-    
+
     // Keep the last 4 screenshots
     let last_four_start = screenshot_positions.len().saturating_sub(4);
     for &pos in &screenshot_positions[last_four_start..] {
         positions_to_keep.insert(pos);
     }
-    
+
     // Replace screenshots that should be removed
     for &pos in &screenshot_positions {
         if !positions_to_keep.contains(&pos) {
@@ -413,7 +419,7 @@ fn limit_screenshots_in_input(input: &mut Vec<ResponseItem>) {
             }
         }
     }
-    
+
     tracing::debug!(
         "Limited screenshots from {} to {} (kept first and last 4)",
         screenshot_positions.len(),
@@ -607,7 +613,10 @@ mod tests {
             stream: true,
             include: vec![],
             prompt_cache_key: None,
-            text: Some(Text { verbosity: OpenAiTextVerbosity::Low, format: None }),
+            text: Some(Text {
+                verbosity: OpenAiTextVerbosity::Low,
+                format: None,
+            }),
         };
 
         let v = serde_json::to_value(&req).expect("json");

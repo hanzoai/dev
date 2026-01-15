@@ -1,11 +1,10 @@
-use hanzo_core::protocol::{
-    Event,
-    EventMsg,
-    ExecCommandBeginEvent,
-    ExecCommandEndEvent,
-    OrderMeta,
-};
-use hanzo_tui::test_helpers::{render_chat_widget_to_vt100, ChatWidgetHarness};
+use hanzo_core::protocol::Event;
+use hanzo_core::protocol::EventMsg;
+use hanzo_core::protocol::ExecCommandBeginEvent;
+use hanzo_core::protocol::ExecCommandEndEvent;
+use hanzo_core::protocol::OrderMeta;
+use hanzo_tui::test_helpers::ChatWidgetHarness;
+use hanzo_tui::test_helpers::render_chat_widget_to_vt100;
 use std::path::PathBuf;
 use std::time::Duration;
 

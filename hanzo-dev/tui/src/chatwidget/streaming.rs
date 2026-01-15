@@ -2,8 +2,8 @@
 
 use super::ChatWidget;
 use crate::height_manager::HeightEvent;
-use crate::streaming::controller::AppEventHistorySink;
 use crate::streaming::StreamKind;
+use crate::streaming::controller::AppEventHistorySink;
 
 pub(super) fn on_commit_tick(chat: &mut ChatWidget<'_>) {
     let sink = AppEventHistorySink(chat.app_event_tx.clone());
@@ -25,13 +25,19 @@ pub(super) fn begin(chat: &mut ChatWidget<'_>, kind: StreamKind, id: Option<Stri
 }
 
 // New facade: apply a delta (ensures begin is called for this id/kind)
-pub(super) fn delta_text(chat: &mut ChatWidget<'_>, kind: StreamKind, id: String, delta: String, seq: Option<u64>) {
+pub(super) fn delta_text(
+    chat: &mut ChatWidget<'_>,
+    kind: StreamKind,
+    id: String,
+    delta: String,
+    seq: Option<u64>,
+) {
     chat.stream_state.current_kind = Some(kind);
     let sink = AppEventHistorySink(chat.app_event_tx.clone());
     let stream_id = id.clone();
     chat.stream.begin_with_id(kind, Some(id), &sink);
     chat.stream.set_last_sequence_number(kind, seq);
-    
+
     chat.stream.push_and_maybe_commit(&delta, &sink);
     if matches!(kind, StreamKind::Answer) {
         chat.track_answer_stream_delta(&stream_id, &delta, seq);

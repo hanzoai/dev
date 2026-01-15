@@ -1,5 +1,7 @@
 use chrono::SecondsFormat;
 use chrono::Utc;
+use eventsource_stream::Event as StreamEvent;
+use eventsource_stream::EventStreamError as StreamError;
 use hanzo_app_server_protocol::AuthMode;
 use hanzo_app_server_protocol::ConversationId;
 use hanzo_protocol::config_types::ReasoningEffort;
@@ -9,8 +11,6 @@ use hanzo_protocol::protocol::AskForApproval;
 use hanzo_protocol::protocol::InputItem;
 use hanzo_protocol::protocol::ReviewDecision;
 use hanzo_protocol::protocol::SandboxPolicy;
-use eventsource_stream::Event as StreamEvent;
-use eventsource_stream::EventStreamError as StreamError;
 use reqwest::Error;
 use reqwest::Response;
 use serde::Serialize;

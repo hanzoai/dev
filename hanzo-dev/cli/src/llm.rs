@@ -1,18 +1,19 @@
 use std::path::PathBuf;
 
 use clap::Parser;
+use futures::StreamExt;
+use hanzo_app_server_protocol::AuthMode;
 use hanzo_common::CliConfigOverrides;
-use hanzo_core::config::Config;
-use hanzo_core::config::ConfigOverrides;
+use hanzo_core::AuthManager;
 use hanzo_core::ModelClient;
 use hanzo_core::ModelProviderInfo;
-use hanzo_core::agent_defaults::model_guide_markdown_with_custom;
-use hanzo_core::AuthManager;
 use hanzo_core::Prompt;
 use hanzo_core::TextFormat;
-use hanzo_app_server_protocol::AuthMode;
-use hanzo_protocol::models::{ContentItem, ResponseItem};
-use futures::StreamExt;
+use hanzo_core::agent_defaults::model_guide_markdown_with_custom;
+use hanzo_core::config::Config;
+use hanzo_core::config::ConfigOverrides;
+use hanzo_protocol::models::ContentItem;
+use hanzo_protocol::models::ResponseItem;
 
 #[derive(Debug, Parser)]
 pub struct LlmCli {
@@ -52,11 +53,11 @@ pub struct RequestArgs {
     pub format_strict: bool,
 
     /// Inline JSON for the schema (mutually exclusive with --schema-file)
-    #[arg(long = "schema-json")] 
+    #[arg(long = "schema-json")]
     pub schema_json: Option<String>,
 
     /// Path to a JSON schema file (mutually exclusive with --schema-json)
-    #[arg(long = "schema-file")] 
+    #[arg(long = "schema-file")]
     pub schema_file: Option<PathBuf>,
 
     /// Optional model override (e.g. gpt-4.1, gpt-5.1)
@@ -74,7 +75,9 @@ async fn run_llm_request(
     cli_overrides: CliConfigOverrides,
     args: RequestArgs,
 ) -> anyhow::Result<()> {
-    let overrides_vec = cli_overrides.parse_overrides().map_err(anyhow::Error::msg)?;
+    let overrides_vec = cli_overrides
+        .parse_overrides()
+        .map_err(anyhow::Error::msg)?;
 
     let overrides = if let Some(model) = &args.model {
         ConfigOverrides {
@@ -94,12 +97,16 @@ async fn run_llm_request(
     input.push(ResponseItem::Message {
         id: None,
         role: "developer".to_string(),
-        content: vec![ContentItem::InputText { text: args.developer.clone() }],
+        content: vec![ContentItem::InputText {
+            text: args.developer.clone(),
+        }],
     });
     input.push(ResponseItem::Message {
         id: None,
         role: "user".to_string(),
-        content: vec![ContentItem::InputText { text: args.message.clone() }],
+        content: vec![ContentItem::InputText {
+            text: args.message.clone(),
+        }],
     });
 
     // Resolve schema
@@ -147,7 +154,9 @@ async fn run_llm_request(
         config.model_reasoning_summary,
         config.model_text_verbosity,
         uuid::Uuid::new_v4(),
-        std::sync::Arc::new(std::sync::Mutex::new(hanzo_core::debug_logger::DebugLogger::new(false)?)),
+        std::sync::Arc::new(std::sync::Mutex::new(
+            hanzo_core::debug_logger::DebugLogger::new(false)?,
+        )),
     );
 
     // Collect the assistant message text from the stream (no TUI events)
@@ -157,8 +166,12 @@ async fn run_llm_request(
     while let Some(ev) = stream.next().await {
         let ev = ev?;
         match ev {
-            hanzo_core::ResponseEvent::ReasoningSummaryDelta { delta, .. } => { tracing::info!(target: "llm", "thinking: {}", delta); }
-            hanzo_core::ResponseEvent::ReasoningContentDelta { delta, .. } => { tracing::info!(target: "llm", "reasoning: {}", delta); }
+            hanzo_core::ResponseEvent::ReasoningSummaryDelta { delta, .. } => {
+                tracing::info!(target: "llm", "thinking: {}", delta);
+            }
+            hanzo_core::ResponseEvent::ReasoningContentDelta { delta, .. } => {
+                tracing::info!(target: "llm", "reasoning: {}", delta);
+            }
             hanzo_core::ResponseEvent::OutputItemDone { item, .. } => {
                 if let ResponseItem::Message { content, .. } = item {
                     for c in content {
@@ -173,7 +186,10 @@ async fn run_llm_request(
                 // For completeness, but we only print at the end to stay simple
                 final_text.push_str(&delta);
             }
-            hanzo_core::ResponseEvent::Completed { .. } => { tracing::info!("LLM: completed"); break; }
+            hanzo_core::ResponseEvent::Completed { .. } => {
+                tracing::info!("LLM: completed");
+                break;
+            }
             _ => {}
         }
     }

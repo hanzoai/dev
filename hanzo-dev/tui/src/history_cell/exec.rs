@@ -1,45 +1,50 @@
 use std::collections::HashSet;
-use std::time::{Duration, Instant, SystemTime};
+use std::time::Duration;
+use std::time::Instant;
+use std::time::SystemTime;
 
 use hanzo_common::elapsed::format_duration;
 use hanzo_core::history::state::MAX_EXEC_STREAM_RETAINED_BYTES;
 use hanzo_core::parse_command::ParsedCommand;
-use ratatui::prelude::{Buffer, Rect};
-use ratatui::style::{Modifier, Style};
-use ratatui::text::{Line, Span};
-use ratatui::widgets::{Block, Borders, Padding, Widget};
+use ratatui::prelude::Buffer;
+use ratatui::prelude::Rect;
+use ratatui::style::Modifier;
+use ratatui::style::Style;
+use ratatui::text::Line;
+use ratatui::text::Span;
+use ratatui::widgets::Block;
+use ratatui::widgets::Borders;
+use ratatui::widgets::Padding;
+use ratatui::widgets::Widget;
 
 use crate::exec_command::strip_bash_lc_and_escape;
-use crate::history::state::{
-    ExecAction,
-    ExecRecord,
-    ExecStatus,
-    ExecStreamChunk,
-    ExecWaitNote as RecordExecWaitNote,
-    HistoryId,
-    TextTone,
-};
+use crate::history::state::ExecAction;
+use crate::history::state::ExecRecord;
+use crate::history::state::ExecStatus;
+use crate::history::state::ExecStreamChunk;
+use crate::history::state::ExecWaitNote as RecordExecWaitNote;
+use crate::history::state::HistoryId;
+use crate::history::state::TextTone;
 use crate::insert_history::word_wrap_lines;
-use crate::util::buffer::{fill_rect, write_line};
+use crate::util::buffer::fill_rect;
+use crate::util::buffer::write_line;
 
-use super::{
-    action_enum_from_parsed,
-    exec_command_lines,
-    emphasize_shell_command_name,
-    first_context_path,
-    format_inline_script_for_display,
-    insert_line_breaks_after_double_ampersand,
-    normalize_shell_command_display,
-    running_status_line,
-    trim_empty_lines,
-    exec_render_parts_parsed,
-    exec_render_parts_parsed_with_meta,
-    CommandOutput,
-    ExecKind,
-    HistoryCell,
-    HistoryCellType,
-    output_lines,
-};
+use super::CommandOutput;
+use super::ExecKind;
+use super::HistoryCell;
+use super::HistoryCellType;
+use super::action_enum_from_parsed;
+use super::emphasize_shell_command_name;
+use super::exec_command_lines;
+use super::exec_render_parts_parsed;
+use super::exec_render_parts_parsed_with_meta;
+use super::first_context_path;
+use super::format_inline_script_for_display;
+use super::insert_line_breaks_after_double_ampersand;
+use super::normalize_shell_command_display;
+use super::output_lines;
+use super::running_status_line;
+use super::trim_empty_lines;
 
 // ==================== ExecCell ====================
 
@@ -344,7 +349,14 @@ impl HistoryCell for ExecCell {
                 };
                 let bg_style = Style::default().bg(crate::colors::background());
                 fill_rect(buf, status_area, Some(' '), bg_style);
-                write_line(buf, status_area.x, status_area.y, status_area.width, &line, bg_style);
+                write_line(
+                    buf,
+                    status_area.x,
+                    status_area.y,
+                    status_area.width,
+                    &line,
+                    bg_style,
+                );
             }
         }
     }
@@ -405,13 +417,11 @@ impl ExecCell {
     }
 
     pub(crate) fn parsed_action(&self) -> ExecAction {
-        self
-            .parsed_meta
+        self.parsed_meta
             .as_ref()
             .map(|meta| meta.action)
             .unwrap_or(ExecAction::Run)
     }
-
 
     pub(crate) fn set_waiting(&mut self, waiting: bool) {
         let mut changed = false;
@@ -572,14 +582,15 @@ impl ExecCell {
         let pre_trimmed = trim_empty_lines(pre_raw);
         let out_trimmed = trim_empty_lines(out_raw);
 
-        let wrap_and_clamp = |lines: Vec<Line<'static>>, wrap_width: u16| -> (Vec<Line<'static>>, u16) {
-            if wrap_width == 0 {
-                return (Vec::new(), 0);
-            }
-            let wrapped = word_wrap_lines(&lines, wrap_width);
-            let total = wrapped.len().min(u16::MAX as usize) as u16;
-            (wrapped, total)
-        };
+        let wrap_and_clamp =
+            |lines: Vec<Line<'static>>, wrap_width: u16| -> (Vec<Line<'static>>, u16) {
+                if wrap_width == 0 {
+                    return (Vec::new(), 0);
+                }
+                let wrapped = word_wrap_lines(&lines, wrap_width);
+                let total = wrapped.len().min(u16::MAX as usize) as u16;
+                (wrapped, total)
+            };
 
         let (pre_lines, pre_total) = wrap_and_clamp(pre_trimmed, width);
         let (out_lines, out_block_total) = wrap_and_clamp(out_trimmed, width.saturating_sub(2));
@@ -602,7 +613,11 @@ impl ExecCell {
         Option<Line<'static>>,
     ) {
         let wait_state = self.wait_state_snapshot();
-        let status_label = if wait_state.waiting { "Waiting" } else { "Running" };
+        let status_label = if wait_state.waiting {
+            "Waiting"
+        } else {
+            "Running"
+        };
 
         let elapsed_since_start = self.elapsed_since_start();
         let (pre, mut out, status) = if self.parsed.is_empty() {
@@ -658,7 +673,6 @@ impl ExecCell {
 
                 out.splice(insert_at..insert_at, block);
             }
-
         }
 
         (pre, out, if self.output.is_none() { status } else { None })
@@ -696,7 +710,6 @@ impl ExecCell {
         } else {
             self.stream_preview = None;
         }
-
     }
 
     fn exec_render_parts_generic(
@@ -708,10 +721,7 @@ impl ExecCell {
         Option<Line<'static>>,
     ) {
         let mut pre = self.generic_command_lines();
-        let display_output = self
-            .output
-            .as_ref()
-            .or(self.stream_preview.as_ref());
+        let display_output = self.output.as_ref().or(self.stream_preview.as_ref());
         let mut out = output_lines(display_output, false, false);
         let has_output = !trim_empty_lines(out.clone()).is_empty();
 
@@ -719,10 +729,7 @@ impl ExecCell {
             if let Some(last) = pre.last_mut() {
                 last.spans.insert(
                     0,
-                    Span::styled(
-                        "┌ ",
-                        Style::default().fg(crate::colors::text_dim()),
-                    ),
+                    Span::styled("┌ ", Style::default().fg(crate::colors::text_dim())),
                 );
             }
         }
@@ -760,10 +767,7 @@ impl ExecCell {
             if idx > 0 {
                 line.spans.insert(
                     0,
-                    Span::styled(
-                        "  ",
-                        Style::default().fg(crate::colors::text()),
-                    ),
+                    Span::styled("  ", Style::default().fg(crate::colors::text())),
                 );
             }
         }
@@ -905,7 +909,6 @@ pub(crate) fn new_completed_exec_command(
 pub(crate) fn display_lines_from_record(record: &ExecRecord) -> Vec<Line<'static>> {
     ExecCell::from_record(record.clone()).display_lines_trimmed()
 }
-
 
 fn command_has_bold_token(command: &[String]) -> bool {
     let command_escaped = strip_bash_lc_and_escape(command);

@@ -127,4 +127,3 @@ fn parse_markdown_line(text: &str) -> Line<'static> {
 
     Line::from(spans)
 }
-

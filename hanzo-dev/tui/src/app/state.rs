@@ -1,27 +1,41 @@
 use std::cmp::Reverse;
-use std::collections::{BTreeSet, BinaryHeap, HashMap, HashSet};
+use std::collections::BTreeSet;
+use std::collections::BinaryHeap;
+use std::collections::HashMap;
+use std::collections::HashSet;
 use std::path::PathBuf;
-use std::sync::atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering};
-use std::sync::mpsc::{Receiver, Sender as StdSender};
-use std::sync::{Arc, Condvar, Mutex};
-use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
+use std::sync::Arc;
+use std::sync::Condvar;
+use std::sync::Mutex;
+use std::sync::atomic::AtomicBool;
+use std::sync::atomic::AtomicU64;
+use std::sync::atomic::AtomicUsize;
+use std::sync::atomic::Ordering;
+use std::sync::mpsc::Receiver;
+use std::sync::mpsc::Sender as StdSender;
+use std::time::Duration;
+use std::time::Instant;
+use std::time::SystemTime;
+use std::time::UNIX_EPOCH;
 
 use crossterm::event::KeyCode;
 use portable_pty::MasterPty;
+use ratatui::CompletedFrame;
 use ratatui::buffer::Buffer;
 use ratatui::prelude::Size;
-use ratatui::CompletedFrame;
 
-use crate::app_event::{AppEvent, TerminalRunController};
+use crate::app_event::AppEvent;
+use crate::app_event::TerminalRunController;
 use crate::app_event_sender::AppEventSender;
-use crate::chatwidget::{ChatWidget, GhostState};
+use crate::chatwidget::ChatWidget;
+use crate::chatwidget::GhostState;
 use crate::file_search::FileSearchManager;
 use crate::history::state::HistorySnapshot;
 use crate::onboarding::onboarding_screen::OnboardingScreen;
 use crate::thread_spawner;
 use crate::tui::TerminalInfo;
-use hanzo_core::config::Config;
 use hanzo_core::ConversationManager;
+use hanzo_core::config::Config;
 use hanzo_login::ShutdownHandle;
 use tokio::sync::oneshot;
 use tokio::task::JoinHandle;
@@ -138,7 +152,9 @@ impl FrameTimer {
         if should_spawn {
             let timer = Arc::clone(self);
             let tx_for_thread = tx.clone();
-            if thread_spawner::spawn_lightweight("frame-timer", move || timer.run(tx_for_thread)).is_none() {
+            if thread_spawner::spawn_lightweight("frame-timer", move || timer.run(tx_for_thread))
+                .is_none()
+            {
                 let mut state = self.state.lock().unwrap();
                 state.worker_running = false;
                 let drained = state.deadlines.len();
@@ -479,7 +495,11 @@ impl BufferDiffProfiler {
                     } else {
                         (min_col, max_col)
                     };
-                    let skipped_cells = current_buffer.content.iter().filter(|cell| cell.skip).count();
+                    let skipped_cells = current_buffer
+                        .content
+                        .iter()
+                        .filter(|cell| cell.skip)
+                        .count();
                     tracing::info!(
                         target: "hanzo_tui::buffer_diff",
                         frame = self.frame_seq,
@@ -529,7 +549,9 @@ impl TimingStats {
         self.last_key_event = Some(Instant::now());
         self.key_waiting_for_frame = true;
     }
-    pub(super) fn on_redraw_begin(&mut self) { self.redraw_events = self.redraw_events.saturating_add(1); }
+    pub(super) fn on_redraw_begin(&mut self) {
+        self.redraw_events = self.redraw_events.saturating_add(1);
+    }
     pub(super) fn on_redraw_end(&mut self, started: Instant) {
         self.frames_drawn = self.frames_drawn.saturating_add(1);
         let dt = started.elapsed().as_nanos() as u64;
@@ -543,7 +565,9 @@ impl TimingStats {
         }
     }
     fn pct(ns: &[u64], p: f64) -> f64 {
-        if ns.is_empty() { return 0.0; }
+        if ns.is_empty() {
+            return 0.0;
+        }
         let mut v = ns.to_vec();
         v.sort_unstable();
         let idx = ((v.len() as f64 - 1.0) * p).round() as usize;
@@ -559,8 +583,10 @@ impl TimingStats {
             self.frames_drawn,
             self.redraw_events,
             self.key_events,
-            draw_p50, draw_p95,
-            kf_p50, kf_p95,
+            draw_p50,
+            draw_p95,
+            kf_p50,
+            kf_p95,
         )
     }
 }
@@ -572,8 +598,10 @@ mod tests {
     use crate::app_event_sender::AppEventSender;
     use crate::thread_spawner;
     use std::io::Write;
-    use std::sync::atomic::{AtomicBool, Ordering};
-    use std::sync::{Arc, Mutex};
+    use std::sync::Arc;
+    use std::sync::Mutex;
+    use std::sync::atomic::AtomicBool;
+    use std::sync::atomic::Ordering;
     use std::time::Duration;
     use tracing_subscriber::filter::LevelFilter;
     use tracing_subscriber::prelude::*;

@@ -1,6 +1,7 @@
 use std::sync::mpsc::Sender;
 
-use crate::app_event::{AppEvent, BackgroundPlacement};
+use crate::app_event::AppEvent;
+use crate::app_event::BackgroundPlacement;
 use crate::chatwidget::BackgroundOrderTicket;
 use crate::session_log;
 use hanzo_core::protocol::OrderMeta;
@@ -22,7 +23,10 @@ impl AppEventSender {
     /// channel. Routes both high‑priority and bulk events to the same sender.
     #[allow(dead_code)]
     pub(crate) fn new(app_event_tx: Sender<AppEvent>) -> Self {
-        Self { high_tx: app_event_tx.clone(), bulk_tx: app_event_tx }
+        Self {
+            high_tx: app_event_tx.clone(),
+            bulk_tx: app_event_tx,
+        }
     }
 
     /// Send an event to the app event channel. If it fails, we swallow the
@@ -52,7 +56,11 @@ impl AppEventSender {
                 | AppEvent::EmitTuiNotification { .. }
         );
 
-        let tx = if is_high { &self.high_tx } else { &self.bulk_tx };
+        let tx = if is_high {
+            &self.high_tx
+        } else {
+            &self.bulk_tx
+        };
         match tx.send(event) {
             Ok(()) => true,
             Err(e) => {
@@ -112,5 +120,4 @@ impl AppEventSender {
             Some(order),
         );
     }
-
 }

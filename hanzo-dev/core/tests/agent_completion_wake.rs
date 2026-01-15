@@ -4,18 +4,28 @@ mod common;
 
 use common::load_default_config_for_test;
 
-use hanzo_core::config_types::AgentConfig;
-use hanzo_core::protocol::{AskForApproval, EventMsg, Op, SandboxPolicy};
-use hanzo_core::{built_in_model_providers, CodexAuth, ConversationManager};
 use hanzo_core::AGENT_MANAGER;
+use hanzo_core::CodexAuth;
+use hanzo_core::ConversationManager;
+use hanzo_core::built_in_model_providers;
+use hanzo_core::config_types::AgentConfig;
+use hanzo_core::protocol::AskForApproval;
+use hanzo_core::protocol::EventMsg;
+use hanzo_core::protocol::Op;
+use hanzo_core::protocol::SandboxPolicy;
 use hanzo_protocol::config_types::ReasoningEffort;
 use serde_json::json;
 use serial_test::serial;
 use tempfile::TempDir;
-use tokio::time::{timeout, Duration, Instant};
+use tokio::time::Duration;
+use tokio::time::Instant;
+use tokio::time::timeout;
 use uuid::Uuid;
-use wiremock::matchers::{method, path_regex};
-use wiremock::{Mock, MockServer, ResponseTemplate};
+use wiremock::Mock;
+use wiremock::MockServer;
+use wiremock::ResponseTemplate;
+use wiremock::matchers::method;
+use wiremock::matchers::path_regex;
 
 fn sse_response(body: String) -> ResponseTemplate {
     ResponseTemplate::new(200)
@@ -74,7 +84,8 @@ event: response.completed\ndata: {completed}\n\n",
     provider.base_url = Some(format!("{}/v1", server.uri()));
     config.model_provider = provider;
 
-    let conversation_manager = ConversationManager::with_auth(CodexAuth::from_api_key("Test API Key"));
+    let conversation_manager =
+        ConversationManager::with_auth(CodexAuth::from_api_key("Test API Key"));
     let codex = conversation_manager
         .new_conversation(config)
         .await

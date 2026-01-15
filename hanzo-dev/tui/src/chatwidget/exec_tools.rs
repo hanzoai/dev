@@ -1,33 +1,36 @@
 //! Exec and tool call lifecycle helpers for `ChatWidget`.
 
-use super::{running_tools, web_search_sessions, ChatWidget};
+use super::ChatWidget;
+use super::running_tools;
+use super::web_search_sessions;
 use crate::app_event::AppEvent;
 use crate::height_manager::HeightEvent;
-use crate::history::state::{
-    ExecAction,
-    ExecRecord,
-    ExecStatus,
-    ExecStreamChunk,
-    ExecWaitNote,
-    ExploreRecord,
-    HistoryDomainEvent,
-    HistoryDomainRecord,
-    HistoryId,
-    HistoryMutation,
-    HistoryRecord,
-    InlineSpan,
-    MessageLine,
-    MessageLineKind,
-    PlainMessageKind,
-    PlainMessageRole,
-    PlainMessageState,
-    TextEmphasis,
-    TextTone,
-};
+use crate::history::state::ExecAction;
+use crate::history::state::ExecRecord;
+use crate::history::state::ExecStatus;
+use crate::history::state::ExecStreamChunk;
+use crate::history::state::ExecWaitNote;
+use crate::history::state::ExploreRecord;
+use crate::history::state::HistoryDomainEvent;
+use crate::history::state::HistoryDomainRecord;
+use crate::history::state::HistoryId;
+use crate::history::state::HistoryMutation;
+use crate::history::state::HistoryRecord;
+use crate::history::state::InlineSpan;
+use crate::history::state::MessageLine;
+use crate::history::state::MessageLineKind;
+use crate::history::state::PlainMessageKind;
+use crate::history::state::PlainMessageRole;
+use crate::history::state::PlainMessageState;
+use crate::history::state::TextEmphasis;
+use crate::history::state::TextTone;
 use crate::history_cell::CommandOutput;
-use crate::history_cell::{self, HistoryCell};
+use crate::history_cell::HistoryCell;
+use crate::history_cell::{self};
 use hanzo_core::parse_command::ParsedCommand;
-use hanzo_core::protocol::{ExecCommandBeginEvent, ExecCommandEndEvent, OrderMeta};
+use hanzo_core::protocol::ExecCommandBeginEvent;
+use hanzo_core::protocol::ExecCommandEndEvent;
+use hanzo_core::protocol::OrderMeta;
 use std::path::PathBuf;
 use std::time::SystemTime;
 
@@ -105,12 +108,17 @@ fn stream_chunks_tail_to_text(chunks: &[ExecStreamChunk], max_bytes: usize) -> S
     pieces.concat()
 }
 
-fn explore_status_from_exec(action: ExecAction, record: &ExecRecord) -> history_cell::ExploreEntryStatus {
+fn explore_status_from_exec(
+    action: ExecAction,
+    record: &ExecRecord,
+) -> history_cell::ExploreEntryStatus {
     match record.status {
         ExecStatus::Running => history_cell::ExploreEntryStatus::Running,
         ExecStatus::Success => history_cell::ExploreEntryStatus::Success,
         ExecStatus::Error => match (record.exit_code, action) {
-            (Some(1), ExecAction::Search | ExecAction::List) => history_cell::ExploreEntryStatus::NotFound,
+            (Some(1), ExecAction::Search | ExecAction::List) => {
+                history_cell::ExploreEntryStatus::NotFound
+            }
             _ => history_cell::ExploreEntryStatus::Error {
                 exit_code: record.exit_code,
             },
@@ -228,11 +236,7 @@ fn promote_exec_cell_to_explore(chat: &mut ChatWidget<'_>, idx: usize) -> bool {
     }
 
     let cell = history_cell::ExploreAggregationCell::from_record(record.clone());
-    chat.history_replace_with_record(
-        idx,
-        Box::new(cell),
-        HistoryDomainRecord::Explore(record),
-    );
+    chat.history_replace_with_record(idx, Box::new(cell), HistoryDomainRecord::Explore(record));
     chat.bottom_pane.set_has_chat_history(true);
     chat.autoscroll_if_near_bottom();
     chat.exec.running_explore_agg_index = None;
@@ -497,7 +501,9 @@ pub(super) fn finalize_all_running_as_interrupted(chat: &mut ChatWidget<'_>) {
                     if replaced {
                         chat.history_replace_with_record(
                             idx,
-                            Box::new(history_cell::PlainHistoryCell::from_state(wait_state.clone())),
+                            Box::new(history_cell::PlainHistoryCell::from_state(
+                                wait_state.clone(),
+                            )),
                             HistoryDomainRecord::Plain(wait_state.clone()),
                         );
                     } else {
@@ -543,12 +549,7 @@ pub(super) fn finalize_all_running_due_to_answer(chat: &mut ChatWidget<'_>) {
 
     // Drain running execs so we can mark them stale and stop the spinner.
     let mut agg_was_updated = false;
-    let running_keys: Vec<super::ExecCallId> = chat
-        .exec
-        .running_commands
-        .keys()
-        .cloned()
-        .collect();
+    let running_keys: Vec<super::ExecCallId> = chat.exec.running_commands.keys().cloned().collect();
 
     for call_id in running_keys {
         if let Some(running) = chat.exec.running_commands.remove(&call_id) {
@@ -571,7 +572,10 @@ pub(super) fn finalize_all_running_due_to_answer(chat: &mut ChatWidget<'_>) {
 
             let history_id = running
                 .history_id
-                .or_else(|| chat.history_state.history_id_for_exec_call(call_id.as_ref()))
+                .or_else(|| {
+                    chat.history_state
+                        .history_id_for_exec_call(call_id.as_ref())
+                })
                 .or_else(|| {
                     running
                         .history_index
@@ -582,20 +586,20 @@ pub(super) fn finalize_all_running_due_to_answer(chat: &mut ChatWidget<'_>) {
             let stderr_tail_event = Some(format!("{stderr_prefix}{STALE_MSG}"));
             let stdout_tail_event = None;
 
-            let finish_mutation = chat.history_state.apply_domain_event(
-                HistoryDomainEvent::FinishExec {
-                    id: history_id,
-                    call_id: Some(call_id.as_ref().to_string()),
-                    status: ExecStatus::Success,
-                    exit_code: Some(exit_code),
-                    completed_at: Some(now),
-                    wait_total: running.wait_total,
-                    wait_active: false,
-                    wait_notes: wait_notes_record,
-                    stdout_tail: stdout_tail_event,
-                    stderr_tail: stderr_tail_event,
-                },
-            );
+            let finish_mutation =
+                chat.history_state
+                    .apply_domain_event(HistoryDomainEvent::FinishExec {
+                        id: history_id,
+                        call_id: Some(call_id.as_ref().to_string()),
+                        status: ExecStatus::Success,
+                        exit_code: Some(exit_code),
+                        completed_at: Some(now),
+                        wait_total: running.wait_total,
+                        wait_active: false,
+                        wait_notes: wait_notes_record,
+                        stdout_tail: stdout_tail_event,
+                        stderr_tail: stderr_tail_event,
+                    });
 
             let mut handled_via_state = false;
             if let HistoryMutation::Replaced {
@@ -710,7 +714,10 @@ pub(super) fn finalize_wait_missing_exec(
     if let Some(running) = chat.exec.running_commands.remove(&call_id) {
         history_id = running
             .history_id
-            .or_else(|| chat.history_state.history_id_for_exec_call(call_id.as_ref()))
+            .or_else(|| {
+                chat.history_state
+                    .history_id_for_exec_call(call_id.as_ref())
+            })
             .or_else(|| {
                 running
                     .history_index
@@ -723,7 +730,9 @@ pub(super) fn finalize_wait_missing_exec(
         wait_notes_pairs = running.wait_notes;
         explore_entry = running.explore_entry;
     } else {
-        history_id = chat.history_state.history_id_for_exec_call(call_id.as_ref());
+        history_id = chat
+            .history_state
+            .history_id_for_exec_call(call_id.as_ref());
         if let Some(id) = history_id {
             if let Some(HistoryRecord::Exec(record)) = chat.history_state.record(id).cloned() {
                 command = record.command.clone();
@@ -758,13 +767,13 @@ pub(super) fn finalize_wait_missing_exec(
 
     if let Some((agg_idx, entry_idx)) = explore_entry {
         let status = history_cell::ExploreEntryStatus::Error { exit_code: None };
-        let updated =
-            update_explore_entry_status(chat, Some(agg_idx), entry_idx, status).is_some();
-        if updated && !chat
-            .exec
-            .running_commands
-            .values()
-            .any(|rc| rc.explore_entry.is_some())
+        let updated = update_explore_entry_status(chat, Some(agg_idx), entry_idx, status).is_some();
+        if updated
+            && !chat
+                .exec
+                .running_commands
+                .values()
+                .any(|rc| rc.explore_entry.is_some())
         {
             chat.exec.running_explore_agg_index = None;
         }
@@ -922,17 +931,15 @@ pub(super) fn try_merge_completed_exec_at(chat: &mut ChatWidget<'_>, idx: usize)
     }
 }
 
-fn try_upgrade_fallback_exec_cell(
-    chat: &mut ChatWidget<'_>,
-    ev: &ExecCommandBeginEvent,
-) -> bool {
+fn try_upgrade_fallback_exec_cell(chat: &mut ChatWidget<'_>, ev: &ExecCommandBeginEvent) -> bool {
     for i in (0..chat.history_cells.len()).rev() {
         if let Some(exec) = chat.history_cells[i]
             .as_any()
             .downcast_ref::<history_cell::ExecCell>()
         {
             let command_matches_call = exec.command.len() == 1
-                && exec.command
+                && exec
+                    .command
                     .first()
                     .map(|cmd| cmd == &ev.call_id)
                     .unwrap_or(false);
@@ -947,8 +954,7 @@ fn try_upgrade_fallback_exec_cell(
                 && (command_matches_call || record_matches_call);
             if looks_like_fallback {
                 let mut upgraded = false;
-                if let Some(HistoryRecord::Exec(mut exec_record)) =
-                    history_record_for_cell(chat, i)
+                if let Some(HistoryRecord::Exec(mut exec_record)) = history_record_for_cell(chat, i)
                 {
                     exec_record.command = ev.command.clone();
                     exec_record.parsed = ev.parsed_cmd.clone();
@@ -961,12 +967,12 @@ fn try_upgrade_fallback_exec_cell(
                     let record_index = chat
                         .record_index_for_cell(i)
                         .unwrap_or_else(|| chat.record_index_for_position(i));
-                    let mutation = chat.history_state.apply_domain_event(
-                        HistoryDomainEvent::Replace {
-                            index: record_index,
-                            record: HistoryDomainRecord::Exec(exec_record.clone()),
-                        },
-                    );
+                    let mutation =
+                        chat.history_state
+                            .apply_domain_event(HistoryDomainEvent::Replace {
+                                index: record_index,
+                                record: HistoryDomainRecord::Exec(exec_record.clone()),
+                            });
 
                     if let HistoryMutation::Replaced {
                         id,
@@ -993,7 +999,8 @@ fn try_upgrade_fallback_exec_cell(
                         .as_any_mut()
                         .downcast_mut::<history_cell::ExecCell>()
                     {
-                        exec_mut.replace_command_metadata(ev.command.clone(), ev.parsed_cmd.clone());
+                        exec_mut
+                            .replace_command_metadata(ev.command.clone(), ev.parsed_cmd.clone());
                     }
                     if promote_exec_cell_to_explore(chat, i) {
                         return true;
@@ -1010,10 +1017,7 @@ fn try_upgrade_fallback_exec_cell(
     false
 }
 
-fn hydrate_exec_record_from_begin(
-    record: &mut ExecRecord,
-    ev: &ExecCommandBeginEvent,
-) -> bool {
+fn hydrate_exec_record_from_begin(record: &mut ExecRecord, ev: &ExecCommandBeginEvent) -> bool {
     let mut changed = false;
     if record.command != ev.command {
         record.command = ev.command.clone();
@@ -1043,10 +1047,7 @@ fn apply_exec_begin_metadata_to_finished_call(
     chat: &mut ChatWidget<'_>,
     ev: &ExecCommandBeginEvent,
 ) -> bool {
-    let history_id = match chat
-        .history_state
-        .history_id_for_exec_call(&ev.call_id)
-    {
+    let history_id = match chat.history_state.history_id_for_exec_call(&ev.call_id) {
         Some(id) => id,
         None => return false,
     };
@@ -1252,7 +1253,9 @@ pub(super) fn handle_exec_begin_now(
                 entries: Vec::new(),
             };
             let idx = chat.history_insert_with_key_global_tagged(
-                Box::new(history_cell::ExploreAggregationCell::from_record(record.clone())),
+                Box::new(history_cell::ExploreAggregationCell::from_record(
+                    record.clone(),
+                )),
                 key,
                 "explore",
                 Some(HistoryDomainRecord::Explore(record)),
@@ -1333,8 +1336,7 @@ pub(super) fn handle_exec_begin_now(
             chat.cell_order_dbg[idx] = None;
         }
         chat.last_assigned_order = Some(
-            chat
-                .last_assigned_order
+            chat.last_assigned_order
                 .map(|prev| prev.max(key))
                 .unwrap_or(key),
         );
@@ -1372,7 +1374,11 @@ pub(super) fn handle_exec_begin_now(
         let history_id = chat
             .history_state
             .history_id_for_exec_call(&ev.call_id)
-            .or_else(|| chat.history_cell_ids.get(history_idx).and_then(|slot| *slot));
+            .or_else(|| {
+                chat.history_cell_ids
+                    .get(history_idx)
+                    .and_then(|slot| *slot)
+            });
         running.history_id = history_id;
     }
     if !chat.tools_state.web_search_sessions.is_empty() {
@@ -1407,14 +1413,14 @@ pub(super) fn handle_exec_end_now(
     if suppressing {
         chat.exec.unsuppress_exec_end(&call_id);
         if !chat.exec.running_commands.contains_key(&call_id) {
-            chat.ended_call_ids.insert(super::ExecCallId(ev.call_id.clone()));
+            chat.ended_call_ids
+                .insert(super::ExecCallId(ev.call_id.clone()));
             chat.maybe_hide_spinner();
             chat.refresh_auto_drive_visuals();
             return;
         }
     }
-    chat
-        .ended_call_ids
+    chat.ended_call_ids
         .insert(super::ExecCallId(ev.call_id.clone()));
     // If this call was already marked as cancelled, drop the End to avoid
     // inserting a duplicate completed cell after the user interrupt.
@@ -1540,7 +1546,8 @@ pub(super) fn handle_exec_end_now(
                     command = exec_cell.command.clone();
                     parsed = exec_cell.parsed.clone();
                     wait_total = exec_cell.record.wait_total;
-                    wait_notes_pairs = ChatWidget::wait_pairs_from_exec_notes(&exec_cell.record.wait_notes);
+                    wait_notes_pairs =
+                        ChatWidget::wait_pairs_from_exec_notes(&exec_cell.record.wait_notes);
                     streamed_stdout = stream_chunks_to_text(&exec_cell.record.stdout_chunks);
                     streamed_stderr = stream_chunks_to_text(&exec_cell.record.stderr_chunks);
                 }
@@ -1570,7 +1577,8 @@ pub(super) fn handle_exec_end_now(
                 exit_code: Some(exit_code),
             },
         };
-        let updated_index = update_explore_entry_status(chat, Some(agg_idx), entry_idx, status.clone());
+        let updated_index =
+            update_explore_entry_status(chat, Some(agg_idx), entry_idx, status.clone());
         if !chat
             .exec
             .running_commands
@@ -1593,7 +1601,11 @@ pub(super) fn handle_exec_end_now(
             history_cell::ExploreEntryStatus::Error { .. } => match action {
                 ExecAction::Read => format!("read failed (exit {exit_code})"),
                 ExecAction::Search => {
-                    if exit_code == 2 { "invalid pattern".to_string() } else { format!("search failed (exit {exit_code})") }
+                    if exit_code == 2 {
+                        "invalid pattern".to_string()
+                    } else {
+                        format!("search failed (exit {exit_code})")
+                    }
                 }
                 ExecAction::List => format!("list failed (exit {exit_code})"),
                 _ => format!("exploration failed (exit {exit_code})"),
@@ -1677,7 +1689,8 @@ pub(super) fn handle_exec_end_now(
                         if let Some(ref c) = completed_opt {
                             // Match by command OR call_id to reliably update the correct cell
                             let command_matches = e.command == c.command;
-                            let call_id_matches = e.record.call_id.as_deref() == Some(call_id.as_ref());
+                            let call_id_matches =
+                                e.record.call_id.as_deref() == Some(call_id.as_ref());
                             (command_matches || call_id_matches) && e.output.is_none()
                         } else {
                             false
@@ -1701,7 +1714,8 @@ pub(super) fn handle_exec_end_now(
                         let is_same = if let Some(ref c) = completed_opt {
                             // Match by command OR call_id to avoid leaving exec cells stuck running
                             let command_matches = exec.command == c.command;
-                            let call_id_matches = exec.record.call_id.as_deref() == Some(call_id.as_ref());
+                            let call_id_matches =
+                                exec.record.call_id.as_deref() == Some(call_id.as_ref());
                             command_matches || call_id_matches
                         } else {
                             false
@@ -1731,8 +1745,7 @@ pub(super) fn handle_exec_end_now(
     }
 
     if exit_code == 0 {
-        chat
-            .bottom_pane
+        chat.bottom_pane
             .update_status_text("command completed".to_string());
         let gh_ticket = chat.make_background_tail_ticket();
         let tx = chat.app_event_tx.clone();
@@ -1744,8 +1757,7 @@ pub(super) fn handle_exec_end_now(
             gh_ticket,
         );
     } else {
-        chat
-            .bottom_pane
+        chat.bottom_pane
             .update_status_text(format!("command failed (exit {})", exit_code));
     }
     chat.maybe_hide_spinner();

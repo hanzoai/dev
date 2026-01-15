@@ -7,9 +7,9 @@ use std::path::Path;
 use std::path::PathBuf;
 use std::pin::Pin;
 use std::process::ExitStatus;
+use std::sync::Arc;
 use std::time::Duration;
 use std::time::Instant;
-use std::sync::Arc;
 
 use async_channel::Sender;
 use tokio::io::AsyncRead;
@@ -24,16 +24,16 @@ use crate::error::CodexErr;
 use crate::error::Result;
 use crate::error::SandboxErr;
 use crate::landlock::spawn_command_under_linux_sandbox;
-use crate::text_encoding::bytes_to_string_smart;
 use crate::protocol::Event;
 use crate::protocol::EventMsg;
-use crate::protocol::OrderMeta;
 use crate::protocol::ExecCommandOutputDeltaEvent;
 use crate::protocol::ExecOutputStream;
+use crate::protocol::OrderMeta;
 use crate::protocol::SandboxPolicy;
 use crate::seatbelt::spawn_command_under_seatbelt;
 use crate::spawn::StdioPolicy;
 use crate::spawn::spawn_child_async;
+use crate::text_encoding::bytes_to_string_smart;
 use serde_bytes::ByteBuf;
 
 // Note: legacy stream caps were removed in favor of streaming all bytes and
@@ -441,8 +441,7 @@ async fn consume_truncated_output(
         }
         StreamOutput {
             text: combined_buf,
-            truncated_after_lines: combined_truncated
-                .then_some(combined_truncated_lines.max(1)),
+            truncated_after_lines: combined_truncated.then_some(combined_truncated_lines.max(1)),
             truncated_before_bytes: (combined_truncated_bytes > 0)
                 .then_some(combined_truncated_bytes),
         }
@@ -627,7 +626,12 @@ async fn emit_pending_delta(
     let event = if let Some(sess) = &stream.session {
         sess.make_event(&stream.sub_id, msg)
     } else {
-        Event { id: stream.sub_id.clone(), event_seq: 0, msg, order: stream.order.clone() }
+        Event {
+            id: stream.sub_id.clone(),
+            event_seq: 0,
+            msg,
+            order: stream.order.clone(),
+        }
     };
     #[allow(clippy::let_unit_value)]
     let _ = stream.tx_event.send(event).await;
@@ -744,9 +748,15 @@ struct KillOnDrop {
 }
 
 impl KillOnDrop {
-    fn new(child: Child) -> Self { Self { child: Some(child) } }
-    fn as_mut(&mut self) -> &mut Child { self.child.as_mut().expect("child present") }
-    fn disarm(&mut self) { self.child = None; }
+    fn new(child: Child) -> Self {
+        Self { child: Some(child) }
+    }
+    fn as_mut(&mut self) -> &mut Child {
+        self.child.as_mut().expect("child present")
+    }
+    fn disarm(&mut self) {
+        self.child = None;
+    }
 }
 
 impl Drop for KillOnDrop {

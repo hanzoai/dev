@@ -100,8 +100,9 @@ impl RmcpClient {
             }
         }
 
-        let (transport, stderr) = spawned
-            .ok_or_else(|| last_err.unwrap_or_else(|| io::Error::other("failed to spawn rmcp server")))?;
+        let (transport, stderr) = spawned.ok_or_else(|| {
+            last_err.unwrap_or_else(|| io::Error::other("failed to spawn rmcp server"))
+        })?;
 
         if let Some(stderr) = stderr {
             tokio::spawn(async move {

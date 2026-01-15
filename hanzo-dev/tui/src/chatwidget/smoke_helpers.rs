@@ -1,24 +1,36 @@
 #![allow(dead_code)]
 
-use super::{perf::PerfStats, ChatWidget, ExecCallId, RunningCommand};
-use crate::app_event::{AppEvent, AutoContinueMode};
+use super::ChatWidget;
+use super::ExecCallId;
+use super::RunningCommand;
+use super::perf::PerfStats;
+use crate::app_event::AppEvent;
+use crate::app_event::AutoContinueMode;
 use crate::app_event_sender::AppEventSender;
-use crate::history_cell::{self, HistoryCellType};
+use crate::bottom_pane::SettingsSection;
+use crate::history_cell::HistoryCellType;
+use crate::history_cell::{self};
 use crate::markdown_render::render_markdown_text;
 use crate::tui::TerminalInfo;
-use crate::bottom_pane::SettingsSection;
+use chrono::Utc;
 use crossterm::event::KeyEvent;
 use hanzo_auto_drive_core::AutoRunPhase;
-use hanzo_core::config::{Config, ConfigOverrides, ConfigToml};
-use hanzo_core::history::state::HistoryRecord;
+use hanzo_core::config::Config;
+use hanzo_core::config::ConfigOverrides;
+use hanzo_core::config::ConfigToml;
 use hanzo_core::history::state::ExecStatus;
-use hanzo_core::protocol::{BackgroundEventEvent, Event, EventMsg, OrderMeta};
+use hanzo_core::history::state::HistoryRecord;
+use hanzo_core::protocol::BackgroundEventEvent;
+use hanzo_core::protocol::Event;
+use hanzo_core::protocol::EventMsg;
+use hanzo_core::protocol::OrderMeta;
 use once_cell::sync::Lazy;
-use chrono::Utc;
 use ratatui::text::Line;
 use std::collections::VecDeque;
-use std::sync::mpsc::{self, Receiver};
-use std::time::{Duration, Instant};
+use std::sync::mpsc::Receiver;
+use std::sync::mpsc::{self};
+use std::time::Duration;
+use std::time::Instant;
 use tokio::runtime::Runtime;
 
 static TEST_RUNTIME: Lazy<Runtime> = Lazy::new(|| {
@@ -72,7 +84,9 @@ impl ChatWidgetHarness {
     pub fn new() -> Self {
         // Stabilize time-of-day dependent greeting so VT100 snapshots remain deterministic.
         // Safe: tests run single-threaded by design.
-        unsafe { std::env::set_var("HANZO_TUI_FAKE_HOUR", "12"); }
+        unsafe {
+            std::env::set_var("HANZO_TUI_FAKE_HOUR", "12");
+        }
 
         unsafe {
             std::env::set_var("HANZO_TUI_FORCE_MINIMAL_HEADER", "1");
@@ -141,7 +155,11 @@ impl ChatWidgetHarness {
                 AppEvent::InsertFinalAnswer { id, lines, source } => {
                     self.chat.insert_final_answer_with_id(id, lines, source);
                 }
-                AppEvent::InsertBackgroundEvent { message, placement, order } => {
+                AppEvent::InsertBackgroundEvent {
+                    message,
+                    placement,
+                    order,
+                } => {
                     self.chat
                         .insert_background_event_with_placement(message, placement, order);
                 }
@@ -166,8 +184,13 @@ impl ChatWidgetHarness {
                         command,
                     );
                 }
-                AppEvent::AgentValidationFinished { name, result, attempt_id } => {
-                    self.chat.handle_agent_validation_finished(&name, attempt_id, result);
+                AppEvent::AgentValidationFinished {
+                    name,
+                    result,
+                    attempt_id,
+                } => {
+                    self.chat
+                        .handle_agent_validation_finished(&name, attempt_id, result);
                 }
                 AppEvent::UpdateReviewAutoResolveEnabled(enabled) => {
                     self.chat.set_review_auto_resolve_enabled(enabled);
@@ -179,7 +202,8 @@ impl ChatWidgetHarness {
                     self.chat.flush_interrupts_if_stream_idle();
                 }
                 AppEvent::ShowAgentsOverview => {
-                    self.chat.ensure_settings_overlay_section(SettingsSection::Agents);
+                    self.chat
+                        .ensure_settings_overlay_section(SettingsSection::Agents);
                     self.chat.show_agents_overview_ui();
                 }
                 AppEvent::CommitTick => {
@@ -345,20 +369,25 @@ impl ChatWidgetHarness {
     }
 
     pub fn open_agents_settings_overlay(&mut self) {
-        self.chat.ensure_settings_overlay_section(SettingsSection::Agents);
+        self.chat
+            .ensure_settings_overlay_section(SettingsSection::Agents);
         self.chat.show_agents_overview_ui();
         self.flush_into_widget();
     }
 
     pub fn open_validation_settings_overlay(&mut self) {
-        self.chat.ensure_settings_overlay_section(SettingsSection::Validation);
-        self.chat.show_settings_overlay(Some(SettingsSection::Validation));
+        self.chat
+            .ensure_settings_overlay_section(SettingsSection::Validation);
+        self.chat
+            .show_settings_overlay(Some(SettingsSection::Validation));
         self.flush_into_widget();
     }
 
     pub fn open_review_settings_overlay(&mut self) {
-        self.chat.ensure_settings_overlay_section(SettingsSection::Review);
-        self.chat.show_settings_overlay(Some(SettingsSection::Review));
+        self.chat
+            .ensure_settings_overlay_section(SettingsSection::Review);
+        self.chat
+            .show_settings_overlay(Some(SettingsSection::Review));
         self.flush_into_widget();
     }
 
@@ -445,11 +474,7 @@ impl ChatWidgetHarness {
     }
 
     #[cfg(any(test, feature = "test-helpers"))]
-    pub fn override_running_tool_elapsed(
-        &mut self,
-        call_id: &str,
-        duration: Duration,
-    ) {
+    pub fn override_running_tool_elapsed(&mut self, call_id: &str, duration: Duration) {
         self.flush_into_widget();
         for cell in &mut self.chat.history_cells {
             if let Some(running) = cell
@@ -626,8 +651,7 @@ impl ChatWidgetHarness {
             }
             chat.auto_state.reset_countdown();
             chat.auto_state.countdown_id = chat.auto_state.countdown_id.wrapping_add(1);
-            chat.auto_state.seconds_remaining =
-                chat.auto_state.countdown_seconds().unwrap_or(0);
+            chat.auto_state.seconds_remaining = chat.auto_state.countdown_seconds().unwrap_or(0);
             chat.auto_rebuild_live_ring();
             chat.request_redraw();
         }
@@ -653,7 +677,8 @@ impl ChatWidgetHarness {
             let countdown = chat.auto_state.countdown_seconds();
             chat.auto_state.countdown_id = chat.auto_state.countdown_id.wrapping_add(1);
             chat.auto_state.seconds_remaining = countdown.unwrap_or(0);
-            if chat.auto_state.awaiting_coordinator_submit() && !chat.auto_state.is_paused_manual() {
+            if chat.auto_state.awaiting_coordinator_submit() && !chat.auto_state.is_paused_manual()
+            {
                 if let Some(seconds) = countdown {
                     chat.auto_spawn_countdown(
                         chat.auto_state.countdown_id,
@@ -794,7 +819,9 @@ pub fn assert_has_insert_history(events: &[AppEvent]) {
     let found = events.iter().any(|event| {
         matches!(
             event,
-            AppEvent::InsertHistory(_) | AppEvent::InsertHistoryWithKind { .. } | AppEvent::InsertFinalAnswer { .. }
+            AppEvent::InsertHistory(_)
+                | AppEvent::InsertHistoryWithKind { .. }
+                | AppEvent::InsertFinalAnswer { .. }
         ) || matches!(
             event,
             AppEvent::CodexEvent(ev)
@@ -831,7 +858,9 @@ pub fn assert_has_terminal_chunk_containing(events: &[AppEvent], needle: &str) {
 
 pub fn assert_has_codex_event(events: &[AppEvent]) {
     assert!(
-        events.iter().any(|event| matches!(event, AppEvent::CodexEvent(_))),
+        events
+            .iter()
+            .any(|event| matches!(event, AppEvent::CodexEvent(_))),
         "expected CodexEvent, got: {events:#?}"
     );
 }

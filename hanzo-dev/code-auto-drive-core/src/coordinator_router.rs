@@ -67,11 +67,7 @@ const PLAN_PHRASES: [&str; 4] = [
     "create a plan",
 ];
 
-const STOP_PHRASES: [&str; 3] = [
-    "stop all agents",
-    "halt agents",
-    "cancel the plan",
-];
+const STOP_PHRASES: [&str; 3] = ["stop all agents", "halt agents", "cancel the plan"];
 
 fn contains_any(message: &str, phrases: &[&str]) -> bool {
     phrases.iter().any(|phrase| message.contains(phrase))
@@ -117,15 +113,10 @@ mod tests {
 
     #[test]
     fn routes_status_queries() {
-        let ctx = CoordinatorContext::new(
-            2,
-            vec!["Finished lint pass on the CLI crate".to_string()],
-        );
+        let ctx =
+            CoordinatorContext::new(2, vec!["Finished lint pass on the CLI crate".to_string()]);
 
-        let response = route_user_message(
-            "Can you tell me what work has been done so far?",
-            &ctx,
-        );
+        let response = route_user_message("Can you tell me what work has been done so far?", &ctx);
 
         let user_response = response.user_response.expect("expected a status message");
         assert!(user_response.contains("2 active agents"));
@@ -139,11 +130,13 @@ mod tests {
         let response = route_user_message("Please start more agents to handle this.", &ctx);
 
         assert_eq!(response.cli_command.as_deref(), Some("/plan"));
-        assert!(response
-            .user_response
-            .as_deref()
-            .unwrap_or_default()
-            .contains("Starting a fresh plan"));
+        assert!(
+            response
+                .user_response
+                .as_deref()
+                .unwrap_or_default()
+                .contains("Starting a fresh plan")
+        );
     }
 
     #[test]

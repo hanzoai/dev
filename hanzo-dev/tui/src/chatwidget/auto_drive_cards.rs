@@ -1,6 +1,10 @@
-use super::{tool_cards, ChatWidget, OrderKey};
+use super::ChatWidget;
+use super::OrderKey;
+use super::tool_cards;
 use super::tool_cards::ToolCardSlot;
-use crate::history_cell::{AutoDriveActionKind, AutoDriveCardCell, AutoDriveStatus};
+use crate::history_cell::AutoDriveActionKind;
+use crate::history_cell::AutoDriveCardCell;
+use crate::history_cell::AutoDriveStatus;
 
 pub(super) struct AutoDriveTracker {
     pub slot: ToolCardSlot,
@@ -11,7 +15,12 @@ pub(super) struct AutoDriveTracker {
 }
 
 impl AutoDriveTracker {
-    fn new(order_key: OrderKey, session_id: u64, request_ordinal: u64, goal: Option<String>) -> Self {
+    fn new(
+        order_key: OrderKey,
+        session_id: u64,
+        request_ordinal: u64,
+        goal: Option<String>,
+    ) -> Self {
         Self {
             slot: ToolCardSlot::new(order_key),
             cell: AutoDriveCardCell::new(goal),
@@ -44,11 +53,7 @@ impl AutoDriveTracker {
     }
 }
 
-pub(super) fn start_session(
-    chat: &mut ChatWidget<'_>,
-    order_key: OrderKey,
-    goal: Option<String>,
-) {
+pub(super) fn start_session(chat: &mut ChatWidget<'_>, order_key: OrderKey, goal: Option<String>) {
     let request_ordinal = order_key.req;
 
     if let Some(mut tracker) = chat.tools_state.auto_drive_tracker.take() {
@@ -83,11 +88,7 @@ pub(super) fn record_action(
     }
 }
 
-pub(super) fn update_goal(
-    chat: &mut ChatWidget<'_>,
-    order_key: OrderKey,
-    goal: Option<String>,
-) {
+pub(super) fn update_goal(chat: &mut ChatWidget<'_>, order_key: OrderKey, goal: Option<String>) {
     if let Some(mut tracker) = chat.tools_state.auto_drive_tracker.take() {
         tracker.request_ordinal = order_key.req;
         tracker.slot.set_order_key(order_key);
@@ -129,10 +130,7 @@ pub(super) fn finalize(
     }
 }
 
-pub(super) fn start_celebration(
-    chat: &mut ChatWidget<'_>,
-    message: Option<String>,
-) -> bool {
+pub(super) fn start_celebration(chat: &mut ChatWidget<'_>, message: Option<String>) -> bool {
     if let Some(mut tracker) = chat.tools_state.auto_drive_tracker.take() {
         tracker.cell.start_celebration(message);
         tracker.replace(chat);

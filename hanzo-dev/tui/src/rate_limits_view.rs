@@ -1,8 +1,11 @@
-#[cfg(feature = "hanzo-fork")]
-use crate::foundation::palette as colors;
 #[cfg(not(feature = "hanzo-fork"))]
 use crate::colors;
-use chrono::{DateTime, Datelike, Local, Utc};
+#[cfg(feature = "hanzo-fork")]
+use crate::foundation::palette as colors;
+use chrono::DateTime;
+use chrono::Datelike;
+use chrono::Local;
+use chrono::Utc;
 use hanzo_common::elapsed::format_duration;
 use hanzo_core::protocol::RateLimitSnapshotEvent;
 use hanzo_protocol::num_format::format_with_separators;
@@ -124,9 +127,7 @@ pub(crate) struct RateLimitResetInfo {
 }
 
 /// Default gauge configuration used by the TUI.
-pub(crate) const DEFAULT_GRID_CONFIG: GridConfig = GridConfig {
-    weekly_slots: 100,
-};
+pub(crate) const DEFAULT_GRID_CONFIG: GridConfig = GridConfig { weekly_slots: 100 };
 
 /// Build the lines and optional gauge used by the `/limits` view.
 pub(crate) fn build_limits_view(
@@ -305,8 +306,7 @@ fn build_hourly_window_line(
                     Style::default().fg(colors::text()),
                 ));
                 let elapsed_display = format_duration(elapsed);
-                let total_display =
-                    format_minutes_round_units(metrics.primary_window_minutes);
+                let total_display = format_minutes_round_units(metrics.primary_window_minutes);
                 spans.push(Span::styled(
                     format!(" ({elapsed_display} / {total_display})"),
                     Style::default().fg(colors::dim()),
@@ -406,10 +406,7 @@ fn build_weekly_window_line(
     Line::from(vec![
         Span::raw(prefix),
         Span::styled(
-            format!(
-                "(unknown / {})",
-                format_minutes_round_units(weekly_minutes)
-            ),
+            format!("(unknown / {})", format_minutes_round_units(weekly_minutes)),
             Style::default().fg(colors::dim()),
         ),
     ])
@@ -590,11 +587,7 @@ fn build_context_tokens_line(used: u64, window: u64) -> Line<'static> {
     Line::from(spans)
 }
 
-fn build_context_status_line(
-    used: u64,
-    window: u64,
-    overflow_auto_compact: bool,
-) -> Line<'static> {
+fn build_context_status_line(used: u64, window: u64, overflow_auto_compact: bool) -> Line<'static> {
     if used < window {
         let remaining = window - used;
         return Line::from(vec![
@@ -620,10 +613,7 @@ fn build_context_status_line(
     }
 
     let overage = used.saturating_sub(window);
-    let mut message = format!(
-        "Exceeded by {} tokens",
-        format_with_separators(overage)
-    );
+    let mut message = format!("Exceeded by {} tokens", format_with_separators(overage));
     if overflow_auto_compact {
         message.push_str("; auto-compaction runs after overflow");
     }
@@ -648,10 +638,7 @@ impl WindowTiming {
     }
 }
 
-fn compute_window_timing(
-    window_minutes: u64,
-    next_reset: DateTime<Utc>,
-) -> Option<WindowTiming> {
+fn compute_window_timing(window_minutes: u64, next_reset: DateTime<Utc>) -> Option<WindowTiming> {
     let window_seconds = (window_minutes as i64).checked_mul(60)?;
     if window_seconds <= 0 {
         return None;
@@ -726,19 +713,15 @@ fn build_status_line(metrics: &RateLimitMetrics) -> Line<'static> {
             (false, true) => "weekly window exhausted",
             (false, false) => unreachable!(),
         };
-        Line::from(vec![
-            Span::styled(
-                format!("✕ Rate limited: {reason}"),
-                Style::default().fg(colors::error()),
-            ),
-        ])
+        Line::from(vec![Span::styled(
+            format!("✕ Rate limited: {reason}"),
+            Style::default().fg(colors::error()),
+        )])
     } else {
-        Line::from(vec![
-            Span::styled(
-                "✓ Within current limits".to_string(),
-                Style::default().fg(colors::success()),
-            ),
-        ])
+        Line::from(vec![Span::styled(
+            "✓ Within current limits".to_string(),
+            Style::default().fg(colors::success()),
+        )])
     }
 }
 
@@ -750,10 +733,7 @@ fn build_legend_lines(show_gauge: bool) -> Vec<Line<'static>> {
     let mut lines = Vec::new();
     let indent = chart_indent();
     lines.push(Line::from(vec![
-        Span::styled(
-            indent.clone(),
-            Style::default().fg(colors::dim()),
-        ),
+        Span::styled(indent.clone(), Style::default().fg(colors::dim())),
         Span::styled(
             WEEKLY_CELL.to_string(),
             Style::default()
@@ -766,10 +746,7 @@ fn build_legend_lines(show_gauge: bool) -> Vec<Line<'static>> {
         ),
     ]));
     lines.push(Line::from(vec![
-        Span::styled(
-            indent.clone(),
-            Style::default().fg(colors::dim()),
-        ),
+        Span::styled(indent.clone(), Style::default().fg(colors::dim())),
         Span::styled(
             HOURLY_CELL.to_string(),
             Style::default()
@@ -782,10 +759,7 @@ fn build_legend_lines(show_gauge: bool) -> Vec<Line<'static>> {
         ),
     ]));
     lines.push(Line::from(vec![
-        Span::styled(
-            indent,
-            Style::default().fg(colors::dim()),
-        ),
+        Span::styled(indent, Style::default().fg(colors::dim())),
         Span::styled(
             UNUSED_CELL.to_string(),
             Style::default()
@@ -1004,11 +978,7 @@ mod tests {
                 show_chart: false,
             },
         );
-        let rendered: Vec<String> = view
-            .summary_lines
-            .iter()
-            .map(plain_text)
-            .collect();
+        let rendered: Vec<String> = view.summary_lines.iter().map(plain_text).collect();
         assert!(rendered.iter().all(|line| !line.contains("Hourly Limit")));
         assert!(rendered.iter().all(|line| !line.contains("Weekly Limit")));
         assert!(rendered.iter().all(|line| !line.contains("Chart")));
@@ -1100,20 +1070,14 @@ impl GridLayout {
                 let linear_index = (self.size * row) + col;
                 let slot = total_cells - 1 - linear_index as isize;
                 let span = if slot < counts.dark_cells {
-                    Span::styled(
-                        WEEKLY_CELL.to_string(),
-                        Style::default().fg(colors::text()),
-                    )
+                    Span::styled(WEEKLY_CELL.to_string(), Style::default().fg(colors::text()))
                 } else if slot < counts.dark_cells + counts.green_cells {
                     Span::styled(
                         HOURLY_CELL.to_string(),
                         Style::default().fg(colors::primary()),
                     )
                 } else {
-                    Span::styled(
-                        UNUSED_CELL.to_string(),
-                        Style::default().fg(colors::info()),
-                    )
+                    Span::styled(UNUSED_CELL.to_string(), Style::default().fg(colors::info()))
                 };
                 spans.push(span);
             }

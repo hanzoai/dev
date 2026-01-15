@@ -1,5 +1,5 @@
-use hanzo_core::CodexAuth;
 use hanzo_app_server_protocol::AuthMode;
+use hanzo_core::CodexAuth;
 use std::path::Path;
 use std::sync::LazyLock;
 use std::sync::RwLock;

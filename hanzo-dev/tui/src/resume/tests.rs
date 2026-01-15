@@ -1,23 +1,23 @@
 #![allow(clippy::unwrap_used, clippy::expect_used)]
 
-use std::fs::{self, File};
-use std::io::{BufWriter, Write};
+use std::fs::File;
+use std::fs::{self};
+use std::io::BufWriter;
+use std::io::Write;
 use std::path::Path;
 
 use tempfile::TempDir;
 use uuid::Uuid;
 
 use hanzo_protocol::ConversationId;
-use hanzo_protocol::protocol::{
-    EventMsg as ProtoEventMsg,
-    RecordedEvent,
-    RolloutItem,
-    RolloutLine,
-    SessionMeta,
-    SessionMetaLine,
-    SessionSource,
-    UserMessageEvent,
-};
+use hanzo_protocol::protocol::EventMsg as ProtoEventMsg;
+use hanzo_protocol::protocol::RecordedEvent;
+use hanzo_protocol::protocol::RolloutItem;
+use hanzo_protocol::protocol::RolloutLine;
+use hanzo_protocol::protocol::SessionMeta;
+use hanzo_protocol::protocol::SessionMetaLine;
+use hanzo_protocol::protocol::SessionSource;
+use hanzo_protocol::protocol::UserMessageEvent;
 
 fn write_event_only_session(path: &Path, cwd: &Path) {
     let file = File::create(path).unwrap();
@@ -76,7 +76,8 @@ fn event_only_sessions_are_dropped_by_resume_discovery() {
         .join("06");
     fs::create_dir_all(&sessions_dir).unwrap();
 
-    let rollout_path = sessions_dir.join("rollout-2025-10-06T12-00-00-00000000-0000-0000-0000-000000000042.jsonl");
+    let rollout_path =
+        sessions_dir.join("rollout-2025-10-06T12-00-00-00000000-0000-0000-0000-000000000042.jsonl");
     write_event_only_session(&rollout_path, &project_cwd);
 
     let results = super::discovery::list_sessions_for_cwd(&project_cwd, code_home, None);

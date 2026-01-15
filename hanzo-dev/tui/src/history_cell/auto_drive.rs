@@ -1,33 +1,43 @@
-use super::card_style::{
-    auto_drive_card_style,
-    hint_text_style,
-    primary_text_style,
-    rows_to_lines,
-    secondary_text_style,
-    title_text_style,
-    truncate_with_ellipsis,
-    CardRow,
-    CardSegment,
-    CardStyle,
-    CARD_ACCENT_WIDTH,
-};
-use super::{HistoryCell, HistoryCellType, ToolCellStatus};
+use super::HistoryCell;
+use super::HistoryCellType;
+use super::ToolCellStatus;
+use super::card_style::CARD_ACCENT_WIDTH;
+use super::card_style::CardRow;
+use super::card_style::CardSegment;
+use super::card_style::CardStyle;
+use super::card_style::auto_drive_card_style;
+use super::card_style::hint_text_style;
+use super::card_style::primary_text_style;
+use super::card_style::rows_to_lines;
+use super::card_style::secondary_text_style;
+use super::card_style::title_text_style;
+use super::card_style::truncate_with_ellipsis;
 use crate::card_theme;
-use crate::glitch_animation::{gradient_multi, mix_rgb};
-use crate::gradient_background::{GradientBackground, RevealRender};
-use crate::util::buffer::fill_rect;
 use crate::colors;
-use crate::theme::{palette_mode, PaletteMode};
+use crate::glitch_animation::gradient_multi;
+use crate::glitch_animation::mix_rgb;
+use crate::gradient_background::GradientBackground;
+use crate::gradient_background::RevealRender;
+use crate::theme::PaletteMode;
+use crate::theme::palette_mode;
+use crate::util::buffer::fill_rect;
 use hanzo_common::elapsed::format_duration_digital;
 use ratatui::buffer::Buffer;
 use ratatui::layout::Rect;
-use ratatui::style::{Color, Modifier, Style};
-use ratatui::text::{Line, Text};
-use ratatui::widgets::{Paragraph, Widget, Wrap};
-use unicode_width::{UnicodeWidthChar, UnicodeWidthStr};
-use std::f32;
-use std::time::{Duration, Instant};
+use ratatui::style::Color;
+use ratatui::style::Modifier;
+use ratatui::style::Style;
+use ratatui::text::Line;
+use ratatui::text::Text;
+use ratatui::widgets::Paragraph;
+use ratatui::widgets::Widget;
+use ratatui::widgets::Wrap;
 use std::env;
+use std::f32;
+use std::time::Duration;
+use std::time::Instant;
+use unicode_width::UnicodeWidthChar;
+use unicode_width::UnicodeWidthStr;
 
 const BORDER_TOP: &str = "╭─";
 const BORDER_BODY: &str = "│";
@@ -88,7 +98,11 @@ struct AutoDriveAction {
 
 impl AutoDriveAction {
     fn new(text: String, kind: AutoDriveActionKind, elapsed: Duration) -> Self {
-        Self { text, kind, elapsed }
+        Self {
+            text,
+            kind,
+            elapsed,
+        }
     }
 }
 
@@ -144,7 +158,10 @@ impl AutoDriveCardCell {
     #[cfg(any(test, feature = "test-helpers"))]
     #[allow(dead_code)]
     pub(crate) fn action_texts(&self) -> Vec<String> {
-        self.actions.iter().map(|action| action.text.clone()).collect()
+        self.actions
+            .iter()
+            .map(|action| action.text.clone())
+            .collect()
     }
 
     fn normalize_text(value: String) -> Option<String> {
@@ -219,9 +236,7 @@ impl AutoDriveCardCell {
         }
 
         let accent_width = CARD_ACCENT_WIDTH.min(width as usize);
-        let body_width = width
-            .saturating_sub(accent_width as u16)
-            .saturating_sub(1) as usize;
+        let body_width = width.saturating_sub(accent_width as u16).saturating_sub(1) as usize;
         if body_width == 0 {
             return Vec::new();
         }
@@ -317,14 +332,8 @@ impl AutoDriveCardCell {
         if UnicodeWidthStr::width(combined.as_str()) <= body_width {
             let mut bold_title = title_style;
             bold_title = bold_title.add_modifier(Modifier::BOLD);
-            segments.push(CardSegment::new(
-                title_text.to_string(),
-                bold_title,
-            ));
-            segments.push(CardSegment::new(
-                status_text,
-                status_style,
-            ));
+            segments.push(CardSegment::new(title_text.to_string(), bold_title));
+            segments.push(CardSegment::new(status_text, status_style));
         } else {
             let display = truncate_with_ellipsis(title_text, body_width);
             let mut bold_title = title_style;
@@ -355,7 +364,10 @@ impl AutoDriveCardCell {
         CardRow::new(
             BORDER_BODY.to_string(),
             Self::accent_style(style),
-            vec![CardSegment::new(filler, Self::celebration_background_style())],
+            vec![CardSegment::new(
+                filler,
+                Self::celebration_background_style(),
+            )],
             None,
         )
     }
@@ -371,9 +383,7 @@ impl AutoDriveCardCell {
 
         let indent = if body_width > 1 { " " } else { "" };
         let indent_width = UnicodeWidthStr::width(indent);
-        let text_width = body_width
-            .saturating_sub(indent_width)
-            .max(1);
+        let text_width = body_width.saturating_sub(indent_width).max(1);
         let wrapped = Self::wrap_goal_text(cleaned, text_width);
 
         wrapped
@@ -609,7 +619,12 @@ impl AutoDriveCardCell {
         )
     }
 
-    fn complete_message_rows(&self, message: &str, body_width: usize, style: &CardStyle) -> Vec<CardRow> {
+    fn complete_message_rows(
+        &self,
+        message: &str,
+        body_width: usize,
+        style: &CardStyle,
+    ) -> Vec<CardRow> {
         if body_width == 0 {
             return Vec::new();
         }
@@ -674,7 +689,11 @@ impl AutoDriveCardCell {
         self.celebration_body_lines_internal(body_width, now, reduced_motion)
     }
 
-    fn celebration_frame_index_at(started_at: Instant, now: Instant, reduced_motion: bool) -> usize {
+    fn celebration_frame_index_at(
+        started_at: Instant,
+        now: Instant,
+        reduced_motion: bool,
+    ) -> usize {
         if reduced_motion {
             return 0;
         }
@@ -767,8 +786,8 @@ impl AutoDriveCardCell {
             let position = (Self::prng_step(&mut state) as usize) % chars.len();
             let in_protected = position >= protected_start && position < protected_end;
             if !in_protected && chars[position] == ' ' {
-                let sparkle_idx = (Self::prng_step(&mut state) as usize)
-                    % CELEBRATION_SPARKLE_CHOICES.len();
+                let sparkle_idx =
+                    (Self::prng_step(&mut state) as usize) % CELEBRATION_SPARKLE_CHOICES.len();
                 chars[position] = CELEBRATION_SPARKLE_CHOICES[sparkle_idx];
             }
         }
@@ -789,9 +808,7 @@ impl AutoDriveCardCell {
     }
 
     fn prng_step(state: &mut u64) -> u64 {
-        *state = state
-            .wrapping_mul(6364136223846793005)
-            .wrapping_add(1);
+        *state = state.wrapping_mul(6364136223846793005).wrapping_add(1);
         *state
     }
 
@@ -1023,17 +1040,18 @@ impl AutoDriveCardCell {
         let mut buffer = String::new();
         let mut active_style: Option<(Color, bool)> = None;
 
-        let flush = |segments: &mut Vec<CardSegment>, buffer: &mut String, style: Option<(Color, bool)>| {
-            if let Some((color, bold)) = style {
-                if !buffer.is_empty() {
-                    let mut segment_style = Style::default().fg(color);
-                    if bold {
-                        segment_style = segment_style.add_modifier(Modifier::BOLD);
+        let flush =
+            |segments: &mut Vec<CardSegment>, buffer: &mut String, style: Option<(Color, bool)>| {
+                if let Some((color, bold)) = style {
+                    if !buffer.is_empty() {
+                        let mut segment_style = Style::default().fg(color);
+                        if bold {
+                            segment_style = segment_style.add_modifier(Modifier::BOLD);
+                        }
+                        segments.push(CardSegment::new(std::mem::take(buffer), segment_style));
                     }
-                    segments.push(CardSegment::new(std::mem::take(buffer), segment_style));
                 }
-            }
-        };
+            };
 
         for idx in 0..total {
             let ch = chars[idx];
@@ -1236,7 +1254,11 @@ impl HistoryCell for AutoDriveCardCell {
 
     fn display_lines(&self) -> Vec<Line<'static>> {
         let mut lines: Vec<Line<'static>> = Vec::new();
-        lines.push(Line::from(format!("{} — {}", "Auto Drive", self.status.label())));
+        lines.push(Line::from(format!(
+            "{} — {}",
+            "Auto Drive",
+            self.status.label()
+        )));
         if let Some(goal) = &self.goal {
             lines.push(Line::from(format!("goal: {goal}")));
         }
@@ -1279,7 +1301,8 @@ impl HistoryCell for AutoDriveCardCell {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::time::{Duration, Instant};
+    use std::time::Duration;
+    use std::time::Instant;
     use unicode_width::UnicodeWidthStr;
 
     const TEST_WIDTH: usize = 60;
@@ -1301,13 +1324,13 @@ mod tests {
         let style = auto_drive_card_style();
         let rows = cell.goal_rows(goal, 16, &style);
 
-        assert!(rows.len() >= 3, "expected multiple wrapped rows, got {}", rows.len());
+        assert!(
+            rows.len() >= 3,
+            "expected multiple wrapped rows, got {}",
+            rows.len()
+        );
         for row in &rows {
-            let combined: String = row
-                .segments
-                .iter()
-                .map(|seg| seg.text.clone())
-                .collect();
+            let combined: String = row.segments.iter().map(|seg| seg.text.clone()).collect();
             assert!(UnicodeWidthStr::width(combined.as_str()) <= 16);
         }
     }
@@ -1324,9 +1347,11 @@ mod tests {
             false,
         );
         assert!(!lines.is_empty());
-        assert!(lines
-            .iter()
-            .all(|line| UnicodeWidthStr::width(line.as_str()) == TEST_WIDTH));
+        assert!(
+            lines
+                .iter()
+                .all(|line| UnicodeWidthStr::width(line.as_str()) == TEST_WIDTH)
+        );
     }
 
     #[test]
@@ -1346,10 +1371,10 @@ mod tests {
             false,
         );
 
-        assert!(first
-            .iter()
-            .zip(second.iter())
-            .any(|(a, b)| a != b), "expected frames to differ");
+        assert!(
+            first.iter().zip(second.iter()).any(|(a, b)| a != b),
+            "expected frames to differ"
+        );
 
         for line in first.iter().chain(second.iter()) {
             assert_eq!(UnicodeWidthStr::width(line.as_str()), TEST_WIDTH);

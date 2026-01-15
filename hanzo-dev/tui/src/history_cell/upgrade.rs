@@ -1,7 +1,8 @@
 //! Upgrade notice cell built from `UpgradeNoticeState` metadata.
 
 use super::*;
-use crate::history::state::{HistoryId, UpgradeNoticeState};
+use crate::history::state::HistoryId;
+use crate::history::state::UpgradeNoticeState;
 
 const TARGET_WIDTH: u16 = 70;
 
@@ -56,19 +57,29 @@ impl UpgradeNoticeCell {
             .bg(self.backdrop)
             .fg(crate::colors::primary())
             .add_modifier(Modifier::BOLD);
-        let highlight = Style::default().bg(self.backdrop).fg(crate::colors::primary());
-        let dim = Style::default().bg(self.backdrop).fg(crate::colors::text_dim());
+        let highlight = Style::default()
+            .bg(self.backdrop)
+            .fg(crate::colors::primary());
+        let dim = Style::default()
+            .bg(self.backdrop)
+            .fg(crate::colors::text_dim());
         (base, title, highlight, dim)
     }
 
     fn message_lines(&self) -> Vec<Line<'static>> {
         let (base_style, title_style, highlight_style, dim_style) = self.styles();
         let mut lines: Vec<Line<'static>> = Vec::new();
-        lines.push(Line::from(vec![Span::styled("★ Upgrade Available ★", title_style)]));
+        lines.push(Line::from(vec![Span::styled(
+            "★ Upgrade Available ★",
+            title_style,
+        )]));
         lines.push(Line::from(vec![
             Span::styled("Latest release: ", dim_style),
             Span::styled(
-                format!("{} → {}", self.state.current_version, self.state.latest_version),
+                format!(
+                    "{} → {}",
+                    self.state.current_version, self.state.latest_version
+                ),
                 highlight_style,
             ),
         ]));

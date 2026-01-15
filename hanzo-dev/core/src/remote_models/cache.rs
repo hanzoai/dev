@@ -1,9 +1,12 @@
-use chrono::{DateTime, Utc};
+use chrono::DateTime;
+use chrono::Utc;
 use hanzo_protocol::openai_models::ModelInfo;
-use serde::{Deserialize, Serialize};
+use serde::Deserialize;
+use serde::Serialize;
 use std::io;
 use std::io::ErrorKind;
-use std::path::{Path, PathBuf};
+use std::path::Path;
+use std::path::PathBuf;
 use std::time::Duration;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -55,4 +58,3 @@ fn tmp_path_for(path: &Path) -> PathBuf {
     tmp.push(".tmp");
     PathBuf::from(tmp)
 }
-

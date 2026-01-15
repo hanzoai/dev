@@ -2,7 +2,8 @@ use std::collections::BTreeMap;
 use std::io::BufRead;
 use std::path::Path;
 use std::sync::OnceLock;
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::AtomicBool;
+use std::sync::atomic::Ordering;
 use std::time::Duration;
 
 use crate::AuthManager;
@@ -11,10 +12,13 @@ use crate::account_usage;
 use crate::auth;
 use crate::auth_accounts;
 use bytes::Bytes;
-use hanzo_app_server_protocol::AuthMode;
-use hanzo_protocol::models::ResponseItem;
+use chrono::DateTime;
+use chrono::Duration as ChronoDuration;
+use chrono::Utc;
 use eventsource_stream::Eventsource;
 use futures::prelude::*;
+use hanzo_app_server_protocol::AuthMode;
+use hanzo_protocol::models::ResponseItem;
 use httpdate::parse_http_date;
 use regex_lite::Regex;
 use reqwest::StatusCode;
@@ -25,19 +29,19 @@ use serde::Serialize;
 use serde_json::Value;
 use tokio::sync::mpsc;
 use tokio::time::timeout;
-use tokio_util::io::ReaderStream;
 use tokio_stream::wrappers::ReceiverStream;
+use tokio_tungstenite::tungstenite::Message;
+use tokio_tungstenite::tungstenite::client::IntoClientRequest;
+use tokio_util::io::ReaderStream;
 use tracing::debug;
 use tracing::trace;
 use tracing::warn;
 use uuid::Uuid;
-use chrono::{DateTime, Duration as ChronoDuration, Utc};
-use tokio_tungstenite::tungstenite::Message;
-use tokio_tungstenite::tungstenite::client::IntoClientRequest;
 
 const AUTH_REQUIRED_MESSAGE: &str = "Authentication required. Run `code login` to continue.";
 
-use crate::agent_defaults::{default_agent_configs, enabled_agent_model_specs};
+use crate::agent_defaults::default_agent_configs;
+use crate::agent_defaults::enabled_agent_model_specs;
 use crate::chat_completions::AggregateStreamExt;
 use crate::chat_completions::stream_chat_completions;
 use crate::client_common::Prompt;
@@ -51,25 +55,28 @@ use crate::config_types::ReasoningSummary as ReasoningSummaryConfig;
 use crate::config_types::TextVerbosity as TextVerbosityConfig;
 use crate::debug_logger::DebugLogger;
 use crate::default_client::create_client;
-use crate::error::{CodexErr, RetryAfter};
+use crate::error::CodexErr;
 use crate::error::Result;
+use crate::error::RetryAfter;
 use crate::error::RetryLimitReachedError;
 use crate::error::UnexpectedResponseError;
 use crate::error::UsageLimitReachedError;
 use crate::flags::HANZO_RS_SSE_FIXTURE;
-use crate::model_family::{find_family_for_model, ModelFamily};
+use crate::model_family::ModelFamily;
+use crate::model_family::find_family_for_model;
 use crate::model_provider_info::ModelProviderInfo;
 use crate::model_provider_info::WireApi;
-use crate::openai_tools::create_tools_json_for_responses_api;
 use crate::openai_tools::ConfigShellToolType;
 use crate::openai_tools::ToolsConfig;
+use crate::openai_tools::create_tools_json_for_responses_api;
 use crate::protocol::RateLimitSnapshotEvent;
 use crate::protocol::SandboxPolicy;
 use crate::protocol::TokenUsage;
 use crate::reasoning::clamp_reasoning_effort_for_model;
 use crate::slash_commands::get_enabled_agents;
 use crate::util::backoff;
-use hanzo_otel::otel_event_manager::{OtelEventManager, TurnLatencyPayload};
+use hanzo_otel::otel_event_manager::OtelEventManager;
+use hanzo_otel::otel_event_manager::TurnLatencyPayload;
 use std::sync::Arc;
 use std::sync::Mutex;
 use std::sync::RwLock;
@@ -143,9 +150,15 @@ fn try_parse_retry_after(err: &Error, now: DateTime<Utc>) -> Option<RetryAfter> 
     let unit = captures.get(2)?.as_str().trim().to_ascii_lowercase();
 
     if unit.starts_with("ms") {
-        Some(RetryAfter::from_duration(Duration::from_millis(value.round() as u64), now))
+        Some(RetryAfter::from_duration(
+            Duration::from_millis(value.round() as u64),
+            now,
+        ))
     } else if unit.starts_with("sec") || unit == "s" || unit.starts_with("second") {
-        Some(RetryAfter::from_duration(Duration::from_secs_f64(value), now))
+        Some(RetryAfter::from_duration(
+            Duration::from_secs_f64(value),
+            now,
+        ))
     } else {
         None
     }
@@ -290,15 +303,14 @@ impl ModelClient {
             return None;
         }
 
-        create_reasoning_param_for_request(
-            family,
-            Some(effort),
-            self.summary,
-        )
+        create_reasoning_param_for_request(family, Some(effort), self.summary)
     }
 
     fn disable_reasoning_summary(&self) {
-        if !self.reasoning_summary_disabled.swap(true, Ordering::Relaxed) {
+        if !self
+            .reasoning_summary_disabled
+            .swap(true, Ordering::Relaxed)
+        {
             tracing::warn!("disabling reasoning summaries after API rejection");
         }
     }
@@ -335,10 +347,7 @@ impl ModelClient {
         self.config.api_key_fallback_on_all_accounts_limited
     }
 
-    pub fn build_tools_config_with_sandbox(
-        &self,
-        sandbox_policy: SandboxPolicy,
-    ) -> ToolsConfig {
+    pub fn build_tools_config_with_sandbox(&self, sandbox_policy: SandboxPolicy) -> ToolsConfig {
         self.build_tools_config_with_sandbox_for_family(sandbox_policy, &self.config.model_family)
     }
 
@@ -357,7 +366,8 @@ impl ModelClient {
             self.config.use_experimental_streamable_shell_tool,
             self.config.include_view_image_tool,
         );
-        tools_config.web_search_allowed_domains = self.config.tools_web_search_allowed_domains.clone();
+        tools_config.web_search_allowed_domains =
+            self.config.tools_web_search_allowed_domains.clone();
 
         let mut agent_models: Vec<String> = if self.config.agents.is_empty() {
             default_agent_configs()
@@ -430,9 +440,7 @@ impl ModelClient {
     /// specialised helpers are private to avoid accidental misuse.
     pub async fn stream(&self, prompt: &Prompt) -> Result<ResponseStream> {
         let env_log_tag = std::env::var("CODE_DEBUG_LOG_TAG").ok();
-        let log_tag = env_log_tag
-            .as_deref()
-            .or(prompt.log_tag.as_deref());
+        let log_tag = env_log_tag.as_deref().or(prompt.log_tag.as_deref());
         match self.provider.wire_api {
             WireApi::Responses => self.stream_responses(prompt, log_tag).await,
             WireApi::ResponsesWebsocket => self.stream_responses_websocket(prompt, log_tag).await,
@@ -527,12 +535,15 @@ impl ModelClient {
         let input_with_instructions = prompt.get_formatted_input();
 
         let want_format = prompt.text_format.clone().or_else(|| {
-            prompt.output_schema.as_ref().map(|schema| crate::client_common::TextFormat {
-                r#type: "json_schema".to_string(),
-                name: Some("code_output_schema".to_string()),
-                strict: Some(true),
-                schema: Some(schema.clone()),
-            })
+            prompt
+                .output_schema
+                .as_ref()
+                .map(|schema| crate::client_common::TextFormat {
+                    r#type: "json_schema".to_string(),
+                    name: Some("code_output_schema".to_string()),
+                    strict: Some(true),
+                    schema: Some(schema.clone()),
+                })
         });
 
         let effective_verbosity = clamp_text_verbosity_for_model(request_model, self.verbosity);
@@ -657,7 +668,12 @@ impl ModelClient {
             if request_id.is_empty() {
                 if let Ok(logger) = self.debug_logger.lock() {
                     request_id = logger
-                        .start_request_log(&endpoint, &payload_json, header_snapshot.as_ref(), log_tag)
+                        .start_request_log(
+                            &endpoint,
+                            &payload_json,
+                            header_snapshot.as_ref(),
+                            log_tag,
+                        )
                         .unwrap_or_default();
                 }
             }
@@ -668,16 +684,13 @@ impl ModelClient {
                 .map(|req| req.headers().clone())
                 .unwrap_or_else(HeaderMap::new);
 
-            let mut ws_request = endpoint
-                .clone()
-                .into_client_request()
-                .map_err(|err| {
-                    CodexErr::Stream(
-                        format!("[ws] failed to build request: {err}"),
-                        None,
-                        Some(request_id.clone()),
-                    )
-                })?;
+            let mut ws_request = endpoint.clone().into_client_request().map_err(|err| {
+                CodexErr::Stream(
+                    format!("[ws] failed to build request: {err}"),
+                    None,
+                    Some(request_id.clone()),
+                )
+            })?;
             ws_request.headers_mut().extend(ws_headers);
 
             // Wrap the normal /responses request payload in the WebSocket envelope.
@@ -817,12 +830,20 @@ impl ModelClient {
     }
 
     /// Implementation for the OpenAI *Responses* experimental API.
-    async fn stream_responses(&self, prompt: &Prompt, log_tag: Option<&str>) -> Result<ResponseStream> {
+    async fn stream_responses(
+        &self,
+        prompt: &Prompt,
+        log_tag: Option<&str>,
+    ) -> Result<ResponseStream> {
         if let Some(path) = &*HANZO_RS_SSE_FIXTURE {
             // short circuit for tests
             warn!(path, "Streaming from fixture");
-            return stream_from_fixture(path, self.provider.clone(), self.otel_event_manager.clone())
-                .await;
+            return stream_from_fixture(
+                path,
+                self.provider.clone(),
+                self.otel_event_manager.clone(),
+            )
+            .await;
         }
 
         let auth_manager = self.auth_manager.clone();
@@ -855,7 +876,7 @@ impl ModelClient {
                     .and_then(|value| value.as_str())
                     .map(|tool_type| tool_type != "web_search")
                     .unwrap_or(true)
-                });
+            });
         }
 
         let input_with_instructions = prompt.get_formatted_input();
@@ -865,12 +886,15 @@ impl ModelClient {
         // - Only include `text.verbosity` for GPT-5 family models; warn and ignore otherwise.
         // - When a structured `format` is present, still include `verbosity` so GPT-5 can honor it.
         let want_format = prompt.text_format.clone().or_else(|| {
-            prompt.output_schema.as_ref().map(|schema| crate::client_common::TextFormat {
-                r#type: "json_schema".to_string(),
-                name: Some("code_output_schema".to_string()),
-                strict: Some(true),
-                schema: Some(schema.clone()),
-            })
+            prompt
+                .output_schema
+                .as_ref()
+                .map(|schema| crate::client_common::TextFormat {
+                    r#type: "json_schema".to_string(),
+                    name: Some("code_output_schema".to_string()),
+                    strict: Some(true),
+                    schema: Some(schema.clone()),
+                })
         });
 
         let effective_verbosity = clamp_text_verbosity_for_model(request_model, self.verbosity);
@@ -904,9 +928,7 @@ impl ModelClient {
 
         let model_slug = request_model;
 
-        let session_id = prompt
-            .session_id_override
-            .unwrap_or(self.session_id);
+        let session_id = prompt.session_id_override.unwrap_or(self.session_id);
         let session_id_str = session_id.to_string();
 
         let mut attempt = 0;
@@ -959,10 +981,7 @@ impl ModelClient {
             if let Some(openrouter_cfg) = self.provider.openrouter_config() {
                 if let Some(obj) = payload_json.as_object_mut() {
                     if let Some(provider) = &openrouter_cfg.provider {
-                        obj.insert(
-                            "provider".to_string(),
-                            serde_json::to_value(provider)?
-                        );
+                        obj.insert("provider".to_string(), serde_json::to_value(provider)?);
                     }
                     if let Some(route) = &openrouter_cfg.route {
                         obj.insert("route".to_string(), route.clone());
@@ -1144,9 +1163,8 @@ impl ModelClient {
                             match manager.refresh_token_classified().await {
                                 Ok(Some(_)) => {}
                                 Ok(None) => {
-                                    auth_refresh_error = Some(RefreshTokenError::permanent(
-                                        AUTH_REQUIRED_MESSAGE,
-                                    ));
+                                    auth_refresh_error =
+                                        Some(RefreshTokenError::permanent(AUTH_REQUIRED_MESSAGE));
                                 }
                                 Err(err) => {
                                     auth_refresh_error = Some(err);
@@ -1184,28 +1202,24 @@ impl ModelClient {
                                 }
                             }
 
-                            let current_auth_mode = auth
-                                .as_ref()
-                                .map(|a| a.mode)
-                                .unwrap_or(AuthMode::ApiKey);
+                            let current_auth_mode =
+                                auth.as_ref().map(|a| a.mode).unwrap_or(AuthMode::ApiKey);
 
-                            let switch_reason = match body
-                                .as_ref()
-                                .and_then(|err| err.error.r#type.as_deref())
-                            {
-                                Some("usage_limit_reached") => "usage_limit_reached",
-                                Some("usage_not_included") => "usage_not_included",
-                                _ => "http_429",
-                            };
+                            let switch_reason =
+                                match body.as_ref().and_then(|err| err.error.r#type.as_deref()) {
+                                    Some("usage_limit_reached") => "usage_limit_reached",
+                                    Some("usage_not_included") => "usage_not_included",
+                                    _ => "http_429",
+                                };
 
                             let (blocked_until, should_record_usage_limit) = match body.as_ref() {
                                 Some(ErrorResponse { error })
                                     if error.r#type.as_deref() == Some("usage_limit_reached") =>
                                 {
                                     (
-                                        error
-                                            .resets_in_seconds
-                                            .map(|seconds| now + ChronoDuration::seconds(seconds as i64)),
+                                        error.resets_in_seconds.map(|seconds| {
+                                            now + ChronoDuration::seconds(seconds as i64)
+                                        }),
                                         true,
                                     )
                                 }
@@ -1245,7 +1259,9 @@ impl ModelClient {
                                             resets_in_seconds,
                                             observed_at,
                                         ) {
-                                            tracing::warn!("Failed to persist usage limit hint: {err}");
+                                            tracing::warn!(
+                                                "Failed to persist usage limit hint: {err}"
+                                            );
                                         }
                                     });
                                 }
@@ -1441,7 +1457,8 @@ impl ModelClient {
                         return Err(CodexErr::RetryLimit(RetryLimitReachedError {
                             status,
                             request_id: None,
-                            retryable: status.is_server_error() || status == StatusCode::TOO_MANY_REQUESTS,
+                            retryable: status.is_server_error()
+                                || status == StatusCode::TOO_MANY_REQUESTS,
                         }));
                     }
 
@@ -1463,7 +1480,11 @@ impl ModelClient {
                     if attempt > max_retries {
                         // Log network error before surfacing.
                         if let Ok(logger) = self.debug_logger.lock() {
-                            let _ = logger.log_error(&endpoint, &format!("Network error: {}", e), log_tag);
+                            let _ = logger.log_error(
+                                &endpoint,
+                                &format!("Network error: {}", e),
+                                log_tag,
+                            );
                         }
                         if is_connectivity {
                             let req_id = (!request_id.is_empty()).then(|| request_id.clone());
@@ -1619,10 +1640,8 @@ impl ModelClient {
                             .flatten()
                     });
                 if let Some(current_account_id) = current_account_id {
-                    let current_auth_mode = auth
-                        .as_ref()
-                        .map(|a| a.mode)
-                        .unwrap_or(AuthMode::ApiKey);
+                    let current_auth_mode =
+                        auth.as_ref().map(|a| a.mode).unwrap_or(AuthMode::ApiKey);
                     rate_limit_switch_state.mark_limited(
                         &current_account_id,
                         current_auth_mode,
@@ -1642,7 +1661,8 @@ impl ModelClient {
                             to_account_id = %next_account_id,
                             "rate limit hit during compact; auto-switching active account"
                         );
-                        if let Err(err) = auth::activate_account(self.code_home(), &next_account_id) {
+                        if let Err(err) = auth::activate_account(self.code_home(), &next_account_id)
+                        {
                             tracing::warn!(
                                 from_account_id = %current_account_id,
                                 to_account_id = %next_account_id,
@@ -1698,7 +1718,9 @@ fn attach_codex_beta_features_header(
     let has_header = builder
         .try_clone()
         .and_then(|builder| builder.build().ok())
-        .map_or(false, |req| req.headers().contains_key("x-codex-beta-features"));
+        .map_or(false, |req| {
+            req.headers().contains_key("x-codex-beta-features")
+        });
     if has_header {
         return builder;
     }
@@ -1758,7 +1780,10 @@ fn clamp_text_verbosity_for_model(
         return requested;
     }
 
-    if let Some(medium) = allowed.iter().find(|v| matches!(v, TextVerbosityConfig::Medium)) {
+    if let Some(medium) = allowed
+        .iter()
+        .find(|v| matches!(v, TextVerbosityConfig::Medium))
+    {
         tracing::debug!(
             model,
             requested = ?requested,
@@ -1783,7 +1808,11 @@ fn supported_text_verbosity_for_model(model: &str) -> &'static [TextVerbosityCon
         return &[TextVerbosityConfig::Medium];
     }
 
-    const ALL: &[TextVerbosityConfig] = &[TextVerbosityConfig::Low, TextVerbosityConfig::Medium, TextVerbosityConfig::High];
+    const ALL: &[TextVerbosityConfig] = &[
+        TextVerbosityConfig::Low,
+        TextVerbosityConfig::Medium,
+        TextVerbosityConfig::High,
+    ];
     ALL
 }
 
@@ -1942,7 +1971,10 @@ fn parse_retry_after_header(value: &str, now: DateTime<Utc>) -> Option<RetryAfte
     }
     if let Ok(float_secs) = normalized.parse::<f64>() {
         if !float_secs.is_sign_negative() {
-            return Some(RetryAfter::from_duration(Duration::from_secs_f64(float_secs), now));
+            return Some(RetryAfter::from_duration(
+                Duration::from_secs_f64(float_secs),
+                now,
+            ));
         }
     }
     if let Ok(system_time) = parse_http_date(normalized) {
@@ -2017,11 +2049,8 @@ async fn process_sse<S>(
             Ok(Some(Ok(sse))) => sse,
             Ok(Some(Err(e))) => {
                 debug!("SSE Error: {e:#}");
-                let event = CodexErr::Stream(
-                    format!("[transport] {e}"),
-                    None,
-                    Some(request_id.clone()),
-                );
+                let event =
+                    CodexErr::Stream(format!("[transport] {e}"), None, Some(request_id.clone()));
                 let _ = tx_event.send(Err(event)).await;
                 return;
             }
@@ -2031,14 +2060,12 @@ async fn process_sse<S>(
                         id: response_id,
                         usage,
                     }) => {
-                        if let (Some(usage), Some(manager)) = (&usage, otel_event_manager.as_ref()) {
+                        if let (Some(usage), Some(manager)) = (&usage, otel_event_manager.as_ref())
+                        {
                             manager.sse_event_completed(
                                 usage.input_tokens,
                                 usage.output_tokens,
-                                usage
-                                    .input_tokens_details
-                                    .as_ref()
-                                    .map(|d| d.cached_tokens),
+                                usage.input_tokens_details.as_ref().map(|d| d.cached_tokens),
                                 usage
                                     .output_tokens_details
                                     .as_ref()
@@ -2430,13 +2457,16 @@ async fn stream_from_fixture(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::model_provider_info::{ModelProviderInfo, WireApi};
-    use std::collections::HashMap;
+    use crate::model_provider_info::ModelProviderInfo;
+    use crate::model_provider_info::WireApi;
+    use chrono::Duration as ChronoDuration;
+    use chrono::TimeZone;
+    use chrono::Utc;
     use serde_json::json;
+    use std::collections::HashMap;
     use tokio::sync::mpsc;
     use tokio_test::io::Builder as IoBuilder;
     use tokio_util::io::ReaderStream;
-    use chrono::{Duration as ChronoDuration, TimeZone, Utc};
 
     // ────────────────────────────
     // Helpers
@@ -2445,15 +2475,10 @@ mod tests {
     #[test]
     fn unauthorized_outcome_returns_permanent_error_for_permanent_refresh_failure() {
         let err = RefreshTokenError::permanent("token revoked");
-        let outcome = map_unauthorized_outcome(true, Some(&err))
-            .expect("should produce CodexErr");
+        let outcome = map_unauthorized_outcome(true, Some(&err)).expect("should produce CodexErr");
         match outcome {
             CodexErr::AuthRefreshPermanent(msg) => {
-                assert!(
-                    msg.contains("token revoked"),
-                    "unexpected message: {}",
-                    msg
-                );
+                assert!(msg.contains("token revoked"), "unexpected message: {}", msg);
             }
             other => panic!("unexpected outcome: {:?}", other),
         }
@@ -2461,8 +2486,7 @@ mod tests {
 
     #[test]
     fn unauthorized_outcome_requires_login_without_auth() {
-        let outcome = map_unauthorized_outcome(false, None)
-            .expect("should require login");
+        let outcome = map_unauthorized_outcome(false, None).expect("should require login");
         match outcome {
             CodexErr::AuthRefreshPermanent(msg) => {
                 assert_eq!(msg, AUTH_REQUIRED_MESSAGE);
@@ -2811,10 +2835,7 @@ mod tests {
 
         assert_eq!(events.len(), 2);
 
-        matches!(
-            events[0],
-            Ok(ResponseEvent::OutputItemDone { .. })
-        );
+        matches!(events[0], Ok(ResponseEvent::OutputItemDone { .. }));
 
         match &events[1] {
             Err(CodexErr::Stream(msg, _, _)) => {
@@ -3087,7 +3108,8 @@ mod tests {
     #[test]
     fn parse_retry_after_header_handles_timezones() {
         let now = Utc.with_ymd_and_hms(2025, 3, 9, 5, 0, 0).unwrap();
-        let retry = parse_retry_after_header("Sun, 09 Mar 2025 01:30:00 -0500", now).expect("header");
+        let retry =
+            parse_retry_after_header("Sun, 09 Mar 2025 01:30:00 -0500", now).expect("header");
         assert_eq!(
             retry.resume_at,
             Utc.with_ymd_and_hms(2025, 3, 9, 6, 30, 0).unwrap()
@@ -3110,7 +3132,10 @@ mod tests {
             StatusCode::FORBIDDEN,
             StatusCode::TOO_MANY_REQUESTS,
         ] {
-            assert!(is_quota_exceeded_http_error(status, &error), "status {status} should be fatal");
+            assert!(
+                is_quota_exceeded_http_error(status, &error),
+                "status {status} should be fatal"
+            );
         }
 
         assert!(
@@ -3130,14 +3155,19 @@ mod tests {
             resets_in_seconds: None,
         };
 
-        assert!(!is_quota_exceeded_http_error(StatusCode::BAD_REQUEST, &error));
+        assert!(!is_quota_exceeded_http_error(
+            StatusCode::BAD_REQUEST,
+            &error
+        ));
     }
 
     #[test]
     fn reasoning_summary_rejection_is_detected() {
         let error_with_param = Error {
             r#type: Some("invalid_request_error".to_string()),
-            message: Some("Your organization must be verified to generate reasoning summaries.".to_string()),
+            message: Some(
+                "Your organization must be verified to generate reasoning summaries.".to_string(),
+            ),
             code: Some("unsupported_value".to_string()),
             param: Some("reasoning.summary".to_string()),
             plan_type: None,

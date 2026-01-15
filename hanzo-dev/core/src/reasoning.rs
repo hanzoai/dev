@@ -13,10 +13,8 @@ const GPT5_1_CODEX_EFFORTS: &[ReasoningEffort] = &[
     ReasoningEffort::High,
 ];
 
-const GPT5_1_CODEX_MINI_EFFORTS: &[ReasoningEffort] = &[
-    ReasoningEffort::Medium,
-    ReasoningEffort::High,
-];
+const GPT5_1_CODEX_MINI_EFFORTS: &[ReasoningEffort] =
+    &[ReasoningEffort::Medium, ReasoningEffort::High];
 
 const GPT5_1_EFFORTS: &[ReasoningEffort] = &[
     ReasoningEffort::Low,
@@ -37,10 +35,8 @@ const GPT5_CODEX_EFFORTS: &[ReasoningEffort] = &[
     ReasoningEffort::High,
 ];
 
-const GPT5_CODEX_MINI_EFFORTS: &[ReasoningEffort] = &[
-    ReasoningEffort::Medium,
-    ReasoningEffort::High,
-];
+const GPT5_CODEX_MINI_EFFORTS: &[ReasoningEffort] =
+    &[ReasoningEffort::Medium, ReasoningEffort::High];
 
 const GPT5_EFFORTS: &[ReasoningEffort] = &[
     ReasoningEffort::Minimal,

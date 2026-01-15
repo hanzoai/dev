@@ -1,8 +1,14 @@
 //! Rendering for structured plan update history cells built from `PlanUpdateState`.
 
 use super::*;
-use crate::history::state::{HistoryId, PlanIcon, PlanProgress, PlanStep, PlanUpdateState};
-use hanzo_core::plan_tool::{PlanItemArg, StepStatus, UpdatePlanArgs};
+use crate::history::state::HistoryId;
+use crate::history::state::PlanIcon;
+use crate::history::state::PlanProgress;
+use crate::history::state::PlanStep;
+use crate::history::state::PlanUpdateState;
+use hanzo_core::plan_tool::PlanItemArg;
+use hanzo_core::plan_tool::StepStatus;
+use hanzo_core::plan_tool::UpdatePlanArgs;
 
 pub(crate) struct PlanUpdateCell {
     state: PlanUpdateState,
@@ -52,10 +58,19 @@ impl PlanUpdateCell {
 
         let bar = progress_meter(progress, 10);
         spans.push(Span::raw(" ["));
-        spans.push(Span::styled(bar.filled, Style::default().fg(crate::colors::success())));
-        spans.push(Span::styled(bar.empty, Style::default().add_modifier(Modifier::DIM)));
+        spans.push(Span::styled(
+            bar.filled,
+            Style::default().fg(crate::colors::success()),
+        ));
+        spans.push(Span::styled(
+            bar.empty,
+            Style::default().add_modifier(Modifier::DIM),
+        ));
         spans.push(Span::raw("] "));
-        spans.push(Span::raw(format!("{}/{}", progress.completed, progress.total)));
+        spans.push(Span::raw(format!(
+            "{}/{}",
+            progress.completed, progress.total
+        )));
         Line::from(spans)
     }
 

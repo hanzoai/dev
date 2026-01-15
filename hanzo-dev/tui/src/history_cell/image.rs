@@ -1,29 +1,31 @@
-use super::card_style::{
-    ansi16_inverse_color,
-    browser_card_style,
-    fill_card_background,
-    hint_text_style,
-    primary_text_style,
-    rows_to_lines,
-    secondary_text_style,
-    title_text_style,
-    truncate_with_ellipsis,
-    CardRow,
-    CardSegment,
-    CardStyle,
-    CARD_ACCENT_WIDTH,
-};
+use super::card_style::CARD_ACCENT_WIDTH;
+use super::card_style::CardRow;
+use super::card_style::CardSegment;
+use super::card_style::CardStyle;
+use super::card_style::ansi16_inverse_color;
+use super::card_style::browser_card_style;
+use super::card_style::fill_card_background;
+use super::card_style::hint_text_style;
+use super::card_style::primary_text_style;
+use super::card_style::rows_to_lines;
+use super::card_style::secondary_text_style;
+use super::card_style::title_text_style;
+use super::card_style::truncate_with_ellipsis;
 use super::*;
 use crate::colors;
 use crate::history::state::ImageRecord;
-use crate::theme::{palette_mode, PaletteMode};
-use hanzo_protocol::num_format::format_with_separators;
+use crate::theme::PaletteMode;
+use crate::theme::palette_mode;
 use ::image::ImageReader;
 use ::image::image_dimensions;
-use ratatui::widgets::{Paragraph, Wrap};
-use ratatui_image::{Image, Resize};
-use ratatui_image::picker::{Picker, ProtocolType};
+use hanzo_protocol::num_format::format_with_separators;
+use ratatui::widgets::Paragraph;
+use ratatui::widgets::Wrap;
 use ratatui_image::FilterType;
+use ratatui_image::Image;
+use ratatui_image::Resize;
+use ratatui_image::picker::Picker;
+use ratatui_image::picker::ProtocolType;
 use std::cell::RefCell;
 use std::path::Path;
 use std::path::PathBuf;
@@ -55,8 +57,15 @@ struct ImagePreviewLayout {
 pub(crate) struct ImageOutputCell {
     record: ImageRecord,
     cached_picker: Rc<RefCell<Option<ratatui_image::picker::Picker>>>,
-    cached_image_protocol:
-        Rc<RefCell<Option<(PathBuf, ratatui::layout::Rect, ratatui_image::protocol::Protocol)>>>,
+    cached_image_protocol: Rc<
+        RefCell<
+            Option<(
+                PathBuf,
+                ratatui::layout::Rect,
+                ratatui_image::protocol::Protocol,
+            )>,
+        >,
+    >,
 }
 
 impl ImageOutputCell {
@@ -72,11 +81,7 @@ impl ImageOutputCell {
         Self::new(record)
     }
 
-    pub(crate) fn ensure_picker_initialized(
-        &self,
-        picker: Option<Picker>,
-        _font_size: (u16, u16),
-    ) {
+    pub(crate) fn ensure_picker_initialized(&self, picker: Option<Picker>, _font_size: (u16, u16)) {
         let mut slot = self.cached_picker.borrow_mut();
         let needs_init = match slot.as_ref() {
             None => true,
@@ -218,7 +223,12 @@ impl ImageOutputCell {
         if !text.is_empty() {
             segments.push(CardSegment::new(text, title_style));
         }
-        CardRow::new(BORDER_TOP.to_string(), Self::accent_style(style), segments, None)
+        CardRow::new(
+            BORDER_TOP.to_string(),
+            Self::accent_style(style),
+            segments,
+            None,
+        )
     }
 
     fn blank_border_row(&self, body_width: usize, style: &CardStyle) -> CardRow {
@@ -240,7 +250,12 @@ impl ImageOutputCell {
         right_padding_cols: usize,
     ) -> CardRow {
         if body_width == 0 {
-            return CardRow::new(BORDER_BODY.to_string(), Self::accent_style(style), Vec::new(), None);
+            return CardRow::new(
+                BORDER_BODY.to_string(),
+                Self::accent_style(style),
+                Vec::new(),
+                None,
+            );
         }
         let indent = indent_cols.min(body_width.saturating_sub(1));
         let available = body_width.saturating_sub(indent);
@@ -250,7 +265,12 @@ impl ImageOutputCell {
         }
         let text: String = text.into();
         if available == 0 {
-            return CardRow::new(BORDER_BODY.to_string(), Self::accent_style(style), segments, None);
+            return CardRow::new(
+                BORDER_BODY.to_string(),
+                Self::accent_style(style),
+                segments,
+                None,
+            );
         }
         let usable_width = available.saturating_sub(right_padding_cols);
         let display = if usable_width == 0 {
@@ -263,7 +283,12 @@ impl ImageOutputCell {
             let pad = right_padding_cols.min(available);
             segments.push(CardSegment::new(" ".repeat(pad), Style::default()));
         }
-        CardRow::new(BORDER_BODY.to_string(), Self::accent_style(style), segments, None)
+        CardRow::new(
+            BORDER_BODY.to_string(),
+            Self::accent_style(style),
+            segments,
+            None,
+        )
     }
 
     fn bottom_border_row(&self, body_width: usize, style: &CardStyle) -> CardRow {
@@ -292,9 +317,7 @@ impl ImageOutputCell {
         }
 
         let accent_width = CARD_ACCENT_WIDTH.min(width as usize);
-        let body_width = width
-            .saturating_sub(accent_width as u16)
-            .saturating_sub(1) as usize;
+        let body_width = width.saturating_sub(accent_width as u16).saturating_sub(1) as usize;
         if body_width == 0 {
             return (Vec::new(), None);
         }
@@ -341,12 +364,9 @@ impl ImageOutputCell {
             }
         } else {
             for detail in details {
-                for wrapped in wrap_card_lines(
-                    detail.as_str(),
-                    body_width,
-                    indent_cols,
-                    right_padding,
-                ) {
+                for wrapped in
+                    wrap_card_lines(detail.as_str(), body_width, indent_cols, right_padding)
+                {
                     rows.push(self.body_text_row(
                         wrapped,
                         body_width,
@@ -434,8 +454,7 @@ impl ImageOutputCell {
         };
 
         let cols = image_cols as u32;
-        let rows_by_w = (cols * cell_w as u32 * img_h) as f64
-            / (img_w * cell_h as u32) as f64;
+        let rows_by_w = (cols * cell_w as u32 * img_h) as f64 / (img_w * cell_h as u32) as f64;
         let rows = rows_by_w.ceil().max(1.0) as usize;
         Some(rows.clamp(MIN_IMAGE_ROWS, MAX_IMAGE_ROWS))
     }
@@ -527,7 +546,6 @@ impl ImageOutputCell {
             return;
         }
 
-
         let rows_to_copy = (visible_bottom - visible_top) as u16;
         if rows_to_copy == 0 {
             return;
@@ -567,7 +585,10 @@ impl ImageOutputCell {
         // escape sequences behave correctly.
         if !is_partially_visible {
             let protocol_target = Rect::new(0, 0, image_width, full_height);
-            if self.ensure_protocol(path, protocol_target, &picker).is_err() {
+            if self
+                .ensure_protocol(path, protocol_target, &picker)
+                .is_err()
+            {
                 self.render_image_placeholder(path, placeholder_area, buf);
                 return;
             }
@@ -609,7 +630,9 @@ impl ImageOutputCell {
                 if dest_col >= area_right {
                     break;
                 }
-                let Some(src_cell) = offscreen.cell((col, src_row)) else { continue; };
+                let Some(src_cell) = offscreen.cell((col, src_row)) else {
+                    continue;
+                };
                 if let Some(dest_cell) = buf.cell_mut((dest_col, dest_row)) {
                     *dest_cell = src_cell.clone();
                 }
@@ -618,13 +641,12 @@ impl ImageOutputCell {
     }
 
     fn render_image_placeholder(&self, path: &Path, area: Rect, buf: &mut Buffer) {
-        use ratatui::style::{Modifier, Style};
-        use ratatui::widgets::{Block, Borders};
+        use ratatui::style::Modifier;
+        use ratatui::style::Style;
+        use ratatui::widgets::Block;
+        use ratatui::widgets::Borders;
 
-        let filename = path
-            .file_name()
-            .and_then(|n| n.to_str())
-            .unwrap_or("image");
+        let filename = path.file_name().and_then(|n| n.to_str()).unwrap_or("image");
         let placeholder_text = format!("Image:\n{filename}");
 
         let block = Block::default()
@@ -742,7 +764,12 @@ impl HistoryCell for ImageOutputCell {
     }
 }
 
-fn wrap_card_lines(text: &str, body_width: usize, indent_cols: usize, right_padding: usize) -> Vec<String> {
+fn wrap_card_lines(
+    text: &str,
+    body_width: usize,
+    indent_cols: usize,
+    right_padding: usize,
+) -> Vec<String> {
     let available = body_width
         .saturating_sub(indent_cols)
         .saturating_sub(right_padding);
@@ -829,8 +856,7 @@ fn split_long_card_word(word: &str, width: usize) -> Vec<String> {
 }
 
 fn string_display_width(text: &str) -> usize {
-    text
-        .chars()
+    text.chars()
         .map(|ch| UnicodeWidthChar::width(ch).unwrap_or(0))
         .sum()
 }

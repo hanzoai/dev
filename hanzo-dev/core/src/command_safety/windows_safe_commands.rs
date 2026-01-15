@@ -295,9 +295,7 @@ fn is_safe_git_config_override(raw: &str) -> bool {
     };
 
     let key = key.trim().to_ascii_lowercase();
-    let value = value
-        .trim()
-        .trim_matches(|c| matches!(c, '"' | '\''));
+    let value = value.trim().trim_matches(|c| matches!(c, '"' | '\''));
     let value_lc = value.to_ascii_lowercase();
 
     matches!(

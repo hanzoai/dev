@@ -2,7 +2,8 @@
 
 use crate::app_event_sender::AppEventSender;
 use crate::chatwidget::BackgroundOrderTicket;
-use crate::user_approval_widget::{ApprovalRequest, UserApprovalWidget};
+use crate::user_approval_widget::ApprovalRequest;
+use crate::user_approval_widget::UserApprovalWidget;
 
 /// Trait bridging approval UI construction so the fork can swap implementations
 /// without touching call sites.

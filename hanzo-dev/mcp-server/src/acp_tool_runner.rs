@@ -4,7 +4,8 @@ use std::sync::Arc;
 
 use agent_client_protocol as acp;
 use agent_client_protocol::ToolCallUpdateFields;
-use anyhow::{Context as _, Result};
+use anyhow::Context as _;
+use anyhow::Result;
 use hanzo_core::CodexConversation;
 use hanzo_core::ConversationManager;
 use hanzo_core::NewConversation;
@@ -21,7 +22,8 @@ use uuid::Uuid;
 
 use crate::outgoing_message::OutgoingMessageSender;
 use crate::outgoing_message::OutgoingNotification;
-use crate::session_store::{SessionEntry, SessionMap};
+use crate::session_store::SessionEntry;
+use crate::session_store::SessionMap;
 use serde_json;
 
 pub async fn new_session(

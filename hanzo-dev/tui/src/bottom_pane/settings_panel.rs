@@ -1,9 +1,15 @@
 use ratatui::buffer::Buffer;
-use ratatui::layout::{Alignment, Margin, Rect};
-use ratatui::style::{Modifier, Style};
-use ratatui::text::{Line, Span};
+use ratatui::layout::Alignment;
+use ratatui::layout::Margin;
+use ratatui::layout::Rect;
 use ratatui::prelude::Widget;
-use ratatui::widgets::{Block, Borders, Clear};
+use ratatui::style::Modifier;
+use ratatui::style::Style;
+use ratatui::text::Line;
+use ratatui::text::Span;
+use ratatui::widgets::Block;
+use ratatui::widgets::Borders;
+use ratatui::widgets::Clear;
 
 use crate::colors;
 use crate::util::buffer::fill_rect;
@@ -29,9 +35,7 @@ impl PanelFrameStyle {
             border_style: Style::default()
                 .fg(colors::border())
                 .bg(colors::background()),
-            background_style: Style::default()
-                .bg(colors::background())
-                .fg(colors::text()),
+            background_style: Style::default().bg(colors::background()).fg(colors::text()),
             content_margin: Margin::new(0, 0),
             clear_background: true,
             fill_inner: true,
@@ -49,7 +53,6 @@ impl PanelFrameStyle {
         self.content_margin = margin;
         self
     }
-
 }
 
 pub(crate) fn render_panel<F>(
@@ -58,8 +61,7 @@ pub(crate) fn render_panel<F>(
     title: &str,
     style: PanelFrameStyle,
     mut render_body: F,
-)
-where
+) where
     F: FnMut(Rect, &mut Buffer),
 {
     if area.width == 0 || area.height == 0 {

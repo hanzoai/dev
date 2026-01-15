@@ -16,14 +16,20 @@ const REMOTE_TEXT_VERBOSITY_ALL: &[TextVerbosityConfig] = &[
 ];
 const REMOTE_TEXT_VERBOSITY_MEDIUM: &[TextVerbosityConfig] = &[TextVerbosityConfig::Medium];
 
-pub(crate) fn merge_remote_models(remote_models: Vec<ModelInfo>, local_presets: Vec<ModelPreset>) -> Vec<ModelPreset> {
+pub(crate) fn merge_remote_models(
+    remote_models: Vec<ModelInfo>,
+    local_presets: Vec<ModelPreset>,
+) -> Vec<ModelPreset> {
     if remote_models.is_empty() {
         return local_presets;
     }
 
     let mut remote_models = remote_models;
     remote_models.sort_by(|a, b| a.priority.cmp(&b.priority));
-    let mut remote_presets: Vec<ModelPreset> = remote_models.into_iter().map(model_info_to_preset).collect();
+    let mut remote_presets: Vec<ModelPreset> = remote_models
+        .into_iter()
+        .map(model_info_to_preset)
+        .collect();
 
     let remote_slugs: HashSet<String> = remote_presets
         .iter()

@@ -22,7 +22,6 @@ pub fn fill_rect(buf: &mut Buffer, area: Rect, fill_char: Option<char>, style: S
     let offset_y = rect.y.saturating_sub(buf.area.y) as usize;
     let row_span = rect.width as usize;
 
-
     if let Some(ch) = fill_char {
         let mut char_buf = [0; 4];
         let expected_symbol = ch.encode_utf8(&mut char_buf);
