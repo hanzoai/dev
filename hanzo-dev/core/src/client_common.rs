@@ -120,28 +120,11 @@ impl Default for Prompt {
 impl Prompt {
     pub(crate) fn get_full_instructions<'a>(&'a self, model: &'a ModelFamily) -> Cow<'a, str> {
         let effective_model = self.model_family_override.as_ref().unwrap_or(model);
-        let base = self
-            .base_instructions_override
-            .as_deref()
-            .unwrap_or(effective_model.base_instructions.deref());
-        let _sections: Vec<&str> = vec![base];
-        // When there are no custom instructions, add apply_patch_tool_instructions if:
-        // - the model needs special instructions (4.1)
-        // AND
-        // - there is no apply_patch tool present
-        let is_apply_patch_tool_present = self.tools.iter().any(|tool| match tool {
-            OpenAiTool::Function(f) => f.name == "apply_patch",
-            OpenAiTool::Freeform(f) => f.name == "apply_patch",
-            _ => false,
-        });
-        if self.base_instructions_override.is_none()
-            && effective_model.needs_special_apply_patch_instructions
-            && !is_apply_patch_tool_present
-        {
-            Cow::Owned(format!("{base}\n{APPLY_PATCH_TOOL_INSTRUCTIONS}"))
-        } else {
-            Cow::Borrowed(base)
-        }
+        Cow::Borrowed(
+            self.base_instructions_override
+                .as_deref()
+                .unwrap_or(effective_model.base_instructions.deref()),
+        )
     }
 
     pub fn set_log_tag<S: Into<String>>(&mut self, tag: S) {
@@ -497,6 +480,7 @@ impl Stream for ResponseStream {
 #[cfg(test)]
 mod tests {
     use crate::model_family::find_family_for_model;
+    use hanzo_apply_patch::APPLY_PATCH_TOOL_INSTRUCTIONS;
     use pretty_assertions::assert_eq;
 
     use super::*;
@@ -542,18 +526,21 @@ mod tests {
         ];
         for test_case in test_cases {
             let model_family = find_family_for_model(test_case.slug).expect("known model slug");
-            let expected = if test_case.expects_apply_patch_instructions {
-                format!(
-                    "{}\n{}",
-                    model_family.clone().base_instructions,
-                    APPLY_PATCH_TOOL_INSTRUCTIONS
-                )
-            } else {
-                model_family.clone().base_instructions
-            };
-
             let full = prompt.get_full_instructions(&model_family);
-            assert_eq!(full, expected);
+            assert_eq!(full, model_family.base_instructions);
+            if test_case.expects_apply_patch_instructions {
+                assert!(
+                    full.contains(APPLY_PATCH_TOOL_INSTRUCTIONS),
+                    "expected apply_patch instructions for {}",
+                    test_case.slug
+                );
+            } else {
+                assert!(
+                    !full.contains(APPLY_PATCH_TOOL_INSTRUCTIONS),
+                    "did not expect apply_patch instructions for {}",
+                    test_case.slug
+                );
+            }
         }
     }
 
