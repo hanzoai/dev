@@ -1,10 +1,10 @@
-## @just-every/code v0.6.40
+## @just-every/code v0.6.48
 
-Small fixes to keep TUI image workflows and Linux builds stable.
+Stabilizes browser-driven flows and keeps automation working when proxy discovery is required.
 
 ### Changes
-- TUI/Image: initialize picker state for image cards so selection works reliably.
-- Core: gate cgroup helpers on Linux to avoid non-Linux builds invoking them.
+- Browser: stabilize /browser command handling and diff rendering for reliable runs.
+- Browser: honor proxy discovery when finding CDP targets so automation works behind proxies.
 
 ### Install
 ```
@@ -12,4 +12,4 @@ npm install -g @just-every/code@latest
 code
 ```
 
-Compare: https://github.com/just-every/code/compare/v0.6.39...v0.6.40
+Compare: https://github.com/just-every/code/compare/v0.6.47...v0.6.48
