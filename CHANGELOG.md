@@ -7,6 +7,51 @@
 
 - (none)
 
+## [0.6.48] - 2026-01-14
+
+- Browser: stabilize /browser command handling and diff rendering for reliable runs. (bfd15335)
+- Browser: honor proxy discovery when finding CDP targets so automation works behind proxies. (bfd15335)
+
+## [0.6.47] - 2026-01-13
+
+- Core/Websocket: reuse connections and add append support to cut reconnect churn. (d75626a, e726a82)
+- MCP: hot reload servers with static callbacks for smoother development. (3e91a95c, d5562983)
+- CLI: add --url with OAuth-friendly defaults and prompt Windows users on unsafe commands. (145974c4, ddae70bd)
+- TUI: keep scrollback tails visible and show in-flight coalesced tool calls. (7c1e7747, 602ddfee, 273ba32d, 12779c7c)
+- Exec/Auto: honor reasoning effort and dedupe reasoning output during auto runs. (bc81e7c2, 00fbc71a)
+
+## [0.6.46] - 2026-01-11
+
+- TUI/Stream: preserve commit ticks while debouncing to keep command ordering intact. (365bf7a)
+- TUI/Render: resync buffers after WouldBlock errors so redraws recover cleanly. (7ef6a6c)
+
+## [0.6.45] - 2026-01-09
+
+- TUI/Render: clear after WouldBlock redraws to resync the terminal and remove stale tail lines. (a354fdf8)
+- TUI/Render: improve redraw stability under terminal backpressure so frames recover cleanly. (a354fdf8)
+
+## [0.6.44] - 2026-01-08
+
+- TUI/Render: reset skip flags when filling backgrounds so reused buffer cells redraw correctly. (035abd0d)
+- TUI/Render: ensure background fill without characters also clears skip to prevent lingering artifacts. (035abd0d)
+
+## [0.6.43] - 2026-01-08
+
+- TUI/Images: guard dropped images and clipped views so broken files fall back to placeholders. (b76b2455)
+- TUI/Images: avoid partial rendering on graphic protocols to prevent cursor corruption while scrolling. (b76b2455)
+
+## [0.6.42] - 2026-01-08
+
+- TUI/Images: persist pasted or dropped images from temp locations into session storage so they stay available when sending. (00cbdfc)
+- TUI/Composer: keep image placeholders verbatim when building messages so inline markers align with attachments. (00cbdfc)
+
+## [0.6.41] - 2026-01-08
+
+- TUI/History: show exec and MCP cards immediately and drop spacer after collapsed reasoning before exec. (3c68afba, fcb48a71)
+- Exec: send prompt and images in one turn to keep runs aligned. (f23e562f)
+- TUI/Queue: dispatch queued input immediately so interactions start without delay. (b00b6ce3)
+- TUI/Render: preserve WouldBlock kind in draw errors for accurate diagnostics. (5faf4411)
+
 ## [0.6.40] - 2026-01-07
 
 - TUI/Image: initialize picker state for image cards so selection works reliably. (63e53af9)

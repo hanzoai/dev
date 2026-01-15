@@ -264,6 +264,17 @@ impl App<'_> {
                             if self.timing_enabled { self.timing.on_redraw_end(t0); }
                         }
                         Err(ref e) if e.kind() == std::io::ErrorKind::WouldBlock => {
+                            // A draw can fail after partially writing to the terminal. In that case,
+                            // the terminal contents may no longer match ratatui's back buffer, and
+                            // subsequent diff-based draws may not fully repair stale tail lines.
+                            // Force a clear on the next successful frame to resynchronize.
+                            self.clear_on_first_frame = true;
+
+                            // Also force the next successful draw to repaint the entire screen by
+                            // invalidating ratatui's notion of the "current" buffer. This avoids
+                            // cases where a partially-applied frame leaves stale glyphs visible but
+                            // the back buffer thinks the terminal is already up to date.
+                            terminal.swap_buffers();
                             // Non‑blocking draw hit backpressure; try again shortly.
                             if used_nonblocking {
                                 tracing::debug!("nonblocking redraw hit WouldBlock; rescheduling");
@@ -307,8 +318,12 @@ impl App<'_> {
                     self.commit_anim_running.store(false, Ordering::Release);
                 }
                 AppEvent::CommitTick => {
-                    if self.pending_redraw.load(Ordering::Relaxed) { continue; }
-                    // Advance streaming animation: commit at most one queued line
+                    // Advance streaming animation: commit at most one queued line.
+                    //
+                    // Do not skip commit ticks when a redraw is already pending.
+                    // Commit ticks are the *driver* for streaming output: skipping
+                    // them can leave the UI appearing frozen even though input is
+                    // still responsive.
                     if let AppState::Chat { widget } = &mut self.app_state {
                         widget.on_commit_tick();
                     }

@@ -34,7 +34,6 @@ impl InterruptManager {
         }
     }
 
-
     pub(crate) fn push_exec_approval(&mut self, seq: u64, id: String, ev: ExecApprovalRequestEvent) {
         self.queue.push(QueuedInterrupt::ExecApproval { seq, id, ev });
     }
@@ -111,10 +110,9 @@ impl InterruptManager {
                         }
                     }
                 },
-                QueuedInterrupt::McpBegin { seq: _, ev, order, .. } => {
-                    let ok = match order.as_ref() { Some(om) => chat.provider_order_key_from_order_meta(om), None => { tracing::warn!("missing OrderMeta in queued McpBegin; using synthetic key"); chat.next_internal_key() } };
-                    tools::mcp_begin(chat, ev, ok);
-                }
+                QueuedInterrupt::McpBegin { .. } => {
+                    // McpBegin events are handled inline; no queued processing needed
+                },
                 QueuedInterrupt::McpEnd { ev, order, .. } => {
                     let ok = match order.as_ref() { Some(om) => chat.provider_order_key_from_order_meta(om), None => { tracing::warn!("missing OrderMeta in queued McpEnd; using synthetic key"); chat.next_internal_key() } };
                     tools::mcp_end(chat, ev, ok)
@@ -128,9 +126,9 @@ impl InterruptManager {
     }
 }
 
-    fn seq_of(q: &QueuedInterrupt) -> u64 {
-        match q {
-            QueuedInterrupt::ExecApproval { seq, .. }
+fn seq_of(q: &QueuedInterrupt) -> u64 {
+    match q {
+        QueuedInterrupt::ExecApproval { seq, .. }
         | QueuedInterrupt::ApplyPatchApproval { seq, .. }
         | QueuedInterrupt::ExecBegin { seq, .. }
         | QueuedInterrupt::ExecEnd { seq, .. }

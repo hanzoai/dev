@@ -1204,7 +1204,6 @@ pub(crate) struct GhostState {
     queue: VecDeque<(u64, GhostSnapshotRequest)>,
     active: Option<(u64, GhostSnapshotRequest)>,
     next_id: u64,
-    pending_dispatches: VecDeque<PendingSnapshotDispatch>,
     queued_user_messages: VecDeque<UserMessage>,
 }
 
@@ -1698,7 +1697,6 @@ pub(crate) struct ChatWidget<'a> {
     ghost_snapshot_queue: VecDeque<(u64, GhostSnapshotRequest)>,
     active_ghost_snapshot: Option<(u64, GhostSnapshotRequest)>,
     next_ghost_snapshot_id: u64,
-    pending_snapshot_dispatches: VecDeque<PendingSnapshotDispatch>,
     queue_block_started_at: Option<Instant>,
 
     auto_drive_card_sequence: u64,
@@ -1918,19 +1916,6 @@ impl GhostSnapshotRequest {
 enum GhostSnapshotJobHandle {
     Scheduled(u64),
     Skipped,
-}
-
-#[derive(Clone)]
-enum PendingSnapshotDispatch {
-    Queued { job_id: u64, message: UserMessage },
-}
-
-impl PendingSnapshotDispatch {
-    fn job_id(&self) -> u64 {
-        match self {
-            PendingSnapshotDispatch::Queued { job_id, .. } => *job_id,
-        }
-    }
 }
 
 #[derive(Default)]
@@ -5316,7 +5301,9 @@ impl ChatWidget<'_> {
         {
             self.handle_exec_end_now(pending_end, &order2);
         }
-        self.flush_interrupt_queue();
+        if self.interrupts.has_queued() {
+            self.flush_interrupt_queue();
+        }
     }
 
     /// Handle exec command end immediately
@@ -5934,8 +5921,90 @@ impl ChatWidget<'_> {
     // Removed: pending insert sequencing is not used under strict ordering.
 
     pub(crate) fn register_pasted_image(&mut self, placeholder: String, path: std::path::PathBuf) {
-        self.pending_images.insert(placeholder, path);
-        self.request_redraw();
+        let persisted = self
+            .persist_user_image_if_needed(&path)
+            .unwrap_or_else(|| path.clone());
+        if persisted.exists() && persisted.is_file() {
+            self.pending_images.insert(placeholder, persisted);
+            self.request_redraw();
+            return;
+        }
+
+        // Some terminals (notably on macOS) can drop a "promised" file path
+        // (e.g., from Preview) that doesn't actually exist on disk. Fall back
+        // to reading the image directly from the clipboard.
+        match crate::clipboard_paste::paste_image_to_temp_png() {
+            Ok((clipboard_path, _info)) => {
+                let clipboard_persisted = self
+                    .persist_user_image_if_needed(&clipboard_path)
+                    .unwrap_or(clipboard_path);
+                self.pending_images.insert(placeholder, clipboard_persisted);
+                self.push_background_tail("Used clipboard image (dropped file path was missing).");
+                self.request_redraw();
+            }
+            Err(err) => {
+                tracing::warn!(
+                    "dropped/pasted image path missing ({}); clipboard fallback failed: {}",
+                    persisted.display(),
+                    err
+                );
+            }
+        }
+    }
+
+    fn persist_user_image_if_needed(&self, path: &std::path::Path) -> Option<PathBuf> {
+        if !path.exists() || !path.is_file() {
+            return None;
+        }
+
+        let temp_dir = std::env::temp_dir();
+        let path_lossy = path.to_string_lossy();
+        let looks_ephemeral = path.starts_with(&temp_dir)
+            || path_lossy.contains("/TemporaryItems/")
+            || path_lossy.contains("\\TemporaryItems\\");
+        if !looks_ephemeral {
+            return None;
+        }
+
+        let ext = path
+            .extension()
+            .and_then(|s| s.to_str())
+            .unwrap_or("png")
+            .to_string();
+
+        let mut dir = self
+            .config
+            .code_home
+            .join("working")
+            .join("_pasted_images");
+        if let Some(session_id) = self.session_id {
+            dir = dir.join(session_id.to_string());
+        }
+
+        if let Err(err) = std::fs::create_dir_all(&dir) {
+            tracing::warn!(
+                "failed to create pasted image dir {}: {}",
+                dir.display(),
+                err
+            );
+            return None;
+        }
+
+        let file_name = format!("dropped-{}.{}", Uuid::new_v4(), ext);
+        let dest = dir.join(file_name);
+
+        match std::fs::copy(path, &dest) {
+            Ok(_) => Some(dest),
+            Err(err) => {
+                tracing::warn!(
+                    "failed to persist dropped image {} -> {}: {}",
+                    path.display(),
+                    dest.display(),
+                    err
+                );
+                None
+            }
+        }
     }
 
     fn parse_message_with_images(&mut self, text: String) -> UserMessage {
@@ -5963,14 +6032,30 @@ impl ChatWidget<'_> {
                 }
             }
 
+
             let placeholder = mat.as_str();
             if placeholder.starts_with("[image:") {
                 if let Some(path) = self.pending_images.remove(placeholder) {
-                    // Emit a small marker followed by the image so the LLM sees placement
-                    let filename = path.file_name().and_then(|n| n.to_str()).unwrap_or("image");
-                    let marker = format!("[image: {}]", filename);
-                    ordered_items.push(InputItem::Text { text: marker });
-                    ordered_items.push(InputItem::LocalImage { path });
+                    if path.exists() && path.is_file() {
+                        // Emit the placeholder marker verbatim followed by the image so the LLM sees placement
+                        ordered_items.push(InputItem::Text {
+                            text: placeholder.to_string(),
+                        });
+                        ordered_items.push(InputItem::LocalImage { path });
+                    } else {
+                        tracing::warn!(
+                            "pending image placeholder {} resolved to missing path {}",
+                            placeholder,
+                            path.display()
+                        );
+                        self.push_background_tail(format!(
+                            "Dropped image file went missing; not attaching ({})",
+                            path.display()
+                        ));
+                        ordered_items.push(InputItem::Text {
+                            text: placeholder.to_string(),
+                        });
+                    }
                 } else {
                     // Unknown placeholder: preserve as text
                     ordered_items.push(InputItem::Text {
@@ -6014,11 +6099,14 @@ impl ChatWidget<'_> {
             if path.exists() {
                 // Add a marker then the image so the LLM has contextual placement info
                 let filename = path.file_name().and_then(|n| n.to_str()).unwrap_or("image");
+                let persisted_path = self
+                    .persist_user_image_if_needed(path)
+                    .unwrap_or_else(|| path.to_path_buf());
                 ordered_items.push(InputItem::Text {
                     text: format!("[image: {}]", filename),
                 });
                 ordered_items.push(InputItem::LocalImage {
-                    path: path.to_path_buf(),
+                    path: persisted_path,
                 });
             }
         }
@@ -6499,7 +6587,6 @@ impl ChatWidget<'_> {
             ghost_snapshot_queue: VecDeque::new(),
             active_ghost_snapshot: None,
             next_ghost_snapshot_id: 0,
-            pending_snapshot_dispatches: VecDeque::new(),
             history_virtualization_sync_pending: Cell::new(false),
             auto_drive_card_sequence: 0,
             auto_drive_variant,
@@ -6871,7 +6958,6 @@ impl ChatWidget<'_> {
             ghost_snapshot_queue: VecDeque::new(),
             active_ghost_snapshot: None,
             next_ghost_snapshot_id: 0,
-            pending_snapshot_dispatches: VecDeque::new(),
             history_virtualization_sync_pending: Cell::new(false),
             auto_drive_card_sequence: 0,
             auto_drive_variant,
@@ -7627,6 +7713,22 @@ impl ChatWidget<'_> {
             .extend_prefix_for_append(prefix_width, spacing, next.height, history_count);
         if let Some(range) = spacing_range {
             self.history_render.append_spacing_range(range);
+        }
+        if next.height >= 2
+            && next
+                .cell
+                .and_then(|cell| {
+                    cell.as_any()
+                        .downcast_ref::<crate::history_cell::AssistantMarkdownCell>()
+                })
+                .is_some()
+        {
+            let cell_end = self.history_render.last_total_height();
+            let cell_start = cell_end.saturating_sub(next.height);
+            self.history_render
+                .append_spacing_range((cell_start, cell_start.saturating_add(1)));
+            self.history_render
+                .append_spacing_range((cell_end.saturating_sub(1), cell_end));
         }
         true
     }
@@ -9218,8 +9320,10 @@ impl ChatWidget<'_> {
                     // Add a placeholder to the compose field instead of submitting
                     let placeholder = format!("[image: {}]", filename);
 
+                    let persisted = self.persist_user_image_if_needed(&path).unwrap_or(path);
+
                     // Store the image path for later submission
-                    self.pending_images.insert(placeholder.clone(), path);
+                    self.pending_images.insert(placeholder.clone(), persisted);
 
                     // Add the placeholder text to the compose field
                     self.bottom_pane.handle_paste(placeholder);
@@ -11316,15 +11420,12 @@ impl ChatWidget<'_> {
                 Some(message.display_text.clone())
             };
 
-            match self.capture_ghost_snapshot(prompt_summary) {
-                GhostSnapshotJobHandle::Scheduled(job_id) => {
-                    self.pending_snapshot_dispatches
-                        .push_back(PendingSnapshotDispatch::Queued { job_id, message });
-                }
-                GhostSnapshotJobHandle::Skipped => {
-                    self.dispatch_queued_user_message_now(message);
-                }
+            let should_capture_snapshot = self.active_ghost_snapshot.is_none()
+                && self.ghost_snapshot_queue.is_empty();
+            if should_capture_snapshot {
+                let _ = self.capture_ghost_snapshot(prompt_summary);
             }
+            self.dispatch_queued_user_message_now(message);
             return;
         }
 
@@ -11443,35 +11544,6 @@ impl ChatWidget<'_> {
         let elapsed = started_at.elapsed();
         let snapshot = self.finalize_ghost_snapshot(request, result, elapsed);
         snapshot
-    }
-
-    fn dispatch_pending_snapshot(&mut self, job_id: u64) {
-        let Some(position) = self
-            .pending_snapshot_dispatches
-            .iter()
-            .position(|pending| pending.job_id() == job_id)
-        else {
-            return;
-        };
-
-        let Some(pending) = self.pending_snapshot_dispatches.remove(position) else {
-            return;
-        };
-        self.process_snapshot_dispatch(pending);
-    }
-
-    fn flush_pending_snapshot_dispatches(&mut self) {
-        while let Some(pending) = self.pending_snapshot_dispatches.pop_front() {
-            self.process_snapshot_dispatch(pending);
-        }
-    }
-
-    fn process_snapshot_dispatch(&mut self, pending: PendingSnapshotDispatch) {
-        match pending {
-            PendingSnapshotDispatch::Queued { message, .. } => {
-                self.dispatch_queued_user_message_now(message);
-            }
-        }
     }
 
     fn dispatch_queued_batch(&mut self, batch: Vec<UserMessage>) {
@@ -11792,12 +11864,8 @@ impl ChatWidget<'_> {
             return;
         }
 
-        let snapshot = self.finalize_ghost_snapshot(request, result, elapsed);
+        let _ = self.finalize_ghost_snapshot(request, result, elapsed);
         self.request_redraw();
-        self.dispatch_pending_snapshot(job_id);
-        if snapshot.is_none() {
-            self.flush_pending_snapshot_dispatches();
-        }
         self.spawn_next_ghost_snapshot();
     }
 
@@ -11892,7 +11960,6 @@ impl ChatWidget<'_> {
             queue: self.ghost_snapshot_queue.clone(),
             active: self.active_ghost_snapshot.clone(),
             next_id: self.next_ghost_snapshot_id,
-            pending_dispatches: self.pending_snapshot_dispatches.clone(),
             queued_user_messages: self.queued_user_messages.clone(),
         }
     }
@@ -11908,7 +11975,6 @@ impl ChatWidget<'_> {
         self.ghost_snapshot_queue = state.queue;
         self.active_ghost_snapshot = state.active;
         self.next_ghost_snapshot_id = state.next_id;
-        self.pending_snapshot_dispatches = state.pending_dispatches;
         self.queued_user_messages = state.queued_user_messages;
         let blocked = self.is_task_running()
             || !self.active_task_ids.is_empty()
@@ -13579,19 +13645,12 @@ impl ChatWidget<'_> {
                 );
             }
             EventMsg::ExecCommandBegin(ev) => {
-                let ev2 = ev.clone();
                 let seq = event.event_seq;
                 let om_begin = event
                     .order
                     .clone()
                     .expect("missing OrderMeta for ExecCommandBegin");
-                let om_begin_for_handler = om_begin.clone();
-                self.defer_or_handle(
-                    move |interrupts| interrupts.push_exec_begin(seq, ev, Some(om_begin)),
-                    move |this| {
-                        this.handle_exec_begin_ordered(ev2, om_begin_for_handler, seq);
-                    },
-                );
+                self.handle_exec_begin_ordered(ev, om_begin, seq);
             }
             EventMsg::ExecCommandOutputDelta(ev) => {
                 let call_id = ExecCallId(ev.call_id.clone());
@@ -13753,7 +13812,6 @@ impl ChatWidget<'_> {
                 );
             }
             EventMsg::McpToolCallBegin(ev) => {
-                let ev2 = ev.clone();
                 let seq = event.event_seq;
                 let order_ok = match event.order.as_ref() {
                     Some(om) => self.provider_order_key_from_order_meta(om),
@@ -13762,20 +13820,17 @@ impl ChatWidget<'_> {
                         self.next_internal_key()
                     }
                 };
-                self.defer_or_handle(
-                    move |interrupts| interrupts.push_mcp_begin(seq, ev, event.order.clone()),
-                    |this| {
-                        this.finalize_active_stream();
-                        this.flush_interrupt_queue();
-                        tracing::info!(
-                            "[order] McpToolCallBegin call_id={} seq={}",
-                            ev2.call_id,
-                            seq
-                        );
-                        this.ensure_spinner_for_activity("mcp-begin");
-                        tools::mcp_begin(this, ev2, order_ok);
-                    },
+                self.finalize_active_stream();
+                tracing::info!(
+                    "[order] McpToolCallBegin call_id={} seq={}",
+                    ev.call_id,
+                    seq
                 );
+                self.ensure_spinner_for_activity("mcp-begin");
+                tools::mcp_begin(self, ev, order_ok);
+                if self.interrupts.has_queued() {
+                    self.flush_interrupt_queue();
+                }
             }
             EventMsg::McpToolCallEnd(ev) => {
                 let ev2 = ev.clone();
@@ -20977,7 +21032,7 @@ Have we met every part of this goal and is there no further work to do?"#
             let build_editor = || {
                 AgentEditorView::new(
                     name.clone(),
-                    true,
+                    builtin,
                     if ro.is_empty() { None } else { Some(ro.clone()) },
                     if wr.is_empty() { None } else { Some(wr.clone()) },
                     None,
@@ -23452,7 +23507,7 @@ Have we met every part of this goal and is there no further work to do?"#
                 };
                 agent_rows.push(AgentOverviewRow {
                     name: cfg.name.clone(),
-                    enabled: cfg.enabled,
+                    enabled: cfg.enabled && installed,
                     installed,
                     description: Self::agent_description_for(
                         &cfg.name,
@@ -23477,7 +23532,7 @@ Have we met every part of this goal and is there no further work to do?"#
                 };
                 agent_rows.push(AgentOverviewRow {
                     name: cfg.name.clone(),
-                    enabled: cfg.enabled,
+                    enabled: cfg.enabled && installed,
                     installed,
                     description: Self::agent_description_for(
                         &cfg.name,
@@ -23498,7 +23553,7 @@ Have we met every part of this goal and is there no further work to do?"#
                 };
                 agent_rows.push(AgentOverviewRow {
                     name: name.clone(),
-                    enabled: true,
+                    enabled: installed,
                     installed,
                     description: Self::agent_description_for(name, Some(&cmd), None),
                 });
@@ -24645,11 +24700,6 @@ Have we met every part of this goal and is there no further work to do?"#
         }
 
         if let Some(front) = self.queued_user_messages.front().cloned() {
-            if let Some(position) = self.pending_snapshot_dispatches.iter().position(|pending| {
-                matches!(pending, PendingSnapshotDispatch::Queued { message, .. } if message == &front)
-            }) {
-                self.pending_snapshot_dispatches.remove(position);
-            }
             self.dispatch_queued_user_message_now(front);
         }
 
@@ -29460,6 +29510,76 @@ use hanzo_core::protocol::OrderMeta;
     }
 
     #[test]
+    fn terminal_auto_review_without_worktree_state_does_not_surface_blank_path() {
+        let mut harness = ChatWidgetHarness::new();
+        let chat = harness.chat();
+
+        chat.config.tui.auto_review_enabled = true;
+        chat.background_review = None;
+
+        let agent = code_core::protocol::AgentInfo {
+            id: "agent-blank".to_string(),
+            name: "Auto Review".to_string(),
+            status: "failed".to_string(),
+            batch_id: None,
+            model: Some("code-review".to_string()),
+            last_progress: None,
+            result: None,
+            error: Some("fatal: not a git repository".to_string()),
+            elapsed_ms: None,
+            token_count: None,
+            last_activity_at: None,
+            seconds_since_last_activity: None,
+            source_kind: Some(AgentSourceKind::AutoReview),
+        };
+
+        chat.observe_auto_review_status(&[agent]);
+
+        let blank_path_message = chat
+            .pending_dispatched_user_messages
+            .iter()
+            .any(|msg| msg.contains("Worktree path: \n") || msg.contains("Worktree path: \r\n"));
+        assert!(!blank_path_message, "should not emit auto-review message with blank worktree path");
+        assert!(chat.processed_auto_review_agents.contains("agent-blank"));
+    }
+
+    #[test]
+    fn missing_agent_clis_start_disabled_in_overview() {
+        let orig_path = std::env::var_os("PATH");
+        unsafe {
+            std::env::set_var("PATH", "");
+        }
+
+        let mut harness = ChatWidgetHarness::new();
+        let chat = harness.chat();
+
+        let (rows, _commands) = chat.collect_agents_overview_rows();
+        let qwen = rows
+            .iter()
+            .find(|row| row.name == "qwen-3-coder")
+            .expect("qwen row present");
+        assert!(!qwen.installed);
+        assert!(!qwen.enabled);
+
+        let code = rows
+            .iter()
+            .find(|row| row.name == "code-gpt-5.2")
+            .expect("code row present");
+        assert!(code.installed);
+        assert!(code.enabled);
+
+        if let Some(path) = orig_path {
+            unsafe {
+                std::env::set_var("PATH", path);
+            }
+        } else {
+            unsafe {
+                std::env::remove_var("PATH");
+            }
+        }
+    }
+
+    #[test]
     fn skipped_auto_review_with_findings_defers_to_next_turn() {
         let _rt = enter_test_runtime_guard();
         let mut harness = ChatWidgetHarness::new();
@@ -33613,14 +33733,30 @@ impl ChatWidget<'_> {
                     state.snapshot.clone(),
                 )
             } else {
-                let branch = agent.batch_id.clone().unwrap_or_default();
-                let worktree_path = resolve_auto_review_worktree_path(&self.config.cwd, &branch)
-                    .unwrap_or_default();
+                let Some(branch) = agent
+                    .batch_id
+                    .clone()
+                    .filter(|value| !value.trim().is_empty())
+                else {
+                    // We sometimes observe the same terminal auto-review agent multiple
+                    // times (especially after cancellation/resend). If the background
+                    // review state is already cleared and we cannot resolve the worktree,
+                    // do not surface a misleading blank-path error.
+                    self.processed_auto_review_agents.insert(agent.id.clone());
+                    continue;
+                };
+                let Some(worktree_path) =
+                    resolve_auto_review_worktree_path(&self.config.cwd, &branch)
+                else {
+                    self.processed_auto_review_agents.insert(agent.id.clone());
+                    continue;
+                };
                 (worktree_path, branch, None)
             };
 
             let (has_findings, findings, summary) = Self::parse_agent_review_result(agent.result.as_deref());
 
+            self.processed_auto_review_agents.insert(agent.id.clone());
             self.on_background_review_finished(
                 worktree_path,
                 branch,
@@ -33631,7 +33767,6 @@ impl ChatWidget<'_> {
                 Some(agent.id.clone()),
                 snapshot,
             );
-            self.processed_auto_review_agents.insert(agent.id.clone());
         }
     }
 
@@ -37843,7 +37978,18 @@ impl WidgetRef for &ChatWidget<'_> {
                         p.record_render((idx, content_width), label.as_str(), ns);
                     }
                 }
+                let cell_start = acc;
                 acc = acc.saturating_add(line_count);
+                let cell_end = acc;
+
+                if cell
+                    .as_any()
+                    .is::<crate::history_cell::AssistantMarkdownCell>()
+                    && line_count >= 2
+                {
+                    spacing_ranges.push((cell_start, cell_start.saturating_add(1)));
+                    spacing_ranges.push((cell_end.saturating_sub(1), cell_end));
+                }
 
                 let mut should_add_spacing = idx < cells.len().saturating_sub(1) && line_count > 0;
                 if should_add_spacing {
@@ -38012,6 +38158,15 @@ impl WidgetRef for &ChatWidget<'_> {
             if overscan_extra > 0 && clamped_scroll_offset == 0 {
                 scroll_from_top = scroll_from_top.saturating_sub(overscan_extra);
             }
+
+            if clamped_scroll_offset == 0 && content_area.height == 1 {
+                scroll_from_top = self
+                    .history_render
+                    .adjust_scroll_to_content(scroll_from_top);
+            }
+
+            // NOTE: when pinned to the bottom, avoid guessing at cell-internal padding.
+            // Only skip known spacer intervals recorded by the history render cache.
 
             tracing::debug!(
                 target: "hanzo_tui::scrollback",
