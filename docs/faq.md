@@ -76,4 +76,4 @@ If npm's directory isn't in your PATH, you can either:
 
 On Windows, Hanzo Dev looks for executables with these extensions: `.exe`, `.cmd`, `.bat`, `.com`. Ensure your agent command includes the correct extension when using absolute paths.
 
-**Related:** See the [Agent Configuration Guide](https://github.com/hanzoai/dev/blob/main/code-rs/config.md#agents) for more details.
+**Related:** See the [Agent Configuration Guide](https://github.com/hanzoai/dev/blob/main/hanzo-dev/config.md#agents) for more details.

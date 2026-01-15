@@ -2310,7 +2310,7 @@ dependencies = [
 
 [[package]]
 name = "hanzo-ansi-escape"
-version = "0.0.0"
+version = "0.6.0"
 dependencies = [
  "ansi-to-tui",
  "ratatui",
@@ -2319,7 +2319,7 @@ dependencies = [
 
 [[package]]
 name = "hanzo-app-server"
-version = "0.0.0"
+version = "0.6.0"
 dependencies = [
  "anyhow",
  "hanzo-arg0",
@@ -2340,7 +2340,7 @@ dependencies = [
 
 [[package]]
 name = "hanzo-app-server-protocol"
-version = "0.0.0"
+version = "0.6.0"
 dependencies = [
  "hanzo-mcp-types",
  "hanzo-protocol",
@@ -2348,7 +2348,7 @@ dependencies = [
 
 [[package]]
 name = "hanzo-apply-patch"
-version = "0.0.0"
+version = "0.6.0"
 dependencies = [
  "anyhow",
  "assert_cmd",
@@ -2362,7 +2362,7 @@ dependencies = [
 
 [[package]]
 name = "hanzo-arg0"
-version = "0.0.0"
+version = "0.6.0"
 dependencies = [
  "anyhow",
  "dotenvy",
@@ -2375,7 +2375,7 @@ dependencies = [
 
 [[package]]
 name = "hanzo-auto-drive-core"
-version = "0.0.0"
+version = "0.6.0"
 dependencies = [
  "anyhow",
  "chrono",
@@ -2399,7 +2399,7 @@ dependencies = [
 
 [[package]]
 name = "hanzo-auto-drive-diagnostics"
-version = "0.0.0"
+version = "0.6.0"
 dependencies = [
  "anyhow",
  "hanzo-auto-drive-core",
@@ -2426,7 +2426,7 @@ dependencies = [
 
 [[package]]
 name = "hanzo-backend-openapi-models"
-version = "0.0.0"
+version = "0.6.0"
 dependencies = [
  "serde",
  "serde_json",
@@ -2434,7 +2434,7 @@ dependencies = [
 
 [[package]]
 name = "hanzo-browser"
-version = "0.0.0"
+version = "0.6.0"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -2462,7 +2462,7 @@ dependencies = [
 
 [[package]]
 name = "hanzo-chatgpt"
-version = "0.0.0"
+version = "0.6.0"
 dependencies = [
  "anyhow",
  "clap",
@@ -2475,51 +2475,6 @@ dependencies = [
  "serde_json",
  "tempfile",
  "tokio",
-]
-
-[[package]]
-name = "hanzo-cli"
-version = "0.0.0"
-dependencies = [
- "anyhow",
- "chrono",
- "clap",
- "clap_complete",
- "ctor 0.5.0",
- "filetime",
- "flate2",
- "futures",
- "hanzo-app-server",
- "hanzo-app-server-protocol",
- "hanzo-arg0",
- "hanzo-chatgpt",
- "hanzo-cloud-tasks",
- "hanzo-common",
- "hanzo-core",
- "hanzo-exec",
- "hanzo-login",
- "hanzo-mcp-server",
- "hanzo-process-hardening",
- "hanzo-protocol",
- "hanzo-protocol-ts",
- "hanzo-responses-api-proxy",
- "hanzo-tui",
- "hanzo-version",
- "owo-colors",
- "regex",
- "reqwest",
- "serde",
- "serde_json",
- "supports-color",
- "tar",
- "tempfile",
- "tokio",
- "tokio-tungstenite",
- "tracing",
- "tracing-subscriber",
- "uuid",
- "which",
- "zip",
 ]
 
 [[package]]
@@ -2542,7 +2497,7 @@ dependencies = [
 
 [[package]]
 name = "hanzo-cloud-tasks"
-version = "0.0.0"
+version = "0.6.0"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -2570,7 +2525,7 @@ dependencies = [
 
 [[package]]
 name = "hanzo-cloud-tasks-client"
-version = "0.0.0"
+version = "0.6.0"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -2585,7 +2540,7 @@ dependencies = [
 
 [[package]]
 name = "hanzo-common"
-version = "0.0.0"
+version = "0.6.0"
 dependencies = [
  "clap",
  "hanzo-app-server-protocol",
@@ -2598,7 +2553,7 @@ dependencies = [
 
 [[package]]
 name = "hanzo-core"
-version = "0.0.0"
+version = "0.6.0"
 dependencies = [
  "agent-client-protocol",
  "anyhow",
@@ -2684,8 +2639,53 @@ dependencies = [
 ]
 
 [[package]]
+name = "hanzo-dev"
+version = "0.6.0"
+dependencies = [
+ "anyhow",
+ "chrono",
+ "clap",
+ "clap_complete",
+ "ctor 0.5.0",
+ "filetime",
+ "flate2",
+ "futures",
+ "hanzo-app-server",
+ "hanzo-app-server-protocol",
+ "hanzo-arg0",
+ "hanzo-chatgpt",
+ "hanzo-cloud-tasks",
+ "hanzo-common",
+ "hanzo-core",
+ "hanzo-exec",
+ "hanzo-login",
+ "hanzo-mcp-server",
+ "hanzo-process-hardening",
+ "hanzo-protocol",
+ "hanzo-protocol-ts",
+ "hanzo-responses-api-proxy",
+ "hanzo-tui",
+ "hanzo-version",
+ "owo-colors",
+ "regex",
+ "reqwest",
+ "serde",
+ "serde_json",
+ "supports-color",
+ "tar",
+ "tempfile",
+ "tokio",
+ "tokio-tungstenite",
+ "tracing",
+ "tracing-subscriber",
+ "uuid",
+ "which",
+ "zip",
+]
+
+[[package]]
 name = "hanzo-exec"
-version = "0.0.0"
+version = "0.6.0"
 dependencies = [
  "anyhow",
  "chrono",
@@ -2716,7 +2716,7 @@ dependencies = [
 
 [[package]]
 name = "hanzo-execpolicy"
-version = "0.0.0"
+version = "0.6.0"
 dependencies = [
  "allocative",
  "anyhow",
@@ -2736,7 +2736,7 @@ dependencies = [
 
 [[package]]
 name = "hanzo-file-search"
-version = "0.0.0"
+version = "0.6.0"
 dependencies = [
  "anyhow",
  "clap",
@@ -2749,7 +2749,7 @@ dependencies = [
 
 [[package]]
 name = "hanzo-git-apply"
-version = "0.0.0"
+version = "0.6.0"
 dependencies = [
  "once_cell",
  "regex",
@@ -2758,7 +2758,7 @@ dependencies = [
 
 [[package]]
 name = "hanzo-git-tooling"
-version = "0.0.0"
+version = "0.6.0"
 dependencies = [
  "pretty_assertions",
  "tempfile",
@@ -2786,7 +2786,7 @@ dependencies = [
 
 [[package]]
 name = "hanzo-linux-sandbox"
-version = "0.0.0"
+version = "0.6.0"
 dependencies = [
  "clap",
  "hanzo-core",
@@ -2799,7 +2799,7 @@ dependencies = [
 
 [[package]]
 name = "hanzo-login"
-version = "0.0.0"
+version = "0.6.0"
 dependencies = [
  "base64 0.22.1",
  "chrono",
@@ -2821,7 +2821,7 @@ dependencies = [
 
 [[package]]
 name = "hanzo-mcp-client"
-version = "0.0.0"
+version = "0.6.0"
 dependencies = [
  "anyhow",
  "hanzo-mcp-types",
@@ -2834,7 +2834,7 @@ dependencies = [
 
 [[package]]
 name = "hanzo-mcp-server"
-version = "0.0.0"
+version = "0.6.0"
 dependencies = [
  "agent-client-protocol",
  "anyhow",
@@ -2859,7 +2859,7 @@ dependencies = [
 
 [[package]]
 name = "hanzo-mcp-types"
-version = "0.0.0"
+version = "0.6.0"
 dependencies = [
  "codex-mcp-types",
  "serde_json",
@@ -2867,7 +2867,7 @@ dependencies = [
 
 [[package]]
 name = "hanzo-ollama"
-version = "0.0.0"
+version = "0.6.0"
 dependencies = [
  "async-stream",
  "bytes",
@@ -2882,7 +2882,7 @@ dependencies = [
 
 [[package]]
 name = "hanzo-otel"
-version = "0.0.0"
+version = "0.6.0"
 dependencies = [
  "chrono",
  "eventsource-stream",
@@ -2903,14 +2903,14 @@ dependencies = [
 
 [[package]]
 name = "hanzo-process-hardening"
-version = "0.0.0"
+version = "0.6.0"
 dependencies = [
  "libc",
 ]
 
 [[package]]
 name = "hanzo-protocol"
-version = "0.0.0"
+version = "0.6.0"
 dependencies = [
  "anyhow",
  "base64 0.22.1",
@@ -2934,7 +2934,7 @@ dependencies = [
 
 [[package]]
 name = "hanzo-protocol-ts"
-version = "0.0.0"
+version = "0.6.0"
 dependencies = [
  "anyhow",
  "clap",
@@ -2946,7 +2946,7 @@ dependencies = [
 
 [[package]]
 name = "hanzo-responses-api-proxy"
-version = "0.0.0"
+version = "0.6.0"
 dependencies = [
  "anyhow",
  "clap",
@@ -2962,7 +2962,7 @@ dependencies = [
 
 [[package]]
 name = "hanzo-rmcp-client"
-version = "0.0.0"
+version = "0.6.0"
 dependencies = [
  "anyhow",
  "axum 0.8.8",
@@ -2979,7 +2979,7 @@ dependencies = [
 
 [[package]]
 name = "hanzo-tui"
-version = "0.0.0"
+version = "0.6.0"
 dependencies = [
  "anyhow",
  "arboard",
@@ -3056,7 +3056,7 @@ dependencies = [
 
 [[package]]
 name = "hanzo-utils-json-to-toml"
-version = "0.0.0"
+version = "0.6.0"
 dependencies = [
  "pretty_assertions",
  "serde_json",
@@ -3065,7 +3065,7 @@ dependencies = [
 
 [[package]]
 name = "hanzo-utils-readiness"
-version = "0.0.0"
+version = "0.6.0"
 dependencies = [
  "async-trait",
  "thiserror 2.0.17",
@@ -3075,7 +3075,7 @@ dependencies = [
 
 [[package]]
 name = "hanzo-version"
-version = "0.0.0"
+version = "0.6.0"
 
 [[package]]
 name = "hashbrown"

@@ -51,8 +51,8 @@ jobs:
     runs-on: ubuntu-latest
     env:
       OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
-      RUST_WORKSPACE_DIR: code-rs
-      CARGO_TARGET_DIR: ${{ github.workspace }}/code-rs/target
+      RUST_WORKSPACE_DIR: hanzo-dev
+      CARGO_TARGET_DIR: ${{ github.workspace }}/hanzo-dev/target
 
     steps:
       - name: Checkout repository

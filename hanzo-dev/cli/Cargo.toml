@@ -1,14 +1,23 @@
 [package]
 edition = "2024"
-name = "hanzo-cli"
+name = "hanzo-dev"
 version = { workspace = true }
+description = "Hanzo Dev - AI-powered development assistant with GitHub Copilot integration"
+license = "MIT"
+repository = "https://github.com/hanzoai/dev"
+homepage = "https://hanzo.ai/dev"
+authors = ["Hanzo AI <dev@hanzo.ai>"]
+keywords = ["ai", "cli", "development", "copilot", "assistant"]
+categories = ["command-line-utilities", "development-tools"]
+readme = "../README.md"
+publish = true
 
 [[bin]]
 name = "dev"
 path = "src/main.rs"
 
 [lib]
-name = "hanzo_cli"
+name = "hanzo_dev"
 path = "src/lib.rs"
 
 [lints]

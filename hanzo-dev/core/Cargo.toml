@@ -2,6 +2,14 @@
 edition = "2024"
 name = "hanzo-core"
 version = { workspace = true }
+description = "Core functionality for Hanzo Dev - AI-powered development assistant"
+license = "MIT"
+repository = "https://github.com/hanzoai/dev"
+homepage = "https://hanzo.ai/dev"
+authors = ["Hanzo AI <dev@hanzo.ai>"]
+keywords = ["ai", "development", "copilot", "core"]
+categories = ["development-tools"]
+publish = true
 
 [lib]
 doctest = false

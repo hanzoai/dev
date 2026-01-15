@@ -194,7 +194,7 @@ fi
 
 REPO_ROOT="${SCRIPT_DIR}"
 
-# Guard against regressions where a code-rs crate references ../codex-rs.
+# Guard against regressions where a hanzo-dev crate references ../codex-rs.
 if [ "${BUILD_FAST_SKIP_CODEX_GUARD:-0}" != "1" ]; then
   echo "Running codex path dependency guard..."
   (
@@ -240,8 +240,8 @@ case "$WORKSPACE_CHOICE" in
     CRATE_PREFIX="codex"
     BIN_NAME="codex"
     ;;
-  code|code-rs)
-    WORKSPACE_DIR="code-rs"
+  code|hanzo-dev)
+    WORKSPACE_DIR="hanzo-dev"
     CRATE_PREFIX="code"
     # Hanzo dev uses "dev" binary name instead of "code"
     BIN_NAME="dev"
