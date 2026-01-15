@@ -75,6 +75,12 @@ export class Thread {
       sandboxMode: mergedOptions?.sandboxMode,
       workingDirectory: mergedOptions?.workingDirectory,
       skipGitRepoCheck: mergedOptions?.skipGitRepoCheck,
+      modelReasoningEffort: mergedOptions?.modelReasoningEffort,
+      signal: mergedOptions?.signal,
+      networkAccessEnabled: mergedOptions?.networkAccessEnabled,
+      webSearchMode: mergedOptions?.webSearchMode,
+      webSearchEnabled: mergedOptions?.webSearchEnabled,
+      approvalPolicy: mergedOptions?.approvalPolicy,
     });
 
     for await (const item of generator) {

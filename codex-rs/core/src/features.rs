@@ -8,6 +8,7 @@
 use crate::config::ConfigToml;
 use crate::config::profile::ConfigProfile;
 use codex_otel::OtelManager;
+use schemars::JsonSchema;
 use serde::Deserialize;
 use serde::Serialize;
 use std::collections::BTreeMap;
@@ -15,6 +16,7 @@ use std::collections::BTreeSet;
 
 mod legacy;
 pub(crate) use legacy::LegacyFeatureToggles;
+pub(crate) use legacy::legacy_feature_keys;
 
 /// High-level lifecycle stage for a feature.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -87,7 +89,7 @@ pub enum Feature {
     /// Experimental shell snapshotting.
     ShellSnapshot,
     /// Append additional AGENTS.md guidance to user instructions.
-    HierarchicalAgents,
+    ChildAgentsMd,
     /// Experimental TUI v2 (viewport) implementation.
     Tui2,
     /// Enforce UTF8 output in Powershell.
@@ -294,7 +296,7 @@ pub fn is_known_feature_key(key: &str) -> bool {
 }
 
 /// Deserializable features table for TOML.
-#[derive(Serialize, Deserialize, Debug, Clone, Default, PartialEq)]
+#[derive(Serialize, Deserialize, Debug, Clone, Default, PartialEq, JsonSchema)]
 pub struct FeaturesToml {
     #[serde(flatten)]
     pub entries: BTreeMap<String, bool>,
@@ -357,8 +359,8 @@ pub const FEATURES: &[FeatureSpec] = &[
         default_enabled: false,
     },
     FeatureSpec {
-        id: Feature::HierarchicalAgents,
-        key: "hierarchical_agents",
+        id: Feature::ChildAgentsMd,
+        key: "child_agents_md",
         stage: Stage::Experimental,
         default_enabled: false,
     },
