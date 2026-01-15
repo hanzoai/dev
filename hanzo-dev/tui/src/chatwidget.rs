@@ -29063,6 +29063,7 @@ impl Drop for AutoReviewStubGuard {
     use crate::chatwidget::message::UserMessage;
     use crate::chatwidget::smoke_helpers::{enter_test_runtime_guard, ChatWidgetHarness};
     use crate::history_cell::{self, ExploreAggregationCell, HistoryCellType};
+    use ratatui::widgets::FrameExt;
     use hanzo_auto_drive_core::{
         AutoContinueMode,
         AutoRunPhase,
@@ -29517,7 +29518,7 @@ use hanzo_core::protocol::OrderMeta;
         chat.config.tui.auto_review_enabled = true;
         chat.background_review = None;
 
-        let agent = code_core::protocol::AgentInfo {
+        let agent = hanzo_core::protocol::AgentInfo {
             id: "agent-blank".to_string(),
             name: "Auto Review".to_string(),
             status: "failed".to_string(),

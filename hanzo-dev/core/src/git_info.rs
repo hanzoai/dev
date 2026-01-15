@@ -811,10 +811,13 @@ mod tests {
             .await
             .expect("Should collect git info from repo");
 
-        // Should have repository URL
-        assert_eq!(
-            git_info.repository_url,
-            Some("https://github.com/example/repo.git".to_string())
+        // Should have repository URL (may be rewritten by git config's insteadOf rules)
+        assert!(git_info.repository_url.is_some());
+        let url = git_info.repository_url.unwrap();
+        assert!(
+            url.contains("github.com/example/repo"),
+            "URL should contain the repo path: {}",
+            url
         );
     }
 

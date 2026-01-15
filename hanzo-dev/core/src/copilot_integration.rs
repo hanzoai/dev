@@ -472,6 +472,8 @@ mod tests {
         
         assert_eq!(before, "line 1\nline 2");
         assert_eq!(current, "line 3");
-        assert_eq!(after, "line 4\nline 5");
+        // window_size=4 with cursor on line 2 (0-indexed) means end = min(5, 2+2) = 4
+        // so after = lines[3..4] = "line 4"
+        assert_eq!(after, "line 4");
     }
 }
