@@ -1316,7 +1316,10 @@ PATCH"#,
         assert!(bytes.ends_with(b"\r\n"), "file should end with CRLF");
         for (idx, byte) in bytes.iter().enumerate() {
             if *byte == b'\n' {
-                assert!(idx > 0 && bytes[idx - 1] == b'\r', "found bare LF at index {idx}");
+                assert!(
+                    idx > 0 && bytes[idx - 1] == b'\r',
+                    "found bare LF at index {idx}"
+                );
             }
         }
         assert_eq!(String::from_utf8_lossy(&bytes), "foo\r\nbaz\r\n");

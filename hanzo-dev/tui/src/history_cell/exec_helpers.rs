@@ -1,10 +1,13 @@
 use std::path::Path;
-use std::time::{Duration, Instant};
+use std::time::Duration;
+use std::time::Instant;
 
 use hanzo_common::elapsed::format_duration;
 use hanzo_core::parse_command::ParsedCommand;
-use ratatui::style::{Modifier, Style};
-use ratatui::text::{Line, Span};
+use ratatui::style::Modifier;
+use ratatui::style::Style;
+use ratatui::text::Line;
+use ratatui::text::Span;
 use shlex::Shlex;
 
 use crate::exec_command::strip_bash_lc_and_escape;
@@ -663,7 +666,9 @@ pub(crate) fn coalesce_read_ranges_in_lines_local(lines: &mut Vec<Line<'static>>
     *lines = rebuilt;
 }
 
-pub(crate) fn parse_read_line_annotation_with_range(cmd: &str) -> (Option<String>, Option<(u32, u32)>) {
+pub(crate) fn parse_read_line_annotation_with_range(
+    cmd: &str,
+) -> (Option<String>, Option<(u32, u32)>) {
     let lower = cmd.to_lowercase();
     // Try sed -n '<start>,<end>p'
     if lower.contains("sed") && lower.contains("-n") {
@@ -1086,11 +1091,7 @@ fn heredoc_delimiter(token: &str) -> Option<String> {
     } else if delim.starts_with('\'') && delim.ends_with('\'') && delim.len() >= 2 {
         delim = delim[1..delim.len() - 1].to_string();
     }
-    if delim.is_empty() {
-        None
-    } else {
-        Some(delim)
-    }
+    if delim.is_empty() { None } else { Some(delim) }
 }
 
 fn split_heredoc_script_lines(script_tokens: &[String]) -> Vec<String> {
@@ -1102,16 +1103,11 @@ fn split_heredoc_script_lines(script_tokens: &[String]) -> Vec<String> {
     let mut current_has_assignment = false;
 
     for (idx, token) in script_tokens.iter().enumerate() {
-        if !current.is_empty()
-            && paren_depth == 0
-            && bracket_depth == 0
-            && brace_depth == 0
-        {
+        if !current.is_empty() && paren_depth == 0 && bracket_depth == 0 && brace_depth == 0 {
             let token_lower = token.to_ascii_lowercase();
             let current_first = current.first().map(|s| s.to_ascii_lowercase());
             let should_flush_before = is_statement_boundary_token(token)
-                && !(token_lower == "import"
-                    && current_first.as_deref() == Some("from"));
+                && !(token_lower == "import" && current_first.as_deref() == Some("from"));
             if should_flush_before {
                 let line = current.join(" ");
                 lines.push(line.trim().to_string());
@@ -1121,7 +1117,12 @@ fn split_heredoc_script_lines(script_tokens: &[String]) -> Vec<String> {
         }
 
         current.push(token.clone());
-        adjust_bracket_depth(token, &mut paren_depth, &mut bracket_depth, &mut brace_depth);
+        adjust_bracket_depth(
+            token,
+            &mut paren_depth,
+            &mut bracket_depth,
+            &mut brace_depth,
+        );
 
         if is_assignment_operator(token) {
             current_has_assignment = true;
@@ -1301,11 +1302,7 @@ fn merge_from_import_lines(lines: Vec<String>) -> Vec<String> {
             && idx + 1 < lines.len()
             && lines[idx + 1].trim_start().starts_with("import ")
         {
-            let combined = format!(
-                "{} {}",
-                line.trim_end(),
-                lines[idx + 1].trim_start()
-            );
+            let combined = format!("{} {}", line.trim_end(), lines[idx + 1].trim_start());
             merged.push(combined);
             idx += 2;
         } else {
@@ -1319,19 +1316,7 @@ fn merge_from_import_lines(lines: Vec<String>) -> Vec<String> {
 fn is_assignment_operator(token: &str) -> bool {
     matches!(
         token,
-        "="
-            | "+="
-            | "-="
-            | "*="
-            | "/="
-            | "//="
-            | "%="
-            | "^="
-            | "|="
-            | "&="
-            | "**="
-            | "<<="
-            | ">>="
+        "=" | "+=" | "-=" | "*=" | "/=" | "//=" | "%=" | "^=" | "|=" | "&=" | "**=" | "<<=" | ">>="
     )
 }
 
@@ -1805,24 +1790,26 @@ fn escape_token_for_display(token: &str) -> String {
 }
 
 fn is_shell_word(token: &str) -> bool {
-    token.chars().all(|ch| matches!(
-        ch,
-        'a'..='z'
-            | 'A'..='Z'
-            | '0'..='9'
-            | '_'
-            | '-'
-            | '.'
-            | '/'
-            | ':'
-            | ','
-            | '@'
-            | '%'
-            | '+'
-            | '='
-            | '['
-            | ']'
-    ))
+    token.chars().all(|ch| {
+        matches!(
+            ch,
+            'a'..='z'
+                | 'A'..='Z'
+                | '0'..='9'
+                | '_'
+                | '-'
+                | '.'
+                | '/'
+                | ':'
+                | ','
+                | '@'
+                | '%'
+                | '+'
+                | '='
+                | '['
+                | ']'
+        )
+    })
 }
 
 fn script_has_semicolon_outside_quotes(script: &str) -> bool {
@@ -2444,9 +2431,7 @@ fn format_inline_shell_for_display(command_escaped: &str) -> Option<String> {
         return None;
     }
 
-    let shell_idx = tokens
-        .iter()
-        .position(|t| is_shell_invocation_token(t))?;
+    let shell_idx = tokens.iter().position(|t| is_shell_invocation_token(t))?;
 
     let flag_idx = shell_idx + 1;
     if flag_idx >= tokens.len() {

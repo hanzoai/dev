@@ -1,9 +1,19 @@
-use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
+use crossterm::event::KeyCode;
+use crossterm::event::KeyEvent;
+use crossterm::event::KeyModifiers;
 use ratatui::buffer::Buffer;
-use ratatui::layout::{Alignment, Rect, Margin};
-use ratatui::style::{Modifier, Style};
-use ratatui::text::{Line, Span};
-use ratatui::widgets::{Block, Borders, Clear, Paragraph, Widget};
+use ratatui::layout::Alignment;
+use ratatui::layout::Margin;
+use ratatui::layout::Rect;
+use ratatui::style::Modifier;
+use ratatui::style::Style;
+use ratatui::text::Line;
+use ratatui::text::Span;
+use ratatui::widgets::Block;
+use ratatui::widgets::Borders;
+use ratatui::widgets::Clear;
+use ratatui::widgets::Paragraph;
+use ratatui::widgets::Widget;
 use unicode_width::UnicodeWidthStr;
 
 use crate::app_event::AppEvent;
@@ -40,7 +50,11 @@ impl SubagentEditorView {
     ) -> Self {
         let mut me = Self {
             name_field: FormTextField::new_single_line(),
-            read_only: if name.is_empty() { false } else { hanzo_core::slash_commands::default_read_only_for(name) },
+            read_only: if name.is_empty() {
+                false
+            } else {
+                hanzo_core::slash_commands::default_read_only_for(name)
+            },
             selected_agent_indices: Vec::new(),
             agent_cursor: 0,
             orch_field: FormTextField::new_multi_line(),
@@ -52,17 +66,23 @@ impl SubagentEditorView {
             confirm_delete: false,
         };
         // Always seed the name field with the provided name
-        if !name.is_empty() { me.name_field.set_text(name); }
+        if !name.is_empty() {
+            me.name_field.set_text(name);
+        }
         // Restrict ID field to [A-Za-z0-9_-]
-        me.name_field.set_filter(super::form_text_field::InputFilter::Id);
+        me.name_field
+            .set_filter(super::form_text_field::InputFilter::Id);
         // Seed from existing config if present
         if let Some(cfg) = existing.iter().find(|c| c.name.eq_ignore_ascii_case(name)) {
             me.name_field.set_text(&cfg.name);
             me.read_only = cfg.read_only;
-            me.orch_field.set_text(&cfg.orchestrator_instructions.clone().unwrap_or_default());
+            me.orch_field
+                .set_text(&cfg.orchestrator_instructions.clone().unwrap_or_default());
             let set: std::collections::HashSet<String> = cfg.agents.iter().cloned().collect();
             for (idx, a) in me.available_agents.iter().enumerate() {
-                if set.contains(a) { me.selected_agent_indices.push(idx); }
+                if set.contains(a) {
+                    me.selected_agent_indices.push(idx);
+                }
             }
         } else {
             // No user config yet; provide sensible defaults from core for built-ins
@@ -106,7 +126,10 @@ impl SubagentEditorView {
         let agents: Vec<String> = if self.selected_agent_indices.is_empty() {
             Vec::new()
         } else {
-            self.selected_agent_indices.iter().filter_map(|i| self.available_agents.get(*i).cloned()).collect()
+            self.selected_agent_indices
+                .iter()
+                .filter_map(|i| self.available_agents.get(*i).cloned())
+                .collect()
         };
         let cfg = hanzo_core::config_types::SubagentCommandConfig {
             name: self.name_field.text().to_string(),
@@ -138,25 +161,40 @@ impl SubagentEditorView {
         let last_btn_idx = if show_delete { 6 } else { 5 };
 
         match key_event {
-            KeyEvent { code: KeyCode::Esc, .. } => {
+            KeyEvent {
+                code: KeyCode::Esc, ..
+            } => {
                 self.is_complete = false;
                 self.app_event_tx.send(AppEvent::ShowAgentsOverview);
                 true
             }
-            KeyEvent { code: KeyCode::Tab, .. } => {
+            KeyEvent {
+                code: KeyCode::Tab, ..
+            } => {
                 self.field = (self.field + 1).min(last_btn_idx);
                 true
             }
-            KeyEvent { code: KeyCode::BackTab, .. } => {
+            KeyEvent {
+                code: KeyCode::BackTab,
+                ..
+            } => {
                 if self.field > 0 {
                     self.field -= 1;
                 }
                 true
             }
-            KeyEvent { code: KeyCode::Up, modifiers, .. } => {
+            KeyEvent {
+                code: KeyCode::Up,
+                modifiers,
+                ..
+            } => {
                 if self.field == 3 {
                     let at_start = self.orch_field.cursor_is_at_start();
-                    let _ = self.orch_field.handle_key(KeyEvent { code: KeyCode::Up, modifiers, ..key_event });
+                    let _ = self.orch_field.handle_key(KeyEvent {
+                        code: KeyCode::Up,
+                        modifiers,
+                        ..key_event
+                    });
                     if at_start && self.field > 0 {
                         self.field -= 1;
                     }
@@ -165,10 +203,18 @@ impl SubagentEditorView {
                 }
                 true
             }
-            KeyEvent { code: KeyCode::Down, modifiers, .. } => {
+            KeyEvent {
+                code: KeyCode::Down,
+                modifiers,
+                ..
+            } => {
                 if self.field == 3 {
                     let at_end = self.orch_field.cursor_is_at_end();
-                    let _ = self.orch_field.handle_key(KeyEvent { code: KeyCode::Down, modifiers, ..key_event });
+                    let _ = self.orch_field.handle_key(KeyEvent {
+                        code: KeyCode::Down,
+                        modifiers,
+                        ..key_event
+                    });
                     if at_end {
                         self.field = (self.field + 1).min(5);
                     }
@@ -177,57 +223,94 @@ impl SubagentEditorView {
                 }
                 true
             }
-            KeyEvent { code: KeyCode::Left, .. } if self.field == 1 => {
+            KeyEvent {
+                code: KeyCode::Left,
+                ..
+            } if self.field == 1 => {
                 self.read_only = !self.read_only;
                 true
             }
-            KeyEvent { code: KeyCode::Right, .. } if self.field == 1 => {
+            KeyEvent {
+                code: KeyCode::Right,
+                ..
+            } if self.field == 1 => {
                 self.read_only = !self.read_only;
                 true
             }
-            KeyEvent { code: KeyCode::Enter, .. } if self.field == 1 => {
+            KeyEvent {
+                code: KeyCode::Enter,
+                ..
+            } if self.field == 1 => {
                 self.read_only = !self.read_only;
                 true
             }
-            KeyEvent { code: KeyCode::Left, .. } if self.field == 2 => {
+            KeyEvent {
+                code: KeyCode::Left,
+                ..
+            } if self.field == 2 => {
                 if self.agent_cursor > 0 {
                     self.agent_cursor -= 1;
                 }
                 true
             }
-            KeyEvent { code: KeyCode::Right, .. } if self.field == 2 => {
+            KeyEvent {
+                code: KeyCode::Right,
+                ..
+            } if self.field == 2 => {
                 if self.agent_cursor + 1 < self.available_agents.len() {
                     self.agent_cursor += 1;
                 }
                 true
             }
-            KeyEvent { code: KeyCode::Char(' '), .. } if self.field == 2 => {
-                let idx = self.agent_cursor.min(self.available_agents.len().saturating_sub(1));
+            KeyEvent {
+                code: KeyCode::Char(' '),
+                ..
+            } if self.field == 2 => {
+                let idx = self
+                    .agent_cursor
+                    .min(self.available_agents.len().saturating_sub(1));
                 self.toggle_agent_at(idx);
                 true
             }
-            KeyEvent { code: KeyCode::Enter, .. } if self.field == 2 => {
-                let idx = self.agent_cursor.min(self.available_agents.len().saturating_sub(1));
+            KeyEvent {
+                code: KeyCode::Enter,
+                ..
+            } if self.field == 2 => {
+                let idx = self
+                    .agent_cursor
+                    .min(self.available_agents.len().saturating_sub(1));
                 self.toggle_agent_at(idx);
                 true
             }
-            KeyEvent { code: KeyCode::Left, .. } if self.field >= 5 && show_delete => {
+            KeyEvent {
+                code: KeyCode::Left,
+                ..
+            } if self.field >= 5 && show_delete => {
                 if self.field > 4 {
                     self.field -= 1;
                 }
                 true
             }
-            KeyEvent { code: KeyCode::Right, .. } if self.field >= 4 && show_delete => {
+            KeyEvent {
+                code: KeyCode::Right,
+                ..
+            } if self.field >= 4 && show_delete => {
                 if self.field < 6 {
                     self.field += 1;
                 }
                 true
             }
-            KeyEvent { code: KeyCode::Left, .. } if !show_delete && self.field == 5 => {
+            KeyEvent {
+                code: KeyCode::Left,
+                ..
+            } if !show_delete && self.field == 5 => {
                 self.field = 4;
                 true
             }
-            KeyEvent { code: KeyCode::Right, .. } if !show_delete && self.field == 4 => {
+            KeyEvent {
+                code: KeyCode::Right,
+                ..
+            } if !show_delete && self.field == 4 => {
                 self.field = 5;
                 true
             }
@@ -239,32 +322,48 @@ impl SubagentEditorView {
                 let _ = self.orch_field.handle_key(ev);
                 true
             }
-            KeyEvent { code: KeyCode::Enter, .. } if self.field == 4 && !self.confirm_delete => {
+            KeyEvent {
+                code: KeyCode::Enter,
+                ..
+            } if self.field == 4 && !self.confirm_delete => {
                 self.save();
                 self.is_complete = true;
                 true
             }
-            KeyEvent { code: KeyCode::Enter, .. } if self.field == 5 && show_delete && !self.confirm_delete => {
+            KeyEvent {
+                code: KeyCode::Enter,
+                ..
+            } if self.field == 5 && show_delete && !self.confirm_delete => {
                 self.confirm_delete = true;
                 true
             }
-            KeyEvent { code: KeyCode::Enter, .. } if self.field == 6 && !self.confirm_delete => {
+            KeyEvent {
+                code: KeyCode::Enter,
+                ..
+            } if self.field == 6 && !self.confirm_delete => {
                 self.is_complete = true;
                 self.app_event_tx.send(AppEvent::ShowAgentsOverview);
                 true
             }
-            KeyEvent { code: KeyCode::Enter, .. } if self.field == 5 && !show_delete && !self.confirm_delete => {
+            KeyEvent {
+                code: KeyCode::Enter,
+                ..
+            } if self.field == 5 && !show_delete && !self.confirm_delete => {
                 self.is_complete = true;
                 self.app_event_tx.send(AppEvent::ShowAgentsOverview);
                 true
             }
-            KeyEvent { code: KeyCode::Enter, .. } if self.confirm_delete && self.field == 4 => {
+            KeyEvent {
+                code: KeyCode::Enter,
+                ..
+            } if self.confirm_delete && self.field == 4 => {
                 let id = self.name_field.text().to_string();
                 if !id.trim().is_empty() {
                     if let Ok(home) = hanzo_core::config::find_code_home() {
                         let idc = id.clone();
                         tokio::spawn(async move {
-                            let _ = hanzo_core::config_edit::delete_subagent_command(&home, &idc).await;
+                            let _ =
+                                hanzo_core::config_edit::delete_subagent_command(&home, &idc).await;
                         });
                     }
                     self.app_event_tx.send(AppEvent::DeleteSubagentCommand(id));
@@ -275,13 +374,18 @@ impl SubagentEditorView {
                 }
                 true
             }
-            KeyEvent { code: KeyCode::Enter, .. } if self.confirm_delete && self.field == 5 => {
+            KeyEvent {
+                code: KeyCode::Enter,
+                ..
+            } if self.confirm_delete && self.field == 5 => {
                 self.confirm_delete = false;
                 true
             }
-            KeyEvent { code: KeyCode::Char('s'), modifiers, .. }
-                if modifiers.contains(KeyModifiers::CONTROL) && !self.confirm_delete =>
-            {
+            KeyEvent {
+                code: KeyCode::Char('s'),
+                modifiers,
+                ..
+            } if modifiers.contains(KeyModifiers::CONTROL) && !self.confirm_delete => {
                 self.save();
                 self.is_complete = true;
                 true
@@ -321,10 +425,16 @@ impl SubagentEditorView {
         spans.push(Span::raw("  "));
 
         for (idx, a) in self.available_agents.iter().enumerate() {
-            let checked = if self.selected_agent_indices.contains(&idx) { "[x]" } else { "[ ]" };
+            let checked = if self.selected_agent_indices.contains(&idx) {
+                "[x]"
+            } else {
+                "[ ]"
+            };
             let mut style = sel(2);
             if self.field == 2 && idx == self.agent_cursor {
-                style = style.fg(crate::colors::primary()).add_modifier(Modifier::BOLD);
+                style = style
+                    .fg(crate::colors::primary())
+                    .add_modifier(Modifier::BOLD);
             }
             spans.push(Span::styled(format!("{} {}", checked, a), style));
             spans.push(Span::raw("  "));
@@ -362,10 +472,16 @@ impl<'a> BottomPaneView<'a> for SubagentEditorView {
         let _ = self.handle_key_event_internal(key_event);
     }
 
-    fn is_complete(&self) -> bool { self.is_complete }
+    fn is_complete(&self) -> bool {
+        self.is_complete
+    }
 
     fn handle_paste(&mut self, text: String) -> super::bottom_pane_view::ConditionalUpdate {
-        match self.field { 0 => self.name_field.handle_paste(text), 3 => self.orch_field.handle_paste(text), _ => {} }
+        match self.field {
+            0 => self.name_field.handle_paste(text),
+            3 => self.orch_field.handle_paste(text),
+            _ => {}
+        }
         super::bottom_pane_view::ConditionalUpdate::NeedsRedraw
     }
 
@@ -397,25 +513,55 @@ impl<'a> BottomPaneView<'a> for SubagentEditorView {
         let block = Block::default()
             .borders(Borders::ALL)
             .border_style(Style::default().fg(crate::colors::border()))
-            .style(Style::default().bg(crate::colors::background()).fg(crate::colors::text()))
+            .style(
+                Style::default()
+                    .bg(crate::colors::background())
+                    .fg(crate::colors::text()),
+            )
             .title(" Configure Agent Command ")
             .title_alignment(Alignment::Center);
         let inner = block.inner(area);
         block.render(area, buf);
         // Compute the content rect once and reuse for layout and reserved lines
-        let content_rect = Rect { x: inner.x.saturating_add(1), y: inner.y, width: inner.width.saturating_sub(1), height: inner.height };
+        let content_rect = Rect {
+            x: inner.x.saturating_add(1),
+            y: inner.y,
+            width: inner.width.saturating_sub(1),
+            height: inner.height,
+        };
 
         let mut lines: Vec<Line<'static>> = Vec::new();
-        let sel = |idx: usize| if self.field == idx { Style::default().bg(crate::colors::selection()).add_modifier(Modifier::BOLD) } else { Style::default() };
-        let label = |idx: usize| if self.field == idx { Style::default().fg(crate::colors::primary()).add_modifier(Modifier::BOLD) } else { Style::default() };
+        let sel = |idx: usize| {
+            if self.field == idx {
+                Style::default()
+                    .bg(crate::colors::selection())
+                    .add_modifier(Modifier::BOLD)
+            } else {
+                Style::default()
+            }
+        };
+        let label = |idx: usize| {
+            if self.field == idx {
+                Style::default()
+                    .fg(crate::colors::primary())
+                    .add_modifier(Modifier::BOLD)
+            } else {
+                Style::default()
+            }
+        };
 
         // Bold title
-        lines.push(Line::from(Span::styled("Agents » Edit Command", Style::default().add_modifier(Modifier::BOLD))));
+        lines.push(Line::from(Span::styled(
+            "Agents » Edit Command",
+            Style::default().add_modifier(Modifier::BOLD),
+        )));
         // Spacer after title
         lines.push(Line::from(""));
         // Reserve a box area for Name (we draw the bordered box with a title after)
         let name_box_h: u16 = 3;
-        for _ in 0..name_box_h { lines.push(Line::from("")); }
+        for _ in 0..name_box_h {
+            lines.push(Line::from(""));
+        }
         // Spacer between inputs
         lines.push(Line::from(""));
         // Mode row: checkbox style (left padding to align with boxed inputs)
@@ -448,14 +594,22 @@ impl<'a> BottomPaneView<'a> for SubagentEditorView {
         let orch_inner_w = content_rect.width.saturating_sub(4);
         let desired_orch_inner = self.orch_field.desired_height(orch_inner_w).max(1);
         let orch_box_h_reserved = desired_orch_inner.min(8).saturating_add(2).max(3);
-        for _ in 0..orch_box_h_reserved { lines.push(Line::from("")); }
+        for _ in 0..orch_box_h_reserved {
+            lines.push(Line::from(""));
+        }
         // Spacer between inputs
         lines.push(Line::from(""));
 
         // Buttons row
-        let show_delete = !self.is_new && !matches!(self.name_field.text().to_ascii_lowercase().as_str(), "plan" | "solve" | "code");
+        let show_delete = !self.is_new
+            && !matches!(
+                self.name_field.text().to_ascii_lowercase().as_str(),
+                "plan" | "solve" | "code"
+            );
         if self.confirm_delete {
-            let confirm_style = sel(4).fg(crate::colors::error()).add_modifier(Modifier::BOLD);
+            let confirm_style = sel(4)
+                .fg(crate::colors::error())
+                .add_modifier(Modifier::BOLD);
             let back_style = sel(5).fg(crate::colors::text());
             let mut btn_spans: Vec<Span> = Vec::new();
             btn_spans.push(Span::styled("[ Confirm Delete ]", confirm_style));
@@ -494,7 +648,11 @@ impl<'a> BottomPaneView<'a> for SubagentEditorView {
         let paragraph = Paragraph::new(lines)
             .alignment(Alignment::Left)
             .wrap(ratatui::widgets::Wrap { trim: false })
-            .style(Style::default().bg(crate::colors::background()).fg(crate::colors::text()));
+            .style(
+                Style::default()
+                    .bg(crate::colors::background())
+                    .fg(crate::colors::text()),
+            );
         paragraph.render(content_rect, buf);
 
         // Draw text fields over the paragraph using the same content rect
@@ -504,8 +662,19 @@ impl<'a> BottomPaneView<'a> for SubagentEditorView {
         // Skip title + spacer
         y = y.saturating_add(2);
         // Row: Name box with title; height fixed (3)
-        let name_box_rect = Rect { x: content_rect.x, y, width: content_w, height: name_box_h };
-        let name_border = if self.field == 0 { Style::default().fg(crate::colors::primary()).add_modifier(Modifier::BOLD) } else { Style::default().fg(crate::colors::border()) };
+        let name_box_rect = Rect {
+            x: content_rect.x,
+            y,
+            width: content_w,
+            height: name_box_h,
+        };
+        let name_border = if self.field == 0 {
+            Style::default()
+                .fg(crate::colors::primary())
+                .add_modifier(Modifier::BOLD)
+        } else {
+            Style::default().fg(crate::colors::border())
+        };
         let name_block = Block::default()
             .borders(Borders::ALL)
             .border_style(name_border)
@@ -527,8 +696,19 @@ impl<'a> BottomPaneView<'a> for SubagentEditorView {
         // Use the same clamped height for the actual box we render
         let orch_box_h = orch_box_h_reserved;
         let orch_inner_h = orch_box_h.saturating_sub(2);
-        let orch_box_rect = Rect { x: content_rect.x, y, width: content_w, height: orch_box_h };
-        let orch_border = if self.field == 3 { Style::default().fg(crate::colors::primary()).add_modifier(Modifier::BOLD) } else { Style::default().fg(crate::colors::border()) };
+        let orch_box_rect = Rect {
+            x: content_rect.x,
+            y,
+            width: content_w,
+            height: orch_box_h,
+        };
+        let orch_border = if self.field == 3 {
+            Style::default()
+                .fg(crate::colors::primary())
+                .add_modifier(Modifier::BOLD)
+        } else {
+            Style::default().fg(crate::colors::border())
+        };
         let orch_block = Block::default()
             .borders(Borders::ALL)
             .border_style(orch_border)

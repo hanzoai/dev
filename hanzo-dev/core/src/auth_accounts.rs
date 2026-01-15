@@ -1,10 +1,15 @@
-use chrono::{DateTime, Utc};
+use chrono::DateTime;
+use chrono::Utc;
 use hanzo_app_server_protocol::AuthMode;
-use serde::{Deserialize, Serialize};
+use serde::Deserialize;
+use serde::Serialize;
 use std::fs::File;
 use std::fs::OpenOptions;
-use std::io::{self, Read, Write};
-use std::path::{Path, PathBuf};
+use std::io::Read;
+use std::io::Write;
+use std::io::{self};
+use std::path::Path;
+use std::path::PathBuf;
 use uuid::Uuid;
 
 use crate::token_data::TokenData;
@@ -154,16 +159,21 @@ fn touch_account(account: &mut StoredAccount, used: bool) {
     }
 }
 
-fn upsert_account(mut data: AccountsFile, mut new_account: StoredAccount) -> (AccountsFile, StoredAccount) {
+fn upsert_account(
+    mut data: AccountsFile,
+    mut new_account: StoredAccount,
+) -> (AccountsFile, StoredAccount) {
     let existing_idx = match new_account.mode {
-        AuthMode::ChatGPT => new_account
-            .tokens
-            .as_ref()
-            .and_then(|tokens| data.accounts.iter().position(|acc| match_chatgpt_account(acc, tokens))),
-        AuthMode::ApiKey => new_account
-            .openai_api_key
-            .as_ref()
-            .and_then(|api_key| data.accounts.iter().position(|acc| match_api_key_account(acc, api_key))),
+        AuthMode::ChatGPT => new_account.tokens.as_ref().and_then(|tokens| {
+            data.accounts
+                .iter()
+                .position(|acc| match_chatgpt_account(acc, tokens))
+        }),
+        AuthMode::ApiKey => new_account.openai_api_key.as_ref().and_then(|api_key| {
+            data.accounts
+                .iter()
+                .position(|acc| match_api_key_account(acc, api_key))
+        }),
     };
 
     if let Some(idx) = existing_idx {
@@ -210,10 +220,7 @@ pub fn get_active_account_id(code_home: &Path) -> io::Result<Option<String>> {
 pub fn find_account(code_home: &Path, account_id: &str) -> io::Result<Option<StoredAccount>> {
     let path = accounts_file_path(code_home);
     let data = read_accounts_file(&path)?;
-    Ok(data
-        .accounts
-        .into_iter()
-        .find(|acc| acc.id == account_id))
+    Ok(data.accounts.into_iter().find(|acc| acc.id == account_id))
 }
 
 pub fn set_active_account_id(
@@ -286,11 +293,7 @@ pub fn upsert_api_key_account(
 
     if make_active {
         data.active_account_id = Some(stored.id.clone());
-        if let Some(account) = data
-            .accounts
-            .iter_mut()
-            .find(|acc| acc.id == stored.id)
-        {
+        if let Some(account) = data.accounts.iter_mut().find(|acc| acc.id == stored.id) {
             touch_account(account, true);
             stored = account.clone();
         }
@@ -325,11 +328,7 @@ pub fn upsert_chatgpt_account(
 
     if make_active {
         data.active_account_id = Some(stored.id.clone());
-        if let Some(account) = data
-            .accounts
-            .iter_mut()
-            .find(|acc| acc.id == stored.id)
-        {
+        if let Some(account) = data.accounts.iter_mut().find(|acc| acc.id == stored.id) {
             touch_account(account, true);
             stored = account.clone();
         }
@@ -342,8 +341,9 @@ pub fn upsert_chatgpt_account(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::token_data::IdTokenInfo;
+    use crate::token_data::TokenData;
     use base64::Engine;
-    use crate::token_data::{IdTokenInfo, TokenData};
     use tempfile::tempdir;
 
     fn make_chatgpt_tokens(account_id: Option<&str>, email: Option<&str>) -> TokenData {
@@ -398,8 +398,8 @@ mod tests {
         assert_eq!(stored.mode, AuthMode::ApiKey);
         assert_eq!(stored.openai_api_key.as_deref(), Some("sk-test"));
 
-        let again = upsert_api_key_account(home.path(), api_key, None, false)
-            .expect("upsert same key");
+        let again =
+            upsert_api_key_account(home.path(), api_key, None, false).expect("upsert same key");
         assert_eq!(stored.id, again.id);
 
         let accounts = list_accounts(home.path()).expect("list accounts");
@@ -411,24 +411,12 @@ mod tests {
     fn upsert_chatgpt_dedupes_by_account_id() {
         let home = tempdir().expect("tempdir");
         let tokens = make_chatgpt_tokens(Some("acct-1"), Some("user@example.com"));
-        let stored = upsert_chatgpt_account(
-            home.path(),
-            tokens.clone(),
-            Utc::now(),
-            None,
-            true,
-        )
-        .expect("insert chatgpt");
+        let stored = upsert_chatgpt_account(home.path(), tokens.clone(), Utc::now(), None, true)
+            .expect("insert chatgpt");
 
         let tokens_updated = make_chatgpt_tokens(Some("acct-1"), Some("user@example.com"));
-        let again = upsert_chatgpt_account(
-            home.path(),
-            tokens_updated,
-            Utc::now(),
-            None,
-            false,
-        )
-        .expect("update chatgpt");
+        let again = upsert_chatgpt_account(home.path(), tokens_updated, Utc::now(), None, false)
+            .expect("update chatgpt");
 
         assert_eq!(stored.id, again.id);
         let accounts = list_accounts(home.path()).expect("list accounts");
@@ -441,28 +429,19 @@ mod tests {
         let home = tempdir().expect("tempdir");
 
         let personal = make_chatgpt_tokens(Some("acct-personal"), Some("user@example.com"));
-        let personal_id = upsert_chatgpt_account(
-            home.path(),
-            personal,
-            Utc::now(),
-            None,
-            true,
-        )
-        .expect("insert personal account")
-        .id;
+        let personal_id = upsert_chatgpt_account(home.path(), personal, Utc::now(), None, true)
+            .expect("insert personal account")
+            .id;
 
         let team = make_chatgpt_tokens(Some("acct-team"), Some("user@example.com"));
-        let team_id = upsert_chatgpt_account(
-            home.path(),
-            team,
-            Utc::now(),
-            None,
-            false,
-        )
-        .expect("insert team account")
-        .id;
+        let team_id = upsert_chatgpt_account(home.path(), team, Utc::now(), None, false)
+            .expect("insert team account")
+            .id;
 
-        assert_ne!(personal_id, team_id, "accounts with different IDs should not be merged");
+        assert_ne!(
+            personal_id, team_id,
+            "accounts with different IDs should not be merged"
+        );
 
         let accounts = list_accounts(home.path()).expect("list accounts");
         assert_eq!(accounts.len(), 2, "both accounts should remain listed");
@@ -472,14 +451,8 @@ mod tests {
     fn remove_account_clears_active() {
         let home = tempdir().expect("tempdir");
         let tokens = make_chatgpt_tokens(Some("acct-remove"), Some("user@example.com"));
-        let stored = upsert_chatgpt_account(
-            home.path(),
-            tokens,
-            Utc::now(),
-            None,
-            true,
-        )
-        .expect("insert chatgpt");
+        let stored = upsert_chatgpt_account(home.path(), tokens, Utc::now(), None, true)
+            .expect("insert chatgpt");
 
         let active_before = get_active_account_id(home.path()).expect("active id");
         assert_eq!(active_before.as_deref(), Some(stored.id.as_str()));

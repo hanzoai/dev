@@ -1,19 +1,29 @@
-use hanzo_core::config_types::{AutoResolveAttemptLimit, ReasoningEffort};
-use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
+use crossterm::event::KeyCode;
+use crossterm::event::KeyEvent;
+use crossterm::event::KeyModifiers;
+use hanzo_core::config_types::AutoResolveAttemptLimit;
+use hanzo_core::config_types::ReasoningEffort;
 use ratatui::buffer::Buffer;
-use ratatui::layout::{Alignment, Rect};
-use ratatui::style::{Modifier, Style};
-use ratatui::text::{Line, Span};
-use ratatui::widgets::{Block, Borders, Clear, Paragraph, Widget};
+use ratatui::layout::Alignment;
+use ratatui::layout::Rect;
+use ratatui::style::Modifier;
+use ratatui::style::Style;
+use ratatui::text::Line;
+use ratatui::text::Span;
+use ratatui::widgets::Block;
+use ratatui::widgets::Borders;
+use ratatui::widgets::Clear;
+use ratatui::widgets::Paragraph;
+use ratatui::widgets::Widget;
 use std::cell::Cell;
 
 use crate::app_event::AppEvent;
 use crate::app_event_sender::AppEventSender;
 use crate::colors;
 
+use super::BottomPane;
 use super::bottom_pane_view::BottomPaneView;
 use super::scroll_state::ScrollState;
-use super::BottomPane;
 
 const DEFAULT_VISIBLE_ROWS: usize = 8;
 
@@ -195,7 +205,9 @@ impl ReviewSettingsView {
     fn toggle_review_auto_resolve(&mut self) {
         self.review_auto_resolve_enabled = !self.review_auto_resolve_enabled;
         self.app_event_tx
-            .send(AppEvent::UpdateReviewAutoResolveEnabled(self.review_auto_resolve_enabled));
+            .send(AppEvent::UpdateReviewAutoResolveEnabled(
+                self.review_auto_resolve_enabled,
+            ));
     }
 
     fn adjust_review_followups(&mut self, forward: bool) {
@@ -221,7 +233,9 @@ impl ReviewSettingsView {
         self.review_followups_index = next;
         self.review_followups = allowed[next];
         self.app_event_tx
-            .send(AppEvent::UpdateReviewAutoResolveAttempts(self.review_followups));
+            .send(AppEvent::UpdateReviewAutoResolveAttempts(
+                self.review_followups,
+            ));
     }
 
     fn adjust_auto_review_followups(&mut self, forward: bool) {
@@ -247,7 +261,9 @@ impl ReviewSettingsView {
         self.auto_review_followups_index = next;
         self.auto_review_followups = allowed[next];
         self.app_event_tx
-            .send(AppEvent::UpdateAutoReviewFollowupAttempts(self.auto_review_followups));
+            .send(AppEvent::UpdateAutoReviewFollowupAttempts(
+                self.auto_review_followups,
+            ));
     }
 
     fn toggle_auto_review(&mut self) {
@@ -257,8 +273,7 @@ impl ReviewSettingsView {
     }
 
     fn open_review_model_selector(&self) {
-        self.app_event_tx
-            .send(AppEvent::ShowReviewModelSelector);
+        self.app_event_tx.send(AppEvent::ShowReviewModelSelector);
     }
 
     fn open_review_resolve_model_selector(&self) {
@@ -308,7 +323,11 @@ impl ReviewSettingsView {
             return 1;
         }
         let hint = self.viewport_rows.get();
-        let target = if hint == 0 { DEFAULT_VISIBLE_ROWS } else { hint };
+        let target = if hint == 0 {
+            DEFAULT_VISIBLE_ROWS
+        } else {
+            hint
+        };
         target.clamp(1, total)
     }
 
@@ -359,29 +378,27 @@ impl ReviewSettingsView {
             Style::default().fg(colors::text_dim())
         };
         match row {
-            RowData::SectionReview => {
-                Line::from(vec![Span::styled(
-                    " /review (manual) ",
-                    Style::default()
-                        .fg(colors::primary())
-                        .add_modifier(Modifier::BOLD | Modifier::UNDERLINED),
-                )])
-            }
-            RowData::SectionAutoReview => {
-                Line::from(vec![Span::styled(
-                    " Auto Review (background) ",
-                    Style::default()
-                        .fg(colors::primary())
-                        .add_modifier(Modifier::BOLD | Modifier::UNDERLINED),
-                )])
-            }
+            RowData::SectionReview => Line::from(vec![Span::styled(
+                " /review (manual) ",
+                Style::default()
+                    .fg(colors::primary())
+                    .add_modifier(Modifier::BOLD | Modifier::UNDERLINED),
+            )]),
+            RowData::SectionAutoReview => Line::from(vec![Span::styled(
+                " Auto Review (background) ",
+                Style::default()
+                    .fg(colors::primary())
+                    .add_modifier(Modifier::BOLD | Modifier::UNDERLINED),
+            )]),
             RowData::ReviewEnabled => {
                 let label_style = if selected {
                     Style::default()
                         .fg(colors::primary())
                         .add_modifier(Modifier::BOLD)
                 } else {
-                    Style::default().fg(colors::text()).add_modifier(Modifier::BOLD)
+                    Style::default()
+                        .fg(colors::text())
+                        .add_modifier(Modifier::BOLD)
                 };
                 let status_span = if self.review_auto_resolve_enabled {
                     Span::styled("On", Style::default().fg(colors::success()))
@@ -412,7 +429,9 @@ impl ReviewSettingsView {
                         .fg(colors::primary())
                         .add_modifier(Modifier::BOLD)
                 } else {
-                    Style::default().fg(colors::text()).add_modifier(Modifier::BOLD)
+                    Style::default()
+                        .fg(colors::text())
+                        .add_modifier(Modifier::BOLD)
                 };
                 let value_style = if selected {
                     Style::default()
@@ -447,7 +466,9 @@ impl ReviewSettingsView {
                         .fg(colors::primary())
                         .add_modifier(Modifier::BOLD)
                 } else {
-                    Style::default().fg(colors::text()).add_modifier(Modifier::BOLD)
+                    Style::default()
+                        .fg(colors::text())
+                        .add_modifier(Modifier::BOLD)
                 };
                 let value_style = if selected {
                     Style::default()
@@ -482,12 +503,18 @@ impl ReviewSettingsView {
                         .fg(colors::primary())
                         .add_modifier(Modifier::BOLD)
                 } else if self.review_auto_resolve_enabled {
-                    Style::default().fg(colors::text()).add_modifier(Modifier::BOLD)
+                    Style::default()
+                        .fg(colors::text())
+                        .add_modifier(Modifier::BOLD)
                 } else {
-                    Style::default().fg(colors::text_dim()).add_modifier(Modifier::BOLD)
+                    Style::default()
+                        .fg(colors::text_dim())
+                        .add_modifier(Modifier::BOLD)
                 };
                 let value_style = if selected {
-                    Style::default().fg(colors::function()).add_modifier(Modifier::BOLD)
+                    Style::default()
+                        .fg(colors::function())
+                        .add_modifier(Modifier::BOLD)
                 } else if self.review_followups == 0 {
                     Style::default().fg(colors::text_dim())
                 } else {
@@ -517,7 +544,9 @@ impl ReviewSettingsView {
                         .fg(colors::primary())
                         .add_modifier(Modifier::BOLD)
                 } else {
-                    Style::default().fg(colors::text()).add_modifier(Modifier::BOLD)
+                    Style::default()
+                        .fg(colors::text())
+                        .add_modifier(Modifier::BOLD)
                 };
                 let status_span = if self.auto_review_enabled {
                     Span::styled("On", Style::default().fg(colors::success()))
@@ -548,7 +577,9 @@ impl ReviewSettingsView {
                         .fg(colors::primary())
                         .add_modifier(Modifier::BOLD)
                 } else {
-                    Style::default().fg(colors::text()).add_modifier(Modifier::BOLD)
+                    Style::default()
+                        .fg(colors::text())
+                        .add_modifier(Modifier::BOLD)
                 };
                 let value_style = if selected {
                     Style::default()
@@ -583,7 +614,9 @@ impl ReviewSettingsView {
                         .fg(colors::primary())
                         .add_modifier(Modifier::BOLD)
                 } else {
-                    Style::default().fg(colors::text()).add_modifier(Modifier::BOLD)
+                    Style::default()
+                        .fg(colors::text())
+                        .add_modifier(Modifier::BOLD)
                 };
                 let value_style = if selected {
                     Style::default()
@@ -618,12 +651,18 @@ impl ReviewSettingsView {
                         .fg(colors::primary())
                         .add_modifier(Modifier::BOLD)
                 } else if self.auto_review_enabled {
-                    Style::default().fg(colors::text()).add_modifier(Modifier::BOLD)
+                    Style::default()
+                        .fg(colors::text())
+                        .add_modifier(Modifier::BOLD)
                 } else {
-                    Style::default().fg(colors::text_dim()).add_modifier(Modifier::BOLD)
+                    Style::default()
+                        .fg(colors::text_dim())
+                        .add_modifier(Modifier::BOLD)
                 };
                 let value_style = if selected {
-                    Style::default().fg(colors::function()).add_modifier(Modifier::BOLD)
+                    Style::default()
+                        .fg(colors::function())
+                        .add_modifier(Modifier::BOLD)
                 } else if self.auto_review_followups == 0 {
                     Style::default().fg(colors::text_dim())
                 } else {
@@ -676,13 +715,21 @@ impl ReviewSettingsView {
             .copied();
 
         match key_event {
-            KeyEvent { code: KeyCode::Up, .. } => {
+            KeyEvent {
+                code: KeyCode::Up, ..
+            } => {
                 self.state.move_up_wrap(total);
             }
-            KeyEvent { code: KeyCode::Down, .. } => {
+            KeyEvent {
+                code: KeyCode::Down,
+                ..
+            } => {
                 self.state.move_down_wrap(total);
             }
-            KeyEvent { code: KeyCode::Left, .. } => {
+            KeyEvent {
+                code: KeyCode::Left,
+                ..
+            } => {
                 if let Some(kind) = current_kind {
                     match kind {
                         SelectionKind::ReviewEnabled => self.toggle_review_auto_resolve(),
@@ -698,7 +745,10 @@ impl ReviewSettingsView {
                     }
                 }
             }
-            KeyEvent { code: KeyCode::Right, .. } => {
+            KeyEvent {
+                code: KeyCode::Right,
+                ..
+            } => {
                 if let Some(kind) = current_kind {
                     match kind {
                         SelectionKind::ReviewEnabled => self.toggle_review_auto_resolve(),
@@ -714,8 +764,15 @@ impl ReviewSettingsView {
                     }
                 }
             }
-            KeyEvent { code: KeyCode::Char(' '), .. }
-            | KeyEvent { code: KeyCode::Enter, modifiers: KeyModifiers::NONE, .. } => {
+            KeyEvent {
+                code: KeyCode::Char(' '),
+                ..
+            }
+            | KeyEvent {
+                code: KeyCode::Enter,
+                modifiers: KeyModifiers::NONE,
+                ..
+            } => {
                 if let Some(kind) = current_kind {
                     match kind {
                         SelectionKind::ReviewEnabled => self.toggle_review_auto_resolve(),
@@ -735,7 +792,9 @@ impl ReviewSettingsView {
                     }
                 }
             }
-            KeyEvent { code: KeyCode::Esc, .. } => {
+            KeyEvent {
+                code: KeyCode::Esc, ..
+            } => {
                 self.is_complete = true;
             }
             _ => {}
@@ -827,7 +886,11 @@ impl<'a> BottomPaneView<'a> for ReviewSettingsView {
 
         let (rows, selection_rows, _) = self.build_rows();
         let selection_count = selection_rows.len();
-        let selected_idx = self.state.selected_idx.unwrap_or(0).min(selection_count.saturating_sub(1));
+        let selected_idx = self
+            .state
+            .selected_idx
+            .unwrap_or(0)
+            .min(selection_count.saturating_sub(1));
         let selected_row_index = selection_rows.get(selected_idx).copied().unwrap_or(0);
 
         let mut visible_lines: Vec<Line> = Vec::new();

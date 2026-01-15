@@ -94,7 +94,9 @@ fn warn_on_unknown_cli_overrides(cli_paths: &[String], ignored_paths: &[String])
             continue;
         }
 
-        eprintln!("Warning: unknown config override `{cli_path}` (ignored). See `code exec --help` for valid keys.");
+        eprintln!(
+            "Warning: unknown config override `{cli_path}` (ignored). See `code exec --help` for valid keys."
+        );
     }
 }
 
@@ -174,7 +176,9 @@ fn upgrade_legacy_model_slug(slug: &str) -> Option<String> {
     }
 
     // Upgrade Gemini 2.5 Pro to Gemini 3 Pro (or preview alias)
-    if slug.eq_ignore_ascii_case("gemini-2.5-pro") || slug.eq_ignore_ascii_case("gemini-3-pro-preview") {
+    if slug.eq_ignore_ascii_case("gemini-2.5-pro")
+        || slug.eq_ignore_ascii_case("gemini-3-pro-preview")
+    {
         return Some("gemini-3-pro".to_string());
     }
 

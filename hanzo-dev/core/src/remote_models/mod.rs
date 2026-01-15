@@ -8,16 +8,18 @@ use hanzo_protocol::openai_models::ApplyPatchToolType as ProtocolApplyPatchToolT
 use hanzo_protocol::openai_models::ModelInfo;
 use hanzo_protocol::openai_models::ModelsResponse;
 use hanzo_protocol::openai_models::ReasoningEffort as ProtocolReasoningEffort;
-use reqwest::header;
 use reqwest::Method;
 use reqwest::Url;
+use reqwest::header;
 use tokio::sync::RwLock;
 
+use crate::CodexAuth;
 use crate::auth::AuthManager;
-use crate::model_family::{derive_default_model_family, find_family_for_model, ModelFamily};
+use crate::model_family::ModelFamily;
+use crate::model_family::derive_default_model_family;
+use crate::model_family::find_family_for_model;
 use crate::model_provider_info::ModelProviderInfo;
 use crate::tool_apply_patch::ApplyPatchToolType;
-use crate::CodexAuth;
 
 mod cache;
 
@@ -49,7 +51,11 @@ pub struct RemoteModelsManager {
 }
 
 impl RemoteModelsManager {
-    pub fn new(auth_manager: Arc<AuthManager>, provider: ModelProviderInfo, code_home: PathBuf) -> Self {
+    pub fn new(
+        auth_manager: Arc<AuthManager>,
+        provider: ModelProviderInfo,
+        code_home: PathBuf,
+    ) -> Self {
         Self {
             state: RwLock::new(RemoteModelsState::default()),
             auth_manager,
@@ -189,18 +195,24 @@ impl RemoteModelsManager {
         if response.status() == reqwest::StatusCode::NOT_MODIFIED {
             let mut state = self.state.write().await;
             state.fetched_at = Some(Utc::now());
-            if let Err(err) = cache::save_cache(&self.cache_path(), &cache::ModelsCache {
-                fetched_at: state.fetched_at.unwrap_or_else(Utc::now),
-                etag: state.etag.clone(),
-                models: state.models.clone(),
-            }) {
+            if let Err(err) = cache::save_cache(
+                &self.cache_path(),
+                &cache::ModelsCache {
+                    fetched_at: state.fetched_at.unwrap_or_else(Utc::now),
+                    etag: state.etag.clone(),
+                    models: state.models.clone(),
+                },
+            ) {
                 tracing::debug!("failed to persist /models cache on 304: {err}");
             }
             return;
         }
 
         if !response.status().is_success() {
-            tracing::debug!("remote /models request failed with status {}", response.status());
+            tracing::debug!(
+                "remote /models request failed with status {}",
+                response.status()
+            );
             return;
         }
 
@@ -236,11 +248,14 @@ impl RemoteModelsManager {
             state.fetched_at = Some(fetched_at);
         }
 
-        if let Err(err) = cache::save_cache(&self.cache_path(), &cache::ModelsCache {
-            fetched_at,
-            etag,
-            models: self.state.read().await.models.clone(),
-        }) {
+        if let Err(err) = cache::save_cache(
+            &self.cache_path(),
+            &cache::ModelsCache {
+                fetched_at,
+                etag,
+                models: self.state.read().await.models.clone(),
+            },
+        ) {
             tracing::debug!("failed to write /models cache: {err}");
         }
     }
@@ -264,7 +279,8 @@ impl RemoteModelsManager {
     }
 
     pub async fn construct_model_family(&self, model: &str) -> ModelFamily {
-        let base = find_family_for_model(model).unwrap_or_else(|| derive_default_model_family(model));
+        let base =
+            find_family_for_model(model).unwrap_or_else(|| derive_default_model_family(model));
         self.apply_remote_overrides(model, base).await
     }
 
@@ -308,7 +324,9 @@ impl RemoteModelsManager {
         });
 
         let mut url = Url::parse(&base_url).map_err(|err| {
-            crate::error::CodexErr::ServerError(format!("invalid models base_url {base_url}: {err}"))
+            crate::error::CodexErr::ServerError(format!(
+                "invalid models base_url {base_url}: {err}"
+            ))
         })?;
         let base_path = url.path().trim_end_matches('/');
         url.set_path(&format!("{base_path}/models"));

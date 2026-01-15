@@ -1,6 +1,8 @@
-use crate::card_theme::{GradientSpec, RevealVariant};
+use crate::card_theme::GradientSpec;
+use crate::card_theme::RevealVariant;
 use crate::colors;
-use crate::glitch_animation::{gradient_multi, mix_rgb};
+use crate::glitch_animation::gradient_multi;
+use crate::glitch_animation::mix_rgb;
 use ratatui::buffer::Buffer;
 use ratatui::layout::Rect;
 use ratatui::prelude::Color;
@@ -60,11 +62,16 @@ impl GradientBackground {
 
         if reveal.intro_light && clamped_progress < LIGHT_REVEAL_HOLD {
             let warm_fg = mix_rgb(fg, Color::Rgb(255, 255, 255), 0.55);
-            Self::render_static(buf, area, &GradientSpec {
-                left: Color::Rgb(255, 255, 255),
-                right: Color::Rgb(255, 255, 255),
-                bias: 0.0,
-            }, warm_fg);
+            Self::render_static(
+                buf,
+                area,
+                &GradientSpec {
+                    left: Color::Rgb(255, 255, 255),
+                    right: Color::Rgb(255, 255, 255),
+                    bias: 0.0,
+                },
+                warm_fg,
+            );
             return;
         }
 
@@ -94,15 +101,16 @@ impl GradientBackground {
                     reveal.variant,
                 );
 
-                let softened_color = if reveal.intro_light && clamped_progress < LIGHT_REVEAL_FADE_END {
-                    mix_rgb(
-                        Color::Rgb(255, 255, 255),
-                        final_color,
-                        smoothstep(LIGHT_REVEAL_HOLD, LIGHT_REVEAL_FADE_END, clamped_progress),
-                    )
-                } else {
-                    final_color
-                };
+                let softened_color =
+                    if reveal.intro_light && clamped_progress < LIGHT_REVEAL_FADE_END {
+                        mix_rgb(
+                            Color::Rgb(255, 255, 255),
+                            final_color,
+                            smoothstep(LIGHT_REVEAL_HOLD, LIGHT_REVEAL_FADE_END, clamped_progress),
+                        )
+                    } else {
+                        final_color
+                    };
 
                 let mut blend = smoothstep(0.0, 1.0, coverage);
                 let mut accent = accent_color(
@@ -232,7 +240,9 @@ fn accent_color(
             mix_rgb(base, final_color, 0.35 + lift.clamp(0.0, 0.3))
         }
         RevealVariant::DiagonalPulse => {
-            let pulse = (((x + y) * std::f32::consts::PI * 2.0) + progress * 6.0).sin().abs();
+            let pulse = (((x + y) * std::f32::consts::PI * 2.0) + progress * 6.0)
+                .sin()
+                .abs();
             let glow = mix_rgb(base, Color::Rgb(255, 255, 255), 0.4 * pulse);
             mix_rgb(glow, final_color, 0.45)
         }

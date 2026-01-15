@@ -4,17 +4,28 @@ mod common;
 
 use common::load_default_config_for_test;
 
+use hanzo_core::CodexAuth;
+use hanzo_core::ConversationManager;
+use hanzo_core::ModelProviderInfo;
 use hanzo_core::built_in_model_providers;
-use hanzo_core::config_types::{ProjectHookConfig, ProjectHookEvent};
+use hanzo_core::config_types::ProjectHookConfig;
+use hanzo_core::config_types::ProjectHookEvent;
 use hanzo_core::project_features::ProjectHooks;
-use hanzo_core::protocol::{AskForApproval, EventMsg, InputItem, Op, SandboxPolicy};
-use hanzo_core::{CodexAuth, ConversationManager, ModelProviderInfo};
+use hanzo_core::protocol::AskForApproval;
+use hanzo_core::protocol::EventMsg;
+use hanzo_core::protocol::InputItem;
+use hanzo_core::protocol::Op;
+use hanzo_core::protocol::SandboxPolicy;
 use serde_json::json;
-use std::fs::{self, File};
+use std::fs::File;
+use std::fs::{self};
 use tempfile::TempDir;
 use tokio::time::timeout;
-use wiremock::matchers::{method, path_regex};
-use wiremock::{Mock, MockServer, ResponseTemplate};
+use wiremock::Mock;
+use wiremock::MockServer;
+use wiremock::ResponseTemplate;
+use wiremock::matchers::method;
+use wiremock::matchers::path_regex;
 
 fn sse_response(body: String) -> ResponseTemplate {
     ResponseTemplate::new(200)
@@ -38,7 +49,10 @@ async fn tool_hooks_fire_for_shell_exec() {
         vec![
             "bash".to_string(),
             "-lc".to_string(),
-            format!("echo {label}:${{CODE_HOOK_EVENT}} >> {}", log_path.display()),
+            format!(
+                "echo {label}:${{CODE_HOOK_EVENT}} >> {}",
+                log_path.display()
+            ),
         ]
     };
 
@@ -100,8 +114,7 @@ async fn tool_hooks_fire_for_shell_exec() {
     let body_one = format!(
         "event: response.output_item.done\ndata: {}\n\n\
 event: response.completed\ndata: {}\n\n",
-        function_call_item,
-        completed_one
+        function_call_item, completed_one
     );
 
     let message_item = json!({
@@ -129,8 +142,7 @@ event: response.completed\ndata: {}\n\n",
     let body_two = format!(
         "event: response.output_item.done\ndata: {}\n\n\
 event: response.completed\ndata: {}\n\n",
-        message_item,
-        completed_two
+        message_item, completed_two
     );
 
     Mock::given(method("POST"))
@@ -152,7 +164,8 @@ event: response.completed\ndata: {}\n\n",
     };
     config.model = "gpt-5.1-codex".to_string();
 
-    let conversation_manager = ConversationManager::with_auth(CodexAuth::from_api_key("Test API Key"));
+    let conversation_manager =
+        ConversationManager::with_auth(CodexAuth::from_api_key("Test API Key"));
     let codex = conversation_manager
         .new_conversation(config)
         .await
@@ -199,10 +212,20 @@ event: response.completed\ndata: {}\n\n",
     });
 
     let requests = server.received_requests().await.unwrap();
-    assert_eq!(requests.len(), 2, "expected two model requests (tool + follow-up)");
+    assert_eq!(
+        requests.len(),
+        2,
+        "expected two model requests (tool + follow-up)"
+    );
 
-    assert!(hook_before_seen, "tool.before hook did not emit ExecCommandBegin");
-    assert!(hook_after_seen, "tool.after hook did not emit ExecCommandEnd");
+    assert!(
+        hook_before_seen,
+        "tool.before hook did not emit ExecCommandBegin"
+    );
+    assert!(
+        hook_after_seen,
+        "tool.after hook did not emit ExecCommandEnd"
+    );
 
     let log_contents = fs::read_to_string(&log_path).unwrap();
     let lines: Vec<&str> = log_contents.lines().collect();

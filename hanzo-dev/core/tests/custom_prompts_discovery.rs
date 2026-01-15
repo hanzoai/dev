@@ -1,8 +1,10 @@
 use anyhow::Result;
-use hanzo_core::custom_prompts::{default_prompts_dir, discover_prompts_in};
+use hanzo_core::custom_prompts::default_prompts_dir;
+use hanzo_core::custom_prompts::discover_prompts_in;
 use once_cell::sync::Lazy;
 use std::fs;
-use std::path::{Path, PathBuf};
+use std::path::Path;
+use std::path::PathBuf;
 use std::sync::Mutex;
 use tempfile::TempDir;
 

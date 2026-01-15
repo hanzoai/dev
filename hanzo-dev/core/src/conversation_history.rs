@@ -59,7 +59,6 @@ impl ConversationHistory {
             self.items.push(item);
         }
     }
-
 }
 
 /// Anything that is not a system message or "reasoning" message is considered

@@ -1,4 +1,5 @@
-use ratatui::text::{Line, Span};
+use ratatui::text::Line;
+use ratatui::text::Span;
 
 /// Clone a borrowed ratatui `Line` into an owned `'static` line.
 #[allow(dead_code)]
@@ -60,6 +61,8 @@ pub fn is_code_block_painted(line: &Line<'_>) -> bool {
     }
     // Treat our hidden language sentinel as code so it groups with the block.
     let flat: String = line.spans.iter().map(|s| s.content.as_ref()).collect();
-    if flat.contains("⟦LANG:") { return true; }
+    if flat.contains("⟦LANG:") {
+        return true;
+    }
     false
 }

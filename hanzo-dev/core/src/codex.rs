@@ -12,46 +12,70 @@ use std::sync::Arc;
 use std::sync::Mutex;
 use std::sync::RwLock;
 use std::sync::Weak;
-use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
-use std::time::{Duration, Instant};
-use time::format_description::well_known::Rfc3339;
+use std::sync::atomic::AtomicBool;
+use std::sync::atomic::AtomicU64;
+use std::sync::atomic::Ordering;
+use std::time::Duration;
+use std::time::Instant;
 use time::OffsetDateTime;
+use time::format_description::well_known::Rfc3339;
 
+use crate::bridge_client::spawn_bridge_listener;
+use crate::config_types::ClientTools;
+use crate::config_types::ReasoningEffort as ReasoningEffortConfig;
+use crate::config_types::ReasoningSummary as ReasoningSummaryConfig;
 use async_channel::Receiver;
 use async_channel::Sender;
 use base64::Engine;
 use hanzo_apply_patch::ApplyPatchAction;
 use hanzo_apply_patch::MaybeApplyPatchVerified;
-use crate::bridge_client::spawn_bridge_listener;
 use hanzo_browser::BrowserConfig as CodexBrowserConfig;
 use hanzo_browser::BrowserManager;
-use hanzo_otel::otel_event_manager::{
-    OtelEventManager,
-    ToolDecisionSource,
-    TurnLatencyPayload,
-    TurnLatencyPhase,
-};
+use hanzo_otel::otel_event_manager::OtelEventManager;
+use hanzo_otel::otel_event_manager::ToolDecisionSource;
+use hanzo_otel::otel_event_manager::TurnLatencyPayload;
+use hanzo_otel::otel_event_manager::TurnLatencyPhase;
 use hanzo_protocol::config_types::ReasoningEffort as ProtoReasoningEffort;
 use hanzo_protocol::config_types::ReasoningSummary as ProtoReasoningSummary;
 use hanzo_protocol::protocol::AskForApproval as ProtoAskForApproval;
-use hanzo_protocol::protocol::ReviewDecision as ProtoReviewDecision;
-use hanzo_protocol::protocol::SandboxPolicy as ProtoSandboxPolicy;
 use hanzo_protocol::protocol::BROWSER_SNAPSHOT_OPEN_TAG;
 use hanzo_protocol::protocol::ENVIRONMENT_CONTEXT_CLOSE_TAG;
 use hanzo_protocol::protocol::ENVIRONMENT_CONTEXT_DELTA_CLOSE_TAG;
 use hanzo_protocol::protocol::ENVIRONMENT_CONTEXT_DELTA_OPEN_TAG;
 use hanzo_protocol::protocol::ENVIRONMENT_CONTEXT_OPEN_TAG;
-use crate::config_types::ReasoningEffort as ReasoningEffortConfig;
-use crate::config_types::ReasoningSummary as ReasoningSummaryConfig;
-use crate::config_types::ClientTools;
+use hanzo_protocol::protocol::ReviewDecision as ProtoReviewDecision;
+use hanzo_protocol::protocol::SandboxPolicy as ProtoSandboxPolicy;
 // unused: AuthManager
 // unused: ConversationHistoryResponseEvent
+use crate::AuthManager;
+use crate::CodexAuth;
+use crate::EnvironmentContextEmission;
+use crate::account_usage;
+use crate::agent_defaults::agent_model_spec;
+use crate::agent_defaults::default_agent_configs;
+use crate::agent_defaults::enabled_agent_model_specs;
+use crate::agent_tool::AgentStatusUpdatePayload;
+use crate::auth_accounts;
+use crate::git_worktree;
+use crate::protocol::ApprovedCommandMatchKind;
+use crate::protocol::WebSearchBeginEvent;
+use crate::protocol::WebSearchCompleteEvent;
+use crate::remote_models::RemoteModelsManager;
+use crate::split_command_and_args;
+use chrono::Local;
+use chrono::Utc;
+use futures::prelude::*;
+use hanzo_protocol::mcp_protocol::AuthMode;
+use hanzo_protocol::models::WebSearchAction;
+use hanzo_protocol::protocol::RolloutItem;
 use hanzo_protocol::protocol::TurnAbortReason;
 use hanzo_protocol::protocol::TurnAbortedEvent;
-use futures::prelude::*;
 use mcp_types::CallToolResult;
-use serde::{Deserialize, Serialize};
+use serde::Deserialize;
+use serde::Serialize;
 use serde_json::json;
+use shlex::split as shlex_split;
+use shlex::try_join as shlex_try_join;
 use tokio::sync::oneshot;
 use tokio::task::AbortHandle;
 use tracing::debug;
@@ -60,26 +84,6 @@ use tracing::info;
 use tracing::trace;
 use tracing::warn;
 use uuid::Uuid;
-use crate::EnvironmentContextEmission;
-use crate::AuthManager;
-use crate::CodexAuth;
-use crate::agent_tool::AgentStatusUpdatePayload;
-use crate::remote_models::RemoteModelsManager;
-use crate::split_command_and_args;
-use crate::git_worktree;
-use crate::protocol::ApprovedCommandMatchKind;
-use crate::protocol::WebSearchBeginEvent;
-use crate::protocol::WebSearchCompleteEvent;
-use hanzo_protocol::mcp_protocol::AuthMode;
-use crate::account_usage;
-use crate::auth_accounts;
-use crate::agent_defaults::{agent_model_spec, default_agent_configs, enabled_agent_model_specs};
-use hanzo_protocol::models::WebSearchAction;
-use hanzo_protocol::protocol::RolloutItem;
-use shlex::split as shlex_split;
-use shlex::try_join as shlex_try_join;
-use chrono::Local;
-use chrono::Utc;
 
 pub mod compact;
 pub mod compact_remote;
@@ -88,11 +92,15 @@ mod exec;
 mod session;
 mod streaming;
 
-pub use session::ApprovedCommandPattern;
-pub(crate) use session::{Session, ToolCallCtx};
-use self::compact::{build_compacted_history, collect_compaction_snippets};
+use self::compact::build_compacted_history;
+use self::compact::collect_compaction_snippets;
 use self::compact_remote::run_inline_remote_auto_compact_task;
-use self::streaming::{add_pending_screenshot, capture_browser_screenshot, submission_loop};
+use self::streaming::add_pending_screenshot;
+use self::streaming::capture_browser_screenshot;
+use self::streaming::submission_loop;
+pub use session::ApprovedCommandPattern;
+pub(crate) use session::Session;
+pub(crate) use session::ToolCallCtx;
 
 /// Initial submission ID for session configuration
 pub(crate) const INITIAL_SUBMIT_ID: &str = "";
@@ -571,7 +579,8 @@ async fn build_turn_status_items_legacy(sess: &Session) -> Vec<ResponseItem> {
                         } else {
                             // No previous screenshot or hash computation failed, include it
                             if let Some((phash, dhash)) = current_hash {
-                                *last_screenshot_info = Some((screenshot_path.clone(), phash, dhash));
+                                *last_screenshot_info =
+                                    Some((screenshot_path.clone(), phash, dhash));
                             }
                             true
                         };
@@ -582,7 +591,8 @@ async fn build_turn_status_items_legacy(sess: &Session) -> Vec<ResponseItem> {
                                     .first()
                                     .map(|m| m.to_string())
                                     .unwrap_or_else(|| "image/png".to_string());
-                                let encoded = base64::engine::general_purpose::STANDARD.encode(bytes);
+                                let encoded =
+                                    base64::engine::general_purpose::STANDARD.encode(bytes);
                                 screenshot_content = Some(ContentItem::InputImage {
                                     image_url: format!("data:{mime};base64,{encoded}"),
                                 });
@@ -683,9 +693,7 @@ async fn build_turn_status_items_v2(sess: &Session) -> Vec<ResponseItem> {
         if browser_manager.is_enabled().await {
             let browser_stream_id = {
                 let mut state = sess.state.lock().unwrap();
-                state
-                    .context_stream_ids
-                    .browser_stream_id(sess.id)
+                state.context_stream_ids.browser_stream_id(sess.id)
             };
 
             if let Some((_, timeout)) = browser_manager.idle_elapsed_past_timeout().await {
@@ -705,51 +713,48 @@ async fn build_turn_status_items_v2(sess: &Session) -> Vec<ResponseItem> {
                     .await
                     .unwrap_or_else(|| "unknown".to_string());
 
-            let title = match browser_manager.get_or_create_page().await {
-                Ok(page) => page.get_title().await,
-                Err(_) => None,
-            };
+                let title = match browser_manager.get_or_create_page().await {
+                    Ok(page) => page.get_title().await,
+                    Err(_) => None,
+                };
 
-            let browser_type = browser_manager.get_browser_type().await.to_string();
-            let (viewport_width, viewport_height) = browser_manager.get_viewport_size().await;
-            let cursor_position = browser_manager.get_cursor_position().await.ok();
+                let browser_type = browser_manager.get_browser_type().await.to_string();
+                let (viewport_width, viewport_height) = browser_manager.get_viewport_size().await;
+                let cursor_position = browser_manager.get_cursor_position().await.ok();
 
-            let mut metadata = HashMap::new();
-            metadata.insert("browser_type".to_string(), browser_type.clone());
-            if let Some((x, y)) = cursor_position {
-                metadata.insert("cursor_position".to_string(), format!("{:.0},{:.0}", x, y));
-            }
+                let mut metadata = HashMap::new();
+                metadata.insert("browser_type".to_string(), browser_type.clone());
+                if let Some((x, y)) = cursor_position {
+                    metadata.insert("cursor_position".to_string(), format!("{:.0},{:.0}", x, y));
+                }
 
-            let viewport = if viewport_width > 0 && viewport_height > 0 {
-                Some(ViewportDimensions {
-                    width: viewport_width as u32,
-                    height: viewport_height as u32,
-                })
-            } else {
-                None
-            };
+                let viewport = if viewport_width > 0 && viewport_height > 0 {
+                    Some(ViewportDimensions {
+                        width: viewport_width as u32,
+                        height: viewport_height as u32,
+                    })
+                } else {
+                    None
+                };
 
-            let mut screenshot_path = None;
+                let mut screenshot_path = None;
 
-            match capture_browser_screenshot(sess).await {
-                Ok((path, _)) => {
-                    add_pending_screenshot(sess, path.clone(), url.clone());
-                    let current_hash = crate::image_comparison::compute_image_hash(&path).ok();
-                    let mut last_info = sess.last_screenshot_info.lock().unwrap();
-                    let include_screenshot = should_include_browser_screenshot(
-                        &mut last_info,
-                        &path,
-                        current_hash,
-                    );
-                    drop(last_info);
-                    if include_screenshot {
-                        screenshot_path = Some(path);
+                match capture_browser_screenshot(sess).await {
+                    Ok((path, _)) => {
+                        add_pending_screenshot(sess, path.clone(), url.clone());
+                        let current_hash = crate::image_comparison::compute_image_hash(&path).ok();
+                        let mut last_info = sess.last_screenshot_info.lock().unwrap();
+                        let include_screenshot =
+                            should_include_browser_screenshot(&mut last_info, &path, current_hash);
+                        drop(last_info);
+                        if include_screenshot {
+                            screenshot_path = Some(path);
+                        }
+                    }
+                    Err(err_msg) => {
+                        trace!("env_ctx_v2: screenshot capture failed: {}", err_msg);
                     }
                 }
-                Err(err_msg) => {
-                    trace!("env_ctx_v2: screenshot capture failed: {}", err_msg);
-                }
-            }
 
                 if let Some(path) = screenshot_path {
                     let captured_at = OffsetDateTime::now_utc()
@@ -757,41 +762,43 @@ async fn build_turn_status_items_v2(sess: &Session) -> Vec<ResponseItem> {
                         .unwrap_or_else(|_| "1970-01-01T00:00:00Z".to_string());
 
                     let mut snapshot = BrowserSnapshot::new(url.clone(), captured_at);
-                snapshot.title = title.clone();
-                snapshot.viewport = viewport;
-                if !metadata.is_empty() {
-                    snapshot.metadata = Some(metadata);
-                }
-
-                match snapshot.to_response_item_with_id(Some(&browser_stream_id)) {
-                    Ok(item) => items.push(item),
-                    Err(err) => warn!("env_ctx_v2: failed to serialize browser_snapshot JSON: {err}"),
-                }
-
-                if *crate::flags::CTX_UI {
-                    sess.emit_browser_snapshot_event(&browser_stream_id, &snapshot);
-                }
-
-                match std::fs::read(&path) {
-                    Ok(bytes) => {
-                        let mime = mime_guess::from_path(&path)
-                            .first()
-                            .map(|m| m.to_string())
-                            .unwrap_or_else(|| "image/png".to_string());
-                        let encoded = base64::engine::general_purpose::STANDARD.encode(bytes);
-                        items.push(ResponseItem::Message {
-                            id: Some(browser_stream_id),
-                            role: "user".to_string(),
-                            content: vec![ContentItem::InputImage {
-                                image_url: format!("data:{mime};base64,{encoded}"),
-                            }],
-                        });
+                    snapshot.title = title.clone();
+                    snapshot.viewport = viewport;
+                    if !metadata.is_empty() {
+                        snapshot.metadata = Some(metadata);
                     }
-                    Err(err) => warn!(
-                        "env_ctx_v2: failed to read screenshot file {}: {err}",
-                        path.display()
-                    ),
-                }
+
+                    match snapshot.to_response_item_with_id(Some(&browser_stream_id)) {
+                        Ok(item) => items.push(item),
+                        Err(err) => {
+                            warn!("env_ctx_v2: failed to serialize browser_snapshot JSON: {err}")
+                        }
+                    }
+
+                    if *crate::flags::CTX_UI {
+                        sess.emit_browser_snapshot_event(&browser_stream_id, &snapshot);
+                    }
+
+                    match std::fs::read(&path) {
+                        Ok(bytes) => {
+                            let mime = mime_guess::from_path(&path)
+                                .first()
+                                .map(|m| m.to_string())
+                                .unwrap_or_else(|| "image/png".to_string());
+                            let encoded = base64::engine::general_purpose::STANDARD.encode(bytes);
+                            items.push(ResponseItem::Message {
+                                id: Some(browser_stream_id),
+                                role: "user".to_string(),
+                                content: vec![ContentItem::InputImage {
+                                    image_url: format!("data:{mime};base64,{encoded}"),
+                                }],
+                            });
+                        }
+                        Err(err) => warn!(
+                            "env_ctx_v2: failed to read screenshot file {}: {err}",
+                            path.display()
+                        ),
+                    }
                 }
             }
         }
@@ -808,10 +815,7 @@ fn should_include_browser_screenshot(
     if let Some((cur_phash, cur_dhash)) = current_hash {
         if let Some((_, last_phash, last_dhash)) = last_info.as_ref() {
             if crate::image_comparison::are_hashes_similar(
-                last_phash,
-                last_dhash,
-                &cur_phash,
-                &cur_dhash,
+                last_phash, last_dhash, &cur_phash, &cur_dhash,
             ) {
                 return false;
             }
@@ -827,7 +831,8 @@ fn should_include_browser_screenshot(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::codex::streaming::{process_rollout_env_item, TimelineReplayContext};
+    use crate::codex::streaming::TimelineReplayContext;
+    use crate::codex::streaming::process_rollout_env_item;
     use hanzo_protocol::models::ContentItem;
     use pretty_assertions::assert_eq;
 
@@ -838,9 +843,21 @@ mod tests {
         let hash_one = (vec![0xAAu8; 32], vec![0x55u8; 32]);
         let hash_two = (vec![0xABu8; 32], vec![0x56u8; 32]);
 
-        assert!(should_include_browser_screenshot(&mut last, &path, Some(hash_one.clone())));
-        assert!(!should_include_browser_screenshot(&mut last, &path, Some(hash_one.clone())));
-        assert!(should_include_browser_screenshot(&mut last, &path, Some(hash_two)));
+        assert!(should_include_browser_screenshot(
+            &mut last,
+            &path,
+            Some(hash_one.clone())
+        ));
+        assert!(!should_include_browser_screenshot(
+            &mut last,
+            &path,
+            Some(hash_one.clone())
+        ));
+        assert!(should_include_browser_screenshot(
+            &mut last,
+            &path,
+            Some(hash_two)
+        ));
     }
 
     fn make_snapshot(cwd: &str) -> EnvironmentContextSnapshot {
@@ -868,9 +885,7 @@ mod tests {
         let baseline_item = baseline
             .to_response_item()
             .expect("serialize baseline snapshot");
-        let delta_item = delta
-            .to_response_item()
-            .expect("serialize delta snapshot");
+        let delta_item = delta.to_response_item().expect("serialize delta snapshot");
 
         let mut ctx = TimelineReplayContext::default();
         process_rollout_env_item(&mut ctx, &baseline_item);
@@ -911,9 +926,7 @@ mod tests {
 
         let mut delta = make_snapshot("/other").diff_from(&baseline);
         delta.base_fingerprint = "mismatch".to_string();
-        let delta_item = delta
-            .to_response_item()
-            .expect("serialize delta snapshot");
+        let delta_item = delta.to_response_item().expect("serialize delta snapshot");
 
         process_rollout_env_item(&mut ctx, &delta_item);
 
@@ -922,60 +935,133 @@ mod tests {
         assert_eq!(ctx.next_sequence, 1);
     }
 }
+use crate::agent_defaults::model_guide_markdown_with_custom;
 use crate::agent_tool::AGENT_MANAGER;
 use crate::agent_tool::AgentStatus;
 use crate::agent_tool::AgentToolRequest;
-use crate::agent_defaults::model_guide_markdown_with_custom;
 use crate::agent_tool::CancelAgentParams;
 use crate::agent_tool::CheckAgentStatusParams;
 use crate::agent_tool::GetAgentResultParams;
 use crate::agent_tool::ListAgentsParams;
-use crate::agent_tool::normalize_agent_name;
 use crate::agent_tool::RunAgentParams;
 use crate::agent_tool::WaitForAgentParams;
+use crate::agent_tool::normalize_agent_name;
+use crate::apply_patch::ApplyPatchResult;
 use crate::apply_patch::convert_apply_patch_to_protocol;
 use crate::apply_patch::get_writable_roots;
-use crate::apply_patch::{self, ApplyPatchResult};
-use crate::bridge_client::{
-    get_effective_subscription, persist_workspace_subscription, send_bridge_control,
-    set_session_subscription, set_workspace_subscription,
-};
+use crate::apply_patch::{self};
+use crate::bridge_client::get_effective_subscription;
+use crate::bridge_client::persist_workspace_subscription;
+use crate::bridge_client::send_bridge_control;
+use crate::bridge_client::set_session_subscription;
+use crate::bridge_client::set_workspace_subscription;
 use crate::client::ModelClient;
-use crate::client_common::{Prompt, ResponseEvent, TextFormat, REVIEW_PROMPT};
-use crate::context_timeline::ContextTimeline;
-use crate::environment_context::{
-    BrowserSnapshot,
-    EnvironmentContext,
-    EnvironmentContextDelta,
-    EnvironmentContextSnapshot,
-    EnvironmentContextTracker,
-    ViewportDimensions,
-};
-use crate::user_instructions::UserInstructions;
-use crate::config::{persist_model_selection, Config};
-use crate::timeboxed_exec_guidance::{
-    AUTO_EXEC_TIMEBOXED_CLI_GUIDANCE,
-    AUTO_EXEC_TIMEBOXED_REVIEW_GUIDANCE,
-};
+use crate::client_common::Prompt;
+use crate::client_common::REVIEW_PROMPT;
+use crate::client_common::ResponseEvent;
+use crate::client_common::TextFormat;
+use crate::config::Config;
+use crate::config::persist_model_selection;
 use crate::config_types::ProjectHookEvent;
 use crate::config_types::ShellEnvironmentPolicy;
+use crate::context_timeline::ContextTimeline;
 use crate::conversation_history::ConversationHistory;
-use crate::error::{CodexErr, RetryAfter};
+use crate::dry_run_guard::DryRunAnalysis;
+use crate::dry_run_guard::DryRunDisposition;
+use crate::dry_run_guard::DryRunGuardState;
+use crate::dry_run_guard::analyze_command;
+use crate::environment_context::BrowserSnapshot;
+use crate::environment_context::EnvironmentContext;
+use crate::environment_context::EnvironmentContextDelta;
+use crate::environment_context::EnvironmentContextSnapshot;
+use crate::environment_context::EnvironmentContextTracker;
+use crate::environment_context::ViewportDimensions;
+use crate::error::CodexErr;
 use crate::error::Result as CodexResult;
+use crate::error::RetryAfter;
 use crate::error::SandboxErr;
 use crate::error::get_error_message_ui;
+use crate::exec::EXEC_CAPTURE_MAX_BYTES;
 use crate::exec::ExecParams;
 use crate::exec::ExecToolCallOutput;
 use crate::exec::SandboxType;
 use crate::exec::StdoutStream;
 use crate::exec::StreamOutput;
-use crate::exec::EXEC_CAPTURE_MAX_BYTES;
 use crate::exec::process_exec_tool_call;
-use crate::review_format::format_review_findings_block;
+use crate::exec_command::ExecSessionManager;
 use crate::exec_env::create_env;
 use crate::mcp_connection_manager::McpConnectionManager;
 use crate::mcp_tool_call::handle_mcp_tool_call;
-use crate::model_family::{derive_default_model_family, find_family_for_model};
+use crate::model_family::derive_default_model_family;
+use crate::model_family::find_family_for_model;
+use crate::openai_tools::ToolsConfig;
+use crate::openai_tools::get_openai_tools;
+use crate::parse_command::parse_command;
+use crate::plan_tool::handle_update_plan;
+use crate::project_doc::get_user_instructions;
+use crate::project_features::ProjectCommand;
+use crate::project_features::ProjectHook;
+use crate::project_features::ProjectHooks;
+use crate::protocol::AgentMessageDeltaEvent;
+use crate::protocol::AgentMessageEvent;
+use crate::protocol::AgentReasoningDeltaEvent;
+use crate::protocol::AgentReasoningEvent;
+use crate::protocol::AgentReasoningRawContentDeltaEvent;
+use crate::protocol::AgentReasoningRawContentEvent;
+use crate::protocol::AgentReasoningSectionBreakEvent;
+use crate::protocol::AgentSourceKind;
+use crate::protocol::AgentStatusUpdateEvent;
+use crate::protocol::ApplyPatchApprovalRequestEvent;
+use crate::protocol::AskForApproval;
+use crate::protocol::BackgroundEventEvent;
+use crate::protocol::BrowserScreenshotUpdateEvent;
+use crate::protocol::BrowserSnapshotEvent;
+use crate::protocol::EnvironmentContextDeltaEvent;
+use crate::protocol::EnvironmentContextFullEvent;
+use crate::protocol::ErrorEvent;
+use crate::protocol::Event;
+use crate::protocol::EventMsg;
+use crate::protocol::ExecApprovalRequestEvent;
+use crate::protocol::ExecCommandBeginEvent;
+use crate::protocol::ExecCommandEndEvent;
+use crate::protocol::ExitedReviewModeEvent;
+use crate::protocol::FileChange;
+use crate::protocol::InputItem;
+use crate::protocol::ListCustomPromptsResponseEvent;
+use crate::protocol::ListSkillsResponseEvent;
+use crate::protocol::Op;
+use crate::protocol::PatchApplyBeginEvent;
+use crate::protocol::PatchApplyEndEvent;
+use crate::protocol::RateLimitSnapshotEvent;
+use crate::protocol::ReviewDecision;
+use crate::protocol::ReviewOutputEvent;
+use crate::protocol::ReviewRequest;
+use crate::protocol::ReviewSnapshotInfo;
+use crate::protocol::SandboxPolicy;
+use crate::protocol::SessionConfiguredEvent;
+use crate::protocol::Submission;
+use crate::protocol::TaskCompleteEvent;
+use crate::protocol::TokenCountEvent;
+use crate::protocol::TokenUsage;
+use crate::protocol::TokenUsageInfo;
+use crate::protocol::TurnDiffEvent;
+use crate::protocol::ValidationGroup;
+use crate::review_format::format_review_findings_block;
+use crate::rollout::RolloutRecorder;
+use crate::rollout::recorder::SessionStateSnapshot;
+use crate::safety::SafetyCheck;
+use crate::safety::assess_command_safety;
+use crate::safety::assess_safety_for_untrusted_command;
+use crate::shell;
+use crate::skills::loader::load_skills;
+use crate::slash_commands::get_enabled_agents;
+use crate::timeboxed_exec_guidance::AUTO_EXEC_TIMEBOXED_CLI_GUIDANCE;
+use crate::timeboxed_exec_guidance::AUTO_EXEC_TIMEBOXED_REVIEW_GUIDANCE;
+use crate::turn_diff_tracker::TurnDiffTracker;
+use crate::user_instructions::UserInstructions;
+use crate::user_notification::UserNotification;
+use crate::util::backoff;
+use crate::util::wait_for_connectivity;
 use hanzo_protocol::models::ContentItem;
 use hanzo_protocol::models::FunctionCallOutputPayload;
 use hanzo_protocol::models::LocalShellAction;
@@ -983,73 +1069,12 @@ use hanzo_protocol::models::ReasoningItemContent;
 use hanzo_protocol::models::ReasoningItemReasoningSummary;
 use hanzo_protocol::models::ResponseInputItem;
 use hanzo_protocol::models::ResponseItem;
-use hanzo_protocol::models::ShellToolCallParams;
 use hanzo_protocol::models::SandboxPermissions;
-use crate::openai_tools::ToolsConfig;
-use crate::openai_tools::get_openai_tools;
-use crate::slash_commands::get_enabled_agents;
-use crate::dry_run_guard::{analyze_command, DryRunAnalysis, DryRunDisposition, DryRunGuardState};
-use crate::parse_command::parse_command;
-use crate::plan_tool::handle_update_plan;
-use crate::project_doc::get_user_instructions;
-use crate::skills::loader::load_skills;
-use crate::project_features::{ProjectCommand, ProjectHook, ProjectHooks};
-use crate::protocol::AgentMessageDeltaEvent;
-use crate::protocol::AgentMessageEvent;
-use crate::protocol::AgentReasoningDeltaEvent;
-use crate::protocol::AgentReasoningEvent;
-use crate::protocol::AgentSourceKind;
-use crate::protocol::AgentReasoningRawContentDeltaEvent;
-use crate::protocol::AgentReasoningRawContentEvent;
-use crate::protocol::AgentReasoningSectionBreakEvent;
-use crate::protocol::AgentStatusUpdateEvent;
-use crate::protocol::ApplyPatchApprovalRequestEvent;
-use crate::protocol::AskForApproval;
-use crate::protocol::BackgroundEventEvent;
-use crate::protocol::BrowserScreenshotUpdateEvent;
-use crate::protocol::ErrorEvent;
-use crate::protocol::Event;
-use crate::protocol::EventMsg;
-use crate::protocol::ExitedReviewModeEvent;
-use crate::protocol::ReviewSnapshotInfo;
-use crate::protocol::ListCustomPromptsResponseEvent;
-use crate::protocol::ListSkillsResponseEvent;
-use crate::protocol::{BrowserSnapshotEvent, EnvironmentContextDeltaEvent, EnvironmentContextFullEvent};
-use crate::protocol::ExecApprovalRequestEvent;
-use crate::protocol::ExecCommandBeginEvent;
-use crate::protocol::ExecCommandEndEvent;
-use crate::protocol::FileChange;
-use crate::protocol::InputItem;
-use crate::protocol::Op;
-use crate::protocol::PatchApplyBeginEvent;
-use crate::protocol::PatchApplyEndEvent;
-use crate::protocol::RateLimitSnapshotEvent;
-use crate::protocol::TokenCountEvent;
-use crate::protocol::TokenUsage;
-use crate::protocol::TokenUsageInfo;
-use crate::protocol::ReviewDecision;
-use crate::protocol::ValidationGroup;
-use crate::protocol::ReviewOutputEvent;
-use crate::protocol::ReviewRequest;
-use crate::protocol::SandboxPolicy;
-use crate::protocol::SessionConfiguredEvent;
-use crate::protocol::Submission;
-use crate::protocol::TaskCompleteEvent;
+use hanzo_protocol::models::ShellToolCallParams;
+use hanzo_protocol::protocol::SessionSource;
+use serde_json::Value;
 use std::sync::OnceLock;
 use tokio::sync::Notify;
-use crate::protocol::TurnDiffEvent;
-use crate::rollout::RolloutRecorder;
-use crate::safety::SafetyCheck;
-use crate::safety::assess_command_safety;
-use crate::safety::assess_safety_for_untrusted_command;
-use crate::shell;
-use crate::turn_diff_tracker::TurnDiffTracker;
-use crate::user_notification::UserNotification;
-use crate::util::{backoff, wait_for_connectivity};
-use hanzo_protocol::protocol::SessionSource;
-use crate::rollout::recorder::SessionStateSnapshot;
-use serde_json::Value;
-use crate::exec_command::ExecSessionManager;
 
 /// The high-level interface to the Codex system.
 /// It operates as a queue pair where you send submissions and receive events.
@@ -1102,7 +1127,9 @@ impl Codex {
 
         let user_instructions = get_user_instructions(
             &config,
-            skills_outcome.as_ref().map(|outcome| outcome.skills.as_slice()),
+            skills_outcome
+                .as_ref()
+                .map(|outcome| outcome.skills.as_slice()),
         )
         .await;
 

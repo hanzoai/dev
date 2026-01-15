@@ -1,27 +1,32 @@
-use super::card_style::{
-    ansi16_inverse_color,
-    fill_card_background,
-    hint_text_style,
-    primary_text_style,
-    rows_to_lines,
-    secondary_text_style,
-    title_text_style,
-    truncate_with_ellipsis,
-    web_search_card_style,
-    CardRow,
-    CardSegment,
-    CardStyle,
-    CARD_ACCENT_WIDTH,
-};
-use super::{HistoryCell, HistoryCellType, ToolCellStatus};
+use super::HistoryCell;
+use super::HistoryCellType;
+use super::ToolCellStatus;
+use super::card_style::CARD_ACCENT_WIDTH;
+use super::card_style::CardRow;
+use super::card_style::CardSegment;
+use super::card_style::CardStyle;
+use super::card_style::ansi16_inverse_color;
+use super::card_style::fill_card_background;
+use super::card_style::hint_text_style;
+use super::card_style::primary_text_style;
+use super::card_style::rows_to_lines;
+use super::card_style::secondary_text_style;
+use super::card_style::title_text_style;
+use super::card_style::truncate_with_ellipsis;
+use super::card_style::web_search_card_style;
 use crate::colors;
-use crate::theme::{palette_mode, PaletteMode};
+use crate::theme::PaletteMode;
+use crate::theme::palette_mode;
 use hanzo_common::elapsed::format_duration_digital;
 use ratatui::buffer::Buffer;
 use ratatui::layout::Rect;
-use ratatui::style::{Modifier, Style};
-use ratatui::text::{Line, Text};
-use ratatui::widgets::{Paragraph, Widget, Wrap};
+use ratatui::style::Modifier;
+use ratatui::style::Style;
+use ratatui::text::Line;
+use ratatui::text::Text;
+use ratatui::widgets::Paragraph;
+use ratatui::widgets::Widget;
+use ratatui::widgets::Wrap;
 use std::time::Duration;
 use unicode_width::UnicodeWidthStr;
 
@@ -72,7 +77,6 @@ impl WebSearchAction {
             timestamp,
         }
     }
-
 }
 
 #[derive(Clone)]
@@ -99,15 +103,14 @@ impl WebSearchSessionCell {
 
     pub(crate) fn set_query(&mut self, query: Option<String>) -> bool {
         let previous = self.query.clone();
-        self.query = query
-            .and_then(|value| {
-                let trimmed = value.trim();
-                if trimmed.is_empty() {
-                    None
-                } else {
-                    Some(trimmed.to_string())
-                }
-            });
+        self.query = query.and_then(|value| {
+            let trimmed = value.trim();
+            if trimmed.is_empty() {
+                None
+            } else {
+                Some(trimmed.to_string())
+            }
+        });
         self.query != previous
     }
 
@@ -173,9 +176,7 @@ impl WebSearchSessionCell {
         }
 
         let accent_width = CARD_ACCENT_WIDTH.min(width as usize);
-        let body_width = width
-            .saturating_sub(accent_width as u16)
-            .saturating_sub(1) as usize;
+        let body_width = width.saturating_sub(accent_width as u16).saturating_sub(1) as usize;
         if body_width == 0 {
             return Vec::new();
         }
@@ -210,14 +211,8 @@ impl WebSearchSessionCell {
         };
 
         if UnicodeWidthStr::width(total.as_str()) <= body_width {
-            segments.push(CardSegment::new(
-                title_text.to_string(),
-                title_style,
-            ));
-            segments.push(CardSegment::new(
-                status_text,
-                status_style,
-            ));
+            segments.push(CardSegment::new(title_text.to_string(), title_style));
+            segments.push(CardSegment::new(status_text, status_style));
         } else {
             let display = truncate_with_ellipsis(title_text, body_width);
             segments.push(CardSegment::new(display, title_style));

@@ -1,5 +1,7 @@
-use hanzo_core::config_types::{AgentConfig, SubagentCommandConfig};
-use hanzo_core::protocol::{ReviewContextMetadata, ReviewRequest};
+use hanzo_core::config_types::AgentConfig;
+use hanzo_core::config_types::SubagentCommandConfig;
+use hanzo_core::protocol::ReviewContextMetadata;
+use hanzo_core::protocol::ReviewRequest;
 
 use hanzo_core::slash_commands::format_subagent_command;
 
@@ -12,11 +14,20 @@ pub struct SlashContext<'a> {
 #[derive(Debug)]
 pub enum SlashDispatch {
     NotSlash,
-    ExpandedPrompt { prompt: String, summary: String },
-    Review { request: ReviewRequest, summary: String },
+    ExpandedPrompt {
+        prompt: String,
+        summary: String,
+    },
+    Review {
+        request: ReviewRequest,
+        summary: String,
+    },
 }
 
-pub fn process_exec_slash_command(message: &str, ctx: SlashContext<'_>) -> Result<SlashDispatch, String> {
+pub fn process_exec_slash_command(
+    message: &str,
+    ctx: SlashContext<'_>,
+) -> Result<SlashDispatch, String> {
     let trimmed = message.trim();
     if trimmed.is_empty() {
         return Ok(SlashDispatch::NotSlash);
@@ -54,16 +65,15 @@ pub fn process_exec_slash_command(message: &str, ctx: SlashContext<'_>) -> Resul
                 return handle_subagent(other, args_raw, ctx);
             }
 
-            Err(format!("Command '/{}' is not supported in exec mode.", other))
+            Err(format!(
+                "Command '/{}' is not supported in exec mode.",
+                other
+            ))
         }
     }
 }
 
-fn handle_subagent(
-    name: &str,
-    args: &str,
-    ctx: SlashContext<'_>,
-) -> Result<SlashDispatch, String> {
+fn handle_subagent(name: &str, args: &str, ctx: SlashContext<'_>) -> Result<SlashDispatch, String> {
     if args.is_empty() {
         return Err(format!(
             "Error: /{name} requires a task description. Usage: /{name} <task>",
@@ -71,7 +81,8 @@ fn handle_subagent(
         ));
     }
 
-    let formatted = format_subagent_command(name, args, Some(ctx.agents), Some(ctx.subagent_commands));
+    let formatted =
+        format_subagent_command(name, args, Some(ctx.agents), Some(ctx.subagent_commands));
     let summary_args = args.replace('\n', " ").trim().to_string();
     let summary = if summary_args.is_empty() {
         format!("/{name}")
@@ -131,10 +142,17 @@ fn handle_review(args_raw: &str) -> Result<SlashDispatch, String> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use hanzo_core::config_types::{AgentConfig, SubagentCommandConfig};
+    use hanzo_core::config_types::AgentConfig;
+    use hanzo_core::config_types::SubagentCommandConfig;
 
-    fn ctx<'a>(agents: &'a [AgentConfig], subagents: &'a [SubagentCommandConfig]) -> SlashContext<'a> {
-        SlashContext { agents, subagent_commands: subagents }
+    fn ctx<'a>(
+        agents: &'a [AgentConfig],
+        subagents: &'a [SubagentCommandConfig],
+    ) -> SlashContext<'a> {
+        SlashContext {
+            agents,
+            subagent_commands: subagents,
+        }
     }
 
     #[test]
@@ -151,8 +169,12 @@ mod tests {
 
     #[test]
     fn custom_subagent_is_supported() {
-        let subagent = SubagentCommandConfig { name: "audit".to_string(), ..Default::default() };
-        let result = process_exec_slash_command("/audit security pass", ctx(&[], &[subagent])).unwrap();
+        let subagent = SubagentCommandConfig {
+            name: "audit".to_string(),
+            ..Default::default()
+        };
+        let result =
+            process_exec_slash_command("/audit security pass", ctx(&[], &[subagent])).unwrap();
         match result {
             SlashDispatch::ExpandedPrompt { prompt, summary } => {
                 assert!(prompt.contains("Task for /audit"));

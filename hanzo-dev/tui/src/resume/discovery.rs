@@ -1,8 +1,13 @@
-use hanzo_core::{entry_to_rollout_path, SessionCatalog, SessionIndexEntry, SessionQuery};
+use hanzo_core::SessionCatalog;
+use hanzo_core::SessionIndexEntry;
+use hanzo_core::SessionQuery;
+use hanzo_core::entry_to_rollout_path;
 use hanzo_protocol::protocol::SessionSource;
-use std::path::{Path, PathBuf};
+use std::path::Path;
+use std::path::PathBuf;
 use std::thread;
-use tokio::runtime::{Builder, Handle};
+use tokio::runtime::Builder;
+use tokio::runtime::Handle;
 
 /// One candidate session for the picker
 #[derive(Clone, Debug)]
@@ -34,7 +39,11 @@ pub fn list_sessions_for_cwd(
         let query = SessionQuery {
             cwd: Some(cwd),
             git_root: None,
-            sources: vec![SessionSource::Cli, SessionSource::VSCode, SessionSource::Exec],
+            sources: vec![
+                SessionSource::Cli,
+                SessionSource::VSCode,
+                SessionSource::Exec,
+            ],
             min_user_messages: 1,
             include_archived: false,
             include_deleted: false,

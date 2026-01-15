@@ -1,17 +1,20 @@
-use super::{tool_cards, BrowserSessionOrderKey, ChatWidget, OrderKey};
+use super::BrowserSessionOrderKey;
+use super::ChatWidget;
+use super::OrderKey;
+use super::tool_cards;
 use super::tool_cards::ToolCardSlot;
-use crate::history_cell::{
-    BrowserSessionCell,
-    PlainHistoryCell,
-    HistoryCellType,
-    plain_message_state_from_lines,
-};
+use crate::history_cell::BrowserSessionCell;
+use crate::history_cell::HistoryCellType;
+use crate::history_cell::PlainHistoryCell;
+use crate::history_cell::plain_message_state_from_lines;
 use hanzo_core::protocol::OrderMeta;
 use ratatui::style::Style;
-use ratatui::text::{Line, Span};
+use ratatui::text::Line;
+use ratatui::text::Span;
 use serde_json::Value;
 use std::path::PathBuf;
-use std::time::{Duration, Instant};
+use std::time::Duration;
+use std::time::Instant;
 
 const BROWSER_CONSOLE_EVENT_PREFIX: &str = "[browser console]";
 
@@ -59,7 +62,8 @@ fn insert_browser_anchor(
     let line = browser_anchor_line(tracker);
     let state = plain_message_state_from_lines(vec![line], HistoryCellType::BackgroundEvent);
     let cell = PlainHistoryCell::from_state(state);
-    let _ = chat.history_insert_with_key_global_tagged(Box::new(cell), order_key, "background", None);
+    let _ =
+        chat.history_insert_with_key_global_tagged(Box::new(cell), order_key, "background", None);
 }
 
 fn browser_anchor_line(tracker: &BrowserSessionTracker) -> Line<'static> {
@@ -136,22 +140,17 @@ pub(super) fn handle_custom_tool_begin(
     tool_cards::assign_tool_card_key(&mut tracker.slot, &mut tracker.cell, Some(key.clone()));
     tool_cards::ensure_tool_card::<BrowserSessionCell>(chat, &mut tracker.slot, &tracker.cell);
 
-    chat
-        .tools_state
+    chat.tools_state
         .browser_session_by_call
         .insert(call_id.to_string(), key.clone());
     if let Some(meta) = order {
-        chat
-            .tools_state
+        chat.tools_state
             .browser_session_by_order
             .insert(BrowserSessionOrderKey::from_order_meta(meta), key.clone());
     }
     chat.tools_state.browser_last_key = Some(key.clone());
 
-    chat
-        .tools_state
-        .browser_sessions
-        .insert(key, tracker);
+    chat.tools_state.browser_sessions.insert(key, tracker);
 
     true
 }
@@ -175,8 +174,7 @@ pub(super) fn handle_custom_tool_end(
         .remove(call_id)
         .or_else(|| {
             order.and_then(|meta| {
-                chat
-                    .tools_state
+                chat.tools_state
                     .browser_session_by_order
                     .get(&BrowserSessionOrderKey::from_order_meta(meta))
                     .cloned()
@@ -237,10 +235,7 @@ pub(super) fn handle_custom_tool_end(
     tool_cards::assign_tool_card_key(&mut tracker.slot, &mut tracker.cell, Some(key.clone()));
     tool_cards::replace_tool_card::<BrowserSessionCell>(chat, &mut tracker.slot, &tracker.cell);
 
-    chat
-        .tools_state
-        .browser_sessions
-        .insert(key, tracker);
+    chat.tools_state.browser_sessions.insert(key, tracker);
 
     true
 }
@@ -263,7 +258,9 @@ pub(super) fn handle_background_event(
     }
 
     let key = key_from_order_or_last(chat, order);
-    let Some(key) = key else { return false; };
+    let Some(key) = key else {
+        return false;
+    };
 
     let mut tracker = match chat.tools_state.browser_sessions.remove(&key) {
         Some(tracker) => tracker,
@@ -294,10 +291,7 @@ pub(super) fn handle_background_event(
     tool_cards::assign_tool_card_key(&mut tracker.slot, &mut tracker.cell, Some(key.clone()));
     tool_cards::replace_tool_card::<BrowserSessionCell>(chat, &mut tracker.slot, &tracker.cell);
 
-    chat
-        .tools_state
-        .browser_sessions
-        .insert(key, tracker);
+    chat.tools_state.browser_sessions.insert(key, tracker);
 
     true
 }
@@ -318,7 +312,9 @@ pub(super) fn handle_screenshot_update(
     }
 
     let key = key_from_order_or_last(chat, order);
-    let Some(key) = key else { return result; };
+    let Some(key) = key else {
+        return result;
+    };
 
     let mut tracker = match chat.tools_state.browser_sessions.remove(&key) {
         Some(tracker) => tracker,
@@ -333,9 +329,7 @@ pub(super) fn handle_screenshot_update(
     tracker.cell.set_url(url.to_string());
 
     let now = Instant::now();
-    let base = tracker
-        .first_screenshot_instant
-        .get_or_insert(now);
+    let base = tracker.first_screenshot_instant.get_or_insert(now);
     let mut relative = now.duration_since(*base);
     if relative <= tracker.last_screenshot_timestamp {
         let bump = tracker.last_screenshot_timestamp - relative + Duration::from_millis(1);
@@ -359,18 +353,21 @@ pub(super) fn handle_screenshot_update(
 
     result.session_key = Some(key.clone());
 
-    chat
-        .tools_state
-        .browser_sessions
-        .insert(key, tracker);
+    chat.tools_state.browser_sessions.insert(key, tracker);
 
     result.grouped = true;
     result
 }
 
-fn order_key_and_ordinal(chat: &mut ChatWidget<'_>, order: Option<&OrderMeta>) -> (OrderKey, Option<u64>) {
+fn order_key_and_ordinal(
+    chat: &mut ChatWidget<'_>,
+    order: Option<&OrderMeta>,
+) -> (OrderKey, Option<u64>) {
     match order {
-        Some(meta) => (chat.provider_order_key_from_order_meta(meta), Some(meta.request_ordinal)),
+        Some(meta) => (
+            chat.provider_order_key_from_order_meta(meta),
+            Some(meta.request_ordinal),
+        ),
         None => (chat.next_internal_key(), None),
     }
 }
@@ -420,10 +417,7 @@ fn select_session_key(
     key
 }
 
-fn key_from_order_or_last(
-    chat: &mut ChatWidget<'_>,
-    order: Option<&OrderMeta>,
-) -> Option<String> {
+fn key_from_order_or_last(chat: &mut ChatWidget<'_>, order: Option<&OrderMeta>) -> Option<String> {
     if let Some(meta) = order {
         return chat
             .tools_state
@@ -452,7 +446,10 @@ fn summarize_action(
 
     match tool_name {
         "browser_open" => {
-            if let Some(url) = params.and_then(|value| value.get("url")).and_then(Value::as_str) {
+            if let Some(url) = params
+                .and_then(|value| value.get("url"))
+                .and_then(Value::as_str)
+            {
                 summary.target = Some(url.to_string());
             }
             if let Some(headless) = params
@@ -479,7 +476,11 @@ fn summarize_action(
                 summary.target = params
                     .and_then(|value| value.get("x"))
                     .and_then(Value::as_f64)
-                    .zip(params.and_then(|value| value.get("y")).and_then(Value::as_f64))
+                    .zip(
+                        params
+                            .and_then(|value| value.get("y"))
+                            .and_then(Value::as_f64),
+                    )
                     .map(|(x, y)| format!("({:.0}, {:.0})", x, y));
             }
         }
@@ -535,12 +536,20 @@ fn summarize_action(
             let absolute = params
                 .and_then(|value| value.get("x"))
                 .and_then(Value::as_f64)
-                .zip(params.and_then(|value| value.get("y")).and_then(Value::as_f64))
+                .zip(
+                    params
+                        .and_then(|value| value.get("y"))
+                        .and_then(Value::as_f64),
+                )
                 .map(|(x, y)| format!("to ({:.0}, {:.0})", x, y));
             let relative = params
                 .and_then(|value| value.get("dx"))
                 .and_then(Value::as_f64)
-                .zip(params.and_then(|value| value.get("dy")).and_then(Value::as_f64))
+                .zip(
+                    params
+                        .and_then(|value| value.get("dy"))
+                        .and_then(Value::as_f64),
+                )
                 .map(|(dx, dy)| format!("by ({:.0}, {:.0})", dx, dy));
             summary.value = absolute.or(relative);
         }
@@ -646,18 +655,19 @@ fn summarize_action_result(result: &Result<String, String>) -> (Option<String>, 
                     .map(|s| s.to_string());
                 let summary_text = status.or(message).unwrap_or_else(|| truncate(trimmed, 64));
 
-                let status_code = map
-                    .get("status_code")
-                    .and_then(|value| match value {
-                        Value::Number(num) => num.as_u64().map(|n| n.to_string()),
-                        Value::String(s) => Some(s.to_string()),
-                        _ => None,
-                    });
+                let status_code = map.get("status_code").and_then(|value| match value {
+                    Value::Number(num) => num.as_u64().map(|n| n.to_string()),
+                    Value::String(s) => Some(s.to_string()),
+                    _ => None,
+                });
 
                 return (Some(summary_text), status_code);
             }
 
-            (Some(truncate(trimmed, 64)), extract_leading_status_code(trimmed))
+            (
+                Some(truncate(trimmed, 64)),
+                extract_leading_status_code(trimmed),
+            )
         }
         Err(err) => {
             let text = format!("error: {}", truncate(err, 48));
@@ -667,10 +677,7 @@ fn summarize_action_result(result: &Result<String, String>) -> (Option<String>, 
 }
 
 fn extract_leading_status_code(text: &str) -> Option<String> {
-    let digits: String = text
-        .chars()
-        .take_while(|ch| ch.is_ascii_digit())
-        .collect();
+    let digits: String = text.chars().take_while(|ch| ch.is_ascii_digit()).collect();
     if digits.len() == 3 {
         Some(digits)
     } else {

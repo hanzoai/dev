@@ -1,4 +1,5 @@
-use rand::{rng, Rng};
+use rand::Rng;
+use rand::rng;
 
 const AUTO_DRIVE_PHRASES: [&str; 60] = [
     "Plotting course…",

@@ -1,11 +1,13 @@
 //! GitHub Copilot CLI Integration for Hanzo Dev
-//! 
+//!
 //! This module provides comprehensive GitHub Copilot integration as a CLI editing/agent backend,
 //! including code suggestions, chat interactions, and workflow automation.
 
 use crate::config::Config;
-use crate::error::{Result, CodexErr};
-use serde::{Deserialize, Serialize};
+use crate::error::CodexErr;
+use crate::error::Result;
+use serde::Deserialize;
+use serde::Serialize;
 use std::collections::HashMap;
 use tokio::process::Command as AsyncCommand;
 
@@ -71,13 +73,9 @@ pub struct CopilotIntegration {
 impl CopilotIntegration {
     /// Create a new Copilot integration instance
     pub fn new(config: CopilotConfig) -> Result<Self> {
-        let cli_path = config.cli_path.clone()
-            .unwrap_or_else(|| "gh".to_string());
-        
-        Ok(Self {
-            config,
-            cli_path,
-        })
+        let cli_path = config.cli_path.clone().unwrap_or_else(|| "gh".to_string());
+
+        Ok(Self { config, cli_path })
     }
 
     /// Check if GitHub CLI and Copilot extension are available
@@ -136,23 +134,22 @@ impl CopilotIntegration {
 
         // Add context as prompt
         cmd.arg("--type").arg("shell");
-        
+
         if let Some(ft) = file_type {
             cmd.arg("--language").arg(ft);
         }
 
-        let output = cmd
-            .arg(context)
-            .output()
-            .await?;
+        let output = cmd.arg(context).output().await?;
 
         if !output.status.success() {
-            return Err(CodexErr::UnsupportedOperation(format!("Copilot command failed: {}", 
-                String::from_utf8_lossy(&output.stderr))));
+            return Err(CodexErr::UnsupportedOperation(format!(
+                "Copilot command failed: {}",
+                String::from_utf8_lossy(&output.stderr)
+            )));
         }
 
         let response = String::from_utf8_lossy(&output.stdout);
-        
+
         // Parse Copilot CLI output (simplified)
         let suggestions = vec![CopilotSuggestion {
             text: response.trim().to_string(),
@@ -171,7 +168,9 @@ impl CopilotIntegration {
         context: Option<HashMap<String, String>>,
     ) -> Result<String> {
         if !self.config.enabled || !self.config.chat_enabled {
-            return Err(CodexErr::UnsupportedOperation("Copilot chat is disabled".to_string()));
+            return Err(CodexErr::UnsupportedOperation(
+                "Copilot chat is disabled".to_string(),
+            ));
         }
 
         let mut cmd = AsyncCommand::new(&self.cli_path);
@@ -184,33 +183,33 @@ impl CopilotIntegration {
             }
         }
 
-        let output = cmd
-            .arg(initial_message)
-            .output()
-            .await?;
+        let output = cmd.arg(initial_message).output().await?;
 
         if !output.status.success() {
-            return Err(CodexErr::UnsupportedOperation(format!("Copilot chat failed: {}", 
-                String::from_utf8_lossy(&output.stderr))));
+            return Err(CodexErr::UnsupportedOperation(format!(
+                "Copilot chat failed: {}",
+                String::from_utf8_lossy(&output.stderr)
+            )));
         }
 
         Ok(String::from_utf8_lossy(&output.stdout).trim().to_string())
     }
 
     /// Get code review suggestions for a file or diff
-    pub async fn review_code(
-        &self,
-        file_path: &str,
-        diff: Option<&str>,
-    ) -> Result<String> {
+    pub async fn review_code(&self, file_path: &str, diff: Option<&str>) -> Result<String> {
         if !self.config.enabled || !self.config.code_review {
-            return Err(CodexErr::UnsupportedOperation("Copilot code review is disabled".to_string()));
+            return Err(CodexErr::UnsupportedOperation(
+                "Copilot code review is disabled".to_string(),
+            ));
         }
 
         let prompt = if let Some(d) = diff {
             format!("Review this code diff and provide suggestions:\n\n{}", d)
         } else {
-            format!("Review the code in file {} and provide suggestions", file_path)
+            format!(
+                "Review the code in file {} and provide suggestions",
+                file_path
+            )
         };
 
         let mut context = HashMap::new();
@@ -226,7 +225,9 @@ impl CopilotIntegration {
         doc_type: &str, // "comment", "readme", "api"
     ) -> Result<String> {
         if !self.config.enabled {
-            return Err(CodexErr::UnsupportedOperation("Copilot is disabled".to_string()));
+            return Err(CodexErr::UnsupportedOperation(
+                "Copilot is disabled".to_string(),
+            ));
         }
 
         let prompt = format!(
@@ -240,13 +241,12 @@ impl CopilotIntegration {
     /// Explain code functionality
     pub async fn explain_code(&self, code: &str) -> Result<String> {
         if !self.config.enabled {
-            return Err(CodexErr::UnsupportedOperation("Copilot is disabled".to_string()));
+            return Err(CodexErr::UnsupportedOperation(
+                "Copilot is disabled".to_string(),
+            ));
         }
 
-        let prompt = format!(
-            "Explain what this code does and how it works:\n\n{}",
-            code
-        );
+        let prompt = format!("Explain what this code does and how it works:\n\n{}", code);
 
         self.start_chat_session(&prompt, None).await
     }
@@ -263,12 +263,14 @@ impl CopilotIntegration {
         let output = cmd.output().await?;
 
         if !output.status.success() {
-            return Err(CodexErr::UnsupportedOperation(format!("Copilot command suggestion failed: {}", 
-                String::from_utf8_lossy(&output.stderr))));
+            return Err(CodexErr::UnsupportedOperation(format!(
+                "Copilot command suggestion failed: {}",
+                String::from_utf8_lossy(&output.stderr)
+            )));
         }
 
         let response = String::from_utf8_lossy(&output.stdout);
-        
+
         // Parse multiple command suggestions
         let commands = response
             .lines()
@@ -282,7 +284,9 @@ impl CopilotIntegration {
     /// Generate Git commit messages
     pub async fn generate_commit_message(&self, diff: &str) -> Result<String> {
         if !self.config.enabled {
-            return Err(CodexErr::UnsupportedOperation("Copilot is disabled".to_string()));
+            return Err(CodexErr::UnsupportedOperation(
+                "Copilot is disabled".to_string(),
+            ));
         }
 
         let prompt = format!(
@@ -326,8 +330,10 @@ impl CopilotIntegration {
             .await?;
 
         if !output.status.success() {
-            return Err(CodexErr::UnsupportedOperation(format!("Failed to install Copilot extension: {}", 
-                String::from_utf8_lossy(&output.stderr))));
+            return Err(CodexErr::UnsupportedOperation(format!(
+                "Failed to install Copilot extension: {}",
+                String::from_utf8_lossy(&output.stderr)
+            )));
         }
 
         Ok(())
@@ -342,8 +348,10 @@ impl CopilotIntegration {
             .await?;
 
         if !output.status.success() {
-            return Err(CodexErr::UnsupportedOperation(format!("Failed to configure Copilot: {}", 
-                String::from_utf8_lossy(&output.stderr))));
+            return Err(CodexErr::UnsupportedOperation(format!(
+                "Failed to configure Copilot: {}",
+                String::from_utf8_lossy(&output.stderr)
+            )));
         }
 
         Ok(())
@@ -371,23 +379,21 @@ pub mod utils {
     ) -> (String, String, String) {
         let lines: Vec<&str> = content.lines().collect();
         let cursor_line = content[..cursor_pos].matches('\n').count();
-        
+
         let start = cursor_line.saturating_sub(window_size / 2);
         let end = std::cmp::min(lines.len(), cursor_line + window_size / 2);
-        
+
         let before = lines[start..cursor_line].join("\n");
         let current = lines.get(cursor_line).unwrap_or(&"").to_string();
         let after = lines[cursor_line + 1..end].join("\n");
-        
+
         (before, current, after)
     }
 
     /// Detect programming language from file extension
     pub fn detect_language(file_path: &str) -> Option<String> {
-        let extension = std::path::Path::new(file_path)
-            .extension()?
-            .to_str()?;
-            
+        let extension = std::path::Path::new(file_path).extension()?.to_str()?;
+
         let language = match extension {
             "rs" => "rust",
             "py" => "python",
@@ -409,33 +415,33 @@ pub mod utils {
             "css" => "css",
             _ => return None,
         };
-        
+
         Some(language.to_string())
     }
 
     /// Format code suggestions for display
     pub fn format_suggestions(suggestions: &[CopilotSuggestion]) -> String {
         let mut output = String::new();
-        
+
         for (i, suggestion) in suggestions.iter().enumerate() {
             output.push_str(&format!("Suggestion {}:\n", i + 1));
             output.push_str(&suggestion.text);
             output.push('\n');
-            
+
             if let Some(reasoning) = &suggestion.reasoning {
                 output.push_str(&format!("Reasoning: {}\n", reasoning));
             }
-            
+
             if !suggestion.alternatives.is_empty() {
                 output.push_str("Alternatives:\n");
                 for alt in &suggestion.alternatives {
                     output.push_str(&format!("  - {}\n", alt));
                 }
             }
-            
+
             output.push('\n');
         }
-        
+
         output
     }
 }
@@ -455,7 +461,7 @@ mod tests {
     #[test]
     fn test_detect_language() {
         use crate::copilot_integration::utils::detect_language;
-        
+
         assert_eq!(detect_language("main.rs"), Some("rust".to_string()));
         assert_eq!(detect_language("script.py"), Some("python".to_string()));
         assert_eq!(detect_language("app.js"), Some("javascript".to_string()));
@@ -465,11 +471,11 @@ mod tests {
     #[test]
     fn test_extract_code_context() {
         use crate::copilot_integration::utils::extract_code_context;
-        
+
         let content = "line 1\nline 2\nline 3\nline 4\nline 5";
         let cursor_pos = 14; // Position in "line 3"
         let (before, current, after) = extract_code_context(content, cursor_pos, 4);
-        
+
         assert_eq!(before, "line 1\nline 2");
         assert_eq!(current, "line 3");
         // window_size=4 with cursor on line 2 (0-indexed) means end = min(5, 2+2) = 4

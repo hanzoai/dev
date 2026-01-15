@@ -6,9 +6,9 @@ use mcp_types::RequestId;
 use serde::Serialize;
 use tracing::warn;
 
-pub use hanzo_app_server::outgoing_message::{
-    OutgoingMessage, OutgoingMessageSender, OutgoingNotification,
-};
+pub use hanzo_app_server::outgoing_message::OutgoingMessage;
+pub use hanzo_app_server::outgoing_message::OutgoingMessageSender;
+pub use hanzo_app_server::outgoing_message::OutgoingNotification;
 
 #[derive(Debug, Clone, PartialEq, Serialize)]
 pub struct OutgoingNotificationParams {

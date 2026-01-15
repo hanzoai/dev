@@ -2,20 +2,19 @@
 
 use super::text;
 use super::*;
-use crate::history::state::{
-    BulletMarker,
-    HistoryId,
-    InlineSpan,
-    ReasoningBlock,
-    ReasoningSection,
-    ReasoningState,
-    TextEmphasis,
-    TextTone,
-};
+use crate::history::state::BulletMarker;
+use crate::history::state::HistoryId;
+use crate::history::state::InlineSpan;
+use crate::history::state::ReasoningBlock;
+use crate::history::state::ReasoningSection;
+use crate::history::state::ReasoningState;
+use crate::history::state::TextEmphasis;
+use crate::history::state::TextTone;
 use crate::history_cell::assistant::detect_bullet_prefix;
 use crate::render::line_utils;
 use ratatui::text::Line;
-use std::cell::{Cell, RefCell};
+use std::cell::Cell;
+use std::cell::RefCell;
 use unicode_width::UnicodeWidthStr as _;
 
 #[derive(Clone, Debug, PartialEq)]
@@ -141,9 +140,11 @@ impl CollapsibleReasoningCell {
                 .collect();
         }
 
-        titles
-            .iter()
-            .any(|line| line.spans.iter().any(|span| !span.content.trim().is_empty()))
+        titles.iter().any(|line| {
+            line.spans
+                .iter()
+                .any(|span| !span.content.trim().is_empty())
+        })
     }
 
     pub(crate) fn toggle_collapsed(&self) {
@@ -286,7 +287,8 @@ impl HistoryCell for CollapsibleReasoningCell {
         }
 
         let dim = crate::colors::text_dim();
-        let stored_lines = sections_to_ratatui_lines(&state.sections, &crate::theme::current_theme());
+        let stored_lines =
+            sections_to_ratatui_lines(&state.sections, &crate::theme::current_theme());
         let mut lines = normalized_lines(&stored_lines)
             .into_iter()
             .map(|mut line| {
@@ -337,8 +339,7 @@ fn dedup_append_entries(
     }
 
     let to_plain = |line: &ReasoningLineEntry| -> String {
-        line
-            .spans
+        line.spans
             .iter()
             .map(|span| span.text.as_str())
             .collect::<String>()
@@ -448,7 +449,8 @@ fn sections_from_entries(lines: &[ReasoningLineEntry]) -> Vec<ReasoningSection> 
 
         if is_heading_entry(entry) {
             trim_section(&mut current);
-            if current.heading.is_some() || !current.blocks.is_empty() || current.summary.is_some() {
+            if current.heading.is_some() || !current.blocks.is_empty() || current.summary.is_some()
+            {
                 sections.push(current);
                 current = new_empty_section();
             }
@@ -601,16 +603,10 @@ fn compute_bullet_prefix_len(plain: &str, indent_spaces: usize, bullet: &str) ->
 }
 
 fn parse_bullet_marker(bullet: &str) -> BulletMarker {
-    if let Some(num) = bullet
-        .strip_suffix('.')
-        .and_then(|s| s.parse::<u32>().ok())
-    {
+    if let Some(num) = bullet.strip_suffix('.').and_then(|s| s.parse::<u32>().ok()) {
         return BulletMarker::Numbered(num);
     }
-    if let Some(num) = bullet
-        .strip_suffix(')')
-        .and_then(|s| s.parse::<u32>().ok())
-    {
+    if let Some(num) = bullet.strip_suffix(')').and_then(|s| s.parse::<u32>().ok()) {
         return BulletMarker::Numbered(num);
     }
     if matches!(bullet, "-" | "*") {
@@ -620,7 +616,10 @@ fn parse_bullet_marker(bullet: &str) -> BulletMarker {
     }
 }
 
-fn strip_prefix_from_inline_spans(spans: Vec<InlineSpan>, mut chars_to_strip: usize) -> Vec<InlineSpan> {
+fn strip_prefix_from_inline_spans(
+    spans: Vec<InlineSpan>,
+    mut chars_to_strip: usize,
+) -> Vec<InlineSpan> {
     let mut out: Vec<InlineSpan> = Vec::new();
     for mut span in spans.into_iter() {
         if chars_to_strip == 0 {
@@ -844,7 +843,11 @@ fn collect_section_summaries(
 ) -> Vec<Line<'static>> {
     let mut out = Vec::new();
     for section in sections {
-        if let Some(summary) = section.summary.as_ref().filter(|spans| !spans_are_blank(spans)) {
+        if let Some(summary) = section
+            .summary
+            .as_ref()
+            .filter(|spans| !spans_are_blank(spans))
+        {
             let spans = summary
                 .iter()
                 .map(|span| text::inline_span_to_span(span, theme))

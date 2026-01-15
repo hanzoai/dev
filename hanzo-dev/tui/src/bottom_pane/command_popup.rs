@@ -1,6 +1,6 @@
 use ratatui::buffer::Buffer;
-use ratatui::layout::Rect;
 use ratatui::layout::Margin;
+use ratatui::layout::Rect;
 use ratatui::widgets::WidgetRef;
 
 use super::popup_consts::MAX_POPUP_ROWS;
@@ -257,12 +257,7 @@ impl WidgetRef for CommandPopup {
                         ),
                         CommandItem::UserPrompt(i) => {
                             let prompt = &self.prompts[i];
-                            let preview = prompt
-                                .content
-                                .lines()
-                                .next()
-                                .unwrap_or("")
-                                .trim();
+                            let preview = prompt.content.lines().next().unwrap_or("").trim();
                             let desc = if preview.is_empty() {
                                 None
                             } else {
@@ -277,8 +272,7 @@ impl WidgetRef for CommandPopup {
                     };
                     GenericDisplayRow {
                         name,
-                        match_indices: indices
-                            .map(|v| v.into_iter().map(|i| i + 1).collect()),
+                        match_indices: indices.map(|v| v.into_iter().map(|i| i + 1).collect()),
                         is_current: false,
                         description: desc,
                         // Slash command names should use theme primary color
@@ -323,6 +317,9 @@ mod tests {
         popup.on_composer_text_change("/prompts".to_string());
 
         let first = popup.filtered_items().first().copied();
-        assert!(matches!(first, Some(CommandItem::Builtin(SlashCommand::Prompts))));
+        assert!(matches!(
+            first,
+            Some(CommandItem::Builtin(SlashCommand::Prompts))
+        ));
     }
 }

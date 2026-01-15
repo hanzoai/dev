@@ -45,21 +45,25 @@ pub fn parse_user_turn_reply(raw: &str) -> anyhow::Result<(Option<String>, Optio
         .ok_or_else(|| anyhow::anyhow!("coordinator response was not a JSON object"))?;
 
     let extract = |name: &str| -> anyhow::Result<Option<String>> {
-        let field = obj
-            .get(name)
-            .ok_or_else(|| anyhow::anyhow!("coordinator response missing required field '{name}'"))?;
+        let field = obj.get(name).ok_or_else(|| {
+            anyhow::anyhow!("coordinator response missing required field '{name}'")
+        })?;
         if field.is_null() {
             return Ok(None);
         }
         let Some(text) = field.as_str() else {
-            return Err(anyhow::anyhow!("coordinator field '{name}' must be string or null"));
+            return Err(anyhow::anyhow!(
+                "coordinator field '{name}' must be string or null"
+            ));
         };
         let trimmed = text.trim();
         if trimmed.is_empty() {
             return Ok(None);
         }
         if trimmed.chars().count() > 400 {
-            return Err(anyhow::anyhow!("coordinator field '{name}' exceeded 400 characters"));
+            return Err(anyhow::anyhow!(
+                "coordinator field '{name}' exceeded 400 characters"
+            ));
         }
         Ok(Some(trimmed.to_string()))
     };

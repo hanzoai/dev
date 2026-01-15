@@ -1,7 +1,7 @@
 use std::io::Cursor;
-use std::io::{self};
 use std::io::Read;
 use std::io::Write;
+use std::io::{self};
 use std::net::SocketAddr;
 use std::net::TcpStream;
 use std::path::Path;
@@ -132,7 +132,9 @@ pub fn run_login_server(opts: ServerOptions) -> io::Result<LoginServer> {
                 }
                 Ok(())
             })
-            .map_err(|err| io::Error::other(format!("failed to spawn login listener thread: {err}")))?
+            .map_err(|err| {
+                io::Error::other(format!("failed to spawn login listener thread: {err}"))
+            })?
     };
 
     let shutdown_notify = Arc::new(tokio::sync::Notify::new());
@@ -193,7 +195,10 @@ pub fn run_login_server(opts: ServerOptions) -> io::Result<LoginServer> {
 enum HandledRequest {
     Response(Response<Cursor<Vec<u8>>>),
     RedirectWithHeader(Header),
-    ResponseAndExit { response: Response<Cursor<Vec<u8>>>, result: io::Result<()> },
+    ResponseAndExit {
+        response: Response<Cursor<Vec<u8>>>,
+        result: io::Result<()>,
+    },
 }
 
 async fn process_request(
@@ -288,11 +293,17 @@ async fn process_request(
             ) {
                 resp.add_header(h);
             }
-            HandledRequest::ResponseAndExit { response: resp, result: Ok(()) }
+            HandledRequest::ResponseAndExit {
+                response: resp,
+                result: Ok(()),
+            }
         }
         "/cancel" => HandledRequest::ResponseAndExit {
             response: Response::from_string("Login cancelled"),
-            result: Err(io::Error::new(io::ErrorKind::Interrupted, "Login cancelled")),
+            result: Err(io::Error::new(
+                io::ErrorKind::Interrupted,
+                "Login cancelled",
+            )),
         },
         _ => HandledRequest::Response(Response::from_string("Not Found").with_status_code(404)),
     }

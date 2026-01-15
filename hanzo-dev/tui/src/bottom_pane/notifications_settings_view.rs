@@ -1,18 +1,27 @@
 #![allow(dead_code)]
 
-use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
+use crossterm::event::KeyCode;
+use crossterm::event::KeyEvent;
+use crossterm::event::KeyModifiers;
 use ratatui::buffer::Buffer;
-use ratatui::layout::{Alignment, Rect};
-use ratatui::style::{Modifier, Style};
-use ratatui::text::{Line, Span};
-use ratatui::widgets::{Block, Borders, Clear, Paragraph, Widget};
+use ratatui::layout::Alignment;
+use ratatui::layout::Rect;
+use ratatui::style::Modifier;
+use ratatui::style::Style;
+use ratatui::text::Line;
+use ratatui::text::Span;
+use ratatui::widgets::Block;
+use ratatui::widgets::Borders;
+use ratatui::widgets::Clear;
+use ratatui::widgets::Paragraph;
+use ratatui::widgets::Widget;
 
 use crate::app_event::AppEvent;
 use crate::app_event_sender::AppEventSender;
 use crate::chatwidget::BackgroundOrderTicket;
 
-use super::bottom_pane_view::BottomPaneView;
 use super::BottomPane;
+use super::bottom_pane_view::BottomPaneView;
 
 #[derive(Clone)]
 pub(crate) enum NotificationsMode {
@@ -58,10 +67,7 @@ impl NotificationsSettingsView {
                 };
                 self.app_event_tx.send_background_event_with_ticket(
                     &self.ticket,
-                    format!(
-                        "TUI notifications are filtered in config: [{}]",
-                        filters
-                    ),
+                    format!("TUI notifications are filtered in config: [{}]", filters),
                 );
                 self.app_event_tx.send_background_event_with_ticket(
                     &self.ticket,
@@ -82,7 +88,10 @@ impl NotificationsSettingsView {
                 };
                 Line::from(vec![
                     Span::styled("Status: ", Style::default().fg(crate::colors::text_dim())),
-                    Span::styled(status, Style::default().fg(color).add_modifier(Modifier::BOLD)),
+                    Span::styled(
+                        status,
+                        Style::default().fg(color).add_modifier(Modifier::BOLD),
+                    ),
                 ])
             }
             NotificationsMode::Custom { entries } => {
@@ -93,7 +102,12 @@ impl NotificationsSettingsView {
                 };
                 Line::from(vec![
                     Span::styled("Status: ", Style::default().fg(crate::colors::text_dim())),
-                    Span::styled("Custom filter", Style::default().fg(crate::colors::info()).add_modifier(Modifier::BOLD)),
+                    Span::styled(
+                        "Custom filter",
+                        Style::default()
+                            .fg(crate::colors::info())
+                            .add_modifier(Modifier::BOLD),
+                    ),
                     Span::raw("  "),
                     Span::styled(filters, Style::default().fg(crate::colors::dim())),
                 ])
@@ -106,51 +120,72 @@ impl NotificationsSettingsView {
             NotificationsMode::Toggle { enabled } => {
                 let label = if *enabled { "Enabled" } else { "Disabled" };
                 Line::from(vec![
-                    Span::styled("Notifications: ", Style::default().fg(crate::colors::text_dim())),
+                    Span::styled(
+                        "Notifications: ",
+                        Style::default().fg(crate::colors::text_dim()),
+                    ),
                     Span::raw(label),
                 ])
             }
-            NotificationsMode::Custom { .. } => {
-                Line::from(vec![
-                    Span::styled(
-                        "Notifications are managed by your config file.",
-                        Style::default().fg(crate::colors::text()),
-                    ),
-                ])
-            }
+            NotificationsMode::Custom { .. } => Line::from(vec![Span::styled(
+                "Notifications are managed by your config file.",
+                Style::default().fg(crate::colors::text()),
+            )]),
         }
     }
 
     fn process_key_event(&mut self, key_event: KeyEvent) {
         match key_event {
-            KeyEvent { code: KeyCode::Up, modifiers: KeyModifiers::NONE, .. } => {
+            KeyEvent {
+                code: KeyCode::Up,
+                modifiers: KeyModifiers::NONE,
+                ..
+            } => {
                 if self.selected_row > 0 {
                     self.selected_row -= 1;
                 }
             }
-            KeyEvent { code: KeyCode::Down, modifiers: KeyModifiers::NONE, .. } => {
+            KeyEvent {
+                code: KeyCode::Down,
+                modifiers: KeyModifiers::NONE,
+                ..
+            } => {
                 if self.selected_row < 1 {
                     self.selected_row += 1;
                 }
             }
-            KeyEvent { code: KeyCode::Left | KeyCode::Right, modifiers: KeyModifiers::NONE, .. } => {
+            KeyEvent {
+                code: KeyCode::Left | KeyCode::Right,
+                modifiers: KeyModifiers::NONE,
+                ..
+            } => {
                 if self.selected_row == 0 {
                     self.toggle();
                 }
             }
-            KeyEvent { code: KeyCode::Enter, modifiers: KeyModifiers::NONE, .. } => {
+            KeyEvent {
+                code: KeyCode::Enter,
+                modifiers: KeyModifiers::NONE,
+                ..
+            } => {
                 if self.selected_row == 0 {
                     self.toggle();
                 } else {
                     self.is_complete = true;
                 }
             }
-            KeyEvent { code: KeyCode::Char(' '), modifiers: KeyModifiers::NONE, .. } => {
+            KeyEvent {
+                code: KeyCode::Char(' '),
+                modifiers: KeyModifiers::NONE,
+                ..
+            } => {
                 if self.selected_row == 0 {
                     self.toggle();
                 }
             }
-            KeyEvent { code: KeyCode::Esc, .. } => {
+            KeyEvent {
+                code: KeyCode::Esc, ..
+            } => {
                 self.is_complete = true;
             }
             _ => {}
@@ -160,8 +195,19 @@ impl NotificationsSettingsView {
     pub(crate) fn handle_key_event_direct(&mut self, key_event: KeyEvent) -> bool {
         let handled = matches!(
             key_event,
-            KeyEvent { code: KeyCode::Up | KeyCode::Down | KeyCode::Left | KeyCode::Right | KeyCode::Enter | KeyCode::Esc, .. }
-                | KeyEvent { code: KeyCode::Char(' '), modifiers: KeyModifiers::NONE, .. }
+            KeyEvent {
+                code: KeyCode::Up
+                    | KeyCode::Down
+                    | KeyCode::Left
+                    | KeyCode::Right
+                    | KeyCode::Enter
+                    | KeyCode::Esc,
+                ..
+            } | KeyEvent {
+                code: KeyCode::Char(' '),
+                modifiers: KeyModifiers::NONE,
+                ..
+            }
         );
         self.process_key_event(key_event);
         handled
@@ -186,7 +232,11 @@ impl<'a> BottomPaneView<'a> for NotificationsSettingsView {
         let block = Block::default()
             .borders(Borders::ALL)
             .border_style(Style::default().fg(crate::colors::border()))
-            .style(Style::default().bg(crate::colors::background()).fg(crate::colors::text()))
+            .style(
+                Style::default()
+                    .bg(crate::colors::background())
+                    .fg(crate::colors::text()),
+            )
             .title(" Notifications ")
             .title_alignment(Alignment::Center);
         let inner = block.inner(area);
@@ -197,12 +247,11 @@ impl<'a> BottomPaneView<'a> for NotificationsSettingsView {
         lines.push(Line::from(""));
         let mut toggle_line = self.toggle_line();
         if self.selected_row == 0 {
-            toggle_line = toggle_line
-                .style(
-                    Style::default()
-                        .bg(crate::colors::selection())
-                        .add_modifier(Modifier::BOLD),
-                );
+            toggle_line = toggle_line.style(
+                Style::default()
+                    .bg(crate::colors::selection())
+                    .add_modifier(Modifier::BOLD),
+            );
         }
         lines.push(toggle_line);
         lines.push(Line::from(""));
@@ -211,12 +260,11 @@ impl<'a> BottomPaneView<'a> for NotificationsSettingsView {
             Span::raw("Close"),
         ]);
         if self.selected_row == 1 {
-            close_line = close_line
-                .style(
-                    Style::default()
-                        .bg(crate::colors::selection())
-                        .add_modifier(Modifier::BOLD),
-                );
+            close_line = close_line.style(
+                Style::default()
+                    .bg(crate::colors::selection())
+                    .add_modifier(Modifier::BOLD),
+            );
         }
         lines.push(close_line);
         lines.push(Line::from(""));
@@ -225,7 +273,10 @@ impl<'a> BottomPaneView<'a> for NotificationsSettingsView {
             NotificationsMode::Toggle { .. } => Line::from(vec![
                 Span::styled("Up/Down", Style::default().fg(crate::colors::light_blue())),
                 Span::raw(" Navigate  "),
-                Span::styled("Left/Right or Space", Style::default().fg(crate::colors::success())),
+                Span::styled(
+                    "Left/Right or Space",
+                    Style::default().fg(crate::colors::success()),
+                ),
                 Span::raw(" Toggle  "),
                 Span::styled("Enter", Style::default().fg(crate::colors::success())),
                 Span::raw(" Toggle or Close  "),
@@ -234,15 +285,23 @@ impl<'a> BottomPaneView<'a> for NotificationsSettingsView {
             ]),
             NotificationsMode::Custom { .. } => Line::from(vec![
                 Span::styled("Edit ", Style::default().fg(crate::colors::text_dim())),
-                Span::styled("[tui].notifications", Style::default().fg(crate::colors::info())),
-                Span::styled(" in ~/.hanzo/config.toml to adjust filters.", Style::default().fg(crate::colors::text_dim())),
+                Span::styled(
+                    "[tui].notifications",
+                    Style::default().fg(crate::colors::info()),
+                ),
+                Span::styled(
+                    " in ~/.hanzo/config.toml to adjust filters.",
+                    Style::default().fg(crate::colors::text_dim()),
+                ),
             ]),
         };
         lines.push(footer);
 
-        let paragraph = Paragraph::new(lines)
-            .alignment(Alignment::Left)
-            .style(Style::default().bg(crate::colors::background()).fg(crate::colors::text()));
+        let paragraph = Paragraph::new(lines).alignment(Alignment::Left).style(
+            Style::default()
+                .bg(crate::colors::background())
+                .fg(crate::colors::text()),
+        );
         paragraph.render(
             Rect {
                 x: inner.x.saturating_add(1),

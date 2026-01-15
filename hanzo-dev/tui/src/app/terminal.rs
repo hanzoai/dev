@@ -1,24 +1,30 @@
-use std::io::{Read, Write};
+use std::io::Read;
+use std::io::Write;
+use std::sync::Arc;
+use std::sync::Mutex;
 use std::sync::mpsc::channel;
-use std::sync::{Arc, Mutex};
-use std::time::{Duration, Instant};
+use std::time::Duration;
+use std::time::Instant;
 
 use futures::FutureExt;
-use portable_pty::{native_pty_system, CommandBuilder, PtyPair, PtySize};
+use portable_pty::CommandBuilder;
+use portable_pty::PtyPair;
+use portable_pty::PtySize;
+use portable_pty::native_pty_system;
 use shlex::try_join;
 
 use color_eyre::eyre::Result;
 
-use crate::app_event::{AppEvent, TerminalRunController, TerminalRunEvent};
+use crate::app_event::AppEvent;
+use crate::app_event::TerminalRunController;
+use crate::app_event::TerminalRunEvent;
 use crate::tui;
 
-use super::state::{
-    App,
-    AppState,
-    DEFAULT_PTY_COLS,
-    DEFAULT_PTY_ROWS,
-    TerminalRunState,
-};
+use super::state::App;
+use super::state::AppState;
+use super::state::DEFAULT_PTY_COLS;
+use super::state::DEFAULT_PTY_ROWS;
+use super::state::TerminalRunState;
 
 impl App<'_> {
     pub(super) fn apply_terminal_title(&self) {
@@ -45,10 +51,7 @@ impl App<'_> {
                 _ => sanitized.push(ch),
             }
         }
-        sanitized
-            .split_whitespace()
-            .collect::<Vec<_>>()
-            .join(" ")
+        sanitized.split_whitespace().collect::<Vec<_>>().join(" ")
     }
 
     pub(super) fn format_notification_message(title: &str, body: Option<&str>) -> Option<String> {

@@ -1,18 +1,27 @@
+use crossterm::event::KeyCode;
+use crossterm::event::KeyEvent;
+use crossterm::event::KeyModifiers;
 use hanzo_core::config_types::ReasoningEffort;
-use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 use ratatui::buffer::Buffer;
-use ratatui::layout::{Alignment, Rect};
-use ratatui::style::{Modifier, Style};
-use ratatui::text::{Line, Span};
-use ratatui::widgets::{Block, Borders, Clear, Paragraph, Widget};
+use ratatui::layout::Alignment;
+use ratatui::layout::Rect;
+use ratatui::style::Modifier;
+use ratatui::style::Style;
+use ratatui::text::Line;
+use ratatui::text::Span;
+use ratatui::widgets::Block;
+use ratatui::widgets::Borders;
+use ratatui::widgets::Clear;
+use ratatui::widgets::Paragraph;
+use ratatui::widgets::Widget;
 
 use crate::app_event::AppEvent;
 use crate::app_event_sender::AppEventSender;
 use crate::colors;
 
+use super::BottomPane;
 use super::bottom_pane_view::BottomPaneView;
 use super::scroll_state::ScrollState;
-use super::BottomPane;
 
 #[derive(Copy, Clone, Debug, PartialEq, Eq)]
 enum PlanningRow {
@@ -87,7 +96,9 @@ impl PlanningSettingsView {
                         .fg(colors::primary())
                         .add_modifier(Modifier::BOLD)
                 } else {
-                    Style::default().fg(colors::text()).add_modifier(Modifier::BOLD)
+                    Style::default()
+                        .fg(colors::text())
+                        .add_modifier(Modifier::BOLD)
                 };
                 let value_style = if selected {
                     Style::default()
@@ -236,7 +247,11 @@ impl<'a> BottomPaneView<'a> for PlanningSettingsView {
         ];
 
         let rows = self.rows();
-        let selected_idx = self.state.selected_idx.unwrap_or(0).min(rows.len().saturating_sub(1));
+        let selected_idx = self
+            .state
+            .selected_idx
+            .unwrap_or(0)
+            .min(rows.len().saturating_sub(1));
 
         let mut lines: Vec<Line> = Vec::new();
         lines.extend(header_lines.into_iter());

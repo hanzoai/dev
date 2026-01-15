@@ -1,17 +1,21 @@
-use anyhow::{anyhow, Result};
+use anyhow::Result;
+use anyhow::anyhow;
 use futures::StreamExt;
 use std::time::Duration;
 use tokio::time::timeout;
 
-use hanzo_core::codex::compact::{
-    collect_compaction_snippets,
-    make_compaction_summary_message,
-    sanitize_items_for_compact,
-};
-use hanzo_core::model_family::{derive_default_model_family, find_family_for_model};
-use hanzo_core::{content_items_to_text, ModelClient, Prompt, ResponseEvent, TextFormat};
-use hanzo_protocol::models::{ContentItem, ResponseItem};
-
+use hanzo_core::ModelClient;
+use hanzo_core::Prompt;
+use hanzo_core::ResponseEvent;
+use hanzo_core::TextFormat;
+use hanzo_core::codex::compact::collect_compaction_snippets;
+use hanzo_core::codex::compact::make_compaction_summary_message;
+use hanzo_core::codex::compact::sanitize_items_for_compact;
+use hanzo_core::content_items_to_text;
+use hanzo_core::model_family::derive_default_model_family;
+use hanzo_core::model_family::find_family_for_model;
+use hanzo_protocol::models::ContentItem;
+use hanzo_protocol::models::ResponseItem;
 
 const BYTES_PER_TOKEN: usize = 4;
 const MAX_TRANSCRIPT_BYTES: usize = 32_000;
@@ -58,9 +62,7 @@ pub(crate) fn compact_with_endpoint(
             .await
         })
         .map_err(|_| {
-            anyhow!(
-                "remote compaction request timed out after {SUMMARY_TIMEOUT_SECONDS}s"
-            )
+            anyhow!("remote compaction request timed out after {SUMMARY_TIMEOUT_SECONDS}s")
         })??;
 
     if let Some((goal_idx, goal_item)) = goal_marker {
@@ -75,7 +77,10 @@ fn ensure_goal_is_present(
     goal_item: ResponseItem,
     original_idx: usize,
 ) {
-    let Some(goal_item) = sanitize_items_for_compact(vec![goal_item]).into_iter().next() else {
+    let Some(goal_item) = sanitize_items_for_compact(vec![goal_item])
+        .into_iter()
+        .next()
+    else {
         return;
     };
     let Some(goal_text) = message_text(&goal_item) else {
@@ -109,9 +114,9 @@ fn message_text(item: &ResponseItem) -> Option<String> {
 }
 
 pub(crate) fn compute_slice_bounds(conversation: &[ResponseItem]) -> Option<(usize, usize)> {
-    let goal_idx = conversation.iter().position(|item| {
-        matches!(item, ResponseItem::Message { role, .. } if role == "user")
-    })?;
+    let goal_idx = conversation
+        .iter()
+        .position(|item| matches!(item, ResponseItem::Message { role, .. } if role == "user"))?;
 
     if conversation.len() <= goal_idx + 3 {
         return None;
@@ -152,9 +157,9 @@ pub(crate) fn apply_compaction(
     prev_summary_text: Option<&str>,
     summary_message: ResponseItem,
 ) -> Option<()> {
-    let goal_idx = conversation.iter().position(|item| {
-        matches!(item, ResponseItem::Message { role, .. } if role == "user")
-    })?;
+    let goal_idx = conversation
+        .iter()
+        .position(|item| matches!(item, ResponseItem::Message { role, .. } if role == "user"))?;
 
     let (slice_start, slice_end) = bounds;
     if slice_start <= goal_idx || slice_end > conversation.len() {
@@ -195,14 +200,19 @@ pub(crate) fn build_checkpoint_summary(
         Ok(text) if !text.trim().is_empty() => text,
         Ok(_) => deterministic_summary(items, prev_summary),
         Err(err) => {
-            warning = Some(format!(
-                "checkpoint summary model request failed: {err:#}"));
+            warning = Some(format!("checkpoint summary model request failed: {err:#}"));
             deterministic_summary(items, prev_summary)
         }
     };
 
     let message = make_compaction_summary_message(&snippets, &summary_text);
-    (CheckpointSummary { message, text: summary_text }, warning)
+    (
+        CheckpointSummary {
+            message,
+            text: summary_text,
+        },
+        warning,
+    )
 }
 
 fn summarize_with_model(
@@ -323,8 +333,9 @@ fn deterministic_summary(items: &[ResponseItem], prev_summary: Option<&str>) -> 
                 let text = content
                     .iter()
                     .filter_map(|chunk| match chunk {
-                        ContentItem::InputText { text }
-                        | ContentItem::OutputText { text } => Some(text.trim()),
+                        ContentItem::InputText { text } | ContentItem::OutputText { text } => {
+                            Some(text.trim())
+                        }
                         _ => None,
                     })
                     .collect::<Vec<_>>()
@@ -334,7 +345,8 @@ fn deterministic_summary(items: &[ResponseItem], prev_summary: Option<&str>) -> 
                 }
                 actions.push(format!("{}: {}", role, text));
                 if role == "assistant" {
-                    if let Some(cmd) = text.lines().find(|line| line.trim_start().starts_with('$')) {
+                    if let Some(cmd) = text.lines().find(|line| line.trim_start().starts_with('$'))
+                    {
                         commands.push(cmd.trim().to_string());
                     }
                 }
@@ -356,7 +368,10 @@ fn deterministic_summary(items: &[ResponseItem], prev_summary: Option<&str>) -> 
     lines.push(format!(
         "Checkpoint covers {} exchanges and {} tool events.",
         actions.len(),
-        items.iter().filter(|item| matches!(item, ResponseItem::FunctionCall { .. })).count()
+        items
+            .iter()
+            .filter(|item| matches!(item, ResponseItem::FunctionCall { .. }))
+            .count()
     ));
     if !commands.is_empty() {
         let display = commands
@@ -385,8 +400,9 @@ fn flatten_items(items: &[ResponseItem]) -> String {
                 let text = content
                     .iter()
                     .filter_map(|chunk| match chunk {
-                        ContentItem::InputText { text }
-                        | ContentItem::OutputText { text } => Some(text.as_str()),
+                        ContentItem::InputText { text } | ContentItem::OutputText { text } => {
+                            Some(text.as_str())
+                        }
                         ContentItem::InputImage { .. } => Some("<image>"),
                     })
                     .collect::<Vec<_>>()
@@ -396,7 +412,9 @@ fn flatten_items(items: &[ResponseItem]) -> String {
                 }
                 buf.push_str(&format!("{role}: {text}\n"));
             }
-            ResponseItem::FunctionCall { name, arguments, .. } => {
+            ResponseItem::FunctionCall {
+                name, arguments, ..
+            } => {
                 buf.push_str(&format!("tool_call {name}: {arguments}\n"));
             }
             ResponseItem::FunctionCallOutput { output, .. } => {
@@ -411,7 +429,9 @@ fn flatten_items(items: &[ResponseItem]) -> String {
             ResponseItem::Reasoning { summary, .. } => {
                 for item in summary {
                     match item {
-                        hanzo_protocol::models::ReasoningItemReasoningSummary::SummaryText { text } => {
+                        hanzo_protocol::models::ReasoningItemReasoningSummary::SummaryText {
+                            text,
+                        } => {
                             buf.push_str(&format!("reasoning: {text}\n"));
                         }
                     }
@@ -480,15 +500,21 @@ pub(crate) fn estimate_item_tokens(item: &ResponseItem) -> usize {
                 ContentItem::InputImage { image_url } => image_url.len() / 10,
             })
             .sum(),
-        ResponseItem::FunctionCall { name, arguments, .. } => name.len() + arguments.len(),
+        ResponseItem::FunctionCall {
+            name, arguments, ..
+        } => name.len() + arguments.len(),
         ResponseItem::FunctionCallOutput { output, .. } => output.content.len(),
         ResponseItem::CustomToolCall { name, input, .. } => name.len() + input.len(),
         ResponseItem::CustomToolCallOutput { output, .. } => output.len(),
-        ResponseItem::Reasoning { summary, content, .. } => {
+        ResponseItem::Reasoning {
+            summary, content, ..
+        } => {
             summary
                 .iter()
                 .map(|s| match s {
-                    hanzo_protocol::models::ReasoningItemReasoningSummary::SummaryText { text } => text.len(),
+                    hanzo_protocol::models::ReasoningItemReasoningSummary::SummaryText { text } => {
+                        text.len()
+                    }
                 })
                 .sum::<usize>()
                 + content
@@ -497,8 +523,12 @@ pub(crate) fn estimate_item_tokens(item: &ResponseItem) -> usize {
                         segments
                             .iter()
                             .map(|segment| match segment {
-                                hanzo_protocol::models::ReasoningItemContent::ReasoningText { text }
-                                | hanzo_protocol::models::ReasoningItemContent::Text { text } => text.len(),
+                                hanzo_protocol::models::ReasoningItemContent::ReasoningText {
+                                    text,
+                                }
+                                | hanzo_protocol::models::ReasoningItemContent::Text { text } => {
+                                    text.len()
+                                }
                             })
                             .sum::<usize>()
                     })
@@ -567,10 +597,8 @@ mod tests {
             assistant_message("Final"),
         ];
 
-        let summary = make_compaction_summary_message(
-            &collect_compaction_snippets(&conversation),
-            "Summary",
-        );
+        let summary =
+            make_compaction_summary_message(&collect_compaction_snippets(&conversation), "Summary");
         apply_compaction(&mut conversation, (2, 5), Some("Prev"), summary).expect("compaction");
 
         assert_eq!(conversation.len(), 4);
@@ -591,7 +619,8 @@ mod tests {
             &collect_compaction_snippets(&conversation),
             "New summary",
         );
-        apply_compaction(&mut conversation, (2, 4), Some("Prev summary"), summary).expect("compaction");
+        apply_compaction(&mut conversation, (2, 4), Some("Prev summary"), summary)
+            .expect("compaction");
 
         assert_eq!(conversation.len(), 4);
         let prev = &conversation[2];
@@ -657,7 +686,11 @@ mod tests {
         let chunks = chunk_text(&text);
         let reconstructed: String = chunks.concat();
         assert_eq!(reconstructed, text);
-        assert!(chunks.iter().all(|chunk| chunk.len() <= MAX_TRANSCRIPT_BYTES));
+        assert!(
+            chunks
+                .iter()
+                .all(|chunk| chunk.len() <= MAX_TRANSCRIPT_BYTES)
+        );
     }
 
     #[test]

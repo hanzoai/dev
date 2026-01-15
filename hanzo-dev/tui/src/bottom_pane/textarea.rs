@@ -757,8 +757,6 @@ impl TextArea {
         }
     }
 
-
-
     fn clamp_pos_to_nearest_boundary(&self, mut pos: usize) -> usize {
         if pos > self.text.len() {
             pos = self.text.len();
@@ -844,7 +842,6 @@ impl TextArea {
         }
     }
 
-
     #[allow(clippy::unwrap_used)]
     fn wrapped_lines(&self, width: u16) -> Ref<'_, Vec<Range<usize>>> {
         // Ensure cache is ready (potentially mutably borrow, then drop)
@@ -925,7 +922,9 @@ impl TextArea {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
+    use crossterm::event::KeyCode;
+    use crossterm::event::KeyEvent;
+    use crossterm::event::KeyModifiers;
 
     #[cfg(target_os = "windows")]
     #[test]
@@ -934,14 +933,21 @@ mod tests {
         let cases = [
             ('/', KeyModifiers::CONTROL | KeyModifiers::ALT),
             ('@', KeyModifiers::CONTROL | KeyModifiers::ALT),
-            ('{', KeyModifiers::CONTROL | KeyModifiers::ALT | KeyModifiers::SHIFT),
+            (
+                '{',
+                KeyModifiers::CONTROL | KeyModifiers::ALT | KeyModifiers::SHIFT,
+            ),
         ];
 
         for (ch, modifiers) in cases {
             textarea.set_text("");
             textarea.set_cursor(0);
             textarea.input(KeyEvent::new(KeyCode::Char(ch), modifiers));
-            assert_eq!(textarea.text(), ch.to_string(), "expected AltGr combination to insert {ch}");
+            assert_eq!(
+                textarea.text(),
+                ch.to_string(),
+                "expected AltGr combination to insert {ch}"
+            );
         }
     }
 
@@ -956,7 +962,11 @@ mod tests {
             KeyModifiers::CONTROL | KeyModifiers::ALT,
         ));
 
-        assert_eq!(textarea.text(), "", "Ctrl+Alt+H should still delete backward word");
+        assert_eq!(
+            textarea.text(),
+            "",
+            "Ctrl+Alt+H should still delete backward word"
+        );
     }
 
     #[test]

@@ -1,22 +1,30 @@
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
+use std::sync::Mutex;
 
+use super::BottomPane;
+use super::bottom_pane_view::BottomPaneView;
+use super::bottom_pane_view::ConditionalUpdate;
 use crate::app_event::AppEvent;
 use crate::app_event_sender::AppEventSender;
 use crate::chatwidget::BackgroundOrderTicket;
 use crate::colors;
 use crate::util::buffer::fill_rect;
-use super::bottom_pane_view::BottomPaneView;
-use super::bottom_pane_view::ConditionalUpdate;
-use super::BottomPane;
-use crossterm::event::{KeyCode, KeyEvent};
+use crossterm::event::KeyCode;
+use crossterm::event::KeyEvent;
 use ratatui::buffer::Buffer;
-use ratatui::layout::{Alignment, Margin, Rect};
+use ratatui::layout::Alignment;
+use ratatui::layout::Margin;
+use ratatui::layout::Rect;
 use ratatui::prelude::Widget;
-use ratatui::style::{Modifier, Style};
-use ratatui::text::{Line, Span};
-use ratatui::widgets::{Paragraph, Wrap};
+use ratatui::style::Modifier;
+use ratatui::style::Style;
+use ratatui::text::Line;
+use ratatui::text::Span;
+use ratatui::widgets::Paragraph;
+use ratatui::widgets::Wrap;
 
-use super::settings_panel::{render_panel, PanelFrameStyle};
+use super::settings_panel::PanelFrameStyle;
+use super::settings_panel::render_panel;
 
 #[derive(Debug, Clone, Default)]
 pub struct UpdateSharedState {
@@ -78,37 +86,37 @@ impl UpdateSettingsView {
             .expect("update shared state poisoned")
             .clone();
 
-            if self.command.is_none() {
-                if let Some(instructions) = &self.manual_instructions {
-                    self.app_event_tx
-                        .send_background_event_with_ticket(&self.ticket, instructions.clone());
-                }
-                return;
+        if self.command.is_none() {
+            if let Some(instructions) = &self.manual_instructions {
+                self.app_event_tx
+                    .send_background_event_with_ticket(&self.ticket, instructions.clone());
             }
+            return;
+        }
 
-            if state.checking {
-                self.app_event_tx.send_background_event_with_ticket(
-                    &self.ticket,
-                    "Still checking for updates…".to_string(),
-                );
-                return;
-            }
-            if let Some(err) = &state.error {
-                self.app_event_tx.send_background_event_with_ticket(
-                    &self.ticket,
-                    format!("❌ /update failed: {err}"),
-                );
-                return;
-            }
-            let Some(latest) = state.latest_version.clone() else {
-                self.app_event_tx.send_background_event_with_ticket(
-                    &self.ticket,
-                    "✅ Code is already up to date.".to_string(),
-                );
-                return;
-            };
+        if state.checking {
+            self.app_event_tx.send_background_event_with_ticket(
+                &self.ticket,
+                "Still checking for updates…".to_string(),
+            );
+            return;
+        }
+        if let Some(err) = &state.error {
+            self.app_event_tx.send_background_event_with_ticket(
+                &self.ticket,
+                format!("❌ /update failed: {err}"),
+            );
+            return;
+        }
+        let Some(latest) = state.latest_version.clone() else {
+            self.app_event_tx.send_background_event_with_ticket(
+                &self.ticket,
+                "✅ Code is already up to date.".to_string(),
+            );
+            return;
+        };
 
-            let command = self.command.clone().expect("command checked above");
+        let command = self.command.clone().expect("command checked above");
         let display = self
             .command_display
             .clone()
@@ -283,7 +291,6 @@ impl UpdateSettingsView {
     pub(crate) fn render_without_frame(&self, area: Rect, buf: &mut Buffer) {
         self.render_panel_body(area, buf);
     }
-
 }
 
 impl<'a> BottomPaneView<'a> for UpdateSettingsView {

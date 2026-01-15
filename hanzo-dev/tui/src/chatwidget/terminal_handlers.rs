@@ -1,6 +1,9 @@
-use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
+use crossterm::event::KeyCode;
+use crossterm::event::KeyEvent;
+use crossterm::event::KeyModifiers;
 
-use super::{ChatWidget, PendingCommandAction};
+use super::ChatWidget;
+use super::PendingCommandAction;
 use crate::app_event::AppEvent;
 
 pub(super) fn handle_terminal_key(chat: &mut ChatWidget<'_>, key_event: KeyEvent) -> bool {
@@ -11,9 +14,7 @@ pub(super) fn handle_terminal_key(chat: &mut ChatWidget<'_>, key_event: KeyEvent
     let running = chat.terminal_is_running();
 
     if running {
-        if key_event
-            .modifiers
-            .contains(KeyModifiers::CONTROL)
+        if key_event.modifiers.contains(KeyModifiers::CONTROL)
             && !key_event
                 .modifiers
                 .intersects(KeyModifiers::ALT | KeyModifiers::SHIFT | KeyModifiers::SUPER)
@@ -203,11 +204,7 @@ fn ansi_modifier_param(mods: KeyModifiers) -> Option<u8> {
     if mods.contains(KeyModifiers::CONTROL) {
         bits |= 4;
     }
-    if bits == 0 {
-        None
-    } else {
-        Some(1 + bits)
-    }
+    if bits == 0 { None } else { Some(1 + bits) }
 }
 
 fn arrow_sequence(letter: u8, mods: KeyModifiers) -> Vec<u8> {

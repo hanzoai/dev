@@ -1,36 +1,43 @@
+use super::text::message_lines_from_ratatui;
+use super::text::message_lines_to_ratatui;
 use super::*;
-use super::text::{message_lines_from_ratatui, message_lines_to_ratatui};
 use crate::account_label::key_suffix;
-use crate::history::state::{
-    HistoryId,
-    InlineSpan,
-    MessageHeader,
-    MessageLine,
-    MessageLineKind,
-    NoticeRecord,
-    PlainMessageKind,
-    PlainMessageRole,
-    PlainMessageState,
-    TextEmphasis,
-    TextTone,
-};
 use crate::colors;
+use crate::history::state::HistoryId;
+use crate::history::state::InlineSpan;
+use crate::history::state::MessageHeader;
+use crate::history::state::MessageLine;
+use crate::history::state::MessageLineKind;
+use crate::history::state::NoticeRecord;
+use crate::history::state::PlainMessageKind;
+use crate::history::state::PlainMessageRole;
+use crate::history::state::PlainMessageState;
+use crate::history::state::TextEmphasis;
+use crate::history::state::TextTone;
 use crate::sanitize::Mode as SanitizeMode;
 use crate::sanitize::Options as SanitizeOptions;
 use crate::sanitize::sanitize_for_tui;
 use crate::slash_command::SlashCommand;
-use crate::theme::{current_theme, Theme};
+use crate::theme::Theme;
+use crate::theme::current_theme;
 use hanzo_ansi_escape::ansi_escape_line;
 use hanzo_common::create_config_summary_entries;
 use hanzo_core::config::Config;
 use hanzo_core::config_types::ReasoningEffort;
-use hanzo_core::protocol::{SessionConfiguredEvent, TokenUsage};
+use hanzo_core::protocol::SessionConfiguredEvent;
+use hanzo_core::protocol::TokenUsage;
 use hanzo_protocol::num_format::format_with_separators;
 use ratatui::buffer::Buffer;
 use ratatui::layout::Rect;
-use ratatui::style::{Modifier, Style};
-use ratatui::text::{Line, Span, Text};
-use ratatui::widgets::{Block, Padding, Paragraph, Wrap};
+use ratatui::style::Modifier;
+use ratatui::style::Style;
+use ratatui::text::Line;
+use ratatui::text::Span;
+use ratatui::text::Text;
+use ratatui::widgets::Block;
+use ratatui::widgets::Padding;
+use ratatui::widgets::Paragraph;
+use ratatui::widgets::Wrap;
 use std::collections::HashMap;
 
 struct PlainLayoutCache {
@@ -86,9 +93,11 @@ impl PlainHistoryCell {
         let mut kind = history_cell_kind_from_plain(state.kind);
         if kind == HistoryCellType::User {
             if let Some(first_line) = state.lines.first() {
-                if first_line.spans.first().map_or(false, |span| {
-                    span.text.starts_with("[Compaction Summary]")
-                }) {
+                if first_line
+                    .spans
+                    .first()
+                    .map_or(false, |span| span.text.starts_with("[Compaction Summary]"))
+                {
                     kind = HistoryCellType::CompactionSummary;
                 }
             }
@@ -133,12 +142,9 @@ impl PlainHistoryCell {
 
     fn ensure_layout(&self, requested_width: u16, effective_width: u16) {
         let mut cache = self.cached_layout.borrow_mut();
-        let needs_rebuild = cache
-            .as_ref()
-            .map_or(true, |cached| {
-                cached.requested_width != requested_width
-                    || cached.effective_width != effective_width
-            });
+        let needs_rebuild = cache.as_ref().map_or(true, |cached| {
+            cached.requested_width != requested_width || cached.effective_width != effective_width
+        });
         if needs_rebuild {
             *cache = Some(self.build_layout(requested_width, effective_width));
         }
@@ -194,18 +200,21 @@ impl PlainHistoryCell {
         let render_area = Rect::new(0, 0, requested_width, render_height);
         let mut buffer = Buffer::empty(render_area);
         // Paint full cell (including padding) with the cell background so tint extends through padding.
-        fill_rect(&mut buffer, render_area, Some(' '), Style::default().bg(cell_bg).fg(crate::colors::text()));
+        fill_rect(
+            &mut buffer,
+            render_area,
+            Some(' '),
+            Style::default().bg(cell_bg).fg(crate::colors::text()),
+        );
 
         let paragraph_lines = Text::from(trimmed_lines);
         if matches!(self.state.kind, HistoryCellType::User) {
-            let block = Block::default()
-                .style(bg_style)
-                .padding(Padding {
-                    left: 0,
-                    right: crate::layout_consts::USER_HISTORY_RIGHT_PAD.into(),
-                    top: 0,
-                    bottom: 0,
-                });
+            let block = Block::default().style(bg_style).padding(Padding {
+                left: 0,
+                right: crate::layout_consts::USER_HISTORY_RIGHT_PAD.into(),
+                top: 0,
+                bottom: 0,
+            });
             Paragraph::new(paragraph_lines)
                 .block(block)
                 .wrap(Wrap { trim: false })
@@ -315,8 +324,7 @@ impl HistoryCell for PlainHistoryCell {
     fn render_with_skip(&self, area: Rect, buf: &mut Buffer, skip_rows: u16) {
         let requested_width = area.width;
         let effective_width = if matches!(self.state.kind, HistoryCellType::User) {
-            requested_width
-                .saturating_sub(crate::layout_consts::USER_HISTORY_RIGHT_PAD.into())
+            requested_width.saturating_sub(crate::layout_consts::USER_HISTORY_RIGHT_PAD.into())
         } else {
             requested_width
         };
@@ -509,9 +517,7 @@ fn header_style(role: PlainMessageRole, theme: &Theme) -> Style {
         PlainMessageRole::Assistant => Style::default()
             .fg(theme.primary)
             .add_modifier(Modifier::BOLD),
-        PlainMessageRole::Tool => Style::default()
-            .fg(theme.info)
-            .add_modifier(Modifier::BOLD),
+        PlainMessageRole::Tool => Style::default().fg(theme.info).add_modifier(Modifier::BOLD),
         PlainMessageRole::Error => Style::default()
             .fg(theme.error)
             .add_modifier(Modifier::BOLD),
@@ -521,7 +527,9 @@ fn header_style(role: PlainMessageRole, theme: &Theme) -> Style {
 }
 
 fn header_badge_style(theme: &Theme) -> Style {
-    Style::default().fg(theme.text_dim).add_modifier(Modifier::ITALIC)
+    Style::default()
+        .fg(theme.text_dim)
+        .add_modifier(Modifier::ITALIC)
 }
 
 fn line_plain_text(line: &Line<'_>) -> String {
@@ -583,20 +591,14 @@ fn popular_commands_lines(_latest_version: Option<&str>) -> Vec<Line<'static>> {
         Span::from(" - "),
         Span::from(SlashCommand::Settings.description())
             .style(Style::default().add_modifier(Modifier::DIM)),
-        Span::styled(
-            " UPDATED",
-            Style::default().fg(crate::colors::primary()),
-        ),
+        Span::styled(" UPDATED", Style::default().fg(crate::colors::primary())),
     ]));
     lines.push(Line::from(vec![
         Span::styled("/auto", Style::default().fg(crate::colors::primary())),
         Span::from(" - "),
         Span::from(SlashCommand::Auto.description())
             .style(Style::default().add_modifier(Modifier::DIM)),
-        Span::styled(
-            " UPDATED",
-            Style::default().fg(crate::colors::primary()),
-        ),
+        Span::styled(" UPDATED", Style::default().fg(crate::colors::primary())),
     ]));
     lines.push(Line::from(vec![
         Span::styled("/chrome", Style::default().fg(crate::colors::primary())),
@@ -621,10 +623,7 @@ fn popular_commands_lines(_latest_version: Option<&str>) -> Vec<Line<'static>> {
         Span::from(" - "),
         Span::from(SlashCommand::Skills.description())
             .style(Style::default().add_modifier(Modifier::DIM)),
-        Span::styled(
-            " NEW",
-            Style::default().fg(crate::colors::primary()),
-        ),
+        Span::styled(" NEW", Style::default().fg(crate::colors::primary())),
     ]));
 
     lines
@@ -838,13 +837,12 @@ pub(crate) fn new_status_output(
             Ok(Some(auth)) => match auth.mode {
                 AuthMode::ApiKey => {
                     // Prefer suffix from auth.json; fall back to env var if needed
-                    let suffix =
-                        try_read_auth_json(&hanzo_login::get_auth_file(&config.code_home))
-                            .ok()
-                            .and_then(|a| a.openai_api_key)
-                            .or_else(|| std::env::var(OPENAI_API_KEY_ENV_VAR).ok())
-                            .map(|k| key_suffix(&k))
-                            .unwrap_or_else(|| "????".to_string());
+                    let suffix = try_read_auth_json(&hanzo_login::get_auth_file(&config.code_home))
+                        .ok()
+                        .and_then(|a| a.openai_api_key)
+                        .or_else(|| std::env::var(OPENAI_API_KEY_ENV_VAR).ok())
+                        .map(|k| key_suffix(&k))
+                        .unwrap_or_else(|| "????".to_string());
                     lines.push(Line::from(format!("  • Method: API key (…{suffix})")));
                 }
                 AuthMode::ChatGPT => {
@@ -937,7 +935,9 @@ pub(crate) fn new_status_output(
                     format_with_separators(remaining)
                 )));
                 if total_usage.total_tokens > limit_u64 {
-                    lines.push(Line::from("    • Compacting will trigger on the next turn".dim()));
+                    lines.push(Line::from(
+                        "    • Compacting will trigger on the next turn".dim(),
+                    ));
                 }
             }
             _ => {
@@ -960,12 +960,18 @@ pub(crate) fn new_status_output(
                             "  • {} tokens before overflow",
                             format_with_separators(remaining)
                         )));
-                        lines.push(Line::from("  • Auto-compaction runs after overflow errors".to_string()));
+                        lines.push(Line::from(
+                            "  • Auto-compaction runs after overflow errors".to_string(),
+                        ));
                     } else {
-                        lines.push(Line::from("  • Auto-compaction runs after overflow errors".to_string()));
+                        lines.push(Line::from(
+                            "  • Auto-compaction runs after overflow errors".to_string(),
+                        ));
                     }
                 } else {
-                    lines.push(Line::from("  • Auto-compaction runs after overflow errors".to_string()));
+                    lines.push(Line::from(
+                        "  • Auto-compaction runs after overflow errors".to_string(),
+                    ));
                 }
             }
         }
@@ -978,7 +984,10 @@ pub(crate) fn new_warning_event(message: String) -> PlainMessageState {
     let warn_style = Style::default().fg(crate::colors::warning());
     let mut lines: Vec<Line<'static>> = Vec::with_capacity(2);
     lines.push(Line::from("notice"));
-    lines.push(Line::from(vec![Span::styled(format!("⚠ {message}"), warn_style)]));
+    lines.push(Line::from(vec![Span::styled(
+        format!("⚠ {message}"),
+        warn_style,
+    )]));
     plain_message_state_from_lines(lines, HistoryCellType::Notice)
 }
 

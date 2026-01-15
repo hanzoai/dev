@@ -1,17 +1,26 @@
 #![allow(dead_code)]
 
 use std::path::Path;
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
+use std::sync::Mutex;
 
-use hanzo_core::config::{Config, ConfigOverrides, ConfigToml};
+use hanzo_core::CodexConversation;
+use hanzo_core::config::Config;
+use hanzo_core::config::ConfigOverrides;
+use hanzo_core::config::ConfigToml;
 use hanzo_core::protocol::EventMsg;
 use hanzo_core::spawn::HANZO_SANDBOX_NETWORK_DISABLED_ENV_VAR;
-use hanzo_core::CodexConversation;
 use serde_json::Value;
 use tempfile::TempDir;
-use tokio::time::{timeout, Duration};
-use wiremock::matchers::{method, path_regex};
-use wiremock::{Match, Mock, MockServer, Request, ResponseTemplate};
+use tokio::time::Duration;
+use tokio::time::timeout;
+use wiremock::Match;
+use wiremock::Mock;
+use wiremock::MockServer;
+use wiremock::Request;
+use wiremock::ResponseTemplate;
+use wiremock::matchers::method;
+use wiremock::matchers::path_regex;
 
 /// Returns a default `Config` whose on-disk state is confined to the provided
 /// temporary directory. Using a per-test directory keeps tests hermetic and
@@ -76,11 +85,7 @@ pub fn load_sse_fixture_with_id(path: impl AsRef<Path>, id: &str) -> String {
                 .get("type")
                 .and_then(|v| v.as_str())
                 .expect("fixture event missing type");
-            if event
-                .as_object()
-                .map(|obj| obj.len() == 1)
-                .unwrap_or(false)
-            {
+            if event.as_object().map(|obj| obj.len() == 1).unwrap_or(false) {
                 format!("event: {kind}\n\n")
             } else {
                 format!("event: {kind}\ndata: {event}\n\n")
@@ -109,9 +114,7 @@ where
 /// Returns true when network-dependent tests should be skipped.
 pub fn skip_if_no_network() -> bool {
     if std::env::var(HANZO_SANDBOX_NETWORK_DISABLED_ENV_VAR).is_ok() {
-        println!(
-            "Skipping test because network access is disabled inside the sandbox."
-        );
+        println!("Skipping test because network access is disabled inside the sandbox.");
         true
     } else {
         false

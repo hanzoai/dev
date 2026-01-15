@@ -2,9 +2,12 @@ use crate::config_loader::LoaderOverrides;
 use std::path::PathBuf;
 use toml::Value as TomlValue;
 
+use super::Config;
+use super::ConfigOverrides;
+use super::ConfigToml;
 use super::sources;
-use super::validation::{apply_toml_override, deserialize_config_toml_with_cli_warnings};
-use super::{Config, ConfigOverrides, ConfigToml};
+use super::validation::apply_toml_override;
+use super::validation::deserialize_config_toml_with_cli_warnings;
 
 #[derive(Default, Debug, Clone)]
 pub struct ConfigBuilder {
@@ -40,13 +43,18 @@ impl ConfigBuilder {
         };
 
         let mut root_value = sources::load_config_as_toml(&code_home)?;
-        let cli_paths: Vec<String> = self.cli_overrides.iter().map(|(path, _)| path.clone()).collect();
+        let cli_paths: Vec<String> = self
+            .cli_overrides
+            .iter()
+            .map(|(path, _)| path.clone())
+            .collect();
         for (path, value) in self.cli_overrides.into_iter() {
             apply_toml_override(&mut root_value, &path, value);
         }
 
         let cfg = deserialize_config_toml_with_cli_warnings(&root_value, &cli_paths)?;
-        let mut config = Config::load_from_base_config_with_overrides(cfg, self.overrides, code_home)?;
+        let mut config =
+            Config::load_from_base_config_with_overrides(cfg, self.overrides, code_home)?;
 
         let requirements = crate::config_loader::load_config_requirements_blocking(
             &config.code_home,
@@ -69,7 +77,11 @@ impl ConfigBuilder {
         };
 
         let mut root_value = sources::load_config_as_toml(&code_home)?;
-        let cli_paths: Vec<String> = self.cli_overrides.iter().map(|(path, _)| path.clone()).collect();
+        let cli_paths: Vec<String> = self
+            .cli_overrides
+            .iter()
+            .map(|(path, _)| path.clone())
+            .collect();
         for (path, value) in self.cli_overrides.into_iter() {
             apply_toml_override(&mut root_value, &path, value);
         }

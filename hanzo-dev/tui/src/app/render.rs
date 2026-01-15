@@ -10,7 +10,9 @@ use crate::app_event::AppEvent;
 use crate::thread_spawner;
 use crate::tui;
 
-use super::state::{App, AppState, REDRAW_DEBOUNCE};
+use super::state::App;
+use super::state::AppState;
+use super::state::REDRAW_DEBOUNCE;
 
 impl App<'_> {
     /// Schedule a redraw immediately and open a short debounce window to coalesce
@@ -65,7 +67,10 @@ impl App<'_> {
     ) -> std::io::Result<Result<()>> {
         #[cfg(unix)]
         {
-            use libc::{fcntl, F_GETFL, F_SETFL, O_NONBLOCK};
+            use libc::F_GETFL;
+            use libc::F_SETFL;
+            use libc::O_NONBLOCK;
+            use libc::fcntl;
             use std::os::fd::AsRawFd;
 
             struct RestoreFlags {
@@ -105,7 +110,9 @@ impl App<'_> {
         // Hard clear on the very first frame (and while onboarding) to ensure a
         // clean background across terminals that don't respect our color attrs
         // during EnterAlternateScreen.
-        if self.alt_screen_active && (self.clear_on_first_frame || matches!(self.app_state, AppState::Onboarding { .. })) {
+        if self.alt_screen_active
+            && (self.clear_on_first_frame || matches!(self.app_state, AppState::Onboarding { .. }))
+        {
             terminal.clear()?;
             self.clear_on_first_frame = false;
         }
@@ -125,16 +132,14 @@ impl App<'_> {
         }
         self.last_frame_size = Some(screen_size);
 
-        let completed_frame = terminal.draw(|frame| {
-            match &mut self.app_state {
-                AppState::Chat { widget } => {
-                    if let Some((x, y)) = widget.cursor_pos(frame.area()) {
-                        frame.set_cursor_position((x, y));
-                    }
-                    frame.render_widget_ref(&**widget, frame.area())
+        let completed_frame = terminal.draw(|frame| match &mut self.app_state {
+            AppState::Chat { widget } => {
+                if let Some((x, y)) = widget.cursor_pos(frame.area()) {
+                    frame.set_cursor_position((x, y));
                 }
-                AppState::Onboarding { screen } => frame.render_widget_ref(&*screen, frame.area()),
+                frame.render_widget_ref(&**widget, frame.area())
             }
+            AppState::Onboarding { screen } => frame.render_widget_ref(&*screen, frame.area()),
         })?;
         self.buffer_diff_profiler.record(&completed_frame);
         Ok(())

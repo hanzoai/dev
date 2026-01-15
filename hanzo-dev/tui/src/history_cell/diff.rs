@@ -1,6 +1,12 @@
 use super::*;
-use crate::history::state::{DiffHunk, DiffLine, DiffLineKind, DiffRecord, HistoryId};
-use crate::sanitize::{sanitize_for_tui, Mode as SanitizeMode, Options as SanitizeOptions};
+use crate::history::state::DiffHunk;
+use crate::history::state::DiffLine;
+use crate::history::state::DiffLineKind;
+use crate::history::state::DiffRecord;
+use crate::history::state::HistoryId;
+use crate::sanitize::Mode as SanitizeMode;
+use crate::sanitize::Options as SanitizeOptions;
+use crate::sanitize::sanitize_for_tui;
 pub(crate) struct DiffCell {
     record: DiffRecord,
 }
@@ -59,12 +65,8 @@ pub(crate) fn diff_lines_from_record(record: &DiffRecord) -> Vec<Line<'static>> 
             };
             let content = format!("{}{}", prefix, diff_line.content);
             let styled = match diff_line.kind {
-                DiffLineKind::Addition => {
-                    Line::from(content).fg(crate::colors::success())
-                }
-                DiffLineKind::Removal => {
-                    Line::from(content).fg(crate::colors::error())
-                }
+                DiffLineKind::Addition => Line::from(content).fg(crate::colors::success()),
+                DiffLineKind::Removal => Line::from(content).fg(crate::colors::error()),
                 DiffLineKind::Context => Line::from(content),
             };
             lines.push(styled);
@@ -164,12 +166,7 @@ mod tests {
 
     #[test]
     fn diff_record_strips_context_prefix_space() {
-        let diff = concat!(
-            "@@ -1,3 +1,3 @@\n",
-            " unchanged\n",
-            "-old\n",
-            "+new\n",
-        );
+        let diff = concat!("@@ -1,3 +1,3 @@\n", " unchanged\n", "-old\n", "+new\n",);
         let record = diff_record_from_string(String::new(), diff);
         assert_eq!(record.hunks.len(), 1);
         let lines = &record.hunks[0].lines;

@@ -1,37 +1,44 @@
-use super::card_style::{
-    ansi16_inverse_color,
-    browser_card_style,
-    fill_card_background,
-    hint_text_style,
-    primary_text_style,
-    rows_to_lines,
-    secondary_text_style,
-    title_text_style,
-    truncate_with_ellipsis,
-    CardRow,
-    CardSegment,
-    CardStyle,
-    CARD_ACCENT_WIDTH,
-};
-use super::{HistoryCell, HistoryCellType, ToolCellStatus};
+use super::HistoryCell;
+use super::HistoryCellType;
+use super::ToolCellStatus;
+use super::card_style::CARD_ACCENT_WIDTH;
+use super::card_style::CardRow;
+use super::card_style::CardSegment;
+use super::card_style::CardStyle;
+use super::card_style::ansi16_inverse_color;
+use super::card_style::browser_card_style;
+use super::card_style::fill_card_background;
+use super::card_style::hint_text_style;
+use super::card_style::primary_text_style;
+use super::card_style::rows_to_lines;
+use super::card_style::secondary_text_style;
+use super::card_style::title_text_style;
+use super::card_style::truncate_with_ellipsis;
 use crate::colors;
-use crate::theme::{palette_mode, PaletteMode};
+use crate::theme::PaletteMode;
+use crate::theme::palette_mode;
 use hanzo_common::elapsed::format_duration_digital;
+use image::ImageReader;
 use ratatui::buffer::Buffer;
 use ratatui::layout::Rect;
 use ratatui::prelude::Style;
-use ratatui::text::{Line, Text};
-use ratatui::widgets::{Paragraph, Widget, Wrap};
-use ratatui_image::{Image, Resize};
-use ratatui_image::picker::{Picker, ProtocolType};
+use ratatui::text::Line;
+use ratatui::text::Text;
+use ratatui::widgets::Paragraph;
+use ratatui::widgets::Widget;
+use ratatui::widgets::Wrap;
 use ratatui_image::FilterType;
-use image::ImageReader;
+use ratatui_image::Image;
+use ratatui_image::Resize;
+use ratatui_image::picker::Picker;
+use ratatui_image::picker::ProtocolType;
 use std::cell::RefCell;
-use std::path::{Path, PathBuf};
+use std::path::Path;
+use std::path::PathBuf;
 use std::rc::Rc;
-use url::Url;
 use std::time::Duration;
 use unicode_width::UnicodeWidthChar;
+use url::Url;
 
 const BORDER_TOP: &str = "╭─";
 const BORDER_BODY: &str = "│";
@@ -74,7 +81,15 @@ pub(crate) struct BrowserSessionCell {
     headless: Option<bool>,
     status_code: Option<String>,
     cached_picker: Rc<RefCell<Option<ratatui_image::picker::Picker>>>,
-    cached_image_protocol: Rc<RefCell<Option<(PathBuf, ratatui::layout::Rect, ratatui_image::protocol::Protocol)>>>,
+    cached_image_protocol: Rc<
+        RefCell<
+            Option<(
+                PathBuf,
+                ratatui::layout::Rect,
+                ratatui_image::protocol::Protocol,
+            )>,
+        >,
+    >,
 }
 
 impl Clone for BrowserSessionCell {
@@ -150,11 +165,7 @@ impl BrowserSessionCell {
         Self::default()
     }
 
-    pub(crate) fn ensure_picker_initialized(
-        &self,
-        picker: Option<Picker>,
-        _font_size: (u16, u16),
-    ) {
+    pub(crate) fn ensure_picker_initialized(&self, picker: Option<Picker>, _font_size: (u16, u16)) {
         let mut slot = self.cached_picker.borrow_mut();
         if slot.is_some() {
             return;
@@ -356,7 +367,12 @@ impl BrowserSessionCell {
         if !text.is_empty() {
             segments.push(CardSegment::new(text, title_style));
         }
-        CardRow::new(BORDER_TOP.to_string(), Self::accent_style(style), segments, None)
+        CardRow::new(
+            BORDER_TOP.to_string(),
+            Self::accent_style(style),
+            segments,
+            None,
+        )
     }
 
     fn blank_border_row(&self, body_width: usize, style: &CardStyle) -> CardRow {
@@ -378,7 +394,12 @@ impl BrowserSessionCell {
         right_padding_cols: usize,
     ) -> CardRow {
         if body_width == 0 {
-            return CardRow::new(BORDER_BODY.to_string(), Self::accent_style(style), Vec::new(), None);
+            return CardRow::new(
+                BORDER_BODY.to_string(),
+                Self::accent_style(style),
+                Vec::new(),
+                None,
+            );
         }
         let indent = indent_cols.min(body_width.saturating_sub(1));
         let available = body_width.saturating_sub(indent);
@@ -388,7 +409,12 @@ impl BrowserSessionCell {
         }
         let text: String = text.into();
         if available == 0 {
-            return CardRow::new(BORDER_BODY.to_string(), Self::accent_style(style), segments, None);
+            return CardRow::new(
+                BORDER_BODY.to_string(),
+                Self::accent_style(style),
+                segments,
+                None,
+            );
         }
         let usable_width = available.saturating_sub(right_padding_cols);
         let display = if usable_width == 0 {
@@ -401,7 +427,12 @@ impl BrowserSessionCell {
             let pad = right_padding_cols.min(available);
             segments.push(CardSegment::new(" ".repeat(pad), Style::default()));
         }
-        CardRow::new(BORDER_BODY.to_string(), Self::accent_style(style), segments, None)
+        CardRow::new(
+            BORDER_BODY.to_string(),
+            Self::accent_style(style),
+            segments,
+            None,
+        )
     }
 
     fn bottom_border_row(&self, body_width: usize, style: &CardStyle) -> CardRow {
@@ -413,12 +444,16 @@ impl BrowserSessionCell {
             hint_text_style(style)
         };
         let segment = CardSegment::new(text, hint_style);
-        CardRow::new(BORDER_BOTTOM.to_string(), Self::accent_style(style), vec![segment], None)
+        CardRow::new(
+            BORDER_BOTTOM.to_string(),
+            Self::accent_style(style),
+            vec![segment],
+            None,
+        )
     }
 
     fn display_host(&self) -> Option<String> {
-        self
-            .url
+        self.url
             .as_ref()
             .and_then(|url| Url::parse(url).ok())
             .and_then(|parsed| parsed.host_str().map(|host| host.to_string()))
@@ -431,22 +466,23 @@ impl BrowserSessionCell {
         if let Some(host) = self.display_host() {
             return host;
         }
-        self
-            .url
+        self.url
             .as_ref()
             .map(|url| url.clone())
             .unwrap_or_else(|| "Browser Session".to_string())
     }
 
-    fn build_card_rows(&self, width: u16, style: &CardStyle) -> (Vec<CardRow>, Option<ScreenshotLayout>) {
+    fn build_card_rows(
+        &self,
+        width: u16,
+        style: &CardStyle,
+    ) -> (Vec<CardRow>, Option<ScreenshotLayout>) {
         if width == 0 {
             return (Vec::new(), None);
         }
 
         let accent_width = CARD_ACCENT_WIDTH.min(width as usize);
-        let body_width = width
-            .saturating_sub(accent_width as u16)
-            .saturating_sub(1) as usize;
+        let body_width = width.saturating_sub(accent_width as u16).saturating_sub(1) as usize;
         if body_width == 0 {
             return (Vec::new(), None);
         }
@@ -530,13 +566,11 @@ impl BrowserSessionCell {
                     ActionDisplayLine::Ellipsis => {
                         let mut segments = Vec::new();
                         if indent_cols > 0 {
-                            segments.push(CardSegment::new(" ".repeat(indent_cols), Style::default()));
+                            segments
+                                .push(CardSegment::new(" ".repeat(indent_cols), Style::default()));
                         }
                         let padded = format!("{:>width$}", "⋮", width = time_width.max(1));
-                        segments.push(CardSegment::new(
-                            padded,
-                            secondary_text_style(style),
-                        ));
+                        segments.push(CardSegment::new(padded, secondary_text_style(style)));
                         if ACTION_TIME_GAP > 0 {
                             segments.push(CardSegment::new(
                                 " ".repeat(ACTION_TIME_GAP),
@@ -633,39 +667,87 @@ impl BrowserSessionCell {
         let indent = indent_cols.min(body_width.saturating_sub(1));
         let available = body_width.saturating_sub(indent);
         if available <= time_width {
-            return self.render_fallback_entry(entry, body_width, style, indent_cols, right_padding, time_width);
+            return self.render_fallback_entry(
+                entry,
+                body_width,
+                style,
+                indent_cols,
+                right_padding,
+                time_width,
+            );
         }
 
         const TIME_GAP: usize = ACTION_TIME_GAP;
         let after_time = available.saturating_sub(time_width);
         if after_time <= TIME_GAP {
-            return self.render_fallback_entry(entry, body_width, style, indent_cols, right_padding, time_width);
+            return self.render_fallback_entry(
+                entry,
+                body_width,
+                style,
+                indent_cols,
+                right_padding,
+                time_width,
+            );
         }
         let after_time_gap = after_time.saturating_sub(TIME_GAP);
         if after_time_gap == 0 {
-            return self.render_fallback_entry(entry, body_width, style, indent_cols, right_padding, time_width);
+            return self.render_fallback_entry(
+                entry,
+                body_width,
+                style,
+                indent_cols,
+                right_padding,
+                time_width,
+            );
         }
 
         let base_available = after_time_gap.saturating_sub(right_padding);
         if base_available == 0 {
-            return self.render_fallback_entry(entry, body_width, style, indent_cols, right_padding, time_width);
+            return self.render_fallback_entry(
+                entry,
+                body_width,
+                style,
+                indent_cols,
+                right_padding,
+                time_width,
+            );
         }
 
         let max_label_width = base_available.saturating_sub(ACTION_LABEL_GAP + 1);
         if max_label_width == 0 {
-            return self.render_fallback_entry(entry, body_width, style, indent_cols, right_padding, time_width);
+            return self.render_fallback_entry(
+                entry,
+                body_width,
+                style,
+                indent_cols,
+                right_padding,
+                time_width,
+            );
         }
 
         let effective_label_width = label_width.min(max_label_width);
-        let detail_width = base_available
-            .saturating_sub(effective_label_width + ACTION_LABEL_GAP);
+        let detail_width = base_available.saturating_sub(effective_label_width + ACTION_LABEL_GAP);
         if detail_width == 0 {
-            return self.render_fallback_entry(entry, body_width, style, indent_cols, right_padding, time_width);
+            return self.render_fallback_entry(
+                entry,
+                body_width,
+                style,
+                indent_cols,
+                right_padding,
+                time_width,
+            );
         }
 
         let label_full_width = string_display_width(entry.label.as_str());
         if effective_label_width < label_full_width {
-            return self.render_fallback_entry(entry, body_width, style, indent_cols, right_padding, time_width);
+            return self.render_fallback_entry(
+                entry,
+                body_width,
+                style,
+                indent_cols,
+                right_padding,
+                time_width,
+            );
         }
 
         let label_display = entry.label.clone();
@@ -793,7 +875,12 @@ impl BrowserSessionCell {
             }
         }
 
-        CardRow::new(BORDER_BODY.to_string(), Self::accent_style(style), segments, None)
+        CardRow::new(
+            BORDER_BODY.to_string(),
+            Self::accent_style(style),
+            segments,
+            None,
+        )
     }
 
     fn render_fallback_entry(
@@ -821,16 +908,25 @@ impl BrowserSessionCell {
         }
 
         let time_style = Style::default().fg(colors::text());
-        let effective_time_width = available.min(time_width).max(ACTION_TIME_COLUMN_MIN_WIDTH.min(available));
+        let effective_time_width = available
+            .min(time_width)
+            .max(ACTION_TIME_COLUMN_MIN_WIDTH.min(available));
         if effective_time_width == 0 {
             return Vec::new();
         }
-        let time_display = format!("{:<width$}", entry.time_label.as_str(), width = effective_time_width);
+        let time_display = format!(
+            "{:<width$}",
+            entry.time_label.as_str(),
+            width = effective_time_width
+        );
         segments.push(CardSegment::new(time_display, time_style));
 
         let mut remaining = available.saturating_sub(effective_time_width);
         if remaining >= ACTION_TIME_GAP {
-            segments.push(CardSegment::new(" ".repeat(ACTION_TIME_GAP), Style::default()));
+            segments.push(CardSegment::new(
+                " ".repeat(ACTION_TIME_GAP),
+                Style::default(),
+            ));
             remaining = remaining.saturating_sub(ACTION_TIME_GAP);
         }
 
@@ -860,7 +956,10 @@ impl BrowserSessionCell {
                 entries.push(ActionEntry {
                     label: "Opened".to_string(),
                     detail: url.clone(),
-                    time_label: format!(" {}", Self::format_elapsed_label(Duration::ZERO, show_minutes)),
+                    time_label: format!(
+                        " {}",
+                        Self::format_elapsed_label(Duration::ZERO, show_minutes)
+                    ),
                 });
             }
         }
@@ -894,10 +993,7 @@ impl BrowserSessionCell {
             }
             display
         } else {
-            entries
-                .into_iter()
-                .map(ActionDisplayLine::Entry)
-                .collect()
+            entries.into_iter().map(ActionDisplayLine::Entry).collect()
         }
     }
 
@@ -911,13 +1007,18 @@ impl BrowserSessionCell {
         }
 
         if body_width
-            < SCREENSHOT_LEFT_PAD + SCREENSHOT_MIN_WIDTH + SCREENSHOT_GAP + MIN_TEXT_WIDTH + TEXT_RIGHT_PADDING
+            < SCREENSHOT_LEFT_PAD
+                + SCREENSHOT_MIN_WIDTH
+                + SCREENSHOT_GAP
+                + MIN_TEXT_WIDTH
+                + TEXT_RIGHT_PADDING
         {
             return None;
         }
 
-        let max_screenshot = body_width
-            .saturating_sub(SCREENSHOT_LEFT_PAD + MIN_TEXT_WIDTH + SCREENSHOT_GAP + TEXT_RIGHT_PADDING);
+        let max_screenshot = body_width.saturating_sub(
+            SCREENSHOT_LEFT_PAD + MIN_TEXT_WIDTH + SCREENSHOT_GAP + TEXT_RIGHT_PADDING,
+        );
         if max_screenshot < SCREENSHOT_MIN_WIDTH {
             return None;
         }
@@ -947,7 +1048,7 @@ impl BrowserSessionCell {
         picker_ref.as_ref().unwrap().clone()
     }
 
-fn compute_screenshot_rows(&self, screenshot_cols: usize) -> Option<usize> {
+    fn compute_screenshot_rows(&self, screenshot_cols: usize) -> Option<usize> {
         if screenshot_cols == 0 {
             return None;
         }
@@ -982,20 +1083,18 @@ fn compute_screenshot_rows(&self, screenshot_cols: usize) -> Option<usize> {
     fn build_plain_summary(&self) -> Vec<String> {
         let mut lines = Vec::new();
         let status = if self.completed { "done" } else { "running" };
-        lines.push(format!("Browser Session: {} [{}]", self.display_label(), status));
+        lines.push(format!(
+            "Browser Session: {} [{}]",
+            self.display_label(),
+            status
+        ));
         if let Some(url) = &self.url {
             lines.push(format!("Opened: {}", url));
         }
         if let Some(code) = &self.status_code {
             lines.push(format!("Status: {}", code));
         }
-        for action in self
-            .actions
-            .iter()
-            .rev()
-            .take(3)
-            .rev()
-        {
+        for action in self.actions.iter().rev().take(3).rev() {
             lines.push(format!("Action: {}", format_action_line(action)));
         }
         if let Some(path) = &self.screenshot_path {
@@ -1015,11 +1114,7 @@ impl HistoryCell for BrowserSessionCell {
     }
 
     fn gutter_symbol(&self) -> Option<&'static str> {
-        if self.completed {
-            Some("✔")
-        } else {
-            None
-        }
+        if self.completed { Some("✔") } else { None }
     }
 
     fn kind(&self) -> HistoryCellType {
@@ -1032,7 +1127,10 @@ impl HistoryCell for BrowserSessionCell {
     }
 
     fn display_lines(&self) -> Vec<Line<'static>> {
-        self.build_plain_summary().into_iter().map(Line::from).collect()
+        self.build_plain_summary()
+            .into_iter()
+            .map(Line::from)
+            .collect()
     }
 
     fn desired_height(&self, width: u16) -> u16 {
@@ -1134,7 +1232,6 @@ impl BrowserSessionCell {
             return;
         }
 
-
         let path = Path::new(path_str);
         let rows_to_copy = (visible_bottom - visible_top) as u16;
         if rows_to_copy == 0 {
@@ -1170,7 +1267,10 @@ impl BrowserSessionCell {
 
         if !is_partially_visible {
             let protocol_target = Rect::new(0, 0, screenshot_width, full_height);
-            if self.ensure_protocol(path, protocol_target, &picker).is_err() {
+            if self
+                .ensure_protocol(path, protocol_target, &picker)
+                .is_err()
+            {
                 self.render_screenshot_placeholder(path, placeholder_area, buf);
                 return;
             }
@@ -1212,7 +1312,9 @@ impl BrowserSessionCell {
                 if dest_col >= area_right {
                     break;
                 }
-                let Some(src_cell) = offscreen.cell((col, src_row)) else { continue; };
+                let Some(src_cell) = offscreen.cell((col, src_row)) else {
+                    continue;
+                };
                 if let Some(dest_cell) = buf.cell_mut((dest_col, dest_row)) {
                     *dest_cell = src_cell.clone();
                 }
@@ -1221,8 +1323,10 @@ impl BrowserSessionCell {
     }
 
     fn render_screenshot_placeholder(&self, path: &Path, area: Rect, buf: &mut Buffer) {
-        use ratatui::style::{Modifier, Style};
-        use ratatui::widgets::{Block, Borders};
+        use ratatui::style::Modifier;
+        use ratatui::style::Style;
+        use ratatui::widgets::Block;
+        use ratatui::widgets::Borders;
 
         let filename = path
             .file_name()
@@ -1285,10 +1389,14 @@ impl BrowserSessionCell {
 
         Ok(())
     }
-
 }
 
-fn wrap_card_lines(text: &str, body_width: usize, indent_cols: usize, right_padding: usize) -> Vec<String> {
+fn wrap_card_lines(
+    text: &str,
+    body_width: usize,
+    indent_cols: usize,
+    right_padding: usize,
+) -> Vec<String> {
     let available = body_width
         .saturating_sub(indent_cols)
         .saturating_sub(right_padding);
@@ -1375,8 +1483,7 @@ fn split_long_card_word(word: &str, width: usize) -> Vec<String> {
 }
 
 fn string_display_width(text: &str) -> usize {
-    text
-        .chars()
+    text.chars()
         .map(|ch| UnicodeWidthChar::width(ch).unwrap_or(0))
         .sum()
 }
@@ -1384,7 +1491,12 @@ fn string_display_width(text: &str) -> usize {
 fn format_action_summary(action: &BrowserAction) -> String {
     match (&action.target, &action.value, &action.outcome) {
         (Some(target), Some(value), Some(outcome)) => {
-            format!("{} {} → {}", action.action, target, outcome_for_display(outcome, value))
+            format!(
+                "{} {} → {}",
+                action.action,
+                target,
+                outcome_for_display(outcome, value)
+            )
         }
         (Some(target), Some(value), None) => {
             format!("{} {} = {}", action.action, target, value)
@@ -1503,7 +1615,9 @@ fn format_action_entry(action: &BrowserAction, time_label: String) -> ActionEntr
                 .unwrap_or_else(|| {
                     format_action_summary(action)
                         .strip_prefix(other)
-                        .map(|suffix| suffix.trim_start_matches(|c| c == ' ' || c == ':' || c == '-'))
+                        .map(|suffix| {
+                            suffix.trim_start_matches(|c| c == ' ' || c == ':' || c == '-')
+                        })
                         .filter(|suffix| !suffix.is_empty())
                         .map(|suffix| suffix.to_string())
                         .unwrap_or_else(|| format_action_summary(action))
@@ -1551,12 +1665,7 @@ fn titleize_action(raw: &str) -> String {
 
 fn sanitize_pressed_detail(raw: &str) -> String {
     let mut candidate = raw;
-    const PREFIXES: &[&str] = &[
-        "pressed key:",
-        "press key:",
-        "key pressed:",
-        "key:",
-    ];
+    const PREFIXES: &[&str] = &["pressed key:", "press key:", "key pressed:", "key:"];
     for prefix in PREFIXES {
         if let Some(rest) = strip_prefix_ignore_case(candidate, prefix) {
             candidate = rest;
@@ -1660,17 +1769,9 @@ fn extract_status_code(outcome: &str) -> Option<String> {
     if trimmed.len() < 3 {
         return None;
     }
-    let code: String = trimmed
-        .chars()
-        .take_while(|c| c.is_ascii_digit())
-        .collect();
-    if code.len() == 3 {
-        Some(code)
-    } else {
-        None
-    }
+    let code: String = trimmed.chars().take_while(|c| c.is_ascii_digit()).collect();
+    if code.len() == 3 { Some(code) } else { None }
 }
-
 
 impl crate::chatwidget::tool_cards::ToolCardCell for BrowserSessionCell {
     fn tool_card_key(&self) -> Option<&str> {

@@ -30,133 +30,154 @@ mod upgrade;
 mod wait_status;
 mod web_search;
 
-pub(crate) use assistant::{
-    assistant_markdown_lines,
-    compute_assistant_layout,
-    AssistantLayoutCache,
-    AssistantMarkdownCell,
-};
-pub(crate) use animated::{AnimatedWelcomeCell, new_animated_welcome};
-pub(crate) use background::{
-    new_background_event,
-    new_connecting_mcp_status,
-    BackgroundEventCell,
-};
+pub(crate) use crate::history::compat::ContextRecord;
+pub(crate) use crate::history::compat::ExecStatus;
+pub(crate) use crate::history::state::ExploreEntryStatus;
+pub(crate) use crate::insert_history::word_wrap_lines;
+pub(crate) use crate::util::buffer::fill_rect;
+pub(crate) use crate::util::buffer::write_line;
+pub(crate) use agent::AgentDetail;
+pub(crate) use agent::AgentRunCell;
+pub(crate) use agent::AgentStatusKind;
+pub(crate) use agent::AgentStatusPreview;
+pub(crate) use agent::StepProgress;
+pub(crate) use animated::AnimatedWelcomeCell;
+pub(crate) use animated::new_animated_welcome;
+pub(crate) use assistant::AssistantLayoutCache;
+pub(crate) use assistant::AssistantMarkdownCell;
+pub(crate) use assistant::assistant_markdown_lines;
+pub(crate) use assistant::compute_assistant_layout;
+pub(crate) use auto_drive::AutoDriveActionKind;
+pub(crate) use auto_drive::AutoDriveCardCell;
+pub(crate) use auto_drive::AutoDriveStatus;
+pub(crate) use background::BackgroundEventCell;
+pub(crate) use background::new_background_event;
+pub(crate) use background::new_connecting_mcp_status;
+pub(crate) use browser::BrowserSessionCell;
 pub(crate) use context::ContextCell;
-pub(crate) use core::{
-    CommandOutput,
-    ExecKind,
-    gutter_symbol_for_kind,
-    HistoryCell,
-    HistoryCellType,
-    PatchEventType,
-    PatchKind,
-    ToolCellStatus,
-};
-pub(crate) use diff::{diff_lines_from_record, diff_record_from_string, DiffCell};
+pub(crate) use core::CommandOutput;
+pub(crate) use core::ExecKind;
+pub(crate) use core::HistoryCell;
+pub(crate) use core::HistoryCellType;
+pub(crate) use core::PatchEventType;
+pub(crate) use core::PatchKind;
+pub(crate) use core::ToolCellStatus;
+pub(crate) use core::gutter_symbol_for_kind;
+pub(crate) use diff::DiffCell;
+pub(crate) use diff::diff_lines_from_record;
+pub(crate) use diff::diff_record_from_string;
 #[allow(unused_imports)]
-pub(crate) use diff::{new_diff_cell_from_string, new_diff_output};
-pub(crate) use exec::{
-    display_lines_from_record as exec_display_lines_from_record,
-    new_active_exec_command,
-    new_completed_exec_command,
-    ExecCell,
-};
+pub(crate) use diff::new_diff_cell_from_string;
+#[allow(unused_imports)]
+pub(crate) use diff::new_diff_output;
+pub(crate) use exec::ExecCell;
 #[allow(unused_imports)]
 pub(crate) use exec::ParsedExecMetadata;
-pub(crate) use exec_helpers::{
-    action_enum_from_parsed,
-    emphasize_shell_command_name,
-    exec_command_lines,
-    exec_render_parts_parsed,
-    exec_render_parts_parsed_with_meta,
-    first_context_path,
-    format_inline_script_for_display,
-    insert_line_breaks_after_double_ampersand,
-    normalize_shell_command_display,
-    parse_read_line_annotation,
-    parse_read_line_annotation_with_range,
-    running_status_line,
-};
-pub(crate) use exec_merged::{merged_exec_lines_from_record, MergedExecCell};
-pub(crate) use explore::{
-    explore_lines_from_record_with_force,
-    explore_lines_without_truncation,
-    explore_record_push_from_parsed,
-    explore_record_update_status,
-    ExploreAggregationCell,
-};
+pub(crate) use exec::display_lines_from_record as exec_display_lines_from_record;
+pub(crate) use exec::new_active_exec_command;
+pub(crate) use exec::new_completed_exec_command;
+pub(crate) use exec_helpers::action_enum_from_parsed;
+pub(crate) use exec_helpers::emphasize_shell_command_name;
+pub(crate) use exec_helpers::exec_command_lines;
+pub(crate) use exec_helpers::exec_render_parts_parsed;
+pub(crate) use exec_helpers::exec_render_parts_parsed_with_meta;
+pub(crate) use exec_helpers::first_context_path;
+pub(crate) use exec_helpers::format_inline_script_for_display;
+pub(crate) use exec_helpers::insert_line_breaks_after_double_ampersand;
+pub(crate) use exec_helpers::normalize_shell_command_display;
+pub(crate) use exec_helpers::parse_read_line_annotation;
+pub(crate) use exec_helpers::parse_read_line_annotation_with_range;
+pub(crate) use exec_helpers::running_status_line;
+pub(crate) use exec_merged::MergedExecCell;
+pub(crate) use exec_merged::merged_exec_lines_from_record;
+pub(crate) use explore::ExploreAggregationCell;
 #[allow(unused_imports)]
 pub(crate) use explore::explore_lines_from_record;
-pub(crate) use formatting::{
-    clean_wait_command,
-    normalize_overwrite_sequences,
-    output_lines,
-    pretty_provider_name,
-    trim_empty_lines,
-};
+pub(crate) use explore::explore_lines_from_record_with_force;
+pub(crate) use explore::explore_lines_without_truncation;
+pub(crate) use explore::explore_record_push_from_parsed;
+pub(crate) use explore::explore_record_update_status;
 #[allow(unused_imports)]
-pub(crate) use formatting::{build_preview_lines, line_to_plain_text, lines_to_plain_text};
+pub(crate) use formatting::build_preview_lines;
+pub(crate) use formatting::clean_wait_command;
+#[allow(unused_imports)]
+pub(crate) use formatting::line_to_plain_text;
+#[allow(unused_imports)]
+pub(crate) use formatting::lines_to_plain_text;
+pub(crate) use formatting::normalize_overwrite_sequences;
+pub(crate) use formatting::output_lines;
+pub(crate) use formatting::pretty_provider_name;
+pub(crate) use formatting::trim_empty_lines;
 pub(crate) use frozen::FrozenHistoryCell;
+pub(crate) use hanzo_common::elapsed::format_duration;
 pub(crate) use image::ImageOutputCell;
 pub(crate) use loading::LoadingCell;
 #[allow(unused_imports)]
 pub(crate) use loading::new_loading_cell;
-pub(crate) use patch::{new_patch_apply_failure, new_patch_event, PatchSummaryCell};
-pub(crate) use plain::{
-    new_error_event,
-    new_model_output,
-    new_popular_commands_notice,
-    new_prompts_output,
-    new_queued_user_prompt,
-    new_reasoning_output,
-    new_session_info,
-    new_status_output,
-    new_user_prompt,
-    new_warning_event,
-    plain_message_state_from_lines,
-    plain_message_state_from_paragraphs,
-    plain_role_for_kind,
-    PlainHistoryCell,
-};
+pub(crate) use patch::PatchSummaryCell;
+pub(crate) use patch::new_patch_apply_failure;
+pub(crate) use patch::new_patch_event;
+pub(crate) use plain::PlainHistoryCell;
+pub(crate) use plain::new_error_event;
+pub(crate) use plain::new_model_output;
+pub(crate) use plain::new_popular_commands_notice;
+pub(crate) use plain::new_prompts_output;
+pub(crate) use plain::new_queued_user_prompt;
+pub(crate) use plain::new_reasoning_output;
+pub(crate) use plain::new_session_info;
+pub(crate) use plain::new_status_output;
 #[allow(unused_imports)]
 pub(crate) use plain::new_text_line;
-pub(crate) use plan_update::{new_plan_update, PlanUpdateCell};
-pub(crate) use rate_limits::RateLimitsCell;
-pub(crate) use reasoning::CollapsibleReasoningCell;
-pub(crate) use registry::{cell_from_record, lines_from_record, record_from_cell};
-pub(crate) use stream::{new_streaming_content, stream_lines_from_state, StreamingContentCell};
-pub(crate) use tool::{RunningToolCallCell, ToolCallCell};
-pub(crate) use tool_factory::{
-    new_completed_custom_tool_call,
-    new_completed_mcp_tool_call,
-    new_completed_web_fetch_tool_call,
-    new_running_browser_tool_call,
-    new_running_custom_tool_call,
-    new_running_mcp_tool_call,
-};
-#[allow(unused_imports)]
-pub(crate) use tool_factory::{
-    new_active_custom_tool_call,
-    new_active_mcp_tool_call,
-    WebFetchToolCell,
-};
-pub(crate) use upgrade::{new_upgrade_prelude, UpgradeNoticeCell};
-pub(crate) use wait_status::{new_completed_wait_tool_call, WaitStatusCell};
-pub(crate) use auto_drive::{AutoDriveActionKind, AutoDriveCardCell, AutoDriveStatus};
-pub(crate) use browser::BrowserSessionCell;
-pub(crate) use web_search::{WebSearchSessionCell, WebSearchStatus};
-pub(crate) use agent::{AgentDetail, AgentRunCell, AgentStatusKind, AgentStatusPreview, StepProgress};
-pub(crate) use crate::history::state::ExploreEntryStatus;
-pub(crate) use crate::insert_history::word_wrap_lines;
-pub(crate) use crate::util::buffer::{fill_rect, write_line};
-pub(crate) use hanzo_common::elapsed::format_duration;
-pub(crate) use crate::history::compat::{ContextRecord, ExecStatus};
+pub(crate) use plain::new_user_prompt;
+pub(crate) use plain::new_warning_event;
+pub(crate) use plain::plain_message_state_from_lines;
+pub(crate) use plain::plain_message_state_from_paragraphs;
+pub(crate) use plain::plain_role_for_kind;
+pub(crate) use plan_update::PlanUpdateCell;
+pub(crate) use plan_update::new_plan_update;
 pub(crate) use ratatui::prelude::Alignment;
-pub(crate) use ratatui::prelude::{Buffer, Rect, Stylize};
-pub(crate) use ratatui::style::{Modifier, Style};
-pub(crate) use ratatui::text::{Line, Span, Text};
-pub(crate) use ratatui::widgets::{Block, Borders, Padding, Paragraph, Widget, Wrap};
+pub(crate) use ratatui::prelude::Buffer;
+pub(crate) use ratatui::prelude::Rect;
+pub(crate) use ratatui::prelude::Stylize;
+pub(crate) use ratatui::style::Modifier;
+pub(crate) use ratatui::style::Style;
+pub(crate) use ratatui::text::Line;
+pub(crate) use ratatui::text::Span;
+pub(crate) use ratatui::text::Text;
+pub(crate) use ratatui::widgets::Block;
+pub(crate) use ratatui::widgets::Borders;
+pub(crate) use ratatui::widgets::Padding;
+pub(crate) use ratatui::widgets::Paragraph;
+pub(crate) use ratatui::widgets::Widget;
 #[allow(unused_imports)]
 pub(crate) use ratatui::widgets::WidgetRef;
+pub(crate) use ratatui::widgets::Wrap;
+pub(crate) use rate_limits::RateLimitsCell;
+pub(crate) use reasoning::CollapsibleReasoningCell;
+pub(crate) use registry::cell_from_record;
+pub(crate) use registry::lines_from_record;
+pub(crate) use registry::record_from_cell;
 pub(crate) use std::path::Path;
+pub(crate) use stream::StreamingContentCell;
+pub(crate) use stream::new_streaming_content;
+pub(crate) use stream::stream_lines_from_state;
+pub(crate) use tool::RunningToolCallCell;
+pub(crate) use tool::ToolCallCell;
+#[allow(unused_imports)]
+pub(crate) use tool_factory::WebFetchToolCell;
+#[allow(unused_imports)]
+pub(crate) use tool_factory::new_active_custom_tool_call;
+#[allow(unused_imports)]
+pub(crate) use tool_factory::new_active_mcp_tool_call;
+pub(crate) use tool_factory::new_completed_custom_tool_call;
+pub(crate) use tool_factory::new_completed_mcp_tool_call;
+pub(crate) use tool_factory::new_completed_web_fetch_tool_call;
+pub(crate) use tool_factory::new_running_browser_tool_call;
+pub(crate) use tool_factory::new_running_custom_tool_call;
+pub(crate) use tool_factory::new_running_mcp_tool_call;
+pub(crate) use upgrade::UpgradeNoticeCell;
+pub(crate) use upgrade::new_upgrade_prelude;
+pub(crate) use wait_status::WaitStatusCell;
+pub(crate) use wait_status::new_completed_wait_tool_call;
+pub(crate) use web_search::WebSearchSessionCell;
+pub(crate) use web_search::WebSearchStatus;

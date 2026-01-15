@@ -10,14 +10,14 @@ use std::sync::atomic::AtomicBool;
 use time::OffsetDateTime;
 use time::PrimitiveDateTime;
 use time::format_description::FormatItem;
-use time::macros::format_description;
 use time::format_description::well_known::Rfc3339;
+use time::macros::format_description;
 use uuid::Uuid;
 
 use super::SESSIONS_SUBDIR;
 use crate::config::resolve_code_path_for_read;
-use crate::protocol::event_msg_from_protocol;
 use crate::protocol::EventMsg;
+use crate::protocol::event_msg_from_protocol;
 use hanzo_protocol::protocol::RolloutItem;
 use hanzo_protocol::protocol::RolloutLine;
 use hanzo_protocol::protocol::SessionSource;
@@ -251,9 +251,8 @@ async fn traverse_directories_for_paths(
         }
     }
 
-    candidates.sort_by_key(|(modified, ts, sid, _)| {
-        (Reverse(*modified), Reverse(*ts), Reverse(*sid))
-    });
+    candidates
+        .sort_by_key(|(modified, ts, sid, _)| (Reverse(*modified), Reverse(*ts), Reverse(*sid)));
 
     let mut items: Vec<ConversationItem> = Vec::with_capacity(page_size.min(candidates.len()));
     for (_, _, _, item) in candidates.into_iter().take(page_size) {
@@ -390,7 +389,9 @@ async fn read_head_and_tail(
                     }
                 }
             }
-            RolloutItem::ResponseItem(_) | RolloutItem::Compacted(_) | RolloutItem::TurnContext(_) => {}
+            RolloutItem::ResponseItem(_)
+            | RolloutItem::Compacted(_)
+            | RolloutItem::TurnContext(_) => {}
         }
 
         summary
@@ -497,9 +498,9 @@ fn snapshot_to_rollout_path(path: &Path) -> Option<PathBuf> {
 
 #[cfg(test)]
 mod tests {
+    use super::SESSIONS_SUBDIR;
     use super::find_conversation_path_by_id_str;
     use super::snapshot_to_rollout_path;
-    use super::SESSIONS_SUBDIR;
     use std::fs;
     use std::path::PathBuf;
     use tempfile::tempdir;

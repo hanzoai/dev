@@ -481,17 +481,12 @@ mod tests {
     #[test]
     fn gpt_5_2_codex_hidden_for_api_key_auth() {
         let presets = builtin_model_presets(Some(AuthMode::ApiKey));
-        assert!(presets
-            .iter()
-            .all(|preset| preset.id != "gpt-5.2-codex"));
+        assert!(presets.iter().all(|preset| preset.id != "gpt-5.2-codex"));
     }
 
     #[test]
     fn clamp_reasoning_effort_downgrades_to_supported_level() {
-        let clamped = clamp_reasoning_effort_for_model(
-            "gpt-5.1-codex",
-            ReasoningEffort::XHigh,
-        );
+        let clamped = clamp_reasoning_effort_for_model("gpt-5.1-codex", ReasoningEffort::XHigh);
         assert_eq!(clamped, ReasoningEffort::High);
 
         let clamped_minimal =

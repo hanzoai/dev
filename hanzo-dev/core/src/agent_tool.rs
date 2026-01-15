@@ -1,29 +1,35 @@
+use crate::protocol::AgentSourceKind;
+use crate::spawn::spawn_tokio_command_with_retry;
 use chrono::DateTime;
 use chrono::Duration;
 use chrono::Utc;
 use serde::Deserialize;
 use serde::Serialize;
-use uuid::Uuid;
-use std::fs::{self, OpenOptions};
-use std::io::Write as IoWrite;
 use std::collections::BTreeMap;
 use std::collections::HashMap;
+use std::fs::OpenOptions;
+use std::fs::{self};
+use std::io::Write as IoWrite;
 use std::path::PathBuf;
 use std::process::Stdio;
+use std::sync::Arc;
+use std::sync::atomic::AtomicBool;
+use std::sync::atomic::Ordering;
+use std::thread;
+use std::time::Duration as StdDuration;
+use std::time::Instant;
+use tokio::io::AsyncBufReadExt;
+use tokio::io::AsyncRead;
+use tokio::io::AsyncWriteExt;
+use tokio::io::BufReader;
 use tokio::process::Command;
-use tokio::io::{AsyncBufReadExt, AsyncRead, AsyncWriteExt, BufReader};
 use tokio::runtime::Builder as TokioRuntimeBuilder;
 use tokio::sync::RwLock;
 use tokio::sync::mpsc;
 use tokio::task::JoinHandle;
 use tokio::time::Duration as TokioDuration;
-use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::Arc;
-use std::thread;
-use std::time::{Duration as StdDuration, Instant};
-use crate::spawn::spawn_tokio_command_with_retry;
-use crate::protocol::AgentSourceKind;
 use tracing::warn;
+use uuid::Uuid;
 
 #[cfg(target_os = "windows")]
 fn default_pathext_or_default() -> Vec<String> {
@@ -40,13 +46,15 @@ fn default_pathext_or_default() -> Vec<String> {
         // .ps1 because PowerShell users can invoke scripts without specifying
         // the extension; CreateProcess still resolves fine when we provide the
         // full path with extension.
-        .unwrap_or_else(|| vec![
-            ".com".into(),
-            ".exe".into(),
-            ".bat".into(),
-            ".cmd".into(),
-            ".ps1".into(),
-        ])
+        .unwrap_or_else(|| {
+            vec![
+                ".com".into(),
+                ".exe".into(),
+                ".bat".into(),
+                ".cmd".into(),
+                ".ps1".into(),
+            ]
+        })
 }
 
 #[cfg(target_os = "windows")]
@@ -64,7 +72,9 @@ fn resolve_in_path(command: &str) -> Option<std::path::PathBuf> {
 
     // Search PATH with PATHEXT semantics and return the first hit.
     let exts = default_pathext_or_default();
-    let Some(path_os) = std::env::var_os("PATH") else { return None; };
+    let Some(path_os) = std::env::var_os("PATH") else {
+        return None;
+    };
     let has_ext = cmd_path.extension().is_some();
     for dir in std::env::split_paths(&path_os) {
         if dir.as_os_str().is_empty() {
@@ -88,13 +98,14 @@ fn resolve_in_path(command: &str) -> Option<std::path::PathBuf> {
     None
 }
 
-use crate::agent_defaults::{agent_model_spec, default_params_for};
-use shlex::split as shlex_split;
+use crate::agent_defaults::agent_model_spec;
+use crate::agent_defaults::default_params_for;
 use crate::config_types::AgentConfig;
 use crate::openai_tools::JsonSchema;
 use crate::openai_tools::OpenAiTool;
 use crate::openai_tools::ResponsesApiTool;
 use crate::protocol::AgentInfo;
+use shlex::split as shlex_split;
 
 fn current_code_binary_path() -> Result<std::path::PathBuf, String> {
     if let Ok(path) = std::env::var("CODE_BINARY_PATH") {
@@ -107,7 +118,8 @@ fn current_code_binary_path() -> Result<std::path::PathBuf, String> {
         }
         return Ok(p);
     }
-    let exe = std::env::current_exe().map_err(|e| format!("Failed to resolve current executable: {}", e))?;
+    let exe = std::env::current_exe()
+        .map_err(|e| format!("Failed to resolve current executable: {}", e))?;
 
     // If the kernel reports the path as "(deleted)", strip the suffix and prefer the live file
     // at the same location (common when a rebuild replaces the inode under a long-running process).
@@ -318,14 +330,18 @@ impl AgentManager {
             loop {
                 ticker.tick().await;
 
-                let Some(manager_arc) = manager.upgrade() else { break; };
+                let Some(manager_arc) = manager.upgrade() else {
+                    break;
+                };
 
                 let mut mgr = manager_arc.write().await;
                 let now = Utc::now();
                 let timeout_ids: Vec<String> = mgr
                     .agents
                     .iter()
-                    .filter(|(_, agent)| matches!(agent.status, AgentStatus::Pending | AgentStatus::Running))
+                    .filter(|(_, agent)| {
+                        matches!(agent.status, AgentStatus::Pending | AgentStatus::Running)
+                    })
                     .filter(|(_, agent)| now - agent.last_activity > timeout)
                     .map(|(id, _)| id.clone())
                     .collect();
@@ -373,7 +389,9 @@ impl AgentManager {
     }
 
     fn append_agent_log(&self, log_tag: &str, line: &str) {
-        let Some(root) = &self.debug_log_root else { return; };
+        let Some(root) = &self.debug_log_root else {
+            return;
+        };
         let dir = root.join(log_tag);
         if let Err(err) = fs::create_dir_all(&dir) {
             warn!("failed to create agent log dir {:?}: {}", dir, err);
@@ -448,14 +466,13 @@ impl AgentManager {
                 .values()
                 .next()
                 .map(|agent| {
-                    let context = agent
-                        .context
-                        .as_ref()
-                        .and_then(|value| if value.trim().is_empty() {
+                    let context = agent.context.as_ref().and_then(|value| {
+                        if value.trim().is_empty() {
                             None
                         } else {
                             Some(value.clone())
-                        });
+                        }
+                    });
                     let task = if agent.prompt.trim().is_empty() {
                         None
                     } else {
@@ -464,7 +481,11 @@ impl AgentManager {
                     (context, task)
                 })
                 .unwrap_or((None, None));
-            let payload = AgentStatusUpdatePayload { agents, context, task };
+            let payload = AgentStatusUpdatePayload {
+                agents,
+                context,
+                task,
+            };
             let _ = sender.send(payload);
         }
     }
@@ -547,23 +568,22 @@ impl AgentManager {
         source_kind: Option<AgentSourceKind>,
         reasoning_effort: hanzo_protocol::config_types::ReasoningEffort,
     ) -> String {
-        self
-            .create_agent_internal(
-                model,
-                name,
-                prompt,
-                context,
-                output_goal,
-                files,
-                read_only,
-                batch_id,
-                config,
-                worktree_branch,
-                worktree_base,
-                source_kind,
-                reasoning_effort,
-            )
-            .await
+        self.create_agent_internal(
+            model,
+            name,
+            prompt,
+            context,
+            output_goal,
+            files,
+            read_only,
+            batch_id,
+            config,
+            worktree_branch,
+            worktree_base,
+            source_kind,
+            reasoning_effort,
+        )
+        .await
     }
 
     async fn create_agent_internal(
@@ -585,9 +605,7 @@ impl AgentManager {
         let agent_id = Uuid::new_v4().to_string();
 
         let log_tag = match source_kind {
-            Some(AgentSourceKind::AutoReview) => {
-                Some(format!("agents/auto-review/{}", agent_id))
-            }
+            Some(AgentSourceKind::AutoReview) => Some(format!("agents/auto-review/{}", agent_id)),
             _ => None,
         };
 
@@ -736,7 +754,11 @@ impl AgentManager {
         let debug_enabled = self.debug_log_root.is_some();
 
         if let Some((log_tag, log_lines)) = self.agents.get_mut(agent_id).map(|agent| {
-            let log_tag = if debug_enabled { agent.log_tag.clone() } else { None };
+            let log_tag = if debug_enabled {
+                agent.log_tag.clone()
+            } else {
+                None
+            };
 
             let mut log_lines: Vec<String> = Vec::new();
             if debug_enabled {
@@ -785,7 +807,11 @@ impl AgentManager {
 
         if let Some((log_tag, entry)) = self.agents.get_mut(agent_id).map(|agent| {
             let entry = format!("{}: {}", Utc::now().format("%H:%M:%S"), message);
-            let log_tag = if debug_enabled { agent.log_tag.clone() } else { None };
+            let log_tag = if debug_enabled {
+                agent.log_tag.clone()
+            } else {
+                None
+            };
             agent.progress.push(entry.clone());
             Self::record_activity(agent);
             (log_tag, entry)
@@ -974,13 +1000,13 @@ async fn execute_agent(agent_id: String, config: Option<AgentConfig>) {
                         drop(manager);
 
                         // Prepare optional review-output JSON path for /review agents
-                        let review_output_json_path: Option<PathBuf> = agent
-                            .source_kind
-                            .as_ref()
-                            .and_then(|kind| matches!(kind, AgentSourceKind::AutoReview).then(|| {
-                                let filename = format!("{}.review-output.json", agent_id);
-                                std::env::temp_dir().join(filename)
-                            }));
+                        let review_output_json_path: Option<PathBuf> =
+                            agent.source_kind.as_ref().and_then(|kind| {
+                                matches!(kind, AgentSourceKind::AutoReview).then(|| {
+                                    let filename = format!("{}.review-output.json", agent_id);
+                                    std::env::temp_dir().join(filename)
+                                })
+                            });
                         review_output_json_path_capture = review_output_json_path.clone();
 
                         // Execute with full permissions in the worktree
@@ -1050,10 +1076,24 @@ async fn execute_agent(agent_id: String, config: Option<AgentConfig>) {
                 if !spec.is_enabled() {
                     Err(gating_error_message(spec))
                 } else {
-                    execute_cloud_built_in_streaming(&agent_id, &full_prompt, None, config, spec.slug).await
+                    execute_cloud_built_in_streaming(
+                        &agent_id,
+                        &full_prompt,
+                        None,
+                        config,
+                        spec.slug,
+                    )
+                    .await
                 }
             } else {
-                execute_cloud_built_in_streaming(&agent_id, &full_prompt, None, config, model.as_str()).await
+                execute_cloud_built_in_streaming(
+                    &agent_id,
+                    &full_prompt,
+                    None,
+                    config,
+                    model.as_str(),
+                )
+                .await
             }
         } else {
             execute_model_with_permissions(
@@ -1078,7 +1118,10 @@ async fn execute_agent(agent_id: String, config: Option<AgentConfig>) {
     manager.update_agent_result(&agent_id, final_result).await;
 }
 
-fn prefer_json_result(path: Option<&PathBuf>, fallback: Result<String, String>) -> Result<String, String> {
+fn prefer_json_result(
+    path: Option<&PathBuf>,
+    fallback: Result<String, String>,
+) -> Result<String, String> {
     if let Some(p) = path {
         if let Ok(json) = std::fs::read_to_string(p) {
             return Ok(json);
@@ -1101,12 +1144,14 @@ async fn execute_model_with_permissions(
 ) -> Result<String, String> {
     // Helper: cross‑platform check whether an executable is available in PATH
     // and is directly spawnable by std::process::Command (no shell wrappers).
-fn command_exists(cmd: &str) -> bool {
+    fn command_exists(cmd: &str) -> bool {
         // Absolute/relative path with separators: check directly (files only).
         if cmd.contains(std::path::MAIN_SEPARATOR) || cmd.contains('/') || cmd.contains('\\') {
             let path = std::path::Path::new(cmd);
             if path.extension().is_some() {
-                return std::fs::metadata(path).map(|m| m.is_file()).unwrap_or(false);
+                return std::fs::metadata(path)
+                    .map(|m| m.is_file())
+                    .unwrap_or(false);
             }
 
             #[cfg(target_os = "windows")]
@@ -1124,7 +1169,9 @@ fn command_exists(cmd: &str) -> bool {
                 }
             }
 
-            return std::fs::metadata(path).map(|m| m.is_file()).unwrap_or(false);
+            return std::fs::metadata(path)
+                .map(|m| m.is_file())
+                .unwrap_or(false);
         }
 
         #[cfg(target_os = "windows")]
@@ -1140,10 +1187,7 @@ fn command_exists(cmd: &str) -> bool {
             let candidates: Vec<String> = if std::path::Path::new(cmd).extension().is_some() {
                 vec![cmd.to_string()]
             } else {
-                exts
-                    .iter()
-                    .map(|ext| format!("{cmd}{ext}"))
-                    .collect()
+                exts.iter().map(|ext| format!("{cmd}{ext}")).collect()
             };
 
             for dir in path_iter {
@@ -1161,14 +1205,20 @@ fn command_exists(cmd: &str) -> bool {
         #[cfg(not(target_os = "windows"))]
         {
             use std::os::unix::fs::PermissionsExt;
-            let Some(path_os) = std::env::var_os("PATH") else { return false; };
+            let Some(path_os) = std::env::var_os("PATH") else {
+                return false;
+            };
             for dir in std::env::split_paths(&path_os) {
-                if dir.as_os_str().is_empty() { continue; }
+                if dir.as_os_str().is_empty() {
+                    continue;
+                }
                 let candidate = dir.join(cmd);
                 if let Ok(meta) = std::fs::metadata(&candidate) {
                     if meta.is_file() {
                         let mode = meta.permissions().mode();
-                        if mode & 0o111 != 0 { return true; }
+                        if mode & 0o111 != 0 {
+                            return true;
+                        }
                     }
                 }
             }
@@ -1178,7 +1228,11 @@ fn command_exists(cmd: &str) -> bool {
 
     let spec_opt = agent_model_spec(model)
         .or_else(|| config.as_ref().and_then(|cfg| agent_model_spec(&cfg.name)))
-        .or_else(|| config.as_ref().and_then(|cfg| agent_model_spec(&cfg.command)));
+        .or_else(|| {
+            config
+                .as_ref()
+                .and_then(|cfg| agent_model_spec(&cfg.command))
+        });
 
     if let Some(spec) = spec_opt {
         if !spec.is_enabled() {
@@ -1223,7 +1277,10 @@ fn command_exists(cmd: &str) -> bool {
     let model_lower = model.to_lowercase();
     let command_lower = command_for_spawn.to_ascii_lowercase();
     fn is_known_family(s: &str) -> bool {
-        matches!(s, "claude" | "gemini" | "qwen" | "codex" | "code" | "cloud" | "coder")
+        matches!(
+            s,
+            "claude" | "gemini" | "qwen" | "codex" | "code" | "cloud" | "coder"
+        )
     }
 
     let slug_for_defaults = spec_opt.map(|spec| spec.slug).unwrap_or(model);
@@ -1239,7 +1296,8 @@ fn command_exists(cmd: &str) -> bool {
     };
 
     let command_missing = !command_exists(&command_for_spawn);
-    let use_current_exe = should_use_current_exe_for_agent(family, command_missing, config.as_ref());
+    let use_current_exe =
+        should_use_current_exe_for_agent(family, command_missing, config.as_ref());
 
     let mut final_args: Vec<String> = command_extra_args;
 
@@ -1260,7 +1318,10 @@ fn command_exists(cmd: &str) -> bool {
     strip_model_flags(&mut final_args);
 
     let spec_model_args: Vec<String> = if let Some(spec) = spec_opt {
-        spec.model_args.iter().map(|arg| (*arg).to_string()).collect()
+        spec.model_args
+            .iter()
+            .map(|arg| (*arg).to_string())
+            .collect()
     } else {
         Vec::new()
     };
@@ -1303,7 +1364,13 @@ fn command_exists(cmd: &str) -> bool {
         "codex" | "code" => {
             let have_mode_args = config
                 .as_ref()
-                .map(|c| if read_only { c.args_read_only.is_some() } else { c.args_write.is_some() })
+                .map(|c| {
+                    if read_only {
+                        c.args_read_only.is_some()
+                    } else {
+                        c.args_write.is_some()
+                    }
+                })
                 .unwrap_or(false);
             if !have_mode_args {
                 let mut defaults = default_params_for(slug_for_defaults, read_only);
@@ -1323,7 +1390,13 @@ fn command_exists(cmd: &str) -> bool {
             }
             let have_mode_args = config
                 .as_ref()
-                .map(|c| if read_only { c.args_read_only.is_some() } else { c.args_write.is_some() })
+                .map(|c| {
+                    if read_only {
+                        c.args_read_only.is_some()
+                    } else {
+                        c.args_write.is_some()
+                    }
+                })
                 .unwrap_or(false);
             if !have_mode_args {
                 let mut defaults = default_params_for(slug_for_defaults, read_only);
@@ -1344,10 +1417,14 @@ fn command_exists(cmd: &str) -> bool {
     }
 
     let log_tag_owned = log_tag.map(str::to_string);
-    let debug_subagent = debug_subagents_enabled()
-        && matches!(source_kind, Some(AgentSourceKind::AutoReview));
+    let debug_subagent =
+        debug_subagents_enabled() && matches!(source_kind, Some(AgentSourceKind::AutoReview));
     let child_log_tag: Option<String> = if debug_subagent {
-        Some(log_tag_owned.clone().unwrap_or_else(|| format!("agents/{agent_id}")))
+        Some(
+            log_tag_owned
+                .clone()
+                .unwrap_or_else(|| format!("agents/{agent_id}")),
+        )
     } else {
         log_tag_owned
     };
@@ -1390,7 +1467,11 @@ fn command_exists(cmd: &str) -> bool {
     let mut env: std::collections::HashMap<String, String> = std::env::vars().collect();
     let orig_home: Option<String> = env.get("HOME").cloned();
     if let Some(ref cfg) = config {
-        if let Some(ref e) = cfg.env { for (k, v) in e { env.insert(k.clone(), v.clone()); } }
+        if let Some(ref e) = cfg.env {
+            for (k, v) in e {
+                env.insert(k.clone(), v.clone());
+            }
+        }
     }
 
     if debug_subagent {
@@ -1414,27 +1495,34 @@ fn command_exists(cmd: &str) -> bool {
 
     // Convenience: map common key names so external CLIs "just work".
     if let Some(google_key) = env.get("GOOGLE_API_KEY").cloned() {
-        env.entry("GEMINI_API_KEY".to_string()).or_insert(google_key);
+        env.entry("GEMINI_API_KEY".to_string())
+            .or_insert(google_key);
     }
     if let Some(claude_key) = env.get("CLAUDE_API_KEY").cloned() {
-        env.entry("ANTHROPIC_API_KEY".to_string()).or_insert(claude_key);
+        env.entry("ANTHROPIC_API_KEY".to_string())
+            .or_insert(claude_key);
     }
     if let Some(anthropic_key) = env.get("ANTHROPIC_API_KEY").cloned() {
-        env.entry("CLAUDE_API_KEY".to_string()).or_insert(anthropic_key);
+        env.entry("CLAUDE_API_KEY".to_string())
+            .or_insert(anthropic_key);
     }
     if let Some(anthropic_base) = env.get("ANTHROPIC_BASE_URL").cloned() {
-        env.entry("CLAUDE_BASE_URL".to_string()).or_insert(anthropic_base);
+        env.entry("CLAUDE_BASE_URL".to_string())
+            .or_insert(anthropic_base);
     }
     // Qwen/DashScope convenience: mirror API keys and base URLs both ways so
     // either variable name works across tools.
     if let Some(qwen_key) = env.get("QWEN_API_KEY").cloned() {
-        env.entry("DASHSCOPE_API_KEY".to_string()).or_insert(qwen_key);
+        env.entry("DASHSCOPE_API_KEY".to_string())
+            .or_insert(qwen_key);
     }
     if let Some(dashscope_key) = env.get("DASHSCOPE_API_KEY").cloned() {
-        env.entry("QWEN_API_KEY".to_string()).or_insert(dashscope_key);
+        env.entry("QWEN_API_KEY".to_string())
+            .or_insert(dashscope_key);
     }
     if let Some(qwen_base) = env.get("QWEN_BASE_URL").cloned() {
-        env.entry("DASHSCOPE_BASE_URL".to_string()).or_insert(qwen_base);
+        env.entry("DASHSCOPE_BASE_URL".to_string())
+            .or_insert(qwen_base);
     }
     if let Some(ds_base) = env.get("DASHSCOPE_BASE_URL").cloned() {
         env.entry("QWEN_BASE_URL".to_string()).or_insert(ds_base);
@@ -1443,9 +1531,12 @@ fn command_exists(cmd: &str) -> bool {
         env.insert("OPENAI_API_KEY".to_string(), String::new());
     }
     // Reduce startup overhead for Claude CLI: disable auto-updater/telemetry.
-    env.entry("DISABLE_AUTOUPDATER".to_string()).or_insert("1".to_string());
-    env.entry("CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC".to_string()).or_insert("1".to_string());
-    env.entry("DISABLE_ERROR_REPORTING".to_string()).or_insert("1".to_string());
+    env.entry("DISABLE_AUTOUPDATER".to_string())
+        .or_insert("1".to_string());
+    env.entry("CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC".to_string())
+        .or_insert("1".to_string());
+    env.entry("DISABLE_ERROR_REPORTING".to_string())
+        .or_insert("1".to_string());
     // Prefer explicit Claude config dir to avoid touching $HOME/.claude.json.
     // Do not force CLAUDE_CONFIG_DIR here; leave CLI free to use its default
     // (including Keychain) unless we explicitly redirect HOME below.
@@ -1465,7 +1556,9 @@ fn command_exists(cmd: &str) -> bool {
             program.clone(),
             args.clone(),
             Some(program.to_string_lossy().as_ref()),
-            working_dir.clone().unwrap_or_else(|| std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from("."))),
+            working_dir.clone().unwrap_or_else(|| {
+                std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from("."))
+            }),
             &SandboxPolicy::DangerFullAccess,
             StdioPolicy::RedirectForShellTool,
             env.clone(),
@@ -1604,7 +1697,8 @@ where
         chunk.push_str(clean);
         chunk.push('\n');
 
-        if chunk.len() >= STREAM_PROGRESS_BYTES || last_flush.elapsed() >= STREAM_PROGRESS_INTERVAL {
+        if chunk.len() >= STREAM_PROGRESS_BYTES || last_flush.elapsed() >= STREAM_PROGRESS_INTERVAL
+        {
             flush_progress(&agent_id, label, &mut chunk).await;
             last_flush = Instant::now();
         }
@@ -1643,7 +1737,9 @@ fn maybe_set_gemini_config_dir(env: &mut HashMap<String, String>, orig_home: Opt
         return;
     }
 
-    let Some(home) = orig_home else { return; };
+    let Some(home) = orig_home else {
+        return;
+    };
     let host_gem_cfg = std::path::PathBuf::from(&home).join(".gemini");
     if host_gem_cfg.is_dir() {
         env.insert(
@@ -1688,7 +1784,10 @@ pub(crate) fn should_use_current_exe_for_agent(
     }
 }
 
-fn resolve_program_path(use_current_exe: bool, command_for_spawn: &str) -> Result<std::path::PathBuf, String> {
+fn resolve_program_path(
+    use_current_exe: bool,
+    command_for_spawn: &str,
+) -> Result<std::path::PathBuf, String> {
     if use_current_exe {
         return current_code_binary_path();
     }
@@ -1742,11 +1841,14 @@ pub fn split_command_and_args(command: &str) -> (String, Vec<String>) {
     }
 }
 
-const AGENT_SMOKE_TEST_PROMPT: &str = "Reply only with the string \"ok\". Do not include any other words.";
+const AGENT_SMOKE_TEST_PROMPT: &str =
+    "Reply only with the string \"ok\". Do not include any other words.";
 const AGENT_SMOKE_TEST_EXPECTED: &str = "ok";
 const AGENT_SMOKE_TEST_TIMEOUT: TokioDuration = TokioDuration::from_secs(20);
 
-fn should_validate_in_read_only(_cfg: &AgentConfig) -> bool { true }
+fn should_validate_in_read_only(_cfg: &AgentConfig) -> bool {
+    true
+}
 
 async fn run_agent_smoke_test(cfg: AgentConfig) -> Result<String, String> {
     let model_name = cfg.name.clone();
@@ -1871,7 +1973,9 @@ async fn execute_cloud_built_in_streaming(
         program.clone(),
         args.clone(),
         Some(program.to_string_lossy().as_ref()),
-        working_dir.clone().unwrap_or_else(|| std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from("."))),
+        working_dir.clone().unwrap_or_else(|| {
+            std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from("."))
+        }),
         &SandboxPolicy::DangerFullAccess,
         StdioPolicy::RedirectForShellTool,
         env,
@@ -1886,12 +1990,16 @@ async fn execute_cloud_built_in_streaming(
             let mut lines = BufReader::new(stderr).lines();
             while let Ok(Some(line)) = lines.next_line().await {
                 let msg = line.trim();
-                if msg.is_empty() { continue; }
+                if msg.is_empty() {
+                    continue;
+                }
                 let mut mgr = AGENT_MANAGER.write().await;
                 mgr.add_progress(&agent, msg.to_string()).await;
             }
         }))
-    } else { None };
+    } else {
+        None
+    };
 
     // Collect stdout fully (final result)
     let mut stdout_buf = String::new();
@@ -1903,8 +2011,13 @@ async fn execute_cloud_built_in_streaming(
         }
     }
 
-    let status = child.wait().await.map_err(|e| format!("Failed to wait: {}", e))?;
-    if let Some(t) = stderr_task { let _ = t.await; }
+    let status = child
+        .wait()
+        .await
+        .map_err(|e| format!("Failed to wait: {}", e))?;
+    if let Some(t) = stderr_task {
+        let _ = t.await;
+    }
     if !status.success() {
         return Err(format!("cloud submit exited with status {}", status));
     }
@@ -1973,7 +2086,8 @@ pub fn create_agent_tool(allowed_models: &[String]) -> OpenAiTool {
         "action".to_string(),
         JsonSchema::String {
             description: Some(
-                "Required: choose one of ['create','status','wait','result','cancel','list']".to_string(),
+                "Required: choose one of ['create','status','wait','result','cancel','list']"
+                    .to_string(),
             ),
             allowed_values: Some(
                 ["create", "status", "wait", "result", "cancel", "list"]
@@ -1988,7 +2102,9 @@ pub fn create_agent_tool(allowed_models: &[String]) -> OpenAiTool {
     create_properties.insert(
         "name".to_string(),
         JsonSchema::String {
-            description: Some("Display name shown in the UI (e.g., \"Plan TUI Refactor\")".to_string()),
+            description: Some(
+                "Display name shown in the UI (e.g., \"Plan TUI Refactor\")".to_string(),
+            ),
             allowed_values: None,
         },
     );
@@ -2029,9 +2145,7 @@ pub fn create_agent_tool(allowed_models: &[String]) -> OpenAiTool {
                 description: None,
                 allowed_values: None,
             }),
-            description: Some(
-                "Optional array of file paths to include in context".to_string(),
-            ),
+            description: Some("Optional array of file paths to include in context".to_string()),
         },
     );
     create_properties.insert(
@@ -2151,7 +2265,8 @@ pub fn create_agent_tool(allowed_models: &[String]) -> OpenAiTool {
         "return_all".to_string(),
         JsonSchema::Boolean {
             description: Some(
-                "When waiting on a batch, return all completed agents instead of the first".to_string(),
+                "When waiting on a batch, return all completed agents instead of the first"
+                    .to_string(),
             ),
         },
     );
@@ -2169,7 +2284,8 @@ pub fn create_agent_tool(allowed_models: &[String]) -> OpenAiTool {
         "status_filter".to_string(),
         JsonSchema::String {
             description: Some(
-                "Optional status filter (pending, running, completed, failed, cancelled)".to_string(),
+                "Optional status filter (pending, running, completed, failed, cancelled)"
+                    .to_string(),
             ),
             allowed_values: None,
         },
@@ -2184,9 +2300,7 @@ pub fn create_agent_tool(allowed_models: &[String]) -> OpenAiTool {
     list_properties.insert(
         "recent_only".to_string(),
         JsonSchema::Boolean {
-            description: Some(
-                "When true, only include agents from the last two hours".to_string(),
-            ),
+            description: Some("When true, only include agents from the last two hours".to_string()),
         },
     );
     properties.insert(
@@ -2363,7 +2477,8 @@ fn canonicalize_agent_word_boundaries(input: &str) -> String {
 }
 
 const AGENT_NAME_ACRONYMS: &[&str] = &[
-    "AI", "API", "CLI", "CPU", "DB", "GPU", "HTTP", "HTTPS", "ID", "LLM", "SDK", "SQL", "TUI", "UI", "UX",
+    "AI", "API", "CLI", "CPU", "DB", "GPU", "HTTP", "HTTPS", "ID", "LLM", "SDK", "SQL", "TUI",
+    "UI", "UX",
 ];
 
 fn format_agent_word(word: &str) -> String {
@@ -2408,21 +2523,22 @@ where
 
 #[cfg(test)]
 mod tests {
-    use super::normalize_agent_name;
-    use super::maybe_set_gemini_config_dir;
+    use super::current_code_binary_path;
     use super::execute_model_with_permissions;
+    use super::maybe_set_gemini_config_dir;
+    use super::normalize_agent_name;
+    use super::prefer_json_result;
     use super::resolve_program_path;
     use super::should_use_current_exe_for_agent;
-    use super::prefer_json_result;
-    use super::current_code_binary_path;
     use crate::config_types::AgentConfig;
     use hanzo_protocol::config_types::ReasoningEffort;
     use std::collections::HashMap;
     use std::ffi::OsString;
-    use tempfile::tempdir;
     use std::path::Path;
     use std::path::PathBuf;
-    use std::sync::{Mutex, OnceLock};
+    use std::sync::Mutex;
+    use std::sync::OnceLock;
+    use tempfile::tempdir;
 
     #[test]
     fn drops_empty_names() {

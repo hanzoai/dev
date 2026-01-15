@@ -30,12 +30,7 @@ pub async fn login_with_chatgpt(code_home: PathBuf, originator: String) -> std::
 pub async fn run_login_with_chatgpt(cli_config_overrides: CliConfigOverrides) -> ! {
     let config = load_config_or_exit(cli_config_overrides);
 
-    match login_with_chatgpt(
-        config.code_home,
-        config.responses_originator_header.clone(),
-    )
-    .await
-    {
+    match login_with_chatgpt(config.code_home, config.responses_originator_header.clone()).await {
         Ok(_) => {
             eprintln!("Successfully logged in");
             std::process::exit(0);
@@ -134,10 +129,10 @@ pub async fn run_login_status(cli_config_overrides: CliConfigOverrides) -> ! {
 
                     if let Ok(env_api_key) = env::var(OPENAI_API_KEY_ENV_VAR) {
                         if env_api_key == api_key {
-                        eprintln!(
-                            "   API loaded from OPENAI_API_KEY environment variable or .env file"
-                        );
-                    }
+                            eprintln!(
+                                "   API loaded from OPENAI_API_KEY environment variable or .env file"
+                            );
+                        }
                     }
                     std::process::exit(0);
                 }

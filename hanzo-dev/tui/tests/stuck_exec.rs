@@ -1,23 +1,22 @@
-use hanzo_core::protocol::{
-    AgentMessageEvent,
-    AgentMessageDeltaEvent,
-    CustomToolCallBeginEvent,
-    CustomToolCallEndEvent,
-    Event,
-    EventMsg,
-    ErrorEvent,
-    ExecCommandBeginEvent,
-    ExecCommandEndEvent,
-    TaskCompleteEvent,
-    AgentReasoningDeltaEvent,
-    McpInvocation,
-    McpToolCallBeginEvent,
-    OrderMeta,
-    PatchApplyBeginEvent,
-    PatchApplyEndEvent,
-};
 use hanzo_core::parse_command::ParsedCommand as CoreParsedCommand;
-use hanzo_tui::test_helpers::{render_chat_widget_to_vt100, ChatWidgetHarness};
+use hanzo_core::protocol::AgentMessageDeltaEvent;
+use hanzo_core::protocol::AgentMessageEvent;
+use hanzo_core::protocol::AgentReasoningDeltaEvent;
+use hanzo_core::protocol::CustomToolCallBeginEvent;
+use hanzo_core::protocol::CustomToolCallEndEvent;
+use hanzo_core::protocol::ErrorEvent;
+use hanzo_core::protocol::Event;
+use hanzo_core::protocol::EventMsg;
+use hanzo_core::protocol::ExecCommandBeginEvent;
+use hanzo_core::protocol::ExecCommandEndEvent;
+use hanzo_core::protocol::McpInvocation;
+use hanzo_core::protocol::McpToolCallBeginEvent;
+use hanzo_core::protocol::OrderMeta;
+use hanzo_core::protocol::PatchApplyBeginEvent;
+use hanzo_core::protocol::PatchApplyEndEvent;
+use hanzo_core::protocol::TaskCompleteEvent;
+use hanzo_tui::test_helpers::ChatWidgetHarness;
+use hanzo_tui::test_helpers::render_chat_widget_to_vt100;
 use std::collections::HashMap;
 use std::path::PathBuf;
 use std::time::Duration;
@@ -750,7 +749,10 @@ fn background_style_exec_end_with_zero_seq_does_not_get_stuck() {
             break;
         }
         if Instant::now() >= deadline {
-            panic!("exec with zero seq end should complete after flush:\n{}", output);
+            panic!(
+                "exec with zero seq end should complete after flush:\n{}",
+                output
+            );
         }
     }
 }

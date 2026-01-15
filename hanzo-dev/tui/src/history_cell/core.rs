@@ -1,8 +1,13 @@
-use crate::history::compat::{ExecAction, ExecStatus, ToolStatus as HistoryToolStatus};
+use crate::history::compat::ExecAction;
+use crate::history::compat::ExecStatus;
+use crate::history::compat::ToolStatus as HistoryToolStatus;
 use crate::util::buffer::fill_rect;
 use ratatui::prelude::*;
 use ratatui::style::Style;
-use ratatui::widgets::{Block, Paragraph, Widget, Wrap};
+use ratatui::widgets::Block;
+use ratatui::widgets::Paragraph;
+use ratatui::widgets::Widget;
+use ratatui::widgets::Wrap;
 
 use super::formatting::trim_empty_lines;
 

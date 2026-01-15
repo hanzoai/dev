@@ -1,9 +1,12 @@
 use std::env;
 
-use ratatui::style::{Color, Modifier, Style};
+use ratatui::style::Color;
+use ratatui::style::Modifier;
+use ratatui::style::Style;
 use ratatui::widgets::BorderType;
 
-use crate::{card_theme, colors};
+use crate::card_theme;
+use crate::colors;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum AutoDriveVariant {
@@ -216,17 +219,13 @@ fn sentinel_style() -> AutoDriveStyle {
             title_style: Style::default()
                 .fg(colors::text())
                 .add_modifier(Modifier::BOLD),
-            border_style: Style::default()
-                .fg(primary)
-                .add_modifier(Modifier::BOLD),
+            border_style: Style::default().fg(primary).add_modifier(Modifier::BOLD),
             border_type: BorderType::Rounded,
             accent: None,
         },
         button: ButtonStyle {
             glyphs: ButtonGlyphs::heavy(),
-            enabled_style: Style::default()
-                .fg(primary)
-                .add_modifier(Modifier::BOLD),
+            enabled_style: Style::default().fg(primary).add_modifier(Modifier::BOLD),
             disabled_style: Style::default().fg(colors::text_dim()),
         },
         composer: ComposerStyle {
@@ -235,15 +234,11 @@ fn sentinel_style() -> AutoDriveStyle {
             background_style: Style::default().bg(colors::background()),
             goal_title_prefix: " ▶ Goal ",
             goal_title_suffix: " ",
-            title_style: Style::default()
-                .fg(accent)
-                .add_modifier(Modifier::BOLD),
+            title_style: Style::default().fg(accent).add_modifier(Modifier::BOLD),
             border_gradient: Some(auto_drive_border_gradient()),
         },
         footer_separator: "  •  ",
-        summary_style: Style::default()
-            .fg(primary)
-            .add_modifier(Modifier::BOLD),
+        summary_style: Style::default().fg(primary).add_modifier(Modifier::BOLD),
     }
 }
 
@@ -342,39 +337,27 @@ fn horizon_style() -> AutoDriveStyle {
             title_prefix: "━━ ",
             title_text: "Auto Drive",
             title_suffix: " ━━",
-            title_style: Style::default()
-                .fg(info)
-                .add_modifier(Modifier::BOLD),
-            border_style: Style::default()
-                .fg(info)
-                .add_modifier(Modifier::BOLD),
+            title_style: Style::default().fg(info).add_modifier(Modifier::BOLD),
+            border_style: Style::default().fg(info).add_modifier(Modifier::BOLD),
             border_type: BorderType::Double,
             accent: None,
         },
         button: ButtonStyle {
             glyphs: ButtonGlyphs::double(),
-            enabled_style: Style::default()
-                .fg(info)
-                .add_modifier(Modifier::BOLD),
+            enabled_style: Style::default().fg(info).add_modifier(Modifier::BOLD),
             disabled_style: Style::default().fg(colors::text_dim()),
         },
         composer: ComposerStyle {
-            border_style: Style::default()
-                .fg(info)
-                .add_modifier(Modifier::BOLD),
+            border_style: Style::default().fg(info).add_modifier(Modifier::BOLD),
             border_type: BorderType::Double,
             background_style: Style::default().bg(colors::assistant_bg()),
             goal_title_prefix: " ═ Goal ",
             goal_title_suffix: " ═",
-            title_style: Style::default()
-                .fg(info)
-                .add_modifier(Modifier::BOLD),
+            title_style: Style::default().fg(info).add_modifier(Modifier::BOLD),
             border_gradient: Some(auto_drive_border_gradient()),
         },
         footer_separator: "  ≡  ",
-        summary_style: Style::default()
-            .fg(info)
-            .add_modifier(Modifier::BOLD),
+        summary_style: Style::default().fg(info).add_modifier(Modifier::BOLD),
     }
 }
 
@@ -386,39 +369,27 @@ fn pulse_style() -> AutoDriveStyle {
             title_prefix: " ◆ ",
             title_text: "Auto Drive",
             title_suffix: " ◆",
-            title_style: Style::default()
-                .fg(success)
-                .add_modifier(Modifier::BOLD),
-            border_style: Style::default()
-                .fg(success)
-                .add_modifier(Modifier::BOLD),
+            title_style: Style::default().fg(success).add_modifier(Modifier::BOLD),
+            border_style: Style::default().fg(success).add_modifier(Modifier::BOLD),
             border_type: BorderType::Thick,
             accent: None,
         },
         button: ButtonStyle {
             glyphs: ButtonGlyphs::bold(),
-            enabled_style: Style::default()
-                .fg(success)
-                .add_modifier(Modifier::BOLD),
+            enabled_style: Style::default().fg(success).add_modifier(Modifier::BOLD),
             disabled_style: Style::default().fg(colors::text_dim()),
         },
         composer: ComposerStyle {
-            border_style: Style::default()
-                .fg(success)
-                .add_modifier(Modifier::BOLD),
+            border_style: Style::default().fg(success).add_modifier(Modifier::BOLD),
             border_type: BorderType::Rounded,
             background_style: Style::default().bg(colors::background()),
             goal_title_prefix: " ◆ Goal ",
             goal_title_suffix: " ◆",
-            title_style: Style::default()
-                .fg(success)
-                .add_modifier(Modifier::BOLD),
+            title_style: Style::default().fg(success).add_modifier(Modifier::BOLD),
             border_gradient: Some(auto_drive_border_gradient()),
         },
         footer_separator: "  ✶  ",
-        summary_style: Style::default()
-            .fg(success)
-            .add_modifier(Modifier::BOLD),
+        summary_style: Style::default().fg(success).add_modifier(Modifier::BOLD),
     }
 }
 

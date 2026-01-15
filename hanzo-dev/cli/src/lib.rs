@@ -1,8 +1,8 @@
+pub mod copilot_cmd;
 pub mod debug_sandbox;
 mod exit_status;
 pub mod login;
 pub mod proto;
-pub mod copilot_cmd;
 
 use clap::Parser;
 use hanzo_common::CliConfigOverrides;

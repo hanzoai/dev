@@ -1,14 +1,12 @@
 use std::sync::Arc;
 
-use super::compact::{
-    is_context_overflow_error,
-    prune_orphan_tool_outputs,
-    response_input_from_core_items,
-    sanitize_items_for_compact,
-    send_compaction_checkpoint_warning,
-};
 use super::Session;
 use super::TurnContext;
+use super::compact::is_context_overflow_error;
+use super::compact::prune_orphan_tool_outputs;
+use super::compact::response_input_from_core_items;
+use super::compact::sanitize_items_for_compact;
+use super::compact::send_compaction_checkpoint_warning;
 use crate::Prompt;
 use crate::error::CodexErr;
 use crate::error::Result as CodexResult;
@@ -17,11 +15,11 @@ use crate::protocol::AgentMessageEvent;
 use crate::protocol::ErrorEvent;
 use crate::protocol::EventMsg;
 use crate::protocol::InputItem;
+use crate::util::backoff;
 use hanzo_protocol::models::ResponseInputItem;
 use hanzo_protocol::models::ResponseItem;
 use hanzo_protocol::protocol::CompactedItem;
 use hanzo_protocol::protocol::RolloutItem;
-use crate::util::backoff;
 use std::time::Duration;
 
 pub(super) async fn run_inline_remote_auto_compact_task(

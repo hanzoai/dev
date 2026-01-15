@@ -23,7 +23,6 @@ pub(crate) struct MarkdownStreamCollector {
     leading_bullet_state: Option<bool>,
 }
 
-
 impl MarkdownStreamCollector {
     pub fn new() -> Self {
         Self {

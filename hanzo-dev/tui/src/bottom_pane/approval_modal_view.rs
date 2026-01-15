@@ -33,11 +33,7 @@ impl ApprovalModalView<'_> {
         }
     }
 
-    pub fn enqueue_request(
-        &mut self,
-        req: ApprovalRequest,
-        ticket: BackgroundOrderTicket,
-    ) {
+    pub fn enqueue_request(&mut self, req: ApprovalRequest, ticket: BackgroundOrderTicket) {
         self.queue.push_back((req, ticket));
     }
 

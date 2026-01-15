@@ -1,26 +1,45 @@
 use crate::app_event::AppEvent;
 use crate::app_event_sender::AppEventSender;
 use crate::auto_drive_strings;
-use crate::auto_drive_style::{AutoDriveStyle, AutoDriveVariant, FrameStyle, BorderGradient};
+use crate::auto_drive_style::AutoDriveStyle;
+use crate::auto_drive_style::AutoDriveVariant;
+use crate::auto_drive_style::BorderGradient;
+use crate::auto_drive_style::FrameStyle;
 use crate::colors;
-use crate::glitch_animation::{gradient_multi, mix_rgb};
+use crate::glitch_animation::gradient_multi;
+use crate::glitch_animation::mix_rgb;
 use crate::spinner;
-use crossterm::event::{KeyCode, KeyEvent, KeyEventKind, KeyModifiers};
+use crossterm::event::KeyCode;
+use crossterm::event::KeyEvent;
+use crossterm::event::KeyEventKind;
+use crossterm::event::KeyModifiers;
 use ratatui::buffer::Buffer;
-use ratatui::layout::{Alignment, Constraint, Direction, Layout, Rect};
+use ratatui::layout::Alignment;
+use ratatui::layout::Constraint;
+use ratatui::layout::Direction;
+use ratatui::layout::Layout;
+use ratatui::layout::Rect;
 use ratatui::prelude::Widget;
-use ratatui::style::{Color, Modifier, Style};
-use ratatui::text::{Line, Span};
-use ratatui::widgets::{Paragraph, WidgetRef, Wrap};
+use ratatui::style::Color;
+use ratatui::style::Modifier;
+use ratatui::style::Style;
+use ratatui::text::Line;
+use ratatui::text::Span;
+use ratatui::widgets::Paragraph;
+use ratatui::widgets::WidgetRef;
+use ratatui::widgets::Wrap;
 use std::borrow::Cow;
-use unicode_width::{UnicodeWidthChar, UnicodeWidthStr};
-use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
+use std::time::Duration;
+use std::time::Instant;
+use std::time::SystemTime;
+use std::time::UNIX_EPOCH;
+use unicode_width::UnicodeWidthChar;
+use unicode_width::UnicodeWidthStr;
 
-use super::{
-    bottom_pane_view::{BottomPaneView, ConditionalUpdate},
-    chat_composer::ChatComposer,
-    BottomPane,
-};
+use super::BottomPane;
+use super::bottom_pane_view::BottomPaneView;
+use super::bottom_pane_view::ConditionalUpdate;
+use super::chat_composer::ChatComposer;
 
 #[derive(Clone, Debug)]
 pub(crate) struct CountdownState {
@@ -271,9 +290,7 @@ impl AutoCoordinatorView {
             return false;
         }
 
-        if key_event
-            .modifiers
-            .contains(KeyModifiers::CONTROL)
+        if key_event.modifiers.contains(KeyModifiers::CONTROL)
             && matches!(key_event.code, KeyCode::Char('s') | KeyCode::Char('S'))
         {
             self.app_event_tx.send(AppEvent::ShowAutoDriveSettings);
@@ -289,7 +306,11 @@ impl AutoCoordinatorView {
             // Allow approval keys to bubble so ChatWidget handles them.
             let allow_passthrough = matches!(
                 key_event.code,
-                KeyCode::Esc | KeyCode::Enter | KeyCode::Char(' ') | KeyCode::Char('e') | KeyCode::Char('E')
+                KeyCode::Esc
+                    | KeyCode::Enter
+                    | KeyCode::Char(' ')
+                    | KeyCode::Char('e')
+                    | KeyCode::Char('E')
             );
             if !allow_passthrough {
                 return true;
@@ -305,7 +326,6 @@ impl AutoCoordinatorView {
 
         false
     }
-
 
     fn frame_style_for_model(&self, model: &AutoActiveViewModel) -> FrameStyle {
         let mut style = self.style.frame.clone();
@@ -479,9 +499,7 @@ impl AutoCoordinatorView {
                     }
                     base_spans.push(Span::styled(
                         ch.to_string(),
-                        Style::default()
-                            .fg(color)
-                            .add_modifier(Modifier::BOLD),
+                        Style::default().fg(color).add_modifier(Modifier::BOLD),
                     ));
                 }
             }
@@ -492,10 +510,7 @@ impl AutoCoordinatorView {
             base_spans.push(Span::styled(header_label.to_string(), title_style));
         }
 
-        base_spans.push(Span::styled(
-            " > ",
-            Style::default().fg(colors::text_dim()),
-        ));
+        base_spans.push(Span::styled(" > ", Style::default().fg(colors::text_dim())));
         let message_style = Style::default().fg(colors::text());
         let default_message_span = Span::styled(display_message.to_string(), message_style);
         let base_line = {
@@ -959,14 +974,8 @@ impl AutoCoordinatorView {
         let inner = format!(" {label} ");
         let inner_width = UnicodeWidthStr::width(inner.as_str());
         let horizontal = glyphs.horizontal.to_string().repeat(inner_width);
-        let top = format!(
-            "{}{}{}",
-            glyphs.top_left, horizontal, glyphs.top_right
-        );
-        let middle = format!(
-            "{}{}{}",
-            glyphs.vertical, inner, glyphs.vertical
-        );
+        let top = format!("{}{}{}", glyphs.top_left, horizontal, glyphs.top_right);
+        let middle = format!("{}{}{}", glyphs.vertical, inner, glyphs.vertical);
         let bottom = format!(
             "{}{}{}",
             glyphs.bottom_left, horizontal, glyphs.bottom_right
@@ -1092,9 +1101,8 @@ impl AutoCoordinatorView {
 
         if model.editing_prompt {
             let display_message = self.resolve_display_message(model);
-            total = total.saturating_add(
-                self.status_message_wrap_count(inner_width, &display_message),
-            );
+            total =
+                total.saturating_add(self.status_message_wrap_count(inner_width, &display_message));
 
             if let Some(ref lines) = prompt_lines {
                 let prompt_height = Self::lines_height(lines, inner_width) as usize;
@@ -1253,8 +1261,7 @@ impl AutoCoordinatorView {
                 }
                 if used > 0 {
                     let new_y = base_y + used;
-                    let remaining_height =
-                        base_height.saturating_sub(new_y.saturating_sub(base_y));
+                    let remaining_height = base_height.saturating_sub(new_y.saturating_sub(base_y));
                     inner = Rect {
                         x: inner.x,
                         y: new_y,
@@ -1308,10 +1315,7 @@ impl AutoCoordinatorView {
         }
 
         if let Some(mut block_lines) = button_block.take() {
-            if top_lines
-                .last()
-                .is_some_and(|line| line.width() > 0)
-            {
+            if top_lines.last().is_some_and(|line| line.width() > 0) {
                 top_lines.push(Line::default());
             }
             top_lines.append(&mut block_lines);
@@ -1435,7 +1439,6 @@ impl AutoCoordinatorView {
                     .render(after_rect, buf);
             }
         }
-
     }
 
     fn clear_row(area: Rect, buf: &mut Buffer) {
@@ -1519,28 +1522,22 @@ impl AutoCoordinatorView {
     }
 
     fn status_labels(model: &AutoActiveViewModel) -> (Option<String>, Option<String>) {
-        let sent_to_user = model
-            .status_sent_to_user
-            .as_ref()
-            .and_then(|value| {
-                let trimmed = value.trim();
-                if trimmed.is_empty() {
-                    None
-                } else {
-                    Some(trimmed.to_string())
-                }
-            });
-        let title = model
-            .status_title
-            .as_ref()
-            .and_then(|value| {
-                let trimmed = value.trim();
-                if trimmed.is_empty() {
-                    None
-                } else {
-                    Some(trimmed.to_string())
-                }
-            });
+        let sent_to_user = model.status_sent_to_user.as_ref().and_then(|value| {
+            let trimmed = value.trim();
+            if trimmed.is_empty() {
+                None
+            } else {
+                Some(trimmed.to_string())
+            }
+        });
+        let title = model.status_title.as_ref().and_then(|value| {
+            let trimmed = value.trim();
+            if trimmed.is_empty() {
+                None
+            } else {
+                Some(trimmed.to_string())
+            }
+        });
         (sent_to_user, title)
     }
 
@@ -1553,7 +1550,6 @@ impl AutoCoordinatorView {
             (None, None) => None,
         }
     }
-
 }
 
 impl<'a> BottomPaneView<'a> for AutoCoordinatorView {
@@ -1566,9 +1562,7 @@ impl<'a> BottomPaneView<'a> for AutoCoordinatorView {
             return;
         }
 
-        if key_event
-            .modifiers
-            .contains(KeyModifiers::CONTROL)
+        if key_event.modifiers.contains(KeyModifiers::CONTROL)
             && matches!(key_event.code, KeyCode::Char('s') | KeyCode::Char('S'))
         {
             self.app_event_tx.send(AppEvent::ShowAutoDriveSettings);
@@ -1590,12 +1584,7 @@ impl<'a> BottomPaneView<'a> for AutoCoordinatorView {
         self.render_active(area, buf, model, None);
     }
 
-    fn render_with_composer(
-        &self,
-        area: Rect,
-        buf: &mut Buffer,
-        composer: &ChatComposer,
-    ) {
+    fn render_with_composer(&self, area: Rect, buf: &mut Buffer, composer: &ChatComposer) {
         if area.height == 0 {
             return;
         }
@@ -1612,7 +1601,7 @@ impl<'a> BottomPaneView<'a> for AutoCoordinatorView {
         }
     }
 
-fn handle_paste_with_composer(
+    fn handle_paste_with_composer(
         &mut self,
         composer: &mut ChatComposer,
         pasted: String,
@@ -1639,9 +1628,6 @@ fn text_gradient_colors(gradient: BorderGradient) -> (Color, Color) {
     if is_dark_theme_active() {
         (gradient.left, gradient.right)
     } else {
-        (
-            Color::Rgb(93, 187, 255),
-            Color::Rgb(243, 173, 72),
-        )
+        (Color::Rgb(93, 187, 255), Color::Rgb(243, 173, 72))
     }
 }

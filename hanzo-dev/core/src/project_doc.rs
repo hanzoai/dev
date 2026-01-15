@@ -363,7 +363,9 @@ mod tests {
         let mut cfg = make_config(&repo, 4096, None);
         cfg.cwd = nested;
 
-        let res = get_user_instructions(&cfg, None).await.expect("doc expected");
+        let res = get_user_instructions(&cfg, None)
+            .await
+            .expect("doc expected");
         assert_eq!(res, "root level doc");
     }
 
@@ -452,7 +454,9 @@ mod tests {
         let mut cfg = make_config(&repo, 4096, None);
         cfg.cwd = nested;
 
-        let res = get_user_instructions(&cfg, None).await.expect("doc expected");
+        let res = get_user_instructions(&cfg, None)
+            .await
+            .expect("doc expected");
         assert_eq!(res, "root doc");
     }
 
@@ -493,7 +497,9 @@ mod tests {
         let mut cfg = make_config(&repo, 4096, None);
         cfg.cwd = nested;
 
-        let res = get_user_instructions(&cfg, None).await.expect("doc expected");
+        let res = get_user_instructions(&cfg, None)
+            .await
+            .expect("doc expected");
         assert_eq!(res, "root doc\n\ncrate doc");
     }
 

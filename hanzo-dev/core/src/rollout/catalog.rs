@@ -1,14 +1,22 @@
 //! Session catalog: unified index of all sessions for efficient querying and resume.
 
 use std::cmp::Reverse;
-use std::collections::{HashMap, HashSet};
+use std::collections::HashMap;
+use std::collections::HashSet;
 use std::fs;
-use std::io::{self, BufRead, BufReader};
-use std::path::{Path, PathBuf};
+use std::io::BufRead;
+use std::io::BufReader;
+use std::io::{self};
+use std::path::Path;
+use std::path::PathBuf;
 
-use hanzo_protocol::models::{ContentItem, ResponseItem};
-use hanzo_protocol::protocol::{RolloutItem, RolloutLine, SessionSource};
-use serde::{Deserialize, Serialize};
+use hanzo_protocol::models::ContentItem;
+use hanzo_protocol::models::ResponseItem;
+use hanzo_protocol::protocol::RolloutItem;
+use hanzo_protocol::protocol::RolloutLine;
+use hanzo_protocol::protocol::SessionSource;
+use serde::Deserialize;
+use serde::Serialize;
 use tracing::warn;
 use uuid::Uuid;
 
@@ -343,12 +351,9 @@ impl SessionCatalog {
     /// Get the full absolute path to a session's snapshot file.
     #[allow(dead_code)]
     pub fn resolve_snapshot_path(&self, code_home: &Path, session_id: &Uuid) -> Option<PathBuf> {
-        self.entries.get(session_id).and_then(|entry| {
-            entry
-                .snapshot_path
-                .as_ref()
-                .map(|p| code_home.join(p))
-        })
+        self.entries
+            .get(session_id)
+            .and_then(|entry| entry.snapshot_path.as_ref().map(|p| code_home.join(p)))
     }
 }
 
@@ -363,9 +368,7 @@ pub struct ReconcileResult {
 
 /// Scan all rollout files under the sessions directory and build index entries.
 #[allow(dead_code)]
-async fn scan_rollout_files(
-    sessions_root: &Path,
-) -> io::Result<HashMap<Uuid, SessionIndexEntry>> {
+async fn scan_rollout_files(sessions_root: &Path) -> io::Result<HashMap<Uuid, SessionIndexEntry>> {
     use tokio::fs;
 
     let mut queue = vec![sessions_root.to_path_buf()];
@@ -405,11 +408,9 @@ async fn scan_rollout_files(
 }
 
 /// Parse a rollout file and extract catalog entry information.
-async fn parse_rollout_file(
-    path: &Path,
-    sessions_root: &Path,
-) -> Option<SessionIndexEntry> {
-    use tokio::io::{AsyncBufReadExt, BufReader};
+async fn parse_rollout_file(path: &Path, sessions_root: &Path) -> Option<SessionIndexEntry> {
+    use tokio::io::AsyncBufReadExt;
+    use tokio::io::BufReader;
 
     // Read the file
     let file = match tokio::fs::File::open(path).await {
@@ -467,10 +468,7 @@ async fn parse_rollout_file(
                 if let ResponseItem::Message { role, content, .. } = response_item {
                     if role.eq_ignore_ascii_case("user") {
                         let snippet = snippet_from_content(&content);
-                        if snippet
-                            .as_deref()
-                            .map_or(false, is_system_status_snippet)
-                        {
+                        if snippet.as_deref().map_or(false, is_system_status_snippet) {
                             continue;
                         }
 
@@ -569,22 +567,26 @@ pub async fn update_catalog_entry(
     let mut catalog = SessionCatalog::load(code_home)?;
 
     // If entry exists, update last_event_at
-        if let Some(mut entry) = catalog.entries.remove(&session_id) {
-            entry.last_event_at = last_timestamp.to_string();
+    if let Some(mut entry) = catalog.entries.remove(&session_id) {
+        entry.last_event_at = last_timestamp.to_string();
 
-            // Re-parse file to update message count and snippet
-            if let Some(updated) = parse_rollout_file(rollout_path, &code_home.join(SESSIONS_SUBDIR)).await {
-                entry.message_count = updated.message_count;
-                entry.user_message_count = updated.user_message_count;
-                entry.last_user_snippet = updated.last_user_snippet;
-            }
+        // Re-parse file to update message count and snippet
+        if let Some(updated) =
+            parse_rollout_file(rollout_path, &code_home.join(SESSIONS_SUBDIR)).await
+        {
+            entry.message_count = updated.message_count;
+            entry.user_message_count = updated.user_message_count;
+            entry.last_user_snippet = updated.last_user_snippet;
+        }
 
+        catalog.upsert(entry)?;
+    } else {
+        // Entry doesn't exist, parse and add it
+        if let Some(entry) =
+            parse_rollout_file(rollout_path, &code_home.join(SESSIONS_SUBDIR)).await
+        {
             catalog.upsert(entry)?;
-        } else {
-            // Entry doesn't exist, parse and add it
-            if let Some(entry) = parse_rollout_file(rollout_path, &code_home.join(SESSIONS_SUBDIR)).await {
-                catalog.upsert(entry)?;
-            }
+        }
     }
 
     Ok(())
@@ -592,8 +594,9 @@ pub async fn update_catalog_entry(
 
 fn snippet_from_content(content: &[ContentItem]) -> Option<String> {
     content.iter().find_map(|item| match item {
-        ContentItem::InputText { text }
-        | ContentItem::OutputText { text } => Some(truncate_snippet(text)),
+        ContentItem::InputText { text } | ContentItem::OutputText { text } => {
+            Some(truncate_snippet(text))
+        }
         _ => None,
     })
 }
@@ -777,7 +780,10 @@ mod tests {
         let retrieved = loaded.get(&session_id).unwrap();
         assert_eq!(retrieved.last_event_at, "2025-01-01T10:15:00.000Z");
         assert_eq!(retrieved.message_count, 10);
-        assert_eq!(retrieved.last_user_snippet, Some("updated message".to_string()));
+        assert_eq!(
+            retrieved.last_user_snippet,
+            Some("updated message".to_string())
+        );
 
         Ok(())
     }
@@ -862,7 +868,7 @@ mod tests {
             session_id: Uuid::parse_str("00000000-0000-0000-0000-000000000003").unwrap(),
             rollout_path: PathBuf::from("sessions/test3.jsonl"),
             last_event_at: "2025-01-01T10:10:00.000Z".to_string(), // Same as entry2
-            created_at: "2025-01-01T10:01:00.000Z".to_string(), // Later created_at
+            created_at: "2025-01-01T10:01:00.000Z".to_string(),    // Later created_at
             ..entry1.clone()
         };
 
@@ -893,7 +899,9 @@ mod tests {
         let entry = SessionIndexEntry {
             session_id: Uuid::new_v4(),
             rollout_path: PathBuf::from("sessions/2025/01/01/rollout-test.jsonl"),
-            snapshot_path: Some(PathBuf::from("sessions/2025/01/01/rollout-test.snapshot.json")),
+            snapshot_path: Some(PathBuf::from(
+                "sessions/2025/01/01/rollout-test.snapshot.json",
+            )),
             created_at: "2025-01-01T10:00:00.000Z".to_string(),
             last_event_at: "2025-01-01T10:05:00.000Z".to_string(),
             cwd_real: PathBuf::from("/test"),

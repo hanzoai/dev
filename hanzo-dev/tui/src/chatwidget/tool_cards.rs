@@ -1,11 +1,10 @@
-use super::{ChatWidget, OrderKey};
+use super::ChatWidget;
+use super::OrderKey;
 use crate::history::state::HistoryId;
-use crate::history_cell::{
-    AgentRunCell,
-    CollapsibleReasoningCell,
-    HistoryCell,
-    HistoryCellType,
-};
+use crate::history_cell::AgentRunCell;
+use crate::history_cell::CollapsibleReasoningCell;
+use crate::history_cell::HistoryCell;
+use crate::history_cell::HistoryCellType;
 use std::any::TypeId;
 
 pub(super) struct ToolCardSlot {
@@ -200,7 +199,9 @@ fn remove_existing_card<C: ToolCardCell>(chat: &mut ChatWidget<'_>, slot: &mut T
 
     if target_idx.is_none() {
         if let Some(idx) = slot.cell_index {
-            if idx < chat.history_cells.len() && cell_matches::<C>(chat, idx, slot, signature.as_deref()) {
+            if idx < chat.history_cells.len()
+                && cell_matches::<C>(chat, idx, slot, signature.as_deref())
+            {
                 target_idx = Some(idx);
             }
         }
@@ -274,14 +275,17 @@ fn find_card_index<C: ToolCardCell>(
     slot: &ToolCardSlot,
     signature: Option<&str>,
 ) -> Option<usize> {
-    chat.history_cells.iter().enumerate().find_map(|(idx, cell)| {
-        let typed = cell.as_any().downcast_ref::<C>()?;
-        if identity_matches(typed, slot, signature) {
-            Some(idx)
-        } else {
-            None
-        }
-    })
+    chat.history_cells
+        .iter()
+        .enumerate()
+        .find_map(|(idx, cell)| {
+            let typed = cell.as_any().downcast_ref::<C>()?;
+            if identity_matches(typed, slot, signature) {
+                Some(idx)
+            } else {
+                None
+            }
+        })
 }
 
 fn cell_matches<C: ToolCardCell>(
@@ -290,15 +294,18 @@ fn cell_matches<C: ToolCardCell>(
     slot: &ToolCardSlot,
     signature: Option<&str>,
 ) -> bool {
-    chat
-        .history_cells
+    chat.history_cells
         .get(idx)
         .and_then(|cell| cell.as_any().downcast_ref::<C>())
         .map(|typed| identity_matches(typed, slot, signature))
         .unwrap_or(false)
 }
 
-fn identity_matches<C: ToolCardCell>(typed: &C, slot: &ToolCardSlot, signature: Option<&str>) -> bool {
+fn identity_matches<C: ToolCardCell>(
+    typed: &C,
+    slot: &ToolCardSlot,
+    signature: Option<&str>,
+) -> bool {
     let mut key_match = match (slot.key(), typed.tool_card_key()) {
         (Some(expected), Some(actual)) => actual == expected,
         (Some(_), None) => false,

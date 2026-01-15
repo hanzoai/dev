@@ -1,5 +1,6 @@
+use super::session::HookGuard;
+use super::session::RunningExecMeta;
 use super::*;
-use super::session::{HookGuard, RunningExecMeta};
 
 fn synthetic_exec_end_payload(cancelled: bool) -> (i32, String) {
     if cancelled {
@@ -67,9 +68,8 @@ impl Drop for ExecDropGuard {
             return;
         }
 
-        let (exit_code, stderr) = synthetic_exec_end_payload(
-            self.cancel_flag.load(Ordering::Acquire),
-        );
+        let (exit_code, stderr) =
+            synthetic_exec_end_payload(self.cancel_flag.load(Ordering::Acquire));
         let msg = EventMsg::ExecCommandEnd(ExecCommandEndEvent {
             call_id: self.call_id.clone(),
             stdout: String::new(),
@@ -314,7 +314,11 @@ impl Session {
                 parsed_cmd: parse_command(&command_for_display),
             }),
         };
-        let order = crate::protocol::OrderMeta { request_ordinal: attempt_req, output_index, sequence_number: seq_hint };
+        let order = crate::protocol::OrderMeta {
+            request_ordinal: attempt_req,
+            output_index,
+            sequence_number: seq_hint,
+        };
         let event = self.make_event_with_order(&sub_id, msg, order, seq_hint);
         let _ = self.tx_event.send(event).await;
     }
@@ -361,7 +365,11 @@ impl Session {
                 duration: *duration,
             })
         };
-        let order = crate::protocol::OrderMeta { request_ordinal: attempt_req, output_index, sequence_number: seq_hint };
+        let order = crate::protocol::OrderMeta {
+            request_ordinal: attempt_req,
+            output_index,
+            sequence_number: seq_hint,
+        };
         let event = self.make_event_with_order(sub_id, msg, order, seq_hint);
         let _ = self.tx_event.send(event).await;
 
@@ -375,7 +383,6 @@ impl Session {
                 let _ = self.tx_event.send(event).await;
             }
         }
-
     }
     /// Runs the exec tool call and emits events for the begin and end of the
     /// command even on error.
@@ -390,17 +397,16 @@ impl Session {
         output_index: Option<u32>,
         attempt_req: u64,
     ) -> crate::error::Result<ExecToolCallOutput> {
-        self
-            .run_exec_with_events_inner(
-                turn_diff_tracker,
-                begin_ctx,
-                exec_args,
-                seq_hint,
-                output_index,
-                attempt_req,
-                true,
-            )
-            .await
+        self.run_exec_with_events_inner(
+            turn_diff_tracker,
+            begin_ctx,
+            exec_args,
+            seq_hint,
+            output_index,
+            attempt_req,
+            true,
+        )
+        .await
     }
 
     fn track_running_exec(
@@ -483,7 +489,12 @@ impl Session {
                     exit_code,
                     duration: Duration::ZERO,
                 });
-                let event = self.make_event_with_order(sub_id, msg, order_meta.clone(), order_meta.sequence_number);
+                let event = self.make_event_with_order(
+                    sub_id,
+                    msg,
+                    order_meta.clone(),
+                    order_meta.sequence_number,
+                );
                 let _ = self.tx_event.send(event).await;
             }
         }
@@ -511,7 +522,13 @@ impl Session {
 
         let cancel_flag = Arc::new(AtomicBool::new(false));
         let end_emitted = Arc::new(AtomicBool::new(false));
-        self.track_running_exec(&call_id, &sub_id, order_for_end.clone(), cancel_flag.clone(), end_emitted.clone());
+        self.track_running_exec(
+            &call_id,
+            &sub_id,
+            order_for_end.clone(),
+            cancel_flag.clone(),
+            end_emitted.clone(),
+        );
 
         let mut exec_guard = ExecDropGuard::new(
             self.self_handle.clone(),
@@ -523,7 +540,14 @@ impl Session {
             end_emitted,
         );
 
-        let ExecInvokeArgs { params, sandbox_type, sandbox_policy, sandbox_cwd, code_linux_sandbox_exe, stdout_stream } = exec_args;
+        let ExecInvokeArgs {
+            params,
+            sandbox_type,
+            sandbox_policy,
+            sandbox_cwd,
+            code_linux_sandbox_exe,
+            stdout_stream,
+        } = exec_args;
         let tracking_command = params.command.clone();
         let dry_run_analysis = analyze_command(&tracking_command);
         let params = maybe_run_with_user_profile(params, self);
@@ -540,23 +564,35 @@ impl Session {
                 } else {
                     ProjectHookEvent::ToolBefore
                 };
-                self
-                    .run_hooks_for_exec_event(
-                        turn_diff_tracker,
-                        before_event,
-                        &begin_ctx,
-                        params_ref,
-                        None,
-                        attempt_req,
-                    )
-                    .await;
+                self.run_hooks_for_exec_event(
+                    turn_diff_tracker,
+                    before_event,
+                    &begin_ctx,
+                    params_ref,
+                    None,
+                    attempt_req,
+                )
+                .await;
             }
         }
 
-        self.on_exec_command_begin(turn_diff_tracker, begin_ctx.clone(), seq_hint, output_index, attempt_req)
-            .await;
+        self.on_exec_command_begin(
+            turn_diff_tracker,
+            begin_ctx.clone(),
+            seq_hint,
+            output_index,
+            attempt_req,
+        )
+        .await;
 
-        let result = process_exec_tool_call(params, sandbox_type, sandbox_policy, sandbox_cwd, code_linux_sandbox_exe, stdout_stream)
+        let result = process_exec_tool_call(
+            params,
+            sandbox_type,
+            sandbox_policy,
+            sandbox_cwd,
+            code_linux_sandbox_exe,
+            stdout_stream,
+        )
         .await;
 
         let output_stderr;
@@ -597,16 +633,15 @@ impl Session {
                 } else {
                     ProjectHookEvent::ToolAfter
                 };
-                self
-                    .run_hooks_for_exec_event(
-                        turn_diff_tracker,
-                        after_event,
-                        &begin_ctx,
-                        params_ref,
-                        Some(borrowed),
-                        attempt_req,
-                    )
-                    .await;
+                self.run_hooks_for_exec_event(
+                    turn_diff_tracker,
+                    after_event,
+                    &begin_ctx,
+                    params_ref,
+                    Some(borrowed),
+                    attempt_req,
+                )
+                .await;
             }
         }
 
@@ -627,7 +662,9 @@ impl Session {
     ) {
         let event = self.make_event_with_order(
             sub_id,
-            EventMsg::BackgroundEvent(BackgroundEventEvent { message: message.into() }),
+            EventMsg::BackgroundEvent(BackgroundEventEvent {
+                message: message.into(),
+            }),
             order,
             None,
         );
@@ -637,7 +674,9 @@ impl Session {
     pub(super) async fn notify_stream_error(&self, sub_id: &str, message: impl Into<String>) {
         let event = self.make_event(
             sub_id,
-            EventMsg::Error(ErrorEvent { message: message.into() }),
+            EventMsg::Error(ErrorEvent {
+                message: message.into(),
+            }),
         );
         let _ = self.tx_event.send(event).await;
     }
@@ -676,9 +715,16 @@ impl Session {
         };
         let payload = build_exec_hook_payload(event, exec_ctx, params, output);
         for (idx, hook) in hooks.into_iter().enumerate() {
-            self
-                .run_hook_command(turn_diff_tracker, &hook, event, &payload, Some(exec_ctx), attempt_req, idx)
-                .await;
+            self.run_hook_command(
+                turn_diff_tracker,
+                &hook,
+                event,
+                &payload,
+                Some(exec_ctx),
+                attempt_req,
+                idx,
+            )
+            .await;
         }
     }
 
@@ -697,8 +743,7 @@ impl Session {
         let mut tracker = TurnDiffTracker::new();
         let attempt_req = self.current_request_ordinal();
         for (idx, hook) in hooks.into_iter().enumerate() {
-            self
-                .run_hook_command(&mut tracker, &hook, event, &payload, None, attempt_req, idx)
+            self.run_hook_command(&mut tracker, &hook, event, &payload, None, attempt_req, idx)
                 .await;
         }
     }
@@ -802,13 +847,16 @@ impl Session {
                 .as_deref()
                 .unwrap_or_else(|| hook.command.first().map(String::as_str).unwrap_or("hook"));
             let order = self.next_background_order(&sub_id, attempt_req, None);
-            self
-                .notify_background_event_with_order(
-                    &sub_id,
-                    order,
-                    format!("Hook `{}` failed: {}", hook_label, get_error_message_ui(&err)),
-                )
-                .await;
+            self.notify_background_event_with_order(
+                &sub_id,
+                order,
+                format!(
+                    "Hook `{}` failed: {}",
+                    hook_label,
+                    get_error_message_ui(&err)
+                ),
+            )
+            .await;
         }
     }
 
@@ -828,13 +876,12 @@ impl Session {
     ) {
         let Some(command) = self.find_project_command(name) else {
             let order = self.next_background_order(sub_id, attempt_req, None);
-            self
-                .notify_background_event_with_order(
-                    sub_id,
-                    order,
-                    format!("Unknown project command `{}`", name.trim()),
-                )
-                .await;
+            self.notify_background_event_with_order(
+                sub_id,
+                order,
+                format!("Unknown project command `{}`", name.trim()),
+            )
+            .await;
             return;
         };
 
@@ -877,21 +924,27 @@ impl Session {
         };
 
         if let Err(err) = self
-            .run_exec_with_events(turn_diff_tracker, exec_ctx, exec_args, None, None, attempt_req)
+            .run_exec_with_events(
+                turn_diff_tracker,
+                exec_ctx,
+                exec_args,
+                None,
+                None,
+                attempt_req,
+            )
             .await
         {
             let order = self.next_background_order(sub_id, attempt_req, None);
-            self
-                .notify_background_event_with_order(
-                    sub_id,
-                    order,
-                    format!(
-                        "Project command `{}` failed: {}",
-                        command.name,
-                        get_error_message_ui(&err)
-                    ),
-                )
-                .await;
+            self.notify_background_event_with_order(
+                sub_id,
+                order,
+                format!(
+                    "Project command `{}` failed: {}",
+                    command.name,
+                    get_error_message_ui(&err)
+                ),
+            )
+            .await;
         }
     }
 }

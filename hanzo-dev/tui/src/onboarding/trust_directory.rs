@@ -1,17 +1,23 @@
 use std::path::PathBuf;
 
-use ratatui::buffer::Buffer;
-use ratatui::layout::Rect;
-use ratatui::style::{Modifier, Style, Stylize};
-use ratatui::text::{Line, Span};
-use ratatui::widgets::{Paragraph, Widget, WidgetRef, Wrap};
+use crossterm::event::KeyCode;
+use crossterm::event::KeyEvent;
 use hanzo_core::config::set_project_access_mode;
 use hanzo_core::config::set_project_trusted;
 use hanzo_core::protocol::AskForApproval;
 use hanzo_core::protocol::SandboxPolicy;
 use hanzo_protocol::config_types::SandboxMode as SandboxModeCfg;
-use crossterm::event::KeyCode;
-use crossterm::event::KeyEvent;
+use ratatui::buffer::Buffer;
+use ratatui::layout::Rect;
+use ratatui::style::Modifier;
+use ratatui::style::Style;
+use ratatui::style::Stylize;
+use ratatui::text::Line;
+use ratatui::text::Span;
+use ratatui::widgets::Paragraph;
+use ratatui::widgets::Widget;
+use ratatui::widgets::WidgetRef;
+use ratatui::widgets::Wrap;
 
 use crate::colors;
 

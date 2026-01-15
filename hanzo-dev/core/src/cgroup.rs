@@ -1,5 +1,7 @@
 #[cfg(target_os = "linux")]
-use std::path::{Path, PathBuf};
+use std::path::Path;
+#[cfg(target_os = "linux")]
+use std::path::PathBuf;
 
 #[cfg(target_os = "linux")]
 const CGROUP_MOUNT: &str = "/sys/fs/cgroup";
@@ -90,7 +92,12 @@ pub(crate) fn exec_cgroup_abs_for_pid(pid: u32) -> Option<PathBuf> {
 #[cfg(target_os = "linux")]
 fn best_effort_enable_memory_controller(parent: &Path) {
     let controllers = std::fs::read_to_string(parent.join("cgroup.controllers")).ok();
-    if controllers.as_deref().unwrap_or_default().split_whitespace().all(|c| c != "memory") {
+    if controllers
+        .as_deref()
+        .unwrap_or_default()
+        .split_whitespace()
+        .all(|c| c != "memory")
+    {
         return;
     }
     let subtree = parent.join("cgroup.subtree_control");

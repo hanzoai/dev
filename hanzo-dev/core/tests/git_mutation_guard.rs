@@ -7,16 +7,16 @@
 
 use std::fs;
 
-const TARGET_DIRS: &[&str] = &[
-    "code-rs/tui/src",
-    "code-rs/code-auto-drive-core/src",
-];
+const TARGET_DIRS: &[&str] = &["code-rs/tui/src", "code-rs/code-auto-drive-core/src"];
 
 // Files allowed to host direct git invocations. They must also demonstrate an
 // epoch bump reference (either direct `bump_snapshot_epoch` or a documented helper).
 const ALLOW_LIST: &[(&str, &[&str])] = &[
     // chatwidget uses run_git_command (bumps epoch) and ghost snapshots with post_commit_hook.
-    ("code-rs/tui/src/chatwidget.rs", &["bump_snapshot_epoch", "run_git_command"]),
+    (
+        "code-rs/tui/src/chatwidget.rs",
+        &["bump_snapshot_epoch", "run_git_command"],
+    ),
     // get_git_diff is read-only; no epoch bump required, still allowed.
     ("code-rs/tui/src/get_git_diff.rs", &[]),
     // auto_coordinator bumps epoch on mutating verbs inside run_git_command.
@@ -34,7 +34,10 @@ fn new_git_invocations_must_use_epoch_helpers() {
 
     for dir in TARGET_DIRS {
         let walker = walkdir::WalkDir::new(dir).into_iter();
-        for entry in walker.filter_map(Result::ok).filter(|e| e.file_type().is_file()) {
+        for entry in walker
+            .filter_map(Result::ok)
+            .filter(|e| e.file_type().is_file())
+        {
             let path = entry.path();
             let path_str = path.to_string_lossy();
             if !path_str.ends_with(".rs") {
@@ -47,14 +50,9 @@ fn new_git_invocations_must_use_epoch_helpers() {
             if !contents.contains("Command::new(\"git\")") {
                 continue;
             }
-            if let Some((_, markers)) = ALLOW_LIST
-                .iter()
-                .find(|(p, _)| path_str.ends_with(p))
-            {
+            if let Some((_, markers)) = ALLOW_LIST.iter().find(|(p, _)| path_str.ends_with(p)) {
                 // If the allowlisted file performs mutations, enforce presence of epoch markers.
-                if !markers.is_empty()
-                    && markers.iter().all(|m| !contents.contains(m))
-                {
+                if !markers.is_empty() && markers.iter().all(|m| !contents.contains(m)) {
                     offenders.push(format!(
                         "{} (allowlisted but missing epoch marker(s): {:?})",
                         path_str, markers

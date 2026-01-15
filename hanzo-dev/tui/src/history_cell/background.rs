@@ -1,10 +1,12 @@
 //! Background event cell used for status messages derived from `BackgroundEventRecord`.
 
 use super::*;
-use crate::history::state::{BackgroundEventRecord, HistoryId};
+use crate::history::state::BackgroundEventRecord;
+use crate::history::state::HistoryId;
 use hanzo_ansi_escape::ansi_escape_line;
 use ratatui::style::Style;
-use ratatui::text::{Line, Span};
+use ratatui::text::Line;
+use ratatui::text::Span;
 
 pub(crate) struct BackgroundEventCell {
     state: BackgroundEventRecord,

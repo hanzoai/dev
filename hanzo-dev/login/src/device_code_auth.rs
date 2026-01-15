@@ -1,5 +1,5 @@
-use reqwest::header::HeaderMap;
 use reqwest::StatusCode;
+use reqwest::header::HeaderMap;
 use serde::Deserialize;
 use serde::Serialize;
 use serde::de::Deserializer;
@@ -8,7 +8,9 @@ use std::time::Duration;
 use std::time::Instant;
 
 use crate::pkce::PkceCodes;
-use crate::server::{persist_tokens_async, exchange_code_for_tokens, ServerOptions};
+use crate::server::ServerOptions;
+use crate::server::exchange_code_for_tokens;
+use crate::server::persist_tokens_async;
 use hanzo_browser::global as browser_global;
 use hanzo_core::default_client;
 use std::io::Write;
@@ -255,11 +257,7 @@ impl DeviceCodeSession {
     }
 }
 
-fn looks_like_cloudflare_challenge(
-    status: StatusCode,
-    headers: &HeaderMap,
-    body: &str,
-) -> bool {
+fn looks_like_cloudflare_challenge(status: StatusCode, headers: &HeaderMap, body: &str) -> bool {
     if status != StatusCode::FORBIDDEN {
         return false;
     }
@@ -325,10 +323,11 @@ async fn request_user_code_via_browser(
     );
 
     for _ in 0..3 {
-        let value = tokio::time::timeout(Duration::from_secs(15), manager.execute_javascript(&script))
-            .await
-            .map_err(|_| std::io::Error::other("browser fetch timed out"))?
-            .map_err(|err| std::io::Error::other(format!("browser execution failed: {err}")))?;
+        let value =
+            tokio::time::timeout(Duration::from_secs(15), manager.execute_javascript(&script))
+                .await
+                .map_err(|_| std::io::Error::other("browser fetch timed out"))?
+                .map_err(|err| std::io::Error::other(format!("browser execution failed: {err}")))?;
 
         let status = value
             .get("status")

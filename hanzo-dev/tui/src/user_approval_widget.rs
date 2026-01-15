@@ -6,24 +6,25 @@
 //! UI to Rust using [`ratatui`]. The goal is feature‑parity for the keyboard
 //! driven workflow – a fully‑fledged visual match is not required.
 
-use std::path::Path;
-use std::path::PathBuf;
-use hanzo_core::protocol::Op;
-use hanzo_core::protocol::ReviewDecision;
 use crossterm::event::KeyCode;
 use crossterm::event::KeyEvent;
 use crossterm::event::KeyEventKind;
+use hanzo_core::protocol::Op;
+use hanzo_core::protocol::ReviewDecision;
 use ratatui::buffer::Buffer;
 use ratatui::layout::Rect;
 use ratatui::prelude::*;
-use ratatui::text::{Line, Span};
+use ratatui::text::Line;
+use ratatui::text::Span;
 use ratatui::widgets::Block;
-use ratatui::widgets::WidgetRef;
 use ratatui::widgets::BorderType;
 use ratatui::widgets::Borders;
 use ratatui::widgets::Paragraph;
+use ratatui::widgets::WidgetRef;
 use ratatui::widgets::Wrap;
 use shlex::split as shlex_split;
+use std::path::Path;
+use std::path::PathBuf;
 
 use crate::app_event::AppEvent;
 use crate::app_event_sender::AppEventSender;
@@ -253,7 +254,10 @@ impl UserApprovalWidget<'_> {
 
     fn send_decision_with_feedback(&mut self, decision: ReviewDecision, feedback: String) {
         if let ApprovalRequest::TerminalCommand { id, .. } = &self.approval_request {
-            let approved = matches!(decision, ReviewDecision::Approved | ReviewDecision::ApprovedForSession);
+            let approved = matches!(
+                decision,
+                ReviewDecision::Approved | ReviewDecision::ApprovedForSession
+            );
             self.app_event_tx
                 .send(AppEvent::TerminalApprovalDecision { id: *id, approved });
             self.done = true;
@@ -266,7 +270,9 @@ impl UserApprovalWidget<'_> {
                 let cmd = strip_bash_lc_and_escape(command);
                 match decision {
                     ReviewDecision::Approved => format!("approved: run {} (this time)", cmd),
-                    ReviewDecision::ApprovedForSession => format!("approved: run {} (every time this session)", cmd),
+                    ReviewDecision::ApprovedForSession => {
+                        format!("approved: run {} (every time this session)", cmd)
+                    }
                     ReviewDecision::Denied => format!("not approved: run {}", cmd),
                     ReviewDecision::Abort => format!("canceled: run {}", cmd),
                 }
@@ -274,7 +280,9 @@ impl UserApprovalWidget<'_> {
             ApprovalRequest::ApplyPatch { .. } => {
                 format!("patch approval decision: {:?}", decision)
             }
-            ApprovalRequest::TerminalCommand { .. } => unreachable!("terminal approvals handled earlier"),
+            ApprovalRequest::TerminalCommand { .. } => {
+                unreachable!("terminal approvals handled earlier")
+            }
         };
         let message = if feedback.trim().is_empty() {
             message
@@ -314,7 +322,9 @@ impl UserApprovalWidget<'_> {
                 id: id.clone(),
                 decision,
             },
-            ApprovalRequest::TerminalCommand { .. } => unreachable!("terminal approvals handled earlier"),
+            ApprovalRequest::TerminalCommand { .. } => {
+                unreachable!("terminal approvals handled earlier")
+            }
         };
 
         self.app_event_tx.send(AppEvent::CodexOp(op));
@@ -362,11 +372,8 @@ impl UserApprovalWidget<'_> {
 impl WidgetRef for &UserApprovalWidget<'_> {
     fn render_ref(&self, area: Rect, buf: &mut Buffer) {
         let prompt_height = self.get_confirmation_prompt_height(area.width);
-        let [prompt_chunk, options_chunk] = Layout::vertical([
-            Constraint::Length(prompt_height),
-            Constraint::Min(0),
-        ])
-        .areas(area);
+        let [prompt_chunk, options_chunk] =
+            Layout::vertical([Constraint::Length(prompt_height), Constraint::Min(0)]).areas(area);
 
         self.confirmation_prompt.clone().render(prompt_chunk, buf);
 
@@ -382,7 +389,12 @@ impl WidgetRef for &UserApprovalWidget<'_> {
                 Style::default()
             };
 
-            let label = format!("{}{}{}", indicator, option.label, hotkey_suffix(option.hotkey));
+            let label = format!(
+                "{}{}{}",
+                indicator,
+                option.label,
+                hotkey_suffix(option.hotkey)
+            );
             lines.push(Line::from(Span::styled(label, line_style)));
 
             let desc_style = Style::default()
@@ -438,18 +450,18 @@ fn build_exec_select_options(command: &[String]) -> Vec<SelectOption> {
         if let Some(prefix) = prefix_candidate(tokens) {
             let prefix_display = strip_bash_lc_and_escape(&prefix);
             let prefix_with_wildcard = format!("{prefix_display} *");
-        options.push(SelectOption {
-            label: format!("Always allow '{prefix_with_wildcard}' for this project"),
-            description: "Approve any command starting with this prefix".to_string(),
-            hotkey: KeyCode::Char('p'),
-            action: SelectAction::ApproveForSession {
-                command: prefix.clone(),
-                match_kind: ApprovedCommandMatchKind::Prefix,
-                persist: true,
-                semantic_prefix: Some(prefix),
-            },
-        });
-    }
+            options.push(SelectOption {
+                label: format!("Always allow '{prefix_with_wildcard}' for this project"),
+                description: "Approve any command starting with this prefix".to_string(),
+                hotkey: KeyCode::Char('p'),
+                action: SelectAction::ApproveForSession {
+                    command: prefix.clone(),
+                    match_kind: ApprovedCommandMatchKind::Prefix,
+                    persist: true,
+                    semantic_prefix: Some(prefix),
+                },
+            });
+        }
     }
 
     options.push(SelectOption {

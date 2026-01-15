@@ -1,22 +1,33 @@
 use std::collections::hash_map::DefaultHasher;
 use std::fs;
-use std::hash::{Hash, Hasher};
-use std::path::{Path, PathBuf};
-use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::{Arc, Mutex};
+use std::hash::Hash;
+use std::hash::Hasher;
+use std::path::Path;
+use std::path::PathBuf;
+use std::sync::Arc;
+use std::sync::Mutex;
+use std::sync::atomic::AtomicBool;
+use std::sync::atomic::Ordering;
 use std::time::Duration;
 
 use anyhow::Result;
 use anyhow::bail;
-use chrono::{DateTime, Duration as ChronoDuration, Utc};
-use futures_util::{SinkExt, StreamExt};
+use chrono::DateTime;
+use chrono::Duration as ChronoDuration;
+use chrono::Utc;
+use futures_util::SinkExt;
+use futures_util::StreamExt;
 use once_cell::sync::Lazy;
-use serde::{Deserialize, Serialize};
+use serde::Deserialize;
+use serde::Serialize;
 use serde_json::Value;
-use tokio::time::{sleep, sleep_until, Instant};
+use tokio::time::Instant;
+use tokio::time::sleep;
+use tokio::time::sleep_until;
 use tokio_tungstenite::connect_async;
 use tokio_tungstenite::tungstenite::Message;
-use tracing::{info, warn};
+use tracing::info;
+use tracing::warn;
 
 use crate::codex::Session;
 
@@ -60,7 +71,8 @@ pub(crate) struct SubscriptionState {
     last_sent: Option<Subscription>,
 }
 
-static SUBSCRIPTIONS: Lazy<Mutex<SubscriptionState>> = Lazy::new(|| Mutex::new(SubscriptionState::default()));
+static SUBSCRIPTIONS: Lazy<Mutex<SubscriptionState>> =
+    Lazy::new(|| Mutex::new(SubscriptionState::default()));
 
 static CONTROL_SENDER: Lazy<Mutex<Option<tokio::sync::mpsc::UnboundedSender<String>>>> =
     Lazy::new(|| Mutex::new(None));
@@ -144,22 +156,23 @@ fn normalise_vec(values: Vec<String>) -> Vec<String> {
 }
 
 fn parse_level(raw: &str) -> Option<String> {
-    serde_json::from_str::<Value>(raw)
-        .ok()
-        .and_then(|val| {
-            val.get("level")
-                .and_then(|v| v.as_str())
-                .map(|s| s.to_lowercase())
-                .or_else(|| {
-                    val.get("type")
-                        .and_then(|v| v.as_str())
-                        .map(|s| s.to_lowercase())
-                })
-        })
+    serde_json::from_str::<Value>(raw).ok().and_then(|val| {
+        val.get("level")
+            .and_then(|v| v.as_str())
+            .map(|s| s.to_lowercase())
+            .or_else(|| {
+                val.get("type")
+                    .and_then(|v| v.as_str())
+                    .map(|s| s.to_lowercase())
+            })
+    })
 }
 
 fn is_error_level(level: &str) -> bool {
-    matches!(level, "error" | "errors" | "err" | "fatal" | "critical" | "panic")
+    matches!(
+        level,
+        "error" | "errors" | "err" | "fatal" | "critical" | "panic"
+    )
 }
 
 fn truncate_summary(text: &str) -> (String, bool) {
@@ -167,7 +180,10 @@ fn truncate_summary(text: &str) -> (String, bool) {
     let truncated: String = chars.by_ref().take(MAX_EVENT_SUMMARY_CHARS).collect();
     if text.chars().count() > MAX_EVENT_SUMMARY_CHARS {
         let remaining = text.chars().count().saturating_sub(MAX_EVENT_SUMMARY_CHARS);
-        (format!("{}... [truncated {remaining} chars]", truncated), true)
+        (
+            format!("{}... [truncated {remaining} chars]", truncated),
+            true,
+        )
     } else {
         (truncated, false)
     }
@@ -329,7 +345,11 @@ pub(crate) fn set_bridge_levels(levels: Vec<String>) {
         .session
         .clone()
         .unwrap_or_else(|| merge_effective_subscription(&state));
-    sub.levels = if levels.is_empty() { default_levels() } else { normalise_vec(levels) };
+    sub.levels = if levels.is_empty() {
+        default_levels()
+    } else {
+        normalise_vec(levels)
+    };
     state.session = Some(sub);
     maybe_resubscribe(&mut state);
 }
@@ -341,7 +361,11 @@ pub(crate) fn set_bridge_subscription(levels: Vec<String>, capabilities: Vec<Str
         .session
         .clone()
         .unwrap_or_else(|| merge_effective_subscription(&state));
-    sub.levels = if levels.is_empty() { default_levels() } else { normalise_vec(levels) };
+    sub.levels = if levels.is_empty() {
+        default_levels()
+    } else {
+        normalise_vec(levels)
+    };
     sub.capabilities = normalise_vec(capabilities);
     state.session = Some(sub);
     maybe_resubscribe(&mut state);
@@ -436,7 +460,8 @@ pub(crate) fn spawn_bridge_listener(session: std::sync::Arc<Session>) {
                     Ok(meta) => {
                         last_notice = None;
                         info!("[bridge] host metadata found, connecting");
-                        if let Err(err) = connect_and_listen(meta, Arc::clone(&session), &cwd).await {
+                        if let Err(err) = connect_and_listen(meta, Arc::clone(&session), &cwd).await
+                        {
                             warn!("[bridge] connect failed: {err:?}");
                         }
                     }
@@ -503,7 +528,10 @@ pub(crate) fn get_workspace_subscription() -> Option<Subscription> {
     SUBSCRIPTIONS.lock().unwrap().workspace.clone()
 }
 
-pub(crate) fn persist_workspace_subscription(cwd: &Path, sub: Option<Subscription>) -> anyhow::Result<()> {
+pub(crate) fn persist_workspace_subscription(
+    cwd: &Path,
+    sub: Option<Subscription>,
+) -> anyhow::Result<()> {
     let path = resolve_subscription_override_path(cwd);
 
     if let Some(parent) = path.parent() {
@@ -575,7 +603,10 @@ fn subscription_override_path(start: &Path) -> Option<PathBuf> {
 
     let mut current = Some(start);
     while let Some(dir) = current {
-        for name in [SUBSCRIPTION_OVERRIDE_FILE, LEGACY_SUBSCRIPTION_OVERRIDE_FILE] {
+        for name in [
+            SUBSCRIPTION_OVERRIDE_FILE,
+            LEGACY_SUBSCRIPTION_OVERRIDE_FILE,
+        ] {
             let candidate = dir.join(".hanzo").join(name);
             if candidate.exists() {
                 return Some(candidate);
@@ -646,11 +677,15 @@ fn workspace_has_code_bridge(start: &Path) -> bool {
     let contains_dep = |section: &str| -> bool {
         json.get(section)
             .and_then(|v| v.as_object())
-            .map(|map| map.contains_key("@hanzo/dev-bridge") || map.contains_key("@just-every/code-bridge"))
+            .map(|map| {
+                map.contains_key("@hanzo/dev-bridge") || map.contains_key("@just-every/code-bridge")
+            })
             .unwrap_or(false)
     };
 
-    contains_dep("dependencies") || contains_dep("devDependencies") || contains_dep("peerDependencies")
+    contains_dep("dependencies")
+        || contains_dep("devDependencies")
+        || contains_dep("peerDependencies")
 }
 
 fn is_meta_stale(meta: &BridgeMeta, path: &Path) -> bool {
@@ -826,7 +861,10 @@ fn summarize(raw: &str) -> String {
         if let Some(msg) = val.get("message").and_then(|v| v.as_str()) {
             parts.push(format!("message: {msg}"));
         }
-        return format!("<code_bridge_event>\n{}\n</code_bridge_event>", parts.join("\n"));
+        return format!(
+            "<code_bridge_event>\n{}\n</code_bridge_event>",
+            parts.join("\n")
+        );
     }
     raw.to_string()
 }
@@ -953,10 +991,7 @@ mod tests {
     #[test]
     fn format_batch_includes_multipliers() {
         let batch = CoalescedBatch {
-            entries: vec![
-                ("one".to_string(), 1),
-                ("two".to_string(), 3),
-            ],
+            entries: vec![("one".to_string(), 1), ("two".to_string(), 3)],
             total_events: 4,
             truncated_events: 0,
             dropped_events: 0,
