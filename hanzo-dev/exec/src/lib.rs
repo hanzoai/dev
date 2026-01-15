@@ -2901,16 +2901,16 @@ mod tests {
 	    fn auto_drive_exec_config_uses_auto_drive_reasoning_effort() {
 	        let temp = TempDir::new().unwrap();
 	        let mut config = test_config(temp.path());
-	        config.model_reasoning_effort = code_core::config_types::ReasoningEffort::Low;
+	        config.model_reasoning_effort = hanzo_core::config_types::ReasoningEffort::Low;
 	        config.auto_drive.model = "gpt-5.2".to_string();
 	        config.auto_drive.model_reasoning_effort =
-	            code_core::config_types::ReasoningEffort::XHigh;
+	            hanzo_core::config_types::ReasoningEffort::XHigh;
 
 	        let auto_config = build_auto_drive_exec_config(&config);
 	        assert_eq!(auto_config.model, "gpt-5.2");
 	        assert_eq!(
 	            auto_config.model_reasoning_effort,
-	            code_core::config_types::ReasoningEffort::XHigh
+	            hanzo_core::config_types::ReasoningEffort::XHigh
 	        );
 	    }
 
