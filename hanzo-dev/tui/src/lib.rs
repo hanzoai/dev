@@ -179,6 +179,7 @@ pub mod test_helpers {
     use std::time::Duration;
 
     use std::io::Write;
+    use ratatui::widgets::FrameExt;
 
     /// Render successive frames of the chat widget into a VT100-backed terminal.
     /// Each entry in `frames` specifies the `(width, height)` for that capture.

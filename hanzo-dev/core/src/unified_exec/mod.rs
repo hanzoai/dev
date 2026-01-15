@@ -455,7 +455,7 @@ mod tests {
                 timeout_ms: Some(2_500),
             })
             .await?;
-        assert!(out_2.output.contains("codex"));
+        assert!(out_2.output.contains("dev"));
 
         Ok(())
     }
@@ -501,7 +501,7 @@ mod tests {
                 timeout_ms: Some(2_500),
             })
             .await?;
-        assert!(out_3.output.contains("codex"));
+        assert!(out_3.output.contains("dev"));
 
         Ok(())
     }
@@ -538,7 +538,7 @@ mod tests {
                 timeout_ms: Some(10),
             })
             .await?;
-        assert!(!out_2.output.contains("codex"));
+        assert!(!out_2.output.contains("dev"));
 
         tokio::time::sleep(Duration::from_secs(7)).await;
 
@@ -551,7 +551,7 @@ mod tests {
             })
             .await?;
 
-        assert!(out_3.output.contains("codex"));
+        assert!(out_3.output.contains("dev"));
 
         Ok(())
     }

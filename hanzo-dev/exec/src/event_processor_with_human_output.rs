@@ -780,7 +780,7 @@ fn format_mcp_invocation(invocation: &McpInvocation) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use code_core::protocol::AgentReasoningEvent;
+    use hanzo_core::protocol::AgentReasoningEvent;
 
     #[test]
     fn reasoning_streams_do_not_reset_mid_stream() {

@@ -7,14 +7,14 @@ use clap_complete::generate;
 use hanzo_arg0::arg0_dispatch_or_else;
 use hanzo_chatgpt::apply_command::ApplyCommand;
 use hanzo_chatgpt::apply_command::run_apply_command;
-use hanzo_cli::LandlockCommand;
-use hanzo_cli::SeatbeltCommand;
-use hanzo_cli::login::read_api_key_from_stdin;
-use hanzo_cli::login::run_login_status;
-use hanzo_cli::login::run_login_with_api_key;
-use hanzo_cli::login::run_login_with_chatgpt;
-use hanzo_cli::login::run_login_with_device_code;
-use hanzo_cli::login::run_logout;
+use hanzo_dev::LandlockCommand;
+use hanzo_dev::SeatbeltCommand;
+use hanzo_dev::login::read_api_key_from_stdin;
+use hanzo_dev::login::run_login_status;
+use hanzo_dev::login::run_login_with_api_key;
+use hanzo_dev::login::run_login_with_chatgpt;
+use hanzo_dev::login::run_login_with_device_code;
+use hanzo_dev::login::run_logout;
 mod bridge;
 mod llm;
 use llm::{LlmCli, run_llm};
@@ -427,9 +427,9 @@ async fn cli_main(code_linux_sandbox_exe: Option<PathBuf>) -> anyhow::Result<()>
     // housekeeping early so stale worktrees/branches don't accumulate.
     let housekeeping_handle = match &subcommand {
         Some(Subcommand::Exec(_)) | Some(Subcommand::Auto(_)) => {
-            match code_core::config::find_code_home() {
+            match hanzo_core::config::find_code_home() {
                 Ok(code_home) => Some(std::thread::spawn(move || {
-                    if let Err(err) = code_core::run_housekeeping_if_due(&code_home) {
+                    if let Err(err) = hanzo_core::run_housekeeping_if_due(&code_home) {
                         tracing::warn!("code home housekeeping failed: {err}");
                     }
                 })),
@@ -585,7 +585,7 @@ async fn cli_main(code_linux_sandbox_exe: Option<PathBuf>) -> anyhow::Result<()>
                     &mut seatbelt_cli.config_overrides,
                     root_config_overrides.clone(),
                 );
-                hanzo_cli::debug_sandbox::run_command_under_seatbelt(
+                hanzo_dev::debug_sandbox::run_command_under_seatbelt(
                     seatbelt_cli,
                     code_linux_sandbox_exe,
                 )
@@ -596,7 +596,7 @@ async fn cli_main(code_linux_sandbox_exe: Option<PathBuf>) -> anyhow::Result<()>
                     &mut landlock_cli.config_overrides,
                     root_config_overrides.clone(),
                 );
-                hanzo_cli::debug_sandbox::run_command_under_landlock(
+                hanzo_dev::debug_sandbox::run_command_under_landlock(
                     landlock_cli,
                     code_linux_sandbox_exe,
                 )
