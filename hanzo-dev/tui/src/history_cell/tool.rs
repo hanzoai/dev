@@ -1,16 +1,16 @@
 //! Tool call history cells driven by structured argument/result state.
 
 use super::*;
-use crate::history::state::{
-    ArgumentValue,
-    HistoryId,
-    RunningToolState,
-    ToolArgument,
-    ToolCallState,
-    ToolStatus as HistoryToolStatus,
-};
+use crate::history::state::ArgumentValue;
+use crate::history::state::HistoryId;
+use crate::history::state::RunningToolState;
+use crate::history::state::ToolArgument;
+use crate::history::state::ToolCallState;
+use crate::history::state::ToolStatus as HistoryToolStatus;
 use crate::text_formatting::format_json_compact;
-use std::time::{Duration, Instant, SystemTime};
+use std::time::Duration;
+use std::time::Instant;
+use std::time::SystemTime;
 
 pub(crate) struct ToolCallCell {
     state: ToolCallState,
@@ -280,18 +280,15 @@ impl HistoryCell for RunningToolCallCell {
         if self.state.title == "Waiting" {
             let show_elapsed = !self.state.wait_has_target;
             let mut spans = Vec::new();
-            spans.push(
-                Span::styled(
-                    "Waiting...",
-                    Style::default()
-                        .fg(crate::colors::text())
-                        .add_modifier(Modifier::BOLD),
-                ),
-            );
+            spans.push(Span::styled(
+                "Waiting...",
+                Style::default()
+                    .fg(crate::colors::text())
+                    .add_modifier(Modifier::BOLD),
+            ));
             let cap_ms = self.state.wait_cap_ms.unwrap_or(600_000);
-            let cap_str = Self::strip_zero_seconds_suffix(
-                format_duration(Duration::from_millis(cap_ms)),
-            );
+            let cap_str =
+                Self::strip_zero_seconds_suffix(format_duration(Duration::from_millis(cap_ms)));
             let suffix = if show_elapsed {
                 let elapsed_str = Self::strip_zero_seconds_suffix(format_duration(elapsed));
                 format!(" ({} / up to {})", elapsed_str, cap_str)
@@ -326,17 +323,20 @@ fn render_arguments(arguments: &[ToolArgument]) -> Vec<Line<'static>> {
 fn render_argument(arg: &ToolArgument) -> Line<'static> {
     let dim_style = Style::default().fg(crate::colors::text_dim());
     let mut spans = vec![Span::styled("└ ", dim_style)];
-    spans.push(Span::styled(
-        format!("{}: ", arg.name),
-        dim_style,
-    ));
+    spans.push(Span::styled(format!("{}: ", arg.name), dim_style));
     let value_span = match &arg.value {
-        ArgumentValue::Text(text) => Span::styled(text.clone(), Style::default().fg(crate::colors::text())),
+        ArgumentValue::Text(text) => {
+            Span::styled(text.clone(), Style::default().fg(crate::colors::text()))
+        }
         ArgumentValue::Json(json) => {
-            let compact = format_json_compact(&json.to_string()).unwrap_or_else(|| json.to_string());
+            let compact =
+                format_json_compact(&json.to_string()).unwrap_or_else(|| json.to_string());
             Span::styled(compact, Style::default().fg(crate::colors::text()))
         }
-        ArgumentValue::Secret => Span::styled("(secret)".to_string(), Style::default().fg(crate::colors::text_dim())),
+        ArgumentValue::Secret => Span::styled(
+            "(secret)".to_string(),
+            Style::default().fg(crate::colors::text_dim()),
+        ),
     };
     spans.push(value_span);
     Line::from(spans)

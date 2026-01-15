@@ -1,15 +1,32 @@
 #![cfg(test)]
 #![allow(clippy::unwrap_used, clippy::expect_used)]
 
-use hanzo_core::history::{
-    ExploreEntry, ExploreEntryStatus, ExploreRecord, ExploreSummary, HistoryId, HistoryRecord,
-    HistorySnapshot, InlineSpan, OrderKeySnapshot, PlanIcon, PlanProgress, PlanStep, PlanUpdateState,
-    ReasoningBlock, ReasoningSection, ReasoningState, TextEmphasis, TextTone,
-};
+use hanzo_core::history::ExploreEntry;
+use hanzo_core::history::ExploreEntryStatus;
+use hanzo_core::history::ExploreRecord;
+use hanzo_core::history::ExploreSummary;
+use hanzo_core::history::HistoryId;
+use hanzo_core::history::HistoryRecord;
+use hanzo_core::history::HistorySnapshot;
+use hanzo_core::history::InlineSpan;
+use hanzo_core::history::OrderKeySnapshot;
+use hanzo_core::history::PlanIcon;
+use hanzo_core::history::PlanProgress;
+use hanzo_core::history::PlanStep;
+use hanzo_core::history::PlanUpdateState;
+use hanzo_core::history::ReasoningBlock;
+use hanzo_core::history::ReasoningSection;
+use hanzo_core::history::ReasoningState;
+use hanzo_core::history::TextEmphasis;
+use hanzo_core::history::TextTone;
 use hanzo_core::plan_tool::StepStatus;
-use hanzo_core::protocol::{Event, EventMsg, ReplayHistoryEvent};
-use hanzo_protocol::models::{ContentItem, ResponseItem};
-use hanzo_tui::test_helpers::{render_chat_widget_to_vt100, ChatWidgetHarness};
+use hanzo_core::protocol::Event;
+use hanzo_core::protocol::EventMsg;
+use hanzo_core::protocol::ReplayHistoryEvent;
+use hanzo_protocol::models::ContentItem;
+use hanzo_protocol::models::ResponseItem;
+use hanzo_tui::test_helpers::ChatWidgetHarness;
+use hanzo_tui::test_helpers::render_chat_widget_to_vt100;
 use serde_json::to_value;
 
 fn assistant_cell_count(screen: &str) -> usize {
@@ -26,8 +43,12 @@ fn assistant_cell_count(screen: &str) -> usize {
 
 fn message(role: &str, text: &str) -> ResponseItem {
     let content = match role {
-        "assistant" => ContentItem::OutputText { text: text.to_string() },
-        _ => ContentItem::InputText { text: text.to_string() },
+        "assistant" => ContentItem::OutputText {
+            text: text.to_string(),
+        },
+        _ => ContentItem::InputText {
+            text: text.to_string(),
+        },
     };
 
     ResponseItem::Message {
@@ -107,17 +128,36 @@ fn interleaved_reasoning_snapshot() -> HistorySnapshot {
         tool_call_lookup: Default::default(),
         stream_lookup: Default::default(),
         order: vec![
-            OrderKeySnapshot { req: 1, out: 0, seq: 1 },
-            OrderKeySnapshot { req: 2, out: 0, seq: 2 },
-            OrderKeySnapshot { req: 3, out: 0, seq: 3 },
-            OrderKeySnapshot { req: 4, out: 0, seq: 4 },
+            OrderKeySnapshot {
+                req: 1,
+                out: 0,
+                seq: 1,
+            },
+            OrderKeySnapshot {
+                req: 2,
+                out: 0,
+                seq: 2,
+            },
+            OrderKeySnapshot {
+                req: 3,
+                out: 0,
+                seq: 3,
+            },
+            OrderKeySnapshot {
+                req: 4,
+                out: 0,
+                seq: 4,
+            },
         ],
         order_debug: Vec::new(),
     }
 }
 
 fn final_reasoning_snapshot() -> HistorySnapshot {
-    let records = vec![explore_record(1), reasoning_state(2, "Summarizing findings")];
+    let records = vec![
+        explore_record(1),
+        reasoning_state(2, "Summarizing findings"),
+    ];
 
     HistorySnapshot {
         records,
@@ -126,8 +166,16 @@ fn final_reasoning_snapshot() -> HistorySnapshot {
         tool_call_lookup: Default::default(),
         stream_lookup: Default::default(),
         order: vec![
-            OrderKeySnapshot { req: 1, out: 0, seq: 1 },
-            OrderKeySnapshot { req: 2, out: 0, seq: 2 },
+            OrderKeySnapshot {
+                req: 1,
+                out: 0,
+                seq: 1,
+            },
+            OrderKeySnapshot {
+                req: 2,
+                out: 0,
+                seq: 2,
+            },
         ],
         order_debug: Vec::new(),
     }
@@ -216,10 +264,7 @@ fn replay_history_hides_interleaved_reasoning_after_exploring() {
         !screen.contains("Inspecting directory structure"),
         "screen: {screen}"
     );
-    assert!(
-        screen.contains("Summarizing findings"),
-        "screen: {screen}"
-    );
+    assert!(screen.contains("Summarizing findings"), "screen: {screen}");
 }
 
 #[test]

@@ -11,9 +11,7 @@ const BUILD_PROFILE: Option<&str> = option_env!("HANZO_PROFILE");
 fn demo_command_enabled() -> bool {
     static ENABLED: OnceLock<bool> = OnceLock::new();
     *ENABLED.get_or_init(|| {
-        let profile_matches = |
-            profile: &str
-        | {
+        let profile_matches = |profile: &str| {
             let normalized = profile.trim().to_ascii_lowercase();
             normalized == "perf" || normalized.starts_with("dev")
         };

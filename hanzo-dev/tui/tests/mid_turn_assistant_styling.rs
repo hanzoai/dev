@@ -3,8 +3,12 @@
 #![cfg(test)]
 #![allow(clippy::unwrap_used, clippy::expect_used)]
 
-use hanzo_core::protocol::{AgentMessageEvent, Event, EventMsg, OrderMeta};
-use hanzo_tui::test_helpers::{render_chat_widget_to_vt100, ChatWidgetHarness};
+use hanzo_core::protocol::AgentMessageEvent;
+use hanzo_core::protocol::Event;
+use hanzo_core::protocol::EventMsg;
+use hanzo_core::protocol::OrderMeta;
+use hanzo_tui::test_helpers::ChatWidgetHarness;
+use hanzo_tui::test_helpers::render_chat_widget_to_vt100;
 
 #[test]
 fn mid_turn_answer_suppresses_bullet_gutter() {

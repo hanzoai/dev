@@ -1,4 +1,5 @@
-use hanzo_core::{built_in_model_providers, WireApi};
+use hanzo_core::WireApi;
+use hanzo_core::built_in_model_providers;
 use serial_test::serial;
 
 fn with_env_override<F, R>(key: &str, value: Option<&str>, f: F) -> R

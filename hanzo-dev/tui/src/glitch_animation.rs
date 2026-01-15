@@ -75,7 +75,11 @@ pub(crate) fn render_intro_animation_with_size_and_alpha_offset(
     let frame = (t * 60.0) as u32;
 
     let mut lines = welcome_lines(size, version);
-    let full_width = lines.iter().map(|line| line.chars().count()).max().unwrap_or(0);
+    let full_width = lines
+        .iter()
+        .map(|line| line.chars().count())
+        .max()
+        .unwrap_or(0);
     let start = row_offset as usize;
     if start >= lines.len() {
         return;
@@ -252,7 +256,9 @@ fn medium_welcome_lines(version: &str) -> Vec<String> {
         let tail_len = first_tail.chars().count();
         let tail_pad = MEDIUM_VERSION_COLUMN.saturating_sub(tail_len);
         let tail_version_pad = " ".repeat(tail_pad);
-        animated.push(format!("{MEDIUM_VERSION_LINE}{tail_version_pad}{version}  "));
+        animated.push(format!(
+            "{MEDIUM_VERSION_LINE}{tail_version_pad}{version}  "
+        ));
         animated.extend(MEDIUM_BODY_TAIL.iter().map(|line| (*line).to_string()));
     }
     shift_left(animated, 3)
@@ -482,14 +488,16 @@ fn render_overlay_lines_with_alpha(
                 let shine =
                     (1.0 - (dx as f32 / (shine_band as f32 + 0.001)).clamp(0.0, 1.0)).powf(1.6);
                 let bright = bump_rgb(base, shine * 0.30);
-                color = blend_to_background(mix_rgb(bright, Color::Rgb(230, 232, 235), fade), alpha);
+                color =
+                    blend_to_background(mix_rgb(bright, Color::Rgb(230, 232, 235), fade), alpha);
                 draw = true;
             } else if border[y][x] && xi <= reveal_x_outline.max(reveal_x_fill) {
                 let base = gradient_multi(x as f32 / (w.max(1) as f32));
                 let period = 8usize;
                 let on = ((x + y + (frame as usize)) % period) < (period / 2);
                 let c = if on { bump_rgb(base, 0.22) } else { base };
-                color = blend_to_background(mix_rgb(c, Color::Rgb(235, 237, 240), fade * 0.8), alpha);
+                color =
+                    blend_to_background(mix_rgb(c, Color::Rgb(235, 237, 240), fade * 0.8), alpha);
                 draw = true;
             }
 
@@ -529,7 +537,11 @@ pub(crate) fn blend_to_background(color: Color, alpha: f32) -> Color {
             Color::Rgb(r, g, b)
         }
         _ => {
-            if alpha > 0.5 { color } else { bg }
+            if alpha > 0.5 {
+                color
+            } else {
+                bg
+            }
         }
     }
 }

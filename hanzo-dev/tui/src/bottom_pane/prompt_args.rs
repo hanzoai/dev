@@ -1,3 +1,4 @@
+use crate::slash_command::built_in_slash_commands;
 use hanzo_protocol::custom_prompts::CustomPrompt;
 use hanzo_protocol::custom_prompts::PROMPTS_CMD_PREFIX;
 use lazy_static::lazy_static;
@@ -5,7 +6,6 @@ use regex_lite::Regex;
 use shlex::Shlex;
 use std::collections::HashMap;
 use std::collections::HashSet;
-use crate::slash_command::built_in_slash_commands;
 
 lazy_static! {
     static ref PROMPT_ARG_REGEX: Regex =

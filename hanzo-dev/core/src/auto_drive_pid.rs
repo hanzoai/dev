@@ -2,7 +2,8 @@ use chrono::Utc;
 use serde::Serialize;
 use std::env;
 use std::fs;
-use std::path::{Path, PathBuf};
+use std::path::Path;
+use std::path::PathBuf;
 
 /// Distinguishes which part of the product started Auto Drive so external
 /// tooling can annotate the dump appropriately.
@@ -41,11 +42,7 @@ impl AutoDrivePidFile {
     /// Write the PID file under the provided code_home, returning a guard that
     /// will delete it on drop. Errors are swallowed so Auto Drive startup never
     /// fails because of telemetry bookkeeping.
-    pub fn write(
-        code_home: &Path,
-        goal: Option<&str>,
-        mode: AutoDriveMode,
-    ) -> Option<Self> {
+    pub fn write(code_home: &Path, goal: Option<&str>, mode: AutoDriveMode) -> Option<Self> {
         let dir = code_home.join("auto-drive");
         fs::create_dir_all(&dir).ok()?;
 
@@ -59,7 +56,11 @@ impl AutoDrivePidFile {
             mode: mode.as_str(),
             goal: goal.map(truncate_goal),
             cwd,
-            command: if command.is_empty() { None } else { Some(command) },
+            command: if command.is_empty() {
+                None
+            } else {
+                Some(command)
+            },
         };
 
         let path = dir.join(format!("pid-{pid}.json"));

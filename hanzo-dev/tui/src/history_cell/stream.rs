@@ -1,13 +1,15 @@
 use super::*;
-use crate::history::{AssistantMessageState, AssistantStreamState};
-use hanzo_core::history::state::MAX_ASSISTANT_STREAM_RETAINED_BYTES;
+use crate::history::AssistantMessageState;
+use crate::history::AssistantStreamState;
 use hanzo_core::config::Config;
 use hanzo_core::config_types::UriBasedFileOpener;
+use hanzo_core::history::state::MAX_ASSISTANT_STREAM_RETAINED_BYTES;
 use ratatui::style::Style;
 use ratatui::text::Line;
 use std::path::Path;
 use std::path::PathBuf;
-use std::time::{SystemTime, UNIX_EPOCH};
+use std::time::SystemTime;
+use std::time::UNIX_EPOCH;
 
 // ==================== StreamingContentCell ====================
 // Renders in-progress assistant answers backed by `AssistantStreamState`.
@@ -69,11 +71,7 @@ impl StreamingContentCell {
         &mut self.state
     }
 
-    pub(crate) fn update_context(
-        &mut self,
-        file_opener: UriBasedFileOpener,
-        cwd: &Path,
-    ) {
+    pub(crate) fn update_context(&mut self, file_opener: UriBasedFileOpener, cwd: &Path) {
         self.file_opener = file_opener;
         self.cwd = cwd.to_path_buf();
     }

@@ -2,22 +2,30 @@ use std::cell::RefCell;
 use std::collections::HashMap;
 use std::path::PathBuf;
 
-use ratatui::prelude::{Buffer, Rect};
-use ratatui::style::{Style, Stylize};
-use ratatui::text::{Line, Text};
-use ratatui::widgets::{Block, Paragraph, Widget, Wrap};
+use ratatui::prelude::Buffer;
+use ratatui::prelude::Rect;
+use ratatui::style::Style;
+use ratatui::style::Stylize;
+use ratatui::text::Line;
+use ratatui::text::Text;
+use ratatui::widgets::Block;
+use ratatui::widgets::Paragraph;
+use ratatui::widgets::Widget;
+use ratatui::widgets::Wrap;
 
 use crate::diff_render::create_diff_summary_with_width;
-use crate::history::compat::{
-    HistoryId,
-    PatchEventType as HistoryPatchEventType,
-    PatchRecord,
-};
+use crate::history::compat::HistoryId;
+use crate::history::compat::PatchEventType as HistoryPatchEventType;
+use crate::history::compat::PatchRecord;
 use hanzo_ansi_escape::ansi_escape_line;
 use hanzo_core::protocol::FileChange;
 
-use super::core::{HistoryCell, HistoryCellType, PatchEventType, PatchKind};
-use super::formatting::{normalize_overwrite_sequences, trim_empty_lines};
+use super::core::HistoryCell;
+use super::core::HistoryCellType;
+use super::core::PatchEventType;
+use super::core::PatchKind;
+use super::formatting::normalize_overwrite_sequences;
+use super::formatting::trim_empty_lines;
 use super::plain_message_state_from_lines;
 use crate::history::compat::PlainMessageState;
 use crate::sanitize::Mode as SanitizeMode;
@@ -107,7 +115,9 @@ fn diff_contains_line_edits(diff: &str) -> bool {
 }
 
 fn diff_contains_binary_markers(diff: &str) -> bool {
-    diff.contains("Binary files") || diff.contains("GIT binary patch") || diff.as_bytes().contains(&0)
+    diff.contains("Binary files")
+        || diff.contains("GIT binary patch")
+        || diff.as_bytes().contains(&0)
 }
 
 fn diff_contains_metadata_markers(diff: &str) -> bool {
@@ -227,10 +237,7 @@ impl PatchSummaryCell {
         .into_iter()
         .collect();
 
-        if matches!(
-            self.record.patch_type,
-            HistoryPatchEventType::ApplyFailure
-        ) {
+        if matches!(self.record.patch_type, HistoryPatchEventType::ApplyFailure) {
             if let Some(metadata) = &self.record.failure {
                 if !lines.is_empty() {
                     lines.push(Line::default());
@@ -375,7 +382,9 @@ pub(crate) fn new_patch_apply_failure(stderr: String) -> PlainMessageState {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use hanzo_core::history::state::{HistoryId, PatchEventType, PatchRecord};
+    use hanzo_core::history::state::HistoryId;
+    use hanzo_core::history::state::PatchEventType;
+    use hanzo_core::history::state::PatchRecord;
     use hanzo_core::protocol::FileChange;
     use std::collections::HashMap;
     use std::path::PathBuf;

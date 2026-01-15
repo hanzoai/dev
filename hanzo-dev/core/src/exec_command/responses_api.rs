@@ -52,8 +52,7 @@ pub fn create_exec_command_tool_for_responses_api() -> ResponsesApiTool {
         "max_output_tokens".to_string(),
         JsonSchema::Number {
             description: Some(
-                "Maximum number of tokens to return. Excess output will be truncated."
-                    .to_string(),
+                "Maximum number of tokens to return. Excess output will be truncated.".to_string(),
             ),
         },
     );
@@ -82,7 +81,7 @@ pub fn create_exec_command_tool_for_responses_api() -> ResponsesApiTool {
         name: EXEC_COMMAND_TOOL_NAME.to_owned(),
         description:
             "Runs a command in a PTY, returning output or a session ID for ongoing interaction."
-            .to_string(),
+                .to_string(),
         strict: false,
         parameters: JsonSchema::Object {
             properties,
@@ -119,8 +118,7 @@ pub fn create_write_stdin_tool_for_responses_api() -> ResponsesApiTool {
         "max_output_tokens".to_string(),
         JsonSchema::Number {
             description: Some(
-                "Maximum number of tokens to return. Excess output will be truncated."
-                    .to_string(),
+                "Maximum number of tokens to return. Excess output will be truncated.".to_string(),
             ),
         },
     );
@@ -129,7 +127,7 @@ pub fn create_write_stdin_tool_for_responses_api() -> ResponsesApiTool {
         name: WRITE_STDIN_TOOL_NAME.to_owned(),
         description:
             "Writes characters to an existing unified exec session and returns recent output."
-            .to_string(),
+                .to_string(),
         strict: false,
         parameters: JsonSchema::Object {
             properties,

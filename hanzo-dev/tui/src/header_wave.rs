@@ -1,9 +1,11 @@
 use std::cell::Cell;
 use std::f32::consts::TAU;
-use std::time::{Duration, Instant};
+use std::time::Duration;
+use std::time::Instant;
 
 use ratatui::buffer::Buffer;
-use ratatui::layout::{Margin, Rect};
+use ratatui::layout::Margin;
+use ratatui::layout::Rect;
 use ratatui::style::Color;
 
 pub struct HeaderWaveEffect {

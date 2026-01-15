@@ -1,16 +1,21 @@
 #![cfg(feature = "dev-faults")]
 
 use anyhow::anyhow;
-use chrono::{Duration as ChronoDuration, Utc};
-use hanzo_core::error::{CodexErr, UnexpectedResponseError, UsageLimitReachedError};
+use chrono::Duration as ChronoDuration;
+use chrono::Utc;
+use hanzo_core::error::CodexErr;
+use hanzo_core::error::UnexpectedResponseError;
+use hanzo_core::error::UsageLimitReachedError;
 use once_cell::sync::OnceCell;
 use rand::Rng;
-use std::collections::HashMap;
-use std::sync::atomic::{AtomicUsize, Ordering};
-use std::sync::Mutex;
-use std::time::{Duration, Instant};
 use reqwest::StatusCode;
 use serde_json::json;
+use std::collections::HashMap;
+use std::sync::Mutex;
+use std::sync::atomic::AtomicUsize;
+use std::sync::atomic::Ordering;
+use std::time::Duration;
+use std::time::Instant;
 
 /// Scope flag – currently only `auto_drive` is recognised.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -47,7 +52,12 @@ fn parse_reset_hint() -> Option<FaultReset> {
         }
         if let Ok(parsed) = chrono::DateTime::parse_from_rfc3339(&seconds) {
             let instant = Instant::now()
-                + Duration::from_secs(parsed.signed_duration_since(chrono::Utc::now()).num_seconds().clamp(0, i64::MAX) as u64);
+                + Duration::from_secs(
+                    parsed
+                        .signed_duration_since(chrono::Utc::now())
+                        .num_seconds()
+                        .clamp(0, i64::MAX) as u64,
+                );
             return Some(FaultReset::Timestamp(instant));
         }
         if let Some(stripped) = seconds.strip_prefix("now+") {
@@ -106,14 +116,20 @@ pub fn next_fault(scope: FaultScope) -> Option<InjectedFault> {
     if cfg.disconnect.load(Ordering::Relaxed) > 0 {
         let remaining = cfg.disconnect.fetch_sub(1, Ordering::Relaxed);
         if remaining > 0 {
-            tracing::warn!("[faults] inject transient disconnect (remaining {})", remaining - 1);
+            tracing::warn!(
+                "[faults] inject transient disconnect (remaining {})",
+                remaining - 1
+            );
             return Some(InjectedFault::Disconnect);
         }
     }
     if cfg.rate_limit.load(Ordering::Relaxed) > 0 {
         let remaining = cfg.rate_limit.fetch_sub(1, Ordering::Relaxed);
         if remaining > 0 {
-            tracing::warn!("[faults] inject 429 rate limit (remaining {})", remaining - 1);
+            tracing::warn!(
+                "[faults] inject 429 rate limit (remaining {})",
+                remaining - 1
+            );
             return Some(InjectedFault::RateLimit {
                 reset_hint: cfg.rate_limit_reset.lock().unwrap().clone(),
             });
@@ -125,12 +141,16 @@ pub fn next_fault(scope: FaultScope) -> Option<InjectedFault> {
 /// Convert a fault into an `anyhow::Error` matching production failures.
 pub fn fault_to_error(fault: InjectedFault) -> anyhow::Error {
     match fault {
-        InjectedFault::Disconnect => anyhow!("model stream error: stream disconnected before completion"),
+        InjectedFault::Disconnect => {
+            anyhow!("model stream error: stream disconnected before completion")
+        }
         InjectedFault::RateLimit { reset_hint } => match reset_hint {
-            Some(FaultReset::Seconds(secs)) => anyhow!(CodexErr::UsageLimitReached(UsageLimitReachedError {
-                plan_type: None,
-                resets_in_seconds: Some(secs),
-            })),
+            Some(FaultReset::Seconds(secs)) => {
+                anyhow!(CodexErr::UsageLimitReached(UsageLimitReachedError {
+                    plan_type: None,
+                    resets_in_seconds: Some(secs),
+                }))
+            }
             Some(FaultReset::Timestamp(instant)) => {
                 let reset_at = chrono::Utc::now()
                     + ChronoDuration::from_std(instant.saturating_duration_since(Instant::now()))

@@ -10,18 +10,21 @@
 //! - Hanzo Engine (hanzo) - Local inference engine (OpenAI-compatible HTTP)
 
 use anyhow::Result;
-use axum::{
-    http::StatusCode,
-    routing::{get, post},
-    Json, Router,
-};
+use axum::http::StatusCode;
+use axum::routing::get;
+use axum::routing::post;
+use axum::Json;
+use axum::Router;
 use clap::Parser;
-use serde::{Deserialize, Serialize};
+use serde::Deserialize;
+use serde::Serialize;
 use std::process::Stdio;
 use tokio::io::AsyncWriteExt;
 use tokio::process::Command;
 use tower_http::cors::CorsLayer;
-use tracing::{error, info, warn};
+use tracing::error;
+use tracing::info;
+use tracing::warn;
 
 /// Default Hanzo engine URL (can be overridden with HANZO_ENGINE_URL env var)
 const DEFAULT_HANZO_ENGINE_URL: &str = "http://localhost:8080";
@@ -57,7 +60,11 @@ impl Backend {
     fn build_args(&self, prompt: &str, model: &str) -> Vec<String> {
         match self.name {
             "claude" => {
-                let mut args = vec!["-p".to_string(), "--output-format".to_string(), "text".to_string()];
+                let mut args = vec![
+                    "-p".to_string(),
+                    "--output-format".to_string(),
+                    "text".to_string(),
+                ];
                 if !model.is_empty() && model != "claude-cli" && model.starts_with("claude-") {
                     args.push("--model".to_string());
                     args.push(model.to_string());
@@ -95,7 +102,11 @@ impl Backend {
             }
             "ollama" => {
                 let model_to_use = if model.is_empty() { "llama3.2" } else { model };
-                vec!["run".to_string(), model_to_use.to_string(), prompt.to_string()]
+                vec![
+                    "run".to_string(),
+                    model_to_use.to_string(),
+                    prompt.to_string(),
+                ]
             }
             "hanzo" => {
                 // Hanzo uses HTTP passthrough, not CLI args
@@ -120,14 +131,27 @@ fn get_backends() -> Vec<Backend> {
             name: "codex",
             command: "codex",
             input_mode: InputMode::Args,
-            models: vec!["codex", "codex-mini", "codex-mini-latest", "gpt-4o", "gpt-4o-mini", "o1", "o3-mini"],
+            models: vec![
+                "codex",
+                "codex-mini",
+                "codex-mini-latest",
+                "gpt-4o",
+                "gpt-4o-mini",
+                "o1",
+                "o3-mini",
+            ],
             api_keys_to_clean: vec!["OPENAI_API_KEY", "OPENAI_ORG_ID"],
         },
         Backend {
             name: "gemini",
             command: "gemini",
             input_mode: InputMode::Args,
-            models: vec!["gemini", "gemini-2.5-pro", "gemini-2.0-flash", "gemini-1.5-pro"],
+            models: vec![
+                "gemini",
+                "gemini-2.5-pro",
+                "gemini-2.0-flash",
+                "gemini-1.5-pro",
+            ],
             api_keys_to_clean: vec!["GOOGLE_API_KEY", "GEMINI_API_KEY"],
         },
         Backend {
@@ -148,7 +172,14 @@ fn get_backends() -> Vec<Backend> {
             name: "ollama",
             command: "ollama",
             input_mode: InputMode::Args,
-            models: vec!["ollama", "llama3.2", "llama3.1", "codellama", "mixtral", "phi3"],
+            models: vec![
+                "ollama",
+                "llama3.2",
+                "llama3.1",
+                "codellama",
+                "mixtral",
+                "phi3",
+            ],
             api_keys_to_clean: vec![],
         },
         Backend {
@@ -176,7 +207,11 @@ fn get_backend_for_model(model: &str) -> Backend {
     if model.starts_with("claude") {
         return backends.into_iter().find(|b| b.name == "claude").unwrap();
     }
-    if model.starts_with("codex") || model.starts_with("gpt") || model.starts_with("o1") || model.starts_with("o3") {
+    if model.starts_with("codex")
+        || model.starts_with("gpt")
+        || model.starts_with("o1")
+        || model.starts_with("o3")
+    {
         return backends.into_iter().find(|b| b.name == "codex").unwrap();
     }
     if model.starts_with("gemini") {
@@ -230,7 +265,10 @@ fn extract_response(output: &str) -> String {
         }
 
         // Skip JSON artifacts
-        if trimmed.chars().all(|c| matches!(c, '[' | ']' | '{' | '}' | ',' | ' ')) {
+        if trimmed
+            .chars()
+            .all(|c| matches!(c, '[' | ']' | '{' | '}' | ',' | ' '))
+        {
             continue;
         }
 
@@ -241,17 +279,19 @@ fn extract_response(output: &str) -> String {
 
     let result = text_lines.join("\n").trim().to_string();
     // Clean trailing brackets
-    result.trim_end_matches(|c: char| matches!(c, '[' | ']' | '{' | '}' | ' ')).to_string()
+    result
+        .trim_end_matches(|c: char| matches!(c, '[' | ']' | '{' | '}' | ' '))
+        .to_string()
 }
 
 /// Invoke Hanzo engine via HTTP passthrough
 async fn invoke_hanzo(request: &ChatRequest) -> Result<ChatResponse> {
-    let hanzo_url = std::env::var("HANZO_ENGINE_URL")
-        .unwrap_or_else(|_| DEFAULT_HANZO_ENGINE_URL.to_string());
+    let hanzo_url =
+        std::env::var("HANZO_ENGINE_URL").unwrap_or_else(|_| DEFAULT_HANZO_ENGINE_URL.to_string());
 
     // Get the model - use env var default or fallback to "default" (hanzo engine interprets this)
-    let default_model = std::env::var("HANZO_DEFAULT_MODEL")
-        .unwrap_or_else(|_| "default".to_string());
+    let default_model =
+        std::env::var("HANZO_DEFAULT_MODEL").unwrap_or_else(|_| "default".to_string());
 
     let endpoint = format!("{}/v1/chat/completions", hanzo_url);
 
@@ -269,7 +309,7 @@ async fn invoke_hanzo(request: &ChatRequest) -> Result<ChatResponse> {
             })
         }).collect::<Vec<_>>()
     });
-    
+
     let response = client
         .post(&endpoint)
         .header("Content-Type", "application/json")
@@ -277,13 +317,13 @@ async fn invoke_hanzo(request: &ChatRequest) -> Result<ChatResponse> {
         .json(&body)
         .send()
         .await?;
-    
+
     if !response.status().is_success() {
         let status = response.status();
         let error_text = response.text().await.unwrap_or_default();
         anyhow::bail!("Hanzo engine error ({}): {}", status, error_text);
     }
-    
+
     let hanzo_response: ChatResponse = response.json().await?;
     Ok(hanzo_response)
 }
@@ -460,7 +500,10 @@ async fn models_handler() -> Json<ModelsResponse> {
 async fn chat_completions_handler(
     Json(request): Json<ChatRequest>,
 ) -> Result<Json<ChatResponse>, (StatusCode, Json<ErrorResponse>)> {
-    let model = request.model.clone().unwrap_or_else(|| "claude-cli".to_string());
+    let model = request
+        .model
+        .clone()
+        .unwrap_or_else(|| "claude-cli".to_string());
     let backend = get_backend_for_model(&model);
 
     info!(model = %model, backend = backend.name, "Processing chat completion");
@@ -557,8 +600,7 @@ async fn main() -> Result<()> {
     // Initialize logging
     tracing_subscriber::fmt()
         .with_env_filter(
-            tracing_subscriber::EnvFilter::try_from_default_env()
-                .unwrap_or_else(|_| "info".into()),
+            tracing_subscriber::EnvFilter::try_from_default_env().unwrap_or_else(|_| "info".into()),
         )
         .init();
 
@@ -574,7 +616,8 @@ async fn main() -> Result<()> {
 
     let backends: Vec<_> = get_backends().iter().map(|b| b.name).collect();
 
-    println!(r#"
+    println!(
+        r#"
 ╔══════════════════════════════════════════════════════════════════╗
 ║     Multi-CLI → OpenAI API Proxy (Subscription Mode)             ║
 ╠══════════════════════════════════════════════════════════════════╣
@@ -591,7 +634,11 @@ async fn main() -> Result<()> {
 ║    ollama, llama3.2        → Ollama (local, no keys needed)      ║
 ║    hanzo, hanzo-engine     → Hanzo Engine (local inference HTTP) ║
 ╚══════════════════════════════════════════════════════════════════╝
-"#, args.port, args.port, backends.join(", "));
+"#,
+        args.port,
+        args.port,
+        backends.join(", ")
+    );
 
     let listener = tokio::net::TcpListener::bind(format!("0.0.0.0:{}", args.port)).await?;
     info!(port = args.port, "Server listening");

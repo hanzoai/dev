@@ -1,14 +1,22 @@
-use std::io::{BufWriter, Write};
+use std::io::BufWriter;
+use std::io::Write;
 use std::path::PathBuf;
-use std::time::{Duration, SystemTime};
+use std::time::Duration;
+use std::time::SystemTime;
 
-use hanzo_protocol::models::{ContentItem, ResponseItem};
-use hanzo_protocol::protocol::{
-    EventMsg as ProtoEventMsg, RecordedEvent, RolloutItem, RolloutLine, SessionMeta,
-    SessionMetaLine, SessionSource, UserMessageEvent,
-};
+use filetime::FileTime;
+use filetime::set_file_mtime;
 use hanzo_protocol::ConversationId;
-use filetime::{set_file_mtime, FileTime};
+use hanzo_protocol::models::ContentItem;
+use hanzo_protocol::models::ResponseItem;
+use hanzo_protocol::protocol::EventMsg as ProtoEventMsg;
+use hanzo_protocol::protocol::RecordedEvent;
+use hanzo_protocol::protocol::RolloutItem;
+use hanzo_protocol::protocol::RolloutLine;
+use hanzo_protocol::protocol::SessionMeta;
+use hanzo_protocol::protocol::SessionMetaLine;
+use hanzo_protocol::protocol::SessionSource;
+use hanzo_protocol::protocol::UserMessageEvent;
 use tempfile::TempDir;
 use uuid::Uuid;
 
@@ -23,7 +31,11 @@ fn write_rollout(
     source: SessionSource,
     user_text: &str,
 ) -> PathBuf {
-    let sessions_dir = code_home.join("sessions").join("2025").join("11").join("16");
+    let sessions_dir = code_home
+        .join("sessions")
+        .join("2025")
+        .join("11")
+        .join("16");
     std::fs::create_dir_all(&sessions_dir).unwrap();
 
     let filename = format!(
@@ -160,8 +172,16 @@ fn resume_picker_orders_by_last_event_even_with_mtime_drift() {
 
     // Simulate sync where the older file has the newest mtime.
     let base = SystemTime::now();
-    set_file_mtime(&old_path, FileTime::from_system_time(base + Duration::from_secs(300))).unwrap();
-    set_file_mtime(&new_path, FileTime::from_system_time(base + Duration::from_secs(60))).unwrap();
+    set_file_mtime(
+        &old_path,
+        FileTime::from_system_time(base + Duration::from_secs(300)),
+    )
+    .unwrap();
+    set_file_mtime(
+        &new_path,
+        FileTime::from_system_time(base + Duration::from_secs(60)),
+    )
+    .unwrap();
 
     let results = list_sessions_for_cwd(&cwd, temp.path(), None);
     assert_eq!(results.len(), 2);
@@ -184,7 +204,12 @@ fn resume_picker_excludes_current_path_and_empty_sessions() {
     );
 
     // Empty session
-    let sessions_dir = temp.path().join("sessions").join("2025").join("11").join("18");
+    let sessions_dir = temp
+        .path()
+        .join("sessions")
+        .join("2025")
+        .join("11")
+        .join("18");
     std::fs::create_dir_all(&sessions_dir).unwrap();
     let empty_path = sessions_dir.join("rollout-empty.jsonl");
     let session_meta = SessionMeta {
@@ -198,7 +223,10 @@ fn resume_picker_excludes_current_path_and_empty_sessions() {
     };
     let session_line = RolloutLine {
         timestamp: session_meta.timestamp.clone(),
-        item: RolloutItem::SessionMeta(SessionMetaLine { meta: session_meta, git: None }),
+        item: RolloutItem::SessionMeta(SessionMetaLine {
+            meta: session_meta,
+            git: None,
+        }),
     };
     let mut writer = BufWriter::new(std::fs::File::create(&empty_path).unwrap());
     serde_json::to_writer(&mut writer, &session_line).unwrap();

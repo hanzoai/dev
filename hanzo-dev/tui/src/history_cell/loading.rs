@@ -1,5 +1,6 @@
 use super::*;
-use crate::history::state::{HistoryId, LoadingState};
+use crate::history::state::HistoryId;
+use crate::history::state::LoadingState;
 
 pub(crate) struct LoadingCell {
     state: LoadingState,

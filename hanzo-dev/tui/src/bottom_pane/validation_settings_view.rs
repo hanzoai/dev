@@ -1,20 +1,30 @@
-use hanzo_core::config_types::{validation_tool_category, ValidationCategory};
+use crossterm::event::KeyCode;
+use crossterm::event::KeyEvent;
+use crossterm::event::KeyModifiers;
+use hanzo_core::config_types::ValidationCategory;
+use hanzo_core::config_types::validation_tool_category;
 use hanzo_core::protocol::ValidationGroup;
-use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 use ratatui::buffer::Buffer;
-use ratatui::layout::{Alignment, Rect};
-use ratatui::style::{Modifier, Style};
-use ratatui::text::{Line, Span};
-use ratatui::widgets::{Block, Borders, Clear, Paragraph, Widget};
+use ratatui::layout::Alignment;
+use ratatui::layout::Rect;
+use ratatui::style::Modifier;
+use ratatui::style::Style;
+use ratatui::text::Line;
+use ratatui::text::Span;
+use ratatui::widgets::Block;
+use ratatui::widgets::Borders;
+use ratatui::widgets::Clear;
+use ratatui::widgets::Paragraph;
+use ratatui::widgets::Widget;
 use std::cell::Cell;
 
 use crate::app_event::AppEvent;
 use crate::app_event_sender::AppEventSender;
 use crate::colors;
 
+use super::BottomPane;
 use super::bottom_pane_view::BottomPaneView;
 use super::scroll_state::ScrollState;
-use super::BottomPane;
 
 #[derive(Clone, Debug)]
 pub(crate) struct ToolStatus {
@@ -71,7 +81,11 @@ impl ValidationSettingsView {
     ) -> Self {
         let mut state = ScrollState::new();
         state.selected_idx = Some(0);
-        let tool_name_width = tools.iter().map(|row| row.status.name.len()).max().unwrap_or(0);
+        let tool_name_width = tools
+            .iter()
+            .map(|row| row.status.name.len())
+            .max()
+            .unwrap_or(0);
         Self {
             groups,
             tools,
@@ -96,8 +110,10 @@ impl ValidationSettingsView {
             *enabled = new_value;
         }
         self.apply_group_to_tools(group, new_value);
-        self.app_event_tx
-            .send(AppEvent::UpdateValidationGroup { group, enable: new_value });
+        self.app_event_tx.send(AppEvent::UpdateValidationGroup {
+            group,
+            enable: new_value,
+        });
     }
 
     fn toggle_tool(&mut self, idx: usize) {
@@ -126,7 +142,11 @@ impl ValidationSettingsView {
             return 1;
         }
         let hint = self.viewport_rows.get();
-        let target = if hint == 0 { DEFAULT_VISIBLE_ROWS } else { hint };
+        let target = if hint == 0 {
+            DEFAULT_VISIBLE_ROWS
+        } else {
+            hint
+        };
         target.clamp(1, total)
     }
 
@@ -169,24 +189,19 @@ impl ValidationSettingsView {
                         if command.is_empty() {
                             self.flash_notice(
                                 pane,
-                                format!(
-                                    "No install command available for {}",
-                                    tool_name
-                                ),
+                                format!("No install command available for {}", tool_name),
                             );
                         } else {
                             self.flash_notice(
                                 pane,
-                                format!(
-                                    "Opening terminal to install {}",
-                                    tool_name
-                                ),
+                                format!("Opening terminal to install {}", tool_name),
                             );
                             self.is_complete = true;
-                            self.app_event_tx.send(AppEvent::RequestValidationToolInstall {
-                                name: tool_name,
-                                command,
-                            });
+                            self.app_event_tx
+                                .send(AppEvent::RequestValidationToolInstall {
+                                    name: tool_name,
+                                    command,
+                                });
                         }
                     } else {
                         self.toggle_tool(idx);
@@ -204,7 +219,11 @@ impl ValidationSettingsView {
         self.app_event_tx.send(AppEvent::RequestRedraw);
     }
 
-    fn handle_key_event_internal(&mut self, mut pane: Option<&mut BottomPane<'_>>, key_event: KeyEvent) {
+    fn handle_key_event_internal(
+        &mut self,
+        mut pane: Option<&mut BottomPane<'_>>,
+        key_event: KeyEvent,
+    ) {
         let (_, _, selection_kinds) = self.build_rows();
         let mut total = selection_kinds.len();
         if total == 0 {
@@ -229,13 +248,25 @@ impl ValidationSettingsView {
             .copied();
 
         match key_event {
-            KeyEvent { code: KeyCode::Up, .. } => {
+            KeyEvent {
+                code: KeyCode::Up, ..
+            } => {
                 self.state.move_up_wrap(total);
             }
-            KeyEvent { code: KeyCode::Down, .. } => {
+            KeyEvent {
+                code: KeyCode::Down,
+                ..
+            } => {
                 self.state.move_down_wrap(total);
             }
-            KeyEvent { code: KeyCode::Left, .. } | KeyEvent { code: KeyCode::Right, .. } => {
+            KeyEvent {
+                code: KeyCode::Left,
+                ..
+            }
+            | KeyEvent {
+                code: KeyCode::Right,
+                ..
+            } => {
                 if let Some(kind) = current_kind {
                     match kind {
                         SelectionKind::Group(idx) => self.toggle_group(idx),
@@ -249,17 +280,26 @@ impl ValidationSettingsView {
                     }
                 }
             }
-            KeyEvent { code: KeyCode::Char(' '), .. } => {
+            KeyEvent {
+                code: KeyCode::Char(' '),
+                ..
+            } => {
                 if let Some(kind) = current_kind {
                     self.activate_selection(pane.take(), kind);
                 }
             }
-            KeyEvent { code: KeyCode::Enter, modifiers: KeyModifiers::NONE, .. } => {
+            KeyEvent {
+                code: KeyCode::Enter,
+                modifiers: KeyModifiers::NONE,
+                ..
+            } => {
                 if let Some(kind) = current_kind {
                     self.activate_selection(pane.take(), kind);
                 }
             }
-            KeyEvent { code: KeyCode::Esc, .. } => {
+            KeyEvent {
+                code: KeyCode::Esc, ..
+            } => {
                 self.is_complete = true;
             }
             _ => {}
@@ -339,11 +379,17 @@ impl ValidationSettingsView {
                     ValidationGroup::Stylistic => "Formatting and style linting",
                 };
                 let label_style = if selected {
-                    Style::default().fg(colors::primary()).add_modifier(Modifier::BOLD)
+                    Style::default()
+                        .fg(colors::primary())
+                        .add_modifier(Modifier::BOLD)
                 } else if *enabled {
-                    Style::default().fg(colors::text()).add_modifier(Modifier::BOLD)
+                    Style::default()
+                        .fg(colors::text())
+                        .add_modifier(Modifier::BOLD)
                 } else {
-                    Style::default().fg(colors::text_dim()).add_modifier(Modifier::BOLD)
+                    Style::default()
+                        .fg(colors::text_dim())
+                        .add_modifier(Modifier::BOLD)
                 };
                 let status_span = if *enabled {
                     Span::styled("enabled", Style::default().fg(colors::success()))
@@ -359,7 +405,11 @@ impl ValidationSettingsView {
                     Span::styled(description, Style::default().fg(colors::text_dim())),
                 ];
                 if selected {
-                    let hint = if *enabled { "(press Enter to disable)" } else { "(press Enter to enable)" };
+                    let hint = if *enabled {
+                        "(press Enter to disable)"
+                    } else {
+                        "(press Enter to enable)"
+                    };
                     spans.push(Span::raw("  "));
                     spans.push(Span::styled(hint, Style::default().fg(colors::text_dim())));
                 }
@@ -371,7 +421,9 @@ impl ValidationSettingsView {
                 let width = self.tool_name_width.max(row.status.name.len());
                 let base_style = if row.group_enabled {
                     if selected {
-                        Style::default().fg(colors::primary()).add_modifier(Modifier::BOLD)
+                        Style::default()
+                            .fg(colors::primary())
+                            .add_modifier(Modifier::BOLD)
                     } else {
                         Style::default().fg(colors::text())
                     }
@@ -386,7 +438,12 @@ impl ValidationSettingsView {
                 spans.push(Span::raw("  "));
                 if row.group_enabled {
                     let (status_label, status_style) = if !row.status.installed {
-                        ("missing", Style::default().fg(colors::warning()).add_modifier(Modifier::BOLD))
+                        (
+                            "missing",
+                            Style::default()
+                                .fg(colors::warning())
+                                .add_modifier(Modifier::BOLD),
+                        )
                     } else if row.enabled {
                         ("enabled", Style::default().fg(colors::success()))
                     } else {
@@ -394,7 +451,10 @@ impl ValidationSettingsView {
                     };
                     spans.push(Span::styled(status_label, status_style));
                     spans.push(Span::raw("  "));
-                    spans.push(Span::styled(row.status.description, Style::default().fg(colors::text_dim())));
+                    spans.push(Span::styled(
+                        row.status.description,
+                        Style::default().fg(colors::text_dim()),
+                    ));
                     if selected {
                         let hint = if !row.status.installed {
                             "(press Enter to install)"
@@ -462,7 +522,11 @@ impl<'a> BottomPaneView<'a> for ValidationSettingsView {
 
         let (rows, selection_rows, _) = self.build_rows();
         let selection_count = selection_rows.len();
-        let selected_idx = self.state.selected_idx.unwrap_or(0).min(selection_count.saturating_sub(1));
+        let selected_idx = self
+            .state
+            .selected_idx
+            .unwrap_or(0)
+            .min(selection_count.saturating_sub(1));
         let selected_row_index = selection_rows.get(selected_idx).copied().unwrap_or(0);
 
         let mut start_row = selection_rows

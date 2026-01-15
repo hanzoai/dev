@@ -37,9 +37,7 @@ fn is_safe_single_component(value: &str) -> bool {
         return false;
     }
 
-    !value
-        .chars()
-        .any(|ch| matches!(ch, '/' | '\\' | '\0'))
+    !value.chars().any(|ch| matches!(ch, '/' | '\\' | '\0'))
 }
 
 fn fnv1a_64(bytes: &[u8]) -> u64 {

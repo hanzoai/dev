@@ -4,8 +4,10 @@ use os_info::Version;
 use serde::Deserialize;
 use serde::Serialize;
 use serde_json::Value as JsonValue;
-use sha1::{Digest, Sha1};
-use std::collections::{BTreeMap, HashMap};
+use sha1::Digest;
+use sha1::Sha1;
+use std::collections::BTreeMap;
+use std::collections::HashMap;
 use std::path::PathBuf;
 use strum_macros::Display as DeriveDisplay;
 use which::which;
@@ -59,58 +61,214 @@ pub struct ToolCandidate {
 }
 
 pub const TOOL_CANDIDATES: &[ToolCandidate] = &[
-    ToolCandidate { label: "git", detection_names: &["git"] },
-    ToolCandidate { label: "gh", detection_names: &["gh"] },
-    ToolCandidate { label: "rg", detection_names: &["rg"] },
-    ToolCandidate { label: "fd", detection_names: &["fd", "fdfind"] },
-    ToolCandidate { label: "fzf", detection_names: &["fzf"] },
-    ToolCandidate { label: "jq", detection_names: &["jq"] },
-    ToolCandidate { label: "yq", detection_names: &["yq"] },
-    ToolCandidate { label: "sed", detection_names: &["sed"] },
-    ToolCandidate { label: "awk", detection_names: &["awk"] },
-    ToolCandidate { label: "xargs", detection_names: &["xargs"] },
-    ToolCandidate { label: "parallel", detection_names: &["parallel"] },
-    ToolCandidate { label: "curl", detection_names: &["curl"] },
-    ToolCandidate { label: "wget", detection_names: &["wget"] },
-    ToolCandidate { label: "tar", detection_names: &["tar"] },
-    ToolCandidate { label: "unzip", detection_names: &["unzip"] },
-    ToolCandidate { label: "gzip", detection_names: &["gzip"] },
-    ToolCandidate { label: "zstd", detection_names: &["zstd"] },
-    ToolCandidate { label: "make", detection_names: &["make"] },
-    ToolCandidate { label: "just", detection_names: &["just"] },
-    ToolCandidate { label: "node", detection_names: &["node"] },
-    ToolCandidate { label: "npm", detection_names: &["npm"] },
-    ToolCandidate { label: "pnpm", detection_names: &["pnpm"] },
-    ToolCandidate { label: "python3", detection_names: &["python3"] },
-    ToolCandidate { label: "pipx", detection_names: &["pipx"] },
-    ToolCandidate { label: "go", detection_names: &["go"] },
-    ToolCandidate { label: "rustup", detection_names: &["rustup"] },
-    ToolCandidate { label: "cargo", detection_names: &["cargo"] },
-    ToolCandidate { label: "rustc", detection_names: &["rustc"] },
-    ToolCandidate { label: "shellcheck", detection_names: &["shellcheck"] },
-    ToolCandidate { label: "shfmt", detection_names: &["shfmt"] },
-    ToolCandidate { label: "docker", detection_names: &["docker"] },
-    ToolCandidate { label: "docker compose", detection_names: &["docker", "docker-compose"] },
-    ToolCandidate { label: "sqlite3", detection_names: &["sqlite3"] },
-    ToolCandidate { label: "duckdb", detection_names: &["duckdb"] },
-    ToolCandidate { label: "rsync", detection_names: &["rsync"] },
-    ToolCandidate { label: "openssl", detection_names: &["openssl"] },
-    ToolCandidate { label: "ssh", detection_names: &["ssh"] },
-    ToolCandidate { label: "dig", detection_names: &["dig"] },
-    ToolCandidate { label: "nc", detection_names: &["nc", "netcat"] },
-    ToolCandidate { label: "lsof", detection_names: &["lsof"] },
-    ToolCandidate { label: "ripgrep-all", detection_names: &["ripgrep-all", "rga"] },
-    ToolCandidate { label: "entr", detection_names: &["entr"] },
-    ToolCandidate { label: "watchexec", detection_names: &["watchexec"] },
-    ToolCandidate { label: "hyperfine", detection_names: &["hyperfine"] },
-    ToolCandidate { label: "pv", detection_names: &["pv"] },
-    ToolCandidate { label: "bat", detection_names: &["bat"] },
-    ToolCandidate { label: "delta", detection_names: &["delta"] },
-    ToolCandidate { label: "tree", detection_names: &["tree"] },
-    ToolCandidate { label: "python", detection_names: &["python"] },
-    ToolCandidate { label: "deno", detection_names: &["deno"] },
-    ToolCandidate { label: "bun", detection_names: &["bun"] },
-    ToolCandidate { label: "js", detection_names: &["js"] },
+    ToolCandidate {
+        label: "git",
+        detection_names: &["git"],
+    },
+    ToolCandidate {
+        label: "gh",
+        detection_names: &["gh"],
+    },
+    ToolCandidate {
+        label: "rg",
+        detection_names: &["rg"],
+    },
+    ToolCandidate {
+        label: "fd",
+        detection_names: &["fd", "fdfind"],
+    },
+    ToolCandidate {
+        label: "fzf",
+        detection_names: &["fzf"],
+    },
+    ToolCandidate {
+        label: "jq",
+        detection_names: &["jq"],
+    },
+    ToolCandidate {
+        label: "yq",
+        detection_names: &["yq"],
+    },
+    ToolCandidate {
+        label: "sed",
+        detection_names: &["sed"],
+    },
+    ToolCandidate {
+        label: "awk",
+        detection_names: &["awk"],
+    },
+    ToolCandidate {
+        label: "xargs",
+        detection_names: &["xargs"],
+    },
+    ToolCandidate {
+        label: "parallel",
+        detection_names: &["parallel"],
+    },
+    ToolCandidate {
+        label: "curl",
+        detection_names: &["curl"],
+    },
+    ToolCandidate {
+        label: "wget",
+        detection_names: &["wget"],
+    },
+    ToolCandidate {
+        label: "tar",
+        detection_names: &["tar"],
+    },
+    ToolCandidate {
+        label: "unzip",
+        detection_names: &["unzip"],
+    },
+    ToolCandidate {
+        label: "gzip",
+        detection_names: &["gzip"],
+    },
+    ToolCandidate {
+        label: "zstd",
+        detection_names: &["zstd"],
+    },
+    ToolCandidate {
+        label: "make",
+        detection_names: &["make"],
+    },
+    ToolCandidate {
+        label: "just",
+        detection_names: &["just"],
+    },
+    ToolCandidate {
+        label: "node",
+        detection_names: &["node"],
+    },
+    ToolCandidate {
+        label: "npm",
+        detection_names: &["npm"],
+    },
+    ToolCandidate {
+        label: "pnpm",
+        detection_names: &["pnpm"],
+    },
+    ToolCandidate {
+        label: "python3",
+        detection_names: &["python3"],
+    },
+    ToolCandidate {
+        label: "pipx",
+        detection_names: &["pipx"],
+    },
+    ToolCandidate {
+        label: "go",
+        detection_names: &["go"],
+    },
+    ToolCandidate {
+        label: "rustup",
+        detection_names: &["rustup"],
+    },
+    ToolCandidate {
+        label: "cargo",
+        detection_names: &["cargo"],
+    },
+    ToolCandidate {
+        label: "rustc",
+        detection_names: &["rustc"],
+    },
+    ToolCandidate {
+        label: "shellcheck",
+        detection_names: &["shellcheck"],
+    },
+    ToolCandidate {
+        label: "shfmt",
+        detection_names: &["shfmt"],
+    },
+    ToolCandidate {
+        label: "docker",
+        detection_names: &["docker"],
+    },
+    ToolCandidate {
+        label: "docker compose",
+        detection_names: &["docker", "docker-compose"],
+    },
+    ToolCandidate {
+        label: "sqlite3",
+        detection_names: &["sqlite3"],
+    },
+    ToolCandidate {
+        label: "duckdb",
+        detection_names: &["duckdb"],
+    },
+    ToolCandidate {
+        label: "rsync",
+        detection_names: &["rsync"],
+    },
+    ToolCandidate {
+        label: "openssl",
+        detection_names: &["openssl"],
+    },
+    ToolCandidate {
+        label: "ssh",
+        detection_names: &["ssh"],
+    },
+    ToolCandidate {
+        label: "dig",
+        detection_names: &["dig"],
+    },
+    ToolCandidate {
+        label: "nc",
+        detection_names: &["nc", "netcat"],
+    },
+    ToolCandidate {
+        label: "lsof",
+        detection_names: &["lsof"],
+    },
+    ToolCandidate {
+        label: "ripgrep-all",
+        detection_names: &["ripgrep-all", "rga"],
+    },
+    ToolCandidate {
+        label: "entr",
+        detection_names: &["entr"],
+    },
+    ToolCandidate {
+        label: "watchexec",
+        detection_names: &["watchexec"],
+    },
+    ToolCandidate {
+        label: "hyperfine",
+        detection_names: &["hyperfine"],
+    },
+    ToolCandidate {
+        label: "pv",
+        detection_names: &["pv"],
+    },
+    ToolCandidate {
+        label: "bat",
+        detection_names: &["bat"],
+    },
+    ToolCandidate {
+        label: "delta",
+        detection_names: &["delta"],
+    },
+    ToolCandidate {
+        label: "tree",
+        detection_names: &["tree"],
+    },
+    ToolCandidate {
+        label: "python",
+        detection_names: &["python"],
+    },
+    ToolCandidate {
+        label: "deno",
+        detection_names: &["deno"],
+    },
+    ToolCandidate {
+        label: "bun",
+        detection_names: &["bun"],
+    },
+    ToolCandidate {
+        label: "js",
+        detection_names: &["js"],
+    },
 ];
 
 impl EnvironmentContext {
@@ -393,7 +551,12 @@ impl EnvironmentContextSnapshot {
         if self.writable_roots != previous.writable_roots {
             changes.insert(
                 "writable_roots".to_string(),
-                JsonValue::Array(self.writable_roots.iter().map(|s| JsonValue::String(s.clone())).collect()),
+                JsonValue::Array(
+                    self.writable_roots
+                        .iter()
+                        .map(|s| JsonValue::String(s.clone()))
+                        .collect(),
+                ),
             );
         }
         if self.operating_system != previous.operating_system {
@@ -405,7 +568,12 @@ impl EnvironmentContextSnapshot {
         if self.common_tools != previous.common_tools {
             changes.insert(
                 "common_tools".to_string(),
-                JsonValue::Array(self.common_tools.iter().map(|s| JsonValue::String(s.clone())).collect()),
+                JsonValue::Array(
+                    self.common_tools
+                        .iter()
+                        .map(|s| JsonValue::String(s.clone()))
+                        .collect(),
+                ),
             );
         }
         if self.shell != previous.shell {
@@ -445,7 +613,11 @@ impl EnvironmentContextSnapshot {
         snapshot_to_response_item(self, stream_id)
     }
 
-    pub fn with_metadata(mut self, git_branch: Option<String>, reasoning_effort: Option<String>) -> Self {
+    pub fn with_metadata(
+        mut self,
+        git_branch: Option<String>,
+        reasoning_effort: Option<String>,
+    ) -> Self {
         self.git_branch = git_branch;
         self.reasoning_effort = reasoning_effort;
         self
@@ -653,9 +825,7 @@ impl EnvironmentContextTracker {
             None => return Ok(None),
         };
 
-        let items = emission
-            .clone()
-            .into_response_items_with_id(stream_id)?;
+        let items = emission.clone().into_response_items_with_id(stream_id)?;
         Ok(Some((emission, items)))
     }
 
@@ -696,12 +866,12 @@ impl EnvironmentContextEmission {
         stream_id: Option<&str>,
     ) -> serde_json::Result<Vec<ResponseItem>> {
         match self {
-            EnvironmentContextEmission::Full { snapshot, .. } => Ok(vec![
-                snapshot.to_response_item_with_id(stream_id)?,
-            ]),
-            EnvironmentContextEmission::Delta { delta, .. } => Ok(vec![
-                delta.to_response_item_with_id(stream_id)?,
-            ]),
+            EnvironmentContextEmission::Full { snapshot, .. } => {
+                Ok(vec![snapshot.to_response_item_with_id(stream_id)?])
+            }
+            EnvironmentContextEmission::Delta { delta, .. } => {
+                Ok(vec![delta.to_response_item_with_id(stream_id)?])
+            }
         }
     }
 
@@ -817,10 +987,7 @@ fn detect_common_tools() -> Option<Vec<String>> {
             candidate.detection_names
         };
 
-        if detection_names
-            .iter()
-            .any(|name| which(name).is_ok())
-        {
+        if detection_names.iter().any(|name| which(name).is_ok()) {
             available.push(candidate.label.to_string());
         }
     }
@@ -977,7 +1144,12 @@ mod tests {
         );
 
         let first = tracker
-            .emit_response_items(&ctx, Some("main".into()), Some("Medium".into()), Some("env-stream"))
+            .emit_response_items(
+                &ctx,
+                Some("main".into()),
+                Some("Medium".into()),
+                Some("env-stream"),
+            )
             .expect("serialize full")
             .expect("full emission");
         assert!(matches!(first.0, EnvironmentContextEmission::Full { .. }));
@@ -995,14 +1167,24 @@ mod tests {
 
         // Unchanged context should not emit again
         let none = tracker
-            .emit_response_items(&ctx, Some("main".into()), Some("Medium".into()), Some("env-stream"))
+            .emit_response_items(
+                &ctx,
+                Some("main".into()),
+                Some("Medium".into()),
+                Some("env-stream"),
+            )
             .expect("unchanged serialize");
         assert!(none.is_none());
 
         // Changing stable fields triggers a delta emission
         ctx.cwd = Some(PathBuf::from("/repo-two"));
         let delta = tracker
-            .emit_response_items(&ctx, Some("feature".into()), Some("High".into()), Some("env-stream"))
+            .emit_response_items(
+                &ctx,
+                Some("feature".into()),
+                Some("High".into()),
+                Some("env-stream"),
+            )
             .expect("serialize delta")
             .expect("delta emission");
         assert!(matches!(delta.0, EnvironmentContextEmission::Delta { .. }));

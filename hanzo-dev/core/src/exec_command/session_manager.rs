@@ -1,5 +1,6 @@
 #![allow(dead_code)]
-use std::collections::{HashMap, VecDeque};
+use std::collections::HashMap;
+use std::collections::VecDeque;
 use std::io::ErrorKind;
 use std::io::Read;
 use std::path::PathBuf;
@@ -59,9 +60,7 @@ impl TruncatingCollector {
             return;
         }
 
-        self.total_bytes = self
-            .total_bytes
-            .saturating_add(chunk.len() as u64);
+        self.total_bytes = self.total_bytes.saturating_add(chunk.len() as u64);
 
         if self.prefix.len() < self.cap_bytes {
             let remaining = self.cap_bytes - self.prefix.len();
@@ -89,10 +88,7 @@ impl TruncatingCollector {
         }
 
         if (self.total_bytes as usize) <= self.cap_bytes {
-            return (
-                String::from_utf8_lossy(&self.prefix).into_owned(),
-                None,
-            );
+            return (String::from_utf8_lossy(&self.prefix).into_owned(), None);
         }
 
         let prefix_str = String::from_utf8_lossy(&self.prefix).into_owned();
@@ -112,9 +108,8 @@ impl TruncatingCollector {
             let prefix_slice = pick_prefix_slice(&prefix_str, left_budget);
             let suffix_slice = pick_suffix_slice(&suffix_str, right_budget);
             let kept_content_bytes = prefix_slice.as_bytes().len() + suffix_slice.as_bytes().len();
-            let truncated_content_bytes = self
-                .total_bytes
-                .saturating_sub(kept_content_bytes as u64);
+            let truncated_content_bytes =
+                self.total_bytes.saturating_sub(kept_content_bytes as u64);
             let new_tokens = truncated_content_bytes.div_ceil(4);
             if new_tokens == guess_tokens {
                 let mut out = String::with_capacity(marker_len + kept_content_bytes + 1);

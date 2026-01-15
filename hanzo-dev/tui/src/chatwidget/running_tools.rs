@@ -1,4 +1,7 @@
-use super::{history_cell, ChatWidget, RunningToolEntry, ToolCallId};
+use super::ChatWidget;
+use super::RunningToolEntry;
+use super::ToolCallId;
+use super::history_cell;
 use crate::history_cell::RunningToolCallCell;
 use std::collections::HashMap;
 use std::mem;
@@ -17,36 +20,35 @@ pub(super) fn rehydrate(chat: &mut ChatWidget<'_>) {
 
     for (idx, cell) in chat.history_cells.iter().enumerate() {
         let Some(order_key) = chat.cell_order_seq.get(idx).copied() else {
-            chat.history_debug(format!("running_tools.rehydrate.skip idx={} reason=no_order", idx));
+            chat.history_debug(format!(
+                "running_tools.rehydrate.skip idx={} reason=no_order",
+                idx
+            ));
             continue;
         };
 
-        let Some(running_cell) = cell
-            .as_any()
-            .downcast_ref::<RunningToolCallCell>()
-        else {
+        let Some(running_cell) = cell.as_any().downcast_ref::<RunningToolCallCell>() else {
             continue;
         };
 
         let state = running_cell.state();
         let Some(call_id) = state.call_id.as_ref().filter(|cid| !cid.is_empty()) else {
-            chat.history_debug(format!("running_tools.rehydrate.skip idx={} reason=no_call_id", idx));
+            chat.history_debug(format!(
+                "running_tools.rehydrate.skip idx={} reason=no_call_id",
+                idx
+            ));
             continue;
         };
         let tool_key = ToolCallId(call_id.clone());
         let history_id = chat.history_cell_ids.get(idx).and_then(|slot| *slot);
 
-        new_state
-            .running_custom_tools
-            .insert(tool_key, RunningToolEntry::new(order_key, idx).with_history_id(history_id));
+        new_state.running_custom_tools.insert(
+            tool_key,
+            RunningToolEntry::new(order_key, idx).with_history_id(history_id),
+        );
         chat.history_debug(format!(
             "running_tools.rehydrate.custom call_id={} idx={} history_id={:?} order=({}, {}, {})",
-            call_id,
-            idx,
-            history_id,
-            order_key.req,
-            order_key.out,
-            order_key.seq
+            call_id, idx, history_id, order_key.req, order_key.out, order_key.seq
         ));
     }
 
@@ -108,8 +110,7 @@ pub(super) fn resolve_entry_index(
     }
     find_by_call_id(chat, call_id)
         .or_else(|| {
-            chat
-                .cell_order_seq
+            chat.cell_order_seq
                 .iter()
                 .position(|key| *key == entry.order_key)
         })
@@ -123,8 +124,7 @@ pub(super) fn resolve_entry_index(
 }
 
 pub(super) fn find_by_call_id(chat: &ChatWidget<'_>, call_id: &str) -> Option<usize> {
-    chat
-        .history_cells
+    chat.history_cells
         .iter()
         .enumerate()
         .find_map(|(idx, cell)| {
@@ -164,8 +164,8 @@ pub(super) fn finalize_all_due_to_answer(chat: &mut ChatWidget<'_>) {
 
     for (tool_id, entry) in entries {
         let call_id = tool_id.0.clone();
-        let resolved_idx = resolve_entry_index(chat, &entry, &call_id)
-            .or_else(|| find_by_call_id(chat, &call_id));
+        let resolved_idx =
+            resolve_entry_index(chat, &entry, &call_id).or_else(|| find_by_call_id(chat, &call_id));
 
         let Some(idx) = resolved_idx else {
             chat.history_debug(format!(
@@ -179,8 +179,7 @@ pub(super) fn finalize_all_due_to_answer(chat: &mut ChatWidget<'_>) {
         if idx >= chat.history_cells.len() {
             chat.history_debug(format!(
                 "running_tools.finalize_due_to_answer.pending call_id={} reason=idx_oob idx={}",
-                call_id,
-                idx
+                call_id, idx
             ));
             unresolved.insert(tool_id, entry);
             continue;
@@ -210,8 +209,7 @@ pub(super) fn finalize_all_due_to_answer(chat: &mut ChatWidget<'_>) {
         chat.history_replace_at(idx, Box::new(completed));
         chat.history_debug(format!(
             "running_tools.finalize_due_to_answer.finalized call_id={} idx={}",
-            call_id,
-            idx
+            call_id, idx
         ));
         any_finalized = true;
     }

@@ -8,9 +8,10 @@
 //! - Byte cap budgeting across all retained items
 //! - Telemetry for tracking bytes saved, delta counts, and deduplication
 
-use hanzo_protocol::models::ResponseItem;
 use hanzo_protocol::models::ContentItem;
-use serde::{Deserialize, Serialize};
+use hanzo_protocol::models::ResponseItem;
+use serde::Deserialize;
+use serde::Serialize;
 
 /// Retention policy configuration for env_ctx_v2 timeline items.
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize)]
@@ -128,19 +129,18 @@ impl CategorizedItem {
 /// Estimates the byte size of a response item.
 fn estimate_item_size(item: &ResponseItem) -> usize {
     match item {
-        ResponseItem::Message { content, .. } => {
-            content.iter().map(|c| match c {
+        ResponseItem::Message { content, .. } => content
+            .iter()
+            .map(|c| match c {
                 ContentItem::InputText { text } | ContentItem::OutputText { text } => text.len(),
                 ContentItem::InputImage { image_url } => image_url.len(),
-            }).sum()
-        }
+            })
+            .sum(),
         ResponseItem::FunctionCall { arguments, .. } => arguments.len(),
         ResponseItem::FunctionCallOutput { output, .. } => output.content.len(),
         ResponseItem::CustomToolCall { input, .. } => input.len(),
         ResponseItem::CustomToolCallOutput { output, .. } => output.len(),
-        ResponseItem::Reasoning { content, .. } => {
-            content.as_ref().map(|c| c.len()).unwrap_or(0)
-        }
+        ResponseItem::Reasoning { content, .. } => content.as_ref().map(|c| c.len()).unwrap_or(0),
         _ => 0,
     }
 }
@@ -206,7 +206,9 @@ fn categorize_item(item: &ResponseItem) -> ItemCategory {
             return ItemCategory::StatusMessage;
         }
 
-        let has_screenshot = content.iter().any(|c| matches!(c, ContentItem::InputImage { .. }));
+        let has_screenshot = content
+            .iter()
+            .any(|c| matches!(c, ContentItem::InputImage { .. }));
 
         if has_screenshot {
             return ItemCategory::Screenshot;
@@ -451,7 +453,9 @@ pub fn apply_retention_policy_owned(
 
     // 4. Keep last K browser snapshots
     if browser_snapshots.len() > policy.max_browser_snapshots {
-        let to_drop = browser_snapshots.len().saturating_sub(policy.max_browser_snapshots);
+        let to_drop = browser_snapshots
+            .len()
+            .saturating_sub(policy.max_browser_snapshots);
         stats.removed_browser_snapshots += to_drop;
         for item in browser_snapshots.drain(0..to_drop) {
             stats.bytes_removed += item.size_bytes;
@@ -510,11 +514,12 @@ pub fn apply_retention_policy_owned(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use hanzo_protocol::protocol::{
-        BROWSER_SNAPSHOT_CLOSE_TAG, BROWSER_SNAPSHOT_OPEN_TAG,
-        ENVIRONMENT_CONTEXT_CLOSE_TAG, ENVIRONMENT_CONTEXT_DELTA_CLOSE_TAG,
-        ENVIRONMENT_CONTEXT_DELTA_OPEN_TAG, ENVIRONMENT_CONTEXT_OPEN_TAG,
-    };
+    use hanzo_protocol::protocol::BROWSER_SNAPSHOT_CLOSE_TAG;
+    use hanzo_protocol::protocol::BROWSER_SNAPSHOT_OPEN_TAG;
+    use hanzo_protocol::protocol::ENVIRONMENT_CONTEXT_CLOSE_TAG;
+    use hanzo_protocol::protocol::ENVIRONMENT_CONTEXT_DELTA_CLOSE_TAG;
+    use hanzo_protocol::protocol::ENVIRONMENT_CONTEXT_DELTA_OPEN_TAG;
+    use hanzo_protocol::protocol::ENVIRONMENT_CONTEXT_OPEN_TAG;
 
     fn make_text_message(text: &str) -> ResponseItem {
         ResponseItem::Message {
@@ -680,12 +685,14 @@ mod tests {
         };
 
         let items: Vec<_> = (0..5)
-            .map(|_| make_text_message(&format!(
-                "{}\n{}\n{}",
-                ENVIRONMENT_CONTEXT_DELTA_OPEN_TAG,
-                "X".repeat(200),
-                ENVIRONMENT_CONTEXT_DELTA_CLOSE_TAG
-            )))
+            .map(|_| {
+                make_text_message(&format!(
+                    "{}\n{}\n{}",
+                    ENVIRONMENT_CONTEXT_DELTA_OPEN_TAG,
+                    "X".repeat(200),
+                    ENVIRONMENT_CONTEXT_DELTA_CLOSE_TAG
+                ))
+            })
             .collect();
 
         let (pruned, stats) = apply_retention_policy(&items, &policy);

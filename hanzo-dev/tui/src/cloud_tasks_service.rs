@@ -1,9 +1,11 @@
 use std::collections::HashMap;
 use std::sync::Arc;
 
-use anyhow::{anyhow, Context, Result};
-use base64::engine::general_purpose::URL_SAFE_NO_PAD;
+use anyhow::Context;
+use anyhow::Result;
+use anyhow::anyhow;
 use base64::Engine as _;
+use base64::engine::general_purpose::URL_SAFE_NO_PAD;
 use hanzo_cloud_tasks_client::ApplyOutcome;
 use hanzo_cloud_tasks_client::CloudBackend;
 use hanzo_cloud_tasks_client::CreatedTask;
@@ -13,10 +15,10 @@ use hanzo_cloud_tasks_client::TaskId;
 use hanzo_cloud_tasks_client::TaskSummary;
 use hanzo_login::AuthManager;
 use hanzo_login::AuthMode;
+use reqwest::header::AUTHORIZATION;
 use reqwest::header::HeaderMap;
 use reqwest::header::HeaderName;
 use reqwest::header::HeaderValue;
-use reqwest::header::AUTHORIZATION;
 use reqwest::header::USER_AGENT;
 use serde::Deserialize;
 
@@ -70,7 +72,8 @@ pub async fn apply_task(task_id: TaskId, preflight: bool) -> Result<ApplyOutcome
     } else {
         backend.apply_task(task_id.clone(), None)
     };
-    fut.await.map_err(|err| anyhow!("apply task {} failed: {err}", task_id.0))
+    fut.await
+        .map_err(|err| anyhow!("apply task {} failed: {err}", task_id.0))
 }
 
 pub async fn create_task(env_id: String, prompt: String, best_of_n: usize) -> Result<CreatedTask> {
@@ -144,12 +147,14 @@ pub async fn fetch_environments() -> Result<Vec<CloudEnvironment>> {
 
     let mut map: HashMap<String, CloudEnvironment> = HashMap::new();
     for entry in entries {
-        let e = map.entry(entry.id.clone()).or_insert_with(|| CloudEnvironment {
-            id: entry.id,
-            label: entry.label.clone(),
-            repo_hints: entry.repo_hints.clone(),
-            is_pinned: entry.is_pinned.unwrap_or(false),
-        });
+        let e = map
+            .entry(entry.id.clone())
+            .or_insert_with(|| CloudEnvironment {
+                id: entry.id,
+                label: entry.label.clone(),
+                repo_hints: entry.repo_hints.clone(),
+                is_pinned: entry.is_pinned.unwrap_or(false),
+            });
         if e.label.is_none() {
             e.label = entry.label;
         }
@@ -163,7 +168,12 @@ pub async fn fetch_environments() -> Result<Vec<CloudEnvironment>> {
     environments.sort_by(|a, b| {
         b.is_pinned
             .cmp(&a.is_pinned)
-            .then_with(|| a.label.as_deref().unwrap_or("").cmp(b.label.as_deref().unwrap_or("")))
+            .then_with(|| {
+                a.label
+                    .as_deref()
+                    .unwrap_or("")
+                    .cmp(b.label.as_deref().unwrap_or(""))
+            })
             .then_with(|| a.id.cmp(&b.id))
     });
     Ok(environments)
@@ -188,7 +198,8 @@ fn build_backend(config: &CloudTasksConfig) -> Result<Arc<dyn CloudBackend>> {
     }
 
     let ua = hanzo_core::default_client::get_code_user_agent(None);
-    let mut client = HttpClient::new(config.base_url.clone()).context("create cloud http client")?;
+    let mut client =
+        HttpClient::new(config.base_url.clone()).context("create cloud http client")?;
     client = client.with_user_agent(ua);
     if let Some(token) = &config.token {
         client = client.with_bearer_token(token.clone());
@@ -216,8 +227,8 @@ async fn load_config() -> Result<CloudTasksConfig> {
         });
     }
 
-    let code_home = hanzo_core::config::find_code_home()
-        .context("determine codex home directory")?;
+    let code_home =
+        hanzo_core::config::find_code_home().context("determine codex home directory")?;
     let auth_manager = AuthManager::new(
         code_home,
         AuthMode::ChatGPT,

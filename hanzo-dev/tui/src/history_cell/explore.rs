@@ -1,15 +1,14 @@
 use super::*;
 use crate::exec_command::strip_bash_lc_and_escape;
-use crate::history::state::{
-    ExecAction,
-    ExploreEntry,
-    ExploreEntryStatus,
-    ExploreRecord,
-    ExploreSummary,
-};
+use crate::history::state::ExecAction;
+use crate::history::state::ExploreEntry;
+use crate::history::state::ExploreEntryStatus;
+use crate::history::state::ExploreRecord;
+use crate::history::state::ExploreSummary;
 use hanzo_core::parse_command::ParsedCommand;
 use shlex::Shlex;
-use std::path::{Component, Path};
+use std::path::Component;
+use std::path::Path;
 
 pub(crate) struct ExploreAggregationCell {
     record: ExploreRecord,
@@ -192,7 +191,8 @@ pub(crate) fn explore_record_push_from_parsed(
                         (Some((es, ee)), Some((ns, ne))) => {
                             if ns <= es && ne >= ee {
                                 *existing_range = Some((ns, ne));
-                                *existing_ann = annot.clone().or_else(|| annotation_for_range(ns, ne));
+                                *existing_ann =
+                                    annot.clone().or_else(|| annotation_for_range(ns, ne));
                                 true
                             } else if es <= ns && ee >= ne {
                                 true
@@ -255,11 +255,7 @@ pub(crate) fn explore_record_push_from_parsed(
         }
     }
 
-    if let ExploreSummary::Count {
-        target,
-        annotation,
-    } = &summary
-    {
+    if let ExploreSummary::Count { target, annotation } = &summary {
         for idx in (0..record.entries.len()).rev() {
             if let ExploreSummary::Count {
                 target: existing_target,
@@ -314,7 +310,11 @@ fn explore_lines_with_truncation(
             .entries
             .iter()
             .any(|entry| matches!(entry.status, ExploreEntryStatus::Running));
-    let header = if exploring { "Exploring..." } else { "Explored" };
+    let header = if exploring {
+        "Exploring..."
+    } else {
+        "Explored"
+    };
 
     let mut lines: Vec<Line<'static>> = Vec::new();
     lines.push(Line::styled(
@@ -410,8 +410,6 @@ pub(crate) fn explore_lines_without_truncation(
     explore_lines_with_truncation(record, force_exploring, false)
 }
 
-
-
 fn entry_label(entry: &ExploreEntry) -> &'static str {
     match entry.summary {
         ExploreSummary::Command { .. } => return "Ran",
@@ -480,7 +478,10 @@ fn entry_summary_spans(entry: &ExploreEntry) -> Vec<Span<'static>> {
             }
             spans
         }
-        ExploreSummary::Command { display, annotation } => {
+        ExploreSummary::Command {
+            display,
+            annotation,
+        } => {
             let mut spans = highlight_command_summary(display);
             if let Some(annotation) = annotation {
                 spans.push(Span::styled(
@@ -555,14 +556,17 @@ fn build_command_summary(cmd: &str, original_command: &[String]) -> CommandSumma
         annotation = super::parse_read_line_annotation(&annotation_command);
     }
 
-    CommandSummary { display, annotation }
+    CommandSummary {
+        display,
+        annotation,
+    }
 }
 
 fn build_count_summary(cmd: &str, cwd: &Path, session_root: &Path) -> Option<CountSummary> {
     let parsed = CountPipeline::parse(cmd)?;
-    let annotation = parsed.line_filter.and_then(|filter| {
-        super::parse_read_line_annotation(&filter)
-    });
+    let annotation = parsed
+        .line_filter
+        .and_then(|filter| super::parse_read_line_annotation(&filter));
 
     let target = parsed
         .target
@@ -587,7 +591,10 @@ impl CountPipeline {
             if is_wc_count(&tail) {
                 let target = extract_count_target(&head);
                 let line_filter = looks_like_line_filter(&head).then_some(head);
-                return Some(CountPipeline { target, line_filter });
+                return Some(CountPipeline {
+                    target,
+                    line_filter,
+                });
             }
         }
 
@@ -857,11 +864,24 @@ fn wrapper_option_requires_value(wrapper: WrapperKind, option: &str) -> bool {
     match wrapper {
         WrapperKind::Sudo | WrapperKind::Doas => matches!(
             opt_norm.as_str(),
-            "u" | "user" | "g" | "group" | "h" | "host" | "p" | "prompt" | "c" | "close-fds" | "a" | "chdir"
+            "u" | "user"
+                | "g"
+                | "group"
+                | "h"
+                | "host"
+                | "p"
+                | "prompt"
+                | "c"
+                | "close-fds"
+                | "a"
+                | "chdir"
         ),
         WrapperKind::Env => matches!(opt_norm.as_str(), "u" | "unset" | "s" | "split-string"),
         WrapperKind::Nice => matches!(opt_norm.as_str(), "n" | "adjustment"),
-        WrapperKind::Ionice => matches!(opt_norm.as_str(), "c" | "class" | "n" | "level" | "t" | "type" | "p" | "pid"),
+        WrapperKind::Ionice => matches!(
+            opt_norm.as_str(),
+            "c" | "class" | "n" | "level" | "t" | "type" | "p" | "pid"
+        ),
         WrapperKind::Stdbuf => matches!(opt_norm.as_str(), "i" | "o" | "e"),
         WrapperKind::Chronic => false,
     }
@@ -879,11 +899,7 @@ fn filter_command_name(token: &str) -> Option<String> {
         .unwrap_or(trimmed)
         .to_ascii_lowercase();
 
-    if base.is_empty() {
-        None
-    } else {
-        Some(base)
-    }
+    if base.is_empty() { None } else { Some(base) }
 }
 
 fn normalize_separators(mut value: String) -> String {

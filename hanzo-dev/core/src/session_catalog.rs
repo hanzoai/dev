@@ -1,16 +1,20 @@
 //! Async-friendly wrapper around the rollout session catalog.
 
 use std::collections::HashMap;
-use std::path::{Path, PathBuf};
-use std::sync::{Arc, Mutex};
+use std::path::Path;
+use std::path::PathBuf;
+use std::sync::Arc;
+use std::sync::Mutex;
 
-use anyhow::{Context, Result};
+use anyhow::Context;
+use anyhow::Result;
 use hanzo_protocol::protocol::SessionSource;
 use once_cell::sync::OnceCell;
-use tokio::task;
 use tokio::sync::Mutex as AsyncMutex;
+use tokio::task;
 
-use crate::rollout::catalog::{self as rollout_catalog, SessionIndexEntry};
+use crate::rollout::catalog::SessionIndexEntry;
+use crate::rollout::catalog::{self as rollout_catalog};
 
 /// Query parameters for catalog lookups.
 #[derive(Debug, Clone, Default)]
@@ -139,10 +143,11 @@ impl SessionCatalog {
         }
 
         let code_home = self.code_home.clone();
-        let mut catalog = task::spawn_blocking(move || rollout_catalog::SessionCatalog::load(&code_home))
-            .await
-            .context("catalog task panicked")?
-            .context("failed to load session catalog")?;
+        let mut catalog =
+            task::spawn_blocking(move || rollout_catalog::SessionCatalog::load(&code_home))
+                .await
+                .context("catalog task panicked")?
+                .context("failed to load session catalog")?;
 
         catalog
             .reconcile(&self.code_home)

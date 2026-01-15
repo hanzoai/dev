@@ -3,7 +3,8 @@ use crate::sanitize::Options as SanitizeOptions;
 use crate::sanitize::sanitize_for_tui;
 use crate::text_formatting::format_json_compact;
 use hanzo_ansi_escape::ansi_escape_line;
-use ratatui::style::{Style, Stylize};
+use ratatui::style::Style;
+use ratatui::style::Stylize;
 use ratatui::text::Line;
 
 use super::core::CommandOutput;
@@ -308,7 +309,10 @@ pub(crate) fn build_preview_lines(text: &str, _include_left_pipe: bool) -> Vec<L
     let mut out: Vec<Line<'static>> = Vec::new();
     if clipped {
         out.push(Line::styled(
-            format!("… output truncated to last {} chars", EXEC_PREVIEW_MAX_CHARS),
+            format!(
+                "… output truncated to last {} chars",
+                EXEC_PREVIEW_MAX_CHARS
+            ),
             Style::default().fg(crate::colors::text_dim()),
         ));
     }
@@ -411,8 +415,7 @@ pub(crate) fn lines_to_plain_text(lines: &[Line<'_>]) -> String {
 }
 
 pub(crate) fn line_to_plain_text(line: &Line<'_>) -> String {
-    line
-        .spans
+    line.spans
         .iter()
         .map(|sp| sp.content.as_ref())
         .collect::<String>()
@@ -455,7 +458,11 @@ pub(crate) fn select_preview_from_lines(
 }
 
 // Helper: like build_preview_lines but parameterized and preserving ANSI
-pub(crate) fn select_preview_from_plain_text(text: &str, head: usize, tail: usize) -> Vec<Line<'static>> {
+pub(crate) fn select_preview_from_plain_text(
+    text: &str,
+    head: usize,
+    tail: usize,
+) -> Vec<Line<'static>> {
     let processed = format_json_compact(text).unwrap_or_else(|| text.to_string());
     let processed = normalize_overwrite_sequences(&processed);
     let processed = sanitize_for_tui(

@@ -1,17 +1,27 @@
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
+use std::sync::Mutex;
 
-use anyhow::{Context, Result};
-use hanzo_core::auth::auth_for_stored_account;
-use hanzo_core::auth_accounts::{self, StoredAccount};
-use hanzo_core::{AuthManager, ModelClient, Prompt, ResponseEvent};
+use anyhow::Context;
+use anyhow::Result;
+use chrono::Utc;
+use futures::StreamExt;
+use hanzo_core::AuthManager;
+use hanzo_core::ModelClient;
+use hanzo_core::Prompt;
+use hanzo_core::ResponseEvent;
 use hanzo_core::account_usage;
+use hanzo_core::auth::auth_for_stored_account;
+use hanzo_core::auth_accounts::StoredAccount;
+use hanzo_core::auth_accounts::{self};
 use hanzo_core::config::Config;
 use hanzo_core::config_types::ReasoningEffort;
 use hanzo_core::debug_logger::DebugLogger;
-use hanzo_core::protocol::{Event, EventMsg, RateLimitSnapshotEvent, TokenCountEvent};
-use hanzo_protocol::models::{ContentItem, ResponseItem};
-use chrono::Utc;
-use futures::StreamExt;
+use hanzo_core::protocol::Event;
+use hanzo_core::protocol::EventMsg;
+use hanzo_core::protocol::RateLimitSnapshotEvent;
+use hanzo_core::protocol::TokenCountEvent;
+use hanzo_protocol::models::ContentItem;
+use hanzo_protocol::models::ResponseItem;
 use tokio::runtime::Runtime;
 use uuid::Uuid;
 
@@ -30,14 +40,7 @@ pub(super) fn start_rate_limit_refresh(
     config: Config,
     debug_enabled: bool,
 ) {
-    start_rate_limit_refresh_with_options(
-        app_event_tx,
-        config,
-        debug_enabled,
-        None,
-        true,
-        true,
-    );
+    start_rate_limit_refresh_with_options(app_event_tx, config, debug_enabled, None, true, true);
 }
 
 pub(super) fn start_rate_limit_refresh_for_account(
@@ -184,8 +187,9 @@ fn run_refresh(
                     .and_then(|tokens| tokens.id_token.get_chatgpt_plan_type()),
             )
         } else {
-            let active_id =
-                auth_accounts::get_active_account_id(&config.code_home).ok().flatten();
+            let active_id = auth_accounts::get_active_account_id(&config.code_home)
+                .ok()
+                .flatten();
             let account = active_id
                 .as_deref()
                 .and_then(|id| auth_accounts::find_account(&config.code_home, id).ok())
@@ -234,12 +238,10 @@ fn run_refresh(
 }
 
 fn build_runtime() -> Result<Runtime> {
-    Ok(
-        tokio::runtime::Builder::new_multi_thread()
-            .enable_all()
-            .build()
-            .context("building rate limit refresh runtime")?,
-    )
+    Ok(tokio::runtime::Builder::new_multi_thread()
+        .enable_all()
+        .build()
+        .context("building rate limit refresh runtime")?)
 }
 
 fn build_model_client(

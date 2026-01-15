@@ -2,6 +2,7 @@ use crate::BrowserError;
 use crate::Result;
 use crate::config::BrowserConfig;
 use crate::config::WaitStrategy;
+use crate::global;
 use crate::page::Page;
 use chromiumoxide::Browser;
 use chromiumoxide::BrowserConfig as CdpConfig;
@@ -24,7 +25,6 @@ use tokio::time::sleep;
 use tracing::debug;
 use tracing::info;
 use tracing::warn;
-use crate::global;
 
 #[derive(Deserialize)]
 struct JsonVersion {
@@ -109,7 +109,8 @@ fn resolve_chrome_log_path() -> Option<PathBuf> {
         }
     }
 
-    let base = if let Ok(home) = std::env::var("CODE_HOME").or_else(|_| std::env::var("HANZO_HOME")) {
+    let base = if let Ok(home) = std::env::var("CODE_HOME").or_else(|_| std::env::var("HANZO_HOME"))
+    {
         PathBuf::from(home).join("debug_logs")
     } else if let Ok(home) = std::env::var("HOME") {
         PathBuf::from(home).join(".hanzo").join("debug_logs")
@@ -146,7 +147,9 @@ fn should_stop_handler<E: std::fmt::Display>(
             // Chromiumoxide surfaces "oneshot canceled" when a request future is dropped
             // (e.g., due to our own timeouts). These are expected and should not
             // be treated as connection failures.
-            if message_lower.contains("oneshot canceled") || message_lower.contains("oneshot cancelled") {
+            if message_lower.contains("oneshot canceled")
+                || message_lower.contains("oneshot cancelled")
+            {
                 *consecutive_errors = 0;
                 debug!("{label} event handler error ignored: {message}");
                 return false;
@@ -370,12 +373,17 @@ impl BrowserManager {
         let config = self.config.read().await.clone();
         tracing::info!(
             "[cdp/bm] config: connect_host={:?}, connect_port={:?}, connect_ws={:?}",
-            config.connect_host, config.connect_port, config.connect_ws
+            config.connect_host,
+            config.connect_port,
+            config.connect_ws
         );
 
         // If a WebSocket is configured explicitly, try that first
         if let Some(ws) = config.connect_ws.clone() {
-            info!("[cdp/bm] Connecting to Chrome via configured WebSocket: {}", ws);
+            info!(
+                "[cdp/bm] Connecting to Chrome via configured WebSocket: {}",
+                ws
+            );
             let attempt_timeout = Duration::from_millis(config.connect_attempt_timeout_ms);
             let attempts = std::cmp::max(1, config.connect_attempts as i32);
             let mut last_err: Option<String> = None;
@@ -394,22 +402,25 @@ impl BrowserManager {
                         info!("[cdp/bm] WS connect attempt {} succeeded", attempt);
 
                         // Start event handler loop
-                let browser_arc = self.browser.clone();
-                let page_arc = self.page.clone();
-                let background_page_arc = self.background_page.clone();
-                let task = tokio::spawn(async move {
-                    let mut consecutive_errors = 0u32;
-                    while let Some(result) = handler.next().await {
-                        if should_stop_handler("[cdp/bm]", result, &mut consecutive_errors) {
-                            break;
-                        }
-                    }
-                    warn!("[cdp/bm] event handler ended; clearing browser state so it can restart");
-                    *browser_arc.lock().await = None;
-                    *page_arc.lock().await = None;
-                    *background_page_arc.lock().await = None;
-                });
-                *self.event_task.lock().await = Some(task);
+                        let browser_arc = self.browser.clone();
+                        let page_arc = self.page.clone();
+                        let background_page_arc = self.background_page.clone();
+                        let task = tokio::spawn(async move {
+                            let mut consecutive_errors = 0u32;
+                            while let Some(result) = handler.next().await {
+                                if should_stop_handler("[cdp/bm]", result, &mut consecutive_errors)
+                                {
+                                    break;
+                                }
+                            }
+                            warn!(
+                                "[cdp/bm] event handler ended; clearing browser state so it can restart"
+                            );
+                            *browser_arc.lock().await = None;
+                            *page_arc.lock().await = None;
+                            *background_page_arc.lock().await = None;
+                        });
+                        *self.event_task.lock().await = Some(task);
                         {
                             let mut guard = self.browser.lock().await;
                             *guard = Some(browser);
@@ -421,7 +432,11 @@ impl BrowserManager {
                             let browser_arc = self.browser.clone();
                             tokio::spawn(async move {
                                 if let Some(browser) = browser_arc.lock().await.as_mut() {
-                                    let _ = tokio::time::timeout(Duration::from_millis(100), browser.fetch_targets()).await;
+                                    let _ = tokio::time::timeout(
+                                        Duration::from_millis(100),
+                                        browser.fetch_targets(),
+                                    )
+                                    .await;
                                 }
                             });
                         }
@@ -454,7 +469,11 @@ impl BrowserManager {
             }
 
             let base = "CDP WebSocket connect failed after all attempts".to_string();
-            let msg = if let Some(e) = last_err { format!("{}: {}", base, e) } else { base };
+            let msg = if let Some(e) = last_err {
+                format!("{}: {}", base, e)
+            } else {
+                base
+            };
             return Err(BrowserError::CdpError(msg));
         }
 
@@ -477,14 +496,21 @@ impl BrowserManager {
             };
 
             if actual_port > 0 {
-                info!("[cdp/bm] Discovering Chrome WebSocket URL via {}:{}...", host, actual_port);
+                info!(
+                    "[cdp/bm] Discovering Chrome WebSocket URL via {}:{}...",
+                    host, actual_port
+                );
                 // Retry discovery for up to 15s to allow a freshly launched Chrome to initialize
                 let deadline = tokio::time::Instant::now() + Duration::from_secs(15);
                 let ws = loop {
                     let discover_start = tokio::time::Instant::now();
                     match discover_ws_via_host_port(host, actual_port).await {
                         Ok(ws) => {
-                            info!("[cdp/bm] WS discovered in {:?}: {}", discover_start.elapsed(), ws);
+                            info!(
+                                "[cdp/bm] WS discovered in {:?}: {}",
+                                discover_start.elapsed(),
+                                ws
+                            );
                             break ws;
                         }
                         Err(e) => {
@@ -521,7 +547,10 @@ impl BrowserManager {
                     match tokio::time::timeout(attempt_timeout, handle).await {
                         Ok(Ok(Ok((browser, mut handler)))) => {
                             info!("[cdp/bm] WS connect attempt {} succeeded", attempt);
-                            info!("[cdp/bm] Connected to Chrome in {:?}", connect_start.elapsed());
+                            info!(
+                                "[cdp/bm] Connected to Chrome in {:?}",
+                                connect_start.elapsed()
+                            );
 
                             // Start event handler loop
                             let browser_arc = self.browser.clone();
@@ -530,11 +559,17 @@ impl BrowserManager {
                             let task = tokio::spawn(async move {
                                 let mut consecutive_errors = 0u32;
                                 while let Some(result) = handler.next().await {
-                                    if should_stop_handler("[cdp/bm]", result, &mut consecutive_errors) {
+                                    if should_stop_handler(
+                                        "[cdp/bm]",
+                                        result,
+                                        &mut consecutive_errors,
+                                    ) {
                                         break;
                                     }
                                 }
-                                warn!("[cdp/bm] event handler ended; clearing browser state so it can restart");
+                                warn!(
+                                    "[cdp/bm] event handler ended; clearing browser state so it can restart"
+                                );
                                 *browser_arc.lock().await = None;
                                 *page_arc.lock().await = None;
                                 *background_page_arc.lock().await = None;
@@ -553,7 +588,11 @@ impl BrowserManager {
                                 let browser_arc = self.browser.clone();
                                 tokio::spawn(async move {
                                     if let Some(browser) = browser_arc.lock().await.as_mut() {
-                                        let _ = tokio::time::timeout(Duration::from_millis(100), browser.fetch_targets()).await;
+                                        let _ = tokio::time::timeout(
+                                            Duration::from_millis(100),
+                                            browser.fetch_targets(),
+                                        )
+                                        .await;
                                     }
                                 });
                             }
@@ -591,7 +630,11 @@ impl BrowserManager {
                 }
 
                 let base = "CDP WebSocket connect failed after all attempts".to_string();
-                let msg = if let Some(e) = last_err { format!("{}: {}", base, e) } else { base };
+                let msg = if let Some(e) = last_err {
+                    format!("{}: {}", base, e)
+                } else {
+                    base
+                };
                 return Err(BrowserError::CdpError(msg));
             } else {
                 return Err(BrowserError::CdpError(
@@ -629,45 +672,52 @@ impl BrowserManager {
                 );
                 let ws_clone = ws.clone();
                 let handle = tokio::spawn(async move { Browser::connect(ws_clone).await });
-            match tokio::time::timeout(attempt_timeout, handle).await {
-                Ok(Ok(Ok((browser, mut handler)))) => {
-                    info!("[cdp/bm] WS connect attempt {} succeeded", attempt);
-                    // Start event handler loop
-                    let browser_arc = self.browser.clone();
-                    let page_arc = self.page.clone();
-                    let background_page_arc = self.background_page.clone();
-                    let task = tokio::spawn(async move {
-                        let mut consecutive_errors = 0u32;
-                        while let Some(result) = handler.next().await {
-                            if should_stop_handler("[cdp/bm]", result, &mut consecutive_errors) {
-                                break;
-                            }
-                        }
-                        warn!("[cdp/bm] event handler ended; clearing browser state so it can restart");
-                        *browser_arc.lock().await = None;
-                        *page_arc.lock().await = None;
-                        *background_page_arc.lock().await = None;
-                    });
-                    *self.event_task.lock().await = Some(task);
-                    {
-                        let mut guard = self.browser.lock().await;
-                        *guard = Some(browser);
-                    }
-                    *self.cleanup_profile_on_drop.lock().await = false;
-
-                    // Fire-and-forget targets warmup after browser is installed
-                    {
+                match tokio::time::timeout(attempt_timeout, handle).await {
+                    Ok(Ok(Ok((browser, mut handler)))) => {
+                        info!("[cdp/bm] WS connect attempt {} succeeded", attempt);
+                        // Start event handler loop
                         let browser_arc = self.browser.clone();
-                        tokio::spawn(async move {
-                            if let Some(browser) = browser_arc.lock().await.as_mut() {
-                                let _ = tokio::time::timeout(Duration::from_millis(100), browser.fetch_targets()).await;
+                        let page_arc = self.page.clone();
+                        let background_page_arc = self.background_page.clone();
+                        let task = tokio::spawn(async move {
+                            let mut consecutive_errors = 0u32;
+                            while let Some(result) = handler.next().await {
+                                if should_stop_handler("[cdp/bm]", result, &mut consecutive_errors)
+                                {
+                                    break;
+                                }
                             }
+                            warn!(
+                                "[cdp/bm] event handler ended; clearing browser state so it can restart"
+                            );
+                            *browser_arc.lock().await = None;
+                            *page_arc.lock().await = None;
+                            *background_page_arc.lock().await = None;
                         });
+                        *self.event_task.lock().await = Some(task);
+                        {
+                            let mut guard = self.browser.lock().await;
+                            *guard = Some(browser);
+                        }
+                        *self.cleanup_profile_on_drop.lock().await = false;
+
+                        // Fire-and-forget targets warmup after browser is installed
+                        {
+                            let browser_arc = self.browser.clone();
+                            tokio::spawn(async move {
+                                if let Some(browser) = browser_arc.lock().await.as_mut() {
+                                    let _ = tokio::time::timeout(
+                                        Duration::from_millis(100),
+                                        browser.fetch_targets(),
+                                    )
+                                    .await;
+                                }
+                            });
+                        }
+                        self.start_idle_monitor().await;
+                        self.update_activity().await;
+                        return Ok(());
                     }
-                    self.start_idle_monitor().await;
-                    self.update_activity().await;
-                    return Ok(());
-                }
                     Ok(Ok(Err(e))) => {
                         let msg = format!("CDP WebSocket connect failed: {}", e);
                         warn!("[cdp/bm] {}", msg);
@@ -690,7 +740,11 @@ impl BrowserManager {
             }
 
             let base = "CDP WebSocket connect failed after all attempts".to_string();
-            let msg = if let Some(e) = last_err { format!("{}: {}", base, e) } else { base };
+            let msg = if let Some(e) = last_err {
+                format!("{}: {}", base, e)
+            } else {
+                base
+            };
             return Err(BrowserError::CdpError(msg));
         }
 
@@ -712,7 +766,10 @@ impl BrowserManager {
             };
 
             if actual_port > 0 {
-                info!("Step 1: Discovering Chrome WebSocket URL via {}:{}...", host, actual_port);
+                info!(
+                    "Step 1: Discovering Chrome WebSocket URL via {}:{}...",
+                    host, actual_port
+                );
                 let ws = loop {
                     let discover_start = tokio::time::Instant::now();
                     match discover_ws_via_host_port(host, actual_port).await {
@@ -725,7 +782,9 @@ impl BrowserManager {
                             break ws;
                         }
                         Err(e) => {
-                            if tokio::time::Instant::now() - discover_start > Duration::from_secs(15) {
+                            if tokio::time::Instant::now() - discover_start
+                                > Duration::from_secs(15)
+                            {
                                 return Err(BrowserError::CdpError(format!(
                                     "Failed to discover Chrome WebSocket on port {} within 15s: {}",
                                     actual_port, e
@@ -767,11 +826,17 @@ impl BrowserManager {
                             let task = tokio::spawn(async move {
                                 let mut consecutive_errors = 0u32;
                                 while let Some(result) = handler.next().await {
-                                    if should_stop_handler("[cdp/bm]", result, &mut consecutive_errors) {
+                                    if should_stop_handler(
+                                        "[cdp/bm]",
+                                        result,
+                                        &mut consecutive_errors,
+                                    ) {
                                         break;
                                     }
                                 }
-                                warn!("[cdp/bm] event handler ended; clearing browser state so it can restart");
+                                warn!(
+                                    "[cdp/bm] event handler ended; clearing browser state so it can restart"
+                                );
                                 *browser_arc.lock().await = None;
                                 *page_arc.lock().await = None;
                                 *background_page_arc.lock().await = None;
@@ -788,7 +853,11 @@ impl BrowserManager {
                                 let browser_arc = self.browser.clone();
                                 tokio::spawn(async move {
                                     if let Some(browser) = browser_arc.lock().await.as_mut() {
-                                        let _ = tokio::time::timeout(Duration::from_millis(100), browser.fetch_targets()).await;
+                                        let _ = tokio::time::timeout(
+                                            Duration::from_millis(100),
+                                            browser.fetch_targets(),
+                                        )
+                                        .await;
                                     }
                                 });
                             }
@@ -821,7 +890,11 @@ impl BrowserManager {
                 }
 
                 let base = "CDP WebSocket connect failed after all attempts".to_string();
-                let msg = if let Some(e) = last_err { format!("{}: {}", base, e) } else { base };
+                let msg = if let Some(e) = last_err {
+                    format!("{}: {}", base, e)
+                } else {
+                    base
+                };
                 return Err(BrowserError::CdpError(msg));
             }
         }
@@ -923,10 +996,15 @@ impl BrowserManager {
                         #[cfg(target_os = "macos")]
                         let hint = "Ensure Google Chrome or Chromium is installed and runnable (e.g., /Applications/Google Chrome.app).";
                         #[cfg(target_os = "linux")]
-                        let hint = "Ensure google-chrome or chromium is installed and available on PATH.";
+                        let hint =
+                            "Ensure google-chrome or chromium is installed and available on PATH.";
                         #[cfg(target_os = "windows")]
                         let hint = "Ensure Chrome is installed and chrome.exe is available (typically in Program Files).";
-                        #[cfg(not(any(target_os = "macos", target_os = "linux", target_os = "windows")))]
+                        #[cfg(not(any(
+                            target_os = "macos",
+                            target_os = "linux",
+                            target_os = "windows"
+                        )))]
                         let hint = "Ensure Chrome/Chromium is installed and available on PATH.";
 
                         let log_note = log_file
@@ -1030,7 +1108,10 @@ impl BrowserManager {
         let overall_start = Instant::now();
         info!("[bm] get_or_create_page: begin");
         self.ensure_browser().await?;
-        info!("[bm] get_or_create_page: ensure_browser in {:?}", overall_start.elapsed());
+        info!(
+            "[bm] get_or_create_page: ensure_browser in {:?}",
+            overall_start.elapsed()
+        );
         self.update_activity().await;
 
         let mut page_guard = self.page.lock().await;
@@ -1054,7 +1135,9 @@ impl BrowserManager {
                 }
                 Err(_) => {
                     // Timeout checking URL; prefer to reuse instead of re-applying overrides repeatedly
-                    warn!("Existing page timed out checking URL; reusing current page to avoid churn");
+                    warn!(
+                        "Existing page timed out checking URL; reusing current page to avoid churn"
+                    );
                     return Ok(Arc::clone(page));
                 }
             }
@@ -1076,16 +1159,18 @@ impl BrowserManager {
                 for _ in 0..10 {
                     tokio::time::sleep(Duration::from_millis(50)).await;
                     pages = browser.pages().await?;
-                    if !pages.is_empty() { break; }
+                    if !pages.is_empty() {
+                        break;
+                    }
                 }
             }
 
             if !pages.is_empty() {
                 // Try to find the active/visible tab
                 // We'll check each page to see if it's visible/focused
-                let mut active_page = None;                // focused && visible
+                let mut active_page = None; // focused && visible
                 let mut first_visible: Option<chromiumoxide::page::Page> = None; // visible
-                let mut last_allowed: Option<chromiumoxide::page::Page> = None;  // allowed regardless of visibility
+                let mut last_allowed: Option<chromiumoxide::page::Page> = None; // allowed regardless of visibility
 
                 // Helper: determine if a URL is controllable (we can inject/evaluate)
                 let is_allowed = |u: &str| {
@@ -1109,10 +1194,11 @@ impl BrowserManager {
 
                 for page in &pages {
                     // Quick URL check first to skip uninjectable pages
-                    let url = match tokio::time::timeout(Duration::from_millis(200), page.url()).await {
-                        Ok(Ok(Some(u))) => u,
-                        _ => "unknown".to_string(),
-                    };
+                    let url =
+                        match tokio::time::timeout(Duration::from_millis(200), page.url()).await {
+                            Ok(Ok(Some(u))) => u,
+                            _ => "unknown".to_string(),
+                        };
                     if !is_allowed(&url) {
                         debug!("Skipping uncontrollable tab: {}", url);
                         continue;
@@ -1121,14 +1207,13 @@ impl BrowserManager {
                     }
                     // Evaluate visibility/focus of the tab. We avoid focus listeners since they won't fire when attaching.
                     let eval = page.evaluate(
-                        "(() => {\n"
-                        .to_string()
-                        + "  return {\n"
-                        + "    visible: document.visibilityState === 'visible',\n"
-                        + "    focused: (document.hasFocus && document.hasFocus()) || false,\n"
-                        + "    url: String(window.location.href || '')\n"
-                        + "  };\n"
-                        + "})()",
+                        "(() => {\n".to_string()
+                            + "  return {\n"
+                            + "    visible: document.visibilityState === 'visible',\n"
+                            + "    focused: (document.hasFocus && document.hasFocus()) || false,\n"
+                            + "    url: String(window.location.href || '')\n"
+                            + "  };\n"
+                            + "})()",
                     );
                     // Guard against hung targets by timing out quickly
                     let is_visible = tokio::time::timeout(Duration::from_millis(300), eval).await;
@@ -1145,7 +1230,10 @@ impl BrowserManager {
                                 .unwrap_or(false);
                             let url = obj.get("url").and_then(|v| v.as_str()).unwrap_or("unknown");
 
-                            debug!("Tab check - URL: {}, Visible: {}, Focused: {}", url, visible, focused);
+                            debug!(
+                                "Tab check - URL: {}, Visible: {}, Focused: {}",
+                                url, visible, focused
+                            );
 
                             // Selection heuristic (revised to avoid minimized windows):
                             // 1) Focused AND visible wins immediately.
@@ -1156,7 +1244,10 @@ impl BrowserManager {
                                 active_page = Some(page.clone());
                                 break;
                             } else if focused && !visible {
-                                info!("Focused but not visible (likely minimized): skipping {}", url);
+                                info!(
+                                    "Focused but not visible (likely minimized): skipping {}",
+                                    url
+                                );
                             } else if visible && first_visible.is_none() {
                                 info!("Found visible tab: {}", url);
                                 first_visible = Some(page.clone());
@@ -1165,7 +1256,9 @@ impl BrowserManager {
                             debug!("Tab visibility check returned non-JSON; skipping");
                         }
                     } else {
-                        debug!("Tab visibility check timed out or failed; skipping unresponsive tab");
+                        debug!(
+                            "Tab visibility check timed out or failed; skipping unresponsive tab"
+                        );
                     }
                 }
 
@@ -1208,7 +1301,10 @@ impl BrowserManager {
         // Apply page overrides (UA, locale, timezone, viewport, etc.)
         let overrides_start = Instant::now();
         self.apply_page_overrides(&cdp_page).await?;
-        info!("[bm] get_or_create_page: overrides in {:?}", overrides_start.elapsed());
+        info!(
+            "[bm] get_or_create_page: overrides in {:?}",
+            overrides_start.elapsed()
+        );
 
         let page = Arc::new(Page::new(cdp_page, config.clone()));
         *page_guard = Some(Arc::clone(&page));
@@ -1425,7 +1521,10 @@ impl BrowserManager {
                 .mobile(mob)
                 .build()
                 .map_err(BrowserError::CdpError)?;
-            info!("Applying external device metrics override: {}x{} @ {} (mobile={})", w, h, dpr, mob);
+            info!(
+                "Applying external device metrics override: {}x{} @ {} (mobile={})",
+                w, h, dpr, mob
+            );
             page.execute(viewport_params).await?;
             let mut guard = self.last_metrics_applied.lock().await;
             *guard = Some((w, h, dpr, mob, std::time::Instant::now()));
@@ -1656,12 +1755,10 @@ impl BrowserManager {
                     return Ok(result);
                 }
                 Err(err) => {
-                    let should_retry =
-                        recovery_attempts < MAX_RECOVERY_ATTEMPTS
-                            && self.should_retry_after_goto_error(&err).await;
+                    let should_retry = recovery_attempts < MAX_RECOVERY_ATTEMPTS
+                        && self.should_retry_after_goto_error(&err).await;
 
-                    self
-                        .log_navigation_failure(url, &err, recovery_attempts, should_retry)
+                    self.log_navigation_failure(url, &err, recovery_attempts, should_retry)
                         .await;
 
                     if !should_retry {
@@ -1746,17 +1843,18 @@ impl BrowserManager {
 
     async fn collect_page_debug_info(page: &Page) -> PageDebugInfo {
         let cached_url = page.get_url().await.ok();
-        let live_url = match tokio::time::timeout(Duration::from_millis(600), page.get_current_url()).await {
-            Ok(Ok(url)) => Some(url),
-            Ok(Err(err)) => {
-                debug!(error = %err, "Navigation telemetry failed to read live URL");
-                None
-            }
-            Err(_) => {
-                debug!("Navigation telemetry timed out reading live URL");
-                None
-            }
-        };
+        let live_url =
+            match tokio::time::timeout(Duration::from_millis(600), page.get_current_url()).await {
+                Ok(Ok(url)) => Some(url),
+                Ok(Err(err)) => {
+                    debug!(error = %err, "Navigation telemetry failed to read live URL");
+                    None
+                }
+                Err(_) => {
+                    debug!("Navigation telemetry timed out reading live URL");
+                    None
+                }
+            };
 
         PageDebugInfo {
             target_id: page.target_id_debug(),
@@ -1770,7 +1868,8 @@ impl BrowserManager {
     async fn collect_target_snapshot(&self) -> Option<TargetSnapshot> {
         let mut browser_guard = self.browser.lock().await;
         let browser = browser_guard.as_mut()?;
-        let fetch = tokio::time::timeout(Duration::from_millis(1200), browser.fetch_targets()).await;
+        let fetch =
+            tokio::time::timeout(Duration::from_millis(1200), browser.fetch_targets()).await;
         let targets = match fetch {
             Ok(Ok(targets)) => targets,
             Ok(Err(err)) => {
@@ -2011,13 +2110,13 @@ impl BrowserManager {
         let page = self.get_or_create_page().await?;
         page.click_at_current().await
     }
-    
+
     /// Perform mouse down at the current position
     pub async fn mouse_down_at_current(&self) -> Result<(f64, f64)> {
         let page = self.get_or_create_page().await?;
         page.mouse_down_at_current().await
     }
-    
+
     /// Perform mouse up at the current position
     pub async fn mouse_up_at_current(&self) -> Result<(f64, f64)> {
         let page = self.get_or_create_page().await?;
@@ -2130,21 +2229,13 @@ impl BrowserManager {
     }
 
     /// Execute an arbitrary CDP command against the active page session
-    pub async fn execute_cdp(
-        &self,
-        method: &str,
-        params: Value,
-    ) -> Result<Value> {
+    pub async fn execute_cdp(&self, method: &str, params: Value) -> Result<Value> {
         let page = self.get_or_create_page().await?;
         page.execute_cdp_raw(method, params).await
     }
 
     /// Execute an arbitrary CDP command at the browser (no session) scope
-    pub async fn execute_cdp_browser(
-        &self,
-        method: &str,
-        params: Value,
-    ) -> Result<Value> {
+    pub async fn execute_cdp_browser(&self, method: &str, params: Value) -> Result<Value> {
         // Ensure a browser is connected
         self.ensure_browser().await?;
         let browser_guard = self.browser.lock().await;
@@ -2187,11 +2278,16 @@ impl BrowserManager {
     /// This does not close the browser; it is safe to call when connected.
     pub async fn cleanup(&self) -> Result<()> {
         // Hide any overlay highlight
-        let _ = self.execute_cdp("Overlay.hideHighlight", serde_json::json!({})).await;
+        let _ = self
+            .execute_cdp("Overlay.hideHighlight", serde_json::json!({}))
+            .await;
 
         // Reset device metrics override (best-effort)
         let _ = self
-            .execute_cdp("Emulation.clearDeviceMetricsOverride", serde_json::json!({}))
+            .execute_cdp(
+                "Emulation.clearDeviceMetricsOverride",
+                serde_json::json!({}),
+            )
             .await;
 
         // Remove virtual cursor and related overlays if present
@@ -2332,7 +2428,10 @@ impl BrowserManager {
                             .to_string();
 
                         if seq > last_seq {
-                            info!("SPA locationchange detected: {} (seq {} -> {})", url, last_seq, seq);
+                            info!(
+                                "SPA locationchange detected: {} (seq {} -> {})",
+                                url, last_seq, seq
+                            );
                             last_seq = seq;
 
                             // Fire callback
@@ -2356,8 +2455,12 @@ impl BrowserManager {
                                 if let Some(assets) = assets_opt {
                                     let cfg = config_arc2.read().await.clone();
                                     let mode = if cfg.fullpage {
-                                        crate::page::ScreenshotMode::FullPage { segments_max: Some(cfg.segments_max) }
-                                    } else { crate::page::ScreenshotMode::Viewport };
+                                        crate::page::ScreenshotMode::FullPage {
+                                            segments_max: Some(cfg.segments_max),
+                                        }
+                                    } else {
+                                        crate::page::ScreenshotMode::Viewport
+                                    };
                                     // small delay to allow SPA content to render
                                     tokio::time::sleep(Duration::from_millis(400)).await;
                                     if let Ok(shots) = page_for_shot.screenshot(mode).await {
@@ -2474,7 +2577,14 @@ impl BrowserManager {
                             if should_warn {
                                 warn!(
                                     "Viewport drift detected (throttled): {}x{}@{} vs expected {}x{}@{} (external={}, can_correct={})",
-                                    cw, ch, cdpr, expected_w, expected_h, expected_dpr, is_external, can_correct
+                                    cw,
+                                    ch,
+                                    cdpr,
+                                    expected_w,
+                                    expected_h,
+                                    expected_dpr,
+                                    is_external,
+                                    can_correct
                                 );
                                 last_warn = Some(now);
                             }
@@ -2562,13 +2672,9 @@ mod tests {
     const TEST_PROXY_WS_URL: &str = "ws://proxy.invalid/devtools/browser/proxy";
     const TEST_TARGET_WS_URL: &str = "ws://target.invalid/devtools/browser/target";
 
-    fn spawn_json_version_server(
-        ws_url: &str,
-    ) -> (u16, Arc<AtomicBool>, thread::JoinHandle<()>) {
+    fn spawn_json_version_server(ws_url: &str) -> (u16, Arc<AtomicBool>, thread::JoinHandle<()>) {
         let listener = TcpListener::bind("127.0.0.1:0").expect("bind server");
-        listener
-            .set_nonblocking(true)
-            .expect("set non-blocking");
+        listener.set_nonblocking(true).expect("set non-blocking");
         let port = listener.local_addr().expect("server addr").port();
         let stop = Arc::new(AtomicBool::new(false));
         let stop_thread = Arc::clone(&stop);
@@ -2603,8 +2709,7 @@ mod tests {
 
     #[test]
     fn cdp_discovery_ignores_proxy_env_vars() {
-        let (proxy_port, proxy_stop, proxy_handle) =
-            spawn_json_version_server(TEST_PROXY_WS_URL);
+        let (proxy_port, proxy_stop, proxy_handle) = spawn_json_version_server(TEST_PROXY_WS_URL);
         let (target_port, target_stop, target_handle) =
             spawn_json_version_server(TEST_TARGET_WS_URL);
 
@@ -2662,8 +2767,7 @@ mod tests {
             .await
             .expect("default request");
 
-        let proxy_version: super::JsonVersion =
-            resp.json().await.expect("parse proxy json");
+        let proxy_version: super::JsonVersion = resp.json().await.expect("parse proxy json");
         assert_eq!(proxy_version.web_socket_debugger_url, TEST_PROXY_WS_URL);
 
         let discovered = discover_ws_via_host_port("127.0.0.1", target_port)
@@ -2671,5 +2775,4 @@ mod tests {
             .expect("discover ws url");
         assert_eq!(discovered, TEST_TARGET_WS_URL);
     }
-
 }

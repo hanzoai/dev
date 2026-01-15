@@ -1,9 +1,16 @@
 use super::*;
-use crate::history::state::{HistoryId, TextTone, WaitStatusDetail, WaitStatusHeader, WaitStatusState};
-use crate::theme::{current_theme, Theme};
+use crate::history::state::HistoryId;
+use crate::history::state::TextTone;
+use crate::history::state::WaitStatusDetail;
+use crate::history::state::WaitStatusHeader;
+use crate::history::state::WaitStatusState;
+use crate::theme::Theme;
+use crate::theme::current_theme;
 use hanzo_common::elapsed::format_duration;
-use ratatui::style::{Modifier, Style};
-use ratatui::text::{Line, Span};
+use ratatui::style::Modifier;
+use ratatui::style::Style;
+use ratatui::text::Line;
+use ratatui::text::Span;
 use std::time::Duration;
 
 pub(crate) struct WaitStatusCell {

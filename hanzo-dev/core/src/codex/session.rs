@@ -1,17 +1,15 @@
+use super::streaming::AgentTask;
+use super::streaming::TRUNCATION_MARKER;
+use super::streaming::TimelineReplayContext;
+use super::streaming::debug_history;
+use super::streaming::ensure_user_dir;
+use super::streaming::parse_env_delta_from_response;
+use super::streaming::parse_env_snapshot_from_response;
+use super::streaming::process_rollout_env_item;
+use super::streaming::truncate_middle_bytes;
+use super::streaming::write_agent_file;
 use super::*;
 use serde_json::Value;
-use super::streaming::{
-    AgentTask,
-    TRUNCATION_MARKER,
-    TimelineReplayContext,
-    debug_history,
-    ensure_user_dir,
-    parse_env_delta_from_response,
-    parse_env_snapshot_from_response,
-    process_rollout_env_item,
-    truncate_middle_bytes,
-    write_agent_file,
-};
 
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub struct ApprovedCommandPattern {
@@ -45,10 +43,9 @@ impl ApprovedCommandPattern {
                 if command.starts_with(&self.argv) {
                     return true;
                 }
-                if let (Some(pattern), Some(candidate)) = (
-                    self.semantic_prefix.as_ref(),
-                    semantic_tokens(command),
-                ) {
+                if let (Some(pattern), Some(candidate)) =
+                    (self.semantic_prefix.as_ref(), semantic_tokens(command))
+                {
                     return candidate.starts_with(pattern);
                 }
                 false
@@ -56,9 +53,13 @@ impl ApprovedCommandPattern {
         }
     }
 
-    pub fn argv(&self) -> &[String] { &self.argv }
+    pub fn argv(&self) -> &[String] {
+        &self.argv
+    }
 
-    pub fn kind(&self) -> ApprovedCommandMatchKind { self.kind }
+    pub fn kind(&self) -> ApprovedCommandMatchKind {
+        self.kind
+    }
 }
 
 fn semantic_tokens(command: &[String]) -> Option<Vec<String>> {
@@ -239,7 +240,9 @@ pub(super) struct AccountUsageContext {
 
 pub(super) fn account_usage_context(sess: &Session) -> Option<AccountUsageContext> {
     let code_home = sess.client.code_home().to_path_buf();
-    let account_id = auth_accounts::get_active_account_id(&code_home).ok().flatten()?;
+    let account_id = auth_accounts::get_active_account_id(&code_home)
+        .ok()
+        .flatten()?;
     let plan = auth_accounts::find_account(&code_home, &account_id)
         .ok()
         .flatten()
@@ -378,8 +381,7 @@ pub(super) struct HookGuard<'a> {
 
 impl<'a> HookGuard<'a> {
     pub(super) fn try_acquire(flag: &'a AtomicBool) -> Option<Self> {
-        flag
-            .compare_exchange(false, true, Ordering::SeqCst, Ordering::SeqCst)
+        flag.compare_exchange(false, true, Ordering::SeqCst, Ordering::SeqCst)
             .ok()
             .map(|_| Self { flag })
     }
@@ -400,12 +402,26 @@ pub(crate) struct ToolCallCtx {
 }
 
 impl ToolCallCtx {
-    pub fn new(sub_id: String, call_id: String, seq_hint: Option<u64>, output_index: Option<u32>) -> Self {
-        Self { sub_id, call_id, seq_hint, output_index }
+    pub fn new(
+        sub_id: String,
+        call_id: String,
+        seq_hint: Option<u64>,
+        output_index: Option<u32>,
+    ) -> Self {
+        Self {
+            sub_id,
+            call_id,
+            seq_hint,
+            output_index,
+        }
     }
 
     pub fn order_meta(&self, req_ordinal: u64) -> crate::protocol::OrderMeta {
-        crate::protocol::OrderMeta { request_ordinal: req_ordinal, output_index: self.output_index, sequence_number: self.seq_hint }
+        crate::protocol::OrderMeta {
+            request_ordinal: req_ordinal,
+            output_index: self.output_index,
+            sequence_number: self.seq_hint,
+        }
     }
 }
 
@@ -471,11 +487,12 @@ impl Session {
                     .and_then(|mgr| mgr.auth())
                     .map(|auth| auth.mode);
 
-                let default_model_slug = if auth_mode == Some(hanzo_app_server_protocol::AuthMode::ChatGPT) {
-                    crate::config::GPT_5_CODEX_MEDIUM_MODEL
-                } else {
-                    crate::config::OPENAI_DEFAULT_MODEL
-                };
+                let default_model_slug =
+                    if auth_mode == Some(hanzo_app_server_protocol::AuthMode::ChatGPT) {
+                        crate::config::GPT_5_CODEX_MEDIUM_MODEL
+                    } else {
+                        crate::config::OPENAI_DEFAULT_MODEL
+                    };
 
                 if let Some(remote) = self.remote_models_manager.as_ref()
                     && configured_model.eq_ignore_ascii_case(default_model_slug)
@@ -679,17 +696,22 @@ impl Session {
         };
 
         let pending_browser_screenshots = self.pending_browser_screenshots.lock().unwrap().len();
-        let (token_usage_input_tokens, token_usage_cached_input_tokens, token_usage_output_tokens, token_usage_reasoning_output_tokens, token_usage_total_tokens) =
-            match token_usage {
-                Some(usage) => (
-                    Some(usage.input_tokens),
-                    Some(usage.cached_input_tokens),
-                    Some(usage.output_tokens),
-                    Some(usage.reasoning_output_tokens),
-                    Some(usage.total_tokens),
-                ),
-                None => (None, None, None, None, None),
-            };
+        let (
+            token_usage_input_tokens,
+            token_usage_cached_input_tokens,
+            token_usage_output_tokens,
+            token_usage_reasoning_output_tokens,
+            token_usage_total_tokens,
+        ) = match token_usage {
+            Some(usage) => (
+                Some(usage.input_tokens),
+                Some(usage.cached_input_tokens),
+                Some(usage.output_tokens),
+                Some(usage.reasoning_output_tokens),
+                Some(usage.total_tokens),
+            ),
+            None => (None, None, None, None, None),
+        };
         let payload = TurnLatencyPayload {
             phase: TurnLatencyPhase::RequestCompleted,
             attempt: attempt_req,
@@ -929,7 +951,9 @@ impl Session {
             .and_then(|dir| write_agent_file(&dir, &filename, &aggregated))
         {
             Ok(path) => format!("\n\n[Full output saved to: {}]", path.display()),
-            Err(e) => format!("\n\n[Full output was too large and truncation applied; failed to save file: {e}]")
+            Err(e) => format!(
+                "\n\n[Full output was too large and truncation applied; failed to save file: {e}]"
+            ),
         };
 
         let original = std::mem::take(content);
@@ -1048,9 +1072,7 @@ impl Session {
     }
 
     pub(super) fn compact_prompt_text(&self) -> String {
-        crate::codex::compact::resolve_compact_prompt_text(
-            self.compact_prompt_override.as_deref(),
-        )
+        crate::codex::compact::resolve_compact_prompt_text(self.compact_prompt_override.as_deref())
     }
 
     pub async fn request_command_approval(
@@ -1131,7 +1153,6 @@ impl Session {
         self.record_state_snapshot(items).await;
 
         self.state.lock().unwrap().history.record_items(items);
-
     }
 
     /// Clean up old screenshots and system status messages from conversation history
@@ -1302,9 +1323,7 @@ impl Session {
                                     skip_next_image = true;
                                     tracing::info!("Filtering out ephemeral marker: {}", text);
                                 }
-                                ContentItem::InputImage { .. }
-                                    if skip_next_image =>
-                                {
+                                ContentItem::InputImage { .. } if skip_next_image => {
                                     // Skip this image as it follows an ephemeral marker
                                     skip_next_image = false;
                                     tracing::info!("Filtering out ephemeral image from history");
@@ -1466,8 +1485,12 @@ impl Session {
 
                     match &emission {
                         EnvironmentContextEmission::Full { snapshot, .. } => {
-                            if let Err(err) = state.context_timeline.add_baseline_once(snapshot.clone()) {
-                                tracing::trace!("env_ctx_v2: baseline already set in context timeline: {err}");
+                            if let Err(err) =
+                                state.context_timeline.add_baseline_once(snapshot.clone())
+                            {
+                                tracing::trace!(
+                                    "env_ctx_v2: baseline already set in context timeline: {err}"
+                                );
                             }
                             match state.context_timeline.record_snapshot(snapshot.clone()) {
                                 Ok(true) => {
@@ -1477,21 +1500,32 @@ impl Session {
                                     crate::telemetry::global_telemetry().record_dedup_drop();
                                 }
                                 Err(err) => {
-                                    tracing::trace!("env_ctx_v2: failed to record baseline snapshot: {err}");
+                                    tracing::trace!(
+                                        "env_ctx_v2: failed to record baseline snapshot: {err}"
+                                    );
                                 }
                             }
                         }
-                        EnvironmentContextEmission::Delta { sequence, delta, snapshot } => {
+                        EnvironmentContextEmission::Delta {
+                            sequence,
+                            delta,
+                            snapshot,
+                        } => {
                             if state.context_timeline.baseline().is_none() {
-                                if let Err(err) = state.context_timeline.add_baseline_once(snapshot.clone()) {
-                                    tracing::warn!("env_ctx_v2: failed to seed baseline before delta: {err}");
+                                if let Err(err) =
+                                    state.context_timeline.add_baseline_once(snapshot.clone())
+                                {
+                                    tracing::warn!(
+                                        "env_ctx_v2: failed to seed baseline before delta: {err}"
+                                    );
                                 }
                             }
-                            if let Err(err) = state
-                                .context_timeline
-                                .apply_delta(*sequence, delta.clone())
+                            if let Err(err) =
+                                state.context_timeline.apply_delta(*sequence, delta.clone())
                             {
-                                tracing::warn!("env_ctx_v2: failed to apply delta to timeline: {err}");
+                                tracing::warn!(
+                                    "env_ctx_v2: failed to apply delta to timeline: {err}"
+                                );
                                 if matches!(err, crate::context_timeline::TimelineError::DeltaSequenceOutOfOrder { .. }) {
                                     crate::telemetry::global_telemetry().record_delta_gap();
                                 }
@@ -1550,8 +1584,7 @@ impl Session {
 
         trace!(
             "env_ctx_v2: emitted environment_context message (seq={}, bytes={})",
-            sequence,
-            bytes_sent
+            sequence, bytes_sent
         );
 
         if *crate::flags::CTX_UI {
@@ -1590,11 +1623,7 @@ impl Session {
         }
     }
 
-    fn emit_env_context_event(
-        &self,
-        stream_id: &str,
-        emission: &EnvironmentContextEmission,
-    ) {
+    fn emit_env_context_event(&self, stream_id: &str, emission: &EnvironmentContextEmission) {
         use crate::protocol::OrderMeta;
 
         let sequence = emission.sequence();
@@ -1683,7 +1712,9 @@ impl Session {
                     );
                 }
                 RolloutItem::Event(recorded_event) => {
-                    if let hanzo_protocol::protocol::EventMsg::UserMessage(user_msg_event) = &recorded_event.msg {
+                    if let hanzo_protocol::protocol::EventMsg::UserMessage(user_msg_event) =
+                        &recorded_event.msg
+                    {
                         let response_item = ResponseItem::Message {
                             id: Some(recorded_event.id.clone()),
                             role: "user".to_string(),
@@ -1707,7 +1738,9 @@ impl Session {
                 match replay_ctx.timeline.record_snapshot(snapshot.clone()) {
                     Ok(true) => crate::telemetry::global_telemetry().record_snapshot_commit(),
                     Ok(false) => crate::telemetry::global_telemetry().record_dedup_drop(),
-                    Err(err) => tracing::warn!("env_ctx_v2: failed to record legacy baseline snapshot: {err}"),
+                    Err(err) => tracing::warn!(
+                        "env_ctx_v2: failed to record legacy baseline snapshot: {err}"
+                    ),
                 }
                 replay_ctx.last_snapshot = Some(snapshot);
             }
@@ -1759,7 +1792,6 @@ impl Session {
         let mut state = self.state.lock().unwrap();
         state.pending_manual_compacts.pop_front()
     }
-
 
     pub fn get_pending_input(&self) -> Vec<ResponseInputItem> {
         self.get_pending_input_filtered(true)
@@ -1998,9 +2030,11 @@ pub(crate) fn prune_history_items(
     for &user_idx in real_user_messages.iter().rev().take(2) {
         for &status_idx in status_messages.iter() {
             if status_idx > user_idx {
-                if let Some(ResponseItem::Message { content, .. }) = current_items.get(status_idx)
-                {
-                    if content.iter().any(|c| matches!(c, ContentItem::InputImage { .. })) {
+                if let Some(ResponseItem::Message { content, .. }) = current_items.get(status_idx) {
+                    if content
+                        .iter()
+                        .any(|c| matches!(c, ContentItem::InputImage { .. }))
+                    {
                         screenshots_to_keep.insert(status_idx);
                         break;
                     }
@@ -2069,7 +2103,9 @@ pub(crate) fn prune_history_items(
     (items_to_keep, stats)
 }
 
-fn prune_history_items_owned(current_items: Vec<ResponseItem>) -> (Vec<ResponseItem>, CleanupStats) {
+fn prune_history_items_owned(
+    current_items: Vec<ResponseItem>,
+) -> (Vec<ResponseItem>, CleanupStats) {
     let mut real_user_messages = Vec::new();
     let mut status_messages = Vec::new();
     let mut env_baselines = Vec::new();
@@ -2163,9 +2199,11 @@ fn prune_history_items_owned(current_items: Vec<ResponseItem>) -> (Vec<ResponseI
     for &user_idx in real_user_messages.iter().rev().take(2) {
         for &status_idx in status_messages.iter() {
             if status_idx > user_idx {
-                if let Some(ResponseItem::Message { content, .. }) = current_items.get(status_idx)
-                {
-                    if content.iter().any(|c| matches!(c, ContentItem::InputImage { .. })) {
+                if let Some(ResponseItem::Message { content, .. }) = current_items.get(status_idx) {
+                    if content
+                        .iter()
+                        .any(|c| matches!(c, ContentItem::InputImage { .. }))
+                    {
                         screenshots_to_keep.insert(status_idx);
                         break;
                     }

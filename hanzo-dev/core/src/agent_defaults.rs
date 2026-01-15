@@ -5,15 +5,28 @@
 //! (to surface the available sub-agent options).
 
 use crate::config_types::AgentConfig;
-use std::collections::{HashMap, HashSet};
+use std::collections::HashMap;
+use std::collections::HashSet;
 
 const CLAUDE_ALLOWED_TOOLS: &str = "Bash(ls:*), Bash(cat:*), Bash(grep:*), Bash(git status:*), Bash(git log:*), Bash(find:*), Read, Grep, Glob, LS, WebFetch, TodoRead, TodoWrite, WebSearch";
 const CLOUD_MODEL_ENV_FLAG: &str = "CODE_ENABLE_CLOUD_AGENT_MODEL";
 
 const CODE_GPT5_CODEX_READ_ONLY: &[&str] = &["-s", "read-only", "exec", "--skip-git-repo-check"];
-const CODE_GPT5_CODEX_WRITE: &[&str] = &["-s", "workspace-write", "--dangerously-bypass-approvals-and-sandbox", "exec", "--skip-git-repo-check"];
+const CODE_GPT5_CODEX_WRITE: &[&str] = &[
+    "-s",
+    "workspace-write",
+    "--dangerously-bypass-approvals-and-sandbox",
+    "exec",
+    "--skip-git-repo-check",
+];
 const CODE_GPT5_READ_ONLY: &[&str] = &["-s", "read-only", "exec", "--skip-git-repo-check"];
-const CODE_GPT5_WRITE: &[&str] = &["-s", "workspace-write", "--dangerously-bypass-approvals-and-sandbox", "exec", "--skip-git-repo-check"];
+const CODE_GPT5_WRITE: &[&str] = &[
+    "-s",
+    "workspace-write",
+    "--dangerously-bypass-approvals-and-sandbox",
+    "exec",
+    "--skip-git-repo-check",
+];
 const CLAUDE_SONNET_READ_ONLY: &[&str] = &["--allowedTools", CLAUDE_ALLOWED_TOOLS];
 const CLAUDE_SONNET_WRITE: &[&str] = &["--dangerously-skip-permissions"];
 const CLAUDE_OPUS_READ_ONLY: &[&str] = &["--allowedTools", CLAUDE_ALLOWED_TOOLS];
@@ -358,7 +371,9 @@ pub fn model_guide_markdown_with_custom(configured_agents: &[AgentConfig]) -> Op
         if !agent.enabled {
             continue;
         }
-        let Some(description) = agent.description.as_deref() else { continue };
+        let Some(description) = agent.description.as_deref() else {
+            continue;
+        };
         let trimmed = description.trim();
         if trimmed.is_empty() {
             continue;

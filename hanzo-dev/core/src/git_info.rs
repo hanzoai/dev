@@ -2,9 +2,9 @@ use std::collections::HashSet;
 use std::path::Path;
 use std::path::PathBuf;
 
+use futures::future::join_all;
 use hanzo_app_server_protocol::GitSha;
 use hanzo_protocol::protocol::GitInfo;
-use futures::future::join_all;
 use serde::Deserialize;
 use serde::Serialize;
 use tokio::process::Command;

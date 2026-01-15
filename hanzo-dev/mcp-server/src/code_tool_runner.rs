@@ -31,7 +31,8 @@ use crate::outgoing_message::OutgoingMessageSender;
 use crate::outgoing_message::OutgoingMessageSenderExt;
 use crate::outgoing_message::OutgoingNotificationMeta;
 use crate::patch_approval::handle_patch_approval_request;
-use crate::session_store::{SessionEntry, SessionMap};
+use crate::session_store::SessionEntry;
+use crate::session_store::SessionMap;
 
 pub(crate) const INVALID_PARAMS_ERROR_CODE: i64 = -32602;
 
@@ -115,13 +116,7 @@ pub async fn run_code_tool_session(
         return;
     }
 
-    run_code_tool_session_inner(
-        conversation,
-        outgoing,
-        id,
-        running_requests_id_to_code_uuid,
-    )
-    .await;
+    run_code_tool_session_inner(conversation, outgoing, id, running_requests_id_to_code_uuid).await;
 }
 
 pub async fn run_code_tool_session_reply(

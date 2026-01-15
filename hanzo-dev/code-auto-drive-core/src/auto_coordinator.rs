@@ -1,49 +1,79 @@
 use std::collections::VecDeque;
 use std::process::Command;
-use std::sync::mpsc::{self, Receiver, Sender};
-use std::sync::{Arc, Mutex};
-use std::time::{Duration, Instant, SystemTime};
+use std::sync::Arc;
+use std::sync::Mutex;
+use std::sync::mpsc::Receiver;
+use std::sync::mpsc::Sender;
+use std::sync::mpsc::{self};
+use std::time::Duration;
+use std::time::Instant;
+use std::time::SystemTime;
 
-use anyhow::{anyhow, Context, Result};
-use hanzo_core::config::Config;
+use anyhow::Context;
+use anyhow::Result;
+use anyhow::anyhow;
+use futures::StreamExt;
+use hanzo_common::model_presets::clamp_reasoning_effort_for_model;
+use hanzo_core::AuthManager;
+use hanzo_core::ModelClient;
+use hanzo_core::Prompt;
+use hanzo_core::RateLimitSwitchState;
+use hanzo_core::ResponseEvent;
+use hanzo_core::TextFormat;
 use hanzo_core::agent_defaults::build_model_guide_description;
-use hanzo_core::config_types::{AutoDriveSettings, ReasoningEffort, TextVerbosity};
-use hanzo_core::debug_logger::DebugLogger;
-use hanzo_core::codex::compact::resolve_compact_prompt_text;
-use hanzo_core::model_family::{derive_default_model_family, find_family_for_model};
-use hanzo_core::project_doc::read_auto_drive_docs;
-use hanzo_core::protocol::SandboxPolicy;
-use hanzo_core::slash_commands::get_enabled_agents;
-use hanzo_core::{AuthManager, ModelClient, Prompt, ResponseEvent, TextFormat};
-use hanzo_core::{RateLimitSwitchState, switch_active_account_on_rate_limit};
 use hanzo_core::auth;
 use hanzo_core::auth_accounts;
+use hanzo_core::codex::compact::resolve_compact_prompt_text;
+use hanzo_core::config::Config;
+use hanzo_core::config_types::AutoDriveSettings;
+use hanzo_core::config_types::ReasoningEffort;
+use hanzo_core::config_types::TextVerbosity;
+use hanzo_core::debug_logger::DebugLogger;
 use hanzo_core::error::CodexErr;
-use hanzo_common::model_presets::clamp_reasoning_effort_for_model;
-use hanzo_protocol::models::{ContentItem, ReasoningItemContent, ResponseItem};
+use hanzo_core::model_family::derive_default_model_family;
+use hanzo_core::model_family::find_family_for_model;
+use hanzo_core::project_doc::read_auto_drive_docs;
+use hanzo_core::protocol::SandboxPolicy;
 use hanzo_core::protocol::TokenUsage;
-use futures::StreamExt;
+use hanzo_core::slash_commands::get_enabled_agents;
+use hanzo_core::switch_active_account_on_rate_limit;
+use hanzo_protocol::models::ContentItem;
+use hanzo_protocol::models::ReasoningItemContent;
+use hanzo_protocol::models::ResponseItem;
 use reqwest::StatusCode;
 use serde::Deserialize;
-use serde_json::{self, json, Value};
+use serde_json::Value;
+use serde_json::json;
+use serde_json::{self};
 use tokio_util::sync::CancellationToken;
-use tracing::{debug, warn};
+use tracing::debug;
+use tracing::warn;
 use uuid::Uuid;
 
-use crate::auto_compact::{
-    apply_compaction,
-    build_checkpoint_summary,
-    compact_with_endpoint,
-    compute_slice_bounds,
-    estimate_item_tokens,
-};
-use crate::coordinator_user_schema::{parse_user_turn_reply, user_turn_schema};
-use crate::session_metrics::SessionMetrics;
-use crate::retry::{retry_with_backoff, RetryDecision, RetryError, RetryOptions};
+use crate::auto_compact::apply_compaction;
+use crate::auto_compact::build_checkpoint_summary;
+use crate::auto_compact::compact_with_endpoint;
+use crate::auto_compact::compute_slice_bounds;
+use crate::auto_compact::estimate_item_tokens;
+use crate::coordinator_user_schema::parse_user_turn_reply;
+use crate::coordinator_user_schema::user_turn_schema;
 #[cfg(feature = "dev-faults")]
-use crate::faults::{fault_to_error, next_fault, FaultScope, InjectedFault};
+use crate::faults::FaultScope;
+#[cfg(feature = "dev-faults")]
+use crate::faults::InjectedFault;
+#[cfg(feature = "dev-faults")]
+use crate::faults::fault_to_error;
+#[cfg(feature = "dev-faults")]
+use crate::faults::next_fault;
+use crate::retry::RetryDecision;
+use crate::retry::RetryError;
+use crate::retry::RetryOptions;
+use crate::retry::retry_with_backoff;
+use crate::session_metrics::SessionMetrics;
+use chrono::DateTime;
+use chrono::Local;
+use chrono::Utc;
 use hanzo_common::elapsed::format_duration;
-use chrono::{DateTime, Local, Utc};
 use rand::Rng;
 
 const RATE_LIMIT_BUFFER: Duration = Duration::from_secs(5);
@@ -287,7 +317,9 @@ pub enum AutoCoordinatorCommand {
         _prompt: String,
         conversation: Arc<[ResponseItem]>,
     },
-    AckDecision { seq: u64 },
+    AckDecision {
+        seq: u64,
+    },
     Stop,
 }
 
@@ -452,17 +484,17 @@ mod tests {
 
     #[test]
     fn schema_includes_prompt_and_agents() {
-        let active_agents = vec![
-            "codex-plan".to_string(),
-            "codex-research".to_string(),
-        ];
+        let active_agents = vec!["codex-plan".to_string(), "codex-research".to_string()];
         let schema = build_schema(&active_agents, SchemaFeatures::default());
         let props = schema
             .get("properties")
             .and_then(|v| v.as_object())
             .expect("schema properties");
         assert!(!props.contains_key("goal"));
-        assert!(props.contains_key("status_title"), "status_title property missing");
+        assert!(
+            props.contains_key("status_title"),
+            "status_title property missing"
+        );
         assert!(
             props.contains_key("status_sent_to_user"),
             "status_sent_to_user property missing"
@@ -669,12 +701,8 @@ mod tests {
 
     #[test]
     fn developer_message_uses_bootstrap_instructions_when_deriving_goal() {
-        let (_, _intro_bootstrap, primary_bootstrap) = build_developer_message(
-            "Deriving goal from recent conversation",
-            "Env",
-            None,
-            true,
-        );
+        let (_, _intro_bootstrap, primary_bootstrap) =
+            build_developer_message("Deriving goal from recent conversation", "Env", None, true);
         assert!(primary_bootstrap.contains("You are preparing to start Auto Drive"));
 
         let (_, _intro_normal, primary_normal) =
@@ -710,19 +738,12 @@ mod tests {
         assert_eq!(cli.prompt, "Apply the patch for the failing test");
         assert!(cli.context.is_none());
 
-        assert_eq!(
-            decision.agents_timing,
-            Some(AutoTurnAgentsTiming::Blocking)
-        );
+        assert_eq!(decision.agents_timing, Some(AutoTurnAgentsTiming::Blocking));
         assert_eq!(decision.agents.len(), 1);
         let agent = &decision.agents[0];
         assert_eq!(agent.prompt, "Draft alternative fix");
         assert_eq!(agent.write, Some(false));
-        assert_eq!(
-            agent.models,
-            Some(vec!["codex-plan".to_string()])
-        );
-
+        assert_eq!(agent.models, Some(vec!["codex-plan".to_string()]));
     }
 
     #[test]
@@ -759,14 +780,8 @@ mod tests {
 
         let (decision, _) = parse_decision(raw).expect("parse legacy decision");
         assert_eq!(decision.status, AutoCoordinatorStatus::Continue);
-        assert_eq!(
-            decision.status_sent_to_user.as_deref(),
-            Some("Drafted fix")
-        );
-        assert_eq!(
-            decision.status_title.as_deref(),
-            Some("Running unit tests")
-        );
+        assert_eq!(decision.status_sent_to_user.as_deref(), Some("Drafted fix"));
+        assert_eq!(decision.status_title.as_deref(), Some("Running unit tests"));
 
         let cli = decision.cli.expect("cli action expected");
         assert_eq!(cli.prompt, "Run cargo test --package core");
@@ -780,12 +795,9 @@ mod tests {
     fn classify_missing_cli_prompt_is_recoverable() {
         let err = anyhow!("model response missing prompt_sent_to_cli for continue");
         let info = classify_recoverable_decision_error(&err).expect("recoverable error");
-        assert!(info
-            .summary
-            .contains("prompt_sent_to_cli"));
+        assert!(info.summary.contains("prompt_sent_to_cli"));
         assert!(
-            info
-                .guidance
+            info.guidance
                 .as_ref()
                 .expect("guidance")
                 .contains("prompt_sent_to_cli")
@@ -797,11 +809,12 @@ mod tests {
         let err = anyhow!("agents[*].prompt is empty");
         let info = classify_recoverable_decision_error(&err).expect("recoverable error");
         assert!(info.summary.contains("agents[*].prompt"));
-        assert!(info
-            .guidance
-            .as_ref()
-            .expect("guidance")
-            .contains("agents[*].prompt"));
+        assert!(
+            info.guidance
+                .as_ref()
+                .expect("guidance")
+                .contains("agents[*].prompt")
+        );
     }
 
     #[test]
@@ -1092,8 +1105,7 @@ fn run_auto_loop(
     }
     let requested_effort: hanzo_protocol::config_types::ReasoningEffort =
         config.model_reasoning_effort.into();
-    let clamped_effort =
-        clamp_reasoning_effort_for_model(&config.model, requested_effort);
+    let clamped_effort = clamp_reasoning_effort_for_model(&config.model, requested_effort);
     config.model_reasoning_effort = ReasoningEffort::from(clamped_effort);
     let allowed_verbosity = supported_text_verbosity_for_model(&config.model);
     config.model_text_verbosity = allowed_verbosity
@@ -1140,10 +1152,9 @@ fn run_auto_loop(
         model_reasoning_summary,
         model_text_verbosity,
         Uuid::new_v4(),
-        Arc::new(Mutex::new(
-            DebugLogger::new(debug_enabled)
-                .unwrap_or_else(|_| DebugLogger::new(false).expect("debug logger")),
-        )),
+        Arc::new(Mutex::new(DebugLogger::new(debug_enabled).unwrap_or_else(
+            |_| DebugLogger::new(false).expect("debug logger"),
+        ))),
     ));
 
     let runtime = tokio::runtime::Builder::new_multi_thread()
@@ -1173,12 +1184,13 @@ fn run_auto_loop(
     };
     let environment_details = format_environment_details(sandbox_label);
     let coordinator_prompt = read_coordinator_prompt(config.as_ref());
-    let (coordinator_prompt_message, mut base_developer_intro, mut primary_goal_message) = build_developer_message(
-        &goal_text,
-        &environment_details,
-        coordinator_prompt.as_deref(),
-        derive_goal_from_history,
-    );
+    let (coordinator_prompt_message, mut base_developer_intro, mut primary_goal_message) =
+        build_developer_message(
+            &goal_text,
+            &environment_details,
+            coordinator_prompt.as_deref(),
+            derive_goal_from_history,
+        );
     let git_repo_present = run_git_command(["rev-parse", "--is-inside-work-tree"])
         .as_deref()
         .map(|value| value == "true")
@@ -1193,8 +1205,9 @@ fn run_auto_loop(
         schema_features.include_goal_field = true;
     }
     let include_agents = schema_features.include_agents;
-    let mut pending_conversation =
-        Some(Arc::<[ResponseItem]>::from(filter_popular_commands(initial_conversation)));
+    let mut pending_conversation = Some(Arc::<[ResponseItem]>::from(filter_popular_commands(
+        initial_conversation,
+    )));
     let mut decision_seq: u64 = 0;
     let mut pending_ack_seq: Option<u64> = None;
     let mut queued_updates: VecDeque<Arc<[ResponseItem]>> = VecDeque::new();
@@ -1381,10 +1394,7 @@ fn run_auto_loop(
                             agents: agents
                                 .iter()
                                 .map(|action| {
-                                    agent_action_to_event_with_write_guard(
-                                        action,
-                                        git_repo_present,
-                                    )
+                                    agent_action_to_event_with_write_guard(action, git_repo_present)
                                 })
                                 .collect(),
                             transcript: std::mem::take(&mut response_items),
@@ -1411,7 +1421,8 @@ fn run_auto_loop(
                         transcript: response_items,
                     };
 
-                    let should_stop = matches!(decision_event.status, AutoCoordinatorStatus::Failed);
+                    let should_stop =
+                        matches!(decision_event.status, AutoCoordinatorStatus::Failed);
                     pending_ack_seq = Some(current_seq);
                     event_tx.send(decision_event.into_event());
                     stopped = should_stop;
@@ -1448,9 +1459,7 @@ fn run_auto_loop(
 
                             warn!(
                                 "auto coordinator decision validation failed (attempt {}/{}): {:#}",
-                                attempt,
-                                MAX_DECISION_RECOVERY_ATTEMPTS,
-                                error
+                                attempt, MAX_DECISION_RECOVERY_ATTEMPTS, error
                             );
                             let raw_excerpt = if already_shared_raw {
                                 None
@@ -1472,8 +1481,8 @@ fn run_auto_loop(
                                 summary_index: None,
                             });
                             {
-                                let retry_vec =
-                                    retry_conversation.get_or_insert_with(|| conv.as_ref().to_vec());
+                                let retry_vec = retry_conversation
+                                    .get_or_insert_with(|| conv.as_ref().to_vec());
                                 let mut developer_note = format!(
                                     "Previous coordinator response failed validation (attempt {attempt}/{MAX_DECISION_RECOVERY_ATTEMPTS}).\nError: {error}\nSchema: {schema_label}"
                                 );
@@ -1510,8 +1519,7 @@ fn run_auto_loop(
                         }
                         warn!(
                             "auto coordinator validation retry limit exceeded after {} attempts: {:#}",
-                            MAX_DECISION_RECOVERY_ATTEMPTS,
-                            error
+                            MAX_DECISION_RECOVERY_ATTEMPTS, error
                         );
                     }
                     consecutive_decision_failures = 0;
@@ -1548,12 +1556,16 @@ fn run_auto_loop(
                     tracing::debug!(target: "auto_drive::coordinator", pending = ?pending_ack_seq, seq, "ignoring ack for unexpected sequence");
                 }
             }
-            Ok(AutoCoordinatorCommand::HandleUserPrompt { _prompt, conversation }) => {
+            Ok(AutoCoordinatorCommand::HandleUserPrompt {
+                _prompt,
+                conversation,
+            }) => {
                 let developer_intro = base_developer_intro.as_str();
                 let base_conversation = conversation.as_ref().to_vec();
                 let conversation_snapshot = Arc::<[ResponseItem]>::from(base_conversation);
                 let schema = user_turn_schema();
-                let time_budget_message = time_budget.as_mut().and_then(|budget| budget.maybe_nudge());
+                let time_budget_message =
+                    time_budget.as_mut().and_then(|budget| budget.maybe_nudge());
                 let time_budget_deadline = time_budget.as_ref().map(|budget| budget.deadline);
                 match request_user_turn_decision(
                     &runtime,
@@ -1573,9 +1585,11 @@ fn run_auto_loop(
                     Ok((user_response, cli_command)) => {
                         let mut updated_conversation = conversation_snapshot.as_ref().to_vec();
                         if let Some(response_text) = user_response.clone() {
-                            updated_conversation.push(make_message("assistant", response_text.clone()));
+                            updated_conversation
+                                .push(make_message("assistant", response_text.clone()));
                         }
-                        pending_conversation = Some(Arc::<[ResponseItem]>::from(updated_conversation));
+                        pending_conversation =
+                            Some(Arc::<[ResponseItem]>::from(updated_conversation));
                         event_tx.send(AutoCoordinatorEvent::UserReply {
                             user_response,
                             cli_command,
@@ -1658,7 +1672,9 @@ fn read_coordinator_prompt(config: &Config) -> Option<String> {
         None
     } else {
         if config.max_run_seconds.is_some() {
-            Some(format!("{trimmed}\n\n# Time Budget\n{TIMEBOXED_EXEC_COORDINATOR_GUIDANCE}"))
+            Some(format!(
+                "{trimmed}\n\n# Time Budget\n{TIMEBOXED_EXEC_COORDINATOR_GUIDANCE}"
+            ))
         } else {
             Some(trimmed.to_string())
         }
@@ -1677,8 +1693,10 @@ fn build_developer_message(
     } else {
         Some(prompt_body.to_string())
     };
-    let intro = format!("Environment:
-{environment_details}");
+    let intro = format!(
+        "Environment:
+{environment_details}"
+    );
     let primary_goal = if derive_goal_from_history {
         "**Primary Goal**\nYou are preparing to start Auto Drive. Review the recent conversation history and identify the single primary coding goal the assistant should pursue next.".to_string()
     } else {
@@ -1696,7 +1714,10 @@ struct InitialPlanningSeed {
     agents_timing: Option<AutoTurnAgentsTiming>,
 }
 
-fn build_initial_planning_seed(goal_text: &str, include_agents: bool) -> Option<InitialPlanningSeed> {
+fn build_initial_planning_seed(
+    goal_text: &str,
+    include_agents: bool,
+) -> Option<InitialPlanningSeed> {
     let goal = goal_text.trim();
     if goal.is_empty() {
         return None;
@@ -1732,7 +1753,8 @@ fn format_environment_details(sandbox: &str) -> String {
     let cwd = std::env::current_dir()
         .map(|dir| dir.display().to_string())
         .unwrap_or_else(|_| "<unknown>".to_string());
-    let branch = run_git_command(["rev-parse", "--abbrev-ref", "HEAD"]).unwrap_or_else(|| "<unknown>".to_string());
+    let branch = run_git_command(["rev-parse", "--abbrev-ref", "HEAD"])
+        .unwrap_or_else(|| "<unknown>".to_string());
     let git_status_raw = run_git_command(["status", "--short"]);
     let git_status = match git_status_raw {
         Some(raw) if raw.trim().is_empty() => "  clean".to_string(),
@@ -1753,7 +1775,10 @@ fn run_git_command<const N: usize>(args: [&str; N]) -> Option<String> {
     if !output.status.success() {
         return None;
     }
-    if args.iter().any(|arg| matches!(*arg, "pull" | "checkout" | "merge" | "apply")) {
+    if args
+        .iter()
+        .any(|arg| matches!(*arg, "pull" | "checkout" | "merge" | "apply"))
+    {
         hanzo_core::review_coord::bump_snapshot_epoch();
     }
     String::from_utf8(output.stdout)
@@ -1932,7 +1957,6 @@ fn build_schema(active_agents: &[String], features: SchemaFeatures) -> Value {
     Value::Object(schema)
 }
 
-
 struct RequestStreamResult {
     output_text: String,
     response_items: Vec<ResponseItem>,
@@ -1986,8 +2010,9 @@ fn request_coordinator_decision(
             Some(output_text),
         ));
     }
-    let (mut decision, value) = parse_decision(&output_text)
-        .map_err(|err| DecisionFailure::new(err, "coordinator_decision", Some(output_text.clone())))?;
+    let (mut decision, value) = parse_decision(&output_text).map_err(|err| {
+        DecisionFailure::new(err, "coordinator_decision", Some(output_text.clone()))
+    })?;
     debug!("[Auto coordinator] model decision: {:?}", value);
     decision.response_items = response_items;
     decision.token_usage = token_usage;
@@ -2123,8 +2148,14 @@ fn request_user_turn_decision(
         preferred_model_slug,
     )
     .map_err(|err| DecisionFailure::new(err, "auto_coordinator_user_turn", None))?;
-    let (user_response, cli_command) = parse_user_turn_reply(&result.output_text)
-        .map_err(|err| DecisionFailure::new(err, "auto_coordinator_user_turn", Some(result.output_text.clone())))?;
+    let (user_response, cli_command) =
+        parse_user_turn_reply(&result.output_text).map_err(|err| {
+            DecisionFailure::new(
+                err,
+                "auto_coordinator_user_turn",
+                Some(result.output_text.clone()),
+            )
+        })?;
     Ok((user_response, cli_command))
 }
 
@@ -2315,7 +2346,10 @@ fn request_decision_with_model(
         Ok(output) => Ok(output),
         Err(RetryError::Aborted) => Err(anyhow!(AutoCoordinatorCancelled)),
         Err(RetryError::Fatal(err)) => Err(err),
-        Err(RetryError::Timeout { elapsed, last_error }) => Err(last_error.context(format!(
+        Err(RetryError::Timeout {
+            elapsed,
+            last_error,
+        }) => Err(last_error.context(format!(
             "auto coordinator retry window exceeded after {}",
             format_duration(elapsed)
         ))),
@@ -2347,9 +2381,7 @@ fn build_user_turn_prompt(
     if let Some(prompt_text) = coordinator_prompt {
         let trimmed = prompt_text.trim();
         if !trimmed.is_empty() {
-            prompt
-                .prepend_developer_messages
-                .push(trimmed.to_string());
+            prompt.prepend_developer_messages.push(trimmed.to_string());
         }
     }
 
@@ -2483,10 +2515,16 @@ pub(crate) fn classify_model_error(error: &anyhow::Error) -> RetryDecision {
             CodexErr::RetryLimit(status) => {
                 if status.retryable {
                     return RetryDecision::RetryAfterBackoff {
-                        reason: format!("retry limit exceeded (status {}), treating as transient", status.status),
+                        reason: format!(
+                            "retry limit exceeded (status {}), treating as transient",
+                            status.status
+                        ),
                     };
                 }
-                return RetryDecision::Fatal(anyhow!("retry limit exceeded (status {})", status.status));
+                return RetryDecision::Fatal(anyhow!(
+                    "retry limit exceeded (status {})",
+                    status.status
+                ));
             }
             CodexErr::Reqwest(req_err) => {
                 return classify_reqwest_error(req_err);
@@ -2543,10 +2581,8 @@ fn classify_model_error_with_auto_switch(
                         let blocked_until = limit
                             .resets_in_seconds
                             .map(|seconds| now + chrono::Duration::seconds(seconds as i64));
-                        let current_auth_mode = auth
-                            .as_ref()
-                            .map(|current| current.mode)
-                            .or_else(|| {
+                        let current_auth_mode =
+                            auth.as_ref().map(|current| current.mode).or_else(|| {
                                 auth_accounts::find_account(
                                     client.code_home(),
                                     current_account_id.as_str(),
@@ -2588,7 +2624,8 @@ fn classify_model_error_with_auto_switch(
                                     });
                                     return RetryDecision::RateLimited {
                                         wait_until: Instant::now(),
-                                        reason: "usage limit reached; switched accounts".to_string(),
+                                        reason: "usage limit reached; switched accounts"
+                                            .to_string(),
                                     };
                                 }
                                 Ok(None) => {}
@@ -2702,12 +2739,19 @@ fn extract_reset_at(value: &serde_json::Value) -> Option<Instant> {
         .ok()?;
     let reset_utc = parsed.with_timezone(&Utc);
     let now = Utc::now();
-    let duration = reset_utc.signed_duration_since(now).to_std().unwrap_or_default();
+    let duration = reset_utc
+        .signed_duration_since(now)
+        .to_std()
+        .unwrap_or_default();
     Some(compute_rate_limit_wait(duration))
 }
 
 fn compute_rate_limit_wait(base: Duration) -> Instant {
-    let mut wait = if base > Duration::ZERO { base } else { Duration::ZERO };
+    let mut wait = if base > Duration::ZERO {
+        base
+    } else {
+        Duration::ZERO
+    };
     wait += RATE_LIMIT_BUFFER;
     wait += random_jitter(RATE_LIMIT_JITTER_MAX);
     Instant::now() + wait
@@ -2730,7 +2774,6 @@ fn find_in_chain<'a, T: std::error::Error + 'static>(error: &'a anyhow::Error) -
     }
     None
 }
-
 
 struct RecoverableDecisionError {
     summary: String,
@@ -2811,7 +2854,9 @@ fn classify_recoverable_decision_error(err: &anyhow::Error) -> Option<Recoverabl
         });
     }
 
-    if lower.contains("model response was not valid json") || lower.contains("parsing json from model output") {
+    if lower.contains("model response was not valid json")
+        || lower.contains("parsing json from model output")
+    {
         return Some(RecoverableDecisionError {
             summary: "response was not valid JSON".to_string(),
             guidance: Some(
@@ -2848,7 +2893,6 @@ fn push_unique_guidance(guidance: &mut Vec<String>, message: &str) {
     }
     guidance.push(trimmed.to_string());
 }
-
 
 fn parse_decision(raw: &str) -> Result<(ParsedCoordinatorDecision, Value)> {
     let value: Value = match serde_json::from_str(raw) {
@@ -2951,7 +2995,12 @@ fn convert_decision_new(
         match payloads {
             AgentsField::List(list) => {
                 for payload in list {
-                    let AgentPayload { prompt, context, write, models } = payload;
+                    let AgentPayload {
+                        prompt,
+                        context,
+                        write,
+                        models,
+                    } = payload;
                     let prompt = clean_required(&prompt, "agents[*].prompt")?;
                     agent_actions.push(AgentAction {
                         prompt,
@@ -2972,7 +3021,12 @@ fn convert_decision_new(
                 }
                 let batch_models = clean_models(models);
                 for payload in requests {
-                    let AgentPayload { prompt, context, write, models } = payload;
+                    let AgentPayload {
+                        prompt,
+                        context,
+                        write,
+                        models,
+                    } = payload;
                     let prompt = clean_required(&prompt, "agents.requests[*].prompt")?;
                     let models = clean_models(models).or_else(|| batch_models.clone());
                     agent_actions.push(AgentAction {
@@ -3025,7 +3079,9 @@ fn convert_decision_legacy(
             suppress_ui_context: false,
         }),
         (AutoCoordinatorStatus::Continue, None) => {
-            return Err(anyhow!("legacy model response missing cli_prompt for continue"));
+            return Err(anyhow!(
+                "legacy model response missing cli_prompt for continue"
+            ));
         }
         (_, Some(prompt)) => Some(CliAction {
             prompt: clean_required(&prompt, "cli_prompt")?,
@@ -3180,7 +3236,9 @@ pub(crate) fn extract_first_json_object(input: &str) -> Option<String> {
                 }
                 depth -= 1;
                 if depth == 0 {
-                    let Some(s) = start else { return None; };
+                    let Some(s) = start else {
+                        return None;
+                    };
                     return Some(input[s..=idx].to_string());
                 }
             }
@@ -3209,9 +3267,7 @@ fn strip_role_prefix(input: &str) -> &str {
     for prefix in PREFIXES {
         if let Some(head) = input.get(..prefix.len()) {
             if head.eq_ignore_ascii_case(prefix) {
-                let rest = input
-                    .get(prefix.len()..)
-                    .unwrap_or_default();
+                let rest = input.get(prefix.len()..).unwrap_or_default();
                 return rest.strip_prefix(' ').unwrap_or(rest);
             }
         }
@@ -3293,9 +3349,7 @@ fn maybe_compact(
                 "[Auto coordinator] remote compacted {removed} messages; new conversation length {}",
                 conversation.len()
             );
-            return CompactionResult::Completed {
-                summary_text: None,
-            };
+            return CompactionResult::Completed { summary_text: None };
         }
         Err(err) => {
             warn!("[Auto coordinator] remote compaction failed: {err:#}");
@@ -3342,9 +3396,7 @@ fn maybe_compact(
     let total = conversation.len();
     let plural = if removed == 1 { "" } else { "s" };
     event_tx.send(AutoCoordinatorEvent::Thinking {
-        delta: format!(
-            "Finished compacting history ({removed} message{plural} -> {total} total)."
-        ),
+        delta: format!("Finished compacting history ({removed} message{plural} -> {total} total)."),
         summary_index: None,
     });
 

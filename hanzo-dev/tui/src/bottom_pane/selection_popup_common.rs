@@ -1,8 +1,15 @@
 use ratatui::buffer::Buffer;
-use ratatui::layout::{Constraint, Rect};
-use ratatui::style::{Color, Modifier, Style};
-use ratatui::text::{Line, Span};
-use ratatui::widgets::{Cell, Row, Table, Widget};
+use ratatui::layout::Constraint;
+use ratatui::layout::Rect;
+use ratatui::style::Color;
+use ratatui::style::Modifier;
+use ratatui::style::Style;
+use ratatui::text::Line;
+use ratatui::text::Span;
+use ratatui::widgets::Cell;
+use ratatui::widgets::Row;
+use ratatui::widgets::Table;
+use ratatui::widgets::Widget;
 
 use super::scroll_state::ScrollState;
 
@@ -110,7 +117,11 @@ pub(crate) fn render_rows(
 
     let table = Table::new(rows, vec![Constraint::Percentage(100)])
         .widths([Constraint::Percentage(100)])
-        .style(Style::default().bg(crate::colors::background()).fg(crate::colors::text()));
+        .style(
+            Style::default()
+                .bg(crate::colors::background())
+                .fg(crate::colors::text()),
+        );
 
     table.render(area, buf);
 }

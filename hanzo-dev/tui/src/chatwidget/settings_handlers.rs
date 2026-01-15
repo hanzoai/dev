@@ -1,5 +1,7 @@
 use super::ChatWidget;
-use crossterm::event::{KeyCode, KeyEvent, KeyEventKind};
+use crossterm::event::KeyCode;
+use crossterm::event::KeyEvent;
+use crossterm::event::KeyEventKind;
 
 pub(super) fn handle_settings_paste(chat: &mut ChatWidget<'_>, text: String) -> bool {
     if chat.settings.overlay.is_none() {
@@ -36,7 +38,9 @@ pub(super) fn handle_settings_key(chat: &mut ChatWidget<'_>, key_event: KeyEvent
         return true;
     }
 
-    let Some(ref mut overlay) = chat.settings.overlay else { return true };
+    let Some(ref mut overlay) = chat.settings.overlay else {
+        return true;
+    };
 
     if overlay.is_help_visible() {
         match key_event.code {

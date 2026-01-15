@@ -98,7 +98,7 @@ pub fn create_ghost_commit(
         .collect::<Result<Vec<_>, _>>()?;
     let force_include =
         apply_repo_prefix_to_force_include(repo_prefix.as_deref(), &normalized_force);
-        let index_tempdir = Builder::new().prefix("dev-git-index-").tempdir()?;
+    let index_tempdir = Builder::new().prefix("dev-git-index-").tempdir()?;
     let index_path = index_tempdir.path().join("index");
     let base_env = vec![(
         OsString::from("GIT_INDEX_FILE"),
@@ -249,7 +249,10 @@ mod tests {
                 .arg("init")
                 .status()
                 .expect("git command");
-            assert!(fallback.success(), "git init failed without --initial-branch");
+            assert!(
+                fallback.success(),
+                "git init failed without --initial-branch"
+            );
 
             let set_head = Command::new("git")
                 .current_dir(repo)
@@ -391,7 +394,8 @@ mod tests {
     #[test]
     /// Verifies the optional post-commit hook runs after snapshot creation.
     fn post_commit_hook_runs_after_creation() -> Result<(), GitToolingError> {
-        use std::sync::atomic::{AtomicUsize, Ordering};
+        use std::sync::atomic::AtomicUsize;
+        use std::sync::atomic::Ordering;
         static CALLS: AtomicUsize = AtomicUsize::new(0);
 
         let temp = tempfile::tempdir()?;

@@ -2,7 +2,8 @@ use chrono::Local;
 use hanzo_otel::otel_event_manager::TurnLatencyPayload;
 use serde_json::Value;
 use std::collections::HashMap;
-use std::fs::{self, OpenOptions};
+use std::fs::OpenOptions;
+use std::fs::{self};
 use std::io::Write;
 use std::path::PathBuf;
 use std::sync::Mutex;
@@ -221,10 +222,7 @@ impl DebugLogger {
         }
 
         let path = {
-            let guard = self
-                .session_usage_file
-                .lock()
-                .expect("usage lock poisoned");
+            let guard = self.session_usage_file.lock().expect("usage lock poisoned");
             if guard.as_os_str().is_empty() {
                 return Ok(());
             }
@@ -255,8 +253,7 @@ impl DebugLogger {
             existing
         } else {
             let timestamp = Local::now().format("%Y%m%d_%H%M%S%.3f");
-            self
-                .usage_dir
+            self.usage_dir
                 .join(format!("{}_{}_usage.json", timestamp, session_id_str))
         };
 
@@ -268,10 +265,7 @@ impl DebugLogger {
             fs::write(&path, "[]")?;
         }
 
-        let mut guard = self
-            .session_usage_file
-            .lock()
-            .expect("usage lock poisoned");
+        let mut guard = self.session_usage_file.lock().expect("usage lock poisoned");
         *guard = path;
 
         self.set_turn_latency_file(session_id)

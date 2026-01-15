@@ -150,8 +150,9 @@ fn write_embedded_files(dest_root: &Path) -> Result<(), SystemSkillsError> {
     for &(rel, bytes) in EMBEDDED_SYSTEM_SKILLS {
         let path = dest_root.join(rel);
         if let Some(parent) = path.parent() {
-            fs::create_dir_all(parent)
-                .map_err(|source| SystemSkillsError::io("create system skills file parent", source))?;
+            fs::create_dir_all(parent).map_err(|source| {
+                SystemSkillsError::io("create system skills file parent", source)
+            })?;
         }
         fs::write(&path, bytes)
             .map_err(|source| SystemSkillsError::io("write system skill file", source))?;

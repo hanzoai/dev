@@ -1,14 +1,14 @@
 use super::*;
-use crate::history::state::{RateLimitLegendEntry, RateLimitsRecord, TextTone};
+use crate::history::state::RateLimitLegendEntry;
+use crate::history::state::RateLimitsRecord;
+use crate::history::state::TextTone;
 use hanzo_common::elapsed::format_duration;
 use hanzo_core::protocol::RateLimitSnapshotEvent;
 use ratatui::style::Color;
-use time::{
-    format_description::FormatItem,
-    macros::format_description,
-    Duration as TimeDuration,
-    OffsetDateTime,
-};
+use time::Duration as TimeDuration;
+use time::OffsetDateTime;
+use time::format_description::FormatItem;
+use time::macros::format_description;
 
 pub(crate) struct RateLimitsCell {
     record: RateLimitsRecord,
@@ -43,14 +43,12 @@ impl HistoryCell for RateLimitsCell {
 
     fn display_lines(&self) -> Vec<Line<'static>> {
         let mut lines: Vec<Line<'static>> = Vec::new();
-        lines.push(
-            Line::styled(
-                "Rate limits update",
-                Style::default()
-                    .fg(crate::colors::warning())
-                    .add_modifier(Modifier::BOLD),
-            ),
-        );
+        lines.push(Line::styled(
+            "Rate limits update",
+            Style::default()
+                .fg(crate::colors::warning())
+                .add_modifier(Modifier::BOLD),
+        ));
 
         let snapshot = &self.record.snapshot;
         lines.extend(snapshot_summary_lines(snapshot));

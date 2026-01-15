@@ -1,13 +1,13 @@
 use crate::chatwidget::BackgroundOrderTicket;
 use crate::user_approval_widget::ApprovalRequest;
 use crossterm::event::KeyEvent;
-use std::any::Any;
 use ratatui::buffer::Buffer;
 use ratatui::layout::Rect;
+use std::any::Any;
 
-use super::ChatComposer;
 use super::BottomPane;
 use super::CancellationEvent;
+use super::ChatComposer;
 
 /// Type to use for a method that may require a redraw of the UI.
 pub(crate) enum ConditionalUpdate {
@@ -41,12 +41,7 @@ pub(crate) trait BottomPaneView<'a> {
     /// Render the view when the caller maintains a persistent composer instance.
     /// Default implementation falls back to `render` for views that do not need
     /// direct access to the composer.
-    fn render_with_composer(
-        &self,
-        area: Rect,
-        buf: &mut Buffer,
-        composer: &ChatComposer,
-    ) {
+    fn render_with_composer(&self, area: Rect, buf: &mut Buffer, composer: &ChatComposer) {
         let _ = composer;
         self.render(area, buf);
     }

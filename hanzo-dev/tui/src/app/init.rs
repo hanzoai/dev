@@ -1,9 +1,12 @@
-use std::collections::{HashMap, HashSet};
+use std::collections::HashMap;
+use std::collections::HashSet;
 use std::path::PathBuf;
-use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::mpsc::channel;
 use std::sync::Arc;
-use std::time::{Duration, Instant};
+use std::sync::atomic::AtomicBool;
+use std::sync::atomic::Ordering;
+use std::sync::mpsc::channel;
+use std::time::Duration;
+use std::time::Instant;
 
 use crossterm::event::KeyEventKind;
 use crossterm::terminal::supports_keyboard_enhancement;
@@ -12,9 +15,10 @@ use signal_hook::consts::signal::SIGTERM;
 #[cfg(unix)]
 use signal_hook::flag;
 
-use hanzo_core::config::Config;
 use hanzo_core::ConversationManager;
-use hanzo_login::{AuthManager, AuthMode};
+use hanzo_core::config::Config;
+use hanzo_login::AuthManager;
+use hanzo_login::AuthMode;
 use hanzo_protocol::protocol::SessionSource;
 
 use crate::app_event::AppEvent;
@@ -22,11 +26,15 @@ use crate::app_event_sender::AppEventSender;
 use crate::chatwidget::ChatWidget;
 use crate::file_search::FileSearchManager;
 use crate::get_login_status;
-use crate::onboarding::onboarding_screen::{OnboardingScreen, OnboardingScreenArgs};
+use crate::onboarding::onboarding_screen::OnboardingScreen;
+use crate::onboarding::onboarding_screen::OnboardingScreenArgs;
 use crate::thread_spawner;
 use crate::tui::TerminalInfo;
 
-use super::state::{App, AppState, ChatWidgetArgs, FrameTimer};
+use super::state::App;
+use super::state::AppState;
+use super::state::ChatWidgetArgs;
+use super::state::FrameTimer;
 
 impl App<'_> {
     pub(crate) fn new(
@@ -70,29 +78,31 @@ impl App<'_> {
                         remote_provider,
                         remote_code_home,
                     );
-                remote_manager.refresh_remote_models().await;
-                let remote_models = remote_manager.remote_models_snapshot().await;
-                if remote_models.is_empty() {
-                    return;
-                }
+                    remote_manager.refresh_remote_models().await;
+                    let remote_models = remote_manager.remote_models_snapshot().await;
+                    if remote_models.is_empty() {
+                        return;
+                    }
 
-                let auth_mode = remote_auth_manager
-                    .auth()
-                    .map(|auth| auth.mode)
-                    .or_else(|| {
-                        if remote_using_chatgpt_hint {
-                            Some(hanzo_protocol::mcp_protocol::AuthMode::ChatGPT)
-                        } else {
-                            Some(hanzo_protocol::mcp_protocol::AuthMode::ApiKey)
-                        }
+                    let auth_mode =
+                        remote_auth_manager
+                            .auth()
+                            .map(|auth| auth.mode)
+                            .or_else(|| {
+                                if remote_using_chatgpt_hint {
+                                    Some(hanzo_protocol::mcp_protocol::AuthMode::ChatGPT)
+                                } else {
+                                    Some(hanzo_protocol::mcp_protocol::AuthMode::ApiKey)
+                                }
+                            });
+                    let presets = hanzo_common::model_presets::builtin_model_presets(auth_mode);
+                    let presets =
+                        crate::remote_model_presets::merge_remote_models(remote_models, presets);
+                    let default_model = remote_manager.default_model_slug(auth_mode).await;
+                    remote_tx.send(AppEvent::ModelPresetsUpdated {
+                        presets,
+                        default_model,
                     });
-                let presets = hanzo_common::model_presets::builtin_model_presets(auth_mode);
-                let presets = crate::remote_model_presets::merge_remote_models(remote_models, presets);
-                let default_model = remote_manager.default_model_slug(auth_mode).await;
-                remote_tx.send(AppEvent::ModelPresetsUpdated {
-                    presets,
-                    default_model,
-                });
                 });
             }
         }
@@ -119,92 +129,101 @@ impl App<'_> {
             if let Err(err) = std::thread::Builder::new()
                 .name("tui-input-loop".to_string())
                 .spawn(move || {
-                // Track recent typing to temporarily increase poll frequency for low latency.
-                let mut last_key_time = Instant::now();
-                loop {
-                    if !input_running_thread.load(Ordering::Relaxed) { break; }
-                    // This timeout is necessary to avoid holding the event lock
-                    // that crossterm::event::read() acquires. In particular,
-                    // reading the cursor position (crossterm::cursor::position())
-                    // needs to acquire the event lock, and so will fail if it
-                    // can't acquire it within 2 sec. Resizing the terminal
-                    // crashes the app if the cursor position can't be read.
-                    // Keep the timeout small to minimize input-to-echo latency.
-                    // Dynamically adapt poll timeout: when the user is actively typing,
-                    // use a very small timeout to minimize key->echo latency; otherwise
-                    // back off to reduce CPU when idle.
-                    let hot_typing = Instant::now().duration_since(last_key_time) <= Duration::from_millis(250);
-                    let poll_timeout = if hot_typing { Duration::from_millis(2) } else { Duration::from_millis(10) };
-                    match crossterm::event::poll(poll_timeout) {
-                        Ok(true) => match crossterm::event::read() {
-                            Ok(event) => {
-                                match event {
-                                    crossterm::event::Event::Key(key_event) => {
-                                        // Some Windows terminals (e.g., legacy conhost) only report
-                                        // `Release` events when keyboard enhancement flags are not
-                                        // supported. Preserve those events so onboarding works there.
-                                        if !drop_release_events
-                                            || matches!(key_event.kind, KeyEventKind::Press | KeyEventKind::Repeat)
-                                        {
-                                            last_key_time = Instant::now();
-                                            app_event_tx.send(AppEvent::KeyEvent(key_event));
+                    // Track recent typing to temporarily increase poll frequency for low latency.
+                    let mut last_key_time = Instant::now();
+                    loop {
+                        if !input_running_thread.load(Ordering::Relaxed) {
+                            break;
+                        }
+                        // This timeout is necessary to avoid holding the event lock
+                        // that crossterm::event::read() acquires. In particular,
+                        // reading the cursor position (crossterm::cursor::position())
+                        // needs to acquire the event lock, and so will fail if it
+                        // can't acquire it within 2 sec. Resizing the terminal
+                        // crashes the app if the cursor position can't be read.
+                        // Keep the timeout small to minimize input-to-echo latency.
+                        // Dynamically adapt poll timeout: when the user is actively typing,
+                        // use a very small timeout to minimize key->echo latency; otherwise
+                        // back off to reduce CPU when idle.
+                        let hot_typing = Instant::now().duration_since(last_key_time)
+                            <= Duration::from_millis(250);
+                        let poll_timeout = if hot_typing {
+                            Duration::from_millis(2)
+                        } else {
+                            Duration::from_millis(10)
+                        };
+                        match crossterm::event::poll(poll_timeout) {
+                            Ok(true) => match crossterm::event::read() {
+                                Ok(event) => {
+                                    match event {
+                                        crossterm::event::Event::Key(key_event) => {
+                                            // Some Windows terminals (e.g., legacy conhost) only report
+                                            // `Release` events when keyboard enhancement flags are not
+                                            // supported. Preserve those events so onboarding works there.
+                                            if !drop_release_events
+                                                || matches!(
+                                                    key_event.kind,
+                                                    KeyEventKind::Press | KeyEventKind::Repeat
+                                                )
+                                            {
+                                                last_key_time = Instant::now();
+                                                app_event_tx.send(AppEvent::KeyEvent(key_event));
+                                            }
                                         }
+                                        crossterm::event::Event::Resize(_, _) => {
+                                            app_event_tx.send(AppEvent::RequestRedraw);
+                                        }
+                                        // When the terminal/tab regains focus, issue a redraw.
+                                        // Some terminals clear the alt‑screen buffer on focus switches,
+                                        // which can leave the status bar and inline images blank until
+                                        // the next resize. A focus‑gain repaint fixes this immediately.
+                                        crossterm::event::Event::FocusGained => {
+                                            app_event_tx.send(AppEvent::RequestRedraw);
+                                        }
+                                        crossterm::event::Event::FocusLost => {
+                                            // No action needed; keep state as‑is.
+                                        }
+                                        crossterm::event::Event::Paste(pasted) => {
+                                            // Many terminals convert newlines to \r when pasting (e.g., iTerm2),
+                                            // but tui-textarea expects \n. Normalize CR to LF.
+                                            // [tui-textarea]: https://github.com/rhysd/tui-textarea/blob/4d18622eeac13b309e0ff6a55a46ac6706da68cf/src/textarea.rs#L782-L783
+                                            // [iTerm2]: https://github.com/gnachman/iTerm2/blob/5d0c0d9f68523cbd0494dad5422998964a2ecd8d/sources/iTermPasteHelper.m#L206-L216
+                                            let pasted = pasted.replace("\r", "\n");
+                                            app_event_tx.send(AppEvent::Paste(pasted));
+                                        }
+                                        crossterm::event::Event::Mouse(mouse_event) => {
+                                            app_event_tx.send(AppEvent::MouseEvent(mouse_event));
+                                        } // All other event variants are explicitly handled above.
                                     }
-                                    crossterm::event::Event::Resize(_, _) => {
-                                        app_event_tx.send(AppEvent::RequestRedraw);
+                                }
+                                Err(err) => {
+                                    if err.kind() == std::io::ErrorKind::Interrupted {
+                                        continue;
                                     }
-                                    // When the terminal/tab regains focus, issue a redraw.
-                                    // Some terminals clear the alt‑screen buffer on focus switches,
-                                    // which can leave the status bar and inline images blank until
-                                    // the next resize. A focus‑gain repaint fixes this immediately.
-                                    crossterm::event::Event::FocusGained => {
-                                        app_event_tx.send(AppEvent::RequestRedraw);
-                                    }
-                                    crossterm::event::Event::FocusLost => {
-                                        // No action needed; keep state as‑is.
-                                    }
-                                    crossterm::event::Event::Paste(pasted) => {
-                                        // Many terminals convert newlines to \r when pasting (e.g., iTerm2),
-                                        // but tui-textarea expects \n. Normalize CR to LF.
-                                        // [tui-textarea]: https://github.com/rhysd/tui-textarea/blob/4d18622eeac13b309e0ff6a55a46ac6706da68cf/src/textarea.rs#L782-L783
-                                        // [iTerm2]: https://github.com/gnachman/iTerm2/blob/5d0c0d9f68523cbd0494dad5422998964a2ecd8d/sources/iTermPasteHelper.m#L206-L216
-                                        let pasted = pasted.replace("\r", "\n");
-                                        app_event_tx.send(AppEvent::Paste(pasted));
-                                    }
-                                    crossterm::event::Event::Mouse(mouse_event) => {
-                                        app_event_tx.send(AppEvent::MouseEvent(mouse_event));
-                                    }
-                                    // All other event variants are explicitly handled above.
+                                    tracing::error!("input thread failed to read event: {err}");
+                                    input_running_thread.store(false, Ordering::Release);
+                                    app_event_tx.send(AppEvent::ExitRequest);
+                                    break;
+                                }
+                            },
+                            Ok(false) => {
+                                // Timeout expired, no `Event` is available. If the user is typing
+                                // keep the loop hot; otherwise sleep briefly to cut idle CPU.
+                                if !hot_typing {
+                                    std::thread::sleep(Duration::from_millis(5));
                                 }
                             }
                             Err(err) => {
                                 if err.kind() == std::io::ErrorKind::Interrupted {
                                     continue;
                                 }
-                                tracing::error!("input thread failed to read event: {err}");
+                                tracing::error!("input thread failed to poll events: {err}");
                                 input_running_thread.store(false, Ordering::Release);
                                 app_event_tx.send(AppEvent::ExitRequest);
                                 break;
                             }
-                        },
-                        Ok(false) => {
-                            // Timeout expired, no `Event` is available. If the user is typing
-                            // keep the loop hot; otherwise sleep briefly to cut idle CPU.
-                            if !hot_typing {
-                                std::thread::sleep(Duration::from_millis(5));
-                            }
-                        }
-                        Err(err) => {
-                            if err.kind() == std::io::ErrorKind::Interrupted {
-                                continue;
-                            }
-                            tracing::error!("input thread failed to poll events: {err}");
-                            input_running_thread.store(false, Ordering::Release);
-                            app_event_tx.send(AppEvent::ExitRequest);
-                            break;
                         }
                     }
-                }
                 })
             {
                 tracing::error!("input thread spawn failed: {err}");

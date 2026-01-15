@@ -1,23 +1,30 @@
-use super::{tool_cards, ChatWidget, OrderKey};
+use super::ChatWidget;
+use super::OrderKey;
+use super::tool_cards;
 use super::tool_cards::ToolCardSlot;
-use crate::history_cell::{
-    AgentDetail,
-    AgentRunCell,
-    AgentStatusKind,
-    AgentStatusPreview,
-    PlainHistoryCell,
-    StepProgress,
-    HistoryCellType,
-    plain_message_state_from_lines,
-    plain_message_state_from_paragraphs,
-};
-use crate::history::state::{PlainMessageKind, PlainMessageRole};
-use hanzo_core::protocol::{AgentInfo, AgentSourceKind, AgentStatusUpdateEvent, OrderMeta};
-use serde_json::Value;
-use std::collections::{HashMap, HashSet};
-use std::time::{Duration, Instant};
+use crate::history::state::PlainMessageKind;
+use crate::history::state::PlainMessageRole;
+use crate::history_cell::AgentDetail;
+use crate::history_cell::AgentRunCell;
+use crate::history_cell::AgentStatusKind;
+use crate::history_cell::AgentStatusPreview;
+use crate::history_cell::HistoryCellType;
+use crate::history_cell::PlainHistoryCell;
+use crate::history_cell::StepProgress;
+use crate::history_cell::plain_message_state_from_lines;
+use crate::history_cell::plain_message_state_from_paragraphs;
+use hanzo_core::protocol::AgentInfo;
+use hanzo_core::protocol::AgentSourceKind;
+use hanzo_core::protocol::AgentStatusUpdateEvent;
+use hanzo_core::protocol::OrderMeta;
 use ratatui::style::Style;
-use ratatui::text::{Line, Span};
+use ratatui::text::Line;
+use ratatui::text::Span;
+use serde_json::Value;
+use std::collections::HashMap;
+use std::collections::HashSet;
+use std::time::Duration;
+use std::time::Instant;
 use tracing::error;
 
 const AGENT_TOOL_NAMES: &[&str] = &[
@@ -65,15 +72,18 @@ fn begin_action_for(tool_name: &str, metadata: &InvocationMetadata) -> Option<St
         .clone()
         .or_else(|| metadata.agent_ids.clone().into_iter().next())
         .unwrap_or_else(|| "agent".to_string());
-    let action = metadata.action.as_deref().unwrap_or_else(|| match tool_name {
-        "agent" | "agent_run" => "create",
-        "agent_wait" => "wait",
-        "agent_result" => "result",
-        "agent_cancel" => "cancel",
-        "agent_check" => "status",
-        "agent_list" => "list",
-        other => other,
-    });
+    let action = metadata
+        .action
+        .as_deref()
+        .unwrap_or_else(|| match tool_name {
+            "agent" | "agent_run" => "create",
+            "agent_wait" => "wait",
+            "agent_result" => "result",
+            "agent_cancel" => "cancel",
+            "agent_check" => "status",
+            "agent_list" => "list",
+            other => other,
+        });
 
     match action {
         "create" => Some(format!("Started agent run for {}", label)),
@@ -94,15 +104,18 @@ fn end_action_for(
     message: Option<&str>,
 ) -> Option<String> {
     let elapsed = format_elapsed_short(duration);
-    let action = metadata.action.as_deref().unwrap_or_else(|| match tool_name {
-        "agent" | "agent_run" => "create",
-        "agent_wait" => "wait",
-        "agent_result" => "result",
-        "agent_cancel" => "cancel",
-        "agent_check" => "status",
-        "agent_list" => "list",
-        other => other,
-    });
+    let action = metadata
+        .action
+        .as_deref()
+        .unwrap_or_else(|| match tool_name {
+            "agent" | "agent_run" => "create",
+            "agent_wait" => "wait",
+            "agent_result" => "result",
+            "agent_cancel" => "cancel",
+            "agent_check" => "status",
+            "agent_list" => "list",
+            other => other,
+        });
 
     match action {
         "create" => {
@@ -243,7 +256,11 @@ fn normalize_end_action_text(
             return Some(action);
         }
         let detail = action.trim_start_matches("Result fetch failed in ");
-        return Some(format!("Result fetch failed for {} in {}", names.join(", "), detail));
+        return Some(format!(
+            "Result fetch failed for {} in {}",
+            names.join(", "),
+            detail
+        ));
     }
 
     Some(action)
@@ -353,8 +370,7 @@ impl AgentRunTracker {
     }
 
     pub(crate) fn overlay_display_label(&self) -> Option<String> {
-        self
-            .effective_label()
+        self.effective_label()
             .map(|value| value.trim().to_string())
             .filter(|value| !value.is_empty())
             .or_else(|| self.batch_id.as_ref().map(|value| value.to_string()))
@@ -408,7 +424,9 @@ fn looks_like_uuid(value: &str) -> bool {
     if parts.len() != 5 {
         return false;
     }
-    parts.iter().all(|part| !part.is_empty() && part.chars().all(|c| c.is_ascii_hexdigit()))
+    parts
+        .iter()
+        .all(|part| !part.is_empty() && part.chars().all(|c| c.is_ascii_hexdigit()))
 }
 
 fn clean_label(value: &str) -> Option<String> {
@@ -420,11 +438,16 @@ fn clean_label(value: &str) -> Option<String> {
     }
 }
 
-fn insert_agent_start_message(chat: &mut ChatWidget<'_>, order_key: OrderKey, tracker: &AgentRunTracker) {
+fn insert_agent_start_message(
+    chat: &mut ChatWidget<'_>,
+    order_key: OrderKey,
+    tracker: &AgentRunTracker,
+) {
     let line = agent_start_line(tracker);
     let state = plain_message_state_from_lines(vec![line], HistoryCellType::BackgroundEvent);
     let cell = PlainHistoryCell::from_state(state);
-    let _ = chat.history_insert_with_key_global_tagged(Box::new(cell), order_key, "background", None);
+    let _ =
+        chat.history_insert_with_key_global_tagged(Box::new(cell), order_key, "background", None);
 }
 
 fn agent_start_line(tracker: &AgentRunTracker) -> Line<'static> {
@@ -896,7 +919,9 @@ pub(super) fn handle_custom_tool_end(
             }
             tracker.cell.set_status_label("Completed");
             tracker.cell.mark_completed();
-            if let Some(action) = end_action_for(tool_name, &metadata, duration, true, Some(text.as_str())) {
+            if let Some(action) =
+                end_action_for(tool_name, &metadata, duration, true, Some(text.as_str()))
+            {
                 if let Some(message) = normalize_end_action_text(&tracker, &metadata, action) {
                     tracker.cell.record_action(message);
                 }
@@ -905,7 +930,9 @@ pub(super) fn handle_custom_tool_end(
         Err(err) => {
             tracker.cell.set_latest_result(vec![err.clone()]);
             tracker.cell.mark_failed();
-            if let Some(action) = end_action_for(tool_name, &metadata, duration, false, Some(err.as_str())) {
+            if let Some(action) =
+                end_action_for(tool_name, &metadata, duration, false, Some(err.as_str()))
+            {
                 if let Some(message) = normalize_end_action_text(&tracker, &metadata, action) {
                     tracker.cell.record_action(message);
                 }
@@ -1002,17 +1029,18 @@ fn process_status_update_for_batch(
         .get(batch_id)
         .cloned()
         .and_then(|key| {
-            chat
-                .tools_state
+            chat.tools_state
                 .agent_runs
                 .remove(&key)
                 .map(|tracker| (tracker, key))
-        })
-    {
+        }) {
         Some((tracker, key)) => (tracker, key),
         None => {
             let order_key = chat.next_internal_key();
-            tracing::warn!(batch_id, "status_update received with no existing tracker; creating placeholder");
+            tracing::warn!(
+                batch_id,
+                "status_update received with no existing tracker; creating placeholder"
+            );
             (AgentRunTracker::new(order_key), agent_batch_key(batch_id))
         }
     };
@@ -1053,16 +1081,14 @@ fn process_status_update_for_batch(
             .map(|label| label.trim().is_empty())
             .unwrap_or(true)
         {
-            if let Some(cleaned) = clean_label(agent.name.as_str()).filter(|name| !looks_like_uuid(name)) {
+            if let Some(cleaned) =
+                clean_label(agent.name.as_str()).filter(|name| !looks_like_uuid(name))
+            {
                 tracker.batch_label = Some(cleaned);
             }
         }
 
-        let phase = classify_status(
-            &agent.status,
-            agent.result.is_some(),
-            agent.error.is_some(),
-        );
+        let phase = classify_status(&agent.status, agent.result.is_some(), agent.error.is_some());
 
         let mut details: Vec<AgentDetail> = Vec::new();
 
@@ -1102,10 +1128,7 @@ fn process_status_update_for_batch(
             }
         }
 
-        let step_progress = agent
-            .last_progress
-            .as_deref()
-            .and_then(parse_progress);
+        let step_progress = agent.last_progress.as_deref().and_then(parse_progress);
 
         if details.is_empty() {
             if let Some(progress) = agent.last_progress.as_ref() {
@@ -1127,28 +1150,18 @@ fn process_status_update_for_batch(
 
         truncate_agent_details(&mut details);
 
-        let last_update = details
-            .last()
-            .map(|detail| match detail {
-                AgentDetail::Progress(text)
-                | AgentDetail::Result(text)
-                | AgentDetail::Error(text)
-                | AgentDetail::Info(text) => text.clone(),
-            });
+        let last_update = details.last().map(|detail| match detail {
+            AgentDetail::Progress(text)
+            | AgentDetail::Result(text)
+            | AgentDetail::Error(text)
+            | AgentDetail::Info(text) => text.clone(),
+        });
 
-        let elapsed = compute_agent_elapsed(
-            &mut tracker,
-            agent.id.as_str(),
-            agent.elapsed_ms,
-            phase,
-        );
+        let elapsed =
+            compute_agent_elapsed(&mut tracker, agent.id.as_str(), agent.elapsed_ms, phase);
         let elapsed_updated_at = elapsed.map(|_| Instant::now());
-        let token_count = resolve_agent_token_count(
-            &mut tracker,
-            agent.id.as_str(),
-            agent.token_count,
-            &details,
-        );
+        let token_count =
+            resolve_agent_token_count(&mut tracker, agent.id.as_str(), agent.token_count, &details);
 
         let preview = AgentStatusPreview {
             id: agent.id.clone(),
@@ -1167,7 +1180,9 @@ fn process_status_update_for_batch(
 
         status_collect.observe(phase);
 
-        if let Some(clean_name) = clean_label(agent.name.as_str()).filter(|name| !looks_like_uuid(name)) {
+        if let Some(clean_name) =
+            clean_label(agent.name.as_str()).filter(|name| !looks_like_uuid(name))
+        {
             tracker.set_agent_name(Some(clean_name), false);
         }
     }
@@ -1208,9 +1223,7 @@ fn process_status_update_for_batch(
         let label = tracker
             .cell
             .agent_name_for_id(preview.id.as_str())
-            .or_else(|| {
-                clean_label(preview.name.as_str()).filter(|value| !looks_like_uuid(value))
-            })
+            .or_else(|| clean_label(preview.name.as_str()).filter(|value| !looks_like_uuid(value)))
             .unwrap_or_else(|| {
                 let trimmed = preview.name.trim();
                 if trimmed.is_empty() || looks_like_uuid(trimmed) {
@@ -1258,9 +1271,15 @@ fn process_status_update_for_batch(
     prune_agent_runs(chat);
 }
 
-fn order_key_and_ordinal(chat: &mut ChatWidget<'_>, order: Option<&OrderMeta>) -> (OrderKey, Option<u64>) {
+fn order_key_and_ordinal(
+    chat: &mut ChatWidget<'_>,
+    order: Option<&OrderMeta>,
+) -> (OrderKey, Option<u64>) {
     match order {
-        Some(meta) => (chat.provider_order_key_from_order_meta(meta), Some(meta.request_ordinal)),
+        Some(meta) => (
+            chat.provider_order_key_from_order_meta(meta),
+            Some(meta.request_ordinal),
+        ),
         None => (chat.next_internal_key(), None),
     }
 }
@@ -1292,26 +1311,22 @@ fn update_mappings(
 
     if let Some(cid) = call_id {
         tracker.call_ids.insert(cid.to_string());
-        chat
-            .tools_state
+        chat.tools_state
             .agent_run_by_call
             .insert(cid.to_string(), key.clone());
     }
     if let Some(meta) = order {
-        chat
-            .tools_state
+        chat.tools_state
             .agent_run_by_order
             .insert(meta.request_ordinal, key.clone());
     }
     if let Some(batch) = tracker.batch_id.as_ref() {
-        chat
-            .tools_state
+        chat.tools_state
             .agent_run_by_batch
             .insert(batch.clone(), key.clone());
     }
     for agent_id in &tracker.agent_ids {
-        chat
-            .tools_state
+        chat.tools_state
             .agent_run_by_agent
             .insert(agent_id.clone(), key.clone());
     }
@@ -1337,8 +1352,7 @@ fn update_mappings(
             }
         }
         for cid in &tracker.call_ids {
-            chat
-                .tools_state
+            chat.tools_state
                 .agent_run_by_call
                 .insert(cid.clone(), key.clone());
         }
@@ -1454,10 +1468,11 @@ fn compute_agent_elapsed(
 ) -> Option<Duration> {
     if let Some(ms) = elapsed_ms {
         let duration = Duration::from_millis(ms);
-        tracker
-            .agent_elapsed
-            .insert(agent_id.to_string(), duration);
-        if matches!(phase, AgentPhase::Completed | AgentPhase::Failed | AgentPhase::Cancelled) {
+        tracker.agent_elapsed.insert(agent_id.to_string(), duration);
+        if matches!(
+            phase,
+            AgentPhase::Completed | AgentPhase::Failed | AgentPhase::Cancelled
+        ) {
             tracker.agent_started_at.remove(agent_id);
         }
         return Some(duration);
@@ -1477,7 +1492,10 @@ fn compute_agent_elapsed(
         *entry = duration;
     }
 
-    if matches!(phase, AgentPhase::Completed | AgentPhase::Failed | AgentPhase::Cancelled) {
+    if matches!(
+        phase,
+        AgentPhase::Completed | AgentPhase::Failed | AgentPhase::Cancelled
+    ) {
         tracker.agent_started_at.remove(agent_id);
     }
 
@@ -1524,9 +1542,7 @@ fn extract_token_count_from_text(text: &str) -> Option<u64> {
     let mut fragment = String::new();
 
     for ch in text.chars() {
-        if ch.is_ascii_digit()
-            || matches!(ch, '.' | ',' | '_' | 'k' | 'K' | 'm' | 'M')
-        {
+        if ch.is_ascii_digit() || matches!(ch, '.' | ',' | '_' | 'k' | 'K' | 'm' | 'M') {
             fragment.push(ch);
         } else {
             if let Some(value) = parse_token_fragment(&fragment) {
@@ -1597,7 +1613,10 @@ fn parse_progress(progress: &str) -> Option<StepProgress> {
             let completed = done.trim().parse::<u32>().ok()?;
             let total = total.trim().parse::<u32>().ok()?;
             if total > 0 {
-                return Some(StepProgress { completed: completed.min(total), total });
+                return Some(StepProgress {
+                    completed: completed.min(total),
+                    total,
+                });
             }
         }
     }
@@ -1627,7 +1646,9 @@ fn prune_agent_runs(chat: &mut ChatWidget<'_>) {
             .min_by_key(|(_, tracker)| order_tuple(tracker.slot.order_key))
             .map(|(key, _)| key.clone());
 
-        let Some(key) = oldest_key else { break; };
+        let Some(key) = oldest_key else {
+            break;
+        };
         drop_agent_run(chat, key.as_str());
     }
 }

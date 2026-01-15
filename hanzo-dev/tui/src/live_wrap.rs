@@ -200,4 +200,3 @@ pub fn take_prefix_by_width(text: &str, max_cols: usize) -> (String, &str, usize
     let suffix = &text[end_idx..];
     (prefix, suffix, cols)
 }
-

@@ -1,29 +1,38 @@
-use std::sync::mpsc::{channel, Receiver};
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
+use std::sync::Mutex;
+use std::sync::mpsc::Receiver;
+use std::sync::mpsc::channel;
 use std::time::Duration;
 
-use anyhow::{anyhow, Context, Result};
+use anyhow::Context;
+use anyhow::Result;
+use anyhow::anyhow;
+use futures::StreamExt;
+use hanzo_core::AuthManager;
+use hanzo_core::ModelClient;
+use hanzo_core::Prompt;
+use hanzo_core::ResponseEvent;
+use hanzo_core::TextFormat;
 use hanzo_core::config::Config;
 use hanzo_core::config::ConfigOverrides;
 use hanzo_core::config_types::ReasoningEffort;
 use hanzo_core::debug_logger::DebugLogger;
 use hanzo_core::protocol::SandboxPolicy;
-use hanzo_core::{AuthManager, ModelClient, Prompt, ResponseEvent, TextFormat};
-use hanzo_protocol::models::{ContentItem, ResponseItem};
-use futures::StreamExt;
+use hanzo_protocol::models::ContentItem;
+use hanzo_protocol::models::ResponseItem;
 use serde::Deserialize;
-use serde_json::{self, json, Value};
+use serde_json::Value;
+use serde_json::json;
+use serde_json::{self};
 use tracing::debug;
 use uuid::Uuid;
 
-use crate::app_event::{
-    AppEvent,
-    Redacted,
-    TerminalAfter,
-    TerminalCommandGate,
-    TerminalRunController,
-    TerminalRunEvent,
-};
+use crate::app_event::AppEvent;
+use crate::app_event::Redacted;
+use crate::app_event::TerminalAfter;
+use crate::app_event::TerminalCommandGate;
+use crate::app_event::TerminalRunController;
+use crate::app_event::TerminalRunEvent;
 use crate::app_event_sender::AppEventSender;
 
 const MAX_OUTPUT_CHARS: usize = 8_000;
@@ -35,8 +44,12 @@ enum GuidedTerminalMode {
         default_command: String,
         selected_index: usize,
     },
-    Prompt { user_prompt: String },
-    DirectCommand { command: String },
+    Prompt {
+        user_prompt: String,
+    },
+    DirectCommand {
+        command: String,
+    },
     #[cfg_attr(test, allow(dead_code))]
     Upgrade {
         initial_command: String,
@@ -161,19 +174,55 @@ fn start_guided_terminal_session(
     if let Err(err) = std::thread::Builder::new()
         .name("guided-terminal-session".to_string())
         .spawn(move || {
-        let runtime = match tokio::runtime::Builder::new_multi_thread()
-            .enable_all()
-            .build()
-        {
-            Ok(rt) => rt,
-            Err(err) => {
+            let runtime = match tokio::runtime::Builder::new_multi_thread()
+                .enable_all()
+                .build()
+            {
+                Ok(rt) => rt,
+                Err(err) => {
+                    let helper = match &mode {
+                        GuidedTerminalMode::AgentInstall { .. } => "Install helper",
+                        GuidedTerminalMode::Prompt { .. }
+                        | GuidedTerminalMode::DirectCommand { .. } => "Terminal helper",
+                        GuidedTerminalMode::Upgrade { .. } => "Upgrade helper",
+                    };
+                    let msg = format!("Failed to start {helper} runtime: {err}");
+                    app_event_tx.send(AppEvent::TerminalChunk {
+                        id: terminal_id,
+                        chunk: format!("{msg}\n").into_bytes(),
+                        _is_stderr: true,
+                    });
+                    app_event_tx.send(AppEvent::TerminalUpdateMessage {
+                        id: terminal_id,
+                        message: msg,
+                    });
+                    return;
+                }
+            };
+
+            let mut controller_rx = controller_rx;
+            if let Err(err) = run_guided_loop(
+                &runtime,
+                &app_event_tx,
+                terminal_id,
+                &mode,
+                cwd.as_deref(),
+                controller,
+                &mut controller_rx,
+                config,
+                debug_enabled,
+            ) {
                 let helper = match &mode {
                     GuidedTerminalMode::AgentInstall { .. } => "Install helper",
                     GuidedTerminalMode::Prompt { .. }
                     | GuidedTerminalMode::DirectCommand { .. } => "Terminal helper",
                     GuidedTerminalMode::Upgrade { .. } => "Upgrade helper",
                 };
-                let msg = format!("Failed to start {helper} runtime: {err}");
+                let msg = if debug_enabled {
+                    format!("{helper} error: {err:#}")
+                } else {
+                    format!("{helper} error: {err}")
+                };
                 app_event_tx.send(AppEvent::TerminalChunk {
                     id: terminal_id,
                     chunk: format!("{msg}\n").into_bytes(),
@@ -183,43 +232,7 @@ fn start_guided_terminal_session(
                     id: terminal_id,
                     message: msg,
                 });
-                return;
             }
-        };
-
-        let mut controller_rx = controller_rx;
-        if let Err(err) = run_guided_loop(
-            &runtime,
-            &app_event_tx,
-            terminal_id,
-            &mode,
-            cwd.as_deref(),
-            controller,
-            &mut controller_rx,
-            config,
-            debug_enabled,
-        ) {
-            let helper = match &mode {
-                GuidedTerminalMode::AgentInstall { .. } => "Install helper",
-                GuidedTerminalMode::Prompt { .. }
-                | GuidedTerminalMode::DirectCommand { .. } => "Terminal helper",
-                GuidedTerminalMode::Upgrade { .. } => "Upgrade helper",
-            };
-            let msg = if debug_enabled {
-                format!("{helper} error: {err:#}")
-            } else {
-                format!("{helper} error: {err}")
-            };
-            app_event_tx.send(AppEvent::TerminalChunk {
-                id: terminal_id,
-                chunk: format!("{msg}\n").into_bytes(),
-                _is_stderr: true,
-            });
-            app_event_tx.send(AppEvent::TerminalUpdateMessage {
-                id: terminal_id,
-                message: msg,
-            });
-        }
         })
     {
         let msg = format!("Failed to start guided terminal helper: {err}");
@@ -228,7 +241,10 @@ fn start_guided_terminal_session(
             chunk: format!("{msg}\n").into_bytes(),
             _is_stderr: true,
         });
-        fail_tx.send(AppEvent::TerminalUpdateMessage { id: terminal_id, message: msg });
+        fail_tx.send(AppEvent::TerminalUpdateMessage {
+            id: terminal_id,
+            message: msg,
+        });
     }
 }
 
@@ -267,10 +283,9 @@ fn run_guided_loop(
         cfg.model_reasoning_summary,
         cfg.model_text_verbosity,
         Uuid::new_v4(),
-        Arc::new(Mutex::new(
-            DebugLogger::new(debug_enabled)
-                .unwrap_or_else(|_| DebugLogger::new(false).expect("debug logger")),
-        )),
+        Arc::new(Mutex::new(DebugLogger::new(debug_enabled).unwrap_or_else(
+            |_| DebugLogger::new(false).expect("debug logger"),
+        ))),
     );
 
     let platform = std::env::consts::OS;
@@ -346,32 +361,19 @@ fn run_guided_loop(
             } => {
                 debug!(
                     "[{}] Starting guided install session: agent={} default_command={} platform={} sandbox={} cwd={}",
-                    helper_label,
-                    agent_name,
-                    default_command,
-                    platform,
-                    sandbox,
-                    cwd_text,
+                    helper_label, agent_name, default_command, platform, sandbox, cwd_text,
                 );
             }
             GuidedTerminalMode::Prompt { user_prompt } => {
                 debug!(
                     "[{}] Starting guided terminal session: prompt={} platform={} sandbox={} cwd={}",
-                    helper_label,
-                    user_prompt,
-                    platform,
-                    sandbox,
-                    cwd_text,
+                    helper_label, user_prompt, platform, sandbox, cwd_text,
                 );
             }
             GuidedTerminalMode::DirectCommand { command } => {
                 debug!(
                     "[{}] Starting direct terminal session: command={} platform={} sandbox={} cwd={}",
-                    helper_label,
-                    command,
-                    platform,
-                    sandbox,
-                    cwd_text,
+                    helper_label, command, platform, sandbox, cwd_text,
                 );
             }
             GuidedTerminalMode::Upgrade {
@@ -380,12 +382,7 @@ fn run_guided_loop(
             } => {
                 debug!(
                     "[{}] Starting upgrade session: command={} latest_version={:?} platform={} sandbox={} cwd={}",
-                    helper_label,
-                    initial_command,
-                    latest_version,
-                    platform,
-                    sandbox,
-                    cwd_text,
+                    helper_label, initial_command, latest_version, platform, sandbox, cwd_text,
                 );
             }
         }
@@ -457,8 +454,8 @@ fn run_guided_loop(
             controller: Some(controller.clone()),
         });
 
-        let Some((output, exit_code)) = collect_command_output(controller_rx)
-            .context("collecting initial command output")?
+        let Some((output, exit_code)) =
+            collect_command_output(controller_rx).context("collecting initial command output")?
         else {
             if debug_enabled {
                 debug!("[Terminal helper] Initial command cancelled by user");
@@ -480,7 +477,10 @@ fn run_guided_loop(
             id: terminal_id,
             message: "Analyzing output…".to_string(),
         });
-    } else if let GuidedTerminalMode::Upgrade { initial_command, .. } = mode {
+    } else if let GuidedTerminalMode::Upgrade {
+        initial_command, ..
+    } = mode
+    {
         if sandbox_restricted {
             let notice = format!(
                 "Automatic upgrades require Full Access. Run `{initial_command}` manually in your own shell, then re-run `/update` once it finishes.\n"
@@ -530,8 +530,8 @@ fn run_guided_loop(
             controller: Some(controller.clone()),
         });
 
-        let Some((output, exit_code)) = collect_command_output(controller_rx)
-            .context("collecting upgrade command output")?
+        let Some((output, exit_code)) =
+            collect_command_output(controller_rx).context("collecting upgrade command output")?
         else {
             if debug_enabled {
                 debug!("[Upgrade helper] Initial command cancelled by user");
@@ -562,13 +562,16 @@ fn run_guided_loop(
         }
 
         if debug_enabled {
-            debug!("[{}] Requesting next command (step={})", helper_label, steps);
+            debug!(
+                "[{}] Requesting next command (step={})",
+                helper_label, steps
+            );
         }
         if steps == 1 {
-                app_event_tx.send(AppEvent::TerminalSetAssistantMessage {
-                    id: terminal_id,
-                    message: "Starting analysis…".to_string(),
-                });
+            app_event_tx.send(AppEvent::TerminalSetAssistantMessage {
+                id: terminal_id,
+                message: "Starting analysis…".to_string(),
+            });
         }
 
         let mut prompt = Prompt::default();
@@ -615,9 +618,8 @@ fn run_guided_loop(
                 let require_confirmation = match mode {
                     GuidedTerminalMode::AgentInstall { .. } => steps > 1,
                     GuidedTerminalMode::Prompt { .. } => steps > 1,
-                    GuidedTerminalMode::DirectCommand { .. } | GuidedTerminalMode::Upgrade { .. } => {
-                        true
-                    }
+                    GuidedTerminalMode::DirectCommand { .. }
+                    | GuidedTerminalMode::Upgrade { .. } => true,
                 };
                 let final_command = if require_confirmation {
                     let (gate_tx, gate_rx) = channel();
@@ -651,8 +653,8 @@ fn run_guided_loop(
                     controller: Some(controller.clone()),
                 });
 
-                let Some((output, exit_code)) = collect_command_output(controller_rx)
-                    .context("collecting command output")?
+                let Some((output, exit_code)) =
+                    collect_command_output(controller_rx).context("collecting command output")?
                 else {
                     if debug_enabled {
                         debug!("[{}] Command collection cancelled by user", helper_label);
@@ -662,9 +664,7 @@ fn run_guided_loop(
                 if debug_enabled {
                     debug!(
                         "[{}] Command finished: command={} exit_code={:?}",
-                        helper_label,
-                        final_command,
-                        exit_code,
+                        helper_label, final_command, exit_code,
                     );
                 }
 
@@ -694,11 +694,7 @@ fn run_guided_loop(
                 {
                     return Err(anyhow!("finish_success must set command to null"));
                 }
-                if let GuidedTerminalMode::AgentInstall {
-                    selected_index,
-                    ..
-                } = mode
-                {
+                if let GuidedTerminalMode::AgentInstall { selected_index, .. } = mode {
                     app_event_tx.send(AppEvent::TerminalForceClose { id: terminal_id });
                     app_event_tx.send(AppEvent::TerminalAfter(
                         TerminalAfter::RefreshAgentsAndClose {
@@ -728,7 +724,6 @@ fn run_guided_loop(
 
     Ok(())
 }
-
 
 fn request_decision(
     runtime: &tokio::runtime::Runtime,
@@ -769,8 +764,8 @@ fn parse_decision(raw: &str) -> Result<(InstallDecision, Value)> {
             serde_json::from_str(&json_blob).context("parsing JSON from model output")?
         }
     };
-    let decision: InstallDecision = serde_json::from_value(value.clone())
-        .context("decoding install decision")?;
+    let decision: InstallDecision =
+        serde_json::from_value(value.clone()).context("decoding install decision")?;
     Ok((decision, value))
 }
 
@@ -780,8 +775,14 @@ fn collect_command_output(
     let mut buf: Vec<u8> = Vec::new();
     let exit_code = loop {
         match controller_rx.recv() {
-            Ok(TerminalRunEvent::Chunk { data, _is_stderr: _ }) => buf.extend_from_slice(&data),
-            Ok(TerminalRunEvent::Exit { exit_code, _duration: _ }) => break exit_code,
+            Ok(TerminalRunEvent::Chunk {
+                data,
+                _is_stderr: _,
+            }) => buf.extend_from_slice(&data),
+            Ok(TerminalRunEvent::Exit {
+                exit_code,
+                _duration: _,
+            }) => break exit_code,
             Err(_) => return Ok(None),
         }
     };
@@ -814,7 +815,11 @@ pub(crate) fn wrap_command(raw: &str) -> Vec<String> {
             simplified.to_string(),
         ]
     } else {
-        vec!["/bin/bash".to_string(), "-lc".to_string(), simplified.to_string()]
+        vec![
+            "/bin/bash".to_string(),
+            "-lc".to_string(),
+            simplified.to_string(),
+        ]
     }
 }
 
@@ -881,7 +886,9 @@ fn extract_first_json_object(input: &str) -> Option<String> {
                 }
                 depth -= 1;
                 if depth == 0 {
-                    let Some(s) = start else { return None; };
+                    let Some(s) = start else {
+                        return None;
+                    };
                     return Some(input[s..=idx].to_string());
                 }
             }

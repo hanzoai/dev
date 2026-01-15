@@ -1,18 +1,27 @@
-use ratatui::prelude::{Buffer, Rect};
-use ratatui::style::{Modifier, Style};
-use ratatui::text::{Line, Span, Text};
-use ratatui::widgets::{Block, Borders, Padding, Paragraph, Widget, Wrap};
+use ratatui::prelude::Buffer;
+use ratatui::prelude::Rect;
+use ratatui::style::Modifier;
+use ratatui::style::Style;
+use ratatui::text::Line;
+use ratatui::text::Span;
+use ratatui::text::Text;
+use ratatui::widgets::Block;
+use ratatui::widgets::Borders;
+use ratatui::widgets::Padding;
+use ratatui::widgets::Paragraph;
+use ratatui::widgets::Widget;
+use ratatui::widgets::Wrap;
 
-use crate::history::compat::{
-    ExecAction,
-    ExecRecord,
-    ExecStatus,
-    HistoryId,
-    MergedExecRecord,
-};
+use crate::history::compat::ExecAction;
+use crate::history::compat::ExecRecord;
+use crate::history::compat::ExecStatus;
+use crate::history::compat::HistoryId;
+use crate::history::compat::MergedExecRecord;
 use crate::util::buffer::fill_rect;
 
-use super::core::{ExecKind, HistoryCell, HistoryCellType};
+use super::core::ExecKind;
+use super::core::HistoryCell;
+use super::core::HistoryCellType;
 use super::exec::ExecCell;
 use super::exec_helpers::coalesce_read_ranges_in_lines_local;
 use super::formatting::trim_empty_lines;
@@ -30,7 +39,13 @@ impl MergedExecSegment {
         Self { record }
     }
 
-    fn exec_parts(&self) -> (Vec<Line<'static>>, Vec<Line<'static>>, Option<Line<'static>>) {
+    fn exec_parts(
+        &self,
+    ) -> (
+        Vec<Line<'static>>,
+        Vec<Line<'static>>,
+        Option<Line<'static>>,
+    ) {
         let exec_cell = ExecCell::from_record(self.record.clone());
         exec_cell.exec_render_parts()
     }

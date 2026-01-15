@@ -2,8 +2,8 @@ use std::future::Future;
 use std::path::Path;
 use std::path::PathBuf;
 
-use hanzo_core::config::resolve_code_path_for_read;
 use hanzo_core::HANZO_APPLY_PATCH_ARG1;
+use hanzo_core::config::resolve_code_path_for_read;
 #[cfg(unix)]
 use std::os::unix::fs::symlink;
 use tempfile::TempDir;
@@ -138,7 +138,9 @@ fn load_dotenv() {
                 continue;
             }
             // Always ignore provider keys from project .env (must be set globally or in shell).
-            if upper == "OPENAI_API_KEY" || upper == "AZURE_OPENAI_API_KEY" { continue; }
+            if upper == "OPENAI_API_KEY" || upper == "AZURE_OPENAI_API_KEY" {
+                continue;
+            }
             // Safe: still single-threaded during startup.
             unsafe { std::env::set_var(&key, &value) };
         }
@@ -219,7 +221,8 @@ fn prepend_path_entry_for_apply_patch() -> std::io::Result<TempDir> {
         existing_path = join_path_env(&existing_path, &default_path_env_var(), PATH_SEPARATOR);
     }
 
-    let updated_path_env_var = join_path_env(&path_element.to_string(), &existing_path, PATH_SEPARATOR);
+    let updated_path_env_var =
+        join_path_env(&path_element.to_string(), &existing_path, PATH_SEPARATOR);
 
     unsafe {
         std::env::set_var("PATH", updated_path_env_var);
@@ -254,10 +257,16 @@ fn bridge_legacy_envs() {
     // If HANZO_HOME is set, backfill legacy vars for compatibility.
     if let Ok(hanzo_home) = std::env::var("HANZO_HOME") {
         if !hanzo_home.trim().is_empty() {
-            if std::env::var("CODE_HOME").map(|v| v.trim().is_empty()).unwrap_or(true) {
+            if std::env::var("CODE_HOME")
+                .map(|v| v.trim().is_empty())
+                .unwrap_or(true)
+            {
                 unsafe { std::env::set_var("CODE_HOME", &hanzo_home) };
             }
-            if std::env::var("HANZO_HOME").map(|v| v.trim().is_empty()).unwrap_or(true) {
+            if std::env::var("HANZO_HOME")
+                .map(|v| v.trim().is_empty())
+                .unwrap_or(true)
+            {
                 unsafe { std::env::set_var("HANZO_HOME", &hanzo_home) };
             }
         }

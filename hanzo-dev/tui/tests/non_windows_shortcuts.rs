@@ -1,7 +1,9 @@
 #![cfg(not(target_os = "windows"))]
 
+use crossterm::event::KeyCode;
+use crossterm::event::KeyEvent;
+use crossterm::event::KeyModifiers;
 use hanzo_tui::ComposerInput;
-use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 
 #[test]
 fn composer_ctrl_alt_letter_shortcut_deletes_word() {
@@ -13,7 +15,10 @@ fn composer_ctrl_alt_letter_shortcut_deletes_word() {
         KeyModifiers::CONTROL | KeyModifiers::ALT,
     ));
 
-    assert!(composer.text().is_empty(), "Ctrl+Alt+H should delete the previous word");
+    assert!(
+        composer.text().is_empty(),
+        "Ctrl+Alt+H should delete the previous word"
+    );
 }
 
 #[test]

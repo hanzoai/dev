@@ -1,13 +1,19 @@
 #![cfg(test)]
 #![allow(clippy::unwrap_used, clippy::expect_used)]
 
-use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
+use crossterm::event::KeyCode;
+use crossterm::event::KeyEvent;
+use crossterm::event::KeyModifiers;
+use hanzo_core::protocol::AgentReasoningDeltaEvent;
+use hanzo_core::protocol::AgentReasoningEvent;
+use hanzo_core::protocol::Event;
+use hanzo_core::protocol::EventMsg;
+use hanzo_core::protocol::OrderMeta;
+use hanzo_tui::test_helpers::ChatWidgetHarness;
+use hanzo_tui::test_helpers::layout_metrics;
+use hanzo_tui::test_helpers::render_chat_widget_to_vt100;
 use regex_lite::Regex;
 use std::sync::OnceLock;
-use hanzo_core::protocol::{
-    AgentReasoningDeltaEvent, AgentReasoningEvent, Event, EventMsg, OrderMeta,
-};
-use hanzo_tui::test_helpers::{layout_metrics, render_chat_widget_to_vt100, ChatWidgetHarness};
 
 #[test]
 fn bottom_spacer_short_wrapped_content_80x24() {
@@ -46,14 +52,8 @@ fn bottom_spacer_collapsed_vs_expanded_reasoning_120x40() {
     assert_viewport_invariants(&collapsed_raw, 40);
     let collapsed = normalize_output(collapsed_raw);
 
-    insta::assert_snapshot!(
-        "bottom_spacer_collapsed_reasoning_120x40",
-        collapsed
-    );
-    insta::assert_snapshot!(
-        "bottom_spacer_expanded_reasoning_120x40",
-        expanded
-    );
+    insta::assert_snapshot!("bottom_spacer_collapsed_reasoning_120x40", collapsed);
+    insta::assert_snapshot!("bottom_spacer_expanded_reasoning_120x40", expanded);
 }
 
 #[test]
@@ -201,8 +201,7 @@ fn assert_viewport_invariants(output: &str, expected_rows: u16) {
 }
 
 fn normalize_output(text: String) -> String {
-    text
-        .chars()
+    text.chars()
         .map(normalize_glyph)
         .collect::<String>()
         .pipe(normalize_timers)
@@ -212,24 +211,18 @@ fn normalize_output(text: String) -> String {
 
 fn normalize_glyph(ch: char) -> char {
     match ch {
-        '┌' | '┐' | '└' | '┘'
-        | '┏' | '┓' | '┗' | '┛'
-        | '╔' | '╗' | '╚' | '╝'
-        | '╒' | '╕' | '╛' | '╜'
-        | '╓' | '╖' | '╙' | '╘'
-        | '╭' | '╮' | '╯' | '╰' => '+',
-        '┬' | '┴' | '┼' | '├' | '┤'
-        | '┽' | '┾' | '┿'
-        | '╀' | '╁' | '╂' | '╃' | '╄'
-        | '╅' | '╆' | '╇' | '╈' | '╉'
-        | '╊' | '╋' | '╟' | '╠' | '╡'
-        | '╢' | '╫' | '╪' | '╬' => '+',
-        '─' | '━' | '═' | '╼' | '╾'
-        | '╸' | '╺' | '╴' | '╶'
-        | '┄' | '┅' | '┈' | '┉' => '-',
-        '│' | '┃' | '║' | '╽' | '╿'
-        | '╏' | '╎' | '┆' | '┇'
-        | '╷' | '╹' => '|',
+        '┌' | '┐' | '└' | '┘' | '┏' | '┓' | '┗' | '┛' | '╔' | '╗' | '╚' | '╝' | '╒' | '╕' | '╛'
+        | '╜' | '╓' | '╖' | '╙' | '╘' | '╭' | '╮' | '╯' | '╰' => '+',
+        '┬' | '┴' | '┼' | '├' | '┤' | '┽' | '┾' | '┿' | '╀' | '╁' | '╂' | '╃' | '╄' | '╅' | '╆'
+        | '╇' | '╈' | '╉' | '╊' | '╋' | '╟' | '╠' | '╡' | '╢' | '╫' | '╪' | '╬' => {
+            '+'
+        }
+        '─' | '━' | '═' | '╼' | '╾' | '╸' | '╺' | '╴' | '╶' | '┄' | '┅' | '┈' | '┉' => {
+            '-'
+        }
+        '│' | '┃' | '║' | '╽' | '╿' | '╏' | '╎' | '┆' | '┇' | '╷' | '╹' => {
+            '|'
+        }
         other => other,
     }
 }

@@ -1,7 +1,7 @@
 use hanzo_file_search::FileMatch;
 use ratatui::buffer::Buffer;
-use ratatui::layout::Rect;
 use ratatui::layout::Margin;
+use ratatui::layout::Rect;
 use ratatui::widgets::WidgetRef;
 
 use super::popup_consts::MAX_POPUP_ROWS;
@@ -59,7 +59,9 @@ impl FileSearchPopup {
             let ql = query.to_lowercase();
             self.matches.retain(|m| {
                 let path_l = m.path.to_lowercase();
-                if path_l.contains(&ql) { return true; }
+                if path_l.contains(&ql) {
+                    return true;
+                }
                 // Also match basename for convenience
                 if let Some((_, base)) = m.path.rsplit_once('/') {
                     return base.to_lowercase().contains(&ql);
@@ -168,7 +170,14 @@ impl WidgetRef for &FileSearchPopup {
             }
             buf.set_string(start, y, msg, ratatui::style::Style::default().dim());
         } else {
-            render_rows(indented_area, buf, &rows_all, &self.state, MAX_POPUP_ROWS, false);
+            render_rows(
+                indented_area,
+                buf,
+                &rows_all,
+                &self.state,
+                MAX_POPUP_ROWS,
+                false,
+            );
         }
     }
 }

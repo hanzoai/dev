@@ -2,19 +2,27 @@ use std::path::PathBuf;
 use std::sync::atomic::Ordering;
 use std::sync::mpsc::Receiver;
 use std::thread;
-use std::time::{Duration, Instant};
+use std::time::Duration;
+use std::time::Instant;
 
 use color_eyre::eyre::Result;
-use crossterm::event::{KeyCode, KeyEvent, KeyEventKind};
-use crossterm::execute;
 use crossterm::SynchronizedUpdate;
+use crossterm::event::KeyCode;
+use crossterm::event::KeyEvent;
+use crossterm::event::KeyEventKind;
+use crossterm::execute;
 use ratatui::prelude::IntoCrossterm;
 
-use hanzo_cloud_tasks_client::{CloudTaskError, TaskId};
+use hanzo_cloud_tasks_client::CloudTaskError;
+use hanzo_cloud_tasks_client::TaskId;
 use hanzo_core::config::add_project_allowed_command;
 use hanzo_core::config_types::Notifications;
-use hanzo_core::protocol::{Event, Op, SandboxPolicy};
-use hanzo_login::{AuthManager, AuthMode, ServerOptions};
+use hanzo_core::protocol::Event;
+use hanzo_core::protocol::Op;
+use hanzo_core::protocol::SandboxPolicy;
+use hanzo_login::AuthManager;
+use hanzo_login::AuthMode;
+use hanzo_login::ServerOptions;
 use portable_pty::PtySize;
 
 use crate::app_event::AppEvent;
@@ -29,14 +37,12 @@ use crate::thread_spawner;
 use crate::tui;
 
 use super::render::flatten_draw_result;
-use super::state::{
-    App,
-    AppState,
-    ChatWidgetArgs,
-    LoginFlowState,
-    BACKPRESSURE_FORCED_DRAW_SKIPS,
-    HIGH_EVENT_BURST_MAX,
-};
+use super::state::App;
+use super::state::AppState;
+use super::state::BACKPRESSURE_FORCED_DRAW_SKIPS;
+use super::state::ChatWidgetArgs;
+use super::state::HIGH_EVENT_BURST_MAX;
+use super::state::LoginFlowState;
 
 impl App<'_> {
     fn handle_login_mode_change(&mut self, using_chatgpt_auth: bool) {
@@ -100,12 +106,17 @@ impl App<'_> {
         app_event_tx.send(AppEvent::ScheduleFrameIn(Duration::from_millis(120)));
 
         'main: loop {
-            let event = match self.next_event_priority() { Some(e) => e, None => break 'main };
+            let event = match self.next_event_priority() {
+                Some(e) => e,
+                None => break 'main,
+            };
             match event {
                 AppEvent::InsertHistory(mut lines) => match &mut self.app_state {
                     AppState::Chat { widget } => {
                         // Coalesce consecutive InsertHistory events to reduce redraw churn.
-                        while let Ok(AppEvent::InsertHistory(mut more)) = self.app_event_rx_bulk.try_recv() {
+                        while let Ok(AppEvent::InsertHistory(mut more)) =
+                            self.app_event_rx_bulk.try_recv()
+                        {
                             lines.append(&mut more);
                         }
                         tracing::debug!("app: InsertHistory lines={}", lines.len());
@@ -117,17 +128,25 @@ impl App<'_> {
                             // adjusts the reserved region immediately even before the next frame.
                             let width = terminal.size().map(|s| s.width).unwrap_or(80);
                             let reserve = widget.desired_bottom_height(width).max(1);
-                            let _ = execute!(stdout(), crossterm::terminal::BeginSynchronizedUpdate);
-                            crate::insert_history::insert_history_lines_above(terminal, reserve, lines);
+                            let _ =
+                                execute!(stdout(), crossterm::terminal::BeginSynchronizedUpdate);
+                            crate::insert_history::insert_history_lines_above(
+                                terminal, reserve, lines,
+                            );
                             let _ = execute!(stdout(), crossterm::terminal::EndSynchronizedUpdate);
                             self.schedule_redraw();
                         }
-                    },
+                    }
                     AppState::Onboarding { .. } => {}
                 },
                 AppEvent::InsertHistoryWithKind { id, kind, lines } => match &mut self.app_state {
                     AppState::Chat { widget } => {
-                        tracing::debug!("app: InsertHistoryWithKind kind={:?} id={:?} lines={}", kind, id, lines.len());
+                        tracing::debug!(
+                            "app: InsertHistoryWithKind kind={:?} id={:?} lines={}",
+                            kind,
+                            id,
+                            lines.len()
+                        );
                         // Always update widget history, even in terminal mode.
                         // In terminal mode, the widget will emit an InsertHistory event
                         // which we will mirror to scrollback in the handler above.
@@ -137,32 +156,47 @@ impl App<'_> {
                             use std::io::stdout;
                             let width = terminal.size().map(|s| s.width).unwrap_or(80);
                             let reserve = widget.desired_bottom_height(width).max(1);
-                            let _ = execute!(stdout(), crossterm::terminal::BeginSynchronizedUpdate);
-                            crate::insert_history::insert_history_lines_above(terminal, reserve, to_mirror);
+                            let _ =
+                                execute!(stdout(), crossterm::terminal::BeginSynchronizedUpdate);
+                            crate::insert_history::insert_history_lines_above(
+                                terminal, reserve, to_mirror,
+                            );
                             let _ = execute!(stdout(), crossterm::terminal::EndSynchronizedUpdate);
                             self.schedule_redraw();
                         }
-                    },
+                    }
                     AppState::Onboarding { .. } => {}
                 },
                 AppEvent::InsertFinalAnswer { id, lines, source } => match &mut self.app_state {
                     AppState::Chat { widget } => {
-                        tracing::debug!("app: InsertFinalAnswer id={:?} lines={} source_len={}", id, lines.len(), source.len());
+                        tracing::debug!(
+                            "app: InsertFinalAnswer id={:?} lines={} source_len={}",
+                            id,
+                            lines.len(),
+                            source.len()
+                        );
                         let to_mirror = lines.clone();
                         widget.insert_final_answer_with_id(id, lines, source);
                         if !self.alt_screen_active {
                             use std::io::stdout;
                             let width = terminal.size().map(|s| s.width).unwrap_or(80);
                             let reserve = widget.desired_bottom_height(width).max(1);
-                            let _ = execute!(stdout(), crossterm::terminal::BeginSynchronizedUpdate);
-                            crate::insert_history::insert_history_lines_above(terminal, reserve, to_mirror);
+                            let _ =
+                                execute!(stdout(), crossterm::terminal::BeginSynchronizedUpdate);
+                            crate::insert_history::insert_history_lines_above(
+                                terminal, reserve, to_mirror,
+                            );
                             let _ = execute!(stdout(), crossterm::terminal::EndSynchronizedUpdate);
                             self.schedule_redraw();
                         }
-                    },
+                    }
                     AppState::Onboarding { .. } => {}
                 },
-                AppEvent::InsertBackgroundEvent { message, placement, order } => match &mut self.app_state {
+                AppEvent::InsertBackgroundEvent {
+                    message,
+                    placement,
+                    order,
+                } => match &mut self.app_state {
                     AppState::Chat { widget } => {
                         tracing::debug!(
                             "app: InsertBackgroundEvent placement={:?} len={}",
@@ -182,15 +216,16 @@ impl App<'_> {
                     AppState::Onboarding { .. } => {}
                 },
                 AppEvent::RateLimitSnapshotStored { account_id } => match &mut self.app_state {
-                    AppState::Chat { widget } => {
-                        widget.on_rate_limit_snapshot_stored(account_id)
-                    }
+                    AppState::Chat { widget } => widget.on_rate_limit_snapshot_stored(account_id),
                     AppState::Onboarding { .. } => {}
                 },
                 AppEvent::RequestRedraw => {
                     self.schedule_redraw();
                 }
-                AppEvent::ModelPresetsUpdated { presets, default_model } => {
+                AppEvent::ModelPresetsUpdated {
+                    presets,
+                    default_model,
+                } => {
                     if let AppState::Chat { widget } = &mut self.app_state {
                         widget.update_model_presets(presets, default_model);
                     }
@@ -220,11 +255,14 @@ impl App<'_> {
                     }
                 }
                 AppEvent::Redraw => {
-                    if self.timing_enabled { self.timing.on_redraw_begin(); }
+                    if self.timing_enabled {
+                        self.timing.on_redraw_begin();
+                    }
                     let t0 = Instant::now();
                     let mut used_nonblocking = false;
                     let draw_result = if !tui::stdout_ready_for_writes() {
-                        self.stdout_backpressure_skips = self.stdout_backpressure_skips.saturating_add(1);
+                        self.stdout_backpressure_skips =
+                            self.stdout_backpressure_skips.saturating_add(1);
                         if self.stdout_backpressure_skips == 1
                             || self.stdout_backpressure_skips % 25 == 0
                         {
@@ -261,7 +299,9 @@ impl App<'_> {
                     match flatten_draw_result(draw_result) {
                         Ok(()) => {
                             self.stdout_backpressure_skips = 0;
-                            if self.timing_enabled { self.timing.on_redraw_end(t0); }
+                            if self.timing_enabled {
+                                self.timing.on_redraw_end(t0);
+                            }
                         }
                         Err(ref e) if e.kind() == std::io::ErrorKind::WouldBlock => {
                             // A draw can fail after partially writing to the terminal. In that case,
@@ -300,7 +340,11 @@ impl App<'_> {
                             .tui
                             .stream
                             .commit_tick_ms
-                            .or(if self.config.tui.stream.responsive { Some(30) } else { None })
+                            .or(if self.config.tui.stream.responsive {
+                                Some(30)
+                            } else {
+                                None
+                            })
                             .unwrap_or(50);
                         if thread_spawner::spawn_lightweight("commit-anim", move || {
                             while running_for_thread.load(Ordering::Relaxed) {
@@ -329,7 +373,9 @@ impl App<'_> {
                     }
                 }
                 AppEvent::KeyEvent(mut key_event) => {
-                    if self.timing_enabled { self.timing.on_key(); }
+                    if self.timing_enabled {
+                        self.timing.on_key();
+                    }
                     #[cfg(windows)]
                     {
                         use crossterm::event::KeyCode;
@@ -400,7 +446,11 @@ impl App<'_> {
                     }
 
                     match key_event {
-                        KeyEvent { code: KeyCode::Esc, kind: KeyEventKind::Press | KeyEventKind::Repeat, .. } => {
+                        KeyEvent {
+                            code: KeyCode::Esc,
+                            kind: KeyEventKind::Press | KeyEventKind::Repeat,
+                            ..
+                        } => {
                             if let AppState::Chat { widget } = &mut self.app_state {
                                 if widget.handle_app_esc(key_event, &mut self.last_esc_time) {
                                     continue;
@@ -470,17 +520,17 @@ impl App<'_> {
                             kind: KeyEventKind::Press,
                             ..
                         } => match &mut self.app_state {
-                            AppState::Chat { widget } => {
-                                match widget.on_ctrl_c() {
-                                    crate::bottom_pane::CancellationEvent::Handled => {
-                                        if widget.ctrl_c_requests_exit() {
-                                            self.app_event_tx.send(AppEvent::ExitRequest);
-                                        }
+                            AppState::Chat { widget } => match widget.on_ctrl_c() {
+                                crate::bottom_pane::CancellationEvent::Handled => {
+                                    if widget.ctrl_c_requests_exit() {
+                                        self.app_event_tx.send(AppEvent::ExitRequest);
                                     }
-                                    crate::bottom_pane::CancellationEvent::Ignored => {}
                                 }
+                                crate::bottom_pane::CancellationEvent::Ignored => {}
+                            },
+                            AppState::Onboarding { .. } => {
+                                self.app_event_tx.send(AppEvent::ExitRequest);
                             }
-                            AppState::Onboarding { .. } => { self.app_event_tx.send(AppEvent::ExitRequest); }
                         },
                         KeyEvent {
                             code: KeyCode::Char('z'),
@@ -595,7 +645,12 @@ impl App<'_> {
                         widget.cancel_running_task_from_approval();
                     }
                 }
-                AppEvent::RegisterApprovedCommand { command, match_kind, persist, semantic_prefix } => {
+                AppEvent::RegisterApprovedCommand {
+                    command,
+                    match_kind,
+                    persist,
+                    semantic_prefix,
+                } => {
                     if let AppState::Chat { widget } = &mut self.app_state {
                         widget.register_approved_command(
                             command.clone(),
@@ -609,9 +664,9 @@ impl App<'_> {
                                 &command,
                                 match_kind.clone(),
                             ) {
-                                widget.history_push_plain_state(history_cell::new_error_event(format!(
-                                    "Failed to persist always-allow command: {err:#}",
-                                )));
+                                widget.history_push_plain_state(history_cell::new_error_event(
+                                    format!("Failed to persist always-allow command: {err:#}",),
+                                ));
                             } else {
                                 let display = strip_bash_lc_and_escape(&command);
                                 widget.push_background_tail(format!(
@@ -629,11 +684,13 @@ impl App<'_> {
                 AppEvent::OpenTerminal(launch) => {
                     let mut spawn = None;
                     let requires_immediate_command = !launch.command.is_empty();
-                    let restricted = !matches!(self.config.sandbox_policy, SandboxPolicy::DangerFullAccess);
+                    let restricted =
+                        !matches!(self.config.sandbox_policy, SandboxPolicy::DangerFullAccess);
                     if let AppState::Chat { widget } = &mut self.app_state {
                         if restricted && requires_immediate_command {
                             widget.history_push_plain_state(history_cell::new_error_event(
-                                "Terminal requires Full Access to auto-run install commands.".to_string(),
+                                "Terminal requires Full Access to auto-run install commands."
+                                    .to_string(),
                             ));
                             widget.show_agents_overview_ui();
                         } else {
@@ -713,18 +770,15 @@ impl App<'_> {
                     }
                 }
                 AppEvent::TerminalRerun { id } => {
-                    let command_and_controller = self
-                        .terminal_runs
-                        .get(&id)
-                        .and_then(|run| {
-                            (!run.running).then(|| {
-                                (
-                                    run.command.clone(),
-                                    run.display.clone(),
-                                    run.controller.clone(),
-                                )
-                            })
-                        });
+                    let command_and_controller = self.terminal_runs.get(&id).and_then(|run| {
+                        (!run.running).then(|| {
+                            (
+                                run.command.clone(),
+                                run.display.clone(),
+                                run.controller.clone(),
+                            )
+                        })
+                    });
                     if let Some((command, display, controller)) = command_and_controller {
                         if let AppState::Chat { widget } = &mut self.app_state {
                             widget.terminal_mark_running(id);
@@ -786,7 +840,11 @@ impl App<'_> {
                         widget.terminal_set_assistant_message(id, message);
                     }
                 }
-                AppEvent::TerminalAwaitCommand { id, suggestion, ack } => {
+                AppEvent::TerminalAwaitCommand {
+                    id,
+                    suggestion,
+                    ack,
+                } => {
                     if let AppState::Chat { widget } = &mut self.app_state {
                         widget.terminal_prepare_command(id, suggestion, ack.0);
                     }
@@ -819,15 +877,22 @@ impl App<'_> {
                 }
                 AppEvent::RequestValidationToolInstall { name, command } => {
                     if let AppState::Chat { widget } = &mut self.app_state {
-                        if let Some(launch) = widget.launch_validation_tool_install(&name, &command) {
+                        if let Some(launch) = widget.launch_validation_tool_install(&name, &command)
+                        {
                             self.app_event_tx.send(AppEvent::OpenTerminal(launch));
                         }
                     }
                 }
-                AppEvent::RunUpdateCommand { command, display, latest_version } => {
+                AppEvent::RunUpdateCommand {
+                    command,
+                    display,
+                    latest_version,
+                } => {
                     if crate::updates::upgrade_ui_enabled() {
                         if let AppState::Chat { widget } = &mut self.app_state {
-                            if let Some(launch) = widget.launch_update_command(command, display, latest_version) {
+                            if let Some(launch) =
+                                widget.launch_update_command(command, display, latest_version)
+                            {
                                 self.app_event_tx.send(AppEvent::OpenTerminal(launch));
                             }
                         }
@@ -880,7 +945,10 @@ impl App<'_> {
                         );
                     }
                 }
-                AppEvent::RequestAgentInstall { name, selected_index } => {
+                AppEvent::RequestAgentInstall {
+                    name,
+                    selected_index,
+                } => {
                     if let AppState::Chat { widget } = &mut self.app_state {
                         if let Some(launch) = widget.launch_agent_install(name, selected_index) {
                             self.app_event_tx.send(AppEvent::OpenTerminal(launch));
@@ -930,7 +998,10 @@ impl App<'_> {
                         widget.auto_handle_user_reply(user_response, cli_command);
                     }
                 }
-                AppEvent::AutoCoordinatorThinking { delta, summary_index } => {
+                AppEvent::AutoCoordinatorThinking {
+                    delta,
+                    summary_index,
+                } => {
                     if let AppState::Chat { widget } = &mut self.app_state {
                         widget.auto_handle_thinking(delta, summary_index);
                     }
@@ -960,12 +1031,18 @@ impl App<'_> {
                 AppEvent::AutoCoordinatorStopAck => {
                     // Coordinator acknowledged stop; no additional action required currently.
                 }
-                AppEvent::AutoCoordinatorCompactedHistory { conversation, show_notice } => {
+                AppEvent::AutoCoordinatorCompactedHistory {
+                    conversation,
+                    show_notice,
+                } => {
                     if let AppState::Chat { widget } = &mut self.app_state {
                         widget.auto_handle_compacted_history(conversation, show_notice);
                     }
                 }
-                AppEvent::AutoCoordinatorCountdown { countdown_id, seconds_left } => {
+                AppEvent::AutoCoordinatorCountdown {
+                    countdown_id,
+                    seconds_left,
+                } => {
                     if let AppState::Chat { widget } = &mut self.app_state {
                         widget.auto_handle_countdown(countdown_id, seconds_left);
                     }
@@ -981,7 +1058,11 @@ impl App<'_> {
                     restore_conversation,
                 } => {
                     if let AppState::Chat { widget } = &mut self.app_state {
-                        widget.perform_undo_restore(commit.as_deref(), restore_files, restore_conversation);
+                        widget.perform_undo_restore(
+                            commit.as_deref(),
+                            restore_files,
+                            restore_conversation,
+                        );
                     }
                 }
                 AppEvent::DispatchCommand(command, command_text) => {
@@ -989,9 +1070,9 @@ impl App<'_> {
                     // For prompt-expanding commands (/plan, /solve, /code) we let the
                     // expanded prompt be recorded by the normal submission path.
                     if !command.is_prompt_expanding() {
-                        let _ = self
-                            .app_event_tx
-                            .send(AppEvent::CodexOp(Op::AddToHistory { text: command_text.clone() }));
+                        let _ = self.app_event_tx.send(AppEvent::CodexOp(Op::AddToHistory {
+                            text: command_text.clone(),
+                        }));
                     }
                     // Extract command arguments by removing the slash command from the beginning
                     // e.g., "/browser status" -> "status", "/chrome 9222" -> "9222"
@@ -1062,7 +1143,9 @@ impl App<'_> {
                                 self.latest_upgrade_version.clone(),
                             );
                             new_widget.enable_perf(self.timing_enabled);
-                            self.app_state = AppState::Chat { widget: Box::new(new_widget) };
+                            self.app_state = AppState::Chat {
+                                widget: Box::new(new_widget),
+                            };
                             self.terminal_runs.clear();
                             self.app_event_tx.send(AppEvent::RequestRedraw);
                         }
@@ -1080,14 +1163,18 @@ impl App<'_> {
                                 self.app_event_tx.send(AppEvent::CodexOp(Op::Compact));
                             }
                         }
-                        SlashCommand::Quit => { break 'main; }
+                        SlashCommand::Quit => {
+                            break 'main;
+                        }
                         SlashCommand::Login => {
                             if let AppState::Chat { widget } = &mut self.app_state {
                                 widget.handle_login_command();
                             }
                         }
                         SlashCommand::Logout => {
-                            if let Err(e) = hanzo_login::logout(&self.config.code_home) { tracing::error!("failed to logout: {e}"); }
+                            if let Err(e) = hanzo_login::logout(&self.config.code_home) {
+                                tracing::error!("failed to logout: {e}");
+                            }
                             break 'main;
                         }
                         SlashCommand::Diff => {
@@ -1103,7 +1190,9 @@ impl App<'_> {
                                         tx.send(AppEvent::DiffResult(text));
                                     }
                                     Err(e) => {
-                                        tx.send(AppEvent::DiffResult(format!("Failed to compute diff: {e}")));
+                                        tx.send(AppEvent::DiffResult(format!(
+                                            "Failed to compute diff: {e}"
+                                        )));
                                     }
                                 }
                             });
@@ -1325,7 +1414,9 @@ impl App<'_> {
                             self.latest_upgrade_version.clone(),
                         );
                         new_widget.enable_perf(self.timing_enabled);
-                        self.app_state = AppState::Chat { widget: Box::new(new_widget) };
+                        self.app_state = AppState::Chat {
+                            widget: Box::new(new_widget),
+                        };
                         self.terminal_runs.clear();
                         self.app_event_tx.send(AppEvent::RequestRedraw);
                     }
@@ -1439,7 +1530,9 @@ impl App<'_> {
                     self.apply_terminal_title();
                 }
                 AppEvent::EmitTuiNotification { title, body } => {
-                    if let Some(message) = Self::format_notification_message(&title, body.as_deref()) {
+                    if let Some(message) =
+                        Self::format_notification_message(&title, body.as_deref())
+                    {
                         Self::emit_osc9_notification(&message);
                     }
                 }
@@ -1478,12 +1571,32 @@ impl App<'_> {
                         widget.show_new_subagent_editor();
                     }
                 }
-                AppEvent::UpdateAgentConfig { name, enabled, args_read_only, args_write, instructions, description, command } => {
+                AppEvent::UpdateAgentConfig {
+                    name,
+                    enabled,
+                    args_read_only,
+                    args_write,
+                    instructions,
+                    description,
+                    command,
+                } => {
                     if let AppState::Chat { widget } = &mut self.app_state {
-                        widget.apply_agent_update(&name, enabled, args_read_only, args_write, instructions, description, command);
+                        widget.apply_agent_update(
+                            &name,
+                            enabled,
+                            args_read_only,
+                            args_write,
+                            instructions,
+                            description,
+                            command,
+                        );
                     }
                 }
-                AppEvent::AgentValidationFinished { name, result, attempt_id } => {
+                AppEvent::AgentValidationFinished {
+                    name,
+                    result,
+                    attempt_id,
+                } => {
                     if let AppState::Chat { widget } = &mut self.app_state {
                         widget.handle_agent_validation_finished(&name, attempt_id, result);
                     }
@@ -1598,12 +1711,31 @@ impl App<'_> {
                         );
                     }
                 }
-                AppEvent::BackgroundReviewStarted { worktree_path, branch, agent_id, snapshot } => {
+                AppEvent::BackgroundReviewStarted {
+                    worktree_path,
+                    branch,
+                    agent_id,
+                    snapshot,
+                } => {
                     if let AppState::Chat { widget } = &mut self.app_state {
-                        widget.on_background_review_started(worktree_path, branch, agent_id, snapshot);
+                        widget.on_background_review_started(
+                            worktree_path,
+                            branch,
+                            agent_id,
+                            snapshot,
+                        );
                     }
                 }
-                AppEvent::BackgroundReviewFinished { worktree_path, branch, has_findings, findings, summary, error, agent_id, snapshot } => {
+                AppEvent::BackgroundReviewFinished {
+                    worktree_path,
+                    branch,
+                    has_findings,
+                    findings,
+                    summary,
+                    error,
+                    agent_id,
+                    snapshot,
+                } => {
                     if let AppState::Chat { widget } = &mut self.app_state {
                         widget.on_background_review_finished(
                             worktree_path,
@@ -1657,8 +1789,12 @@ impl App<'_> {
                     let tx = self.app_event_tx.clone();
                     tokio::spawn(async move {
                         match cloud_tasks_service::fetch_environments().await {
-                            Ok(envs) => tx.send(AppEvent::PresentCloudEnvironments { environments: envs }),
-                            Err(err) => tx.send(AppEvent::CloudTasksError { message: err.to_string() }),
+                            Ok(envs) => {
+                                tx.send(AppEvent::PresentCloudEnvironments { environments: envs })
+                            }
+                            Err(err) => tx.send(AppEvent::CloudTasksError {
+                                message: err.to_string(),
+                            }),
                         }
                     });
                 }
@@ -1688,7 +1824,9 @@ impl App<'_> {
                             Ok(None) => tx.send(AppEvent::CloudTasksError {
                                 message: format!("Task {} has no diff available", task.0),
                             }),
-                            Err(err) => tx.send(AppEvent::CloudTasksError { message: err.to_string() }),
+                            Err(err) => tx.send(AppEvent::CloudTasksError {
+                                message: err.to_string(),
+                            }),
                         }
                     });
                 }
@@ -1708,7 +1846,9 @@ impl App<'_> {
                             Ok(_) => tx.send(AppEvent::CloudTasksError {
                                 message: format!("Task {task_id} has no assistant messages"),
                             }),
-                            Err(err) => tx.send(AppEvent::CloudTasksError { message: err.to_string() }),
+                            Err(err) => tx.send(AppEvent::CloudTasksError {
+                                message: err.to_string(),
+                            }),
                         }
                     });
                 }
@@ -1727,7 +1867,11 @@ impl App<'_> {
                         });
                     });
                 }
-                AppEvent::CloudTaskApplyFinished { task_id, outcome, preflight } => {
+                AppEvent::CloudTaskApplyFinished {
+                    task_id,
+                    outcome,
+                    preflight,
+                } => {
                     if let AppState::Chat { widget } = &mut self.app_state {
                         widget.handle_cloud_task_apply_finished(task_id, outcome, preflight);
                     }
@@ -1737,13 +1881,22 @@ impl App<'_> {
                         widget.show_cloud_task_create_prompt();
                     }
                 }
-                AppEvent::SubmitCloudTaskCreate { env_id, prompt, best_of_n } => {
+                AppEvent::SubmitCloudTaskCreate {
+                    env_id,
+                    prompt,
+                    best_of_n,
+                } => {
                     if let AppState::Chat { widget } = &mut self.app_state {
                         widget.show_cloud_task_create_progress();
                     }
                     let tx = self.app_event_tx.clone();
                     tokio::spawn(async move {
-                        let result = cloud_tasks_service::create_task(env_id.clone(), prompt.clone(), best_of_n).await;
+                        let result = cloud_tasks_service::create_task(
+                            env_id.clone(),
+                            prompt.clone(),
+                            best_of_n,
+                        )
+                        .await;
                         tx.send(AppEvent::CloudTaskCreated {
                             env_id,
                             result: result.map_err(|err| CloudTaskError::Msg(err.to_string())),
@@ -1806,8 +1959,16 @@ impl App<'_> {
                     if matches!(new_theme, hanzo_core::config_types::ThemeName::Custom) {
                         // Prefer runtime custom colors; fall back to config on disk
                         if let Some(colors) = crate::theme::custom_theme_colors() {
-                            crate::theme::init_theme(&hanzo_core::config_types::ThemeConfig { name: new_theme, colors, label: crate::theme::custom_theme_label(), is_dark: crate::theme::custom_theme_is_dark() });
-                        } else if let Ok(cfg) = hanzo_core::config::Config::load_with_cli_overrides(vec![], hanzo_core::config::ConfigOverrides::default()) {
+                            crate::theme::init_theme(&hanzo_core::config_types::ThemeConfig {
+                                name: new_theme,
+                                colors,
+                                label: crate::theme::custom_theme_label(),
+                                is_dark: crate::theme::custom_theme_is_dark(),
+                            });
+                        } else if let Ok(cfg) = hanzo_core::config::Config::load_with_cli_overrides(
+                            vec![],
+                            hanzo_core::config::ConfigOverrides::default(),
+                        ) {
                             crate::theme::init_theme(&cfg.tui.theme);
                         } else {
                             crate::theme::switch_theme(new_theme);
@@ -1847,8 +2008,16 @@ impl App<'_> {
                     // Switch the theme immediately for preview (no history event)
                     if matches!(new_theme, hanzo_core::config_types::ThemeName::Custom) {
                         if let Some(colors) = crate::theme::custom_theme_colors() {
-                            crate::theme::init_theme(&hanzo_core::config_types::ThemeConfig { name: new_theme, colors, label: crate::theme::custom_theme_label(), is_dark: crate::theme::custom_theme_is_dark() });
-                        } else if let Ok(cfg) = hanzo_core::config::Config::load_with_cli_overrides(vec![], hanzo_core::config::ConfigOverrides::default()) {
+                            crate::theme::init_theme(&hanzo_core::config_types::ThemeConfig {
+                                name: new_theme,
+                                colors,
+                                label: crate::theme::custom_theme_label(),
+                                is_dark: crate::theme::custom_theme_is_dark(),
+                            });
+                        } else if let Ok(cfg) = hanzo_core::config::Config::load_with_cli_overrides(
+                            vec![],
+                            hanzo_core::config::ConfigOverrides::default(),
+                        ) {
                             crate::theme::init_theme(&cfg.tui.theme);
                         } else {
                             crate::theme::switch_theme(new_theme);
@@ -1950,10 +2119,8 @@ impl App<'_> {
                                 let shutdown = server.cancel_handle();
                                 let tx = self.app_event_tx.clone();
                                 let join_handle = tokio::spawn(async move {
-                                    let result = server
-                                        .block_until_done()
-                                        .await
-                                        .map_err(|e| e.to_string());
+                                    let result =
+                                        server.block_until_done().await.map_err(|e| e.to_string());
                                     tx.send(AppEvent::LoginChatGptComplete { result });
                                 });
                                 self.login_flow = Some(LoginFlowState {
@@ -1994,16 +2161,25 @@ impl App<'_> {
                                 Ok(session) => {
                                     let authorize_url = session.authorize_url();
                                     let user_code = session.user_code().to_string();
-                                    let _ = tx.send(AppEvent::LoginDeviceCodeReady { authorize_url, user_code });
-                                    let result = session.wait_for_tokens().await.map_err(|e| e.to_string());
+                                    let _ = tx.send(AppEvent::LoginDeviceCodeReady {
+                                        authorize_url,
+                                        user_code,
+                                    });
+                                    let result =
+                                        session.wait_for_tokens().await.map_err(|e| e.to_string());
                                     let _ = tx.send(AppEvent::LoginDeviceCodeComplete { result });
                                 }
                                 Err(err) => {
-                                    let _ = tx.send(AppEvent::LoginDeviceCodeFailed { message: err.to_string() });
+                                    let _ = tx.send(AppEvent::LoginDeviceCodeFailed {
+                                        message: err.to_string(),
+                                    });
                                 }
                             }
                         });
-                        self.login_flow = Some(LoginFlowState { shutdown: None, join_handle });
+                        self.login_flow = Some(LoginFlowState {
+                            shutdown: None,
+                            join_handle,
+                        });
                     }
                 }
                 AppEvent::LoginCancelChatGpt => {
@@ -2032,7 +2208,10 @@ impl App<'_> {
                         widget.notify_login_chatgpt_complete(result);
                     }
                 }
-                AppEvent::LoginDeviceCodeReady { authorize_url, user_code } => {
+                AppEvent::LoginDeviceCodeReady {
+                    authorize_url,
+                    user_code,
+                } => {
                     if let AppState::Chat { widget } = &mut self.app_state {
                         widget.notify_login_device_code_ready(authorize_url, user_code);
                     }
@@ -2097,7 +2276,9 @@ impl App<'_> {
                     if resume_picker {
                         w.show_resume_picker();
                     }
-                    self.app_state = AppState::Chat { widget: Box::new(w) };
+                    self.app_state = AppState::Chat {
+                        widget: Box::new(w),
+                    };
                     self.terminal_runs.clear();
                 }
                 AppEvent::StartFileSearch(query) => {
@@ -2136,10 +2317,16 @@ impl App<'_> {
                             let mut user_seen = 0usize;
                             let mut cut = items.len();
                             for (idx, it) in items.iter().enumerate().rev() {
-                                if let hanzo_protocol::models::ResponseItem::Message { role, .. } = it {
+                                if let hanzo_protocol::models::ResponseItem::Message {
+                                    role, ..
+                                } = it
+                                {
                                     if role == "user" {
                                         user_seen += 1;
-                                        if user_seen == nth { cut = idx; break; }
+                                        if user_seen == nth {
+                                            cut = idx;
+                                            break;
+                                        }
                                     }
                                 }
                             }
@@ -2167,7 +2354,12 @@ impl App<'_> {
                                     server.new_conversation(cfg_for_rt).await
                                 });
                                 if let Ok(new_conv) = result {
-                                    tx.send(AppEvent::JumpBackForked { cfg, new_conv: crate::app_event::Redacted(new_conv), prefix_items, prefill: prefill_clone });
+                                    tx.send(AppEvent::JumpBackForked {
+                                        cfg,
+                                        new_conv: crate::app_event::Redacted(new_conv),
+                                        prefix_items,
+                                        prefill: prefill_clone,
+                                    });
                                 } else if let Err(e) = result {
                                     tracing::error!("error forking conversation: {e:#}");
                                 }
@@ -2177,7 +2369,12 @@ impl App<'_> {
                         }
                     }
                 }
-                AppEvent::JumpBackForked { cfg, new_conv, prefix_items, prefill } => {
+                AppEvent::JumpBackForked {
+                    cfg,
+                    new_conv,
+                    prefix_items,
+                    prefill,
+                } => {
                     // Replace widget with a new one bound to the forked conversation
                     let session_conf = new_conv.0.session_configured.clone();
                     let conv = new_conv.0.conversation.clone();
@@ -2203,7 +2400,9 @@ impl App<'_> {
                         if let Some(state) = ghost_state.take() {
                             new_widget.adopt_ghost_state(state);
                         } else {
-                            tracing::warn!("jump-back fork missing ghost snapshot state; redo may be unavailable");
+                            tracing::warn!(
+                                "jump-back fork missing ghost snapshot state; redo may be unavailable"
+                            );
                         }
                         if let Some(snapshot) = history_snapshot.as_ref() {
                             new_widget.restore_history_snapshot(snapshot);
@@ -2237,7 +2436,9 @@ impl App<'_> {
                         }
                         new_widget.enable_perf(self.timing_enabled);
                         new_widget.check_for_initial_animations();
-                        self.app_state = AppState::Chat { widget: Box::new(new_widget) };
+                        self.app_state = AppState::Chat {
+                            widget: Box::new(new_widget),
+                        };
                     }
                     self.terminal_runs.clear();
                     // Reset any transient state from the previous widget/session
@@ -2255,7 +2456,7 @@ impl App<'_> {
                                 hanzo_core::protocol::ReplayHistoryEvent {
                                     items: prefix_items,
                                     history_snapshot: None,
-                                }
+                                },
                             ),
                             order: None,
                         };
@@ -2264,7 +2465,9 @@ impl App<'_> {
 
                     // Prefill composer with the edited text
                     if let AppState::Chat { widget } = &mut self.app_state {
-                        if !prefill.is_empty() { widget.insert_str(&prefill); }
+                        if !prefill.is_empty() {
+                            widget.insert_str(&prefill);
+                        }
                     }
                     self.app_event_tx.send(AppEvent::RequestRedraw);
                 }
@@ -2272,12 +2475,19 @@ impl App<'_> {
                     // Schedule the next redraw with the requested duration
                     self.schedule_redraw_in(duration);
                 }
-                AppEvent::GhostSnapshotFinished { job_id, result, elapsed } => {
+                AppEvent::GhostSnapshotFinished {
+                    job_id,
+                    result,
+                    elapsed,
+                } => {
                     if let AppState::Chat { widget } = &mut self.app_state {
                         widget.handle_ghost_snapshot_finished(job_id, result, elapsed);
                     }
                 }
-                AppEvent::AutoReviewBaselineCaptured { turn_sequence, result } => {
+                AppEvent::AutoReviewBaselineCaptured {
+                    turn_sequence,
+                    result,
+                } => {
                     if let AppState::Chat { widget } = &mut self.app_state {
                         widget.handle_auto_review_baseline_captured(turn_sequence, result);
                     }
@@ -2300,7 +2510,6 @@ impl App<'_> {
             &mut self.consecutive_high_events,
         )
     }
-
 }
 
 fn next_event_priority_impl(
@@ -2308,7 +2517,8 @@ fn next_event_priority_impl(
     bulk_rx: &Receiver<AppEvent>,
     consecutive_high_events: &mut u32,
 ) -> Option<AppEvent> {
-    use std::sync::mpsc::RecvTimeoutError::{Disconnected, Timeout};
+    use std::sync::mpsc::RecvTimeoutError::Disconnected;
+    use std::sync::mpsc::RecvTimeoutError::Timeout;
 
     loop {
         if *consecutive_high_events >= HIGH_EVENT_BURST_MAX {

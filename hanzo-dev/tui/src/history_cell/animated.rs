@@ -1,6 +1,8 @@
 use super::*;
-use std::cell::{Cell, RefCell};
-use std::time::{Duration, Instant};
+use std::cell::Cell;
+use std::cell::RefCell;
+use std::time::Duration;
+use std::time::Instant;
 
 pub(crate) struct AnimatedWelcomeCell {
     start_time: Instant,
@@ -52,7 +54,6 @@ impl AnimatedWelcomeCell {
     pub(crate) fn should_remove(&self) -> bool {
         self.faded_out.get()
     }
-
 }
 
 impl HistoryCell for AnimatedWelcomeCell {

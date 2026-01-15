@@ -5,7 +5,9 @@ mod event_processor_with_json_output;
 mod slash;
 
 pub use cli::Cli;
-use hanzo_auto_drive_core::start_auto_coordinator;
+use event_processor::handle_last_message;
+use event_processor_with_human_output::EventProcessorWithHumanOutput;
+use event_processor_with_json_output::EventProcessorWithJsonOutput;
 use hanzo_auto_drive_core::AutoCoordinatorCommand;
 use hanzo_auto_drive_core::AutoCoordinatorEvent;
 use hanzo_auto_drive_core::AutoCoordinatorEventSender;
@@ -15,74 +17,77 @@ use hanzo_auto_drive_core::AutoTurnAgentsAction;
 use hanzo_auto_drive_core::AutoTurnAgentsTiming;
 use hanzo_auto_drive_core::AutoTurnCliAction;
 use hanzo_auto_drive_core::MODEL_SLUG;
+use hanzo_auto_drive_core::start_auto_coordinator;
 use hanzo_core::AuthManager;
 use hanzo_core::BUILT_IN_OSS_MODEL_PROVIDER_ID;
+use hanzo_core::CodexConversation;
 use hanzo_core::ConversationManager;
 use hanzo_core::NewConversation;
-use hanzo_core::CodexConversation;
-use hanzo_core::config::set_default_originator;
 use hanzo_core::config::Config;
 use hanzo_core::config::ConfigOverrides;
+use hanzo_core::config::set_default_originator;
 use hanzo_core::config_types::AutoDriveContinueMode;
-use hanzo_core::model_family::{derive_default_model_family, find_family_for_model};
 use hanzo_core::git_info::get_git_repo_root;
 use hanzo_core::git_info::recent_commits;
-use hanzo_core::review_coord::{
-    bump_snapshot_epoch_for,
-    clear_stale_lock_if_dead,
-    current_snapshot_epoch_for,
-    try_acquire_lock,
-};
-use hanzo_core::protocol::AskForApproval;
+use hanzo_core::model_family::derive_default_model_family;
+use hanzo_core::model_family::find_family_for_model;
 use hanzo_core::protocol::AgentSourceKind;
 use hanzo_core::protocol::AgentStatusUpdateEvent;
+use hanzo_core::protocol::AskForApproval;
 use hanzo_core::protocol::Event;
 use hanzo_core::protocol::EventMsg;
 use hanzo_core::protocol::InputItem;
 use hanzo_core::protocol::Op;
+use hanzo_core::protocol::ReviewContextMetadata;
 use hanzo_core::protocol::ReviewOutputEvent;
 use hanzo_core::protocol::ReviewRequest;
 use hanzo_core::protocol::TaskCompleteEvent;
-use hanzo_core::protocol::ReviewContextMetadata;
+use hanzo_core::review_coord::bump_snapshot_epoch_for;
+use hanzo_core::review_coord::clear_stale_lock_if_dead;
+use hanzo_core::review_coord::current_snapshot_epoch_for;
+use hanzo_core::review_coord::try_acquire_lock;
+use hanzo_git_tooling::CreateGhostCommitOptions;
+use hanzo_git_tooling::GhostCommit;
+use hanzo_git_tooling::create_ghost_commit;
+use hanzo_ollama::DEFAULT_OSS_MODEL;
+use hanzo_protocol::config_types::SandboxMode;
 use hanzo_protocol::models::ContentItem;
 use hanzo_protocol::models::ResponseItem;
 use hanzo_protocol::protocol::SessionSource;
-use hanzo_ollama::DEFAULT_OSS_MODEL;
-use hanzo_protocol::config_types::SandboxMode;
-use event_processor_with_human_output::EventProcessorWithHumanOutput;
-use event_processor_with_json_output::EventProcessorWithJsonOutput;
-use event_processor::handle_last_message;
-use hanzo_git_tooling::GhostCommit;
-use hanzo_git_tooling::CreateGhostCommitOptions;
-use hanzo_git_tooling::create_ghost_commit;
 use serde_json::Value;
 use std::collections::HashSet;
 use std::io::IsTerminal;
 use std::io::Read;
-use std::path::{Path, PathBuf};
+use std::path::Path;
+use std::path::PathBuf;
 use std::sync::Arc;
 use supports_color::Stream;
-use tokio::time::{Duration, Instant};
+use tokio::time::Duration;
+use tokio::time::Instant;
 use tracing::debug;
 use tracing::error;
 use tracing::info;
 use tracing_subscriber::EnvFilter;
 
-use anyhow::Context;
 use crate::cli::Command as ExecCommand;
 use crate::event_processor::CodexStatus;
 use crate::event_processor::EventProcessor;
-use crate::slash::{process_exec_slash_command, SlashContext, SlashDispatch};
+use crate::slash::SlashContext;
+use crate::slash::SlashDispatch;
+use crate::slash::process_exec_slash_command;
+use anyhow::Context;
 use hanzo_auto_drive_core::AUTO_RESOLVE_REVIEW_FOLLOWUP;
 use hanzo_auto_drive_core::AutoResolvePhase;
 use hanzo_auto_drive_core::AutoResolveState;
-use hanzo_core::{entry_to_rollout_path, AutoDriveMode, AutoDrivePidFile, SessionCatalog, SessionQuery};
-use hanzo_core::protocol::SandboxPolicy;
+use hanzo_core::AutoDriveMode;
+use hanzo_core::AutoDrivePidFile;
+use hanzo_core::SessionCatalog;
+use hanzo_core::SessionQuery;
+use hanzo_core::entry_to_rollout_path;
 use hanzo_core::git_info::current_branch_name;
-use hanzo_core::timeboxed_exec_guidance::{
-    AUTO_EXEC_TIMEBOXED_CLI_GUIDANCE,
-    AUTO_EXEC_TIMEBOXED_GOAL_SUFFIX,
-};
+use hanzo_core::protocol::SandboxPolicy;
+use hanzo_core::timeboxed_exec_guidance::AUTO_EXEC_TIMEBOXED_CLI_GUIDANCE;
+use hanzo_core::timeboxed_exec_guidance::AUTO_EXEC_TIMEBOXED_GOAL_SUFFIX;
 
 /// How long exec waits after task completion before sending Shutdown when Auto Review
 /// may be about to start. Guarded so sub-agents are not delayed.
@@ -177,17 +182,21 @@ pub async fn run_main(cli: Cli, code_linux_sandbox_exe: Option<PathBuf>) -> anyh
     let mut auto_drive_goal: Option<String> = None;
     let trimmed_prompt = prompt.trim();
     if trimmed_prompt.starts_with("/auto") {
-        auto_drive_goal = Some(trimmed_prompt.trim_start_matches("/auto").trim().to_string());
+        auto_drive_goal = Some(
+            trimmed_prompt
+                .trim_start_matches("/auto")
+                .trim()
+                .to_string(),
+        );
     }
     if auto_drive {
         if trimmed_prompt.is_empty() {
-            eprintln!("Auto Drive requires a goal. Provide one after --auto or prefix the prompt with /auto.");
+            eprintln!(
+                "Auto Drive requires a goal. Provide one after --auto or prefix the prompt with /auto."
+            );
             std::process::exit(1);
         }
-        if auto_drive_goal
-            .as_ref()
-            .is_some_and(|goal| goal.is_empty())
-        {
+        if auto_drive_goal.as_ref().is_some_and(|goal| goal.is_empty()) {
             auto_drive_goal = Some(trimmed_prompt.to_string());
         } else if auto_drive_goal.is_none() {
             auto_drive_goal = Some(trimmed_prompt.to_string());
@@ -401,18 +410,19 @@ pub async fn run_main(cli: Cli, code_linux_sandbox_exe: Option<PathBuf>) -> anyh
     } else {
         config.auto_drive.auto_resolve_review_attempts.get()
     };
-    let mut auto_resolve_state: Option<AutoResolveState> = review_request.as_ref().and_then(|req| {
-        if review_auto_resolve_requested {
-            Some(AutoResolveState::new_with_limit(
-                req.prompt.clone(),
-                req.user_facing_hint.clone(),
-                req.metadata.clone(),
-                max_auto_resolve_attempts,
-            ))
-        } else {
-            None
-        }
-    });
+    let mut auto_resolve_state: Option<AutoResolveState> =
+        review_request.as_ref().and_then(|req| {
+            if review_auto_resolve_requested {
+                Some(AutoResolveState::new_with_limit(
+                    req.prompt.clone(),
+                    req.user_facing_hint.clone(),
+                    req.metadata.clone(),
+                    max_auto_resolve_attempts,
+                ))
+            } else {
+                None
+            }
+        });
     let mut auto_resolve_fix_guard: Option<hanzo_core::review_coord::ReviewGuard> = None;
     let mut auto_resolve_followup_guard: Option<hanzo_core::review_coord::ReviewGuard> = None;
     // Base snapshot captured at the start of auto-resolve; each review snapshot is parented to this.
@@ -543,15 +553,14 @@ pub async fn run_main(cli: Cli, code_linux_sandbox_exe: Option<PathBuf>) -> anyh
         let conversation = conversation.clone();
         tokio::spawn(async move {
             #[cfg(unix)]
-            let mut sigterm_stream = match tokio::signal::unix::signal(
-                tokio::signal::unix::SignalKind::terminate(),
-            ) {
-                Ok(stream) => Some(stream),
-                Err(err) => {
-                    tracing::warn!("failed to install SIGTERM handler: {err}");
-                    None
-                }
-            };
+            let mut sigterm_stream =
+                match tokio::signal::unix::signal(tokio::signal::unix::SignalKind::terminate()) {
+                    Ok(stream) => Some(stream),
+                    Err(err) => {
+                        tracing::warn!("failed to install SIGTERM handler: {err}");
+                        None
+                    }
+                };
             #[cfg(unix)]
             let mut sigterm_requested = false;
 
@@ -689,14 +698,19 @@ pub async fn run_main(cli: Cli, code_linux_sandbox_exe: Option<PathBuf>) -> anyh
 
         if auto_resolve_state.is_some() {
             if auto_resolve_base_snapshot.is_none() {
-                auto_resolve_base_snapshot = capture_auto_resolve_snapshot(&config.cwd, None, "auto-resolve base snapshot");
+                auto_resolve_base_snapshot =
+                    capture_auto_resolve_snapshot(&config.cwd, None, "auto-resolve base snapshot");
                 if let Some(state) = auto_resolve_state.as_mut() {
                     state.snapshot_epoch = Some(current_snapshot_epoch_for(&config.cwd));
                 }
             }
 
             if let Some(base) = auto_resolve_base_snapshot.as_ref() {
-                if let Some((snap, diff_paths)) = capture_snapshot_against_base(&config.cwd, base, "auto-resolve working snapshot") {
+                if let Some((snap, diff_paths)) = capture_snapshot_against_base(
+                    &config.cwd,
+                    base,
+                    "auto-resolve working snapshot",
+                ) {
                     review_request = apply_commit_scope_to_review_request(
                         review_request,
                         snap.id(),
@@ -721,8 +735,14 @@ pub async fn run_main(cli: Cli, code_linux_sandbox_exe: Option<PathBuf>) -> anyh
         event_id
     } else {
         let mut items: Vec<InputItem> = Vec::new();
-        items.push(InputItem::Text { text: prompt_to_send });
-        items.extend(images.into_iter().map(|path| InputItem::LocalImage { path }));
+        items.push(InputItem::Text {
+            text: prompt_to_send,
+        });
+        items.extend(
+            images
+                .into_iter()
+                .map(|path| InputItem::LocalImage { path }),
+        );
         // Fallback for older core protocol: send only user input items.
         let event_id = conversation
             .submit(Op::UserInput {
@@ -1230,7 +1250,10 @@ pub async fn run_main(cli: Cli, code_linux_sandbox_exe: Option<PathBuf>) -> anyh
         }
     }
     if review_runs > 0 {
-        eprintln!("Review runs: {} (auto_resolve={} max_attempts={})", review_runs, config.tui.review_auto_resolve, max_auto_resolve_attempts);
+        eprintln!(
+            "Review runs: {} (auto_resolve={} max_attempts={})",
+            review_runs, config.tui.review_auto_resolve, max_auto_resolve_attempts
+        );
     }
     if error_seen {
         std::process::exit(1);
@@ -1259,7 +1282,11 @@ async fn resolve_resume_path(
         let query = SessionQuery {
             cwd: None,
             git_root: None,
-            sources: vec![SessionSource::Cli, SessionSource::VSCode, SessionSource::Exec],
+            sources: vec![
+                SessionSource::Cli,
+                SessionSource::VSCode,
+                SessionSource::Exec,
+            ],
             min_user_messages: 1,
             include_archived: false,
             include_deleted: false,
@@ -1343,7 +1370,7 @@ async fn run_auto_drive_session(
     let mut auto_drive_pid_guard =
         AutoDrivePidFile::write(&config.code_home, Some(goal.as_str()), AutoDriveMode::Exec);
 
-	    let auto_config = build_auto_drive_exec_config(&config);
+    let auto_config = build_auto_drive_exec_config(&config);
 
     let (auto_tx, mut auto_rx) = tokio::sync::mpsc::unbounded_channel();
     let sender = AutoCoordinatorEventSender::new(move |event| {
@@ -1440,10 +1467,9 @@ async fn run_auto_drive_session(
                             history.append_raw(&[make_assistant_message(text.clone())]);
                             final_last_message = Some(text);
                         }
-                        let _ = handle
-                            .send(AutoCoordinatorCommand::UpdateConversation(
-                                history.raw_snapshot().into(),
-                            ));
+                        let _ = handle.send(AutoCoordinatorCommand::UpdateConversation(
+                            history.raw_snapshot().into(),
+                        ));
                     }
                 }
             }
@@ -1472,8 +1498,10 @@ async fn run_auto_drive_session(
                 }
 
                 let Some(cli_action) = cli else {
-                    if matches!(status, AutoCoordinatorStatus::Success | AutoCoordinatorStatus::Failed)
-                    {
+                    if matches!(
+                        status,
+                        AutoCoordinatorStatus::Success | AutoCoordinatorStatus::Failed
+                    ) {
                         let _ = handle.send(AutoCoordinatorCommand::Stop);
                     }
                     continue;
@@ -1714,10 +1742,7 @@ impl AutoReviewTracker {
                 continue;
             }
 
-            let is_terminal = matches!(
-                status.as_str(),
-                "completed" | "failed" | "cancelled"
-            );
+            let is_terminal = matches!(status.as_str(), "completed" | "failed" | "cancelled");
             if !is_terminal || self.processed.contains(&agent.id) {
                 continue;
             }
@@ -1773,9 +1798,7 @@ fn emit_auto_review_completion(completion: &AutoReviewCompletion) {
                 path.display()
             );
         } else {
-            eprintln!(
-                "[auto-review] {branch}: {count} issue(s) found. Summary: {summary_text}"
-            );
+            eprintln!("[auto-review] {branch}: {count} issue(s) found. Summary: {summary_text}");
         }
     } else if summary_text == "No issues reported." {
         eprintln!("[auto-review] {branch}: no issues found.");
@@ -1834,15 +1857,7 @@ fn parse_auto_review_summary(raw: &str) -> AutoReviewSummary {
         "skip this",
     ];
     let issue_markers = [
-        "issue",
-        "issues",
-        "finding",
-        "findings",
-        "bug",
-        "bugs",
-        "problem",
-        "problems",
-        "error",
+        "issue", "issues", "finding", "findings", "bug", "bugs", "problem", "problems", "error",
         "errors",
     ];
 
@@ -2059,12 +2074,12 @@ fn build_auto_prompt(
         lines.push("Please use agents to help you complete this task.".to_string());
 
         for action in agents {
-            let prompt = action
-                .prompt
-                .trim()
-                .replace('\n', " ")
-                .replace('"', "\\\"");
-            let write_text = if action.write { "write: true" } else { "write: false" };
+            let prompt = action.prompt.trim().replace('\n', " ").replace('"', "\\\"");
+            let write_text = if action.write {
+                "write: true"
+            } else {
+                "write: false"
+            };
 
             lines.push(String::new());
             lines.push(format!("prompt: \"{prompt}\" ({write_text})"));
@@ -2401,7 +2416,7 @@ fn build_fix_prompt(review: &hanzo_core::protocol::ReviewOutputEvent) -> String 
     let summary = format_review_findings(review);
     let raw_json = serde_json::to_string_pretty(review).unwrap_or_else(|_| "{}".to_string());
     let mut preface = String::from(
-        "You are continuing an automated /review resolution loop. Review the listed findings and determine whether they represent real issues introduced by our changes. If they are, apply the necessary fixes and resolve any similar issues you can identify before responding."
+        "You are continuing an automated /review resolution loop. Review the listed findings and determine whether they represent real issues introduced by our changes. If they are, apply the necessary fixes and resolve any similar issues you can identify before responding.",
     );
     if !summary.is_empty() {
         preface.push_str("\n\nFindings:\n");
@@ -2590,11 +2605,12 @@ async fn submit_and_wait(
             }
         }
 
-        let last_agent_message = if let EventMsg::TaskComplete(TaskCompleteEvent { last_agent_message }) = &event.msg {
-            last_agent_message.clone()
-        } else {
-            None
-        };
+        let last_agent_message =
+            if let EventMsg::TaskComplete(TaskCompleteEvent { last_agent_message }) = &event.msg {
+                last_agent_message.clone()
+            } else {
+                None
+            };
 
         let status = event_processor.process_event(event);
 
@@ -2644,81 +2660,70 @@ fn load_output_schema(path: Option<PathBuf>) -> Option<Value> {
 mod tests {
     use super::*;
     use std::io::Write;
-    use std::path::{Path, PathBuf};
-    use std::time::{Duration, SystemTime};
+    use std::path::Path;
+    use std::path::PathBuf;
+    use std::time::Duration;
+    use std::time::SystemTime;
 
-    use hanzo_core::config::{ConfigOverrides, ConfigToml};
-    use hanzo_protocol::models::{ContentItem, ResponseItem};
+    use filetime::FileTime;
+    use filetime::set_file_mtime;
+    use hanzo_core::config::ConfigOverrides;
+    use hanzo_core::config::ConfigToml;
     use hanzo_protocol::mcp_protocol::ConversationId;
-	    use hanzo_protocol::protocol::{
-	        EventMsg as ProtoEventMsg, RecordedEvent, RolloutItem, RolloutLine, SessionMeta,
-	        SessionMetaLine, SessionSource, UserMessageEvent,
-	    };
-	    use filetime::{set_file_mtime, FileTime};
-	    use tempfile::TempDir;
-	    use uuid::Uuid;
+    use hanzo_protocol::models::ContentItem;
+    use hanzo_protocol::models::ResponseItem;
+    use hanzo_protocol::protocol::EventMsg as ProtoEventMsg;
+    use hanzo_protocol::protocol::RecordedEvent;
+    use hanzo_protocol::protocol::RolloutItem;
+    use hanzo_protocol::protocol::RolloutLine;
+    use hanzo_protocol::protocol::SessionMeta;
+    use hanzo_protocol::protocol::SessionMetaLine;
+    use hanzo_protocol::protocol::SessionSource;
+    use hanzo_protocol::protocol::UserMessageEvent;
+    use tempfile::TempDir;
+    use uuid::Uuid;
 
-	    #[test]
-	    fn shutdown_state_schedules_grace_on_first_request() {
-	        let now = Instant::now();
-	        let (attempt_send, pending, deadline) = shutdown_state_after_request(
-	            false,
-	            false,
-	            None,
-	            now,
-	            true,
-	        );
-	        assert!(!attempt_send);
-	        assert!(pending);
-	        assert!(deadline.expect("deadline").gt(&now));
-	    }
+    #[test]
+    fn shutdown_state_schedules_grace_on_first_request() {
+        let now = Instant::now();
+        let (attempt_send, pending, deadline) =
+            shutdown_state_after_request(false, false, None, now, true);
+        assert!(!attempt_send);
+        assert!(pending);
+        assert!(deadline.expect("deadline").gt(&now));
+    }
 
-	    #[test]
-	    fn shutdown_state_waits_until_deadline() {
-	        let now = Instant::now();
-	        let future_deadline = now + tokio::time::Duration::from_millis(100);
-	        let (attempt_send, pending, deadline) = shutdown_state_after_request(
-	            false,
-	            true,
-	            Some(future_deadline),
-	            now,
-	            true,
-	        );
-	        assert!(!attempt_send);
-	        assert!(pending);
-	        assert_eq!(deadline, Some(future_deadline));
-	    }
+    #[test]
+    fn shutdown_state_waits_until_deadline() {
+        let now = Instant::now();
+        let future_deadline = now + tokio::time::Duration::from_millis(100);
+        let (attempt_send, pending, deadline) =
+            shutdown_state_after_request(false, true, Some(future_deadline), now, true);
+        assert!(!attempt_send);
+        assert!(pending);
+        assert_eq!(deadline, Some(future_deadline));
+    }
 
-	    #[test]
-	    fn shutdown_state_attempts_send_after_grace_elapses() {
-	        let now = Instant::now();
-	        let expired_deadline = now - tokio::time::Duration::from_millis(1);
-	        let (attempt_send, pending, deadline) = shutdown_state_after_request(
-	            false,
-	            true,
-	            Some(expired_deadline),
-	            now,
-	            true,
-	        );
-	        assert!(attempt_send);
-	        assert!(pending);
-	        assert!(deadline.is_none());
-	    }
+    #[test]
+    fn shutdown_state_attempts_send_after_grace_elapses() {
+        let now = Instant::now();
+        let expired_deadline = now - tokio::time::Duration::from_millis(1);
+        let (attempt_send, pending, deadline) =
+            shutdown_state_after_request(false, true, Some(expired_deadline), now, true);
+        assert!(attempt_send);
+        assert!(pending);
+        assert!(deadline.is_none());
+    }
 
-	    #[test]
-	    fn shutdown_state_sends_immediately_without_grace() {
-	        let now = Instant::now();
-	        let (attempt_send, pending, deadline) = shutdown_state_after_request(
-	            false,
-	            false,
-	            None,
-	            now,
-	            false,
-	        );
-	        assert!(attempt_send);
-	        assert!(pending);
-	        assert!(deadline.is_none());
-	    }
+    #[test]
+    fn shutdown_state_sends_immediately_without_grace() {
+        let now = Instant::now();
+        let (attempt_send, pending, deadline) =
+            shutdown_state_after_request(false, false, None, now, false);
+        assert!(attempt_send);
+        assert!(pending);
+        assert!(deadline.is_none());
+    }
 
     #[test]
     fn write_review_json_includes_snapshot() {
@@ -2836,7 +2841,8 @@ mod tests {
             .unwrap();
 
         let base = capture_auto_resolve_snapshot(temp.path(), None, "base").expect("base snapshot");
-        let snap = capture_auto_resolve_snapshot(temp.path(), Some(base.id()), "dup").expect("child");
+        let snap =
+            capture_auto_resolve_snapshot(temp.path(), Some(base.id()), "dup").expect("child");
 
         assert!(should_skip_followup(Some(snap.id()), &snap));
         assert!(!should_skip_followup(Some("different"), &snap));
@@ -2871,11 +2877,9 @@ mod tests {
         // second commit (represents a snapshot captured off the current HEAD)
         std::fs::write(temp.path().join("a.txt"), "b").unwrap();
         run_git(["commit", "-am", "c2"].as_slice());
-        let base = String::from_utf8_lossy(
-            &run_git(["rev-parse", "HEAD"].as_slice()).stdout,
-        )
-        .trim()
-        .to_string();
+        let base = String::from_utf8_lossy(&run_git(["rev-parse", "HEAD"].as_slice()).stdout)
+            .trim()
+            .to_string();
 
         assert!(head_is_ancestor_of_base(temp.path(), &base));
 
@@ -2897,22 +2901,21 @@ mod tests {
         .unwrap()
     }
 
-	    #[test]
-	    fn auto_drive_exec_config_uses_auto_drive_reasoning_effort() {
-	        let temp = TempDir::new().unwrap();
-	        let mut config = test_config(temp.path());
-	        config.model_reasoning_effort = hanzo_core::config_types::ReasoningEffort::Low;
-	        config.auto_drive.model = "gpt-5.2".to_string();
-	        config.auto_drive.model_reasoning_effort =
-	            hanzo_core::config_types::ReasoningEffort::XHigh;
+    #[test]
+    fn auto_drive_exec_config_uses_auto_drive_reasoning_effort() {
+        let temp = TempDir::new().unwrap();
+        let mut config = test_config(temp.path());
+        config.model_reasoning_effort = hanzo_core::config_types::ReasoningEffort::Low;
+        config.auto_drive.model = "gpt-5.2".to_string();
+        config.auto_drive.model_reasoning_effort = hanzo_core::config_types::ReasoningEffort::XHigh;
 
-	        let auto_config = build_auto_drive_exec_config(&config);
-	        assert_eq!(auto_config.model, "gpt-5.2");
-	        assert_eq!(
-	            auto_config.model_reasoning_effort,
-	            hanzo_core::config_types::ReasoningEffort::XHigh
-	        );
-	    }
+        let auto_config = build_auto_drive_exec_config(&config);
+        assert_eq!(auto_config.model, "gpt-5.2");
+        assert_eq!(
+            auto_config.model_reasoning_effort,
+            hanzo_core::config_types::ReasoningEffort::XHigh
+        );
+    }
 
     fn write_rollout(
         code_home: &Path,
@@ -2922,7 +2925,11 @@ mod tests {
         source: SessionSource,
         message: &str,
     ) -> PathBuf {
-        let sessions_dir = code_home.join("sessions").join("2025").join("11").join("16");
+        let sessions_dir = code_home
+            .join("sessions")
+            .join("2025")
+            .join("11")
+            .join("16");
         std::fs::create_dir_all(&sessions_dir).unwrap();
         let filename = format!(
             "rollout-{}-{}.jsonl",
@@ -3095,8 +3102,16 @@ mod tests {
         );
 
         let base = SystemTime::now();
-        set_file_mtime(&older_path, FileTime::from_system_time(base + Duration::from_secs(500))).unwrap();
-        set_file_mtime(&newer_path, FileTime::from_system_time(base + Duration::from_secs(10))).unwrap();
+        set_file_mtime(
+            &older_path,
+            FileTime::from_system_time(base + Duration::from_secs(500)),
+        )
+        .unwrap();
+        set_file_mtime(
+            &newer_path,
+            FileTime::from_system_time(base + Duration::from_secs(10)),
+        )
+        .unwrap();
 
         let args = crate::cli::ResumeArgs {
             session_id: None,
@@ -3114,5 +3129,4 @@ mod tests {
             path_str
         );
     }
-
 }

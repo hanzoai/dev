@@ -1,4 +1,5 @@
-use std::cell::{Cell, RefCell};
+use std::cell::Cell;
+use std::cell::RefCell;
 use std::collections::HashMap;
 use std::rc::Rc;
 use std::time::Instant;
@@ -6,25 +7,25 @@ use std::time::Instant;
 use ratatui::buffer::Cell as BufferCell;
 use ratatui::text::Line;
 
-use crate::history::state::{HistoryId, HistoryRecord, HistoryState};
-use crate::history_cell::{
-    assistant_markdown_lines,
-    compute_assistant_layout,
-    diff_lines_from_record,
-    explore_lines_from_record_with_force,
-    explore_lines_without_truncation,
-    exec_display_lines_from_record,
-    merged_exec_lines_from_record,
-    stream_lines_from_state,
-    AssistantLayoutCache,
-    AssistantMarkdownCell,
-    HistoryCell,
-};
-use hanzo_core::config::Config;
 #[cfg(feature = "hanzo-fork")]
 use crate::foundation::wrapping::word_wrap_lines;
+use crate::history::state::HistoryId;
+use crate::history::state::HistoryRecord;
+use crate::history::state::HistoryState;
+use crate::history_cell::AssistantLayoutCache;
+use crate::history_cell::AssistantMarkdownCell;
+use crate::history_cell::HistoryCell;
+use crate::history_cell::assistant_markdown_lines;
+use crate::history_cell::compute_assistant_layout;
+use crate::history_cell::diff_lines_from_record;
+use crate::history_cell::exec_display_lines_from_record;
+use crate::history_cell::explore_lines_from_record_with_force;
+use crate::history_cell::explore_lines_without_truncation;
+use crate::history_cell::merged_exec_lines_from_record;
+use crate::history_cell::stream_lines_from_state;
 #[cfg(not(feature = "hanzo-fork"))]
 use crate::insert_history::word_wrap_lines;
+use hanzo_core::config::Config;
 use unicode_segmentation::UnicodeSegmentation;
 use unicode_width::UnicodeWidthStr;
 
@@ -181,7 +182,11 @@ impl HistoryRenderState {
         self.prefix_valid.set(true);
     }
 
-    pub(crate) fn cached_fallback_lines<F>(&self, history_id: HistoryId, build: F) -> Rc<Vec<Line<'static>>>
+    pub(crate) fn cached_fallback_lines<F>(
+        &self,
+        history_id: HistoryId,
+        build: F,
+    ) -> Rc<Vec<Line<'static>>>
     where
         F: FnOnce() -> Vec<Line<'static>>,
     {
@@ -198,7 +203,11 @@ impl HistoryRenderState {
         lines
     }
 
-    pub(crate) fn cached_height(&self, history_id: HistoryId, settings: RenderSettings) -> Option<u16> {
+    pub(crate) fn cached_height(
+        &self,
+        history_id: HistoryId,
+        settings: RenderSettings,
+    ) -> Option<u16> {
         if history_id == HistoryId::ZERO {
             return None;
         }
@@ -339,7 +348,11 @@ impl HistoryRenderState {
         self.last_history_count.set(new_history_count);
         self.last_prefix_width.set(width);
         self.prefix_valid.set(true);
-        if spacing > 0 { Some((spacing_start, spacing_end)) } else { None }
+        if spacing > 0 {
+            Some((spacing_start, spacing_end))
+        } else {
+            None
+        }
     }
 
     pub(crate) fn append_spacing_range(&self, range: (u16, u16)) {
@@ -360,14 +373,12 @@ impl HistoryRenderState {
                 } else if let Some(assistant_cell) = req.assistant {
                     Some(assistant_cell.ensure_layout(settings.width))
                 } else if let RenderRequestKind::Assistant { id } = req.kind {
-                    history_state
-                        .record(id)
-                        .and_then(|record| match record {
-                            HistoryRecord::AssistantMessage(state) => Some(Rc::new(
-                                compute_assistant_layout(state, req.config, settings.width),
-                            )),
-                            _ => None,
-                        })
+                    history_state.record(id).and_then(|record| match record {
+                        HistoryRecord::AssistantMessage(state) => Some(Rc::new(
+                            compute_assistant_layout(state, req.config, settings.width),
+                        )),
+                        _ => None,
+                    })
                 } else {
                     None
                 };
@@ -380,21 +391,20 @@ impl HistoryRenderState {
                 let prohibit_cache = matches!(req.kind, RenderRequestKind::Streaming { .. });
                 let use_cache = req.use_cache && !prohibit_cache;
 
-                let layout = if has_custom_render {
-                    None
-                } else if settings.width == 0 {
-                    None
-                } else if assistant_plan.is_some() {
-                    None
-                } else if use_cache && req.history_id != HistoryId::ZERO {
-                    Some(self.render_cached(req.history_id, settings, || {
-                        req.build_lines(history_state)
-                    }))
-                } else {
-                    Some(self.render_adhoc(settings.width, || {
-                        req.build_lines(history_state)
-                    }))
-                };
+                let layout =
+                    if has_custom_render {
+                        None
+                    } else if settings.width == 0 {
+                        None
+                    } else if assistant_plan.is_some() {
+                        None
+                    } else if use_cache && req.history_id != HistoryId::ZERO {
+                        Some(self.render_cached(req.history_id, settings, || {
+                            req.build_lines(history_state)
+                        }))
+                    } else {
+                        Some(self.render_adhoc(settings.width, || req.build_lines(history_state)))
+                    };
 
                 let use_height_cache = use_cache && req.history_id != HistoryId::ZERO;
                 let cached_height = if use_height_cache {
@@ -414,9 +424,7 @@ impl HistoryRenderState {
                     (plan.total_rows(), HeightSource::AssistantPlan, None)
                 } else if let Some(layout_ref) = layout.as_ref() {
                     (
-                        layout_ref
-                            .line_count()
-                            .min(u16::MAX as usize) as u16,
+                        layout_ref.line_count().min(u16::MAX as usize) as u16,
                         HeightSource::Layout,
                         None,
                     )
@@ -431,11 +439,7 @@ impl HistoryRenderState {
                             let key = CacheKey::new(req.history_id, settings);
                             self.height_cache.borrow_mut().insert(key, computed);
                         }
-                        (
-                            computed,
-                            HeightSource::DesiredHeight,
-                            Some(elapsed),
-                        )
+                        (computed, HeightSource::DesiredHeight, Some(elapsed))
                     } else if let Some(lines) = req.fallback_lines.as_ref() {
                         let wrapped = word_wrap_lines(lines, settings.width);
                         let height = wrapped.len().min(u16::MAX as usize) as u16;
@@ -452,11 +456,7 @@ impl HistoryRenderState {
                             let key = CacheKey::new(req.history_id, settings);
                             self.height_cache.borrow_mut().insert(key, computed);
                         }
-                        (
-                            computed,
-                            HeightSource::DesiredHeight,
-                            Some(elapsed),
-                        )
+                        (computed, HeightSource::DesiredHeight, Some(elapsed))
                     }
                 } else if let Some(lines) = req.fallback_lines.as_ref() {
                     let wrapped = word_wrap_lines(lines, settings.width);
@@ -482,7 +482,12 @@ impl HistoryRenderState {
             .collect()
     }
 
-    fn render_cached<F>(&self, history_id: HistoryId, settings: RenderSettings, build_lines: F) -> LayoutRef
+    fn render_cached<F>(
+        &self,
+        history_id: HistoryId,
+        settings: RenderSettings,
+        build_lines: F,
+    ) -> LayoutRef
     where
         F: FnOnce() -> Vec<Line<'static>>,
     {
@@ -558,7 +563,10 @@ fn build_cached_layout(lines: Vec<Line<'static>>, width: u16) -> CachedLayout {
         word_wrap_lines(&lines, width)
     };
     let rows = build_cached_rows(&wrapped, width);
-    CachedLayout { lines: wrapped, rows }
+    CachedLayout {
+        lines: wrapped,
+        rows,
+    }
 }
 
 fn build_cached_rows(lines: &[Line<'static>], width: u16) -> Vec<Box<[BufferCell]>> {
@@ -735,16 +743,26 @@ impl<'a> RenderRequest<'a> {
 /// shared renderer cache is the single source of truth for layout data.
 pub(crate) enum RenderRequestKind {
     Legacy,
-    Exec { id: HistoryId },
-    MergedExec { id: HistoryId },
+    Exec {
+        id: HistoryId,
+    },
+    MergedExec {
+        id: HistoryId,
+    },
     Explore {
         id: HistoryId,
         hold_header: bool,
         full_detail: bool,
     },
-    Diff { id: HistoryId },
-    Streaming { id: HistoryId },
-    Assistant { id: HistoryId },
+    Diff {
+        id: HistoryId,
+    },
+    Streaming {
+        id: HistoryId,
+    },
+    Assistant {
+        id: HistoryId,
+    },
 }
 
 /// Output from `HistoryRenderState::visible_cells()`. Contains the resolved

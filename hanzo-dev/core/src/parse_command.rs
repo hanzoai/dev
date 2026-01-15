@@ -1376,8 +1376,7 @@ fn parse_jq_filter_and_path(args: &[String]) -> (Option<String>, Option<String>)
 fn git_grep_flag_consumes_value(flag: &str) -> bool {
     matches!(
         flag,
-        "-e"
-            | "-f"
+        "-e" | "-f"
             | "-g"
             | "-O"
             | "-A"
@@ -1681,7 +1680,8 @@ fn git_branch_is_read_only(args: &[String]) -> bool {
         "--column",
     ];
     const SAFE_SHORT_FLAGS: &[char] = &['a', 'r', 'v', 'q', 'l'];
-    const MUTATING_SHORT_FLAGS: &[char] = &['d', 'D', 'm', 'M', 'c', 'C', 'f', 'F', 'b', 'B', 't', 'u'];
+    const MUTATING_SHORT_FLAGS: &[char] =
+        &['d', 'D', 'm', 'M', 'c', 'C', 'f', 'F', 'b', 'B', 't', 'u'];
 
     let mut expect_value = false;
     let mut allow_patterns = false;

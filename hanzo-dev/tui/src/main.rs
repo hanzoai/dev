@@ -3,8 +3,8 @@ use hanzo_arg0::arg0_dispatch_or_else;
 use hanzo_common::CliConfigOverrides;
 use hanzo_tui::Cli;
 use hanzo_tui::ExitSummary;
-use hanzo_tui::run_main;
 use hanzo_tui::resume_command_name;
+use hanzo_tui::run_main;
 
 #[derive(Parser, Debug)]
 struct TopCli {

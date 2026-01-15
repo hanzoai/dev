@@ -29,7 +29,6 @@ mod fuzzy_file_search;
 mod message_processor;
 pub mod outgoing_message;
 
-
 /// Size of the bounded channels used to communicate between tasks. The value
 /// is a balance between throughput and memory usage – 128 messages should be
 /// plenty for an interactive CLI.

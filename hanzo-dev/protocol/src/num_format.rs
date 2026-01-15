@@ -1,8 +1,8 @@
 use std::cell::OnceCell;
 
+use icu_decimal::DecimalFormatter;
 use icu_decimal::input::Decimal;
 use icu_decimal::options::DecimalFormatterOptions;
-use icu_decimal::DecimalFormatter;
 use icu_locale_core::Locale;
 
 fn make_local_formatter() -> Option<DecimalFormatter> {
@@ -23,7 +23,8 @@ fn with_formatter<T>(f: impl FnOnce(&DecimalFormatter) -> T) -> T {
     }
 
     FORMATTER.with(|cell| {
-        let formatter = cell.get_or_init(|| make_local_formatter().unwrap_or_else(make_en_us_formatter));
+        let formatter =
+            cell.get_or_init(|| make_local_formatter().unwrap_or_else(make_en_us_formatter));
         f(formatter)
     })
 }

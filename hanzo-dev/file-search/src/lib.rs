@@ -10,7 +10,8 @@ use serde::Serialize;
 use std::cell::UnsafeCell;
 use std::cmp::Reverse;
 use std::collections::BinaryHeap;
-use std::num::{NonZero, NonZeroUsize};
+use std::num::NonZero;
+use std::num::NonZeroUsize;
 use std::path::Path;
 use std::sync::Arc;
 use std::sync::atomic::AtomicBool;
@@ -302,7 +303,10 @@ pub fn run_streaming(
     _prefer_cwd: bool,
 ) -> anyhow::Result<FileSearchResults> {
     if cancel_flag.load(Ordering::Relaxed) {
-        return Ok(FileSearchResults { matches: Vec::new(), total_match_count: 0 });
+        return Ok(FileSearchResults {
+            matches: Vec::new(),
+            total_match_count: 0,
+        });
     }
 
     // Convert NonZeroUsize → NonZero<usize>

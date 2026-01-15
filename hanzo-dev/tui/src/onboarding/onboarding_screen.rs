@@ -1,8 +1,10 @@
+use crossterm::event::KeyEvent;
+use hanzo_core::git_info::get_git_repo_root;
 use ratatui::buffer::Buffer;
 use ratatui::layout::Rect;
-use ratatui::widgets::{Clear, Widget, WidgetRef};
-use hanzo_core::git_info::get_git_repo_root;
-use crossterm::event::KeyEvent;
+use ratatui::widgets::Clear;
+use ratatui::widgets::Widget;
+use ratatui::widgets::WidgetRef;
 
 use hanzo_login::AuthMode;
 
@@ -18,8 +20,8 @@ use crate::onboarding::trust_directory::TrustDirectoryWidget;
 use crate::onboarding::welcome::WelcomeWidget;
 use std::path::PathBuf;
 use std::sync::Arc;
-use tracing::warn;
 use std::sync::Mutex;
+use tracing::warn;
 
 #[allow(clippy::large_enum_variant)]
 enum Step {

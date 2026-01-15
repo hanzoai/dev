@@ -8,14 +8,15 @@
 
 use crate::CodexAuth;
 use crate::error::CodexErr;
+use crate::error::EnvVarError;
 use hanzo_app_server_protocol::AuthMode;
 use serde::Deserialize;
 use serde::Serialize;
 use serde_json::Value;
-use std::collections::{BTreeMap, HashMap};
+use std::collections::BTreeMap;
+use std::collections::HashMap;
 use std::env::VarError;
 use std::time::Duration;
-use crate::error::EnvVarError;
 const DEFAULT_STREAM_IDLE_TIMEOUT_MS: u64 = 300_000;
 const DEFAULT_STREAM_MAX_RETRIES: u64 = 5;
 const DEFAULT_REQUEST_MAX_RETRIES: u64 = 4;
@@ -241,7 +242,10 @@ impl ModelProviderInfo {
         client: &'a reqwest::Client,
         auth: &Option<CodexAuth>,
     ) -> crate::error::Result<reqwest::RequestBuilder> {
-        if !matches!(self.wire_api, WireApi::Responses | WireApi::ResponsesWebsocket) {
+        if !matches!(
+            self.wire_api,
+            WireApi::Responses | WireApi::ResponsesWebsocket
+        ) {
             return Err(CodexErr::UnsupportedOperation(
                 "Compaction endpoint requires Responses API providers".to_string(),
             ));
@@ -261,10 +265,7 @@ impl ModelProviderInfo {
         Ok(self.apply_http_headers(builder))
     }
 
-    fn effective_auth(
-        &self,
-        auth: &Option<CodexAuth>,
-    ) -> crate::error::Result<Option<CodexAuth>> {
+    fn effective_auth(&self, auth: &Option<CodexAuth>) -> crate::error::Result<Option<CodexAuth>> {
         if let Some(token) = self
             .experimental_bearer_token
             .as_deref()
@@ -332,7 +333,10 @@ impl ModelProviderInfo {
     }
 
     pub(crate) fn get_compact_url(&self, auth: &Option<CodexAuth>) -> Option<String> {
-        if !matches!(self.wire_api, WireApi::Responses | WireApi::ResponsesWebsocket) {
+        if !matches!(
+            self.wire_api,
+            WireApi::Responses | WireApi::ResponsesWebsocket
+        ) {
             return None;
         }
         let full = self.get_full_url(auth);
@@ -344,7 +348,10 @@ impl ModelProviderInfo {
     }
 
     pub(crate) fn is_azure_responses_endpoint(&self) -> bool {
-        if !matches!(self.wire_api, WireApi::Responses | WireApi::ResponsesWebsocket) {
+        if !matches!(
+            self.wire_api,
+            WireApi::Responses | WireApi::ResponsesWebsocket
+        ) {
             return false;
         }
 
@@ -359,7 +366,10 @@ impl ModelProviderInfo {
     }
 
     pub(crate) fn is_backend_responses_endpoint(&self) -> bool {
-        if !matches!(self.wire_api, WireApi::Responses | WireApi::ResponsesWebsocket) {
+        if !matches!(
+            self.wire_api,
+            WireApi::Responses | WireApi::ResponsesWebsocket
+        ) {
             return false;
         }
 
@@ -373,7 +383,10 @@ impl ModelProviderInfo {
     }
 
     pub(crate) fn is_public_openai_responses_endpoint(&self) -> bool {
-        if !matches!(self.wire_api, WireApi::Responses | WireApi::ResponsesWebsocket) {
+        if !matches!(
+            self.wire_api,
+            WireApi::Responses | WireApi::ResponsesWebsocket
+        ) {
             return false;
         }
         if self.is_backend_responses_endpoint() || self.is_azure_responses_endpoint() {
@@ -383,7 +396,11 @@ impl ModelProviderInfo {
         self.base_url
             .as_ref()
             .and_then(|base| reqwest::Url::parse(base).ok())
-            .and_then(|parsed| parsed.host_str().map(|host| host.eq_ignore_ascii_case("api.openai.com")))
+            .and_then(|parsed| {
+                parsed
+                    .host_str()
+                    .map(|host| host.eq_ignore_ascii_case("api.openai.com"))
+            })
             .unwrap_or(true)
     }
 
@@ -513,14 +530,9 @@ pub fn built_in_model_providers() -> HashMap<String, ModelProviderInfo> {
                     .unwrap_or(WireApi::Responses),
                 query_params: None,
                 http_headers: Some(
-                    [
-                        (
-                            "version".to_string(),
-                            hanzo_version::version().to_string(),
-                        ),
-                    ]
-                    .into_iter()
-                    .collect(),
+                    [("version".to_string(), hanzo_version::version().to_string())]
+                        .into_iter()
+                        .collect(),
                 ),
                 env_http_headers: Some(
                     [

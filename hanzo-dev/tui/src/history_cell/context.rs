@@ -1,11 +1,11 @@
 use super::*;
-use crate::history::compat::{
-    ContextBrowserSnapshotRecord,
-    ContextDeltaField,
-    ContextDeltaRecord,
-};
-use ratatui::style::{Modifier, Style};
-use ratatui::text::{Line, Span};
+use crate::history::compat::ContextBrowserSnapshotRecord;
+use crate::history::compat::ContextDeltaField;
+use crate::history::compat::ContextDeltaRecord;
+use ratatui::style::Modifier;
+use ratatui::style::Style;
+use ratatui::text::Line;
+use ratatui::text::Span;
 
 const MAX_DELTA_PREVIEW: usize = 10;
 
@@ -18,7 +18,10 @@ impl ContextCell {
     pub(crate) fn new(record: ContextRecord) -> Self {
         let clamped = clamp_record(record);
         let lines = build_lines(&clamped);
-        Self { record: clamped, lines }
+        Self {
+            record: clamped,
+            lines,
+        }
     }
 
     pub(crate) fn update(&mut self, record: ContextRecord) {

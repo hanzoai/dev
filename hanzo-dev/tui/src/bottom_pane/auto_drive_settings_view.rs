@@ -1,18 +1,27 @@
-use crate::app_event::{AppEvent, AutoContinueMode};
+use crate::app_event::AppEvent;
+use crate::app_event::AutoContinueMode;
 use crate::app_event_sender::AppEventSender;
 use crate::colors;
+use crossterm::event::KeyCode;
+use crossterm::event::KeyEvent;
+use crossterm::event::KeyEventKind;
+use crossterm::event::KeyModifiers;
 use hanzo_core::config_types::ReasoningEffort;
-use crossterm::event::{KeyCode, KeyEvent, KeyEventKind, KeyModifiers};
 use ratatui::buffer::Buffer;
 use ratatui::layout::Rect;
 use ratatui::prelude::Widget;
-use ratatui::style::{Modifier, Style};
-use ratatui::text::{Line, Span};
-use ratatui::widgets::{Paragraph, Wrap};
+use ratatui::style::Modifier;
+use ratatui::style::Style;
+use ratatui::text::Line;
+use ratatui::text::Span;
+use ratatui::widgets::Paragraph;
+use ratatui::widgets::Wrap;
 
-use super::bottom_pane_view::{BottomPaneView, ConditionalUpdate};
 use super::BottomPane;
-use super::settings_panel::{render_panel, PanelFrameStyle};
+use super::bottom_pane_view::BottomPaneView;
+use super::bottom_pane_view::ConditionalUpdate;
+use super::settings_panel::PanelFrameStyle;
+use super::settings_panel::render_panel;
 
 pub(crate) struct AutoDriveSettingsView {
     app_event_tx: AppEventSender,
@@ -43,8 +52,7 @@ impl AutoDriveSettingsView {
         qa_automation_enabled: bool,
         continue_mode: AutoContinueMode,
     ) -> Self {
-        let diagnostics_enabled = qa_automation_enabled
-            && (review_enabled || cross_check_enabled);
+        let diagnostics_enabled = qa_automation_enabled && (review_enabled || cross_check_enabled);
         Self {
             app_event_tx,
             selected_index: 0,
@@ -242,10 +250,7 @@ impl AutoDriveSettingsView {
             }
             1 | 2 => {
                 let checkbox = if enabled { "[x]" } else { "[ ]" };
-                spans.push(Span::styled(
-                    format!("{checkbox} {label}"),
-                    label_style,
-                ));
+                spans.push(Span::styled(format!("{checkbox} {label}"), label_style));
             }
             3 => {
                 spans.push(Span::styled(label.to_string(), label_style));
@@ -254,7 +259,11 @@ impl AutoDriveSettingsView {
                     self.continue_mode.label().to_string(),
                     Style::default()
                         .fg(colors::text_dim())
-                        .add_modifier(if selected { Modifier::BOLD } else { Modifier::empty() }),
+                        .add_modifier(if selected {
+                            Modifier::BOLD
+                        } else {
+                            Modifier::empty()
+                        }),
                 ));
             }
             _ => {}

@@ -17,18 +17,15 @@
 
 use std::sync::Once;
 
-use hanzo_core::protocol::{
-    AgentMessageDeltaEvent,
-    AgentMessageEvent,
-    Event,
-    EventMsg,
-    OrderMeta,
-};
-use hanzo_tui::test_helpers::{
-    render_chat_widget_to_vt100,
-    ChatWidgetHarness,
-};
-use tracing::{info, warn};
+use hanzo_core::protocol::AgentMessageDeltaEvent;
+use hanzo_core::protocol::AgentMessageEvent;
+use hanzo_core::protocol::Event;
+use hanzo_core::protocol::EventMsg;
+use hanzo_core::protocol::OrderMeta;
+use hanzo_tui::test_helpers::ChatWidgetHarness;
+use hanzo_tui::test_helpers::render_chat_widget_to_vt100;
+use tracing::info;
+use tracing::warn;
 use tracing_subscriber::EnvFilter;
 
 static TRACE_INIT: Once = Once::new();
@@ -300,13 +297,27 @@ fn test_multiple_sequential_turns_no_duplicates() {
     let output = render_chat_widget_to_vt100(&mut harness, 80, 24);
 
     // Verify all messages appear
-    assert!(output.contains("1, 2, 3, 4, 5"), "First response should appear");
-    assert!(output.contains("Continue please"), "Second user message should appear");
+    assert!(
+        output.contains("1, 2, 3, 4, 5"),
+        "First response should appear"
+    );
+    assert!(
+        output.contains("Continue please"),
+        "Second user message should appear"
+    );
     assert!(output.contains("6, 7, 8"), "Second response should appear");
 
     // Critical: Verify no duplicates (this is the main risk with race conditions)
-    assert_eq!(output.matches("1, 2, 3, 4, 5").count(), 1, "No duplicate first response");
-    assert_eq!(output.matches("6, 7, 8").count(), 1, "No duplicate second response");
+    assert_eq!(
+        output.matches("1, 2, 3, 4, 5").count(),
+        1,
+        "No duplicate first response"
+    );
+    assert_eq!(
+        output.matches("6, 7, 8").count(),
+        1,
+        "No duplicate second response"
+    );
 }
 
 /// Test that ACK events with different request_ordinal values don't create duplicate cells.
@@ -383,17 +394,35 @@ fn test_ack_with_different_request_ordinals_no_duplicates() {
     let output = render_chat_widget_to_vt100(&mut harness, 80, 24);
 
     // Verify all messages appear
-    assert!(output.contains("Question 1"), "First question should appear");
-    assert!(output.contains("Answer to question 1"), "First answer should appear");
-    assert!(output.contains("Question 2"), "Second question should appear");
-    assert!(output.contains("Answer to question 2"), "Second answer should appear");
+    assert!(
+        output.contains("Question 1"),
+        "First question should appear"
+    );
+    assert!(
+        output.contains("Answer to question 1"),
+        "First answer should appear"
+    );
+    assert!(
+        output.contains("Question 2"),
+        "Second question should appear"
+    );
+    assert!(
+        output.contains("Answer to question 2"),
+        "Second answer should appear"
+    );
 
     // Critical: Verify no duplicate assistant cells
     // This would occur if ACK handling races or doesn't properly serialize turns
     let a1_count = output.matches("Answer to question 1").count();
     let a2_count = output.matches("Answer to question 2").count();
-    assert_eq!(a1_count, 1, "Should have exactly one instance of answer 1 (no duplicates from race)");
-    assert_eq!(a2_count, 1, "Should have exactly one instance of answer 2 (no duplicates from race)");
+    assert_eq!(
+        a1_count, 1,
+        "Should have exactly one instance of answer 1 (no duplicates from race)"
+    );
+    assert_eq!(
+        a2_count, 1,
+        "Should have exactly one instance of answer 2 (no duplicates from race)"
+    );
 }
 
 /// Test that user input injected mid-turn is properly queued and processed after ACK.
@@ -635,7 +664,10 @@ fn test_mid_turn_user_input_queueing() {
     assert!(poem1_pos.is_some(), "First user message should exist");
     assert!(poem2_pos.is_some(), "Second user message should exist");
     assert!(roses_pos.is_some(), "First assistant response should exist");
-    assert!(whiskers_pos.is_some(), "Second assistant response should exist");
+    assert!(
+        whiskers_pos.is_some(),
+        "Second assistant response should exist"
+    );
 
     // Verify proper ordering: both user messages before assistant responses
     let poem1 = poem1_pos.unwrap();

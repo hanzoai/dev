@@ -3,7 +3,8 @@
 //! Phase 2A: Placeholder for future persistence implementation.
 //! Current implementation is in-memory only.
 
-use serde::{Deserialize, Serialize};
+use serde::Deserialize;
+use serde::Serialize;
 
 use super::timeline::ContextTimeline;
 
