@@ -94,9 +94,10 @@ pub(crate) async fn stream_chat_completions(
     let mut last_user_index: Option<usize> = None;
     for (idx, item) in input.iter().enumerate() {
         if let ResponseItem::Message { role, .. } = item
-            && role == "user" {
-                last_user_index = Some(idx);
-            }
+            && role == "user"
+        {
+            last_user_index = Some(idx);
+        }
     }
 
     // Attach reasoning only if the conversation does not end with a user message.
@@ -104,9 +105,10 @@ pub(crate) async fn stream_chat_completions(
         for (idx, item) in input.iter().enumerate() {
             // Only consider reasoning that appears after the last user message.
             if let Some(u_idx) = last_user_index
-                && idx <= u_idx {
-                    continue;
-                }
+                && idx <= u_idx
+            {
+                continue;
+            }
 
             if let ResponseItem::Reasoning {
                 content: Some(items),
@@ -128,13 +130,14 @@ pub(crate) async fn stream_chat_completions(
                 let mut attached = false;
                 if idx > 0
                     && let ResponseItem::Message { role, .. } = &input[idx - 1]
-                        && role == "assistant" {
-                            reasoning_by_anchor_index
-                                .entry(idx - 1)
-                                .and_modify(|v| v.push_str(&text))
-                                .or_insert(text.clone());
-                            attached = true;
-                        }
+                    && role == "assistant"
+                {
+                    reasoning_by_anchor_index
+                        .entry(idx - 1)
+                        .and_modify(|v| v.push_str(&text))
+                        .or_insert(text.clone());
+                    attached = true;
+                }
 
                 // Otherwise, attach to immediate next assistant anchor (tool-calls or assistant message)
                 if !attached && idx + 1 < input.len() {
@@ -294,30 +297,32 @@ pub(crate) async fn stream_chat_completions(
     });
 
     if let Some(openrouter_cfg) = provider.openrouter_config()
-        && let Some(obj) = payload.as_object_mut() {
-            if let Some(provider_cfg) = &openrouter_cfg.provider {
-                obj.insert("provider".to_string(), serde_json::to_value(provider_cfg)?);
-            }
-            if let Some(route) = &openrouter_cfg.route {
-                obj.insert("route".to_string(), route.clone());
-            }
-            for (key, value) in &openrouter_cfg.extra {
-                obj.entry(key.clone()).or_insert(value.clone());
-            }
+        && let Some(obj) = payload.as_object_mut()
+    {
+        if let Some(provider_cfg) = &openrouter_cfg.provider {
+            obj.insert("provider".to_string(), serde_json::to_value(provider_cfg)?);
         }
+        if let Some(route) = &openrouter_cfg.route {
+            obj.insert("route".to_string(), route.clone());
+        }
+        for (key, value) in &openrouter_cfg.extra {
+            obj.entry(key.clone()).or_insert(value.clone());
+        }
+    }
 
     // If an Ollama context override is present, propagate it. Some Ollama
     // builds honor `num_ctx` directly in OpenAI-compatible Chat Completions,
     // and others accept it under an `options` object – include both.
     if let Ok(val) = std::env::var("HANZO_OLLAMA_NUM_CTX")
         && let Ok(n) = val.parse::<u64>()
-            && let Some(obj) = payload.as_object_mut() {
-                obj.insert("num_ctx".to_string(), json!(n));
-                // Also set options.num_ctx for native-style compatibility.
-                let mut options = serde_json::Map::new();
-                options.insert("num_ctx".to_string(), json!(n));
-                obj.entry("options").or_insert(json!(options));
-            }
+        && let Some(obj) = payload.as_object_mut()
+    {
+        obj.insert("num_ctx".to_string(), json!(n));
+        // Also set options.num_ctx for native-style compatibility.
+        let mut options = serde_json::Map::new();
+        options.insert("num_ctx".to_string(), json!(n));
+        obj.entry("options").or_insert(json!(options));
+    }
 
     let endpoint = provider.get_full_url(&None);
     debug!(
@@ -337,9 +342,10 @@ pub(crate) async fn stream_chat_completions(
 
         if let Some(auth) = auth.as_ref()
             && auth.mode == AuthMode::ChatGPT
-                && let Some(account_id) = auth.get_account_id() {
-                    req_builder = req_builder.header("chatgpt-account-id", account_id);
-                }
+            && let Some(account_id) = auth.get_account_id()
+        {
+            req_builder = req_builder.header("chatgpt-account-id", account_id);
+        }
 
         req_builder = req_builder
             .header(reqwest::header::ACCEPT, "text/event-stream")
@@ -718,17 +724,18 @@ async fn process_chat_sse<S>(
                 .get("delta")
                 .and_then(|d| d.get("content"))
                 .and_then(|c| c.as_str())
-                && !content.is_empty() {
-                    assistant_text.push_str(content);
-                    let _ = tx_event
-                        .send(Ok(ResponseEvent::OutputTextDelta {
-                            delta: content.to_string(),
-                            item_id: current_item_id.clone(),
-                            sequence_number: None,
-                            output_index: None,
-                        }))
-                        .await;
-                }
+                && !content.is_empty()
+            {
+                assistant_text.push_str(content);
+                let _ = tx_event
+                    .send(Ok(ResponseEvent::OutputTextDelta {
+                        delta: content.to_string(),
+                        item_id: current_item_id.clone(),
+                        sequence_number: None,
+                        output_index: None,
+                    }))
+                    .await;
+            }
 
             // Forward any reasoning/thinking deltas if present.
             // Some providers stream `reasoning` as a plain string while others
@@ -792,18 +799,19 @@ async fn process_chat_sse<S>(
                         .get("text")
                         .and_then(|v| v.as_str())
                         .or_else(|| obj.get("content").and_then(|v| v.as_str()))
-                        && !s.is_empty() {
-                            reasoning_text.push_str(s);
-                            let _ = tx_event
-                                .send(Ok(ResponseEvent::ReasoningContentDelta {
-                                    delta: s.to_string(),
-                                    item_id: current_item_id.clone(),
-                                    sequence_number: None,
-                                    output_index: None,
-                                    content_index: None,
-                                }))
-                                .await;
-                        }
+                    && !s.is_empty()
+                {
+                    reasoning_text.push_str(s);
+                    let _ = tx_event
+                        .send(Ok(ResponseEvent::ReasoningContentDelta {
+                            delta: s.to_string(),
+                            item_id: current_item_id.clone(),
+                            sequence_number: None,
+                            output_index: None,
+                            content_index: None,
+                        }))
+                        .await;
+                }
             }
 
             // Handle streaming function / tool calls.
@@ -811,28 +819,28 @@ async fn process_chat_sse<S>(
                 .get("delta")
                 .and_then(|d| d.get("tool_calls"))
                 .and_then(|tc| tc.as_array())
-                && let Some(tool_call) = tool_calls.first() {
-                    // Mark that we have an active function call in progress.
-                    fn_call_state.active = true;
+                && let Some(tool_call) = tool_calls.first()
+            {
+                // Mark that we have an active function call in progress.
+                fn_call_state.active = true;
 
-                    // Extract call_id if present.
-                    if let Some(id) = tool_call.get("id").and_then(|v| v.as_str()) {
-                        fn_call_state.call_id.get_or_insert_with(|| id.to_string());
+                // Extract call_id if present.
+                if let Some(id) = tool_call.get("id").and_then(|v| v.as_str()) {
+                    fn_call_state.call_id.get_or_insert_with(|| id.to_string());
+                }
+
+                // Extract function details if present.
+                if let Some(function) = tool_call.get("function") {
+                    if let Some(name) = function.get("name").and_then(|n| n.as_str()) {
+                        fn_call_state.name.get_or_insert_with(|| name.to_string());
                     }
 
-                    // Extract function details if present.
-                    if let Some(function) = tool_call.get("function") {
-                        if let Some(name) = function.get("name").and_then(|n| n.as_str()) {
-                            fn_call_state.name.get_or_insert_with(|| name.to_string());
-                        }
-
-                        if let Some(args_fragment) =
-                            function.get("arguments").and_then(|a| a.as_str())
-                        {
-                            fn_call_state.arguments.push_str(args_fragment);
-                        }
+                    if let Some(args_fragment) = function.get("arguments").and_then(|a| a.as_str())
+                    {
+                        fn_call_state.arguments.push_str(args_fragment);
                     }
                 }
+            }
 
             // Emit end-of-turn when finish_reason signals completion.
             if let Some(finish_reason) = choice.get("finish_reason").and_then(|v| v.as_str()) {
@@ -1002,25 +1010,27 @@ where
                         // seen any deltas; otherwise, deltas already built the
                         // cumulative text and this would duplicate it.
                         if this.cumulative.is_empty()
-                            && let ResponseItem::Message { content, id, .. } = &item {
-                                // Capture the item_id if present
-                                if let Some(item_id) = id {
-                                    this.cumulative_item_id = Some(item_id.clone());
-                                }
-                                if let Some(text) = content.iter().find_map(|c| match c {
-                                    ContentItem::OutputText { text } => Some(text),
-                                    _ => None,
-                                }) {
-                                    this.cumulative.push_str(text);
-                                }
+                            && let ResponseItem::Message { content, id, .. } = &item
+                        {
+                            // Capture the item_id if present
+                            if let Some(item_id) = id {
+                                this.cumulative_item_id = Some(item_id.clone());
                             }
+                            if let Some(text) = content.iter().find_map(|c| match c {
+                                ContentItem::OutputText { text } => Some(text),
+                                _ => None,
+                            }) {
+                                this.cumulative.push_str(text);
+                            }
+                        }
                     }
 
                     // Also capture item_id from Reasoning items
                     if let ResponseItem::Reasoning { id, .. } = &item
-                        && !id.is_empty() {
-                            this.cumulative_item_id = Some(id.clone());
-                        }
+                        && !id.is_empty()
+                    {
+                        this.cumulative_item_id = Some(id.clone());
+                    }
 
                     // Not an assistant message – forward immediately.
                     return Poll::Ready(Some(Ok(ResponseEvent::OutputItemDone {

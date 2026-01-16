@@ -359,17 +359,20 @@ fn append_agent_entry(
         t["args-write"] = toml_edit::value(toml_edit::Array::from_iter(w.iter().cloned()));
     }
     if let Some(instr) = instructions
-        && !instr.trim().is_empty() {
-            t["instructions"] = toml_edit::value(instr.to_string());
-        }
+        && !instr.trim().is_empty()
+    {
+        t["instructions"] = toml_edit::value(instr.to_string());
+    }
     if let Some(desc) = description
-        && !desc.trim().is_empty() {
-            t["description"] = toml_edit::value(desc.to_string());
-        }
+        && !desc.trim().is_empty()
+    {
+        t["description"] = toml_edit::value(desc.to_string());
+    }
     if let Some(cmd) = command
-        && !cmd.trim().is_empty() {
-            t["command"] = toml_edit::value(cmd.to_string());
-        }
+        && !cmd.trim().is_empty()
+    {
+        t["command"] = toml_edit::value(cmd.to_string());
+    }
 
     let mut arr = doc
         .as_table()

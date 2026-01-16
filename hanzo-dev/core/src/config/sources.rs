@@ -361,10 +361,11 @@ pub fn set_tui_theme_name(code_home: &Path, theme: ThemeName) -> anyhow::Result<
     // When switching away from the Custom theme, clear any lingering custom
     // overrides so built-in themes render true to spec on next startup.
     if theme != ThemeName::Custom
-        && let Some(tbl) = doc["tui"]["theme"].as_table_mut() {
-            tbl.remove("label");
-            tbl.remove("colors");
-        }
+        && let Some(tbl) = doc["tui"]["theme"].as_table_mut()
+    {
+        tbl.remove("label");
+        tbl.remove("colors");
+    }
 
     // ensure code_home exists
     std::fs::create_dir_all(code_home)?;
@@ -1054,9 +1055,7 @@ pub fn set_project_access_mode(
     let proj_tbl = projects_tbl
         .get_mut(project_key.as_str())
         .and_then(|i| i.as_table_mut())
-        .ok_or_else(|| {
-            anyhow::anyhow!(format!("failed to create projects.{project_key} table"))
-        })?;
+        .ok_or_else(|| anyhow::anyhow!(format!("failed to create projects.{project_key} table")))?;
 
     // Write fields
     proj_tbl.insert(
@@ -1134,9 +1133,7 @@ pub fn add_project_allowed_command(
     let project_tbl = projects_tbl
         .get_mut(project_key.as_str())
         .and_then(|i| i.as_table_mut())
-        .ok_or_else(|| {
-            anyhow::anyhow!(format!("failed to create projects.{project_key} table"))
-        })?;
+        .ok_or_else(|| anyhow::anyhow!(format!("failed to create projects.{project_key} table")))?;
 
     let mut argv_array = TomlArray::new();
     for arg in command {
@@ -1228,12 +1225,16 @@ pub fn list_mcp_servers(
                                     })
                                     .collect::<HashMap<_, _>>(),
                             )
-                        } else { v.as_table().map(|table| table
+                        } else {
+                            v.as_table().map(|table| {
+                                table
                                     .iter()
                                     .filter_map(|(k, v)| {
                                         v.as_str().map(|s| (k.to_string(), s.to_string()))
                                     })
-                                    .collect::<HashMap<_, _>>()) }
+                                    .collect::<HashMap<_, _>>()
+                            })
+                        }
                     });
 
                     McpServerTransportConfig::Stdio {
@@ -1520,9 +1521,10 @@ pub fn resolve_code_path_for_read(code_home: &Path, relative: &Path) -> PathBuf 
     }
 
     if let Some(default_home) = default_code_home_dir()
-        && default_home != code_home {
-            return default_path;
-        }
+        && default_home != code_home
+    {
+        return default_path;
+    }
 
     if let Some(legacy) = legacy_code_home_dir() {
         let candidate = legacy.join(relative);

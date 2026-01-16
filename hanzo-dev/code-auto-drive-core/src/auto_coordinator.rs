@@ -1212,28 +1212,29 @@ fn run_auto_loop(
     let mut pending_ack_seq: Option<u64> = None;
     let mut queued_updates: VecDeque<Arc<[ResponseItem]>> = VecDeque::new();
     if !derive_goal_from_history
-        && let Some(seed) = build_initial_planning_seed(&goal_text, include_agents) {
-            let transcript_item = make_message("assistant", seed.response_json.clone());
-            let cli_action = AutoTurnCliAction {
-                prompt: seed.cli_prompt.clone(),
-                context: Some(seed.goal_message.clone()),
-                suppress_ui_context: true,
-            };
-            let event = AutoCoordinatorEvent::Decision {
-                seq: decision_seq,
-                status: AutoCoordinatorStatus::Continue,
-                status_title: Some(seed.status_title.clone()),
-                status_sent_to_user: Some(seed.status_sent_to_user.clone()),
-                goal: Some(goal_text.clone()),
-                cli: Some(cli_action),
-                agents_timing: seed.agents_timing,
-                agents: Vec::new(),
-                transcript: vec![transcript_item],
-            };
-            event_tx.send(event);
-            pending_ack_seq = Some(decision_seq);
-            pending_conversation = None;
-        }
+        && let Some(seed) = build_initial_planning_seed(&goal_text, include_agents)
+    {
+        let transcript_item = make_message("assistant", seed.response_json.clone());
+        let cli_action = AutoTurnCliAction {
+            prompt: seed.cli_prompt.clone(),
+            context: Some(seed.goal_message.clone()),
+            suppress_ui_context: true,
+        };
+        let event = AutoCoordinatorEvent::Decision {
+            seq: decision_seq,
+            status: AutoCoordinatorStatus::Continue,
+            status_title: Some(seed.status_title.clone()),
+            status_sent_to_user: Some(seed.status_sent_to_user.clone()),
+            goal: Some(goal_text.clone()),
+            cli: Some(cli_action),
+            agents_timing: seed.agents_timing,
+            agents: Vec::new(),
+            transcript: vec![transcript_item],
+        };
+        event_tx.send(event);
+        pending_ack_seq = Some(decision_seq);
+        pending_conversation = None;
+    }
     let mut schema = build_schema(&active_agent_names, schema_features);
     let platform = std::env::consts::OS;
     debug!("[Auto coordinator] starting: goal={goal_text} platform={platform}");
@@ -1261,9 +1262,10 @@ fn run_auto_loop(
                 next_conversation = Some(conv);
             }
         } else if pending_ack_seq.is_none()
-            && let Some(conv) = queued_updates.pop_front() {
-                next_conversation = Some(conv);
-            }
+            && let Some(conv) = queued_updates.pop_front()
+        {
+            next_conversation = Some(conv);
+        }
 
         if let Some(conv) = next_conversation {
             if cancel_token.is_cancelled() {
@@ -2419,16 +2421,17 @@ fn build_user_turn_prompt(
 fn should_retry_with_default_model(err: &anyhow::Error) -> bool {
     err.chain().any(|cause| {
         if let Some(code_err) = cause.downcast_ref::<CodexErr>()
-            && let CodexErr::UnexpectedStatus(err) = code_err {
-                if !err.status.is_client_error() {
-                    return false;
-                }
-                let body_lower = err.body.to_lowercase();
-                return body_lower.contains("invalid model")
-                    || body_lower.contains("unknown model")
-                    || body_lower.contains("model_not_found")
-                    || body_lower.contains("model does not exist");
+            && let CodexErr::UnexpectedStatus(err) = code_err
+        {
+            if !err.status.is_client_error() {
+                return false;
             }
+            let body_lower = err.body.to_lowercase();
+            return body_lower.contains("invalid model")
+                || body_lower.contains("unknown model")
+                || body_lower.contains("model_not_found")
+                || body_lower.contains("model does not exist");
+        }
         false
     })
 }
@@ -2538,11 +2541,12 @@ pub(crate) fn classify_model_error(error: &anyhow::Error) -> RetryDecision {
     }
 
     if let Some(io_err) = find_in_chain::<std::io::Error>(error)
-        && io_err.kind() == std::io::ErrorKind::TimedOut {
-            return RetryDecision::RetryAfterBackoff {
-                reason: "network timeout".to_string(),
-            };
-        }
+        && io_err.kind() == std::io::ErrorKind::TimedOut
+    {
+        return RetryDecision::RetryAfterBackoff {
+            reason: "network timeout".to_string(),
+        };
+    }
 
     RetryDecision::Fatal(anyhow!(error.to_string()))
 }
@@ -2555,87 +2559,81 @@ fn classify_model_error_with_auto_switch(
 ) -> RetryDecision {
     if let Some(code_err) = find_in_chain::<CodexErr>(error)
         && let CodexErr::UsageLimitReached(limit) = code_err
-            && client.auto_switch_accounts_on_rate_limit()
-                && auth::read_code_api_key_from_env().is_none()
-                && let Some(auth_manager) = client.get_auth_manager() {
-                    let auth = auth_manager.auth();
-                    let current_account_id = auth
-                        .as_ref()
-                        .and_then(hanzo_core::CodexAuth::get_account_id)
-                        .or_else(|| {
-                            auth_accounts::get_active_account_id(client.code_home())
+        && client.auto_switch_accounts_on_rate_limit()
+        && auth::read_code_api_key_from_env().is_none()
+        && let Some(auth_manager) = client.get_auth_manager()
+    {
+        let auth = auth_manager.auth();
+        let current_account_id = auth
+            .as_ref()
+            .and_then(hanzo_core::CodexAuth::get_account_id)
+            .or_else(|| {
+                auth_accounts::get_active_account_id(client.code_home())
+                    .ok()
+                    .flatten()
+            });
+        if let Some(current_account_id) = current_account_id {
+            let now = Utc::now();
+            let blocked_until = limit
+                .resets_in_seconds
+                .map(|seconds| now + chrono::Duration::seconds(seconds as i64));
+            let current_auth_mode = auth.as_ref().map(|current| current.mode).or_else(|| {
+                auth_accounts::find_account(client.code_home(), current_account_id.as_str())
+                    .ok()
+                    .flatten()
+                    .map(|account| account.mode)
+            });
+            if let Some(current_auth_mode) = current_auth_mode {
+                match switch_active_account_on_rate_limit(
+                    client.code_home(),
+                    state,
+                    client.api_key_fallback_on_all_accounts_limited(),
+                    now,
+                    current_account_id.as_str(),
+                    current_auth_mode,
+                    blocked_until,
+                ) {
+                    Ok(Some(next_account_id)) => {
+                        let next_label =
+                            auth_accounts::find_account(client.code_home(), &next_account_id)
                                 .ok()
                                 .flatten()
+                                .and_then(|account| account.label)
+                                .unwrap_or_else(|| next_account_id.clone());
+                        tracing::info!(
+                            from_account_id = %current_account_id,
+                            to_account_id = %next_account_id,
+                            reason = "usage_limit_reached",
+                            "rate limit hit; auto-switching active account"
+                        );
+                        auth_manager.reload();
+                        event_tx.send(AutoCoordinatorEvent::Action {
+                            message: format!(
+                                "Auto-switch: now using {next_label} due to usage limit."
+                            ),
                         });
-                    if let Some(current_account_id) = current_account_id {
-                        let now = Utc::now();
-                        let blocked_until = limit
-                            .resets_in_seconds
-                            .map(|seconds| now + chrono::Duration::seconds(seconds as i64));
-                        let current_auth_mode =
-                            auth.as_ref().map(|current| current.mode).or_else(|| {
-                                auth_accounts::find_account(
-                                    client.code_home(),
-                                    current_account_id.as_str(),
-                                )
-                                .ok()
-                                .flatten()
-                                .map(|account| account.mode)
-                            });
-                        if let Some(current_auth_mode) = current_auth_mode {
-                            match switch_active_account_on_rate_limit(
-                                client.code_home(),
-                                state,
-                                client.api_key_fallback_on_all_accounts_limited(),
-                                now,
-                                current_account_id.as_str(),
-                                current_auth_mode,
-                                blocked_until,
-                            ) {
-                                Ok(Some(next_account_id)) => {
-                                    let next_label = auth_accounts::find_account(
-                                        client.code_home(),
-                                        &next_account_id,
-                                    )
-                                    .ok()
-                                    .flatten()
-                                    .and_then(|account| account.label)
-                                    .unwrap_or_else(|| next_account_id.clone());
-                                    tracing::info!(
-                                        from_account_id = %current_account_id,
-                                        to_account_id = %next_account_id,
-                                        reason = "usage_limit_reached",
-                                        "rate limit hit; auto-switching active account"
-                                    );
-                                    auth_manager.reload();
-                                    event_tx.send(AutoCoordinatorEvent::Action {
-                                        message: format!(
-                                            "Auto-switch: now using {next_label} due to usage limit."
-                                        ),
-                                    });
-                                    return RetryDecision::RateLimited {
-                                        wait_until: Instant::now(),
-                                        reason: "usage limit reached; switched accounts"
-                                            .to_string(),
-                                    };
-                                }
-                                Ok(None) => {}
-                                Err(err) => {
-                                    warn!(
-                                        from_account_id = %current_account_id,
-                                        error = %err,
-                                        "failed to activate account after usage limit"
-                                    );
-                                }
-                            }
-                        } else {
-                            warn!(
-                                from_account_id = %current_account_id,
-                                "skipping account switch after usage limit: missing auth mode"
-                            );
-                        }
+                        return RetryDecision::RateLimited {
+                            wait_until: Instant::now(),
+                            reason: "usage limit reached; switched accounts".to_string(),
+                        };
+                    }
+                    Ok(None) => {}
+                    Err(err) => {
+                        warn!(
+                            from_account_id = %current_account_id,
+                            error = %err,
+                            "failed to activate account after usage limit"
+                        );
                     }
                 }
+            } else {
+                warn!(
+                    from_account_id = %current_account_id,
+                    "skipping account switch after usage limit: missing auth mode"
+                );
+            }
+        }
+    }
 
     classify_model_error(error)
 }
@@ -2708,12 +2706,13 @@ fn extract_seconds(value: &serde_json::Value) -> Option<Duration> {
                 return Some(Duration::from_secs_f64(num));
             }
             if let Some(text) = seconds.as_str()
-                && let Ok(num) = text.parse::<f64>() {
-                    if num.is_sign_negative() {
-                        continue;
-                    }
-                    return Some(Duration::from_secs_f64(num));
+                && let Ok(num) = text.parse::<f64>()
+            {
+                if num.is_sign_negative() {
+                    continue;
                 }
+                return Some(Duration::from_secs_f64(num));
+            }
         }
     }
     None
@@ -2810,19 +2809,20 @@ fn classify_recoverable_decision_error(err: &anyhow::Error) -> Option<Recoverabl
     }
 
     if lower.contains(" is empty")
-        && let Some((field, _)) = text.split_once(" is empty") {
-            let field_trimmed = field.trim().trim_matches('`');
-            if !field_trimmed.is_empty() {
-                let summary = format!("`{field_trimmed}` was empty");
-                let guidance = format!(
-                    "Provide a meaningful value for `{field_trimmed}` instead of leaving it blank."
-                );
-                return Some(RecoverableDecisionError {
-                    summary,
-                    guidance: Some(guidance),
-                });
-            }
+        && let Some((field, _)) = text.split_once(" is empty")
+    {
+        let field_trimmed = field.trim().trim_matches('`');
+        if !field_trimmed.is_empty() {
+            let summary = format!("`{field_trimmed}` was empty");
+            let guidance = format!(
+                "Provide a meaningful value for `{field_trimmed}` instead of leaving it blank."
+            );
+            return Some(RecoverableDecisionError {
+                summary,
+                guidance: Some(guidance),
+            });
         }
+    }
 
     if lower.contains("unexpected finish_status") {
         let extracted = text
@@ -3252,10 +3252,11 @@ fn strip_role_prefix(input: &str) -> &str {
     const PREFIXES: [&str; 2] = ["Coordinator:", "CLI:"];
     for prefix in PREFIXES {
         if let Some(head) = input.get(..prefix.len())
-            && head.eq_ignore_ascii_case(prefix) {
-                let rest = input.get(prefix.len()..).unwrap_or_default();
-                return rest.strip_prefix(' ').unwrap_or(rest);
-            }
+            && head.eq_ignore_ascii_case(prefix)
+        {
+            let rest = input.get(prefix.len()..).unwrap_or_default();
+            return rest.strip_prefix(' ').unwrap_or(rest);
+        }
     }
     input
 }
@@ -3422,19 +3423,20 @@ pub fn should_compact(
         .or(family.context_window);
 
     if let Some(token_limit) = token_limit
-        && token_limit > 0 {
-            let threshold = (token_limit as f64 * 0.8) as u64;
-            let projected_total = transcript_tokens.saturating_add(estimated_next);
-            if projected_total >= threshold {
-                return true;
-            }
-
-            // When we have an explicit token budget for the model, rely on it and
-            // skip the fallback message-count heuristic. This avoids runaway
-            // compaction loops when restarting Auto Drive with a large but still
-            // token-safe transcript.
-            return false;
+        && token_limit > 0
+    {
+        let threshold = (token_limit as f64 * 0.8) as u64;
+        let projected_total = transcript_tokens.saturating_add(estimated_next);
+        if projected_total >= threshold {
+            return true;
         }
+
+        // When we have an explicit token budget for the model, rely on it and
+        // skip the fallback message-count heuristic. This avoids runaway
+        // compaction loops when restarting Auto Drive with a large but still
+        // token-safe transcript.
+        return false;
+    }
 
     if has_recorded_turns {
         return false;

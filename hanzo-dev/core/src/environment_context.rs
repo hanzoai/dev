@@ -411,13 +411,14 @@ impl EnvironmentContext {
             lines.push("  </operating_system>".to_string());
         }
         if let Some(common_tools) = self.common_tools
-            && !common_tools.is_empty() {
-                lines.push("  <common_tools>".to_string());
-                for tool in common_tools {
-                    lines.push(format!("    <tool>{tool}</tool>"));
-                }
-                lines.push("  </common_tools>".to_string());
+            && !common_tools.is_empty()
+        {
+            lines.push("  <common_tools>".to_string());
+            for tool in common_tools {
+                lines.push(format!("    <tool>{tool}</tool>"));
             }
+            lines.push("  </common_tools>".to_string());
+        }
         if let Some(current_date) = self.current_date {
             lines.push(format!("  <current_date>{current_date}</current_date>"));
         }
@@ -930,9 +931,7 @@ fn browser_snapshot_to_response_item(
         id: stream_id.map(std::string::ToString::to_string),
         role: "user".to_string(),
         content: vec![ContentItem::InputText {
-            text: format!(
-                "{BROWSER_SNAPSHOT_OPEN_TAG}\n{json}\n{BROWSER_SNAPSHOT_CLOSE_TAG}"
-            ),
+            text: format!("{BROWSER_SNAPSHOT_OPEN_TAG}\n{json}\n{BROWSER_SNAPSHOT_CLOSE_TAG}"),
         }],
     })
 }

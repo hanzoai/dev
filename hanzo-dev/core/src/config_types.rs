@@ -472,8 +472,7 @@ pub struct GithubConfig {
     pub actionlint_strict: bool,
 }
 
-#[derive(Deserialize, Debug, Clone, PartialEq)]
-#[derive(Default)]
+#[derive(Deserialize, Debug, Clone, PartialEq, Default)]
 pub struct ValidationConfig {
     /// Legacy master toggle for the validation harness (kept for config compatibility).
     /// `run_patch_harness` now relies solely on the functional/stylistic group toggles.
@@ -497,9 +496,7 @@ pub struct ValidationConfig {
     pub tools: ValidationTools,
 }
 
-
-#[derive(Deserialize, Debug, Clone, PartialEq)]
-#[derive(Default)]
+#[derive(Deserialize, Debug, Clone, PartialEq, Default)]
 pub struct ValidationGroups {
     /// Functional checks catch correctness regressions.
     #[serde(default = "default_true")]
@@ -509,7 +506,6 @@ pub struct ValidationGroups {
     #[serde(default)]
     pub stylistic: bool,
 }
-
 
 #[derive(Deserialize, Debug, Clone, PartialEq, Default)]
 pub struct ValidationTools {
@@ -925,8 +921,7 @@ impl Default for StreamConfig {
 }
 
 /// Theme configuration for the TUI
-#[derive(Deserialize, Debug, Clone, PartialEq)]
-#[derive(Default)]
+#[derive(Deserialize, Debug, Clone, PartialEq, Default)]
 pub struct ThemeConfig {
     /// Name of the predefined theme to use
     #[serde(default)]
@@ -948,7 +943,6 @@ pub struct ThemeConfig {
     #[serde(default)]
     pub is_dark: Option<bool>,
 }
-
 
 /// Selected loading spinner style.
 #[derive(Deserialize, Debug, Clone, PartialEq)]

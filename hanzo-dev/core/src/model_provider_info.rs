@@ -157,7 +157,6 @@ pub enum OpenRouterDataCollectionPolicy {
     Deny,
 }
 
-
 #[derive(Debug, Clone, Deserialize, Serialize, PartialEq)]
 #[serde(rename_all = "lowercase")]
 #[derive(Default)]
@@ -167,7 +166,6 @@ pub enum OpenRouterProviderSort {
     Throughput,
     Latency,
 }
-
 
 /// `max_price` envelope for OpenRouter provider routing controls.
 #[derive(Debug, Clone, Default, Deserialize, Serialize, PartialEq)]
@@ -411,9 +409,10 @@ impl ModelProviderInfo {
         if let Some(env_headers) = &self.env_http_headers {
             for (header, env_var) in env_headers {
                 if let Ok(val) = std::env::var(env_var)
-                    && !val.trim().is_empty() {
-                        builder = builder.header(header, val);
-                    }
+                    && !val.trim().is_empty()
+                {
+                    builder = builder.header(header, val);
+                }
             }
         }
         builder

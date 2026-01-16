@@ -153,9 +153,10 @@ pub fn make_compaction_summary_message(
 /// template instead of sending a blank developer message.
 pub fn resolve_compact_prompt_text(override_prompt: Option<&str>) -> String {
     if let Some(text) = override_prompt
-        && !text.trim().is_empty() {
-            return text.to_string();
-        }
+        && !text.trim().is_empty()
+    {
+        return text.to_string();
+    }
     SUMMARIZATION_PROMPT.to_string()
 }
 

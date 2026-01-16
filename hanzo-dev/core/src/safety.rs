@@ -269,9 +269,10 @@ fn is_write_patch_constrained_to_writable_paths(
                     return false;
                 }
                 if let Some(dest) = move_path
-                    && !is_path_writable(dest) {
-                        return false;
-                    }
+                    && !is_path_writable(dest)
+                {
+                    return false;
+                }
             }
         }
     }

@@ -128,15 +128,16 @@ pub(crate) fn deserialize_config_toml_with_cli_warnings(
 pub(crate) fn upgrade_legacy_model_slugs(cfg: &mut ConfigToml) {
     fn maybe_upgrade(field: &mut Option<String>) {
         if let Some(old) = field.clone()
-            && let Some(new) = upgrade_legacy_model_slug(&old) {
-                tracing::info!(
-                    target: "code.config",
-                    old,
-                    new,
-                    "upgrading legacy model slug to newer default",
-                );
-                *field = Some(new);
-            }
+            && let Some(new) = upgrade_legacy_model_slug(&old)
+        {
+            tracing::info!(
+                target: "code.config",
+                old,
+                new,
+                "upgrading legacy model slug to newer default",
+            );
+            *field = Some(new);
+        }
     }
 
     maybe_upgrade(&mut cfg.model);

@@ -204,9 +204,10 @@ pub async fn setup_worktree(
             .current_dir(git_root)
             .output()
             .await
-            && out.status.success() {
-                bump_snapshot_epoch_for(&worktree_path);
-            }
+            && out.status.success()
+        {
+            bump_snapshot_epoch_for(&worktree_path);
+        }
     }
 
     let mut args = vec![
@@ -615,9 +616,10 @@ pub async fn write_branch_metadata(
 pub fn load_branch_metadata(worktree_path: &Path) -> Option<BranchMetadata> {
     if let Some(path) = metadata_file_path(worktree_path)
         && let Ok(bytes) = stdfs::read(&path)
-            && let Ok(parsed) = serde_json::from_slice(&bytes) {
-                return Some(parsed);
-            }
+        && let Ok(parsed) = serde_json::from_slice(&bytes)
+    {
+        return Some(parsed);
+    }
     let legacy_path = worktree_path.join(".codex-branch.json");
     let bytes = stdfs::read(legacy_path).ok()?;
     serde_json::from_slice(&bytes).ok()
@@ -678,28 +680,29 @@ async fn _ensure_origin_remote(git_root: &Path) -> Result<(), String> {
             .output()
             .await;
         if let Ok(out) = url_out
-            && out.status.success() {
-                let url = String::from_utf8_lossy(&out.stdout).trim().to_string();
-                if !url.is_empty() {
-                    // Add origin pointing to this URL
-                    let add = Command::new("git")
-                        .current_dir(git_root)
-                        .args(["remote", "add", "origin", &url])
-                        .output()
-                        .await
-                        .map_err(|e| format!("git remote add origin failed: {e}"))?;
-                    if !add.status.success() {
-                        return Err("failed to add origin".to_string());
-                    }
-                    bump_snapshot_epoch_for(git_root);
-                    let _ = Command::new("git")
-                        .current_dir(git_root)
-                        .args(["remote", "set-head", "origin", "-a"])
-                        .output()
-                        .await;
-                    return Ok(());
+            && out.status.success()
+        {
+            let url = String::from_utf8_lossy(&out.stdout).trim().to_string();
+            if !url.is_empty() {
+                // Add origin pointing to this URL
+                let add = Command::new("git")
+                    .current_dir(git_root)
+                    .args(["remote", "add", "origin", &url])
+                    .output()
+                    .await
+                    .map_err(|e| format!("git remote add origin failed: {e}"))?;
+                if !add.status.success() {
+                    return Err("failed to add origin".to_string());
                 }
+                bump_snapshot_epoch_for(git_root);
+                let _ = Command::new("git")
+                    .current_dir(git_root)
+                    .args(["remote", "set-head", "origin", "-a"])
+                    .output()
+                    .await;
+                return Ok(());
             }
+        }
     }
     // No usable remote found; leave as-is
     Err("no suitable remote to alias as origin".to_string())
@@ -813,31 +816,32 @@ pub async fn copy_uncommitted_to_worktree(
             .args(["submodule", "status", "--recursive"])
             .output()
             .await
-            && out.status.success() {
-                let text = String::from_utf8_lossy(&out.stdout);
-                for line in text.lines() {
-                    let line = line.trim();
-                    if !line.starts_with('+') {
-                        continue;
-                    }
-                    let rest = &line[1..];
-                    let mut parts = rest.split_whitespace();
-                    let sha = match parts.next() {
-                        Some(s) => s,
-                        None => continue,
-                    };
-                    let path = match parts.next() {
-                        Some(p) => p,
-                        None => continue,
-                    };
-                    let spec = format!("160000,{sha},{path}");
-                    let _ = Command::new("git")
-                        .current_dir(worktree_path)
-                        .args(["update-index", "--add", "--cacheinfo", &spec])
-                        .output()
-                        .await;
-                }
+        && out.status.success()
+    {
+        let text = String::from_utf8_lossy(&out.stdout);
+        for line in text.lines() {
+            let line = line.trim();
+            if !line.starts_with('+') {
+                continue;
             }
+            let rest = &line[1..];
+            let mut parts = rest.split_whitespace();
+            let sha = match parts.next() {
+                Some(s) => s,
+                None => continue,
+            };
+            let path = match parts.next() {
+                Some(p) => p,
+                None => continue,
+            };
+            let spec = format!("160000,{sha},{path}");
+            let _ = Command::new("git")
+                .current_dir(worktree_path)
+                .args(["update-index", "--add", "--cacheinfo", &spec])
+                .output()
+                .await;
+        }
+    }
     Ok(count)
 }
 
@@ -852,9 +856,10 @@ pub async fn detect_default_branch(cwd: &Path) -> Option<String> {
         .ok()?;
     if sym.status.success()
         && let Ok(s) = String::from_utf8(sym.stdout)
-            && let Some((_, name)) = s.trim().rsplit_once('/') {
-                return Some(name.to_string());
-            }
+        && let Some((_, name)) = s.trim().rsplit_once('/')
+    {
+        return Some(name.to_string());
+    }
     // Fallback to local main/master
     for candidate in ["main", "master"] {
         let out = Command::new("git")

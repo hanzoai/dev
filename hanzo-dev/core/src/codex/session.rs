@@ -884,9 +884,10 @@ impl Session {
     pub fn remove_task(&self, sub_id: &str) {
         let mut state = self.state.lock().unwrap();
         if let Some(agent) = &state.current_task
-            && agent.sub_id == sub_id {
-                state.current_task.take();
-            }
+            && agent.sub_id == sub_id
+        {
+            state.current_task.take();
+        }
     }
 
     pub fn has_running_task(&self) -> bool {
@@ -1233,9 +1234,10 @@ impl Session {
             guard.as_ref().cloned()
         };
         if let Some(rec) = recorder
-            && let Err(e) = rec.record_items(items).await {
-                error!("failed to record rollout items: {e:#}");
-            }
+            && let Err(e) = rec.record_items(items).await
+        {
+            error!("failed to record rollout items: {e:#}");
+        }
     }
 
     /// Build the full turn input by concatenating the current conversation
@@ -1280,15 +1282,16 @@ impl Session {
         // Helper closure to detect legacy XML environment context items
         let is_legacy_env_context = |item: &ResponseItem| -> bool {
             if let ResponseItem::Message { role, content, .. } = item
-                && role == "user" {
-                    return content.iter().any(|c| {
-                        if let ContentItem::InputText { text } = c {
-                            text.contains("<environment_context>")
-                        } else {
-                            false
-                        }
-                    });
-                }
+                && role == "user"
+            {
+                return content.iter().any(|c| {
+                    if let ContentItem::InputText { text } = c {
+                        text.contains("<environment_context>")
+                    } else {
+                        false
+                    }
+                });
+            }
             false
         };
 
@@ -1511,11 +1514,11 @@ impl Session {
                             if state.context_timeline.baseline().is_none()
                                 && let Err(err) =
                                     state.context_timeline.add_baseline_once(snapshot.clone())
-                                {
-                                    tracing::warn!(
-                                        "env_ctx_v2: failed to seed baseline before delta: {err}"
-                                    );
-                                }
+                            {
+                                tracing::warn!(
+                                    "env_ctx_v2: failed to seed baseline before delta: {err}"
+                                );
+                            }
                             if let Err(err) =
                                 state.context_timeline.apply_delta(*sequence, delta.clone())
                             {
@@ -1727,19 +1730,20 @@ impl Session {
         }
 
         if replay_ctx.timeline.baseline().is_none()
-            && let Some(snapshot) = replay_ctx.legacy_baseline.clone() {
-                if let Err(err) = replay_ctx.timeline.add_baseline_once(snapshot.clone()) {
-                    tracing::warn!("env_ctx_v2: failed to map legacy status to baseline: {err}");
-                }
-                match replay_ctx.timeline.record_snapshot(snapshot.clone()) {
-                    Ok(true) => crate::telemetry::global_telemetry().record_snapshot_commit(),
-                    Ok(false) => crate::telemetry::global_telemetry().record_dedup_drop(),
-                    Err(err) => tracing::warn!(
-                        "env_ctx_v2: failed to record legacy baseline snapshot: {err}"
-                    ),
-                }
-                replay_ctx.last_snapshot = Some(snapshot);
+            && let Some(snapshot) = replay_ctx.legacy_baseline.clone()
+        {
+            if let Err(err) = replay_ctx.timeline.add_baseline_once(snapshot.clone()) {
+                tracing::warn!("env_ctx_v2: failed to map legacy status to baseline: {err}");
             }
+            match replay_ctx.timeline.record_snapshot(snapshot.clone()) {
+                Ok(true) => crate::telemetry::global_telemetry().record_snapshot_commit(),
+                Ok(false) => crate::telemetry::global_telemetry().record_dedup_drop(),
+                Err(err) => {
+                    tracing::warn!("env_ctx_v2: failed to record legacy baseline snapshot: {err}")
+                }
+            }
+            replay_ctx.last_snapshot = Some(snapshot);
+        }
 
         let restored_snapshot = replay_ctx.last_snapshot.clone();
         let next_seq_value = replay_ctx.next_sequence;
@@ -2195,13 +2199,13 @@ fn prune_history_items_owned(
         for &status_idx in status_messages.iter() {
             if status_idx > user_idx
                 && let Some(ResponseItem::Message { content, .. }) = current_items.get(status_idx)
-                    && content
-                        .iter()
-                        .any(|c| matches!(c, ContentItem::InputImage { .. }))
-                    {
-                        screenshots_to_keep.insert(status_idx);
-                        break;
-                    }
+                && content
+                    .iter()
+                    .any(|c| matches!(c, ContentItem::InputImage { .. }))
+            {
+                screenshots_to_keep.insert(status_idx);
+                break;
+            }
         }
     }
 

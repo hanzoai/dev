@@ -132,9 +132,8 @@ impl TruncatingCollector {
         let right_budget = keep_budget - left_budget;
         let prefix_slice = pick_prefix_slice(&prefix_str, left_budget);
         let suffix_slice = pick_suffix_slice(&suffix_str, right_budget);
-        let mut out = String::with_capacity(
-            marker_len + prefix_slice.len() + suffix_slice.len() + 1,
-        );
+        let mut out =
+            String::with_capacity(marker_len + prefix_slice.len() + suffix_slice.len() + 1);
         out.push_str(prefix_slice);
         out.push_str(&marker);
         out.push('\n');
@@ -148,9 +147,10 @@ fn pick_prefix_slice(input: &str, left_budget: usize) -> &str {
         return input;
     }
     if let Some(head) = input.get(..left_budget)
-        && let Some(idx) = head.rfind('\n') {
-            return &input[..idx + 1];
-        }
+        && let Some(idx) = head.rfind('\n')
+    {
+        return &input[..idx + 1];
+    }
     truncate_on_boundary(input, left_budget)
 }
 
@@ -160,9 +160,10 @@ fn pick_suffix_slice(input: &str, right_budget: usize) -> &str {
     }
     let tail_start = input.len().saturating_sub(right_budget);
     if let Some(tail) = input.get(tail_start..)
-        && let Some(idx) = tail.find('\n') {
-            return &input[tail_start + idx + 1..];
-        }
+        && let Some(idx) = tail.find('\n')
+    {
+        return &input[tail_start + idx + 1..];
+    }
     let mut idx = tail_start;
     while idx < input.len() && !input.is_char_boundary(idx) {
         idx += 1;

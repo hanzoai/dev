@@ -178,9 +178,10 @@ impl CopilotIntegration {
 
         // Add context if provided
         if let Some(ctx) = context
-            && let Some(file_path) = ctx.get("file_path") {
-                cmd.arg("--file").arg(file_path);
-            }
+            && let Some(file_path) = ctx.get("file_path")
+        {
+            cmd.arg("--file").arg(file_path);
+        }
 
         let output = cmd.arg(initial_message).output().await?;
 
@@ -205,9 +206,7 @@ impl CopilotIntegration {
         let prompt = if let Some(d) = diff {
             format!("Review this code diff and provide suggestions:\n\n{d}")
         } else {
-            format!(
-                "Review the code in file {file_path} and provide suggestions"
-            )
+            format!("Review the code in file {file_path} and provide suggestions")
         };
 
         let mut context = HashMap::new();
@@ -228,9 +227,7 @@ impl CopilotIntegration {
             ));
         }
 
-        let prompt = format!(
-            "Generate {doc_type} documentation for this code:\n\n{code}"
-        );
+        let prompt = format!("Generate {doc_type} documentation for this code:\n\n{code}");
 
         self.start_chat_session(&prompt, None).await
     }

@@ -383,10 +383,11 @@ async fn read_head_and_tail(
             }
             RolloutItem::Event(event) => {
                 if let Some(msg) = event_msg_from_protocol(&event.msg)
-                    && matches!(msg, EventMsg::UserMessage(_) | EventMsg::AgentMessage(_)) {
-                        summary.saw_user_event = true;
-                        summary.updated_at = Some(rollout_line.timestamp.clone());
-                    }
+                    && matches!(msg, EventMsg::UserMessage(_) | EventMsg::AgentMessage(_))
+                {
+                    summary.saw_user_event = true;
+                    summary.updated_at = Some(rollout_line.timestamp.clone());
+                }
             }
             RolloutItem::ResponseItem(_)
             | RolloutItem::Compacted(_)
