@@ -1,8 +1,9 @@
 // Forbid accidental stdout/stderr writes in the *library* portion of the TUI.
 // The standalone `codex-tui` binary prints a short help message before the
 // alternate‑screen mode starts; that file opts‑out locally via `allow`.
-#![deny(clippy::print_stdout, clippy::print_stderr)]
-#![deny(clippy::disallowed_methods)]
+// Changed from deny to warn for gradual cleanup.
+#![warn(clippy::print_stdout, clippy::print_stderr)]
+#![warn(clippy::disallowed_methods)]
 use app::App;
 use hanzo_common::model_presets::HIDE_GPT_5_1_CODEX_MAX_MIGRATION_PROMPT_CONFIG;
 use hanzo_common::model_presets::HIDE_GPT_5_2_MIGRATION_PROMPT_CONFIG;

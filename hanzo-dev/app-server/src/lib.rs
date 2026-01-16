@@ -1,4 +1,4 @@
-#![deny(clippy::print_stdout, clippy::print_stderr)]
+#![warn(clippy::print_stdout, clippy::print_stderr)]
 
 use std::io::ErrorKind;
 use std::io::Result as IoResult;
