@@ -1007,27 +1007,28 @@ impl Config {
 
         let mut always_allow_commands: Vec<ApprovedCommandPattern> = Vec::new();
         if let Some(project_cfg) = project_override
-            && let Some(commands) = &project_cfg.always_allow_commands {
-                for cmd in commands {
-                    if cmd.argv.is_empty() {
-                        continue;
-                    }
-                    let kind = match cmd.match_kind {
-                        AllowedCommandMatchKind::Exact => ApprovedCommandMatchKind::Exact,
-                        AllowedCommandMatchKind::Prefix => ApprovedCommandMatchKind::Prefix,
-                    };
-                    let semantic = if matches!(kind, ApprovedCommandMatchKind::Prefix) {
-                        Some(cmd.argv.clone())
-                    } else {
-                        None
-                    };
-                    always_allow_commands.push(ApprovedCommandPattern::new(
-                        cmd.argv.clone(),
-                        kind,
-                        semantic,
-                    ));
+            && let Some(commands) = &project_cfg.always_allow_commands
+        {
+            for cmd in commands {
+                if cmd.argv.is_empty() {
+                    continue;
                 }
+                let kind = match cmd.match_kind {
+                    AllowedCommandMatchKind::Exact => ApprovedCommandMatchKind::Exact,
+                    AllowedCommandMatchKind::Prefix => ApprovedCommandMatchKind::Prefix,
+                };
+                let semantic = if matches!(kind, ApprovedCommandMatchKind::Prefix) {
+                    Some(cmd.argv.clone())
+                } else {
+                    None
+                };
+                always_allow_commands.push(ApprovedCommandPattern::new(
+                    cmd.argv.clone(),
+                    kind,
+                    semantic,
+                ));
             }
+        }
 
         let project_hooks = project_override
             .map(|cfg| ProjectHooks::from_configs(&cfg.hooks, &resolved_cwd))

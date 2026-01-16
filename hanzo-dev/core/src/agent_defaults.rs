@@ -82,9 +82,10 @@ impl AgentModelSpec {
             return true;
         }
         if let Some(env) = self.gating_env
-            && let Ok(value) = std::env::var(env) {
-                return matches!(value.as_str(), "1" | "true" | "TRUE" | "True");
-            }
+            && let Ok(value) = std::env::var(env)
+        {
+            return matches!(value.as_str(), "1" | "true" | "TRUE" | "True");
+        }
         false
     }
 

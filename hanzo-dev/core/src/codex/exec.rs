@@ -557,23 +557,22 @@ impl Session {
             None
         };
 
-        if enable_hooks
-            && let Some(params_ref) = params_for_hooks.as_ref() {
-                let before_event = if is_apply_patch {
-                    ProjectHookEvent::FileBeforeWrite
-                } else {
-                    ProjectHookEvent::ToolBefore
-                };
-                self.run_hooks_for_exec_event(
-                    turn_diff_tracker,
-                    before_event,
-                    &begin_ctx,
-                    params_ref,
-                    None,
-                    attempt_req,
-                )
-                .await;
-            }
+        if enable_hooks && let Some(params_ref) = params_for_hooks.as_ref() {
+            let before_event = if is_apply_patch {
+                ProjectHookEvent::FileBeforeWrite
+            } else {
+                ProjectHookEvent::ToolBefore
+            };
+            self.run_hooks_for_exec_event(
+                turn_diff_tracker,
+                before_event,
+                &begin_ctx,
+                params_ref,
+                None,
+                attempt_req,
+            )
+            .await;
+        }
 
         self.on_exec_command_begin(
             turn_diff_tracker,
@@ -625,23 +624,22 @@ impl Session {
         exec_guard.mark_completed();
         self.finalize_cancelled_execs(&sub_id).await;
 
-        if enable_hooks
-            && let Some(params_ref) = params_for_hooks.as_ref() {
-                let after_event = if is_apply_patch {
-                    ProjectHookEvent::FileAfterWrite
-                } else {
-                    ProjectHookEvent::ToolAfter
-                };
-                self.run_hooks_for_exec_event(
-                    turn_diff_tracker,
-                    after_event,
-                    &begin_ctx,
-                    params_ref,
-                    Some(borrowed),
-                    attempt_req,
-                )
-                .await;
-            }
+        if enable_hooks && let Some(params_ref) = params_for_hooks.as_ref() {
+            let after_event = if is_apply_patch {
+                ProjectHookEvent::FileAfterWrite
+            } else {
+                ProjectHookEvent::ToolAfter
+            };
+            self.run_hooks_for_exec_event(
+                turn_diff_tracker,
+                after_event,
+                &begin_ctx,
+                params_ref,
+                Some(borrowed),
+                attempt_req,
+            )
+            .await;
+        }
 
         if let Some(analysis) = dry_run_analysis.as_ref() {
             let mut state = self.state.lock().unwrap();

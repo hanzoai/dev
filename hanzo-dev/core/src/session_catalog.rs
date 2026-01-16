@@ -69,13 +69,15 @@ impl SessionCatalog {
                 continue;
             }
             if let Some(cwd) = &query.cwd
-                && &entry.cwd_real != cwd {
-                    continue;
-                }
+                && &entry.cwd_real != cwd
+            {
+                continue;
+            }
             if let Some(git_root) = &query.git_root
-                && entry.git_project_root.as_ref() != Some(git_root) {
-                    continue;
-                }
+                && entry.git_project_root.as_ref() != Some(git_root)
+            {
+                continue;
+            }
             if !query.sources.is_empty() && !query.sources.contains(&entry.session_source) {
                 continue;
             }
@@ -86,9 +88,10 @@ impl SessionCatalog {
             rows.push(entry.clone());
 
             if let Some(limit) = query.limit
-                && rows.len() >= limit {
-                    break;
-                }
+                && rows.len() >= limit
+            {
+                break;
+            }
         }
 
         Ok(rows)

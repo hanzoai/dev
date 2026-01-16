@@ -362,9 +362,10 @@ fn get_git_branch(cwd: &std::path::Path) -> Option<String> {
     let head_path = cwd.join(".git/HEAD");
     if let Ok(contents) = std::fs::read_to_string(&head_path)
         && let Some(rest) = contents.trim().strip_prefix("ref: ")
-            && let Some(branch) = rest.trim().rsplit('/').next() {
-                return Some(branch.to_string());
-            }
+        && let Some(branch) = rest.trim().rsplit('/').next()
+    {
+        return Some(branch.to_string());
+    }
     None
 }
 
@@ -381,9 +382,10 @@ fn maybe_update_from_model_info<T: Copy + PartialEq>(
     }
 
     if let (Some(current), Some(old_val)) = (*field, old_default)
-        && current == old_val {
-            *field = new_default;
-        }
+        && current == old_val
+    {
+        *field = new_default;
+    }
 }
 
 #[derive(Clone, Debug)]
@@ -500,125 +502,124 @@ async fn build_turn_status_items_legacy(sess: &Session) -> Vec<ResponseItem> {
     let mut include_screenshot = false;
 
     if let Some(browser_manager) = hanzo_browser::global::get_browser_manager().await
-        && browser_manager.is_enabled().await {
-            if let Some((_, idle_timeout)) = browser_manager.idle_elapsed_past_timeout().await {
-                let idle_text = format!(
-                    "Browser idle (timeout {idle_timeout:?}); screenshot capture paused until browser_* tools run again."
-                );
-                current_status.push('\n');
-                current_status.push_str(&idle_text);
-            } else {
-                // Get current URL and browser info
-                let url = browser_manager
-                    .get_current_url()
-                    .await
-                    .unwrap_or_else(|| "unknown".to_string());
+        && browser_manager.is_enabled().await
+    {
+        if let Some((_, idle_timeout)) = browser_manager.idle_elapsed_past_timeout().await {
+            let idle_text = format!(
+                "Browser idle (timeout {idle_timeout:?}); screenshot capture paused until browser_* tools run again."
+            );
+            current_status.push('\n');
+            current_status.push_str(&idle_text);
+        } else {
+            // Get current URL and browser info
+            let url = browser_manager
+                .get_current_url()
+                .await
+                .unwrap_or_else(|| "unknown".to_string());
 
-                // Try to get a tab title if available
-                let title = match browser_manager.get_or_create_page().await {
-                    Ok(page) => page.get_title().await,
-                    Err(_) => None,
-                };
+            // Try to get a tab title if available
+            let title = match browser_manager.get_or_create_page().await {
+                Ok(page) => page.get_title().await,
+                Err(_) => None,
+            };
 
-                // Get browser type description
-                let browser_type = browser_manager.get_browser_type().await;
+            // Get browser type description
+            let browser_type = browser_manager.get_browser_type().await;
 
-                // Get viewport dimensions
-                let (viewport_width, viewport_height) = browser_manager.get_viewport_size().await;
-                let viewport_info = format!(" | Viewport: {viewport_width}x{viewport_height}");
+            // Get viewport dimensions
+            let (viewport_width, viewport_height) = browser_manager.get_viewport_size().await;
+            let viewport_info = format!(" | Viewport: {viewport_width}x{viewport_height}");
 
-                // Get cursor position
-                let cursor_info = match browser_manager.get_cursor_position().await {
-                    Ok((x, y)) => format!(
-                        " | Mouse position: ({x:.0}, {y:.0}) [shown as a blue cursor in the screenshot]"
-                    ),
-                    Err(_) => String::new(),
-                };
+            // Get cursor position
+            let cursor_info = match browser_manager.get_cursor_position().await {
+                Ok((x, y)) => format!(
+                    " | Mouse position: ({x:.0}, {y:.0}) [shown as a blue cursor in the screenshot]"
+                ),
+                Err(_) => String::new(),
+            };
 
-                // Try to capture screenshot and compare with last one
-                let screenshot_status = match capture_browser_screenshot(sess).await {
-                    Ok((screenshot_path, _url)) => {
-                        // Always update the UI with the latest screenshot, even if unchanged for LLM payload
-                        // This ensures the user sees that a fresh capture occurred each turn.
-                        add_pending_screenshot(sess, screenshot_path.clone(), url.clone());
-                        // Check if screenshot has changed using image hashing
-                        let mut last_screenshot_info = sess.last_screenshot_info.lock().unwrap();
+            // Try to capture screenshot and compare with last one
+            let screenshot_status = match capture_browser_screenshot(sess).await {
+                Ok((screenshot_path, _url)) => {
+                    // Always update the UI with the latest screenshot, even if unchanged for LLM payload
+                    // This ensures the user sees that a fresh capture occurred each turn.
+                    add_pending_screenshot(sess, screenshot_path.clone(), url.clone());
+                    // Check if screenshot has changed using image hashing
+                    let mut last_screenshot_info = sess.last_screenshot_info.lock().unwrap();
 
-                        // Compute hash for current screenshot
-                        let current_hash =
-                            crate::image_comparison::compute_image_hash(&screenshot_path).ok();
+                    // Compute hash for current screenshot
+                    let current_hash =
+                        crate::image_comparison::compute_image_hash(&screenshot_path).ok();
 
-                        let should_include_screenshot = if let (
-                            Some((_last_path, last_phash, last_dhash)),
-                            Some((cur_phash, cur_dhash)),
-                        ) =
-                            (last_screenshot_info.as_ref(), current_hash.as_ref())
-                        {
-                            // Compare hashes to see if screenshots are similar
-                            let similar = crate::image_comparison::are_hashes_similar(
-                                last_phash, last_dhash, cur_phash, cur_dhash,
-                            );
+                    let should_include_screenshot = if let (
+                        Some((_last_path, last_phash, last_dhash)),
+                        Some((cur_phash, cur_dhash)),
+                    ) =
+                        (last_screenshot_info.as_ref(), current_hash.as_ref())
+                    {
+                        // Compare hashes to see if screenshots are similar
+                        let similar = crate::image_comparison::are_hashes_similar(
+                            last_phash, last_dhash, cur_phash, cur_dhash,
+                        );
 
-                            if !similar {
-                                // Screenshot has changed, include it
-                                *last_screenshot_info = Some((
-                                    screenshot_path.clone(),
-                                    cur_phash.clone(),
-                                    cur_dhash.clone(),
-                                ));
-                                true
-                            } else {
-                                // Screenshot unchanged
-                                false
-                            }
-                        } else {
-                            // No previous screenshot or hash computation failed, include it
-                            if let Some((phash, dhash)) = current_hash {
-                                *last_screenshot_info =
-                                    Some((screenshot_path.clone(), phash, dhash));
-                            }
+                        if !similar {
+                            // Screenshot has changed, include it
+                            *last_screenshot_info = Some((
+                                screenshot_path.clone(),
+                                cur_phash.clone(),
+                                cur_dhash.clone(),
+                            ));
                             true
-                        };
-
-                        if should_include_screenshot {
-                            if let Ok(bytes) = std::fs::read(&screenshot_path) {
-                                let mime = mime_guess::from_path(&screenshot_path)
-                                    .first()
-                                    .map(|m| m.to_string())
-                                    .unwrap_or_else(|| "image/png".to_string());
-                                let encoded =
-                                    base64::engine::general_purpose::STANDARD.encode(bytes);
-                                screenshot_content = Some(ContentItem::InputImage {
-                                    image_url: format!("data:{mime};base64,{encoded}"),
-                                });
-                                include_screenshot = true;
-                                ""
-                            } else {
-                                " [Screenshot file read failed]"
-                            }
                         } else {
-                            " [Screenshot unchanged]"
+                            // Screenshot unchanged
+                            false
                         }
-                    }
-                    Err(err_msg) => {
-                        // Include error message so LLM knows screenshot failed
-                        format!(" [Screenshot unavailable: {err_msg}]").leak()
-                    }
-                };
+                    } else {
+                        // No previous screenshot or hash computation failed, include it
+                        if let Some((phash, dhash)) = current_hash {
+                            *last_screenshot_info = Some((screenshot_path.clone(), phash, dhash));
+                        }
+                        true
+                    };
 
-                let status_line = if let Some(t) = title {
-                    format!(
-                        "Browser url: {url} — {t} ({browser_type}){viewport_info}{cursor_info}{screenshot_status}. You can interact with it using browser_* tools."
-                    )
-                } else {
-                    format!(
-                        "Browser url: {url} ({browser_type}){viewport_info}{cursor_info}{screenshot_status}. You can interact with it using browser_* tools."
-                    )
-                };
-                current_status.push('\n');
-                current_status.push_str(&status_line);
-            }
+                    if should_include_screenshot {
+                        if let Ok(bytes) = std::fs::read(&screenshot_path) {
+                            let mime = mime_guess::from_path(&screenshot_path)
+                                .first()
+                                .map(|m| m.to_string())
+                                .unwrap_or_else(|| "image/png".to_string());
+                            let encoded = base64::engine::general_purpose::STANDARD.encode(bytes);
+                            screenshot_content = Some(ContentItem::InputImage {
+                                image_url: format!("data:{mime};base64,{encoded}"),
+                            });
+                            include_screenshot = true;
+                            ""
+                        } else {
+                            " [Screenshot file read failed]"
+                        }
+                    } else {
+                        " [Screenshot unchanged]"
+                    }
+                }
+                Err(err_msg) => {
+                    // Include error message so LLM knows screenshot failed
+                    format!(" [Screenshot unavailable: {err_msg}]").leak()
+                }
+            };
+
+            let status_line = if let Some(t) = title {
+                format!(
+                    "Browser url: {url} — {t} ({browser_type}){viewport_info}{cursor_info}{screenshot_status}. You can interact with it using browser_* tools."
+                )
+            } else {
+                format!(
+                    "Browser url: {url} ({browser_type}){viewport_info}{cursor_info}{screenshot_status}. You can interact with it using browser_* tools."
+                )
+            };
+            current_status.push('\n');
+            current_status.push_str(&status_line);
         }
+    }
 
     // Check if system status has changed
     let mut last_status = sess.last_system_status.lock().unwrap();
@@ -638,10 +639,9 @@ async fn build_turn_status_items_legacy(sess: &Session) -> Vec<ResponseItem> {
         });
     }
 
-    if include_screenshot
-        && let Some(image) = screenshot_content {
-            content.push(image);
-        }
+    if include_screenshot && let Some(image) = screenshot_content {
+        content.push(image);
+    }
 
     if !content.is_empty() {
         jar.items.push(ResponseItem::Message {
@@ -681,117 +681,118 @@ async fn build_turn_status_items_v2(sess: &Session) -> Vec<ResponseItem> {
     }
 
     if let Some(browser_manager) = hanzo_browser::global::get_browser_manager().await
-        && browser_manager.is_enabled().await {
-            let browser_stream_id = {
-                let mut state = sess.state.lock().unwrap();
-                state.context_stream_ids.browser_stream_id(sess.id)
+        && browser_manager.is_enabled().await
+    {
+        let browser_stream_id = {
+            let mut state = sess.state.lock().unwrap();
+            state.context_stream_ids.browser_stream_id(sess.id)
+        };
+
+        if let Some((_, timeout)) = browser_manager.idle_elapsed_past_timeout().await {
+            let idle_text = format!(
+                "Browser idle (timeout {timeout:?}); screenshot capture paused until browser_* tools run again."
+            );
+            items.push(ResponseItem::Message {
+                id: Some(browser_stream_id),
+                role: "user".to_string(),
+                content: vec![ContentItem::InputText { text: idle_text }],
+            });
+            return items;
+        } else {
+            let url = browser_manager
+                .get_current_url()
+                .await
+                .unwrap_or_else(|| "unknown".to_string());
+
+            let title = match browser_manager.get_or_create_page().await {
+                Ok(page) => page.get_title().await,
+                Err(_) => None,
             };
 
-            if let Some((_, timeout)) = browser_manager.idle_elapsed_past_timeout().await {
-                let idle_text = format!(
-                    "Browser idle (timeout {timeout:?}); screenshot capture paused until browser_* tools run again."
-                );
-                items.push(ResponseItem::Message {
-                    id: Some(browser_stream_id),
-                    role: "user".to_string(),
-                    content: vec![ContentItem::InputText { text: idle_text }],
-                });
-                return items;
+            let browser_type = browser_manager.get_browser_type().await.to_string();
+            let (viewport_width, viewport_height) = browser_manager.get_viewport_size().await;
+            let cursor_position = browser_manager.get_cursor_position().await.ok();
+
+            let mut metadata = HashMap::new();
+            metadata.insert("browser_type".to_string(), browser_type.clone());
+            if let Some((x, y)) = cursor_position {
+                metadata.insert("cursor_position".to_string(), format!("{x:.0},{y:.0}"));
+            }
+
+            let viewport = if viewport_width > 0 && viewport_height > 0 {
+                Some(ViewportDimensions {
+                    width: viewport_width,
+                    height: viewport_height,
+                })
             } else {
-                let url = browser_manager
-                    .get_current_url()
-                    .await
-                    .unwrap_or_else(|| "unknown".to_string());
+                None
+            };
 
-                let title = match browser_manager.get_or_create_page().await {
-                    Ok(page) => page.get_title().await,
-                    Err(_) => None,
-                };
+            let mut screenshot_path = None;
 
-                let browser_type = browser_manager.get_browser_type().await.to_string();
-                let (viewport_width, viewport_height) = browser_manager.get_viewport_size().await;
-                let cursor_position = browser_manager.get_cursor_position().await.ok();
+            match capture_browser_screenshot(sess).await {
+                Ok((path, _)) => {
+                    add_pending_screenshot(sess, path.clone(), url.clone());
+                    let current_hash = crate::image_comparison::compute_image_hash(&path).ok();
+                    let mut last_info = sess.last_screenshot_info.lock().unwrap();
+                    let include_screenshot =
+                        should_include_browser_screenshot(&mut last_info, &path, current_hash);
+                    drop(last_info);
+                    if include_screenshot {
+                        screenshot_path = Some(path);
+                    }
+                }
+                Err(err_msg) => {
+                    trace!("env_ctx_v2: screenshot capture failed: {}", err_msg);
+                }
+            }
 
-                let mut metadata = HashMap::new();
-                metadata.insert("browser_type".to_string(), browser_type.clone());
-                if let Some((x, y)) = cursor_position {
-                    metadata.insert("cursor_position".to_string(), format!("{x:.0},{y:.0}"));
+            if let Some(path) = screenshot_path {
+                let captured_at = OffsetDateTime::now_utc()
+                    .format(&Rfc3339)
+                    .unwrap_or_else(|_| "1970-01-01T00:00:00Z".to_string());
+
+                let mut snapshot = BrowserSnapshot::new(url.clone(), captured_at);
+                snapshot.title = title.clone();
+                snapshot.viewport = viewport;
+                if !metadata.is_empty() {
+                    snapshot.metadata = Some(metadata);
                 }
 
-                let viewport = if viewport_width > 0 && viewport_height > 0 {
-                    Some(ViewportDimensions {
-                        width: viewport_width,
-                        height: viewport_height,
-                    })
-                } else {
-                    None
-                };
-
-                let mut screenshot_path = None;
-
-                match capture_browser_screenshot(sess).await {
-                    Ok((path, _)) => {
-                        add_pending_screenshot(sess, path.clone(), url.clone());
-                        let current_hash = crate::image_comparison::compute_image_hash(&path).ok();
-                        let mut last_info = sess.last_screenshot_info.lock().unwrap();
-                        let include_screenshot =
-                            should_include_browser_screenshot(&mut last_info, &path, current_hash);
-                        drop(last_info);
-                        if include_screenshot {
-                            screenshot_path = Some(path);
-                        }
-                    }
-                    Err(err_msg) => {
-                        trace!("env_ctx_v2: screenshot capture failed: {}", err_msg);
+                match snapshot.to_response_item_with_id(Some(&browser_stream_id)) {
+                    Ok(item) => items.push(item),
+                    Err(err) => {
+                        warn!("env_ctx_v2: failed to serialize browser_snapshot JSON: {err}")
                     }
                 }
 
-                if let Some(path) = screenshot_path {
-                    let captured_at = OffsetDateTime::now_utc()
-                        .format(&Rfc3339)
-                        .unwrap_or_else(|_| "1970-01-01T00:00:00Z".to_string());
+                if *crate::flags::CTX_UI {
+                    sess.emit_browser_snapshot_event(&browser_stream_id, &snapshot);
+                }
 
-                    let mut snapshot = BrowserSnapshot::new(url.clone(), captured_at);
-                    snapshot.title = title.clone();
-                    snapshot.viewport = viewport;
-                    if !metadata.is_empty() {
-                        snapshot.metadata = Some(metadata);
+                match std::fs::read(&path) {
+                    Ok(bytes) => {
+                        let mime = mime_guess::from_path(&path)
+                            .first()
+                            .map(|m| m.to_string())
+                            .unwrap_or_else(|| "image/png".to_string());
+                        let encoded = base64::engine::general_purpose::STANDARD.encode(bytes);
+                        items.push(ResponseItem::Message {
+                            id: Some(browser_stream_id),
+                            role: "user".to_string(),
+                            content: vec![ContentItem::InputImage {
+                                image_url: format!("data:{mime};base64,{encoded}"),
+                            }],
+                        });
                     }
-
-                    match snapshot.to_response_item_with_id(Some(&browser_stream_id)) {
-                        Ok(item) => items.push(item),
-                        Err(err) => {
-                            warn!("env_ctx_v2: failed to serialize browser_snapshot JSON: {err}")
-                        }
-                    }
-
-                    if *crate::flags::CTX_UI {
-                        sess.emit_browser_snapshot_event(&browser_stream_id, &snapshot);
-                    }
-
-                    match std::fs::read(&path) {
-                        Ok(bytes) => {
-                            let mime = mime_guess::from_path(&path)
-                                .first()
-                                .map(|m| m.to_string())
-                                .unwrap_or_else(|| "image/png".to_string());
-                            let encoded = base64::engine::general_purpose::STANDARD.encode(bytes);
-                            items.push(ResponseItem::Message {
-                                id: Some(browser_stream_id),
-                                role: "user".to_string(),
-                                content: vec![ContentItem::InputImage {
-                                    image_url: format!("data:{mime};base64,{encoded}"),
-                                }],
-                            });
-                        }
-                        Err(err) => warn!(
-                            "env_ctx_v2: failed to read screenshot file {}: {err}",
-                            path.display()
-                        ),
-                    }
+                    Err(err) => warn!(
+                        "env_ctx_v2: failed to read screenshot file {}: {err}",
+                        path.display()
+                    ),
                 }
             }
         }
+    }
 
     items
 }
@@ -805,9 +806,10 @@ fn should_include_browser_screenshot(
         if let Some((_, last_phash, last_dhash)) = last_info.as_ref()
             && crate::image_comparison::are_hashes_similar(
                 last_phash, last_dhash, &cur_phash, &cur_dhash,
-            ) {
-                return false;
-            }
+            )
+        {
+            return false;
+        }
         *last_info = Some((path.clone(), cur_phash, cur_dhash));
         true
     } else {

@@ -113,14 +113,15 @@ impl MessageProcessor {
 
     pub(crate) async fn process_request(&mut self, request: JSONRPCRequest) {
         if let Ok(request_json) = serde_json::to_value(request.clone())
-            && let Ok(code_request) = serde_json::from_value::<ClientRequest>(request_json) {
-                // If the request is a Codex request, handle it with the Codex
-                // message processor.
-                self.code_message_processor
-                    .process_request(code_request)
-                    .await;
-                return;
-            }
+            && let Ok(code_request) = serde_json::from_value::<ClientRequest>(request_json)
+        {
+            // If the request is a Codex request, handle it with the Codex
+            // message processor.
+            self.code_message_processor
+                .process_request(code_request)
+                .await;
+            return;
+        }
 
         tracing::trace!("processing JSON-RPC request: {}", request.method);
         // Hold on to the ID so we can respond.
@@ -214,45 +215,46 @@ impl MessageProcessor {
         let mut request = request;
 
         if request.method == mcp_types::InitializeRequest::METHOD
-            && let Some(params) = request.params.as_mut() {
-                if let Some(protocol_version) = params.get_mut("protocolVersion") {
-                    if let Some(num) = protocol_version.as_i64() {
-                        *protocol_version = serde_json::Value::String(num.to_string());
-                    } else if let Some(num) = protocol_version.as_u64() {
-                        *protocol_version = serde_json::Value::String(num.to_string());
-                    } else if protocol_version.is_null() {
-                        *protocol_version = serde_json::Value::String("1".to_string());
-                    }
-                }
-
-                if let serde_json::Value::Object(map) = params {
-                    if !map.contains_key("capabilities") {
-                        let capabilities = map
-                            .remove("clientCapabilities")
-                            .unwrap_or_else(|| serde_json::Value::Object(Default::default()));
-
-                        let mut cap_wrapper = serde_json::Map::new();
-                        cap_wrapper.insert("experimental".to_string(), capabilities);
-                        map.insert(
-                            "capabilities".to_string(),
-                            serde_json::Value::Object(cap_wrapper),
-                        );
-                    }
-
-                    map.entry("clientInfo").or_insert_with(|| {
-                        let mut info = serde_json::Map::new();
-                        info.insert(
-                            "name".to_string(),
-                            serde_json::Value::String("unknown-client".into()),
-                        );
-                        info.insert(
-                            "version".to_string(),
-                            serde_json::Value::String("0.0.0".into()),
-                        );
-                        serde_json::Value::Object(info)
-                    });
+            && let Some(params) = request.params.as_mut()
+        {
+            if let Some(protocol_version) = params.get_mut("protocolVersion") {
+                if let Some(num) = protocol_version.as_i64() {
+                    *protocol_version = serde_json::Value::String(num.to_string());
+                } else if let Some(num) = protocol_version.as_u64() {
+                    *protocol_version = serde_json::Value::String(num.to_string());
+                } else if protocol_version.is_null() {
+                    *protocol_version = serde_json::Value::String("1".to_string());
                 }
             }
+
+            if let serde_json::Value::Object(map) = params {
+                if !map.contains_key("capabilities") {
+                    let capabilities = map
+                        .remove("clientCapabilities")
+                        .unwrap_or_else(|| serde_json::Value::Object(Default::default()));
+
+                    let mut cap_wrapper = serde_json::Map::new();
+                    cap_wrapper.insert("experimental".to_string(), capabilities);
+                    map.insert(
+                        "capabilities".to_string(),
+                        serde_json::Value::Object(cap_wrapper),
+                    );
+                }
+
+                map.entry("clientInfo").or_insert_with(|| {
+                    let mut info = serde_json::Map::new();
+                    info.insert(
+                        "name".to_string(),
+                        serde_json::Value::String("unknown-client".into()),
+                    );
+                    info.insert(
+                        "version".to_string(),
+                        serde_json::Value::String("0.0.0".into()),
+                    );
+                    serde_json::Value::Object(info)
+                });
+            }
+        }
 
         let client_request = match McpClientRequest::try_from(request) {
             Ok(client_request) => client_request,
@@ -1142,13 +1144,14 @@ impl MessageProcessor {
         drop(config_guard);
 
         if let Some(op) = configure_op
-            && let Err(err) = entry.conversation.submit(op).await {
-                return Err(JSONRPCErrorError {
-                    code: INTERNAL_ERROR_CODE,
-                    message: err.to_string(),
-                    data: None,
-                });
-            }
+            && let Err(err) = entry.conversation.submit(op).await
+        {
+            return Err(JSONRPCErrorError {
+                code: INTERNAL_ERROR_CODE,
+                message: err.to_string(),
+                data: None,
+            });
+        }
 
         if let Some(models_meta) = models_meta_value {
             let notification = acp::SessionNotification {

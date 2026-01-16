@@ -422,9 +422,7 @@ impl AgentManager {
                 .values()
                 .map(|agent| {
                     // Just show the model name - status provides the useful info
-                    let name = agent
-                        .name.clone()
-                        .unwrap_or_else(|| agent.model.clone());
+                    let name = agent.name.clone().unwrap_or_else(|| agent.model.clone());
                     let start = agent.started_at.unwrap_or(agent.created_at);
                     let end = agent.completed_at.unwrap_or(now);
                     let elapsed_ms = match end.signed_duration_since(start).num_milliseconds() {
@@ -679,17 +677,20 @@ impl AgentManager {
             .values()
             .filter(|agent| {
                 if let Some(ref filter) = status_filter
-                    && agent.status != *filter {
-                        return false;
-                    }
+                    && agent.status != *filter
+                {
+                    return false;
+                }
                 if let Some(ref batch) = batch_id
-                    && agent.batch_id.as_ref() != Some(batch) {
-                        return false;
-                    }
+                    && agent.batch_id.as_ref() != Some(batch)
+                {
+                    return false;
+                }
                 if let Some(cutoff) = cutoff
-                    && agent.created_at < cutoff {
-                        return false;
-                    }
+                    && agent.created_at < cutoff
+                {
+                    return false;
+                }
                 true
             })
             .cloned()
@@ -930,9 +931,10 @@ async fn execute_agent(agent_id: String, config: Option<AgentConfig>) {
     // Prepend any per-agent instructions from config when available
     if let Some(cfg) = config.as_ref()
         && let Some(instr) = cfg.instructions.as_ref()
-            && !instr.trim().is_empty() {
-                full_prompt = format!("{}\n\n{}", instr.trim(), full_prompt);
-            }
+        && !instr.trim().is_empty()
+    {
+        full_prompt = format!("{}\n\n{}", instr.trim(), full_prompt);
+    }
     if let Some(context) = &context {
         let trimmed = full_prompt.trim_start();
         if trimmed.starts_with('/') {
@@ -1060,9 +1062,8 @@ async fn execute_agent(agent_id: String, config: Option<AgentConfig>) {
         }
     } else {
         // Execute in read-only mode
-        full_prompt = format!(
-            "{full_prompt}\n\n[Running in read-only mode - no modifications allowed]"
-        );
+        full_prompt =
+            format!("{full_prompt}\n\n[Running in read-only mode - no modifications allowed]");
         let use_built_in_cloud = config.is_none()
             && model_spec
                 .map(|spec| spec.cli.eq_ignore_ascii_case("cloud"))
@@ -1120,9 +1121,10 @@ fn prefer_json_result(
     fallback: Result<String, String>,
 ) -> Result<String, String> {
     if let Some(p) = path
-        && let Ok(json) = std::fs::read_to_string(p) {
-            return Ok(json);
-        }
+        && let Ok(json) = std::fs::read_to_string(p)
+    {
+        return Ok(json);
+    }
     fallback
 }
 
@@ -1210,12 +1212,13 @@ async fn execute_model_with_permissions(
                 }
                 let candidate = dir.join(cmd);
                 if let Ok(meta) = std::fs::metadata(&candidate)
-                    && meta.is_file() {
-                        let mode = meta.permissions().mode();
-                        if mode & 0o111 != 0 {
-                            return true;
-                        }
+                    && meta.is_file()
+                {
+                    let mode = meta.permissions().mode();
+                    if mode & 0o111 != 0 {
+                        return true;
                     }
+                }
             }
             false
         }
@@ -1230,15 +1233,16 @@ async fn execute_model_with_permissions(
         });
 
     if let Some(spec) = spec_opt
-        && !spec.is_enabled() {
-            if let Some(flag) = spec.gating_env {
-                return Err(format!(
-                    "agent model '{}' is disabled; set {}=1 to enable it",
-                    spec.slug, flag
-                ));
-            }
-            return Err(format!("agent model '{}' is disabled", spec.slug));
+        && !spec.is_enabled()
+    {
+        if let Some(flag) = spec.gating_env {
+            return Err(format!(
+                "agent model '{}' is disabled; set {}=1 to enable it",
+                spec.slug, flag
+            ));
         }
+        return Err(format!("agent model '{}' is disabled", spec.slug));
+    }
 
     // Use config command if provided, otherwise fall back to the spec CLI (or the
     // lowercase model string).
@@ -1461,11 +1465,12 @@ async fn execute_model_with_permissions(
     let mut env: std::collections::HashMap<String, String> = std::env::vars().collect();
     let orig_home: Option<String> = env.get("HOME").cloned();
     if let Some(ref cfg) = config
-        && let Some(ref e) = cfg.env {
-            for (k, v) in e {
-                env.insert(k.clone(), v.clone());
-            }
+        && let Some(ref e) = cfg.env
+    {
+        for (k, v) in e {
+            env.insert(k.clone(), v.clone());
         }
+    }
 
     if debug_subagent {
         env.entry("CODE_SUBAGENT_DEBUG".to_string())
@@ -1764,9 +1769,10 @@ pub(crate) fn should_use_current_exe_for_agent(
 
         // If the configured command matches the canonical CLI for this spec, prefer self.
         if let Some(spec) = agent_model_spec(&cfg.name).or_else(|| agent_model_spec(trimmed))
-            && trimmed.eq_ignore_ascii_case(spec.cli) {
-                return true;
-            }
+            && trimmed.eq_ignore_ascii_case(spec.cli)
+        {
+            return true;
+        }
 
         // Otherwise assume the user intentionally set a custom command; do not override.
         false
@@ -1819,11 +1825,15 @@ pub fn split_command_and_args(command: &str) -> (String, Vec<String>) {
         return (String::new(), Vec::new());
     }
     if let Some(tokens) = shlex_split(trimmed)
-        && let Some((first, rest)) = tokens.split_first() {
-            return (first.clone(), rest.to_vec());
-        }
+        && let Some((first, rest)) = tokens.split_first()
+    {
+        return (first.clone(), rest.to_vec());
+    }
 
-    let tokens: Vec<String> = trimmed.split_whitespace().map(std::string::ToString::to_string).collect();
+    let tokens: Vec<String> = trimmed
+        .split_whitespace()
+        .map(std::string::ToString::to_string)
+        .collect();
     if tokens.is_empty() {
         (String::new(), Vec::new())
     } else {
@@ -2023,34 +2033,35 @@ async fn execute_cloud_built_in_streaming(
         };
 
         if let Some(diff_text) = diff_text_opt
-            && !diff_text.is_empty() {
-                let mut apply = Command::new("git");
-                apply.arg("apply").arg("--whitespace=nowarn");
-                apply.current_dir(dir);
-                apply.stdin(Stdio::piped());
+            && !diff_text.is_empty()
+        {
+            let mut apply = Command::new("git");
+            apply.arg("apply").arg("--whitespace=nowarn");
+            apply.current_dir(dir);
+            apply.stdin(Stdio::piped());
 
-                let mut child = spawn_tokio_command_with_retry(&mut apply)
+            let mut child = spawn_tokio_command_with_retry(&mut apply)
+                .await
+                .map_err(|e| format!("Failed to spawn git apply: {e}"))?;
+
+            if let Some(mut stdin) = child.stdin.take() {
+                stdin
+                    .write_all(diff_text.as_bytes())
                     .await
-                    .map_err(|e| format!("Failed to spawn git apply: {e}"))?;
-
-                if let Some(mut stdin) = child.stdin.take() {
-                    stdin
-                        .write_all(diff_text.as_bytes())
-                        .await
-                        .map_err(|e| format!("Failed to write diff to git apply: {e}"))?;
-                }
-
-                let status = child
-                    .wait()
-                    .await
-                    .map_err(|e| format!("Failed to wait for git apply: {e}"))?;
-
-                if !status.success() {
-                    return Err(format!(
-                        "git apply exited with status {status} while applying cloud diff"
-                    ));
-                }
+                    .map_err(|e| format!("Failed to write diff to git apply: {e}"))?;
             }
+
+            let status = child
+                .wait()
+                .await
+                .map_err(|e| format!("Failed to wait for git apply: {e}"))?;
+
+            if !status.success() {
+                return Err(format!(
+                    "git apply exited with status {status} while applying cloud diff"
+                ));
+            }
+        }
     }
 
     // Truncate large outputs
@@ -2429,17 +2440,18 @@ fn canonicalize_agent_word_boundaries(input: &str) -> String {
         let mut split = false;
 
         if !current.is_empty()
-            && let Some(prev) = prev_char {
-                if prev.is_ascii_lowercase() && ch.is_ascii_uppercase() {
-                    split = true;
-                } else if prev.is_ascii_uppercase()
-                    && ch.is_ascii_uppercase()
-                    && uppercase_run > 0
-                    && next_char.is_some_and(|c| c.is_ascii_lowercase())
-                {
-                    split = true;
-                }
+            && let Some(prev) = prev_char
+        {
+            if prev.is_ascii_lowercase() && ch.is_ascii_uppercase() {
+                split = true;
+            } else if prev.is_ascii_uppercase()
+                && ch.is_ascii_uppercase()
+                && uppercase_run > 0
+                && next_char.is_some_and(|c| c.is_ascii_lowercase())
+            {
+                split = true;
             }
+        }
 
         if split {
             tokens.push(std::mem::take(&mut current));

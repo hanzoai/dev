@@ -441,9 +441,10 @@ impl SandboxPolicy {
                 // having to hardcode it in the config.
                 if !exclude_tmpdir_env_var
                     && let Some(tmpdir) = std::env::var_os("TMPDIR")
-                        && !tmpdir.is_empty() {
-                            roots.push(PathBuf::from(tmpdir));
-                        }
+                    && !tmpdir.is_empty()
+                {
+                    roots.push(PathBuf::from(tmpdir));
+                }
 
                 // For each root, compute subpaths that should remain read-only.
                 roots

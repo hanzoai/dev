@@ -398,9 +398,9 @@ pub(super) async fn submission_loop(
                         new_config.preferred_model_reasoning_effort,
                     )
                     .await
-                    {
-                        warn!("failed to persist model selection: {err:#}");
-                    }
+                {
+                    warn!("failed to persist model selection: {err:#}");
+                }
 
                 config = Arc::clone(&new_config);
 
@@ -440,9 +440,10 @@ pub(super) async fn submission_loop(
 
                 if config.debug {
                     if let Ok(logger) = debug_logger.lock()
-                        && let Err(e) = logger.set_session_usage_file(&session_id) {
-                            warn!("failed to initialise session usage log: {e}");
-                        }
+                        && let Err(e) = logger.set_session_usage_file(&session_id)
+                    {
+                        warn!("failed to initialise session usage log: {e}");
+                    }
 
                     // SAFETY: setting a process-wide env var is intentional here to
                     // coordinate sub-agent debug behaviour launched from this session.
@@ -676,27 +677,29 @@ pub(super) async fn submission_loop(
                 }
                 sess = Some(new_session);
                 if let Some(sess_arc) = &sess
-                    && !config.always_allow_commands.is_empty() {
-                        let mut st = sess_arc.state.lock().unwrap();
-                        for pattern in &config.always_allow_commands {
-                            st.approved_commands.insert(pattern.clone());
-                        }
+                    && !config.always_allow_commands.is_empty()
+                {
+                    let mut st = sess_arc.state.lock().unwrap();
+                    for pattern in &config.always_allow_commands {
+                        st.approved_commands.insert(pattern.clone());
                     }
+                }
                 let mut replay_history_items: Option<Vec<ResponseItem>> = None;
 
                 // Patch restored state into the newly created session.
                 if let Some(sess_arc) = &sess
-                    && let Some(items) = &restored_items {
-                        let turn_context = sess_arc.make_turn_context();
-                        let reconstructed =
-                            sess_arc.reconstruct_history_from_rollout(&turn_context, items);
-                        {
-                            let mut st = sess_arc.state.lock().unwrap();
-                            st.history = ConversationHistory::new();
-                            st.history.record_items(reconstructed.iter());
-                        }
-                        replay_history_items = Some(reconstructed);
+                    && let Some(items) = &restored_items
+                {
+                    let turn_context = sess_arc.make_turn_context();
+                    let reconstructed =
+                        sess_arc.reconstruct_history_from_rollout(&turn_context, items);
+                    {
+                        let mut st = sess_arc.state.lock().unwrap();
+                        st.history = ConversationHistory::new();
+                        st.history.record_items(reconstructed.iter());
                     }
+                    replay_history_items = Some(reconstructed);
+                }
 
                 // Gather history metadata for SessionConfiguredEvent.
                 let (history_log_id, history_entry_count) =
@@ -820,8 +823,7 @@ pub(super) async fn submission_loop(
 
                 // Spawn a new agent for this user input.
                 let turn_context = sess.make_turn_context_with_schema(final_output_json_schema);
-                let agent =
-                    AgentTask::spawn(Arc::clone(sess), turn_context, sub.id.clone(), items);
+                let agent = AgentTask::spawn(Arc::clone(sess), turn_context, sub.id.clone(), items);
                 sess.set_task(agent);
             }
             Op::QueueUserInput { items } => {
@@ -1132,18 +1134,19 @@ pub(super) async fn submission_loop(
                 if let Some(ref sess_arc) = sess {
                     let recorder_opt = sess_arc.rollout.lock().unwrap().take();
                     if let Some(rec) = recorder_opt
-                        && let Err(e) = rec.shutdown().await {
-                            warn!("failed to shutdown rollout recorder: {e}");
-                            let event = sess_arc.make_event(
-                                &sub.id,
-                                EventMsg::Error(ErrorEvent {
-                                    message: "Failed to shutdown rollout recorder".to_string(),
-                                }),
-                            );
-                            if let Err(e) = tx_event.send(event).await {
-                                warn!("failed to send error message: {e:?}");
-                            }
+                        && let Err(e) = rec.shutdown().await
+                    {
+                        warn!("failed to shutdown rollout recorder: {e}");
+                        let event = sess_arc.make_event(
+                            &sub.id,
+                            EventMsg::Error(ErrorEvent {
+                                message: "Failed to shutdown rollout recorder".to_string(),
+                            }),
+                        );
+                        if let Err(e) = tx_event.send(event).await {
+                            warn!("failed to send error message: {e:?}");
                         }
+                    }
                 }
                 if let Some(ref sess_arc) = sess {
                     sess_arc
@@ -1396,12 +1399,13 @@ fn parse_review_output_event(text: &str) -> ReviewOutputEvent {
 
     // Attempt to extract JSON from fenced code blocks if present.
     if let Some(idx) = text.find("```json")
-        && let Some(end_idx) = text[idx + 7..].find("```") {
-            let json_slice = &text[idx + 7..idx + 7 + end_idx];
-            if let Ok(parsed) = serde_json::from_str::<ReviewOutputEvent>(json_slice) {
-                return parsed;
-            }
+        && let Some(end_idx) = text[idx + 7..].find("```")
+    {
+        let json_slice = &text[idx + 7..idx + 7 + end_idx];
+        if let Ok(parsed) = serde_json::from_str::<ReviewOutputEvent>(json_slice) {
+            return parsed;
         }
+    }
 
     ReviewOutputEvent {
         findings: Vec::new(),
@@ -1586,14 +1590,13 @@ async fn run_agent(
                         (ResponseItem::Message { role, .. }, None) if role == "assistant" => {
                             // If the model returned a message, we need to record it.
                             items_to_record_in_conversation_history.push(item.clone());
-                            if is_review_mode
-                                && let ResponseItem::Message { content, .. } = &item {
-                                    for ci in content {
-                                        if let ContentItem::OutputText { text } = ci {
-                                            review_messages.push(text.clone());
-                                        }
+                            if is_review_mode && let ResponseItem::Message { content, .. } = &item {
+                                for ci in content {
+                                    if let ContentItem::OutputText { text } = ci {
+                                        review_messages.push(text.clone());
                                     }
                                 }
+                            }
                         }
                         (
                             ResponseItem::LocalShellCall { .. },
@@ -1815,8 +1818,9 @@ async fn run_agent(
         }),
     );
     if let EventMsg::TaskComplete(TaskCompleteEvent {
-            last_agent_message: Some(m),
-        }) = &event.msg {
+        last_agent_message: Some(m),
+    }) = &event.msg
+    {
         tracing::info!("core.emit TaskComplete last_agent_message.len={}", m.len());
     }
     sess.tx_event.send(event).await.ok();
@@ -1967,70 +1971,70 @@ async fn run_turn(
                 let mut switched = false;
                 if sess.client.auto_switch_accounts_on_rate_limit()
                     && auth::read_code_api_key_from_env().is_none()
-                    && let Some(auth_manager) = sess.client.get_auth_manager() {
-                        let auth = auth_manager.auth();
-                        let current_account_id = auth
+                    && let Some(auth_manager) = sess.client.get_auth_manager()
+                {
+                    let auth = auth_manager.auth();
+                    let current_account_id = auth
+                        .as_ref()
+                        .and_then(super::super::auth::CodexAuth::get_account_id)
+                        .or_else(|| {
+                            auth_accounts::get_active_account_id(sess.client.code_home())
+                                .ok()
+                                .flatten()
+                        });
+                    if let Some(current_account_id) = current_account_id {
+                        let now = Utc::now();
+                        let blocked_until = limit_err
+                            .resets_in_seconds
+                            .map(|seconds| now + chrono::Duration::seconds(seconds as i64));
+                        let current_auth_mode = auth
                             .as_ref()
-                            .and_then(super::super::auth::CodexAuth::get_account_id)
-                            .or_else(|| {
-                                auth_accounts::get_active_account_id(sess.client.code_home())
-                                    .ok()
-                                    .flatten()
-                            });
-                        if let Some(current_account_id) = current_account_id {
-                            let now = Utc::now();
-                            let blocked_until = limit_err
-                                .resets_in_seconds
-                                .map(|seconds| now + chrono::Duration::seconds(seconds as i64));
-                            let current_auth_mode = auth
-                                .as_ref()
-                                .map(|current| current.mode)
-                                .unwrap_or(AppAuthMode::ApiKey);
-                            match crate::account_switching::switch_active_account_on_rate_limit(
-                                sess.client.code_home(),
-                                &mut rate_limit_switch_state,
-                                sess.client.api_key_fallback_on_all_accounts_limited(),
-                                now,
-                                current_account_id.as_str(),
-                                current_auth_mode,
-                                blocked_until,
-                            ) {
-                                Ok(Some(next_account_id)) => {
-                                    let next_label = auth_accounts::find_account(
-                                        sess.client.code_home(),
-                                        &next_account_id,
-                                    )
-                                    .ok()
-                                    .flatten()
-                                    .and_then(|account| account.label)
-                                    .unwrap_or_else(|| next_account_id.clone());
-                                    tracing::info!(
-                                        from_account_id = %current_account_id,
-                                        to_account_id = %next_account_id,
-                                        reason = "usage_limit_reached",
-                                        "rate limit hit; auto-switching active account"
-                                    );
-                                    auth_manager.reload();
-                                    let order =
-                                        sess.next_background_order(&sub_id, attempt_req, None);
-                                    let notice = format!(
-                                        "Auto-switch: now using {next_label} due to usage limit."
-                                    );
-                                    sess.notify_background_event_with_order(&sub_id, order, notice)
-                                        .await;
-                                    switched = true;
-                                }
-                                Ok(None) => {}
-                                Err(err) => {
-                                    tracing::warn!(
-                                        from_account_id = %current_account_id,
-                                        error = %err,
-                                        "failed to activate account after usage limit"
-                                    );
-                                }
+                            .map(|current| current.mode)
+                            .unwrap_or(AppAuthMode::ApiKey);
+                        match crate::account_switching::switch_active_account_on_rate_limit(
+                            sess.client.code_home(),
+                            &mut rate_limit_switch_state,
+                            sess.client.api_key_fallback_on_all_accounts_limited(),
+                            now,
+                            current_account_id.as_str(),
+                            current_auth_mode,
+                            blocked_until,
+                        ) {
+                            Ok(Some(next_account_id)) => {
+                                let next_label = auth_accounts::find_account(
+                                    sess.client.code_home(),
+                                    &next_account_id,
+                                )
+                                .ok()
+                                .flatten()
+                                .and_then(|account| account.label)
+                                .unwrap_or_else(|| next_account_id.clone());
+                                tracing::info!(
+                                    from_account_id = %current_account_id,
+                                    to_account_id = %next_account_id,
+                                    reason = "usage_limit_reached",
+                                    "rate limit hit; auto-switching active account"
+                                );
+                                auth_manager.reload();
+                                let order = sess.next_background_order(&sub_id, attempt_req, None);
+                                let notice = format!(
+                                    "Auto-switch: now using {next_label} due to usage limit."
+                                );
+                                sess.notify_background_event_with_order(&sub_id, order, notice)
+                                    .await;
+                                switched = true;
+                            }
+                            Ok(None) => {}
+                            Err(err) => {
+                                tracing::warn!(
+                                    from_account_id = %current_account_id,
+                                    error = %err,
+                                    "failed to activate account after usage limit"
+                                );
                             }
                         }
                     }
+                }
 
                 if switched {
                     retries = 0;
@@ -2056,77 +2060,75 @@ async fn run_turn(
             Err(CodexErr::QuotaExceeded) => return Err(CodexErr::QuotaExceeded),
             Err(e) => {
                 // Detect context-window overflow and auto-run a compact summarization once
-                if !did_auto_compact
-                    && let CodexErr::Stream(msg, _maybe_delay, _req_id) = &e {
-                        let lower = msg.to_ascii_lowercase();
-                        let looks_like_context_overflow = lower
-                            .contains("exceeds the context window")
-                            || lower.contains("exceed the context window")
-                            || lower.contains("context length exceeded")
-                            || lower.contains("maximum context length")
-                            || (lower.contains("context window")
-                                && (lower.contains("exceed")
-                                    || lower.contains("exceeded")
-                                    || lower.contains("full")
-                                    || lower.contains("too long")));
+                if !did_auto_compact && let CodexErr::Stream(msg, _maybe_delay, _req_id) = &e {
+                    let lower = msg.to_ascii_lowercase();
+                    let looks_like_context_overflow = lower.contains("exceeds the context window")
+                        || lower.contains("exceed the context window")
+                        || lower.contains("context length exceeded")
+                        || lower.contains("maximum context length")
+                        || (lower.contains("context window")
+                            && (lower.contains("exceed")
+                                || lower.contains("exceeded")
+                                || lower.contains("full")
+                                || lower.contains("too long")));
 
-                        if looks_like_context_overflow {
-                            did_auto_compact = true;
-                            sess.notify_stream_error(
-                                &sub_id,
-                                "Model hit context-window limit; running /compact and retrying…"
-                                    .to_string(),
-                            )
-                            .await;
+                    if looks_like_context_overflow {
+                        did_auto_compact = true;
+                        sess.notify_stream_error(
+                            &sub_id,
+                            "Model hit context-window limit; running /compact and retrying…"
+                                .to_string(),
+                        )
+                        .await;
 
-                            let previous_input_snapshot = input.clone();
-                            let compacted_history =
-                                if compact::should_use_remote_compact_task(sess).await {
-                                    run_inline_remote_auto_compact_task(
-                                        Arc::clone(sess),
-                                        Arc::clone(turn_context),
-                                        Vec::new(),
-                                    )
-                                    .await
-                                } else {
-                                    compact::run_inline_auto_compact_task(
-                                        Arc::clone(sess),
-                                        Arc::clone(turn_context),
-                                    )
-                                    .await
-                                };
-
-                            // Reset any partial attempt state and rebuild the request payload using the
-                            // newly compacted history plus the current user turn items.
-                            sess.clear_scratchpad();
-
-                            if compacted_history.is_empty() {
-                                attempt_input = input.clone();
+                        let previous_input_snapshot = input.clone();
+                        let compacted_history =
+                            if compact::should_use_remote_compact_task(sess).await {
+                                run_inline_remote_auto_compact_task(
+                                    Arc::clone(sess),
+                                    Arc::clone(turn_context),
+                                    Vec::new(),
+                                )
+                                .await
                             } else {
-                                let mut rebuilt = compacted_history;
-                                if let Some(initial_item) = initial_user_item.clone() {
-                                    rebuilt.push(initial_item);
-                                }
-                                if !pending_input_tail.is_empty() {
-                                    let (missing_calls, filtered_outputs) =
-                                        reconcile_pending_tool_outputs(
-                                            &pending_input_tail,
-                                            &rebuilt,
-                                            &previous_input_snapshot,
-                                        );
-                                    if !missing_calls.is_empty() {
-                                        rebuilt.extend(missing_calls);
-                                    }
-                                    if !filtered_outputs.is_empty() {
-                                        rebuilt.extend(filtered_outputs);
-                                    }
-                                }
-                                input = rebuilt.clone();
-                                attempt_input = rebuilt;
+                                compact::run_inline_auto_compact_task(
+                                    Arc::clone(sess),
+                                    Arc::clone(turn_context),
+                                )
+                                .await
+                            };
+
+                        // Reset any partial attempt state and rebuild the request payload using the
+                        // newly compacted history plus the current user turn items.
+                        sess.clear_scratchpad();
+
+                        if compacted_history.is_empty() {
+                            attempt_input = input.clone();
+                        } else {
+                            let mut rebuilt = compacted_history;
+                            if let Some(initial_item) = initial_user_item.clone() {
+                                rebuilt.push(initial_item);
                             }
-                            continue;
+                            if !pending_input_tail.is_empty() {
+                                let (missing_calls, filtered_outputs) =
+                                    reconcile_pending_tool_outputs(
+                                        &pending_input_tail,
+                                        &rebuilt,
+                                        &previous_input_snapshot,
+                                    );
+                                if !missing_calls.is_empty() {
+                                    rebuilt.extend(missing_calls);
+                                }
+                                if !filtered_outputs.is_empty() {
+                                    rebuilt.extend(filtered_outputs);
+                                }
+                            }
+                            input = rebuilt.clone();
+                            attempt_input = rebuilt;
                         }
+                        continue;
                     }
+                }
 
                 // Use the configured provider-specific stream retry budget.
                 let max_retries = tc.client.get_provider().stream_max_retries();
@@ -2213,9 +2215,7 @@ async fn run_turn(
                                     0
                                 };
                                 let tail = &s[start_idx..];
-                                hint.push_str(&format!(
-                                    "Last assistant text fragment:\n{tail}\n"
-                                ));
+                                hint.push_str(&format!("Last assistant text fragment:\n{tail}\n"));
                             }
                             attempt_input.push(ResponseItem::Message {
                                 id: None,
@@ -2652,23 +2652,24 @@ async fn try_run_turn(
                 }
 
                 if let Some(usage) = token_usage.as_ref()
-                    && let Some(ctx) = account_usage_context(sess) {
-                        let usage_home = ctx.code_home.clone();
-                        let usage_account = ctx.account_id.clone();
-                        let usage_plan = ctx.plan;
-                        let usage_clone = usage.clone();
-                        spawn_usage_task(move || {
-                            if let Err(err) = account_usage::record_token_usage(
-                                &usage_home,
-                                &usage_account,
-                                usage_plan.as_deref(),
-                                &usage_clone,
-                                Utc::now(),
-                            ) {
-                                warn!("Failed to persist token usage: {err}");
-                            }
-                        });
-                    }
+                    && let Some(ctx) = account_usage_context(sess)
+                {
+                    let usage_home = ctx.code_home.clone();
+                    let usage_account = ctx.account_id.clone();
+                    let usage_plan = ctx.plan;
+                    let usage_clone = usage.clone();
+                    spawn_usage_task(move || {
+                        if let Err(err) = account_usage::record_token_usage(
+                            &usage_home,
+                            &usage_account,
+                            usage_plan.as_deref(),
+                            &usage_clone,
+                            Utc::now(),
+                        ) {
+                            warn!("Failed to persist token usage: {err}");
+                        }
+                    });
+                }
 
                 let unified_diff = turn_diff_tracker.get_unified_diff();
                 if let Ok(Some(unified_diff)) = unified_diff {
@@ -3422,15 +3423,16 @@ async fn handle_web_fetch(
     let mut params_for_event = serde_json::from_str::<serde_json::Value>(&arguments).ok();
     // If call_id is provided, include a friendly "for" string with the command we are waiting on
     if let Some(serde_json::Value::Object(map)) = params_for_event.as_mut()
-        && let Some(serde_json::Value::String(cid)) = map.get("call_id") {
-            let st = sess.state.lock().unwrap();
-            if let Some(bg) = st.background_execs.get(cid) {
-                map.insert(
-                    "for".to_string(),
-                    serde_json::Value::String(bg.cmd_display.clone()),
-                );
-            }
+        && let Some(serde_json::Value::String(cid)) = map.get("call_id")
+    {
+        let st = sess.state.lock().unwrap();
+        if let Some(bg) = st.background_execs.get(cid) {
+            map.insert(
+                "for".to_string(),
+                serde_json::Value::String(bg.cmd_display.clone()),
+            );
         }
+    }
     let arguments_clone = arguments.clone();
     let call_id_clone = ctx.call_id.clone();
 
@@ -4543,15 +4545,16 @@ async fn handle_wait(sess: &Session, ctx: &ToolCallCtx, arguments: String) -> Re
     }
     let mut params_for_event = serde_json::from_str::<serde_json::Value>(&arguments).ok();
     if let Some(serde_json::Value::Object(map)) = params_for_event.as_mut()
-        && let Some(serde_json::Value::String(cid)) = map.get("call_id") {
-            let st = sess.state.lock().unwrap();
-            if let Some(bg) = st.background_execs.get(cid) {
-                map.insert(
-                    "for".to_string(),
-                    serde_json::Value::String(bg.cmd_display.clone()),
-                );
-            }
+        && let Some(serde_json::Value::String(cid)) = map.get("call_id")
+    {
+        let st = sess.state.lock().unwrap();
+        if let Some(bg) = st.background_execs.get(cid) {
+            map.insert(
+                "for".to_string(),
+                serde_json::Value::String(bg.cmd_display.clone()),
+            );
         }
+    }
     let arguments_clone = arguments.clone();
     let ctx_clone = ToolCallCtx::new(
         ctx.sub_id.clone(),
@@ -4900,9 +4903,10 @@ async fn handle_gh_run_wait(
 
     async fn detect_branch(cwd: &Path) -> String {
         if let Some(branch) = run_git(cwd, &["rev-parse", "--abbrev-ref", "HEAD"]).await
-            && branch != "HEAD" {
-                return branch;
-            }
+            && branch != "HEAD"
+        {
+            return branch;
+        }
 
         if let Some(symref) = run_git(
             cwd,
@@ -4910,9 +4914,10 @@ async fn handle_gh_run_wait(
         )
         .await
             && let Some((_, name)) = symref.rsplit_once('/')
-                && !name.is_empty() {
-                    return name.to_string();
-                }
+            && !name.is_empty()
+        {
+            return name.to_string();
+        }
 
         if let Some(show) = run_git(cwd, &["remote", "show", "origin"]).await {
             for line in show.lines() {
@@ -5584,32 +5589,35 @@ pub(crate) async fn handle_agent_tool(
                 );
             }
             if let Some(ref ctx_str) = context
-                && !ctx_str.is_empty() {
-                    create_event.insert(
-                        "context".to_string(),
-                        serde_json::Value::String(ctx_str.clone()),
-                    );
-                }
+                && !ctx_str.is_empty()
+            {
+                create_event.insert(
+                    "context".to_string(),
+                    serde_json::Value::String(ctx_str.clone()),
+                );
+            }
             if let Some(ref output_str) = output
-                && !output_str.is_empty() {
-                    create_event.insert(
-                        "output".to_string(),
-                        serde_json::Value::String(output_str.clone()),
-                    );
-                }
+                && !output_str.is_empty()
+            {
+                create_event.insert(
+                    "output".to_string(),
+                    serde_json::Value::String(output_str.clone()),
+                );
+            }
             if let Some(ref files_vec) = files
-                && !files_vec.is_empty() {
-                    create_event.insert(
-                        "files".to_string(),
-                        serde_json::Value::Array(
-                            files_vec
-                                .iter()
-                                .cloned()
-                                .map(serde_json::Value::String)
-                                .collect(),
-                        ),
-                    );
-                }
+                && !files_vec.is_empty()
+            {
+                create_event.insert(
+                    "files".to_string(),
+                    serde_json::Value::Array(
+                        files_vec
+                            .iter()
+                            .cloned()
+                            .map(serde_json::Value::String)
+                            .collect(),
+                    ),
+                );
+            }
             if let Some(flag) = write {
                 create_event.insert("write".to_string(), serde_json::Value::Bool(flag));
             }
@@ -5617,12 +5625,13 @@ pub(crate) async fn handle_agent_tool(
                 create_event.insert("read_only".to_string(), serde_json::Value::Bool(flag));
             }
             if let Some(ref name_str) = normalized_name
-                && !name_str.is_empty() {
-                    create_event.insert(
-                        "name".to_string(),
-                        serde_json::Value::String(name_str.clone()),
-                    );
-                }
+                && !name_str.is_empty()
+            {
+                create_event.insert(
+                    "name".to_string(),
+                    serde_json::Value::String(name_str.clone()),
+                );
+            }
 
             let mut event_root = serde_json::Map::new();
             event_root.insert(
@@ -5822,9 +5831,7 @@ pub(crate) async fn handle_agent_tool(
             let wait_event_payload = serde_json::Value::Object(wait_event_root);
             match serde_json::to_string(&params) {
                 Ok(json) => handle_wait_for_agent(sess, ctx, json, wait_event_payload).await,
-                Err(e) => {
-                    agent_tool_failure(ctx, format!("Failed to encode wait arguments: {e}"))
-                }
+                Err(e) => agent_tool_failure(ctx, format!("Failed to encode wait arguments: {e}")),
             }
         }
         "list" => {
@@ -5849,12 +5856,13 @@ pub(crate) async fn handle_agent_tool(
             };
             let mut list_event = serde_json::Map::new();
             if let Some(ref status) = status_filter
-                && !status.is_empty() {
-                    list_event.insert(
-                        "status_filter".to_string(),
-                        serde_json::Value::String(status.clone()),
-                    );
-                }
+                && !status.is_empty()
+            {
+                list_event.insert(
+                    "status_filter".to_string(),
+                    serde_json::Value::String(status.clone()),
+                );
+            }
             list_event.insert("batch_id".to_string(), serde_json::Value::String(batch_id));
             if let Some(recent) = recent_only {
                 list_event.insert("recent_only".to_string(), serde_json::Value::Bool(recent));
@@ -5868,9 +5876,7 @@ pub(crate) async fn handle_agent_tool(
             let list_event_payload = serde_json::Value::Object(list_event_root);
             match serde_json::to_string(&params) {
                 Ok(json) => handle_list_agents(sess, ctx, json, list_event_payload).await,
-                Err(e) => {
-                    agent_tool_failure(ctx, format!("Failed to encode list arguments: {e}"))
-                }
+                Err(e) => agent_tool_failure(ctx, format!("Failed to encode list arguments: {e}")),
             }
         }
         other => agent_tool_failure(ctx, format!("Unsupported agent action: {other}")),
@@ -6465,9 +6471,7 @@ async fn handle_get_agent_result(
                                 return ResponseInputItem::FunctionCallOutput {
                                     call_id: call_id_clone,
                                     output: FunctionCallOutputPayload {
-                                        content: format!(
-                                            "Failed to prepare agent output dir: {e}"
-                                        ),
+                                        content: format!("Failed to prepare agent output dir: {e}"),
                                         success: Some(false),
                                     },
                                 };
@@ -6594,17 +6598,18 @@ async fn handle_cancel_agent(
                             }
                         };
                         if let Some(agent) = manager.get_agent(&agent_id)
-                            && agent.batch_id.as_deref() != Some(batch_id.as_str()) {
-                                return ResponseInputItem::FunctionCallOutput {
-                                    call_id: call_id_clone,
-                                    output: FunctionCallOutputPayload {
-                                        content: format!(
-                                            "Agent {agent_id} does not belong to batch {batch_id}"
-                                        ),
-                                        success: Some(false),
-                                    },
-                                };
-                            }
+                            && agent.batch_id.as_deref() != Some(batch_id.as_str())
+                        {
+                            return ResponseInputItem::FunctionCallOutput {
+                                call_id: call_id_clone,
+                                output: FunctionCallOutputPayload {
+                                    content: format!(
+                                        "Agent {agent_id} does not belong to batch {batch_id}"
+                                    ),
+                                    success: Some(false),
+                                },
+                            };
+                        }
                         if manager.cancel_agent(&agent_id).await {
                             ResponseInputItem::FunctionCallOutput {
                                 call_id: call_id_clone,
@@ -6627,9 +6632,7 @@ async fn handle_cancel_agent(
                         ResponseInputItem::FunctionCallOutput {
                             call_id: call_id_clone,
                             output: FunctionCallOutputPayload {
-                                content: format!(
-                                    "Cancelled {count} agents in batch {batch_id}"
-                                ),
+                                content: format!("Cancelled {count} agents in batch {batch_id}"),
                                 success: Some(true),
                             },
                         }
@@ -7597,39 +7600,40 @@ async fn handle_container_exec_with_params(
         let dry_run_analysis = analyze_command(&params.command);
         if !has_confirm_prefix
             && let Some(analysis) = dry_run_analysis.as_ref()
-                && analysis.disposition == DryRunDisposition::Mutating {
-                    let needs_dry_run = {
-                        let state = sess.state.lock().unwrap();
-                        !state.dry_run_guard.has_recent_dry_run(analysis.key)
-                    };
-                    if needs_dry_run {
-                        let mut argv_confirm = params.command.clone();
-                        argv_confirm[script_index] =
-                            format!("confirm: {}", params.command[script_index].trim_start());
-                        let guidance = guidance_for_dry_run_guard(
-                            analysis,
-                            "original_script",
-                            &params.command[script_index],
-                            argv_confirm,
-                        );
+            && analysis.disposition == DryRunDisposition::Mutating
+        {
+            let needs_dry_run = {
+                let state = sess.state.lock().unwrap();
+                !state.dry_run_guard.has_recent_dry_run(analysis.key)
+            };
+            if needs_dry_run {
+                let mut argv_confirm = params.command.clone();
+                argv_confirm[script_index] =
+                    format!("confirm: {}", params.command[script_index].trim_start());
+                let guidance = guidance_for_dry_run_guard(
+                    analysis,
+                    "original_script",
+                    &params.command[script_index],
+                    argv_confirm,
+                );
 
-                        let order = sess.next_background_order(&sub_id, attempt_req, output_index);
-                        sess.notify_background_event_with_order(
-                            &sub_id,
-                            order,
-                            format!("Command guard: {}", guidance.clone()),
-                        )
-                        .await;
+                let order = sess.next_background_order(&sub_id, attempt_req, output_index);
+                sess.notify_background_event_with_order(
+                    &sub_id,
+                    order,
+                    format!("Command guard: {}", guidance.clone()),
+                )
+                .await;
 
-                        return ResponseInputItem::FunctionCallOutput {
-                            call_id,
-                            output: FunctionCallOutputPayload {
-                                content: guidance,
-                                success: None,
-                            },
-                        };
-                    }
-                }
+                return ResponseInputItem::FunctionCallOutput {
+                    call_id,
+                    output: FunctionCallOutputPayload {
+                        content: guidance,
+                        success: None,
+                    },
+                };
+            }
+        }
     }
 
     strip_leading_confirm_prefix(&mut params.command);
@@ -7695,17 +7699,55 @@ async fn handle_container_exec_with_params(
     if extract_shell_script_from_wrapper(&params.command).is_none() {
         let joined = params.command.join(" ");
         if !sess.confirm_guard.is_empty()
-            && let Some(pattern) = sess.confirm_guard.matched_pattern(&joined) {
-                let suggested = serde_json::to_string(&vec![
+            && let Some(pattern) = sess.confirm_guard.matched_pattern(&joined)
+        {
+            let suggested = serde_json::to_string(&vec![
+                "bash".to_string(),
+                "-lc".to_string(),
+                format!("confirm: {}", joined),
+            ])
+            .unwrap_or_else(|_| "<failed to serialize suggested argv>".to_string());
+            let guidance = pattern.guidance(
+                "original_argv",
+                &format!("{:?}", params.command),
+                &suggested,
+            );
+
+            let order = sess.next_background_order(&sub_id, attempt_req, output_index);
+            sess.notify_background_event_with_order(
+                &sub_id,
+                order,
+                format!("Command guard: {}", guidance.clone()),
+            )
+            .await;
+
+            return ResponseInputItem::FunctionCallOutput {
+                call_id,
+                output: FunctionCallOutputPayload {
+                    content: guidance,
+                    success: None,
+                },
+            };
+        }
+
+        if let Some(analysis) = analyze_command(&params.command)
+            && analysis.disposition == DryRunDisposition::Mutating
+        {
+            let needs_dry_run = {
+                let state = sess.state.lock().unwrap();
+                !state.dry_run_guard.has_recent_dry_run(analysis.key)
+            };
+            if needs_dry_run {
+                let resend = vec![
                     "bash".to_string(),
                     "-lc".to_string(),
                     format!("confirm: {}", joined),
-                ])
-                .unwrap_or_else(|_| "<failed to serialize suggested argv>".to_string());
-                let guidance = pattern.guidance(
+                ];
+                let guidance = guidance_for_dry_run_guard(
+                    &analysis,
                     "original_argv",
                     &format!("{:?}", params.command),
-                    &suggested,
+                    resend,
                 );
 
                 let order = sess.next_background_order(&sub_id, attempt_req, output_index);
@@ -7724,43 +7766,7 @@ async fn handle_container_exec_with_params(
                     },
                 };
             }
-
-        if let Some(analysis) = analyze_command(&params.command)
-            && analysis.disposition == DryRunDisposition::Mutating {
-                let needs_dry_run = {
-                    let state = sess.state.lock().unwrap();
-                    !state.dry_run_guard.has_recent_dry_run(analysis.key)
-                };
-                if needs_dry_run {
-                    let resend = vec![
-                        "bash".to_string(),
-                        "-lc".to_string(),
-                        format!("confirm: {}", joined),
-                    ];
-                    let guidance = guidance_for_dry_run_guard(
-                        &analysis,
-                        "original_argv",
-                        &format!("{:?}", params.command),
-                        resend,
-                    );
-
-                    let order = sess.next_background_order(&sub_id, attempt_req, output_index);
-                    sess.notify_background_event_with_order(
-                        &sub_id,
-                        order,
-                        format!("Command guard: {}", guidance.clone()),
-                    )
-                    .await;
-
-                    return ResponseInputItem::FunctionCallOutput {
-                        call_id,
-                        output: FunctionCallOutputPayload {
-                            content: guidance,
-                            success: None,
-                        },
-                    };
-                }
-            }
+        }
 
         fn strip_tok2(t: &str) -> &str {
             t.trim_matches(|c| matches!(c, '(' | ')' | '{' | '}' | '\'' | '"'))
@@ -7892,23 +7898,24 @@ async fn handle_container_exec_with_params(
     {
         MaybeApplyPatchVerified::Body(action) => {
             if let Some(branch_root) = git_worktree::branch_worktree_root(sess.get_cwd())
-                && let Some(guidance) = guard_apply_patch_outside_branch(&branch_root, &action) {
-                    let order = sess.next_background_order(&sub_id, attempt_req, output_index);
-                    sess.notify_background_event_with_order(
-                        &sub_id,
-                        order,
-                        format!("Command guard: {}", guidance.clone()),
-                    )
-                    .await;
+                && let Some(guidance) = guard_apply_patch_outside_branch(&branch_root, &action)
+            {
+                let order = sess.next_background_order(&sub_id, attempt_req, output_index);
+                sess.notify_background_event_with_order(
+                    &sub_id,
+                    order,
+                    format!("Command guard: {}", guidance.clone()),
+                )
+                .await;
 
-                    return ResponseInputItem::FunctionCallOutput {
-                        call_id,
-                        output: FunctionCallOutputPayload {
-                            content: guidance,
-                            success: None,
-                        },
-                    };
-                }
+                return ResponseInputItem::FunctionCallOutput {
+                    call_id,
+                    output: FunctionCallOutputPayload {
+                        content: guidance,
+                        success: None,
+                    },
+                };
+            }
 
             let changes = convert_apply_patch_to_protocol(&action);
             turn_diff_tracker.on_patch_begin(&changes);
@@ -7949,7 +7956,9 @@ async fn handle_container_exec_with_params(
             {
                 ApplyPatchResult::Reply(item) => return item,
                 ApplyPatchResult::Applied(run) => {
-                    if let Some(ctx) = hook_ctx.apply_patch.as_mut() { ctx.user_explicitly_approved_this_action = !run.auto_approved; }
+                    if let Some(ctx) = hook_ctx.apply_patch.as_mut() {
+                        ctx.user_explicitly_approved_this_action = !run.auto_approved;
+                    }
 
                     let order_begin = crate::protocol::OrderMeta {
                         request_ordinal: attempt_req,
@@ -8027,12 +8036,13 @@ async fn handle_container_exec_with_params(
                         content.push_str(&format!("stderr: {}", run.stderr));
                     }
                     if let Some(summary) = run.harness_summary_json
-                        && !summary.is_empty() {
-                            if !content.is_empty() {
-                                content.push('\n');
-                            }
-                            content.push_str(&summary);
+                        && !summary.is_empty()
+                    {
+                        if !content.is_empty() {
+                            content.push('\n');
                         }
+                        content.push_str(&summary);
+                    }
 
                     return ResponseInputItem::FunctionCallOutput {
                         call_id,
@@ -8318,19 +8328,20 @@ async fn handle_container_exec_with_params(
         }
 
         if backgrounded_task.load(std::sync::atomic::Ordering::Relaxed)
-            && let Some(sess_arc) = sess_for_hooks.clone() {
-                let mut hook_tracker = TurnDiffTracker::new();
-                sess_arc
-                    .run_hooks_for_exec_event(
-                        &mut hook_tracker,
-                        ProjectHookEvent::ToolAfter,
-                        &exec_ctx_for_hooks,
-                        &params_for_after_hooks,
-                        Some(&out),
-                        attempt_req_for_task,
-                    )
-                    .await;
-            }
+            && let Some(sess_arc) = sess_for_hooks.clone()
+        {
+            let mut hook_tracker = TurnDiffTracker::new();
+            sess_arc
+                .run_hooks_for_exec_event(
+                    &mut hook_tracker,
+                    ProjectHookEvent::ToolAfter,
+                    &exec_ctx_for_hooks,
+                    &params_for_after_hooks,
+                    Some(&out),
+                    attempt_req_for_task,
+                )
+                .await;
+        }
         // Only emit background completion notifications if the command actually backgrounded
         if backgrounded_task.load(std::sync::atomic::Ordering::Relaxed) {
             if !suppress_event_flag_task.load(std::sync::atomic::Ordering::Relaxed) {
@@ -8423,10 +8434,11 @@ async fn handle_container_exec_with_params(
                 sess.tool_output_max_bytes,
             );
             if let Some(harness) = harness_summary_json.as_ref()
-                && !harness.is_empty() {
-                    content.push('\n');
-                    content.push_str(harness);
-                }
+                && !harness.is_empty()
+            {
+                content.push('\n');
+                content.push_str(harness);
+            }
 
             sess.run_hooks_for_exec_event(
                 turn_diff_tracker,
@@ -8713,9 +8725,10 @@ pub(super) fn truncate_middle_bytes(s: &str, max_bytes: usize) -> (String, bool,
     let prefix_end = {
         let mut end = left_budget.min(s.len());
         if let Some(head) = s.get(..end)
-            && let Some(i) = head.rfind('\n') {
-                end = i + 1;
-            }
+            && let Some(i) = head.rfind('\n')
+        {
+            end = i + 1;
+        }
         while end > 0 && !s.is_char_boundary(end) {
             end -= 1;
         }
@@ -8726,9 +8739,10 @@ pub(super) fn truncate_middle_bytes(s: &str, max_bytes: usize) -> (String, bool,
     let suffix_start = {
         let mut start = s.len().saturating_sub(right_budget);
         if let Some(tail) = s.get(start..)
-            && let Some(i) = tail.find('\n') {
-                start += i + 1;
-            }
+            && let Some(i) = tail.find('\n')
+        {
+            start += i + 1;
+        }
         while start < s.len() && !s.is_char_boundary(start) {
             start += 1;
         }
@@ -9685,9 +9699,7 @@ async fn handle_browser_click(
                             return ResponseInputItem::FunctionCallOutput {
                                 call_id: call_id_clone.clone(),
                                 output: FunctionCallOutputPayload {
-                                    content: format!(
-                                        "Failed to get current cursor position: {e}"
-                                    ),
+                                    content: format!("Failed to get current cursor position: {e}"),
                                     success: Some(false),
                                 },
                             };
@@ -9776,13 +9788,25 @@ async fn handle_browser_move(
 
                         let result = if has_dx || has_dy {
                             // Relative movement
-                            let dx = json.get("dx").and_then(serde_json::Value::as_f64).unwrap_or(0.0);
-                            let dy = json.get("dy").and_then(serde_json::Value::as_f64).unwrap_or(0.0);
+                            let dx = json
+                                .get("dx")
+                                .and_then(serde_json::Value::as_f64)
+                                .unwrap_or(0.0);
+                            let dy = json
+                                .get("dy")
+                                .and_then(serde_json::Value::as_f64)
+                                .unwrap_or(0.0);
                             browser_manager.move_mouse_relative(dx, dy).await
                         } else if has_x || has_y {
                             // Absolute movement
-                            let x = json.get("x").and_then(serde_json::Value::as_f64).unwrap_or(0.0);
-                            let y = json.get("y").and_then(serde_json::Value::as_f64).unwrap_or(0.0);
+                            let x = json
+                                .get("x")
+                                .and_then(serde_json::Value::as_f64)
+                                .unwrap_or(0.0);
+                            let y = json
+                                .get("y")
+                                .and_then(serde_json::Value::as_f64)
+                                .unwrap_or(0.0);
                             browser_manager.move_mouse(x, y).await.map(|_| (x, y))
                         } else {
                             // No parameters provided, just return current position
@@ -10021,16 +10045,16 @@ async fn handle_browser_javascript(
                                         let mut output = String::new();
 
                                         if let Some(logs) = logs
-                                            && !logs.is_empty() {
-                                                output.push_str("Console logs:\n");
-                                                for log in logs {
-                                                    if let Some(log_str) = log.as_str() {
-                                                        output
-                                                            .push_str(&format!("  {log_str}\n"));
-                                                    }
+                                            && !logs.is_empty()
+                                        {
+                                            output.push_str("Console logs:\n");
+                                            for log in logs {
+                                                if let Some(log_str) = log.as_str() {
+                                                    output.push_str(&format!("  {log_str}\n"));
                                                 }
-                                                output.push('\n');
                                             }
+                                            output.push('\n');
+                                        }
 
                                         if success.as_bool().unwrap_or(false) {
                                             output.push_str("Result: ");
@@ -10122,8 +10146,14 @@ async fn handle_browser_scroll(
                 let args: Result<Value, _> = serde_json::from_str(&arguments_clone);
                 match args {
                     Ok(json) => {
-                        let dx = json.get("dx").and_then(serde_json::Value::as_f64).unwrap_or(0.0);
-                        let dy = json.get("dy").and_then(serde_json::Value::as_f64).unwrap_or(0.0);
+                        let dx = json
+                            .get("dx")
+                            .and_then(serde_json::Value::as_f64)
+                            .unwrap_or(0.0);
+                        let dy = json
+                            .get("dy")
+                            .and_then(serde_json::Value::as_f64)
+                            .unwrap_or(0.0);
 
                         match browser_manager.scroll_by(dx, dy).await {
                             Ok(_) => ResponseInputItem::FunctionCallOutput {
@@ -10714,20 +10744,19 @@ struct CatWriteSuggestion {
 
 fn detect_cat_write(argv: &[String]) -> Option<CatWriteSuggestion> {
     if let Some((_, script)) = extract_shell_script_from_wrapper(argv)
-        && script_contains_cat_write(&script) {
-            return Some(CatWriteSuggestion {
-                label: "original_script",
-                original_value: script,
-            });
-        }
+        && script_contains_cat_write(&script)
+    {
+        return Some(CatWriteSuggestion {
+            label: "original_script",
+            original_value: script,
+        });
+    }
 
     None
 }
 
 fn script_contains_cat_write(script: &str) -> bool {
-    script
-        .lines()
-        .any(line_contains_cat_heredoc_write)
+    script.lines().any(line_contains_cat_heredoc_write)
 }
 
 fn line_contains_cat_heredoc_write(line: &str) -> bool {
@@ -10885,12 +10914,13 @@ struct PythonWriteSuggestion {
 
 fn detect_python_write(argv: &[String]) -> Option<PythonWriteSuggestion> {
     if let Some((_, script)) = extract_shell_script_from_wrapper(argv)
-        && script_contains_python_write(&script) {
-            return Some(PythonWriteSuggestion {
-                label: "original_script",
-                original_value: script,
-            });
-        }
+        && script_contains_python_write(&script)
+    {
+        return Some(PythonWriteSuggestion {
+            label: "original_script",
+            original_value: script,
+        });
+    }
 
     detect_python_write_in_argv(argv)
 }
@@ -10971,9 +11001,9 @@ fn detect_redundant_cd(argv: &[String], cwd: &Path) -> Option<RedundantCdSuggest
     if let Some((script_index, script)) = extract_shell_script_from_wrapper(argv)
         && let Some(suggestion) =
             detect_redundant_cd_in_shell(argv, script_index, &script, cwd, &normalized_cwd)
-        {
-            return Some(suggestion);
-        }
+    {
+        return Some(suggestion);
+    }
     detect_redundant_cd_in_argv(argv, cwd, &normalized_cwd)
 }
 
@@ -11453,9 +11483,10 @@ impl Default for TimelineReplayContext {
 pub(super) fn process_rollout_env_item(ctx: &mut TimelineReplayContext, item: &ResponseItem) {
     if let Some(snapshot) = parse_env_snapshot_from_response(item) {
         if ctx.timeline.baseline().is_none()
-            && let Err(err) = ctx.timeline.add_baseline_once(snapshot.clone()) {
-                tracing::warn!("env_ctx_v2: failed to seed baseline during replay: {err}");
-            }
+            && let Err(err) = ctx.timeline.add_baseline_once(snapshot.clone())
+        {
+            tracing::warn!("env_ctx_v2: failed to seed baseline during replay: {err}");
+        }
 
         match ctx.timeline.record_snapshot(snapshot.clone()) {
             Ok(true) => crate::telemetry::global_telemetry().record_snapshot_commit(),
@@ -11513,10 +11544,12 @@ pub(super) fn process_rollout_env_item(ctx: &mut TimelineReplayContext, item: &R
         return;
     }
 
-    if ctx.legacy_baseline.is_none() && is_legacy_system_status(item)
-        && let Some(snapshot) = parse_legacy_status_snapshot(item) {
-            ctx.legacy_baseline = Some(snapshot);
-        }
+    if ctx.legacy_baseline.is_none()
+        && is_legacy_system_status(item)
+        && let Some(snapshot) = parse_legacy_status_snapshot(item)
+    {
+        ctx.legacy_baseline = Some(snapshot);
+    }
 }
 
 fn extract_tagged_json<'a>(text: &'a str, open: &str, close: &str) -> Option<&'a str> {
@@ -11542,9 +11575,10 @@ pub(super) fn parse_env_snapshot_from_response(
                     ENVIRONMENT_CONTEXT_OPEN_TAG,
                     ENVIRONMENT_CONTEXT_CLOSE_TAG,
                 )
-                    && let Ok(snapshot) = serde_json::from_str::<EnvironmentContextSnapshot>(json) {
-                        return Some(snapshot);
-                    }
+                && let Ok(snapshot) = serde_json::from_str::<EnvironmentContextSnapshot>(json)
+            {
+                return Some(snapshot);
+            }
         }
     }
     None
@@ -11564,9 +11598,10 @@ pub(super) fn parse_env_delta_from_response(
                     ENVIRONMENT_CONTEXT_DELTA_OPEN_TAG,
                     ENVIRONMENT_CONTEXT_DELTA_CLOSE_TAG,
                 )
-                    && let Ok(delta) = serde_json::from_str::<EnvironmentContextDelta>(json) {
-                        return Some(delta);
-                    }
+                && let Ok(delta) = serde_json::from_str::<EnvironmentContextDelta>(json)
+            {
+                return Some(delta);
+            }
         }
     }
     None

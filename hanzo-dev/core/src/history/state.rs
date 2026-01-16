@@ -427,8 +427,7 @@ pub enum TextTone {
     Info,
 }
 
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-#[derive(Default)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, Default)]
 pub struct TextEmphasis {
     pub bold: bool,
     pub italic: bool,
@@ -436,7 +435,6 @@ pub struct TextEmphasis {
     pub strike: bool,
     pub underline: bool,
 }
-
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub enum TextEntity {
@@ -755,11 +753,12 @@ fn prune_exec_stream(chunks: &mut Vec<ExecStreamChunk>, max_bytes: usize) {
     }
 
     if bytes_to_drop > 0
-        && let Some(first) = chunks.first_mut() {
-            let drain = bytes_to_drop.min(first.content.len());
-            first.offset = first.offset.saturating_add(drain);
-            first.content.drain(..drain);
-        }
+        && let Some(first) = chunks.first_mut()
+    {
+        let drain = bytes_to_drop.min(first.content.len());
+        first.offset = first.offset.saturating_add(drain);
+        first.content.drain(..drain);
+    }
 }
 
 fn append_assistant_delta(
@@ -1011,7 +1010,6 @@ pub enum ContextDeltaField {
     BrowserSnapshot,
 }
 
-
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ContextDeltaRecord {
     pub field: ContextDeltaField,
@@ -1195,14 +1193,16 @@ impl HistoryUsageTracker {
     fn restore_snapshot(&mut self, record: &HistoryRecord, snapshot: UsageTrackerSnapshot) {
         if let Some(state) = snapshot.exec
             && let HistoryRecord::Exec(exec_record) = record
-                && exec_record.id != HistoryId::ZERO {
-                    self.exec.insert(exec_record.id, state);
-                }
+            && exec_record.id != HistoryId::ZERO
+        {
+            self.exec.insert(exec_record.id, state);
+        }
         if let Some(state) = snapshot.assistant
             && let HistoryRecord::AssistantStream(stream_record) = record
-                && stream_record.id != HistoryId::ZERO {
-                    self.assistant.insert(stream_record.id, state);
-                }
+            && stream_record.id != HistoryId::ZERO
+        {
+            self.assistant.insert(stream_record.id, state);
+        }
     }
 
     fn observe_exec(&mut self, record: &ExecRecord, label: &'static str) {
@@ -1334,9 +1334,10 @@ fn assistant_preview(state: &AssistantStreamState) -> String {
         return truncate_display(state.preview_markdown.trim());
     }
     if let Some(last) = state.deltas.last()
-        && !last.delta.trim().is_empty() {
-            return truncate_display(last.delta.trim());
-        }
+        && !last.delta.trim().is_empty()
+    {
+        return truncate_display(last.delta.trim());
+    }
     "<empty preview>".to_string()
 }
 
@@ -1464,14 +1465,15 @@ impl HistoryState {
                 HistoryRecord::AssistantStream(state) => state.stream_id == stream_id,
                 _ => false,
             })
-                && let Some(HistoryRecord::AssistantStream(state)) = self.remove(idx) {
-                    if !state.citations.is_empty() {
-                        carried_citations = state.citations;
-                    }
-                    if carried_metadata.is_none() {
-                        carried_metadata = state.metadata;
-                    }
-                }
+            && let Some(HistoryRecord::AssistantStream(state)) = self.remove(idx)
+        {
+            if !state.citations.is_empty() {
+                carried_citations = state.citations;
+            }
+            if carried_metadata.is_none() {
+                carried_metadata = state.metadata;
+            }
+        }
 
         let citations = metadata
             .map(|meta| meta.citations.clone())
@@ -1492,14 +1494,15 @@ impl HistoryState {
                 }
                 _ => false,
             })
-                && let HistoryRecord::AssistantMessage(existing) = &mut self.records[idx] {
-                    existing.markdown = markdown;
-                    existing.citations = citations;
-                    existing.metadata = metadata;
-                    existing.token_usage = token_usage;
-                    existing.created_at = SystemTime::now();
-                    return existing.clone();
-                }
+            && let HistoryRecord::AssistantMessage(existing) = &mut self.records[idx]
+        {
+            existing.markdown = markdown;
+            existing.citations = citations;
+            existing.metadata = metadata;
+            existing.token_usage = token_usage;
+            existing.created_at = SystemTime::now();
+            return existing.clone();
+        }
 
         let mut state = AssistantMessageState {
             id: HistoryId::ZERO,
@@ -1762,9 +1765,9 @@ impl HistoryState {
                         .exec_call_lookup
                         .get(call_id)
                         .is_some_and(|id| *id == state.id)
-                    {
-                        self.exec_call_lookup.remove(call_id);
-                    }
+                {
+                    self.exec_call_lookup.remove(call_id);
+                }
                 self.remove_exec_stream_retained(state.id);
             }
             HistoryRecord::MergedExec(state) => {
@@ -1774,9 +1777,9 @@ impl HistoryState {
                             .exec_call_lookup
                             .get(call_id)
                             .is_some_and(|id| *id == state.id)
-                        {
-                            self.exec_call_lookup.remove(call_id);
-                        }
+                    {
+                        self.exec_call_lookup.remove(call_id);
+                    }
                 }
             }
             HistoryRecord::RunningTool(state) => {
@@ -1785,9 +1788,9 @@ impl HistoryState {
                         .tool_call_lookup
                         .get(call_id)
                         .is_some_and(|id| *id == state.id)
-                    {
-                        self.tool_call_lookup.remove(call_id);
-                    }
+                {
+                    self.tool_call_lookup.remove(call_id);
+                }
             }
             HistoryRecord::ToolCall(state) => {
                 if let Some(call_id) = state.call_id.as_ref()
@@ -1795,9 +1798,9 @@ impl HistoryState {
                         .tool_call_lookup
                         .get(call_id)
                         .is_some_and(|id| *id == state.id)
-                    {
-                        self.tool_call_lookup.remove(call_id);
-                    }
+                {
+                    self.tool_call_lookup.remove(call_id);
+                }
             }
             HistoryRecord::AssistantStream(state) => {
                 if self
@@ -1956,38 +1959,36 @@ impl HistoryState {
                 if let Some(idx) = self.records.iter().position(|record| {
                     matches!(record,
                         HistoryRecord::AssistantStream(state) if state.stream_id == stream_id)
-                })
-                    && let Some(HistoryRecord::AssistantStream(existing)) =
-                        self.records.get(idx).cloned()
-                    {
-                        let mut updated = existing;
-                        if let Some(delta_clone) = delta.clone() {
-                            self.usage_tracker
-                                .add_assistant_delta(updated.id, delta_clone.delta.len());
-                            let truncated =
-                                append_assistant_delta(&mut updated.deltas, delta_clone);
-                            if truncated > 0 {
-                                updated.truncated_prefix_bytes =
-                                    updated.truncated_prefix_bytes.saturating_add(truncated);
-                            }
-                        }
-                        updated.preview_markdown = preview_markdown.clone();
-                        if let Some(meta) = metadata.clone() {
-                            updated.citations = meta.citations.clone();
-                            updated.metadata = Some(meta);
-                        }
-                        updated.in_progress = true;
-                        updated.last_updated_at = now;
+                }) && let Some(HistoryRecord::AssistantStream(existing)) =
+                    self.records.get(idx).cloned()
+                {
+                    let mut updated = existing;
+                    if let Some(delta_clone) = delta.clone() {
                         self.usage_tracker
-                            .observe_assistant(&updated, "domain:assistant-stream");
-                        let mutation = self.apply_event(HistoryEvent::Replace {
-                            index: idx,
-                            record: HistoryRecord::AssistantStream(updated),
-                        });
-                        if !matches!(mutation, HistoryMutation::Noop) {
-                            return mutation;
+                            .add_assistant_delta(updated.id, delta_clone.delta.len());
+                        let truncated = append_assistant_delta(&mut updated.deltas, delta_clone);
+                        if truncated > 0 {
+                            updated.truncated_prefix_bytes =
+                                updated.truncated_prefix_bytes.saturating_add(truncated);
                         }
                     }
+                    updated.preview_markdown = preview_markdown.clone();
+                    if let Some(meta) = metadata.clone() {
+                        updated.citations = meta.citations.clone();
+                        updated.metadata = Some(meta);
+                    }
+                    updated.in_progress = true;
+                    updated.last_updated_at = now;
+                    self.usage_tracker
+                        .observe_assistant(&updated, "domain:assistant-stream");
+                    let mutation = self.apply_event(HistoryEvent::Replace {
+                        index: idx,
+                        record: HistoryRecord::AssistantStream(updated),
+                    });
+                    if !matches!(mutation, HistoryMutation::Noop) {
+                        return mutation;
+                    }
+                }
 
                 let mut deltas = Vec::new();
                 let mut truncated_prefix_bytes = 0usize;
@@ -2094,9 +2095,10 @@ impl HistoryState {
                 let mut target_idx = id.and_then(|hid| self.index_of(hid));
                 if target_idx.is_none()
                     && let Some(call_id) = call_id.as_ref()
-                        && let Some(mapped_id) = self.history_id_for_exec_call(call_id) {
-                            target_idx = self.index_of(mapped_id);
-                        }
+                    && let Some(mapped_id) = self.history_id_for_exec_call(call_id)
+                {
+                    target_idx = self.index_of(mapped_id);
+                }
 
                 if let Some(idx) = target_idx {
                     if let Some(HistoryRecord::Exec(existing)) = self.records.get(idx).cloned() {
@@ -2109,29 +2111,31 @@ impl HistoryState {
                         updated.wait_notes = wait_notes;
 
                         if let Some(tail) = stdout_tail
-                            && !tail.is_empty() {
-                                let offset = stream_len(&updated.stdout_chunks);
-                                self.usage_tracker.add_exec_delta(updated.id, 1, tail.len());
-                                append_exec_chunk(
-                                    &mut updated.stdout_chunks,
-                                    ExecStreamChunk {
-                                        offset,
-                                        content: tail,
-                                    },
-                                );
-                            }
+                            && !tail.is_empty()
+                        {
+                            let offset = stream_len(&updated.stdout_chunks);
+                            self.usage_tracker.add_exec_delta(updated.id, 1, tail.len());
+                            append_exec_chunk(
+                                &mut updated.stdout_chunks,
+                                ExecStreamChunk {
+                                    offset,
+                                    content: tail,
+                                },
+                            );
+                        }
                         if let Some(tail) = stderr_tail
-                            && !tail.is_empty() {
-                                let offset = stream_len(&updated.stderr_chunks);
-                                self.usage_tracker.add_exec_delta(updated.id, 1, tail.len());
-                                append_exec_chunk(
-                                    &mut updated.stderr_chunks,
-                                    ExecStreamChunk {
-                                        offset,
-                                        content: tail,
-                                    },
-                                );
-                            }
+                            && !tail.is_empty()
+                        {
+                            let offset = stream_len(&updated.stderr_chunks);
+                            self.usage_tracker.add_exec_delta(updated.id, 1, tail.len());
+                            append_exec_chunk(
+                                &mut updated.stderr_chunks,
+                                ExecStreamChunk {
+                                    offset,
+                                    content: tail,
+                                },
+                            );
+                        }
 
                         self.usage_tracker
                             .observe_exec(&updated, "domain:finish-exec");

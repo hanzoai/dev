@@ -276,7 +276,11 @@ fn first_command_tokens(argv: &[String]) -> Option<Vec<String>> {
     };
     match shlex_split(&cmd) {
         Some(tokens) => Some(tokens),
-        None => Some(cmd.split_whitespace().map(std::string::ToString::to_string).collect()),
+        None => Some(
+            cmd.split_whitespace()
+                .map(std::string::ToString::to_string)
+                .collect(),
+        ),
     }
 }
 

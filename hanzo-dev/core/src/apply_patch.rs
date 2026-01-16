@@ -51,79 +51,79 @@ pub(crate) async fn apply_patch(
         if let (Ok(validation_cfg), Ok(github_cfg)) = (validation_cfg.read(), github_cfg.read())
             && let Some((mut findings, mut ran_checks)) =
                 run_patch_harness(&action, sess.get_cwd(), &validation_cfg, &github_cfg)
-            {
-                const MAX_ISSUES: usize = 12;
-                let total_issues = findings.len();
-                let truncated = total_issues > MAX_ISSUES;
-                if truncated {
-                    findings.truncate(MAX_ISSUES);
-                }
-                findings.retain(|finding| {
-                    finding.tool.trim().len() <= 120 && finding.message.trim().len() <= 800
-                });
-                let issues_json: Vec<serde_json::Value> = findings
-                    .iter()
-                    .map(|finding| {
-                        let relative_file = finding
-                            .file
-                            .as_ref()
-                            .and_then(|path| path.strip_prefix(sess.get_cwd()).ok())
-                            .map(|path| path.display().to_string());
-                        json!({
-                            "tool": finding.tool,
-                            "file": relative_file,
-                            "msg": finding.message,
-                        })
-                    })
-                    .collect();
-                summary_json = Some(
-                    json!({
-                        "validation": {
-                            "issues": issues_json,
-                            "checks": ran_checks,
-                            "issue_count": total_issues,
-                            "truncated": truncated,
-                        }
-                    })
-                    .to_string(),
-                );
-
-                let mut lines: Vec<String> = Vec::new();
-                if total_issues == 0 {
-                    lines.push("✅ Validate New Code: no issues".to_string());
-                } else {
-                    lines.push(format!("❌ Validate New Code: {total_issues} issue(s)"));
-                    for finding in findings.iter() {
-                        let mut parts = vec![finding.tool.clone()];
-                        if let Some(rel) = finding
-                            .file
-                            .as_ref()
-                            .and_then(|p| p.strip_prefix(sess.get_cwd()).ok())
-                            .map(|p| p.display().to_string())
-                        {
-                            parts.push(rel);
-                        }
-                        let mut msg = finding.message.clone();
-                        if msg.len() > 160 {
-                            msg.truncate(157);
-                            msg.push('…');
-                        }
-                        parts.push(msg);
-                        lines.push(format!("• {}", parts.join(" — ")));
-                    }
-                    if truncated {
-                        let remaining = total_issues - findings.len();
-                        lines.push(format!("… plus {remaining} more issue(s)"));
-                    }
-                }
-                if ran_checks.is_empty() {
-                    lines.push("Checks run: none".to_string());
-                } else {
-                    ran_checks.sort();
-                    lines.push(format!("Checks run: {}", ran_checks.join(", ")));
-                }
-                status_message = Some(lines.join("\n"));
+        {
+            const MAX_ISSUES: usize = 12;
+            let total_issues = findings.len();
+            let truncated = total_issues > MAX_ISSUES;
+            if truncated {
+                findings.truncate(MAX_ISSUES);
             }
+            findings.retain(|finding| {
+                finding.tool.trim().len() <= 120 && finding.message.trim().len() <= 800
+            });
+            let issues_json: Vec<serde_json::Value> = findings
+                .iter()
+                .map(|finding| {
+                    let relative_file = finding
+                        .file
+                        .as_ref()
+                        .and_then(|path| path.strip_prefix(sess.get_cwd()).ok())
+                        .map(|path| path.display().to_string());
+                    json!({
+                        "tool": finding.tool,
+                        "file": relative_file,
+                        "msg": finding.message,
+                    })
+                })
+                .collect();
+            summary_json = Some(
+                json!({
+                    "validation": {
+                        "issues": issues_json,
+                        "checks": ran_checks,
+                        "issue_count": total_issues,
+                        "truncated": truncated,
+                    }
+                })
+                .to_string(),
+            );
+
+            let mut lines: Vec<String> = Vec::new();
+            if total_issues == 0 {
+                lines.push("✅ Validate New Code: no issues".to_string());
+            } else {
+                lines.push(format!("❌ Validate New Code: {total_issues} issue(s)"));
+                for finding in findings.iter() {
+                    let mut parts = vec![finding.tool.clone()];
+                    if let Some(rel) = finding
+                        .file
+                        .as_ref()
+                        .and_then(|p| p.strip_prefix(sess.get_cwd()).ok())
+                        .map(|p| p.display().to_string())
+                    {
+                        parts.push(rel);
+                    }
+                    let mut msg = finding.message.clone();
+                    if msg.len() > 160 {
+                        msg.truncate(157);
+                        msg.push('…');
+                    }
+                    parts.push(msg);
+                    lines.push(format!("• {}", parts.join(" — ")));
+                }
+                if truncated {
+                    let remaining = total_issues - findings.len();
+                    lines.push(format!("… plus {remaining} more issue(s)"));
+                }
+            }
+            if ran_checks.is_empty() {
+                lines.push("Checks run: none".to_string());
+            } else {
+                ran_checks.sort();
+                lines.push(format!("Checks run: {}", ran_checks.join(", ")));
+            }
+            status_message = Some(lines.join("\n"));
+        }
         (summary_json, status_message)
     };
 
@@ -270,11 +270,12 @@ async fn apply_changes_from_apply_patch(
         match change {
             ApplyPatchFileChange::Add { content } => {
                 if let Some(parent) = path.parent()
-                    && !parent.as_os_str().is_empty() {
-                        std::fs::create_dir_all(parent).with_context(|| {
-                            format!("Failed to create parent directories for {}", path.display())
-                        })?;
-                    }
+                    && !parent.as_os_str().is_empty()
+                {
+                    std::fs::create_dir_all(parent).with_context(|| {
+                        format!("Failed to create parent directories for {}", path.display())
+                    })?;
+                }
                 fs.write_text_file(path, content.clone())
                     .await
                     .with_context(|| format!("Failed to write file {}", path.display()))?;
@@ -292,14 +293,15 @@ async fn apply_changes_from_apply_patch(
             } => {
                 if let Some(move_path) = move_path {
                     if let Some(parent) = move_path.parent()
-                        && !parent.as_os_str().is_empty() {
-                            std::fs::create_dir_all(parent).with_context(|| {
-                                format!(
-                                    "Failed to create parent directories for {}",
-                                    move_path.display()
-                                )
-                            })?;
-                        }
+                        && !parent.as_os_str().is_empty()
+                    {
+                        std::fs::create_dir_all(parent).with_context(|| {
+                            format!(
+                                "Failed to create parent directories for {}",
+                                move_path.display()
+                            )
+                        })?;
+                    }
 
                     std::fs::rename(path, move_path)
                         .with_context(|| format!("Failed to rename file {}", path.display()))?;
