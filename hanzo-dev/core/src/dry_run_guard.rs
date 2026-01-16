@@ -276,7 +276,7 @@ fn first_command_tokens(argv: &[String]) -> Option<Vec<String>> {
     };
     match shlex_split(&cmd) {
         Some(tokens) => Some(tokens),
-        None => Some(cmd.split_whitespace().map(|s| s.to_string()).collect()),
+        None => Some(cmd.split_whitespace().map(std::string::ToString::to_string).collect()),
     }
 }
 
@@ -843,7 +843,7 @@ fn analyze_direct_formatter(tokens: &[String]) -> Option<InternalAnalysis> {
     }
 }
 
-fn peel_exec_wrappers<'a>(mut tokens: &'a [String]) -> &'a [String] {
+fn peel_exec_wrappers(mut tokens: &[String]) -> &[String] {
     loop {
         if tokens.is_empty() {
             return tokens;
@@ -876,7 +876,7 @@ fn peel_exec_wrappers<'a>(mut tokens: &'a [String]) -> &'a [String] {
     tokens
 }
 
-fn skip_leading_flags<'a>(tokens: &'a [String]) -> &'a [String] {
+fn skip_leading_flags(tokens: &[String]) -> &[String] {
     let mut idx = 0usize;
     while idx < tokens.len() {
         let token = tokens[idx].as_str();

@@ -315,7 +315,7 @@ fn set_project_trusted_inner(doc: &mut DocumentMut, project_path: &Path) -> anyh
         .get_mut(project_key.as_str())
         .and_then(|i| i.as_table_mut())
     else {
-        return Err(anyhow::anyhow!("project table missing for {}", project_key));
+        return Err(anyhow::anyhow!("project table missing for {project_key}"));
     };
     proj_tbl.set_implicit(false);
     proj_tbl["trust_level"] = toml_edit::value("trusted");
@@ -360,12 +360,11 @@ pub fn set_tui_theme_name(code_home: &Path, theme: ThemeName) -> anyhow::Result<
     doc["tui"]["theme"]["name"] = toml_edit::value(theme_str);
     // When switching away from the Custom theme, clear any lingering custom
     // overrides so built-in themes render true to spec on next startup.
-    if theme != ThemeName::Custom {
-        if let Some(tbl) = doc["tui"]["theme"].as_table_mut() {
+    if theme != ThemeName::Custom
+        && let Some(tbl) = doc["tui"]["theme"].as_table_mut() {
             tbl.remove("label");
             tbl.remove("colors");
         }
-    }
 
     // ensure code_home exists
     std::fs::create_dir_all(code_home)?;
@@ -1056,17 +1055,17 @@ pub fn set_project_access_mode(
         .get_mut(project_key.as_str())
         .and_then(|i| i.as_table_mut())
         .ok_or_else(|| {
-            anyhow::anyhow!(format!("failed to create projects.{} table", project_key))
+            anyhow::anyhow!(format!("failed to create projects.{project_key} table"))
         })?;
 
     // Write fields
     proj_tbl.insert(
         "approval_policy",
-        TomlItem::Value(toml_edit::Value::from(format!("{}", approval))),
+        TomlItem::Value(toml_edit::Value::from(format!("{approval}"))),
     );
     proj_tbl.insert(
         "sandbox_mode",
-        TomlItem::Value(toml_edit::Value::from(format!("{}", sandbox_mode))),
+        TomlItem::Value(toml_edit::Value::from(format!("{sandbox_mode}"))),
     );
 
     // Harmonize trust_level with selected access mode:
@@ -1136,7 +1135,7 @@ pub fn add_project_allowed_command(
         .get_mut(project_key.as_str())
         .and_then(|i| i.as_table_mut())
         .ok_or_else(|| {
-            anyhow::anyhow!(format!("failed to create projects.{} table", project_key))
+            anyhow::anyhow!(format!("failed to create projects.{project_key} table"))
         })?;
 
     let mut argv_array = TomlArray::new();
@@ -1216,7 +1215,7 @@ pub fn list_mcp_servers(
                         .and_then(|v| v.as_array())
                         .map(|arr| {
                             arr.iter()
-                                .filter_map(|i| i.as_str().map(|s| s.to_string()))
+                                .filter_map(|i| i.as_str().map(std::string::ToString::to_string))
                                 .collect()
                         })
                         .unwrap_or_default();
@@ -1229,18 +1228,12 @@ pub fn list_mcp_servers(
                                     })
                                     .collect::<HashMap<_, _>>(),
                             )
-                        } else if let Some(table) = v.as_table() {
-                            Some(
-                                table
+                        } else { v.as_table().map(|table| table
                                     .iter()
                                     .filter_map(|(k, v)| {
                                         v.as_str().map(|s| (k.to_string(), s.to_string()))
                                     })
-                                    .collect::<HashMap<_, _>>(),
-                            )
-                        } else {
-                            None
-                        }
+                                    .collect::<HashMap<_, _>>()) }
                     });
 
                     McpServerTransportConfig::Stdio {
@@ -1252,7 +1245,7 @@ pub fn list_mcp_servers(
                     let bearer_token = t
                         .get("bearer_token")
                         .and_then(|v| v.as_str())
-                        .map(|s| s.to_string());
+                        .map(std::string::ToString::to_string);
 
                     McpServerTransportConfig::StreamableHttp {
                         url: url.to_string(),
@@ -1272,7 +1265,7 @@ pub fn list_mcp_servers(
                     .flatten()
                     .or_else(|| {
                         t.get("startup_timeout_ms")
-                            .and_then(|v| v.as_integer())
+                            .and_then(toml_edit::Item::as_integer)
                             .map(|ms| Duration::from_millis(ms as u64))
                     });
 
@@ -1324,8 +1317,7 @@ pub fn add_mcp_server(code_home: &Path, name: &str, cfg: McpServerConfig) -> any
         .all(|c| c.is_ascii_alphanumeric() || c == '_' || c == '-')
     {
         return Err(anyhow::anyhow!(
-            "invalid server name '{}': must match ^[a-zA-Z0-9_-]+$",
-            name
+            "invalid server name '{name}': must match ^[a-zA-Z0-9_-]+$"
         ));
     }
 
@@ -1527,11 +1519,10 @@ pub fn resolve_code_path_for_read(code_home: &Path, relative: &Path) -> PathBuf 
         return default_path;
     }
 
-    if let Some(default_home) = default_code_home_dir() {
-        if default_home != code_home {
+    if let Some(default_home) = default_code_home_dir()
+        && default_home != code_home {
             return default_path;
         }
-    }
 
     if let Some(legacy) = legacy_code_home_dir() {
         let candidate = legacy.join(relative);

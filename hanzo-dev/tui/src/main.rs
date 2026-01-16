@@ -31,7 +31,7 @@ fn main() -> anyhow::Result<()> {
         if !token_usage.is_zero() {
             println!(
                 "{}",
-                hanzo_core::protocol::FinalOutput::from(token_usage.clone())
+                hanzo_core::protocol::FinalOutput::from(token_usage)
             );
         }
         if let Some(session_id) = session_id {

@@ -19,7 +19,7 @@ fn make_en_us_formatter() -> DecimalFormatter {
 
 fn with_formatter<T>(f: impl FnOnce(&DecimalFormatter) -> T) -> T {
     thread_local! {
-        static FORMATTER: OnceCell<DecimalFormatter> = OnceCell::new();
+        static FORMATTER: OnceCell<DecimalFormatter> = const { OnceCell::new() };
     }
 
     FORMATTER.with(|cell| {

@@ -23,8 +23,8 @@ fn parse_response_expected(path: &Path) -> Result<Vec<(u64, u64)>> {
     for ev in events {
         let data = ev.get("data");
         if let Some(d) = data {
-            let out = d.get("output_index").and_then(|x| x.as_u64());
-            let seq = d.get("sequence_number").and_then(|x| x.as_u64());
+            let out = d.get("output_index").and_then(serde_json::Value::as_u64);
+            let seq = d.get("sequence_number").and_then(serde_json::Value::as_u64);
             if let (Some(out), Some(seq)) = (out, seq) {
                 items.push((out, seq));
             }
@@ -86,7 +86,7 @@ fn main() -> Result<()> {
 
     println!("Expected (first 20):");
     for (i, (out, seq)) in expected.iter().take(20).enumerate() {
-        println!("  {:>3}: out={} seq={}", i, out, seq);
+        println!("  {i:>3}: out={out} seq={seq}");
     }
 
     println!("\nActual inserts (first 40):");

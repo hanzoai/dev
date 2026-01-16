@@ -26,6 +26,12 @@ use tracing::debug;
 use tracing::info;
 use tracing::warn;
 
+/// Type alias for navigation callback to reduce complexity
+type NavigationCallback = Arc<RwLock<Option<Box<dyn Fn(String) + Send + Sync>>>>;
+
+/// Type alias for last applied device metrics (width, height, scale, mobile, time)
+type LastMetricsApplied = Arc<Mutex<Option<(i64, i64, f64, bool, std::time::Instant)>>>;
+
 #[derive(Deserialize)]
 struct JsonVersion {
     #[serde(rename = "webSocketDebuggerUrl")]
@@ -43,6 +49,7 @@ impl BrowserLaunchLockFile {
         let lock_path = std::env::temp_dir().join("dev-browser-launch.lock");
         let file = std::fs::OpenOptions::new()
             .create(true)
+            .truncate(false)
             .read(true)
             .write(true)
             .open(&lock_path)?;
@@ -169,20 +176,20 @@ fn should_stop_handler<E: std::fmt::Display>(
 }
 
 async fn discover_ws_via_host_port(host: &str, port: u16) -> Result<String> {
-    let url = format!("http://{}:{}/json/version", host, port);
-    debug!("Requesting Chrome version info from: {}", url);
+    let url = format!("http://{host}:{port}/json/version");
+    debug!("Requesting Chrome version info from: {url}");
 
     let client_start = tokio::time::Instant::now();
     let client = Client::builder()
         .no_proxy()
         .timeout(Duration::from_secs(5)) // Allow Chrome time to bring up /json/version on fresh launch
         .build()
-        .map_err(|e| BrowserError::CdpError(format!("Failed to build HTTP client: {}", e)))?;
+        .map_err(|e| BrowserError::CdpError(format!("Failed to build HTTP client: {e}")))?;
     debug!("HTTP client created in {:?}", client_start.elapsed());
 
     let req_start = tokio::time::Instant::now();
     let resp = client.get(&url).send().await.map_err(|e| {
-        BrowserError::CdpError(format!("Failed to connect to Chrome debug port: {}", e))
+        BrowserError::CdpError(format!("Failed to connect to Chrome debug port: {e}"))
     })?;
     debug!(
         "HTTP request completed in {:?}, status: {}",
@@ -199,7 +206,7 @@ async fn discover_ws_via_host_port(host: &str, port: u16) -> Result<String> {
 
     let parse_start = tokio::time::Instant::now();
     let body: JsonVersion = resp.json().await.map_err(|e| {
-        BrowserError::CdpError(format!("Failed to parse Chrome debug response: {}", e))
+        BrowserError::CdpError(format!("Failed to parse Chrome debug response: {e}"))
     })?;
     debug!("Response parsed in {:?}", parse_start.elapsed());
 
@@ -211,7 +218,7 @@ async fn scan_for_chrome_debug_port() -> Option<u16> {
     use std::process::Command;
 
     // Use ps to find Chrome processes with remote-debugging-port
-    let output = Command::new("ps").args(&["aux"]).output().ok()?;
+    let output = Command::new("ps").args(["aux"]).output().ok()?;
 
     let ps_output = String::from_utf8_lossy(&output.stdout);
 
@@ -260,7 +267,7 @@ async fn scan_for_chrome_debug_port() -> Option<u16> {
     let mut port_tests = Vec::new();
     for port in found_ports {
         let test_future = async move {
-            let url = format!("http://127.0.0.1:{}/json/version", port);
+            let url = format!("http://127.0.0.1:{port}/json/version");
             let client = Client::builder()
                 .no_proxy()
                 .timeout(Duration::from_millis(200)) // Shorter timeout for parallel tests
@@ -292,7 +299,7 @@ async fn scan_for_chrome_debug_port() -> Option<u16> {
         test_start.elapsed()
     );
 
-    for port in results.into_iter().flatten() {
+    if let Some(port) = results.into_iter().flatten().next() {
         info!("Verified Chrome debug port at {} is accessible", port);
         return Some(port);
     }
@@ -313,13 +320,13 @@ pub struct BrowserManager {
     assets: Arc<Mutex<Option<Arc<crate::assets::AssetManager>>>>,
     user_data_dir: Arc<Mutex<Option<String>>>,
     cleanup_profile_on_drop: Arc<Mutex<bool>>,
-    navigation_callback: Arc<tokio::sync::RwLock<Option<Box<dyn Fn(String) + Send + Sync>>>>,
+    navigation_callback: NavigationCallback,
     navigation_monitor_handle: Arc<Mutex<Option<tokio::task::JoinHandle<()>>>>,
     viewport_monitor_handle: Arc<Mutex<Option<tokio::task::JoinHandle<()>>>>,
     /// Gate to temporarily disable all automatic viewport corrections (post-initial set)
     auto_viewport_correction_enabled: Arc<tokio::sync::RwLock<bool>>,
     /// Track last applied device metrics to avoid redundant overrides
-    last_metrics_applied: Arc<Mutex<Option<(i64, i64, f64, bool, std::time::Instant)>>>,
+    last_metrics_applied: LastMetricsApplied,
 }
 
 #[derive(Debug)]
@@ -448,12 +455,12 @@ impl BrowserManager {
                         return Ok(());
                     }
                     Ok(Ok(Err(e))) => {
-                        let msg = format!("CDP WebSocket connect failed: {}", e);
+                        let msg = format!("CDP WebSocket connect failed: {e}");
                         warn!("[cdp/bm] {}", msg);
                         last_err = Some(msg);
                     }
                     Ok(Err(join_err)) => {
-                        let msg = format!("Join error during connect attempt: {}", join_err);
+                        let msg = format!("Join error during connect attempt: {join_err}");
                         warn!("[cdp/bm] {}", msg);
                         last_err = Some(msg);
                     }
@@ -470,7 +477,7 @@ impl BrowserManager {
 
             let base = "CDP WebSocket connect failed after all attempts".to_string();
             let msg = if let Some(e) = last_err {
-                format!("{}: {}", base, e)
+                format!("{base}: {e}")
             } else {
                 base
             };
@@ -516,8 +523,7 @@ impl BrowserManager {
                         Err(e) => {
                             if tokio::time::Instant::now() >= deadline {
                                 return Err(BrowserError::CdpError(format!(
-                                    "Failed to discover Chrome WebSocket on port {} within 15s: {}",
-                                    actual_port, e
+                                    "Failed to discover Chrome WebSocket on port {actual_port} within 15s: {e}"
                                 )));
                             }
                             tokio::time::sleep(Duration::from_millis(300)).await;
@@ -604,12 +610,12 @@ impl BrowserManager {
                             return Ok(());
                         }
                         Ok(Ok(Err(e))) => {
-                            let msg = format!("CDP WebSocket connect failed: {}", e);
+                            let msg = format!("CDP WebSocket connect failed: {e}");
                             warn!("[cdp/bm] {}", msg);
                             last_err = Some(msg);
                         }
                         Ok(Err(join_err)) => {
-                            let msg = format!("Join error during connect attempt: {}", join_err);
+                            let msg = format!("Join error during connect attempt: {join_err}");
                             warn!("[cdp/bm] {}", msg);
                             last_err = Some(msg);
                         }
@@ -631,20 +637,20 @@ impl BrowserManager {
 
                 let base = "CDP WebSocket connect failed after all attempts".to_string();
                 let msg = if let Some(e) = last_err {
-                    format!("{}: {}", base, e)
+                    format!("{base}: {e}")
                 } else {
                     base
                 };
-                return Err(BrowserError::CdpError(msg));
+                Err(BrowserError::CdpError(msg))
             } else {
-                return Err(BrowserError::CdpError(
+                Err(BrowserError::CdpError(
                     "No Chrome instance found with debug port".to_string(),
-                ));
+                ))
             }
         } else {
-            return Err(BrowserError::CdpError(
+            Err(BrowserError::CdpError(
                 "No CDP port configured for Chrome connection".to_string(),
-            ));
+            ))
         }
     }
 
@@ -719,12 +725,12 @@ impl BrowserManager {
                         return Ok(());
                     }
                     Ok(Ok(Err(e))) => {
-                        let msg = format!("CDP WebSocket connect failed: {}", e);
+                        let msg = format!("CDP WebSocket connect failed: {e}");
                         warn!("[cdp/bm] {}", msg);
                         last_err = Some(msg);
                     }
                     Ok(Err(join_err)) => {
-                        let msg = format!("Join error during connect attempt: {}", join_err);
+                        let msg = format!("Join error during connect attempt: {join_err}");
                         warn!("[cdp/bm] {}", msg);
                         last_err = Some(msg);
                     }
@@ -741,7 +747,7 @@ impl BrowserManager {
 
             let base = "CDP WebSocket connect failed after all attempts".to_string();
             let msg = if let Some(e) = last_err {
-                format!("{}: {}", base, e)
+                format!("{base}: {e}")
             } else {
                 base
             };
@@ -786,8 +792,7 @@ impl BrowserManager {
                                 > Duration::from_secs(15)
                             {
                                 return Err(BrowserError::CdpError(format!(
-                                    "Failed to discover Chrome WebSocket on port {} within 15s: {}",
-                                    actual_port, e
+                                    "Failed to discover Chrome WebSocket on port {actual_port} within 15s: {e}"
                                 )));
                             }
                             tokio::time::sleep(Duration::from_millis(300)).await;
@@ -869,12 +874,12 @@ impl BrowserManager {
                             return Ok(());
                         }
                         Ok(Ok(Err(e))) => {
-                            let msg = format!("CDP WebSocket connect failed: {}", e);
+                            let msg = format!("CDP WebSocket connect failed: {e}");
                             warn!("[cdp/bm] {}", msg);
                             last_err = Some(msg);
                         }
                         Ok(Err(join_err)) => {
-                            let msg = format!("Join error during connect attempt: {}", join_err);
+                            let msg = format!("Join error during connect attempt: {join_err}");
                             warn!("[cdp/bm] {}", msg);
                             last_err = Some(msg);
                         }
@@ -891,7 +896,7 @@ impl BrowserManager {
 
                 let base = "CDP WebSocket connect failed after all attempts".to_string();
                 let msg = if let Some(e) = last_err {
-                    format!("{}: {}", base, e)
+                    format!("{base}: {e}")
                 } else {
                     base
                 };
@@ -968,7 +973,7 @@ impl BrowserManager {
 
                 let browser_config = builder
                     .build()
-                    .map_err(|e| BrowserError::CdpError(e.to_string()))?;
+                    .map_err(BrowserError::CdpError)?;
 
                 match Browser::launch(browser_config).await {
                     Ok((browser, handler)) => break (browser, handler, user_data_path),
@@ -1222,11 +1227,11 @@ impl BrowserManager {
                         if let Ok(obj) = result.into_value::<serde_json::Value>() {
                             let visible = obj
                                 .get("visible")
-                                .and_then(|v| v.as_bool())
+                                .and_then(serde_json::Value::as_bool)
                                 .unwrap_or(false);
                             let focused = obj
                                 .get("focused")
-                                .and_then(|v| v.as_bool())
+                                .and_then(serde_json::Value::as_bool)
                                 .unwrap_or(false);
                             let url = obj.get("url").and_then(|v| v.as_str()).unwrap_or("unknown");
 
@@ -1269,23 +1274,21 @@ impl BrowserManager {
                 } else if let Some(page) = first_visible {
                     info!("Using first visible Chrome tab");
                     page
+                } else if let Some(p) = last_allowed {
+                    info!("No active tab found, using last allowed tab");
+                    p
                 } else {
-                    if let Some(p) = last_allowed {
-                        info!("No active tab found, using last allowed tab");
-                        p
-                    } else {
-                        // No allowed pages at all, create an about:blank tab
-                        warn!("No controllable tabs found; creating about:blank");
-                        browser.new_page("about:blank").await?
-                    }
+                    // No allowed pages at all, create an about:blank tab
+                    warn!("No controllable tabs found; creating about:blank");
+                    browser.new_page("about:blank").await?
                 }
             } else {
                 // No existing tabs found. Do NOT create a new tab for external Chrome if avoidable.
                 info!("No existing tabs found; waiting briefly for targets");
                 tokio::time::sleep(Duration::from_millis(200)).await;
                 let mut pages2 = browser.pages().await?;
-                if !pages2.is_empty() {
-                    pages2.pop().unwrap()
+                if let Some(page) = pages2.pop() {
+                    page
                 } else {
                     // As a last resort, still create a tab, but log it clearly
                     warn!("Creating a new about:blank tab because none were available");
@@ -1544,7 +1547,7 @@ impl BrowserManager {
                     serde_json::Value::String(al.clone()),
                 );
                 let headers = network::Headers::new(serde_json::Value::Object(
-                    headers_map.into_iter().map(|(k, v)| (k, v)).collect(),
+                    headers_map.into_iter().collect(),
                 ));
                 let p = network::SetExtraHttpHeadersParams::builder()
                     .headers(headers)
@@ -1719,11 +1722,10 @@ impl BrowserManager {
                     if let Some(mut browser) = browser_guard.take() {
                         let _ = browser.close().await;
                     }
-                    if should_cleanup {
-                        if let Some(user_data_path) = user_data_dir.lock().await.take() {
+                    if should_cleanup
+                        && let Some(user_data_path) = user_data_dir.lock().await.take() {
                             let _ = tokio::fs::remove_dir_all(&user_data_path).await;
                         }
-                    }
                     break;
                 }
             }
@@ -2016,7 +2018,9 @@ impl BrowserManager {
         if assets_guard.is_none() {
             *assets_guard = Some(Arc::new(crate::assets::AssetManager::new().await?));
         }
-        let assets = assets_guard.as_ref().unwrap().clone();
+        let Some(assets) = assets_guard.as_ref().cloned() else {
+            return Err(BrowserError::AssetError("Failed to get assets manager".into()));
+        };
         drop(assets_guard);
 
         // Get current config
@@ -2052,8 +2056,7 @@ impl BrowserManager {
             Ok(Ok(shots)) => shots,
             Ok(Err(e)) => {
                 return Err(BrowserError::ScreenshotError(format!(
-                    "Screenshot capture failed: {}",
-                    e
+                    "Screenshot capture failed: {e}"
                 )));
             }
             Err(_) => {
@@ -2420,7 +2423,7 @@ impl BrowserManager {
                     "#;
 
                     if let Ok(result) = page.execute_javascript(listener_script).await {
-                        let seq = result.get("seq").and_then(|v| v.as_u64()).unwrap_or(0);
+                        let seq = result.get("seq").and_then(serde_json::Value::as_u64).unwrap_or(0);
                         let url = result
                             .get("url")
                             .and_then(|v| v.as_str())
@@ -2445,11 +2448,10 @@ impl BrowserManager {
                             let page_for_shot = Arc::clone(&page);
                             tokio::spawn(async move {
                                 // Initialize assets manager if needed
-                                if assets_arc2.lock().await.is_none() {
-                                    if let Ok(am) = crate::assets::AssetManager::new().await {
+                                if assets_arc2.lock().await.is_none()
+                                    && let Ok(am) = crate::assets::AssetManager::new().await {
                                         *assets_arc2.lock().await = Some(Arc::new(am));
                                     }
-                                }
                                 let assets_opt = assets_arc2.lock().await.clone();
                                 drop(assets_arc2);
                                 if let Some(assets) = assets_opt {
@@ -2536,9 +2538,9 @@ impl BrowserManager {
                 }))()"#;
 
                 if let Ok(val) = page.inject_js(probe_js).await {
-                    let cw = val.get("w").and_then(|v| v.as_u64()).unwrap_or(0) as f64;
-                    let ch = val.get("h").and_then(|v| v.as_u64()).unwrap_or(0) as f64;
-                    let cdpr = val.get("dpr").and_then(|v| v.as_f64()).unwrap_or(1.0);
+                    let cw = val.get("w").and_then(serde_json::Value::as_u64).unwrap_or(0) as f64;
+                    let ch = val.get("h").and_then(serde_json::Value::as_u64).unwrap_or(0) as f64;
+                    let cdpr = val.get("dpr").and_then(serde_json::Value::as_f64).unwrap_or(1.0);
 
                     let w_ok = (cw - expected_w).abs() <= 5.0;
                     let h_ok = (ch - expected_h).abs() <= 5.0;

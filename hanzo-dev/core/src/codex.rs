@@ -308,7 +308,7 @@ fn response_input_from_core_items(items: Vec<InputItem>) -> ResponseInputItem {
 
                 if let Some(meta) = metadata {
                     content_items.push(ContentItem::InputText {
-                        text: format!("[EPHEMERAL:{}]", meta),
+                        text: format!("[EPHEMERAL:{meta}]"),
                     });
                 }
 
@@ -360,13 +360,11 @@ fn convert_call_tool_result_to_function_call_output_payload(
 
 fn get_git_branch(cwd: &std::path::Path) -> Option<String> {
     let head_path = cwd.join(".git/HEAD");
-    if let Ok(contents) = std::fs::read_to_string(&head_path) {
-        if let Some(rest) = contents.trim().strip_prefix("ref: ") {
-            if let Some(branch) = rest.trim().rsplit('/').next() {
+    if let Ok(contents) = std::fs::read_to_string(&head_path)
+        && let Some(rest) = contents.trim().strip_prefix("ref: ")
+            && let Some(branch) = rest.trim().rsplit('/').next() {
                 return Some(branch.to_string());
             }
-        }
-    }
     None
 }
 
@@ -382,11 +380,10 @@ fn maybe_update_from_model_info<T: Copy + PartialEq>(
         return;
     }
 
-    if let (Some(current), Some(old_val)) = (*field, old_default) {
-        if current == old_val {
+    if let (Some(current), Some(old_val)) = (*field, old_default)
+        && current == old_val {
             *field = new_default;
         }
-    }
 }
 
 #[derive(Clone, Debug)]
@@ -502,14 +499,13 @@ async fn build_turn_status_items_legacy(sess: &Session) -> Vec<ResponseItem> {
     let mut screenshot_content: Option<ContentItem> = None;
     let mut include_screenshot = false;
 
-    if let Some(browser_manager) = hanzo_browser::global::get_browser_manager().await {
-        if browser_manager.is_enabled().await {
+    if let Some(browser_manager) = hanzo_browser::global::get_browser_manager().await
+        && browser_manager.is_enabled().await {
             if let Some((_, idle_timeout)) = browser_manager.idle_elapsed_past_timeout().await {
                 let idle_text = format!(
-                    "Browser idle (timeout {:?}); screenshot capture paused until browser_* tools run again.",
-                    idle_timeout
+                    "Browser idle (timeout {idle_timeout:?}); screenshot capture paused until browser_* tools run again."
                 );
-                current_status.push_str("\n");
+                current_status.push('\n');
                 current_status.push_str(&idle_text);
             } else {
                 // Get current URL and browser info
@@ -529,13 +525,12 @@ async fn build_turn_status_items_legacy(sess: &Session) -> Vec<ResponseItem> {
 
                 // Get viewport dimensions
                 let (viewport_width, viewport_height) = browser_manager.get_viewport_size().await;
-                let viewport_info = format!(" | Viewport: {}x{}", viewport_width, viewport_height);
+                let viewport_info = format!(" | Viewport: {viewport_width}x{viewport_height}");
 
                 // Get cursor position
                 let cursor_info = match browser_manager.get_cursor_position().await {
                     Ok((x, y)) => format!(
-                        " | Mouse position: ({:.0}, {:.0}) [shown as a blue cursor in the screenshot]",
-                        x, y
+                        " | Mouse position: ({x:.0}, {y:.0}) [shown as a blue cursor in the screenshot]"
                     ),
                     Err(_) => String::new(),
                 };
@@ -607,26 +602,23 @@ async fn build_turn_status_items_legacy(sess: &Session) -> Vec<ResponseItem> {
                     }
                     Err(err_msg) => {
                         // Include error message so LLM knows screenshot failed
-                        format!(" [Screenshot unavailable: {}]", err_msg).leak()
+                        format!(" [Screenshot unavailable: {err_msg}]").leak()
                     }
                 };
 
                 let status_line = if let Some(t) = title {
                     format!(
-                        "Browser url: {} — {} ({}){}{}{}. You can interact with it using browser_* tools.",
-                        url, t, browser_type, viewport_info, cursor_info, screenshot_status
+                        "Browser url: {url} — {t} ({browser_type}){viewport_info}{cursor_info}{screenshot_status}. You can interact with it using browser_* tools."
                     )
                 } else {
                     format!(
-                        "Browser url: {} ({}){}{}{}. You can interact with it using browser_* tools.",
-                        url, browser_type, viewport_info, cursor_info, screenshot_status
+                        "Browser url: {url} ({browser_type}){viewport_info}{cursor_info}{screenshot_status}. You can interact with it using browser_* tools."
                     )
                 };
-                current_status.push_str("\n");
+                current_status.push('\n');
                 current_status.push_str(&status_line);
             }
         }
-    }
 
     // Check if system status has changed
     let mut last_status = sess.last_system_status.lock().unwrap();
@@ -646,11 +638,10 @@ async fn build_turn_status_items_legacy(sess: &Session) -> Vec<ResponseItem> {
         });
     }
 
-    if include_screenshot {
-        if let Some(image) = screenshot_content {
+    if include_screenshot
+        && let Some(image) = screenshot_content {
             content.push(image);
         }
-    }
 
     if !content.is_empty() {
         jar.items.push(ResponseItem::Message {
@@ -689,8 +680,8 @@ async fn build_turn_status_items_v2(sess: &Session) -> Vec<ResponseItem> {
         items.push(item);
     }
 
-    if let Some(browser_manager) = hanzo_browser::global::get_browser_manager().await {
-        if browser_manager.is_enabled().await {
+    if let Some(browser_manager) = hanzo_browser::global::get_browser_manager().await
+        && browser_manager.is_enabled().await {
             let browser_stream_id = {
                 let mut state = sess.state.lock().unwrap();
                 state.context_stream_ids.browser_stream_id(sess.id)
@@ -698,8 +689,7 @@ async fn build_turn_status_items_v2(sess: &Session) -> Vec<ResponseItem> {
 
             if let Some((_, timeout)) = browser_manager.idle_elapsed_past_timeout().await {
                 let idle_text = format!(
-                    "Browser idle (timeout {:?}); screenshot capture paused until browser_* tools run again.",
-                    timeout
+                    "Browser idle (timeout {timeout:?}); screenshot capture paused until browser_* tools run again."
                 );
                 items.push(ResponseItem::Message {
                     id: Some(browser_stream_id),
@@ -725,13 +715,13 @@ async fn build_turn_status_items_v2(sess: &Session) -> Vec<ResponseItem> {
                 let mut metadata = HashMap::new();
                 metadata.insert("browser_type".to_string(), browser_type.clone());
                 if let Some((x, y)) = cursor_position {
-                    metadata.insert("cursor_position".to_string(), format!("{:.0},{:.0}", x, y));
+                    metadata.insert("cursor_position".to_string(), format!("{x:.0},{y:.0}"));
                 }
 
                 let viewport = if viewport_width > 0 && viewport_height > 0 {
                     Some(ViewportDimensions {
-                        width: viewport_width as u32,
-                        height: viewport_height as u32,
+                        width: viewport_width,
+                        height: viewport_height,
                     })
                 } else {
                     None
@@ -802,7 +792,6 @@ async fn build_turn_status_items_v2(sess: &Session) -> Vec<ResponseItem> {
                 }
             }
         }
-    }
 
     items
 }
@@ -813,13 +802,12 @@ fn should_include_browser_screenshot(
     current_hash: Option<(Vec<u8>, Vec<u8>)>,
 ) -> bool {
     if let Some((cur_phash, cur_dhash)) = current_hash {
-        if let Some((_, last_phash, last_dhash)) = last_info.as_ref() {
-            if crate::image_comparison::are_hashes_similar(
+        if let Some((_, last_phash, last_dhash)) = last_info.as_ref()
+            && crate::image_comparison::are_hashes_similar(
                 last_phash, last_dhash, &cur_phash, &cur_dhash,
             ) {
                 return false;
             }
-        }
         *last_info = Some((path.clone(), cur_phash, cur_dhash));
         true
     } else {

@@ -1049,7 +1049,7 @@ pub fn start_auto_coordinator(
     }
 
     let (cmd_tx, cmd_rx) = mpsc::channel();
-    let thread_tx = cmd_tx.clone();
+    let thread_tx = cmd_tx;
     let cancel_token = CancellationToken::new();
     let thread_cancel = cancel_token.clone();
 
@@ -1058,7 +1058,7 @@ pub fn start_auto_coordinator(
     // overflow when validation recursed through long assistant responses.
     let builder = std::thread::Builder::new()
         .name("code-auto-coordinator".to_string())
-        .stack_size(1 * 1024 * 1024);
+        .stack_size(1024 * 1024);
     let handle = builder.spawn(move || {
         if let Err(err) = run_auto_loop(
             event_tx,
@@ -1211,8 +1211,8 @@ fn run_auto_loop(
     let mut decision_seq: u64 = 0;
     let mut pending_ack_seq: Option<u64> = None;
     let mut queued_updates: VecDeque<Arc<[ResponseItem]>> = VecDeque::new();
-    if !derive_goal_from_history {
-        if let Some(seed) = build_initial_planning_seed(&goal_text, include_agents) {
+    if !derive_goal_from_history
+        && let Some(seed) = build_initial_planning_seed(&goal_text, include_agents) {
             let transcript_item = make_message("assistant", seed.response_json.clone());
             let cli_action = AutoTurnCliAction {
                 prompt: seed.cli_prompt.clone(),
@@ -1234,7 +1234,6 @@ fn run_auto_loop(
             pending_ack_seq = Some(decision_seq);
             pending_conversation = None;
         }
-    }
     let mut schema = build_schema(&active_agent_names, schema_features);
     let platform = std::env::consts::OS;
     debug!("[Auto coordinator] starting: goal={goal_text} platform={platform}");
@@ -1261,11 +1260,10 @@ fn run_auto_loop(
             } else {
                 next_conversation = Some(conv);
             }
-        } else if pending_ack_seq.is_none() {
-            if let Some(conv) = queued_updates.pop_front() {
+        } else if pending_ack_seq.is_none()
+            && let Some(conv) = queued_updates.pop_front() {
                 next_conversation = Some(conv);
             }
-        }
 
         if let Some(conv) = next_conversation {
             if cancel_token.is_cancelled() {
@@ -1297,7 +1295,7 @@ fn run_auto_loop(
             }
             let developer_intro = base_developer_intro.as_str();
             let mut retry_conversation: Option<Vec<ResponseItem>> = None;
-            let time_budget_message = time_budget.as_mut().and_then(|budget| budget.maybe_nudge());
+            let time_budget_message = time_budget.as_mut().and_then(AutoTimeBudget::maybe_nudge);
             let time_budget_deadline = time_budget.as_ref().map(|budget| budget.deadline);
             let loop_warning = session_metrics.loop_detection_warning();
             match request_coordinator_decision(
@@ -1476,7 +1474,7 @@ fn run_auto_loop(
                             } else if already_shared_raw {
                                 message.push_str("\nSee assistant message above for the full model output that failed validation.");
                             }
-                            let _ = event_tx.send(AutoCoordinatorEvent::Thinking {
+                            event_tx.send(AutoCoordinatorEvent::Thinking {
                                 delta: message,
                                 summary_index: None,
                             });
@@ -1491,12 +1489,12 @@ fn run_auto_loop(
                                     developer_note.push_str(guidance);
                                 }
                                 if already_shared_raw {
-                                    developer_note.push_str("\n");
+                                    developer_note.push('\n');
                                     developer_note.push_str(OVERLONG_MSG);
                                 } else if let Some(excerpt) = raw_excerpt {
                                     developer_note.push_str("\nLast JSON:\n");
                                     developer_note.push_str(&indent_lines(&excerpt, "    "));
-                                    developer_note.push_str("\n");
+                                    developer_note.push('\n');
                                     developer_note.push_str(OVERLONG_MSG);
                                 }
                                 retry_vec.push(make_message("developer", developer_note));
@@ -1506,12 +1504,12 @@ fn run_auto_loop(
                                 .map(Arc::<[ResponseItem]>::from)
                                 .unwrap_or_else(|| Arc::clone(&conv));
                             // Keep the model and UI in sync with the full conversation, but avoid spamming a compaction notice.
-                            let _ = event_tx.send(AutoCoordinatorEvent::CompactedHistory {
+                            event_tx.send(AutoCoordinatorEvent::CompactedHistory {
                                 conversation: Arc::clone(&retry_snapshot),
                                 show_notice: false,
                             });
                             // Show a user-facing action entry in the Auto Drive card (does not go to the model).
-                            let _ = event_tx.send(AutoCoordinatorEvent::Action {
+                            event_tx.send(AutoCoordinatorEvent::Action {
                                 message: "Retrying prompt generation after the previous response was too long to send to the CLI.".to_string(),
                             });
                             pending_conversation = Some(retry_snapshot);
@@ -1565,7 +1563,7 @@ fn run_auto_loop(
                 let conversation_snapshot = Arc::<[ResponseItem]>::from(base_conversation);
                 let schema = user_turn_schema();
                 let time_budget_message =
-                    time_budget.as_mut().and_then(|budget| budget.maybe_nudge());
+                    time_budget.as_mut().and_then(AutoTimeBudget::maybe_nudge);
                 let time_budget_deadline = time_budget.as_ref().map(|budget| budget.deadline);
                 match request_user_turn_decision(
                     &runtime,
@@ -1670,14 +1668,12 @@ fn read_coordinator_prompt(config: &Config) -> Option<String> {
     let trimmed = COORDINATOR_PROMPT.trim();
     if trimmed.is_empty() {
         None
+    } else if config.max_run_seconds.is_some() {
+        Some(format!(
+            "{trimmed}\n\n# Time Budget\n{TIMEBOXED_EXEC_COORDINATOR_GUIDANCE}"
+        ))
     } else {
-        if config.max_run_seconds.is_some() {
-            Some(format!(
-                "{trimmed}\n\n# Time Budget\n{TIMEBOXED_EXEC_COORDINATOR_GUIDANCE}"
-            ))
-        } else {
-            Some(trimmed.to_string())
-        }
+        Some(trimmed.to_string())
     }
 }
 
@@ -1700,7 +1696,7 @@ fn build_developer_message(
     let primary_goal = if derive_goal_from_history {
         "**Primary Goal**\nYou are preparing to start Auto Drive. Review the recent conversation history and identify the single primary coding goal the assistant should pursue next.".to_string()
     } else {
-        format!("**Primary Goal**\n{}", goal_text)
+        format!("**Primary Goal**\n{goal_text}")
     };
     (coordinator_message, intro, primary_goal)
 }
@@ -1821,7 +1817,7 @@ fn build_schema(active_agents: &[String], features: SchemaFeatures) -> Value {
             "type": "string",
         });
         if !models_enum_values.is_empty() {
-            schema["enum"] = Value::Array(models_enum_values.clone());
+            schema["enum"] = Value::Array(models_enum_values);
         }
         schema
     };
@@ -1931,7 +1927,7 @@ fn build_schema(active_agents: &[String], features: SchemaFeatures) -> Value {
                                     "maxLength": 400,
                                     "description": "Outcome-oriented instruction (what to produce)."
                                 },
-                                "models": models_request_property.clone()
+                                "models": models_request_property
                             },
                             "required": ["prompt", "context", "write", "models"]
                         },
@@ -2073,7 +2069,7 @@ fn request_decision(
                     client,
                     developer_intro,
                     primary_goal,
-                    coordinator_prompt.as_deref(),
+                    coordinator_prompt,
                     time_budget_message,
                     time_budget_deadline,
                     loop_warning,
@@ -2086,8 +2082,7 @@ fn request_decision(
                 )
                 .map_err(|fallback_err| {
                     fallback_err.context(format!(
-                        "coordinator fallback with model '{}' failed after original error: {}",
-                        fallback_slug, original_error
+                        "coordinator fallback with model '{fallback_slug}' failed after original error: {original_error}"
                     ))
                 });
             }
@@ -2177,12 +2172,12 @@ fn request_decision_with_model(
 ) -> Result<RequestStreamResult> {
     let developer_intro = developer_intro.to_string();
     let primary_goal = primary_goal.to_string();
-    let time_budget_message = time_budget_message.map(|text| text.to_string());
-    let loop_warning = loop_warning.map(|text| text.to_string());
+    let time_budget_message = time_budget_message.map(std::string::ToString::to_string);
+    let loop_warning = loop_warning.map(std::string::ToString::to_string);
     let schema = schema.clone();
     let conversation = Arc::clone(&conversation);
-    let auto_instructions = auto_instructions.map(|text| text.to_string());
-    let coordinator_prompt = coordinator_prompt.map(|text| text.to_string());
+    let auto_instructions = auto_instructions.map(std::string::ToString::to_string);
+    let coordinator_prompt = coordinator_prompt.map(std::string::ToString::to_string);
     let tx = event_tx.clone();
     let cancel = cancel_token.clone();
     let mut rate_limit_switch_state = RateLimitSwitchState::default();
@@ -2230,15 +2225,14 @@ fn request_decision_with_model(
                                 saw_output_text_delta = true;
                             }
                             Ok(ResponseEvent::OutputItemDone { item, .. }) => {
-                                if let ResponseItem::Message { content, .. } = &item {
-                                    if !saw_output_text_delta {
+                                if let ResponseItem::Message { content, .. } = &item
+                                    && !saw_output_text_delta {
                                         for c in content {
                                             if let ContentItem::OutputText { text } = c {
                                                 out.push_str(text);
                                             }
                                         }
                                     }
-                                }
                                 if matches!(item, ResponseItem::Reasoning { .. }) {
                                     reasoning_delta_accumulator.clear();
                                 }
@@ -2333,7 +2327,7 @@ fn request_decision_with_model(
                         .map(|s| format!("; next attempt at {s}"))
                         .unwrap_or_default()
                 );
-                let _ = tx.send(AutoCoordinatorEvent::Thinking {
+                tx.send(AutoCoordinatorEvent::Thinking {
                     delta: message,
                     summary_index: None,
                 });
@@ -2424,8 +2418,8 @@ fn build_user_turn_prompt(
 
 fn should_retry_with_default_model(err: &anyhow::Error) -> bool {
     err.chain().any(|cause| {
-        if let Some(code_err) = cause.downcast_ref::<CodexErr>() {
-            if let CodexErr::UnexpectedStatus(err) = code_err {
+        if let Some(code_err) = cause.downcast_ref::<CodexErr>()
+            && let CodexErr::UnexpectedStatus(err) = code_err {
                 if !err.status.is_client_error() {
                     return false;
                 }
@@ -2435,7 +2429,6 @@ fn should_retry_with_default_model(err: &anyhow::Error) -> bool {
                     || body_lower.contains("model_not_found")
                     || body_lower.contains("model does not exist");
             }
-        }
         false
     })
 }
@@ -2544,13 +2537,12 @@ pub(crate) fn classify_model_error(error: &anyhow::Error) -> RetryDecision {
         return classify_reqwest_error(req_err);
     }
 
-    if let Some(io_err) = find_in_chain::<std::io::Error>(error) {
-        if io_err.kind() == std::io::ErrorKind::TimedOut {
+    if let Some(io_err) = find_in_chain::<std::io::Error>(error)
+        && io_err.kind() == std::io::ErrorKind::TimedOut {
             return RetryDecision::RetryAfterBackoff {
                 reason: "network timeout".to_string(),
             };
         }
-    }
 
     RetryDecision::Fatal(anyhow!(error.to_string()))
 }
@@ -2561,16 +2553,15 @@ fn classify_model_error_with_auto_switch(
     event_tx: &AutoCoordinatorEventSender,
     error: &anyhow::Error,
 ) -> RetryDecision {
-    if let Some(code_err) = find_in_chain::<CodexErr>(error) {
-        if let CodexErr::UsageLimitReached(limit) = code_err {
-            if client.auto_switch_accounts_on_rate_limit()
+    if let Some(code_err) = find_in_chain::<CodexErr>(error)
+        && let CodexErr::UsageLimitReached(limit) = code_err
+            && client.auto_switch_accounts_on_rate_limit()
                 && auth::read_code_api_key_from_env().is_none()
-            {
-                if let Some(auth_manager) = client.get_auth_manager() {
+                && let Some(auth_manager) = client.get_auth_manager() {
                     let auth = auth_manager.auth();
                     let current_account_id = auth
                         .as_ref()
-                        .and_then(|current| current.get_account_id())
+                        .and_then(hanzo_core::CodexAuth::get_account_id)
                         .or_else(|| {
                             auth_accounts::get_active_account_id(client.code_home())
                                 .ok()
@@ -2645,9 +2636,6 @@ fn classify_model_error_with_auto_switch(
                         }
                     }
                 }
-            }
-        }
-    }
 
     classify_model_error(error)
 }
@@ -2719,14 +2707,13 @@ fn extract_seconds(value: &serde_json::Value) -> Option<Duration> {
                 }
                 return Some(Duration::from_secs_f64(num));
             }
-            if let Some(text) = seconds.as_str() {
-                if let Ok(num) = text.parse::<f64>() {
+            if let Some(text) = seconds.as_str()
+                && let Ok(num) = text.parse::<f64>() {
                     if num.is_sign_negative() {
                         continue;
                     }
                     return Some(Duration::from_secs_f64(num));
                 }
-            }
         }
     }
     None
@@ -2766,7 +2753,7 @@ fn random_jitter(max: Duration) -> Duration {
     Duration::from_secs_f64(jitter)
 }
 
-fn find_in_chain<'a, T: std::error::Error + 'static>(error: &'a anyhow::Error) -> Option<&'a T> {
+fn find_in_chain<T: std::error::Error + 'static>(error: &anyhow::Error) -> Option<&T> {
     for cause in error.chain() {
         if let Some(specific) = cause.downcast_ref::<T>() {
             return Some(specific);
@@ -2822,8 +2809,8 @@ fn classify_recoverable_decision_error(err: &anyhow::Error) -> Option<Recoverabl
         });
     }
 
-    if lower.contains(" is empty") {
-        if let Some((field, _)) = text.split_once(" is empty") {
+    if lower.contains(" is empty")
+        && let Some((field, _)) = text.split_once(" is empty") {
             let field_trimmed = field.trim().trim_matches('`');
             if !field_trimmed.is_empty() {
                 let summary = format!("`{field_trimmed}` was empty");
@@ -2836,7 +2823,6 @@ fn classify_recoverable_decision_error(err: &anyhow::Error) -> Option<Recoverabl
                 });
             }
         }
-    }
 
     if lower.contains("unexpected finish_status") {
         let extracted = text
@@ -2958,10 +2944,10 @@ fn convert_decision_new(
         let legacy_past = clean_optional(progress.past);
         let legacy_current = clean_optional(progress.current);
         if status_title.is_none() {
-            status_title = legacy_current.clone();
+            status_title = legacy_current;
         }
         if status_sent_to_user.is_none() {
-            status_sent_to_user = legacy_past.clone();
+            status_sent_to_user = legacy_past;
         }
     }
 
@@ -3075,7 +3061,7 @@ fn convert_decision_legacy(
     let cli = match (status, cli_prompt) {
         (AutoCoordinatorStatus::Continue, Some(prompt)) => Some(CliAction {
             prompt: clean_required(&prompt, "cli_prompt")?,
-            context: context.clone(),
+            context: context,
             suppress_ui_context: false,
         }),
         (AutoCoordinatorStatus::Continue, None) => {
@@ -3085,7 +3071,7 @@ fn convert_decision_legacy(
         }
         (_, Some(prompt)) => Some(CliAction {
             prompt: clean_required(&prompt, "cli_prompt")?,
-            context: context.clone(),
+            context: context,
             suppress_ui_context: false,
         }),
         (_, None) => None,
@@ -3265,12 +3251,11 @@ pub(crate) fn make_message(role: &str, text: String) -> ResponseItem {
 fn strip_role_prefix(input: &str) -> &str {
     const PREFIXES: [&str; 2] = ["Coordinator:", "CLI:"];
     for prefix in PREFIXES {
-        if let Some(head) = input.get(..prefix.len()) {
-            if head.eq_ignore_ascii_case(prefix) {
+        if let Some(head) = input.get(..prefix.len())
+            && head.eq_ignore_ascii_case(prefix) {
                 let rest = input.get(prefix.len()..).unwrap_or_default();
                 return rest.strip_prefix(' ').unwrap_or(rest);
             }
-        }
     }
     input
 }
@@ -3433,11 +3418,11 @@ pub fn should_compact(
 
     let token_limit = family
         .auto_compact_token_limit()
-        .and_then(|limit| (limit > 0).then(|| limit as u64))
+        .and_then(|limit| (limit > 0).then_some(limit as u64))
         .or(family.context_window);
 
-    if let Some(token_limit) = token_limit {
-        if token_limit > 0 {
+    if let Some(token_limit) = token_limit
+        && token_limit > 0 {
             let threshold = (token_limit as f64 * 0.8) as u64;
             let projected_total = transcript_tokens.saturating_add(estimated_next);
             if projected_total >= threshold {
@@ -3450,7 +3435,6 @@ pub fn should_compact(
             // token-safe transcript.
             return false;
         }
-    }
 
     if has_recorded_turns {
         return false;

@@ -305,10 +305,10 @@ pub fn maybe_parse_apply_patch_verified(argv: &[String], cwd: &Path) -> MaybeApp
         }
     }
 
-    if let Some((_, script)) = parse_shell_script(argv) {
-        if parse_patch(script).is_ok() {
-            return MaybeApplyPatchVerified::CorrectnessError(ApplyPatchError::ImplicitInvocation);
-        }
+    if let Some((_, script)) = parse_shell_script(argv)
+        && parse_patch(script).is_ok()
+    {
+        return MaybeApplyPatchVerified::CorrectnessError(ApplyPatchError::ImplicitInvocation);
     }
 
     match maybe_parse_apply_patch(argv) {
