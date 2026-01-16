@@ -280,7 +280,7 @@ fn extract_response(output: &str) -> String {
     let result = text_lines.join("\n").trim().to_string();
     // Clean trailing brackets
     result
-        .trim_end_matches(|c: char| matches!(c, '[' | ']' | '{' | '}' | ' '))
+        .trim_end_matches(['[', ']', '{', '}', ' '])
         .to_string()
 }
 

@@ -290,6 +290,7 @@ pub fn run(
 /// `run` that sends one final batch of results over the provided channel.
 ///
 /// Parameters mirror the upstream API for compatibility.
+#[allow(clippy::too_many_arguments)]
 pub fn run_streaming(
     pattern_text: &str,
     limit: NonZeroUsize,

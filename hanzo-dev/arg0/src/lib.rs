@@ -236,27 +236,23 @@ fn bridge_legacy_envs() {
     let hanzo_home_missing = std::env::var("HANZO_HOME")
         .map(|v| v.trim().is_empty())
         .unwrap_or(true);
-    if hanzo_home_missing {
-        if let Ok(code_home) = std::env::var("CODE_HOME") {
-            if !code_home.trim().is_empty() {
+    if hanzo_home_missing
+        && let Ok(code_home) = std::env::var("CODE_HOME")
+            && !code_home.trim().is_empty() {
                 unsafe { std::env::set_var("HANZO_HOME", code_home) };
             }
-        }
-    }
     let hanzo_home_missing = std::env::var("HANZO_HOME")
         .map(|v| v.trim().is_empty())
         .unwrap_or(true);
-    if hanzo_home_missing {
-        if let Ok(codex_home) = std::env::var("HANZO_HOME") {
-            if !codex_home.trim().is_empty() {
+    if hanzo_home_missing
+        && let Ok(codex_home) = std::env::var("HANZO_HOME")
+            && !codex_home.trim().is_empty() {
                 unsafe { std::env::set_var("HANZO_HOME", codex_home) };
             }
-        }
-    }
 
     // If HANZO_HOME is set, backfill legacy vars for compatibility.
-    if let Ok(hanzo_home) = std::env::var("HANZO_HOME") {
-        if !hanzo_home.trim().is_empty() {
+    if let Ok(hanzo_home) = std::env::var("HANZO_HOME")
+        && !hanzo_home.trim().is_empty() {
             if std::env::var("CODE_HOME")
                 .map(|v| v.trim().is_empty())
                 .unwrap_or(true)
@@ -270,7 +266,6 @@ fn bridge_legacy_envs() {
                 unsafe { std::env::set_var("HANZO_HOME", &hanzo_home) };
             }
         }
-    }
 
     // Bridge legacy CODEX_* vars into HANZO_* if HANZO_* is not already set.
     let legacy: Vec<(String, String)> = std::env::vars()
@@ -278,7 +273,7 @@ fn bridge_legacy_envs() {
         .collect();
     for (key, value) in legacy {
         let suffix = &key[LEGACY_ENV_VAR_PREFIX.len()..];
-        let new_key = format!("{}{}", ILLEGAL_ENV_VAR_PREFIX, suffix);
+        let new_key = format!("{ILLEGAL_ENV_VAR_PREFIX}{suffix}");
         if std::env::var_os(&new_key).is_none() {
             unsafe { std::env::set_var(new_key, value) };
         }

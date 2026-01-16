@@ -169,8 +169,8 @@ impl DebugLogger {
             return Ok(());
         }
 
-        if let Ok(mut streams) = self.active_streams.lock() {
-            if let Some(stream_info) = streams.get_mut(request_id) {
+        if let Ok(mut streams) = self.active_streams.lock()
+            && let Some(stream_info) = streams.get_mut(request_id) {
                 let timestamp = Local::now();
                 let event_entry = serde_json::json!({
                     "timestamp": timestamp.to_rfc3339(),
@@ -179,7 +179,6 @@ impl DebugLogger {
                 });
                 stream_info.events.push(event_entry);
             }
-        }
 
         if let Some(response) = data.get("response") {
             if let Some(usage) = response.get("usage") {
@@ -198,8 +197,8 @@ impl DebugLogger {
             return Ok(());
         }
 
-        if let Ok(mut streams) = self.active_streams.lock() {
-            if let Some(stream_info) = streams.remove(request_id) {
+        if let Ok(mut streams) = self.active_streams.lock()
+            && let Some(stream_info) = streams.remove(request_id) {
                 // Create the response object with all events as an array
                 let response_data = serde_json::json!({
                     "request_id": request_id,
@@ -211,7 +210,6 @@ impl DebugLogger {
                 let formatted_response = serde_json::to_string_pretty(&response_data)?;
                 fs::write(&stream_info.response_file, formatted_response)?;
             }
-        }
 
         Ok(())
     }
@@ -254,7 +252,7 @@ impl DebugLogger {
         } else {
             let timestamp = Local::now().format("%Y%m%d_%H%M%S%.3f");
             self.usage_dir
-                .join(format!("{}_{}_usage.json", timestamp, session_id_str))
+                .join(format!("{timestamp}_{session_id_str}_usage.json"))
         };
 
         if let Some(parent) = path.parent() {
@@ -278,7 +276,7 @@ impl DebugLogger {
 
         let path = self
             .turn_latency_dir
-            .join(format!("{}_turn_latency.jsonl", session_id));
+            .join(format!("{session_id}_turn_latency.jsonl"));
         if let Some(parent) = path.parent() {
             fs::create_dir_all(parent)?;
         }
@@ -339,13 +337,12 @@ impl DebugLogger {
                 if !path.is_file() {
                     continue;
                 }
-                if let Some(name) = path.file_name().and_then(|n| n.to_str()) {
-                    if name == format!("{}_usage.json", session_id)
-                        || name.ends_with(&format!("_{}_usage.json", session_id))
+                if let Some(name) = path.file_name().and_then(|n| n.to_str())
+                    && (name == format!("{session_id}_usage.json")
+                        || name.ends_with(&format!("_{session_id}_usage.json")))
                     {
                         return Some(path);
                     }
-                }
             }
         }
         None

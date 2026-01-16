@@ -455,7 +455,7 @@ impl AutoDriveController {
     }
 
     pub fn transition(&mut self, transition: PhaseTransition) -> TransitionEffects {
-        let old_phase = self.phase.clone();
+        let old_phase = self.phase;
         let effects = Vec::new();
 
         match (&self.phase, &transition) {
@@ -695,7 +695,7 @@ impl AutoDriveController {
             "Waiting for connection… retrying in {human_delay} (attempt {pending_attempt})"
         ));
         self.current_display_is_summary = true;
-        self.current_status_title = Some(format!("Retrying after error"));
+        self.current_status_title = Some("Retrying after error".to_string());
         self.current_status_sent_to_user = Some(format!(
             "Encountered an error: {truncated_reason}. Waiting before retrying."
         ));

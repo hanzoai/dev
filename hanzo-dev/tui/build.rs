@@ -30,9 +30,9 @@ fn main() {
                 prev_is_alpha = false;
                 continue;
             }
-            if ch.is_ascii_uppercase() && prev_is_lower {
-                out.push(' ');
-            } else if ch.is_ascii_digit() && prev_is_alpha {
+            if (ch.is_ascii_uppercase() && prev_is_lower)
+                || (ch.is_ascii_digit() && prev_is_alpha)
+            {
                 out.push(' ');
             }
             out.push(ch);
@@ -87,13 +87,15 @@ fn main() {
         g.to_string()
     }
 
-    let manifest_dir = std::env::var("CARGO_MANIFEST_DIR").unwrap();
+    let Ok(manifest_dir) = std::env::var("CARGO_MANIFEST_DIR") else {
+        return;
+    };
     let path = PathBuf::from(manifest_dir)
         .join("src")
         .join("assets")
         .join("spinners.json");
-    if let Ok(text) = fs::read_to_string(&path) {
-        if let Ok(src) = serde_json::from_str::<BTreeMap<String, serde_json::Value>>(&text) {
+    if let Ok(text) = fs::read_to_string(&path)
+        && let Ok(src) = serde_json::from_str::<BTreeMap<String, serde_json::Value>>(&text) {
             let mut changed = false;
             let mut out: BTreeMap<String, Dest> = BTreeMap::new();
             for (name, v) in src.into_iter() {
@@ -114,11 +116,11 @@ fn main() {
                     changed = true;
                 }
             }
-            if changed {
-                let pretty = serde_json::to_string_pretty(&out).unwrap();
+            if changed
+                && let Ok(pretty) = serde_json::to_string_pretty(&out)
+            {
                 let _ = fs::write(&path, pretty);
                 println!("cargo:rerun-if-changed={}", path.display());
             }
         }
-    }
 }

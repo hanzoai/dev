@@ -159,11 +159,11 @@ fn parse_level(raw: &str) -> Option<String> {
     serde_json::from_str::<Value>(raw).ok().and_then(|val| {
         val.get("level")
             .and_then(|v| v.as_str())
-            .map(|s| s.to_lowercase())
+            .map(str::to_lowercase)
             .or_else(|| {
                 val.get("type")
                     .and_then(|v| v.as_str())
-                    .map(|s| s.to_lowercase())
+                    .map(str::to_lowercase)
             })
     })
 }
@@ -181,7 +181,7 @@ fn truncate_summary(text: &str) -> (String, bool) {
     if text.chars().count() > MAX_EVENT_SUMMARY_CHARS {
         let remaining = text.chars().count().saturating_sub(MAX_EVENT_SUMMARY_CHARS);
         (
-            format!("{}... [truncated {remaining} chars]", truncated),
+            format!("{truncated}... [truncated {remaining} chars]"),
             true,
         )
     } else {
@@ -227,11 +227,10 @@ fn coalesce_events(events: Vec<BridgeBatchEvent>) -> CoalescedBatch {
             truncated_events += 1;
         }
 
-        if let Some(level) = level.as_deref() {
-            if is_error_level(level) {
+        if let Some(level) = level.as_deref()
+            && is_error_level(level) {
                 saw_error = true;
             }
-        }
 
         if let Some((_, count)) = entries.iter_mut().find(|(msg, _)| msg == &summary) {
             *count += 1;
@@ -280,7 +279,7 @@ fn format_batch_message(batch: &CoalescedBatch) -> String {
             String::new()
         };
         let indented = msg.replace('\n', "\n  ");
-        lines.push(format!("- {}{}", prefix, indented));
+        lines.push(format!("- {prefix}{indented}"));
     }
 
     if batch.dropped_events > 0 {
@@ -543,14 +542,12 @@ pub(crate) fn persist_workspace_subscription(
         let payload = serde_json::to_string_pretty(&SubscriptionOverride {
             levels: sub.levels.clone(),
             capabilities: sub.capabilities.clone(),
-            llm_filter: sub.llm_filter.clone(),
+            llm_filter: sub.llm_filter,
         })?;
         fs::write(&tmp, payload)?;
         fs::rename(tmp, &path)?;
-    } else {
-        if path.exists() {
-            fs::remove_file(&path)?;
-        }
+    } else if path.exists() {
+        fs::remove_file(&path)?;
     }
 
     Ok(())
@@ -592,14 +589,13 @@ fn find_meta_path(start: &Path) -> Option<PathBuf> {
 }
 
 fn subscription_override_path(start: &Path) -> Option<PathBuf> {
-    if let Some(meta) = find_meta_path(start) {
-        if let Some(dir) = meta.parent() {
+    if let Some(meta) = find_meta_path(start)
+        && let Some(dir) = meta.parent() {
             let candidate = dir.join(SUBSCRIPTION_OVERRIDE_FILE);
             if candidate.exists() {
                 return Some(candidate);
             }
         }
-    }
 
     let mut current = Some(start);
     while let Some(dir) = current {
@@ -689,21 +685,19 @@ fn workspace_has_code_bridge(start: &Path) -> bool {
 }
 
 fn is_meta_stale(meta: &BridgeMeta, path: &Path) -> bool {
-    if let Some(hb) = &meta.heartbeat_at {
-        if let Ok(ts) = DateTime::parse_from_rfc3339(hb) {
+    if let Some(hb) = &meta.heartbeat_at
+        && let Ok(ts) = DateTime::parse_from_rfc3339(hb) {
             let age = Utc::now().signed_duration_since(ts.with_timezone(&Utc));
             return age.num_milliseconds() > HEARTBEAT_STALE_MS;
         }
-    }
 
     // Fallback for hosts that don't emit heartbeat: use file mtime as staleness signal
-    if let Ok(stat) = std::fs::metadata(path) {
-        if let Ok(modified) = stat.modified() {
+    if let Ok(stat) = std::fs::metadata(path)
+        && let Ok(modified) = stat.modified() {
             let modified: DateTime<Utc> = modified.into();
             let age = Utc::now().signed_duration_since(modified);
             return age > ChronoDuration::milliseconds(HEARTBEAT_STALE_MS);
         }
-    }
     false
 }
 

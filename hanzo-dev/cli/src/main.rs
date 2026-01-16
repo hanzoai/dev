@@ -36,7 +36,6 @@ use hanzo_tui::ExitSummary;
 use hanzo_tui::resume_command_name;
 use serde::Deserialize;
 use serde::Serialize;
-use serde_json;
 use std::fs;
 use std::path::Path;
 use std::path::PathBuf;
@@ -461,7 +460,7 @@ async fn cli_main(code_linux_sandbox_exe: Option<PathBuf>) -> anyhow::Result<()>
             if !token_usage.is_zero() {
                 println!(
                     "{}",
-                    hanzo_core::protocol::FinalOutput::from(token_usage.clone())
+                    hanzo_core::protocol::FinalOutput::from(token_usage)
                 );
             }
             if let Some(session_id) = session_id {
@@ -526,7 +525,7 @@ async fn cli_main(code_linux_sandbox_exe: Option<PathBuf>) -> anyhow::Result<()>
             if !token_usage.is_zero() {
                 println!(
                     "{}",
-                    hanzo_core::protocol::FinalOutput::from(token_usage.clone())
+                    hanzo_core::protocol::FinalOutput::from(token_usage)
                 );
             }
             if let Some(session_id) = session_id {
@@ -749,10 +748,10 @@ async fn run_bridge_list(_cmd: BridgeListCommand) -> anyhow::Result<()> {
         println!("{}Bridge metadata : {}", prefix, target.meta_path.display());
         println!("{}url             : {}", indent, target.meta.url);
         if let Some(ws) = target.meta.workspace_path.as_deref() {
-            println!("{}workspace       : {ws}", indent);
+            println!("{indent}workspace       : {ws}");
         }
         if let Some(pid) = target.meta.pid {
-            println!("{}host pid        : {pid}", indent);
+            println!("{indent}host pid        : {pid}");
         }
 
         let hb = match target.heartbeat_age_ms {
@@ -766,7 +765,7 @@ async fn run_bridge_list(_cmd: BridgeListCommand) -> anyhow::Result<()> {
             }
             None => "unknown".to_string(),
         };
-        println!("{}heartbeat       : {hb}", indent);
+        println!("{indent}heartbeat       : {hb}");
         println!(
             "{}stale           : {}",
             indent,
@@ -774,14 +773,13 @@ async fn run_bridge_list(_cmd: BridgeListCommand) -> anyhow::Result<()> {
         );
         if target.stale {
             println!(
-                "{}⚠ metadata looks stale; restart dev-bridge-host if this persists.",
-                indent
+                "{indent}⚠ metadata looks stale; restart dev-bridge-host if this persists."
             );
         }
 
         match bridge::list_control_capable(target).await {
-            Ok(count) => println!("{}control-capable : {count} bridge client(s)", indent),
-            Err(err) => println!("{}control-capable : unknown ({err})", indent),
+            Ok(count) => println!("{indent}control-capable : {count} bridge client(s)"),
+            Err(err) => println!("{indent}control-capable : unknown ({err})"),
         }
 
         if idx + 1 < targets.len() {
@@ -807,11 +805,11 @@ async fn run_bridge_screenshot(cmd: BridgeScreenshotCommand) -> anyhow::Result<(
     );
 
     if let Some(res) = outcome.result.as_ref() {
-        let ok = res.get("ok").and_then(|v| v.as_bool()).unwrap_or(false);
+        let ok = res.get("ok").and_then(serde_json::Value::as_bool).unwrap_or(false);
         if ok {
             let payload = res
                 .get("result")
-                .map(|v| v.to_string())
+                .map(std::string::ToString::to_string)
                 .unwrap_or_else(|| "ok".to_string());
             println!("Control result  : {payload}");
         } else {
@@ -849,11 +847,11 @@ async fn run_bridge_javascript(cmd: BridgeJavascriptCommand) -> anyhow::Result<(
     );
 
     if let Some(res) = outcome.result.as_ref() {
-        let ok = res.get("ok").and_then(|v| v.as_bool()).unwrap_or(false);
+        let ok = res.get("ok").and_then(serde_json::Value::as_bool).unwrap_or(false);
         if ok {
             let payload = res
                 .get("result")
-                .map(|v| v.to_string())
+                .map(std::string::ToString::to_string)
                 .unwrap_or_else(|| "ok".to_string());
             println!("Result          : {payload}");
         } else {
@@ -896,11 +894,10 @@ fn select_bridge_target(selector: Option<&str>) -> anyhow::Result<bridge::Bridge
         if paths_match(&target.meta_path, &path) {
             return Ok(target.clone());
         }
-        if let Some(ws) = target.meta.workspace_path.as_deref() {
-            if ws == selector || ws.ends_with(selector) || ws.contains(selector) {
+        if let Some(ws) = target.meta.workspace_path.as_deref()
+            && (ws == selector || ws.ends_with(selector) || ws.contains(selector)) {
                 return Ok(target.clone());
             }
-        }
     }
 
     anyhow::bail!(
@@ -1030,7 +1027,7 @@ fn finalize_resume_interactive(
     merge_resume_cli_flags(&mut interactive, resume_cli);
 
     if let Err(err) = apply_resume_directives(&mut interactive, session_id, last) {
-        eprintln!("{}", err);
+        eprintln!("{err}");
         process::exit(1);
     }
 
@@ -1126,7 +1123,7 @@ fn resolve_resume_path(session_id: Option<&str>, last: bool) -> anyhow::Result<O
     let code_home = hanzo_core::config::find_code_home()
         .context("failed to locate Hanzo Dev home directory")?;
 
-    let sess = session_id.map(|s| s.to_string());
+    let sess = session_id.map(std::string::ToString::to_string);
     let fetch = async move {
         let catalog = SessionCatalog::new(code_home.clone());
         if let Some(id) = sess.as_deref() {
@@ -1161,7 +1158,7 @@ fn resolve_resume_path(session_id: Option<&str>, last: bool) -> anyhow::Result<O
 
     match TokioHandle::try_current() {
         Ok(handle) => {
-            let handle = handle.clone();
+            let handle = handle;
             std::thread::Builder::new()
                 .name("resume-lookup".to_string())
                 .spawn(move || handle.block_on(fetch))
@@ -1214,8 +1211,8 @@ fn order_replay_main(args: OrderReplayArgs) -> anyhow::Result<()> {
         for ev in events {
             let data = ev.get("data");
             if let Some(d) = data {
-                let out = d.get("output_index").and_then(|x| x.as_u64());
-                let seq = d.get("sequence_number").and_then(|x| x.as_u64());
+                let out = d.get("output_index").and_then(serde_json::Value::as_u64);
+                let seq = d.get("sequence_number").and_then(serde_json::Value::as_u64);
                 if let (Some(out), Some(seq)) = (out, seq) {
                     items.push((out, seq));
                 }
@@ -1271,7 +1268,7 @@ fn order_replay_main(args: OrderReplayArgs) -> anyhow::Result<()> {
 
     println!("Expected (first 20 sorted by out,seq):");
     for (i, (out, seq)) in expected.iter().take(20).enumerate() {
-        println!("  {:>3}: out={} seq={}", i, out, seq);
+        println!("  {i:>3}: out={out} seq={seq}");
     }
 
     println!("\nActual inserts (first 40):");
@@ -1294,8 +1291,7 @@ fn order_replay_main(args: OrderReplayArgs) -> anyhow::Result<()> {
         .iter()
         .position(|l| l.ordered && l.req == 1 && l.out == 2);
     println!(
-        "\nCheck (req=1): first out=1 at {:?}, first out=2 at {:?}",
-        pos_out1, pos_out2
+        "\nCheck (req=1): first out=1 at {pos_out1:?}, first out=2 at {pos_out2:?}"
     );
     if let (Some(p1), Some(p2)) = (pos_out1, pos_out2) {
         if p1 < p2 {
@@ -1325,7 +1321,7 @@ async fn preview_main(args: PreviewArgs) -> anyhow::Result<()> {
     let (owner, name) = repo
         .split_once('/')
         .map(|(o, n)| (o.to_string(), n.to_string()))
-        .ok_or_else(|| anyhow::anyhow!(format!("Invalid repo format: {}", repo)))?;
+        .ok_or_else(|| anyhow::anyhow!(format!("Invalid repo format: {repo}")))?;
 
     let os = env::consts::OS;
     let arch = env::consts::ARCH;
@@ -1335,7 +1331,7 @@ async fn preview_main(args: PreviewArgs) -> anyhow::Result<()> {
         ("macos", "x86_64") => "x86_64-apple-darwin",
         ("macos", "aarch64") => "aarch64-apple-darwin",
         ("windows", _) => "x86_64-pc-windows-msvc",
-        _ => bail!(format!("Unsupported platform: {}/{}", os, arch)),
+        _ => bail!(format!("Unsupported platform: {os}/{arch}")),
     };
 
     let client = reqwest::Client::builder()
@@ -1359,7 +1355,7 @@ async fn preview_main(args: PreviewArgs) -> anyhow::Result<()> {
         name: &str,
         slug: &str,
     ) -> anyhow::Result<String> {
-        let base = format!("preview-{}", slug);
+        let base = format!("preview-{slug}");
         let url = format!("https://api.github.com/repos/{owner}/{name}/releases?per_page=100");
         let v = fetch_json(client, &url).await?;
         let mut latest = base.clone();
@@ -1406,7 +1402,7 @@ async fn preview_main(args: PreviewArgs) -> anyhow::Result<()> {
         let resp = client.get(u).send().await?;
         if resp.status().is_success() {
             let data = resp.bytes().await?;
-            let filename = u.split('/').last().unwrap_or("download.bin");
+            let filename = u.split('/').next_back().unwrap_or("download.bin");
             let p = tmp.path().join(filename);
             fs::write(&p, &data)?;
             downloaded = Some((p, u.clone()));
@@ -1419,11 +1415,10 @@ async fn preview_main(args: PreviewArgs) -> anyhow::Result<()> {
     fn first_match(dir: &Path, pat: &str) -> Option<std::path::PathBuf> {
         for entry in fs::read_dir(dir).ok()? {
             let p = entry.ok()?.path();
-            if let Some(name) = p.file_name().and_then(|s| s.to_str()) {
-                if name.starts_with(pat) {
+            if let Some(name) = p.file_name().and_then(|s| s.to_str())
+                && name.starts_with(pat) {
                     return Some(p);
                 }
-            }
         }
         None
     }
@@ -1456,7 +1451,7 @@ async fn preview_main(args: PreviewArgs) -> anyhow::Result<()> {
     if os != "windows" {
         // If we downloaded a tar.gz, extract
         if path.extension().and_then(|e| e.to_str()) == Some("gz") {
-            let tgz = path.clone();
+            let tgz = path;
             let file = fs::File::open(&tgz)?;
             let gz = GzDecoder::new(file);
             let mut ar = tar::Archive::new(gz);
@@ -1491,7 +1486,7 @@ async fn preview_main(args: PreviewArgs) -> anyhow::Result<()> {
             let dest = match exe.extension().and_then(|e| e.to_str()) {
                 Some(ext) => {
                     let stem = exe.file_stem().and_then(|s| s.to_str()).unwrap_or("dev");
-                    out_dir.join(format!("{}-{}.{}", stem, slug, ext))
+                    out_dir.join(format!("{stem}-{slug}.{ext}"))
                 }
                 None => out_dir.join(format!(
                     "{}-{}",
@@ -1525,9 +1520,9 @@ async fn preview_main(args: PreviewArgs) -> anyhow::Result<()> {
             // Derive base name from archive (e.g., dev-aarch64-apple-darwin.zst -> dev-aarch64-apple-darwin-<slug>.{exe?})
             let stem = path.file_stem().and_then(|s| s.to_str()).unwrap_or("dev");
             let dest = if cfg!(windows) {
-                out_dir.join(format!("{}-{}.exe", stem, slug))
+                out_dir.join(format!("{stem}-{slug}.exe"))
             } else {
-                out_dir.join(format!("{}-{}", stem, slug))
+                out_dir.join(format!("{stem}-{slug}"))
             };
             let status = std::process::Command::new("zstd")
                 .arg("-d")
@@ -1576,11 +1571,11 @@ async fn doctor_main() -> anyhow::Result<()> {
         .map(|p| p.display().to_string())
         .unwrap_or_else(|_| "<unknown>".to_string());
     println!("code version: {}", hanzo_version::version());
-    println!("current_exe: {}", exe);
+    println!("current_exe: {exe}");
 
     // PATH
     let path = env::var("PATH").unwrap_or_default();
-    println!("PATH: {}", path);
+    println!("PATH: {path}");
 
     // Helper to run a shell command and capture stdout (best-effort)
     async fn run_cmd(cmd: &str, args: &[&str]) -> String {
@@ -1598,12 +1593,12 @@ async fn doctor_main() -> anyhow::Result<()> {
         async move {
             let out = run_cmd(
                 "/bin/bash",
-                &["-lc", &format!("which -a {} 2>/dev/null || true", name)],
+                &["-lc", &format!("which -a {name} 2>/dev/null || true")],
             )
             .await;
             out.split('\n')
                 .filter(|s| !s.is_empty())
-                .map(|s| s.to_string())
+                .map(std::string::ToString::to_string)
                 .collect::<Vec<_>>()
         }
     };
@@ -1628,7 +1623,7 @@ async fn doctor_main() -> anyhow::Result<()> {
         println!("  <none>");
     } else {
         for p in &code_paths {
-            println!("  {}", p);
+            println!("  {p}");
         }
     }
     println!("\nFound 'coder' on PATH (in order):");
@@ -1636,19 +1631,19 @@ async fn doctor_main() -> anyhow::Result<()> {
         println!("  <none>");
     } else {
         for p in &coder_paths {
-            println!("  {}", p);
+            println!("  {p}");
         }
     }
 
     // Try to run --version for each resolved binary to show where mismatches come from
     async fn show_versions(caption: &str, paths: &[String]) {
-        println!("\n{}:", caption);
+        println!("\n{caption}:");
         for p in paths {
             let out = run_cmd(p, &["--version"]).await;
             if out.is_empty() {
-                println!("  {} -> (no output)", p);
+                println!("  {p} -> (no output)");
             } else {
-                println!("  {} -> {}", p, out);
+                println!("  {p} -> {out}");
             }
         }
     }
@@ -1658,17 +1653,17 @@ async fn doctor_main() -> anyhow::Result<()> {
     // Detect Bun shims
     let bun_home = env::var("BUN_INSTALL")
         .ok()
-        .or_else(|| env::var("HOME").ok().map(|h| format!("{}/.bun", h)));
+        .or_else(|| env::var("HOME").ok().map(|h| format!("{h}/.bun")));
     if let Some(bun) = bun_home {
-        let bun_bin = format!("{}/bin", bun);
-        let bun_coder = format!("{}/coder", bun_bin);
+        let bun_bin = format!("{bun}/bin");
+        let bun_coder = format!("{bun_bin}/coder");
         if coder_paths.iter().any(|p| p == &bun_coder) {
-            println!("\nBun shim detected for 'coder': {}", bun_coder);
+            println!("\nBun shim detected for 'coder': {bun_coder}");
             println!("Suggestion: remove old Bun global with: bun remove -g @just-every/code");
         }
-        let bun_code = format!("{}/code", bun_bin);
+        let bun_code = format!("{bun_bin}/code");
         if code_paths.iter().any(|p| p == &bun_code) {
-            println!("Bun shim detected for 'code': {}", bun_code);
+            println!("Bun shim detected for 'code': {bun_code}");
             println!("Suggestion: prefer 'coder' or remove Bun shim if it conflicts.");
         }
     }
@@ -1694,10 +1689,10 @@ async fn doctor_main() -> anyhow::Result<()> {
     let npm_root = run_cmd("npm", &["root", "-g"]).await;
     let npm_prefix = run_cmd("npm", &["prefix", "-g"]).await;
     if !npm_root.is_empty() {
-        println!("\nnpm root -g: {}", npm_root);
+        println!("\nnpm root -g: {npm_root}");
     }
     if !npm_prefix.is_empty() {
-        println!("npm prefix -g: {}", npm_prefix);
+        println!("npm prefix -g: {npm_prefix}");
     }
 
     println!("\nIf versions differ, remove older installs and keep one package manager:");

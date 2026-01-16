@@ -84,11 +84,10 @@ fn read_accounts_file(path: &Path) -> io::Result<AccountsFile> {
 }
 
 fn write_accounts_file(path: &Path, data: &AccountsFile) -> io::Result<()> {
-    if let Some(parent) = path.parent() {
-        if !parent.exists() {
+    if let Some(parent) = path.parent()
+        && !parent.exists() {
             std::fs::create_dir_all(parent)?;
         }
-    }
 
     let json = serde_json::to_string_pretty(data)?;
     let mut options = OpenOptions::new();

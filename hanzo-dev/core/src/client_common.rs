@@ -9,7 +9,6 @@ use crate::openai_tools::OpenAiTool;
 use crate::protocol::RateLimitSnapshotEvent;
 use crate::protocol::TokenUsage;
 use futures::Stream;
-use hanzo_apply_patch::APPLY_PATCH_TOOL_INSTRUCTIONS;
 use hanzo_protocol::models::ContentItem;
 use hanzo_protocol::models::ResponseItem;
 use once_cell::sync::Lazy;
@@ -26,7 +25,7 @@ use uuid::Uuid;
 
 /// Additional prompt for Code. Can not edit Codex instructions.
 const PROMPT_CODER_TEMPLATE: &str = include_str!("../prompt_coder.md");
-static BASE_MODEL_DESCRIPTIONS: Lazy<String> = Lazy::new(|| model_guide_markdown());
+static BASE_MODEL_DESCRIPTIONS: Lazy<String> = Lazy::new(model_guide_markdown);
 static DEFAULT_DEVELOPER_PROMPT: Lazy<String> =
     Lazy::new(|| PROMPT_CODER_TEMPLATE.replace("{MODEL_DESCRIPTIONS}", &BASE_MODEL_DESCRIPTIONS));
 
@@ -147,7 +146,7 @@ impl Prompt {
 
     fn get_formatted_environment_context(&self) -> Option<String> {
         self.environment_context.as_ref().map(|ec| {
-            let ec_str = serde_json::to_string_pretty(ec).unwrap_or_else(|_| format!("{:?}", ec));
+            let ec_str = serde_json::to_string_pretty(ec).unwrap_or_else(|_| format!("{ec:?}"));
             format!("{ENVIRONMENT_CONTEXT_START}{ec_str}{ENVIRONMENT_CONTEXT_END}")
         })
     }
@@ -213,19 +212,15 @@ impl Prompt {
         // Deduplicate function call outputs before adding to input
         let mut seen_call_ids = std::collections::HashSet::new();
         for item in &self.input {
-            match item {
-                ResponseItem::FunctionCallOutput { call_id, .. } => {
-                    if !seen_call_ids.insert(call_id.clone()) {
-                        // Skip duplicate function call output
-                        tracing::debug!(
-                            "Filtering duplicate FunctionCallOutput with call_id: {} from input",
-                            call_id
-                        );
-                        continue;
-                    }
+            if let ResponseItem::FunctionCallOutput { call_id, .. } = item
+                && !seen_call_ids.insert(call_id.clone()) {
+                    // Skip duplicate function call output
+                    tracing::debug!(
+                        "Filtering duplicate FunctionCallOutput with call_id: {} from input",
+                        call_id
+                    );
+                    continue;
                 }
-                _ => {}
-            }
             input_with_instructions.push(item.clone());
         }
 
@@ -401,8 +396,8 @@ fn limit_screenshots_in_input(input: &mut Vec<ResponseItem>) {
 
     // Replace screenshots that should be removed
     for &pos in &screenshot_positions {
-        if !positions_to_keep.contains(&pos) {
-            if let Some(ResponseItem::Message { content, .. }) = input.get_mut(pos) {
+        if !positions_to_keep.contains(&pos)
+            && let Some(ResponseItem::Message { content, .. }) = input.get_mut(pos) {
                 // Replace image content with placeholder message
                 let mut new_content = Vec::new();
                 for item in content.iter() {
@@ -417,7 +412,6 @@ fn limit_screenshots_in_input(input: &mut Vec<ResponseItem>) {
                 }
                 *content = new_content;
             }
-        }
     }
 
     tracing::debug!(

@@ -69,27 +69,25 @@ fn create_seatbelt_command_args(
                 // If the writable root is a file, allow writes to that exact file via literal.
                 if canonical_root.is_file() {
                     writable_folder_policies.push(format!("(literal (param \"{root_param}\"))"));
+                } else if wr.read_only_subpaths.is_empty() {
+                    writable_folder_policies
+                        .push(format!("(subpath (param \"{root_param}\"))"));
                 } else {
-                    if wr.read_only_subpaths.is_empty() {
-                        writable_folder_policies
-                            .push(format!("(subpath (param \"{root_param}\"))"));
-                    } else {
-                        // Add parameters for each read-only subpath and generate
-                        // the `(require-not ...)` clauses.
-                        let mut require_parts: Vec<String> = Vec::new();
-                        require_parts.push(format!("(subpath (param \"{root_param}\"))"));
-                        for (subpath_index, ro) in wr.read_only_subpaths.iter().enumerate() {
-                            let canonical_ro = ro.canonicalize().unwrap_or_else(|_| ro.clone());
-                            let ro_param = format!("WRITABLE_ROOT_{index}_RO_{subpath_index}");
-                            cli_args
-                                .push(format!("-D{ro_param}={}", canonical_ro.to_string_lossy()));
-                            require_parts
-                                .push(format!("(require-not (subpath (param \"{ro_param}\")))"));
-                        }
-                        let policy_component =
-                            format!("(require-all {} )", require_parts.join(" "));
-                        writable_folder_policies.push(policy_component);
+                    // Add parameters for each read-only subpath and generate
+                    // the `(require-not ...)` clauses.
+                    let mut require_parts: Vec<String> = Vec::new();
+                    require_parts.push(format!("(subpath (param \"{root_param}\"))"));
+                    for (subpath_index, ro) in wr.read_only_subpaths.iter().enumerate() {
+                        let canonical_ro = ro.canonicalize().unwrap_or_else(|_| ro.clone());
+                        let ro_param = format!("WRITABLE_ROOT_{index}_RO_{subpath_index}");
+                        cli_args
+                            .push(format!("-D{ro_param}={}", canonical_ro.to_string_lossy()));
+                        require_parts
+                            .push(format!("(require-not (subpath (param \"{ro_param}\")))"));
                     }
+                    let policy_component =
+                        format!("(require-all {} )", require_parts.join(" "));
+                    writable_folder_policies.push(policy_component);
                 }
             }
 
@@ -124,8 +122,7 @@ fn create_seatbelt_command_args(
 
     if std::env::var("HANZO_DEBUG_PRINT_SEATBELT").is_ok() {
         eprintln!(
-            "--- Codex Seatbelt Policy ---\n{}\n------------------------------",
-            full_policy
+            "--- Codex Seatbelt Policy ---\n{full_policy}\n------------------------------"
         );
     }
 
