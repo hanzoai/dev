@@ -53,11 +53,11 @@ jobs:
         working-directory: codex-rs
     steps:
       - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@1.82
+      - uses: dtolnay/rust-toolchain@nightly
         with:
           components: rustfmt
       - name: cargo fmt
-        run: cargo fmt -- --config imports_granularity=Item --check
+        run: cargo +nightly fmt -- --config imports_granularity=Item --check
       - name: Verify codegen for mcp-types
         run: ./mcp-types/check_lib_rs.py
 
@@ -71,11 +71,11 @@ jobs:
         working-directory: hanzo-dev
     steps:
       - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@1.82
+      - uses: dtolnay/rust-toolchain@nightly
         with:
           components: rustfmt
       - name: cargo fmt
-        run: cargo fmt -- --config imports_granularity=Item --check
+        run: cargo +nightly fmt -- --config imports_granularity=Item --check
 
   lint_build:
     name: Lint/Build — ${{ matrix.runner }} - ${{ matrix.target }}${{ matrix.profile == 'release' && ' (release)' || '' }}
