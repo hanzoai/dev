@@ -11313,83 +11313,67 @@ impl ChatWidget<'_> {
 
                 BG_SHOT_LAST_START_MS.store(now_ms, Ordering::Relaxed);
 
-                // Retry screenshot capture with exponential backoff
-                // Keep background capture lightweight: single attempt with a modest timeout
-                let mut attempts = 0;
-                let max_attempts = 1;
+                // Single screenshot capture attempt with a modest timeout
+                tracing::info!("Screenshot capture attempt");
 
-                loop {
-                    attempts += 1;
-                    tracing::info!(
-                        "Screenshot capture attempt {} of {}",
-                        attempts,
-                        max_attempts
-                    );
+                // Add timeout to screenshot capture
+                let capture_result = tokio::time::timeout(
+                    tokio::time::Duration::from_secs(5),
+                    browser_manager.capture_screenshot_with_url(),
+                )
+                .await;
 
-                    // Add timeout to screenshot capture
-                    let capture_result = tokio::time::timeout(
-                        tokio::time::Duration::from_secs(5),
-                        browser_manager.capture_screenshot_with_url(),
-                    )
-                    .await;
+                match capture_result {
+                    Ok(Ok((screenshot_paths, url))) => {
+                        tracing::info!(
+                            "Background screenshot capture succeeded with {} images",
+                            screenshot_paths.len()
+                        );
 
-                    match capture_result {
-                        Ok(Ok((screenshot_paths, url))) => {
-                            tracing::info!(
-                                "Background screenshot capture succeeded with {} images on attempt {}",
-                                screenshot_paths.len(),
-                                attempts
-                            );
-
-                            // Save the first screenshot path and URL for display in the TUI
-                            if let Some(first_path) = screenshot_paths.first() {
-                                if let Ok(mut latest) = latest_browser_screenshot_clone.lock() {
-                                    let url_string =
-                                        url.clone().unwrap_or_else(|| "Browser".to_string());
-                                    *latest = Some((first_path.clone(), url_string));
-                                }
+                        // Save the first screenshot path and URL for display in the TUI
+                        if let Some(first_path) = screenshot_paths.first() {
+                            if let Ok(mut latest) = latest_browser_screenshot_clone.lock() {
+                                let url_string =
+                                    url.clone().unwrap_or_else(|| "Browser".to_string());
+                                *latest = Some((first_path.clone(), url_string));
                             }
+                        }
 
-                            // Create screenshot items
-                            let mut screenshot_items = Vec::new();
-                            for path in screenshot_paths {
-                                if path.exists() {
-                                    tracing::info!("Adding browser screenshot: {}", path.display());
-                                    let timestamp = std::time::SystemTime::now()
-                                        .duration_since(std::time::UNIX_EPOCH)
-                                        .unwrap_or_default()
-                                        .as_secs();
-                                    let metadata = format!(
-                                        "screenshot:{}:{}",
-                                        timestamp,
-                                        url.as_deref().unwrap_or("unknown")
-                                    );
-                                    screenshot_items.push(InputItem::EphemeralImage {
-                                        path,
-                                        metadata: Some(metadata),
-                                    });
-                                }
+                        // Create screenshot items
+                        let mut screenshot_items = Vec::new();
+                        for path in screenshot_paths {
+                            if path.exists() {
+                                tracing::info!("Adding browser screenshot: {}", path.display());
+                                let timestamp = std::time::SystemTime::now()
+                                    .duration_since(std::time::UNIX_EPOCH)
+                                    .unwrap_or_default()
+                                    .as_secs();
+                                let metadata = format!(
+                                    "screenshot:{}:{}",
+                                    timestamp,
+                                    url.as_deref().unwrap_or("unknown")
+                                );
+                                screenshot_items.push(InputItem::EphemeralImage {
+                                    path,
+                                    metadata: Some(metadata),
+                                });
                             }
+                        }
 
-                            // Do not enqueue screenshots as messages.
-                            // They are now injected per-turn by the core session.
-                            break; // Success - exit retry loop
-                        }
-                        Ok(Err(e)) => {
-                            tracing::warn!(
-                                "Background screenshot capture failed (attempt {}): {}",
-                                attempts,
-                                e
-                            );
-                            break;
-                        }
-                        Err(_timeout_err) => {
-                            tracing::warn!(
-                                "Background screenshot capture timed out (attempt {})",
-                                attempts
-                            );
-                            break;
-                        }
+                        // Do not enqueue screenshots as messages.
+                        // They are now injected per-turn by the core session.
+                        let _ = screenshot_items; // Consumed above
+                    }
+                    Ok(Err(e)) => {
+                        tracing::warn!(
+                            "Background screenshot capture failed: {}",
+                            e
+                        );
+                    }
+                    Err(_timeout_err) => {
+                        tracing::warn!(
+                            "Background screenshot capture timed out"
+                        );
                     }
                 }
             });

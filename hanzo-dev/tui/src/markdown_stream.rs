@@ -424,10 +424,7 @@ fn is_potentially_volatile_list_line(text: &str) -> bool {
 #[inline]
 fn is_bare_list_marker(text: &str) -> bool {
     let t = text.trim();
-    if t == "-" || t == "-" || t == "*" || t == "*" {
-        return true;
-    }
-    if t == "-" || t == "- " || t == "*" || t == "* " {
+    if t == "-" || t == "*" || t == "- " || t == "* " {
         return true;
     }
     // ordered like "1." possibly followed by a single space
