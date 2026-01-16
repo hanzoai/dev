@@ -346,9 +346,9 @@ fn deterministic_summary(items: &[ResponseItem], prev_summary: Option<&str>) -> 
                 actions.push(format!("{role}: {text}"));
                 if role == "assistant"
                     && let Some(cmd) = text.lines().find(|line| line.trim_start().starts_with('$'))
-                    {
-                        commands.push(cmd.trim().to_string());
-                    }
+                {
+                    commands.push(cmd.trim().to_string());
+                }
             }
             ResponseItem::FunctionCall { name, .. } => {
                 actions.push(format!("Tool call: {name}"));

@@ -65,9 +65,7 @@ pub fn process_exec_slash_command(
                 return handle_subagent(other, args_raw, ctx);
             }
 
-            Err(format!(
-                "Command '/{other}' is not supported in exec mode."
-            ))
+            Err(format!("Command '/{other}' is not supported in exec mode."))
         }
     }
 }

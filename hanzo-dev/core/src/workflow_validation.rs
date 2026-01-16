@@ -211,9 +211,10 @@ fn stage_file_with_contents(temp_root: &Path, cwd: &Path, target: &Path, content
     };
     let destination = temp_root.join(relative);
     if let Some(parent) = destination.parent()
-        && fs::create_dir_all(parent).is_err() {
-            return false;
-        }
+        && fs::create_dir_all(parent).is_err()
+    {
+        return false;
+    }
     match fs::File::create(&destination) {
         Ok(mut file) => file.write_all(contents.as_bytes()).is_ok(),
         Err(_) => false,

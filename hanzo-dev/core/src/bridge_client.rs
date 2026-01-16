@@ -228,9 +228,10 @@ fn coalesce_events(events: Vec<BridgeBatchEvent>) -> CoalescedBatch {
         }
 
         if let Some(level) = level.as_deref()
-            && is_error_level(level) {
-                saw_error = true;
-            }
+            && is_error_level(level)
+        {
+            saw_error = true;
+        }
 
         if let Some((_, count)) = entries.iter_mut().find(|(msg, _)| msg == &summary) {
             *count += 1;
@@ -590,12 +591,13 @@ fn find_meta_path(start: &Path) -> Option<PathBuf> {
 
 fn subscription_override_path(start: &Path) -> Option<PathBuf> {
     if let Some(meta) = find_meta_path(start)
-        && let Some(dir) = meta.parent() {
-            let candidate = dir.join(SUBSCRIPTION_OVERRIDE_FILE);
-            if candidate.exists() {
-                return Some(candidate);
-            }
+        && let Some(dir) = meta.parent()
+    {
+        let candidate = dir.join(SUBSCRIPTION_OVERRIDE_FILE);
+        if candidate.exists() {
+            return Some(candidate);
         }
+    }
 
     let mut current = Some(start);
     while let Some(dir) = current {
@@ -686,18 +688,20 @@ fn workspace_has_code_bridge(start: &Path) -> bool {
 
 fn is_meta_stale(meta: &BridgeMeta, path: &Path) -> bool {
     if let Some(hb) = &meta.heartbeat_at
-        && let Ok(ts) = DateTime::parse_from_rfc3339(hb) {
-            let age = Utc::now().signed_duration_since(ts.with_timezone(&Utc));
-            return age.num_milliseconds() > HEARTBEAT_STALE_MS;
-        }
+        && let Ok(ts) = DateTime::parse_from_rfc3339(hb)
+    {
+        let age = Utc::now().signed_duration_since(ts.with_timezone(&Utc));
+        return age.num_milliseconds() > HEARTBEAT_STALE_MS;
+    }
 
     // Fallback for hosts that don't emit heartbeat: use file mtime as staleness signal
     if let Ok(stat) = std::fs::metadata(path)
-        && let Ok(modified) = stat.modified() {
-            let modified: DateTime<Utc> = modified.into();
-            let age = Utc::now().signed_duration_since(modified);
-            return age > ChronoDuration::milliseconds(HEARTBEAT_STALE_MS);
-        }
+        && let Ok(modified) = stat.modified()
+    {
+        let modified: DateTime<Utc> = modified.into();
+        let age = Utc::now().signed_duration_since(modified);
+        return age > ChronoDuration::milliseconds(HEARTBEAT_STALE_MS);
+    }
     false
 }
 

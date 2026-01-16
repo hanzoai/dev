@@ -458,10 +458,7 @@ async fn cli_main(code_linux_sandbox_exe: Option<PathBuf>) -> anyhow::Result<()>
                 session_id,
             } = hanzo_tui::run_main(interactive, code_linux_sandbox_exe).await?;
             if !token_usage.is_zero() {
-                println!(
-                    "{}",
-                    hanzo_core::protocol::FinalOutput::from(token_usage)
-                );
+                println!("{}", hanzo_core::protocol::FinalOutput::from(token_usage));
             }
             if let Some(session_id) = session_id {
                 println!(
@@ -523,10 +520,7 @@ async fn cli_main(code_linux_sandbox_exe: Option<PathBuf>) -> anyhow::Result<()>
                 session_id,
             } = hanzo_tui::run_main(interactive, code_linux_sandbox_exe).await?;
             if !token_usage.is_zero() {
-                println!(
-                    "{}",
-                    hanzo_core::protocol::FinalOutput::from(token_usage)
-                );
+                println!("{}", hanzo_core::protocol::FinalOutput::from(token_usage));
             }
             if let Some(session_id) = session_id {
                 println!(
@@ -772,9 +766,7 @@ async fn run_bridge_list(_cmd: BridgeListCommand) -> anyhow::Result<()> {
             if target.stale { "yes" } else { "no" }
         );
         if target.stale {
-            println!(
-                "{indent}⚠ metadata looks stale; restart dev-bridge-host if this persists."
-            );
+            println!("{indent}⚠ metadata looks stale; restart dev-bridge-host if this persists.");
         }
 
         match bridge::list_control_capable(target).await {
@@ -805,7 +797,10 @@ async fn run_bridge_screenshot(cmd: BridgeScreenshotCommand) -> anyhow::Result<(
     );
 
     if let Some(res) = outcome.result.as_ref() {
-        let ok = res.get("ok").and_then(serde_json::Value::as_bool).unwrap_or(false);
+        let ok = res
+            .get("ok")
+            .and_then(serde_json::Value::as_bool)
+            .unwrap_or(false);
         if ok {
             let payload = res
                 .get("result")
@@ -847,7 +842,10 @@ async fn run_bridge_javascript(cmd: BridgeJavascriptCommand) -> anyhow::Result<(
     );
 
     if let Some(res) = outcome.result.as_ref() {
-        let ok = res.get("ok").and_then(serde_json::Value::as_bool).unwrap_or(false);
+        let ok = res
+            .get("ok")
+            .and_then(serde_json::Value::as_bool)
+            .unwrap_or(false);
         if ok {
             let payload = res
                 .get("result")
@@ -895,9 +893,10 @@ fn select_bridge_target(selector: Option<&str>) -> anyhow::Result<bridge::Bridge
             return Ok(target.clone());
         }
         if let Some(ws) = target.meta.workspace_path.as_deref()
-            && (ws == selector || ws.ends_with(selector) || ws.contains(selector)) {
-                return Ok(target.clone());
-            }
+            && (ws == selector || ws.ends_with(selector) || ws.contains(selector))
+        {
+            return Ok(target.clone());
+        }
     }
 
     anyhow::bail!(
@@ -1290,9 +1289,7 @@ fn order_replay_main(args: OrderReplayArgs) -> anyhow::Result<()> {
     let pos_out2 = actual
         .iter()
         .position(|l| l.ordered && l.req == 1 && l.out == 2);
-    println!(
-        "\nCheck (req=1): first out=1 at {pos_out1:?}, first out=2 at {pos_out2:?}"
-    );
+    println!("\nCheck (req=1): first out=1 at {pos_out1:?}, first out=2 at {pos_out2:?}");
     if let (Some(p1), Some(p2)) = (pos_out1, pos_out2) {
         if p1 < p2 {
             println!("Result: OK (assistant precedes tool)");
@@ -1416,9 +1413,10 @@ async fn preview_main(args: PreviewArgs) -> anyhow::Result<()> {
         for entry in fs::read_dir(dir).ok()? {
             let p = entry.ok()?.path();
             if let Some(name) = p.file_name().and_then(|s| s.to_str())
-                && name.starts_with(pat) {
-                    return Some(p);
-                }
+                && name.starts_with(pat)
+            {
+                return Some(p);
+            }
         }
         None
     }

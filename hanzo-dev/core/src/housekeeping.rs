@@ -162,21 +162,23 @@ fn perform_housekeeping(
     let mut outcome = CleanupOutcome::default();
 
     if let Some(days) = config.session_retention_days
-        && let Some(stats) = cleanup_sessions(code_home, now.date(), days)? {
-            outcome.session_days_removed = stats.removed_days;
-            outcome.session_files_removed = stats.removed_files;
-            outcome.session_bytes_reclaimed = stats.reclaimed_bytes;
-            outcome.errors += stats.errors;
-        }
+        && let Some(stats) = cleanup_sessions(code_home, now.date(), days)?
+    {
+        outcome.session_days_removed = stats.removed_days;
+        outcome.session_files_removed = stats.removed_files;
+        outcome.session_bytes_reclaimed = stats.reclaimed_bytes;
+        outcome.errors += stats.errors;
+    }
 
     if let Some(days) = config.worktree_retention_days
-        && let Some(stats) = cleanup_worktrees(code_home, now, days)? {
-            outcome.worktrees_removed = stats.removed_worktrees;
-            outcome.worktree_files_removed = stats.removed_files;
-            outcome.worktree_bytes_reclaimed = stats.reclaimed_bytes;
-            outcome.worktrees_skipped_active = stats.skipped_active;
-            outcome.errors += stats.errors;
-        }
+        && let Some(stats) = cleanup_worktrees(code_home, now, days)?
+    {
+        outcome.worktrees_removed = stats.removed_worktrees;
+        outcome.worktree_files_removed = stats.removed_files;
+        outcome.worktree_bytes_reclaimed = stats.reclaimed_bytes;
+        outcome.worktrees_skipped_active = stats.skipped_active;
+        outcome.errors += stats.errors;
+    }
 
     Ok(outcome)
 }
@@ -375,9 +377,10 @@ fn cleanup_worktrees(
                     purge_session_registry(&working_root.join("_session"), &branch_path);
 
                     if let Some(repo_root) = repo_root.as_deref()
-                        && should_prune_worktree_branch(&branch_name) {
-                            run_git_branch_delete_if_merged(repo_root, &branch_name);
-                        }
+                        && should_prune_worktree_branch(&branch_name)
+                    {
+                        run_git_branch_delete_if_merged(repo_root, &branch_name);
+                    }
 
                     stats.removed_worktrees += 1;
                     stats.removed_files += dir_stats.files;
@@ -588,11 +591,12 @@ fn purge_session_registry(session_dir: &Path, worktree_path: &Path) {
             .write(true)
             .truncate(true)
             .open(&file_path)
-            && !kept.is_empty() {
-                let content = kept.join("\n");
-                let _ = file.write_all(content.as_bytes());
-                let _ = file.write_all(b"\n");
-            }
+            && !kept.is_empty()
+        {
+            let content = kept.join("\n");
+            let _ = file.write_all(content.as_bytes());
+            let _ = file.write_all(b"\n");
+        }
     }
 }
 
@@ -772,8 +776,7 @@ fn write_state(path: &Path, state: &CleanupState) -> io::Result<()> {
         opts.mode(0o600);
     }
     let mut file = opts.open(path)?;
-    let data =
-        serde_json::to_vec(state).map_err(io::Error::other)?;
+    let data = serde_json::to_vec(state).map_err(io::Error::other)?;
     file.write_all(&data)?;
     file.write_all(b"\n")?;
     file.sync_all()

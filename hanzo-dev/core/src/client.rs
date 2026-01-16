@@ -605,17 +605,18 @@ impl ModelClient {
                 attach_item_ids(&mut payload_json, &input_with_instructions);
             }
             if let Some(openrouter_cfg) = self.provider.openrouter_config()
-                && let Some(obj) = payload_json.as_object_mut() {
-                    if let Some(provider) = &openrouter_cfg.provider {
-                        obj.insert("provider".to_string(), serde_json::to_value(provider)?);
-                    }
-                    if let Some(route) = &openrouter_cfg.route {
-                        obj.insert("route".to_string(), route.clone());
-                    }
-                    for (key, value) in &openrouter_cfg.extra {
-                        obj.entry(key.clone()).or_insert(value.clone());
-                    }
+                && let Some(obj) = payload_json.as_object_mut()
+            {
+                if let Some(provider) = &openrouter_cfg.provider {
+                    obj.insert("provider".to_string(), serde_json::to_value(provider)?);
                 }
+                if let Some(route) = &openrouter_cfg.route {
+                    obj.insert("route".to_string(), route.clone());
+                }
+                for (key, value) in &openrouter_cfg.extra {
+                    obj.entry(key.clone()).or_insert(value.clone());
+                }
+            }
 
             let auth = auth_manager.as_ref().and_then(|m| m.auth());
             let endpoint = self.provider.get_full_url(&auth);
@@ -665,16 +666,12 @@ impl ModelClient {
                 .map(|req| header_map_to_json(req.headers()));
 
             if request_id.is_empty()
-                && let Ok(logger) = self.debug_logger.lock() {
-                    request_id = logger
-                        .start_request_log(
-                            &endpoint,
-                            &payload_json,
-                            header_snapshot.as_ref(),
-                            log_tag,
-                        )
-                        .unwrap_or_default();
-                }
+                && let Ok(logger) = self.debug_logger.lock()
+            {
+                request_id = logger
+                    .start_request_log(&endpoint, &payload_json, header_snapshot.as_ref(), log_tag)
+                    .unwrap_or_default();
+            }
 
             let ws_headers = req_builder
                 .try_clone()
@@ -733,9 +730,9 @@ impl ModelClient {
                             .send(Ok(ResponseEvent::ModelsEtag(etag)))
                             .await
                             .is_err()
-                        {
-                            debug!("receiver dropped models etag event");
-                        }
+                    {
+                        debug!("receiver dropped models etag event");
+                    }
 
                     ws_stream
                         .send(Message::Text(ws_payload_text))
@@ -976,17 +973,18 @@ impl ModelClient {
                 attach_item_ids(&mut payload_json, &input_with_instructions);
             }
             if let Some(openrouter_cfg) = self.provider.openrouter_config()
-                && let Some(obj) = payload_json.as_object_mut() {
-                    if let Some(provider) = &openrouter_cfg.provider {
-                        obj.insert("provider".to_string(), serde_json::to_value(provider)?);
-                    }
-                    if let Some(route) = &openrouter_cfg.route {
-                        obj.insert("route".to_string(), route.clone());
-                    }
-                    for (key, value) in &openrouter_cfg.extra {
-                        obj.entry(key.clone()).or_insert(value.clone());
-                    }
+                && let Some(obj) = payload_json.as_object_mut()
+            {
+                if let Some(provider) = &openrouter_cfg.provider {
+                    obj.insert("provider".to_string(), serde_json::to_value(provider)?);
                 }
+                if let Some(route) = &openrouter_cfg.route {
+                    obj.insert("route".to_string(), route.clone());
+                }
+                for (key, value) in &openrouter_cfg.extra {
+                    obj.entry(key.clone()).or_insert(value.clone());
+                }
+            }
             let payload_body = serde_json::to_string(&payload_json)?;
 
             let mut auth_refresh_error: Option<RefreshTokenError> = None;
@@ -1115,9 +1113,9 @@ impl ModelClient {
                             .send(Ok(ResponseEvent::ModelsEtag(etag)))
                             .await
                             .is_err()
-                        {
-                            debug!("receiver dropped models etag event");
-                        }
+                    {
+                        debug!("receiver dropped models etag event");
+                    }
 
                     // spawn task to process SSE
                     let stream = resp.bytes_stream().map_err(CodexErr::Reqwest);
@@ -1192,9 +1190,10 @@ impl ModelClient {
                         if let Some(current_account_id) = current_account_id {
                             let mut retry_after_delay = retry_after_hint.clone();
                             if retry_after_delay.is_none()
-                                && let Some(ErrorResponse { ref error }) = body {
-                                    retry_after_delay = try_parse_retry_after(error, now);
-                                }
+                                && let Some(ErrorResponse { ref error }) = body
+                            {
+                                retry_after_delay = try_parse_retry_after(error, now);
+                            }
 
                             let current_auth_mode =
                                 auth.as_ref().map(|a| a.mode).unwrap_or(AuthMode::ApiKey);
@@ -1302,28 +1301,28 @@ impl ModelClient {
 
                     if status == StatusCode::BAD_REQUEST
                         && let Some(ErrorResponse { ref error }) = body
-                            && !self.reasoning_summary_disabled.load(Ordering::Relaxed)
-                                && is_reasoning_summary_rejected(error)
-                            {
-                                self.disable_reasoning_summary();
+                        && !self.reasoning_summary_disabled.load(Ordering::Relaxed)
+                        && is_reasoning_summary_rejected(error)
+                    {
+                        self.disable_reasoning_summary();
 
-                                if let Ok(logger) = self.debug_logger.lock() {
-                                    let _ = logger.append_response_event(
-                                        &request_id,
-                                        "reasoning_summary_disabled",
-                                        &serde_json::json!({
-                                            "status": status.as_u16(),
-                                            "message": error.message.clone(),
-                                            "code": error.code.clone(),
-                                            "param": error.param.clone(),
-                                        }),
-                                    );
-                                }
+                        if let Ok(logger) = self.debug_logger.lock() {
+                            let _ = logger.append_response_event(
+                                &request_id,
+                                "reasoning_summary_disabled",
+                                &serde_json::json!({
+                                    "status": status.as_u16(),
+                                    "message": error.message.clone(),
+                                    "code": error.code.clone(),
+                                    "param": error.param.clone(),
+                                }),
+                            );
+                        }
 
-                                // Retry immediately with reasoning summaries removed.
-                                attempt = 0;
-                                continue;
-                            }
+                        // Retry immediately with reasoning summaries removed.
+                        attempt = 0;
+                        continue;
+                    }
 
                     // The OpenAI Responses endpoint returns structured JSON bodies even for 4xx/5xx
                     // errors. When we bubble early with only the HTTP status the caller sees an opaque
@@ -1356,36 +1355,38 @@ impl ModelClient {
                     }
 
                     if let Some(ErrorResponse { ref error }) = body
-                        && is_quota_exceeded_http_error(status, error) {
-                            return Err(CodexErr::QuotaExceeded);
-                        }
+                        && is_quota_exceeded_http_error(status, error)
+                    {
+                        return Err(CodexErr::QuotaExceeded);
+                    }
 
                     if status == StatusCode::UNAUTHORIZED
                         && let Some(error) =
                             map_unauthorized_outcome(auth.is_some(), auth_refresh_error.as_ref())
-                        {
-                            return Err(error);
-                        }
+                    {
+                        return Err(error);
+                    }
 
                     if status == StatusCode::TOO_MANY_REQUESTS
-                        && let Some(ErrorResponse { ref error }) = body {
-                            if error.r#type.as_deref() == Some("usage_limit_reached") {
-                                // Prefer the plan_type provided in the error message if present
-                                // because it's more up to date than the one encoded in the auth
-                                // token.
-                                let plan_type = error
-                                    .plan_type
-                                    .clone()
-                                    .or_else(|| auth.and_then(|a| a.get_plan_type()));
-                                let resets_in_seconds = error.resets_in_seconds;
-                                return Err(CodexErr::UsageLimitReached(UsageLimitReachedError {
-                                    plan_type,
-                                    resets_in_seconds,
-                                }));
-                            } else if error.r#type.as_deref() == Some("usage_not_included") {
-                                return Err(CodexErr::UsageNotIncluded);
-                            }
+                        && let Some(ErrorResponse { ref error }) = body
+                    {
+                        if error.r#type.as_deref() == Some("usage_limit_reached") {
+                            // Prefer the plan_type provided in the error message if present
+                            // because it's more up to date than the one encoded in the auth
+                            // token.
+                            let plan_type = error
+                                .plan_type
+                                .clone()
+                                .or_else(|| auth.and_then(|a| a.get_plan_type()));
+                            let resets_in_seconds = error.resets_in_seconds;
+                            return Err(CodexErr::UsageLimitReached(UsageLimitReachedError {
+                                plan_type,
+                                resets_in_seconds,
+                            }));
+                        } else if error.r#type.as_deref() == Some("usage_not_included") {
+                            return Err(CodexErr::UsageNotIncluded);
                         }
+                    }
 
                     if attempt > max_retries {
                         // On final attempt, surface rich diagnostics for server errors.
@@ -1453,9 +1454,10 @@ impl ModelClient {
 
                     let mut retry_after_delay = retry_after_hint;
                     if retry_after_delay.is_none()
-                        && let Some(ErrorResponse { ref error }) = body {
-                            retry_after_delay = try_parse_retry_after(error, now);
-                        }
+                        && let Some(ErrorResponse { ref error }) = body
+                    {
+                        retry_after_delay = try_parse_retry_after(error, now);
+                    }
 
                     let delay = retry_after_delay
                         .as_ref()
@@ -1593,20 +1595,21 @@ impl ModelClient {
                 .map(|req| header_map_to_json(req.headers()));
 
             if request_id.is_empty()
-                && let Ok(logger) = self.debug_logger.lock() {
-                    let endpoint = self
-                        .provider
-                        .get_compact_url(&auth)
-                        .unwrap_or_else(|| self.provider.get_full_url(&auth));
-                    request_id = logger
-                        .start_request_log(
-                            &endpoint,
-                            &payload_json,
-                            header_snapshot.as_ref(),
-                            Some("compact_remote"),
-                        )
-                        .unwrap_or_default();
-                }
+                && let Ok(logger) = self.debug_logger.lock()
+            {
+                let endpoint = self
+                    .provider
+                    .get_compact_url(&auth)
+                    .unwrap_or_else(|| self.provider.get_full_url(&auth));
+                request_id = logger
+                    .start_request_log(
+                        &endpoint,
+                        &payload_json,
+                        header_snapshot.as_ref(),
+                        Some("compact_remote"),
+                    )
+                    .unwrap_or_default();
+            }
 
             let response = request.send().await?;
             let status = response.status();
@@ -1705,9 +1708,7 @@ fn attach_codex_beta_features_header(
     let has_header = builder
         .try_clone()
         .and_then(|builder| builder.build().ok())
-        .is_some_and(|req| {
-            req.headers().contains_key("x-codex-beta-features")
-        });
+        .is_some_and(|req| req.headers().contains_key("x-codex-beta-features"));
     if has_header {
         return builder;
     }
@@ -1957,12 +1958,13 @@ fn parse_retry_after_header(value: &str, now: DateTime<Utc>) -> Option<RetryAfte
         return Some(RetryAfter::from_duration(Duration::from_secs(secs), now));
     }
     if let Ok(float_secs) = normalized.parse::<f64>()
-        && !float_secs.is_sign_negative() {
-            return Some(RetryAfter::from_duration(
-                Duration::from_secs_f64(float_secs),
-                now,
-            ));
-        }
+        && !float_secs.is_sign_negative()
+    {
+        return Some(RetryAfter::from_duration(
+            Duration::from_secs_f64(float_secs),
+            now,
+        ));
+    }
     if let Ok(system_time) = parse_http_date(normalized) {
         let resume_at: DateTime<Utc> = system_time.into();
         return Some(RetryAfter::from_resume_at(resume_at, now));
@@ -2100,9 +2102,10 @@ async fn process_sse<S>(
 
         // Log the raw SSE event data
         if let Ok(logger) = debug_logger.lock()
-            && let Ok(json_value) = serde_json::from_str::<serde_json::Value>(&sse.data) {
-                let _ = logger.append_response_event(&request_id, "sse_event", &json_value);
-            }
+            && let Ok(json_value) = serde_json::from_str::<serde_json::Value>(&sse.data)
+        {
+            let _ = logger.append_response_event(&request_id, "sse_event", &json_value);
+        }
 
         let event: SseEvent = match serde_json::from_str(&sse.data) {
             Ok(event) => event,
@@ -2130,9 +2133,10 @@ async fn process_sse<S>(
 
         if let Some(seq) = event.sequence_number {
             if let Some(last) = global_last_seq
-                && seq <= last {
-                    continue;
-                }
+                && seq <= last
+            {
+                continue;
+            }
             global_last_seq = Some(seq);
             if let Ok(mut guard) = checkpoint.write() {
                 guard.last_sequence = Some(seq);

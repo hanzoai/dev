@@ -196,7 +196,10 @@ pub async fn run_main(cli: Cli, code_linux_sandbox_exe: Option<PathBuf>) -> anyh
             );
             std::process::exit(1);
         }
-        if auto_drive_goal.as_ref().is_some_and(std::string::String::is_empty) {
+        if auto_drive_goal
+            .as_ref()
+            .is_some_and(std::string::String::is_empty)
+        {
             auto_drive_goal = Some(trimmed_prompt.to_string());
         } else if auto_drive_goal.is_none() {
             auto_drive_goal = Some(trimmed_prompt.to_string());
@@ -212,10 +215,9 @@ pub async fn run_main(cli: Cli, code_linux_sandbox_exe: Option<PathBuf>) -> anyh
     }
 
     let timeboxed_auto_exec = auto_drive_goal.is_some() && max_seconds.is_some();
-    if timeboxed_auto_exec
-        && let Some(goal) = auto_drive_goal.as_mut() {
-            *goal = append_timeboxed_auto_drive_goal(goal);
-        }
+    if timeboxed_auto_exec && let Some(goal) = auto_drive_goal.as_mut() {
+        *goal = append_timeboxed_auto_drive_goal(goal);
+    }
 
     let mut prompt_to_send = prompt.clone();
     let mut summary_prompt = if let Some(goal) = auto_drive_goal.as_ref() {
@@ -352,12 +354,11 @@ pub async fn run_main(cli: Cli, code_linux_sandbox_exe: Option<PathBuf>) -> anyh
         }
     }
 
-    if auto_review
-        && let Some(req) = review_request.as_mut() {
-            let mut metadata = req.metadata.clone().unwrap_or_default();
-            metadata.auto_review = Some(true);
-            req.metadata = Some(metadata);
-        }
+    if auto_review && let Some(req) = review_request.as_mut() {
+        let mut metadata = req.metadata.clone().unwrap_or_default();
+        metadata.auto_review = Some(true);
+        req.metadata = Some(metadata);
+    }
 
     let is_auto_review = review_request
         .as_ref()
@@ -708,17 +709,18 @@ pub async fn run_main(cli: Cli, code_linux_sandbox_exe: Option<PathBuf>) -> anyh
                     &config.cwd,
                     base,
                     "auto-resolve working snapshot",
-                ) {
-                    review_request = apply_commit_scope_to_review_request(
-                        review_request,
-                        snap.id(),
-                        base.id(),
-                        Some(diff_paths.as_slice()),
-                    );
-                    if let Some(state) = auto_resolve_state.as_mut() {
-                        state.last_reviewed_commit = Some(snap.id().to_string());
-                    }
+                )
+            {
+                review_request = apply_commit_scope_to_review_request(
+                    review_request,
+                    snap.id(),
+                    base.id(),
+                    Some(diff_paths.as_slice()),
+                );
+                if let Some(state) = auto_resolve_state.as_mut() {
+                    state.last_reviewed_commit = Some(snap.id().to_string());
                 }
+            }
         }
 
         // Capture baseline epoch after any snapshot creation so we don't trip on our own bumps.
@@ -1240,9 +1242,10 @@ pub async fn run_main(cli: Cli, code_linux_sandbox_exe: Option<PathBuf>) -> anyh
         }
     }
     if let Some(path) = review_output_json
-        && !review_outputs.is_empty() {
-            let _ = write_review_json(path, &review_outputs, final_review_snapshot.as_ref());
-        }
+        && !review_outputs.is_empty()
+    {
+        let _ = write_review_json(path, &review_outputs, final_review_snapshot.as_ref());
+    }
     if review_runs > 0 {
         eprintln!(
             "Review runs: {} (auto_resolve={} max_attempts={})",
@@ -1828,12 +1831,13 @@ fn parse_auto_review_summary(raw: &str) -> AutoReviewSummary {
     }
 
     if let Some(start) = trimmed.find("```")
-        && let Some((body, _)) = trimmed[start + 3..].split_once("```") {
-            let candidate = body.trim_start_matches("json").trim();
-            if let Ok(output) = serde_json::from_str::<ReviewOutputEvent>(candidate) {
-                return summary_from_output(&output);
-            }
+        && let Some((body, _)) = trimmed[start + 3..].split_once("```")
+    {
+        let candidate = body.trim_start_matches("json").trim();
+        if let Ok(output) = serde_json::from_str::<ReviewOutputEvent>(candidate) {
+            return summary_from_output(&output);
         }
+    }
 
     let lowered = trimmed.to_ascii_lowercase();
     let clean_phrases = [
@@ -2032,9 +2036,10 @@ fn shutdown_state_after_request(
     }
 
     if let Some(deadline) = shutdown_deadline
-        && deadline > now {
-            return (false, true, Some(deadline));
-        }
+        && deadline > now
+    {
+        return (false, true, Some(deadline));
+    }
 
     (true, true, None)
 }
@@ -2183,14 +2188,15 @@ fn apply_commit_scope_to_review_request(
     prompt.push('.');
 
     if let Some(paths) = paths
-        && !paths.is_empty() {
-            prompt.push_str("\nFiles changed in this snapshot:\n");
-            for path in paths {
-                prompt.push_str("- ");
-                prompt.push_str(path);
-                prompt.push('\n');
-            }
+        && !paths.is_empty()
+    {
+        prompt.push_str("\nFiles changed in this snapshot:\n");
+        for path in paths {
+            prompt.push_str("- ");
+            prompt.push_str(path);
+            prompt.push('\n');
         }
+    }
 
     request.prompt = prompt;
     request.user_facing_hint = format!("commit {short_commit} (parent {short_parent})");
@@ -2206,14 +2212,15 @@ fn extract_commit_from_prompt(prompt: &str) -> Option<String> {
     let mut words = prompt.split_whitespace().peekable();
     while let Some(word) = words.next() {
         if word.eq_ignore_ascii_case("commit")
-            && let Some(next) = words.peek() {
-                let candidate = next.trim_matches(|c: char| c == '.' || c == ',' || c == ';');
-                let len_ok = (7..=40).contains(&candidate.len());
-                let is_hex = candidate.chars().all(|c| c.is_ascii_hexdigit());
-                if len_ok && is_hex {
-                    return Some(candidate.to_string());
-                }
+            && let Some(next) = words.peek()
+        {
+            let candidate = next.trim_matches(|c: char| c == '.' || c == ',' || c == ';');
+            let len_ok = (7..=40).contains(&candidate.len());
+            let is_hex = candidate.chars().all(|c| c.is_ascii_hexdigit());
+            if len_ok && is_hex {
+                return Some(candidate.to_string());
             }
+        }
     }
     None
 }
@@ -2353,9 +2360,10 @@ async fn build_followup_review_request(
         metadata.commit = Some(snapshot.id().to_string());
         metadata.scope = Some("commit".to_string());
     } else if metadata.commit.is_none()
-        && let Some(commit) = extract_commit_from_prompt(&prompt) {
-            metadata.commit = Some(commit);
-        }
+        && let Some(commit) = extract_commit_from_prompt(&prompt)
+    {
+        metadata.commit = Some(commit);
+    }
 
     if metadata.scope.is_none() && metadata.commit.is_some() {
         metadata.scope = Some("commit".to_string());
@@ -2366,13 +2374,15 @@ async fn build_followup_review_request(
         .as_ref()
         .is_some_and(|scope| scope.eq_ignore_ascii_case("commit"));
 
-    if scope_is_commit && metadata.commit.is_none()
-        && let Some((head_sha, _)) = head_commit_with_subject(cwd).await {
-            metadata.commit = Some(head_sha.clone());
-            if metadata.current_branch.is_none() {
-                metadata.current_branch = current_branch_name(cwd).await;
-            }
+    if scope_is_commit
+        && metadata.commit.is_none()
+        && let Some((head_sha, _)) = head_commit_with_subject(cwd).await
+    {
+        metadata.commit = Some(head_sha.clone());
+        if metadata.current_branch.is_none() {
+            metadata.current_branch = current_branch_name(cwd).await;
         }
+    }
 
     if let Some(last_review) = state.last_review.as_ref() {
         let recap = format_review_findings(last_review);
@@ -2427,9 +2437,7 @@ fn format_review_findings(output: &hanzo_core::protocol::ReviewOutputEvent) -> S
         let body = f.body.trim();
         let location = format!(
             "path: {}:{}-{}",
-            f.code_location
-                .absolute_file_path
-                .to_string_lossy(),
+            f.code_location.absolute_file_path.to_string_lossy(),
             f.code_location.line_range.start,
             f.code_location.line_range.end
         );
@@ -2529,8 +2537,8 @@ fn write_review_json(
         runs,
         snapshot,
     };
-    let json = serde_json::to_string_pretty(&payload)
-        .map_err(|e| std::io::Error::other(e.to_string()))?;
+    let json =
+        serde_json::to_string_pretty(&payload).map_err(|e| std::io::Error::other(e.to_string()))?;
     std::fs::write(path, json)
 }
 

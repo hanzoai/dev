@@ -249,9 +249,10 @@ impl OllamaClient {
 
         // 1) Top-level `details.context_length` (observed in newer builds)
         if let Some(details) = val.get("details").and_then(|d| d.as_object())
-            && let Some(n) = get_u64(&JsonValue::Object(details.clone()), "context_length") {
-                return Ok(Some(n));
-            }
+            && let Some(n) = get_u64(&JsonValue::Object(details.clone()), "context_length")
+        {
+            return Ok(Some(n));
+        }
 
         // 2) `model_info.context_length` (some builds)
         if let Some(model_info) = val.get("model_info").and_then(|d| d.as_object()) {

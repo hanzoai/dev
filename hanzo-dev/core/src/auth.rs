@@ -103,9 +103,9 @@ impl CodexAuth {
                     if err.is_refresh_token_reused()
                         && let Some(access) =
                             self.adopt_rotated_refresh_token_from_disk(&refresh_token)?
-                        {
-                            return Ok(access);
-                        }
+                    {
+                        return Ok(access);
+                    }
                     if err.kind == RefreshTokenErrorKind::Transient && attempt < 4 {
                         let delay = backoff(attempt as u64);
                         tokio::time::sleep(delay).await;
@@ -233,13 +233,16 @@ impl CodexAuth {
     }
 
     pub fn get_account_id(&self) -> Option<String> {
-        self.get_current_token_data()
-            .and_then(|t| t.account_id)
+        self.get_current_token_data().and_then(|t| t.account_id)
     }
 
     pub fn get_plan_type(&self) -> Option<String> {
-        self.get_current_token_data()
-            .and_then(|t| t.id_token.chatgpt_plan_type.as_ref().map(super::token_data::PlanType::as_string))
+        self.get_current_token_data().and_then(|t| {
+            t.id_token
+                .chatgpt_plan_type
+                .as_ref()
+                .map(super::token_data::PlanType::as_string)
+        })
     }
 
     fn get_current_auth_json(&self) -> Option<AuthDotJson> {
@@ -399,13 +402,14 @@ pub async fn auth_for_stored_account(
                         if err.is_refresh_token_reused()
                             && let Ok(Some(updated)) =
                                 crate::auth_accounts::find_account(code_home, &account.id)
-                                && let Some(updated_tokens) = updated.tokens {
-                                    return Ok(CodexAuth::from_tokens_with_originator(
-                                        updated_tokens,
-                                        updated.last_refresh,
-                                        originator,
-                                    ));
-                                }
+                            && let Some(updated_tokens) = updated.tokens
+                        {
+                            return Ok(CodexAuth::from_tokens_with_originator(
+                                updated_tokens,
+                                updated.last_refresh,
+                                originator,
+                            ));
+                        }
                         return Err(std::io::Error::other(err));
                     }
                 };
@@ -605,17 +609,18 @@ async fn update_tokens(
     write_auth_json(auth_file, &auth_dot_json)?;
 
     if let Some(code_home) = auth_file.parent()
-        && let Some(tokens) = auth_dot_json.tokens.clone() {
-            let last_refresh = auth_dot_json.last_refresh.unwrap_or_else(Utc::now);
-            let email = tokens.id_token.email.clone();
-            let _ = crate::auth_accounts::upsert_chatgpt_account(
-                code_home,
-                tokens,
-                last_refresh,
-                email,
-                true,
-            )?;
-        }
+        && let Some(tokens) = auth_dot_json.tokens.clone()
+    {
+        let last_refresh = auth_dot_json.last_refresh.unwrap_or_else(Utc::now);
+        let email = tokens.id_token.email.clone();
+        let _ = crate::auth_accounts::upsert_chatgpt_account(
+            code_home,
+            tokens,
+            last_refresh,
+            email,
+            true,
+        )?;
+    }
     Ok(auth_dot_json)
 }
 
@@ -690,37 +695,39 @@ struct OpenAiErrorData {
 fn classify_refresh_failure(status: StatusCode, body: &str) -> RefreshTokenError {
     if let Ok(parsed) = serde_json::from_str::<OpenAiErrorWrapper>(body)
         && let Some(error) = parsed.error
-            && error.code.as_deref() == Some("refresh_token_reused") {
-                let message = error
-                    .message
-                    .unwrap_or_else(|| "refresh token already rotated".to_string());
-                return RefreshTokenError::transient(format!("refresh_token_reused: {message}"));
-            }
+        && error.code.as_deref() == Some("refresh_token_reused")
+    {
+        let message = error
+            .message
+            .unwrap_or_else(|| "refresh token already rotated".to_string());
+        return RefreshTokenError::transient(format!("refresh_token_reused: {message}"));
+    }
 
     if let Ok(parsed) = serde_json::from_str::<OAuthErrorBody>(body)
-        && let Some(code) = parsed.error.as_deref() {
-            let description = parsed.error_description.as_deref().unwrap_or(code).trim();
-            let formatted = format!("OAuth error ({code}): {description}");
-            match code {
-                "invalid_grant" | "invalid_client" | "invalid_scope" => {
-                    return RefreshTokenError::permanent(formatted);
-                }
-                "access_denied" => {
-                    return RefreshTokenError::permanent(formatted);
-                }
-                "temporarily_unavailable" => {
+        && let Some(code) = parsed.error.as_deref()
+    {
+        let description = parsed.error_description.as_deref().unwrap_or(code).trim();
+        let formatted = format!("OAuth error ({code}): {description}");
+        match code {
+            "invalid_grant" | "invalid_client" | "invalid_scope" => {
+                return RefreshTokenError::permanent(formatted);
+            }
+            "access_denied" => {
+                return RefreshTokenError::permanent(formatted);
+            }
+            "temporarily_unavailable" => {
+                return RefreshTokenError::transient(formatted);
+            }
+            _ => {
+                if status.is_server_error() {
                     return RefreshTokenError::transient(formatted);
                 }
-                _ => {
-                    if status.is_server_error() {
-                        return RefreshTokenError::transient(formatted);
-                    }
-                    if status.is_client_error() {
-                        return RefreshTokenError::permanent(formatted);
-                    }
+                if status.is_client_error() {
+                    return RefreshTokenError::permanent(formatted);
                 }
             }
         }
+    }
 
     if status == StatusCode::FORBIDDEN || status == StatusCode::UNAUTHORIZED {
         return RefreshTokenError::permanent(format!(

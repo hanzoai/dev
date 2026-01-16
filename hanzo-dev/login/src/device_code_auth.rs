@@ -85,9 +85,10 @@ async fn request_user_code(
         }
 
         if looks_like_cloudflare_challenge(status, &headers, &body_text)
-            && let Ok(via_browser) = request_user_code_via_browser(base_url, client_id).await {
-                return Ok(via_browser);
-            }
+            && let Ok(via_browser) = request_user_code_via_browser(base_url, client_id).await
+        {
+            return Ok(via_browser);
+        }
 
         return Err(std::io::Error::other(format!(
             "device code request failed with status {status}"
@@ -331,7 +332,10 @@ async fn request_user_code_via_browser(
             .get("status")
             .and_then(serde_json::Value::as_i64)
             .unwrap_or_default();
-        let ok = value.get("ok").and_then(serde_json::Value::as_bool).unwrap_or(false);
+        let ok = value
+            .get("ok")
+            .and_then(serde_json::Value::as_bool)
+            .unwrap_or(false);
         let body = value.get("body").and_then(|v| v.as_str()).unwrap_or("");
 
         if ok {

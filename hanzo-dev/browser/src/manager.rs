@@ -971,9 +971,7 @@ impl BrowserManager {
                         .arg(format!("--log-file={}", log_file.display()));
                 }
 
-                let browser_config = builder
-                    .build()
-                    .map_err(BrowserError::CdpError)?;
+                let browser_config = builder.build().map_err(BrowserError::CdpError)?;
 
                 match Browser::launch(browser_config).await {
                     Ok((browser, handler)) => break (browser, handler, user_data_path),
@@ -1723,9 +1721,10 @@ impl BrowserManager {
                         let _ = browser.close().await;
                     }
                     if should_cleanup
-                        && let Some(user_data_path) = user_data_dir.lock().await.take() {
-                            let _ = tokio::fs::remove_dir_all(&user_data_path).await;
-                        }
+                        && let Some(user_data_path) = user_data_dir.lock().await.take()
+                    {
+                        let _ = tokio::fs::remove_dir_all(&user_data_path).await;
+                    }
                     break;
                 }
             }
@@ -2019,7 +2018,9 @@ impl BrowserManager {
             *assets_guard = Some(Arc::new(crate::assets::AssetManager::new().await?));
         }
         let Some(assets) = assets_guard.as_ref().cloned() else {
-            return Err(BrowserError::AssetError("Failed to get assets manager".into()));
+            return Err(BrowserError::AssetError(
+                "Failed to get assets manager".into(),
+            ));
         };
         drop(assets_guard);
 
@@ -2423,7 +2424,10 @@ impl BrowserManager {
                     "#;
 
                     if let Ok(result) = page.execute_javascript(listener_script).await {
-                        let seq = result.get("seq").and_then(serde_json::Value::as_u64).unwrap_or(0);
+                        let seq = result
+                            .get("seq")
+                            .and_then(serde_json::Value::as_u64)
+                            .unwrap_or(0);
                         let url = result
                             .get("url")
                             .and_then(|v| v.as_str())
@@ -2449,9 +2453,10 @@ impl BrowserManager {
                             tokio::spawn(async move {
                                 // Initialize assets manager if needed
                                 if assets_arc2.lock().await.is_none()
-                                    && let Ok(am) = crate::assets::AssetManager::new().await {
-                                        *assets_arc2.lock().await = Some(Arc::new(am));
-                                    }
+                                    && let Ok(am) = crate::assets::AssetManager::new().await
+                                {
+                                    *assets_arc2.lock().await = Some(Arc::new(am));
+                                }
                                 let assets_opt = assets_arc2.lock().await.clone();
                                 drop(assets_arc2);
                                 if let Some(assets) = assets_opt {
@@ -2538,9 +2543,18 @@ impl BrowserManager {
                 }))()"#;
 
                 if let Ok(val) = page.inject_js(probe_js).await {
-                    let cw = val.get("w").and_then(serde_json::Value::as_u64).unwrap_or(0) as f64;
-                    let ch = val.get("h").and_then(serde_json::Value::as_u64).unwrap_or(0) as f64;
-                    let cdpr = val.get("dpr").and_then(serde_json::Value::as_f64).unwrap_or(1.0);
+                    let cw = val
+                        .get("w")
+                        .and_then(serde_json::Value::as_u64)
+                        .unwrap_or(0) as f64;
+                    let ch = val
+                        .get("h")
+                        .and_then(serde_json::Value::as_u64)
+                        .unwrap_or(0) as f64;
+                    let cdpr = val
+                        .get("dpr")
+                        .and_then(serde_json::Value::as_f64)
+                        .unwrap_or(1.0);
 
                     let w_ok = (cw - expected_w).abs() <= 5.0;
                     let h_ok = (ch - expected_h).abs() <= 5.0;

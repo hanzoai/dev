@@ -60,18 +60,17 @@ pub fn generate_ts(out_dir: &Path, prettier: Option<&Path>) -> Result<()> {
 
     // Format with Prettier by passing individual files (no shell globbing)
     if let Some(prettier_bin) = prettier
-        && !ts_files.is_empty() {
-            let status = Command::new(prettier_bin)
-                .arg("--write")
-                .args(ts_files.iter().map(|p| p.as_os_str()))
-                .status()
-                .with_context(|| {
-                    format!("Failed to invoke Prettier at {}", prettier_bin.display())
-                })?;
-            if !status.success() {
-                return Err(anyhow!("Prettier failed with status {status}"));
-            }
+        && !ts_files.is_empty()
+    {
+        let status = Command::new(prettier_bin)
+            .arg("--write")
+            .args(ts_files.iter().map(|p| p.as_os_str()))
+            .status()
+            .with_context(|| format!("Failed to invoke Prettier at {}", prettier_bin.display()))?;
+        if !status.success() {
+            return Err(anyhow!("Prettier failed with status {status}"));
         }
+    }
 
     Ok(())
 }

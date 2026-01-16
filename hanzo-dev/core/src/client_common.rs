@@ -213,14 +213,15 @@ impl Prompt {
         let mut seen_call_ids = std::collections::HashSet::new();
         for item in &self.input {
             if let ResponseItem::FunctionCallOutput { call_id, .. } = item
-                && !seen_call_ids.insert(call_id.clone()) {
-                    // Skip duplicate function call output
-                    tracing::debug!(
-                        "Filtering duplicate FunctionCallOutput with call_id: {} from input",
-                        call_id
-                    );
-                    continue;
-                }
+                && !seen_call_ids.insert(call_id.clone())
+            {
+                // Skip duplicate function call output
+                tracing::debug!(
+                    "Filtering duplicate FunctionCallOutput with call_id: {} from input",
+                    call_id
+                );
+                continue;
+            }
             input_with_instructions.push(item.clone());
         }
 
@@ -397,21 +398,22 @@ fn limit_screenshots_in_input(input: &mut Vec<ResponseItem>) {
     // Replace screenshots that should be removed
     for &pos in &screenshot_positions {
         if !positions_to_keep.contains(&pos)
-            && let Some(ResponseItem::Message { content, .. }) = input.get_mut(pos) {
-                // Replace image content with placeholder message
-                let mut new_content = Vec::new();
-                for item in content.iter() {
-                    match item {
-                        ContentItem::InputImage { .. } => {
-                            new_content.push(ContentItem::InputText {
-                                text: "[screenshot no longer available]".to_string(),
-                            });
-                        }
-                        other => new_content.push(other.clone()),
+            && let Some(ResponseItem::Message { content, .. }) = input.get_mut(pos)
+        {
+            // Replace image content with placeholder message
+            let mut new_content = Vec::new();
+            for item in content.iter() {
+                match item {
+                    ContentItem::InputImage { .. } => {
+                        new_content.push(ContentItem::InputText {
+                            text: "[screenshot no longer available]".to_string(),
+                        });
                     }
+                    other => new_content.push(other.clone()),
                 }
-                *content = new_content;
             }
+            *content = new_content;
+        }
     }
 
     tracing::debug!(

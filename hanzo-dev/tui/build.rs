@@ -30,8 +30,7 @@ fn main() {
                 prev_is_alpha = false;
                 continue;
             }
-            if (ch.is_ascii_uppercase() && prev_is_lower)
-                || (ch.is_ascii_digit() && prev_is_alpha)
+            if (ch.is_ascii_uppercase() && prev_is_lower) || (ch.is_ascii_digit() && prev_is_alpha)
             {
                 out.push(' ');
             }
@@ -95,32 +94,31 @@ fn main() {
         .join("assets")
         .join("spinners.json");
     if let Ok(text) = fs::read_to_string(&path)
-        && let Ok(src) = serde_json::from_str::<BTreeMap<String, serde_json::Value>>(&text) {
-            let mut changed = false;
-            let mut out: BTreeMap<String, Dest> = BTreeMap::new();
-            for (name, v) in src.into_iter() {
-                if let Ok(d) = serde_json::from_value::<Dest>(v.clone()) {
-                    out.insert(name, d);
-                    continue;
-                }
-                if let Ok(s) = serde_json::from_value::<Src>(v.clone()) {
-                    out.insert(
-                        name.clone(),
-                        Dest {
-                            interval: s.interval,
-                            frames: s.frames,
-                            label: humanize(&name),
-                            group: group_for(&name),
-                        },
-                    );
-                    changed = true;
-                }
+        && let Ok(src) = serde_json::from_str::<BTreeMap<String, serde_json::Value>>(&text)
+    {
+        let mut changed = false;
+        let mut out: BTreeMap<String, Dest> = BTreeMap::new();
+        for (name, v) in src.into_iter() {
+            if let Ok(d) = serde_json::from_value::<Dest>(v.clone()) {
+                out.insert(name, d);
+                continue;
             }
-            if changed
-                && let Ok(pretty) = serde_json::to_string_pretty(&out)
-            {
-                let _ = fs::write(&path, pretty);
-                println!("cargo:rerun-if-changed={}", path.display());
+            if let Ok(s) = serde_json::from_value::<Src>(v.clone()) {
+                out.insert(
+                    name.clone(),
+                    Dest {
+                        interval: s.interval,
+                        frames: s.frames,
+                        label: humanize(&name),
+                        group: group_for(&name),
+                    },
+                );
+                changed = true;
             }
         }
+        if changed && let Ok(pretty) = serde_json::to_string_pretty(&out) {
+            let _ = fs::write(&path, pretty);
+            println!("cargo:rerun-if-changed={}", path.display());
+        }
+    }
 }

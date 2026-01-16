@@ -620,11 +620,12 @@ impl EventProcessor for EventProcessorWithHumanOutput {
                     event.tool_name.style(self.bold),
                 );
                 if let Some(params) = &event.parameters
-                    && let Ok(formatted) = serde_json::to_string_pretty(params) {
-                        for line in formatted.lines() {
-                            println!("{}", line.style(self.dimmed));
-                        }
+                    && let Ok(formatted) = serde_json::to_string_pretty(params)
+                {
+                    for line in formatted.lines() {
+                        println!("{}", line.style(self.dimmed));
                     }
+                }
             }
             EventMsg::CustomToolCallEnd(event) => {
                 let status = if event.result.is_ok() {

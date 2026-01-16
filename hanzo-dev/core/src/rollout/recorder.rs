@@ -546,9 +546,9 @@ async fn rollout_writer(
                         &state.last_timestamp,
                     )
                     .await
-                    {
-                        warn!("failed to update session catalog after AddItems: {err}");
-                    }
+                {
+                    warn!("failed to update session catalog after AddItems: {err}");
+                }
             }
             RolloutCmd::SetSnapshot(snapshot) => {
                 if let Err(err) = write_snapshot(&snapshot_path, &snapshot).await {

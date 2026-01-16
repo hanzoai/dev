@@ -30,9 +30,11 @@ fn command_exists(cmd: &str) -> bool {
             }
             let candidate = dir.join(cmd);
             if let Ok(meta) = std::fs::metadata(&candidate)
-                && meta.is_file() && (meta.permissions().mode() & 0o111 != 0) {
-                    return true;
-                }
+                && meta.is_file()
+                && (meta.permissions().mode() & 0o111 != 0)
+            {
+                return true;
+            }
         }
         false
     }
@@ -47,9 +49,10 @@ pub fn get_enabled_agents(agents: &[AgentConfig]) -> Vec<String> {
     fn agent_is_runnable(agent: &AgentConfig) -> bool {
         let spec = agent_model_spec(&agent.name).or_else(|| agent_model_spec(&agent.command));
         if let Some(spec) = spec
-            && matches!(spec.family, "code" | "codex" | "cloud") {
-                return true;
-            }
+            && matches!(spec.family, "code" | "codex" | "cloud")
+        {
+            return true;
+        }
 
         let cmd = agent.command.trim();
         let cmd = if cmd.is_empty() {
@@ -256,7 +259,10 @@ pub fn handle_slash_command(input: &str, agents: Option<&[AgentConfig]>) -> Opti
     // Parse the command and arguments
     let parts: Vec<&str> = input.splitn(2, ' ').collect();
     let command = parts[0];
-    let args = parts.get(1).map(std::string::ToString::to_string).unwrap_or_default();
+    let args = parts
+        .get(1)
+        .map(std::string::ToString::to_string)
+        .unwrap_or_default();
 
     match command {
         "/plan" => {

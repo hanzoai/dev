@@ -278,23 +278,25 @@ fn default_levels() -> Vec<String> {
 
 fn compute_staleness(meta: &BridgeMeta, path: &Path) -> (bool, Option<i64>) {
     if let Some(hb) = &meta.heartbeat_at
-        && let Ok(ts) = DateTime::parse_from_rfc3339(hb) {
-            let age = Utc::now().signed_duration_since(ts.with_timezone(&Utc));
-            return (
-                age.num_milliseconds() > HEARTBEAT_STALE_MS,
-                Some(age.num_milliseconds()),
-            );
-        }
+        && let Ok(ts) = DateTime::parse_from_rfc3339(hb)
+    {
+        let age = Utc::now().signed_duration_since(ts.with_timezone(&Utc));
+        return (
+            age.num_milliseconds() > HEARTBEAT_STALE_MS,
+            Some(age.num_milliseconds()),
+        );
+    }
 
     if let Ok(stat) = std::fs::metadata(path)
-        && let Ok(modified) = stat.modified() {
-            let modified: DateTime<Utc> = modified.into();
-            let age = Utc::now().signed_duration_since(modified);
-            return (
-                age.num_milliseconds() > HEARTBEAT_STALE_MS,
-                Some(age.num_milliseconds()),
-            );
-        }
+        && let Ok(modified) = stat.modified()
+    {
+        let modified: DateTime<Utc> = modified.into();
+        let age = Utc::now().signed_duration_since(modified);
+        return (
+            age.num_milliseconds() > HEARTBEAT_STALE_MS,
+            Some(age.num_milliseconds()),
+        );
+    }
 
     (false, None)
 }
@@ -362,7 +364,10 @@ async fn wait_for_type(
     expected: &[&str],
     dur: Duration,
 ) -> Result<Option<Value>> {
-    let expected_lower: Vec<String> = expected.iter().map(std::string::ToString::to_string).collect();
+    let expected_lower: Vec<String> = expected
+        .iter()
+        .map(std::string::ToString::to_string)
+        .collect();
     let found = timeout(dur, async {
         while let Some(msg) = rx.next().await {
             match msg {
@@ -373,9 +378,9 @@ async fn wait_for_type(
                             .and_then(|t| t.as_str())
                             .map(|t| expected_lower.contains(&t.to_string()))
                             .unwrap_or(false)
-                        {
-                            return Some(val);
-                        }
+                    {
+                        return Some(val);
+                    }
                 }
                 Ok(Message::Binary(_)) => {}
                 Ok(Message::Close(frame)) => {
@@ -409,13 +414,13 @@ async fn wait_for_forwarded(
                 Ok(Message::Text(text)) => {
                     if let Ok(val) = serde_json::from_str::<Value>(&text)
                         && val.get("type").and_then(|t| t.as_str()) == Some("control_forwarded")
-                            && val.get("id").and_then(|v| v.as_str()) == Some(id)
-                        {
-                            return val
-                                .get("delivered")
-                                .and_then(serde_json::Value::as_u64)
-                                .map(|v| v as usize);
-                        }
+                        && val.get("id").and_then(|v| v.as_str()) == Some(id)
+                    {
+                        return val
+                            .get("delivered")
+                            .and_then(serde_json::Value::as_u64)
+                            .map(|v| v as usize);
+                    }
                 }
                 Ok(Message::Binary(_)) => {}
                 Ok(_) => {}
@@ -500,7 +505,10 @@ fn format_bridge_message(val: &Value) -> Option<String> {
             Some(format!("⚠ drop/rate-limit: {msg}"))
         }
         "control_result" => {
-            let ok = val.get("ok").and_then(serde_json::Value::as_bool).unwrap_or(false);
+            let ok = val
+                .get("ok")
+                .and_then(serde_json::Value::as_bool)
+                .unwrap_or(false);
             let id = val.get("id").and_then(|v| v.as_str()).unwrap_or("");
             let summary = if ok {
                 val.get("result")
