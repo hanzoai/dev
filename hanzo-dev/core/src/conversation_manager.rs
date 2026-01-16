@@ -186,7 +186,7 @@ impl ConversationManager {
             ),
         )
         .await
-        .map_err(|e| CodexErr::Io(e))?;
+        .map_err(CodexErr::Io)?;
 
         // Persist rollout items to seed the resumed conversation.
         let rollout_items = history.get_rollout_items();
@@ -197,7 +197,7 @@ impl ConversationManager {
                 .map_err(CodexErr::Io)?;
         }
         // Ensure data is flushed to disk before resuming.
-        recorder.shutdown().await.map_err(|e| CodexErr::Io(e))?;
+        recorder.shutdown().await.map_err(CodexErr::Io)?;
 
         // Now spawn a conversation resuming from the newly created rollout.
         config.experimental_resume = Some(recorder.rollout_path.clone());

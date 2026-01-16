@@ -8,8 +8,11 @@ use tokio::sync::RwLock;
 static GLOBAL_BROWSER_MANAGER: Lazy<Arc<RwLock<Option<Arc<BrowserManager>>>>> =
     Lazy::new(|| Arc::new(RwLock::new(None)));
 
+/// Type alias to reduce complexity for clippy
+type LastConnectionState = (Option<u16>, Option<String>);
+
 /// Cache of the last successful external Chrome connection (port/ws)
-static LAST_CONNECTION: Lazy<Arc<RwLock<(Option<u16>, Option<String>)>>> =
+static LAST_CONNECTION: Lazy<Arc<RwLock<LastConnectionState>>> =
     Lazy::new(|| Arc::new(RwLock::new((None, None))));
 
 /// Get or create the global browser manager

@@ -116,9 +116,9 @@ pub fn run_patch_harness(
     }
 
     // 2) Workflow checks (actionlint plugin).
-    if functional_enabled {
-        if let Some(lines) = maybe_run_actionlint(action, cwd, github) {
-            if !lines.is_empty() {
+    if functional_enabled
+        && let Some(lines) = maybe_run_actionlint(action, cwd, github)
+            && !lines.is_empty() {
                 record_ran("actionlint");
                 for line in lines.into_iter().take(24) {
                     findings.push(HarnessFinding {
@@ -128,8 +128,6 @@ pub fn run_patch_harness(
                     });
                 }
             }
-        }
-    }
 
     // 3) External tools (shellcheck, markdownlint, etc.).
     let allow = cfg.tools_allowlist.clone().unwrap_or_default();
@@ -157,7 +155,7 @@ pub fn run_patch_harness(
                     changed_paths.push(rel);
                 }
                 if move_path.is_some()
-                    && move_path.as_ref().map(|p| p.as_path()) != Some(path.as_path())
+                    && move_path.as_ref().map(std::path::PathBuf::as_path) != Some(path.as_path())
                 {
                     remove_staged_file(staged_root, cwd, path);
                 }
@@ -361,8 +359,7 @@ pub fn run_patch_harness(
         && cfg.tools.tsc.unwrap_or(true)
         && !ts_files.is_empty()
         && is_allowed("tsc")
-    {
-        if let Some(exe) = which(Path::new("tsc")) {
+        && let Some(exe) = which(Path::new("tsc")) {
             record_ran("tsc");
             let ts_timeout = timeout.max(20);
             let project = find_nearest_config(
@@ -393,7 +390,7 @@ pub fn run_patch_harness(
                     }
                     match run_with_timeout(cmd, ts_timeout) {
                         Some(output) => {
-                            if output.status.map_or(true, |status| !status.success()) {
+                            if output.status.is_none_or(|status| !status.success()) {
                                 let mut lines =
                                     collect_output_lines(&output.stdout, &output.stderr);
                                 if lines.is_empty() {
@@ -422,7 +419,6 @@ pub fn run_patch_harness(
                 }),
             }
         }
-    }
 
     let eslint_files: Vec<PathBuf> = changed_paths
         .iter()
@@ -439,8 +435,7 @@ pub fn run_patch_harness(
         && !eslint_files.is_empty()
         && is_allowed("eslint")
         && has_eslint_config(cwd, &eslint_files)
-    {
-        if let Some(exe) = which(Path::new("eslint")) {
+        && let Some(exe) = which(Path::new("eslint")) {
             record_ran("eslint");
             let lint_timeout = timeout.max(15);
             match WorkspaceOverlay::apply(action) {
@@ -453,7 +448,7 @@ pub fn run_patch_harness(
                     }
                     match run_with_timeout(cmd, lint_timeout) {
                         Some(output) => {
-                            if output.status.map_or(true, |status| !status.success()) {
+                            if output.status.is_none_or(|status| !status.success()) {
                                 let mut lines =
                                     collect_output_lines(&output.stdout, &output.stderr);
                                 if lines.is_empty() {
@@ -482,7 +477,6 @@ pub fn run_patch_harness(
                 }),
             }
         }
-    }
 
     let php_files: Vec<PathBuf> = changed_paths
         .iter()
@@ -494,8 +488,7 @@ pub fn run_patch_harness(
         && !php_files.is_empty()
         && is_allowed("phpstan")
         && has_phpstan_config(cwd, &php_files)
-    {
-        if let Some(exe) = which(Path::new("phpstan")) {
+        && let Some(exe) = which(Path::new("phpstan")) {
             record_ran("phpstan");
             let phpstan_timeout = timeout.max(20);
             match WorkspaceOverlay::apply(action) {
@@ -508,7 +501,7 @@ pub fn run_patch_harness(
                     }
                     match run_with_timeout(cmd, phpstan_timeout) {
                         Some(output) => {
-                            if output.status.map_or(true, |status| !status.success()) {
+                            if output.status.is_none_or(|status| !status.success()) {
                                 let mut lines =
                                     collect_output_lines(&output.stdout, &output.stderr);
                                 if lines.is_empty() {
@@ -537,15 +530,13 @@ pub fn run_patch_harness(
                 }),
             }
         }
-    }
 
     if functional_enabled
         && cfg.tools.psalm.unwrap_or(true)
         && !php_files.is_empty()
         && is_allowed("psalm")
         && has_psalm_config(cwd, &php_files)
-    {
-        if let Some(exe) = which(Path::new("psalm")) {
+        && let Some(exe) = which(Path::new("psalm")) {
             record_ran("psalm");
             let psalm_timeout = timeout.max(20);
             match WorkspaceOverlay::apply(action) {
@@ -558,7 +549,7 @@ pub fn run_patch_harness(
                     }
                     match run_with_timeout(cmd, psalm_timeout) {
                         Some(output) => {
-                            if output.status.map_or(true, |status| !status.success()) {
+                            if output.status.is_none_or(|status| !status.success()) {
                                 let mut lines =
                                     collect_output_lines(&output.stdout, &output.stderr);
                                 if lines.is_empty() {
@@ -587,7 +578,6 @@ pub fn run_patch_harness(
                 }),
             }
         }
-    }
 
     let py_files: Vec<PathBuf> = changed_paths
         .iter()
@@ -598,8 +588,7 @@ pub fn run_patch_harness(
         && cfg.tools.mypy.unwrap_or(true)
         && !py_files.is_empty()
         && is_allowed("mypy")
-    {
-        if let Some(exe) = which(Path::new("mypy")) {
+        && let Some(exe) = which(Path::new("mypy")) {
             record_ran("mypy");
             let mypy_timeout = timeout.max(20);
             match WorkspaceOverlay::apply(action) {
@@ -612,7 +601,7 @@ pub fn run_patch_harness(
                     }
                     match run_with_timeout(cmd, mypy_timeout) {
                         Some(output) => {
-                            if output.status.map_or(true, |status| !status.success()) {
+                            if output.status.is_none_or(|status| !status.success()) {
                                 let mut lines =
                                     collect_output_lines(&output.stdout, &output.stderr);
                                 if lines.is_empty() {
@@ -641,14 +630,12 @@ pub fn run_patch_harness(
                 }),
             }
         }
-    }
 
     if functional_enabled
         && cfg.tools.pyright.unwrap_or(true)
         && !py_files.is_empty()
         && is_allowed("pyright")
-    {
-        if let Some(exe) = which(Path::new("pyright")) {
+        && let Some(exe) = which(Path::new("pyright")) {
             record_ran("pyright");
             let pyright_timeout = timeout.max(20);
             match WorkspaceOverlay::apply(action) {
@@ -661,7 +648,7 @@ pub fn run_patch_harness(
                     }
                     match run_with_timeout(cmd, pyright_timeout) {
                         Some(output) => {
-                            if output.status.map_or(true, |status| !status.success()) {
+                            if output.status.is_none_or(|status| !status.success()) {
                                 let mut lines =
                                     collect_output_lines(&output.stdout, &output.stderr);
                                 if lines.is_empty() {
@@ -690,7 +677,6 @@ pub fn run_patch_harness(
                 }),
             }
         }
-    }
 
     let go_files: Vec<PathBuf> = changed_paths
         .iter()
@@ -702,8 +688,7 @@ pub fn run_patch_harness(
         && !go_files.is_empty()
         && is_allowed("golangci-lint")
         && has_go_module(cwd)
-    {
-        if let Some(exe) = which(Path::new("golangci-lint")) {
+        && let Some(exe) = which(Path::new("golangci-lint")) {
             record_ran("golangci-lint");
             let lint_timeout = timeout.max(20);
             match WorkspaceOverlay::apply(action) {
@@ -713,7 +698,7 @@ pub fn run_patch_harness(
                     cmd.args(["run", "./..."]);
                     match run_with_timeout(cmd, lint_timeout) {
                         Some(output) => {
-                            if output.status.map_or(true, |status| !status.success()) {
+                            if output.status.is_none_or(|status| !status.success()) {
                                 let mut lines =
                                     collect_output_lines(&output.stdout, &output.stderr);
                                 if lines.is_empty() {
@@ -744,7 +729,6 @@ pub fn run_patch_harness(
                 }),
             }
         }
-    }
 
     if functional_enabled && cfg.tools.cargo_check.unwrap_or(true) && !rust_files.is_empty() {
         if which(Path::new("cargo")).is_none() {
@@ -788,7 +772,7 @@ pub fn run_patch_harness(
                         match run_with_timeout(cmd, rust_timeout) {
                             Some(output) => {
                                 record_ran(&format!("cargo-check({label})"));
-                                if output.status.map_or(true, |status| !status.success()) {
+                                if output.status.is_none_or(|status| !status.success()) {
                                     let mut lines =
                                         collect_output_lines(&output.stdout, &output.stderr);
                                     if lines.is_empty() {
@@ -862,7 +846,7 @@ fn which(exe: &Path) -> Option<PathBuf> {
     let name = exe.as_os_str();
     let paths: Vec<PathBuf> = std::env::var_os("PATH")
         .map(|p| std::env::split_paths(&p).collect())
-        .unwrap_or_else(Vec::new);
+        .unwrap_or_default();
     for dir in paths {
         let candidate = dir.join(name);
         if candidate.is_file() {
@@ -912,11 +896,10 @@ fn stage_file(staged_root: &Path, cwd: &Path, path: &Path, contents: &str) -> Op
     if let Some(parent) = dest.parent() {
         let _ = fs::create_dir_all(parent);
     }
-    if let Ok(mut file) = fs::File::create(&dest) {
-        if file.write_all(contents.as_bytes()).is_ok() {
+    if let Ok(mut file) = fs::File::create(&dest)
+        && file.write_all(contents.as_bytes()).is_ok() {
             return Some(relative.to_path_buf());
         }
-    }
     None
 }
 
@@ -933,14 +916,14 @@ fn collect_output_lines(stdout: &[u8], stderr: &[u8]) -> Vec<String> {
         lines.extend(
             String::from_utf8_lossy(stdout)
                 .lines()
-                .map(|s| s.to_string()),
+                .map(std::string::ToString::to_string),
         );
     }
     if !stderr.is_empty() {
         lines.extend(
             String::from_utf8_lossy(stderr)
                 .lines()
-                .map(|s| s.to_string()),
+                .map(std::string::ToString::to_string),
         );
     }
     lines.retain(|line| !line.trim().is_empty());
@@ -1227,11 +1210,10 @@ impl WorkspaceOverlay {
 
     fn remove_file(&mut self, path: &Path, seen: &mut HashSet<PathBuf>) -> std::io::Result<()> {
         self.backup_if_needed(path, seen)?;
-        if let Err(err) = fs::remove_file(path) {
-            if err.kind() != std::io::ErrorKind::NotFound {
+        if let Err(err) = fs::remove_file(path)
+            && err.kind() != std::io::ErrorKind::NotFound {
                 return Err(err);
             }
-        }
         Ok(())
     }
 

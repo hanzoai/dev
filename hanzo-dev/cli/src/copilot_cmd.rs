@@ -216,7 +216,7 @@ async fn handle_chat_command(
     }
 
     let response = copilot.start_chat_session(&prompt, Some(context)).await?;
-    println!("Copilot: {}", response);
+    println!("Copilot: {response}");
 
     // Interactive mode if no message was provided
     if is_interactive || continue_session {
@@ -232,7 +232,7 @@ async fn handle_chat_command(
             }
 
             let response = copilot.start_chat_session(input, None).await?;
-            println!("Copilot: {}", response);
+            println!("Copilot: {response}");
         }
     }
 
@@ -257,8 +257,7 @@ async fn handle_suggest_command(
             Ok(content) => content,
             Err(_e) => {
                 return Err(CodexErr::UnsupportedOperation(format!(
-                    "Failed to read file {}",
-                    file_path
+                    "Failed to read file {file_path}"
                 )));
             }
         },
@@ -288,7 +287,7 @@ async fn handle_suggest_command(
         println!("--- Suggestion {} ---", i + 1);
         println!("{}", suggestion.text);
         if let Some(reasoning) = &suggestion.reasoning {
-            println!("Reasoning: {}", reasoning);
+            println!("Reasoning: {reasoning}");
         }
         println!();
     }
@@ -346,12 +345,12 @@ async fn handle_review_command(
             println!("{}", serde_json::to_string_pretty(&json)?);
         }
         "markdown" => {
-            println!("# Code Review: {}\n", file);
-            println!("{}", review);
+            println!("# Code Review: {file}\n");
+            println!("{review}");
         }
         _ => {
-            println!("Code Review for {}:", file);
-            println!("{}", review);
+            println!("Code Review for {file}:");
+            println!("{review}");
         }
     }
 
@@ -374,8 +373,7 @@ async fn handle_docs_command(
             Ok(content) => content,
             Err(_e) => {
                 return Err(CodexErr::UnsupportedOperation(format!(
-                    "Failed to read file {}",
-                    input
+                    "Failed to read file {input}"
                 )));
             }
         }
@@ -387,16 +385,15 @@ async fn handle_docs_command(
 
     match output {
         Some(output_file) => match std::fs::write(&output_file, &documentation) {
-            Ok(_) => println!("Documentation written to {}", output_file),
+            Ok(_) => println!("Documentation written to {output_file}"),
             Err(_e) => {
                 return Err(CodexErr::UnsupportedOperation(format!(
-                    "Failed to write to {}",
-                    output_file
+                    "Failed to write to {output_file}"
                 )));
             }
         },
         None => {
-            println!("{}", documentation);
+            println!("{documentation}");
         }
     }
 
@@ -419,8 +416,7 @@ async fn handle_explain_command(
             Ok(content) => content,
             Err(_e) => {
                 return Err(CodexErr::UnsupportedOperation(format!(
-                    "Failed to read file {}",
-                    file_path
+                    "Failed to read file {file_path}"
                 )));
             }
         },
@@ -437,8 +433,8 @@ async fn handle_explain_command(
 
     let explanation = copilot.explain_code(&code_content).await?;
 
-    println!("Code Explanation ({} level):", level);
-    println!("{}", explanation);
+    println!("Code Explanation ({level} level):");
+    println!("{explanation}");
 
     Ok(())
 }
@@ -457,11 +453,11 @@ async fn handle_shell_command(
     let commands = copilot.suggest_commands(&task).await?;
 
     if commands.is_empty() {
-        println!("No commands suggested for task: {}", task);
+        println!("No commands suggested for task: {task}");
         return Ok(());
     }
 
-    println!("Suggested commands for: {}", task);
+    println!("Suggested commands for: {task}");
     println!();
 
     for (i, command) in commands.iter().enumerate() {
@@ -470,9 +466,9 @@ async fn handle_shell_command(
         if explain {
             // Get explanation for the command
             let explanation = copilot
-                .explain_code(&format!("Shell command: {}", command))
+                .explain_code(&format!("Shell command: {command}"))
                 .await?;
-            println!("   → {}", explanation);
+            println!("   → {explanation}");
         }
         println!();
     }
@@ -537,7 +533,7 @@ async fn handle_commit_command(
             ""
         }
     );
-    println!("{}", commit_message);
+    println!("{commit_message}");
 
     Ok(())
 }
@@ -606,8 +602,7 @@ async fn handle_complete_command(
         Ok(content) => content,
         Err(_e) => {
             return Err(CodexErr::UnsupportedOperation(format!(
-                "Failed to read file {}",
-                file
+                "Failed to read file {file}"
             )));
         }
     };
@@ -638,13 +633,13 @@ async fn handle_complete_command(
     let end_line = std::cmp::min(lines.len(), line + context);
     let context_lines: Vec<String> = lines[start_line..end_line]
         .iter()
-        .map(|s| s.to_string())
+        .map(std::string::ToString::to_string)
         .collect();
 
     let file_ext = Path::new(&file)
         .extension()
         .and_then(|ext| ext.to_str())
-        .map(|ext| ext.to_string());
+        .map(std::string::ToString::to_string);
 
     let completions = copilot
         .auto_complete(prefix, file_ext.as_deref(), context_lines)
@@ -655,7 +650,7 @@ async fn handle_complete_command(
         return Ok(());
     }
 
-    println!("Completions for position {}:{} in {}:", line, column, file);
+    println!("Completions for position {line}:{column} in {file}:");
     for (i, completion) in completions.iter().enumerate() {
         println!("{}. {}", i + 1, completion);
     }

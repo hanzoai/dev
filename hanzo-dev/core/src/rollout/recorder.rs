@@ -538,8 +538,8 @@ async fn rollout_writer(
                     }
                 }
 
-                if let Some(ref state) = catalog_state {
-                    if let Err(err) = super::catalog::update_catalog_entry(
+                if let Some(ref state) = catalog_state
+                    && let Err(err) = super::catalog::update_catalog_entry(
                         &state.code_home,
                         &state.rollout_path,
                         state.session_id.into(),
@@ -549,7 +549,6 @@ async fn rollout_writer(
                     {
                         warn!("failed to update session catalog after AddItems: {err}");
                     }
-                }
             }
             RolloutCmd::SetSnapshot(snapshot) => {
                 if let Err(err) = write_snapshot(&snapshot_path, &snapshot).await {

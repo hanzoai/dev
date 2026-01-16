@@ -24,6 +24,12 @@ pub struct AutoDriveHistory {
     session_metrics: SessionMetrics,
 }
 
+impl Default for AutoDriveHistory {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl AutoDriveHistory {
     pub fn new() -> Self {
         Self {
@@ -269,7 +275,7 @@ impl AutoDriveHistory {
             id: None,
             role: "user".to_string(),
             content: vec![ContentItem::InputText {
-                text: format!("<compact_summary>\n{}\n</compact_summary>", summary_text),
+                text: format!("<compact_summary>\n{summary_text}\n</compact_summary>"),
             }],
         };
 

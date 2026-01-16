@@ -140,7 +140,7 @@ fn estimate_item_size(item: &ResponseItem) -> usize {
         ResponseItem::FunctionCallOutput { output, .. } => output.content.len(),
         ResponseItem::CustomToolCall { input, .. } => input.len(),
         ResponseItem::CustomToolCallOutput { output, .. } => output.len(),
-        ResponseItem::Reasoning { content, .. } => content.as_ref().map(|c| c.len()).unwrap_or(0),
+        ResponseItem::Reasoning { content, .. } => content.as_ref().map(std::vec::Vec::len).unwrap_or(0),
         _ => 0,
     }
 }
@@ -425,12 +425,11 @@ pub fn apply_retention_policy_owned(
     }
 
     // 2. Keep only the latest baseline (immutable)
-    if policy.keep_latest_baseline {
-        if let Some(latest) = env_baselines.pop() {
+    if policy.keep_latest_baseline
+        && let Some(latest) = env_baselines.pop() {
             stats.bytes_kept += latest.size_bytes;
             kept.push(latest);
         }
-    }
 
     for item in env_baselines {
         stats.removed_env_baselines += 1;

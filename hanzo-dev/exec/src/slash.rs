@@ -66,8 +66,7 @@ pub fn process_exec_slash_command(
             }
 
             Err(format!(
-                "Command '/{}' is not supported in exec mode.",
-                other
+                "Command '/{other}' is not supported in exec mode."
             ))
         }
     }
@@ -76,8 +75,7 @@ pub fn process_exec_slash_command(
 fn handle_subagent(name: &str, args: &str, ctx: SlashContext<'_>) -> Result<SlashDispatch, String> {
     if args.is_empty() {
         return Err(format!(
-            "Error: /{name} requires a task description. Usage: /{name} <task>",
-            name = name
+            "Error: /{name} requires a task description. Usage: /{name} <task>"
         ));
     }
 
@@ -110,7 +108,7 @@ fn handle_review(args_raw: &str) -> Result<SlashDispatch, String> {
         let text = args_raw.trim().to_string();
         (
             text.clone(),
-            text.clone(),
+            text,
             ReviewContextMetadata {
                 scope: Some("custom".to_string()),
                 ..Default::default()

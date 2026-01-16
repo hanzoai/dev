@@ -107,7 +107,7 @@ impl TruncatingCollector {
             let right_budget = keep_budget - left_budget;
             let prefix_slice = pick_prefix_slice(&prefix_str, left_budget);
             let suffix_slice = pick_suffix_slice(&suffix_str, right_budget);
-            let kept_content_bytes = prefix_slice.as_bytes().len() + suffix_slice.as_bytes().len();
+            let kept_content_bytes = prefix_slice.len() + suffix_slice.len();
             let truncated_content_bytes =
                 self.total_bytes.saturating_sub(kept_content_bytes as u64);
             let new_tokens = truncated_content_bytes.div_ceil(4);
@@ -133,7 +133,7 @@ impl TruncatingCollector {
         let prefix_slice = pick_prefix_slice(&prefix_str, left_budget);
         let suffix_slice = pick_suffix_slice(&suffix_str, right_budget);
         let mut out = String::with_capacity(
-            marker_len + prefix_slice.as_bytes().len() + suffix_slice.as_bytes().len() + 1,
+            marker_len + prefix_slice.len() + suffix_slice.len() + 1,
         );
         out.push_str(prefix_slice);
         out.push_str(&marker);
@@ -143,28 +143,26 @@ impl TruncatingCollector {
     }
 }
 
-fn pick_prefix_slice<'a>(input: &'a str, left_budget: usize) -> &'a str {
+fn pick_prefix_slice(input: &str, left_budget: usize) -> &str {
     if left_budget >= input.len() {
         return input;
     }
-    if let Some(head) = input.get(..left_budget) {
-        if let Some(idx) = head.rfind('\n') {
+    if let Some(head) = input.get(..left_budget)
+        && let Some(idx) = head.rfind('\n') {
             return &input[..idx + 1];
         }
-    }
     truncate_on_boundary(input, left_budget)
 }
 
-fn pick_suffix_slice<'a>(input: &'a str, right_budget: usize) -> &'a str {
+fn pick_suffix_slice(input: &str, right_budget: usize) -> &str {
     if right_budget >= input.len() {
         return input;
     }
     let tail_start = input.len().saturating_sub(right_budget);
-    if let Some(tail) = input.get(tail_start..) {
-        if let Some(idx) = tail.find('\n') {
+    if let Some(tail) = input.get(tail_start..)
+        && let Some(idx) = tail.find('\n') {
             return &input[tail_start + idx + 1..];
         }
-    }
     let mut idx = tail_start;
     while idx < input.len() && !input.is_char_boundary(idx) {
         idx += 1;
@@ -172,7 +170,7 @@ fn pick_suffix_slice<'a>(input: &'a str, right_budget: usize) -> &'a str {
     &input[idx..]
 }
 
-fn truncate_on_boundary<'a>(input: &'a str, max_len: usize) -> &'a str {
+fn truncate_on_boundary(input: &str, max_len: usize) -> &str {
     if input.len() <= max_len {
         return input;
     }

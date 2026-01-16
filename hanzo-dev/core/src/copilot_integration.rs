@@ -177,11 +177,10 @@ impl CopilotIntegration {
         cmd.args(["copilot", "chat"]);
 
         // Add context if provided
-        if let Some(ctx) = context {
-            if let Some(file_path) = ctx.get("file_path") {
+        if let Some(ctx) = context
+            && let Some(file_path) = ctx.get("file_path") {
                 cmd.arg("--file").arg(file_path);
             }
-        }
 
         let output = cmd.arg(initial_message).output().await?;
 
@@ -204,11 +203,10 @@ impl CopilotIntegration {
         }
 
         let prompt = if let Some(d) = diff {
-            format!("Review this code diff and provide suggestions:\n\n{}", d)
+            format!("Review this code diff and provide suggestions:\n\n{d}")
         } else {
             format!(
-                "Review the code in file {} and provide suggestions",
-                file_path
+                "Review the code in file {file_path} and provide suggestions"
             )
         };
 
@@ -231,8 +229,7 @@ impl CopilotIntegration {
         }
 
         let prompt = format!(
-            "Generate {} documentation for this code:\n\n{}",
-            doc_type, code
+            "Generate {doc_type} documentation for this code:\n\n{code}"
         );
 
         self.start_chat_session(&prompt, None).await
@@ -246,7 +243,7 @@ impl CopilotIntegration {
             ));
         }
 
-        let prompt = format!("Explain what this code does and how it works:\n\n{}", code);
+        let prompt = format!("Explain what this code does and how it works:\n\n{code}");
 
         self.start_chat_session(&prompt, None).await
     }
@@ -290,8 +287,7 @@ impl CopilotIntegration {
         }
 
         let prompt = format!(
-            "Generate a concise, descriptive Git commit message for these changes:\n\n{}",
-            diff
+            "Generate a concise, descriptive Git commit message for these changes:\n\n{diff}"
         );
 
         self.start_chat_session(&prompt, None).await
@@ -429,13 +425,13 @@ pub mod utils {
             output.push('\n');
 
             if let Some(reasoning) = &suggestion.reasoning {
-                output.push_str(&format!("Reasoning: {}\n", reasoning));
+                output.push_str(&format!("Reasoning: {reasoning}\n"));
             }
 
             if !suggestion.alternatives.is_empty() {
                 output.push_str("Alternatives:\n");
                 for alt in &suggestion.alternatives {
-                    output.push_str(&format!("  - {}\n", alt));
+                    output.push_str(&format!("  - {alt}\n"));
                 }
             }
 
