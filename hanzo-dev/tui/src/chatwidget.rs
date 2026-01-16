@@ -11365,15 +11365,10 @@ impl ChatWidget<'_> {
                         let _ = screenshot_items; // Consumed above
                     }
                     Ok(Err(e)) => {
-                        tracing::warn!(
-                            "Background screenshot capture failed: {}",
-                            e
-                        );
+                        tracing::warn!("Background screenshot capture failed: {}", e);
                     }
                     Err(_timeout_err) => {
-                        tracing::warn!(
-                            "Background screenshot capture timed out"
-                        );
+                        tracing::warn!("Background screenshot capture timed out");
                     }
                 }
             });
