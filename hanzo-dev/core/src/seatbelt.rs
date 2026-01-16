@@ -118,6 +118,7 @@ fn create_seatbelt_command_args(
     );
 
     if std::env::var("HANZO_DEBUG_PRINT_SEATBELT").is_ok() {
+        #[allow(clippy::print_stderr)]
         eprintln!("--- Codex Seatbelt Policy ---\n{full_policy}\n------------------------------");
     }
 
