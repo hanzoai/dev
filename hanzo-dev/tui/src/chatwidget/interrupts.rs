@@ -23,6 +23,7 @@ pub(crate) enum QueuedInterrupt {
         id: String,
         ev: ApplyPatchApprovalRequestEvent,
     },
+    #[allow(dead_code)]
     ExecBegin {
         seq: u64,
         ev: ExecCommandBeginEvent,
@@ -33,6 +34,7 @@ pub(crate) enum QueuedInterrupt {
         ev: ExecCommandEndEvent,
         order: Option<hanzo_core::protocol::OrderMeta>,
     },
+    #[allow(dead_code)]
     McpBegin {
         seq: u64,
         ev: McpToolCallBeginEvent,
@@ -79,6 +81,7 @@ impl InterruptManager {
             .push(QueuedInterrupt::ApplyPatchApproval { seq, id, ev });
     }
 
+    #[allow(dead_code)]
     pub(crate) fn push_exec_begin(
         &mut self,
         seq: u64,
@@ -98,6 +101,7 @@ impl InterruptManager {
         self.queue.push(QueuedInterrupt::ExecEnd { seq, ev, order });
     }
 
+    #[allow(dead_code)]
     pub(crate) fn push_mcp_begin(
         &mut self,
         seq: u64,

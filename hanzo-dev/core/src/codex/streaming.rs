@@ -11452,8 +11452,8 @@ pub(super) fn debug_history(label: &str, items: &[ResponseItem]) {
         })
         .collect();
     let rendered = preview.join(" | ");
+    #[allow(clippy::print_stderr)]
     if std::env::var_os("HANZO_COMPACT_TRACE").is_some() {
-        #[allow(clippy::print_stderr)]
         eprintln!("[compact_history] {label} => [{rendered}]");
     }
     info!(

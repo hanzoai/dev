@@ -4575,6 +4575,7 @@ impl ChatWidget<'_> {
         }
     }
 
+    #[allow(dead_code)]
     fn reasoning_preview(lines: &[Line<'static>]) -> String {
         const MAX_LINES: usize = 3;
         const MAX_CHARS: usize = 120;
@@ -11814,7 +11815,7 @@ impl ChatWidget<'_> {
                     _ => (
                         format!("Snapshots disabled after Git error: {err}"),
                         Some(
-                            "Restart Code after resolving the issue to re-enable snapshots."
+                            "Restart Dev after resolving the issue to re-enable snapshots."
                                 .to_string(),
                         ),
                     ),
@@ -11992,7 +11993,7 @@ impl ChatWidget<'_> {
             }
         } else {
             lines.push(
-                "Snapshots are currently disabled. Resolve the Git issue and restart Code to re-enable them.".to_string(),
+                "Snapshots are currently disabled. Resolve the Git issue and restart Dev to re-enable them.".to_string(),
             );
         }
 
@@ -12016,7 +12017,7 @@ impl ChatWidget<'_> {
                 "Restores workspace files only. Conversation history remains unchanged."
                     .to_string(),
             ),
-            Some("Snapshots appear once Code captures a Git checkpoint.".to_string()),
+            Some("Snapshots appear once Dev captures a Git checkpoint.".to_string()),
             vec![
                 "No snapshot is available to restore.".to_string(),
                 "Run a command that modifies files to create the first snapshot.".to_string(),
@@ -12219,7 +12220,7 @@ impl ChatWidget<'_> {
     fn conversation_line(role: UndoPreviewRole, text: &str) -> Line<'static> {
         let (label, color) = match role {
             UndoPreviewRole::User => ("You", crate::colors::text_bright()),
-            UndoPreviewRole::Assistant => ("Code", crate::colors::primary()),
+            UndoPreviewRole::Assistant => ("Dev", crate::colors::primary()),
         };
         let label_span = Span::styled(
             format!("{label}: "),
@@ -21619,8 +21620,8 @@ Have we met every part of this goal and is there no further work to do?"#
             if cmd_str == "test-approval" {
                 continue;
             }
-            // Prefer "Code" branding in the Help panel
-            let desc = cmd.description().replace("Codex", "Code");
+            // Prefer "Hanzo Dev" branding in the Help panel
+            let desc = cmd.description().replace("Codex", "Hanzo Dev");
             // Render as "/command  —  description"
             lines.push(RtLine::from(vec![
                 RtSpan::styled(format!("/{cmd_str:<12}"), t_fg),
@@ -28548,7 +28549,7 @@ Have we met every part of this goal and is there no further work to do?"#
             let mut spans: Vec<Span> = Vec::new();
             // Title follows theme text color
             spans.push(Span::styled(
-                "Every Code",
+                "Hanzo Dev",
                 Style::default()
                     .fg(crate::colors::text())
                     .add_modifier(Modifier::BOLD),
@@ -38627,7 +38628,7 @@ impl WidgetRef for &ChatWidget<'_> {
             preview: String,
         }
 
-        let mut height_mismatches: Vec<HeightMismatch> = Vec::new();
+        let height_mismatches: Vec<HeightMismatch> = Vec::new();
         let is_collapsed_reasoning_at = |idx: usize| {
             if idx >= request_count {
                 return false;
@@ -40552,7 +40553,7 @@ impl ChatWidget<'_> {
             .filter(|text| !text.is_empty());
 
         self.app_event_tx.send(AppEvent::EmitTuiNotification {
-            title: "Code".to_string(),
+            title: "Hanzo Dev".to_string(),
             body: snippet,
         });
     }

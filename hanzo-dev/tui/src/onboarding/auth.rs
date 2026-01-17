@@ -303,7 +303,8 @@ impl AuthModeWidget {
     }
 
     fn render_env_var_found(&self, area: Rect, buf: &mut Buffer) {
-        let lines = vec![Line::from("✓ Using OPENAI_API_KEY").fg(crate::colors::success())];
+        let provider = Self::detect_any_provider_key().unwrap_or("API key");
+        let lines = vec![Line::from(format!("✓ Using {}", provider)).fg(crate::colors::success())];
 
         Paragraph::new(lines)
             .wrap(Wrap { trim: false })
@@ -382,17 +383,76 @@ impl AuthModeWidget {
         }
     }
 
-    /// TODO: Read/write from the correct hierarchy config overrides + auth json + OPENAI_API_KEY.
+    /// Check for any configured provider API keys or authenticated CLIs.
     fn verify_api_key(&mut self) {
         if matches!(self.login_status, LoginStatus::AuthMode(AuthMode::ApiKey)) {
             // We already have an API key configured (e.g., from auth.json or env),
             // so mark this step complete immediately.
             self.sign_in_state = SignInState::EnvVarFound;
         } else {
-            self.sign_in_state = SignInState::EnvVarMissing;
+            // Check for any provider API keys in environment
+            let provider_found = Self::detect_any_provider_key();
+            if provider_found.is_some() {
+                self.sign_in_state = SignInState::EnvVarFound;
+            } else {
+                self.sign_in_state = SignInState::EnvVarMissing;
+            }
         }
 
         self.event_tx.send(AppEvent::RequestRedraw);
+    }
+
+    /// Detect any configured provider API key or authenticated CLI
+    fn detect_any_provider_key() -> Option<&'static str> {
+        // Check environment variables for various providers
+        let providers = [
+            ("ANTHROPIC_API_KEY", "Claude"),
+            ("OPENAI_API_KEY", "OpenAI"),
+            ("GOOGLE_API_KEY", "Gemini"),
+            ("GEMINI_API_KEY", "Gemini"),
+            ("DASHSCOPE_API_KEY", "Qwen"),
+            ("QWEN_API_KEY", "Qwen"),
+            ("MISTRAL_API_KEY", "Vibe/Mistral"),
+            ("GH_TOKEN", "GitHub Copilot"),
+            ("GITHUB_TOKEN", "GitHub Copilot"),
+        ];
+
+        for (env_var, provider_name) in providers {
+            if std::env::var(env_var).is_ok() {
+                return Some(provider_name);
+            }
+        }
+
+        // Check for authenticated CLIs
+        // Claude: ~/.claude/
+        if let Ok(home) = std::env::var("HOME") {
+            let claude_dir = std::path::PathBuf::from(&home).join(".claude");
+            if claude_dir.exists() {
+                return Some("Claude CLI");
+            }
+        }
+
+        // GitHub Copilot: check if gh is authenticated
+        if let Ok(output) = std::process::Command::new("gh")
+            .args(["auth", "status"])
+            .output()
+        {
+            if output.status.success() {
+                return Some("GitHub Copilot");
+            }
+        }
+
+        // Check for Ollama running locally
+        if let Ok(output) = std::process::Command::new("ollama")
+            .args(["list"])
+            .output()
+        {
+            if output.status.success() {
+                return Some("Ollama (local)");
+            }
+        }
+
+        None
     }
 
     pub(crate) fn apply_chatgpt_login_side_effects(&mut self) {

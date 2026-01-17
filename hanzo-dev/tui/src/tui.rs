@@ -135,7 +135,7 @@ pub fn init(config: &Config) -> Result<(Tui, TerminalInfo)> {
         )),
         Clear(ClearType::All),
         MoveTo(0, 0),
-        crossterm::terminal::SetTitle("Code"),
+        crossterm::terminal::SetTitle("Hanzo Dev"),
         crossterm::terminal::EnableLineWrap
     )?;
 
@@ -319,7 +319,7 @@ pub fn enter_alt_screen_only(
         )),
         Clear(ClearType::All),
         MoveTo(0, 0),
-        crossterm::terminal::SetTitle("Code"),
+        crossterm::terminal::SetTitle("Hanzo Dev"),
         crossterm::terminal::EnableLineWrap
     )?;
     Ok(())
