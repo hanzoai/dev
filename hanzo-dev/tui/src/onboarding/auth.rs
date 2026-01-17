@@ -114,14 +114,14 @@ impl AuthModeWidget {
             Line::from(vec![
                 Span::raw("> "),
                 Span::styled(
-                    "Sign in with ChatGPT to use your paid OpenAI plan",
+                    "Choose your AI provider",
                     Style::default().add_modifier(Modifier::BOLD),
                 ),
             ]),
             Line::from(vec![
                 Span::raw("  "),
                 Span::styled(
-                    "or connect an API key for usage-based billing",
+                    "Sign in or provide an API key to get started",
                     Style::default().add_modifier(Modifier::BOLD),
                 ),
             ]),
@@ -188,19 +188,19 @@ impl AuthModeWidget {
             0,
             AuthMode::ChatGPT,
             chatgpt_label,
-            "Usage included with Plus, Pro, and Team plans",
+            "OpenAI: Plus, Pro, Team plans or API key",
         ));
         let api_key_label = if matches!(self.login_status, LoginStatus::AuthMode(AuthMode::ApiKey))
         {
             "Continue using API key"
         } else {
-            "Provide your own API key"
+            "Use other provider"
         };
         lines.extend(create_mode_item(
             1,
             AuthMode::ApiKey,
             api_key_label,
-            "Pay for what you use",
+            "Claude, Gemini, Qwen, Copilot, Vibe, or Ollama",
         ));
         lines.push(Line::from(""));
         lines.push(
@@ -261,17 +261,17 @@ impl AuthModeWidget {
             Line::from(""),
             Line::from("> Before you start:"),
             Line::from(""),
-            Line::from("  Decide how much autonomy you want to grant Code"),
+            Line::from("  Decide how much autonomy you want to grant the agent"),
             Line::from(vec![
                 Span::raw("  For more details see the "),
                 Span::styled(
-                    "\u{1b}]8;;https://github.com/just-every/code\u{7}Code docs\u{1b}]8;;\u{7}",
+                    "\u{1b}]8;;https://github.com/hanzoai/dev\u{7}Hanzo Dev docs\u{1b}]8;;\u{7}",
                     Style::default().add_modifier(Modifier::UNDERLINED),
                 ),
             ])
             .style(Style::default().add_modifier(Modifier::DIM)),
             Line::from(""),
-            Line::from("  Code can make mistakes"),
+            Line::from("  AI agents can make mistakes"),
             Line::from("  Review the code it writes and commands it runs")
                 .style(Style::default().add_modifier(Modifier::DIM)),
             Line::from(""),
@@ -312,8 +312,24 @@ impl AuthModeWidget {
 
     fn render_env_var_missing(&self, area: Rect, buf: &mut Buffer) {
         let lines = vec![
-            Line::from("  To use Code with the OpenAI API, set OPENAI_API_KEY in your environment")
+            Line::from("  Set one of these environment variables to use your preferred provider:")
                 .style(Style::default().fg(crate::colors::info())),
+            Line::from(""),
+            Line::from("    ANTHROPIC_API_KEY   - Claude (or run: claude login)")
+                .style(Style::default().fg(crate::colors::text_dim())),
+            Line::from("    OPENAI_API_KEY      - OpenAI/Codex")
+                .style(Style::default().fg(crate::colors::text_dim())),
+            Line::from("    GOOGLE_API_KEY      - Gemini")
+                .style(Style::default().fg(crate::colors::text_dim())),
+            Line::from("    DASHSCOPE_API_KEY   - Qwen")
+                .style(Style::default().fg(crate::colors::text_dim())),
+            Line::from("    MISTRAL_API_KEY     - Vibe/Mistral")
+                .style(Style::default().fg(crate::colors::text_dim())),
+            Line::from("    GH_TOKEN            - GitHub Copilot (or run: gh auth login)")
+                .style(Style::default().fg(crate::colors::text_dim())),
+            Line::from(""),
+            Line::from("  Or use Ollama for local models (no API key needed)")
+                .style(Style::default().fg(crate::colors::text_dim())),
             Line::from(""),
             Line::from("  Press Enter to return")
                 .style(Style::default().add_modifier(Modifier::DIM)),
