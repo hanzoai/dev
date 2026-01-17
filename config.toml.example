@@ -67,6 +67,41 @@ description = "Codex AI assistant (self-referential)"
 args = ["-s", "workspace-write", "-a", "never"]
 
 [[agents]]
+name = "vibe"
+command = "vibe"
+enabled = true
+read-only = false
+description = "Mistral Vibe CLI for coding assistance"
+args = ["-y"]
+# Optional environment variables for the agent
+# env = { MISTRAL_API_KEY = "your-key-here" }
+
+[[agents]]
+name = "vibe-safe"
+command = "vibe"
+enabled = true
+read-only = true
+description = "Mistral Vibe CLI in read-only mode"
+args = []
+
+[[agents]]
+name = "copilot"
+command = "gh"
+enabled = true
+read-only = false
+description = "GitHub Copilot CLI via gh extension"
+args = ["copilot"]
+# Requires: gh extension install github/gh-copilot
+
+[[agents]]
+name = "copilot-safe"
+command = "gh"
+enabled = true
+read-only = true
+description = "GitHub Copilot CLI in read-only mode"
+args = ["copilot"]
+
+[[agents]]
 name = "context-collector"
 command = "gemini"
 enabled = true
@@ -194,21 +229,21 @@ file-opener = "vscode"  # Options: vscode, vscode-insiders, windsurf, cursor, no
 [[subagents.commands]]
 name = "plan"
 read-only = true
-agents = ["claude", "gemini", "qwen"]
+agents = ["claude", "gemini", "qwen", "copilot", "vibe"]
 orchestrator-instructions = "Focus on discovering project layout and risks. Prefer small, verifiable steps."
 agent-instructions = "Summarize assumptions explicitly. Cite files you read."
 
 [[subagents.commands]]
 name = "solve"
 read-only = true
-agents = ["claude", "gemini", "qwen"]
+agents = ["claude", "gemini", "qwen", "copilot", "vibe"]
 orchestrator-instructions = "Run multiple approaches in parallel and compare. Defer cancellation until a tested fix exists."
 agent-instructions = "Propose a concrete fix with steps to validate."
 
 [[subagents.commands]]
 name = "code"
 read-only = false
-agents = ["claude", "gemini", "qwen"]
+agents = ["claude", "gemini", "qwen", "copilot", "vibe"]
 orchestrator-instructions = "Coordinate implementations across agents; surface worktree locations and branches."
 agent-instructions = "Write minimal, focused changes with clear rationale. Include test or validation steps."
 
@@ -223,6 +258,6 @@ agent-instructions = "Summarize high-signal files, why they matter, and recommen
 [[subagents.commands]]
 name = "review"
 read-only = true
-agents = ["claude", "gemini", "qwen"]
+agents = ["claude", "gemini", "qwen", "copilot", "vibe"]
 orchestrator-instructions = "Perform a multi-agent code review; reconcile disagreements into actionable feedback."
 agent-instructions = "Provide inline comments, cite files/lines, and suggest precise diffs."

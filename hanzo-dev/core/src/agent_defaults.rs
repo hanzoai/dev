@@ -11,6 +11,14 @@ use std::collections::HashSet;
 const CLAUDE_ALLOWED_TOOLS: &str = "Bash(ls:*), Bash(cat:*), Bash(grep:*), Bash(git status:*), Bash(git log:*), Bash(find:*), Read, Grep, Glob, LS, WebFetch, TodoRead, TodoWrite, WebSearch";
 const CLOUD_MODEL_ENV_FLAG: &str = "CODE_ENABLE_CLOUD_AGENT_MODEL";
 
+// Copilot CLI args (gh copilot)
+const COPILOT_READ_ONLY: &[&str] = &[];
+const COPILOT_WRITE: &[&str] = &[];
+
+// Vibe (Mistral) CLI args
+const VIBE_READ_ONLY: &[&str] = &[];
+const VIBE_WRITE: &[&str] = &["-y"];
+
 const CODE_GPT5_CODEX_READ_ONLY: &[&str] = &["-s", "read-only", "exec", "--skip-git-repo-check"];
 const CODE_GPT5_CODEX_WRITE: &[&str] = &[
     "-s",
@@ -58,6 +66,8 @@ pub const DEFAULT_AGENT_NAMES: &[&str] = &[
     // Mixed/general and alternates
     "claude-haiku-4.5",
     "qwen-3-coder",
+    "vibe-mistral-large",
+    "copilot",
     "cloud-gpt-5.1-codex-max",
 ];
 
@@ -257,6 +267,32 @@ const AGENT_MODEL_SPECS: &[AgentModelSpec] = &[
         enabled_by_default: false,
         aliases: &["cloud-gpt-5.1-codex", "cloud-gpt-5-codex", "cloud"],
         gating_env: Some(CLOUD_MODEL_ENV_FLAG),
+        is_frontline: false,
+    },
+    AgentModelSpec {
+        slug: "vibe-mistral-large",
+        family: "vibe",
+        cli: "vibe",
+        read_only_args: VIBE_READ_ONLY,
+        write_args: VIBE_WRITE,
+        model_args: &["--model", "mistral-large"],
+        description: "Mistral Vibe CLI for coding tasks; uses Mistral API subscription.",
+        enabled_by_default: true,
+        aliases: &["vibe", "mistral", "mistral-large", "mistral-small"],
+        gating_env: None,
+        is_frontline: false,
+    },
+    AgentModelSpec {
+        slug: "copilot",
+        family: "copilot",
+        cli: "gh",
+        read_only_args: COPILOT_READ_ONLY,
+        write_args: COPILOT_WRITE,
+        model_args: &["copilot"],
+        description: "GitHub Copilot CLI via gh extension; uses GitHub Copilot subscription.",
+        enabled_by_default: true,
+        aliases: &["gh-copilot", "github-copilot"],
+        gating_env: None,
         is_frontline: false,
     },
 ];
