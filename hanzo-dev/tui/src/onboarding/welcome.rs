@@ -17,10 +17,11 @@ pub(crate) struct WelcomeWidget {
 
 impl WidgetRef for &WelcomeWidget {
     fn render_ref(&self, area: Rect, buf: &mut Buffer) {
+        let version = env!("CARGO_PKG_VERSION");
         let line1 = Line::from(vec![
             Span::raw(">_ "),
             Span::styled(
-                "Welcome to Code",
+                format!("Hanzo Dev v{}", version),
                 Style::default().add_modifier(Modifier::BOLD),
             ),
         ]);

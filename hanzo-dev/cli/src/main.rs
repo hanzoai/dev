@@ -1568,7 +1568,7 @@ async fn doctor_main() -> anyhow::Result<()> {
     let exe = std::env::current_exe()
         .map(|p| p.display().to_string())
         .unwrap_or_else(|_| "<unknown>".to_string());
-    println!("code version: {}", hanzo_version::version());
+    println!("hanzo dev version: {}", hanzo_version::version());
     println!("current_exe: {exe}");
 
     // PATH

@@ -52,7 +52,7 @@ impl WidgetRef for &TrustDirectoryWidget {
             .add_modifier(Modifier::BOLD);
         let mut lines: Vec<Line> = vec![
             Line::from(vec![
-                Span::styled("You are running Code in ", success_style),
+                Span::styled("You are running Hanzo Dev in ", success_style),
                 Span::styled(
                     self.cwd.to_string_lossy().to_string(),
                     Style::default().fg(colors::success()),
@@ -63,7 +63,7 @@ impl WidgetRef for &TrustDirectoryWidget {
 
         if self.is_git_repo {
             lines.push(Line::from(
-                "  Since this folder is version controlled, you may wish to allow Code",
+                "  Since this folder is version controlled, you may wish to allow Dev",
             ));
             lines.push(Line::from(
                 "  to work in this folder without asking for approval.",
@@ -96,7 +96,7 @@ impl WidgetRef for &TrustDirectoryWidget {
             lines.push(create_option(
                 0,
                 TrustDirectorySelection::Trust,
-                "Yes, allow Code to work in this folder without asking for approval",
+                "Yes, allow Dev to work in this folder without asking for approval",
             ));
             lines.push(create_option(
                 1,
@@ -107,7 +107,7 @@ impl WidgetRef for &TrustDirectoryWidget {
             lines.push(create_option(
                 0,
                 TrustDirectorySelection::Trust,
-                "Allow Code to work in this folder without asking for approval",
+                "Allow Dev to work in this folder without asking for approval",
             ));
             lines.push(create_option(
                 1,

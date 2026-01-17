@@ -82,7 +82,7 @@ impl RemoteModelsManager {
 
     /// Returns the remote default model slug when available.
     ///
-    /// When the user did not explicitly choose a model, Code may adopt this
+    /// When the user did not explicitly choose a model, Dev may adopt this
     /// server-provided default without persisting it.
     pub async fn default_model_slug(&self, auth_mode: Option<AuthMode>) -> Option<String> {
         self.ensure_loaded_from_disk().await;

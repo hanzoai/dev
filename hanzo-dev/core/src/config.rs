@@ -126,7 +126,7 @@ pub struct Config {
     pub model: String,
 
     /// True if the model was explicitly chosen by the user (via CLI args,
-    /// config.toml, or a profile). When false, Code may adopt a server-provided
+    /// config.toml, or a profile). When false, Dev may adopt a server-provided
     /// default model (e.g. "codex-auto-balanced") when available.
     pub model_explicit: bool,
 
@@ -230,7 +230,7 @@ pub struct Config {
     /// OTEL configuration (exporter type, endpoint, headers, etc.).
     pub otel: crate::config_types::OtelConfig,
 
-    /// When true, Code will silently install updates on startup whenever a newer
+    /// When true, Dev will silently install updates on startup whenever a newer
     /// release is available. Upgrades are performed using the package manager
     /// that originally installed the CLI (Homebrew or npm). Manual installs are
     /// never upgraded automatically.
@@ -341,7 +341,7 @@ pub struct Config {
     pub model_reasoning_effort: ReasoningEffort,
 
     /// Optional preferred reasoning effort for the chat model. When the active model
-    /// does not support this level, Code will clamp the effective effort but keep
+    /// does not support this level, Dev will clamp the effective effort but keep
     /// the preference so switching back restores it.
     pub preferred_model_reasoning_effort: Option<ReasoningEffort>,
 

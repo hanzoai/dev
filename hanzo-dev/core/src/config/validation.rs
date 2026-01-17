@@ -50,17 +50,17 @@ fn warn_on_suspicious_cli_overrides(cli_paths: &[String]) {
     }
 
     for cli_path in cli_paths {
+        #[allow(clippy::print_stderr)]
         if cli_path == "auto_drive.use_chat_model"
             || (cli_path.starts_with("auto_drive.") && cli_path.ends_with(".use_chat_model"))
         {
-            #[allow(clippy::print_stderr)]
             eprintln!(
                 "Warning: unknown config override `{cli_path}` (ignored). Did you mean `auto_drive_use_chat_model`?"
             );
         }
 
+        #[allow(clippy::print_stderr)]
         if cli_path == "auto_review_enabled" {
-            #[allow(clippy::print_stderr)]
             eprintln!(
                 "Warning: unknown config override `{cli_path}` (ignored). Did you mean `tui.auto_review_enabled`?"
             );
@@ -97,9 +97,11 @@ fn warn_on_unknown_cli_overrides(cli_paths: &[String], ignored_paths: &[String])
         }
 
         #[allow(clippy::print_stderr)]
-        eprintln!(
-            "Warning: unknown config override `{cli_path}` (ignored). See `code exec --help` for valid keys."
-        );
+        {
+            eprintln!(
+                "Warning: unknown config override `{cli_path}` (ignored). See `dev exec --help` for valid keys."
+            );
+        }
     }
 }
 

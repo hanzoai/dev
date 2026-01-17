@@ -72,7 +72,7 @@ impl HistoryCell for AnimatedWelcomeCell {
     fn display_lines(&self) -> Vec<Line<'static>> {
         vec![
             Line::from(""),
-            Line::from("Welcome to Code"),
+            Line::from(format!("Hanzo Dev v{}", env!("CARGO_PKG_VERSION"))),
             Line::from(crate::greeting::greeting_placeholder()),
             Line::from(""),
         ]
