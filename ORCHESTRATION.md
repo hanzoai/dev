@@ -78,9 +78,11 @@ dev "fix the bug in auth.ts"
 
 # Explicit provider selection
 dev --provider claude "refactor this function"
-dev --provider dev "write tests for utils.ts"
-dev --provider qwen "explain this dev"
+dev --provider codex "write tests for utils.ts"
+dev --provider qwen "explain this code"
 dev --provider gemini "optimize performance"
+dev --provider vibe "mistral-powered assistance"
+dev --provider copilot "github copilot integration"
 dev --provider ollama "local inference"
 
 # Interactive mode
@@ -194,11 +196,13 @@ interface ProviderCapabilities {
 
 | Provider | Package | CLI Tool | Status |
 |----------|---------|----------|--------|
-| Claude | `@anthropic-ai/claude-dev` | `claude` | ✅ |
-| Hanzo Dev | `@hanzo/dev` | `dev` | ✅ |
-| Qwen | `qwen-cli` | `qwen` | 🔜 |
-| Gemini | `@google/gemini-cli` | `gemini` | 🔜 |
-| Ollama | `ollama` | `ollama` | 🔜 |
+| Claude | `@anthropic-ai/claude-code` | `claude` | ✅ |
+| Codex | `@hanzo/dev` | `dev/codex` | ✅ |
+| Qwen | `qwen-cli` | `qwen` | ✅ |
+| Gemini | `@google/gemini-cli` | `gemini` | ✅ |
+| Vibe | `vibe` | `vibe` | ✅ |
+| Copilot | `gh (extension)` | `gh copilot` | ✅ |
+| Ollama | `ollama` | `ollama` | ✅ |
 
 ## Data Flow
 

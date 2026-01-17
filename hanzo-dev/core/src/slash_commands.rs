@@ -2,6 +2,7 @@ use crate::agent_defaults::agent_model_spec;
 use crate::agent_defaults::enabled_agent_model_specs;
 use crate::config_types::AgentConfig;
 use crate::config_types::SubagentCommandConfig;
+use crate::custom_agents::CustomAgentDef;
 
 // NOTE: These are the prompt formatters for the prompt‑expanding slash commands
 // (/plan, /solve, /code). If you add or change a slash command, please update
@@ -247,6 +248,172 @@ pub fn format_code_command(
     res.prompt
 }
 
+/// Result of `/use <agent>` command resolution
+#[derive(Debug, Clone)]
+pub struct UseAgentResult {
+    pub agent_name: String,
+    pub found: bool,
+    pub instructions: Option<String>,
+    pub model: Option<String>,
+    pub description: Option<String>,
+    pub prompt: String,
+}
+
+/// Format help message for /use command
+pub fn format_use_help() -> String {
+    r#"Usage: /use <agent>
+
+Switch to a custom agent persona loaded from ~/.hanzo/agents or ~/.claude/agents.
+
+Available agents are loaded from:
+  - ~/.hanzo/agents/*.md (Hanzo format)
+  - ~/.claude/agents/*.md (Claude Code format)
+
+Agent files use YAML frontmatter:
+```
+---
+name: cto
+description: Chief Technology Officer persona
+model: opus
+---
+
+You are the CTO. Focus on architecture and technical leadership.
+```
+
+Examples:
+  /use cto        - Switch to CTO agent
+  /use vp         - Switch to VP of Engineering
+  /agent reviewer - Switch to code reviewer agent
+
+To list available agents, type /use without arguments."#.to_string()
+}
+
+/// Format a /use command to switch to a custom agent
+pub fn format_use_command(agent_name: &str) -> String {
+    // The actual agent lookup is async, so we return a prompt that instructs
+    // the LLM to adopt the specified persona. The TUI/exec layer can perform
+    // the actual lookup and inject the agent's instructions.
+    let agent_name = agent_name.trim();
+    
+    format!(
+        r#"Please adopt the "{agent_name}" agent persona. 
+
+Look up the custom agent definition for "{agent_name}" from the available agents directory. 
+If the agent exists, load its instructions and personality, then acknowledge the switch.
+If the agent is not found, list available custom agents.
+
+You are now acting as the "{agent_name}" agent."#,
+    )
+}
+
+/// Resolve a custom agent by name (async version for use with actual file lookup)
+pub async fn resolve_use_agent(agent_name: &str) -> UseAgentResult {
+    use crate::custom_agents::find_custom_agent;
+    
+    let agent_name = agent_name.trim();
+    
+    if let Some(agent) = find_custom_agent(agent_name).await {
+        UseAgentResult {
+            agent_name: agent.name.clone(),
+            found: true,
+            instructions: agent.instructions.clone(),
+            model: agent.model.clone(),
+            description: agent.description.clone(),
+            prompt: format_use_agent_prompt(&agent),
+        }
+    } else {
+        use crate::custom_agents::list_custom_agent_names;
+        let available = list_custom_agent_names().await;
+        let list_str = if available.is_empty() {
+            "No custom agents found. Create agents in ~/.hanzo/agents/ or ~/.claude/agents/".to_string()
+        } else {
+            format!("Available agents: {}", available.join(", "))
+        };
+        
+        UseAgentResult {
+            agent_name: agent_name.to_string(),
+            found: false,
+            instructions: None,
+            model: None,
+            description: None,
+            prompt: format!("Agent '{}' not found. {}", agent_name, list_str),
+        }
+    }
+}
+
+/// Format a prompt that injects the custom agent's persona
+fn format_use_agent_prompt(agent: &CustomAgentDef) -> String {
+    let mut prompt = String::new();
+    
+    prompt.push_str(&format!("You are now acting as the \"{}\" agent.\n\n", agent.name));
+    
+    if let Some(desc) = &agent.description {
+        prompt.push_str(&format!("**Role**: {}\n\n", desc));
+    }
+    
+    if let Some(model) = &agent.model {
+        prompt.push_str(&format!("**Preferred Model**: {}\n\n", model));
+    }
+    
+    if let Some(instructions) = &agent.instructions {
+        prompt.push_str("**Instructions**:\n");
+        prompt.push_str(instructions);
+        prompt.push_str("\n\n");
+    }
+    
+    prompt.push_str("Acknowledge this persona switch and proceed with any pending tasks.");
+    prompt
+}
+
+/// Format a language-specific development command
+/// Uses the language-specific agent with subagent orchestration
+pub fn format_language_command(
+    language: &str,
+    task: &str,
+    agents: Option<&[AgentConfig]>,
+) -> String {
+    let language_agents = match language {
+        "python" => vec!["python", "claude", "codex"],
+        "typescript" => vec!["typescript", "claude", "codex"],
+        "rust" => vec!["rust", "claude", "codex"],
+        "go" => vec!["go", "claude", "codex"],
+        _ => vec!["claude", "codex"],
+    };
+    
+    let lang_display = match language {
+        "python" => "Python 3.12+",
+        "typescript" => "TypeScript",
+        "rust" => "Rust 1.75+",
+        "go" => "Go 1.21+",
+        _ => language,
+    };
+
+    let models_str = language_agents
+        .iter()
+        .map(|m| format!("\"{m}\""))
+        .collect::<Vec<_>>()
+        .join(", ");
+
+    format!(
+        r#"Please complete the following {lang_display} development task using specialized agents.
+
+<tools>
+Use `agent {{"action":"create","create":{{"models":[{models_str}],"write":true}}}}` to start {lang_display} expert agents.
+Each agent will work in a separate worktree and can read/write code, run tests, and install dependencies.
+Monitor with `agent {{"action":"wait","wait":{{"batch_id":"<batch_id>","return_all":true}}}}`.
+</tools>
+
+<language_context>
+Language: {lang_display}
+Focus: Use modern {language} idioms, tooling, and best practices.
+</language_context>
+
+<task>
+{task}
+</task>"#,
+    )
+}
+
 /// Parse a slash command and return the formatted prompt
 pub fn handle_slash_command(input: &str, agents: Option<&[AgentConfig]>) -> Option<String> {
     let input = input.trim();
@@ -287,6 +454,42 @@ pub fn handle_slash_command(input: &str, agents: Option<&[AgentConfig]>) -> Opti
                 Some("Error: /code requires a task description. Usage: /code <task>".to_string())
             } else {
                 Some(format_code_command(&args, None, agents))
+            }
+        }
+        "/use" | "/agent" => {
+            if args.is_empty() {
+                Some(format_use_help())
+            } else {
+                Some(format_use_command(&args))
+            }
+        }
+        // First-class language support
+        "/python" | "/py" => {
+            if args.is_empty() {
+                Some("Error: /python requires a task. Usage: /python <task>".to_string())
+            } else {
+                Some(format_language_command("python", &args, agents))
+            }
+        }
+        "/typescript" | "/ts" => {
+            if args.is_empty() {
+                Some("Error: /typescript requires a task. Usage: /typescript <task>".to_string())
+            } else {
+                Some(format_language_command("typescript", &args, agents))
+            }
+        }
+        "/rust" | "/rs" => {
+            if args.is_empty() {
+                Some("Error: /rust requires a task. Usage: /rust <task>".to_string())
+            } else {
+                Some(format_language_command("rust", &args, agents))
+            }
+        }
+        "/go" | "/golang" => {
+            if args.is_empty() {
+                Some("Error: /go requires a task. Usage: /go <task>".to_string())
+            } else {
+                Some(format_language_command("go", &args, agents))
             }
         }
         _ => None,

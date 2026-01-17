@@ -109,6 +109,15 @@ const CLI_BACKENDS = {
         inputMode: 'args',
         models: ['ollama', 'llama3.2', 'llama3.1', 'codellama', 'mixtral', 'phi3'],
     },
+
+    // GitHub Copilot - uses GitHub subscription via gh extension
+    'copilot': {
+        command: 'gh',
+        args: (prompt, model) => ['copilot', 'suggest', '--type', 'shell', prompt],
+        env: {},
+        inputMode: 'args',
+        models: ['copilot', 'gh-copilot', 'github-copilot'],
+    },
 };
 
 /**
@@ -134,6 +143,9 @@ function getBackend(model) {
     if (model.startsWith('qwen')) return { ...CLI_BACKENDS['qwen'], name: 'qwen' };
     if (model.startsWith('llama') || model.startsWith('ollama') || model.startsWith('phi')) {
         return { ...CLI_BACKENDS['ollama'], name: 'ollama' };
+    }
+    if (model.startsWith('copilot') || model.startsWith('gh-copilot')) {
+        return { ...CLI_BACKENDS['copilot'], name: 'copilot' };
     }
 
     // Default to Claude

@@ -112,6 +112,15 @@ impl Backend {
                 // Hanzo uses HTTP passthrough, not CLI args
                 vec![]
             }
+            "copilot" => {
+                vec![
+                    "copilot".to_string(),
+                    "suggest".to_string(),
+                    "--type".to_string(),
+                    "shell".to_string(),
+                    prompt.to_string(),
+                ]
+            }
             _ => vec![prompt.to_string()],
         }
     }
@@ -189,6 +198,13 @@ fn get_backends() -> Vec<Backend> {
             models: vec!["hanzo", "hanzo-engine", "hanzo-local", "default"],
             api_keys_to_clean: vec![],
         },
+        Backend {
+            name: "copilot",
+            command: "gh",
+            input_mode: InputMode::Args,
+            models: vec!["copilot", "gh-copilot", "github-copilot"],
+            api_keys_to_clean: vec!["GITHUB_TOKEN"],
+        },
     ]
 }
 
@@ -228,6 +244,9 @@ fn get_backend_for_model(model: &str) -> Backend {
     }
     if model.starts_with("hanzo") {
         return backends.into_iter().find(|b| b.name == "hanzo").unwrap();
+    }
+    if model.starts_with("copilot") || model.starts_with("gh-copilot") {
+        return backends.into_iter().find(|b| b.name == "copilot").unwrap();
     }
 
     // Default to Claude

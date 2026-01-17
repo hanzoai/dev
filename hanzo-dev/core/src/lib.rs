@@ -34,6 +34,7 @@ pub mod config_profile;
 pub mod config_types;
 pub mod context_timeline;
 mod conversation_history;
+pub mod custom_agents;
 pub mod custom_prompts;
 // GitHub Copilot integration
 pub mod copilot_integration;
