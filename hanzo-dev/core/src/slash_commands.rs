@@ -370,7 +370,7 @@ fn format_use_agent_prompt(agent: &CustomAgentDef) -> String {
 pub fn format_language_command(
     language: &str,
     task: &str,
-    agents: Option<&[AgentConfig]>,
+    _agents: Option<&[AgentConfig]>,
 ) -> String {
     let language_agents = match language {
         "python" => vec!["python", "claude", "codex"],

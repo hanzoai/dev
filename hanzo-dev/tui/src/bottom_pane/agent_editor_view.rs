@@ -645,7 +645,7 @@ impl AgentEditorView {
             ))
         } else {
             Line::from(Span::styled(
-                "Required: explain what this agent is good at so Code can pick it intelligently.",
+                "Required: explain what this agent is good at so Dev can pick it intelligently.",
                 desc_style,
             ))
         };

@@ -1,4 +1,3 @@
-use std::path::PathBuf;
 use std::sync::atomic::Ordering;
 use std::sync::mpsc::Receiver;
 use std::thread;
@@ -17,7 +16,6 @@ use hanzo_cloud_tasks_client::CloudTaskError;
 use hanzo_cloud_tasks_client::TaskId;
 use hanzo_core::config::add_project_allowed_command;
 use hanzo_core::config_types::Notifications;
-use hanzo_core::protocol::Event;
 use hanzo_core::protocol::Op;
 use hanzo_core::protocol::SandboxPolicy;
 use hanzo_login::AuthManager;
