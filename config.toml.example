@@ -1,263 +1,326 @@
-# Codex Configuration Example
-# Copy this file to config.toml and customize as needed
+# ==============================================================================
+# Hanzo Dev Configuration Example
+# ==============================================================================
+# 
+# Copy this file to ~/.hanzo/config.toml (or ~/.code/config.toml)
+#
+# Environment Variables for API Keys:
+# -----------------------------------
+# ANTHROPIC_API_KEY    - For Claude CLI (or use 'claude login')
+# OPENAI_API_KEY       - For Codex/GPT (or use ChatGPT auth)
+# GOOGLE_API_KEY       - For Gemini CLI
+# DASHSCOPE_API_KEY    - For Qwen CLI (Alibaba)
+# MISTRAL_API_KEY      - For Vibe CLI
+# GH_TOKEN             - For GitHub Copilot (or use 'gh auth login')
+#
+# MCP Server Auth:
+# ----------------
+# HANZO_API_KEY        - For Hanzo MCP server authentication
+# GITHUB_PERSONAL_ACCESS_TOKEN - For GitHub MCP server
+#
+# ==============================================================================
 
-# Agent Configuration
-# Configure which external AI models are available and their settings
+# ==============================================================================
+# Hanzo Dev Configuration
+# ==============================================================================
+
+# Trusted Projects
+[projects."/Users/z/work/lux"]
+trust_level = "trusted"
+
+[projects."/Users/z/work/hanzo"]
+trust_level = "trusted"
+
+[projects."/Users/z/work/secretmenu/sfsecretmenu"]
+trust_level = "trusted"
+
+[notice]
+hide_rate_limit_model_nudge = true
+
+# ==============================================================================
+# MCP Servers - Native Tool Providers
+# ==============================================================================
+
+# Hanzo Python MCP - Full tool suite (50+ tools)
+[mcp_servers.hanzo]
+command = "hanzo-mcp"
+args = ["serve", "--enable-agent"]
+startup_timeout_sec = 15
+tool_timeout_sec = 60
+env = { HANZO_MCP_LOG_LEVEL = "info" }
+
+# Hanzo Node MCP - Alternative with UI tools
+[mcp_servers.hanzo-node]
+command = "npx"
+args = ["-y", "@hanzo/mcp", "serve"]
+startup_timeout_sec = 10
+tool_timeout_sec = 30
+
+# GitHub MCP - For repo/PR/issue operations
+[mcp_servers.github]
+command = "npx"
+args = ["-y", "@modelcontextprotocol/server-github"]
+env = { GITHUB_PERSONAL_ACCESS_TOKEN = "" }  # Set via GH_TOKEN env
+
+# Filesystem MCP - Sandboxed file access
+[mcp_servers.filesystem]
+command = "npx"
+args = ["-y", "@modelcontextprotocol/server-filesystem", "/Users/z/work"]
+
+# ==============================================================================
+# Agent Backends - External AI CLIs
+# ==============================================================================
+
+# Claude Code - Primary agent
 [[agents]]
 name = "claude"
 command = "claude"
 enabled = true
-read-only = false
-description = "Claude AI assistant with full capabilities"
+read_only = false
+description = "Claude AI - Strong reasoning, coding, and multi-file edits"
 args = ["--dangerously-skip-permissions"]
 
 [[agents]]
 name = "claude-safe"
 command = "claude"
 enabled = true
-read-only = true
-description = "Claude AI assistant in read-only mode"
+read_only = true
+description = "Claude AI in read-only mode"
 args = []
 
+# OpenAI Codex/GPT
+[[agents]]
+name = "codex"
+command = "codex"
+enabled = true
+read_only = false
+description = "OpenAI Codex - Fast coding agent"
+args = ["-s", "workspace-write", "-a", "never"]
+
+# Google Gemini
 [[agents]]
 name = "gemini"
 command = "gemini"
 enabled = true
-read-only = false
-description = "Google Gemini AI assistant"
+read_only = false
+description = "Google Gemini - Long context and multimodal"
 args = ["-y"]
 
 [[agents]]
 name = "gemini-safe"
 command = "gemini"
 enabled = true
-read-only = true
-description = "Google Gemini AI assistant in read-only mode"
+read_only = true
+description = "Gemini in read-only mode"
 args = []
 
+# Alibaba Qwen
 [[agents]]
 name = "qwen"
 command = "qwen"
 enabled = true
-read-only = false
-description = "Qwen Coder assistant (tracks latest default model)"
-# No default -m: let the CLI choose its current default model
-# To pin a model explicitly, export QWEN_MODEL or add here, e.g.:
-# args = ["-m", "qwen-3-coder", "-y"]
+read_only = false
+description = "Qwen Coder - Strong at code generation"
 args = ["-y"]
-# Optional environment variables (either name works; mirrored automatically):
-# env = { QWEN_API_KEY = "your-key", DASHSCOPE_API_KEY = "your-key" }
 
 [[agents]]
 name = "qwen-safe"
 command = "qwen"
 enabled = true
-read-only = true
-description = "Qwen Coder assistant in read-only mode"
-# No -y in read-only; omit -m to track latest default. To pin:
-# args = ["-m", "qwen-3-coder"]
+read_only = true
+description = "Qwen in read-only mode"
 args = []
 
-[[agents]]
-name = "codex"
-command = "codex"
-enabled = true
-read-only = false
-description = "Codex AI assistant (self-referential)"
-args = ["-s", "workspace-write", "-a", "never"]
-
+# Mistral Vibe
 [[agents]]
 name = "vibe"
 command = "vibe"
 enabled = true
-read-only = false
-description = "Mistral Vibe CLI for coding assistance"
+read_only = false
+description = "Mistral Vibe - Fast coding assistance"
 args = ["-y"]
-# Optional environment variables for the agent
-# env = { MISTRAL_API_KEY = "your-key-here" }
 
 [[agents]]
 name = "vibe-safe"
 command = "vibe"
 enabled = true
-read-only = true
-description = "Mistral Vibe CLI in read-only mode"
+read_only = true
+description = "Vibe in read-only mode"
 args = []
 
+# GitHub Copilot
 [[agents]]
 name = "copilot"
 command = "gh"
 enabled = true
-read-only = false
-description = "GitHub Copilot CLI via gh extension"
+read_only = false
+description = "GitHub Copilot - Authenticated via gh CLI"
 args = ["copilot"]
-# Requires: gh extension install github/gh-copilot
 
 [[agents]]
 name = "copilot-safe"
 command = "gh"
 enabled = true
-read-only = true
-description = "GitHub Copilot CLI in read-only mode"
+read_only = true
+description = "Copilot in read-only mode"
 args = ["copilot"]
+
+# Ollama (local models)
+[[agents]]
+name = "ollama"
+command = "ollama"
+enabled = true
+read_only = false
+description = "Local LLM via Ollama"
+args = ["run", "codellama"]
+
+# ==============================================================================
+# Language-Specific Agents
+# ==============================================================================
+
+[[agents]]
+name = "python-expert"
+command = "claude"
+args = ["--model", "sonnet"]
+description = "Python 3.12+ expert with modern tooling (uv, ruff, pydantic)"
+enabled = true
+instructions = "You are a Python expert. Use modern Python 3.12+ features, type hints, and tools like uv, ruff, and pydantic."
+
+[[agents]]
+name = "typescript-expert"
+command = "claude"
+args = ["--model", "sonnet"]
+description = "TypeScript expert with strict types and modern patterns"
+enabled = true
+instructions = "You are a TypeScript expert. Use strict mode, advanced types, and modern ES2024 features."
+
+[[agents]]
+name = "rust-expert"
+command = "claude"
+args = ["--model", "sonnet"]
+description = "Rust expert with async patterns and systems programming"
+enabled = true
+instructions = "You are a Rust expert. Follow Rust idioms, use Result/Option properly, and leverage the type system."
+
+[[agents]]
+name = "go-expert"
+command = "claude"
+args = ["--model", "sonnet"]
+description = "Go expert with concurrency and clean architecture"
+enabled = true
+instructions = "You are a Go expert. Use idiomatic Go, proper error handling, and effective concurrency patterns."
+
+# ==============================================================================
+# Context Collector (long-context sweeps)
+# ==============================================================================
 
 [[agents]]
 name = "context-collector"
 command = "gemini"
 enabled = true
-read-only = true
-description = "Gemini 2.5 long-context helper for repository sweeps"
-# Supply the long-context model and default yes flag
+read_only = true
+description = "Gemini 2.5 long-context for repository analysis"
 args = ["-y", "--model", "gemini-2.5-pro-exp"]
-# Optional: pass API key overrides or helper tool environment
-# env = { GEMINI_API_KEY = "your-key", STATIC_ANALYZER = "scripts/blast-radius" }
 
-[[agents]]
-name = "gpt-4"
-command = "gpt"
-enabled = false
-read-only = false
-description = "OpenAI GPT-4 assistant"
-args = ["--model", "gpt-4"]
-# Optional environment variables for the agent
-# env = { OPENAI_API_KEY = "your-key-here" }
-
-# Custom agent example
-[[agents]]
-name = "custom-llm"
-command = "/usr/local/bin/custom-llm"
-enabled = false
-read-only = false
-description = "Custom LLM implementation"
-args = ["--config", "/path/to/config.json"]
-env = { MODEL_PATH = "/models/custom.bin", TEMP = "0.7" }
-
-# Cloud agent example
-[[agents]]
-name = "cloud"    # keep name = "cloud" so built-in /plan,/solve default lists include it
-command = "cloud"  # can be any CLI or path (e.g., "cloud-agent"); behavior keys off the agent name
-enabled = true
-read-only = true   # cloud work typically runs remotely; local writes aren't needed
-description = "Submit tasks to a remote cloud worker"
-# By default no extra flags are passed; the prompt is appended positionally.
-# If your CLI expects a flag before the prompt, specify it here, e.g.:
-# args = ["submit", "-p"]
-# Optional environment:
-# env = { CODEX_CLOUD_ENV = "prod" }
-
-# Windows-specific agent configuration examples
-# On Windows, it's recommended to use absolute paths to avoid PATH issues.
-# Typical npm global install location: C:\Users\YourUser\AppData\Roaming\npm\
-
-# [[agents]]
-# name = "claude"
-# command = "C:\\Users\\YourUser\\AppData\\Roaming\\npm\\claude.cmd"
-# enabled = true
-# description = "Claude AI assistant (Windows absolute path)"
-# args = ["--dangerously-skip-permissions"]
-
-# [[agents]]
-# name = "gemini"
-# command = "C:\\Users\\YourUser\\AppData\\Roaming\\npm\\gemini.cmd"
-# enabled = true
-# description = "Gemini assistant (Windows absolute path)"
-# args = ["-y"]
-# env = { GEMINI_API_KEY = "your-key-here" }
-
-# [[agents]]
-# name = "coder"
-# command = "C:\\Users\\YourUser\\AppData\\Roaming\\npm\\coder.cmd"
-# enabled = true
-# description = "Code assistant (Windows absolute path)"
-# args = ["-y"]
-
-# Note: Replace "YourUser" with your actual Windows username.
-# To find your npm global install location, run: npm config get prefix
-
-# Sandbox Configuration
-# Controls file system access and permissions
-sandbox-mode = "workspace-write"
-
-[sandbox-workspace-write]
-writable-roots = ["."]
-network-access = true
-exclude-tmpdir-env-var = false
-exclude-slash-tmp = false
-
-# Shell Environment Configuration
-[shell-environment-policy]
-inherit = "all"
-ignore-default-excludes = false
-# Exclude sensitive environment variables
-exclude = ["*SECRET*", "*PASSWORD*", "*CREDENTIAL*"]
-# Set custom environment variables
-set = { EDITOR = "vim", PAGER = "less" }
-
-# History Configuration
-[history]
-persistence = "save-all"
-max-bytes = 10485760  # 10MB
-
-# Notice acknowledgement flags
-[notice]
-hide_gpt5_1_migration_prompt = false
-hide_gpt-5.1-codex-max_migration_prompt = false
-
-# MCP Server Configuration
-# Example MCP server configurations
-[mcp-servers.example-server]
-command = "npx"
-args = ["-y", "@example/mcp-server"]
-env = { API_KEY = "your-api-key" }
-
-# File Opener Configuration
-file-opener = "vscode"  # Options: vscode, vscode-insiders, windsurf, cursor, none
-
-# Subagent Commands
-# Configure built-in and custom multi-agent slash commands.
-# Each entry overrides defaults when the `name` matches a built-in: plan | solve | code.
-#
-# Fields:
-# - name: command name (e.g., "plan")
-# - read-only: true for read-only (default: plan/solve=true, code=false)
-# - agents: array of agent names; if empty, falls back to enabled [[agents]] or built-ins
-# - orchestrator-instructions: extra instructions appended to Code (the coordinator)
-# - agent-instructions: extra instructions appended to each agent’s prompt
+# ==============================================================================
+# Subagent Commands - Multi-Agent Orchestration
+# ==============================================================================
 
 [subagents]
 
+# /plan - Read-only planning with all agents
 [[subagents.commands]]
 name = "plan"
-read-only = true
+read_only = true
 agents = ["claude", "gemini", "qwen", "copilot", "vibe"]
-orchestrator-instructions = "Focus on discovering project layout and risks. Prefer small, verifiable steps."
-agent-instructions = "Summarize assumptions explicitly. Cite files you read."
+orchestrator_instructions = "Fan out to all agents for planning. Synthesize diverse perspectives into actionable plan."
+agent_instructions = "Analyze the codebase and propose a detailed plan. Cite specific files and rationale."
 
+# /solve - Read-only problem solving
 [[subagents.commands]]
 name = "solve"
-read-only = true
+read_only = true
 agents = ["claude", "gemini", "qwen", "copilot", "vibe"]
-orchestrator-instructions = "Run multiple approaches in parallel and compare. Defer cancellation until a tested fix exists."
-agent-instructions = "Propose a concrete fix with steps to validate."
+orchestrator_instructions = "Have each agent propose solutions independently. Compare and select best approach."
+agent_instructions = "Propose a concrete solution with implementation steps. Include validation approach."
 
+# /code - Write-enabled implementation
 [[subagents.commands]]
 name = "code"
-read-only = false
-agents = ["claude", "gemini", "qwen", "copilot", "vibe"]
-orchestrator-instructions = "Coordinate implementations across agents; surface worktree locations and branches."
-agent-instructions = "Write minimal, focused changes with clear rationale. Include test or validation steps."
+read_only = false
+agents = ["claude", "codex", "gemini", "qwen", "vibe"]
+orchestrator_instructions = "Coordinate implementation across agents. Each works in isolated worktree."
+agent_instructions = "Implement the requested changes. Write minimal, focused code with tests."
 
-[[subagents.commands]]
-name = "context"
-read-only = true
-agents = ["context-collector", "codex"]
-orchestrator-instructions = "Launch a context sweep before coding. Aggregate file summaries and tooling hints for the main agent."
-agent-instructions = "Summarize high-signal files, why they matter, and recommended analysis commands. Keep replies concise."
-
-# Custom example
+# /review - Multi-agent code review
 [[subagents.commands]]
 name = "review"
-read-only = true
+read_only = true
 agents = ["claude", "gemini", "qwen", "copilot", "vibe"]
-orchestrator-instructions = "Perform a multi-agent code review; reconcile disagreements into actionable feedback."
-agent-instructions = "Provide inline comments, cite files/lines, and suggest precise diffs."
+orchestrator_instructions = "Each agent reviews independently. Reconcile feedback into actionable items."
+agent_instructions = "Review for bugs, security issues, and improvements. Cite file:line precisely."
+
+# /context - Repository context gathering
+[[subagents.commands]]
+name = "context"
+read_only = true
+agents = ["context-collector", "claude"]
+orchestrator_instructions = "Sweep repository for relevant context before main task."
+agent_instructions = "Summarize key files, architecture, and dependencies. Keep concise."
+
+# Language-specific commands
+[[subagents.commands]]
+name = "python"
+agents = ["python-expert", "claude", "codex"]
+read_only = false
+orchestrator_instructions = "Execute Python development tasks using language experts"
+
+[[subagents.commands]]
+name = "typescript"
+agents = ["typescript-expert", "claude", "codex"]
+read_only = false
+orchestrator_instructions = "Execute TypeScript development tasks using language experts"
+
+[[subagents.commands]]
+name = "rust"
+agents = ["rust-expert", "claude", "codex"]
+read_only = false
+orchestrator_instructions = "Execute Rust development tasks using language experts"
+
+[[subagents.commands]]
+name = "go"
+agents = ["go-expert", "claude", "codex"]
+read_only = false
+orchestrator_instructions = "Execute Go development tasks using language experts"
+
+# ==============================================================================
+# Sandbox Configuration
+# ==============================================================================
+
+sandbox_mode = "workspace-write"
+
+[sandbox_workspace_write]
+writable_roots = ["."]
+network_access = true
+exclude_tmpdir_env_var = false
+exclude_slash_tmp = false
+
+# ==============================================================================
+# Shell Environment
+# ==============================================================================
+
+[shell_environment_policy]
+inherit = "all"
+ignore_default_excludes = false
+exclude = ["*SECRET*", "*PASSWORD*", "*CREDENTIAL*", "*PRIVATE*"]
+set = { EDITOR = "vim", PAGER = "less" }
+
+# ==============================================================================
+# History & UI
+# ==============================================================================
+
+[history]
+persistence = "save-all"
+max_bytes = 10485760  # 10MB
+
+file_opener = "cursor"  # vscode, cursor, windsurf, none
