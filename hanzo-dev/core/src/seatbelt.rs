@@ -119,7 +119,9 @@ fn create_seatbelt_command_args(
 
     #[allow(clippy::print_stderr)]
     if std::env::var("HANZO_DEBUG_PRINT_SEATBELT").is_ok() {
-        eprintln!("--- Hanzo Dev Seatbelt Policy ---\n{full_policy}\n------------------------------");
+        eprintln!(
+            "--- Hanzo Dev Seatbelt Policy ---\n{full_policy}\n------------------------------"
+        );
     }
 
     let mut seatbelt_args: Vec<String> = vec!["-p".to_string(), full_policy];

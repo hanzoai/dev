@@ -166,8 +166,9 @@ pub(crate) fn render_intro_animation_with_size_and_alpha_offset(
 
 fn welcome_lines(size: IntroArtSize, version: &str) -> Vec<String> {
     // Use the session's random art variant
-    use crate::intro_art_variants::{SESSION_VARIANT, get_art_for_variant};
-    
+    use crate::intro_art_variants::SESSION_VARIANT;
+    use crate::intro_art_variants::get_art_for_variant;
+
     match size {
         IntroArtSize::Tiny => {
             // For tiny size, use simple text
