@@ -42,13 +42,20 @@ static HIDE_UPGRADE_NOTICE: AtomicU8 = AtomicU8::new(FORCE_UPGRADE_UNSET);
 /// Set whether upgrade notice should be hidden (from config)
 pub fn set_hide_upgrade_notice(hide: bool) {
     HIDE_UPGRADE_NOTICE.store(
-        if hide { FORCE_UPGRADE_TRUE } else { FORCE_UPGRADE_FALSE },
+        if hide {
+            FORCE_UPGRADE_TRUE
+        } else {
+            FORCE_UPGRADE_FALSE
+        },
         Ordering::Relaxed,
     );
 }
 
 fn is_upgrade_notice_hidden() -> bool {
-    matches!(HIDE_UPGRADE_NOTICE.load(Ordering::Relaxed), FORCE_UPGRADE_TRUE)
+    matches!(
+        HIDE_UPGRADE_NOTICE.load(Ordering::Relaxed),
+        FORCE_UPGRADE_TRUE
+    )
 }
 
 fn force_upgrade_preview_enabled() -> bool {

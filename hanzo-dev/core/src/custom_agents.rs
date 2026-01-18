@@ -261,7 +261,11 @@ fn default_agents_dirs() -> Vec<PathBuf> {
 
     // Development repo agents: ~/work/hanzo/agents/agents
     if let Some(home) = dirs::home_dir() {
-        let repo_agents = home.join("work").join("hanzo").join("agents").join("agents");
+        let repo_agents = home
+            .join("work")
+            .join("hanzo")
+            .join("agents")
+            .join("agents");
         if repo_agents.exists() {
             dirs.push(repo_agents);
         }

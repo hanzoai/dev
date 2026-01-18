@@ -7,16 +7,16 @@ use rand::Rng;
 /// Art variant style
 #[derive(Copy, Clone, Debug, PartialEq, Eq)]
 pub enum ArtVariant {
-    Classic,      // Clean HANZO DEV
-    Matrix,       // Matrix-style hex rain
-    Cyberpunk,    // Neon cyberpunk style
-    Minimal,      // Minimal square H logo
-    Glitch,       // Glitchy effect
-    Robot,        // Robot/AI themed
-    Terminal,     // Old-school terminal
-    Gradient,     // Gradient blocks
-    Circuit,      // Circuit board style
-    Hologram,     // Holographic style
+    Classic,   // Clean HANZO DEV
+    Matrix,    // Matrix-style hex rain
+    Cyberpunk, // Neon cyberpunk style
+    Minimal,   // Minimal square H logo
+    Glitch,    // Glitchy effect
+    Robot,     // Robot/AI themed
+    Terminal,  // Old-school terminal
+    Gradient,  // Gradient blocks
+    Circuit,   // Circuit board style
+    Hologram,  // Holographic style
 }
 
 impl ArtVariant {
@@ -265,9 +265,8 @@ pub fn get_session_art_height() -> u16 {
 
 /// Matrix rain characters for animation
 pub const MATRIX_CHARS: &[char] = &[
-    '0', '1', '2', '3', '4', '5', '6', '7', '8', '9',
-    'A', 'B', 'C', 'D', 'E', 'F', 'ア', 'イ', 'ウ', 'エ', 'オ',
-    'カ', 'キ', 'ク', 'ケ', 'コ', '░', '▒', '▓', '█',
+    '0', '1', '2', '3', '4', '5', '6', '7', '8', '9', 'A', 'B', 'C', 'D', 'E', 'F', 'ア', 'イ',
+    'ウ', 'エ', 'オ', 'カ', 'キ', 'ク', 'ケ', 'コ', '░', '▒', '▓', '█',
 ];
 
 /// Get a random matrix character

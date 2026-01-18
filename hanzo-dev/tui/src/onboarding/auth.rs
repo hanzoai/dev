@@ -443,10 +443,7 @@ impl AuthModeWidget {
         }
 
         // Check for Ollama running locally
-        if let Ok(output) = std::process::Command::new("ollama")
-            .args(["list"])
-            .output()
-        {
+        if let Ok(output) = std::process::Command::new("ollama").args(["list"]).output() {
             if output.status.success() {
                 return Some("Ollama (local)");
             }
