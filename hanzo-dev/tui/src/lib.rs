@@ -695,6 +695,11 @@ pub async fn run_main(
 
     let _otel = hanzo_core::otel_init::build_provider(&config, env!("CARGO_PKG_VERSION"));
 
+    // Initialize upgrade notice visibility from config
+    if config.notices.hide_upgrade_notice.unwrap_or(false) {
+        crate::updates::set_hide_upgrade_notice(true);
+    }
+
     let latest_upgrade_version = if crate::updates::upgrade_ui_enabled() {
         updates::get_upgrade_version(&config)
     } else {

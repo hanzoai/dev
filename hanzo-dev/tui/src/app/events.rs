@@ -1335,8 +1335,10 @@ impl App<'_> {
                         }
                         #[cfg(debug_assertions)]
                         SlashCommand::TestApproval => {
+                            use hanzo_core::protocol::Event;
                             use hanzo_core::protocol::EventMsg;
                             use std::collections::HashMap;
+                            use std::path::PathBuf;
 
                             use hanzo_core::protocol::ApplyPatchApprovalRequestEvent;
                             use hanzo_core::protocol::FileChange;
