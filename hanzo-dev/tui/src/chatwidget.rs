@@ -38628,7 +38628,7 @@ impl WidgetRef for &ChatWidget<'_> {
             preview: String,
         }
 
-        let height_mismatches: Vec<HeightMismatch> = Vec::new();
+        let mut height_mismatches: Vec<HeightMismatch> = Vec::new();
         let is_collapsed_reasoning_at = |idx: usize| {
             if idx >= request_count {
                 return false;

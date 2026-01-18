@@ -723,6 +723,10 @@ pub struct Notice {
     pub hide_gpt_5_1_codex_max_migration_prompt: Option<bool>,
     pub hide_gpt5_2_migration_prompt: Option<bool>,
     pub hide_gpt5_2_codex_migration_prompt: Option<bool>,
+    /// Hide the upgrade available notification banner
+    pub hide_upgrade_notice: Option<bool>,
+    /// Hide the rate limit model nudge
+    pub hide_rate_limit_model_nudge: Option<bool>,
 }
 
 #[derive(Serialize, Debug, Clone, Copy, PartialEq, Eq)]
