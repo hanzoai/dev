@@ -285,7 +285,8 @@ Examples:
   /use vp         - Switch to VP of Engineering
   /agent reviewer - Switch to code reviewer agent
 
-To list available agents, type /use without arguments."#.to_string()
+To list available agents, type /use without arguments."#
+        .to_string()
 }
 
 /// Format a /use command to switch to a custom agent
@@ -294,7 +295,7 @@ pub fn format_use_command(agent_name: &str) -> String {
     // the LLM to adopt the specified persona. The TUI/exec layer can perform
     // the actual lookup and inject the agent's instructions.
     let agent_name = agent_name.trim();
-    
+
     format!(
         r#"Please adopt the "{agent_name}" agent persona. 
 
@@ -309,9 +310,9 @@ You are now acting as the "{agent_name}" agent."#,
 /// Resolve a custom agent by name (async version for use with actual file lookup)
 pub async fn resolve_use_agent(agent_name: &str) -> UseAgentResult {
     use crate::custom_agents::find_custom_agent;
-    
+
     let agent_name = agent_name.trim();
-    
+
     if let Some(agent) = find_custom_agent(agent_name).await {
         UseAgentResult {
             agent_name: agent.name.clone(),
@@ -325,11 +326,12 @@ pub async fn resolve_use_agent(agent_name: &str) -> UseAgentResult {
         use crate::custom_agents::list_custom_agent_names;
         let available = list_custom_agent_names().await;
         let list_str = if available.is_empty() {
-            "No custom agents found. Create agents in ~/.hanzo/agents/ or ~/.claude/agents/".to_string()
+            "No custom agents found. Create agents in ~/.hanzo/agents/ or ~/.claude/agents/"
+                .to_string()
         } else {
             format!("Available agents: {}", available.join(", "))
         };
-        
+
         UseAgentResult {
             agent_name: agent_name.to_string(),
             found: false,
@@ -344,23 +346,26 @@ pub async fn resolve_use_agent(agent_name: &str) -> UseAgentResult {
 /// Format a prompt that injects the custom agent's persona
 fn format_use_agent_prompt(agent: &CustomAgentDef) -> String {
     let mut prompt = String::new();
-    
-    prompt.push_str(&format!("You are now acting as the \"{}\" agent.\n\n", agent.name));
-    
+
+    prompt.push_str(&format!(
+        "You are now acting as the \"{}\" agent.\n\n",
+        agent.name
+    ));
+
     if let Some(desc) = &agent.description {
         prompt.push_str(&format!("**Role**: {}\n\n", desc));
     }
-    
+
     if let Some(model) = &agent.model {
         prompt.push_str(&format!("**Preferred Model**: {}\n\n", model));
     }
-    
+
     if let Some(instructions) = &agent.instructions {
         prompt.push_str("**Instructions**:\n");
         prompt.push_str(instructions);
         prompt.push_str("\n\n");
     }
-    
+
     prompt.push_str("Acknowledge this persona switch and proceed with any pending tasks.");
     prompt
 }
@@ -379,7 +384,7 @@ pub fn format_language_command(
         "go" => vec!["go", "claude", "codex"],
         _ => vec!["claude", "codex"],
     };
-    
+
     let lang_display = match language {
         "python" => "Python 3.12+",
         "typescript" => "TypeScript",
