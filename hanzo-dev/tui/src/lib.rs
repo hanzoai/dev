@@ -79,6 +79,7 @@ mod header_wave;
 mod history;
 mod history_cell;
 mod insert_history;
+pub mod intro_art_variants;
 pub mod live_wrap;
 mod markdown;
 mod markdown_render;

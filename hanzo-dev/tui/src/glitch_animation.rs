@@ -165,38 +165,45 @@ pub(crate) fn render_intro_animation_with_size_and_alpha_offset(
 /* ---------------- welcome art ---------------- */
 
 fn welcome_lines(size: IntroArtSize, version: &str) -> Vec<String> {
+    // Use the session's random art variant
+    use crate::intro_art_variants::{SESSION_VARIANT, get_art_for_variant};
+    
     match size {
-        IntroArtSize::Large => large_welcome_lines(version),
-        IntroArtSize::Medium => medium_welcome_lines(version),
-        IntroArtSize::Small => small_welcome_lines(version),
-        IntroArtSize::Tiny => tiny_welcome_lines(version),
+        IntroArtSize::Tiny => {
+            // For tiny size, use simple text
+            tiny_welcome_lines(version)
+        }
+        _ => {
+            // For larger sizes, use the session's random art variant
+            get_art_for_variant(*SESSION_VARIANT, version)
+        }
     }
 }
 
-const LARGE_VERSION_LINE: &str = "   ██║  ██║ ╚████╔╝   ██║   ╚█████╔╝ ╚████╔╝ ";
+const LARGE_VERSION_LINE: &str = "   ██║  ██║██║  ██║██║ ╚████║███████╗╚█████╔╝ ";
 const LARGE_BODY_TAIL: [&str; 22] = [
-    "      █████████╗     ███████████████╗  ██╗   ██╗",
-    "      █████████║     ███████████████║  ██║   ██║",
-    "      █████████║     ███████████████║  ██║   ██║",
-    "   ███╔════════███╗  ██╔══════════╝    ██║   ██║",
-    "   ███║        ███║  ██║               ██║   ██║",
-    "   ███║        ███║  ██║               ██║   ██║",
-    "   ███║        ╚══╝  ██║               ██║   ██║",
-    "   ███║              ██║               ██║   ██║",
-    "   ███║              ██║               ██║   ██║",
-    "   ███║              █████████████╗    ╚██╗ ██╔╝",
-    "   ███║              █████████████║     ╚████╔╝ ",
-    "   ███║              █████████████║      ╚██╔╝  ",
-    "   ███║              ██╔══════════╝       ██║   ",
-    "   ███║              ██║                  ██║   ",
-    "   ███║              ██║                  ██║   ",
-    "   ███║        ███╗  ██║                  ██║   ",
-    "   ███║        ███║  ██║                  ██║   ",
-    "   ███║        ███║  ██║                  ██║   ",
-    "   ╚══█████████╔══╝  ███████████████╗     ██║   ",
-    "      █████████║     ███████████████║     ██║   ",
-    "      █████████║     ███████████████║     ██║   ",
-    "      ╚════════╝     ╚══════════════╝     ╚═╝   ",
+    "   ██████╗ ███████╗██╗   ██╗                  ",
+    "   ██╔══██╗██╔════╝██║   ██║                  ",
+    "   ██║  ██║█████╗  ██║   ██║                  ",
+    "   ██║  ██║██╔══╝  ██║   ██║                  ",
+    "   ██████╔╝███████╗╚██████╔╝                  ",
+    "   ╚═════╝ ╚══════╝ ╚═════╝                   ",
+    "                                              ",
+    "                                              ",
+    "                                              ",
+    "                                              ",
+    "                                              ",
+    "                                              ",
+    "                                              ",
+    "                                              ",
+    "                                              ",
+    "                                              ",
+    "                                              ",
+    "                                              ",
+    "                                              ",
+    "                                              ",
+    "                                              ",
+    "                                              ",
 ];
 
 fn large_welcome_lines(version: &str) -> Vec<String> {
@@ -221,23 +228,23 @@ fn large_welcome_lines(version: &str) -> Vec<String> {
     shift_left(animated, 3)
 }
 
-const MEDIUM_VERSION_LINE: &str = "   ██║  ██║ ╚████╔╝   ██║   ╚█████╔╝ ╚████╔╝  ";
+const MEDIUM_VERSION_LINE: &str = "   ██║  ██║██║  ██║██║ ╚████║███████╗╚█████╔╝  ";
 const MEDIUM_BODY_TAIL: [&str; 15] = [
-    "     █████████╗     ███████████████╗  ██╗   ██╗",
-    "     █████████║     ███████████████║  ██║   ██║",
-    "   ██╔════════██╗   ██╔══════════╝    ██║   ██║",
-    "   ██║        ██║   ██║               ██║   ██║",
-    "   ██║        ╚═╝   ██║               ██║   ██║",
-    "   ██║              ██║               ██║   ██║",
-    "   ██║              █████████████╗    ╚██╗ ██╔╝",
-    "   ██║              █████████████║     ╚████╔╝ ",
-    "   ██║              ██╔══════════╝      ╚██╔╝  ",
-    "   ██║              ██║                  ██║   ",
-    "   ██║        ██╗   ██║                  ██║   ",
-    "   ██║        ██║   ██║                  ██║   ",
-    "   ╚═████████╔═╝    ███████████████╗     ██║   ",
-    "     ████████║      ███████████████║     ██║   ",
-    "     ╚═══════╝      ╚══════════════╝     ╚═╝   ",
+    "   ██████╗ ███████╗██╗   ██╗                  ",
+    "   ██╔══██╗██╔════╝██║   ██║                  ",
+    "   ██║  ██║█████╗  ██║   ██║                  ",
+    "   ██║  ██║██╔══╝  ╚██╗ ██╔╝                  ",
+    "   ██████╔╝███████╗ ╚████╔╝                   ",
+    "   ╚═════╝ ╚══════╝  ╚═══╝                    ",
+    "                                              ",
+    "                                              ",
+    "                                              ",
+    "                                              ",
+    "                                              ",
+    "                                              ",
+    "                                              ",
+    "                                              ",
+    "                                              ",
 ];
 
 fn medium_welcome_lines(version: &str) -> Vec<String> {
@@ -264,7 +271,7 @@ fn medium_welcome_lines(version: &str) -> Vec<String> {
     shift_left(animated, 3)
 }
 
-const SMALL_VERSION_LINE: &str = "   ██║  ██║ ╚████╔╝   ██║   ╚█████╔╝ ╚████╔╝  ";
+const SMALL_VERSION_LINE: &str = "   ██║  ██║██║  ██║██║ ╚████║███████╗╚█████╔╝  ";
 
 fn small_welcome_lines(version: &str) -> Vec<String> {
     let mut lines = vec![
@@ -281,19 +288,19 @@ fn small_welcome_lines(version: &str) -> Vec<String> {
     lines.push(format!("{SMALL_VERSION_LINE}{pad}{version}  "));
 
     let tail = [
-        "     █████████╗     ███████████████╗  ██╗   ██╗",
-        "     █████████║     ███████████████║  ██║   ██║",
-        "   ██╔════════██╗   ██╔══════════╝    ██║   ██║",
-        "   ██║        ██║   ██║               ██║   ██║",
-        "   ██║        ╚═╝   ██║               ╚██╗ ██╔╝",
-        "   ██║              █████████████╗     ╚████╔╝ ",
-        "   ██║              █████████████║      ╚██╔╝  ",
-        "   ██║              ██╔══════════╝       ██║   ",
-        "   ██║        ██╗   ██║                  ██║   ",
-        "   ██║        ██║   ██║                  ██║   ",
-        "   ╚═████████╔═╝    ███████████████╗     ██║   ",
-        "     ████████║      ███████████████║     ██║   ",
-        "     ╚═══════╝      ╚══════════════╝     ╚═╝   ",
+        "   ██████╗ ███████╗██╗   ██╗                  ",
+        "   ██╔══██╗██╔════╝██║   ██║                  ",
+        "   ██║  ██║█████╗  ██║   ██║                  ",
+        "   ██║  ██║██╔══╝  ╚██╗ ██╔╝                  ",
+        "   ██████╔╝███████╗ ╚████╔╝                   ",
+        "   ╚═════╝ ╚══════╝  ╚═══╝                    ",
+        "                                              ",
+        "                                              ",
+        "                                              ",
+        "                                              ",
+        "                                              ",
+        "                                              ",
+        "                                              ",
     ];
     lines.extend(tail.iter().map(|l| (*l).to_string()));
 
@@ -302,13 +309,13 @@ fn small_welcome_lines(version: &str) -> Vec<String> {
 
 fn tiny_welcome_lines(version: &str) -> Vec<String> {
     vec![
-        format!("HANZO                 {version}    "),
-        " █████╗  ██████╗██╗   ██╗              ".to_string(),
-        "██╔═══╝  ██╔═══╝██║   ██║              ".to_string(),
-        "██║      █████╗ ╚██╗ ██╔╝              ".to_string(),
-        "██║      ██╔══╝  ╚████╔╝               ".to_string(),
-        "╚█████╗  ██████╗  ╚██╔╝                ".to_string(),
-        " ╚════╝  ╚═════╝   ╚═╝                 ".to_string(),
+        format!("HANZO DEV             {version}    "),
+        "██████╗ ███████╗██╗   ██╗              ".to_string(),
+        "██╔══██╗██╔════╝██║   ██║              ".to_string(),
+        "██║  ██║█████╗  ██║   ██║              ".to_string(),
+        "██║  ██║██╔══╝  ╚██╗ ██╔╝              ".to_string(),
+        "██████╔╝███████╗ ╚████╔╝               ".to_string(),
+        "╚═════╝ ╚══════╝  ╚═══╝                ".to_string(),
     ]
 }
 
