@@ -210,7 +210,7 @@ fn format_agent_not_found_error(agent_name: &str, command: &str) -> String {
                command = \"C:\\\\Users\\\\YourUser\\\\AppData\\\\Roaming\\\\npm\\\\{}.cmd\"\n\
             3. Verify your PATH includes the directory containing '{}'\n\
             4. On Windows, ensure the file has a valid extension (.exe, .cmd, .bat, .com)\n\n\
-            For more information, see: https://github.com/just-every/code/blob/main/code-rs/config.md",
+            For more information, see: https://github.com/hanzoai/dev/blob/main/hanzo-dev/config.md",
             command, agent_name, command, command
         ));
     }
@@ -225,7 +225,7 @@ fn format_agent_not_found_error(agent_name: &str, command: &str) -> String {
                [[agents]]\n\
                name = \"{agent_name}\"\n\
                command = \"/absolute/path/to/{command}\"\n\n\
-            For more information, see: https://github.com/just-every/code/blob/main/code-rs/config.md"
+            For more information, see: https://github.com/hanzoai/dev/blob/main/hanzo-dev/config.md"
         ));
     }
 

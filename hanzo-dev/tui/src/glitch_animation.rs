@@ -247,6 +247,7 @@ const MEDIUM_BODY_TAIL: [&str; 15] = [
     "                                              ",
 ];
 
+#[allow(dead_code)]
 fn medium_welcome_lines(version: &str) -> Vec<String> {
     let mut animated = vec![
         "   ██╗  ██╗ █████╗ ███╗   ██╗██████╗  █████╗ ".to_string(),
@@ -271,8 +272,10 @@ fn medium_welcome_lines(version: &str) -> Vec<String> {
     shift_left(animated, 3)
 }
 
+#[allow(dead_code)]
 const SMALL_VERSION_LINE: &str = "   ██║  ██║██║  ██║██║ ╚████║███████╗╚█████╔╝  ";
 
+#[allow(dead_code)]
 fn small_welcome_lines(version: &str) -> Vec<String> {
     let mut lines = vec![
         "   ██╗  ██╗ █████╗ ███╗   ██╗██████╗  █████╗ ".to_string(),
@@ -319,6 +322,7 @@ fn tiny_welcome_lines(version: &str) -> Vec<String> {
     ]
 }
 
+#[allow(dead_code)]
 fn shift_left(lines: Vec<String>, n: usize) -> Vec<String> {
     let mut out = Vec::with_capacity(lines.len());
     for line in lines {

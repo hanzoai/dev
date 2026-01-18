@@ -524,7 +524,7 @@ If subagents can't detect Git, ensure:
 2. You're running Dev from a Git repository
 3. The `.git` directory is accessible
 
-For more details, see the [FAQ](https://github.com/just-every/code/blob/main/docs/faq.md).
+For more details, see the [FAQ](https://github.com/hanzoai/dev/blob/main/docs/faq.md).
 
 ## disable_response_storage
 

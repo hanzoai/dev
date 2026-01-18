@@ -398,7 +398,7 @@ struct OrderReplayArgs {
 struct PreviewArgs {
     /// Slug identifier (e.g., faster-downloads)
     slug: String,
-    /// Optional owner/repo to override (defaults to just-every/code or $GITHUB_REPOSITORY)
+    /// Optional owner/repo to override (defaults to hanzoai/dev or $GITHUB_REPOSITORY)
     #[arg(long = "repo", value_name = "OWNER/REPO")]
     repo: Option<String>,
     /// Output directory where the binary will be extracted
@@ -1314,7 +1314,7 @@ async fn preview_main(args: PreviewArgs) -> anyhow::Result<()> {
     let repo = args
         .repo
         .or_else(|| env::var("GITHUB_REPOSITORY").ok())
-        .unwrap_or_else(|| "just-every/code".to_string());
+        .unwrap_or_else(|| "hanzoai/dev".to_string());
     let (owner, name) = repo
         .split_once('/')
         .map(|(o, n)| (o.to_string(), n.to_string()))
@@ -1657,7 +1657,7 @@ async fn doctor_main() -> anyhow::Result<()> {
         let bun_coder = format!("{bun_bin}/coder");
         if coder_paths.iter().any(|p| p == &bun_coder) {
             println!("\nBun shim detected for 'coder': {bun_coder}");
-            println!("Suggestion: remove old Bun global with: bun remove -g @just-every/code");
+            println!("Suggestion: remove old Bun global with: bun remove -g @hanzo/dev");
         }
         let bun_code = format!("{bun_bin}/code");
         if code_paths.iter().any(|p| p == &bun_code) {
@@ -1694,10 +1694,10 @@ async fn doctor_main() -> anyhow::Result<()> {
     }
 
     println!("\nIf versions differ, remove older installs and keep one package manager:");
-    println!("  - Bun: bun remove -g @just-every/code");
-    println!("  - npm/pnpm: npm uninstall -g @just-every/code");
-    println!("  - Homebrew: brew uninstall code");
-    println!("  - Prefer using 'coder' to avoid conflicts with VS Code's 'code'.");
+    println!("  - Bun: bun remove -g @hanzo/dev");
+    println!("  - npm/pnpm: npm uninstall -g @hanzo/dev");
+    println!("  - Homebrew: brew uninstall hanzo-dev");
+    println!("  - Prefer using 'dev' to avoid conflicts with VS Code's 'code'.");
 
     Ok(())
 }

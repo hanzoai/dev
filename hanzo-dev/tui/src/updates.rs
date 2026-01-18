@@ -37,6 +37,19 @@ const FORCE_UPGRADE_FALSE: u8 = 1;
 const FORCE_UPGRADE_TRUE: u8 = 2;
 
 static FORCE_UPGRADE_PREVIEW: AtomicU8 = AtomicU8::new(FORCE_UPGRADE_UNSET);
+static HIDE_UPGRADE_NOTICE: AtomicU8 = AtomicU8::new(FORCE_UPGRADE_UNSET);
+
+/// Set whether upgrade notice should be hidden (from config)
+pub fn set_hide_upgrade_notice(hide: bool) {
+    HIDE_UPGRADE_NOTICE.store(
+        if hide { FORCE_UPGRADE_TRUE } else { FORCE_UPGRADE_FALSE },
+        Ordering::Relaxed,
+    );
+}
+
+fn is_upgrade_notice_hidden() -> bool {
+    matches!(HIDE_UPGRADE_NOTICE.load(Ordering::Relaxed), FORCE_UPGRADE_TRUE)
+}
 
 fn force_upgrade_preview_enabled() -> bool {
     match FORCE_UPGRADE_PREVIEW.load(Ordering::Relaxed) {
@@ -64,6 +77,10 @@ fn force_upgrade_preview_enabled() -> bool {
 }
 
 pub fn upgrade_ui_enabled() -> bool {
+    // Check if user explicitly hid upgrade notices in config
+    if is_upgrade_notice_hidden() {
+        return false;
+    }
     !cfg!(debug_assertions) || force_upgrade_preview_enabled()
 }
 
@@ -144,10 +161,10 @@ struct ReleaseInfo {
 }
 
 const VERSION_FILENAME: &str = "version.json";
-const LATEST_RELEASE_URL: &str = "https://api.github.com/repos/just-every/code/releases/latest";
-const CURRENT_RELEASE_REPO: &str = "just-every/code";
-const LEGACY_RELEASE_REPO: &str = "openai/codex";
-pub const CODE_RELEASE_URL: &str = "https://github.com/just-every/code/releases/latest";
+const LATEST_RELEASE_URL: &str = "https://api.github.com/repos/hanzoai/dev/releases/latest";
+const CURRENT_RELEASE_REPO: &str = "hanzoai/dev";
+const LEGACY_RELEASE_REPO: &str = "just-every/code";
+pub const CODE_RELEASE_URL: &str = "https://github.com/hanzoai/dev/releases/latest";
 
 const CACHE_TTL_HOURS: i64 = 20;
 const MAX_CLOCK_SKEW_MINUTES: i64 = 5;
@@ -191,9 +208,9 @@ pub fn resolve_upgrade_resolution() -> UpgradeResolution {
                 "npm".to_string(),
                 "install".to_string(),
                 "-g".to_string(),
-                "@just-every/code@latest".to_string(),
+                "@hanzo/dev@latest".to_string(),
             ],
-            display: "npm install -g @just-every/code@latest".to_string(),
+            display: "npm install -g @hanzo/dev@latest".to_string(),
         };
     }
 
