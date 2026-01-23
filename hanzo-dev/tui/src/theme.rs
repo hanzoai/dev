@@ -1454,6 +1454,31 @@ fn get_predefined_theme(name: ThemeName) -> Theme {
             progress: Color::Rgb(0, 95, 204),          // #005FCC
         },
 
+        ThemeName::DarkMonochrome => Theme {
+            // Pure grayscale monochrome theme - no colors
+            primary: Color::Rgb(200, 200, 200),        // Light gray
+            secondary: Color::Rgb(160, 160, 160),      // Medium gray
+            background: Color::Rgb(0, 0, 0),           // Black
+            foreground: Color::Rgb(220, 220, 220),     // Off-white
+            border: Color::Rgb(68, 68, 68),            // Dark gray
+            border_focused: Color::Rgb(100, 100, 100), // Medium gray
+            selection: Color::Rgb(32, 32, 32),         // Very dark gray
+            cursor: Color::Rgb(220, 220, 220),         // Off-white
+            success: Color::Rgb(180, 180, 180),        // Light gray (no green)
+            warning: Color::Rgb(200, 200, 200),        // Light gray (no yellow)
+            error: Color::Rgb(255, 255, 255),          // White (for visibility)
+            info: Color::Rgb(180, 180, 180),           // Light gray
+            text: Color::Rgb(200, 200, 200),           // Light gray
+            text_dim: Color::Rgb(128, 128, 128),       // Medium gray
+            text_bright: Color::White,                 // Pure white
+            keyword: Color::Rgb(220, 220, 220),        // Off-white
+            string: Color::Rgb(180, 180, 180),         // Light gray
+            comment: Color::Rgb(100, 100, 100),        // Dark gray
+            function: Color::Rgb(200, 200, 200),       // Light gray
+            spinner: Color::Rgb(80, 80, 80),           // Dark gray
+            progress: Color::Rgb(180, 180, 180),       // Light gray
+        },
+
         ThemeName::Custom => {
             // Use DarkCarbonNight (dark default) as base for custom
             get_predefined_theme(ThemeName::DarkCarbonNight)

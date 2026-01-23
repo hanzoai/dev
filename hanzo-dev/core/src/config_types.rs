@@ -1020,6 +1020,7 @@ pub enum ThemeName {
     DarkCharcoalRainbow,
     DarkZenGarden,
     DarkPaperLightPro,
+    DarkMonochrome,
     Custom,
 }
 

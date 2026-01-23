@@ -353,6 +353,7 @@ pub fn set_tui_theme_name(code_home: &Path, theme: ThemeName) -> anyhow::Result<
         ThemeName::DarkCharcoalRainbow => "dark-charcoal-rainbow",
         ThemeName::DarkZenGarden => "dark-zen-garden",
         ThemeName::DarkPaperLightPro => "dark-paper-light-pro",
+        ThemeName::DarkMonochrome => "dark-monochrome",
         ThemeName::Custom => "custom",
     };
 
