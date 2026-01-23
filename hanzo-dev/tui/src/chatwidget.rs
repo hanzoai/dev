@@ -27800,8 +27800,14 @@ Have we met every part of this goal and is there no further work to do?"#
     /// Handle `/provider` command: list or switch API providers.
     pub(crate) fn handle_provider_command(&mut self, command_text: String) {
         let trimmed = command_text.trim();
+        let parts: Vec<&str> = trimmed.split_whitespace().collect();
+        let subcommand = parts.first().map(|s| s.to_ascii_lowercase());
 
-        if trimmed.is_empty() || trimmed == "list" {
+        // Get account counts per provider
+        let account_counts = auth_accounts::count_accounts_by_provider(&self.config.code_home)
+            .unwrap_or_default();
+
+        if trimmed.is_empty() || subcommand.as_deref() == Some("list") {
             // List all available providers
             let providers = &self.config.model_providers;
             let current = &self.config.model_provider_id;
@@ -27820,15 +27826,141 @@ Have we met every part of this goal and is there no further work to do?"#
                     .as_ref()
                     .map(|k| format!(" [{}]", k))
                     .unwrap_or_default();
+
+                // Show account count for this provider
+                let provider_id_key = if id == "openai" { None } else { Some(id.clone()) };
+                let acct_count = account_counts.get(&provider_id_key).copied().unwrap_or(0);
+                let acct_info = if acct_count > 0 {
+                    format!(" ({} account{})", acct_count, if acct_count == 1 { "" } else { "s" })
+                } else {
+                    String::new()
+                };
+
                 lines.push_str(&format!(
-                    "{}{} — {}{}\n    {}\n",
-                    marker, id, info.name, env_key, base_url
+                    "{}{} — {}{}{}\n    {}\n",
+                    marker, id, info.name, env_key, acct_info, base_url
                 ));
             }
 
-            lines.push_str("\nUsage: /provider <name> — switch to provider");
-            lines.push_str("\n       /provider list — list providers");
+            lines.push_str("\nUsage:");
+            lines.push_str("\n  /provider <name>           — switch to provider");
+            lines.push_str("\n  /provider add <name> <key> — add API key for provider");
+            lines.push_str("\n  /provider rotate <name>    — show rotation status");
+            lines.push_str("\n  /provider list             — list providers");
             self.push_background_tail(lines);
+            return;
+        }
+
+        // Handle subcommands
+        if subcommand.as_deref() == Some("add") {
+            if parts.len() < 3 {
+                self.history_push_plain_state(history_cell::new_error_event(
+                    "Usage: /provider add <provider-name> <api-key>".to_string(),
+                ));
+                return;
+            }
+            let provider_name = parts[1].to_ascii_lowercase();
+            let api_key = parts[2..].join(" ");
+
+            if !self.config.model_providers.contains_key(&provider_name) {
+                self.history_push_plain_state(history_cell::new_error_event(format!(
+                    "Unknown provider '{}'. Use /provider list to see available providers.",
+                    provider_name
+                )));
+                return;
+            }
+
+            // Add API key for the provider
+            let provider_id = if provider_name == "openai" {
+                None
+            } else {
+                Some(provider_name.clone())
+            };
+
+            match auth_accounts::upsert_api_key_account_for_provider(
+                &self.config.code_home,
+                api_key,
+                None,
+                provider_id,
+                false, // Don't make active - just store it
+            ) {
+                Ok(_account) => {
+                    let count = account_counts
+                        .get(&Some(provider_name.clone()))
+                        .copied()
+                        .unwrap_or(0)
+                        + 1;
+                    self.push_background_tail(format!(
+                        "Added API key for {} (now {} account{} for rotation)",
+                        provider_name,
+                        count,
+                        if count == 1 { "" } else { "s" }
+                    ));
+                }
+                Err(err) => {
+                    self.history_push_plain_state(history_cell::new_error_event(format!(
+                        "Failed to add API key: {}",
+                        err
+                    )));
+                }
+            }
+            return;
+        }
+
+        if subcommand.as_deref() == Some("rotate") {
+            let provider_name = parts.get(1).map(|s| s.to_ascii_lowercase());
+            let provider_id = match provider_name.as_deref() {
+                Some("openai") | None => None,
+                Some(name) => Some(name.to_string()),
+            };
+
+            match auth_accounts::list_accounts_for_provider(
+                &self.config.code_home,
+                provider_id.as_deref(),
+            ) {
+                Ok(accounts) => {
+                    if accounts.is_empty() {
+                        self.push_background_tail(format!(
+                            "No accounts configured for {}. Use /provider add to add API keys.",
+                            provider_name.as_deref().unwrap_or("openai")
+                        ));
+                    } else {
+                        let mut lines = format!(
+                            "Rotation status for {} ({} account{}):\n\n",
+                            provider_name.as_deref().unwrap_or("openai"),
+                            accounts.len(),
+                            if accounts.len() == 1 { "" } else { "s" }
+                        );
+                        for (i, acc) in accounts.iter().enumerate() {
+                            let key_preview = acc
+                                .openai_api_key
+                                .as_ref()
+                                .map(|k| {
+                                    if k.len() > 12 {
+                                        format!("{}...{}", &k[..4], &k[k.len() - 4..])
+                                    } else {
+                                        "****".to_string()
+                                    }
+                                })
+                                .unwrap_or_else(|| "N/A".to_string());
+                            lines.push_str(&format!(
+                                "  {}. {} — {} uses\n",
+                                i + 1,
+                                key_preview,
+                                acc.usage_count
+                            ));
+                        }
+                        lines.push_str("\nAccounts are rotated round-robin based on usage count.");
+                        self.push_background_tail(lines);
+                    }
+                }
+                Err(err) => {
+                    self.history_push_plain_state(history_cell::new_error_event(format!(
+                        "Failed to list accounts: {}",
+                        err
+                    )));
+                }
+            }
             return;
         }
 
@@ -27854,16 +27986,29 @@ Have we met every part of this goal and is there no further work to do?"#
         if let Some(info) = self.config.model_providers.get(&provider_id) {
             if let Some(env_key) = &info.env_key {
                 if std::env::var(env_key).map(|v| v.trim().is_empty()).unwrap_or(true) {
-                    let instructions = info
-                        .env_key_instructions
-                        .as_deref()
-                        .unwrap_or("Set the environment variable and restart.");
-                    let msg = format!(
-                        "Provider '{}' requires {} to be set.\n\n{}",
-                        provider_id, env_key, instructions
-                    );
-                    self.history_push_plain_state(history_cell::new_error_event(msg));
-                    return;
+                    // Check if we have stored accounts for this provider
+                    let provider_key = if provider_id == "openai" {
+                        None
+                    } else {
+                        Some(provider_id.clone())
+                    };
+                    let has_stored_accounts = account_counts
+                        .get(&provider_key)
+                        .copied()
+                        .unwrap_or(0) > 0;
+
+                    if !has_stored_accounts {
+                        let instructions = info
+                            .env_key_instructions
+                            .as_deref()
+                            .unwrap_or("Set the environment variable and restart.");
+                        let msg = format!(
+                            "Provider '{}' requires {} to be set.\n\n{}\n\nOr use: /provider add {} <api-key>",
+                            provider_id, env_key, instructions, provider_id
+                        );
+                        self.history_push_plain_state(history_cell::new_error_event(msg));
+                        return;
+                    }
                 }
             }
         }

@@ -24,6 +24,11 @@ pub struct StoredAccount {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub label: Option<String>,
 
+    /// Provider ID this account is associated with (e.g., "openai", "openrouter", "groq").
+    /// None means the account is for the default OpenAI provider.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub provider_id: Option<String>,
+
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub openai_api_key: Option<String>,
 
@@ -38,6 +43,10 @@ pub struct StoredAccount {
 
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub last_used_at: Option<DateTime<Utc>>,
+
+    /// Number of times this account has been used (for rotation tracking).
+    #[serde(default)]
+    pub usage_count: u64,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -142,12 +151,13 @@ fn match_chatgpt_account(existing: &StoredAccount, tokens: &TokenData) -> bool {
     account_id_matches && email_matches
 }
 
-fn match_api_key_account(existing: &StoredAccount, api_key: &str) -> bool {
+fn match_api_key_account(existing: &StoredAccount, api_key: &str, provider_id: Option<&str>) -> bool {
     existing.mode == AuthMode::ApiKey
         && existing
             .openai_api_key
             .as_ref()
             .is_some_and(|stored| stored == api_key)
+        && existing.provider_id.as_deref() == provider_id
 }
 
 fn touch_account(account: &mut StoredAccount, used: bool) {
@@ -170,9 +180,9 @@ fn upsert_account(
                 .position(|acc| match_chatgpt_account(acc, tokens))
         }),
         AuthMode::ApiKey => new_account.openai_api_key.as_ref().and_then(|api_key| {
-            data.accounts
-                .iter()
-                .position(|acc| match_api_key_account(acc, api_key))
+            data.accounts.iter().position(|acc| {
+                match_api_key_account(acc, api_key, new_account.provider_id.as_deref())
+            })
         }),
     };
 
@@ -275,6 +285,17 @@ pub fn upsert_api_key_account(
     label: Option<String>,
     make_active: bool,
 ) -> io::Result<StoredAccount> {
+    upsert_api_key_account_for_provider(code_home, api_key, label, None, make_active)
+}
+
+/// Upsert an API key account for a specific provider.
+pub fn upsert_api_key_account_for_provider(
+    code_home: &Path,
+    api_key: String,
+    label: Option<String>,
+    provider_id: Option<String>,
+    make_active: bool,
+) -> io::Result<StoredAccount> {
     let path = accounts_file_path(code_home);
     let data = read_accounts_file(&path)?;
 
@@ -282,11 +303,13 @@ pub fn upsert_api_key_account(
         id: next_id(),
         mode: AuthMode::ApiKey,
         label,
+        provider_id,
         openai_api_key: Some(api_key),
         tokens: None,
         last_refresh: None,
         created_at: None,
         last_used_at: None,
+        usage_count: 0,
     };
 
     let (mut data, mut stored) = upsert_account(data, new_account);
@@ -317,11 +340,13 @@ pub fn upsert_chatgpt_account(
         id: next_id(),
         mode: AuthMode::ChatGPT,
         label,
+        provider_id: None, // ChatGPT accounts are always for OpenAI
         openai_api_key: None,
         tokens: Some(tokens),
         last_refresh: Some(last_refresh),
         created_at: None,
         last_used_at: None,
+        usage_count: 0,
     };
 
     let (mut data, mut stored) = upsert_account(data, new_account);
@@ -336,6 +361,93 @@ pub fn upsert_chatgpt_account(
 
     write_accounts_file(&path, &data)?;
     Ok(stored)
+}
+
+/// List accounts for a specific provider (None = default OpenAI provider).
+pub fn list_accounts_for_provider(
+    code_home: &Path,
+    provider_id: Option<&str>,
+) -> io::Result<Vec<StoredAccount>> {
+    let path = accounts_file_path(code_home);
+    let data = read_accounts_file(&path)?;
+    Ok(data
+        .accounts
+        .into_iter()
+        .filter(|acc| acc.provider_id.as_deref() == provider_id)
+        .collect())
+}
+
+/// Get the next account to use for a provider using round-robin rotation.
+/// Returns the account with the lowest usage_count among accounts for this provider.
+pub fn get_next_rotated_account(
+    code_home: &Path,
+    provider_id: Option<&str>,
+) -> io::Result<Option<StoredAccount>> {
+    let path = accounts_file_path(code_home);
+    let data = read_accounts_file(&path)?;
+
+    let matching: Vec<_> = data
+        .accounts
+        .iter()
+        .filter(|acc| acc.provider_id.as_deref() == provider_id && acc.mode == AuthMode::ApiKey)
+        .collect();
+
+    if matching.is_empty() {
+        return Ok(None);
+    }
+
+    // Find the account with the lowest usage count
+    let next = matching
+        .iter()
+        .min_by_key(|acc| acc.usage_count)
+        .map(|acc| (*acc).clone());
+
+    Ok(next)
+}
+
+/// Increment the usage count for an account (for rotation tracking).
+pub fn increment_usage_count(code_home: &Path, account_id: &str) -> io::Result<()> {
+    let path = accounts_file_path(code_home);
+    let mut data = read_accounts_file(&path)?;
+
+    if let Some(account) = data.accounts.iter_mut().find(|acc| acc.id == account_id) {
+        account.usage_count = account.usage_count.saturating_add(1);
+        account.last_used_at = Some(now());
+    }
+
+    write_accounts_file(&path, &data)?;
+    Ok(())
+}
+
+/// Get all unique provider IDs from stored accounts.
+pub fn list_provider_ids(code_home: &Path) -> io::Result<Vec<Option<String>>> {
+    let path = accounts_file_path(code_home);
+    let data = read_accounts_file(&path)?;
+
+    let mut provider_ids: Vec<Option<String>> = data
+        .accounts
+        .iter()
+        .map(|acc| acc.provider_id.clone())
+        .collect();
+
+    // Deduplicate while preserving order
+    let mut seen = std::collections::HashSet::new();
+    provider_ids.retain(|id| seen.insert(id.clone()));
+
+    Ok(provider_ids)
+}
+
+/// Count accounts per provider.
+pub fn count_accounts_by_provider(code_home: &Path) -> io::Result<std::collections::HashMap<Option<String>, usize>> {
+    let path = accounts_file_path(code_home);
+    let data = read_accounts_file(&path)?;
+
+    let mut counts = std::collections::HashMap::new();
+    for acc in data.accounts {
+        *counts.entry(acc.provider_id).or_insert(0) += 1;
+    }
+
+    Ok(counts)
 }
 
 #[cfg(test)]
