@@ -2,24 +2,24 @@
 
 > **Warning:** This is an experimental and non-stable feature. If you depend on it, please expect breaking changes over the coming weeks and understand that there is currently no guarantee that this works well. Use at your own risk!
 
-Hanzo Dev can automatically discover reusable "skills" you keep on disk. A skill is a small bundle with a name, a short description (what it does and when to use it), and an optional body of instructions you can open when needed. Hanzo Dev injects only the name, description, and file path into the runtime context; the body stays on disk.
+Codex can automatically discover reusable "skills" you keep on disk. A skill is a small bundle with a name, a short description (what it does and when to use it), and an optional body of instructions you can open when needed. Codex injects only the name, description, and file path into the runtime context; the body stays on disk.
 
 ## Enable skills
 
 Skills are behind the experimental `skills` feature flag and are enabled by default.
 
-- Disable in config (preferred): add the following to `$HANZO_HOME/config.toml` (usually `~/.hanzo/config.toml`) and restart Hanzo Dev:
+- Disable in config (preferred): add the following to `$CODEX_HOME/config.toml` (usually `~/.codex/config.toml`) and restart Codex:
 
   ```toml
   [features]
   skills = false
   ```
 
-- Override for a single run when disabled in config: launch Hanzo Dev with `dev --enable skills`
+- Override for a single run when disabled in config: launch Codex with `codex --enable skills`
 
 ## Where skills live
 
-- Location (v1): `~/.hanzo/skills/**/SKILL.md` (recursive). Hidden entries and symlinks are skipped. Only files named exactly `SKILL.md` count. Legacy `~/.code/skills/` and `~/.codex/skills/` are still read.
+- Location (v1): `~/.codex/skills/**/SKILL.md` (recursive). Hidden entries and symlinks are skipped. Only files named exactly `SKILL.md` count.
 - Sorting: rendered by name, then path for stability.
 
 ## File format
@@ -33,7 +33,7 @@ Skills are behind the experimental `skills` feature flag and are enabled by defa
 ## Loading and rendering
 
 - Loaded once at startup.
-- If valid skills exist, Hanzo Dev appends a runtime-only `## Skills` section after `AGENTS.md`, one bullet per skill: `- <name>: <description> (file: /absolute/path/to/SKILL.md)`.
+- If valid skills exist, Codex appends a runtime-only `## Skills` section after `AGENTS.md`, one bullet per skill: `- <name>: <description> (file: /absolute/path/to/SKILL.md)`.
 - If no valid skills exist, the section is omitted. On-disk files are never modified.
 
 ## Using skills
@@ -47,7 +47,7 @@ Skills are behind the experimental `skills` feature flag and are enabled by defa
 
 ## Create a skill
 
-1. Create `~/.hanzo/skills/<skill-name>/`.
+1. Create `~/.codex/skills/<skill-name>/`.
 2. Add `SKILL.md`:
 
    ```
@@ -61,13 +61,13 @@ Skills are behind the experimental `skills` feature flag and are enabled by defa
    ```
 
 3. Keep `name`/`description` within the limits; avoid newlines in those fields.
-4. Restart Hanzo Dev to load the new skill.
+4. Restart Codex to load the new skill.
 
 ## Example
 
 ```
-mkdir -p ~/.hanzo/skills/pdf-processing
-cat <<'SKILL_EXAMPLE' > ~/.hanzo/skills/pdf-processing/SKILL.md
+mkdir -p ~/.codex/skills/pdf-processing
+cat <<'SKILL_EXAMPLE' > ~/.codex/skills/pdf-processing/SKILL.md
 ---
 name: pdf-processing
 description: Extract text and tables from PDFs; use when PDFs, forms, or document extraction are mentioned.

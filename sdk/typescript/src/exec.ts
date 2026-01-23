@@ -1,14 +1,10 @@
 import { spawn } from "node:child_process";
+
 import readline from "node:readline";
+
+import { SandboxMode } from "./threadOptions";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-
-import {
-  SandboxMode,
-  ModelReasoningEffort,
-  ApprovalMode,
-  WebSearchMode,
-} from "./threadOptions";
 
 export type CodexExecArgs = {
   input: string;
@@ -24,22 +20,6 @@ export type CodexExecArgs = {
   workingDirectory?: string;
   // --skip-git-repo-check
   skipGitRepoCheck?: boolean;
-  // --output-schema
-  outputSchemaFile?: string;
-  // --config model_reasoning_effort
-  modelReasoningEffort?: ModelReasoningEffort;
-  // AbortSignal to cancel the execution
-  signal?: AbortSignal;
-  // --config sandbox_workspace_write.network_access
-  networkAccessEnabled?: boolean;
-  // --config web_search
-  webSearchMode?: WebSearchMode;
-  // legacy --config features.web_search_request
-  webSearchEnabled?: boolean;
-  // --config approval_policy
-  approvalPolicy?: ApprovalMode;
-  // --image flags
-  images?: string[];
 };
 
 export class CodexExec {
@@ -67,39 +47,6 @@ export class CodexExec {
       commandArgs.push("--skip-git-repo-check");
     }
 
-    if (args.outputSchemaFile) {
-      commandArgs.push("--output-schema", args.outputSchemaFile);
-    }
-
-    if (args.modelReasoningEffort) {
-      commandArgs.push("--config", `model_reasoning_effort="${args.modelReasoningEffort}"`);
-    }
-
-    if (args.networkAccessEnabled !== undefined) {
-      commandArgs.push(
-        "--config",
-        `sandbox_workspace_write.network_access=${args.networkAccessEnabled}`,
-      );
-    }
-
-    if (args.webSearchMode) {
-      commandArgs.push("--config", `web_search="${args.webSearchMode}"`);
-    } else if (args.webSearchEnabled === true) {
-      commandArgs.push("--config", `web_search="live"`);
-    } else if (args.webSearchEnabled === false) {
-      commandArgs.push("--config", `web_search="disabled"`);
-    }
-
-    if (args.approvalPolicy) {
-      commandArgs.push("--config", `approval_policy="${args.approvalPolicy}"`);
-    }
-
-    if (args.images?.length) {
-      for (const image of args.images) {
-        commandArgs.push("--image", image);
-      }
-    }
-
     if (args.threadId) {
       commandArgs.push("resume", args.threadId);
     }
@@ -116,7 +63,6 @@ export class CodexExec {
 
     const child = spawn(this.executablePath, commandArgs, {
       env,
-      signal: args.signal,
     });
 
     let spawnError: unknown | null = null;

@@ -1,6 +1,6 @@
 {
-  "name": "@hanzo/dev",
-  "version": "0.6.48",
+  "name": "@just-every/code",
+  "version": "0.6.50",
   "license": "Apache-2.0",
   "description": "Lightweight coding agent that runs in your terminal - fork of OpenAI Codex",
   "bin": {
@@ -25,7 +25,7 @@
   },
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/hanzoai/dev.git"
+    "url": "git+https://github.com/just-every/code.git"
   },
   "publishConfig": {
     "access": "public"
@@ -35,10 +35,10 @@
     "prettier": "^3.3.3"
   },
   "optionalDependencies": {
-    "@hanzo/dev-darwin-arm64": "0.6.48",
-    "@hanzo/dev-darwin-x64": "0.6.48",
-    "@hanzo/dev-linux-x64-musl": "0.6.48",
-    "@hanzo/dev-linux-arm64-musl": "0.6.48",
-    "@hanzo/dev-win32-x64": "0.6.48"
+    "@just-every/code-darwin-arm64": "0.6.50",
+    "@just-every/code-darwin-x64": "0.6.50",
+    "@just-every/code-linux-x64-musl": "0.6.50",
+    "@just-every/code-linux-arm64-musl": "0.6.50",
+    "@just-every/code-win32-x64": "0.6.50"
   }
 }

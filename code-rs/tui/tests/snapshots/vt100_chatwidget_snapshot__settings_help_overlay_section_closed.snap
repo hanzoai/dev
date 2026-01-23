@@ -1,0 +1,31 @@
+---
+source: tui/tests/vt100_chatwidget_snapshot.rs
+expression: section_closed
+---
+ +------------------------------------------------------------------------------------------------+
+ |                                           Every Code                                           |
+ +------------------------------------------------------------------------------------------------+
+ +Settings ▸ Model--------------------------------------------------------------------------------+
+ |                                                                                                |
+ | ›  Model              + Select Model & Reasoning --------------------------------------------+ |
+ |    Theme              |                                                                      | |
+ |    Updates            |  Current model: GPT-5.2-Codex                                        | |
+ |    Accounts           |  Reasoning effort: Medium                                            | |
+ |    Agents             |                                                                      | |
+ |    Prompts            |  GPT-5.2                                                             | |
+ |    Skills             |  Latest frontier model with improvements across knowledge, reasoning | |
+ |    Auto Drive         |     XHigh - Extra high reasoning depth for complex problems          | |
+ |    Review             |     High - Maximizes reasoning depth for complex or ambiguous proble | |
+ |    Planning           |     Medium - Provides a solid balance of reasoning depth and latency | |
+ |    Validation         |     Low - Balances speed with some reasoning; useful for straightfor | |
+ |    Chrome             |                                                                      | |
+ |    MCP                |                                                                      | |
+ |  ↓ Notifications      +----------------------------------------------------------------------+ |
+ | ↑ ↓ Move    Enter Open    Esc Close    ? Help                                                  |
+ |                                                                                                |
+ +------------------------------------------------------------------------------------------------+
+
+ +------------------------------------------------------------------------------------------------+
+ | What can I code for you today?                                                                 |
+ +------------------------------------------------------------------------------------------------+
+ Read Only  (Shift+Tab change)                                            Ctrl+G guide  •  API key

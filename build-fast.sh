@@ -14,7 +14,7 @@ Environment flags:
   DETERMINISTIC=1                     Add -C debuginfo=0; promotes to release-prod unless DETERMINISTIC_FORCE_RELEASE=0
   DETERMINISTIC_FORCE_RELEASE=0|1     Keep dev-fast (0) or switch to release-prod (1, default)
   DETERMINISTIC_NO_UUID=1             macOS only: strip LC_UUID on final executables
-  BUILD_FAST_BINS="dev dev-tui"         Override bins to build (space or comma separated)
+  BUILD_FAST_BINS="code code-tui"      Override bins to build (space or comma separated)
   --workspace codex|code|both         Select workspace to build (default: code)
 
 Examples:
@@ -110,10 +110,10 @@ resolve_bin_path() {
   fi
 
   TARGET_DIR_ABS="${target_root}"
-  BIN_CARGO_FILENAME="${BIN_NAME}"
-  BIN_FILENAME="${BIN_NAME}"
+  BIN_CARGO_FILENAME="${CRATE_PREFIX}"
+  BIN_FILENAME="${CRATE_PREFIX}"
   if [ "$PROFILE" = "perf" ]; then
-    BIN_FILENAME="${BIN_NAME}-perf"
+    BIN_FILENAME="${CRATE_PREFIX}-perf"
   fi
   BIN_SUBPATH="${BIN_SUBDIR}/${BIN_FILENAME}"
   BIN_CARGO_SUBPATH="${BIN_SUBDIR}/${BIN_CARGO_FILENAME}"
@@ -194,7 +194,7 @@ fi
 
 REPO_ROOT="${SCRIPT_DIR}"
 
-# Guard against regressions where a hanzo-dev crate references ../codex-rs.
+# Guard against regressions where a code-rs crate references ../codex-rs.
 if [ "${BUILD_FAST_SKIP_CODEX_GUARD:-0}" != "1" ]; then
   echo "Running codex path dependency guard..."
   (
@@ -214,17 +214,15 @@ if [ "$WORKSPACE_CHOICE" = "both" ]; then
   exit 0
 fi
 
-if [ -n "${HANZO_HOME:-}" ] && [ -n "${HANZO_HOME}" ]; then
-  CACHE_HOME="${HANZO_HOME%/}"
-elif [ -n "${CODE_HOME:-}" ] && [ -n "${CODE_HOME}" ]; then
+if [ -n "${CODE_HOME:-}" ] && [ -n "${CODE_HOME}" ]; then
   CACHE_HOME="${CODE_HOME%/}"
 elif [ -n "${CODEX_HOME:-}" ] && [ -n "${CODEX_HOME}" ]; then
   CACHE_HOME="${CODEX_HOME%/}"
 else
   if [ -d "/mnt/data" ] && [ -w "/mnt/data" ]; then
-    CACHE_HOME="/mnt/data/.hanzo"
+    CACHE_HOME="/mnt/data/.code"
   else
-    CACHE_HOME="${REPO_ROOT}/.hanzo"
+    CACHE_HOME="${REPO_ROOT}/.code"
   fi
 fi
 case "${CACHE_HOME}" in
@@ -238,13 +236,10 @@ case "$WORKSPACE_CHOICE" in
   codex|codex-rs)
     WORKSPACE_DIR="codex-rs"
     CRATE_PREFIX="codex"
-    BIN_NAME="codex"
     ;;
-  code|hanzo-dev)
-    WORKSPACE_DIR="hanzo-dev"
+  code|code-rs)
+    WORKSPACE_DIR="code-rs"
     CRATE_PREFIX="code"
-    # Hanzo dev uses "dev" binary name instead of "code"
-    BIN_NAME="dev"
     ;;
   *)
     echo "Error: Unknown workspace '${WORKSPACE_CHOICE}'. Use codex, code, or both." >&2
@@ -326,17 +321,17 @@ if [ -n "${BUILD_FAST_BINS:-}" ]; then
   done
 fi
 if [ "${#TARGET_BINS[@]}" -eq 0 ]; then
-  TARGET_BINS=("${BIN_NAME}")
+  TARGET_BINS=("${CRATE_PREFIX}")
 fi
 PRIMARY_PRESENT=0
 for candidate in "${TARGET_BINS[@]}"; do
-  if [ "${candidate}" = "${BIN_NAME}" ]; then
+  if [ "${candidate}" = "${CRATE_PREFIX}" ]; then
     PRIMARY_PRESENT=1
     break
   fi
 done
 if [ "$PRIMARY_PRESENT" -eq 0 ]; then
-  TARGET_BINS=("${BIN_NAME}" "${TARGET_BINS[@]}")
+  TARGET_BINS=("${CRATE_PREFIX}" "${TARGET_BINS[@]}")
 fi
 PRIMARY_BIN="${TARGET_BINS[0]}"
 
@@ -500,7 +495,7 @@ if [ "${DEBUG_SYMBOLS:-}" = "1" ]; then
   export CARGO_PROFILE_RELEASE_PROD_STRIP="none"
 fi
 
-echo "Building ${BIN_NAME} binary (${PROFILE} mode)..."
+echo "Building ${CRATE_PREFIX} binary (${PROFILE} mode)..."
 
 # Ensure Cargo cache locations are stable.
 # In CI, we can optionally enforce a specific CARGO_HOME regardless of caller env
@@ -580,8 +575,8 @@ if [ "${TRACE_BUILD:-}" = "1" ]; then
     rustup run "$TOOLCHAIN" cargo -vV || true
   fi
   echo "CANONICAL_ENV_APPLIED: ${CANONICAL_ENV_APPLIED} (KEEP_ENV=${KEEP_ENV})"
-  echo "Filtered env (CARGO|RUST*|PROFILE|HANZO_HOME|CODE_HOME|CODEX_HOME):"
-  env | egrep '^(CARGO|RUST|RUSTUP|PROFILE|HANZO_HOME|CODE_HOME|CODEX_HOME)=' | sort || true
+  echo "Filtered env (CARGO|RUST*|PROFILE|CODE_HOME|CODEX_HOME):"
+  env | egrep '^(CARGO|RUST|RUSTUP|PROFILE|CODE_HOME|CODEX_HOME)=' | sort || true
   echo "--------------------------------"
 fi
 
@@ -614,7 +609,6 @@ SCCACHE=${SCCACHE:-}
 SCCACHE_BIN=${SCCACHE_BIN:-}
 CARGO_INCREMENTAL=${CARGO_INCREMENTAL:-}
 MACOSX_DEPLOYMENT_TARGET=${MACOSX_DEPLOYMENT_TARGET:-}
-HANZO_HOME=${HANZO_HOME:-}
 CODE_HOME=${CODE_HOME:-}
 CODEX_HOME=${CODEX_HOME:-}
 FP

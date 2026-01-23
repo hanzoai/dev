@@ -1,6 +1,6 @@
 # TUI Settings Overlay
 
-Full-screen settings panel for Hanzo Dev’s TUI. Use it to change models, themes, Auto Drive defaults, agents, notifications, and more without leaving the chat.
+Full-screen settings panel for Every Code’s TUI. Use it to change models, themes, Auto Drive defaults, agents, notifications, and more without leaving the chat.
 
 ## Open & navigate
 - `/settings` opens the overview; `/settings <section>` jumps directly (section names below). `/auto settings` and `/update` route into their sections.
@@ -8,7 +8,7 @@ Full-screen settings panel for Hanzo Dev’s TUI. Use it to change models, theme
 - Overlay is modal: chat input is blocked while it is visible. It remembers the last active section on reopen (`pending_settings_return`).
 
 ## Persistence
-- Changes write to `HANZO_HOME/config.toml` when available; if that directory is missing you’ll see a warning and the changes remain session-only.
+- Changes write to `CODE_HOME/config.toml` when available; if that directory is missing you’ll see a warning and the changes remain session-only.
 - Access mode can be stored per workspace; other settings apply globally unless your config file overrides them per project.
 - Agent and MCP edits also live in the same config directory.
 
@@ -16,7 +16,7 @@ Full-screen settings panel for Hanzo Dev’s TUI. Use it to change models, theme
 - **Model**: pick the default chat model and reasoning effort.
 - **Theme**: choose a theme and spinner; applies immediately.
 - **Updates**: view upgrade channel/status. `/update` opens here before running installers.
-- **Agents**: see built-in/custom agents, enable/disable, force read-only, add per-agent instructions. Open the Subagent editor to configure `/plan`/`/solve`/`/dev` or custom slash commands.
+- **Agents**: see built-in/custom agents, enable/disable, force read-only, add per-agent instructions. Open the Subagent editor to configure `/plan`/`/solve`/`/code` or custom slash commands.
 - **Prompts**: edit saved prompt snippets.
 - **Auto Drive**: set review/agents/QA/cross-check toggles, continue mode (manual/immediate/ten-seconds/sixty-seconds), model override, or “use chat model.” Updates apply to active runs.
 - **Review**: choose a review model (or reuse chat), toggle auto-resolve, and set the max auto-resolve attempts.
@@ -33,9 +33,9 @@ Full-screen settings panel for Hanzo Dev’s TUI. Use it to change models, theme
 - Sections mark completion via their content structs; the overlay closes when a section reports `is_complete` (e.g., Chrome option chosen).
 
 ## Scope reminders
-- Global defaults live in `HANZO_HOME/config.toml`.
+- Global defaults live in `CODE_HOME/config.toml`.
 - Workspace overrides are honored where setters accept `cwd` (access mode) or when project-level config files exist. The UI always renders merged effective values.
-- Agent commands and MCP servers are stored under `HANZO_HOME` and apply to all workspaces unless overridden by project config.
+- Agent commands and MCP servers are stored under `CODE_HOME` and apply to all workspaces unless overridden by project config.
 
 ## Commands
 - `/settings [section]`

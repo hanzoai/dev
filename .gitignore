@@ -156,15 +156,3 @@ branches/
 docs/release-notes/prompt.expanded.txt
 docs/release-notes/context.md
 prompts/projects/
-
-AGENTS.md
-CLAUDE.md
-GEMINI.md
-GROK.md
-QWEN.md
-
-# Hanzo working/cache directories
-.hanzo/working/
-
-# Binary outputs
-hanzo-dev/bin/

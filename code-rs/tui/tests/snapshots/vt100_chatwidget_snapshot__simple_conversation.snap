@@ -1,0 +1,27 @@
+---
+source: tui/tests/vt100_chatwidget_snapshot.rs
+expression: output
+---
+ +----------------------------------------------------------------------------+
+ |                                 Every Code                                 |
+ +----------------------------------------------------------------------------+
+
+
+ › Can you help me understand the available commands?
+
+
+   Hello! How can I help you today?
+
+
+
+ • I can help with various tasks including:
+
+   - Writing code
+   - Reading files
+   - Running commands
+
+
+ +----------------------------------------------------------------------------+
+ | What can I code for you today?                                             |
+ +----------------------------------------------------------------------------+
+ Read Only  (Shift+Tab change)                        Ctrl+G guide  •  API key

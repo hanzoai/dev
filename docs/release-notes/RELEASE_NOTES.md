@@ -1,10 +1,13 @@
-## @just-every/code v0.6.48
+## @just-every/code v0.6.50
 
-Stabilizes browser-driven flows and keeps automation working when proxy discovery is required.
+This release upgrades model defaults, improves request-user-input UX, and tightens config and sandbox handling.
 
 ### Changes
-- Browser: stabilize /browser command handling and diff rendering for reliable runs.
-- Browser: honor proxy discovery when finding CDP targets so automation works behind proxies.
+- Core/Models: default to gpt-5.2-codex with personality templating and request-user-input support.
+- Core/Config: add layered config.toml support for app-server reads and merges.
+- TUI: add request-user-input overlay with interactive picker and reliable pending/answer routing.
+- Core/Runtime: preserve interrupted turns to prevent repeats and avoid touching thread mtime on resume.
+- Sandbox/Paths: harden tilde expansion and Windows sandbox audit paths for safer writable roots.
 
 ### Install
 ```
@@ -12,4 +15,7 @@ npm install -g @just-every/code@latest
 code
 ```
 
-Compare: https://github.com/just-every/code/compare/v0.6.47...v0.6.48
+### Thanks
+Thanks to @zerone0x and @sgraika127 for contributions!
+
+Compare: https://github.com/just-every/code/compare/v0.6.49...v0.6.50

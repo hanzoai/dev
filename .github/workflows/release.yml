@@ -59,7 +59,7 @@ jobs:
           if npm whoami >/dev/null 2>&1; then
             echo "npm auth ok"
           else
-            echo "::error::npm auth failed (npm whoami). Ensure NPM_TOKEN is a granular/automation token with publish rights to @hanzo/*, bypass 2FA enabled: https://docs.npmjs.com/creating-and-viewing-access-tokens#creating-access-tokens ; update the secret: https://github.com/organizations/hanzoai/settings/secrets/actions/NPM_TOKEN" >&2
+            echo "::error::npm auth failed (npm whoami). Ensure NPM_TOKEN is a granular/automation token with publish rights to @just-every/*, bypass 2FA enabled: https://docs.npmjs.com/creating-and-viewing-access-tokens#creating-access-tokens ; update the secret: https://github.com/organizations/just-every/settings/secrets/actions/NPM_TOKEN" >&2
             exit 1
           fi
 
@@ -92,7 +92,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          TOOLCHAIN=$(python -c "import sys, pathlib; p=pathlib.Path('hanzo-dev/rust-toolchain.toml').read_text();
+          TOOLCHAIN=$(python -c "import sys, pathlib; p=pathlib.Path('code-rs/rust-toolchain.toml').read_text();
           try:
               import tomllib as tl
           except ModuleNotFoundError:
@@ -112,7 +112,7 @@ jobs:
           prefix-key: v5-rust
           shared-key: code-preflight-${{ steps.rust_toolchain.outputs.channel }}
           workspaces: |
-            hanzo-dev -> target
+            code-rs -> target
           cache-targets: false
           cache-workspace-crates: true
           cache-on-failure: false
@@ -121,14 +121,14 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          cd hanzo-dev
-          cargo build --locked --profile dev-fast --bin dev
+          cd code-rs
+          cargo build --locked --profile dev-fast --bin code
 
       - name: CLI smokes (skip duplicated cargo tests)
         shell: bash
         env:
           SKIP_CARGO_TESTS: "1"
-          CI_CLI_BIN: ${{ env.CARGO_TARGET_DIR }}/dev-fast/dev
+          CI_CLI_BIN: ${{ env.CARGO_TARGET_DIR }}/dev-fast/code
         run: bash scripts/ci-tests.sh
 
       - name: Drop dev-fast artifacts before workspace tests
@@ -146,7 +146,7 @@ jobs:
       - name: Workspace tests (nextest)
         shell: bash
         run: |
-          cd hanzo-dev
+          cd code-rs
           cargo nextest run --no-fail-fast --locked
 
       - name: Free disk after tests
@@ -185,12 +185,12 @@ jobs:
           set -euo pipefail
           CURRENT_VERSION=$(node -p "require('./package.json').version")
           PKGS=(
-            "@hanzo/dev"
-            "@hanzo/dev-darwin-arm64"
-            "@hanzo/dev-darwin-x64"
-            "@hanzo/dev-linux-x64-musl"
-            "@hanzo/dev-linux-arm64-musl"
-            "@hanzo/dev-win32-x64"
+            "@just-every/code"
+            "@just-every/code-darwin-arm64"
+            "@just-every/code-darwin-x64"
+            "@just-every/code-linux-x64-musl"
+            "@just-every/code-linux-arm64-musl"
+            "@just-every/code-win32-x64"
           )
           # Find the highest published version across all packages
           MAX_PUBLISHED="0.0.0"
@@ -230,22 +230,22 @@ jobs:
           # Linux builds
           - os: ubuntu-24.04
             target: x86_64-unknown-linux-musl
-            artifact: dev-x86_64-unknown-linux-musl
+            artifact: code-x86_64-unknown-linux-musl
           - os: ubuntu-24.04-arm
             target: aarch64-unknown-linux-musl
-            artifact: dev-aarch64-unknown-linux-musl
+            artifact: code-aarch64-unknown-linux-musl
           # (GNU variants omitted to reduce asset duplication; npm defaults to musl)
           # macOS builds
           - os: macos-14
             target: x86_64-apple-darwin
-            artifact: dev-x86_64-apple-darwin
+            artifact: code-x86_64-apple-darwin
           - os: macos-14
             target: aarch64-apple-darwin
-            artifact: dev-aarch64-apple-darwin
+            artifact: code-aarch64-apple-darwin
           # Windows build
           - os: windows-latest
             target: x86_64-pc-windows-msvc
-            artifact: dev-x86_64-pc-windows-msvc.exe
+            artifact: code-x86_64-pc-windows-msvc.exe
 
     steps:
       - name: Checkout code
@@ -263,7 +263,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          TOOLCHAIN=$(python -c "import sys, pathlib; p=pathlib.Path('hanzo-dev/rust-toolchain.toml').read_text();
+          TOOLCHAIN=$(python -c "import sys, pathlib; p=pathlib.Path('code-rs/rust-toolchain.toml').read_text();
           try:
               import tomllib as tl
           except ModuleNotFoundError:
@@ -286,7 +286,7 @@ jobs:
           prefix-key: v5-rust
           shared-key: code-${{ matrix.target }}-toolchain-${{ steps.rust_toolchain.outputs.channel }}
           workspaces: |
-            hanzo-dev -> target
+            code-rs -> target
           cache-targets: true
           cache-workspace-crates: true
           cache-on-failure: true
@@ -371,7 +371,7 @@ jobs:
 
       # Prefetch deps so --frozen works even with git deps
       - name: Prefetch dependencies (git + registry)
-        working-directory: hanzo-dev
+        working-directory: code-rs
         env:
           CARGO_NET_GIT_FETCH_WITH_CLI: "true"
         run: cargo fetch --locked
@@ -387,8 +387,8 @@ jobs:
           CARGO_INCREMENTAL: "0"   # keep off in CI; release builds + sccache
           RUST_BACKTRACE: "1"
         run: |
-          cd hanzo-dev
-          cargo build --release --frozen --locked --timings --target ${{ matrix.target }} --bin dev
+          cd code-rs
+          cargo build --release --frozen --locked --timings --target ${{ matrix.target }} --bin code
 
       - name: Post-build smoke (run binary) [Unix]
         if: |
@@ -398,7 +398,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          exe="hanzo-dev/target/${{ matrix.target }}/release/dev"
+          exe="code-rs/target/${{ matrix.target }}/release/code"
           "$exe" --version
           "$exe" completion bash > /dev/null
 
@@ -406,7 +406,7 @@ jobs:
         if: matrix.os == 'windows-latest' && matrix.target == 'x86_64-pc-windows-msvc'
         shell: pwsh
         run: |
-          $exe = "hanzo-dev/target/${{ matrix.target }}/release/dev.exe"
+          $exe = "code-rs/target/${{ matrix.target }}/release/code.exe"
           & $exe --version | Out-Null
           & $exe completion bash | Out-Null
 
@@ -419,9 +419,9 @@ jobs:
         run: |
           mkdir -p artifacts
           if [[ "${{ matrix.os }}" == "windows-latest" ]]; then
-            cp hanzo-dev/target/${{ matrix.target }}/release/dev.exe artifacts/${{ matrix.artifact }}
+            cp code-rs/target/${{ matrix.target }}/release/code.exe artifacts/${{ matrix.artifact }}
           else
-            cp hanzo-dev/target/${{ matrix.target }}/release/dev artifacts/${{ matrix.artifact }}
+            cp code-rs/target/${{ matrix.target }}/release/code artifacts/${{ matrix.artifact }}
           fi
 
       - name: Compress artifacts (Windows)
@@ -483,7 +483,7 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: cargo-timings-${{ matrix.target }}
-          path: hanzo-dev/target/cargo-timings/*.html
+          path: code-rs/target/cargo-timings/*.html
           if-no-files-found: ignore
           compression-level: 0
 
@@ -554,11 +554,11 @@ jobs:
 
           map_target() {
             case "$1" in
-              aarch64-apple-darwin) echo "os=darwin cpu=arm64 pkg=@hanzo/dev-darwin-arm64" ;;
-              x86_64-apple-darwin) echo "os=darwin cpu=x64 pkg=@hanzo/dev-darwin-x64" ;;
-              x86_64-unknown-linux-musl) echo "os=linux cpu=x64 pkg=@hanzo/dev-linux-x64-musl" ;;
-              aarch64-unknown-linux-musl) echo "os=linux cpu=arm64 pkg=@hanzo/dev-linux-arm64-musl" ;;
-              x86_64-pc-windows-msvc.exe) echo "os=win32 cpu=x64 pkg=@hanzo/dev-win32-x64" ;;
+              aarch64-apple-darwin) echo "os=darwin cpu=arm64 pkg=@just-every/code-darwin-arm64" ;;
+              x86_64-apple-darwin) echo "os=darwin cpu=x64 pkg=@just-every/code-darwin-x64" ;;
+              x86_64-unknown-linux-musl) echo "os=linux cpu=x64 pkg=@just-every/code-linux-x64-musl" ;;
+              aarch64-unknown-linux-musl) echo "os=linux cpu=arm64 pkg=@just-every/code-linux-arm64-musl" ;;
+              x86_64-pc-windows-msvc.exe) echo "os=win32 cpu=x64 pkg=@just-every/code-win32-x64" ;;
               *) echo "" ;;
             esac
           }
@@ -612,7 +612,7 @@ jobs:
             rawbin="$(decompress_to "$f" "$workdir/bin")"
             chmod +x "$rawbin" || true
             # package.json
-            printf '{\n  "name": "%s",\n  "version": "%s",\n  "license": "Apache-2.0",\n  "description": "Platform binary for @hanzo/dev (%s)",\n  "os": ["%s"],\n  "cpu": ["%s"],\n  "files": ["bin/"],\n  "private": false\n}\n' \
+            printf '{\n  "name": "%s",\n  "version": "%s",\n  "license": "Apache-2.0",\n  "description": "Platform binary for @just-every/code (%s)",\n  "os": ["%s"],\n  "cpu": ["%s"],\n  "files": ["bin/"],\n  "private": false\n}\n' \
               "$pkg" "$NEW_VERSION" "$t" "$os" "$cpu" > "$workdir/package.json"
           done
 
@@ -648,11 +648,11 @@ jobs:
           # Note: These are platform-filtered in the target packages, so npm will fetch only one.
           tmp=$(mktemp)
           jq '.optionalDependencies = {
-            "@hanzo/dev-darwin-arm64": "'"$NEW_VERSION"'",
-            "@hanzo/dev-darwin-x64": "'"$NEW_VERSION"'",
-            "@hanzo/dev-linux-x64-musl": "'"$NEW_VERSION"'",
-            "@hanzo/dev-linux-arm64-musl": "'"$NEW_VERSION"'",
-            "@hanzo/dev-win32-x64": "'"$NEW_VERSION"'"
+            "@just-every/code-darwin-arm64": "'"$NEW_VERSION"'",
+            "@just-every/code-darwin-x64": "'"$NEW_VERSION"'",
+            "@just-every/code-linux-x64-musl": "'"$NEW_VERSION"'",
+            "@just-every/code-linux-arm64-musl": "'"$NEW_VERSION"'",
+            "@just-every/code-win32-x64": "'"$NEW_VERSION"'"
           }' package.json > "$tmp" && mv "$tmp" package.json
           git add package.json
           if git diff --staged --quiet; then
@@ -722,7 +722,7 @@ jobs:
 
           if [ -f CHANGELOG.md ] && [ -f docs/release-notes/RELEASE_NOTES.md ] \
              && grep -qF "## [${NEW_VERSION}]" CHANGELOG.md 2>/dev/null \
-             && grep -qF "## @hanzo/dev v${NEW_VERSION}" docs/release-notes/RELEASE_NOTES.md 2>/dev/null; then
+             && grep -qF "## @just-every/code v${NEW_VERSION}" docs/release-notes/RELEASE_NOTES.md 2>/dev/null; then
             echo "CHANGELOG.md and docs/release-notes/RELEASE_NOTES.md already contain v${NEW_VERSION}; skipping regeneration."
             exit 0
           fi
@@ -782,13 +782,13 @@ jobs:
 
           Release Notes (docs/release-notes/RELEASE_NOTES.md)
           - Write exactly these sections in order; include the optional Thanks section only when applicable:
-            1) Title: ## @hanzo/dev v${NEW_VERSION}
+            1) Title: ## @just-every/code v${NEW_VERSION}
             2) One brief intro sentence (1–2 lines max).
             3) Section header: ### Changes
                - The same 2–5 bullets as in the changelog (you may omit SHAs).
             4) Section header: ### Install
                Code block with exactly:
-               npm install -g @hanzo/dev@latest
+               npm install -g @just-every/code@latest
                code
             5) Optional section header: ### Thanks
                - Include ONE line like: "Thanks to @alice and @bob for contributions!"
@@ -871,7 +871,7 @@ jobs:
             awk -v v="${NEW_VERSION}" '/^## /{p=($2==("v"v)||$2==v)} p{print}' CHANGELOG.md > docs/release-notes/RELEASE_NOTES.md || true
           fi
           if [ ! -s docs/release-notes/RELEASE_NOTES.md ]; then
-            printf "## @hanzo/dev v%s\n\nSee CHANGELOG.md for details." "${NEW_VERSION}" > docs/release-notes/RELEASE_NOTES.md
+            printf "## @just-every/code v%s\n\nSee CHANGELOG.md for details." "${NEW_VERSION}" > docs/release-notes/RELEASE_NOTES.md
           fi
 
           # Commit CHANGELOG changes if any.
@@ -914,7 +914,7 @@ jobs:
             awk -v v="${NEW_VERSION}" '/^## /{p=($2==("v"v)||$2==v)} p{print}' CHANGELOG.md > docs/release-notes/RELEASE_NOTES.md || true
           fi
           if [ ! -s docs/release-notes/RELEASE_NOTES.md ]; then
-            printf "## @hanzo/dev v%s\n\nSee CHANGELOG.md for details." "${NEW_VERSION}" > docs/release-notes/RELEASE_NOTES.md
+            printf "## @just-every/code v%s\n\nSee CHANGELOG.md for details." "${NEW_VERSION}" > docs/release-notes/RELEASE_NOTES.md
           fi
 
       - name: Assert release notes exist
@@ -1042,7 +1042,7 @@ jobs:
           config_path="${NPM_CONFIG_USERCONFIG:-$HOME/.npmrc}"
           mkdir -p "$(dirname "$config_path")"
           echo "//registry.npmjs.org/:_authToken=${NODE_AUTH_TOKEN}" > "$config_path"
-          npm whoami >/dev/null 2>&1 || { echo "npm auth failed (npm whoami). Ensure NPM_TOKEN is a granular/automation token with publish rights to @hanzo/* and bypass 2FA enabled; update the secret via npmjs.com." >&2; exit 1; }
+          npm whoami >/dev/null 2>&1 || { echo "npm auth failed (npm whoami). Ensure NPM_TOKEN is a granular/automation token with publish rights to @just-every/* and bypass 2FA enabled; update the secret via npmjs.com." >&2; exit 1; }
           shopt -s nullglob
           for dir in npm-binaries/*; do
             name=$(jq -r '.name' "$dir/package.json")
@@ -1068,8 +1068,8 @@ jobs:
           config_path="${NPM_CONFIG_USERCONFIG:-$HOME/.npmrc}"
           mkdir -p "$(dirname "$config_path")"
           echo "//registry.npmjs.org/:_authToken=${NODE_AUTH_TOKEN}" > "$config_path"
-          npm whoami >/dev/null 2>&1 || { echo "npm auth failed (npm whoami). Ensure NPM_TOKEN is a granular/automation token with publish rights to @hanzo/* and bypass 2FA enabled; update the secret via npmjs.com." >&2; exit 1; }
-          name="@hanzo/dev"
+          npm whoami >/dev/null 2>&1 || { echo "npm auth failed (npm whoami). Ensure NPM_TOKEN is a granular/automation token with publish rights to @just-every/* and bypass 2FA enabled; update the secret via npmjs.com." >&2; exit 1; }
+          name="@just-every/code"
           version=$(jq -r '.version' package.json)
           echo "Preparing to publish $name@$version"
           existing=$(npm view "$name@$version" version 2>/dev/null || true)

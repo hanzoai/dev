@@ -1,10 +1,10 @@
 # Auto Drive
 
-What Auto Drive is, how to start it, and how it behaves in Hanzo Dev.
+What Auto Drive is, how to start it, and how it behaves in Every Code.
 
 ## Start points
-- TUI: `/auto <goal>`. If you omit the goal and there is recent history, Hanzo Dev proposes one for you. `/auto settings` jumps straight to the Auto Drive pane.
-- CLI: `dev exec --auto "<goal>"` or `dev exec "/auto <goal>"`. A goal is required when launching headless.
+- TUI: `/auto <goal>`. If you omit the goal and there is recent history, Code proposes one for you. `/auto settings` jumps straight to the Auto Drive pane.
+- CLI: `code exec --auto "<goal>"` or `code exec "/auto <goal>"`. A goal is required when launching headless.
 - Precondition: Full Auto mode (danger-full-access + approval=never) must be selected in the TUI; otherwise you’ll see a warning and Auto Drive will not start.
 
 ## Goal handling
@@ -60,6 +60,6 @@ What Auto Drive is, how to start it, and how it behaves in Hanzo Dev.
 - All of these can be changed from `/auto settings` in the TUI or directly in `config.toml`.
 
 ## Tips
-- Stay in the TUI if you want countdowns and visual status; use `dev exec --auto` for CI or scripted flows.
+- Stay in the TUI if you want countdowns and visual status; use `code exec --auto` for CI or scripted flows.
 - If Auto Drive stops because it couldn’t derive a goal, rerun `/auto <goal>` with a short, specific instruction.
 - Turn off agents in `/auto settings` if you want a single-model run.

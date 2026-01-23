@@ -1,0 +1,27 @@
+---
+source: tui/tests/vt100_chatwidget_snapshot.rs
+expression: output
+---
+ +----------------------------------------------------------------------------+
+ |                                 Every Code                                 |
+ +----------------------------------------------------------------------------+
+
+   - Writing code
+   - Reading files
+   - Running commands
+
+
+
+ • Here's a simple function:
+
+   + rust ----------------------------+
+   |  fn hello() {                    |
+   |      println!("Hello, world!");  |
+   |  }                               |
+   +----------------------------------+
+
+
+ +----------------------------------------------------------------------------+
+ | What can I code for you today?                                             |
+ +----------------------------------------------------------------------------+
+ Read Only  (Shift+Tab change)                        Ctrl+G guide  •  API key
