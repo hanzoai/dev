@@ -126,7 +126,7 @@ impl SlashCommand {
             SlashCommand::Model => "choose your default model",
             SlashCommand::Agents => "configure agents",
             SlashCommand::Auto => "work autonomously on long tasks with Auto Drive",
-            SlashCommand::Provider => "list or switch API providers (ollama, lmstudio, openrouter, etc.)",
+            SlashCommand::Provider => "manage providers and API key rotation across endpoints",
             SlashCommand::Branch => {
                 "work in an isolated /branch then /merge when done (great for parallel work)"
             }
