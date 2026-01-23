@@ -75,6 +75,7 @@ pub enum SlashCommand {
     Demo,
     Agents,
     Auto,
+    Provider,
     Branch,
     Merge,
     Push,
@@ -125,6 +126,7 @@ impl SlashCommand {
             SlashCommand::Model => "choose your default model",
             SlashCommand::Agents => "configure agents",
             SlashCommand::Auto => "work autonomously on long tasks with Auto Drive",
+            SlashCommand::Provider => "list or switch API providers (ollama, lmstudio, openrouter, etc.)",
             SlashCommand::Branch => {
                 "work in an isolated /branch then /merge when done (great for parallel work)"
             }

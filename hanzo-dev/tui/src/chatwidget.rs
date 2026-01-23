@@ -27797,6 +27797,92 @@ Have we met every part of this goal and is there no further work to do?"#
         }
     }
 
+    /// Handle `/provider` command: list or switch API providers.
+    pub(crate) fn handle_provider_command(&mut self, command_text: String) {
+        let trimmed = command_text.trim();
+
+        if trimmed.is_empty() || trimmed == "list" {
+            // List all available providers
+            let providers = &self.config.model_providers;
+            let current = &self.config.model_provider_id;
+
+            let mut lines = String::new();
+            lines.push_str("Available providers:\n\n");
+
+            let mut sorted_providers: Vec<_> = providers.iter().collect();
+            sorted_providers.sort_by(|a, b| a.0.cmp(b.0));
+
+            for (id, info) in sorted_providers {
+                let marker = if id == current { "▶ " } else { "  " };
+                let base_url = info.base_url.as_deref().unwrap_or("(default)");
+                let env_key = info
+                    .env_key
+                    .as_ref()
+                    .map(|k| format!(" [{}]", k))
+                    .unwrap_or_default();
+                lines.push_str(&format!(
+                    "{}{} — {}{}\n    {}\n",
+                    marker, id, info.name, env_key, base_url
+                ));
+            }
+
+            lines.push_str("\nUsage: /provider <name> — switch to provider");
+            lines.push_str("\n       /provider list — list providers");
+            self.push_background_tail(lines);
+            return;
+        }
+
+        // Try to switch to the named provider
+        let provider_id = trimmed.to_ascii_lowercase();
+
+        if !self.config.model_providers.contains_key(&provider_id) {
+            let available: Vec<_> = self.config.model_providers.keys().collect();
+            let msg = format!(
+                "Unknown provider '{}'. Available: {}",
+                provider_id,
+                available
+                    .iter()
+                    .map(|s| s.as_str())
+                    .collect::<Vec<_>>()
+                    .join(", ")
+            );
+            self.history_push_plain_state(history_cell::new_error_event(msg));
+            return;
+        }
+
+        // Check if provider's env key is set (if required)
+        if let Some(info) = self.config.model_providers.get(&provider_id) {
+            if let Some(env_key) = &info.env_key {
+                if std::env::var(env_key).map(|v| v.trim().is_empty()).unwrap_or(true) {
+                    let instructions = info
+                        .env_key_instructions
+                        .as_deref()
+                        .unwrap_or("Set the environment variable and restart.");
+                    let msg = format!(
+                        "Provider '{}' requires {} to be set.\n\n{}",
+                        provider_id, env_key, instructions
+                    );
+                    self.history_push_plain_state(history_cell::new_error_event(msg));
+                    return;
+                }
+            }
+        }
+
+        // Switch provider
+        let provider = self.config.model_providers.get(&provider_id).cloned();
+        if let Some(info) = provider {
+            self.config.model_provider_id = provider_id.clone();
+            self.config.model_provider = info.clone();
+            let msg = format!(
+                "Switched to provider: {} ({})\nBase URL: {}",
+                info.name,
+                provider_id,
+                info.base_url.as_deref().unwrap_or("(default)")
+            );
+            self.push_background_tail(msg);
+        }
+    }
+
     #[allow(dead_code)]
     fn switch_to_internal_browser(&mut self) {
         // Switch to internal browser mode
