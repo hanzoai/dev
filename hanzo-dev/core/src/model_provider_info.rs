@@ -498,11 +498,10 @@ fn wire_api_override_from_env(env_key: &str) -> Option<WireApi> {
 pub fn built_in_model_providers() -> HashMap<String, ModelProviderInfo> {
     use ModelProviderInfo as P;
 
-    // We do not want to be in the business of adjucating which third-party
-    // providers are bundled with Codex CLI, so we only include the OpenAI and
-    // open source ("oss") providers by default. Users are encouraged to add to
-    // `model_providers` in config.toml to add their own providers.
+    // Built-in providers for common OpenAI-compatible endpoints.
+    // Users can add more via `model_providers` in config.toml.
     [
+        // OpenAI (default)
         (
             "openai",
             P {
@@ -545,7 +544,208 @@ pub fn built_in_model_providers() -> HashMap<String, ModelProviderInfo> {
                 openrouter: None,
             },
         ),
+        // Generic local OSS provider (defaults to Ollama port)
         (BUILT_IN_OSS_MODEL_PROVIDER_ID, create_oss_provider()),
+        // Ollama - local inference server (port 11434)
+        (
+            "ollama",
+            P {
+                name: "Ollama".into(),
+                base_url: std::env::var("OLLAMA_BASE_URL")
+                    .ok()
+                    .filter(|v| !v.trim().is_empty())
+                    .or_else(|| Some(format!("http://localhost:{DEFAULT_OLLAMA_PORT}/v1"))),
+                env_key: None,
+                env_key_instructions: Some("Ollama runs locally - no API key needed. Start with: ollama serve".into()),
+                experimental_bearer_token: None,
+                wire_api: WireApi::Chat,
+                query_params: None,
+                http_headers: None,
+                env_http_headers: None,
+                request_max_retries: Some(2),
+                stream_max_retries: Some(2),
+                stream_idle_timeout_ms: Some(60_000),
+                requires_openai_auth: false,
+                openrouter: None,
+            },
+        ),
+        // LM Studio - local inference server (port 1234)
+        (
+            "lmstudio",
+            P {
+                name: "LM Studio".into(),
+                base_url: std::env::var("LMSTUDIO_BASE_URL")
+                    .ok()
+                    .filter(|v| !v.trim().is_empty())
+                    .or_else(|| Some("http://localhost:1234/v1".into())),
+                env_key: None,
+                env_key_instructions: Some("LM Studio runs locally - no API key needed. Enable local server in LM Studio.".into()),
+                experimental_bearer_token: None,
+                wire_api: WireApi::Chat,
+                query_params: None,
+                http_headers: None,
+                env_http_headers: None,
+                request_max_retries: Some(2),
+                stream_max_retries: Some(2),
+                stream_idle_timeout_ms: Some(60_000),
+                requires_openai_auth: false,
+                openrouter: None,
+            },
+        ),
+        // Hanzo Node - Hanzo AI local/cloud inference
+        (
+            "hanzo",
+            P {
+                name: "Hanzo Node".into(),
+                base_url: std::env::var("HANZO_BASE_URL")
+                    .ok()
+                    .filter(|v| !v.trim().is_empty())
+                    .or_else(|| Some("http://localhost:8787/v1".into())),
+                env_key: Some("HANZO_API_KEY".into()),
+                env_key_instructions: Some("Get your Hanzo API key at https://hanzo.ai or run a local Hanzo Node".into()),
+                experimental_bearer_token: None,
+                wire_api: WireApi::Chat,
+                query_params: None,
+                http_headers: None,
+                env_http_headers: None,
+                request_max_retries: None,
+                stream_max_retries: None,
+                stream_idle_timeout_ms: None,
+                requires_openai_auth: false,
+                openrouter: None,
+            },
+        ),
+        // OpenRouter - multi-provider router
+        (
+            "openrouter",
+            P {
+                name: "OpenRouter".into(),
+                base_url: Some("https://openrouter.ai/api/v1".into()),
+                env_key: Some("OPENROUTER_API_KEY".into()),
+                env_key_instructions: Some("Get your OpenRouter API key at https://openrouter.ai/keys".into()),
+                experimental_bearer_token: None,
+                wire_api: WireApi::Chat,
+                query_params: None,
+                http_headers: Some(
+                    [
+                        ("HTTP-Referer".to_string(), "https://hanzo.ai".to_string()),
+                        ("X-Title".to_string(), "Hanzo Dev".to_string()),
+                    ]
+                    .into_iter()
+                    .collect(),
+                ),
+                env_http_headers: None,
+                request_max_retries: None,
+                stream_max_retries: None,
+                stream_idle_timeout_ms: None,
+                requires_openai_auth: false,
+                openrouter: Some(OpenRouterConfig::default()),
+            },
+        ),
+        // Groq - fast inference cloud
+        (
+            "groq",
+            P {
+                name: "Groq".into(),
+                base_url: Some("https://api.groq.com/openai/v1".into()),
+                env_key: Some("GROQ_API_KEY".into()),
+                env_key_instructions: Some("Get your Groq API key at https://console.groq.com/keys".into()),
+                experimental_bearer_token: None,
+                wire_api: WireApi::Chat,
+                query_params: None,
+                http_headers: None,
+                env_http_headers: None,
+                request_max_retries: None,
+                stream_max_retries: None,
+                stream_idle_timeout_ms: None,
+                requires_openai_auth: false,
+                openrouter: None,
+            },
+        ),
+        // Together.ai - inference platform
+        (
+            "together",
+            P {
+                name: "Together.ai".into(),
+                base_url: Some("https://api.together.xyz/v1".into()),
+                env_key: Some("TOGETHER_API_KEY".into()),
+                env_key_instructions: Some("Get your Together API key at https://api.together.xyz/settings/api-keys".into()),
+                experimental_bearer_token: None,
+                wire_api: WireApi::Chat,
+                query_params: None,
+                http_headers: None,
+                env_http_headers: None,
+                request_max_retries: None,
+                stream_max_retries: None,
+                stream_idle_timeout_ms: None,
+                requires_openai_auth: false,
+                openrouter: None,
+            },
+        ),
+        // Anthropic Claude
+        (
+            "anthropic",
+            P {
+                name: "Anthropic".into(),
+                base_url: Some("https://api.anthropic.com/v1".into()),
+                env_key: Some("ANTHROPIC_API_KEY".into()),
+                env_key_instructions: Some("Get your Anthropic API key at https://console.anthropic.com/settings/keys".into()),
+                experimental_bearer_token: None,
+                wire_api: WireApi::Chat,
+                query_params: None,
+                http_headers: Some(
+                    [("anthropic-version".to_string(), "2023-06-01".to_string())]
+                        .into_iter()
+                        .collect(),
+                ),
+                env_http_headers: None,
+                request_max_retries: None,
+                stream_max_retries: None,
+                stream_idle_timeout_ms: None,
+                requires_openai_auth: false,
+                openrouter: None,
+            },
+        ),
+        // Fireworks AI
+        (
+            "fireworks",
+            P {
+                name: "Fireworks AI".into(),
+                base_url: Some("https://api.fireworks.ai/inference/v1".into()),
+                env_key: Some("FIREWORKS_API_KEY".into()),
+                env_key_instructions: Some("Get your Fireworks API key at https://fireworks.ai/account/api-keys".into()),
+                experimental_bearer_token: None,
+                wire_api: WireApi::Chat,
+                query_params: None,
+                http_headers: None,
+                env_http_headers: None,
+                request_max_retries: None,
+                stream_max_retries: None,
+                stream_idle_timeout_ms: None,
+                requires_openai_auth: false,
+                openrouter: None,
+            },
+        ),
+        // Deepseek
+        (
+            "deepseek",
+            P {
+                name: "DeepSeek".into(),
+                base_url: Some("https://api.deepseek.com/v1".into()),
+                env_key: Some("DEEPSEEK_API_KEY".into()),
+                env_key_instructions: Some("Get your DeepSeek API key at https://platform.deepseek.com/api_keys".into()),
+                experimental_bearer_token: None,
+                wire_api: WireApi::Chat,
+                query_params: None,
+                http_headers: None,
+                env_http_headers: None,
+                request_max_retries: None,
+                stream_max_retries: None,
+                stream_idle_timeout_ms: None,
+                requires_openai_auth: false,
+                openrouter: None,
+            },
+        ),
     ]
     .into_iter()
     .map(|(k, v)| (k.to_string(), v))
