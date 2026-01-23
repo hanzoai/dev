@@ -1,6 +1,6 @@
-# Performance testing (`dev-tui2`)
+# Performance testing (`codex-tui2`)
 
-This doc captures a repeatable workflow for investigating `dev-tui2` performance issues
+This doc captures a repeatable workflow for investigating `codex-tui2` performance issues
 (especially high idle CPU and high CPU while streaming) and validating optimizations to the draw
 hot path.
 
@@ -21,7 +21,7 @@ Key invariants:
 
 ## Roles
 
-- Human: runs `dev-tui2` in an interactive terminal (e.g. Ghostty), triggers “idle” and
+- Human: runs `codex-tui2` in an interactive terminal (e.g. Ghostty), triggers “idle” and
   “streaming” scenarios, and captures profiles.
 - Assistant (or a script): reads profile output and extracts hotspots and deltas.
 
@@ -30,20 +30,20 @@ Key invariants:
 Build from a clean checkout:
 
 ```sh
-cd hanzo-dev
-cargo build -p dev-tui2
+cd codex-rs
+cargo build -p codex-tui2
 ```
 
-Run `dev-tui2` in a terminal and get a PID (macOS):
+Run `codex-tui2` in a terminal and get a PID (macOS):
 
 ```sh
-pgrep -n dev-tui2
+pgrep -n codex-tui2
 ```
 
 Track CPU quickly while reproducing:
 
 ```sh
-top -pid "$(pgrep -n dev-tui2)"
+top -pid "$(pgrep -n codex-tui2)"
 ```
 
 ## Capture profiles (macOS)
@@ -51,8 +51,8 @@ top -pid "$(pgrep -n dev-tui2)"
 Capture both an “idle” and a “streaming” profile so hotspots are not conflated:
 
 ```sh
-sample "$(pgrep -n dev-tui2)" 1 -file /tmp/tui2.idle.sample.txt
-sample "$(pgrep -n dev-tui2)" 1 -file /tmp/tui2.streaming.sample.txt
+sample "$(pgrep -n codex-tui2)" 1 -file /tmp/tui2.idle.sample.txt
+sample "$(pgrep -n codex-tui2)" 1 -file /tmp/tui2.streaming.sample.txt
 ```
 
 For the streaming sample, trigger a response that emits many deltas (e.g. “Tell me a story”) so
@@ -87,11 +87,11 @@ After implementing a transcript rasterization cache, re-run the same scenarios a
 - CPU snapshot: `top` (directional)
 - Profile excerpt: 20–50 relevant lines for the dominant stacks
 
-## Hanzo Dev pointers
+## Code pointers
 
-- `hanzo-dev/tui2/src/transcript_view_cache.rs`: wrapped transcript memoization + per-line
+- `codex-rs/tui2/src/transcript_view_cache.rs`: wrapped transcript memoization + per-line
   rasterization cache (cached `Cell` rows).
-- `hanzo-dev/tui2/src/transcript_render.rs`: incremental helper used by the wrapped-line cache
+- `codex-rs/tui2/src/transcript_render.rs`: incremental helper used by the wrapped-line cache
   (`append_wrapped_transcript_cell`).
-- `hanzo-dev/tui2/src/app.rs`: wiring in `App::render_transcript_cells` (uses cached rows instead of
+- `codex-rs/tui2/src/app.rs`: wiring in `App::render_transcript_cells` (uses cached rows instead of
   calling `Line::render_ref` every frame).

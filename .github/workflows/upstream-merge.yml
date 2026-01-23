@@ -266,7 +266,7 @@ jobs:
         if: steps.check_upstream.outputs.skip != 'true'
         run: |
           echo "CARGO_HOME=${RUNNER_TEMP}/cargo-home" >> "$GITHUB_ENV"
-          echo "CARGO_TARGET_DIR=${GITHUB_WORKSPACE}/hanzo-dev/target" >> "$GITHUB_ENV"
+          echo "CARGO_TARGET_DIR=${GITHUB_WORKSPACE}/code-rs/target" >> "$GITHUB_ENV"
 
       - name: Cache ripgrep binary
         if: steps.check_upstream.outputs.skip != 'true'
@@ -366,14 +366,30 @@ jobs:
           restore-keys: |
             npm-cache-${{ runner.os }}-node20-
 
-      - name: Verify GitHub Copilot access
+      - name: Start local OpenAI proxy (no key to agent; verbose logging)
+        if: steps.check_upstream.outputs.skip != 'true'
+        id: openai_proxy
+        env:
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+        run: |
+          set -euo pipefail
+          if [ -z "${OPENAI_API_KEY:-}" ]; then
+            echo "OPENAI_API_KEY secret is required to start the proxy." >&2
+            exit 1
+          fi
+          mkdir -p .github/auto
+          PORT=5055 LOG_DEST=stdout EXIT_ON_5XX=1 RESPONSES_BETA="responses=v1" node scripts/openai-proxy.js > .github/auto/openai-proxy.log 2>&1 &
+          echo "pid=$!" >> "$GITHUB_OUTPUT"
+          # Wait briefly for readiness
+          for i in {1..30}; do if nc -z 127.0.0.1 5055; then break; else sleep 0.2; fi; done || true
+
+
+      - name: Print proxy startup log tail
         if: steps.check_upstream.outputs.skip != 'true'
         run: |
           set -euo pipefail
-          mkdir -p .github/auto
-          echo "Using GitHub Copilot for agent backend (authenticated via GH_TOKEN)"
-          # Verify gh is available and authenticated
-          gh auth status || echo "Note: gh auth may show warning but GH_TOKEN should work"
+          echo '### openai-proxy.log (tail)' >> "$GITHUB_STEP_SUMMARY"
+          { echo '```'; tail -n 80 .github/auto/openai-proxy.log || true; echo '```'; } >> "$GITHUB_STEP_SUMMARY"
 
       - name: Prepare agent context (commit range, deleted paths, histogram)
         id: prep
@@ -601,15 +617,17 @@ jobs:
 
           env -i PATH="$SAFE_PATH" HOME="$SAFE_HOME" \
             RUSTC_WRAPPER="sccache" SCCACHE_GHA_ENABLED="true" SCCACHE_IDLE_TIMEOUT="1800" SCCACHE_CACHE_SIZE="5G" \
+            OPENAI_API_KEY="x" \
+            OPENAI_BASE_URL="http://127.0.0.1:5055/v1" \
+            OPENAI_API_BASE="http://127.0.0.1:5055/v1" \
             GH_TOKEN="$GH_TOKEN" \
             npm_config_cache="$SAFE_HOME/.npm" \
-            npx -y @hanzo/dev@latest \
+            npx -y @just-every/code@latest \
             auto \
             --goal-file .github/auto/AUTO_GOAL.md \
             --max-attempts 3 \
             --cd "$GITHUB_WORKSPACE" \
             --skip-git-repo-check \
-            --provider copilot \
             -s workspace-write \
             -c sandbox_workspace_write.allow_git_writes=true \
             -c sandbox_workspace_write.network_access=true \
@@ -633,6 +651,27 @@ jobs:
             rg -n "^\\[.*\\] ERROR: (stream error|server error|exceeded retry limit)" .github/auto/AGENT_STDOUT.txt || true
             exit 1
           fi
+          # Also flag 5xx responses from the proxy logs if present
+          if [ -s .github/auto/openai-proxy.log ]; then
+            if rg -n '"phase":"response_head".*"status":5\\d\\d' .github/auto/openai-proxy.log >/dev/null 2>&1; then
+              echo "Proxy observed 5xx from upstream during agent run. Failing job." >&2
+              rg -n '"phase":"response_head".*"status":5\\d\\d' .github/auto/openai-proxy.log | tail -n 5 || true
+              exit 1
+            fi
+            if rg -n '"phase":"upstream_error"' .github/auto/openai-proxy.log >/dev/null 2>&1; then
+              echo "Proxy upstream_error entries found. Failing job." >&2
+              rg -n '"phase":"upstream_error"' .github/auto/openai-proxy.log | tail -n 10 || true
+              exit 1
+            fi
+          fi
+
+      - name: Upload artifact - openai-proxy.log
+        if: steps.check_upstream.outputs.skip != 'true'
+        uses: actions/upload-artifact@v4
+        with:
+          name: openai-proxy.log
+          if-no-files-found: warn
+          path: .github/auto/openai-proxy.log
 
       - name: Post-merge verify (build-fast + API compile)
         id: verify
@@ -700,7 +739,7 @@ jobs:
               GH_TOKEN="$GH_TOKEN" \
               RUSTC_WRAPPER="sccache" SCCACHE_GHA_ENABLED="true" SCCACHE_IDLE_TIMEOUT="1800" SCCACHE_CACHE_SIZE="5G" \
               npm_config_cache="$SAFE_HOME/.npm" \
-              npx -y @hanzo/dev@latest \
+              npx -y @just-every/code@latest \
               exec \
               -s workspace-write \
               -c sandbox_workspace_write.allow_git_writes=true \

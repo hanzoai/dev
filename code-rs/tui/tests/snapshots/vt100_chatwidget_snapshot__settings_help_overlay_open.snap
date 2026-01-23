@@ -1,0 +1,31 @@
+---
+source: tui/tests/vt100_chatwidget_snapshot.rs
+expression: open
+---
+ +------------------------------------------------------------------------------------------------+
+ |                                           Every Code                                           |
+ +------------------------------------------------------------------------------------------------+
+ +Settings ▸ Overview-----------------------------------------------------------------------------+
+ |                                                                                                |
+ | › Model              Model: GPT-5.2-Codex (Medium)                                             |
+ |   + Choose the language model used for new completions.                                        |
+ |                           +----------------------------------------+                           |
+ |   Theme              Theme|Settings Overview                       |mond                       |
+ |   + Switch between preset |                                        |                           |
+ |                           |• ↑/↓  Move between sections            |                           |
+ |   Updates            Auto |• Enter  Open selected section          |                           |
+ |   + Control CLI auto-updat|• Tab    Jump forward between sections  |                           |
+ |                           |• Esc    Close settings                 |                           |
+ |   ------------------------|• ?      Toggle this help               |-------------------------- |
+ |                           |                                        |                           |
+ |   Accounts           Auto-|Press Esc to close                      |                           |
+ |   + Configure account swit+----------------------------------------+.                          |
+ |                                                                                                |
+ | ↑ ↓ Move    Enter Open    Esc Close    ? Help                                                  |
+ |                                                                                                |
+ +------------------------------------------------------------------------------------------------+
+
+ +------------------------------------------------------------------------------------------------+
+ | What can I code for you today?                                                                 |
+ +------------------------------------------------------------------------------------------------+
+ Read Only  (Shift+Tab change)                                            Ctrl+G guide  •  API key

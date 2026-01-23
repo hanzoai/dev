@@ -7,6 +7,22 @@
 
 - (none)
 
+## [0.6.50] - 2026-01-22
+
+- Core/Models: default to gpt-5.2-codex with personality templating and request-user-input support. (7aad17a5, 95bcf62e)
+- Core/Config: add layered config.toml support for app-server reads and merges. (2ca9a565)
+- TUI: add request-user-input overlay with interactive picker and reliable pending/answer routing. (5f55ed66, c7123257, 35f18684, b972185d)
+- Core/Runtime: preserve interrupted turns to prevent repeats and avoid touching thread mtime on resume. (b236f1c9, b0049ab6)
+- Sandbox/Paths: harden tilde expansion and Windows sandbox audit paths for safer writable roots. (8179312f, c73a11d5, f2de9201)
+
+## [0.6.49] - 2026-01-17
+
+- CLI/Fork: /fork now clones the current session and surfaces the source session id in /status. (e893e83e, c26fe645)
+- Auth: add device code login for headless environments to simplify setup. (13159006)
+- TUI/Auto-review: persist review baselines across sessions to avoid repeated prompts. (8aba6b6f)
+- Core: align tool output caps with model policy to prevent unexpected truncation. (63dcaeda)
+- API: allow listing threads ordered by created_at or updated_at for predictable pagination. (f1653dd4)
+
 ## [0.6.48] - 2026-01-14
 
 - Browser: stabilize /browser command handling and diff rendering for reliable runs. (bfd15335)

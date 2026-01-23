@@ -35,6 +35,4 @@ export type {
   ThreadOptions as TurnOptions,
   ApprovalMode,
   SandboxMode,
-  ModelReasoningEffort,
-  WebSearchMode,
 } from "./threadOptions";

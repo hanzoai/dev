@@ -1,6 +1,6 @@
-# Hanzo Dev Documentation
+# Every Code Documentation
 
-Use these docs to install, configure, and operate Hanzo Dev (Hanzo Dev).
+Use these docs to install, configure, and operate Every Code (Code).
 
 ## Start Here
 - [Getting started](getting-started.md)
@@ -8,7 +8,7 @@ Use these docs to install, configure, and operate Hanzo Dev (Hanzo Dev).
 - [Authentication](authentication.md)
 - [FAQ](faq.md)
 
-## Using Hanzo Dev
+## Using Code
 - [Executing commands](exec.md)
 - [Execution policy](execpolicy.md)
 - [Slash commands](slash-commands.md)
