@@ -123,6 +123,35 @@ pub(crate) fn background() -> Color {
     current_theme().background
 }
 
+/// Input area background - slightly lighter than main background for contrast
+/// (Codex-style grey input bar)
+pub(crate) fn input_background() -> Color {
+    match palette_mode() {
+        PaletteMode::Ansi16 => {
+            // Use dark grey for ANSI terminals
+            Color::Indexed(8)
+        }
+        PaletteMode::Ansi256 => {
+            let bg = current_theme().background;
+            let (r, g, b) = color_to_rgb(bg);
+            // Lighten dark backgrounds, darken light backgrounds
+            let is_dark = (r as u16 + g as u16 + b as u16) < 384;
+            if is_dark {
+                // Lighten by blending toward grey (#303030)
+                let target = 48u8;
+                let blend = |c: u8| -> u8 {
+                    ((c as u16 + target as u16 * 2) / 3) as u8
+                };
+                quantize_color_for_palette(Color::Rgb(blend(r), blend(g), blend(b)))
+            } else {
+                // Darken light backgrounds slightly
+                let blend = |c: u8| -> u8 { (c as u16 * 95 / 100) as u8 };
+                quantize_color_for_palette(Color::Rgb(blend(r), blend(g), blend(b)))
+            }
+        }
+    }
+}
+
 #[allow(dead_code)]
 pub(crate) fn selection() -> Color {
     current_theme().selection

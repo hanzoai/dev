@@ -631,23 +631,11 @@ fn popular_commands_lines(_latest_version: Option<&str>) -> Vec<Line<'static>> {
 
 pub(crate) fn new_popular_commands_notice(
     _connecting_mcp: bool,
-    latest_version: Option<&str>,
+    _latest_version: Option<&str>,
 ) -> PlainMessageState {
-    if crate::chatwidget::is_test_mode() {
-        let mut lines: Vec<Line<'static>> = Vec::new();
-        lines.push(Line::from(""));
-        let legacy_line = "  /code - perform a coding task (multiple agents)";
-        #[cfg(any(test, feature = "test-helpers"))]
-        println!("legacy command line: {legacy_line}");
-        lines.push(Line::from(legacy_line));
-        return plain_message_state_from_lines(lines, HistoryCellType::Notice);
-    }
-    let mut lines: Vec<Line<'static>> = Vec::new();
-    lines.push(Line::from("notice".dim()));
-    lines.extend(popular_commands_lines(latest_version));
-    // Connecting status is now rendered as a separate BackgroundEvent cell
-    // with its own gutter icon and spacing. Keep this notice focused.
-    plain_message_state_from_lines(lines, HistoryCellType::Notice)
+    // Minimal notice - popular commands hidden for cleaner startup
+    let lines: Vec<Line<'static>> = Vec::new();
+    plain_message_state_from_lines(lines, HistoryCellType::Plain)
 }
 
 pub(crate) fn new_user_prompt(message: String) -> PlainMessageState {

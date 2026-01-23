@@ -10502,7 +10502,13 @@ impl ChatWidget<'_> {
     /// Push a cell using a synthetic key at the TOP of the NEXT request.
     fn history_push_top_next_req(&mut self, cell: impl HistoryCell + 'static) {
         let key = self.next_req_key_top();
-        let _ = self.history_insert_with_key_global_tagged(Box::new(cell), key, "prelude", None);
+        // Use correct tag based on cell type to satisfy debug assertions
+        let tag = if cell.kind() == HistoryCellType::BackgroundEvent {
+            "background"
+        } else {
+            "prelude"
+        };
+        let _ = self.history_insert_with_key_global_tagged(Box::new(cell), key, tag, None);
     }
     fn history_replace_with_record(
         &mut self,
@@ -24073,6 +24079,7 @@ Have we met every part of this goal and is there no further work to do?"#
             hanzo_core::config_types::ThemeName::DarkPaperLightPro => {
                 "Dark - Paper Light Pro".to_string()
             }
+            hanzo_core::config_types::ThemeName::DarkMonochrome => "Dark - Monochrome".to_string(),
             hanzo_core::config_types::ThemeName::Custom => {
                 let mut label =
                     crate::theme::custom_theme_label().unwrap_or_else(|| "Custom".to_string());
@@ -27566,6 +27573,24 @@ Have we met every part of this goal and is there no further work to do?"#
                     self.history_push_plain_state(history_cell::new_error_event(msg));
                 }
             },
+            "list" | "tools" => {
+                // List configured MCP servers and their tool prefixes
+                // Note: Runtime tool details are loaded when a session starts
+                if self.config.mcp_servers.is_empty() {
+                    self.push_background_tail("No MCP servers configured. Use /mcp add … to add one.".to_string());
+                } else {
+                    let mut lines = format!("MCP Servers ({}):\n", self.config.mcp_servers.len());
+                    let mut sorted_servers: Vec<_> = self.config.mcp_servers.iter().collect();
+                    sorted_servers.sort_by_key(|(name, _)| name.as_str());
+                    for (name, cfg) in sorted_servers {
+                        let transport_info = Self::format_mcp_summary(cfg);
+                        lines.push_str(&format!("• {} — {}\n", name, transport_info));
+                        lines.push_str(&format!("  Tools prefix: mcp__{}_*\n", name));
+                    }
+                    lines.push_str("\nTools are loaded when a session starts. Use model to discover available tools.");
+                    self.push_background_tail(lines);
+                }
+            }
             "on" | "off" => {
                 let name = parts.next().unwrap_or("");
                 if name.is_empty() {
@@ -27764,7 +27789,7 @@ Have we met every part of this goal and is there no further work to do?"#
             }
             _ => {
                 let msg = format!(
-                    "Unknown MCP command: '{}'\nUsage:\n  /mcp status\n  /mcp on <name>\n  /mcp off <name>\n  /mcp add <name> <command> [args…] [ENV=VAL…]",
+                    "Unknown MCP command: '{}'\nUsage:\n  /mcp status\n  /mcp list\n  /mcp on <name>\n  /mcp off <name>\n  /mcp add <name> <command> [args…] [ENV=VAL…]",
                     sub
                 );
                 self.history_push_plain_state(history_cell::new_error_event(msg));
@@ -28642,11 +28667,11 @@ Have we met every part of this goal and is there no further work to do?"#
         // Render a bordered status block and explicitly fill its background.
         // Without a background fill, some terminals blend with prior frame
         // contents, which is especially noticeable on dark themes as dark
-        // "caps" at the edges. Match the app background for consistency.
+        // "caps" at the edges. Use input_background for Codex-style grey box.
         let status_block = Block::default()
             .borders(Borders::ALL)
             .border_style(Style::default().fg(crate::colors::border()))
-            .style(Style::default().bg(crate::colors::background()));
+            .style(Style::default().bg(crate::colors::input_background()));
         let inner_area = status_block.inner(padded_area);
         let padded_inner = inner_area.inner(Margin::new(1, 0));
         let inner_width = padded_inner.width as usize;

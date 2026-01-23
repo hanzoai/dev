@@ -49,7 +49,7 @@ pub fn intro_art_height(size: IntroArtSize) -> u16 {
         IntroArtSize::Large => 28,
         IntroArtSize::Medium => 21,
         IntroArtSize::Small => 19,
-        IntroArtSize::Tiny => 7,
+        IntroArtSize::Tiny => 2, // Codex-style minimal
     }
 }
 
@@ -312,14 +312,10 @@ fn small_welcome_lines(version: &str) -> Vec<String> {
 }
 
 fn tiny_welcome_lines(version: &str) -> Vec<String> {
+    // Codex-style minimal one-liner
     vec![
-        format!("HANZO DEV             {version}    "),
-        "██████╗ ███████╗██╗   ██╗              ".to_string(),
-        "██╔══██╗██╔════╝██║   ██║              ".to_string(),
-        "██║  ██║█████╗  ██║   ██║              ".to_string(),
-        "██║  ██║██╔══╝  ╚██╗ ██╔╝              ".to_string(),
-        "██████╔╝███████╗ ╚████╔╝               ".to_string(),
-        "╚═════╝ ╚══════╝  ╚═══╝                ".to_string(),
+        format!(">_ hanzo dev ({version})"),
+        String::new(),
     ]
 }
 

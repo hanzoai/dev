@@ -87,6 +87,16 @@ impl PartialEq for CodexAuth {
 
 impl CodexAuth {
     pub async fn refresh_token(&self) -> Result<String, RefreshTokenError> {
+        // API key auth cannot be refreshed - the key is either valid or not.
+        // Return the existing key so the caller can retry with it.
+        if self.mode == AuthMode::ApiKey {
+            return self.api_key.clone().ok_or_else(|| {
+                RefreshTokenError::permanent(
+                    "API key authentication failed. Please check your API key is valid.",
+                )
+            });
+        }
+
         let token_data = self
             .get_current_token_data()
             .ok_or_else(|| RefreshTokenError::permanent("Token data is not available."))?;

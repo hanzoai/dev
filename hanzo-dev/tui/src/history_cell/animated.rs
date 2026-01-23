@@ -72,7 +72,7 @@ impl HistoryCell for AnimatedWelcomeCell {
     fn display_lines(&self) -> Vec<Line<'static>> {
         vec![
             Line::from(""),
-            Line::from(format!("Hanzo Dev v{}", env!("CARGO_PKG_VERSION"))),
+            Line::from(format!("hanzo dev v{}", env!("CARGO_PKG_VERSION"))),
             Line::from(crate::greeting::greeting_placeholder()),
             Line::from(""),
         ]
@@ -81,7 +81,11 @@ impl HistoryCell for AnimatedWelcomeCell {
     fn desired_height(&self, width: u16) -> u16 {
         let variant_for_width = crate::glitch_animation::intro_art_size_for_width(width);
         let h = crate::glitch_animation::intro_art_height(variant_for_width);
-        h.saturating_add(3)
+        // For Tiny (Codex-style minimal), no extra padding needed
+        match variant_for_width {
+            crate::glitch_animation::IntroArtSize::Tiny => h,
+            _ => h.saturating_add(3),
+        }
     }
 
     fn has_custom_render(&self) -> bool {
@@ -110,9 +114,13 @@ impl HistoryCell for AnimatedWelcomeCell {
         }
 
         let height_hint = self.available_height.get().unwrap_or(area.height);
+        // Check if we're in Tiny mode (minimal terminal) - don't subtract padding
+        let variant_check = crate::glitch_animation::intro_art_size_for_width(area.width);
+        let is_tiny_mode = matches!(variant_check, crate::glitch_animation::IntroArtSize::Tiny);
+        let adjusted_height = if is_tiny_mode { height_hint } else { height_hint.saturating_sub(3) };
         let current_variant = crate::glitch_animation::intro_art_size_for_area(
             area.width,
-            height_hint.saturating_sub(3),
+            adjusted_height,
         );
         let previous_variant = self.variant.get();
         let variant_changed = previous_variant.map_or(false, |v| v != current_variant);
@@ -129,11 +137,13 @@ impl HistoryCell for AnimatedWelcomeCell {
         let variant_for_render = current_variant;
 
         let art_height = crate::glitch_animation::intro_art_height(current_variant);
-        let full_height = art_height.saturating_add(3);
+        // For Tiny (Codex-style minimal), no extra padding
+        let is_tiny = matches!(current_variant, crate::glitch_animation::IntroArtSize::Tiny);
+        let full_height = if is_tiny { art_height } else { art_height.saturating_add(3) };
         // Prefer the logo low in the cell so spare lines sit above it. Keep a
         // small bottom gap (up to 2 rows) when there's room; otherwise center.
         let slack = full_height.saturating_sub(art_height);
-        let bottom_pad = slack.min(2);
+        let bottom_pad = if is_tiny { 0 } else { slack.min(2) };
         let top_pad = slack.saturating_sub(bottom_pad);
         let art_top = top_pad;
         let art_bottom = art_top.saturating_add(art_height);

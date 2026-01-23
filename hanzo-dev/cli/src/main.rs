@@ -75,7 +75,7 @@ fn pre_main_hardening() {
 #[derive(Debug, Parser)]
 #[clap(
     author,
-    name = "dev",
+    name = "hanzo dev",
     version = hanzo_version::version(),
     // If a sub‑command is given, ignore requirements of the default args.
     subcommand_negates_reqs = true,
