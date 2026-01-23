@@ -28028,6 +28028,229 @@ Have we met every part of this goal and is there no further work to do?"#
         }
     }
 
+    /// Handle `/share` command: share local LLM nodes via tunnel.
+    pub(crate) fn handle_share_command(&mut self, command_text: String) {
+        let trimmed = command_text.trim();
+        let parts: Vec<&str> = trimmed.split_whitespace().collect();
+        let subcommand = parts.first().map(|s| s.to_ascii_lowercase());
+
+        // Default ports for common local inference servers
+        const OLLAMA_PORT: u16 = 11434;
+        const LMSTUDIO_PORT: u16 = 1234;
+        const HANZO_NODE_PORT: u16 = 8080;
+
+        if trimmed.is_empty() || subcommand.as_deref() == Some("help") {
+            let help = r#"Share local LLM nodes via tunnel for remote access.
+
+Usage:
+  /share ollama       — share Ollama (port 11434)
+  /share lmstudio     — share LM Studio (port 1234)
+  /share hanzo        — share Hanzo Node (port 8080)
+  /share <port>       — share custom port
+  /share stop         — stop active tunnel
+  /share status       — show tunnel status
+
+Prerequisites:
+  Install ngrok: brew install ngrok (macOS) or https://ngrok.com
+  Or: Install localxpose: https://localxpose.io
+
+The tunnel URL can be used by others with:
+  /provider add hanzo <tunnel-url>/v1
+
+Note: Free ngrok accounts have connection limits."#;
+            self.push_background_tail(help.to_string());
+            return;
+        }
+
+        // Check for ngrok or localxpose
+        let ngrok_available = std::process::Command::new("ngrok")
+            .arg("version")
+            .output()
+            .map(|o| o.status.success())
+            .unwrap_or(false);
+
+        let localxpose_available = std::process::Command::new("loclx")
+            .arg("--version")
+            .output()
+            .map(|o| o.status.success())
+            .unwrap_or(false);
+
+        if !ngrok_available && !localxpose_available {
+            self.history_push_plain_state(history_cell::new_error_event(
+                "No tunnel tool found. Install ngrok or localxpose:\n\n\
+                 ngrok: brew install ngrok (macOS) or https://ngrok.com\n\
+                 localxpose: https://localxpose.io".to_string()
+            ));
+            return;
+        }
+
+        if subcommand.as_deref() == Some("stop") {
+            // Kill any existing ngrok/loclx processes
+            let _ = std::process::Command::new("pkill")
+                .args(["-f", "ngrok"])
+                .output();
+            let _ = std::process::Command::new("pkill")
+                .args(["-f", "loclx"])
+                .output();
+            self.push_background_tail("Stopped all active tunnels.".to_string());
+            return;
+        }
+
+        if subcommand.as_deref() == Some("status") {
+            // Check ngrok status via API
+            let status = std::process::Command::new("curl")
+                .args(["-s", "http://127.0.0.1:4040/api/tunnels"])
+                .output();
+
+            match status {
+                Ok(output) if output.status.success() => {
+                    let body = String::from_utf8_lossy(&output.stdout);
+                    if body.contains("public_url") {
+                        // Parse the JSON to extract tunnel URLs
+                        if let Ok(json) = serde_json::from_str::<serde_json::Value>(&body) {
+                            if let Some(tunnels) = json.get("tunnels").and_then(|t| t.as_array()) {
+                                let mut lines = "Active tunnels:\n\n".to_string();
+                                for tunnel in tunnels {
+                                    if let (Some(name), Some(url)) = (
+                                        tunnel.get("name").and_then(|n| n.as_str()),
+                                        tunnel.get("public_url").and_then(|u| u.as_str()),
+                                    ) {
+                                        lines.push_str(&format!("  {} → {}\n", name, url));
+                                    }
+                                }
+                                self.push_background_tail(lines);
+                                return;
+                            }
+                        }
+                    }
+                    self.push_background_tail("No active ngrok tunnels.".to_string());
+                }
+                _ => {
+                    self.push_background_tail("No active tunnels (ngrok not running).".to_string());
+                }
+            }
+            return;
+        }
+
+        // Determine the port to share
+        let port: u16 = match subcommand.as_deref() {
+            Some("ollama") => OLLAMA_PORT,
+            Some("lmstudio") | Some("lm-studio") => LMSTUDIO_PORT,
+            Some("hanzo") | Some("hanzo-node") => HANZO_NODE_PORT,
+            Some(port_str) => {
+                match port_str.parse::<u16>() {
+                    Ok(p) => p,
+                    Err(_) => {
+                        self.history_push_plain_state(history_cell::new_error_event(format!(
+                            "Invalid port or service: '{}'. Use /share help for usage.",
+                            port_str
+                        )));
+                        return;
+                    }
+                }
+            }
+            None => {
+                self.history_push_plain_state(history_cell::new_error_event(
+                    "Please specify a service or port. Use /share help for usage.".to_string()
+                ));
+                return;
+            }
+        };
+
+        // Check if the local service is running
+        let check_port = std::process::Command::new("lsof")
+            .args(["-i", &format!(":{}", port)])
+            .output();
+
+        let port_in_use = check_port
+            .map(|o| o.status.success() && !o.stdout.is_empty())
+            .unwrap_or(false);
+
+        if !port_in_use {
+            self.history_push_plain_state(history_cell::new_error_event(format!(
+                "No service detected on port {}. Start the service first:\n\n\
+                 Ollama: ollama serve\n\
+                 LM Studio: Start from the app\n\
+                 Hanzo Node: hanzo-node serve",
+                port
+            )));
+            return;
+        }
+
+        // Start the tunnel
+        let service_name = match port {
+            OLLAMA_PORT => "ollama",
+            LMSTUDIO_PORT => "lmstudio",
+            HANZO_NODE_PORT => "hanzo-node",
+            _ => "custom",
+        };
+
+        self.push_background_tail(format!(
+            "Starting tunnel for {} (port {})...\n\n\
+             The tunnel URL will appear shortly. Use Ctrl+C to stop.",
+            service_name, port
+        ));
+
+        // Start ngrok in background
+        let app_event_tx = self.app_event_tx.clone();
+        let ticket = self.make_background_tail_ticket();
+
+        std::thread::spawn(move || {
+            // Give ngrok a moment to start
+            std::thread::sleep(std::time::Duration::from_millis(500));
+
+            // Start ngrok
+            let child = std::process::Command::new("ngrok")
+                .args(["http", &port.to_string()])
+                .stdout(std::process::Stdio::null())
+                .stderr(std::process::Stdio::null())
+                .spawn();
+
+            if child.is_err() {
+                return;
+            }
+
+            // Wait for ngrok to be ready
+            std::thread::sleep(std::time::Duration::from_secs(2));
+
+            // Get the public URL from ngrok API
+            let status = std::process::Command::new("curl")
+                .args(["-s", "http://127.0.0.1:4040/api/tunnels"])
+                .output();
+
+            if let Ok(output) = status {
+                if output.status.success() {
+                    let body = String::from_utf8_lossy(&output.stdout);
+                    if let Ok(json) = serde_json::from_str::<serde_json::Value>(&body) {
+                        if let Some(tunnels) = json.get("tunnels").and_then(|t| t.as_array()) {
+                            for tunnel in tunnels {
+                                if let Some(url) = tunnel.get("public_url").and_then(|u| u.as_str()) {
+                                    if url.starts_with("https://") {
+                                        let msg = format!(
+                                            "Tunnel active!\n\n\
+                                             Public URL: {}\n\n\
+                                             Others can use this endpoint with:\n\
+                                             /provider add {} {}/v1\n\n\
+                                             Use /share stop to close the tunnel.",
+                                            url, service_name, url
+                                        );
+                                        app_event_tx.send_background_event_with_ticket(&ticket, msg);
+                                        return;
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+
+            app_event_tx.send_background_event_with_ticket(
+                &ticket,
+                "Tunnel started but couldn't retrieve URL. Check /share status.".to_string(),
+            );
+        });
+    }
+
     #[allow(dead_code)]
     fn switch_to_internal_browser(&mut self) {
         // Switch to internal browser mode

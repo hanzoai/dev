@@ -1274,6 +1274,11 @@ impl App<'_> {
                                 widget.handle_provider_command(command_args);
                             }
                         }
+                        SlashCommand::Share => {
+                            if let AppState::Chat { widget } = &mut self.app_state {
+                                widget.handle_share_command(command_args);
+                            }
+                        }
                         SlashCommand::Reasoning => {
                             if let AppState::Chat { widget } = &mut self.app_state {
                                 widget.handle_reasoning_command(command_args);

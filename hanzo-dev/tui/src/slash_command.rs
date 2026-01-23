@@ -76,6 +76,7 @@ pub enum SlashCommand {
     Agents,
     Auto,
     Provider,
+    Share,
     Branch,
     Merge,
     Push,
@@ -127,6 +128,7 @@ impl SlashCommand {
             SlashCommand::Agents => "configure agents",
             SlashCommand::Auto => "work autonomously on long tasks with Auto Drive",
             SlashCommand::Provider => "manage providers and API key rotation across endpoints",
+            SlashCommand::Share => "share local LLM node via tunnel (ngrok/localxpose)",
             SlashCommand::Branch => {
                 "work in an isolated /branch then /merge when done (great for parallel work)"
             }
