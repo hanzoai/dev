@@ -10746,7 +10746,7 @@ impl ChatWidget<'_> {
 
     /// Replace the initial Popular Commands notice that includes
     /// the transient "Connecting MCP servers…" line with a version
-    /// that omits it.
+    /// that omits it, and show which MCP servers connected.
     fn remove_connecting_mcp_notice(&mut self) {
         if self.test_mode {
             return;
@@ -10759,6 +10759,9 @@ impl ChatWidget<'_> {
                     .any(|span| span.content.as_ref() == needle)
             })
         }) {
+            // Collect MCP server names before modifying history
+            let server_names: Vec<String> = self.config.mcp_servers.keys().cloned().collect();
+
             match cell.kind() {
                 crate::history_cell::HistoryCellType::Notice => {
                     // Older layout: status was inside the notice cell — replace it
@@ -10774,8 +10777,18 @@ impl ChatWidget<'_> {
                     );
                 }
                 _ => {
-                    // New layout: status is a separate BackgroundEvent cell — remove it
-                    self.history_remove_at(idx);
+                    // New layout: status is a separate BackgroundEvent cell — replace with connected message
+                    if !server_names.is_empty() {
+                        let connected_msg = format!(
+                            "Connected MCP servers: {}",
+                            server_names.join(", ")
+                        );
+                        let new_cell = history_cell::new_background_event(connected_msg.clone());
+                        let record = HistoryDomainRecord::BackgroundEvent(new_cell.state().clone());
+                        self.history_replace_with_record(idx, Box::new(new_cell), record);
+                    } else {
+                        self.history_remove_at(idx);
+                    }
                 }
             }
         }
@@ -38992,12 +39005,28 @@ impl WidgetRef for &ChatWidget<'_> {
                         }
                         // Background events (AI actions) also use dynamic color
                         crate::history_cell::HistoryCellType::BackgroundEvent => {
-                            // Check if this is an error message
-                            let is_error = item.display_lines().first()
-                                .map(|l| l.spans.iter().any(|s| s.content.contains("Failed") || s.content.contains("❌") || s.content.contains("Error")))
-                                .unwrap_or(false);
+                            // Check if this is a connecting/in-progress message
+                            let first_line_content = item.display_lines().first()
+                                .map(|l| l.spans.iter().map(|s| s.content.as_ref()).collect::<String>())
+                                .unwrap_or_default();
+                            let is_connecting = first_line_content.contains("Connecting")
+                                || first_line_content.contains("connecting")
+                                || first_line_content.contains("Preparing")
+                                || first_line_content.contains("Loading");
+                            let is_error = first_line_content.contains("Failed")
+                                || first_line_content.contains("❌")
+                                || first_line_content.contains("Error");
                             if is_error {
                                 (ratatui::style::Color::Red, base_symbol)
+                            } else if is_connecting {
+                                // Use shimmer color for connecting status
+                                let shimmer_span = crate::shimmer::shimmer_spans("•");
+                                let shimmer_color = shimmer_span.first()
+                                    .and_then(|s| s.style.fg)
+                                    .unwrap_or(crate::colors::text_dim());
+                                // Schedule animation frame for shimmer
+                                let _ = self.app_event_tx.send(AppEvent::ScheduleFrameIn(HISTORY_ANIMATION_FRAME_INTERVAL));
+                                (shimmer_color, base_symbol)
                             } else {
                                 (crate::colors::text(), base_symbol)
                             }
@@ -39266,26 +39295,38 @@ impl WidgetRef for &ChatWidget<'_> {
                 .map(|s| s.to_string())
                 .unwrap_or_else(|| "Thinking".to_string());
 
-            // Render the thinking line with spinner at the position where next AI message will appear
-            use std::time::{SystemTime, UNIX_EPOCH};
-            let now_ms = SystemTime::now()
-                .duration_since(UNIX_EPOCH)
-                .unwrap_or_default()
-                .as_millis();
-            let spinner_def = crate::spinner::current_spinner();
-            let spinner_str = crate::spinner::frame_at_time(spinner_def, now_ms);
-
-            // Build the thinking line: "◇ Thinking..." style
-            let thinking_text = format!("{} {}...", spinner_str, status_msg);
-            let thinking_style = Style::default().fg(crate::colors::text_dim());
-
             // Position thinking indicator on the next row after spacer
             let thinking_y = screen_y.saturating_add(1);
             if thinking_y < content_area.y + content_area.height {
                 // Clear the thinking row first to remove any user message background
                 let thinking_rect = Rect::new(history_area.x, thinking_y, history_area.width, 1);
                 fill_rect(buf, thinking_rect, Some(' '), base_style);
-                buf.set_string(history_area.x, thinking_y, &thinking_text, thinking_style);
+
+                // Build shimmer-animated thinking line (Codex style)
+                let thinking_text = format!("• {}...", status_msg);
+                let has_truecolor = crate::theme::has_truecolor_terminal();
+                if has_truecolor {
+                    // Shimmer the entire "• Thinking..." text with gradient animation
+                    let spans = crate::shimmer::shimmer_spans(&thinking_text);
+                    let line = ratatui::text::Line::from(spans);
+                    buf.set_line(history_area.x, thinking_y, &line, history_area.width);
+                } else {
+                    // Fallback: blink the bullet between • and ◦
+                    use std::time::{SystemTime, UNIX_EPOCH};
+                    let now_ms = SystemTime::now()
+                        .duration_since(UNIX_EPOCH)
+                        .unwrap_or_default()
+                        .as_millis();
+                    let blink_on = (now_ms / 600) % 2 == 0;
+                    let bullet = if blink_on { "•" } else { "◦" };
+                    let display_text = format!("{} {}...", bullet, status_msg);
+                    let style = if blink_on {
+                        Style::default().fg(crate::colors::text_dim())
+                    } else {
+                        Style::default().fg(crate::colors::text_dim()).add_modifier(ratatui::style::Modifier::DIM)
+                    };
+                    buf.set_string(history_area.x, thinking_y, &display_text, style);
+                }
                 thinking_rows_used = 2; // spacer + thinking
 
                 // Schedule animation frame for spinner to animate
