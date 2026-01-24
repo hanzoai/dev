@@ -186,6 +186,8 @@ fn normalize_glyph(ch: char) -> char {
         '█' | '▓' | '▒' | '░' => ' ',
         // Various unicode dash variants → ASCII hyphen.
         '‐' | '‑' | '‒' | '–' | '—' | '―' => '-',
+        // Bullet variants → filled bullet for consistency between environments.
+        '◦' | '○' | '◯' | '◌' => '•',
         other => other,
     }
 }
