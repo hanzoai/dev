@@ -110,6 +110,8 @@ vt100 = "0.15.0"
 libc = "0.2"
 signal-hook = "0.3"
 
+[target.'cfg(windows)'.dependencies]
+winsplit = "0.1"
 
 [dev-dependencies]
 chrono = { version = "0.4", features = ["serde"] }
