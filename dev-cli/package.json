@@ -1,0 +1,44 @@
+{
+  "name": "@hanzo/dev",
+  "version": "0.6.50",
+  "license": "Apache-2.0",
+  "description": "Hanzo AI coding assistant - intelligent CLI for developers",
+  "bin": {
+    "dev": "bin/dev.js",
+    "hanzo": "bin/dev.js"
+  },
+  "type": "module",
+  "engines": {
+    "node": ">=16"
+  },
+  "files": [
+    "bin/dev.js",
+    "postinstall.js",
+    "scripts/preinstall.js",
+    "scripts/windows-cleanup.ps1",
+    "dist"
+  ],
+  "scripts": {
+    "preinstall": "node scripts/preinstall.js",
+    "postinstall": "node postinstall.js",
+    "prepublishOnly": "node -e \"const fs=require('fs'),path=require('path'); const repoGit=path.join(__dirname,'..','.git'); const inCi=process.env.GITHUB_ACTIONS==='true'||process.env.CI==='true'; if(fs.existsSync(repoGit) && !inCi){ console.error('Refusing to publish from dev-cli. Publishing happens via release.yml.'); process.exit(1);} else { console.log(inCi ? 'CI publish detected.' : 'Publishing staged package...'); }\""
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/hanzoai/dev.git"
+  },
+  "publishConfig": {
+    "access": "public"
+  },
+  "dependencies": {},
+  "devDependencies": {
+    "prettier": "^3.3.3"
+  },
+  "optionalDependencies": {
+    "@hanzo/dev-darwin-arm64": "0.6.50",
+    "@hanzo/dev-darwin-x64": "0.6.50",
+    "@hanzo/dev-linux-x64-musl": "0.6.50",
+    "@hanzo/dev-linux-arm64-musl": "0.6.50",
+    "@hanzo/dev-win32-x64": "0.6.50"
+  }
+}
