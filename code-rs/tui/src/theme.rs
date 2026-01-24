@@ -991,7 +991,7 @@ fn get_predefined_theme(name: ThemeName) -> Theme {
             warning: Color::Rgb(245, 158, 11),        // #F59E0B (shadcn amber)
             error: Color::Rgb(239, 68, 68),           // #EF4444 (shadcn red)
             info: Color::Rgb(59, 130, 246),           // #3B82F6 (shadcn blue)
-            text: Color::Rgb(237, 237, 237),          // #EDEDED (body text)
+            text: Color::Rgb(250, 250, 250),          // #FAFAFA (body text - matches Codex)
             text_dim: Color::Rgb(161, 161, 170),      // #A1A1AA (zinc-400)
             text_bright: Color::White,                // #FFFFFF (pure white)
             keyword: Color::Rgb(212, 212, 216),       // #D4D4D8 (zinc-300)
