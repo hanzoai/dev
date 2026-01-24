@@ -24,6 +24,9 @@ pub(crate) struct CollapsibleReasoningState {
     pub sections: Vec<ReasoningSection>,
     pub in_progress: bool,
     pub hide_when_collapsed: bool,
+    /// When true, reasoning is permanently hidden (Codex style: ephemeral thinking).
+    /// This flag is set when the task completes and is NOT reset by show_reasoning toggle.
+    pub task_completed: bool,
     pub id: Option<String>,
     pub history_id: HistoryId,
 }
@@ -50,6 +53,7 @@ impl CollapsibleReasoningState {
             sections,
             in_progress: false,
             hide_when_collapsed: false,
+            task_completed: false,
             id,
             history_id: HistoryId::ZERO,
         }
@@ -92,6 +96,7 @@ impl CollapsibleReasoningCell {
             sections,
             in_progress,
             hide_when_collapsed: false,
+            task_completed: false,
             id: None,
             history_id: id,
         };
@@ -119,6 +124,7 @@ impl CollapsibleReasoningCell {
         self.state.borrow().in_progress
     }
 
+    #[allow(dead_code)]
     pub(crate) fn collapsed_has_summary(&self) -> bool {
         let state = self.state.borrow();
         if state.sections.is_empty() {
@@ -166,6 +172,21 @@ impl CollapsibleReasoningCell {
         }
         state.hide_when_collapsed = hide;
         true
+    }
+
+    /// Mark this reasoning cell as belonging to a completed task.
+    /// Once set, the cell will be hidden regardless of show_reasoning toggle.
+    pub(crate) fn set_task_completed(&self, completed: bool) -> bool {
+        let mut state = self.state.borrow_mut();
+        if state.task_completed == completed {
+            return false;
+        }
+        state.task_completed = completed;
+        true
+    }
+
+    pub(crate) fn is_task_completed(&self) -> bool {
+        self.state.borrow().task_completed
     }
 
     pub(crate) fn append_lines_dedup(&self, new_lines: Vec<Line<'static>>) {
@@ -224,6 +245,10 @@ impl HistoryCell for CollapsibleReasoningCell {
 
     fn display_lines(&self) -> Vec<Line<'static>> {
         let state = self.state.borrow();
+        // Codex style: once the task completes, reasoning disappears entirely.
+        if state.task_completed {
+            return Vec::new();
+        }
         if state.sections.is_empty() {
             return Vec::new();
         }
@@ -257,6 +282,21 @@ impl HistoryCell for CollapsibleReasoningCell {
         }
     }
 
+    fn desired_height(&self, width: u16) -> u16 {
+        let state = self.state.borrow();
+        // Task-completed cells contribute zero height.
+        if state.task_completed {
+            return 0;
+        }
+        // Defer to default trait impl for normal cells.
+        drop(state);
+        Paragraph::new(Text::from(self.display_lines_trimmed()))
+            .wrap(Wrap { trim: false })
+            .line_count(width)
+            .try_into()
+            .unwrap_or(0)
+    }
+
     fn gutter_symbol(&self) -> Option<&'static str> {
         None
     }
@@ -267,6 +307,10 @@ impl HistoryCell for CollapsibleReasoningCell {
 
     fn custom_render_with_skip(&self, area: Rect, buf: &mut Buffer, skip_rows: u16) {
         let state = self.state.borrow();
+        // Codex style: once the task completes, reasoning disappears entirely.
+        if state.task_completed {
+            return;
+        }
         if self.collapsed.get() {
             if state.hide_when_collapsed {
                 return;

@@ -294,7 +294,7 @@ pub(crate) struct ChatWidgetArgs {
 }
 
 impl App<'_> {
-    pub(crate) const DEFAULT_TERMINAL_TITLE: &'static str = "Code";
+    pub(crate) const DEFAULT_TERMINAL_TITLE: &'static str = "Dev";
 
     #[cfg(unix)]
     pub(crate) fn sigterm_triggered(&self) -> bool {

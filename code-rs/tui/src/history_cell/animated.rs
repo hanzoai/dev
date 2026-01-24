@@ -22,7 +22,7 @@ impl AnimatedWelcomeCell {
             faded_out: Cell::new(false),
             available_height: Cell::new(None),
             variant: Cell::new(None),
-            version_label: format!("v{}", code_version::version()),
+            version_label: code_version::version().to_string(),
             hidden: Cell::new(false),
         }
     }
@@ -73,7 +73,7 @@ impl HistoryCell for AnimatedWelcomeCell {
         vec![
             Line::from(""),
             Line::from(vec![
-                Span::styled(">_ ", Style::default().fg(crate::colors::text_dim())),
+                Span::styled("🥷 ", Style::default()),
                 Span::styled("Hanzo Dev", Style::default().fg(crate::colors::text_bright()).add_modifier(Modifier::BOLD)),
                 Span::styled(format!(" ({})", self.version_label), Style::default().fg(crate::colors::text_dim())),
             ]),

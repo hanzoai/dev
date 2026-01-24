@@ -50,8 +50,8 @@ fn demo_command_enabled() -> bool {
 pub enum SlashCommand {
     // DO NOT ALPHA-SORT! Enum order is presentation order in the popup, so
     // more frequently used commands should be listed first.
+    #[strum(serialize = "browser", serialize = "chrome")]
     Browser,
-    Chrome,
     New,
     Init,
     Compact,
@@ -98,8 +98,7 @@ impl SlashCommand {
     /// User-visible description shown in the popup.
     pub fn description(self) -> &'static str {
         match self {
-            SlashCommand::Chrome => "connect to your Chrome browser",
-            SlashCommand::Browser => "open internal browser",
+            SlashCommand::Browser => "connect to browser (internal or external Chrome)",
             SlashCommand::Resume => "resume a past session for this folder",
             SlashCommand::Plan => "create a comprehensive plan (multiple agents)",
             SlashCommand::Solve => "solve a challenging problem (multiple agents)",

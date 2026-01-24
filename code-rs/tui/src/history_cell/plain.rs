@@ -82,6 +82,21 @@ impl PlainHistoryCell {
         // Symmetric top/bottom padding for auto-review notices.
         (1, 1)
     }
+
+    /// Returns (pad_top, pad_bottom) for each cell kind.
+    /// Used by both ensure_layout (for measurement) and render (for bg fill).
+    pub(crate) fn padding_for_kind(kind: HistoryCellType) -> (u16, u16) {
+        match kind {
+            // User messages: 1 row padding above AND below for visual separation
+            HistoryCellType::User => (1, 1),
+            // Assistant messages: no padding (compact Codex style)
+            HistoryCellType::Assistant => (0, 0),
+            // Notice cells (Popular commands etc.): no padding
+            HistoryCellType::Notice => (0, 0),
+            // Other messages: no padding (compact Codex style)
+            _ => (0, 0),
+        }
+    }
     pub(crate) fn from_state(state: PlainMessageState) -> Self {
         let mut kind = history_cell_kind_from_plain(state.kind);
         if kind == HistoryCellType::User {
@@ -156,7 +171,8 @@ impl PlainHistoryCell {
 
         let is_auto_review = self.is_auto_review_notice();
         let cell_bg = match self.state.kind {
-            HistoryCellType::Assistant => crate::colors::assistant_bg(),
+            HistoryCellType::User => crate::colors::user_message_bg(),
+            HistoryCellType::Assistant => crate::colors::background(),
             HistoryCellType::CompactionSummary => crate::colors::background(),
             _ if is_auto_review => Self::auto_review_bg(),
             _ => crate::colors::background(),
@@ -170,7 +186,7 @@ impl PlainHistoryCell {
         let (pad_top, pad_bottom) = if is_auto_review {
             Self::auto_review_padding()
         } else {
-            (0, 0)
+            Self::padding_for_kind(self.state.kind)
         };
 
         let inner_height: u16 = paragraph
@@ -198,19 +214,22 @@ impl PlainHistoryCell {
 
         let paragraph_lines = Text::from(trimmed_lines);
         if matches!(self.state.kind, HistoryCellType::User) {
+            // User messages: full-width background with top and bottom padding
             let block = Block::default()
                 .style(bg_style)
-                .padding(Padding {
-                    left: 0,
-                    right: crate::layout_consts::USER_HISTORY_RIGHT_PAD.into(),
-                    top: 0,
-                    bottom: 0,
-                });
+                .padding(Padding::ZERO);
+            // Render text to inner area (with padding offsets) so bg extends around text
+            let inner_area = Rect::new(
+                render_area.x,
+                render_area.y.saturating_add(pad_top),
+                render_area.width,
+                render_height.saturating_sub(pad_top + pad_bottom),
+            );
             Paragraph::new(paragraph_lines)
                 .block(block)
                 .wrap(Wrap { trim: false })
                 .style(bg_style)
-                .render(render_area, &mut buffer);
+                .render(inner_area, &mut buffer);
         } else {
             let block = Block::default().style(Style::default().bg(cell_bg));
             let inner_area = if pad_top + pad_bottom < render_height {
@@ -294,15 +313,13 @@ impl HistoryCell for PlainHistoryCell {
     }
 
     fn has_custom_render(&self) -> bool {
-        matches!(self.state.kind, HistoryCellType::User) || self.is_auto_review_notice()
+        matches!(self.state.kind, HistoryCellType::User | HistoryCellType::Assistant)
+            || self.is_auto_review_notice()
     }
 
     fn desired_height(&self, width: u16) -> u16 {
-        let effective_width = if matches!(self.state.kind, HistoryCellType::User) {
-            width.saturating_sub(crate::layout_consts::USER_HISTORY_RIGHT_PAD.into())
-        } else {
-            width
-        };
+        // User messages use full width (no right padding) for edge-to-edge background
+        let effective_width = width;
 
         self.ensure_layout(width, effective_width);
         self.cached_layout
@@ -314,20 +331,20 @@ impl HistoryCell for PlainHistoryCell {
 
     fn render_with_skip(&self, area: Rect, buf: &mut Buffer, skip_rows: u16) {
         let requested_width = area.width;
-        let effective_width = if matches!(self.state.kind, HistoryCellType::User) {
-            requested_width
-                .saturating_sub(crate::layout_consts::USER_HISTORY_RIGHT_PAD.into())
-        } else {
-            requested_width
-        };
+        // User messages use full width (no right padding) for edge-to-edge background
+        let effective_width = requested_width;
 
         let is_auto_review = self.is_auto_review_notice();
         let cell_bg = match self.state.kind {
-            HistoryCellType::Assistant => crate::colors::assistant_bg(),
+            HistoryCellType::User => crate::colors::user_message_bg(),
+            HistoryCellType::Assistant => crate::colors::background(),
             _ if is_auto_review => Self::auto_review_bg(),
             _ => crate::colors::background(),
         };
-        if matches!(self.state.kind, HistoryCellType::Assistant) || is_auto_review {
+        // Explicitly paint bg for User/Assistant/auto_review to guarantee pad rows are filled
+        if matches!(self.state.kind, HistoryCellType::User | HistoryCellType::Assistant)
+            || is_auto_review
+        {
             let bg_style = Style::default().bg(cell_bg).fg(crate::colors::text());
             fill_rect(buf, area, Some(' '), bg_style);
         }
@@ -596,9 +613,9 @@ fn popular_commands_lines(_latest_version: Option<&str>) -> Vec<Line<'static>> {
         Span::styled(" UPDATED", tag_style),
     ]));
     lines.push(Line::from(vec![
-        Span::styled("/chrome", cmd_style),
+        Span::styled("/browser", cmd_style),
         Span::from(" - "),
-        Span::from(SlashCommand::Chrome.description())
+        Span::from(SlashCommand::Browser.description())
             .style(Style::default().add_modifier(Modifier::DIM)),
     ]));
     lines.push(Line::from(vec![

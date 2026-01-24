@@ -557,6 +557,27 @@ impl App<'_> {
                                 widget.toggle_diffs_popup();
                             }
                         }
+                        KeyEvent {
+                            code: KeyCode::Char('g'),
+                            modifiers: crossterm::event::KeyModifiers::CONTROL,
+                            kind: KeyEventKind::Press,
+                            ..
+                        } => {
+                            // Launch external editor (Ctrl+G)
+                            if let AppState::Chat { widget } = &mut self.app_state {
+                                use crate::chatwidget::ExternalEditorState;
+                                if widget.can_launch_external_editor()
+                                    && widget.external_editor_state() == ExternalEditorState::Closed
+                                {
+                                    widget.set_external_editor_state(ExternalEditorState::Requested);
+                                    widget.set_footer_hint_override(Some(vec![(
+                                        "Save and close external editor to continue.".to_string(),
+                                        String::new(),
+                                    )]));
+                                    self.app_event_tx.send(AppEvent::LaunchExternalEditor);
+                                }
+                            }
+                        }
                         // (Ctrl+Y disabled): Previously cycled syntax themes; now intentionally no-op
                         KeyEvent {
                             kind: KeyEventKind::Press | KeyEventKind::Repeat,
@@ -1237,16 +1258,11 @@ impl App<'_> {
                         }
                         SlashCommand::Browser => {
                             if let AppState::Chat { widget } = &mut self.app_state {
-                                widget.handle_browser_command(command_args);
-                            }
-                        }
-                        SlashCommand::Chrome => {
-                            if let AppState::Chat { widget } = &mut self.app_state {
-                                tracing::info!("[cdp] /chrome invoked, args='{}'", command_args);
+                                tracing::info!("[cdp] /browser invoked, args='{}'", command_args);
                                 if command_args.trim().is_empty() {
                                     widget.show_settings_overlay(Some(SettingsSection::Chrome));
                                 } else {
-                                    widget.handle_chrome_command(command_args);
+                                    widget.handle_browser_command(command_args);
                                 }
                             }
                         }
@@ -2284,6 +2300,114 @@ impl App<'_> {
                 AppEvent::AutoReviewBaselineCaptured { turn_sequence, result } => {
                     if let AppState::Chat { widget } = &mut self.app_state {
                         widget.handle_auto_review_baseline_captured(turn_sequence, result);
+                    }
+                }
+                AppEvent::LaunchExternalEditor => {
+                    use crate::chatwidget::ExternalEditorState;
+                    use crate::external_editor;
+
+                    // Only proceed if the widget is in the Requested state
+                    let should_launch = if let AppState::Chat { widget } = &self.app_state {
+                        widget.external_editor_state() == ExternalEditorState::Requested
+                    } else {
+                        false
+                    };
+
+                    if should_launch {
+                        // Get the seed text from the composer
+                        let seed = if let AppState::Chat { widget } = &self.app_state {
+                            widget.composer_text_with_pending()
+                        } else {
+                            String::new()
+                        };
+
+                        // Resolve the editor command
+                        match external_editor::resolve_editor_command() {
+                            Ok(editor_cmd) => {
+                                // Mark as Active
+                                if let AppState::Chat { widget } = &mut self.app_state {
+                                    widget.set_external_editor_state(ExternalEditorState::Active);
+                                }
+
+                                // Restore terminal for external editor
+                                let restore_result = tui::restore();
+                                if restore_result.is_err() {
+                                    tracing::error!("failed to restore terminal for external editor");
+                                    if let AppState::Chat { widget } = &mut self.app_state {
+                                        widget.set_external_editor_state(ExternalEditorState::Closed);
+                                        widget.set_footer_hint_override(None);
+                                    }
+                                    self.schedule_redraw();
+                                    continue;
+                                }
+
+                                // Build a blocking runtime to run the editor synchronously
+                                let editor_result = std::thread::spawn({
+                                    let seed = seed.clone();
+                                    let editor_cmd = editor_cmd.clone();
+                                    move || {
+                                        let rt = tokio::runtime::Builder::new_current_thread()
+                                            .enable_all()
+                                            .build()
+                                            .expect("build tokio runtime for external editor");
+                                        rt.block_on(external_editor::run_editor(&seed, &editor_cmd))
+                                    }
+                                })
+                                .join()
+                                .map_err(|_| color_eyre::eyre::eyre!("editor thread panicked"))
+                                .and_then(|r| r);
+
+                                // Re-initialize terminal
+                                match tui::init(&self.config) {
+                                    Ok((new_terminal, new_terminal_info)) => {
+                                        *terminal = new_terminal;
+                                        self.terminal_info = new_terminal_info;
+                                        let _ = terminal.clear();
+                                    }
+                                    Err(e) => {
+                                        tracing::error!("failed to reinitialize terminal after external editor: {e}");
+                                    }
+                                }
+
+                                // Apply result
+                                match editor_result {
+                                    Ok(edited) => {
+                                        // Trim trailing whitespace/newlines for cleaner input
+                                        let cleaned = edited.trim_end().to_string();
+                                        if let AppState::Chat { widget } = &mut self.app_state {
+                                            widget.apply_external_edit(cleaned);
+                                        }
+                                    }
+                                    Err(e) => {
+                                        tracing::warn!("external editor failed: {e}");
+                                        // Leave the original text in place
+                                    }
+                                }
+
+                                // Reset state
+                                if let AppState::Chat { widget } = &mut self.app_state {
+                                    widget.set_external_editor_state(ExternalEditorState::Closed);
+                                    widget.set_footer_hint_override(None);
+                                }
+
+                                self.clear_on_first_frame = true;
+                                self.schedule_redraw();
+                            }
+                            Err(e) => {
+                                // No editor configured
+                                tracing::warn!("external editor not configured: {e}");
+                                if let AppState::Chat { widget } = &mut self.app_state {
+                                    widget.set_external_editor_state(ExternalEditorState::Closed);
+                                    widget.set_footer_hint_override(None);
+                                    widget.history_push_plain_state(
+                                        crate::history_cell::new_error_event(
+                                            "No external editor configured. Set $VISUAL or $EDITOR.".to_string()
+                                        )
+                                    );
+                                }
+                                self.schedule_redraw();
+                            }
+                        }
                     }
                 }
             }

@@ -19,5 +19,6 @@ pub const COMPOSER_CONTENT_WIDTH_OFFSET: u16 = (COMPOSER_OUTER_HPAD * 2)
 pub const _COMPOSER_INNER_AREA_OFFSET: u16 = (COMPOSER_BORDER_WIDTH * 2) + (COMPOSER_INNER_HPAD * 2); // = 4
 
 // Extra right padding for user history cells so wrapped lines match the
-// composer’s visual width. Keep this in sync with composer’s inner layout.
+// composer's visual width. Keep this in sync with composer's inner layout.
+#[allow(dead_code)]
 pub const USER_HISTORY_RIGHT_PAD: u16 = 2;

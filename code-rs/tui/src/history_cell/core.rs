@@ -45,28 +45,24 @@ pub(crate) enum HistoryCellType {
 pub(crate) fn gutter_symbol_for_kind(kind: HistoryCellType) -> Option<&'static str> {
     match kind {
         HistoryCellType::Plain => None,
-        HistoryCellType::User => Some("›"),
-        // Restore assistant gutter icon
+        HistoryCellType::User => Some("▸"),
+        // Assistant uses bullet with dynamic color (white=done, green=working, red=error)
         HistoryCellType::Assistant => Some("•"),
         HistoryCellType::Reasoning => None,
         HistoryCellType::Error => Some("✖"),
-        HistoryCellType::Tool { status } => Some(match status {
-            ToolCellStatus::Running => "⚙",
-            ToolCellStatus::Success => "✔",
-            ToolCellStatus::Failed => "✖",
-        }),
-        HistoryCellType::Exec { kind, status } => {
-            // Show ❯ only for Run executions; hide for read/search/list summaries
-            match (kind, status) {
-                (ExecKind::Run, ExecStatus::Error) => Some("✖"),
-                (ExecKind::Run, _) => Some("❯"),
+        // Tool cells use ⏺ with dynamic color (green=success, red=error, dim=running)
+        HistoryCellType::Tool { status: _ } => Some("⏺"),
+        HistoryCellType::Exec { kind, status: _ } => {
+            // Show ⏺ for Run executions with dynamic color; hide for read/search/list summaries
+            match kind {
+                ExecKind::Run => Some("⏺"),
                 _ => None,
             }
         }
         HistoryCellType::Patch { .. } => Some("↯"),
         // Plan updates supply their own gutter glyph dynamically.
         HistoryCellType::PlanUpdate => None,
-        HistoryCellType::BackgroundEvent => Some("»"),
+        HistoryCellType::BackgroundEvent => Some("•"),
         HistoryCellType::Notice => None,
         HistoryCellType::CompactionSummary => Some("📍"),
         HistoryCellType::Diff => Some("↯"),
@@ -177,15 +173,14 @@ pub(crate) trait HistoryCell {
         // IMPORTANT: Explicitly clear the entire area first. While some containers
         // clear broader regions, custom widgets that shrink or scroll can otherwise
         // leave residual glyphs to the right of shorter lines or from prior frames.
-        // We paint spaces with the current theme background to guarantee a clean slate.
-        // Assistant messages use a subtly tinted background: theme background
-        // moved 5% toward the theme info color for a gentle distinction.
+        // User messages get a grey background matching the input area.
+        // Assistant messages use transparent background (just gutter icon).
         let cell_bg = match self.kind() {
-            HistoryCellType::Assistant => crate::colors::assistant_bg(),
+            HistoryCellType::User => crate::colors::user_message_bg(),
             _ => crate::colors::background(),
         };
         let bg_style = Style::default().bg(cell_bg).fg(crate::colors::text());
-        if matches!(self.kind(), HistoryCellType::Assistant) {
+        if matches!(self.kind(), HistoryCellType::User) {
             fill_rect(buf, area, Some(' '), bg_style);
         }
 

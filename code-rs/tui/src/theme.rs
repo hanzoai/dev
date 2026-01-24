@@ -978,28 +978,28 @@ fn ansi256_to_rgb(idx: u8) -> (u8, u8, u8) {
 fn get_predefined_theme(name: ThemeName) -> Theme {
     match name {
         ThemeName::DarkCarbonNight => Theme {
-            // Dark default - monochrome theme (hanzo dev)
-            primary: Color::Rgb(230, 237, 243),       // #E6EDF3 (white/light gray - monochrome)
-            secondary: Color::Rgb(139, 148, 158),     // #8B949E (gray - monochrome)
-            background: Color::Rgb(11, 13, 16),       // #0B0D10
-            foreground: Color::Rgb(230, 237, 243),    // #E6EDF3
-            border: Color::Rgb(83, 85, 88),           // #535558  (↑ contrast)
-            border_focused: Color::Rgb(106, 109, 114), // toned contrast vs border
-            selection: Color::Rgb(23, 32, 42),        // #17202A
-            cursor: Color::Rgb(230, 237, 243),        // #E6EDF3
-            success: Color::Rgb(63, 185, 80),         // #3FB950
-            warning: Color::Rgb(210, 153, 34),        // #D29922
-            error: Color::Rgb(248, 81, 73),           // #F85149
-            info: Color::Rgb(121, 192, 255),          // #79C0FF
-            text: Color::Rgb(230, 237, 243),          // #E6EDF3
-            text_dim: Color::Rgb(139, 148, 158),      // #8B949E
-            text_bright: Color::White,                // #FFFFFF
-            keyword: Color::Rgb(179, 146, 240),       // #B392F0
-            string: Color::Rgb(165, 214, 255),        // #A5D6FF
-            comment: Color::Rgb(110, 118, 129),       // #6E7681
-            function: Color::Rgb(126, 231, 135),      // #7EE787
-            spinner: Color::Rgb(59, 67, 79),          // #3B434F
-            progress: Color::Rgb(230, 237, 243),      // #E6EDF3 (white - monochrome)
+            // Vercel/shadcn monochrome dark theme (Tailwind Zinc ramp)
+            primary: Color::Rgb(250, 250, 250),       // #FAFAFA (near-white)
+            secondary: Color::Rgb(161, 161, 170),     // #A1A1AA (zinc-400)
+            background: Color::Rgb(10, 10, 10),       // #0A0A0A (Vercel near-black)
+            foreground: Color::Rgb(250, 250, 250),    // #FAFAFA (near-white)
+            border: Color::Rgb(39, 39, 42),           // #27272A (zinc-800)
+            border_focused: Color::Rgb(63, 63, 70),   // #3F3F46 (zinc-700)
+            selection: Color::Rgb(17, 17, 17),        // #111111 (subtle highlight)
+            cursor: Color::Rgb(250, 250, 250),        // #FAFAFA
+            success: Color::Rgb(34, 197, 94),         // #22C55E (shadcn green)
+            warning: Color::Rgb(245, 158, 11),        // #F59E0B (shadcn amber)
+            error: Color::Rgb(239, 68, 68),           // #EF4444 (shadcn red)
+            info: Color::Rgb(59, 130, 246),           // #3B82F6 (shadcn blue)
+            text: Color::Rgb(237, 237, 237),          // #EDEDED (body text)
+            text_dim: Color::Rgb(161, 161, 170),      // #A1A1AA (zinc-400)
+            text_bright: Color::White,                // #FFFFFF (pure white)
+            keyword: Color::Rgb(212, 212, 216),       // #D4D4D8 (zinc-300)
+            string: Color::Rgb(228, 228, 231),        // #E4E4E7 (zinc-200)
+            comment: Color::Rgb(113, 113, 122),       // #71717A (zinc-500)
+            function: Color::Rgb(244, 244, 245),      // #F4F4F5 (zinc-100)
+            spinner: Color::Rgb(63, 63, 70),          // #3F3F46 (zinc-700)
+            progress: Color::Rgb(250, 250, 250),      // #FAFAFA
         },
         ThemeName::DarkCarbonAnsi16 => Theme {
             primary: Color::Indexed(12),

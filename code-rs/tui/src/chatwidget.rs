@@ -1094,7 +1094,6 @@ const RATE_LIMIT_WARNING_THRESHOLDS: [f64; 3] = [50.0, 75.0, 90.0];
 const RATE_LIMIT_REFRESH_INTERVAL: chrono::Duration = chrono::Duration::minutes(10);
 
 const MAX_TRACKED_GHOST_COMMITS: usize = 20;
-const GHOST_SNAPSHOT_NOTICE_THRESHOLD: Duration = Duration::from_secs(4);
 const GHOST_SNAPSHOT_TIMEOUT: Duration = Duration::from_secs(30);
 
 #[derive(Clone)]
@@ -1463,6 +1462,15 @@ pub(crate) enum TurnOrigin {
     Developer,
 }
 
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+#[allow(dead_code)]
+pub(crate) enum ExternalEditorState {
+    #[default]
+    Closed,
+    Requested,
+    Active,
+}
+
 #[derive(Clone, Debug)]
 struct PendingRequestUserInput {
     turn_id: String,
@@ -1784,6 +1792,8 @@ pub(crate) struct ChatWidget<'a> {
     replay_history_depth: usize,
     resume_placeholder_visible: bool,
     resume_picker_loading: bool,
+    #[allow(dead_code)] // Not yet wired up to app.rs
+    external_editor_state: ExternalEditorState,
 }
 
 #[derive(Clone, Debug, Default)]
@@ -4406,17 +4416,15 @@ impl ChatWidget<'_> {
 
         debug_assert_eq!(layout.lines.len(), layout.rows.len());
 
-        let is_assistant = matches!(item.kind(), crate::history_cell::HistoryCellType::Assistant);
         let is_auto_review = ChatWidget::is_auto_review_cell(item);
-        let cell_bg = if is_assistant {
-            crate::colors::assistant_bg()
-        } else if is_auto_review {
+        // Assistant messages use transparent background (no special tint)
+        let cell_bg = if is_auto_review {
             crate::history_cell::PlainHistoryCell::auto_review_bg()
         } else {
             crate::colors::background()
         };
 
-        if is_assistant || is_auto_review {
+        if is_auto_review {
             let bg_style = Style::default()
                 .bg(cell_bg)
                 .fg(crate::colors::text());
@@ -4488,38 +4496,22 @@ impl ChatWidget<'_> {
     }
 
     fn clear_reasoning_in_progress(&mut self) {
-        let last_reasoning_index = self
-            .history_cells
-            .iter()
-            .enumerate()
-            .rev()
-            .find_map(|(idx, cell)| {
-                cell.as_any()
-                    .downcast_ref::<history_cell::CollapsibleReasoningCell>()
-                    .map(|_| idx)
-            });
-
         let mut changed = false;
-        for (idx, cell) in self.history_cells.iter().enumerate() {
+        for cell in self.history_cells.iter() {
             if let Some(reasoning_cell) = cell
                 .as_any()
                 .downcast_ref::<history_cell::CollapsibleReasoningCell>()
             {
-                if !reasoning_cell.is_in_progress() {
-                    continue;
+                // Clear in_progress flag if still set
+                if reasoning_cell.is_in_progress() {
+                    reasoning_cell.set_in_progress(false);
+                    changed = true;
                 }
-
-                let keep_in_progress = !self.config.tui.show_reasoning
-                    && Some(idx) == last_reasoning_index
-                    && reasoning_cell.is_collapsed()
-                    && !reasoning_cell.collapsed_has_summary();
-
-                if keep_in_progress {
-                    continue;
+                // Codex style: mark reasoning as task-completed so it disappears.
+                // This flag is permanent and NOT reset by show_reasoning toggle.
+                if reasoning_cell.set_task_completed(true) {
+                    changed = true;
                 }
-
-                reasoning_cell.set_in_progress(false);
-                changed = true;
             }
         }
 
@@ -4561,6 +4553,10 @@ impl ChatWidget<'_> {
                     .as_any()
                     .downcast_ref::<history_cell::CollapsibleReasoningCell>()
                 {
+                    // Don't unhide task-completed cells - they stay hidden (Codex style).
+                    if reasoning_cell.is_task_completed() {
+                        continue;
+                    }
                     if reasoning_cell.set_hide_when_collapsed(false) {
                         needs_invalidate = true;
                     }
@@ -4576,11 +4572,13 @@ impl ChatWidget<'_> {
             let mut idx = 0usize;
             while idx < len {
                 let cell = &self.history_cells[idx];
-                let is_reasoning = cell
+                // Skip non-reasoning and task-completed reasoning cells.
+                let is_active_reasoning = cell
                     .as_any()
                     .downcast_ref::<history_cell::CollapsibleReasoningCell>()
-                    .is_some();
-                if !is_reasoning {
+                    .map(|rc| !rc.is_task_completed())
+                    .unwrap_or(false);
+                if !is_active_reasoning {
                     idx += 1;
                     continue;
                 }
@@ -4595,12 +4593,14 @@ impl ChatWidget<'_> {
                         continue;
                     }
 
-                    if cell
+                    // Only include active (non-task-completed) reasoning cells.
+                    if let Some(rc) = cell
                         .as_any()
                         .downcast_ref::<history_cell::CollapsibleReasoningCell>()
-                        .is_some()
                     {
-                        reasoning_indices.push(j);
+                        if !rc.is_task_completed() {
+                            reasoning_indices.push(j);
+                        }
                         j += 1;
                         continue;
                     }
@@ -4645,6 +4645,10 @@ impl ChatWidget<'_> {
                     .as_any()
                     .downcast_ref::<history_cell::CollapsibleReasoningCell>()
                 {
+                    // Don't modify task-completed cells - they stay hidden (Codex style).
+                    if reasoning_cell.is_task_completed() {
+                        continue;
+                    }
                     let hide = hide_indices.contains(&i);
                     if reasoning_cell.set_hide_when_collapsed(hide) {
                         needs_invalidate = true;
@@ -6643,6 +6647,7 @@ impl ChatWidget<'_> {
             replay_history_depth: 0,
             resume_placeholder_visible: false,
             resume_picker_loading: false,
+            external_editor_state: ExternalEditorState::Closed,
         };
         new_widget.load_auto_review_baseline_marker();
         new_widget.spawn_conversation_runtime(config.clone(), auth_manager.clone(), code_op_rx);
@@ -7016,6 +7021,7 @@ impl ChatWidget<'_> {
             replay_history_depth: 0,
             resume_placeholder_visible: false,
             resume_picker_loading: false,
+            external_editor_state: ExternalEditorState::Closed,
         };
         w.load_auto_review_baseline_marker();
         if let Ok(Some(active_id)) = auth_accounts::get_active_account_id(&config.code_home) {
@@ -11833,7 +11839,6 @@ impl ChatWidget<'_> {
 
         let repo_path = self.config.cwd.clone();
         let app_event_tx = self.app_event_tx.clone();
-        let notice_ticket = self.make_background_tail_ticket();
         let started_at = request.started_at;
         self.active_ghost_snapshot = Some((job_id, request));
 
@@ -11845,9 +11850,6 @@ impl ChatWidget<'_> {
             });
             tokio::pin!(handle);
 
-            let mut notice_sent = false;
-            let notice_sleep = tokio::time::sleep(GHOST_SNAPSHOT_NOTICE_THRESHOLD);
-            tokio::pin!(notice_sleep);
             let timeout_sleep = tokio::time::sleep(GHOST_SNAPSHOT_TIMEOUT);
             tokio::pin!(timeout_sleep);
 
@@ -11871,15 +11873,6 @@ impl ChatWidget<'_> {
                         };
                         app_event_tx.send(event);
                         return;
-                    }
-                    _ = &mut notice_sleep, if !notice_sent => {
-                        notice_sent = true;
-                        let elapsed = started_at.elapsed();
-                        let message = format!(
-                            "Git snapshot still running… {} elapsed.",
-                            format_duration(elapsed)
-                        );
-                        app_event_tx.send_background_event_with_ticket(&notice_ticket, message);
                     }
                 }
             };
@@ -11937,12 +11930,6 @@ impl ChatWidget<'_> {
                 );
                 if self.ghost_snapshots.len() > MAX_TRACKED_GHOST_COMMITS {
                     self.ghost_snapshots.remove(0);
-                }
-                if elapsed >= GHOST_SNAPSHOT_NOTICE_THRESHOLD {
-                    self.push_background_tail(format!(
-                        "Git snapshot captured in {}.",
-                        format_duration(elapsed)
-                    ));
                 }
                 Some(snapshot)
             }
@@ -21808,7 +21795,8 @@ Have we met every part of this goal and is there no further work to do?"#
         ));
 
         // Global
-        lines.push(kv("Ctrl+G", "Guide overlay"));
+        lines.push(kv("Ctrl+H", "Help overlay"));
+        lines.push(kv("Ctrl+G", "Open in external editor"));
         lines.push(kv("Ctrl+R", "Toggle reasoning"));
         lines.push(kv("Ctrl+T", "Toggle screen"));
         lines.push(kv("Ctrl+D", "Diff viewer"));
@@ -21836,7 +21824,7 @@ Have we met every part of this goal and is there no further work to do?"#
         lines.push(kv("Alt+Right", "Move by word"));
         // Simplify delete shortcuts; remove Alt+Backspace/Backspace/Delete variants
         lines.push(kv("Ctrl+W", "Delete previous word"));
-        lines.push(kv("Ctrl+H", "Delete previous char"));
+        lines.push(kv("Backspace", "Delete previous char"));
         lines.push(kv("Ctrl+D", "Delete next char"));
         lines.push(kv("Ctrl+Backspace", "Delete current line"));
         lines.push(kv("Ctrl+U", "Delete to line start"));
@@ -24772,6 +24760,39 @@ Have we met every part of this goal and is there no further work to do?"#
     #[allow(dead_code)]
     pub(crate) fn composer_is_empty(&self) -> bool {
         self.bottom_pane.composer_is_empty()
+    }
+
+    // --- External Editor helpers ---
+
+    /// Get the current external editor state.
+    pub(crate) fn external_editor_state(&self) -> ExternalEditorState {
+        self.external_editor_state
+    }
+
+    /// Set the external editor state.
+    pub(crate) fn set_external_editor_state(&mut self, state: ExternalEditorState) {
+        self.external_editor_state = state;
+    }
+
+    /// Return true when no popups or modal views are active, regardless of task state.
+    pub(crate) fn can_launch_external_editor(&self) -> bool {
+        self.bottom_pane.can_launch_external_editor()
+    }
+
+    /// Get the composer text with any pending paste placeholders expanded.
+    pub(crate) fn composer_text_with_pending(&self) -> String {
+        self.bottom_pane.composer_text_with_pending()
+    }
+
+    /// Apply text from external editor to the composer.
+    pub(crate) fn apply_external_edit(&mut self, text: String) {
+        self.bottom_pane.apply_external_edit(text);
+        self.request_redraw();
+    }
+
+    /// Set custom footer hint items (e.g., for external editor mode).
+    pub(crate) fn set_footer_hint_override(&mut self, items: Option<Vec<(String, String)>>) {
+        self.bottom_pane.set_footer_hint_override(items);
     }
 
     // --- Double‑Escape helpers ---
@@ -28101,6 +28122,7 @@ Have we met every part of this goal and is there no further work to do?"#
         });
     }
 
+    #[allow(dead_code)]
     fn handle_chrome_connection(
         &mut self,
         host: Option<String>,
@@ -28144,6 +28166,7 @@ Have we met every part of this goal and is there no further work to do?"#
         });
     }
 
+    #[allow(dead_code)]
     pub(crate) fn handle_chrome_command(&mut self, command_text: String) {
         tracing::info!("[cdp] handle_chrome_command start: '{}'", command_text);
         // Parse the chrome command arguments
@@ -28767,12 +28790,17 @@ Have we met every part of this goal and is there no further work to do?"#
         //   3) Branch
         //   4) Directory
         let branch_opt = self.get_git_branch();
+        let snapshot_label = self
+            .ghost_snapshots
+            .last()
+            .map(GhostSnapshot::short_id);
 
         // Helper to assemble spans based on include flags
         let build_spans = |include_reasoning: bool,
                            include_model: bool,
                            include_branch: bool,
                            include_dir: bool,
+                           include_snapshot: bool,
                            dir_display: &str| {
             let mut spans: Vec<Span> = Vec::new();
 
@@ -28786,7 +28814,7 @@ Have we met every part of this goal and is there no further work to do?"#
                 ));
                 spans.push(Span::styled(
                     self.format_model_name(&self.config.model),
-                    Style::default().fg(crate::colors::info()),
+                    Style::default().fg(crate::colors::text_bright()),
                 ));
             }
 
@@ -28800,7 +28828,7 @@ Have we met every part of this goal and is there no further work to do?"#
                 ));
                 spans.push(Span::styled(
                     Self::format_reasoning_effort(self.config.model_reasoning_effort),
-                    Style::default().fg(crate::colors::info()),
+                    Style::default().fg(crate::colors::text_bright()),
                 ));
             }
 
@@ -28814,12 +28842,20 @@ Have we met every part of this goal and is there no further work to do?"#
                 ));
                 spans.push(Span::styled(
                     dir_display.to_string(),
-                    Style::default().fg(crate::colors::info()),
+                    Style::default().fg(crate::colors::text_bright()),
                 ));
             }
 
             if include_branch {
                 if let Some(branch) = &branch_opt {
+                    let branch_value = if include_snapshot {
+                        snapshot_label
+                            .as_deref()
+                            .map(|snapshot| format!("{branch}@{snapshot}"))
+                            .unwrap_or_else(|| branch.clone())
+                    } else {
+                        branch.clone()
+                    };
                     if !spans.is_empty() {
                         spans.push(Span::styled("  •  ", Style::default().fg(crate::colors::text_dim())));
                     }
@@ -28828,8 +28864,8 @@ Have we met every part of this goal and is there no further work to do?"#
                         Style::default().fg(crate::colors::text_dim()),
                     ));
                     spans.push(Span::styled(
-                        branch.clone(),
-                        Style::default().fg(crate::colors::success_green()),
+                        branch_value,
+                        Style::default().fg(crate::colors::text_dim()),
                     ));
                 }
             }
@@ -28845,6 +28881,7 @@ Have we met every part of this goal and is there no further work to do?"#
         let mut include_reasoning = !minimal_header;
         let mut include_model = !minimal_header;
         let mut include_branch = !minimal_header && branch_opt.is_some();
+        let mut include_snapshot = !minimal_header && snapshot_label.is_some();
         let mut include_dir = !minimal_header && !demo_mode;
         let mut use_short_dir = false;
         let mut status_spans = build_spans(
@@ -28852,6 +28889,7 @@ Have we met every part of this goal and is there no further work to do?"#
             include_model,
             include_branch,
             include_dir,
+            include_snapshot,
             &cwd_str,
         );
 
@@ -28879,6 +28917,7 @@ Have we met every part of this goal and is there no further work to do?"#
                 include_model,
                 include_branch,
                 include_dir,
+                include_snapshot,
                 &cwd_short_str,
             );
         }
@@ -28889,6 +28928,8 @@ Have we met every part of this goal and is there no further work to do?"#
                 include_reasoning = false;
             } else if include_model {
                 include_model = false;
+            } else if include_snapshot {
+                include_snapshot = false;
             } else if include_branch {
                 include_branch = false;
             } else if include_dir {
@@ -28901,6 +28942,7 @@ Have we met every part of this goal and is there no further work to do?"#
                 include_model,
                 include_branch,
                 include_dir,
+                include_snapshot,
                 if use_short_dir { &cwd_short_str } else { &cwd_str },
             );
         }
@@ -38138,12 +38180,11 @@ impl WidgetRef for &ChatWidget<'_> {
         }
 
         // Create a unified scrollable container for all chat content
-        // Use consistent padding throughout
-        let padding = 1u16;
+        // No horizontal padding - symbol at column 0, text at column 2 (Codex style)
         let content_area = Rect {
-            x: history_area.x + padding,
+            x: history_area.x,
             y: history_area.y,
-            width: history_area.width.saturating_sub(padding * 2),
+            width: history_area.width,
             height: history_area.height,
         };
 
@@ -38483,6 +38524,13 @@ impl WidgetRef for &ChatWidget<'_> {
             self.history_render.set_bottom_spacer_range(None);
         }
         let overscan_extra = total_height.saturating_sub(base_total_height);
+
+        // Include thinking indicator rows in total height when task is running
+        // This ensures scroll calculation accounts for it so it's always visible
+        // 2 rows: 1 spacer + 1 thinking indicator
+        let thinking_indicator_height = if self.bottom_pane.is_task_running() { 2u16 } else { 0u16 };
+        total_height = total_height.saturating_add(thinking_indicator_height);
+
         // Calculate scroll position and vertical alignment
         // Stabilize viewport when input area height changes while scrolled up.
         let prev_viewport_h = self.layout.last_history_viewport_height.get();
@@ -38878,51 +38926,37 @@ impl WidgetRef for &ChatWidget<'_> {
                     );
                 }
 
-                // Paint gutter background. For Assistant and Auto Review, extend the tint under the
-                // gutter and also one extra column to the left (so the • has color on both sides),
-                // without changing layout or symbol positions.
-                let is_assistant =
-                    matches!(item.kind(), crate::history_cell::HistoryCellType::Assistant);
+                // Paint gutter background. For User cells and Auto Review, extend the tint under the
+                // gutter. Assistant messages use transparent background.
                 let is_auto_review = ChatWidget::is_auto_review_cell(item);
+                let is_user = matches!(item.kind(), crate::history_cell::HistoryCellType::User);
                 let auto_review_bg = crate::history_cell::PlainHistoryCell::auto_review_bg();
-                let gutter_bg = if is_assistant {
-                    crate::colors::assistant_bg()
-                } else if is_auto_review {
+                let gutter_bg = if is_auto_review {
                     auto_review_bg
+                } else if is_user {
+                    crate::colors::user_message_bg()
                 } else {
                     crate::colors::background()
                 };
 
-                // Paint gutter background for assistant/auto-review cells so the tinted
-                // strip appears contiguous with the message body. This avoids
-                // the light "hole" seen after we reduced redraws. For other
-                // cell types keep the default background (already painted by
-                // the frame bg fill above).
-                if (is_assistant || is_auto_review) && gutter_area.width > 0 && gutter_area.height > 0 {
+                // Paint gutter background for User cells and auto-review cells so the tinted
+                // strip appears contiguous with the message body. Assistant
+                // messages use transparent background.
+                if (is_user || is_auto_review) && gutter_area.width > 0 && gutter_area.height > 0 {
                     let _perf_gutter_start = if self.perf_state.enabled {
                         Some(std::time::Instant::now())
                     } else {
                         None
                     };
                     let style = Style::default().bg(gutter_bg);
-                    let mut tint_x = gutter_area.x;
-                    let mut tint_width = gutter_area.width;
-                    if content_area.x > history_area.x {
-                        tint_x = content_area.x.saturating_sub(1);
-                        tint_width = tint_width.saturating_add(1);
-                    }
+                    // For user messages, tint full width of history area (Codex style).
+                    // The cell's render already paints its allocated area (including padding
+                    // from padding_for_kind). The gutter tint just needs to match that area
+                    // exactly - no extra rows above or below.
+                    let tint_x = history_area.x;
+                    let tint_width = history_area.width;
                     let tint_rect = Rect::new(tint_x, gutter_area.y, tint_width, gutter_area.height);
                     fill_rect(buf, tint_rect, Some(' '), style);
-                    // Also tint one column immediately to the right of the content area
-                    // so the assistant block is visually bookended. This column lives in the
-                    // right padding stripe; when the scrollbar is visible it will draw over
-                    // the far-right edge, which is fine.
-                    let right_col_x = content_area.x.saturating_add(content_area.width);
-                    let history_right = history_area.x.saturating_add(history_area.width);
-                    if right_col_x < history_right {
-                        let right_rect = Rect::new(right_col_x, item_area.y, 1, item_area.height);
-                        fill_rect(buf, right_rect, Some(' '), style);
-                    }
                     if let Some(t0) = _perf_gutter_start {
                         let dt = t0.elapsed().as_nanos();
                         let mut p = self.perf_state.stats.borrow_mut();
@@ -38935,87 +38969,71 @@ impl WidgetRef for &ChatWidget<'_> {
                 }
 
                 // Render gutter symbol if present
-                if let Some(symbol) = item.gutter_symbol() {
-                    // Choose color based on symbol/type
-                    let color = if is_auto_review {
-                        crate::colors::success()
-                    } else if symbol == "❯" {
-                        // Executed arrow – color reflects exec state
-                        if let Some(exec) = item
-                            .as_any()
-                            .downcast_ref::<crate::history_cell::ExecCell>()
-                        {
-                            match &exec.output {
-                                None => crate::colors::text(), // Running...
-                                // Successful runs use the theme success color so the arrow stays visible on all themes
-                                Some(o) if o.exit_code == 0 => crate::colors::text(),
-                                Some(_) => crate::colors::error(),
-                            }
-                        } else {
-                            // Handle merged exec cells (multi-block "Ran") the same as single execs
-                            match item.kind() {
-                                crate::history_cell::HistoryCellType::Exec {
-                                    kind: crate::history_cell::ExecKind::Run,
-                                    status: crate::history::state::ExecStatus::Success,
-                                } => crate::colors::text(),
-                                crate::history_cell::HistoryCellType::Exec {
-                                    kind: crate::history_cell::ExecKind::Run,
-                                    status: crate::history::state::ExecStatus::Error,
-                                } => crate::colors::error(),
-                                crate::history_cell::HistoryCellType::Exec { .. } => {
-                                    crate::colors::text()
-                                }
-                                _ => crate::colors::text(),
-                            }
-                        }
-                    } else if symbol == "↯" {
-                        // Patch/Updated arrow color – match the header text color
-                        match item.kind() {
-                            crate::history_cell::HistoryCellType::Patch {
-                                kind: crate::history_cell::PatchKind::ApplySuccess,
-                            } => crate::colors::success(),
-                            crate::history_cell::HistoryCellType::Patch {
-                                kind: crate::history_cell::PatchKind::ApplyBegin,
-                            } => crate::colors::success(),
-                            crate::history_cell::HistoryCellType::Patch {
-                                kind: crate::history_cell::PatchKind::Proposed,
-                            } => crate::colors::primary(),
-                            crate::history_cell::HistoryCellType::Patch {
-                                kind: crate::history_cell::PatchKind::ApplyFailure,
-                            } => crate::colors::error(),
-                            _ => crate::colors::primary(),
-                        }
-                    } else if matches!(symbol, "◐" | "◓" | "◑" | "◒")
-                        && item
-                            .as_any()
-                            .downcast_ref::<crate::history_cell::RunningToolCallCell>()
-                            .map_or(false, |cell| cell.has_title("Waiting"))
-                    {
-                        crate::colors::text_bright()
-                    } else if matches!(symbol, "○" | "◔" | "◑" | "◕" | "●") {
-                        if let Some(plan_cell) = item
-                            .as_any()
-                            .downcast_ref::<crate::history_cell::PlanUpdateCell>()
-                        {
-                            if plan_cell.is_complete() {
-                                crate::colors::success()
+                if let Some(base_symbol) = item.gutter_symbol() {
+                    // Determine gutter color and symbol based on cell type and state
+                    let (color, symbol) = match item.kind() {
+                        // Assistant cells: green pulsing bullet while animating, white when done
+                        crate::history_cell::HistoryCellType::Assistant => {
+                            if item.is_animating() {
+                                // Pulsing animation: cycle between small and large bullet
+                                use std::time::{SystemTime, UNIX_EPOCH};
+                                let now_ms = SystemTime::now()
+                                    .duration_since(UNIX_EPOCH)
+                                    .unwrap_or_default()
+                                    .as_millis();
+                                // Cycle every 400ms between small (·) and large (●) bullets
+                                let phase = (now_ms / 400) % 2;
+                                let animated_symbol = if phase == 0 { "·" } else { "●" };
+                                (ratatui::style::Color::Green, animated_symbol)
                             } else {
-                                crate::colors::info()
+                                // White/normal bullet when complete
+                                (crate::colors::text(), base_symbol)
                             }
-                        } else {
-                            crate::colors::success()
                         }
-                    } else {
-                        match symbol {
-                            "›" => crate::colors::text(),        // user
-                            "⋮" => crate::colors::primary(),     // thinking
-                            "•" => crate::colors::text_bright(), // codex/agent
-                            "⚙" => crate::colors::info(),        // tool working
-                            "✔" => crate::colors::success(),     // tool complete
-                            "✖" => crate::colors::error(),       // error
-                            "★" => crate::colors::text_bright(), // notice/popular
-                            _ => crate::colors::text_dim(),
+                        // Background events (AI actions) also use dynamic color
+                        crate::history_cell::HistoryCellType::BackgroundEvent => {
+                            // Check if this is an error message
+                            let is_error = item.display_lines().first()
+                                .map(|l| l.spans.iter().any(|s| s.content.contains("Failed") || s.content.contains("❌") || s.content.contains("Error")))
+                                .unwrap_or(false);
+                            if is_error {
+                                (ratatui::style::Color::Red, base_symbol)
+                            } else {
+                                (crate::colors::text(), base_symbol)
+                            }
                         }
+                        // Tool cells use ⏺ with dynamic color based on status
+                        crate::history_cell::HistoryCellType::Tool { status } => {
+                            match status {
+                                crate::history_cell::ToolCellStatus::Success => {
+                                    (ratatui::style::Color::Green, base_symbol)
+                                }
+                                crate::history_cell::ToolCellStatus::Failed => {
+                                    (ratatui::style::Color::Red, base_symbol)
+                                }
+                                crate::history_cell::ToolCellStatus::Running => {
+                                    // Dim color while running
+                                    (crate::colors::text_dim(), base_symbol)
+                                }
+                            }
+                        }
+                        // Exec cells (command execution) use ⏺ with dynamic color
+                        crate::history_cell::HistoryCellType::Exec { status, .. } => {
+                            match status {
+                                crate::history_cell::ExecStatus::Success => {
+                                    (ratatui::style::Color::Green, base_symbol)
+                                }
+                                crate::history_cell::ExecStatus::Error => {
+                                    (ratatui::style::Color::Red, base_symbol)
+                                }
+                                crate::history_cell::ExecStatus::Running => {
+                                    // Dim color while running
+                                    (crate::colors::text_dim(), base_symbol)
+                                }
+                            }
+                        }
+                        // All other symbols use monochrome text_dim color
+                        _ => (crate::colors::text_dim(), base_symbol),
                     };
 
                     // Draw the symbol anchored to the top of the message (not the viewport).
@@ -39024,14 +39042,11 @@ impl WidgetRef for &ChatWidget<'_> {
                     if gutter_area.width >= 2 {
                         // Anchor offset counted from the very start of the item's painted area
                         // to the first line of its content that the icon should align with.
-                        let anchor_offset: u16 = match item.kind() {
-                            // Assistant messages render with one row of top padding so that
-                            // the content visually aligns; anchor to that second row.
-                            crate::history_cell::HistoryCellType::Assistant => 1,
-                            _ if is_auto_review => {
-                                crate::history_cell::PlainHistoryCell::auto_review_padding().0
-                            }
-                            _ => 0,
+                        let anchor_offset: u16 = if is_auto_review {
+                            crate::history_cell::PlainHistoryCell::auto_review_padding().0
+                        } else {
+                            // Use padding_for_kind to align gutter with actual text start
+                            crate::history_cell::PlainHistoryCell::padding_for_kind(item.kind()).0
                         };
 
                         // If we've scrolled past the anchor line, don't render the icon.
@@ -39040,7 +39055,9 @@ impl WidgetRef for &ChatWidget<'_> {
                             let symbol_y = gutter_area.y.saturating_add(rel);
                             if symbol_y < gutter_area.y.saturating_add(gutter_area.height) {
                                 let symbol_style = Style::default().fg(color).bg(gutter_bg);
-                                let symbol_x = gutter_area.x;
+                                // Position symbol at the left edge of history area (Codex style)
+                                // Use history_area.x to account for any terminal splits/sidebars
+                                let symbol_x = history_area.x;
                                 buf.set_string(symbol_x, symbol_y, symbol, symbol_style);
                             }
                         }
@@ -39231,16 +39248,62 @@ impl WidgetRef for &ChatWidget<'_> {
             }
         }
 
-        // Clear any bottom gap inside the content area that wasn’t covered by items
-        if screen_y < content_area.y + content_area.height {
+        // Render thinking indicator at the bottom of history when task is running
+        // This shows where the next AI response will appear (like Codex)
+        let mut thinking_rows_used = 0u16;
+        if self.bottom_pane.is_task_running() && screen_y < content_area.y + content_area.height {
+            // Add 1 row spacer before thinking indicator (separate from user message bg)
+            let spacer_y = screen_y;
+            if spacer_y < content_area.y + content_area.height {
+                // Clear the spacer row with default background
+                let spacer_rect = Rect::new(history_area.x, spacer_y, history_area.width, 1);
+                fill_rect(buf, spacer_rect, Some(' '), base_style);
+                thinking_rows_used = 1;
+            }
+
+            // Get status message for the thinking indicator
+            let status_msg = self.bottom_pane.composer().status_message()
+                .map(|s| s.to_string())
+                .unwrap_or_else(|| "Thinking".to_string());
+
+            // Render the thinking line with spinner at the position where next AI message will appear
+            use std::time::{SystemTime, UNIX_EPOCH};
+            let now_ms = SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .unwrap_or_default()
+                .as_millis();
+            let spinner_def = crate::spinner::current_spinner();
+            let spinner_str = crate::spinner::frame_at_time(spinner_def, now_ms);
+
+            // Build the thinking line: "◇ Thinking..." style
+            let thinking_text = format!("{} {}...", spinner_str, status_msg);
+            let thinking_style = Style::default().fg(crate::colors::text_dim());
+
+            // Position thinking indicator on the next row after spacer
+            let thinking_y = screen_y.saturating_add(1);
+            if thinking_y < content_area.y + content_area.height {
+                // Clear the thinking row first to remove any user message background
+                let thinking_rect = Rect::new(history_area.x, thinking_y, history_area.width, 1);
+                fill_rect(buf, thinking_rect, Some(' '), base_style);
+                buf.set_string(history_area.x, thinking_y, &thinking_text, thinking_style);
+                thinking_rows_used = 2; // spacer + thinking
+
+                // Schedule animation frame for spinner to animate
+                let _ = self.app_event_tx.send(AppEvent::ScheduleFrameIn(HISTORY_ANIMATION_FRAME_INTERVAL));
+            }
+        }
+
+        // Clear any bottom gap inside the content area that wasn't covered by items
+        let gap_start_y = screen_y.saturating_add(thinking_rows_used);
+        if gap_start_y < content_area.y + content_area.height {
             let _perf_hist_clear2 = if self.perf_state.enabled {
                 Some(std::time::Instant::now())
             } else {
                 None
             };
-            let gap_height = (content_area.y + content_area.height).saturating_sub(screen_y);
+            let gap_height = (content_area.y + content_area.height).saturating_sub(gap_start_y);
             if gap_height > 0 {
-                let gap_rect = Rect::new(content_area.x, screen_y, content_area.width, gap_height);
+                let gap_rect = Rect::new(content_area.x, gap_start_y, content_area.width, gap_height);
                 fill_rect(buf, gap_rect, Some(' '), base_style);
             }
             if let Some(t0) = _perf_hist_clear2 {
@@ -39255,14 +39318,10 @@ impl WidgetRef for &ChatWidget<'_> {
 
         // Render vertical scrollbar when content is scrollable and currently visible
         // Auto-hide after a short delay to avoid copying it along with text.
-        let now = std::time::Instant::now();
-        let show_scrollbar = total_height > content_area.height
-            && self
-                .layout
-                .scrollbar_visible_until
-                .get()
-                .map(|t| now < t)
-                .unwrap_or(false);
+        // Scrollbar disabled for cleaner Codex-style UI - content scrolls naturally
+        let show_scrollbar = false;
+        #[allow(dead_code)]
+        let _now = std::time::Instant::now();
         if show_scrollbar {
             let mut sb_state = self.layout.vertical_scrollbar_state.borrow_mut();
             // Scrollbar expects number of scroll positions, not total rows.

@@ -674,7 +674,9 @@ pub(crate) enum AppEvent {
         result: Result<(), String>,
         attempt_id: Uuid,
     },
-    
+
+    /// Launch the external editor after a normal draw has completed.
+    LaunchExternalEditor,
 }
 
 // No helper constructor; use `AppEvent::CodexEvent(ev)` directly to avoid shadowing.
