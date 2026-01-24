@@ -122,13 +122,13 @@ jobs:
         run: |
           set -euo pipefail
           cd code-rs
-          cargo build --locked --profile dev-fast --bin code
+          cargo build --locked --profile dev-fast --bin dev
 
       - name: CLI smokes (skip duplicated cargo tests)
         shell: bash
         env:
           SKIP_CARGO_TESTS: "1"
-          CI_CLI_BIN: ${{ env.CARGO_TARGET_DIR }}/dev-fast/code
+          CI_CLI_BIN: ${{ env.CARGO_TARGET_DIR }}/dev-fast/dev
         run: bash scripts/ci-tests.sh
 
       - name: Drop dev-fast artifacts before workspace tests
@@ -388,7 +388,7 @@ jobs:
           RUST_BACKTRACE: "1"
         run: |
           cd code-rs
-          cargo build --release --frozen --locked --timings --target ${{ matrix.target }} --bin code
+          cargo build --release --frozen --locked --timings --target ${{ matrix.target }} --bin dev
 
       - name: Post-build smoke (run binary) [Unix]
         if: |
@@ -398,7 +398,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          exe="code-rs/target/${{ matrix.target }}/release/code"
+          exe="code-rs/target/${{ matrix.target }}/release/dev"
           "$exe" --version
           "$exe" completion bash > /dev/null
 
@@ -406,7 +406,7 @@ jobs:
         if: matrix.os == 'windows-latest' && matrix.target == 'x86_64-pc-windows-msvc'
         shell: pwsh
         run: |
-          $exe = "code-rs/target/${{ matrix.target }}/release/code.exe"
+          $exe = "code-rs/target/${{ matrix.target }}/release/dev.exe"
           & $exe --version | Out-Null
           & $exe completion bash | Out-Null
 
@@ -419,9 +419,9 @@ jobs:
         run: |
           mkdir -p artifacts
           if [[ "${{ matrix.os }}" == "windows-latest" ]]; then
-            cp code-rs/target/${{ matrix.target }}/release/code.exe artifacts/${{ matrix.artifact }}
+            cp code-rs/target/${{ matrix.target }}/release/dev.exe artifacts/${{ matrix.artifact }}
           else
-            cp code-rs/target/${{ matrix.target }}/release/code artifacts/${{ matrix.artifact }}
+            cp code-rs/target/${{ matrix.target }}/release/dev artifacts/${{ matrix.artifact }}
           fi
 
       - name: Compress artifacts (Windows)
