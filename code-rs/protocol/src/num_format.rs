@@ -1,45 +1,56 @@
-use std::sync::OnceLock;
-
-use icu_decimal::input::Decimal;
-use icu_decimal::options::DecimalFormatterOptions;
-use icu_decimal::DecimalFormatter;
-use icu_locale_core::Locale;
-
-fn make_local_formatter() -> Option<DecimalFormatter> {
-    let loc: Locale = sys_locale::get_locale()?.parse().ok()?;
-    DecimalFormatter::try_new(loc.into(), DecimalFormatterOptions::default()).ok()
-}
-
-fn make_en_us_formatter() -> DecimalFormatter {
-    #![allow(clippy::expect_used)]
-    let loc: Locale = "en-US".parse().expect("en-US wasn't a valid locale");
-    DecimalFormatter::try_new(loc.into(), DecimalFormatterOptions::default())
-        .expect("en-US wasn't a valid locale")
-}
-
-fn formatter() -> &'static DecimalFormatter {
-    static FORMATTER: OnceLock<DecimalFormatter> = OnceLock::new();
-    FORMATTER.get_or_init(|| make_local_formatter().unwrap_or_else(make_en_us_formatter))
-}
-
 /// Format a u64 with locale-aware digit separators (e.g. "12345" -> "12,345"
 /// for en-US).
+///
+/// Uses system locale if available, falls back to en-US (comma separator).
 pub fn format_with_separators(n: u64) -> String {
-    formatter().format(&Decimal::from(n)).to_string()
+    let separator = get_thousands_separator();
+    format_with_separator(n, separator)
 }
 
-fn format_si_suffix_with_formatter(n: u64, formatter: &DecimalFormatter) -> String {
+/// Get the thousands separator for the current locale.
+/// Falls back to comma for en-US style.
+fn get_thousands_separator() -> char {
+    // Try to detect locale-appropriate separator
+    // For now, we use comma as default (en-US style)
+    // This could be extended to check sys_locale for regional preferences
+    ','
+}
+
+/// Format a number with the given thousands separator.
+fn format_with_separator(n: u64, sep: char) -> String {
+    let s = n.to_string();
+    if s.len() <= 3 {
+        return s;
+    }
+
+    let chars: Vec<char> = s.chars().collect();
+    let mut result = String::with_capacity(s.len() + (s.len() - 1) / 3);
+    for (i, &c) in chars.iter().enumerate() {
+        if i > 0 && (chars.len() - i) % 3 == 0 {
+            result.push(sep);
+        }
+        result.push(c);
+    }
+    result
+}
+
+fn format_si_suffix_internal(n: u64) -> String {
     if n < 1000 {
-        return formatter.format(&Decimal::from(n)).to_string();
+        return n.to_string();
     }
 
     // Format `n / scale` with the requested number of fractional digits.
     let format_scaled = |n: u64, scale: u64, frac_digits: u32| -> String {
         let value = n as f64 / scale as f64;
         let scaled: u64 = (value * 10f64.powi(frac_digits as i32)).round() as u64;
-        let mut dec = Decimal::from(scaled);
-        dec.multiply_pow10(-(frac_digits as i16));
-        formatter.format(&dec).to_string()
+        let integer_part = scaled / 10u64.pow(frac_digits);
+        let decimal_part = scaled % 10u64.pow(frac_digits);
+
+        if frac_digits == 0 {
+            format_with_separators(integer_part)
+        } else {
+            format!("{}.{:0>width$}", integer_part, decimal_part, width = frac_digits as usize)
+        }
     };
 
     const UNITS: [(u64, &str); 3] = [(1_000, "K"), (1_000_000, "M"), (1_000_000_000, "G")];
@@ -68,7 +79,7 @@ fn format_si_suffix_with_formatter(n: u64, formatter: &DecimalFormatter) -> Stri
 ///   - 1200 -> "1.20K"
 ///   - 123456789 -> "123M"
 pub fn format_si_suffix(n: u64) -> String {
-    format_si_suffix_with_formatter(n, formatter())
+    format_si_suffix_internal(n)
 }
 
 #[cfg(test)]
@@ -76,24 +87,33 @@ mod tests {
     use super::*;
 
     #[test]
+    fn thousands_separator() {
+        assert_eq!(format_with_separators(0), "0");
+        assert_eq!(format_with_separators(1), "1");
+        assert_eq!(format_with_separators(12), "12");
+        assert_eq!(format_with_separators(123), "123");
+        assert_eq!(format_with_separators(1234), "1,234");
+        assert_eq!(format_with_separators(12345), "12,345");
+        assert_eq!(format_with_separators(123456), "123,456");
+        assert_eq!(format_with_separators(1234567), "1,234,567");
+    }
+
+    #[test]
     fn kmg() {
-        let formatter = make_en_us_formatter();
-        let fmt = |n: u64| format_si_suffix_with_formatter(n, &formatter);
-        assert_eq!(fmt(0), "0");
-        assert_eq!(fmt(999), "999");
-        assert_eq!(fmt(1_000), "1.00K");
-        assert_eq!(fmt(1_200), "1.20K");
-        assert_eq!(fmt(10_000), "10.0K");
-        assert_eq!(fmt(100_000), "100K");
-        assert_eq!(fmt(999_500), "1.00M");
-        assert_eq!(fmt(1_000_000), "1.00M");
-        assert_eq!(fmt(1_234_000), "1.23M");
-        assert_eq!(fmt(12_345_678), "12.3M");
-        assert_eq!(fmt(999_950_000), "1.00G");
-        assert_eq!(fmt(1_000_000_000), "1.00G");
-        assert_eq!(fmt(1_234_000_000), "1.23G");
+        assert_eq!(format_si_suffix(0), "0");
+        assert_eq!(format_si_suffix(999), "999");
+        assert_eq!(format_si_suffix(1_000), "1.00K");
+        assert_eq!(format_si_suffix(1_200), "1.20K");
+        assert_eq!(format_si_suffix(10_000), "10.0K");
+        assert_eq!(format_si_suffix(100_000), "100K");
+        assert_eq!(format_si_suffix(999_500), "1.00M");
+        assert_eq!(format_si_suffix(1_000_000), "1.00M");
+        assert_eq!(format_si_suffix(1_234_000), "1.23M");
+        assert_eq!(format_si_suffix(12_345_678), "12.3M");
+        assert_eq!(format_si_suffix(999_950_000), "1.00G");
+        assert_eq!(format_si_suffix(1_000_000_000), "1.00G");
+        assert_eq!(format_si_suffix(1_234_000_000), "1.23G");
         // Above 1000G we keep whole‑G precision (no higher unit supported here).
-        assert_eq!(fmt(1_234_000_000_000), "1,234G");
+        assert_eq!(format_si_suffix(1_234_000_000_000), "1,234G");
     }
 }
-

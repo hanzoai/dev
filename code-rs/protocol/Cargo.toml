@@ -12,8 +12,6 @@ workspace = true
 
 [dependencies]
 base64 = { workspace = true }
-icu_decimal = { workspace = true }
-icu_locale_core = { workspace = true }
 mcp-types = { workspace = true }
 mime_guess = { workspace = true }
 schemars = { workspace = true }
@@ -22,7 +20,6 @@ serde_json = { workspace = true }
 serde_with = { workspace = true, features = ["macros", "base64"] }
 strum = { workspace = true }
 strum_macros = { workspace = true }
-sys-locale = { workspace = true }
 tracing = { workspace = true }
 ts-rs = { workspace = true, features = [
     "uuid-impl",
