@@ -574,57 +574,51 @@ pub(crate) fn new_session_info(
 /// "notice" marker). Shared between the initial session info and the startup prelude.
 fn popular_commands_lines(_latest_version: Option<&str>) -> Vec<Line<'static>> {
     let mut lines: Vec<Line<'static>> = Vec::new();
+    // Monochrome style - use text colors instead of primary (blue)
+    let cmd_style = Style::default().fg(crate::colors::text_bright());
+    let tag_style = Style::default().fg(crate::colors::text_dim());
     lines.push(Line::styled(
         "Popular commands:",
         Style::default().fg(crate::colors::text_bright()),
     ));
     lines.push(Line::from(vec![
-        Span::styled("/settings", Style::default().fg(crate::colors::primary())),
+        Span::styled("/settings", cmd_style),
         Span::from(" - "),
         Span::from(SlashCommand::Settings.description())
             .style(Style::default().add_modifier(Modifier::DIM)),
-        Span::styled(
-            " UPDATED",
-            Style::default().fg(crate::colors::primary()),
-        ),
+        Span::styled(" UPDATED", tag_style),
     ]));
     lines.push(Line::from(vec![
-        Span::styled("/auto", Style::default().fg(crate::colors::primary())),
+        Span::styled("/auto", cmd_style),
         Span::from(" - "),
         Span::from(SlashCommand::Auto.description())
             .style(Style::default().add_modifier(Modifier::DIM)),
-        Span::styled(
-            " UPDATED",
-            Style::default().fg(crate::colors::primary()),
-        ),
+        Span::styled(" UPDATED", tag_style),
     ]));
     lines.push(Line::from(vec![
-        Span::styled("/chrome", Style::default().fg(crate::colors::primary())),
+        Span::styled("/chrome", cmd_style),
         Span::from(" - "),
         Span::from(SlashCommand::Chrome.description())
             .style(Style::default().add_modifier(Modifier::DIM)),
     ]));
     lines.push(Line::from(vec![
-        Span::styled("/plan", Style::default().fg(crate::colors::primary())),
+        Span::styled("/plan", cmd_style),
         Span::from(" - "),
         Span::from(SlashCommand::Plan.description())
             .style(Style::default().add_modifier(Modifier::DIM)),
     ]));
     lines.push(Line::from(vec![
-        Span::styled("/code", Style::default().fg(crate::colors::primary())),
+        Span::styled("/code", cmd_style),
         Span::from(" - "),
         Span::from(SlashCommand::Code.description())
             .style(Style::default().add_modifier(Modifier::DIM)),
     ]));
     lines.push(Line::from(vec![
-        Span::styled("/skills", Style::default().fg(crate::colors::primary())),
+        Span::styled("/skills", cmd_style),
         Span::from(" - "),
         Span::from(SlashCommand::Skills.description())
             .style(Style::default().add_modifier(Modifier::DIM)),
-        Span::styled(
-            " NEW",
-            Style::default().fg(crate::colors::primary()),
-        ),
+        Span::styled(" NEW", tag_style),
     ]));
 
     lines

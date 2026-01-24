@@ -67,7 +67,7 @@ pub(crate) fn gutter_symbol_for_kind(kind: HistoryCellType) -> Option<&'static s
         // Plan updates supply their own gutter glyph dynamically.
         HistoryCellType::PlanUpdate => None,
         HistoryCellType::BackgroundEvent => Some("»"),
-        HistoryCellType::Notice => Some("★"),
+        HistoryCellType::Notice => None,
         HistoryCellType::CompactionSummary => Some("📍"),
         HistoryCellType::Diff => Some("↯"),
         HistoryCellType::Image => None,

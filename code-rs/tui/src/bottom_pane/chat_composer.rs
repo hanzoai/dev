@@ -1,8 +1,8 @@
 use ratatui::buffer::Buffer;
-use ratatui::layout::{Constraint, Layout, Margin, Rect};
+use ratatui::layout::{Constraint, Layout, Rect};
 use ratatui::style::{Color, Modifier, Style, Stylize};
 use ratatui::text::{Line, Span};
-use ratatui::widgets::{Block, BorderType, Borders, StatefulWidgetRef, WidgetRef};
+use ratatui::widgets::{Block, Borders, StatefulWidgetRef, WidgetRef};
 use code_core::protocol::TokenUsage;
 use crossterm::event::KeyCode;
 use crossterm::event::KeyEvent;
@@ -606,16 +606,18 @@ impl ChatComposer {
         ])
         .areas(area);
 
-        // Get inner area of the bordered input box
-        let input_block = Block::default().borders(Borders::ALL);
-        let textarea_rect = input_block.inner(input_area);
-
-        // Apply the same inner padding as in render (horizontal only).
-        let padded_textarea_rect = textarea_rect.inner(Margin::new(crate::layout_consts::COMPOSER_INNER_HPAD.into(), 0));
+        // Match the textarea rect calculation from render (1 top, 2 left for prompt, 1 bottom, 1 right)
+        let prompt_width = 2u16;
+        let textarea_rect = Rect {
+            x: input_area.x + prompt_width,
+            y: input_area.y + 1,
+            width: input_area.width.saturating_sub(prompt_width + 1),
+            height: input_area.height.saturating_sub(2),
+        };
 
         let state = self.textarea_state.borrow();
         self.textarea
-            .cursor_pos_with_state(padded_textarea_rect, *state)
+            .cursor_pos_with_state(textarea_rect, *state)
     }
 
     /// Returns true if the composer currently contains no user input.
@@ -2171,7 +2173,7 @@ impl ChatComposer {
         status: AutoReviewFooterStatus,
         agent_hint_label: AgentHintLabel,
     ) -> (Vec<Span<'static>>, Vec<Span<'static>>) {
-        let key_hint_style = Style::default().fg(crate::colors::function());
+        let key_hint_style = Style::default().fg(crate::colors::text_bright());
         let label_style = Style::default().fg(crate::colors::text_dim());
 
         let agent_hint_label_text = match agent_hint_label {
@@ -2269,7 +2271,7 @@ impl ChatComposer {
                     return;
                 }
 
-                let key_hint_style = Style::default().fg(crate::colors::function());
+                let key_hint_style = Style::default().fg(crate::colors::text_bright());
                 let label_style = Style::default().fg(crate::colors::text_dim());
 
                 if let Some(hints) = &self.footer_hint_override {
@@ -2450,8 +2452,8 @@ impl ChatComposer {
                 // Guide hint (priority 4) — only when not auto-drive and not showing quit hint
                 let guide_spans: Vec<Span<'static>> = if !self.auto_drive_active && !self.ctrl_c_quit_hint {
                     vec![
-                        Span::from("Ctrl+G").style(key_hint_style),
-                        Span::from(" guide").style(label_style),
+                        Span::from("?").style(key_hint_style),
+                        Span::from(" for shortcuts").style(label_style),
                     ]
                 } else {
                     Vec::new()
@@ -2824,6 +2826,7 @@ impl WidgetRef for ChatComposer {
         // Draw border around input area with optional variant title when task is running
         let mut input_block = Block::default().borders(Borders::ALL);
         let mut auto_drive_border_gradient = None;
+        let input_bg = Color::Rgb(30, 32, 36);  // Dark grey background (matches Codex style)
         if let Some(style) = self
             .auto_drive_style
             .as_ref()
@@ -2835,10 +2838,10 @@ impl WidgetRef for ChatComposer {
                 .border_type(style.border_type)
                 .style(style.background_style.clone());
         } else {
+            // No border, just grey background (matches Codex style)
             input_block = input_block
-                .border_style(Style::default().fg(crate::colors::border()))
-                .border_type(BorderType::Plain)
-                .style(Style::default().bg(crate::colors::background()));
+                .borders(Borders::NONE)
+                .style(Style::default().bg(input_bg));
         }
 
         if self.is_task_running && !self.embedded_mode {
@@ -2879,23 +2882,35 @@ impl WidgetRef for ChatComposer {
             }
         }
 
-        let textarea_rect = input_block.inner(input_area);
+        // Render the background block first
         input_block.render_ref(input_area, buf);
         if let Some(gradient) = auto_drive_border_gradient {
             apply_auto_drive_border_gradient(buf, input_area, gradient);
         }
 
-        // Add padding inside the text area (1 char horizontal only, no vertical padding)
-        let padded_textarea_rect = textarea_rect.inner(Margin::new(1, 0));
+        // Inset for the text content area (like Codex: 1 top, 2 left for prompt, 1 bottom, 1 right)
+        let prompt_width = 2u16;
+        let textarea_rect = Rect {
+            x: input_area.x + prompt_width,
+            y: input_area.y + 1,
+            width: input_area.width.saturating_sub(prompt_width + 1),
+            height: input_area.height.saturating_sub(2),
+        };
+
+        // Render prompt "› " at the left edge, aligned with text
+        if !textarea_rect.is_empty() {
+            let prompt = Span::styled("› ", Style::default().fg(crate::colors::text_dim()).add_modifier(Modifier::BOLD));
+            buf.set_span(input_area.x, input_area.y + 1, &prompt, prompt_width);
+        }
 
         let mut state = self.textarea_state.borrow_mut();
-        StatefulWidgetRef::render_ref(&(&self.textarea), padded_textarea_rect, buf, &mut state);
+        StatefulWidgetRef::render_ref(&(&self.textarea), textarea_rect, buf, &mut state);
         // Only show placeholder if there's no chat history AND no text typed
         if !self.typed_anything && self.textarea.text().is_empty() {
             let placeholder = crate::greeting::greeting_placeholder();
             Line::from(placeholder)
-                .style(Style::default().dim())
-                .render_ref(padded_textarea_rect, buf);
+                .style(Style::default().dim().bg(input_bg))
+                .render_ref(textarea_rect, buf);
         }
 
         // Draw a high-contrast cursor overlay under the terminal cursor using the theme's
@@ -2912,7 +2927,7 @@ impl WidgetRef for ChatComposer {
         drop(state); // release the borrow before computing position again
         if let Some((cx, cy)) = self
             .textarea
-            .cursor_pos_with_state(padded_textarea_rect, *self.textarea_state.borrow())
+            .cursor_pos_with_state(textarea_rect, *self.textarea_state.borrow())
         {
             let theme = crate::theme::current_theme();
             let cursor_bg = theme.cursor;

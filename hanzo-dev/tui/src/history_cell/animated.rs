@@ -3,14 +3,15 @@ use std::cell::Cell;
 use std::cell::RefCell;
 use std::time::Duration;
 use std::time::Instant;
+use ratatui::style::Stylize;
 
+/// Simplified welcome cell that renders a Codex-style bordered card
+/// with version and model info instead of complex glitch animations.
 pub(crate) struct AnimatedWelcomeCell {
     start_time: Instant,
     completed: Cell<bool>,
     fade_start: RefCell<Option<Instant>>,
     faded_out: Cell<bool>,
-    available_height: Cell<Option<u16>>,
-    variant: Cell<Option<crate::glitch_animation::IntroArtSize>>,
     version_label: String,
     hidden: Cell<bool>,
 }
@@ -22,18 +23,13 @@ impl AnimatedWelcomeCell {
             completed: Cell::new(false),
             fade_start: RefCell::new(None),
             faded_out: Cell::new(false),
-            available_height: Cell::new(None),
-            variant: Cell::new(None),
-            version_label: format!("v{}", hanzo_version::version()),
+            version_label: format!("v{}", env!("CARGO_PKG_VERSION")),
             hidden: Cell::new(false),
         }
     }
 
-    pub(crate) fn set_available_height(&self, height: u16) {
-        let prev = self.available_height.get();
-        if prev.map_or(true, |current| height > current) {
-            self.available_height.set(Some(height));
-        }
+    pub(crate) fn set_available_height(&self, _height: u16) {
+        // No longer needed for simplified rendering
     }
 
     fn fade_start(&self) -> Option<Instant> {
@@ -70,147 +66,48 @@ impl HistoryCell for AnimatedWelcomeCell {
     }
 
     fn display_lines(&self) -> Vec<Line<'static>> {
+        // Codex-style simple bordered card with version info
+        // Format: ">_ Hanzo Dev (vX.X.X)"
+        let title_line = Line::from(vec![
+            Span::from(">_ ").dim(),
+            Span::from("hanzo dev").bold(),
+            Span::from(" ").dim(),
+            Span::from(format!("({})", self.version_label)).dim(),
+        ]);
+
+        let greeting_line = Line::from(vec![
+            Span::from("   "), // Indent to align with text after ">_ "
+            Span::from(crate::greeting::greeting_placeholder()),
+        ]);
+
         vec![
+            title_line,
             Line::from(""),
-            Line::from(format!("hanzo dev v{}", env!("CARGO_PKG_VERSION"))),
-            Line::from(crate::greeting::greeting_placeholder()),
-            Line::from(""),
+            greeting_line,
         ]
     }
 
-    fn desired_height(&self, width: u16) -> u16 {
-        let variant_for_width = crate::glitch_animation::intro_art_size_for_width(width);
-        let h = crate::glitch_animation::intro_art_height(variant_for_width);
-        // For Tiny (Codex-style minimal), no extra padding needed
-        match variant_for_width {
-            crate::glitch_animation::IntroArtSize::Tiny => h,
-            _ => h.saturating_add(3),
-        }
+    fn desired_height(&self, _width: u16) -> u16 {
+        // Simple 3-line card: title, blank, greeting
+        3
     }
 
     fn has_custom_render(&self) -> bool {
-        true
+        // Use simple text rendering, no custom glitch animation
+        false
     }
 
-    fn custom_render(&self, area: Rect, buf: &mut Buffer) {
-        self.custom_render_with_skip(area, buf, 0);
+    fn custom_render(&self, _area: Rect, _buf: &mut Buffer) {
+        // Not used - has_custom_render returns false
     }
 
-    fn custom_render_with_skip(&self, area: Rect, buf: &mut Buffer, skip_rows: u16) {
-        if self.hidden.get() {
-            return;
-        }
-
-        // Clear the full allocated area first so repositioning the art (e.g.,
-        // bottom-aligning when there's vertical slack) doesn't leave stale
-        // pixels behind in the padding rows.
-        let bg = crate::colors::background();
-        for y in area.y..area.y.saturating_add(area.height) {
-            for x in area.x..area.x.saturating_add(area.width) {
-                let cell = &mut buf[(x, y)];
-                cell.set_bg(bg);
-                cell.set_symbol(" ");
-            }
-        }
-
-        let height_hint = self.available_height.get().unwrap_or(area.height);
-        // Check if we're in Tiny mode (minimal terminal) - don't subtract padding
-        let variant_check = crate::glitch_animation::intro_art_size_for_width(area.width);
-        let is_tiny_mode = matches!(variant_check, crate::glitch_animation::IntroArtSize::Tiny);
-        let adjusted_height = if is_tiny_mode { height_hint } else { height_hint.saturating_sub(3) };
-        let current_variant = crate::glitch_animation::intro_art_size_for_area(
-            area.width,
-            adjusted_height,
-        );
-        let previous_variant = self.variant.get();
-        let variant_changed = previous_variant.map_or(false, |v| v != current_variant);
-
-        if variant_changed {
-            self.variant.set(Some(current_variant));
-            // Keep `completed` as-is so the intro animation continues when the
-            // size adjusts mid-run instead of jumping to the final frame.
-        } else if previous_variant.is_none() {
-            // First render: set the variant without suppressing the intro animation.
-            self.variant.set(Some(current_variant));
-        }
-
-        let variant_for_render = current_variant;
-
-        let art_height = crate::glitch_animation::intro_art_height(current_variant);
-        // For Tiny (Codex-style minimal), no extra padding
-        let is_tiny = matches!(current_variant, crate::glitch_animation::IntroArtSize::Tiny);
-        let full_height = if is_tiny { art_height } else { art_height.saturating_add(3) };
-        // Prefer the logo low in the cell so spare lines sit above it. Keep a
-        // small bottom gap (up to 2 rows) when there's room; otherwise center.
-        let slack = full_height.saturating_sub(art_height);
-        let bottom_pad = if is_tiny { 0 } else { slack.min(2) };
-        let top_pad = slack.saturating_sub(bottom_pad);
-        let art_top = top_pad;
-        let art_bottom = art_top.saturating_add(art_height);
-        let vis_top = skip_rows;
-        let vis_bottom = skip_rows.saturating_add(area.height);
-        let intersection_top = art_top.max(vis_top);
-        let intersection_bottom = art_bottom.min(vis_bottom);
-        if intersection_bottom <= intersection_top {
-            return;
-        }
-        let row_offset = intersection_top.saturating_sub(art_top);
-        let y_offset = intersection_top.saturating_sub(vis_top);
-        let visible_height = intersection_bottom.saturating_sub(intersection_top);
-        let positioned_area = Rect {
-            x: area.x,
-            y: area.y.saturating_add(y_offset),
-            width: area.width,
-            height: visible_height,
-        };
-
-        let fade_duration = Duration::from_millis(800);
-
-        if let Some(fade_time) = self.fade_start() {
-            let fade_elapsed = fade_time.elapsed();
-            if fade_elapsed < fade_duration && !self.faded_out.get() {
-                let fade_progress = fade_elapsed.as_secs_f32() / fade_duration.as_secs_f32();
-                let alpha = 1.0 - fade_progress;
-                crate::glitch_animation::render_intro_animation_with_size_and_alpha_offset(
-                    positioned_area,
-                    buf,
-                    1.0,
-                    alpha,
-                    current_variant,
-                    &self.version_label,
-                    row_offset,
-                );
-            } else {
-                self.faded_out.set(true);
-            }
-            return;
-        }
-
-        let animation_duration = Duration::from_secs(2);
-
-        let elapsed = self.start_time.elapsed();
-        let progress = if variant_changed {
-            1.0
-        } else if elapsed < animation_duration && !self.completed.get() {
-            elapsed.as_secs_f32() / animation_duration.as_secs_f32()
-        } else {
-            self.completed.set(true);
-            1.0
-        };
-
-        crate::glitch_animation::render_intro_animation_with_size_and_alpha_offset(
-            positioned_area,
-            buf,
-            progress,
-            1.0,
-            variant_for_render,
-            &self.version_label,
-            row_offset,
-        );
+    fn custom_render_with_skip(&self, _area: Rect, _buf: &mut Buffer, _skip_rows: u16) {
+        // Not used - has_custom_render returns false
     }
 
     fn is_animating(&self) -> bool {
-        let animation_duration = Duration::from_secs(2);
+        // Simple fade animation for removal
+        let animation_duration = Duration::from_secs(1);
         if !self.completed.get() {
             if self.start_time.elapsed() < animation_duration {
                 return true;
@@ -220,7 +117,7 @@ impl HistoryCell for AnimatedWelcomeCell {
 
         if let Some(fade_time) = self.fade_start() {
             if !self.faded_out.get() {
-                if fade_time.elapsed() < Duration::from_millis(800) {
+                if fade_time.elapsed() < Duration::from_millis(500) {
                     return true;
                 }
                 self.faded_out.set(true);

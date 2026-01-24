@@ -5,11 +5,19 @@ use crossterm::event::{KeyCode, KeyEvent};
 
 // Returns true if the key was handled by the guide overlay (or toggled it closed).
 pub(super) fn handle_help_key(chat: &mut ChatWidget<'_>, key_event: KeyEvent) -> bool {
-    // If no guide overlay, only intercept Ctrl+G to open it.
+    // If no guide overlay, intercept Ctrl+G or '?' to open it.
     if chat.help.overlay.is_none() {
-        if let KeyEvent { code: KeyCode::Char('g'), modifiers: crossterm::event::KeyModifiers::CONTROL, .. } = key_event {
-            chat.toggle_help_popup();
-            return true;
+        match key_event {
+            KeyEvent { code: KeyCode::Char('g'), modifiers: crossterm::event::KeyModifiers::CONTROL, .. } => {
+                chat.toggle_help_popup();
+                return true;
+            }
+            KeyEvent { code: KeyCode::Char('?'), modifiers: crossterm::event::KeyModifiers::SHIFT, .. } |
+            KeyEvent { code: KeyCode::Char('?'), .. } => {
+                chat.toggle_help_popup();
+                return true;
+            }
+            _ => {}
         }
         return false;
     }
@@ -56,8 +64,8 @@ pub(super) fn handle_help_key(chat: &mut ChatWidget<'_>, key_event: KeyEvent) ->
             chat.request_redraw();
             true
         }
-        KeyCode::Esc | KeyCode::Char('g') => {
-            // Close on Esc or Ctrl+G
+        KeyCode::Esc | KeyCode::Char('g') | KeyCode::Char('?') => {
+            // Close on Esc, Ctrl+G, or ?
             chat.help.overlay = None;
             chat.request_redraw();
             true

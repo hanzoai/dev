@@ -69,22 +69,30 @@ impl HistoryCell for AnimatedWelcomeCell {
     }
 
     fn display_lines(&self) -> Vec<Line<'static>> {
+        // Codex-style simple session header with version
         vec![
             Line::from(""),
-            Line::from("Welcome to Code"),
-            Line::from(crate::greeting::greeting_placeholder()),
+            Line::from(vec![
+                Span::styled(">_ ", Style::default().fg(crate::colors::text_dim())),
+                Span::styled("Hanzo Dev", Style::default().fg(crate::colors::text_bright()).add_modifier(Modifier::BOLD)),
+                Span::styled(format!(" ({})", self.version_label), Style::default().fg(crate::colors::text_dim())),
+            ]),
             Line::from(""),
+            Line::from(vec![
+                Span::styled("Tip: ", Style::default().fg(crate::colors::text_dim())),
+                Span::styled("Use /skills to list available skills or ask Dev to use one.", Style::default().fg(crate::colors::text_dim())),
+            ]),
         ]
     }
 
-    fn desired_height(&self, width: u16) -> u16 {
-        let variant_for_width = crate::glitch_animation::intro_art_size_for_width(width);
-        let h = crate::glitch_animation::intro_art_height(variant_for_width);
-        h.saturating_add(3)
+    fn desired_height(&self, _width: u16) -> u16 {
+        // Simple text-only welcome - just 4 lines (matches Codex session header style)
+        4
     }
 
     fn has_custom_render(&self) -> bool {
-        true
+        // Use simple text rendering, no ASCII art animation
+        false
     }
 
     fn custom_render(&self, area: Rect, buf: &mut Buffer) {

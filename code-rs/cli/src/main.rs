@@ -40,7 +40,7 @@ mod mcp_cmd;
 
 use crate::mcp_cmd::McpCli;
 
-const CLI_COMMAND_NAME: &str = "code";
+const CLI_COMMAND_NAME: &str = "dev";
 pub(crate) const CODEX_SECURE_MODE_ENV_VAR: &str = "CODEX_SECURE_MODE";
 
 /// As early as possible in the process lifecycle, apply hardening measures
@@ -62,20 +62,20 @@ fn pre_main_hardening() {
     }
 }
 
-/// Codex CLI
+/// Hanzo Dev CLI
 ///
 /// If no subcommand is specified, options will be forwarded to the interactive CLI.
 #[derive(Debug, Parser)]
 #[clap(
     author,
-    name = "code",
+    name = "dev",
     version = code_version::version(),
     // If a sub‑command is given, ignore requirements of the default args.
     subcommand_negates_reqs = true,
     // The executable is sometimes invoked via a platform‑specific name like
-    // `codex-x86_64-unknown-linux-musl`, but the help output should always use
-    // the generic `code` command name that users run.
-    bin_name = "code"
+    // `dev-x86_64-unknown-linux-musl`, but the help output should always use
+    // the generic `dev` command name that users run.
+    bin_name = "dev"
 )]
 struct MultitoolCli {
     #[clap(flatten)]
@@ -98,7 +98,7 @@ struct MultitoolCli {
 
 #[derive(Debug, clap::Subcommand)]
 enum Subcommand {
-    /// Run Codex non-interactively.
+    /// Run Hanzo Dev non-interactively.
     #[clap(visible_alias = "e")]
     Exec(ExecCli),
 
@@ -112,11 +112,11 @@ enum Subcommand {
     /// Remove stored authentication credentials.
     Logout(LogoutCommand),
 
-    /// [experimental] Run Codex as an MCP server and manage MCP servers.
+    /// [experimental] Run Hanzo Dev as an MCP server and manage MCP servers.
     #[clap(visible_alias = "acp")]
     Mcp(McpCli),
 
-    /// [experimental] Run the Codex MCP server (stdio transport).
+    /// [experimental] Run the Hanzo Dev MCP server (stdio transport).
     McpServer,
 
     /// [experimental] Run the app server.
@@ -320,7 +320,7 @@ struct LoginCommand {
 
     #[arg(
         long = "with-api-key",
-        help = "Read the API key from stdin (e.g. `printenv OPENAI_API_KEY | codex login --with-api-key`)"
+        help = "Read the API key from stdin (e.g. `printenv OPENAI_API_KEY | dev login --with-api-key`)"
     )]
     with_api_key: bool,
 
@@ -543,7 +543,7 @@ async fn cli_main(code_linux_sandbox_exe: Option<PathBuf>) -> anyhow::Result<()>
                         .await;
                     } else if login_cli.api_key.is_some() {
                         eprintln!(
-                            "The --api-key flag is no longer supported. Pipe the key instead, e.g. `printenv OPENAI_API_KEY | codex login --with-api-key`."
+                            "The --api-key flag is no longer supported. Pipe the key instead, e.g. `printenv OPENAI_API_KEY | dev login --with-api-key`."
                         );
                         std::process::exit(1);
                     } else if login_cli.with_api_key {

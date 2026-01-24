@@ -978,9 +978,9 @@ fn ansi256_to_rgb(idx: u8) -> (u8, u8, u8) {
 fn get_predefined_theme(name: ThemeName) -> Theme {
     match name {
         ThemeName::DarkCarbonNight => Theme {
-            // Dark default - sleek modern dark theme
-            primary: Color::Rgb(37, 194, 255),        // #25C2FF
-            secondary: Color::Rgb(179, 146, 240),     // #B392F0
+            // Dark default - monochrome theme (hanzo dev)
+            primary: Color::Rgb(230, 237, 243),       // #E6EDF3 (white/light gray - monochrome)
+            secondary: Color::Rgb(139, 148, 158),     // #8B949E (gray - monochrome)
             background: Color::Rgb(11, 13, 16),       // #0B0D10
             foreground: Color::Rgb(230, 237, 243),    // #E6EDF3
             border: Color::Rgb(83, 85, 88),           // #535558  (↑ contrast)
@@ -999,7 +999,7 @@ fn get_predefined_theme(name: ThemeName) -> Theme {
             comment: Color::Rgb(110, 118, 129),       // #6E7681
             function: Color::Rgb(126, 231, 135),      // #7EE787
             spinner: Color::Rgb(59, 67, 79),          // #3B434F
-            progress: Color::Rgb(37, 194, 255),       // #25C2FF
+            progress: Color::Rgb(230, 237, 243),      // #E6EDF3 (white - monochrome)
         },
         ThemeName::DarkCarbonAnsi16 => Theme {
             primary: Color::Indexed(12),

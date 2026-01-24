@@ -110,10 +110,16 @@ resolve_bin_path() {
   fi
 
   TARGET_DIR_ABS="${target_root}"
-  BIN_CARGO_FILENAME="${CRATE_PREFIX}"
-  BIN_FILENAME="${CRATE_PREFIX}"
+  # code-rs binary is named "dev", codex-rs binary matches crate prefix
+  if [ "${CRATE_PREFIX}" = "code" ]; then
+    BIN_CARGO_FILENAME="dev"
+    BIN_FILENAME="dev"
+  else
+    BIN_CARGO_FILENAME="${CRATE_PREFIX}"
+    BIN_FILENAME="${CRATE_PREFIX}"
+  fi
   if [ "$PROFILE" = "perf" ]; then
-    BIN_FILENAME="${CRATE_PREFIX}-perf"
+    BIN_FILENAME="${BIN_FILENAME}-perf"
   fi
   BIN_SUBPATH="${BIN_SUBDIR}/${BIN_FILENAME}"
   BIN_CARGO_SUBPATH="${BIN_SUBDIR}/${BIN_CARGO_FILENAME}"
@@ -321,17 +327,27 @@ if [ -n "${BUILD_FAST_BINS:-}" ]; then
   done
 fi
 if [ "${#TARGET_BINS[@]}" -eq 0 ]; then
-  TARGET_BINS=("${CRATE_PREFIX}")
+  # code-rs binary is named "dev", codex-rs binary matches prefix
+  if [ "${CRATE_PREFIX}" = "code" ]; then
+    TARGET_BINS=("dev")
+  else
+    TARGET_BINS=("${CRATE_PREFIX}")
+  fi
 fi
 PRIMARY_PRESENT=0
+# For code-rs, primary bin is "dev"; for codex-rs, it's the crate prefix
+PRIMARY_BIN_NAME="${CRATE_PREFIX}"
+if [ "${CRATE_PREFIX}" = "code" ]; then
+  PRIMARY_BIN_NAME="dev"
+fi
 for candidate in "${TARGET_BINS[@]}"; do
-  if [ "${candidate}" = "${CRATE_PREFIX}" ]; then
+  if [ "${candidate}" = "${PRIMARY_BIN_NAME}" ]; then
     PRIMARY_PRESENT=1
     break
   fi
 done
 if [ "$PRIMARY_PRESENT" -eq 0 ]; then
-  TARGET_BINS=("${CRATE_PREFIX}" "${TARGET_BINS[@]}")
+  TARGET_BINS=("${PRIMARY_BIN_NAME}" "${TARGET_BINS[@]}")
 fi
 PRIMARY_BIN="${TARGET_BINS[0]}"
 
@@ -681,7 +697,8 @@ if [ $? -eq 0 ]; then
 
     SYMLINK_PREFIXES=("${CRATE_PREFIX}")
     if [ "${CRATE_PREFIX}" = "code" ]; then
-      SYMLINK_PREFIXES+=("coder")
+      # code-rs binary is named "dev", add symlinks for both
+      SYMLINK_PREFIXES=("dev" "code" "coder")
     fi
 
     create_cli_symlinks() {
