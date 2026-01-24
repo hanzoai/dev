@@ -744,6 +744,28 @@ jobs:
           fi
           echo "ESM integrity OK for coder.js"
 
+      - name: Verify ESM bin integrity (no require in dev.js)
+        shell: bash
+        working-directory: dev-cli
+        run: |
+          set -euo pipefail
+          tgz=$(npm pack --json | jq -r '.[0].filename')
+          mkdir -p .pack && tar -xzf "$tgz" -C .pack
+          BIN=".pack/package/bin/dev.js"
+          test -f "$BIN" || { echo "dev.js missing in packed tarball" >&2; exit 1; }
+          if grep -q "require(\"fs\").createWriteStream" "$BIN"; then
+            echo "Found CommonJS require in dev.js; expected ESM. Failing." >&2
+            sed -n '1,60p' "$BIN" >&2 || true
+            exit 1
+          fi
+          # Sanity: ensure ESM import of fs functions exists
+          if ! grep -q "import .*from \"fs\"" "$BIN"; then
+            echo "Missing ESM import from fs in dev.js; unexpected content." >&2
+            sed -n '1,80p' "$BIN" >&2 || true
+            exit 1
+          fi
+          echo "ESM integrity OK for dev.js"
+
       # Generate CHANGELOG and release notes by running our own `code` CLI in headless mode.
       # It will:
       #  - Review changes between the previous tag and the new version
