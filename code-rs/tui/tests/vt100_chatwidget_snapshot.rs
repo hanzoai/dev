@@ -58,6 +58,7 @@ fn normalize_output(text: String) -> String {
         .collect::<String>()
         .pipe(normalize_ellipsis)
         .pipe(normalize_timers)
+        .pipe(normalize_version)
         .pipe(normalize_auto_drive_layout)
         .pipe(normalize_agent_history_details)
         .pipe(normalize_spacer_rows)
@@ -261,6 +262,19 @@ fn normalize_timers(text: String) -> String {
     MIN_SEC_RE
         .get_or_init(|| Regex::new(r"\b\d+m\s+\d+s\b").expect("valid minute-second regex"))
         .replace_all(&text, "Xm Ys")
+        .into_owned()
+}
+
+fn normalize_version(text: String) -> String {
+    static VERSION_RE: OnceLock<Regex> = OnceLock::new();
+
+    // Normalize version strings like "Hanzo Dev (v0.6.50-56-gadda9b189-dev)" or "Hanzo Dev (5511c8c53)"
+    // to "Hanzo Dev (VERSION)" for consistent snapshots across environments
+    VERSION_RE
+        .get_or_init(|| {
+            Regex::new(r"Hanzo Dev \([^)]+\)").expect("valid version regex")
+        })
+        .replace_all(&text, "Hanzo Dev (VERSION)")
         .into_owned()
 }
 
