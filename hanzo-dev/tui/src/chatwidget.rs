@@ -29020,15 +29020,20 @@ Note: Free ngrok accounts have connection limits."#;
         let branch_opt = self.get_git_branch();
 
         // Helper to assemble spans based on include flags
+        let version = env!("CARGO_PKG_VERSION");
         let build_spans = |include_reasoning: bool,
                            include_model: bool,
                            include_branch: bool,
                            include_dir: bool,
                            dir_display: &str| {
             let mut spans: Vec<Span> = Vec::new();
-            // Title follows theme text color
+            // Title with >_ prefix and version, follows theme text color
             spans.push(Span::styled(
-                "Hanzo Dev",
+                ">_ ",
+                Style::default().fg(crate::colors::text_dim()),
+            ));
+            spans.push(Span::styled(
+                format!("Hanzo Dev (v{})", version),
                 Style::default()
                     .fg(crate::colors::text())
                     .add_modifier(Modifier::BOLD),
@@ -29045,7 +29050,7 @@ Note: Free ngrok accounts have connection limits."#;
                 ));
                 spans.push(Span::styled(
                     self.format_model_name(&self.config.model),
-                    Style::default().fg(crate::colors::info()),
+                    Style::default().fg(crate::colors::text()),
                 ));
             }
 
@@ -29060,7 +29065,7 @@ Note: Free ngrok accounts have connection limits."#;
                 ));
                 spans.push(Span::styled(
                     Self::format_reasoning_effort(self.config.model_reasoning_effort),
-                    Style::default().fg(crate::colors::info()),
+                    Style::default().fg(crate::colors::text()),
                 ));
             }
 
@@ -29075,7 +29080,7 @@ Note: Free ngrok accounts have connection limits."#;
                 ));
                 spans.push(Span::styled(
                     dir_display.to_string(),
-                    Style::default().fg(crate::colors::info()),
+                    Style::default().fg(crate::colors::text()),
                 ));
             }
 
@@ -29091,7 +29096,7 @@ Note: Free ngrok accounts have connection limits."#;
                     ));
                     spans.push(Span::styled(
                         branch.clone(),
-                        Style::default().fg(crate::colors::success_green()),
+                        Style::default().fg(crate::colors::text()),
                     ));
                 }
             }
@@ -29118,14 +29123,11 @@ Note: Free ngrok accounts have connection limits."#;
         );
 
         // Now recompute exact available width inside the border + padding before measuring
-        // Render a bordered status block and explicitly fill its background.
-        // Without a background fill, some terminals blend with prior frame
-        // contents, which is especially noticeable on dark themes as dark
-        // "caps" at the edges. Use input_background for Codex-style grey box.
+        // Render status block with border outline (no grey bg - that's only for inputs).
         let status_block = Block::default()
             .borders(Borders::ALL)
-            .border_style(Style::default().fg(crate::colors::border()))
-            .style(Style::default().bg(crate::colors::input_background()));
+            .border_type(ratatui::widgets::BorderType::Rounded)
+            .border_style(Style::default().fg(crate::colors::border_dim()));
         let inner_area = status_block.inner(padded_area);
         let padded_inner = inner_area.inner(Margin::new(1, 0));
         let inner_width = padded_inner.width as usize;
@@ -29200,9 +29202,7 @@ Note: Free ngrok accounts have connection limits."#;
         let status_style = if effect_enabled {
             Style::default().fg(crate::colors::text())
         } else {
-            Style::default()
-                .bg(crate::colors::background())
-                .fg(crate::colors::text())
+            Style::default().fg(crate::colors::text())
         };
 
         let status_widget = Paragraph::new(vec![status_line])
@@ -38490,10 +38490,10 @@ impl WidgetRef for &ChatWidget<'_> {
             .last_bottom_reserved_rows
             .set(bottom_pane_area.height);
 
-        // Render status bar and HUD only in full TUI mode
-        if !self.standard_terminal_mode {
-            self.render_status_bar(status_bar_area, buf);
-        }
+        // Status bar is disabled to match Codex-style layout.
+        // The status info is shown in the session header card in the history area instead.
+        // Note: status_bar_area will be 0 height since status is disabled in layout_areas.
+        let _ = status_bar_area; // Suppress unused warning
 
         // In standard-terminal mode, do not paint the history region: committed
         // content is appended to the terminal's own scrollback via

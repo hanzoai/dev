@@ -1,8 +1,23 @@
 //! Multiple intro art variants for Hanzo Dev
-//! Randomly selected on each launch for variety
+//! Randomly selected on each launch for variety, avoiding repeats
 
 use once_cell::sync::Lazy;
 use rand::Rng;
+use std::fs;
+use std::path::PathBuf;
+
+const ALL_VARIANTS: [ArtVariant; 10] = [
+    ArtVariant::Classic,
+    ArtVariant::Matrix,
+    ArtVariant::Cyberpunk,
+    ArtVariant::Minimal,
+    ArtVariant::Glitch,
+    ArtVariant::Robot,
+    ArtVariant::Terminal,
+    ArtVariant::Gradient,
+    ArtVariant::Circuit,
+    ArtVariant::Hologram,
+];
 
 /// Art variant style
 #[derive(Copy, Clone, Debug, PartialEq, Eq)]
@@ -20,25 +35,76 @@ pub enum ArtVariant {
 }
 
 impl ArtVariant {
-    pub fn random() -> Self {
+    fn to_index(self) -> u8 {
+        match self {
+            ArtVariant::Classic => 0,
+            ArtVariant::Matrix => 1,
+            ArtVariant::Cyberpunk => 2,
+            ArtVariant::Minimal => 3,
+            ArtVariant::Glitch => 4,
+            ArtVariant::Robot => 5,
+            ArtVariant::Terminal => 6,
+            ArtVariant::Gradient => 7,
+            ArtVariant::Circuit => 8,
+            ArtVariant::Hologram => 9,
+        }
+    }
+
+    fn from_index(idx: u8) -> Option<Self> {
+        ALL_VARIANTS.get(idx as usize).copied()
+    }
+
+    /// Select a random variant, avoiding the last used one
+    pub fn random_avoiding(last: Option<ArtVariant>) -> Self {
         let mut rng = rand::rng();
-        match rng.random_range(0..10) {
-            0 => ArtVariant::Classic,
-            1 => ArtVariant::Matrix,
-            2 => ArtVariant::Cyberpunk,
-            3 => ArtVariant::Minimal,
-            4 => ArtVariant::Glitch,
-            5 => ArtVariant::Robot,
-            6 => ArtVariant::Terminal,
-            7 => ArtVariant::Gradient,
-            8 => ArtVariant::Circuit,
-            _ => ArtVariant::Hologram,
+        let available: Vec<ArtVariant> = ALL_VARIANTS
+            .iter()
+            .filter(|v| Some(**v) != last)
+            .copied()
+            .collect();
+        if available.is_empty() {
+            // Fallback if somehow all filtered out
+            ALL_VARIANTS[rng.random_range(0..ALL_VARIANTS.len())]
+        } else {
+            available[rng.random_range(0..available.len())]
         }
     }
 }
 
-/// Selected variant for this session (randomized once at startup)
-pub static SESSION_VARIANT: Lazy<ArtVariant> = Lazy::new(ArtVariant::random);
+/// Get the path to the last-animation file
+fn last_animation_path() -> Option<PathBuf> {
+    hanzo_core::config::find_code_home()
+        .ok()
+        .map(|home| home.join("last_animation"))
+}
+
+/// Load the last used animation variant from disk
+fn load_last_variant() -> Option<ArtVariant> {
+    let path = last_animation_path()?;
+    let data = fs::read(&path).ok()?;
+    if data.is_empty() {
+        return None;
+    }
+    ArtVariant::from_index(data[0])
+}
+
+/// Save the current animation variant to disk
+fn save_variant(variant: ArtVariant) {
+    if let Some(path) = last_animation_path() {
+        let _ = fs::write(path, [variant.to_index()]);
+    }
+}
+
+/// Select a new random variant avoiding the last used one
+fn select_session_variant() -> ArtVariant {
+    let last = load_last_variant();
+    let new = ArtVariant::random_avoiding(last);
+    save_variant(new);
+    new
+}
+
+/// Selected variant for this session (randomized once at startup, avoiding repeats)
+pub static SESSION_VARIANT: Lazy<ArtVariant> = Lazy::new(select_session_variant);
 
 /// Square H logo (Hanzo brand)
 pub const SQUARE_H_LOGO: [&str; 7] = [
@@ -54,7 +120,6 @@ pub const SQUARE_H_LOGO: [&str; 7] = [
 /// Classic clean HANZO DEV
 pub fn classic_art(version: &str) -> Vec<String> {
     vec![
-        "".to_string(),
         "   ██╗  ██╗ █████╗ ███╗   ██╗███████╗ ██████╗ ".to_string(),
         "   ██║  ██║██╔══██╗████╗  ██║╚══███╔╝██╔═══██╗".to_string(),
         "   ███████║███████║██╔██╗ ██║  ███╔╝ ██║   ██║".to_string(),
@@ -68,7 +133,6 @@ pub fn classic_art(version: &str) -> Vec<String> {
         "   ██║  ██║██╔══╝  ╚██╗ ██╔╝".to_string(),
         "   ██████╔╝███████╗ ╚████╔╝ ".to_string(),
         format!("   ╚═════╝ ╚══════╝  ╚═══╝   {}", version),
-        "".to_string(),
     ]
 }
 
@@ -87,7 +151,6 @@ pub fn matrix_art(version: &str) -> Vec<String> {
         "   │ 01010110 00100000 ████████████████  │".to_string(),
         "   └──────────────────────────────────────┘".to_string(),
         format!("                                    {}", version),
-        "".to_string(),
     ]
 }
 
@@ -103,14 +166,12 @@ pub fn cyberpunk_art(version: &str) -> Vec<String> {
         "   ║  ░▒▓█ NEURAL NETWORK ACTIVE █▓▒░  ║".to_string(),
         "   ╚═══════════════════════════════════════╝".to_string(),
         format!("   [ SYSTEM {} ONLINE ]", version),
-        "".to_string(),
     ]
 }
 
 /// Minimal square H logo style
 pub fn minimal_art(version: &str) -> Vec<String> {
     vec![
-        "".to_string(),
         "      ┏━━━━━━━━━━━━━━━━━┓".to_string(),
         "      ┃  █   █         ┃".to_string(),
         "      ┃  █   █  HANZO  ┃".to_string(),
@@ -119,7 +180,6 @@ pub fn minimal_art(version: &str) -> Vec<String> {
         "      ┃  █   █         ┃".to_string(),
         "      ┗━━━━━━━━━━━━━━━━━┛".to_string(),
         format!("           {}", version),
-        "".to_string(),
     ]
 }
 
@@ -137,7 +197,6 @@ pub fn glitch_art(version: &str) -> Vec<String> {
         "".to_string(),
         "   ▓▓▓ D̶͝E̷̕V̴̛ ░░░ CORRUPTED_REALITY ▒▒▒".to_string(),
         format!("   ░░░ {} ▓▓▓", version),
-        "".to_string(),
     ]
 }
 
@@ -156,7 +215,6 @@ pub fn robot_art(version: &str) -> Vec<String> {
         "      └────╫─────╫────┘".to_string(),
         "           ╨     ╨".to_string(),
         format!("      [ {} ]", version),
-        "".to_string(),
     ]
 }
 
@@ -173,7 +231,6 @@ pub fn terminal_art(version: &str) -> Vec<String> {
         "   ║                                          ║".to_string(),
         format!("   ║  VERSION: {:30}  ║", version),
         "   ╚══════════════════════════════════════════╝".to_string(),
-        "".to_string(),
     ]
 }
 
@@ -189,7 +246,6 @@ pub fn gradient_art(version: &str) -> Vec<String> {
         "".to_string(),
         "   ░▒▓█ D █▓▒░  ░▒▓█ E █▓▒░  ░▒▓█ V █▓▒░".to_string(),
         format!("                              {}", version),
-        "".to_string(),
     ]
 }
 
@@ -206,7 +262,6 @@ pub fn circuit_art(version: &str) -> Vec<String> {
         "   │  ══════════════════════ │".to_string(),
         "   └─●──────●───────●──────●─┘".to_string(),
         format!("          {}", version),
-        "".to_string(),
     ]
 }
 
@@ -222,7 +277,6 @@ pub fn hologram_art(version: &str) -> Vec<String> {
         "   ·  ·  ·  ·  ·  ·  ·  ·  ·  ·  ·".to_string(),
         "   ╱╲ HOLOGRAPHIC INTERFACE ╱╲".to_string(),
         format!("        {}", version),
-        "".to_string(),
     ]
 }
 
@@ -250,16 +304,16 @@ pub fn get_art_for_variant(variant: ArtVariant, version: &str) -> Vec<String> {
 /// Get the height for the current session's art
 pub fn get_session_art_height() -> u16 {
     match *SESSION_VARIANT {
-        ArtVariant::Classic => 15,
-        ArtVariant::Matrix => 13,
-        ArtVariant::Cyberpunk => 10,
-        ArtVariant::Minimal => 10,
-        ArtVariant::Glitch => 12,
-        ArtVariant::Robot => 13,
-        ArtVariant::Terminal => 11,
-        ArtVariant::Gradient => 10,
-        ArtVariant::Circuit => 11,
-        ArtVariant::Hologram => 10,
+        ArtVariant::Classic => 13,
+        ArtVariant::Matrix => 12,
+        ArtVariant::Cyberpunk => 9,
+        ArtVariant::Minimal => 8,
+        ArtVariant::Glitch => 11,
+        ArtVariant::Robot => 12,
+        ArtVariant::Terminal => 10,
+        ArtVariant::Gradient => 9,
+        ArtVariant::Circuit => 10,
+        ArtVariant::Hologram => 9,
     }
 }
 

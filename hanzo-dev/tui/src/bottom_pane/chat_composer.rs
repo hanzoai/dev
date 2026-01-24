@@ -629,8 +629,8 @@ impl ChatComposer {
         ])
         .areas(area);
 
-        // Get inner area of the bordered input box
-        let input_block = Block::default().borders(Borders::ALL);
+        // Get inner area of the input box (no borders)
+        let input_block = Block::default().borders(Borders::NONE);
         let textarea_rect = input_block.inner(input_area);
 
         // Apply the same inner padding as in render (horizontal only).
@@ -2256,7 +2256,7 @@ impl ChatComposer {
         status: AutoReviewFooterStatus,
         agent_hint_label: AgentHintLabel,
     ) -> (Vec<Span<'static>>, Vec<Span<'static>>) {
-        let key_hint_style = Style::default().fg(crate::colors::function());
+        let key_hint_style = Style::default().fg(crate::colors::text_dim());
         let label_style = Style::default().fg(crate::colors::text_dim());
 
         let agent_hint_label_text = match agent_hint_label {
@@ -2358,7 +2358,7 @@ impl ChatComposer {
                     return;
                 }
 
-                let key_hint_style = Style::default().fg(crate::colors::function());
+                let key_hint_style = Style::default().fg(crate::colors::text_dim());
                 let label_style = Style::default().fg(crate::colors::text_dim());
 
                 if let Some(hints) = &self.footer_hint_override {
@@ -2555,10 +2555,7 @@ impl ChatComposer {
                 // Guide hint (priority 4) — only when not auto-drive and not showing quit hint
                 let guide_spans: Vec<Span<'static>> =
                     if !self.auto_drive_active && !self.ctrl_c_quit_hint {
-                        vec![
-                            Span::from("Ctrl+G").style(key_hint_style),
-                            Span::from(" guide").style(label_style),
-                        ]
+                        vec![Span::from("?").style(key_hint_style)]
                     } else {
                         Vec::new()
                     };
@@ -2930,23 +2927,25 @@ impl WidgetRef for ChatComposer {
         if let Some(area) = footer_area {
             self.render_footer(area, buf);
         }
-        // Draw border around input area with optional variant title when task is running
-        let mut input_block = Block::default().borders(Borders::ALL);
+        // Draw input area with grey background (no borders for clean Codex-style look)
+        let mut input_block = Block::default();
         let mut auto_drive_border_gradient = None;
         if let Some(style) = self
             .auto_drive_style
             .as_ref()
             .filter(|_| self.auto_drive_active)
         {
+            // Auto-drive mode keeps its borders
             auto_drive_border_gradient = style.border_gradient;
             input_block = input_block
+                .borders(Borders::ALL)
                 .border_style(style.border_style.clone())
                 .border_type(style.border_type)
                 .style(style.background_style.clone());
         } else {
+            // Normal mode: no borders, grey background (Codex-style)
             input_block = input_block
-                .border_style(Style::default().fg(crate::colors::border()))
-                .border_type(BorderType::Plain)
+                .borders(Borders::NONE)
                 .style(Style::default().bg(crate::colors::input_background()));
         }
 

@@ -6688,7 +6688,7 @@ impl ChatWidget<'_> {
             let _ = w.history_insert_plain_state_with_key(notice_state, notice_key, "prelude");
             if connecting_mcp && !w.test_mode {
                 // Render connecting status as a separate cell with standard gutter and spacing
-                w.history_push_top_next_req(history_cell::new_connecting_mcp_status());
+                w.insert_background_event_early("\nConnecting MCP servers…".to_string());
             }
             // Mark welcome as shown to avoid duplicating the Popular commands section
             // when SessionConfigured arrives shortly after.
@@ -28737,7 +28737,6 @@ Have we met every part of this goal and is there no further work to do?"#
     fn render_status_bar(&self, area: Rect, buf: &mut Buffer) {
         use crate::exec_command::relativize_to_home;
         use ratatui::layout::Margin;
-        use ratatui::style::Modifier;
         use ratatui::style::Style;
         use ratatui::text::Line;
         use ratatui::text::Span;
@@ -28745,14 +28744,8 @@ Have we met every part of this goal and is there no further work to do?"#
         use ratatui::widgets::Borders;
         use ratatui::widgets::Paragraph;
 
-        // Add same horizontal padding as the Message input (2 chars on each side)
-        let horizontal_padding = 1u16;
-        let padded_area = Rect {
-            x: area.x + horizontal_padding,
-            y: area.y,
-            width: area.width.saturating_sub(horizontal_padding * 2),
-            height: area.height,
-        };
+        // No horizontal padding - use full width
+        let padded_area = area;
 
         // Get current working directory string
         let cwd_str = match relativize_to_home(&self.config.cwd) {
@@ -28782,19 +28775,11 @@ Have we met every part of this goal and is there no further work to do?"#
                            include_dir: bool,
                            dir_display: &str| {
             let mut spans: Vec<Span> = Vec::new();
-            // Title follows theme text color
-            spans.push(Span::styled(
-                "Every Code",
-                Style::default()
-                    .fg(crate::colors::text())
-                    .add_modifier(Modifier::BOLD),
-            ));
 
             if include_model {
-                spans.push(Span::styled(
-                    "  •  ",
-                    Style::default().fg(crate::colors::text_dim()),
-                ));
+                if !spans.is_empty() {
+                    spans.push(Span::styled("  •  ", Style::default().fg(crate::colors::text_dim())));
+                }
                 spans.push(Span::styled(
                     "Model: ",
                     Style::default().fg(crate::colors::text_dim()),
@@ -28806,10 +28791,9 @@ Have we met every part of this goal and is there no further work to do?"#
             }
 
             if include_reasoning {
-                spans.push(Span::styled(
-                    "  •  ",
-                    Style::default().fg(crate::colors::text_dim()),
-                ));
+                if !spans.is_empty() {
+                    spans.push(Span::styled("  •  ", Style::default().fg(crate::colors::text_dim())));
+                }
                 spans.push(Span::styled(
                     "Reasoning: ",
                     Style::default().fg(crate::colors::text_dim()),
@@ -28821,10 +28805,9 @@ Have we met every part of this goal and is there no further work to do?"#
             }
 
             if include_dir {
-                spans.push(Span::styled(
-                    "  •  ",
-                    Style::default().fg(crate::colors::text_dim()),
-                ));
+                if !spans.is_empty() {
+                    spans.push(Span::styled("  •  ", Style::default().fg(crate::colors::text_dim())));
+                }
                 spans.push(Span::styled(
                     "Directory: ",
                     Style::default().fg(crate::colors::text_dim()),
@@ -28837,10 +28820,9 @@ Have we met every part of this goal and is there no further work to do?"#
 
             if include_branch {
                 if let Some(branch) = &branch_opt {
-                    spans.push(Span::styled(
-                        "  •  ",
-                        Style::default().fg(crate::colors::text_dim()),
-                    ));
+                    if !spans.is_empty() {
+                        spans.push(Span::styled("  •  ", Style::default().fg(crate::colors::text_dim())));
+                    }
                     spans.push(Span::styled(
                         "Branch: ",
                         Style::default().fg(crate::colors::text_dim()),
@@ -28958,7 +28940,7 @@ Have we met every part of this goal and is there no further work to do?"#
         };
 
         let status_widget = Paragraph::new(vec![status_line])
-            .alignment(ratatui::layout::Alignment::Center)
+            .alignment(ratatui::layout::Alignment::Left)
             .style(status_style);
         ratatui::widgets::Widget::render(status_widget, padded_inner, buf);
     }

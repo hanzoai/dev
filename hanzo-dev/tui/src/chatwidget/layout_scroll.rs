@@ -194,7 +194,7 @@ pub(super) fn layout_areas(chat: &ChatWidget<'_>, area: Rect) -> Vec<Rect> {
         bottom_desired,
         font_cell,
         None,
-        // Disable status bar when in standard terminal mode
-        !chat.standard_terminal_mode,
+        // Disable status bar to match Codex-style layout (no top header)
+        false,
     )
 }

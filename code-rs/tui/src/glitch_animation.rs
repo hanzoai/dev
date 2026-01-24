@@ -20,6 +20,7 @@ const LARGE_VERSION_COLUMN: usize = 65;
 const MEDIUM_VERSION_COLUMN: usize = 43;
 const ANIMATED_CHARS: &[char] = &['█'];
 
+#[allow(dead_code)]
 pub fn intro_art_size_for_width(width: u16) -> IntroArtSize {
     if width >= LARGE_MIN_WIDTH {
         IntroArtSize::Large
@@ -296,7 +297,7 @@ fn small_welcome_lines(version: &str) -> Vec<String> {
 
 fn tiny_welcome_lines(version: &str) -> Vec<String> {
     vec![
-        format!("EVERY                 {version}    "),
+        format!("hanzo                 {version}    "),
         " █████╗ █████╗ █████╗ ██████╗         ".to_string(),
         "██╔═══╝██╔══██╗██╔═██╗██╔═══╝         ".to_string(),
         "██║    ██║  ██║██║ ██║████╗           ".to_string(),
