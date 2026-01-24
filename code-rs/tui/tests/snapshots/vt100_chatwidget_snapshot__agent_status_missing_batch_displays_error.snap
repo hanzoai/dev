@@ -2,22 +2,22 @@
 source: tui/tests/vt100_chatwidget_snapshot.rs
 expression: output
 ---
- +----------------------------------------------------------------------------+
- |                                 Every Code                                 |
- +----------------------------------------------------------------------------+
- • I can help with various tasks including:
-
-   - Writing code
-   - Reading files
-   - Running commands
++------------------------------------------------------------------------------+
+|                                                                              |
++------------------------------------------------------------------------------+
+  - Writing code
+  - Reading files
+  - Running commands
 
 
- › /agents
+▸ /agents
 
- ✖ ⚠️  status_update: missing agent batch_id. tool=agent_status
-   agents=orphan-agent
 
- +----------------------------- ✶ Using tools... -----------------------------+
- | What can I code for you today?                                             |
- +----------------------------------------------------------------------------+
- Read Only  (Shift+Tab change)                        Ctrl+G guide  •  API key
+✖ ⚠️  status_update: missing agent batch_id. tool=agent_status agents=orphan-agen
+
+• Using tools...
+
+
+▸ What can I code for you today?
+
+Read Only  (Shift+Tab change)                    @ file   Ctrl+H help   API key

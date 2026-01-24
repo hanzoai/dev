@@ -2,22 +2,22 @@
 source: tui/tests/vt100_chatwidget_snapshot.rs
 expression: frame
 ---
- +----------------------------------------------------------------------------+
- |                                 Every Code                                 |
- +----------------------------------------------------------------------------+
++------------------------------------------------------------------------------+
+|                                                                              |
++------------------------------------------------------------------------------+
+    /code - perform a coding task (multiple agents)
+
+• Hello! How can I help you today?
+
+• I can help with various tasks including:
+
+  - Writing code
+  - Reading files
+  - Running commands
+
+  History checkpoint: earlier conversation compacted.
 
 
+▸ What can I code for you today?
 
- • I can help with various tasks including:
-
-   - Writing code
-   - Reading files
-   - Running commands
-
-
- ★ History checkpoint: earlier conversation compacted.
-
- +----------------------------------------------------------------------------+
- | What can I code for you today?                                             |
- +----------------------------------------------------------------------------+
- Read Only  (Shift+Tab change)                        Ctrl+G guide  •  API key
+Read Only  (Shift+Tab change)                    @ file   Ctrl+H help   API key
