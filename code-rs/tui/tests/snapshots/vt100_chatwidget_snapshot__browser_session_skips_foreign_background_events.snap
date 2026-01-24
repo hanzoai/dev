@@ -2,26 +2,26 @@
 source: tui/tests/vt100_chatwidget_snapshot.rs
 expression: output
 ---
- +----------------------------------------------------------------------------+
- |                                 Every Code                                 |
- +----------------------------------------------------------------------------+
-   - Running commands
++------------------------------------------------------------------------------+
+|                                                                              |
++------------------------------------------------------------------------------+
+▸ Keep browsing while checking status
 
 
- › Keep browsing while checking status
+• Command guard: Leading cd /tmp/work is redundant
 
- » Command guard: Leading cd /tmp/work is redundant
+  +- Browser (headless): example.com
+  |
+  |   Actions
+  |    MM:SS  Opened  https://example.com
+  |
+  |   Console: Encountering captcha challenge on checkout
+  |
+  +- [Ctrl+B] View · [Esc] Stop
 
-   +- Browser (headless): example.com
-   |
-   |   Actions
-   |    MM:SS  Opened  https://example.com
-   |
-   |   Console: Encountering captcha challenge on checkout
-   |
-   +- [Ctrl+B] View · [Esc] Stop
+• Browsing...
 
- +----------------------------- ✶ Browsing... -----------------------------+
- | What can I code for you today?                                             |
- +----------------------------------------------------------------------------+
- Read Only  (Shift+Tab change)                        Ctrl+G guide  •  API key
+
+▸ What can I code for you today?
+
+Read Only  (Shift+Tab change)                    @ file   Ctrl+H help   API key

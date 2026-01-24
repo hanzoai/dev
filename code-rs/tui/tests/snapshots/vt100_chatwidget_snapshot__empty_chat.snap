@@ -2,26 +2,26 @@
 source: tui/tests/vt100_chatwidget_snapshot.rs
 expression: output
 ---
- +----------------------------------------------------------------------------+
- |                                 Every Code                                 |
- +----------------------------------------------------------------------------+
++------------------------------------------------------------------------------+
+|                                                                              |
++------------------------------------------------------------------------------+
 
 
- ★   /code - perform a coding task (multiple agents)
+  🥷 Hanzo Dev (v0.6.50-54-g8641b5d11)
+
+  Tip: Use /skills to list available skills or ask Dev to use one.
+
+    /code - perform a coding task (multiple agents)
+
+• Hello! How can I help you today?
+
+• I can help with various tasks including:
+
+  - Writing code
+  - Reading files
+  - Running commands
 
 
- • Hello! How can I help you today?
+▸ What can I code for you today?
 
-
-
- • I can help with various tasks including:
-
-   - Writing code
-   - Reading files
-   - Running commands
-
-
- +----------------------------------------------------------------------------+
- | What can I code for you today?                                             |
- +----------------------------------------------------------------------------+
- Read Only  (Shift+Tab change)                        Ctrl+G guide  •  API key
+Read Only  (Shift+Tab change)                    @ file   Ctrl+H help   API key
