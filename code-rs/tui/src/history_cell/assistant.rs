@@ -101,11 +101,8 @@ impl AssistantMarkdownCell {
         buf: &mut Buffer,
         skip_rows: u16,
     ) {
-        let cell_bg = if self.state.mid_turn {
-            crate::colors::assistant_mid_turn_bg()
-        } else {
-            crate::colors::assistant_bg()
-        };
+        // Assistant messages use transparent background (just gutter icon)
+        let cell_bg = crate::colors::background();
         let bg_style = Style::default().bg(cell_bg);
         fill_rect(buf, area, Some(' '), bg_style);
 
@@ -119,13 +116,7 @@ impl AssistantMarkdownCell {
         let mut cur_y = area.y;
         let end_y = area.y.saturating_add(area.height);
 
-        if remaining_skip == 0
-            && cur_y < end_y
-            && area.height.saturating_sub(skip_rows) > 1
-        {
-            cur_y = cur_y.saturating_add(1);
-        }
-        remaining_skip = remaining_skip.saturating_sub(1);
+        // No top padding - content starts at row 0, aligned with bullet (Codex style)
 
         for (seg_idx, seg) in segs.iter().enumerate() {
             if cur_y >= end_y {
@@ -495,7 +486,7 @@ pub(crate) fn compute_assistant_layout_with_context(
         seg_rows.push(rows);
         total = total.saturating_add(rows);
     }
-    total = total.saturating_add(2);
+    // No extra padding - content starts at row 0 (Codex style)
 
     AssistantLayoutCache {
         segs,

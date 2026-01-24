@@ -207,8 +207,12 @@ impl ChatComposer {
     ) -> Self {
         let use_shift_enter_hint = enhanced_keys_supported;
 
+        let mut textarea = TextArea::new();
+        // Set the input area background color to match the grey input block
+        textarea.set_background(crate::colors::user_message_bg());
+
         Self {
-            textarea: TextArea::new(),
+            textarea,
             textarea_state: RefCell::new(TextAreaState::default()),
             active_popup: ActivePopup::None,
             app_event_tx,
@@ -964,6 +968,36 @@ impl ChatComposer {
 
     pub(crate) fn file_popup_visible(&self) -> bool {
         matches!(self.active_popup, ActivePopup::File(_))
+    }
+
+    /// Returns true if any popup is currently active.
+    pub(crate) fn popup_active(&self) -> bool {
+        !matches!(self.active_popup, ActivePopup::None)
+    }
+
+    /// Returns the composer text with any pending paste placeholders expanded.
+    pub(crate) fn current_text_with_pending(&self) -> String {
+        let mut text = self.textarea.text().to_string();
+        for (placeholder, actual) in &self.pending_pastes {
+            if text.contains(placeholder) {
+                text = text.replace(placeholder, actual);
+            }
+        }
+        text
+    }
+
+    /// Replace the composer content with text from an external editor.
+    /// Clears pending paste placeholders and keeps only attachments whose
+    /// placeholder labels still appear in the new text.
+    pub(crate) fn apply_external_edit(&mut self, text: String) {
+        self.pending_pastes.clear();
+        self.textarea.set_text(&text);
+        // Move cursor to end of text
+        let end_pos = self.textarea.text().len();
+        self.textarea.set_cursor(end_pos);
+        self.typed_anything = true;
+        self.sync_command_popup();
+        self.sync_file_search_popup();
     }
 
     /// Handle a key event coming from the main UI.
@@ -2259,6 +2293,10 @@ impl ChatComposer {
             return;
         }
 
+        // Fill footer area with status bar background (slightly lighter than input)
+        let footer_bg = Style::default().bg(crate::colors::status_bar_bg());
+        crate::util::buffer::fill_rect(buf, area, Some(' '), footer_bg);
+
         match &self.active_popup {
             ActivePopup::Command(popup) => {
                 popup.render_ref(area, buf);
@@ -2318,6 +2356,9 @@ impl ChatComposer {
                 // Build footer content as ordered sections so we can prune by priority.
                 let mut left_sections: Vec<(u8, Vec<Span<'static>>, bool)> = Vec::new();
                 let mut right_sections: Vec<(u8, Vec<Span<'static>>, bool)> = Vec::new();
+
+                // NOTE: Activity spinner moved to chatwidget.rs history area rendering
+                // so it appears where the AI response will be (DRY - one location only)
 
                 // Auto Review status + agent hint
                 let mut auto_review_status_spans: Vec<Span<'static>> = Vec::new();
@@ -2449,11 +2490,25 @@ impl ChatComposer {
                 let mut include_tokens = !token_spans_full.is_empty() || !token_spans_compact.is_empty();
                 let mut token_use_compact = false;
 
-                // Guide hint (priority 4) — only when not auto-drive and not showing quit hint
+                // File paths hint (priority 5) — only when not auto-drive and not showing quit hint
+                let at_spans: Vec<Span<'static>> = if !self.auto_drive_active && !self.ctrl_c_quit_hint {
+                    vec![
+                        Span::from("@").style(key_hint_style),
+                        Span::from(" file").style(label_style),
+                    ]
+                } else {
+                    Vec::new()
+                };
+                let at_present = !at_spans.is_empty();
+                if at_present {
+                    right_sections.push((5, at_spans, true));
+                }
+
+                // Help hint (priority 4) — only when not auto-drive and not showing quit hint
                 let guide_spans: Vec<Span<'static>> = if !self.auto_drive_active && !self.ctrl_c_quit_hint {
                     vec![
-                        Span::from("?").style(key_hint_style),
-                        Span::from(" for shortcuts").style(label_style),
+                        Span::from("Ctrl+H").style(key_hint_style),
+                        Span::from(" help").style(label_style),
                     ]
                 } else {
                     Vec::new()
@@ -2476,7 +2531,7 @@ impl ChatComposer {
                 // Assemble with pruning according to priority rules.
                 let total_width = area.width as usize;
                 let trailing_pad = 1usize;
-                let separator = Span::from("  •  ").style(label_style);
+                let separator = Span::from("   ").style(label_style);
                 let separator_len = separator.content.chars().count();
 
                 // Base padding for left-aligned footer content when Auto Review is present.
@@ -2826,7 +2881,7 @@ impl WidgetRef for ChatComposer {
         // Draw border around input area with optional variant title when task is running
         let mut input_block = Block::default().borders(Borders::ALL);
         let mut auto_drive_border_gradient = None;
-        let input_bg = Color::Rgb(30, 32, 36);  // Dark grey background (matches Codex style)
+        let input_bg = crate::colors::user_message_bg();  // Dark grey background (matches Codex style)
         if let Some(style) = self
             .auto_drive_style
             .as_ref()
@@ -2844,41 +2899,21 @@ impl WidgetRef for ChatComposer {
                 .style(Style::default().bg(input_bg));
         }
 
-        if self.is_task_running && !self.embedded_mode {
-            if self.auto_drive_active {
-                if let Some(style) = self.auto_drive_style.as_ref() {
-                    if self
-                        .status_message
-                        .eq_ignore_ascii_case("auto drive goal")
-                    {
-                        let title_text = format!(
-                            "{}Auto Drive Goal{}",
-                            style.goal_title_prefix, style.goal_title_suffix
-                        );
-                        let title_line =
-                            Line::from(Span::styled(title_text, style.title_style.clone()));
-                        input_block = input_block.title(title_line);
-                    }
+        // Auto Drive goal title only (spinner moved to footer)
+        if self.is_task_running && !self.embedded_mode && self.auto_drive_active {
+            if let Some(style) = self.auto_drive_style.as_ref() {
+                if self
+                    .status_message
+                    .eq_ignore_ascii_case("auto drive goal")
+                {
+                    let title_text = format!(
+                        "{}Auto Drive Goal{}",
+                        style.goal_title_prefix, style.goal_title_suffix
+                    );
+                    let title_line =
+                        Line::from(Span::styled(title_text, style.title_style.clone()));
+                    input_block = input_block.title(title_line);
                 }
-            } else {
-                use std::time::{SystemTime, UNIX_EPOCH};
-                let now_ms = SystemTime::now()
-                    .duration_since(UNIX_EPOCH)
-                    .unwrap_or_default()
-                    .as_millis();
-                let def = crate::spinner::current_spinner();
-                let spinner_str = crate::spinner::frame_at_time(def, now_ms);
-
-                let title_line = Line::from(vec![
-                    Span::raw(" "),
-                    Span::styled(spinner_str, Style::default().fg(crate::colors::info())),
-                    Span::styled(
-                        format!(" {}... ", self.status_message),
-                        Style::default().fg(crate::colors::info()),
-                    ),
-                ])
-                .centered();
-                input_block = input_block.title(title_line);
             }
         }
 
@@ -2897,9 +2932,9 @@ impl WidgetRef for ChatComposer {
             height: input_area.height.saturating_sub(2),
         };
 
-        // Render prompt "› " at the left edge, aligned with text
+        // Render prompt "▸ " at the left edge, aligned with text (matches Codex style)
         if !textarea_rect.is_empty() {
-            let prompt = Span::styled("› ", Style::default().fg(crate::colors::text_dim()).add_modifier(Modifier::BOLD));
+            let prompt = Span::styled("▸ ", Style::default().fg(crate::colors::text_dim()));
             buf.set_span(input_area.x, input_area.y + 1, &prompt, prompt_width);
         }
 

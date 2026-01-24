@@ -5,7 +5,7 @@ use crossterm::event::KeyEventKind;
 use crossterm::event::KeyModifiers;
 use ratatui::buffer::Buffer;
 use ratatui::layout::Rect;
-use ratatui::style::Style;
+use ratatui::style::{Color, Style};
 use ratatui::widgets::StatefulWidgetRef;
 use ratatui::widgets::WidgetRef;
 use std::cell::Ref;
@@ -24,6 +24,8 @@ pub(crate) struct TextArea {
     // Simple undo stack capturing full snapshots of text and cursor before edits.
     // This is intentionally simple to reliably undo paste and bulk edits across terminals.
     undo_stack: Vec<UndoSnapshot>,
+    /// Optional custom background color for the textarea.
+    custom_bg: Option<Color>,
 }
 
 #[derive(Debug, Clone)]
@@ -52,7 +54,13 @@ impl TextArea {
             wrap_cache: RefCell::new(None),
             preferred_col: None,
             undo_stack: Vec::new(),
+            custom_bg: None,
         }
+    }
+
+    /// Set a custom background color for rendering.
+    pub fn set_background(&mut self, bg: Color) {
+        self.custom_bg = Some(bg);
     }
 
     pub fn set_text(&mut self, text: &str) {
@@ -1041,7 +1049,7 @@ impl TextArea {
         lines: &[Range<usize>],
         range: std::ops::Range<usize>,
     ) {
-        let bg = crate::colors::background();
+        let bg = self.custom_bg.unwrap_or_else(crate::colors::background);
         let fg = crate::colors::text();
         let line_style = Style::default().bg(bg).fg(fg);
         for (row, idx) in range.enumerate() {

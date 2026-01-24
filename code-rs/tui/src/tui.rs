@@ -135,7 +135,7 @@ pub fn init(config: &Config) -> Result<(Tui, TerminalInfo)> {
         )),
         Clear(ClearType::All),
         MoveTo(0, 0),
-        crossterm::terminal::SetTitle("Code"),
+        crossterm::terminal::SetTitle("Dev"),
         crossterm::terminal::EnableLineWrap
     )?;
 
@@ -293,7 +293,7 @@ pub fn enter_alt_screen_only(theme_fg: ratatui::style::Color, theme_bg: ratatui:
         SetColors(crossterm::style::Colors::new(theme_fg.into(), theme_bg.into())),
         Clear(ClearType::All),
         MoveTo(0, 0),
-        crossterm::terminal::SetTitle("Code"),
+        crossterm::terminal::SetTitle("Dev"),
         crossterm::terminal::EnableLineWrap
     )?;
     Ok(())

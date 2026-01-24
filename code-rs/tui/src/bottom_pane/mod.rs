@@ -354,12 +354,11 @@ impl BottomPane<'_> {
             // Account for the optional empty line above the composer
             let y_offset = if self.top_spacer_enabled { 1u16 } else { 0u16 };
 
-            // Adjust composer area to account for empty line and padding
-            let horizontal_padding = 1u16; // Message input uses 1 char padding
+            // Adjust composer area to account for empty line (no horizontal padding - Codex style)
             let composer_rect = Rect {
-                x: area.x + horizontal_padding,
+                x: area.x,
                 y: area.y + y_offset,
-                width: area.width.saturating_sub(horizontal_padding * 2),
+                width: area.width,
                 height: (area.height.saturating_sub(y_offset)).saturating_sub(
                     BottomPane::BOTTOM_PAD_LINES
                         .min((area.height.saturating_sub(y_offset)).saturating_sub(1)),
@@ -682,6 +681,32 @@ impl BottomPane<'_> {
 
     pub(crate) fn is_task_running(&self) -> bool {
         self.is_task_running
+    }
+
+    /// Return true when no popups or modal views are active, regardless of task state.
+    pub(crate) fn can_launch_external_editor(&self) -> bool {
+        self.active_view.is_none() && !self.composer.popup_active()
+    }
+
+    /// Get the composer text with any pending paste placeholders expanded.
+    pub(crate) fn composer_text_with_pending(&self) -> String {
+        self.composer.current_text_with_pending()
+    }
+
+    /// Apply text from external editor to the composer.
+    pub(crate) fn apply_external_edit(&mut self, text: String) {
+        self.composer.apply_external_edit(text);
+        self.request_redraw();
+    }
+
+    /// Set custom footer hint items (e.g., for external editor mode).
+    pub(crate) fn set_footer_hint_override(&mut self, items: Option<Vec<(String, String)>>) {
+        self.composer.set_footer_hint_override(items);
+    }
+
+    /// Get a reference to the composer.
+    pub(crate) fn composer(&self) -> &ChatComposer {
+        &self.composer
     }
 
     // is_normal_backtrack_mode removed; App-level policy handles Esc behavior directly.
@@ -1152,13 +1177,12 @@ impl WidgetRef for &BottomPane<'_> {
 
         let mut composer_rect = compute_composer_rect(area, self.top_spacer_enabled);
         let mut composer_needs_render = true;
-        let horizontal_padding = 1u16;
 
         if let Some(view) = &self.active_view {
             if !view.is_complete() {
                 let is_auto = matches!(self.active_view_kind, ActiveViewKind::AutoCoordinator);
                 if is_auto {
-                    let content_width = area.width.saturating_sub(horizontal_padding * 2);
+                    let content_width = area.width; // No horizontal padding (Codex style)
                     let composer_visible = view
                         .as_ref()
                         .as_any()
@@ -1180,7 +1204,7 @@ impl WidgetRef for &BottomPane<'_> {
 
                     if view_height > 0 {
                         let view_rect = Rect {
-                            x: area.x + horizontal_padding,
+                            x: area.x, // No horizontal padding (Codex style)
                             y: area.y,
                             width: content_width,
                             height: view_height,
@@ -1216,9 +1240,9 @@ impl WidgetRef for &BottomPane<'_> {
                                 area.y
                             };
                             let view_rect = Rect {
-                                x: area.x + horizontal_padding,
+                                x: area.x, // No horizontal padding (Codex style)
                                 y: y_base,
-                                width: area.width.saturating_sub(horizontal_padding * 2),
+                                width: area.width,
                                 height: view_height,
                             };
                             let view_bg = ratatui::style::Style::default().bg(crate::colors::background());
@@ -1234,6 +1258,75 @@ impl WidgetRef for &BottomPane<'_> {
         if composer_needs_render && composer_rect.width > 0 && composer_rect.height > 0 {
             let comp_bg = ratatui::style::Style::default().bg(crate::colors::background());
             fill_rect(buf, composer_rect, None, comp_bg);
+
+            // Calculate input-only height (exclude footer)
+            let footer_height = self.composer.footer_height();
+            let input_only_height = composer_rect.height.saturating_sub(footer_height);
+
+            // Fill the left and right padding strips with input background color
+            // so the input area extends to the edges (Codex style)
+            // Only for the input area, not the footer
+            let input_bg = ratatui::style::Style::default().bg(crate::colors::user_message_bg());
+            if input_only_height > 0 {
+                let left_pad = Rect {
+                    x: area.x,
+                    y: composer_rect.y,
+                    width: composer_rect.x.saturating_sub(area.x),
+                    height: input_only_height,
+                };
+                if left_pad.width > 0 {
+                    fill_rect(buf, left_pad, Some(' '), input_bg);
+                }
+                let right_pad_x = composer_rect.x.saturating_add(composer_rect.width);
+                let right_pad = Rect {
+                    x: right_pad_x,
+                    y: composer_rect.y,
+                    width: (area.x + area.width).saturating_sub(right_pad_x),
+                    height: input_only_height,
+                };
+                if right_pad.width > 0 {
+                    fill_rect(buf, right_pad, Some(' '), input_bg);
+                }
+            }
+
+            // Fill footer left/right padding and bottom padding with status bar background (black)
+            let status_bg = ratatui::style::Style::default().bg(crate::colors::status_bar_bg());
+            if footer_height > 0 {
+                let footer_y = composer_rect.y.saturating_add(input_only_height);
+                // Left padding for footer
+                let footer_left_pad = Rect {
+                    x: area.x,
+                    y: footer_y,
+                    width: composer_rect.x.saturating_sub(area.x),
+                    height: footer_height,
+                };
+                if footer_left_pad.width > 0 {
+                    fill_rect(buf, footer_left_pad, Some(' '), status_bg);
+                }
+                // Right padding for footer
+                let right_pad_x = composer_rect.x.saturating_add(composer_rect.width);
+                let footer_right_pad = Rect {
+                    x: right_pad_x,
+                    y: footer_y,
+                    width: (area.x + area.width).saturating_sub(right_pad_x),
+                    height: footer_height,
+                };
+                if footer_right_pad.width > 0 {
+                    fill_rect(buf, footer_right_pad, Some(' '), status_bg);
+                }
+            }
+
+            // Fill bottom padding strip with status bar background
+            let bottom_y = composer_rect.y.saturating_add(composer_rect.height);
+            let bottom_pad = Rect {
+                x: area.x,
+                y: bottom_y,
+                width: area.width,
+                height: (area.y + area.height).saturating_sub(bottom_y),
+            };
+            if bottom_pad.height > 0 {
+                fill_rect(buf, bottom_pad, Some(' '), status_bg);
+            }
             (&self.composer).render_ref(composer_rect, buf);
         }
 
@@ -1241,7 +1334,7 @@ impl WidgetRef for &BottomPane<'_> {
 }
 
 fn compute_composer_rect(area: Rect, top_spacer_enabled: bool) -> Rect {
-    let horizontal_padding = 1u16;
+    // No horizontal padding - aligns with history (Codex style)
     let mut y_offset = 0u16;
     if top_spacer_enabled {
         y_offset = y_offset.saturating_add(1);
@@ -1251,9 +1344,9 @@ fn compute_composer_rect(area: Rect, top_spacer_enabled: bool) -> Rect {
         BottomPane::BOTTOM_PAD_LINES.min(available.saturating_sub(1)),
     );
     Rect {
-        x: area.x + horizontal_padding,
+        x: area.x,
         y: area.y + y_offset,
-        width: area.width.saturating_sub(horizontal_padding * 2),
+        width: area.width,
         height,
     }
 }

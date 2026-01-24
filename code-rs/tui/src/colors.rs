@@ -267,6 +267,17 @@ pub(crate) fn overlay_scrim() -> Color {
     quantize_color_for_palette(Color::Rgb(r, g, b))
 }
 
+/// Background for user messages: matches Vercel/shadcn subtle highlight.
+/// Slightly lighter than pure black for visual separation.
+pub(crate) fn user_message_bg() -> Color {
+    Color::Rgb(17, 17, 17) // #111111 (shadcn selection)
+}
+
+/// Background for status bar / footer area: Vercel near-black.
+pub(crate) fn status_bar_bg() -> Color {
+    Color::Rgb(10, 10, 10) // #0A0A0A
+}
+
 /// Background for assistant messages: theme background moved 5% toward theme info.
 pub(crate) fn assistant_bg() -> Color {
     match palette_mode() {
@@ -288,6 +299,7 @@ pub(crate) fn assistant_bg() -> Color {
 /// Background for mid-turn assistant messages.
 ///
 /// Uses a lighter tint than `assistant_bg` so progress inserts feel secondary.
+#[allow(dead_code)]
 pub(crate) fn assistant_mid_turn_bg() -> Color {
     match palette_mode() {
         PaletteMode::Ansi16 => assistant_bg(),

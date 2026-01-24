@@ -511,8 +511,6 @@ if [ "${DEBUG_SYMBOLS:-}" = "1" ]; then
   export CARGO_PROFILE_RELEASE_PROD_STRIP="none"
 fi
 
-echo "Building ${CRATE_PREFIX} binary (${PROFILE} mode)..."
-
 # Ensure Cargo cache locations are stable.
 # In CI, we can optionally enforce a specific CARGO_HOME regardless of caller env
 # by setting STRICT_CARGO_HOME=1 (used by Issue Triage workflow to keep caching deterministic).
