@@ -552,13 +552,26 @@ jobs:
           stage_root="npm-binaries"
           rm -rf "$stage_root" && mkdir -p "$stage_root"
 
-          map_target() {
+          # Map target triple to package info for @just-every/code
+          map_target_code() {
             case "$1" in
               aarch64-apple-darwin) echo "os=darwin cpu=arm64 pkg=@just-every/code-darwin-arm64" ;;
               x86_64-apple-darwin) echo "os=darwin cpu=x64 pkg=@just-every/code-darwin-x64" ;;
               x86_64-unknown-linux-musl) echo "os=linux cpu=x64 pkg=@just-every/code-linux-x64-musl" ;;
               aarch64-unknown-linux-musl) echo "os=linux cpu=arm64 pkg=@just-every/code-linux-arm64-musl" ;;
               x86_64-pc-windows-msvc.exe) echo "os=win32 cpu=x64 pkg=@just-every/code-win32-x64" ;;
+              *) echo "" ;;
+            esac
+          }
+
+          # Map target triple to package info for @hanzo/dev
+          map_target_dev() {
+            case "$1" in
+              aarch64-apple-darwin) echo "os=darwin cpu=arm64 pkg=@hanzo/dev-darwin-arm64" ;;
+              x86_64-apple-darwin) echo "os=darwin cpu=x64 pkg=@hanzo/dev-darwin-x64" ;;
+              x86_64-unknown-linux-musl) echo "os=linux cpu=x64 pkg=@hanzo/dev-linux-x64-musl" ;;
+              aarch64-unknown-linux-musl) echo "os=linux cpu=arm64 pkg=@hanzo/dev-linux-arm64-musl" ;;
+              x86_64-pc-windows-msvc.exe) echo "os=win32 cpu=x64 pkg=@hanzo/dev-win32-x64" ;;
               *) echo "" ;;
             esac
           }
@@ -601,19 +614,40 @@ jobs:
               *)        base="$b" ;;
             esac
             t="${base#code-}"
-            meta="$(map_target "$t")" || true
-            if [ -z "$meta" ]; then
-              echo "Skipping unrecognized artifact: $b"
-              continue
+
+            # Create @just-every/code-* package
+            meta="$(map_target_code "$t")" || true
+            if [ -n "$meta" ]; then
+              eval "$meta" # sets os, cpu, pkg
+              workdir="$stage_root/${pkg##*/}"
+              rm -rf "$workdir" && mkdir -p "$workdir/bin"
+              rawbin="$(decompress_to "$f" "$workdir/bin")"
+              chmod +x "$rawbin" || true
+              printf '{\n  "name": "%s",\n  "version": "%s",\n  "license": "Apache-2.0",\n  "description": "Platform binary for @just-every/code (%s)",\n  "os": ["%s"],\n  "cpu": ["%s"],\n  "files": ["bin/"],\n  "private": false\n}\n' \
+                "$pkg" "$NEW_VERSION" "$t" "$os" "$cpu" > "$workdir/package.json"
             fi
-            eval "$meta" # sets os, cpu, pkg
-            workdir="$stage_root/${pkg##*/}"
-            rm -rf "$workdir" && mkdir -p "$workdir/bin"
-            rawbin="$(decompress_to "$f" "$workdir/bin")"
-            chmod +x "$rawbin" || true
-            # package.json
-            printf '{\n  "name": "%s",\n  "version": "%s",\n  "license": "Apache-2.0",\n  "description": "Platform binary for @just-every/code (%s)",\n  "os": ["%s"],\n  "cpu": ["%s"],\n  "files": ["bin/"],\n  "private": false\n}\n' \
-              "$pkg" "$NEW_VERSION" "$t" "$os" "$cpu" > "$workdir/package.json"
+
+            # Create @hanzo/dev-* package (uses same binary, renamed to dev-*)
+            meta_dev="$(map_target_dev "$t")" || true
+            if [ -n "$meta_dev" ]; then
+              eval "$meta_dev" # sets os, cpu, pkg
+              workdir_dev="$stage_root/${pkg##*/}"
+              rm -rf "$workdir_dev" && mkdir -p "$workdir_dev/bin"
+              # Copy the binary with dev-* name
+              rawbin_dev="$(decompress_to "$f" "$workdir_dev/bin")"
+              chmod +x "$rawbin_dev" || true
+              # Rename code-* to dev-*
+              devbin="${rawbin_dev/code-/dev-}"
+              if [ "$rawbin_dev" != "$devbin" ]; then
+                mv "$rawbin_dev" "$devbin"
+              fi
+              printf '{\n  "name": "%s",\n  "version": "%s",\n  "license": "Apache-2.0",\n  "description": "Platform binary for @hanzo/dev (%s)",\n  "os": ["%s"],\n  "cpu": ["%s"],\n  "files": ["bin/"],\n  "private": false\n}\n' \
+                "$pkg" "$NEW_VERSION" "$t" "$os" "$cpu" > "$workdir_dev/package.json"
+            fi
+
+            if [ -z "$meta" ] && [ -z "$meta_dev" ]; then
+              echo "Skipping unrecognized artifact: $b"
+            fi
           done
 
           ls -R "$stage_root"
@@ -632,7 +666,9 @@ jobs:
 
       - name: Sync README for npm
         shell: bash
-        run: cp README.md codex-cli/README.md
+        run: |
+          cp README.md codex-cli/README.md
+          cp README.md dev-cli/README.md
 
       - name: Update package.json version
         id: version
@@ -665,6 +701,26 @@ jobs:
             git tag "v${NEW_VERSION}"
           fi
           echo "tag=v${NEW_VERSION}" >> "$GITHUB_OUTPUT"
+
+      - name: Update dev-cli package.json version
+        working-directory: dev-cli
+        shell: bash
+        run: |
+          NEW_VERSION="${{ needs.determine-version.outputs.version }}"
+          npm version "$NEW_VERSION" --no-git-tag-version --allow-same-version
+          # Inject optionalDependencies pointing to per-target packages
+          tmp=$(mktemp)
+          jq '.optionalDependencies = {
+            "@hanzo/dev-darwin-arm64": "'"$NEW_VERSION"'",
+            "@hanzo/dev-darwin-x64": "'"$NEW_VERSION"'",
+            "@hanzo/dev-linux-x64-musl": "'"$NEW_VERSION"'",
+            "@hanzo/dev-linux-arm64-musl": "'"$NEW_VERSION"'",
+            "@hanzo/dev-win32-x64": "'"$NEW_VERSION"'"
+          }' package.json > "$tmp" && mv "$tmp" package.json
+          git add package.json
+          if ! git diff --staged --quiet; then
+            git commit -m "chore(release): @hanzo/dev ${NEW_VERSION} [skip ci]"
+          fi
 
       - name: Verify ESM bin integrity (no require in coder.js)
         shell: bash
@@ -1070,6 +1126,28 @@ jobs:
           echo "//registry.npmjs.org/:_authToken=${NODE_AUTH_TOKEN}" > "$config_path"
           npm whoami >/dev/null 2>&1 || { echo "npm auth failed (npm whoami). Ensure NPM_TOKEN is a granular/automation token with publish rights to @just-every/* and bypass 2FA enabled; update the secret via npmjs.com." >&2; exit 1; }
           name="@just-every/code"
+          version=$(jq -r '.version' package.json)
+          echo "Preparing to publish $name@$version"
+          existing=$(npm view "$name@$version" version 2>/dev/null || true)
+          if [ "$existing" = "$version" ]; then
+            echo "Skip: $name@$version already published"
+            exit 0
+          fi
+          npm publish --access public
+
+      - name: Publish @hanzo/dev npm package
+        if: steps.should_publish.outputs.publish == 'true'
+        working-directory: dev-cli
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          config_path="${NPM_CONFIG_USERCONFIG:-$HOME/.npmrc}"
+          mkdir -p "$(dirname "$config_path")"
+          echo "//registry.npmjs.org/:_authToken=${NODE_AUTH_TOKEN}" > "$config_path"
+          npm whoami >/dev/null 2>&1 || { echo "npm auth failed (npm whoami). Ensure NPM_TOKEN is a granular/automation token with publish rights to @hanzo/* and bypass 2FA enabled; update the secret via npmjs.com." >&2; exit 1; }
+          name="@hanzo/dev"
           version=$(jq -r '.version' package.json)
           echo "Preparing to publish $name@$version"
           existing=$(npm view "$name@$version" version 2>/dev/null || true)
