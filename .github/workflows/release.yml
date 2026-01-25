@@ -1,6 +1,7 @@
 name: Release
 
 on:
+  workflow_dispatch: {}  # Allow manual trigger
   push:
     branches: [ main ]
     # Ignore common non-release paths, but DO NOT ignore release.yml so that
