@@ -14,6 +14,7 @@ ZAP (Zero-copy Agent Protocol) enables agents to be implemented in any supported
 | **Ruby** | ✅ Complete | `hanzo-tools` gem | [`ruby/agent.rb`](ruby/agent.rb) |
 | **Elixir** | ✅ Complete | `hanzo_tools` hex | [`elixir/agent.exs`](elixir/agent.exs) |
 | **Haskell** | ✅ Complete | `zap-agent-haskell` | [`haskell/Agent.hs`](haskell/Agent.hs) |
+| **OCaml** | ✅ Complete | `zap-agent-ocaml` | [`ocaml/agent.ml`](ocaml/agent.ml) |
 
 ## Quick Start
 
@@ -64,6 +65,14 @@ cd examples/haskell
 cabal run zap-agent-haskell
 ```
 
+### OCaml
+
+```bash
+cd examples/ocaml
+dune build
+dune exec zap-agent-ocaml
+```
+
 ## Architecture
 
 All language implementations share the same:
@@ -74,16 +83,16 @@ All language implementations share the same:
 4. **Permission Model** - Consistent path-based access control
 
 ```
-┌─────────────────────────────────────────────────────────────────┐
-│                      ZAP Protocol Layer                         │
-├─────────────────────────────────────────────────────────────────┤
-│  Rust   │  Python  │  Node.js  │   Go    │  Ruby  │  Elixir  │ Haskell │
-│ Native  │  FFI/MCP │  FFI/MCP  │ FFI/MCP │   MCP  │    MCP   │   MCP   │
-├─────────────────────────────────────────────────────────────────┤
-│               Unified Tool Schemas (tools.rs)                   │
-├─────────────────────────────────────────────────────────────────┤
-│        hanzo-protocol (AskForApproval, SandboxPolicy)           │
-└─────────────────────────────────────────────────────────────────┘
+┌───────────────────────────────────────────────────────────────────────────┐
+│                          ZAP Protocol Layer                                │
+├───────────────────────────────────────────────────────────────────────────┤
+│  Rust  │ Python │ Node.js │  Go   │ Ruby │ Elixir │ Haskell │ OCaml │ C  │
+│ Native │ FFI/MCP│ FFI/MCP │FFI/MCP│  MCP │   MCP  │   MCP   │  MCP  │FFI │
+├───────────────────────────────────────────────────────────────────────────┤
+│                    Unified Tool Schemas (tools.rs)                         │
+├───────────────────────────────────────────────────────────────────────────┤
+│             hanzo-protocol (AskForApproval, SandboxPolicy)                 │
+└───────────────────────────────────────────────────────────────────────────┘
 ```
 
 ## Tool Categories
