@@ -1,0 +1,51 @@
+{
+  "name": "@hanzo/zap",
+  "version": "0.6.0",
+  "description": "Zero-copy Agent Protocol (ZAP) SDK for TypeScript - 1000x faster than MCP",
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js",
+      "require": "./dist/index.cjs"
+    }
+  },
+  "scripts": {
+    "build": "tsup src/index.ts --format esm,cjs --dts",
+    "dev": "tsup src/index.ts --format esm,cjs --dts --watch",
+    "test": "vitest",
+    "lint": "eslint src/",
+    "typecheck": "tsc --noEmit"
+  },
+  "keywords": [
+    "zap",
+    "mcp",
+    "ai",
+    "agent",
+    "protocol",
+    "hanzo",
+    "zero-copy"
+  ],
+  "author": "Hanzo AI <dev@hanzo.ai>",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/hanzoai/dev.git",
+    "directory": "zap/sdk/typescript"
+  },
+  "homepage": "https://github.com/hanzoai/dev/tree/main/zap",
+  "bugs": {
+    "url": "https://github.com/hanzoai/dev/issues"
+  },
+  "engines": {
+    "node": ">=18.0.0"
+  },
+  "devDependencies": {
+    "@types/node": "^20.0.0",
+    "tsup": "^8.0.0",
+    "typescript": "^5.3.0",
+    "vitest": "^1.0.0"
+  }
+}
