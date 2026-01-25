@@ -9,11 +9,9 @@ on:
     paths:
       - 'hanzo-node/**'
       - '.github/workflows/hanzo-node-release.yml'
-    # Ignore test and documentation changes
-    paths-ignore:
-      - 'hanzo-node/**/*.md'
-      - 'hanzo-node/**/*.test.*'
-      - 'hanzo-node/**/test/**'
+      - '!hanzo-node/**/*.md'
+      - '!hanzo-node/**/*.test.*'
+      - '!hanzo-node/**/test/**'
 
   # Allow manual trigger with optional version override
   workflow_dispatch:
