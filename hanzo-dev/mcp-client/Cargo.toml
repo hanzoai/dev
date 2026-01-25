@@ -10,7 +10,7 @@ documentation = "https://docs.rs/hanzo-mcp-client"
 readme = "README.md"
 authors = ["Hanzo AI <dev@hanzo.ai>"]
 categories = ["network-programming", "asynchronous", "development-tools"]
-keywords = ["mcp", "model-context-protocol", "ai", "agent", "client"]
+keywords = ["mcp", "protocol", "ai", "agent", "client"]
 
 [lints]
 workspace = true

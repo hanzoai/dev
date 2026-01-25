@@ -10,7 +10,7 @@ documentation = "https://docs.rs/hanzo-mcp-types"
 readme = "README.md"
 authors = ["Hanzo AI <dev@hanzo.ai>"]
 categories = ["development-tools", "api-bindings"]
-keywords = ["mcp", "model-context-protocol", "ai", "agent", "tools"]
+keywords = ["mcp", "protocol", "ai", "agent", "tools"]
 
 [lib]
 name = "mcp_types"
