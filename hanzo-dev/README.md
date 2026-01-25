@@ -1,8 +1,21 @@
-# Hanzo Dev CLI (Rust Implementation)
+# Hanzo Dev
+
+AI-powered development tools from [Hanzo AI](https://hanzo.ai).
+
+## Projects
+
+| Project | Description | Install |
+|---------|-------------|---------|
+| **[Hanzo Dev CLI](cli/)** | AI coding assistant with TUI | `npm i -g @hanzo/dev` |
+| **[ZAP](zap/)** | Zero-copy Agent Protocol (1000x faster than MCP) | `cargo add hanzo-zap` |
+
+---
+
+## Hanzo Dev CLI
 
 We provide Hanzo Dev CLI as a standalone, native executable to ensure a zero-dependency install.
 
-## Installing Hanzo Dev
+### Installing Hanzo Dev
 
 Today, the easiest way to install Hanzo Dev is via `npm`:
 

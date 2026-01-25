@@ -1,0 +1,10 @@
+(lang dune 3.0)
+(name zap-agent-ocaml)
+(version 0.1.0)
+
+(package
+ (name zap-agent-ocaml)
+ (synopsis "ZAP Agent Example in OCaml")
+ (description "Demonstrates using ZAP (Zero-copy Agent Protocol) tools from OCaml")
+ (authors "Hanzo AI")
+ (license "MIT"))
