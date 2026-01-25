@@ -1,7 +1,16 @@
 [package]
-edition = "2024"
 name = "hanzo-protocol"
 version = { workspace = true }
+edition = "2024"
+description = "Core protocol types for Hanzo AI - AskForApproval, SandboxPolicy, and agent communication"
+license = "MIT"
+repository = "https://github.com/hanzoai/dev"
+homepage = "https://github.com/hanzoai/dev/tree/main/protocol"
+documentation = "https://docs.rs/hanzo-protocol"
+readme = "README.md"
+authors = ["Hanzo AI <dev@hanzo.ai>"]
+categories = ["development-tools", "api-bindings"]
+keywords = ["protocol", "ai", "agent", "sandbox", "approval"]
 
 [lib]
 name = "hanzo_protocol"
