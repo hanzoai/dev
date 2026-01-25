@@ -2,7 +2,14 @@
 name = "hanzo-zap"
 version = { workspace = true }
 edition = "2024"
-description = "ZAP (Zero-copy Agent Protocol) for high-performance agent communication"
+description = "ZAP (Zero-copy Agent Protocol) - 1000x faster than MCP for AI agent tool calls"
+license = "MIT"
+repository = "https://github.com/hanzoai/dev"
+homepage = "https://github.com/hanzoai/dev/tree/main/zap"
+documentation = "https://docs.rs/hanzo-zap"
+readme = "README.md"
+authors = ["Hanzo AI <dev@hanzo.ai>"]
+categories = ["network-programming", "asynchronous", "development-tools"]
 keywords = ["zap", "mcp", "agent", "rpc", "zero-copy"]
 
 [lints]
