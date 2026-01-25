@@ -270,6 +270,8 @@ fn normalize_glyph(ch: char) -> char {
         '│' | '┃' | '║' | '╽' | '╿'
         | '╏' | '╎' | '┆' | '┇'
         | '╷' | '╹' => '|',
+        // Bullet variants → filled bullet for consistency between environments.
+        '◦' | '○' | '◯' | '◌' => '•',
         other => other,
     }
 }
