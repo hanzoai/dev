@@ -1,0 +1,19 @@
+/Users/z/work/hanzo/dev/hanzo-node/rust/target/release/deps/hanzo_node-c291b9bdbc640139.d: src/lib.rs src/compute/mod.rs src/p2p/mod.rs src/rpc/mod.rs src/rpc/generated.rs src/rpc/service.rs src/storage/mod.rs src/error.rs /Users/z/work/hanzo/dev/hanzo-node/rust/target/release/build/hanzo-node-58de045ff101b211/out/hanzo.node.v1.rs
+
+/Users/z/work/hanzo/dev/hanzo-node/rust/target/release/deps/libhanzo_node-c291b9bdbc640139.rlib: src/lib.rs src/compute/mod.rs src/p2p/mod.rs src/rpc/mod.rs src/rpc/generated.rs src/rpc/service.rs src/storage/mod.rs src/error.rs /Users/z/work/hanzo/dev/hanzo-node/rust/target/release/build/hanzo-node-58de045ff101b211/out/hanzo.node.v1.rs
+
+/Users/z/work/hanzo/dev/hanzo-node/rust/target/release/deps/libhanzo_node-c291b9bdbc640139.rmeta: src/lib.rs src/compute/mod.rs src/p2p/mod.rs src/rpc/mod.rs src/rpc/generated.rs src/rpc/service.rs src/storage/mod.rs src/error.rs /Users/z/work/hanzo/dev/hanzo-node/rust/target/release/build/hanzo-node-58de045ff101b211/out/hanzo.node.v1.rs
+
+src/lib.rs:
+src/compute/mod.rs:
+src/p2p/mod.rs:
+src/rpc/mod.rs:
+src/rpc/generated.rs:
+src/rpc/service.rs:
+src/storage/mod.rs:
+src/error.rs:
+/Users/z/work/hanzo/dev/hanzo-node/rust/target/release/build/hanzo-node-58de045ff101b211/out/hanzo.node.v1.rs:
+
+# env-dep:CARGO_PKG_NAME=hanzo-node
+# env-dep:CARGO_PKG_VERSION=0.1.0
+# env-dep:OUT_DIR=/Users/z/work/hanzo/dev/hanzo-node/rust/target/release/build/hanzo-node-58de045ff101b211/out

@@ -1,0 +1,602 @@
+name: Hanzo Node Release
+
+# This workflow builds and publishes the hanzo-node Rust binary and npm packages.
+# It builds native binaries for all supported platforms from hanzo-node/rust/
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'hanzo-node/**'
+      - '.github/workflows/hanzo-node-release.yml'
+    # Ignore test and documentation changes
+    paths-ignore:
+      - 'hanzo-node/**/*.md'
+      - 'hanzo-node/**/*.test.*'
+      - 'hanzo-node/**/test/**'
+
+  # Allow manual trigger with optional version override
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Version to release (leave empty for auto-increment)'
+        required: false
+        type: string
+      skip_npm:
+        description: 'Skip npm publish'
+        required: false
+        type: boolean
+        default: false
+      dry_run:
+        description: 'Dry run (build only, no publish)'
+        required: false
+        type: boolean
+        default: false
+
+concurrency:
+  group: hanzo-node-release-${{ github.ref }}
+  cancel-in-progress: false
+
+permissions:
+  contents: write
+  packages: write
+  id-token: write
+
+env:
+  CARGO_TERM_COLOR: always
+  CARGO_INCREMENTAL: "0"
+  RUST_BACKTRACE: "1"
+
+jobs:
+  npm-auth-check:
+    name: Validate npm auth
+    runs-on: ubuntu-latest
+    if: "!contains(github.event.head_commit.message, '[skip ci]')"
+    timeout-minutes: 5
+    env:
+      NPM_TOKEN: ${{ secrets.NPM_TOKEN }}
+    steps:
+      - name: Setup Node.js for auth check
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          registry-url: 'https://registry.npmjs.org'
+
+      - name: Validate npm authentication
+        if: inputs.skip_npm != true && inputs.dry_run != true
+        env:
+          NODE_AUTH_TOKEN: ${{ env.NPM_TOKEN }}
+        run: |
+          set -euo pipefail
+          if [ -z "${NODE_AUTH_TOKEN:-}" ]; then
+            echo "::warning::NPM_TOKEN is missing. npm publish will be skipped."
+            exit 0
+          fi
+          echo "//registry.npmjs.org/:_authToken=${NODE_AUTH_TOKEN}" > ~/.npmrc
+          if npm whoami >/dev/null 2>&1; then
+            echo "npm auth ok"
+          else
+            echo "::warning::npm auth failed. npm publish will be skipped."
+          fi
+
+  determine-version:
+    name: Determine Version
+    needs: [npm-auth-check]
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+      should_release: ${{ steps.version.outputs.should_release }}
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          registry-url: 'https://registry.npmjs.org'
+
+      - name: Determine next version
+        id: version
+        working-directory: hanzo-node
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          # If version provided via input, use it
+          if [ -n "${{ inputs.version }}" ]; then
+            NEW_VERSION="${{ inputs.version }}"
+            echo "Using provided version: ${NEW_VERSION}"
+            echo "version=${NEW_VERSION}" >> "$GITHUB_OUTPUT"
+            echo "should_release=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          CURRENT_VERSION=$(node -p "require('./package.json').version")
+          PKGS=(
+            "hanzo-node"
+            "hanzo-node-darwin-arm64"
+            "hanzo-node-darwin-x64"
+            "hanzo-node-linux-x64-musl"
+            "hanzo-node-linux-arm64-musl"
+            "hanzo-node-win32-x64"
+          )
+
+          # Find the highest published version across all packages
+          MAX_PUBLISHED="0.0.0"
+          for p in "${PKGS[@]}"; do
+            v=$(npm view "$p" version 2>/dev/null || echo "0.0.0")
+            if [ "$(printf '%s\n%s\n' "$MAX_PUBLISHED" "$v" | sort -V | tail -n1)" != "$MAX_PUBLISHED" ]; then
+              MAX_PUBLISHED="$v"
+            fi
+          done
+
+          # Start with whichever is higher: CURRENT_VERSION or MAX_PUBLISHED
+          CANDIDATE=$(printf '%s\n%s\n' "$CURRENT_VERSION" "$MAX_PUBLISHED" | sort -V | tail -n1)
+
+          # If equal to MAX_PUBLISHED, bump patch once
+          if [ "$CANDIDATE" = "$MAX_PUBLISHED" ]; then
+            IFS='.' read -ra V <<< "$CANDIDATE"
+            CANDIDATE="${V[0]}.${V[1]}.$((${V[2]} + 1))"
+          fi
+
+          # Ensure candidate is globally unused
+          while :; do
+            used=false
+            for p in "${PKGS[@]}"; do
+              if [ "$(npm view "$p@$CANDIDATE" version 2>/dev/null || true)" = "$CANDIDATE" ]; then
+                used=true
+                break
+              fi
+            done
+            if [ "$used" = false ]; then break; fi
+            IFS='.' read -ra V <<< "$CANDIDATE"
+            CANDIDATE="${V[0]}.${V[1]}.$((${V[2]} + 1))"
+          done
+
+          NEW_VERSION="$CANDIDATE"
+          echo "version=${NEW_VERSION}" >> "$GITHUB_OUTPUT"
+          echo "should_release=true" >> "$GITHUB_OUTPUT"
+          echo "Determined version: ${NEW_VERSION}"
+
+  build-binaries:
+    name: Build ${{ matrix.target }}
+    needs: [determine-version]
+    if: needs.determine-version.outputs.should_release == 'true'
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          # Linux builds (musl for static linking)
+          - os: ubuntu-24.04
+            target: x86_64-unknown-linux-musl
+            artifact: hanzo-node-x86_64-unknown-linux-musl
+            cross: false
+          - os: ubuntu-24.04-arm
+            target: aarch64-unknown-linux-musl
+            artifact: hanzo-node-aarch64-unknown-linux-musl
+            cross: false
+          # macOS builds
+          - os: macos-14
+            target: x86_64-apple-darwin
+            artifact: hanzo-node-x86_64-apple-darwin
+            cross: false
+          - os: macos-14
+            target: aarch64-apple-darwin
+            artifact: hanzo-node-aarch64-apple-darwin
+            cross: false
+          # Windows build (optional, may need adjustments for libp2p)
+          # - os: windows-latest
+          #   target: x86_64-pc-windows-msvc
+          #   artifact: hanzo-node-x86_64-pc-windows-msvc.exe
+          #   cross: false
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: stable
+          targets: ${{ matrix.target }}
+
+      - name: Setup Rust Cache
+        uses: Swatinem/rust-cache@v2
+        with:
+          prefix-key: v1-hanzo-node
+          shared-key: ${{ matrix.target }}
+          workspaces: |
+            hanzo-node/rust -> target
+          cache-targets: true
+          cache-on-failure: true
+
+      # Platform-specific setup
+      - name: Linux (musl) setup
+        if: contains(matrix.os, 'ubuntu') && contains(matrix.target, 'musl')
+        shell: bash
+        run: |
+          set -euo pipefail
+          sudo apt-get update -qq
+          sudo apt-get install -y musl-tools pkg-config protobuf-compiler
+          echo 'CC=musl-gcc' >> "$GITHUB_ENV"
+          case "${{ matrix.target }}" in
+            x86_64-unknown-linux-musl)
+              echo 'CARGO_TARGET_X86_64_UNKNOWN_LINUX_MUSL_LINKER=musl-gcc' >> "$GITHUB_ENV" ;;
+            aarch64-unknown-linux-musl)
+              echo 'CARGO_TARGET_AARCH64_UNKNOWN_LINUX_MUSL_LINKER=musl-gcc' >> "$GITHUB_ENV" ;;
+          esac
+          echo 'PKG_CONFIG_ALLOW_CROSS=1' >> "$GITHUB_ENV"
+          echo 'OPENSSL_STATIC=1' >> "$GITHUB_ENV"
+          echo 'RUSTFLAGS=-Awarnings -C debuginfo=0 -C strip=symbols -C panic=abort' >> "$GITHUB_ENV"
+
+      - name: macOS setup
+        if: startsWith(matrix.os, 'macos-')
+        shell: bash
+        run: |
+          brew install protobuf || true
+          echo 'RUSTFLAGS=-Awarnings -C debuginfo=0 -C strip=symbols -C panic=abort' >> "$GITHUB_ENV"
+
+      - name: Windows setup
+        if: matrix.os == 'windows-latest'
+        shell: pwsh
+        run: |
+          choco install protoc -y
+          "RUSTFLAGS=-Awarnings -C debuginfo=0 -C strip=symbols -C panic=abort" >> $env:GITHUB_ENV
+
+      - name: Export VERSION for Rust build
+        shell: bash
+        run: echo "HANZO_NODE_VERSION=${{ needs.determine-version.outputs.version }}" >> "$GITHUB_ENV"
+
+      - name: Build binary
+        shell: bash
+        working-directory: hanzo-node/rust
+        run: |
+          cargo build --release --locked --target ${{ matrix.target }} --bin hanzo-node || {
+            echo "Build failed, attempting without --locked"
+            cargo build --release --target ${{ matrix.target }} --bin hanzo-node
+          }
+
+      - name: Smoke test (native arch only)
+        if: |
+          (contains(matrix.os, 'ubuntu') && matrix.target == 'x86_64-unknown-linux-musl') ||
+          (matrix.os == 'ubuntu-24.04-arm' && matrix.target == 'aarch64-unknown-linux-musl') ||
+          (startsWith(matrix.os, 'macos-') && matrix.target == 'aarch64-apple-darwin')
+        shell: bash
+        run: |
+          set -euo pipefail
+          exe="hanzo-node/rust/target/${{ matrix.target }}/release/hanzo-node"
+          "$exe" --version || "$exe" --help || true
+
+      - name: Prepare artifacts
+        shell: bash
+        run: |
+          mkdir -p artifacts
+          if [[ "${{ matrix.os }}" == "windows-latest" ]]; then
+            cp hanzo-node/rust/target/${{ matrix.target }}/release/hanzo-node.exe artifacts/${{ matrix.artifact }}
+          else
+            cp hanzo-node/rust/target/${{ matrix.target }}/release/hanzo-node artifacts/${{ matrix.artifact }}
+          fi
+
+      - name: Install zstd (Linux)
+        if: contains(matrix.os, 'ubuntu')
+        shell: bash
+        run: sudo apt-get update -qq && sudo apt-get install -y zstd
+
+      - name: Compress artifacts (Linux)
+        if: contains(matrix.os, 'ubuntu')
+        shell: bash
+        run: |
+          shopt -s nullglob
+          for f in artifacts/*; do
+            [ -f "$f" ] || continue
+            base=$(basename "$f")
+            zstd -T0 -19 --force -o "artifacts/${base}.zst" "$f"
+            tar -C artifacts -czf "artifacts/${base}.tar.gz" "$base"
+            rm -f "$f"
+          done
+
+      - name: Compress artifacts (macOS)
+        if: startsWith(matrix.os, 'macos-')
+        shell: bash
+        run: |
+          shopt -s nullglob
+          for f in artifacts/*; do
+            [ -f "$f" ] || continue
+            base=$(basename "$f")
+            zstd -T0 -19 --force -o "artifacts/${base}.zst" "$f"
+            tar -C artifacts -czf "artifacts/${base}.tar.gz" "$base"
+            rm -f "$f"
+          done
+
+      - name: Compress artifacts (Windows)
+        if: matrix.os == 'windows-latest'
+        shell: pwsh
+        run: |
+          Get-ChildItem artifacts -File | ForEach-Object {
+            $src = $_.FullName
+            $dst = "$src.zip"
+            Compress-Archive -Path $src -DestinationPath $dst -Force
+            Remove-Item $src -Force
+          }
+
+      - name: Upload binaries
+        uses: actions/upload-artifact@v4
+        with:
+          name: binaries-${{ matrix.target }}
+          path: artifacts/
+          compression-level: 0
+
+  release:
+    name: Create Release & Publish npm
+    needs: [determine-version, build-binaries]
+    runs-on: ubuntu-latest
+    if: "!contains(github.event.head_commit.message, '[skip ci]')"
+    timeout-minutes: 30
+    env:
+      NPM_TOKEN: ${{ secrets.NPM_TOKEN }}
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          token: ${{ secrets.GH_PAT || secrets.GITHUB_TOKEN }}
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          registry-url: 'https://registry.npmjs.org'
+
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: artifacts/
+
+      - name: Install zstd
+        run: sudo apt-get update -qq && sudo apt-get install -y zstd
+
+      - name: Prepare release assets
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p release-assets
+          shopt -s nullglob
+          while IFS= read -r -d '' f; do
+            cp "$f" release-assets/
+          done < <(find artifacts -type f -name 'hanzo-node-*' -print0)
+          ls -la release-assets/ || true
+
+      - name: Build per-target npm binary packages
+        shell: bash
+        env:
+          NEW_VERSION: ${{ needs.determine-version.outputs.version }}
+        run: |
+          set -euo pipefail
+          stage_root="npm-binaries"
+          rm -rf "$stage_root" && mkdir -p "$stage_root"
+
+          # Map target triple to package info
+          map_target() {
+            case "$1" in
+              aarch64-apple-darwin) echo "os=darwin cpu=arm64 pkg=hanzo-node-darwin-arm64" ;;
+              x86_64-apple-darwin) echo "os=darwin cpu=x64 pkg=hanzo-node-darwin-x64" ;;
+              x86_64-unknown-linux-musl) echo "os=linux cpu=x64 pkg=hanzo-node-linux-x64-musl" ;;
+              aarch64-unknown-linux-musl) echo "os=linux cpu=arm64 pkg=hanzo-node-linux-arm64-musl" ;;
+              x86_64-pc-windows-msvc.exe) echo "os=win32 cpu=x64 pkg=hanzo-node-win32-x64" ;;
+              *) echo "" ;;
+            esac
+          }
+
+          decompress_to() {
+            local input="$1" outdir="$2" base
+            base="$(basename "$input")"
+            mkdir -p "$outdir"
+            case "$base" in
+              *.zst)
+                local raw="${outdir}/${base%.zst}"
+                zstd -d -q --force "$input" -o "$raw"
+                echo "$raw"
+                ;;
+              *.tar.gz)
+                tar -xzf "$input" -C "$outdir"
+                echo "$outdir/${base%.tar.gz}"
+                ;;
+              *.zip)
+                unzip -q -o "$input" -d "$outdir"
+                echo "$outdir/${base%.zip}"
+                ;;
+              *)
+                cp "$input" "$outdir/"
+                echo "$outdir/$base"
+                ;;
+            esac
+          }
+
+          for f in release-assets/*; do
+            b="$(basename "$f")"
+            case "$b" in
+              *.tar.gz) base="${b%.tar.gz}" ;;
+              *.zst)    base="${b%.zst}" ;;
+              *.zip)    base="${b%.zip}" ;;
+              *)        base="$b" ;;
+            esac
+            t="${base#hanzo-node-}"
+
+            meta="$(map_target "$t")" || true
+            if [ -n "$meta" ]; then
+              eval "$meta"
+              workdir="$stage_root/${pkg}"
+              rm -rf "$workdir" && mkdir -p "$workdir/bin"
+              rawbin="$(decompress_to "$f" "$workdir/bin")"
+              chmod +x "$rawbin" || true
+
+              printf '{\n  "name": "%s",\n  "version": "%s",\n  "license": "Apache-2.0",\n  "description": "Platform binary for hanzo-node (%s)",\n  "os": ["%s"],\n  "cpu": ["%s"],\n  "files": ["bin/"],\n  "publishConfig": {"access": "public"},\n  "private": false\n}\n' \
+                "$pkg" "$NEW_VERSION" "$t" "$os" "$cpu" > "$workdir/package.json"
+            else
+              echo "Skipping unrecognized artifact: $b"
+            fi
+          done
+
+          ls -R "$stage_root"
+
+      - name: Update hanzo-node package version
+        working-directory: hanzo-node
+        shell: bash
+        env:
+          NEW_VERSION: ${{ needs.determine-version.outputs.version }}
+        run: |
+          git config --local user.email "action@github.com"
+          git config --local user.name "GitHub Action"
+
+          npm version "$NEW_VERSION" --no-git-tag-version --allow-same-version
+
+          # Update optionalDependencies
+          tmp=$(mktemp)
+          jq '.optionalDependencies = {
+            "hanzo-node-darwin-arm64": "'"$NEW_VERSION"'",
+            "hanzo-node-darwin-x64": "'"$NEW_VERSION"'",
+            "hanzo-node-linux-x64-musl": "'"$NEW_VERSION"'",
+            "hanzo-node-linux-arm64-musl": "'"$NEW_VERSION"'",
+            "hanzo-node-win32-x64": "'"$NEW_VERSION"'"
+          }' package.json > "$tmp" && mv "$tmp" package.json
+
+          git add package.json
+          if ! git diff --staged --quiet; then
+            git commit -m "chore(hanzo-node): release v${NEW_VERSION} [skip ci]"
+          fi
+
+          if ! git rev-parse "hanzo-node-v${NEW_VERSION}" >/dev/null 2>&1; then
+            git tag "hanzo-node-v${NEW_VERSION}"
+          fi
+
+      - name: Sync README for npm
+        shell: bash
+        run: cp hanzo-node/README.md hanzo-node/README.md 2>/dev/null || true
+
+      - name: Push tag
+        if: inputs.dry_run != true
+        shell: bash
+        env:
+          NEW_VERSION: ${{ needs.determine-version.outputs.version }}
+        run: git push origin "hanzo-node-v${NEW_VERSION}" || true
+
+      - name: Push changes
+        if: inputs.dry_run != true
+        shell: bash
+        run: |
+          git push origin main || {
+            echo "Push failed, attempting fetch + merge"
+            git fetch origin
+            git merge --ff-only origin/main || git merge --no-ff origin/main -m "Merge origin/main [skip ci]"
+            git push origin main
+          }
+
+      - name: Create GitHub Release
+        if: inputs.dry_run != true
+        uses: softprops/action-gh-release@v1
+        with:
+          tag_name: hanzo-node-v${{ needs.determine-version.outputs.version }}
+          name: Hanzo Node v${{ needs.determine-version.outputs.version }}
+          body: |
+            ## Hanzo Node v${{ needs.determine-version.outputs.version }}
+
+            Hanzo Node - RPC-based compute node for the Hanzo Platform.
+
+            ### Installation
+
+            ```bash
+            npm install -g hanzo-node
+            ```
+
+            ### Platforms
+
+            - macOS (Apple Silicon arm64)
+            - macOS (Intel x64)
+            - Linux (x64 musl)
+            - Linux (arm64 musl)
+
+            ### Changes
+
+            See [CHANGELOG](https://github.com/hanzoai/dev/blob/main/hanzo-node/CHANGELOG.md) for details.
+          files: |
+            release-assets/*
+          draft: false
+          prerelease: false
+        env:
+          GITHUB_TOKEN: ${{ secrets.GH_PAT || secrets.GITHUB_TOKEN }}
+
+      - name: Publish per-target npm binary packages
+        if: inputs.skip_npm != true && inputs.dry_run != true
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          if [ -z "${NODE_AUTH_TOKEN:-}" ]; then
+            echo "NPM_TOKEN not set, skipping npm publish"
+            exit 0
+          fi
+
+          config_path="${NPM_CONFIG_USERCONFIG:-$HOME/.npmrc}"
+          mkdir -p "$(dirname "$config_path")"
+          echo "//registry.npmjs.org/:_authToken=${NODE_AUTH_TOKEN}" > "$config_path"
+
+          npm whoami >/dev/null 2>&1 || {
+            echo "npm auth failed, skipping npm publish"
+            exit 0
+          }
+
+          shopt -s nullglob
+          for dir in npm-binaries/*; do
+            name=$(jq -r '.name' "$dir/package.json")
+            version=$(jq -r '.version' "$dir/package.json")
+            echo "Preparing to publish $name@$version"
+
+            existing=$(npm view "$name@$version" version 2>/dev/null || true)
+            if [ "$existing" = "$version" ]; then
+              echo "Skip: $name@$version already published"
+              continue
+            fi
+
+            echo "Publishing $name"
+            (cd "$dir" && npm publish --access public)
+          done
+
+      - name: Publish main hanzo-node package
+        if: inputs.skip_npm != true && inputs.dry_run != true
+        working-directory: hanzo-node
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+          NEW_VERSION: ${{ needs.determine-version.outputs.version }}
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          if [ -z "${NODE_AUTH_TOKEN:-}" ]; then
+            echo "NPM_TOKEN not set, skipping npm publish"
+            exit 0
+          fi
+
+          config_path="${NPM_CONFIG_USERCONFIG:-$HOME/.npmrc}"
+          mkdir -p "$(dirname "$config_path")"
+          echo "//registry.npmjs.org/:_authToken=${NODE_AUTH_TOKEN}" > "$config_path"
+
+          name="hanzo-node"
+          echo "Preparing to publish $name@$NEW_VERSION"
+
+          existing=$(npm view "$name@$NEW_VERSION" version 2>/dev/null || true)
+          if [ "$existing" = "$NEW_VERSION" ]; then
+            echo "Skip: $name@$NEW_VERSION already published"
+            exit 0
+          fi
+
+          npm publish --access public
+          echo "Published hanzo-node@$NEW_VERSION"

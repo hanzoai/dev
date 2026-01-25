@@ -1,0 +1,351 @@
+syntax = "proto3";
+package hanzo.node.v1;
+
+// Node management service - core RPC interface for hanzo-node
+service NodeService {
+    // Health and status
+    rpc GetHealth(GetHealthRequest) returns (GetHealthResponse);
+    rpc GetStatus(GetStatusRequest) returns (GetStatusResponse);
+    rpc GetMetrics(GetMetricsRequest) returns (stream MetricsResponse);
+
+    // Node registration and lifecycle
+    rpc RegisterNode(RegisterNodeRequest) returns (RegisterNodeResponse);
+    rpc Heartbeat(HeartbeatRequest) returns (HeartbeatResponse);
+    rpc UpdateCapabilities(UpdateCapabilitiesRequest) returns (UpdateCapabilitiesResponse);
+
+    // Deployment lifecycle
+    rpc Deploy(DeployRequest) returns (DeployResponse);
+    rpc Stop(StopRequest) returns (StopResponse);
+    rpc Remove(RemoveRequest) returns (RemoveResponse);
+    rpc Scale(ScaleRequest) returns (ScaleResponse);
+
+    // Logs and monitoring
+    rpc GetLogs(GetLogsRequest) returns (stream LogEntry);
+    rpc GetEvents(GetEventsRequest) returns (stream NodeEvent);
+
+    // Container management (replaces Docker API)
+    rpc ListContainers(ListContainersRequest) returns (ListContainersResponse);
+    rpc InspectContainer(InspectContainerRequest) returns (ContainerInfo);
+    rpc ExecInContainer(stream ExecInput) returns (stream ExecOutput);
+}
+
+// Health check messages
+message GetHealthRequest {}
+
+message GetHealthResponse {
+    HealthStatus status = 1;
+    string version = 2;
+    bool mlx_enabled = 3;
+    repeated string models = 4;
+    ConsensusStatus consensus = 5;
+}
+
+enum HealthStatus {
+    HEALTH_STATUS_UNSPECIFIED = 0;
+    HEALTH_STATUS_HEALTHY = 1;
+    HEALTH_STATUS_DEGRADED = 2;
+    HEALTH_STATUS_UNHEALTHY = 3;
+}
+
+message ConsensusStatus {
+    bool synced = 1;
+    uint64 block_height = 2;
+    string network_id = 3;  // 43114 mainnet, 43113 testnet, 1337 local
+}
+
+// Node registration messages
+message RegisterNodeRequest {
+    string node_id = 1;
+    string operator_address = 2;
+    NodeCapabilities capabilities = 3;
+    string endpoint = 4;
+    bytes public_key = 5;
+}
+
+message RegisterNodeResponse {
+    bool success = 1;
+    string message = 2;
+    string assigned_node_id = 3;
+    bytes challenge = 4;  // For challenge-response auth
+}
+
+message HeartbeatRequest {
+    string node_id = 1;
+    uint64 timestamp = 2;
+    NodeMetrics metrics = 3;
+}
+
+message HeartbeatResponse {
+    bool acknowledged = 1;
+    uint64 server_timestamp = 2;
+    repeated NodeCommand pending_commands = 3;
+}
+
+message NodeCommand {
+    string command_id = 1;
+    CommandType type = 2;
+    bytes payload = 3;
+}
+
+enum CommandType {
+    COMMAND_TYPE_UNSPECIFIED = 0;
+    COMMAND_TYPE_DEPLOY = 1;
+    COMMAND_TYPE_STOP = 2;
+    COMMAND_TYPE_UPDATE = 3;
+    COMMAND_TYPE_DRAIN = 4;
+}
+
+message UpdateCapabilitiesRequest {
+    string node_id = 1;
+    NodeCapabilities capabilities = 2;
+}
+
+message UpdateCapabilitiesResponse {
+    bool success = 1;
+    string message = 2;
+}
+
+message NodeCapabilities {
+    uint64 cpu_cores = 1;
+    uint64 memory_bytes = 2;
+    uint64 disk_bytes = 3;
+    repeated GpuInfo gpus = 4;
+    bool mlx_enabled = 5;
+    repeated string supported_runtimes = 6;  // ["docker", "containerd", "wasm"]
+    string region = 7;
+    string zone = 8;
+}
+
+message GpuInfo {
+    string model = 1;
+    uint64 memory_bytes = 2;
+    string driver_version = 3;
+}
+
+message NodeMetrics {
+    double cpu_usage = 1;
+    double memory_usage = 2;
+    double disk_usage = 3;
+    double network_rx_bytes = 4;
+    double network_tx_bytes = 5;
+    uint32 active_containers = 6;
+}
+
+// Status messages
+message GetStatusRequest {
+    string node_id = 1;
+}
+
+message GetStatusResponse {
+    NodeState state = 1;
+    uint64 uptime_seconds = 2;
+    NodeMetrics metrics = 3;
+    repeated DeploymentStatus deployments = 4;
+}
+
+enum NodeState {
+    NODE_STATE_UNSPECIFIED = 0;
+    NODE_STATE_STARTING = 1;
+    NODE_STATE_READY = 2;
+    NODE_STATE_DRAINING = 3;
+    NODE_STATE_STOPPED = 4;
+}
+
+message DeploymentStatus {
+    string deployment_id = 1;
+    string name = 2;
+    string status = 3;
+    uint32 replicas = 4;
+    uint32 ready_replicas = 5;
+}
+
+// Metrics streaming
+message GetMetricsRequest {
+    string node_id = 1;
+    uint32 interval_seconds = 2;
+}
+
+message MetricsResponse {
+    uint64 timestamp = 1;
+    NodeMetrics metrics = 2;
+}
+
+// Deployment messages
+message DeployRequest {
+    string deployment_id = 1;
+    string name = 2;
+    ComposeSpec spec = 3;
+    map<string, string> environment = 4;
+    DeploymentOptions options = 5;
+}
+
+message ComposeSpec {
+    string version = 1;  // "3.0"
+    string name = 2;
+    map<string, ServiceSpec> services = 3;
+    map<string, NetworkSpec> networks = 4;
+    map<string, VolumeSpec> volumes = 5;
+}
+
+message ServiceSpec {
+    string image = 1;
+    repeated string command = 2;
+    repeated string entrypoint = 3;
+    map<string, string> environment = 4;
+    repeated string ports = 5;
+    repeated string volumes = 6;
+    repeated string networks = 7;
+    DeploySpec deploy = 8;
+    HealthcheckSpec healthcheck = 9;
+    string restart = 10;
+}
+
+message DeploySpec {
+    uint32 replicas = 1;
+    ResourceSpec resources = 2;
+}
+
+message ResourceSpec {
+    ResourceLimits limits = 1;
+    ResourceLimits reservations = 2;
+}
+
+message ResourceLimits {
+    string cpus = 1;
+    string memory = 2;
+}
+
+message HealthcheckSpec {
+    repeated string test = 1;
+    string interval = 2;
+    string timeout = 3;
+    uint32 retries = 4;
+    string start_period = 5;
+}
+
+message NetworkSpec {
+    string driver = 1;
+    bool external = 2;
+}
+
+message VolumeSpec {
+    string driver = 1;
+    map<string, string> driver_opts = 2;
+}
+
+message DeploymentOptions {
+    string namespace = 1;
+    string environment = 2;  // production, staging, development
+    map<string, string> labels = 3;
+    ResourceLimits resource_limits = 4;
+}
+
+message DeployResponse {
+    bool success = 1;
+    string deployment_id = 2;
+    string message = 3;
+    repeated string endpoints = 4;
+}
+
+message StopRequest {
+    string deployment_id = 1;
+    bool force = 2;
+}
+
+message StopResponse {
+    bool success = 1;
+    string message = 2;
+}
+
+message RemoveRequest {
+    string deployment_id = 1;
+    bool remove_volumes = 2;
+}
+
+message RemoveResponse {
+    bool success = 1;
+    string message = 2;
+}
+
+message ScaleRequest {
+    string deployment_id = 1;
+    string service_name = 2;
+    uint32 replicas = 3;
+}
+
+message ScaleResponse {
+    bool success = 1;
+    string message = 2;
+    uint32 previous_replicas = 3;
+    uint32 current_replicas = 4;
+}
+
+// Logging messages
+message GetLogsRequest {
+    string deployment_id = 1;
+    string service_name = 2;
+    uint32 tail = 3;
+    bool follow = 4;
+    uint64 since = 5;  // Unix timestamp
+}
+
+message LogEntry {
+    uint64 timestamp = 1;
+    string service = 2;
+    string container_id = 3;
+    string stream = 4;  // stdout, stderr
+    string message = 5;
+}
+
+message GetEventsRequest {
+    string node_id = 1;
+    repeated string event_types = 2;
+}
+
+message NodeEvent {
+    uint64 timestamp = 1;
+    string event_type = 2;
+    string resource_type = 3;
+    string resource_id = 4;
+    string message = 5;
+    map<string, string> attributes = 6;
+}
+
+// Container management messages
+message ListContainersRequest {
+    bool all = 1;
+    map<string, string> filters = 2;
+}
+
+message ListContainersResponse {
+    repeated ContainerInfo containers = 1;
+}
+
+message InspectContainerRequest {
+    string container_id = 1;
+}
+
+message ContainerInfo {
+    string id = 1;
+    string name = 2;
+    string image = 3;
+    string status = 4;
+    string state = 5;
+    uint64 created = 6;
+    repeated string ports = 7;
+    map<string, string> labels = 8;
+}
+
+message ExecInput {
+    string container_id = 1;
+    repeated string command = 2;
+    bytes stdin = 3;
+    bool tty = 4;
+}
+
+message ExecOutput {
+    bytes stdout = 1;
+    bytes stderr = 2;
+    int32 exit_code = 3;
+    bool done = 4;
+}

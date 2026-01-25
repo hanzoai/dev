@@ -1,0 +1,97 @@
+[workspace]
+# This crate is standalone, not part of the parent workspace
+
+[package]
+name = "hanzo-node"
+version = "0.1.0"
+edition = "2021"
+description = "Hanzo Node - RPC-based compute node for Hanzo Platform"
+authors = ["Hanzo AI <dev@hanzo.ai>"]
+license = "Apache-2.0"
+
+[lib]
+name = "hanzo_node"
+path = "src/lib.rs"
+
+[[bin]]
+name = "hanzo-node"
+path = "src/bin/hanzo-node.rs"
+
+[dependencies]
+# Async runtime
+tokio = { version = "1", features = [
+    "rt-multi-thread",
+    "macros",
+    "sync",
+    "time",
+    "signal",
+    "fs",
+    "io-util",
+    "net",
+] }
+
+# gRPC
+tonic = { version = "0.12" }
+prost = "0.13"
+
+# P2P networking
+libp2p = { version = "0.54", features = [
+    "tokio",
+    "tcp",
+    "noise",
+    "yamux",
+    "identify",
+    "kad",
+    "gossipsub",
+    "mdns",
+    "macros",
+] }
+
+# Storage
+sled = "0.34"
+
+# Serialization
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+
+# Error handling
+thiserror = "2"
+anyhow = "1"
+
+# Logging and tracing
+tracing = { version = "0.1", features = ["log"] }
+tracing-subscriber = { version = "0.3", features = ["fmt", "env-filter"] }
+
+# Utilities
+uuid = { version = "1", features = ["v4", "serde"] }
+chrono = { version = "0.4", features = ["serde"] }
+bytes = "1"
+
+# HTTP for health check
+axum = { version = "0.8", features = ["tokio"] }
+tower = "0.5"
+
+# Streaming
+async-stream = "0.3"
+tokio-stream = "0.1"
+futures = "0.3"
+
+[build-dependencies]
+tonic-build = "0.12"
+
+[dev-dependencies]
+tempfile = "3"
+tokio-test = "0.4"
+
+[features]
+default = []
+full = ["mlx"]
+mlx = []  # Optional MLX acceleration support
+
+[lints.rust]
+# Match code-rs linting style
+
+[lints.clippy]
+expect_used = "deny"
+unwrap_used = "deny"
+uninlined_format_args = "deny"

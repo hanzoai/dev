@@ -1,0 +1,39 @@
+[package]
+name = "code-device-onboarding"
+version.workspace = true
+edition.workspace = true
+description = "QR code-based device onboarding for Hanzo Node"
+license = "MIT OR Apache-2.0"
+
+[dependencies]
+# Serialization
+serde = { workspace = true, features = ["derive"] }
+serde_json = { workspace = true }
+base64 = { workspace = true }
+
+# Cryptography
+sha2 = { workspace = true }
+# Use rand 0.8 for rand_core 0.6 compatibility with dalek crates
+rand = "0.8"
+x25519-dalek = { version = "2.0", features = ["static_secrets"] }
+ed25519-dalek = { version = "2.1", features = ["rand_core"] }
+chacha20poly1305 = "0.10"
+hkdf = "0.12"
+zeroize = { workspace = true }
+
+# QR Code (feature gated for headless builds)
+qrcode = { version = "0.14", optional = true }
+image = { workspace = true, optional = true, features = ["png"] }
+
+# Error handling
+thiserror = { workspace = true }
+
+[dev-dependencies]
+tokio = { workspace = true, features = ["rt-multi-thread", "macros"] }
+
+[features]
+default = ["qr-render"]
+qr-render = ["qrcode", "image"]
+
+[lints]
+workspace = true

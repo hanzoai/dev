@@ -1,0 +1,11 @@
+/Users/z/work/hanzo/dev/hanzo-node/rust/target/debug/deps/libp2p_identity-fd9af68536ab7861.d: /Users/z/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/libp2p-identity-0.2.13/src/lib.rs /Users/z/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/libp2p-identity-0.2.13/src/ed25519.rs /Users/z/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/libp2p-identity-0.2.13/src/error.rs /Users/z/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/libp2p-identity-0.2.13/src/keypair.rs /Users/z/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/libp2p-identity-0.2.13/src/peer_id.rs /Users/z/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/libp2p-identity-0.2.13/src/generated/mod.rs /Users/z/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/libp2p-identity-0.2.13/src/generated/keys_proto.rs
+
+/Users/z/work/hanzo/dev/hanzo-node/rust/target/debug/deps/liblibp2p_identity-fd9af68536ab7861.rmeta: /Users/z/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/libp2p-identity-0.2.13/src/lib.rs /Users/z/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/libp2p-identity-0.2.13/src/ed25519.rs /Users/z/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/libp2p-identity-0.2.13/src/error.rs /Users/z/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/libp2p-identity-0.2.13/src/keypair.rs /Users/z/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/libp2p-identity-0.2.13/src/peer_id.rs /Users/z/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/libp2p-identity-0.2.13/src/generated/mod.rs /Users/z/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/libp2p-identity-0.2.13/src/generated/keys_proto.rs
+
+/Users/z/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/libp2p-identity-0.2.13/src/lib.rs:
+/Users/z/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/libp2p-identity-0.2.13/src/ed25519.rs:
+/Users/z/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/libp2p-identity-0.2.13/src/error.rs:
+/Users/z/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/libp2p-identity-0.2.13/src/keypair.rs:
+/Users/z/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/libp2p-identity-0.2.13/src/peer_id.rs:
+/Users/z/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/libp2p-identity-0.2.13/src/generated/mod.rs:
+/Users/z/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/libp2p-identity-0.2.13/src/generated/keys_proto.rs:
