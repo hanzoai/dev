@@ -1,0 +1,55 @@
+[package]
+name = "hanzo-zap"
+version = { workspace = true }
+edition = "2024"
+description = "ZAP (Zero-copy Agent Protocol) for high-performance agent communication"
+keywords = ["zap", "mcp", "agent", "rpc", "zero-copy"]
+
+[lints]
+workspace = true
+
+[dependencies]
+# Async runtime
+tokio = { workspace = true, features = [
+    "fs",
+    "io-util",
+    "macros",
+    "net",
+    "process",
+    "rt-multi-thread",
+    "sync",
+    "time",
+] }
+
+# Serialization
+serde = { workspace = true, features = ["derive"] }
+serde_json = { workspace = true }
+
+# Error handling
+anyhow = { workspace = true }
+thiserror = { workspace = true }
+
+# Logging
+tracing = { workspace = true, features = ["log"] }
+
+# MCP types for gateway bridging
+mcp-types = { workspace = true }
+hanzo-mcp-client = { workspace = true }
+
+# Core protocol for unified policies
+hanzo-protocol = { workspace = true }
+
+# Utilities
+bytes = { workspace = true }
+
+# Executor dependencies
+async-trait = "0.1"
+reqwest = { version = "0.12", features = ["json"] }
+glob = "0.3"
+walkdir = "2"
+regex = "1"
+chrono = { version = "0.4", features = ["serde"] }
+base64 = "0.22"
+
+[dev-dependencies]
+tokio-test = "0.4"

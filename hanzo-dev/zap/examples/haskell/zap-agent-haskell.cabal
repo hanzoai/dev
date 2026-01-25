@@ -1,0 +1,57 @@
+cabal-version:      3.0
+name:               zap-agent-haskell
+version:            0.1.0.0
+synopsis:           ZAP Agent Example - Haskell implementation
+description:
+    A complete ZAP (Zero-copy Agent Protocol) agent implementation in Haskell.
+    Demonstrates tool execution with proper Haskell idioms including Maybe,
+    Either for errors, and the IO monad.
+
+    Implements the following tools:
+    * read_file - Read file contents
+    * list_dir - List directory entries
+    * git_status - Get git repository status
+    * git_log - Get git commit history
+    * exec - Execute shell commands
+
+    Types match hanzo-protocol:
+    * ApprovalPolicy - When to ask for user approval
+    * SandboxPolicy - Execution restrictions
+
+license:            MIT
+license-file:       LICENSE
+author:             Hanzo AI
+maintainer:         dev@hanzo.ai
+copyright:          2025 Hanzo AI Inc
+category:           Agent
+build-type:         Simple
+extra-doc-files:    README.md
+
+common warnings
+    ghc-options: -Wall -Wcompat -Widentities -Wincomplete-record-updates
+                 -Wincomplete-uni-patterns -Wmissing-export-lists
+                 -Wmissing-home-modules -Wpartial-fields -Wredundant-constraints
+
+executable zap-agent-haskell
+    import:           warnings
+    main-is:          Agent.hs
+    build-depends:
+        base ^>=4.17 || ^>=4.18 || ^>=4.19 || ^>=4.20,
+        aeson >=2.0 && <3,
+        bytestring >=0.11 && <0.13,
+        containers >=0.6 && <0.8,
+        directory >=1.3 && <1.4,
+        filepath >=1.4 && <1.6,
+        process >=1.6 && <1.7,
+        text >=2.0 && <2.2,
+        unix >=2.7 && <2.9
+    hs-source-dirs:   .
+    default-language: Haskell2010
+    default-extensions:
+        OverloadedStrings
+        RecordWildCards
+        LambdaCase
+
+source-repository head
+    type:     git
+    location: https://github.com/hanzoai/hanzo-dev.git

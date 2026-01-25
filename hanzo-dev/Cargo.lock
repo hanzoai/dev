@@ -3078,6 +3078,30 @@ name = "hanzo-version"
 version = "0.6.0"
 
 [[package]]
+name = "hanzo-zap"
+version = "0.6.0"
+dependencies = [
+ "anyhow",
+ "async-trait",
+ "base64 0.22.1",
+ "bytes",
+ "chrono",
+ "glob",
+ "hanzo-mcp-client",
+ "hanzo-mcp-types",
+ "hanzo-protocol",
+ "regex",
+ "reqwest",
+ "serde",
+ "serde_json",
+ "thiserror 2.0.17",
+ "tokio",
+ "tokio-test",
+ "tracing",
+ "walkdir",
+]
+
+[[package]]
 name = "hashbrown"
 version = "0.12.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
