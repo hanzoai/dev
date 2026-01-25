@@ -1,0 +1,22 @@
+(lang dune 3.0)
+(name hanzo-zap)
+(version 0.6.0)
+(generate_opam_files true)
+
+(source (github hanzoai/dev))
+(license MIT)
+(authors "Hanzo AI <dev@hanzo.ai>")
+(maintainers "Hanzo AI <dev@hanzo.ai>")
+
+(package
+ (name hanzo-zap)
+ (synopsis "Zero-copy Agent Protocol (ZAP) SDK - 1000x faster than MCP")
+ (description "ZAP is a high-performance binary protocol for AI agent communication.
+Features zero-copy serialization for minimal latency and CPU overhead.")
+ (depends
+  (ocaml (>= 4.14))
+  (dune (>= 3.0))
+  (lwt (>= 5.6))
+  (lwt_ppx (>= 2.1))
+  (yojson (>= 2.0))
+  (ppx_deriving_yojson (>= 3.7))))
