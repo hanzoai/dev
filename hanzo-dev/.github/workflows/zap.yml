@@ -228,5 +228,4 @@ jobs:
           CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
         run: |
           cd zap
-          cargo publish --dry-run || echo "Dry run complete"
-          # Uncomment when ready: cargo publish
+          cargo publish
