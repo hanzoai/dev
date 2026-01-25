@@ -1,0 +1,5 @@
+(library
+ (name hanzo_zap)
+ (public_name hanzo-zap)
+ (libraries lwt lwt.unix yojson)
+ (preprocess (pps lwt_ppx ppx_deriving_yojson)))
