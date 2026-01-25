@@ -1,0 +1,2592 @@
+openapi: 3.0.3
+info:
+  title: Hanzo Node RPC API
+  description: |
+    Comprehensive API for Hanzo Node - the RPC-based compute node for Hanzo Platform.
+
+    This API provides:
+    - **Node Management**: Health checks, status monitoring, and node lifecycle
+    - **Compute Pool Operations**: Node registration, capability management, and compute orchestration
+    - **Deployment Lifecycle**: Container deployment, scaling, and removal
+    - **QoS Challenge System**: Quality of Service verification through cryptographic challenges
+    - **Container Management**: Docker-compatible container operations over RPC (replaces SSH)
+    - **Inference Services**: LLM inference, embeddings, and reranking
+
+    ## Authentication
+
+    All endpoints require mTLS authentication. The client must present a valid certificate
+    signed by the Hanzo CA. Bearer tokens are supported as fallback for development.
+
+    ## gRPC Equivalents
+
+    This REST API mirrors the gRPC interface defined in `hanzo.node.v1.proto`.
+    For streaming endpoints, WebSocket connections are available at `/ws/*`.
+
+    ## Network IDs
+
+    - `43114` - Mainnet
+    - `43113` - Testnet (Fuji)
+    - `1337` - Local development
+
+  version: 1.0.0
+  contact:
+    name: Hanzo AI
+    url: https://hanzo.ai
+    email: dev@hanzo.ai
+  license:
+    name: Apache 2.0
+    url: https://www.apache.org/licenses/LICENSE-2.0
+
+servers:
+  - url: https://node.hanzo.ai:50051
+    description: Production gRPC-Gateway
+  - url: https://node.hanzo.network:50051
+    description: Hanzo Network Mainnet
+  - url: http://127.0.0.1:8080
+    description: Local development HTTP (localhost)
+
+tags:
+  - name: Health
+    description: Health and status endpoints
+  - name: Node Registration
+    description: Node registration and lifecycle management
+  - name: Compute Pool
+    description: Compute pool operations and capability management
+  - name: Deployments
+    description: Deployment lifecycle operations
+  - name: QoS Challenges
+    description: Quality of Service challenge and verification system
+  - name: Containers
+    description: Container management (replaces Docker over SSH)
+  - name: Logs
+    description: Logging and event streaming
+  - name: Inference
+    description: AI inference services
+  - name: Operator
+    description: Operator and staking operations
+
+paths:
+  # ============================================================================
+  # Health Endpoints
+  # ============================================================================
+  /health:
+    get:
+      tags:
+        - Health
+      summary: Get node health status
+      description: |
+        Returns comprehensive health information including MLX status,
+        available models, and consensus synchronization state.
+      operationId: getHealth
+      responses:
+        '200':
+          description: Health status retrieved successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/GetHealthResponse'
+        '401':
+          description: Authentication required
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '503':
+          description: Node is unhealthy
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+
+  /readiness:
+    get:
+      tags:
+        - Health
+      summary: Kubernetes readiness probe
+      description: Returns 200 if the node is ready to accept traffic
+      operationId: getReadiness
+      responses:
+        '200':
+          description: Node is ready
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  ready:
+                    type: boolean
+                    example: true
+        '503':
+          description: Node is not ready
+
+  /liveness:
+    get:
+      tags:
+        - Health
+      summary: Kubernetes liveness probe
+      description: Returns 200 if the node process is alive
+      operationId: getLiveness
+      responses:
+        '200':
+          description: Node is alive
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  alive:
+                    type: boolean
+                    example: true
+
+  /v1/status:
+    get:
+      tags:
+        - Health
+      summary: Get detailed node status
+      description: Returns detailed status including uptime, metrics, and deployment states
+      operationId: getStatus
+      parameters:
+        - name: node_id
+          in: query
+          description: Node identifier (optional, defaults to self)
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Status retrieved successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/GetStatusResponse'
+        '404':
+          description: Node not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+
+  /v1/metrics:
+    get:
+      tags:
+        - Health
+      summary: Get node metrics (Prometheus format)
+      description: |
+        Returns metrics in Prometheus exposition format for scraping.
+        For streaming metrics, use the WebSocket endpoint `/ws/metrics`.
+      operationId: getMetrics
+      responses:
+        '200':
+          description: Metrics retrieved
+          content:
+            text/plain:
+              schema:
+                type: string
+                example: |
+                  # HELP hanzo_node_cpu_usage_ratio CPU usage ratio
+                  # TYPE hanzo_node_cpu_usage_ratio gauge
+                  hanzo_node_cpu_usage_ratio 0.45
+
+  # ============================================================================
+  # Node Registration Endpoints
+  # ============================================================================
+  /v1/nodes/register:
+    post:
+      tags:
+        - Node Registration
+      summary: Register a new compute node
+      description: |
+        Registers a new compute node with the network. The node must provide
+        its capabilities, endpoint, and public key for challenge-response auth.
+
+        Returns a challenge that must be signed to complete registration.
+      operationId: registerNode
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/RegisterNodeRequest'
+      responses:
+        '200':
+          description: Registration initiated
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RegisterNodeResponse'
+        '400':
+          description: Invalid registration request
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '409':
+          description: Node already registered
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+
+  /v1/nodes/{node_id}/heartbeat:
+    post:
+      tags:
+        - Node Registration
+      summary: Send heartbeat from node
+      description: |
+        Periodic heartbeat from a registered node. Updates the node's metrics
+        and retrieves any pending commands from the control plane.
+      operationId: heartbeat
+      parameters:
+        - name: node_id
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/HeartbeatRequest'
+      responses:
+        '200':
+          description: Heartbeat acknowledged
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HeartbeatResponse'
+        '404':
+          description: Node not registered
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+
+  /v1/nodes/{node_id}/capabilities:
+    put:
+      tags:
+        - Node Registration
+      summary: Update node capabilities
+      description: |
+        Updates the advertised capabilities of a registered node.
+        Triggers re-evaluation of QoS scores.
+      operationId: updateCapabilities
+      parameters:
+        - name: node_id
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/NodeCapabilities'
+      responses:
+        '200':
+          description: Capabilities updated
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/UpdateCapabilitiesResponse'
+        '404':
+          description: Node not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+
+  # ============================================================================
+  # Compute Pool Endpoints
+  # ============================================================================
+  /v1/compute/pools:
+    get:
+      tags:
+        - Compute Pool
+      summary: List available compute pools
+      description: Returns all compute pools the node participates in
+      operationId: listComputePools
+      parameters:
+        - name: region
+          in: query
+          description: Filter by region
+          schema:
+            type: string
+        - name: min_gpu_memory
+          in: query
+          description: Minimum GPU memory in GB
+          schema:
+            type: integer
+        - name: capabilities
+          in: query
+          description: Required capabilities (comma-separated)
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Compute pools listed
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  pools:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/ComputePool'
+
+  /v1/compute/pools/{pool_id}:
+    get:
+      tags:
+        - Compute Pool
+      summary: Get compute pool details
+      description: Returns detailed information about a specific compute pool
+      operationId: getComputePool
+      parameters:
+        - name: pool_id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Pool details retrieved
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ComputePool'
+        '404':
+          description: Pool not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+
+  /v1/compute/pools/{pool_id}/nodes:
+    get:
+      tags:
+        - Compute Pool
+      summary: List nodes in a compute pool
+      description: Returns all nodes participating in the specified pool
+      operationId: listPoolNodes
+      parameters:
+        - name: pool_id
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: status
+          in: query
+          description: Filter by node status
+          schema:
+            type: string
+            enum: [active, draining, offline]
+        - name: page
+          in: query
+          schema:
+            type: integer
+            default: 1
+        - name: per_page
+          in: query
+          schema:
+            type: integer
+            default: 50
+            maximum: 100
+      responses:
+        '200':
+          description: Pool nodes listed
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  nodes:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/PoolNode'
+                  total:
+                    type: integer
+                  page:
+                    type: integer
+                  per_page:
+                    type: integer
+
+  /v1/compute/allocate:
+    post:
+      tags:
+        - Compute Pool
+      summary: Allocate compute resources
+      description: |
+        Requests allocation of compute resources from the pool.
+        Returns selected nodes based on requirements and QoS scores.
+      operationId: allocateCompute
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/AllocateComputeRequest'
+      responses:
+        '200':
+          description: Compute allocated
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AllocateComputeResponse'
+        '422':
+          description: Cannot satisfy allocation requirements
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+
+  # ============================================================================
+  # QoS Challenge Endpoints
+  # ============================================================================
+  /v1/qos/challenges:
+    post:
+      tags:
+        - QoS Challenges
+      summary: Issue a QoS challenge
+      description: |
+        Issues a new QoS challenge to a provider node. The challenge must be
+        completed within the deadline to maintain QoS score.
+
+        Challenge types:
+        - `compute`: GPU/CPU performance verification
+        - `latency`: Network latency measurement
+        - `bandwidth`: Throughput testing
+        - `availability`: Uptime verification
+        - `model`: AI model capability testing
+      operationId: issueChallenge
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/IssueChallengeRequest'
+      responses:
+        '201':
+          description: Challenge issued
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Challenge'
+        '400':
+          description: Invalid challenge parameters
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+    get:
+      tags:
+        - QoS Challenges
+      summary: List active challenges
+      description: Returns all active challenges for the authenticated node
+      operationId: listChallenges
+      parameters:
+        - name: provider_id
+          in: query
+          description: Filter by provider (admin only)
+          schema:
+            type: string
+        - name: status
+          in: query
+          description: Filter by challenge status
+          schema:
+            type: string
+            enum: [pending, completed, expired, failed]
+        - name: type
+          in: query
+          description: Filter by challenge type
+          schema:
+            type: string
+            enum: [compute, latency, bandwidth, availability, model]
+      responses:
+        '200':
+          description: Challenges listed
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  challenges:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/Challenge'
+
+  /v1/qos/challenges/{challenge_id}:
+    get:
+      tags:
+        - QoS Challenges
+      summary: Get challenge details
+      description: Returns details of a specific challenge including status and proof
+      operationId: getChallenge
+      parameters:
+        - name: challenge_id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '200':
+          description: Challenge details retrieved
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ChallengeDetails'
+        '404':
+          description: Challenge not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+
+  /v1/qos/challenges/{challenge_id}/respond:
+    post:
+      tags:
+        - QoS Challenges
+      summary: Submit challenge response
+      description: |
+        Submits a proof in response to a challenge. The proof must be submitted
+        before the challenge deadline expires.
+
+        The proof data format depends on the challenge type:
+        - `compute`: Result hash, intermediate hashes, achieved FLOPS
+        - `latency`: Round results, P50/P95/P99 latencies
+        - `bandwidth`: Merkle proofs, achieved throughput
+        - `availability`: Signed nonce, response time
+        - `model`: Completion hash, token count, TPS achieved
+      operationId: respondToChallenge
+      parameters:
+        - name: challenge_id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ChallengeProof'
+      responses:
+        '200':
+          description: Challenge response accepted
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ChallengeResult'
+        '400':
+          description: Invalid proof
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '408':
+          description: Challenge deadline expired
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+
+  /v1/qos/challenges/{challenge_id}/verify:
+    post:
+      tags:
+        - QoS Challenges
+      summary: Verify challenge proof
+      description: |
+        Verifies a submitted challenge proof. Called by verifier nodes to
+        confirm the validity of a provider's response.
+      operationId: verifyChallenge
+      parameters:
+        - name: challenge_id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - verifier_id
+                - verification_signature
+              properties:
+                verifier_id:
+                  type: string
+                  description: Verifier node ID
+                verification_signature:
+                  type: string
+                  format: byte
+                  description: Verifier's signature on the proof
+      responses:
+        '200':
+          description: Verification recorded
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/VerificationResult'
+        '404':
+          description: Challenge or proof not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+
+  /v1/qos/providers/{provider_id}/score:
+    get:
+      tags:
+        - QoS Challenges
+      summary: Get provider QoS score
+      description: |
+        Returns the composite QoS score and component scores for a provider.
+        The score is calculated using a weighted geometric mean of:
+        - Compute performance (30%)
+        - Latency (20%)
+        - Bandwidth (15%)
+        - Availability (25%)
+        - Consistency (10%)
+      operationId: getProviderScore
+      parameters:
+        - name: provider_id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Score retrieved
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/QoSScore'
+        '404':
+          description: Provider not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+
+  /v1/qos/providers/{provider_id}/state:
+    get:
+      tags:
+        - QoS Challenges
+      summary: Get provider state
+      description: |
+        Returns the full state of a provider including stake, reputation,
+        challenge history, and current status.
+      operationId: getProviderState
+      parameters:
+        - name: provider_id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Provider state retrieved
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ProviderState'
+        '404':
+          description: Provider not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+
+  /v1/qos/providers/{provider_id}/history:
+    get:
+      tags:
+        - QoS Challenges
+      summary: Get provider challenge history
+      description: Returns historical challenge results for a provider
+      operationId: getProviderHistory
+      parameters:
+        - name: provider_id
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: from
+          in: query
+          description: Start timestamp (Unix ms)
+          schema:
+            type: integer
+            format: int64
+        - name: to
+          in: query
+          description: End timestamp (Unix ms)
+          schema:
+            type: integer
+            format: int64
+        - name: type
+          in: query
+          description: Filter by challenge type
+          schema:
+            type: string
+        - name: limit
+          in: query
+          schema:
+            type: integer
+            default: 100
+            maximum: 1000
+      responses:
+        '200':
+          description: History retrieved
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  results:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/ChallengeResult'
+                  total:
+                    type: integer
+
+  # ============================================================================
+  # Deployment Endpoints
+  # ============================================================================
+  /v1/deployments:
+    post:
+      tags:
+        - Deployments
+      summary: Create a new deployment
+      description: |
+        Deploys a compose spec to the node. Supports Docker Compose v3 format
+        with Hanzo-specific extensions for resource management.
+      operationId: deploy
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/DeployRequest'
+      responses:
+        '201':
+          description: Deployment created
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DeployResponse'
+        '400':
+          description: Invalid deployment spec
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '507':
+          description: Insufficient resources
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+    get:
+      tags:
+        - Deployments
+      summary: List deployments
+      description: Returns all deployments on this node
+      operationId: listDeployments
+      parameters:
+        - name: namespace
+          in: query
+          schema:
+            type: string
+        - name: environment
+          in: query
+          schema:
+            type: string
+            enum: [production, staging, development]
+        - name: status
+          in: query
+          schema:
+            type: string
+            enum: [running, stopped, failed, pending]
+      responses:
+        '200':
+          description: Deployments listed
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  deployments:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/DeploymentStatus'
+
+  /v1/deployments/{deployment_id}:
+    get:
+      tags:
+        - Deployments
+      summary: Get deployment details
+      operationId: getDeployment
+      parameters:
+        - name: deployment_id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Deployment details
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DeploymentDetails'
+        '404':
+          description: Deployment not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+    delete:
+      tags:
+        - Deployments
+      summary: Remove a deployment
+      operationId: removeDeployment
+      parameters:
+        - name: deployment_id
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: remove_volumes
+          in: query
+          description: Also remove associated volumes
+          schema:
+            type: boolean
+            default: false
+      responses:
+        '200':
+          description: Deployment removed
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RemoveResponse'
+        '404':
+          description: Deployment not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+
+  /v1/deployments/{deployment_id}/stop:
+    post:
+      tags:
+        - Deployments
+      summary: Stop a deployment
+      operationId: stopDeployment
+      parameters:
+        - name: deployment_id
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                force:
+                  type: boolean
+                  default: false
+                  description: Force stop without graceful shutdown
+      responses:
+        '200':
+          description: Deployment stopped
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/StopResponse'
+
+  /v1/deployments/{deployment_id}/scale:
+    post:
+      tags:
+        - Deployments
+      summary: Scale a deployment service
+      operationId: scaleDeployment
+      parameters:
+        - name: deployment_id
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ScaleRequest'
+      responses:
+        '200':
+          description: Deployment scaled
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ScaleResponse'
+
+  # ============================================================================
+  # Container Management Endpoints (replaces Docker over SSH)
+  # ============================================================================
+  /v1/containers:
+    get:
+      tags:
+        - Containers
+      summary: List containers
+      description: Lists all containers (replaces `docker ps`)
+      operationId: listContainers
+      parameters:
+        - name: all
+          in: query
+          description: Show all containers (default shows only running)
+          schema:
+            type: boolean
+            default: false
+        - name: filters
+          in: query
+          description: JSON-encoded filters
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Containers listed
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  containers:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/ContainerInfo'
+
+  /v1/containers/{container_id}:
+    get:
+      tags:
+        - Containers
+      summary: Inspect a container
+      description: Returns detailed container information (replaces `docker inspect`)
+      operationId: inspectContainer
+      parameters:
+        - name: container_id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Container details
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ContainerInfo'
+        '404':
+          description: Container not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+
+  /v1/containers/{container_id}/exec:
+    post:
+      tags:
+        - Containers
+      summary: Execute command in container
+      description: |
+        Executes a command inside a running container (replaces SSH exec).
+        For interactive sessions, use the WebSocket endpoint `/ws/exec/{container_id}`.
+      operationId: execInContainer
+      parameters:
+        - name: container_id
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - command
+              properties:
+                command:
+                  type: array
+                  items:
+                    type: string
+                  example: ["/bin/sh", "-c", "ls -la"]
+                tty:
+                  type: boolean
+                  default: false
+                stdin:
+                  type: string
+                  format: byte
+                  description: Base64-encoded stdin input
+      responses:
+        '200':
+          description: Command executed
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ExecOutput'
+        '404':
+          description: Container not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+
+  # ============================================================================
+  # Logs Endpoints
+  # ============================================================================
+  /v1/deployments/{deployment_id}/logs:
+    get:
+      tags:
+        - Logs
+      summary: Get deployment logs
+      description: |
+        Returns logs for a deployment. For real-time streaming, use
+        WebSocket endpoint `/ws/logs/{deployment_id}`.
+      operationId: getLogs
+      parameters:
+        - name: deployment_id
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: service_name
+          in: query
+          description: Filter by service name
+          schema:
+            type: string
+        - name: tail
+          in: query
+          description: Number of lines from the end
+          schema:
+            type: integer
+            default: 100
+        - name: since
+          in: query
+          description: Unix timestamp to start from
+          schema:
+            type: integer
+            format: int64
+        - name: until
+          in: query
+          description: Unix timestamp to end at
+          schema:
+            type: integer
+            format: int64
+      responses:
+        '200':
+          description: Logs retrieved
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  entries:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/LogEntry'
+
+  /v1/events:
+    get:
+      tags:
+        - Logs
+      summary: Get node events
+      description: Returns system events. For streaming, use `/ws/events`.
+      operationId: getEvents
+      parameters:
+        - name: node_id
+          in: query
+          schema:
+            type: string
+        - name: event_types
+          in: query
+          description: Comma-separated event types to filter
+          schema:
+            type: string
+        - name: since
+          in: query
+          schema:
+            type: integer
+            format: int64
+        - name: limit
+          in: query
+          schema:
+            type: integer
+            default: 100
+      responses:
+        '200':
+          description: Events retrieved
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  events:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/NodeEvent'
+
+  # ============================================================================
+  # Inference Endpoints
+  # ============================================================================
+  /v1/inference:
+    post:
+      tags:
+        - Inference
+      summary: Run LLM inference
+      description: |
+        Runs inference on the node's LLM. For streaming responses,
+        set `stream: true` or use WebSocket endpoint `/ws/inference`.
+      operationId: inference
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/InferenceRequest'
+      responses:
+        '200':
+          description: Inference completed
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/InferenceResponse'
+        '503':
+          description: Model not available
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+
+  /v1/embed:
+    post:
+      tags:
+        - Inference
+      summary: Generate embeddings
+      description: Generates vector embeddings for the provided text
+      operationId: embed
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/EmbedRequest'
+      responses:
+        '200':
+          description: Embeddings generated
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/EmbedResponse'
+
+  /v1/rerank:
+    post:
+      tags:
+        - Inference
+      summary: Rerank documents
+      description: Reranks a list of documents by relevance to a query
+      operationId: rerank
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/RerankRequest'
+      responses:
+        '200':
+          description: Documents reranked
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RerankResponse'
+
+  # ============================================================================
+  # Operator Endpoints
+  # ============================================================================
+  /v1/operators/register:
+    post:
+      tags:
+        - Operator
+      summary: Register as an operator
+      description: |
+        Registers the wallet as a compute operator in the Lux consensus.
+        Requires staking tokens.
+      operationId: registerOperator
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/RegisterOperatorRequest'
+      responses:
+        '201':
+          description: Operator registered
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RegisterOperatorResponse'
+        '400':
+          description: Invalid registration
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+
+  /v1/operators/{operator_address}/status:
+    get:
+      tags:
+        - Operator
+      summary: Get operator status
+      description: Returns the registration status and stake information
+      operationId: getOperatorStatus
+      parameters:
+        - name: operator_address
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Operator status
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OperatorStatus'
+        '404':
+          description: Operator not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+
+  /v1/operators/{operator_address}/stake:
+    post:
+      tags:
+        - Operator
+      summary: Update stake amount
+      description: Increases or decreases the operator's staked amount
+      operationId: updateStake
+      parameters:
+        - name: operator_address
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UpdateStakeRequest'
+      responses:
+        '200':
+          description: Stake updated
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/UpdateStakeResponse'
+
+components:
+  securitySchemes:
+    # Note: OpenAPI 3.0 doesn't have native mTLS support. In 3.1 use mutualTLS.
+    # For 3.0, document mTLS requirement in description and use http as placeholder.
+    mtls:
+      type: http
+      scheme: basic
+      description: |
+        mTLS authentication with Hanzo CA signed certificates.
+        The client must present a valid X.509 certificate signed by the Hanzo CA.
+        This is enforced at the transport layer, not by this scheme directly.
+    bearerAuth:
+      type: http
+      scheme: bearer
+      description: Bearer token for development (mTLS preferred in production)
+
+  schemas:
+    # ========================================================================
+    # Error Schema
+    # ========================================================================
+    Error:
+      type: object
+      required:
+        - code
+        - message
+      properties:
+        code:
+          type: string
+          description: Error code
+          example: INVALID_REQUEST
+        message:
+          type: string
+          description: Human-readable error message
+        details:
+          type: object
+          description: Additional error details
+
+    # ========================================================================
+    # Health Schemas
+    # ========================================================================
+    GetHealthResponse:
+      type: object
+      properties:
+        status:
+          $ref: '#/components/schemas/HealthStatus'
+        version:
+          type: string
+          example: "0.1.0"
+        mlx_enabled:
+          type: boolean
+          description: Whether MLX acceleration is available (macOS)
+        models:
+          type: array
+          items:
+            type: string
+          description: Available model IDs
+          example: ["llama-3-70b", "mistral-7b"]
+        consensus:
+          $ref: '#/components/schemas/ConsensusStatus'
+
+    HealthStatus:
+      type: string
+      enum:
+        - HEALTHY
+        - DEGRADED
+        - UNHEALTHY
+
+    ConsensusStatus:
+      type: object
+      properties:
+        synced:
+          type: boolean
+        block_height:
+          type: integer
+          format: int64
+        network_id:
+          type: string
+          description: "43114 mainnet, 43113 testnet, 1337 local"
+
+    GetStatusResponse:
+      type: object
+      properties:
+        state:
+          $ref: '#/components/schemas/NodeState'
+        uptime_seconds:
+          type: integer
+          format: int64
+        metrics:
+          $ref: '#/components/schemas/NodeMetrics'
+        deployments:
+          type: array
+          items:
+            $ref: '#/components/schemas/DeploymentStatus'
+
+    NodeState:
+      type: string
+      enum:
+        - STARTING
+        - READY
+        - DRAINING
+        - STOPPED
+
+    NodeMetrics:
+      type: object
+      properties:
+        cpu_usage:
+          type: number
+          format: double
+          description: CPU usage ratio (0-1)
+        memory_usage:
+          type: number
+          format: double
+          description: Memory usage ratio (0-1)
+        disk_usage:
+          type: number
+          format: double
+          description: Disk usage ratio (0-1)
+        network_rx_bytes:
+          type: number
+          format: double
+          description: Network received bytes per second
+        network_tx_bytes:
+          type: number
+          format: double
+          description: Network transmitted bytes per second
+        active_containers:
+          type: integer
+
+    # ========================================================================
+    # Node Registration Schemas
+    # ========================================================================
+    RegisterNodeRequest:
+      type: object
+      required:
+        - node_id
+        - operator_address
+        - capabilities
+        - endpoint
+        - public_key
+      properties:
+        node_id:
+          type: string
+          description: Unique node identifier
+        operator_address:
+          type: string
+          description: Wallet address of the operator
+        capabilities:
+          $ref: '#/components/schemas/NodeCapabilities'
+        endpoint:
+          type: string
+          description: Node's gRPC endpoint
+          example: "https://node1.example.com:50051"
+        public_key:
+          type: string
+          format: byte
+          description: Node's public key for challenge-response auth
+
+    RegisterNodeResponse:
+      type: object
+      properties:
+        success:
+          type: boolean
+        message:
+          type: string
+        assigned_node_id:
+          type: string
+        challenge:
+          type: string
+          format: byte
+          description: Challenge bytes for proof-of-control
+
+    HeartbeatRequest:
+      type: object
+      required:
+        - node_id
+        - timestamp
+      properties:
+        node_id:
+          type: string
+        timestamp:
+          type: integer
+          format: int64
+          description: Unix timestamp in milliseconds
+        metrics:
+          $ref: '#/components/schemas/NodeMetrics'
+
+    HeartbeatResponse:
+      type: object
+      properties:
+        acknowledged:
+          type: boolean
+        server_timestamp:
+          type: integer
+          format: int64
+        pending_commands:
+          type: array
+          items:
+            $ref: '#/components/schemas/NodeCommand'
+
+    NodeCommand:
+      type: object
+      properties:
+        command_id:
+          type: string
+        type:
+          type: string
+          enum: [DEPLOY, STOP, UPDATE, DRAIN]
+        payload:
+          type: string
+          format: byte
+
+    NodeCapabilities:
+      type: object
+      properties:
+        cpu_cores:
+          type: integer
+          format: int64
+        memory_bytes:
+          type: integer
+          format: int64
+        disk_bytes:
+          type: integer
+          format: int64
+        gpus:
+          type: array
+          items:
+            $ref: '#/components/schemas/GpuInfo'
+        mlx_enabled:
+          type: boolean
+        supported_runtimes:
+          type: array
+          items:
+            type: string
+          example: ["docker", "containerd", "wasm"]
+        region:
+          type: string
+          example: "us-west-2"
+        zone:
+          type: string
+          example: "us-west-2a"
+
+    GpuInfo:
+      type: object
+      properties:
+        model:
+          type: string
+          example: "NVIDIA A100-SXM4-80GB"
+        memory_bytes:
+          type: integer
+          format: int64
+          example: 85899345920
+        driver_version:
+          type: string
+          example: "535.104.12"
+
+    UpdateCapabilitiesResponse:
+      type: object
+      properties:
+        success:
+          type: boolean
+        message:
+          type: string
+
+    # ========================================================================
+    # Compute Pool Schemas
+    # ========================================================================
+    ComputePool:
+      type: object
+      properties:
+        pool_id:
+          type: string
+        name:
+          type: string
+        description:
+          type: string
+        region:
+          type: string
+        total_nodes:
+          type: integer
+        active_nodes:
+          type: integer
+        total_gpus:
+          type: integer
+        available_gpus:
+          type: integer
+        min_stake:
+          type: integer
+          format: int64
+          description: Minimum stake required to join
+        average_qos_score:
+          type: integer
+          description: Average QoS score of nodes (0-1000)
+
+    PoolNode:
+      type: object
+      properties:
+        node_id:
+          type: string
+        operator_address:
+          type: string
+        capabilities:
+          $ref: '#/components/schemas/NodeCapabilities'
+        status:
+          type: string
+          enum: [active, draining, offline]
+        qos_score:
+          type: integer
+        stake:
+          type: integer
+          format: int64
+        uptime_percentage:
+          type: number
+          format: double
+
+    AllocateComputeRequest:
+      type: object
+      required:
+        - requirements
+      properties:
+        requirements:
+          type: object
+          properties:
+            min_cpu_cores:
+              type: integer
+            min_memory_bytes:
+              type: integer
+              format: int64
+            min_gpu_memory_bytes:
+              type: integer
+              format: int64
+            gpu_model:
+              type: string
+            region:
+              type: string
+            min_qos_score:
+              type: integer
+              description: Minimum acceptable QoS score (0-1000)
+        node_count:
+          type: integer
+          default: 1
+          description: Number of nodes to allocate
+        duration_seconds:
+          type: integer
+          format: int64
+          description: Expected allocation duration
+
+    AllocateComputeResponse:
+      type: object
+      properties:
+        allocation_id:
+          type: string
+        nodes:
+          type: array
+          items:
+            $ref: '#/components/schemas/AllocatedNode'
+        expires_at:
+          type: integer
+          format: int64
+
+    AllocatedNode:
+      type: object
+      properties:
+        node_id:
+          type: string
+        endpoint:
+          type: string
+        capabilities:
+          $ref: '#/components/schemas/NodeCapabilities'
+        qos_score:
+          type: integer
+
+    # ========================================================================
+    # QoS Challenge Schemas
+    # ========================================================================
+    IssueChallengeRequest:
+      type: object
+      required:
+        - provider_id
+        - challenge_type
+      properties:
+        provider_id:
+          type: string
+          description: Target provider node ID
+        challenge_type:
+          $ref: '#/components/schemas/ChallengeType'
+        difficulty:
+          type: integer
+          minimum: 1
+          maximum: 10
+          default: 5
+        deadline_ms:
+          type: integer
+          format: int64
+          description: Deadline in milliseconds (auto-calculated if not provided)
+
+    ChallengeType:
+      type: object
+      properties:
+        type:
+          type: string
+          enum: [compute, latency, bandwidth, availability, model]
+        compute_metric:
+          type: string
+          enum: [gpu_fp32, gpu_fp16, gpu_int8, cpu_gflops, memory_bandwidth]
+          description: Required when type is 'compute'
+        transfer_direction:
+          type: string
+          enum: [upload, download, bidirectional]
+          description: Required when type is 'bandwidth'
+        model_capability:
+          $ref: '#/components/schemas/ModelCapability'
+          description: Required when type is 'model'
+
+    ModelCapability:
+      type: object
+      properties:
+        model_id:
+          type: string
+          example: "llama-3-70b"
+        required_vram_gb:
+          type: integer
+          example: 80
+        expected_tps:
+          type: number
+          format: double
+          example: 50.0
+
+    Challenge:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        challenge_type:
+          $ref: '#/components/schemas/ChallengeType'
+        seed:
+          type: string
+          format: byte
+          description: 32-byte random seed
+        difficulty:
+          type: integer
+          minimum: 1
+          maximum: 10
+        deadline_ms:
+          type: integer
+          format: int64
+        issued_at:
+          type: integer
+          format: int64
+          description: Unix timestamp in milliseconds
+        signature:
+          type: string
+          format: byte
+          description: Challenger's signature (ML-DSA or ECDSA)
+
+    ChallengeDetails:
+      allOf:
+        - $ref: '#/components/schemas/Challenge'
+        - type: object
+          properties:
+            status:
+              type: string
+              enum: [pending, completed, expired, failed]
+            proof:
+              $ref: '#/components/schemas/ChallengeProof'
+            result:
+              $ref: '#/components/schemas/ChallengeResult'
+
+    ChallengeProof:
+      type: object
+      required:
+        - challenge_id
+        - provider_id
+        - proof_data
+        - signature
+      properties:
+        challenge_id:
+          type: string
+          format: uuid
+        provider_id:
+          type: string
+        proof_data:
+          $ref: '#/components/schemas/ProofData'
+        executed_at:
+          type: integer
+          format: int64
+        duration_ms:
+          type: integer
+          format: int64
+        signature:
+          type: string
+          format: byte
+        tee_attestation:
+          $ref: '#/components/schemas/TeeAttestation'
+
+    ProofData:
+      type: object
+      description: Varies by challenge type
+      properties:
+        type:
+          type: string
+          enum: [compute, latency, bandwidth, availability, model]
+        # Compute proof
+        result_hash:
+          type: string
+          format: byte
+        intermediate_hashes:
+          type: array
+          items:
+            type: string
+            format: byte
+        actual_flops:
+          type: number
+          format: double
+        # Latency proof
+        round_results:
+          type: array
+          items:
+            $ref: '#/components/schemas/LatencyRound'
+        p50_ms:
+          type: integer
+        p95_ms:
+          type: integer
+        p99_ms:
+          type: integer
+        # Bandwidth proof
+        merkle_proofs:
+          type: array
+          items:
+            $ref: '#/components/schemas/MerkleProof'
+        achieved_mbps:
+          type: integer
+        bytes_transferred:
+          type: integer
+          format: int64
+        # Availability proof
+        signed_nonce:
+          type: string
+          format: byte
+        response_time_ms:
+          type: integer
+        # Model proof
+        completion_hash:
+          type: string
+          format: byte
+        token_count:
+          type: integer
+        tokens_per_second:
+          type: number
+          format: double
+
+    LatencyRound:
+      type: object
+      properties:
+        round:
+          type: integer
+        rtt_ms:
+          type: integer
+        signed_response:
+          type: string
+          format: byte
+
+    MerkleProof:
+      type: object
+      properties:
+        index:
+          type: integer
+          format: int64
+        path:
+          type: array
+          items:
+            type: string
+            format: byte
+        leaf_hash:
+          type: string
+          format: byte
+
+    TeeAttestation:
+      type: object
+      properties:
+        tee_type:
+          type: string
+          enum: [intel_sgx, amd_sev, arm_trustzone, nvidia_cc, nvidia_blackwell_tee_io]
+        quote:
+          type: string
+          format: byte
+        measurement:
+          type: string
+          format: byte
+
+    ChallengeResult:
+      type: object
+      properties:
+        challenge_id:
+          type: string
+          format: uuid
+        provider_id:
+          type: string
+        passed:
+          type: boolean
+        performance_score:
+          type: number
+          format: double
+          description: "1.0 = met expectations, >1.0 = exceeded"
+        tee_verified:
+          type: boolean
+        verified_at:
+          type: integer
+          format: int64
+        failure_reason:
+          type: string
+
+    VerificationResult:
+      type: object
+      properties:
+        challenge_id:
+          type: string
+          format: uuid
+        verified:
+          type: boolean
+        verifier_id:
+          type: string
+        timestamp:
+          type: integer
+          format: int64
+
+    QoSScore:
+      type: object
+      properties:
+        composite:
+          type: integer
+          minimum: 0
+          maximum: 1000
+          description: Overall score (weighted geometric mean)
+        components:
+          $ref: '#/components/schemas/QoSComponents'
+        confidence:
+          type: number
+          format: double
+          minimum: 0
+          maximum: 1
+          description: Score confidence based on sample size
+        updated_at:
+          type: integer
+          format: int64
+        trend:
+          type: number
+          format: double
+          description: Historical trend (positive = improving)
+
+    QoSComponents:
+      type: object
+      properties:
+        compute_score:
+          type: integer
+          minimum: 0
+          maximum: 1000
+          description: Compute performance vs claimed
+        latency_score:
+          type: integer
+          minimum: 0
+          maximum: 1000
+          description: Latency vs SLA
+        bandwidth_score:
+          type: integer
+          minimum: 0
+          maximum: 1000
+          description: Bandwidth vs claimed
+        availability_score:
+          type: integer
+          minimum: 0
+          maximum: 1000
+          description: Uptime percentage * 10
+        consistency_score:
+          type: integer
+          minimum: 0
+          maximum: 1000
+          description: Performance consistency
+
+    ProviderState:
+      type: object
+      properties:
+        id:
+          type: string
+        stake:
+          type: integer
+          format: int64
+          description: Staked amount in smallest token unit
+        reputation:
+          type: number
+          format: double
+        qos_score:
+          $ref: '#/components/schemas/QoSScore'
+        challenges_passed:
+          type: integer
+          format: int64
+        challenges_failed:
+          type: integer
+          format: int64
+        consecutive_failures:
+          type: integer
+        challenge_streak:
+          type: integer
+          description: Consecutive passes
+        total_challenges:
+          type: integer
+        total_rewards:
+          type: integer
+          format: int64
+        total_slashed:
+          type: integer
+          format: int64
+        last_active:
+          type: integer
+          format: int64
+        status:
+          $ref: '#/components/schemas/ProviderStatus'
+
+    ProviderStatus:
+      type: object
+      properties:
+        type:
+          type: string
+          enum: [active, temporarily_banned, permanently_banned, suspended]
+        until:
+          type: integer
+          format: int64
+          description: Ban expiry (for temporary bans)
+        reason:
+          type: string
+
+    # ========================================================================
+    # Deployment Schemas
+    # ========================================================================
+    DeployRequest:
+      type: object
+      required:
+        - name
+        - spec
+      properties:
+        deployment_id:
+          type: string
+          description: Optional custom ID (auto-generated if not provided)
+        name:
+          type: string
+        spec:
+          $ref: '#/components/schemas/ComposeSpec'
+        environment:
+          type: object
+          additionalProperties:
+            type: string
+        options:
+          $ref: '#/components/schemas/DeploymentOptions'
+
+    ComposeSpec:
+      type: object
+      properties:
+        version:
+          type: string
+          default: "3.0"
+        name:
+          type: string
+        services:
+          type: object
+          additionalProperties:
+            $ref: '#/components/schemas/ServiceSpec'
+        networks:
+          type: object
+          additionalProperties:
+            $ref: '#/components/schemas/NetworkSpec'
+        volumes:
+          type: object
+          additionalProperties:
+            $ref: '#/components/schemas/VolumeSpec'
+
+    ServiceSpec:
+      type: object
+      required:
+        - image
+      properties:
+        image:
+          type: string
+        command:
+          type: array
+          items:
+            type: string
+        entrypoint:
+          type: array
+          items:
+            type: string
+        environment:
+          type: object
+          additionalProperties:
+            type: string
+        ports:
+          type: array
+          items:
+            type: string
+          example: ["8080:80", "443:443"]
+        volumes:
+          type: array
+          items:
+            type: string
+        networks:
+          type: array
+          items:
+            type: string
+        deploy:
+          $ref: '#/components/schemas/DeploySpec'
+        healthcheck:
+          $ref: '#/components/schemas/HealthcheckSpec'
+        restart:
+          type: string
+          enum: [no, always, on-failure, unless-stopped]
+
+    DeploySpec:
+      type: object
+      properties:
+        replicas:
+          type: integer
+          default: 1
+        resources:
+          $ref: '#/components/schemas/ResourceSpec'
+
+    ResourceSpec:
+      type: object
+      properties:
+        limits:
+          $ref: '#/components/schemas/ResourceLimits'
+        reservations:
+          $ref: '#/components/schemas/ResourceLimits'
+
+    ResourceLimits:
+      type: object
+      properties:
+        cpus:
+          type: string
+          example: "2.0"
+        memory:
+          type: string
+          example: "4G"
+
+    HealthcheckSpec:
+      type: object
+      properties:
+        test:
+          type: array
+          items:
+            type: string
+          example: ["CMD", "curl", "-f", "http://localhost/health"]
+        interval:
+          type: string
+          example: "30s"
+        timeout:
+          type: string
+          example: "10s"
+        retries:
+          type: integer
+          default: 3
+        start_period:
+          type: string
+          example: "60s"
+
+    NetworkSpec:
+      type: object
+      properties:
+        driver:
+          type: string
+          default: bridge
+        external:
+          type: boolean
+          default: false
+
+    VolumeSpec:
+      type: object
+      properties:
+        driver:
+          type: string
+          default: local
+        driver_opts:
+          type: object
+          additionalProperties:
+            type: string
+
+    DeploymentOptions:
+      type: object
+      properties:
+        namespace:
+          type: string
+          default: default
+        environment:
+          type: string
+          enum: [production, staging, development]
+        labels:
+          type: object
+          additionalProperties:
+            type: string
+        resource_limits:
+          $ref: '#/components/schemas/ResourceLimits'
+
+    DeployResponse:
+      type: object
+      properties:
+        success:
+          type: boolean
+        deployment_id:
+          type: string
+        message:
+          type: string
+        endpoints:
+          type: array
+          items:
+            type: string
+
+    DeploymentStatus:
+      type: object
+      properties:
+        deployment_id:
+          type: string
+        name:
+          type: string
+        status:
+          type: string
+          enum: [running, stopped, failed, pending]
+        replicas:
+          type: integer
+        ready_replicas:
+          type: integer
+
+    DeploymentDetails:
+      allOf:
+        - $ref: '#/components/schemas/DeploymentStatus'
+        - type: object
+          properties:
+            spec:
+              $ref: '#/components/schemas/ComposeSpec'
+            created_at:
+              type: integer
+              format: int64
+            updated_at:
+              type: integer
+              format: int64
+            services:
+              type: array
+              items:
+                type: object
+                properties:
+                  name:
+                    type: string
+                  status:
+                    type: string
+                  replicas:
+                    type: integer
+                  ready:
+                    type: integer
+                  containers:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/ContainerInfo'
+
+    StopResponse:
+      type: object
+      properties:
+        success:
+          type: boolean
+        message:
+          type: string
+
+    RemoveResponse:
+      type: object
+      properties:
+        success:
+          type: boolean
+        message:
+          type: string
+
+    ScaleRequest:
+      type: object
+      required:
+        - service_name
+        - replicas
+      properties:
+        service_name:
+          type: string
+        replicas:
+          type: integer
+          minimum: 0
+
+    ScaleResponse:
+      type: object
+      properties:
+        success:
+          type: boolean
+        message:
+          type: string
+        previous_replicas:
+          type: integer
+        current_replicas:
+          type: integer
+
+    # ========================================================================
+    # Container Schemas
+    # ========================================================================
+    ContainerInfo:
+      type: object
+      properties:
+        id:
+          type: string
+        name:
+          type: string
+        image:
+          type: string
+        status:
+          type: string
+          example: "running"
+        state:
+          type: string
+          enum: [created, running, paused, restarting, removing, exited, dead]
+        created:
+          type: integer
+          format: int64
+        ports:
+          type: array
+          items:
+            type: string
+        labels:
+          type: object
+          additionalProperties:
+            type: string
+
+    ExecOutput:
+      type: object
+      properties:
+        stdout:
+          type: string
+          format: byte
+        stderr:
+          type: string
+          format: byte
+        exit_code:
+          type: integer
+        done:
+          type: boolean
+
+    # ========================================================================
+    # Logs Schemas
+    # ========================================================================
+    LogEntry:
+      type: object
+      properties:
+        timestamp:
+          type: integer
+          format: int64
+        service:
+          type: string
+        container_id:
+          type: string
+        stream:
+          type: string
+          enum: [stdout, stderr]
+        message:
+          type: string
+
+    NodeEvent:
+      type: object
+      properties:
+        timestamp:
+          type: integer
+          format: int64
+        event_type:
+          type: string
+        resource_type:
+          type: string
+        resource_id:
+          type: string
+        message:
+          type: string
+        attributes:
+          type: object
+          additionalProperties:
+            type: string
+
+    # ========================================================================
+    # Inference Schemas
+    # ========================================================================
+    InferenceRequest:
+      type: object
+      required:
+        - prompt
+      properties:
+        prompt:
+          type: string
+        model:
+          type: string
+          description: Model ID (uses default if not specified)
+        max_tokens:
+          type: integer
+          default: 256
+        temperature:
+          type: number
+          format: double
+          default: 0.7
+        top_p:
+          type: number
+          format: double
+          default: 0.9
+        stream:
+          type: boolean
+          default: false
+        stop:
+          type: array
+          items:
+            type: string
+
+    InferenceResponse:
+      type: object
+      properties:
+        id:
+          type: string
+        model:
+          type: string
+        choices:
+          type: array
+          items:
+            type: object
+            properties:
+              index:
+                type: integer
+              text:
+                type: string
+              finish_reason:
+                type: string
+        usage:
+          type: object
+          properties:
+            prompt_tokens:
+              type: integer
+            completion_tokens:
+              type: integer
+            total_tokens:
+              type: integer
+
+    EmbedRequest:
+      type: object
+      required:
+        - input
+      properties:
+        input:
+          oneOf:
+            - type: string
+            - type: array
+              items:
+                type: string
+        model:
+          type: string
+
+    EmbedResponse:
+      type: object
+      properties:
+        model:
+          type: string
+        data:
+          type: array
+          items:
+            type: object
+            properties:
+              index:
+                type: integer
+              embedding:
+                type: array
+                items:
+                  type: number
+                  format: double
+
+    RerankRequest:
+      type: object
+      required:
+        - query
+        - documents
+      properties:
+        query:
+          type: string
+        documents:
+          type: array
+          items:
+            type: string
+        model:
+          type: string
+        top_n:
+          type: integer
+
+    RerankResponse:
+      type: object
+      properties:
+        results:
+          type: array
+          items:
+            type: object
+            properties:
+              index:
+                type: integer
+              relevance_score:
+                type: number
+                format: double
+              document:
+                type: string
+
+    # ========================================================================
+    # Operator Schemas
+    # ========================================================================
+    RegisterOperatorRequest:
+      type: object
+      required:
+        - operator_address
+        - stake_amount
+      properties:
+        operator_address:
+          type: string
+          description: Wallet address
+        stake_amount:
+          type: integer
+          format: int64
+          description: Amount to stake (smallest unit)
+        node_ids:
+          type: array
+          items:
+            type: string
+          description: Associated node IDs
+
+    RegisterOperatorResponse:
+      type: object
+      properties:
+        success:
+          type: boolean
+        operator_id:
+          type: string
+        message:
+          type: string
+
+    OperatorStatus:
+      type: object
+      properties:
+        operator_address:
+          type: string
+        registered:
+          type: boolean
+        stake_amount:
+          type: integer
+          format: int64
+        node_count:
+          type: integer
+        total_rewards:
+          type: integer
+          format: int64
+        total_penalties:
+          type: integer
+          format: int64
+        registration_time:
+          type: integer
+          format: int64
+
+    UpdateStakeRequest:
+      type: object
+      required:
+        - amount
+        - action
+      properties:
+        amount:
+          type: integer
+          format: int64
+        action:
+          type: string
+          enum: [increase, decrease]
+
+    UpdateStakeResponse:
+      type: object
+      properties:
+        success:
+          type: boolean
+        new_stake:
+          type: integer
+          format: int64
+        message:
+          type: string
+
+security:
+  - mtls: []
+  - bearerAuth: []

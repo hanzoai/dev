@@ -3,7 +3,49 @@
 ## Project Overview
 Hanzo Dev is a powerful fork of OpenAI's Codex CLI, enhanced with enterprise features and maintained by Hanzo AI. This is a Rust-based CLI tool that provides AI-powered development assistance directly in the terminal.
 
-## Recent Updates (December 2025)
+## Recent Updates (January 2026)
+
+### hanzo-node Package and Release Pipeline (January 2026)
+
+Added `hanzo-node` npm package for Node.js project integration:
+
+1. **Package Structure** (`/hanzo-node/`)
+   - `package.json`: Main package with optionalDependencies for platform binaries
+   - `bin/hanzo.js`: Entry point that spawns native binary
+   - `postinstall.js`: Downloads platform binary from GitHub releases
+   - `scripts/preinstall.js`: Node.js version check (requires 18+)
+
+2. **Platform Packages**
+   - `hanzo-node-darwin-arm64`: macOS Apple Silicon
+   - `hanzo-node-darwin-x64`: macOS Intel
+   - `hanzo-node-linux-x64-musl`: Linux x64 (static musl)
+   - `hanzo-node-linux-arm64-musl`: Linux ARM64 (static musl)
+   - `hanzo-node-win32-x64`: Windows x64
+
+3. **Release Workflow** (`.github/workflows/hanzo-node-release.yml`)
+   - Triggered by successful main Release workflow
+   - Reuses binary artifacts from main release
+   - Publishes all platform packages then main package
+   - Supports manual trigger with version override
+
+4. **Binary Resolution Strategy**
+   - First checks user cache (`~/.cache/hanzo/node/<version>/`)
+   - Falls back to platform optionalDependency package
+   - Downloads from GitHub releases as last resort
+   - Validates binary headers (ELF/Mach-O/PE)
+
+5. **Usage**
+   ```bash
+   # Global installation
+   npm install -g hanzo-node
+
+   # Direct run
+   npx hanzo-node
+
+   # Commands
+   hanzo "explain this code"
+   hanzo-dev --help
+   ```
 
 ### Branding + Tooling Refresh (January 2026)
 - Updated docs and CLI guidance to use Hanzo Dev branding, `dev` command, and `~/.hanzo` as primary config home (legacy `~/.code`/`~/.codex` still read).

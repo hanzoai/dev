@@ -2,6 +2,9 @@ packages:
   - docs
   - sdk/typescript
   - shell-tool-mcp
+  - codex-cli
+  - dev-cli
+  - hanzo-node
 
 ignoredBuiltDependencies:
   - esbuild

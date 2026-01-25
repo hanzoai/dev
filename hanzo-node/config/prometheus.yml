@@ -1,0 +1,43 @@
+# Prometheus Configuration for Hanzo Node
+# Scrapes metrics from the Hanzo Node HTTP endpoint
+
+global:
+  scrape_interval: 15s
+  evaluation_interval: 15s
+
+  # Attach these labels to any time series or alert when communicating with
+  # external systems (federation, remote storage, Alertmanager)
+  external_labels:
+    monitor: 'hanzo-node'
+
+# Alertmanager configuration (optional)
+alerting:
+  alertmanagers:
+    - static_configs:
+        - targets: []
+
+# Rule files (for recording rules and alerts)
+rule_files:
+  # - "first_rules.yml"
+  # - "second_rules.yml"
+
+scrape_configs:
+  # Scrape Prometheus itself
+  - job_name: 'prometheus'
+    static_configs:
+      - targets: ['localhost:9090']
+
+  # Scrape Hanzo Node
+  - job_name: 'hanzo-node'
+    static_configs:
+      - targets: ['hanzo-node:8080']
+    metrics_path: '/metrics'
+    scrape_interval: 10s
+    scrape_timeout: 5s
+
+  # Scrape Hanzo Node gRPC health (via grpc-health-probe or custom exporter)
+  - job_name: 'hanzo-node-grpc'
+    static_configs:
+      - targets: ['hanzo-node:9090']
+    metrics_path: '/metrics'
+    scrape_interval: 30s

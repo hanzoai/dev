@@ -212,9 +212,42 @@ fn normalize_output(text: String) -> String {
         .chars()
         .map(normalize_glyph)
         .collect::<String>()
+        .pipe(normalize_ellipsis)
         .pipe(normalize_timers)
+        .pipe(normalize_version)
         .pipe(normalize_spacer_rows)
         .pipe(scrub_intro_art)
+        .pipe(normalize_trailing_whitespace)
+}
+
+fn normalize_ellipsis(text: String) -> String {
+    text.replace('…', "...")
+}
+
+fn normalize_trailing_whitespace(text: String) -> String {
+    let mut normalized = String::with_capacity(text.len());
+    for segment in text.split_inclusive('\n') {
+        if let Some(stripped) = segment.strip_suffix('\n') {
+            normalized.push_str(stripped.trim_end());
+            normalized.push('\n');
+        } else {
+            normalized.push_str(segment.trim_end());
+        }
+    }
+    normalized
+}
+
+fn normalize_version(text: String) -> String {
+    static VERSION_RE: OnceLock<Regex> = OnceLock::new();
+
+    // Normalize version strings like "Hanzo Dev (v0.6.50-56-gadda9b189-dev)" or "Hanzo Dev (5511c8c53)"
+    // to "Hanzo Dev (VERSION)" for consistent snapshots across environments
+    VERSION_RE
+        .get_or_init(|| {
+            Regex::new(r"Hanzo Dev \([^)]+\)").expect("valid version regex")
+        })
+        .replace_all(&text, "Hanzo Dev (VERSION)")
+        .into_owned()
 }
 
 fn normalize_glyph(ch: char) -> char {
@@ -265,8 +298,15 @@ fn normalize_timers(text: String) -> String {
     static IN_SECONDS_RE: OnceLock<Regex> = OnceLock::new();
     static T_MINUS_RE: OnceLock<Regex> = OnceLock::new();
     static MM_SS_RE: OnceLock<Regex> = OnceLock::new();
+    static MM_SS_SUFFIX_RE: OnceLock<Regex> = OnceLock::new();
     static MS_RE: OnceLock<Regex> = OnceLock::new();
     static MIN_SEC_RE: OnceLock<Regex> = OnceLock::new();
+    static PAREN_SECONDS_RE: OnceLock<Regex> = OnceLock::new();
+    static PAREN_MINUTES_RE: OnceLock<Regex> = OnceLock::new();
+    static PAREN_MINUTES_SECONDS_RE: OnceLock<Regex> = OnceLock::new();
+    static PAREN_HOURS_MINUTES_RE: OnceLock<Regex> = OnceLock::new();
+    static PAREN_HOURS_MINUTES_SECONDS_RE: OnceLock<Regex> = OnceLock::new();
+    static RAW_SECONDS_SUFFIX_RE: OnceLock<Regex> = OnceLock::new();
 
     let text = IN_SECONDS_RE
         .get_or_init(|| Regex::new(r"\bin\s+\d+s\b").expect("valid in seconds regex"))
@@ -283,9 +323,44 @@ fn normalize_timers(text: String) -> String {
         .replace_all(&text, "MM:SS")
         .into_owned();
 
+    let text = MM_SS_SUFFIX_RE
+        .get_or_init(|| Regex::new(r"MM:SS:\d{2}").expect("valid mm:ss suffix regex"))
+        .replace_all(&text, "MM:SS")
+        .into_owned();
+
     let text = MS_RE
         .get_or_init(|| Regex::new(r"\b\d+ms\b").expect("valid milliseconds regex"))
         .replace_all(&text, "Xms")
+        .into_owned();
+
+    let text = PAREN_SECONDS_RE
+        .get_or_init(|| Regex::new(r"\(\d+s\)").expect("valid paren seconds regex"))
+        .replace_all(&text, "(Xs)")
+        .into_owned();
+
+    let text = PAREN_MINUTES_RE
+        .get_or_init(|| Regex::new(r"\(\d+m\)").expect("valid paren minutes regex"))
+        .replace_all(&text, "(Xm)")
+        .into_owned();
+
+    let text = PAREN_MINUTES_SECONDS_RE
+        .get_or_init(|| Regex::new(r"\(\d+m\s+\d+s\)").expect("valid paren minutes seconds regex"))
+        .replace_all(&text, "(Xm Xs)")
+        .into_owned();
+
+    let text = PAREN_HOURS_MINUTES_RE
+        .get_or_init(|| Regex::new(r"\(\d+h\s+\d+m\)").expect("valid paren hours minutes regex"))
+        .replace_all(&text, "(Xh Xm)")
+        .into_owned();
+
+    let text = PAREN_HOURS_MINUTES_SECONDS_RE
+        .get_or_init(|| Regex::new(r"\(\d+h\s+\d+m\s+\d+s\)").expect("valid paren hours minutes seconds regex"))
+        .replace_all(&text, "(Xh Xm Xs)")
+        .into_owned();
+
+    let text = RAW_SECONDS_SUFFIX_RE
+        .get_or_init(|| Regex::new(r"\b\d+s\b").expect("valid raw seconds suffix regex"))
+        .replace_all(&text, "Xs")
         .into_owned();
 
     MIN_SEC_RE

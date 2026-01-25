@@ -1,0 +1,49 @@
+# Hanzo Node - Docker Ignore
+# Excludes files not needed in the build context
+
+# Git
+.git
+.gitignore
+.gitattributes
+
+# Build artifacts
+rust/target/
+target/
+*.log
+
+# Node.js (not needed for Rust build)
+node_modules/
+npm-debug.log
+yarn-error.log
+pnpm-lock.yaml
+package-lock.json
+
+# IDE and editors
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+
+# Documentation
+*.md
+!README.md
+LICENSE
+
+# Local config
+.env
+.env.local
+.env.*.local
+
+# Test files
+**/*_test.rs
+**/tests/
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Docker files (recursive builds)
+Dockerfile*
+compose*.yml
+.dockerignore

@@ -1,0 +1,54 @@
+{
+  "name": "hanzo-node",
+  "version": "0.6.50",
+  "license": "Apache-2.0",
+  "description": "Hanzo Dev CLI - AI-powered development assistant for Node.js projects",
+  "bin": {
+    "hanzo": "bin/hanzo.js",
+    "hanzo-dev": "bin/hanzo.js"
+  },
+  "type": "module",
+  "engines": {
+    "node": ">=18"
+  },
+  "files": [
+    "bin/hanzo.js",
+    "postinstall.js",
+    "scripts/preinstall.js",
+    "scripts/windows-cleanup.ps1",
+    "dist"
+  ],
+  "scripts": {
+    "preinstall": "node scripts/preinstall.js",
+    "postinstall": "node postinstall.js",
+    "prepublishOnly": "node -e \"const fs=require('fs'),path=require('path'); const repoGit=path.join(__dirname,'..','.git'); const inCi=process.env.GITHUB_ACTIONS==='true'||process.env.CI==='true'; if(fs.existsSync(repoGit) && !inCi){ console.error('Refusing to publish from hanzo-node. Publishing happens via release.yml.'); process.exit(1);} else { console.log(inCi ? 'CI publish detected.' : 'Publishing staged package...'); }\""
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/hanzoai/dev.git"
+  },
+  "homepage": "https://hanzo.ai/dev",
+  "keywords": [
+    "hanzo",
+    "ai",
+    "cli",
+    "development",
+    "assistant",
+    "coding",
+    "copilot"
+  ],
+  "publishConfig": {
+    "access": "public"
+  },
+  "dependencies": {},
+  "devDependencies": {
+    "prettier": "^3.3.3"
+  },
+  "optionalDependencies": {
+    "hanzo-node-darwin-arm64": "0.6.50",
+    "hanzo-node-darwin-x64": "0.6.50",
+    "hanzo-node-linux-x64-musl": "0.6.50",
+    "hanzo-node-linux-arm64-musl": "0.6.50",
+    "hanzo-node-win32-x64": "0.6.50"
+  }
+}

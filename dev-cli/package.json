@@ -1,6 +1,6 @@
 {
   "name": "@hanzo/dev",
-  "version": "0.6.50",
+  "version": "0.6.51",
   "license": "Apache-2.0",
   "description": "Hanzo AI coding assistant - intelligent CLI for developers",
   "bin": {
@@ -35,10 +35,10 @@
     "prettier": "^3.3.3"
   },
   "optionalDependencies": {
-    "@hanzo/dev-darwin-arm64": "0.6.50",
-    "@hanzo/dev-darwin-x64": "0.6.50",
-    "@hanzo/dev-linux-x64-musl": "0.6.50",
-    "@hanzo/dev-linux-arm64-musl": "0.6.50",
-    "@hanzo/dev-win32-x64": "0.6.50"
+    "@hanzo/dev-darwin-arm64": "0.6.51",
+    "@hanzo/dev-darwin-x64": "0.6.51",
+    "@hanzo/dev-linux-x64-musl": "0.6.51",
+    "@hanzo/dev-linux-arm64-musl": "0.6.51",
+    "@hanzo/dev-win32-x64": "0.6.51"
   }
 }
