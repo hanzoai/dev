@@ -51,7 +51,7 @@ jobs:
         run: |
           set -euo pipefail
           if [ -z "${NODE_AUTH_TOKEN:-}" ]; then
-            echo "::error::NPM_TOKEN is missing. Create a granular automation token with publish + bypass-2FA: https://docs.npmjs.com/creating-and-viewing-access-tokens#creating-access-tokens ; add/update the secret: https://github.com/organizations/just-every/settings/secrets/actions/NPM_TOKEN" >&2
+            echo "::error::NPM_TOKEN is missing. Create a granular automation token with publish + bypass-2FA: https://docs.npmjs.com/creating-and-viewing-access-tokens#creating-access-tokens ; add/update the secret: https://github.com/hanzoai/dev/settings/secrets/actions/NPM_TOKEN" >&2
             exit 1
           fi
 
@@ -60,7 +60,7 @@ jobs:
           if npm whoami >/dev/null 2>&1; then
             echo "npm auth ok"
           else
-            echo "::error::npm auth failed (npm whoami). Ensure NPM_TOKEN is a granular/automation token with publish rights to @just-every/*, bypass 2FA enabled: https://docs.npmjs.com/creating-and-viewing-access-tokens#creating-access-tokens ; update the secret: https://github.com/organizations/just-every/settings/secrets/actions/NPM_TOKEN" >&2
+            echo "::error::npm auth failed (npm whoami). Ensure NPM_TOKEN is a granular/automation token with publish rights to @hanzo/*, bypass 2FA enabled: https://docs.npmjs.com/creating-and-viewing-access-tokens#creating-access-tokens ; update the secret: https://github.com/hanzoai/dev/settings/secrets/actions/NPM_TOKEN" >&2
             exit 1
           fi
 
@@ -186,12 +186,12 @@ jobs:
           set -euo pipefail
           CURRENT_VERSION=$(node -p "require('./package.json').version")
           PKGS=(
-            "@just-every/code"
-            "@just-every/code-darwin-arm64"
-            "@just-every/code-darwin-x64"
-            "@just-every/code-linux-x64-musl"
-            "@just-every/code-linux-arm64-musl"
-            "@just-every/code-win32-x64"
+            "@hanzo/dev"
+            "@hanzo/dev-darwin-arm64"
+            "@hanzo/dev-darwin-x64"
+            "@hanzo/dev-linux-x64-musl"
+            "@hanzo/dev-linux-arm64-musl"
+            "@hanzo/dev-win32-x64"
           )
           # Find the highest published version across all packages
           MAX_PUBLISHED="0.0.0"
@@ -553,18 +553,6 @@ jobs:
           stage_root="npm-binaries"
           rm -rf "$stage_root" && mkdir -p "$stage_root"
 
-          # Map target triple to package info for @just-every/code
-          map_target_code() {
-            case "$1" in
-              aarch64-apple-darwin) echo "os=darwin cpu=arm64 pkg=@just-every/code-darwin-arm64" ;;
-              x86_64-apple-darwin) echo "os=darwin cpu=x64 pkg=@just-every/code-darwin-x64" ;;
-              x86_64-unknown-linux-musl) echo "os=linux cpu=x64 pkg=@just-every/code-linux-x64-musl" ;;
-              aarch64-unknown-linux-musl) echo "os=linux cpu=arm64 pkg=@just-every/code-linux-arm64-musl" ;;
-              x86_64-pc-windows-msvc.exe) echo "os=win32 cpu=x64 pkg=@just-every/code-win32-x64" ;;
-              *) echo "" ;;
-            esac
-          }
-
           # Map target triple to package info for @hanzo/dev
           map_target_dev() {
             case "$1" in
@@ -616,37 +604,22 @@ jobs:
             esac
             t="${base#code-}"
 
-            # Create @just-every/code-* package
-            meta="$(map_target_code "$t")" || true
+            # Create @hanzo/dev-* package
+            meta="$(map_target_dev "$t")" || true
             if [ -n "$meta" ]; then
               eval "$meta" # sets os, cpu, pkg
               workdir="$stage_root/${pkg##*/}"
               rm -rf "$workdir" && mkdir -p "$workdir/bin"
               rawbin="$(decompress_to "$f" "$workdir/bin")"
               chmod +x "$rawbin" || true
-              printf '{\n  "name": "%s",\n  "version": "%s",\n  "license": "Apache-2.0",\n  "description": "Platform binary for @just-every/code (%s)",\n  "os": ["%s"],\n  "cpu": ["%s"],\n  "files": ["bin/"],\n  "private": false\n}\n' \
-                "$pkg" "$NEW_VERSION" "$t" "$os" "$cpu" > "$workdir/package.json"
-            fi
-
-            # Create @hanzo/dev-* package (uses same binary, renamed to dev-*)
-            meta_dev="$(map_target_dev "$t")" || true
-            if [ -n "$meta_dev" ]; then
-              eval "$meta_dev" # sets os, cpu, pkg
-              workdir_dev="$stage_root/${pkg##*/}"
-              rm -rf "$workdir_dev" && mkdir -p "$workdir_dev/bin"
-              # Copy the binary with dev-* name
-              rawbin_dev="$(decompress_to "$f" "$workdir_dev/bin")"
-              chmod +x "$rawbin_dev" || true
               # Rename code-* to dev-*
-              devbin="${rawbin_dev/code-/dev-}"
-              if [ "$rawbin_dev" != "$devbin" ]; then
-                mv "$rawbin_dev" "$devbin"
+              devbin="${rawbin/code-/dev-}"
+              if [ "$rawbin" != "$devbin" ]; then
+                mv "$rawbin" "$devbin"
               fi
               printf '{\n  "name": "%s",\n  "version": "%s",\n  "license": "Apache-2.0",\n  "description": "Platform binary for @hanzo/dev (%s)",\n  "os": ["%s"],\n  "cpu": ["%s"],\n  "files": ["bin/"],\n  "private": false\n}\n' \
-                "$pkg" "$NEW_VERSION" "$t" "$os" "$cpu" > "$workdir_dev/package.json"
-            fi
-
-            if [ -z "$meta" ] && [ -z "$meta_dev" ]; then
+                "$pkg" "$NEW_VERSION" "$t" "$os" "$cpu" > "$workdir/package.json"
+            else
               echo "Skipping unrecognized artifact: $b"
             fi
           done
@@ -681,16 +654,6 @@ jobs:
           NEW_VERSION="${{ needs.determine-version.outputs.version }}"
           npm version "$NEW_VERSION" --no-git-tag-version --allow-same-version
           echo "version=${NEW_VERSION}" >> "$GITHUB_OUTPUT"
-          # Inject optionalDependencies pointing to per-target packages
-          # Note: These are platform-filtered in the target packages, so npm will fetch only one.
-          tmp=$(mktemp)
-          jq '.optionalDependencies = {
-            "@just-every/code-darwin-arm64": "'"$NEW_VERSION"'",
-            "@just-every/code-darwin-x64": "'"$NEW_VERSION"'",
-            "@just-every/code-linux-x64-musl": "'"$NEW_VERSION"'",
-            "@just-every/code-linux-arm64-musl": "'"$NEW_VERSION"'",
-            "@just-every/code-win32-x64": "'"$NEW_VERSION"'"
-          }' package.json > "$tmp" && mv "$tmp" package.json
           git add package.json
           if git diff --staged --quiet; then
             echo "skip_push=true" >> "$GITHUB_OUTPUT"
@@ -801,7 +764,7 @@ jobs:
 
           if [ -f CHANGELOG.md ] && [ -f docs/release-notes/RELEASE_NOTES.md ] \
              && grep -qF "## [${NEW_VERSION}]" CHANGELOG.md 2>/dev/null \
-             && grep -qF "## @just-every/code v${NEW_VERSION}" docs/release-notes/RELEASE_NOTES.md 2>/dev/null; then
+             && grep -qF "## @hanzo/dev v${NEW_VERSION}" docs/release-notes/RELEASE_NOTES.md 2>/dev/null; then
             echo "CHANGELOG.md and docs/release-notes/RELEASE_NOTES.md already contain v${NEW_VERSION}; skipping regeneration."
             exit 0
           fi
@@ -861,13 +824,13 @@ jobs:
 
           Release Notes (docs/release-notes/RELEASE_NOTES.md)
           - Write exactly these sections in order; include the optional Thanks section only when applicable:
-            1) Title: ## @just-every/code v${NEW_VERSION}
+            1) Title: ## @hanzo/dev v${NEW_VERSION}
             2) One brief intro sentence (1–2 lines max).
             3) Section header: ### Changes
                - The same 2–5 bullets as in the changelog (you may omit SHAs).
             4) Section header: ### Install
                Code block with exactly:
-               npm install -g @just-every/code@latest
+               npm install -g @hanzo/dev@latest
                code
             5) Optional section header: ### Thanks
                - Include ONE line like: "Thanks to @alice and @bob for contributions!"
@@ -950,7 +913,7 @@ jobs:
             awk -v v="${NEW_VERSION}" '/^## /{p=($2==("v"v)||$2==v)} p{print}' CHANGELOG.md > docs/release-notes/RELEASE_NOTES.md || true
           fi
           if [ ! -s docs/release-notes/RELEASE_NOTES.md ]; then
-            printf "## @just-every/code v%s\n\nSee CHANGELOG.md for details." "${NEW_VERSION}" > docs/release-notes/RELEASE_NOTES.md
+            printf "## @hanzo/dev v%s\n\nSee CHANGELOG.md for details." "${NEW_VERSION}" > docs/release-notes/RELEASE_NOTES.md
           fi
 
           # Commit CHANGELOG changes if any.
@@ -993,7 +956,7 @@ jobs:
             awk -v v="${NEW_VERSION}" '/^## /{p=($2==("v"v)||$2==v)} p{print}' CHANGELOG.md > docs/release-notes/RELEASE_NOTES.md || true
           fi
           if [ ! -s docs/release-notes/RELEASE_NOTES.md ]; then
-            printf "## @just-every/code v%s\n\nSee CHANGELOG.md for details." "${NEW_VERSION}" > docs/release-notes/RELEASE_NOTES.md
+            printf "## @hanzo/dev v%s\n\nSee CHANGELOG.md for details." "${NEW_VERSION}" > docs/release-notes/RELEASE_NOTES.md
           fi
 
       - name: Assert release notes exist
@@ -1122,7 +1085,7 @@ jobs:
           config_path="${NPM_CONFIG_USERCONFIG:-$HOME/.npmrc}"
           mkdir -p "$(dirname "$config_path")"
           echo "//registry.npmjs.org/:_authToken=${NODE_AUTH_TOKEN}" > "$config_path"
-          npm whoami >/dev/null 2>&1 || { echo "npm auth failed (npm whoami). Ensure NPM_TOKEN is a granular/automation token with publish rights to @just-every/* and bypass 2FA enabled; update the secret via npmjs.com." >&2; exit 1; }
+          npm whoami >/dev/null 2>&1 || { echo "npm auth failed (npm whoami). Ensure NPM_TOKEN is a granular/automation token with publish rights to @hanzo/* and bypass 2FA enabled; update the secret via npmjs.com." >&2; exit 1; }
           shopt -s nullglob
           for dir in npm-binaries/*; do
             name=$(jq -r '.name' "$dir/package.json")
@@ -1136,28 +1099,6 @@ jobs:
             echo "Publishing $(basename \"$dir\")"
             (cd "$dir" && npm publish --access public)
           done
-
-      - name: Publish main npm package (last)
-        if: steps.should_publish.outputs.publish == 'true'
-        working-directory: codex-cli
-        env:
-          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
-        shell: bash
-        run: |
-          set -euo pipefail
-          config_path="${NPM_CONFIG_USERCONFIG:-$HOME/.npmrc}"
-          mkdir -p "$(dirname "$config_path")"
-          echo "//registry.npmjs.org/:_authToken=${NODE_AUTH_TOKEN}" > "$config_path"
-          npm whoami >/dev/null 2>&1 || { echo "npm auth failed (npm whoami). Ensure NPM_TOKEN is a granular/automation token with publish rights to @just-every/* and bypass 2FA enabled; update the secret via npmjs.com." >&2; exit 1; }
-          name="@just-every/code"
-          version=$(jq -r '.version' package.json)
-          echo "Preparing to publish $name@$version"
-          existing=$(npm view "$name@$version" version 2>/dev/null || true)
-          if [ "$existing" = "$version" ]; then
-            echo "Skip: $name@$version already published"
-            exit 0
-          fi
-          npm publish --access public
 
       - name: Publish @hanzo/dev npm package
         if: steps.should_publish.outputs.publish == 'true'
