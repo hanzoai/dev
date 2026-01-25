@@ -1,0 +1,70 @@
+# ZAP Gateway Configuration
+#
+# The ZAP Gateway bridges multiple MCP servers through a single high-performance
+# ZAP interface. This enables agents to connect to a unified tool set while
+# maintaining MCP compatibility with existing servers.
+#
+# Related specifications:
+# - HIP-007: ZAP Protocol Specification (Hanzo AI)
+# - LP-120: ZAP Transport Protocol (Lux Network)
+#
+# Usage:
+#   zapd --config /path/to/config.toml
+#
+# Or programmatically:
+#   let config: GatewayConfig = toml::from_str(&config_str)?;
+#   let gateway = Gateway::new(config).await?;
+#   gateway.serve().await
+
+# Gateway server settings
+listen = "127.0.0.1:9999"
+# tls_cert = "/etc/zap/cert.pem"
+# tls_key = "/etc/zap/key.pem"
+max_message_size = 16777216  # 16MB
+timeout_ms = 30000           # 30 seconds
+
+# MCP Server: Filesystem (local subprocess)
+[[servers]]
+name = "filesystem"
+
+[servers.transport]
+type = "stdio"
+command = "mcp-server-filesystem"
+args = ["/home"]
+# env = { "DEBUG" = "1" }
+
+# MCP Server: Hanzo Search (native ZAP)
+[[servers]]
+name = "search"
+
+[servers.transport]
+type = "zap"
+url = "zaps://search.hanzo.ai:9999"
+
+# MCP Server: GitHub (HTTP/SSE)
+[[servers]]
+name = "github"
+
+[servers.transport]
+type = "http"
+url = "https://mcp.github.com"
+
+[servers.auth]
+type = "bearer"
+token = "${GITHUB_TOKEN}"
+
+# MCP Server: Local Ollama (HTTP)
+[[servers]]
+name = "ollama"
+
+[servers.transport]
+type = "http"
+url = "http://localhost:11434"
+
+# MCP Server: Custom Unix socket
+[[servers]]
+name = "custom"
+
+[servers.transport]
+type = "unix"
+path = "/var/run/custom-mcp.sock"

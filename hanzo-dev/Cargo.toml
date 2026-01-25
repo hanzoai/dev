@@ -35,6 +35,7 @@ members = [
     "git-apply",
     "utils/json-to-toml",
     "utils/readiness",
+    "zap",
 ]
 resolver = "2"
 
@@ -80,6 +81,7 @@ hanzo-tui = { path = "tui" }
 hanzo-utils-json-to-toml = { path = "utils/json-to-toml" }
 hanzo-utils-readiness = { path = "utils/readiness" }
 hanzo-auto-drive-core = { path = "code-auto-drive-core" }
+hanzo-zap = { path = "zap" }
 mcp-types = { path = "mcp-types", package = "hanzo-mcp-types" }
 upstream-mcp-types = { package = "codex-mcp-types", version = "0.63.0" }
 
