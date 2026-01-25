@@ -1082,6 +1082,7 @@ jobs:
           test -s Formula/Code.rb || { echo "Formula/Code.rb missing" >&2; exit 1; }
 
       - name: Publish Homebrew formula to just-every/homebrew-tap
+        continue-on-error: true  # Non-blocking: npm publish is higher priority
         shell: bash
         env:
           GH_PAT: ${{ secrets.GH_PAT || secrets.GITHUB_TOKEN }}
