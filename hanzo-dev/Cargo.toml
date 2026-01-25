@@ -68,11 +68,11 @@ hanzo-git-tooling = { path = "git-tooling" }
 hanzo-git-apply = { path = "git-apply" }
 hanzo-linux-sandbox = { path = "linux-sandbox" }
 hanzo-login = { path = "login" }
-hanzo-mcp-client = { path = "mcp-client" }
+hanzo-mcp-client = { path = "mcp-client", version = "0.6.0" }
 hanzo-mcp-server = { path = "mcp-server" }
 hanzo-ollama = { path = "ollama" }
 hanzo-process-hardening = { path = "process-hardening" }
-hanzo-protocol = { path = "protocol" }
+hanzo-protocol = { path = "protocol", version = "0.6.0" }
 hanzo-protocol-ts = { path = "protocol-ts" }
 hanzo-responses-api-proxy = { path = "responses-api-proxy" }
 hanzo-rmcp-client = { path = "rmcp-client" }
@@ -81,8 +81,8 @@ hanzo-tui = { path = "tui" }
 hanzo-utils-json-to-toml = { path = "utils/json-to-toml" }
 hanzo-utils-readiness = { path = "utils/readiness" }
 hanzo-auto-drive-core = { path = "code-auto-drive-core" }
-hanzo-zap = { path = "zap" }
-mcp-types = { path = "mcp-types", package = "hanzo-mcp-types" }
+hanzo-zap = { path = "zap", version = "0.6.0" }
+mcp-types = { path = "mcp-types", package = "hanzo-mcp-types", version = "0.6.0" }
 upstream-mcp-types = { package = "codex-mcp-types", version = "0.63.0" }
 
 # External - Guard for I/O sanitization

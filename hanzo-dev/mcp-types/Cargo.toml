@@ -1,7 +1,16 @@
 [package]
-edition = "2024"
 name = "hanzo-mcp-types"
 version = { workspace = true }
+edition = "2024"
+description = "MCP (Model Context Protocol) type definitions for Hanzo AI agents"
+license = "MIT"
+repository = "https://github.com/hanzoai/dev"
+homepage = "https://github.com/hanzoai/dev/tree/main/mcp-types"
+documentation = "https://docs.rs/hanzo-mcp-types"
+readme = "README.md"
+authors = ["Hanzo AI <dev@hanzo.ai>"]
+categories = ["development-tools", "api-bindings"]
+keywords = ["mcp", "model-context-protocol", "ai", "agent", "tools"]
 
 [lib]
 name = "mcp_types"
