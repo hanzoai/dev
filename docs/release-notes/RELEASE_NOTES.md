@@ -1,21 +1,16 @@
-## @just-every/code v0.6.50
+## @hanzo/dev v3.0.5
 
-This release upgrades model defaults, improves request-user-input UX, and tightens config and sandbox handling.
+This release adds polyglot SDKs for the ZAP protocol across multiple languages.
 
 ### Changes
-- Core/Models: default to gpt-5.2-codex with personality templating and request-user-input support.
-- Core/Config: add layered config.toml support for app-server reads and merges.
-- TUI: add request-user-input overlay with interactive picker and reliable pending/answer routing.
-- Core/Runtime: preserve interrupted turns to prevent repeats and avoid touching thread mtime on resume.
-- Sandbox/Paths: harden tilde expansion and Windows sandbox audit paths for safer writable roots.
+- ZAP SDKs: Added comprehensive SDKs for OCaml, Ada, Fortran, Haskell, Swift, and Kotlin
+- Protocol: Zero-latency Async Protocol bindings with Cap'n Proto serialization
+- Cross-platform: Support for all major platforms via native bindings
 
 ### Install
 ```
-npm install -g @just-every/code@latest
-code
+npm install -g @hanzo/dev@latest
+dev
 ```
 
-### Thanks
-Thanks to @zerone0x and @sgraika127 for contributions!
-
-Compare: https://github.com/just-every/code/compare/v0.6.49...v0.6.50
+Compare: https://github.com/hanzoai/dev/compare/v3.0.4...v3.0.5
