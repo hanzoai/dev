@@ -29213,10 +29213,14 @@ Note: Free ngrok accounts have connection limits."#;
 
     fn render_screenshot_highlevel(&self, path: &PathBuf, area: Rect, buf: &mut Buffer) {
         use ratatui::widgets::Widget;
+        use ratatui::style::Color;
+        use ratatui::style::Style;
         use ratatui_image::Image;
         use ratatui_image::Resize;
         use ratatui_image::picker::Picker;
         use ratatui_image::picker::ProtocolType;
+
+        fill_rect(buf, area, Some(' '), Style::default().bg(Color::Black));
 
         // First, cheaply read image dimensions without decoding the full image
         let (img_w, img_h) = match image::image_dimensions(path) {
@@ -29349,6 +29353,7 @@ Note: Free ngrok accounts have connection limits."#;
     fn render_screenshot_placeholder(&self, path: &PathBuf, area: Rect, buf: &mut Buffer) {
         use ratatui::style::Modifier;
         use ratatui::style::Style;
+        use ratatui::style::Color;
         use ratatui::widgets::Block;
         use ratatui::widgets::Borders;
         use ratatui::widgets::Paragraph;
@@ -29365,7 +29370,8 @@ Note: Free ngrok accounts have connection limits."#;
                 Block::default()
                     .borders(Borders::ALL)
                     .border_style(Style::default().fg(crate::colors::info()))
-                    .title("Browser"),
+                    .title("Browser")
+                    .style(Style::default().bg(Color::Black)),
             )
             .style(
                 Style::default()
