@@ -267,10 +267,20 @@ pub(crate) fn overlay_scrim() -> Color {
     quantize_color_for_palette(Color::Rgb(r, g, b))
 }
 
-/// Background for user messages: matches Vercel/shadcn subtle highlight.
-/// Slightly lighter than pure black for visual separation.
+/// Background for user messages: uses OpenAI codex approach with terminal-aware blending
 pub(crate) fn user_message_bg() -> Color {
-    Color::Rgb(17, 17, 17) // #111111 (shadcn selection)
+    use crate::style::user_message_style;
+    match user_message_style().bg {
+        Some(bg) => bg,
+        None => {
+            // Fallback to simple approach if terminal bg detection fails
+            if crate::style::is_light((128, 128, 128)) { // Assume light
+                Color::Rgb(17, 17, 17) // Dark on light
+            } else {
+                Color::Rgb(255, 255, 255) // Light on dark
+            }
+        }
+    }
 }
 
 /// Background for status bar / footer area: Vercel near-black.
@@ -278,20 +288,32 @@ pub(crate) fn status_bar_bg() -> Color {
     Color::Rgb(10, 10, 10) // #0A0A0A
 }
 
-/// Background for assistant messages: theme background moved 5% toward theme info.
+/// Background for assistant messages: uses terminal-aware background with subtle tint
 pub(crate) fn assistant_bg() -> Color {
-    match palette_mode() {
-        PaletteMode::Ansi16 => {
-            if is_dark_background(current_theme().background) {
-                Color::Indexed(4)
+    use crate::terminal_palette::default_bg;
+    
+    match default_bg() {
+        Some(bg) => {
+            // Use OpenAI's blending approach for assistant messages
+            let (top, alpha) = if crate::style::is_light(bg) {
+                ((59, 130, 246), 0.03) // Light blue tint for light backgrounds
             } else {
-                Color::Indexed(7)
-            }
+                ((96, 165, 250), 0.05) // Slightly stronger blue tint for dark
+            };
+            crate::terminal_palette::best_color(crate::style::blend(top, bg, alpha))
         }
-        PaletteMode::Ansi256 => {
-            let bg = current_theme().background;
-            let info = current_theme().info;
-            mix_toward(bg, info, 0.05)
+        None => {
+            // Fallback for when terminal bg can't be detected
+            match palette_mode() {
+                PaletteMode::Ansi16 => {
+                    Color::Indexed(0) // Assume dark background
+                }
+                PaletteMode::Ansi256 => {
+                    let bg = current_theme().background;
+                    let info = current_theme().info;
+                    mix_toward(bg, info, 0.05)
+                }
+            }
         }
     }
 }
