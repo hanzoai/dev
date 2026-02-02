@@ -978,28 +978,28 @@ fn ansi256_to_rgb(idx: u8) -> (u8, u8, u8) {
 fn get_predefined_theme(name: ThemeName) -> Theme {
     match name {
         ThemeName::DarkCarbonNight => Theme {
-            // Vercel/shadcn monochrome dark theme (Tailwind Zinc ramp)
-            primary: Color::Rgb(250, 250, 250),       // #FAFAFA (near-white)
-            secondary: Color::Rgb(161, 161, 170),     // #A1A1AA (zinc-400)
-            background: Color::Rgb(10, 10, 10),       // #0A0A0A (Vercel near-black)
-            foreground: Color::Rgb(250, 250, 250),    // #FAFAFA (near-white)
-            border: Color::Rgb(39, 39, 42),           // #27272A (zinc-800)
-            border_focused: Color::Rgb(63, 63, 70),   // #3F3F46 (zinc-700)
-            selection: Color::Rgb(17, 17, 17),        // #111111 (subtle highlight)
-            cursor: Color::Rgb(250, 250, 250),        // #FAFAFA
-            success: Color::Rgb(34, 197, 94),         // #22C55E (shadcn green)
-            warning: Color::Rgb(245, 158, 11),        // #F59E0B (shadcn amber)
-            error: Color::Rgb(239, 68, 68),           // #EF4444 (shadcn red)
-            info: Color::Rgb(59, 130, 246),           // #3B82F6 (shadcn blue)
-            text: Color::Rgb(250, 250, 250),          // #FAFAFA (body text - matches Codex)
-            text_dim: Color::Rgb(161, 161, 170),      // #A1A1AA (zinc-400)
-            text_bright: Color::White,                // #FFFFFF (pure white)
-            keyword: Color::Rgb(212, 212, 216),       // #D4D4D8 (zinc-300)
-            string: Color::Rgb(228, 228, 231),        // #E4E4E7 (zinc-200)
-            comment: Color::Rgb(113, 113, 122),       // #71717A (zinc-500)
-            function: Color::Rgb(244, 244, 245),      // #F4F4F5 (zinc-100)
-            spinner: Color::Rgb(63, 63, 70),          // #3F3F46 (zinc-700)
-            progress: Color::Rgb(250, 250, 250),      // #FAFAFA
+            // OpenAI Codex style - simple terminal-friendly dark theme
+            primary: Color::Rgb(96, 165, 250),       // Blue-400 - subtle blue
+            secondary: Color::Rgb(156, 163, 175),     // Gray-400 - muted gray
+            background: Color::Reset,                 // Use terminal default
+            foreground: Color::Rgb(229, 231, 235),   // Gray-200 - light gray text
+            border: Color::Rgb(75, 85, 99),          // Gray-600 - subtle border
+            border_focused: Color::Rgb(107, 114, 128), // Gray-500 - slightly lighter
+            selection: Color::Rgb(30, 58, 138),      // Blue-800 - dark blue selection
+            cursor: Color::Rgb(229, 231, 235),       // Gray-200 - matches text
+            success: Color::Rgb(34, 197, 94),        // Green-500
+            warning: Color::Rgb(251, 191, 36),       // Yellow-400
+            error: Color::Rgb(239, 68, 68),          // Red-500
+            info: Color::Rgb(59, 130, 246),          // Blue-500
+            text: Color::Rgb(229, 231, 235),         // Gray-200 - main text
+            text_dim: Color::Rgb(156, 163, 175),     // Gray-400 - dimmed text
+            text_bright: Color::Rgb(248, 250, 252),  // Gray-50 - bright text
+            keyword: Color::Rgb(167, 139, 250),      // Purple-400 - keywords
+            string: Color::Rgb(52, 211, 153),        // Teal-400 - strings
+            comment: Color::Rgb(107, 114, 128),      // Gray-500 - comments
+            function: Color::Rgb(96, 165, 250),      // Blue-400 - functions
+            spinner: Color::Rgb(107, 114, 128),      // Gray-500
+            progress: Color::Rgb(96, 165, 250),      // Blue-400
         },
         ThemeName::DarkCarbonAnsi16 => Theme {
             primary: Color::Indexed(12),
@@ -1026,28 +1026,28 @@ fn get_predefined_theme(name: ThemeName) -> Theme {
         },
 
         ThemeName::LightPhoton => Theme {
-            // Light default - clean professional light theme
-            primary: Color::Rgb(0, 162, 255),       // #00A2FF
-            secondary: Color::Rgb(110, 89, 203),    // #6E59CB
-            background: Color::Rgb(250, 250, 250),  // #FAFAFA
-            foreground: Color::Rgb(31, 35, 40),     // #1F2328
-            border: Color::Rgb(206, 206, 206),      // #CECECE  (↑ contrast)
-            border_focused: Color::Rgb(160, 160, 160), // toned contrast vs border
-            selection: Color::Rgb(234, 242, 255),   // #EAF2FF
-            cursor: Color::Rgb(31, 35, 40),         // #1F2328
-            success: Color::Rgb(26, 127, 55),       // #1A7F37
-            warning: Color::Rgb(154, 103, 0),       // #9A6700
-            error: Color::Rgb(207, 34, 46),         // #CF222E
-            info: Color::Rgb(9, 105, 218),          // #0969DA
-            text: Color::Rgb(79, 91, 106),          // #4f5b6a
-            text_dim: Color::Rgb(171, 180, 199),    // #abb4c7
-            text_bright: Color::Rgb(0, 0, 20),      // #000014
-            keyword: Color::Rgb(110, 89, 203),      // #6E59CB
-            string: Color::Rgb(11, 125, 105),       // #0B7D69
-            comment: Color::Rgb(100, 115, 132),     // #647384
-            function: Color::Rgb(0, 95, 204),       // #005FCC
-            spinner: Color::Rgb(156, 163, 175),     // #9CA3AF
-            progress: Color::Rgb(0, 95, 204),       // #005FCC
+            // OpenAI Codex style - clean terminal-friendly light theme
+            primary: Color::Rgb(37, 99, 235),        // Blue-600
+            secondary: Color::Rgb(107, 114, 128),    // Gray-500
+            background: Color::Reset,                // Use terminal default
+            foreground: Color::Rgb(31, 41, 55),     // Gray-800 - dark gray text
+            border: Color::Rgb(209, 213, 219),      // Gray-300 - light border
+            border_focused: Color::Rgb(156, 163, 175), // Gray-400 - darker border
+            selection: Color::Rgb(219, 234, 254),   // Blue-100 - light blue selection
+            cursor: Color::Rgb(31, 41, 55),         // Gray-800 - matches text
+            success: Color::Rgb(22, 163, 74),       // Green-600
+            warning: Color::Rgb(217, 119, 6),       // Yellow-600
+            error: Color::Rgb(220, 38, 38),         // Red-600
+            info: Color::Rgb(37, 99, 235),          // Blue-600
+            text: Color::Rgb(31, 41, 55),           // Gray-800 - main text
+            text_dim: Color::Rgb(107, 114, 128),    // Gray-500 - dimmed text
+            text_bright: Color::Rgb(17, 24, 39),    // Gray-900 - bright text
+            keyword: Color::Rgb(147, 51, 234),      // Purple-600 - keywords
+            string: Color::Rgb(5, 150, 105),        // Emerald-600 - strings
+            comment: Color::Rgb(156, 163, 175),     // Gray-400 - comments
+            function: Color::Rgb(37, 99, 235),      // Blue-600 - functions
+            spinner: Color::Rgb(156, 163, 175),     // Gray-400
+            progress: Color::Rgb(37, 99, 235),      // Blue-600
         },
         ThemeName::LightPhotonAnsi16 => Theme {
             primary: Color::Indexed(12),
