@@ -67,17 +67,38 @@ rust/
       service.rs              # NodeService impl
     compute/mod.rs            # Container orchestration
     storage/mod.rs            # Persistent storage
+    iam/                      # IAM (Identity & Access Management)
+      mod.rs                  # IAM service and config
+      auth.rs                 # Identity, AuthContext, ApiKey
+      error.rs                # IAM error types
+      jwt.rs                  # JWT validation (HS256, RS256, ES256)
+      middleware.rs           # gRPC interceptor, HTTP layer
+      permission.rs           # Resource, Action, Permission
+      rbac.rs                 # Role, RoleBinding, RoleManager
     bin/hanzo-node.rs         # CLI binary
 ```
 
 ### Test Results
 
 ```
-running 4 tests
-test p2p::tests::test_p2p_network_start_stop ... ok
+running 17 tests
+test iam::jwt::tests::test_base64_decode ... ok
+test iam::jwt::tests::test_sha256 ... ok
+test iam::middleware::tests::test_grpc_method_mapping ... ok
+test iam::permission::tests::test_permission_allows ... ok
+test iam::middleware::tests::test_http_method_mapping ... ok
+test iam::auth::tests::test_api_key_generation ... ok
+test iam::permission::tests::test_permission_parsing ... ok
+test iam::auth::tests::test_api_key_validity ... ok
+test iam::permission::tests::test_resource_matching ... ok
+test iam::rbac::tests::test_role_permissions ... ok
+test iam::jwt::tests::test_jwt_validation_disabled ... ok
+test iam::rbac::tests::test_role_manager ... ok
+test iam::rbac::tests::test_role_inheritance ... ok
 test p2p::tests::test_p2p_network_creation ... ok
-test storage::tests::test_storage_deployment_crud ... ok
+test p2p::tests::test_p2p_network_start_stop ... ok
 test compute::tests::test_deployment_lifecycle ... ok
+test storage::tests::test_storage_deployment_crud ... ok
 ```
 
 ### Binary Info
@@ -86,6 +107,60 @@ test compute::tests::test_deployment_lifecycle ... ok
 - Architecture: arm64 (Apple Silicon)
 - All clippy warnings addressed
 - No unsafe code
+
+## IAM (Identity & Access Management)
+
+Added 2025-01-26. Full IAM integration for authentication and authorization.
+
+### Components
+
+1. **JWT Validation** (`iam/jwt.rs`)
+   - HS256 (shared secret) for development
+   - RS256/ES256 (JWKS) ready for production
+   - Standard OIDC claims support
+   - Hanzo-specific claims (org, roles, permissions, node_id)
+
+2. **RBAC** (`iam/rbac.rs`)
+   - Predefined roles: anonymous, viewer, operator, admin, node
+   - Role inheritance support
+   - Permission-based access control
+   - Role bindings for subjects
+
+3. **Permissions** (`iam/permission.rs`)
+   - Resources: Health, Metrics, Node, Deployment, Container, Logs, Events, ApiKey, User, Admin
+   - Actions: Read, Create, Update, Delete, Execute, Manage
+   - Wildcard support for admin access
+
+4. **API Keys** (`iam/auth.rs`)
+   - Programmatic access via `hzk_` prefixed keys
+   - Expiration support
+   - Rate limiting hooks
+   - Organization/tenant scoping
+
+5. **Middleware** (`iam/middleware.rs`)
+   - `GrpcAuthInterceptor` for tonic gRPC
+   - `HttpAuthLayer` for axum HTTP
+   - Method-to-permission mapping
+
+### Configuration
+
+IAM is disabled by default for development. Enable via environment variables:
+
+```bash
+HANZO_IAM_ENABLED=true
+HANZO_IAM_ISSUER=https://auth.hanzo.ai
+HANZO_IAM_AUDIENCE=hanzo-node
+HANZO_IAM_JWKS_URI=https://auth.hanzo.ai/.well-known/jwks.json
+# Or for dev with shared secret:
+HANZO_IAM_SECRET=your-secret-at-least-32-chars
+```
+
+### Docker Compose IAM Profile
+
+Start with IAM (Casdoor):
+```bash
+docker compose --profile iam up -d
+```
 
 ## Future Enhancements
 
@@ -107,6 +182,12 @@ test compute::tests::test_deployment_lifecycle ... ok
    - Lux network registration
    - Stake management
    - Consensus participation
+
+5. **IAM Enhancements**
+   - Full RSA/ECDSA signature verification (use jsonwebtoken crate)
+   - mTLS client certificate authentication
+   - Rate limiting enforcement
+   - Audit logging
 
 ## Commands
 

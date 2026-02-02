@@ -1,0 +1,163 @@
+# Hanzo Platform - Local Development Stack
+# Hanzo Node with embedded sled storage and Lux consensus
+#
+# Usage:
+#   docker compose up -d              # Start all services
+#   docker compose up -d --build      # Rebuild and start
+#   docker compose logs -f            # Follow logs
+#   docker compose down -v            # Stop and remove volumes
+#
+# Profiles:
+#   docker compose --profile monitoring up -d  # Include Prometheus/Grafana
+
+services:
+  # ==========================================================================
+  # Core Services
+  # ==========================================================================
+
+  # Hanzo Node - Core compute node with embedded sled + Lux consensus
+  hanzo-node:
+    build:
+      context: ../hanzo-node
+      dockerfile: Dockerfile
+    image: hanzoai/hanzo-node:dev
+    container_name: hanzo-node
+    restart: unless-stopped
+    ports:
+      - "8080:8080"   # HTTP/REST API
+      - "9090:9090"   # gRPC API
+      - "9000:9000"   # P2P networking
+    environment:
+      - HANZO_NODE_ID=dev-node-1
+      - HANZO_HTTP_ADDR=0.0.0.0:8080
+      - HANZO_GRPC_ADDR=0.0.0.0:9090
+      - HANZO_P2P_ADDR=/ip4/0.0.0.0/tcp/9000
+      - HANZO_DATA_DIR=/app/data
+      - HANZO_NETWORK_ID=1337
+      - HANZO_LOG_LEVEL=debug
+      - RUST_LOG=hanzo_node=debug,tonic=info,libp2p=info,sled=info
+    volumes:
+      - hanzo-data:/app/data
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8080/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+    networks:
+      - hanzo-network
+
+  # Console - Admin Dashboard
+  console:
+    build:
+      context: ../console
+      dockerfile: Dockerfile
+      args:
+        - HANZO_NODE_URL=http://hanzo-node:8080
+    image: hanzoai/console:dev
+    container_name: hanzo-console
+    restart: unless-stopped
+    ports:
+      - "3001:3001"
+    environment:
+      - NODE_ENV=development
+      - HANZO_NODE_URL=http://hanzo-node:8080
+      - HANZO_NODE_GRPC_URL=http://hanzo-node:9090
+      - NEXT_PUBLIC_HANZO_NODE_URL=http://localhost:8080
+    depends_on:
+      hanzo-node:
+        condition: service_healthy
+    networks:
+      - hanzo-network
+
+  # Platform API - Compute Pools Service
+  platform-api:
+    build:
+      context: ../platform
+      dockerfile: Dockerfile
+    image: hanzoai/platform-api:dev
+    container_name: hanzo-platform-api
+    restart: unless-stopped
+    ports:
+      - "8000:8000"
+    environment:
+      - NODE_ENV=development
+      - PORT=8000
+      - HANZO_NODE_URL=http://hanzo-node:8080
+    depends_on:
+      hanzo-node:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - hanzo-network
+
+  # ==========================================================================
+  # Monitoring Services (Optional)
+  # ==========================================================================
+
+  # Prometheus - Metrics Collection
+  prometheus:
+    image: prom/prometheus:v2.48.0
+    container_name: hanzo-prometheus
+    restart: unless-stopped
+    profiles:
+      - monitoring
+    ports:
+      - "9091:9090"
+    volumes:
+      - ../hanzo-node/config/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - prometheus-data:/prometheus
+    command:
+      - '--config.file=/etc/prometheus/prometheus.yml'
+      - '--storage.tsdb.path=/prometheus'
+      - '--web.enable-lifecycle'
+      - '--web.enable-remote-write-receiver'
+    networks:
+      - hanzo-network
+
+  # Grafana - Dashboards
+  grafana:
+    image: grafana/grafana:10.2.0
+    container_name: hanzo-grafana
+    restart: unless-stopped
+    profiles:
+      - monitoring
+    ports:
+      - "3000:3000"
+    environment:
+      - GF_SECURITY_ADMIN_USER=admin
+      - GF_SECURITY_ADMIN_PASSWORD=hanzo
+      - GF_USERS_ALLOW_SIGN_UP=false
+      - GF_SERVER_ROOT_URL=http://localhost:3000
+    volumes:
+      - grafana-data:/var/lib/grafana
+    depends_on:
+      - prometheus
+    networks:
+      - hanzo-network
+
+# ==========================================================================
+# Networks
+# ==========================================================================
+networks:
+  hanzo-network:
+    driver: bridge
+    ipam:
+      config:
+        - subnet: 172.30.0.0/16
+
+# ==========================================================================
+# Volumes
+# ==========================================================================
+volumes:
+  hanzo-data:
+    driver: local
+  prometheus-data:
+    driver: local
+  grafana-data:
+    driver: local

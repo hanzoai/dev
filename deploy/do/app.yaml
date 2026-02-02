@@ -1,0 +1,268 @@
+# Digital Ocean App Platform Specification
+# Hanzo Platform: Console + Node + Platform Services
+# Architecture: Embedded sled storage + Lux consensus (no external databases)
+# Documentation: https://docs.digitalocean.com/products/app-platform/reference/app-spec/
+
+name: hanzo-platform
+
+region: nyc
+
+# Domain configuration
+domains:
+  - domain: console.hanzo.network
+    type: PRIMARY
+    zone: hanzo.network
+  - domain: api.hanzo.network
+    type: ALIAS
+    zone: hanzo.network
+
+# Feature flags
+features:
+  - buildpack-stack=ubuntu-22
+
+# Environment variables shared across all services
+envs:
+  - key: NODE_ENV
+    value: production
+    scope: RUN_AND_BUILD_TIME
+  - key: HANZO_NETWORK_ID
+    value: "43114"
+    scope: RUN_TIME
+  - key: LOG_LEVEL
+    value: info
+    scope: RUN_TIME
+
+# Service definitions
+services:
+  # ==========================================================================
+  # Hanzo Console - Admin Dashboard
+  # ==========================================================================
+  - name: console
+    github:
+      repo: hanzoai/dev
+      branch: main
+      deploy_on_push: true
+    source_dir: console
+    dockerfile_path: console/Dockerfile
+
+    http_port: 3001
+    instance_size_slug: basic-xs
+    instance_count: 2
+
+    health_check:
+      http_path: /api/health
+      initial_delay_seconds: 10
+      period_seconds: 30
+      timeout_seconds: 5
+      success_threshold: 1
+      failure_threshold: 3
+
+    routes:
+      - path: /
+
+    envs:
+      - key: HANZO_NODE_URL
+        value: ${hanzo-node.PRIVATE_URL}
+        scope: RUN_TIME
+      - key: HANZO_NODE_GRPC_URL
+        value: ${hanzo-node.PRIVATE_URL}:9090
+        scope: RUN_TIME
+
+    cors:
+      allow_origins:
+        - prefix: https://console.hanzo.network
+        - prefix: https://hanzo.ai
+      allow_methods:
+        - GET
+        - POST
+        - PUT
+        - DELETE
+        - OPTIONS
+      allow_headers:
+        - Content-Type
+        - Authorization
+      allow_credentials: true
+
+    autoscaling:
+      min_instance_count: 2
+      max_instance_count: 10
+      metrics:
+        - type: CPU
+          percent: 70
+        - type: MEMORY
+          percent: 80
+
+  # ==========================================================================
+  # Hanzo Node - Core Compute Node (sled + Lux consensus)
+  # ==========================================================================
+  - name: hanzo-node
+    github:
+      repo: hanzoai/dev
+      branch: main
+      deploy_on_push: true
+    source_dir: hanzo-node
+    dockerfile_path: hanzo-node/Dockerfile
+
+    http_port: 8080
+    instance_size_slug: professional-xs
+    instance_count: 1
+
+    health_check:
+      http_path: /health
+      initial_delay_seconds: 30
+      period_seconds: 30
+      timeout_seconds: 10
+      success_threshold: 1
+      failure_threshold: 5
+
+    internal_ports:
+      - 9090  # gRPC
+      - 9000  # P2P
+
+    routes:
+      - path: /api/node
+        preserve_path_prefix: false
+
+    envs:
+      - key: HANZO_HTTP_ADDR
+        value: "0.0.0.0:8080"
+        scope: RUN_TIME
+      - key: HANZO_GRPC_ADDR
+        value: "0.0.0.0:9090"
+        scope: RUN_TIME
+      - key: HANZO_P2P_ADDR
+        value: "/ip4/0.0.0.0/tcp/9000"
+        scope: RUN_TIME
+      - key: HANZO_DATA_DIR
+        value: /app/data
+        scope: RUN_TIME
+      - key: RUST_LOG
+        value: "hanzo_node=info,tonic=info,libp2p=warn,sled=info"
+        scope: RUN_TIME
+      - key: HANZO_BOOTSTRAP_PEERS
+        type: SECRET
+        key: HANZO_BOOTSTRAP_PEERS
+      - key: HANZO_OPERATOR
+        type: SECRET
+        key: HANZO_OPERATOR
+
+    autoscaling:
+      min_instance_count: 1
+      max_instance_count: 5
+      metrics:
+        - type: CPU
+          percent: 80
+
+  # ==========================================================================
+  # Platform API - Compute Pools Service
+  # ==========================================================================
+  - name: platform-api
+    github:
+      repo: hanzoai/dev
+      branch: main
+      deploy_on_push: true
+    source_dir: platform
+
+    build_command: npm install && npm run build
+    run_command: npm start
+
+    http_port: 8000
+    instance_size_slug: basic-xs
+    instance_count: 2
+
+    health_check:
+      http_path: /health
+      initial_delay_seconds: 10
+      period_seconds: 30
+
+    routes:
+      - path: /api/platform
+        preserve_path_prefix: false
+
+    envs:
+      - key: HANZO_NODE_URL
+        value: ${hanzo-node.PRIVATE_URL}
+        scope: RUN_TIME
+
+    autoscaling:
+      min_instance_count: 2
+      max_instance_count: 10
+      metrics:
+        - type: CPU
+          percent: 70
+
+# Job definitions for background tasks
+jobs:
+  # Scheduled QoS challenge issuer
+  - name: qos-challenger
+    github:
+      repo: hanzoai/dev
+      branch: main
+    source_dir: platform
+    kind: CRON
+
+    run_command: npm run job:qos-challenge
+
+    cron: "*/15 * * * *"  # Every 15 minutes
+
+    envs:
+      - key: HANZO_NODE_URL
+        value: ${hanzo-node.PRIVATE_URL}
+        scope: RUN_TIME
+
+  # Reward distribution job
+  - name: reward-distributor
+    github:
+      repo: hanzoai/dev
+      branch: main
+    source_dir: platform
+    kind: CRON
+
+    run_command: npm run job:distribute-rewards
+
+    cron: "0 0 * * *"  # Daily at midnight
+
+    envs:
+      - key: HANZO_NODE_URL
+        value: ${hanzo-node.PRIVATE_URL}
+        scope: RUN_TIME
+
+# Static sites (optional - for documentation)
+static_sites:
+  - name: docs
+    github:
+      repo: hanzoai/dev
+      branch: main
+    source_dir: docs
+    build_command: npm run build:docs
+    output_dir: docs/dist
+
+    routes:
+      - path: /docs
+        preserve_path_prefix: false
+
+# Alerts configuration
+alerts:
+  - rule: DEPLOYMENT_FAILED
+  - rule: DOMAIN_FAILED
+  - rule: DEPLOYMENT_LIVE
+  - rule: DEPLOYMENT_CANCELED
+
+# Ingress configuration
+ingress:
+  rules:
+    - component:
+        name: console
+      match:
+        path:
+          prefix: /
+    - component:
+        name: hanzo-node
+      match:
+        path:
+          prefix: /api/node
+    - component:
+        name: platform-api
+      match:
+        path:
+          prefix: /api/platform

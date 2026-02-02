@@ -1,0 +1,80 @@
+[workspace]
+# This crate is standalone, not part of the parent workspace
+
+[package]
+name = "hanzo-wallet"
+version = "0.1.0"
+edition = "2021"
+description = "MPC Wallet - Multi-Party Computation threshold signatures for Hanzo Node"
+authors = ["Hanzo AI <dev@hanzo.ai>"]
+license = "Apache-2.0"
+
+[lib]
+name = "hanzo_wallet"
+path = "src/lib.rs"
+
+[dependencies]
+# FROST threshold signatures (Schnorr-based)
+frost-secp256k1 = { version = "2.2", features = ["serde"] }
+frost-ed25519 = { version = "2.2", features = ["serde"] }
+frost-core = { version = "2.2", features = ["serde"] }
+
+# Curve operations
+k256 = { version = "0.13", features = ["ecdsa", "serde", "sha256"] }
+ed25519-dalek = { version = "2.1", features = ["serde", "rand_core"] }
+elliptic-curve = { version = "0.13", features = ["sec1", "arithmetic"] }
+
+# Crypto primitives
+sha2 = "0.10"
+sha3 = "0.10"
+rand = "0.8"
+rand_core = "0.6"
+aes-gcm = "0.10"
+argon2 = "0.5"
+hkdf = "0.12"
+hmac = "0.12"
+zeroize = { version = "1", features = ["derive"] }
+
+# Serialization
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+bincode = "1"
+hex = { version = "0.4", features = ["serde"] }
+
+# Async runtime
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "sync", "time"] }
+
+# gRPC
+tonic = { version = "0.12" }
+prost = "0.13"
+
+# Storage
+sled = "0.34"
+
+# Error handling
+thiserror = "2"
+anyhow = "1"
+
+# Logging
+tracing = { version = "0.1", features = ["log"] }
+
+# Utilities
+uuid = { version = "1", features = ["v4", "serde"] }
+chrono = { version = "0.4", features = ["serde"] }
+bytes = "1"
+parking_lot = "0.12"
+
+[build-dependencies]
+tonic-build = "0.12"
+
+[dev-dependencies]
+tokio-test = "0.4"
+tempfile = "3"
+
+[lints.rust]
+# Match hanzo-node linting style
+
+[lints.clippy]
+expect_used = "deny"
+unwrap_used = "deny"
+uninlined_format_args = "deny"

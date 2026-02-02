@@ -1,0 +1,70 @@
+# Hanzo Platform - Terraform Variables Example
+# Copy this file to terraform.tfvars and fill in your values
+# DO NOT commit terraform.tfvars to version control!
+
+# =============================================================================
+# Required: Digital Ocean Credentials
+# =============================================================================
+
+# API token from DO console: https://cloud.digitalocean.com/account/api/tokens
+do_token = "dop_v1_your_api_token_here"
+
+# Spaces access keys from: https://cloud.digitalocean.com/account/api/spaces
+spaces_access_id  = "your_spaces_access_id"
+spaces_secret_key = "your_spaces_secret_key"
+
+# =============================================================================
+# Environment Settings
+# =============================================================================
+
+environment = "production"  # production, staging, development
+region      = "nyc3"        # Digital Ocean region
+domain      = "hanzo.network"
+
+# =============================================================================
+# Compute Configuration
+# =============================================================================
+
+node_count = 3
+node_size  = "s-4vcpu-8gb"  # 4 vCPU, 8GB RAM
+
+# SSH key names (must exist in DO account)
+ssh_keys = ["my-ssh-key"]
+
+# Restrict SSH access to specific IPs (recommended for production)
+allowed_ssh_ips = ["YOUR_IP/32"]
+
+# =============================================================================
+# Database Configuration
+# =============================================================================
+
+db_size        = "db-s-2vcpu-4gb"
+db_node_count  = 2  # 1=single, 2=primary+standby, 3=primary+2 standby
+
+redis_size       = "db-s-1vcpu-2gb"
+redis_node_count = 1
+
+# =============================================================================
+# Network Configuration
+# =============================================================================
+
+vpc_ip_range     = "10.10.0.0/16"
+hanzo_network_id = "43114"  # 43114=mainnet, 43113=testnet
+
+# Bootstrap peers (comma-separated multiaddresses)
+# bootstrap_peers = "/ip4/1.2.3.4/tcp/9000/p2p/Qm..."
+
+# =============================================================================
+# Monitoring
+# =============================================================================
+
+alert_email       = "ops@hanzo.ai"
+enable_monitoring = true
+
+# =============================================================================
+# Feature Flags
+# =============================================================================
+
+enable_backups           = true
+enable_spaces_versioning = true
+enable_ha_database       = true

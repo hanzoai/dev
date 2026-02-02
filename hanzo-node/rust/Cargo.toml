@@ -49,6 +49,11 @@ libp2p = { version = "0.54", features = [
 
 # Storage
 sled = "0.34"
+parking_lot = "0.12"
+
+# Cryptography (KMS)
+ring = "0.17"
+async-trait = "0.1"
 
 # Serialization
 serde = { version = "1", features = ["derive"] }

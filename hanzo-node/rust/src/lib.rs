@@ -5,11 +5,14 @@
 //! - gRPC server for compute pool operations
 //! - Storage layer for deployment state
 //! - Compute orchestration for container management
+//! - IAM (Identity and Access Management) for authentication and authorization
 
 #![deny(clippy::expect_used)]
 #![deny(clippy::unwrap_used)]
 
 pub mod compute;
+pub mod consensus;
+pub mod iam;
 pub mod p2p;
 pub mod rpc;
 pub mod storage;
@@ -17,6 +20,7 @@ pub mod storage;
 mod error;
 
 pub use error::{Error, Result};
+pub use iam::{IamConfig, IamService};
 
 use std::sync::Arc;
 use tokio::sync::RwLock;
@@ -42,6 +46,10 @@ pub struct NodeConfig {
     pub operator_address: Option<String>,
     /// Enable MLX acceleration (macOS only)
     pub mlx_enabled: bool,
+    /// IAM configuration for authentication/authorization
+    pub iam: IamConfig,
+    /// Lux node endpoint for consensus replication (e.g., "http://localhost:9650")
+    pub lux_endpoint: Option<String>,
 }
 
 impl Default for NodeConfig {
@@ -56,6 +64,8 @@ impl Default for NodeConfig {
             network_id: "1337".to_string(),
             operator_address: None,
             mlx_enabled: false,
+            iam: IamConfig::default(),
+            lux_endpoint: None,
         }
     }
 }
@@ -76,6 +86,7 @@ pub struct HanzoNode {
     storage: Arc<storage::Storage>,
     p2p: Arc<p2p::P2PNetwork>,
     compute: Arc<compute::ComputeManager>,
+    iam: Arc<IamService>,
     start_time: std::time::Instant,
 }
 
@@ -93,12 +104,26 @@ impl HanzoNode {
         // Initialize compute manager
         let compute = Arc::new(compute::ComputeManager::new(storage.clone())?);
 
+        // Initialize IAM service
+        let iam = Arc::new(
+            IamService::new(config.iam.clone())
+                .await
+                .map_err(|e| Error::Config(format!("IAM initialization failed: {e}")))?,
+        );
+
+        if iam.is_enabled() {
+            tracing::info!("IAM authentication enabled");
+        } else {
+            tracing::warn!("IAM authentication disabled - all requests will be allowed");
+        }
+
         Ok(Self {
             config,
             state: Arc::new(RwLock::new(NodeState::Starting)),
             storage,
             p2p,
             compute,
+            iam,
             start_time: std::time::Instant::now(),
         })
     }
@@ -182,6 +207,11 @@ impl HanzoNode {
     /// Get uptime in seconds
     pub fn uptime_seconds(&self) -> u64 {
         self.start_time.elapsed().as_secs()
+    }
+
+    /// Get the IAM service
+    pub fn iam(&self) -> &Arc<IamService> {
+        &self.iam
     }
 }
 

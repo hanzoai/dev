@@ -1,0 +1,82 @@
+# Hanzo Node IAM Configuration
+#
+# This configuration file controls authentication and authorization
+# for the hanzo-node gRPC and HTTP APIs.
+
+# Enable/disable authentication
+# Set to false for development environments
+enabled: false
+
+# JWT Configuration
+jwt:
+  # OIDC issuer URL (e.g., Casdoor, Auth0, Keycloak)
+  # issuer: "https://auth.hanzo.ai"
+
+  # Expected audience (your client ID)
+  # audience: "hanzo-node"
+
+  # JWKS endpoint for public key verification
+  # jwks_uri: "https://auth.hanzo.ai/.well-known/jwks.json"
+
+  # Shared secret for HS256 (development only - NOT for production)
+  # secret: "your-development-secret-at-least-32-chars"
+
+# API Key Configuration
+api_keys:
+  # Header name for API key authentication
+  header: "x-api-key"
+
+  # Predefined API keys (for development/testing)
+  # In production, use the API to manage keys dynamically
+  keys:
+    # Example development key
+    # - name: "dev-key"
+    #   key: "hzk_dev_12345"
+    #   role: "admin"
+    #   expires: null  # never expires
+
+# Authorization Configuration
+authorization:
+  # Default role for authenticated users without explicit role
+  default_role: "viewer"
+
+  # Allow anonymous access to health endpoints
+  allow_anonymous_health: true
+
+# Casdoor Integration (optional)
+casdoor:
+  # Base URL of Casdoor server
+  # base_url: "http://localhost:8080"
+
+  # Organization name in Casdoor
+  # organization: "hanzo"
+
+  # Application name in Casdoor
+  # application: "hanzo-node"
+
+# Role Definitions
+# These extend the built-in roles (anonymous, viewer, operator, admin, node)
+roles:
+  # Custom role example
+  # deployer:
+  #   description: "Can deploy but not delete"
+  #   permissions:
+  #     - "health:read"
+  #     - "metrics:read"
+  #     - "deployment:read"
+  #     - "deployment:create"
+  #     - "deployment:update"
+  #     - "container:read"
+  #     - "logs:read"
+  #     - "events:read"
+
+# Audit Configuration
+audit:
+  # Enable audit logging
+  enabled: true
+
+  # Log authentication events
+  log_auth_events: true
+
+  # Log authorization decisions
+  log_authz_events: true

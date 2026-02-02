@@ -40,6 +40,14 @@ services:
       - HANZO_LOG_LEVEL=${HANZO_LOG_LEVEL:-info}
       - RUST_LOG=${RUST_LOG:-hanzo_node=info,tonic=info,libp2p=warn}
 
+      # IAM Configuration
+      - HANZO_IAM_ENABLED=${HANZO_IAM_ENABLED:-false}
+      - HANZO_IAM_ISSUER=${HANZO_IAM_ISSUER:-}
+      - HANZO_IAM_AUDIENCE=${HANZO_IAM_AUDIENCE:-hanzo-node}
+      - HANZO_IAM_JWKS_URI=${HANZO_IAM_JWKS_URI:-}
+      - HANZO_IAM_SECRET=${HANZO_IAM_SECRET:-}
+      - HANZO_IAM_BASE_URL=${HANZO_IAM_BASE_URL:-http://iam:8000}
+
     # Port mappings
     ports:
       # RPC/gRPC API - main interface
@@ -53,6 +61,7 @@ services:
     volumes:
       - hanzo-data:/app/data
       - ./config:/app/config:ro
+      - ./iam:/app/iam:ro
 
     # Health check
     healthcheck:
@@ -126,6 +135,77 @@ services:
     depends_on:
       - prometheus
 
+  # IAM Service (Casdoor) - Optional authentication provider
+  iam-db:
+    image: mysql:8.0
+    platform: linux/amd64
+    container_name: hanzo-iam-db
+    profiles:
+      - iam
+    restart: unless-stopped
+    environment:
+      MYSQL_ROOT_PASSWORD: ${IAM_DB_PASSWORD:-hanzo123}
+      MYSQL_DATABASE: hanzo_node
+    ports:
+      - "${IAM_DB_PORT:-3306}:3306"
+    volumes:
+      - iam-db-data:/var/lib/mysql
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost", "-u", "root", "-p${IAM_DB_PASSWORD:-hanzo123}"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 30s
+    networks:
+      - hanzo-network
+
+  iam-redis:
+    image: redis:7-alpine
+    container_name: hanzo-iam-redis
+    profiles:
+      - iam
+    restart: unless-stopped
+    ports:
+      - "${IAM_REDIS_PORT:-6380}:6379"
+    volumes:
+      - iam-redis-data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - hanzo-network
+
+  iam:
+    image: casbin/casdoor:latest
+    platform: linux/amd64
+    container_name: hanzo-iam
+    profiles:
+      - iam
+    restart: unless-stopped
+    command: ./server --createDatabase=true
+    ports:
+      - "${IAM_PORT:-8000}:8000"
+    depends_on:
+      iam-db:
+        condition: service_healthy
+      iam-redis:
+        condition: service_healthy
+    environment:
+      RUNNING_IN_DOCKER: "true"
+    volumes:
+      - ./iam/app.conf:/conf/app.conf:ro
+      - ./iam/init_data.json:/init_data.json:ro
+    healthcheck:
+      test: ["CMD", "wget", "-q", "--spider", "http://localhost:8000/api/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 120s
+    networks:
+      - hanzo-network
+
 # Named volumes for persistence
 volumes:
   hanzo-data:
@@ -133,6 +213,10 @@ volumes:
   prometheus-data:
     driver: local
   grafana-data:
+    driver: local
+  iam-db-data:
+    driver: local
+  iam-redis-data:
     driver: local
 
 # Network configuration
