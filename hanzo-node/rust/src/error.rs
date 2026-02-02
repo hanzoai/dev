@@ -59,6 +59,16 @@ pub enum Error {
     /// Internal error
     #[error("Internal error: {0}")]
     Internal(String),
+
+    /// Consensus/replication error
+    #[error("Consensus error: {0}")]
+    Consensus(String),
+}
+
+impl From<anyhow::Error> for Error {
+    fn from(err: anyhow::Error) -> Self {
+        Error::Internal(err.to_string())
+    }
 }
 
 impl From<Error> for tonic::Status {

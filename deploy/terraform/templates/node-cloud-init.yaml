@@ -1,0 +1,194 @@
+#cloud-config
+# Hanzo Node - Cloud-Init Configuration
+# This initializes compute nodes with Docker and Hanzo Node service
+
+package_update: true
+package_upgrade: true
+
+packages:
+  - apt-transport-https
+  - ca-certificates
+  - curl
+  - gnupg
+  - lsb-release
+  - jq
+  - htop
+  - iotop
+  - net-tools
+  - prometheus-node-exporter
+
+# Write files
+write_files:
+  # Docker daemon configuration
+  - path: /etc/docker/daemon.json
+    content: |
+      {
+        "log-driver": "json-file",
+        "log-opts": {
+          "max-size": "100m",
+          "max-file": "5"
+        },
+        "storage-driver": "overlay2",
+        "live-restore": true,
+        "default-ulimits": {
+          "nofile": {
+            "Name": "nofile",
+            "Hard": 65536,
+            "Soft": 65536
+          }
+        }
+      }
+    owner: root:root
+    permissions: '0644'
+
+  # Hanzo Node environment file
+  - path: /etc/hanzo/node.env
+    content: |
+      # Hanzo Node Configuration
+      HANZO_NODE_ID=node-${node_index}
+      HANZO_ENVIRONMENT=${environment}
+      HANZO_NETWORK_ID=${network_id}
+
+      # Network addresses
+      HANZO_HTTP_ADDR=0.0.0.0:8080
+      HANZO_GRPC_ADDR=0.0.0.0:9090
+      HANZO_P2P_ADDR=/ip4/0.0.0.0/tcp/9000
+
+      # Storage
+      HANZO_DATA_DIR=/var/lib/hanzo/data
+
+      # Database connections
+      DATABASE_URL=${postgres_url}
+      REDIS_URL=${redis_url}
+
+      # Object storage
+      SPACES_ENDPOINT=${spaces_endpoint}
+      SPACES_ACCESS_KEY=${spaces_access_key}
+      SPACES_SECRET_KEY=${spaces_secret_key}
+
+      # Bootstrap peers
+      HANZO_BOOTSTRAP_PEERS=${bootstrap_peers}
+
+      # Logging
+      RUST_LOG=hanzo_node=info,tonic=info,libp2p=warn
+    owner: root:root
+    permissions: '0600'
+
+  # Systemd service for Hanzo Node
+  - path: /etc/systemd/system/hanzo-node.service
+    content: |
+      [Unit]
+      Description=Hanzo Node Service
+      After=docker.service
+      Requires=docker.service
+
+      [Service]
+      Type=simple
+      Restart=always
+      RestartSec=10
+      EnvironmentFile=/etc/hanzo/node.env
+      ExecStartPre=-/usr/bin/docker pull hanzoai/hanzo-node:latest
+      ExecStartPre=-/usr/bin/docker stop hanzo-node
+      ExecStartPre=-/usr/bin/docker rm hanzo-node
+      ExecStart=/usr/bin/docker run --name hanzo-node \
+        --network host \
+        --env-file /etc/hanzo/node.env \
+        -v /var/lib/hanzo/data:/app/data \
+        -v /var/run/docker.sock:/var/run/docker.sock \
+        --restart unless-stopped \
+        hanzoai/hanzo-node:latest
+      ExecStop=/usr/bin/docker stop hanzo-node
+
+      [Install]
+      WantedBy=multi-user.target
+    owner: root:root
+    permissions: '0644'
+
+  # Logrotate configuration
+  - path: /etc/logrotate.d/hanzo
+    content: |
+      /var/log/hanzo/*.log {
+        daily
+        rotate 7
+        compress
+        delaycompress
+        missingok
+        notifempty
+        create 0640 root root
+      }
+    owner: root:root
+    permissions: '0644'
+
+  # System tuning for high-performance networking
+  - path: /etc/sysctl.d/99-hanzo.conf
+    content: |
+      # Network performance tuning for Hanzo Node
+      net.core.rmem_max = 16777216
+      net.core.wmem_max = 16777216
+      net.core.rmem_default = 1048576
+      net.core.wmem_default = 1048576
+      net.core.optmem_max = 65536
+      net.ipv4.tcp_rmem = 4096 1048576 16777216
+      net.ipv4.tcp_wmem = 4096 1048576 16777216
+      net.core.somaxconn = 65535
+      net.ipv4.tcp_max_syn_backlog = 65535
+      net.ipv4.tcp_slow_start_after_idle = 0
+      net.ipv4.tcp_tw_reuse = 1
+      net.core.netdev_max_backlog = 65535
+
+      # File descriptor limits
+      fs.file-max = 2097152
+      fs.nr_open = 2097152
+
+      # Virtual memory
+      vm.swappiness = 10
+      vm.dirty_ratio = 60
+      vm.dirty_background_ratio = 5
+    owner: root:root
+    permissions: '0644'
+
+  # Security limits
+  - path: /etc/security/limits.d/99-hanzo.conf
+    content: |
+      * soft nofile 65536
+      * hard nofile 65536
+      * soft nproc 65536
+      * hard nproc 65536
+      root soft nofile 65536
+      root hard nofile 65536
+    owner: root:root
+    permissions: '0644'
+
+# Run commands
+runcmd:
+  # Create directories
+  - mkdir -p /etc/hanzo /var/lib/hanzo/data /var/log/hanzo
+
+  # Install Docker
+  - curl -fsSL https://get.docker.com | sh
+  - systemctl enable docker
+  - systemctl start docker
+
+  # Apply sysctl settings
+  - sysctl --system
+
+  # Pull Hanzo Node image
+  - docker pull hanzoai/hanzo-node:latest
+
+  # Enable and start Hanzo Node service
+  - systemctl daemon-reload
+  - systemctl enable hanzo-node
+  - systemctl start hanzo-node
+
+  # Enable Prometheus node exporter
+  - systemctl enable prometheus-node-exporter
+  - systemctl start prometheus-node-exporter
+
+  # Final status check
+  - echo "Hanzo Node ${node_index} initialized successfully" >> /var/log/hanzo/init.log
+
+# Final message
+final_message: |
+  Hanzo Node ${node_index} cloud-init complete.
+  Environment: ${environment}
+  Network ID: ${network_id}

@@ -44,6 +44,7 @@ codex-rs/codex-cli/bin/
 code-rs/bin/
 
 # Rust build artifacts
+*/rust/target
 /target/
 /codex-rs/target/
 **/*.rs.bk

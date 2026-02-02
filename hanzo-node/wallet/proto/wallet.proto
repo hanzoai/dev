@@ -1,0 +1,518 @@
+syntax = "proto3";
+package hanzo.wallet.v1;
+
+// MPC Wallet Service - Threshold signature operations
+service WalletService {
+    // ===================
+    // Key Management
+    // ===================
+
+    // Initiate a new DKG session for key generation
+    rpc InitiateDkg(InitiateDkgRequest) returns (InitiateDkgResponse);
+
+    // Submit DKG Round 1 package (commitments)
+    rpc SubmitDkgRound1(DkgRound1Request) returns (DkgRound1Response);
+
+    // Get all Round 1 packages for a DKG session
+    rpc GetDkgRound1Packages(GetDkgRound1Request) returns (GetDkgRound1Response);
+
+    // Submit DKG Round 2 package (secret shares)
+    rpc SubmitDkgRound2(DkgRound2Request) returns (DkgRound2Response);
+
+    // Get Round 2 packages addressed to a participant
+    rpc GetDkgRound2Packages(GetDkgRound2Request) returns (GetDkgRound2Response);
+
+    // Finalize DKG and retrieve key metadata
+    rpc FinalizeDkg(FinalizeDkgRequest) returns (FinalizeDkgResponse);
+
+    // List all keys
+    rpc ListKeys(ListKeysRequest) returns (ListKeysResponse);
+
+    // Get key metadata
+    rpc GetKey(GetKeyRequest) returns (GetKeyResponse);
+
+    // Delete a key
+    rpc DeleteKey(DeleteKeyRequest) returns (DeleteKeyResponse);
+
+    // Export encrypted key share for backup
+    rpc ExportKey(ExportKeyRequest) returns (ExportKeyResponse);
+
+    // Import encrypted key share from backup
+    rpc ImportKey(ImportKeyRequest) returns (ImportKeyResponse);
+
+    // ===================
+    // Signing Operations
+    // ===================
+
+    // Initiate a signing session
+    rpc InitiateSigning(InitiateSigningRequest) returns (InitiateSigningResponse);
+
+    // Submit signing commitment (Round 1)
+    rpc SubmitSigningCommitment(SigningCommitmentRequest) returns (SigningCommitmentResponse);
+
+    // Get all commitments for a signing session
+    rpc GetSigningCommitments(GetCommitmentsRequest) returns (GetCommitmentsResponse);
+
+    // Submit signature share (Round 2)
+    rpc SubmitSignatureShare(SignatureShareRequest) returns (SignatureShareResponse);
+
+    // Get all signature shares for a session
+    rpc GetSignatureShares(GetSharesRequest) returns (GetSharesResponse);
+
+    // Finalize signing and get the aggregated signature
+    rpc FinalizeSigning(FinalizeSigningRequest) returns (FinalizeSigningResponse);
+
+    // Sign message directly (for single-participant or coordinator)
+    rpc Sign(SignRequest) returns (SignResponse);
+
+    // ===================
+    // Policy Management
+    // ===================
+
+    // Add or update a policy
+    rpc SetPolicy(SetPolicyRequest) returns (SetPolicyResponse);
+
+    // Get a policy by name
+    rpc GetPolicy(GetPolicyRequest) returns (GetPolicyResponse);
+
+    // List all policies
+    rpc ListPolicies(ListPoliciesRequest) returns (ListPoliciesResponse);
+
+    // Delete a policy
+    rpc DeletePolicy(DeletePolicyRequest) returns (DeletePolicyResponse);
+
+    // Evaluate a transaction against policies
+    rpc EvaluatePolicy(EvaluatePolicyRequest) returns (EvaluatePolicyResponse);
+
+    // Submit an approval for a pending transaction
+    rpc SubmitApproval(SubmitApprovalRequest) returns (SubmitApprovalResponse);
+
+    // ===================
+    // Health & Status
+    // ===================
+
+    // Health check
+    rpc Health(HealthRequest) returns (HealthResponse);
+
+    // Get wallet service status
+    rpc GetStatus(GetStatusRequest) returns (GetStatusResponse);
+}
+
+// ===================
+// Common Types
+// ===================
+
+enum CurveType {
+    CURVE_TYPE_UNSPECIFIED = 0;
+    CURVE_TYPE_SECP256K1 = 1;
+    CURVE_TYPE_ED25519 = 2;
+}
+
+enum SignatureType {
+    SIGNATURE_TYPE_UNSPECIFIED = 0;
+    SIGNATURE_TYPE_FROST_SCHNORR = 1;
+    SIGNATURE_TYPE_ECDSA = 2;
+    SIGNATURE_TYPE_ED25519 = 3;
+}
+
+message KeyMetadata {
+    string key_id = 1;
+    CurveType curve = 2;
+    uint32 threshold = 3;
+    uint32 total_participants = 4;
+    string group_public_key = 5;  // Hex encoded
+    uint64 created_at = 6;        // Unix timestamp
+    uint64 last_used_at = 7;      // Unix timestamp
+    string description = 8;
+    map<string, string> labels = 9;
+}
+
+message SigningMetadata {
+    uint64 value = 1;             // Transaction value
+    string destination = 2;       // Destination address
+    uint64 chain_id = 3;          // Chain ID for EVM
+    string tx_type = 4;           // Transaction type description
+}
+
+// ===================
+// DKG Messages
+// ===================
+
+message InitiateDkgRequest {
+    string session_id = 1;
+    CurveType curve = 2;
+    uint32 threshold = 3;
+    uint32 total_participants = 4;
+    repeated string participant_ids = 5;
+}
+
+message InitiateDkgResponse {
+    bool success = 1;
+    string session_id = 2;
+    string message = 3;
+}
+
+message DkgRound1Request {
+    string session_id = 1;
+    string participant_id = 2;
+    bytes commitment = 3;
+    bytes proof_of_knowledge = 4;
+}
+
+message DkgRound1Response {
+    bool success = 1;
+    string message = 2;
+}
+
+message GetDkgRound1Request {
+    string session_id = 1;
+}
+
+message GetDkgRound1Response {
+    repeated DkgRound1Package packages = 1;
+    bool all_received = 2;
+}
+
+message DkgRound1Package {
+    string participant_id = 1;
+    bytes commitment = 2;
+    bytes proof_of_knowledge = 3;
+}
+
+message DkgRound2Request {
+    string session_id = 1;
+    string from_participant = 2;
+    string to_participant = 3;
+    bytes encrypted_share = 4;
+}
+
+message DkgRound2Response {
+    bool success = 1;
+    string message = 2;
+}
+
+message GetDkgRound2Request {
+    string session_id = 1;
+    string participant_id = 2;  // Get packages addressed to this participant
+}
+
+message GetDkgRound2Response {
+    repeated DkgRound2Package packages = 1;
+    bool all_received = 2;
+}
+
+message DkgRound2Package {
+    string from_participant = 1;
+    string to_participant = 2;
+    bytes encrypted_share = 3;
+}
+
+message FinalizeDkgRequest {
+    string session_id = 1;
+    string key_id = 2;
+    string description = 3;
+    string password = 4;  // For encrypting the key share
+}
+
+message FinalizeDkgResponse {
+    bool success = 1;
+    string message = 2;
+    KeyMetadata key_metadata = 3;
+}
+
+// ===================
+// Key Management Messages
+// ===================
+
+message ListKeysRequest {
+    CurveType curve_filter = 1;   // Optional filter by curve
+}
+
+message ListKeysResponse {
+    repeated KeyMetadata keys = 1;
+}
+
+message GetKeyRequest {
+    string key_id = 1;
+}
+
+message GetKeyResponse {
+    KeyMetadata key_metadata = 1;
+}
+
+message DeleteKeyRequest {
+    string key_id = 1;
+}
+
+message DeleteKeyResponse {
+    bool success = 1;
+    string message = 2;
+}
+
+message ExportKeyRequest {
+    string key_id = 1;
+}
+
+message ExportKeyResponse {
+    bytes encrypted_data = 1;
+    string checksum = 2;
+}
+
+message ImportKeyRequest {
+    string key_id = 1;
+    bytes encrypted_data = 2;
+    string password = 3;
+}
+
+message ImportKeyResponse {
+    bool success = 1;
+    string message = 2;
+    KeyMetadata key_metadata = 3;
+}
+
+// ===================
+// Signing Messages
+// ===================
+
+message InitiateSigningRequest {
+    string session_id = 1;
+    string key_id = 2;
+    bytes message = 3;              // Message hash to sign
+    SignatureType signature_type = 4;
+    repeated string signers = 5;    // Participating signers
+    SigningMetadata metadata = 6;   // For policy evaluation
+}
+
+message InitiateSigningResponse {
+    bool success = 1;
+    string session_id = 2;
+    string message = 3;
+    PolicyEvaluationResult policy_result = 4;
+}
+
+message SigningCommitmentRequest {
+    string session_id = 1;
+    string participant_id = 2;
+    bytes commitment = 3;
+}
+
+message SigningCommitmentResponse {
+    bool success = 1;
+    string message = 2;
+}
+
+message GetCommitmentsRequest {
+    string session_id = 1;
+}
+
+message GetCommitmentsResponse {
+    repeated SigningCommitmentData commitments = 1;
+    bool all_received = 2;
+}
+
+message SigningCommitmentData {
+    string participant_id = 1;
+    bytes commitment = 2;
+}
+
+message SignatureShareRequest {
+    string session_id = 1;
+    string participant_id = 2;
+    bytes share = 3;
+}
+
+message SignatureShareResponse {
+    bool success = 1;
+    string message = 2;
+}
+
+message GetSharesRequest {
+    string session_id = 1;
+}
+
+message GetSharesResponse {
+    repeated SignatureShareData shares = 1;
+    bool all_received = 2;
+}
+
+message SignatureShareData {
+    string participant_id = 1;
+    bytes share = 2;
+}
+
+message FinalizeSigningRequest {
+    string session_id = 1;
+}
+
+message FinalizeSigningResponse {
+    bool success = 1;
+    string message = 2;
+    bytes signature = 3;
+    SignatureType signature_type = 4;
+    uint32 recovery_id = 5;  // For ECDSA recovery
+}
+
+message SignRequest {
+    string key_id = 1;
+    string password = 2;            // To decrypt key share
+    bytes message = 3;              // Message hash to sign
+    SignatureType signature_type = 4;
+    SigningMetadata metadata = 5;   // For policy evaluation
+}
+
+message SignResponse {
+    bool success = 1;
+    string error_message = 2;
+    bytes signature = 3;
+    SignatureType signature_type = 4;
+    uint32 recovery_id = 5;
+}
+
+// ===================
+// Policy Messages
+// ===================
+
+message PolicyRule {
+    oneof rule {
+        MaxAutoApproveRule max_auto_approve = 1;
+        RequireApproversRule require_approvers = 2;
+        WhitelistRule whitelist = 3;
+        BlacklistRule blacklist = 4;
+        RateLimitRule rate_limit = 5;
+        DailyLimitRule daily_limit = 6;
+        AllowedChainsRule allowed_chains = 7;
+        TimeRestrictionRule time_restriction = 8;
+    }
+}
+
+message MaxAutoApproveRule {
+    uint64 value = 1;
+}
+
+message RequireApproversRule {
+    uint32 count = 1;
+    uint64 for_value_above = 2;  // 0 means always require
+}
+
+message WhitelistRule {
+    repeated string addresses = 1;
+}
+
+message BlacklistRule {
+    repeated string addresses = 1;
+}
+
+message RateLimitRule {
+    uint32 max_count = 1;
+    uint64 window_seconds = 2;
+}
+
+message DailyLimitRule {
+    uint64 max_value = 1;
+}
+
+message AllowedChainsRule {
+    repeated uint64 chain_ids = 1;
+}
+
+message TimeRestrictionRule {
+    uint32 allowed_hours_start = 1;
+    uint32 allowed_hours_end = 2;
+    int32 timezone_offset_hours = 3;
+}
+
+message Policy {
+    string name = 1;
+    string description = 2;
+    repeated PolicyRule rules = 3;
+    bool enabled = 4;
+    int32 priority = 5;
+}
+
+message SetPolicyRequest {
+    Policy policy = 1;
+}
+
+message SetPolicyResponse {
+    bool success = 1;
+    string message = 2;
+}
+
+message GetPolicyRequest {
+    string name = 1;
+}
+
+message GetPolicyResponse {
+    Policy policy = 1;
+}
+
+message ListPoliciesRequest {}
+
+message ListPoliciesResponse {
+    repeated Policy policies = 1;
+}
+
+message DeletePolicyRequest {
+    string name = 1;
+}
+
+message DeletePolicyResponse {
+    bool success = 1;
+    string message = 2;
+}
+
+message EvaluatePolicyRequest {
+    SigningMetadata metadata = 1;
+}
+
+message EvaluatePolicyResponse {
+    PolicyEvaluationResult result = 1;
+}
+
+message PolicyEvaluationResult {
+    enum Status {
+        STATUS_UNSPECIFIED = 0;
+        STATUS_APPROVED = 1;
+        STATUS_REQUIRES_APPROVAL = 2;
+        STATUS_DENIED = 3;
+        STATUS_PENDING = 4;
+    }
+
+    Status status = 1;
+    string reason = 2;
+    uint32 required_approvers = 3;
+    uint32 received_approvers = 4;
+}
+
+message SubmitApprovalRequest {
+    string session_id = 1;
+    string approver_id = 2;
+    bytes signature = 3;  // Approver's signature on the request
+}
+
+message SubmitApprovalResponse {
+    bool success = 1;
+    string message = 2;
+    PolicyEvaluationResult result = 3;
+}
+
+// ===================
+// Health & Status Messages
+// ===================
+
+message HealthRequest {}
+
+message HealthResponse {
+    bool healthy = 1;
+    string version = 2;
+}
+
+message GetStatusRequest {}
+
+message GetStatusResponse {
+    bool ready = 1;
+    uint32 total_keys = 2;
+    uint32 active_sessions = 3;
+    uint32 pending_approvals = 4;
+    map<string, string> capabilities = 5;
+}

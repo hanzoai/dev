@@ -5,8 +5,14 @@
 //! - Container information
 //! - Node metrics history
 //! - Configuration
+//! - KMS keys and IAM data (via KeyValueStore trait)
+
+mod traits;
+
+pub use traits::*;
 
 use crate::{Error, Result};
+use parking_lot::RwLock;
 use serde::{de::DeserializeOwned, Serialize};
 use sled::Db;
 use std::path::Path;
@@ -20,6 +26,7 @@ const CONFIG_TREE: &str = "config";
 /// Persistent storage backed by sled
 pub struct Storage {
     db: Db,
+    change_callback: RwLock<Option<StateChangeCallback>>,
 }
 
 impl Storage {
@@ -30,12 +37,22 @@ impl Storage {
 
         let db = sled::open(&db_path)?;
 
-        Ok(Self { db })
+        Ok(Self {
+            db,
+            change_callback: RwLock::new(None),
+        })
     }
 
     /// Get a reference to the underlying database
     pub fn db(&self) -> &Db {
         &self.db
+    }
+
+    /// Fire the change callback if set
+    fn fire_callback(&self, tree: &str, key: &[u8], value: Option<&[u8]>) {
+        if let Some(ref cb) = *self.change_callback.read() {
+            cb(tree, key, value);
+        }
     }
 
     // ========== Deployment Operations ==========
@@ -215,6 +232,48 @@ impl Storage {
     }
 }
 
+// ========== KeyValueStore Implementation ==========
+
+impl KeyValueStore for Storage {
+    fn kv_get(&self, tree: &str, key: &[u8]) -> Result<Option<Vec<u8>>> {
+        let tree = self.db.open_tree(tree)?;
+        match tree.get(key)? {
+            Some(bytes) => Ok(Some(bytes.to_vec())),
+            None => Ok(None),
+        }
+    }
+
+    fn kv_put(&self, tree: &str, key: &[u8], value: &[u8]) -> Result<()> {
+        let sled_tree = self.db.open_tree(tree)?;
+        sled_tree.insert(key, value)?;
+        self.fire_callback(tree, key, Some(value));
+        Ok(())
+    }
+
+    fn kv_delete(&self, tree: &str, key: &[u8]) -> Result<bool> {
+        let sled_tree = self.db.open_tree(tree)?;
+        let existed = sled_tree.remove(key)?.is_some();
+        if existed {
+            self.fire_callback(tree, key, None);
+        }
+        Ok(existed)
+    }
+
+    fn kv_list(&self, tree: &str) -> Result<Vec<(Vec<u8>, Vec<u8>)>> {
+        let sled_tree = self.db.open_tree(tree)?;
+        let mut items = Vec::new();
+        for result in sled_tree.iter() {
+            let (key, value) = result?;
+            items.push((key.to_vec(), value.to_vec()));
+        }
+        Ok(items)
+    }
+
+    fn set_change_callback(&self, cb: StateChangeCallback) {
+        *self.change_callback.write() = Some(cb);
+    }
+}
+
 /// Deployment metadata
 #[derive(Debug, Clone, Serialize, serde::Deserialize)]
 pub struct Deployment {
@@ -302,6 +361,8 @@ impl Default for NodeMetrics {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::sync::atomic::{AtomicU32, Ordering};
+    use std::sync::Arc;
     use tempfile::TempDir;
 
     #[test]
@@ -341,5 +402,62 @@ mod tests {
 
         let none = storage.get_deployment(&deployment.id).unwrap();
         assert!(none.is_none());
+    }
+
+    #[test]
+    fn test_kv_store_trait() {
+        let tmp = TempDir::new().unwrap();
+        let storage = Storage::new(tmp.path()).unwrap();
+
+        // Test basic kv operations
+        let tree = "test:kv";
+        let key = b"testkey";
+        let value = b"testvalue";
+
+        // Put
+        storage.kv_put(tree, key, value).unwrap();
+
+        // Get
+        let fetched = storage.kv_get(tree, key).unwrap().unwrap();
+        assert_eq!(fetched, value);
+
+        // List
+        let items = storage.kv_list(tree).unwrap();
+        assert_eq!(items.len(), 1);
+        assert_eq!(items[0].0, key.to_vec());
+        assert_eq!(items[0].1, value.to_vec());
+
+        // Delete
+        let deleted = storage.kv_delete(tree, key).unwrap();
+        assert!(deleted);
+
+        let none = storage.kv_get(tree, key).unwrap();
+        assert!(none.is_none());
+    }
+
+    #[test]
+    fn test_change_callback() {
+        let tmp = TempDir::new().unwrap();
+        let storage = Storage::new(tmp.path()).unwrap();
+
+        let callback_count = Arc::new(AtomicU32::new(0));
+        let count_clone = callback_count.clone();
+
+        // Set callback
+        storage.set_change_callback(Arc::new(move |_tree, _key, _value| {
+            count_clone.fetch_add(1, Ordering::SeqCst);
+        }));
+
+        // Put should trigger callback
+        storage.kv_put("test", b"key1", b"value1").unwrap();
+        assert_eq!(callback_count.load(Ordering::SeqCst), 1);
+
+        // Delete should trigger callback
+        storage.kv_delete("test", b"key1").unwrap();
+        assert_eq!(callback_count.load(Ordering::SeqCst), 2);
+
+        // Delete of non-existent key should not trigger
+        storage.kv_delete("test", b"nonexistent").unwrap();
+        assert_eq!(callback_count.load(Ordering::SeqCst), 2);
     }
 }
