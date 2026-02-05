@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# diff-crates.sh: Compare codex-rs vs code-rs per crate
+# diff-crates.sh: Compare codex-rs vs hanzo-dev per crate
 #
 # Usage:
 #   ./scripts/upstream-merge/diff-crates.sh [crate-name]
@@ -19,7 +19,7 @@ cd "$ROOT_DIR"
 OUTPUT_DIR=".github/auto/upstream-diffs"
 mkdir -p "$OUTPUT_DIR"
 
-# List of crates that exist in both codex-rs and code-rs
+# List of crates that exist in both codex-rs and hanzo-dev
 SHARED_CRATES=(
     "ansi-escape"
     "app-server"
@@ -57,7 +57,7 @@ SHARED_CRATES=(
 diff_crate() {
     local crate_name="$1"
     local codex_path="codex-rs/${crate_name}"
-    local code_path="code-rs/${crate_name}"
+    local code_path="hanzo-dev/${crate_name}"
 
     # Check if both directories exist
     if [[ ! -d "$codex_path" ]]; then
@@ -117,7 +117,7 @@ generate_summary() {
 
 Generated: ${timestamp}
 
-This report compares \`codex-rs\` (upstream baseline) vs \`code-rs\` (fork) for each shared crate.
+This report compares \`codex-rs\` (upstream baseline) vs \`hanzo-dev\` (fork) for each shared crate.
 
 ## Overview
 
