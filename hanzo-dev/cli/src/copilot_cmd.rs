@@ -8,7 +8,7 @@ use clap::Subcommand;
 use hanzo_core::config::Config;
 use hanzo_core::copilot_integration::CopilotConfig;
 use hanzo_core::copilot_integration::CopilotIntegration;
-use hanzo_core::error::CodexErr;
+use hanzo_core::error::CodeErr;
 use hanzo_core::error::Result;
 use std::collections::HashMap;
 use std::io::Read;
@@ -256,7 +256,7 @@ async fn handle_suggest_command(
         (None, Some(file_path)) => match std::fs::read_to_string(&file_path) {
             Ok(content) => content,
             Err(_e) => {
-                return Err(CodexErr::UnsupportedOperation(format!(
+                return Err(CodeErr::UnsupportedOperation(format!(
                     "Failed to read file {file_path}"
                 )));
             }
@@ -315,14 +315,14 @@ async fn handle_review_command(
         let output = match output {
             Ok(output) => output,
             Err(_e) => {
-                return Err(CodexErr::UnsupportedOperation(
+                return Err(CodeErr::UnsupportedOperation(
                     "Failed to get git diff".to_string(),
                 ));
             }
         };
 
         if !output.status.success() {
-            return Err(CodexErr::UnsupportedOperation(format!(
+            return Err(CodeErr::UnsupportedOperation(format!(
                 "Git diff failed: {}",
                 String::from_utf8_lossy(&output.stderr)
             )));
@@ -372,7 +372,7 @@ async fn handle_docs_command(
         match std::fs::read_to_string(&input) {
             Ok(content) => content,
             Err(_e) => {
-                return Err(CodexErr::UnsupportedOperation(format!(
+                return Err(CodeErr::UnsupportedOperation(format!(
                     "Failed to read file {input}"
                 )));
             }
@@ -387,7 +387,7 @@ async fn handle_docs_command(
         Some(output_file) => match std::fs::write(&output_file, &documentation) {
             Ok(_) => println!("Documentation written to {output_file}"),
             Err(_e) => {
-                return Err(CodexErr::UnsupportedOperation(format!(
+                return Err(CodeErr::UnsupportedOperation(format!(
                     "Failed to write to {output_file}"
                 )));
             }
@@ -415,7 +415,7 @@ async fn handle_explain_command(
         Some(file_path) => match std::fs::read_to_string(&file_path) {
             Ok(content) => content,
             Err(_e) => {
-                return Err(CodexErr::UnsupportedOperation(format!(
+                return Err(CodeErr::UnsupportedOperation(format!(
                     "Failed to read file {file_path}"
                 )));
             }
@@ -501,14 +501,14 @@ async fn handle_commit_command(
             let output = match output {
                 Ok(output) => output,
                 Err(_e) => {
-                    return Err(CodexErr::UnsupportedOperation(
+                    return Err(CodeErr::UnsupportedOperation(
                         "Failed to get git diff".to_string(),
                     ));
                 }
             };
 
             if !output.status.success() {
-                return Err(CodexErr::UnsupportedOperation(format!(
+                return Err(CodeErr::UnsupportedOperation(format!(
                     "Git diff failed: {}",
                     String::from_utf8_lossy(&output.stderr)
                 )));
@@ -601,7 +601,7 @@ async fn handle_complete_command(
     let content = match std::fs::read_to_string(&file) {
         Ok(content) => content,
         Err(_e) => {
-            return Err(CodexErr::UnsupportedOperation(format!(
+            return Err(CodeErr::UnsupportedOperation(format!(
                 "Failed to read file {file}"
             )));
         }
@@ -610,7 +610,7 @@ async fn handle_complete_command(
     let lines: Vec<&str> = content.lines().collect();
 
     if line == 0 || line > lines.len() {
-        return Err(CodexErr::UnsupportedOperation(format!(
+        return Err(CodeErr::UnsupportedOperation(format!(
             "Invalid line number: {} (file has {} lines)",
             line,
             lines.len()
@@ -619,7 +619,7 @@ async fn handle_complete_command(
 
     let line_content = lines[line - 1];
     if column > line_content.len() {
-        return Err(CodexErr::UnsupportedOperation(format!(
+        return Err(CodeErr::UnsupportedOperation(format!(
             "Invalid column: {} (line has {} characters)",
             column,
             line_content.len()

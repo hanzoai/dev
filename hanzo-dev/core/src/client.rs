@@ -55,7 +55,7 @@ use crate::config_types::ReasoningSummary as ReasoningSummaryConfig;
 use crate::config_types::TextVerbosity as TextVerbosityConfig;
 use crate::debug_logger::DebugLogger;
 use crate::default_client::create_client;
-use crate::error::CodexErr;
+use crate::error::CodeErr;
 use crate::error::Result;
 use crate::error::RetryAfter;
 use crate::error::RetryLimitReachedError;
@@ -197,16 +197,16 @@ fn is_reasoning_summary_rejected(error: &Error) -> bool {
 fn map_unauthorized_outcome(
     had_auth: bool,
     refresh_error: Option<&RefreshTokenError>,
-) -> Option<CodexErr> {
+) -> Option<CodeErr> {
     if let Some(err) = refresh_error {
         if err.is_permanent() {
-            return Some(CodexErr::AuthRefreshPermanent(err.message.clone()));
+            return Some(CodeErr::AuthRefreshPermanent(err.message.clone()));
         }
         return None;
     }
 
     if !had_auth {
-        return Some(CodexErr::AuthRefreshPermanent(
+        return Some(CodeErr::AuthRefreshPermanent(
             AUTH_REQUIRED_MESSAGE.to_string(),
         ));
     }
@@ -622,7 +622,7 @@ impl ModelClient {
             let endpoint = self.provider.get_full_url(&auth);
 
             let url = reqwest::Url::parse(&endpoint).map_err(|err| {
-                CodexErr::Stream(
+                CodeErr::Stream(
                     format!("[ws] invalid URL: {err}"),
                     None,
                     Some(request_id.clone()),
@@ -680,7 +680,7 @@ impl ModelClient {
                 .unwrap_or_else(HeaderMap::new);
 
             let mut ws_request = endpoint.clone().into_client_request().map_err(|err| {
-                CodexErr::Stream(
+                CodeErr::Stream(
                     format!("[ws] failed to build request: {err}"),
                     None,
                     Some(request_id.clone()),
@@ -738,7 +738,7 @@ impl ModelClient {
                         .send(Message::Text(ws_payload_text))
                         .await
                         .map_err(|err| {
-                            CodexErr::Stream(
+                            CodeErr::Stream(
                                 format!("[ws] failed to send websocket request: {err}"),
                                 None,
                                 Some(request_id.clone()),
@@ -768,7 +768,7 @@ impl ModelClient {
                                 Ok(Message::Close(_)) => break,
                                 Ok(Message::Binary(_)) => {
                                     let _ = tx_bytes
-                                        .send(Err(CodexErr::Stream(
+                                        .send(Err(CodeErr::Stream(
                                             "[ws] unexpected binary websocket event".to_string(),
                                             None,
                                             Some(request_id_for_ws.clone()),
@@ -779,7 +779,7 @@ impl ModelClient {
                                 Ok(_) => {}
                                 Err(err) => {
                                     let _ = tx_bytes
-                                        .send(Err(CodexErr::Stream(
+                                        .send(Err(CodeErr::Stream(
                                             format!("[ws] websocket error: {err}"),
                                             None,
                                             Some(request_id_for_ws.clone()),
@@ -808,7 +808,7 @@ impl ModelClient {
                     return Ok(ResponseStream { rx_event });
                 }
                 Err(err) => {
-                    let err = CodexErr::Stream(
+                    let err = CodeErr::Stream(
                         format!("[ws] failed to connect: {err}"),
                         None,
                         Some(request_id.clone()),
@@ -1118,7 +1118,7 @@ impl ModelClient {
                     }
 
                     // spawn task to process SSE
-                    let stream = resp.bytes_stream().map_err(CodexErr::Reqwest);
+                    let stream = resp.bytes_stream().map_err(CodeErr::Reqwest);
                     let debug_logger = Arc::clone(&self.debug_logger);
                     let request_id_clone = request_id.clone();
                     let otel_event_manager = self.otel_event_manager.clone();
@@ -1347,7 +1347,7 @@ impl ModelClient {
                             );
                             let _ = logger.end_request_log(&request_id);
                         }
-                        return Err(CodexErr::UnexpectedStatus(UnexpectedResponseError {
+                        return Err(CodeErr::UnexpectedStatus(UnexpectedResponseError {
                             status,
                             body: body_text,
                             request_id: None,
@@ -1357,7 +1357,7 @@ impl ModelClient {
                     if let Some(ErrorResponse { ref error }) = body
                         && is_quota_exceeded_http_error(status, error)
                     {
-                        return Err(CodexErr::QuotaExceeded);
+                        return Err(CodeErr::QuotaExceeded);
                     }
 
                     if status == StatusCode::UNAUTHORIZED
@@ -1379,12 +1379,12 @@ impl ModelClient {
                                 .clone()
                                 .or_else(|| auth.and_then(|a| a.get_plan_type()));
                             let resets_in_seconds = error.resets_in_seconds;
-                            return Err(CodexErr::UsageLimitReached(UsageLimitReachedError {
+                            return Err(CodeErr::UsageLimitReached(UsageLimitReachedError {
                                 plan_type,
                                 resets_in_seconds,
                             }));
                         } else if error.r#type.as_deref() == Some("usage_not_included") {
-                            return Err(CodexErr::UsageNotIncluded);
+                            return Err(CodeErr::UsageNotIncluded);
                         }
                     }
 
@@ -1441,10 +1441,10 @@ impl ModelClient {
                                 let _ = logger.end_request_log(&request_id);
                             }
 
-                            return Err(CodexErr::ServerError(msg));
+                            return Err(CodeErr::ServerError(msg));
                         }
 
-                        return Err(CodexErr::RetryLimit(RetryLimitReachedError {
+                        return Err(CodeErr::RetryLimit(RetryLimitReachedError {
                             status,
                             request_id: None,
                             retryable: status.is_server_error()
@@ -1478,7 +1478,7 @@ impl ModelClient {
                         }
                         if is_connectivity {
                             let req_id = (!request_id.is_empty()).then(|| request_id.clone());
-                            return Err(CodexErr::Stream(
+                            return Err(CodeErr::Stream(
                                 format!("[transport] network unavailable: {e}"),
                                 None,
                                 req_id,
@@ -1684,7 +1684,7 @@ impl ModelClient {
             }
 
             if !status.is_success() {
-                return Err(CodexErr::UnexpectedStatus(UnexpectedResponseError {
+                return Err(CodeErr::UnexpectedStatus(UnexpectedResponseError {
                     status,
                     body,
                     request_id: None,
@@ -2008,7 +2008,7 @@ async fn process_sse<S>(
     // If the stream stays completely silent for an extended period treat it as disconnected.
     // The response id returned from the "complete" message.
     let mut response_completed: Option<ResponseCompleted> = None;
-    let mut response_error: Option<CodexErr> = None;
+    let mut response_error: Option<CodeErr> = None;
     // Track the current item_id to include with delta events
     let mut current_item_id: Option<String> = None;
 
@@ -2038,7 +2038,7 @@ async fn process_sse<S>(
             Ok(Some(Err(e))) => {
                 debug!("SSE Error: {e:#}");
                 let event =
-                    CodexErr::Stream(format!("[transport] {e}"), None, Some(request_id.clone()));
+                    CodeErr::Stream(format!("[transport] {e}"), None, Some(request_id.clone()));
                 let _ = tx_event.send(Err(event)).await;
                 return;
             }
@@ -2068,7 +2068,7 @@ async fn process_sse<S>(
                         let _ = tx_event.send(Ok(event)).await;
                     }
                     None => {
-                        let error = response_error.unwrap_or(CodexErr::Stream(
+                        let error = response_error.unwrap_or(CodeErr::Stream(
                             "stream closed before response.completed".into(),
                             None,
                             Some(request_id.clone()),
@@ -2087,7 +2087,7 @@ async fn process_sse<S>(
             }
             Err(_) => {
                 let _ = tx_event
-                    .send(Err(CodexErr::Stream(
+                    .send(Err(CodeErr::Stream(
                         "[idle] timeout waiting for SSE".into(),
                         None,
                         Some(request_id.clone()),
@@ -2322,7 +2322,7 @@ async fn process_sse<S>(
             }
             "response.failed" => {
                 if let Some(resp_val) = event.response {
-                    response_error = Some(CodexErr::Stream(
+                    response_error = Some(CodeErr::Stream(
                         "response.failed event received".to_string(),
                         None,
                         Some(request_id.clone()),
@@ -2334,11 +2334,11 @@ async fn process_sse<S>(
                         match serde_json::from_value::<Error>(error.clone()) {
                             Ok(error) => {
                                 if is_quota_exceeded_error(&error) {
-                                    response_error = Some(CodexErr::QuotaExceeded);
+                                    response_error = Some(CodeErr::QuotaExceeded);
                                 } else {
                                     let retry_after = try_parse_retry_after(&error, Utc::now());
                                     let message = error.message.unwrap_or_default();
-                                    response_error = Some(CodexErr::Stream(
+                                    response_error = Some(CodeErr::Stream(
                                         message,
                                         retry_after,
                                         Some(request_id.clone()),
@@ -2421,7 +2421,7 @@ async fn stream_from_fixture(
     }
 
     let rdr = std::io::Cursor::new(content);
-    let stream = ReaderStream::new(rdr).map_err(CodexErr::Io);
+    let stream = ReaderStream::new(rdr).map_err(CodeErr::Io);
     // Create a dummy debug logger for testing
     let debug_logger = Arc::new(Mutex::new(DebugLogger::new(false).unwrap()));
     tokio::spawn(process_sse(
@@ -2461,9 +2461,9 @@ mod tests {
     #[test]
     fn unauthorized_outcome_returns_permanent_error_for_permanent_refresh_failure() {
         let err = RefreshTokenError::permanent("token revoked");
-        let outcome = map_unauthorized_outcome(true, Some(&err)).expect("should produce CodexErr");
+        let outcome = map_unauthorized_outcome(true, Some(&err)).expect("should produce CodeErr");
         match outcome {
-            CodexErr::AuthRefreshPermanent(msg) => {
+            CodeErr::AuthRefreshPermanent(msg) => {
                 assert!(msg.contains("token revoked"), "unexpected message: {}", msg);
             }
             other => panic!("unexpected outcome: {:?}", other),
@@ -2474,7 +2474,7 @@ mod tests {
     fn unauthorized_outcome_requires_login_without_auth() {
         let outcome = map_unauthorized_outcome(false, None).expect("should require login");
         match outcome {
-            CodexErr::AuthRefreshPermanent(msg) => {
+            CodeErr::AuthRefreshPermanent(msg) => {
                 assert_eq!(msg, AUTH_REQUIRED_MESSAGE);
             }
             other => panic!("unexpected outcome: {:?}", other),
@@ -2637,7 +2637,7 @@ mod tests {
         }
 
         let reader = builder.build();
-        let stream = ReaderStream::new(reader).map_err(CodexErr::Io);
+        let stream = ReaderStream::new(reader).map_err(CodeErr::Io);
         let (tx, mut rx) = mpsc::channel::<Result<ResponseEvent>>(16);
         let debug_logger = Arc::new(Mutex::new(DebugLogger::new(false).unwrap()));
         let checkpoint = Arc::new(RwLock::new(StreamCheckpoint::default()));
@@ -2678,7 +2678,7 @@ mod tests {
         }
 
         let (tx, mut rx) = mpsc::channel::<Result<ResponseEvent>>(8);
-        let stream = ReaderStream::new(std::io::Cursor::new(body)).map_err(CodexErr::Io);
+        let stream = ReaderStream::new(std::io::Cursor::new(body)).map_err(CodeErr::Io);
         let debug_logger = Arc::new(Mutex::new(DebugLogger::new(false).unwrap()));
         let checkpoint = Arc::new(RwLock::new(StreamCheckpoint::default()));
         tokio::spawn(process_sse(
@@ -2824,7 +2824,7 @@ mod tests {
         matches!(events[0], Ok(ResponseEvent::OutputItemDone { .. }));
 
         match &events[1] {
-            Err(CodexErr::Stream(msg, _, _)) => {
+            Err(CodeErr::Stream(msg, _, _)) => {
                 assert_eq!(msg, "stream closed before response.completed")
             }
             other => panic!("unexpected second event: {other:?}"),
@@ -2858,7 +2858,7 @@ mod tests {
         assert_eq!(events.len(), 1);
 
         match &events[0] {
-            Err(CodexErr::Stream(msg, Some(retry), _)) => {
+            Err(CodeErr::Stream(msg, Some(retry), _)) => {
                 assert_eq!(
                     msg,
                     "Rate limit reached for gpt-5.1 in organization org-AAA on tokens per min (TPM): Limit 30000, Used 22999, Requested 12528. Please try again in 11.054s. Visit https://platform.openai.com/account/rate-limits to learn more."
@@ -3213,7 +3213,7 @@ mod tests {
 
         assert_eq!(events.len(), 1);
         match &events[0] {
-            Err(CodexErr::QuotaExceeded) => {}
+            Err(CodeErr::QuotaExceeded) => {}
             other => panic!("unexpected quota event: {other:?}"),
         }
     }

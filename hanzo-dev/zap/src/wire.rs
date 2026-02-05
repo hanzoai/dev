@@ -104,8 +104,7 @@ impl<'a> Reader<'a> {
     /// Read a string with length prefix (zero-copy).
     pub fn read_string(&mut self) -> Result<&'a str> {
         let bytes = self.read_bytes()?;
-        std::str::from_utf8(bytes)
-            .map_err(|e| Error::Protocol(format!("invalid UTF-8: {}", e)))
+        std::str::from_utf8(bytes).map_err(|e| Error::Protocol(format!("invalid UTF-8: {}", e)))
     }
 
     /// Read fixed-size bytes (zero-copy).

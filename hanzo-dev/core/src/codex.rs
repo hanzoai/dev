@@ -966,7 +966,7 @@ use crate::environment_context::EnvironmentContextDelta;
 use crate::environment_context::EnvironmentContextSnapshot;
 use crate::environment_context::EnvironmentContextTracker;
 use crate::environment_context::ViewportDimensions;
-use crate::error::CodexErr;
+use crate::error::CodeErr;
 use crate::error::Result as CodexResult;
 use crate::error::RetryAfter;
 use crate::error::SandboxErr;
@@ -1189,7 +1189,7 @@ impl Codex {
         self.tx_sub
             .send(sub)
             .await
-            .map_err(|_| CodexErr::InternalAgentDied)?;
+            .map_err(|_| CodeErr::InternalAgentDied)?;
         Ok(())
     }
 
@@ -1198,7 +1198,7 @@ impl Codex {
             .rx_event
             .recv()
             .await
-            .map_err(|_| CodexErr::InternalAgentDied)?;
+            .map_err(|_| CodeErr::InternalAgentDied)?;
         Ok(event)
     }
 }

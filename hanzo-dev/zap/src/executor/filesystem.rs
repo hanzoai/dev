@@ -3,9 +3,9 @@
 //! Provides file operations: read, write, edit, glob, grep, etc.
 
 use crate::error::{Error, Result};
-use crate::message::ToolResult;
-use crate::tools::{filesystem, ToolCategory};
 use crate::executor::{ExecutorContext, ToolExecutor};
+use crate::message::ToolResult;
+use crate::tools::{ToolCategory, filesystem};
 use async_trait::async_trait;
 use serde_json::Value;
 use std::path::Path;
@@ -33,10 +33,15 @@ impl FilesystemExecutor {
         })
     }
 
-    async fn read_file(&self, args: filesystem::ReadFileArgs, ctx: &ExecutorContext) -> Result<ToolResult> {
+    async fn read_file(
+        &self,
+        args: filesystem::ReadFileArgs,
+        ctx: &ExecutorContext,
+    ) -> Result<ToolResult> {
         let path = self.resolve_path(&args.path, ctx);
 
-        let metadata = fs::metadata(&path).await
+        let metadata = fs::metadata(&path)
+            .await
             .map_err(|e| Error::Tool(format!("Cannot access {}: {}", path, e)))?;
 
         if metadata.len() > self.max_read_size as u64 {
@@ -47,7 +52,8 @@ impl FilesystemExecutor {
             )));
         }
 
-        let content = fs::read_to_string(&path).await
+        let content = fs::read_to_string(&path)
+            .await
             .map_err(|e| Error::Tool(format!("Failed to read {}: {}", path, e)))?;
 
         // Apply offset/limit if specified
@@ -55,37 +61,44 @@ impl FilesystemExecutor {
         let offset = args.offset.unwrap_or(0) as usize;
         let limit = args.limit.unwrap_or(lines.len() as u64) as usize;
 
-        let selected: Vec<&str> = lines
-            .into_iter()
-            .skip(offset)
-            .take(limit)
-            .collect();
+        let selected: Vec<&str> = lines.into_iter().skip(offset).take(limit).collect();
 
         Self::result(selected.join("\n"), None)
     }
 
-    async fn write_file(&self, args: filesystem::WriteFileArgs, ctx: &ExecutorContext) -> Result<ToolResult> {
+    async fn write_file(
+        &self,
+        args: filesystem::WriteFileArgs,
+        ctx: &ExecutorContext,
+    ) -> Result<ToolResult> {
         let path = self.resolve_path(&args.path, ctx);
 
         // Create parent directories if needed
         if let Some(parent) = Path::new(&path).parent() {
-            fs::create_dir_all(parent).await
+            fs::create_dir_all(parent)
+                .await
                 .map_err(|e| Error::Tool(format!("Failed to create directories: {}", e)))?;
         }
 
-        fs::write(&path, &args.content).await
+        fs::write(&path, &args.content)
+            .await
             .map_err(|e| Error::Tool(format!("Failed to write {}: {}", path, e)))?;
 
         Self::result(
             serde_json::json!({"bytes_written": args.content.len(), "path": path}),
-            None
+            None,
         )
     }
 
-    async fn edit_file(&self, args: filesystem::EditFileArgs, ctx: &ExecutorContext) -> Result<ToolResult> {
+    async fn edit_file(
+        &self,
+        args: filesystem::EditFileArgs,
+        ctx: &ExecutorContext,
+    ) -> Result<ToolResult> {
         let path = self.resolve_path(&args.path, ctx);
 
-        let content = fs::read_to_string(&path).await
+        let content = fs::read_to_string(&path)
+            .await
             .map_err(|e| Error::Tool(format!("Failed to read {}: {}", path, e)))?;
 
         let mut new_content = content.clone();
@@ -103,14 +116,24 @@ impl FilesystemExecutor {
             }
         }
 
-        fs::write(&path, &new_content).await
+        fs::write(&path, &new_content)
+            .await
             .map_err(|e| Error::Tool(format!("Failed to write {}: {}", path, e)))?;
 
-        Self::result(serde_json::json!({"edits_applied": changes, "path": path}), None)
+        Self::result(
+            serde_json::json!({"edits_applied": changes, "path": path}),
+            None,
+        )
     }
 
-    async fn glob_files(&self, args: filesystem::GlobArgs, ctx: &ExecutorContext) -> Result<ToolResult> {
-        let base = args.base_path.as_deref()
+    async fn glob_files(
+        &self,
+        args: filesystem::GlobArgs,
+        ctx: &ExecutorContext,
+    ) -> Result<ToolResult> {
+        let base = args
+            .base_path
+            .as_deref()
             .map(|p| self.resolve_path(p, ctx))
             .unwrap_or_else(|| ctx.cwd.clone().unwrap_or_else(|| ".".to_string()));
 
@@ -118,7 +141,9 @@ impl FilesystemExecutor {
         let max = args.max_results.unwrap_or(1000) as usize;
 
         let mut matches = Vec::new();
-        for entry in glob::glob(&pattern).map_err(|e| Error::Tool(format!("Invalid glob: {}", e)))? {
+        for entry in
+            glob::glob(&pattern).map_err(|e| Error::Tool(format!("Invalid glob: {}", e)))?
+        {
             if matches.len() >= max {
                 break;
             }
@@ -130,7 +155,11 @@ impl FilesystemExecutor {
         Self::result(matches, None)
     }
 
-    async fn grep_files(&self, args: filesystem::GrepArgs, ctx: &ExecutorContext) -> Result<ToolResult> {
+    async fn grep_files(
+        &self,
+        args: filesystem::GrepArgs,
+        ctx: &ExecutorContext,
+    ) -> Result<ToolResult> {
         let path = self.resolve_path(&args.path, ctx);
         let regex = regex::Regex::new(&args.pattern)
             .map_err(|e| Error::Tool(format!("Invalid regex: {}", e)))?;
@@ -188,8 +217,16 @@ impl FilesystemExecutor {
                         path: file_path.clone(),
                         line_number: (i + 1) as u32,
                         line: line.to_string(),
-                        context_before: if context_before.is_empty() { None } else { Some(context_before) },
-                        context_after: if context_after.is_empty() { None } else { Some(context_after) },
+                        context_before: if context_before.is_empty() {
+                            None
+                        } else {
+                            Some(context_before)
+                        },
+                        context_after: if context_after.is_empty() {
+                            None
+                        } else {
+                            Some(context_after)
+                        },
                     });
 
                     if results.len() >= max {
@@ -202,7 +239,11 @@ impl FilesystemExecutor {
         Self::result(results, None)
     }
 
-    async fn list_dir(&self, args: filesystem::ListDirArgs, ctx: &ExecutorContext) -> Result<ToolResult> {
+    async fn list_dir(
+        &self,
+        args: filesystem::ListDirArgs,
+        ctx: &ExecutorContext,
+    ) -> Result<ToolResult> {
         let path = self.resolve_path(&args.path, ctx);
         let show_hidden = args.show_hidden.unwrap_or(false);
         let recursive = args.recursive.unwrap_or(false);
@@ -210,7 +251,9 @@ impl FilesystemExecutor {
         let mut entries: Vec<filesystem::DirEntry> = Vec::new();
 
         if recursive {
-            for entry in walkdir::WalkDir::new(&path).max_depth(args.max_depth.unwrap_or(10) as usize) {
+            for entry in
+                walkdir::WalkDir::new(&path).max_depth(args.max_depth.unwrap_or(10) as usize)
+            {
                 if let Ok(e) = entry {
                     let name = e.file_name().to_string_lossy().to_string();
                     if !show_hidden && name.starts_with('.') {
@@ -227,10 +270,13 @@ impl FilesystemExecutor {
                 }
             }
         } else {
-            let mut read_dir = fs::read_dir(&path).await
+            let mut read_dir = fs::read_dir(&path)
+                .await
                 .map_err(|e| Error::Tool(format!("Cannot read dir: {}", e)))?;
 
-            while let Some(entry) = read_dir.next_entry().await
+            while let Some(entry) = read_dir
+                .next_entry()
+                .await
                 .map_err(|e| Error::Tool(format!("Error reading entry: {}", e)))?
             {
                 let name = entry.file_name().to_string_lossy().to_string();
@@ -308,7 +354,14 @@ impl ToolExecutor for FilesystemExecutor {
     }
 
     fn tools(&self) -> Vec<&'static str> {
-        vec!["read_file", "write_file", "edit_file", "glob", "grep", "list_dir"]
+        vec![
+            "read_file",
+            "write_file",
+            "edit_file",
+            "glob",
+            "grep",
+            "list_dir",
+        ]
     }
 
     fn category(&self) -> ToolCategory {

@@ -194,7 +194,7 @@ pub(super) fn layout_areas(chat: &ChatWidget<'_>, area: Rect) -> Vec<Rect> {
         bottom_desired,
         font_cell,
         None,
-        // Disable status bar to match Codex-style layout (no top header)
-        false,
+        // Use config setting for status bar visibility (defaults to false)
+        chat.config.tui.show_status_bar,
     )
 }

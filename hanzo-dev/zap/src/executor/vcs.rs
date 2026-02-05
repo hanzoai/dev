@@ -3,9 +3,9 @@
 //! Provides git operations: status, diff, commit, log, etc.
 
 use crate::error::{Error, Result};
-use crate::message::ToolResult;
-use crate::tools::{vcs, ToolCategory};
 use crate::executor::{ExecutorContext, ToolExecutor};
+use crate::message::ToolResult;
+use crate::tools::{ToolCategory, vcs};
 use async_trait::async_trait;
 use serde_json::Value;
 use tokio::process::Command;
@@ -28,9 +28,7 @@ impl VcsExecutor {
     }
 
     async fn git_status(&self, args: vcs::StatusArgs, ctx: &ExecutorContext) -> Result<ToolResult> {
-        let cwd = args.path.as_deref()
-            .or(ctx.cwd.as_deref())
-            .unwrap_or(".");
+        let cwd = args.path.as_deref().or(ctx.cwd.as_deref()).unwrap_or(".");
 
         let output = Command::new("git")
             .args(["status", "--porcelain=v2", "--branch"])
@@ -164,7 +162,9 @@ impl VcsExecutor {
             .await
             .map_err(|e| Error::Tool(format!("git rev-parse failed: {}", e)))?;
 
-        let commit_hash = String::from_utf8_lossy(&hash_output.stdout).trim().to_string();
+        let commit_hash = String::from_utf8_lossy(&hash_output.stdout)
+            .trim()
+            .to_string();
 
         let result = vcs::CommitResult {
             commit: commit_hash,
@@ -250,7 +250,11 @@ impl VcsExecutor {
         match args.action {
             vcs::BranchAction::List => {
                 let output = Command::new("git")
-                    .args(["branch", "-a", "--format=%(refname:short)|%(upstream:short)|%(HEAD)"])
+                    .args([
+                        "branch",
+                        "-a",
+                        "--format=%(refname:short)|%(upstream:short)|%(HEAD)",
+                    ])
                     .current_dir(cwd)
                     .output()
                     .await
@@ -263,7 +267,10 @@ impl VcsExecutor {
                         let parts: Vec<&str> = line.splitn(3, '|').collect();
                         vcs::BranchInfo {
                             name: parts.first().unwrap_or(&"").to_string(),
-                            upstream: parts.get(1).filter(|s| !s.is_empty()).map(|s| s.to_string()),
+                            upstream: parts
+                                .get(1)
+                                .filter(|s| !s.is_empty())
+                                .map(|s| s.to_string()),
                             is_current: parts.get(2).map(|s| s.contains('*')).unwrap_or(false),
                         }
                     })
@@ -272,7 +279,9 @@ impl VcsExecutor {
                 Self::result(branches, None)
             }
             vcs::BranchAction::Create => {
-                let name = args.name.ok_or_else(|| Error::Tool("Branch name required".into()))?;
+                let name = args
+                    .name
+                    .ok_or_else(|| Error::Tool("Branch name required".into()))?;
                 let mut cmd_args = vec!["checkout", "-b", &name];
                 if let Some(ref from) = args.from {
                     cmd_args.push(from);
@@ -294,12 +303,18 @@ impl VcsExecutor {
 
                 Self::result(
                     serde_json::json!({"action": "created", "branch": name}),
-                    None
+                    None,
                 )
             }
             vcs::BranchAction::Delete => {
-                let name = args.name.ok_or_else(|| Error::Tool("Branch name required".into()))?;
-                let flag = if args.force.unwrap_or(false) { "-D" } else { "-d" };
+                let name = args
+                    .name
+                    .ok_or_else(|| Error::Tool("Branch name required".into()))?;
+                let flag = if args.force.unwrap_or(false) {
+                    "-D"
+                } else {
+                    "-d"
+                };
 
                 let output = Command::new("git")
                     .args(["branch", flag, &name])
@@ -317,11 +332,13 @@ impl VcsExecutor {
 
                 Self::result(
                     serde_json::json!({"action": "deleted", "branch": name}),
-                    None
+                    None,
                 )
             }
             vcs::BranchAction::Switch => {
-                let name = args.name.ok_or_else(|| Error::Tool("Branch name required".into()))?;
+                let name = args
+                    .name
+                    .ok_or_else(|| Error::Tool("Branch name required".into()))?;
 
                 let output = Command::new("git")
                     .args(["checkout", &name])
@@ -339,7 +356,7 @@ impl VcsExecutor {
 
                 Self::result(
                     serde_json::json!({"action": "switched", "branch": name}),
-                    None
+                    None,
                 )
             }
         }
@@ -391,7 +408,14 @@ impl ToolExecutor for VcsExecutor {
     }
 
     fn tools(&self) -> Vec<&'static str> {
-        vec!["git_status", "git_diff", "git_commit", "git_log", "git_blame", "git_branch"]
+        vec![
+            "git_status",
+            "git_diff",
+            "git_commit",
+            "git_log",
+            "git_blame",
+            "git_branch",
+        ]
     }
 
     fn category(&self) -> ToolCategory {

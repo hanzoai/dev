@@ -3,9 +3,9 @@
 //! Provides intent creation, routing, DAG composition, and execution.
 
 use crate::error::{Error, Result};
-use crate::message::ToolResult;
-use crate::tools::{plan, ToolCategory};
 use crate::executor::{ExecutorContext, ToolExecutor};
+use crate::message::ToolResult;
+use crate::tools::{ToolCategory, plan};
 use async_trait::async_trait;
 use serde_json::Value;
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -37,9 +37,14 @@ impl PlanExecutor {
         })
     }
 
-    async fn create_intent(&self, args: plan::IntentArgs, _ctx: &ExecutorContext) -> Result<ToolResult> {
+    async fn create_intent(
+        &self,
+        args: plan::IntentArgs,
+        _ctx: &ExecutorContext,
+    ) -> Result<ToolResult> {
         // Parse the description to extract goals
-        let goals: Vec<plan::Goal> = args.description
+        let goals: Vec<plan::Goal> = args
+            .description
             .split(|c| c == '.' || c == ';' || c == '\n')
             .filter(|s| !s.trim().is_empty())
             .enumerate()
@@ -62,20 +67,31 @@ impl PlanExecutor {
         Self::result(intent, None)
     }
 
-    async fn create_route(&self, args: plan::RouteArgs, _ctx: &ExecutorContext) -> Result<ToolResult> {
+    async fn create_route(
+        &self,
+        args: plan::RouteArgs,
+        _ctx: &ExecutorContext,
+    ) -> Result<ToolResult> {
         let intent: plan::Intent = serde_json::from_value(args.intent)
             .map_err(|e| Error::Tool(format!("Invalid intent: {}", e)))?;
 
         // Create steps from goals
-        let steps: Vec<plan::Step> = intent.goals.iter().enumerate().map(|(i, goal)| {
-            plan::Step {
+        let steps: Vec<plan::Step> = intent
+            .goals
+            .iter()
+            .enumerate()
+            .map(|(i, goal)| plan::Step {
                 id: format!("step-{}", i + 1),
                 tool: self.suggest_tool_for_goal(&goal.description, &args.available_tools),
                 args: serde_json::json!({}),
-                depends_on: if i > 0 { vec![format!("step-{}", i)] } else { vec![] },
+                depends_on: if i > 0 {
+                    vec![format!("step-{}", i)]
+                } else {
+                    vec![]
+                },
                 description: goal.description.clone(),
-            }
-        }).collect();
+            })
+            .collect();
 
         let route = plan::Route {
             id: self.next_id("route"),
@@ -87,21 +103,43 @@ impl PlanExecutor {
         Self::result(route, None)
     }
 
-    fn suggest_tool_for_goal(&self, description: &str, available_tools: &Option<Vec<String>>) -> String {
+    fn suggest_tool_for_goal(
+        &self,
+        description: &str,
+        available_tools: &Option<Vec<String>>,
+    ) -> String {
         let desc_lower = description.to_lowercase();
 
         // Simple keyword matching for tool suggestion
-        let suggested = if desc_lower.contains("read") || desc_lower.contains("file") || desc_lower.contains("open") {
+        let suggested = if desc_lower.contains("read")
+            || desc_lower.contains("file")
+            || desc_lower.contains("open")
+        {
             "read_file"
-        } else if desc_lower.contains("write") || desc_lower.contains("save") || desc_lower.contains("create file") {
+        } else if desc_lower.contains("write")
+            || desc_lower.contains("save")
+            || desc_lower.contains("create file")
+        {
             "write_file"
-        } else if desc_lower.contains("edit") || desc_lower.contains("modify") || desc_lower.contains("change") {
+        } else if desc_lower.contains("edit")
+            || desc_lower.contains("modify")
+            || desc_lower.contains("change")
+        {
             "edit_file"
-        } else if desc_lower.contains("search") || desc_lower.contains("find") || desc_lower.contains("grep") {
+        } else if desc_lower.contains("search")
+            || desc_lower.contains("find")
+            || desc_lower.contains("grep")
+        {
             "grep"
-        } else if desc_lower.contains("list") || desc_lower.contains("dir") || desc_lower.contains("folder") {
+        } else if desc_lower.contains("list")
+            || desc_lower.contains("dir")
+            || desc_lower.contains("folder")
+        {
             "list_dir"
-        } else if desc_lower.contains("run") || desc_lower.contains("execute") || desc_lower.contains("command") {
+        } else if desc_lower.contains("run")
+            || desc_lower.contains("execute")
+            || desc_lower.contains("command")
+        {
             "exec"
         } else if desc_lower.contains("git") || desc_lower.contains("commit") {
             "git_commit"
@@ -109,7 +147,10 @@ impl PlanExecutor {
             "test"
         } else if desc_lower.contains("build") || desc_lower.contains("compile") {
             "build"
-        } else if desc_lower.contains("http") || desc_lower.contains("request") || desc_lower.contains("api") {
+        } else if desc_lower.contains("http")
+            || desc_lower.contains("request")
+            || desc_lower.contains("api")
+        {
             "http_request"
         } else {
             "exec"
@@ -121,13 +162,20 @@ impl PlanExecutor {
                 return suggested.to_string();
             }
             // Return first available tool as fallback
-            return tools.first().cloned().unwrap_or_else(|| suggested.to_string());
+            return tools
+                .first()
+                .cloned()
+                .unwrap_or_else(|| suggested.to_string());
         }
 
         suggested.to_string()
     }
 
-    async fn compose_dag(&self, args: plan::ComposeArgs, _ctx: &ExecutorContext) -> Result<ToolResult> {
+    async fn compose_dag(
+        &self,
+        args: plan::ComposeArgs,
+        _ctx: &ExecutorContext,
+    ) -> Result<ToolResult> {
         let routes: Vec<plan::Route> = serde_json::from_value(args.routes)
             .map_err(|e| Error::Tool(format!("Invalid routes: {}", e)))?;
 
@@ -162,7 +210,11 @@ impl PlanExecutor {
         Self::result(dag, None)
     }
 
-    async fn cache_lookup(&self, args: plan::CacheLookupArgs, _ctx: &ExecutorContext) -> Result<ToolResult> {
+    async fn cache_lookup(
+        &self,
+        args: plan::CacheLookupArgs,
+        _ctx: &ExecutorContext,
+    ) -> Result<ToolResult> {
         // Placeholder - would integrate with actual cache store
         let result = plan::CacheResult {
             hit: false,
@@ -174,7 +226,11 @@ impl PlanExecutor {
         Self::result(result, None)
     }
 
-    async fn audit_log(&self, args: plan::AuditLogArgs, _ctx: &ExecutorContext) -> Result<ToolResult> {
+    async fn audit_log(
+        &self,
+        args: plan::AuditLogArgs,
+        _ctx: &ExecutorContext,
+    ) -> Result<ToolResult> {
         // Log the audit event (would persist to actual audit store)
         let entry = plan::AuditEntry {
             id: self.next_id("audit"),
@@ -239,7 +295,13 @@ impl ToolExecutor for PlanExecutor {
     }
 
     fn tools(&self) -> Vec<&'static str> {
-        vec!["plan_intent", "plan_route", "plan_compose", "cache_lookup", "audit_log"]
+        vec![
+            "plan_intent",
+            "plan_route",
+            "plan_compose",
+            "cache_lookup",
+            "audit_log",
+        ]
     }
 
     fn category(&self) -> ToolCategory {

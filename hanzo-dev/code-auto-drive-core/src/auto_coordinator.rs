@@ -29,7 +29,7 @@ use hanzo_core::config_types::AutoDriveSettings;
 use hanzo_core::config_types::ReasoningEffort;
 use hanzo_core::config_types::TextVerbosity;
 use hanzo_core::debug_logger::DebugLogger;
-use hanzo_core::error::CodexErr;
+use hanzo_core::error::CodeErr;
 use hanzo_core::model_family::derive_default_model_family;
 use hanzo_core::model_family::find_family_for_model;
 use hanzo_core::project_doc::read_auto_drive_docs;
@@ -596,7 +596,7 @@ mod tests {
 
     #[test]
     fn retry_limit_marked_retryable_is_retried() {
-        let err = CodexErr::RetryLimit(RetryLimitReachedError {
+        let err = CodeErr::RetryLimit(RetryLimitReachedError {
             status: StatusCode::SERVICE_UNAVAILABLE,
             request_id: None,
             retryable: true,
@@ -833,7 +833,7 @@ mod tests {
 
     #[test]
     fn quota_exceeded_errors_short_circuit_retries() {
-        let err = anyhow!(CodexErr::QuotaExceeded);
+        let err = anyhow!(CodeErr::QuotaExceeded);
         match classify_model_error(&err) {
             RetryDecision::Fatal(e) => {
                 assert!(e.to_string().contains("Quota exceeded"));
@@ -2420,8 +2420,8 @@ fn build_user_turn_prompt(
 
 fn should_retry_with_default_model(err: &anyhow::Error) -> bool {
     err.chain().any(|cause| {
-        if let Some(code_err) = cause.downcast_ref::<CodexErr>()
-            && let CodexErr::UnexpectedStatus(err) = code_err
+        if let Some(code_err) = cause.downcast_ref::<CodeErr>()
+            && let CodeErr::UnexpectedStatus(err) = code_err
         {
             if !err.status.is_client_error() {
                 return false;
@@ -2437,19 +2437,19 @@ fn should_retry_with_default_model(err: &anyhow::Error) -> bool {
 }
 
 pub(crate) fn classify_model_error(error: &anyhow::Error) -> RetryDecision {
-    if let Some(code_err) = find_in_chain::<CodexErr>(error) {
+    if let Some(code_err) = find_in_chain::<CodeErr>(error) {
         match code_err {
-            CodexErr::Stream(message, _, _) => {
+            CodeErr::Stream(message, _, _) => {
                 return RetryDecision::RetryAfterBackoff {
                     reason: format!("model stream error: {message}"),
                 };
             }
-            CodexErr::Timeout => {
+            CodeErr::Timeout => {
                 return RetryDecision::RetryAfterBackoff {
                     reason: "model request timed out".to_string(),
                 };
             }
-            CodexErr::UnexpectedStatus(err) => {
+            CodeErr::UnexpectedStatus(err) => {
                 let status = err.status;
                 let body = &err.body;
                 if status == StatusCode::REQUEST_TIMEOUT || status.as_u16() == 408 {
@@ -2482,7 +2482,7 @@ pub(crate) fn classify_model_error(error: &anyhow::Error) -> RetryDecision {
                     };
                 }
             }
-            CodexErr::UsageLimitReached(limit) => {
+            CodeErr::UsageLimitReached(limit) => {
                 if let Some(seconds) = limit.resets_in_seconds {
                     let wait_until = compute_rate_limit_wait(Duration::from_secs(seconds));
                     return RetryDecision::RateLimited {
@@ -2494,21 +2494,21 @@ pub(crate) fn classify_model_error(error: &anyhow::Error) -> RetryDecision {
                     reason: "usage limit reached".to_string(),
                 };
             }
-            CodexErr::UsageNotIncluded => {
+            CodeErr::UsageNotIncluded => {
                 return RetryDecision::Fatal(anyhow!(error.to_string()));
             }
-            CodexErr::AuthRefreshPermanent(_) => {
+            CodeErr::AuthRefreshPermanent(_) => {
                 return RetryDecision::Fatal(anyhow!(error.to_string()));
             }
-            CodexErr::QuotaExceeded => {
+            CodeErr::QuotaExceeded => {
                 return RetryDecision::Fatal(anyhow!(error.to_string()));
             }
-            CodexErr::ServerError(_) => {
+            CodeErr::ServerError(_) => {
                 return RetryDecision::RetryAfterBackoff {
                     reason: error.to_string(),
                 };
             }
-            CodexErr::RetryLimit(status) => {
+            CodeErr::RetryLimit(status) => {
                 if status.retryable {
                     return RetryDecision::RetryAfterBackoff {
                         reason: format!(
@@ -2522,10 +2522,10 @@ pub(crate) fn classify_model_error(error: &anyhow::Error) -> RetryDecision {
                     status.status
                 ));
             }
-            CodexErr::Reqwest(req_err) => {
+            CodeErr::Reqwest(req_err) => {
                 return classify_reqwest_error(req_err);
             }
-            CodexErr::Io(io_err) => {
+            CodeErr::Io(io_err) => {
                 if io_err.kind() == std::io::ErrorKind::TimedOut {
                     return RetryDecision::RetryAfterBackoff {
                         reason: "network timeout".to_string(),
@@ -2557,8 +2557,8 @@ fn classify_model_error_with_auto_switch(
     event_tx: &AutoCoordinatorEventSender,
     error: &anyhow::Error,
 ) -> RetryDecision {
-    if let Some(code_err) = find_in_chain::<CodexErr>(error)
-        && let CodexErr::UsageLimitReached(limit) = code_err
+    if let Some(code_err) = find_in_chain::<CodeErr>(error)
+        && let CodeErr::UsageLimitReached(limit) = code_err
         && client.auto_switch_accounts_on_rate_limit()
         && auth::read_code_api_key_from_env().is_none()
         && let Some(auth_manager) = client.get_auth_manager()

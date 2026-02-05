@@ -1947,9 +1947,9 @@ async fn run_turn(
                 sess.clear_scratchpad();
                 return Ok(output);
             }
-            Err(CodexErr::Interrupted) => return Err(CodexErr::Interrupted),
-            Err(CodexErr::EnvVar(var)) => return Err(CodexErr::EnvVar(var)),
-            Err(CodexErr::UsageLimitReached(limit_err)) => {
+            Err(CodeErr::Interrupted) => return Err(CodeErr::Interrupted),
+            Err(CodeErr::EnvVar(var)) => return Err(CodeErr::EnvVar(var)),
+            Err(CodeErr::UsageLimitReached(limit_err)) => {
                 if let Some(ctx) = account_usage_context(sess) {
                     let usage_home = ctx.code_home.clone();
                     let usage_account = ctx.account_id.clone();
@@ -2056,11 +2056,11 @@ async fn run_turn(
                 retries = 0;
                 continue;
             }
-            Err(CodexErr::UsageNotIncluded) => return Err(CodexErr::UsageNotIncluded),
-            Err(CodexErr::QuotaExceeded) => return Err(CodexErr::QuotaExceeded),
+            Err(CodeErr::UsageNotIncluded) => return Err(CodeErr::UsageNotIncluded),
+            Err(CodeErr::QuotaExceeded) => return Err(CodeErr::QuotaExceeded),
             Err(e) => {
                 // Detect context-window overflow and auto-run a compact summarization once
-                if !did_auto_compact && let CodexErr::Stream(msg, _maybe_delay, _req_id) = &e {
+                if !did_auto_compact && let CodeErr::Stream(msg, _maybe_delay, _req_id) = &e {
                     let lower = msg.to_ascii_lowercase();
                     let looks_like_context_overflow = lower.contains("exceeds the context window")
                         || lower.contains("exceed the context window")
@@ -2133,7 +2133,7 @@ async fn run_turn(
                 // Use the configured provider-specific stream retry budget.
                 let max_retries = tc.client.get_provider().stream_max_retries();
                 let req_id = match &e {
-                    CodexErr::Stream(_, _, req) => req.clone(),
+                    CodeErr::Stream(_, _, req) => req.clone(),
                     _ => None,
                 };
                 let is_connectivity = is_connectivity_error(&e);
@@ -2240,7 +2240,7 @@ async fn run_turn(
                 if retries < max_retries {
                     retries += 1;
                     let (delay, retry_eta) = match e {
-                        CodexErr::Stream(_, Some(ref retry_after), _) => {
+                        CodeErr::Stream(_, Some(ref retry_after), _) => {
                             let eta = format_retry_eta(retry_after);
                             (retry_after.delay, eta)
                         }
@@ -2548,7 +2548,7 @@ async fn try_run_turn(
             // Channel closed without yielding a final Completed event or explicit error.
             // Treat as a disconnected stream so the caller can retry.
             turn_latency_guard.mark_failed(Some("stream_closed_before_completed".to_string()));
-            return Err(CodexErr::Stream(
+            return Err(CodeErr::Stream(
                 "stream closed before response.completed".into(),
                 None,
                 None,
@@ -8286,9 +8286,7 @@ async fn handle_container_exec_with_params(
                 let exit = o.exit_code;
                 (o, exit)
             }
-            Err(CodexErr::Sandbox(SandboxErr::Timeout { output })) => {
-                (output.as_ref().clone(), 124)
-            }
+            Err(CodeErr::Sandbox(SandboxErr::Timeout { output })) => (output.as_ref().clone(), 124),
             Err(e) => {
                 let msg = get_error_message_ui(&e);
                 (
