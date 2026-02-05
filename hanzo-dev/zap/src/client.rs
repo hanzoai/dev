@@ -1,9 +1,7 @@
 //! ZAP client for connecting to ZAP servers and gateways.
 
 use crate::error::{Error, Result};
-use crate::message::{
-    ClientInfo, MessageType, ServerInfo, Tool, ToolCall, ToolResult,
-};
+use crate::message::{ClientInfo, MessageType, ServerInfo, Tool, ToolCall, ToolResult};
 use crate::transport::ZapTransport;
 use serde_json::Value;
 use std::sync::atomic::{AtomicU64, Ordering};

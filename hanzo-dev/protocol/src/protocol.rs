@@ -622,7 +622,7 @@ pub enum EventMsg {
 #[derive(Debug, Clone, Deserialize, Serialize, PartialEq, Eq, TS)]
 #[serde(rename_all = "snake_case")]
 #[ts(rename_all = "snake_case")]
-pub enum CodexErrorInfo {
+pub enum CodeErrorInfo {
     ContextWindowExceeded,
     UsageLimitExceeded,
     HttpConnectionFailed {
@@ -1364,7 +1364,7 @@ pub struct BackgroundEventEvent {
 pub struct StreamErrorEvent {
     pub message: String,
     #[serde(default)]
-    pub codex_error_info: Option<CodexErrorInfo>,
+    pub codex_error_info: Option<CodeErrorInfo>,
     /// Optional details about the underlying stream failure (often the same
     /// human-readable message that is surfaced as the terminal error if retries
     /// are exhausted).

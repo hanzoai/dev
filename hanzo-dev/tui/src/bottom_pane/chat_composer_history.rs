@@ -229,7 +229,7 @@ impl ChatComposerHistory {
                 offset: global_idx,
                 log_id,
             };
-            app_event_tx.send(AppEvent::CodexOp(op));
+            app_event_tx.send(AppEvent::CodeOp(op));
         }
         None
     }

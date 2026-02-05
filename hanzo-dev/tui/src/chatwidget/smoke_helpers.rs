@@ -824,7 +824,7 @@ pub fn assert_has_insert_history(events: &[AppEvent]) {
                 | AppEvent::InsertFinalAnswer { .. }
         ) || matches!(
             event,
-            AppEvent::CodexEvent(ev)
+            AppEvent::CodeEvent(ev)
                 if crate::chatwidget::is_test_mode()
                     && matches!(ev.msg, EventMsg::SessionConfigured(_))
         )
@@ -860,8 +860,8 @@ pub fn assert_has_codex_event(events: &[AppEvent]) {
     assert!(
         events
             .iter()
-            .any(|event| matches!(event, AppEvent::CodexEvent(_))),
-        "expected CodexEvent, got: {events:#?}"
+            .any(|event| matches!(event, AppEvent::CodeEvent(_))),
+        "expected CodeEvent, got: {events:#?}"
     );
 }
 
