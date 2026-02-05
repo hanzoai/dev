@@ -4,7 +4,7 @@ name = "hanzo-linux-sandbox"
 version = { workspace = true }
 
 [[bin]]
-name = "hanzo-linux-sandbox"
+name = "dev-linux-sandbox"
 path = "src/main.rs"
 
 [lib]
