@@ -31,8 +31,8 @@ jobs:
       # Consistent Cargo/rustup homes for caching across all workflows
       CARGO_HOME: ${{ github.workspace }}/.cargo-home
       RUSTUP_HOME: ${{ github.workspace }}/.cargo-home/rustup
-      RUST_WORKSPACE_DIR: code-rs
-      CARGO_TARGET_DIR: ${{ github.workspace }}/code-rs/target
+      RUST_WORKSPACE_DIR: hanzo-dev
+      CARGO_TARGET_DIR: ${{ github.workspace }}/hanzo-dev/target
     strategy:
       fail-fast: false
       matrix:
@@ -79,7 +79,7 @@ jobs:
           prefix-key: v1-preview
           shared-key: preview-${{ matrix.target }}-rust-1.90
           workspaces: |
-            code-rs -> target
+            hanzo-dev -> target
             codex-rs -> target
           cache-targets: true
           cache-workspace-crates: true
