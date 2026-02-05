@@ -1,5 +1,18 @@
 use unicode_segmentation::UnicodeSegmentation;
 
+/// Capitalize the first character of a string.
+pub(crate) fn capitalize_first(input: &str) -> String {
+    let mut chars = input.chars();
+    match chars.next() {
+        Some(first) => {
+            let mut capitalized = first.to_uppercase().collect::<String>();
+            capitalized.push_str(chars.as_str());
+            capitalized
+        }
+        None => String::new(),
+    }
+}
+
 /// Truncate a tool result to fit within the given height and width. If the text is valid JSON, we format it in a
 /// compact way before truncating. This is a best-effort approach that may not work perfectly for text where one
 /// grapheme spans multiple terminal cells.
