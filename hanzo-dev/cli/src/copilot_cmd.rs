@@ -48,7 +48,7 @@ pub enum CopilotCommand {
         #[arg(short, long)]
         file: Option<String>,
         /// Number of suggestions to generate
-        #[arg(short, long, default_value = "3")]
+        #[arg(short = 'n', long, default_value = "3")]
         count: usize,
     },
     /// Review code and provide suggestions
@@ -127,7 +127,7 @@ pub enum CopilotCommand {
         #[arg(short, long)]
         line: usize,
         /// Column number (1-based)
-        #[arg(short, long)]
+        #[arg(short = 'o', long)]
         column: usize,
         /// Context window size
         #[arg(long, default_value = "10")]
