@@ -34,7 +34,7 @@ pub enum CopilotCommand {
         #[arg(short, long)]
         file: Option<String>,
         /// Continue previous conversation
-        #[arg(short, long)]
+        #[arg(short = 'C', long)]
         continue_session: bool,
     },
     /// Get code suggestions
