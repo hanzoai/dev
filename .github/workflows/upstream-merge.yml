@@ -266,7 +266,7 @@ jobs:
         if: steps.check_upstream.outputs.skip != 'true'
         run: |
           echo "CARGO_HOME=${RUNNER_TEMP}/cargo-home" >> "$GITHUB_ENV"
-          echo "CARGO_TARGET_DIR=${GITHUB_WORKSPACE}/code-rs/target" >> "$GITHUB_ENV"
+          echo "CARGO_TARGET_DIR=${GITHUB_WORKSPACE}/hanzo-dev/target" >> "$GITHUB_ENV"
 
       - name: Cache ripgrep binary
         if: steps.check_upstream.outputs.skip != 'true'
