@@ -16,7 +16,12 @@ exec *args:
 
 # Run the CLI version of the file-search crate.
 file-search *args:
-    cargo run --bin code-file-search -- "$@"
+    cargo run --bin codex-file-search -- "$@"
+
+# Build the CLI and run the app-server test client
+app-server-test-client *args:
+    cargo build -p codex-cli
+    cargo run -p codex-app-server-test-client -- --codex-bin ./target/debug/codex "$@"
 
 # format code
 fmt:
@@ -57,4 +62,16 @@ build-for-release:
 
 # Run the MCP server
 mcp-server-run *args:
-    cargo run -p code-mcp-server -- "$@"
+    cargo run -p codex-mcp-server -- "$@"
+
+# Regenerate the json schema for config.toml from the current config types.
+write-config-schema:
+    cargo run -p codex-core --bin codex-write-config-schema
+
+# Regenerate vendored app-server protocol schema artifacts.
+write-app-server-schema *args:
+    cargo run -p codex-app-server-protocol --bin write_schema_fixtures -- "$@"
+
+# Tail logs from the state SQLite database
+log *args:
+    if [ "${1:-}" = "--" ]; then shift; fi; cargo run -p codex-state --bin logs_client -- "$@"

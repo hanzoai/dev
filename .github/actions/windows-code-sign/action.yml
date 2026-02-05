@@ -1,6 +1,5 @@
 name: windows-code-sign
 description: Sign Windows binaries with Azure Trusted Signing.
-
 inputs:
   target:
     description: Target triple for the artifacts to sign.
