@@ -313,10 +313,7 @@ fn small_welcome_lines(version: &str) -> Vec<String> {
 
 fn tiny_welcome_lines(version: &str) -> Vec<String> {
     // Codex-style minimal one-liner
-    vec![
-        format!(">_ hanzo dev ({version})"),
-        String::new(),
-    ]
+    vec![format!(">_ hanzo dev ({version})"), String::new()]
 }
 
 #[allow(dead_code)]

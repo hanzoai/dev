@@ -3,16 +3,16 @@
 //! Provides process execution and system operations.
 
 use crate::error::{Error, Result};
-use crate::message::ToolResult;
-use crate::tools::{process, ToolCategory};
 use crate::executor::{ExecutorContext, ToolExecutor};
+use crate::message::ToolResult;
+use crate::tools::{ToolCategory, process};
 use async_trait::async_trait;
 use serde_json::Value;
 use std::collections::HashMap;
 use std::process::Stdio;
 use std::time::Instant;
 use tokio::process::Command;
-use tokio::time::{timeout, Duration};
+use tokio::time::{Duration, timeout};
 
 /// Computer executor for process and system operations
 pub struct ComputerExecutor {
@@ -39,15 +39,17 @@ impl ComputerExecutor {
         })
     }
 
-    async fn exec_command(&self, args: process::ExecArgs, ctx: &ExecutorContext) -> Result<ToolResult> {
-        let timeout_ms = args.timeout_ms
+    async fn exec_command(
+        &self,
+        args: process::ExecArgs,
+        ctx: &ExecutorContext,
+    ) -> Result<ToolResult> {
+        let timeout_ms = args
+            .timeout_ms
             .or(ctx.timeout_ms)
             .unwrap_or(self.default_timeout_ms);
 
-        let cwd = args.cwd
-            .as_deref()
-            .or(ctx.cwd.as_deref())
-            .unwrap_or(".");
+        let cwd = args.cwd.as_deref().or(ctx.cwd.as_deref()).unwrap_or(".");
 
         let mut cmd = Command::new(&args.command);
         cmd.args(args.args.as_ref().unwrap_or(&vec![]))
@@ -71,15 +73,19 @@ impl ComputerExecutor {
 
         let start = Instant::now();
 
-        let child = cmd.spawn()
+        let child = cmd
+            .spawn()
             .map_err(|e| Error::Tool(format!("Failed to spawn {}: {}", args.command, e)))?;
 
         // Execute with timeout
         let result = timeout(Duration::from_millis(timeout_ms), async {
-            let output = child.wait_with_output().await
+            let output = child
+                .wait_with_output()
+                .await
                 .map_err(|e| Error::Tool(format!("Command failed: {}", e)))?;
             Ok::<_, Error>(output)
-        }).await;
+        })
+        .await;
 
         let duration_ms = start.elapsed().as_millis() as u64;
 
@@ -106,7 +112,10 @@ impl ComputerExecutor {
                 };
 
                 let error_msg = if !output.status.success() {
-                    Some(format!("Command exited with code {}", output.status.code().unwrap_or(-1)))
+                    Some(format!(
+                        "Command exited with code {}",
+                        output.status.code().unwrap_or(-1)
+                    ))
                 } else {
                     None
                 };
@@ -153,7 +162,11 @@ impl ComputerExecutor {
         Self::result(processes, None)
     }
 
-    async fn kill_process(&self, args: process::KillProcessArgs, _ctx: &ExecutorContext) -> Result<ToolResult> {
+    async fn kill_process(
+        &self,
+        args: process::KillProcessArgs,
+        _ctx: &ExecutorContext,
+    ) -> Result<ToolResult> {
         let signal = args.signal.unwrap_or(15); // SIGTERM default
 
         let output = Command::new("kill")
@@ -163,10 +176,7 @@ impl ComputerExecutor {
             .map_err(|e| Error::Tool(format!("Failed to kill process: {}", e)))?;
 
         if output.status.success() {
-            Self::result(
-                serde_json::json!({"pid": args.pid, "signal": signal}),
-                None
-            )
+            Self::result(serde_json::json!({"pid": args.pid, "signal": signal}), None)
         } else {
             Err(Error::Tool(format!(
                 "Failed to kill process {}: {}",
@@ -176,17 +186,26 @@ impl ComputerExecutor {
         }
     }
 
-    async fn get_env(&self, args: process::GetEnvArgs, ctx: &ExecutorContext) -> Result<ToolResult> {
+    async fn get_env(
+        &self,
+        args: process::GetEnvArgs,
+        ctx: &ExecutorContext,
+    ) -> Result<ToolResult> {
         match &args.name {
             Some(name) => {
                 // Get specific env var
-                let value = ctx.env.get(name)
+                let value = ctx
+                    .env
+                    .get(name)
                     .cloned()
                     .or_else(|| std::env::var(name).ok());
 
                 match value {
                     Some(val) => Self::result(val, None),
-                    None => Err(Error::Tool(format!("Environment variable {} not found", name)))
+                    None => Err(Error::Tool(format!(
+                        "Environment variable {} not found",
+                        name
+                    ))),
                 }
             }
             None => {
@@ -213,9 +232,7 @@ impl ToolExecutor for ComputerExecutor {
                     .map_err(|e| Error::Tool(format!("Invalid args: {}", e)))?;
                 self.exec_command(args, ctx).await
             }
-            "list_processes" => {
-                self.list_processes(ctx).await
-            }
+            "list_processes" => self.list_processes(ctx).await,
             "kill_process" => {
                 let args: process::KillProcessArgs = serde_json::from_value(args)
                     .map_err(|e| Error::Tool(format!("Invalid args: {}", e)))?;

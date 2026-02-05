@@ -151,7 +151,11 @@ fn match_chatgpt_account(existing: &StoredAccount, tokens: &TokenData) -> bool {
     account_id_matches && email_matches
 }
 
-fn match_api_key_account(existing: &StoredAccount, api_key: &str, provider_id: Option<&str>) -> bool {
+fn match_api_key_account(
+    existing: &StoredAccount,
+    api_key: &str,
+    provider_id: Option<&str>,
+) -> bool {
     existing.mode == AuthMode::ApiKey
         && existing
             .openai_api_key
@@ -438,7 +442,9 @@ pub fn list_provider_ids(code_home: &Path) -> io::Result<Vec<Option<String>>> {
 }
 
 /// Count accounts per provider.
-pub fn count_accounts_by_provider(code_home: &Path) -> io::Result<std::collections::HashMap<Option<String>, usize>> {
+pub fn count_accounts_by_provider(
+    code_home: &Path,
+) -> io::Result<std::collections::HashMap<Option<String>, usize>> {
     let path = accounts_file_path(code_home);
     let data = read_accounts_file(&path)?;
 

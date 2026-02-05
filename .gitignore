@@ -17,6 +17,9 @@ storybook-static/
 # ignore README for publishing
 codex-cli/README.md
 
+# legacy build artifacts
+code-rs/bin/
+
 # ignore Nix derivation results
 result
 
@@ -31,6 +34,9 @@ result
 # cli tools
 CLAUDE.md
 .claude/
+.hanzo/
+.code/
+.cargo-home/
 AGENTS.override.md
 
 # caches

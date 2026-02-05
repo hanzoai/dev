@@ -126,7 +126,7 @@ pub(crate) fn log_inbound_app_event(event: &AppEvent) {
     }
 
     match event {
-        AppEvent::CodexEvent(ev) => {
+        AppEvent::CodeEvent(ev) => {
             write_record("to_tui", "code_event", ev);
         }
         AppEvent::KeyEvent(k) => {

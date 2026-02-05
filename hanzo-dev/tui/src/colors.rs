@@ -139,9 +139,7 @@ pub(crate) fn input_background() -> Color {
             if is_dark {
                 // Lighten by blending toward grey (#303030)
                 let target = 48u8;
-                let blend = |c: u8| -> u8 {
-                    ((c as u16 + target as u16 * 2) / 3) as u8
-                };
+                let blend = |c: u8| -> u8 { ((c as u16 + target as u16 * 2) / 3) as u8 };
                 quantize_color_for_palette(Color::Rgb(blend(r), blend(g), blend(b)))
             } else {
                 // Darken light backgrounds slightly

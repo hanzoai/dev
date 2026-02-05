@@ -25,7 +25,7 @@ use crate::client_common::Prompt;
 use crate::client_common::ResponseEvent;
 use crate::client_common::ResponseStream;
 use crate::debug_logger::DebugLogger;
-use crate::error::CodexErr;
+use crate::error::CodeErr;
 use crate::error::Result;
 use crate::error::RetryLimitReachedError;
 use crate::error::UnexpectedResponseError;
@@ -52,7 +52,7 @@ pub(crate) async fn stream_chat_completions(
     log_tag: Option<&str>,
 ) -> Result<ResponseStream> {
     if prompt.output_schema.is_some() {
-        return Err(CodexErr::UnsupportedOperation(
+        return Err(CodeErr::UnsupportedOperation(
             "output_schema is not supported for Chat Completions API".to_string(),
         ));
     }
@@ -386,7 +386,7 @@ pub(crate) async fn stream_chat_completions(
                     );
                 }
                 let (tx_event, rx_event) = mpsc::channel::<Result<ResponseEvent>>(1600);
-                let stream = resp.bytes_stream().map_err(CodexErr::Reqwest);
+                let stream = resp.bytes_stream().map_err(CodeErr::Reqwest);
                 let debug_logger_clone = Arc::clone(debug_logger);
                 let request_id_clone = request_id.clone();
                 tokio::spawn(process_chat_sse(
@@ -414,7 +414,7 @@ pub(crate) async fn stream_chat_completions(
                         );
                         let _ = logger.end_request_log(&request_id);
                     }
-                    return Err(CodexErr::UnexpectedStatus(UnexpectedResponseError {
+                    return Err(CodeErr::UnexpectedStatus(UnexpectedResponseError {
                         status,
                         body,
                         request_id: None,
@@ -422,7 +422,7 @@ pub(crate) async fn stream_chat_completions(
                 }
 
                 if attempt > max_retries {
-                    return Err(CodexErr::RetryLimit(RetryLimitReachedError {
+                    return Err(CodeErr::RetryLimit(RetryLimitReachedError {
                         status,
                         request_id: None,
                         retryable: status.is_server_error()
@@ -456,7 +456,7 @@ pub(crate) async fn stream_chat_completions(
                     }
                     if is_connectivity {
                         let req_id = (!request_id.is_empty()).then(|| request_id.clone());
-                        return Err(CodexErr::Stream(
+                        return Err(CodeErr::Stream(
                             format!("[transport] network unavailable: {e}"),
                             None,
                             req_id,
@@ -611,7 +611,7 @@ async fn process_chat_sse<S>(
             Ok(Some(Ok(ev))) => ev,
             Ok(Some(Err(e))) => {
                 let _ = tx_event
-                    .send(Err(CodexErr::Stream(
+                    .send(Err(CodeErr::Stream(
                         format!("[transport] {e}"),
                         None,
                         Some(request_id.clone()),
@@ -645,7 +645,7 @@ async fn process_chat_sse<S>(
             }
             Err(_) => {
                 let _ = tx_event
-                    .send(Err(CodexErr::Stream(
+                    .send(Err(CodeErr::Stream(
                         "[idle] timeout waiting for SSE".into(),
                         None,
                         Some(request_id.clone()),

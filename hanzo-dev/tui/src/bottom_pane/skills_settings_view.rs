@@ -523,7 +523,7 @@ impl SkillsSettingsView {
         self.skills = updated;
         self.status = Some(("Saved.".to_string(), Style::default().fg(colors::success())));
 
-        self.app_event_tx.send(AppEvent::CodexOp(Op::ListSkills));
+        self.app_event_tx.send(AppEvent::CodeOp(Op::ListSkills));
     }
 
     fn delete_current(&mut self) {
@@ -573,7 +573,7 @@ impl SkillsSettingsView {
             Style::default().fg(colors::success()),
         ));
 
-        self.app_event_tx.send(AppEvent::CodexOp(Op::ListSkills));
+        self.app_event_tx.send(AppEvent::CodeOp(Op::ListSkills));
     }
 }
 

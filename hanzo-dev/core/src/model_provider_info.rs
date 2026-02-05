@@ -7,7 +7,7 @@
 //!      key. These override or extend the defaults at runtime.
 
 use crate::CodexAuth;
-use crate::error::CodexErr;
+use crate::error::CodeErr;
 use crate::error::EnvVarError;
 use hanzo_app_server_protocol::AuthMode;
 use serde::Deserialize;
@@ -238,13 +238,13 @@ impl ModelProviderInfo {
             self.wire_api,
             WireApi::Responses | WireApi::ResponsesWebsocket
         ) {
-            return Err(CodexErr::UnsupportedOperation(
+            return Err(CodeErr::UnsupportedOperation(
                 "Compaction endpoint requires Responses API providers".to_string(),
             ));
         }
         let effective_auth = self.effective_auth(auth)?;
         let url = self.get_compact_url(&effective_auth).ok_or_else(|| {
-            CodexErr::UnsupportedOperation(
+            CodeErr::UnsupportedOperation(
                 "Compaction endpoint requires Responses API providers".to_string(),
             )
         })?;
@@ -434,7 +434,7 @@ impl ModelProviderInfo {
                         }
                     })
                     .map_err(|_| {
-                        crate::error::CodexErr::EnvVar(EnvVarError {
+                        crate::error::CodeErr::EnvVar(EnvVarError {
                             var: env_key.clone(),
                             instructions: self.env_key_instructions.clone(),
                         })
@@ -556,7 +556,9 @@ pub fn built_in_model_providers() -> HashMap<String, ModelProviderInfo> {
                     .filter(|v| !v.trim().is_empty())
                     .or_else(|| Some(format!("http://localhost:{DEFAULT_OLLAMA_PORT}/v1"))),
                 env_key: None,
-                env_key_instructions: Some("Ollama runs locally - no API key needed. Start with: ollama serve".into()),
+                env_key_instructions: Some(
+                    "Ollama runs locally - no API key needed. Start with: ollama serve".into(),
+                ),
                 experimental_bearer_token: None,
                 wire_api: WireApi::Chat,
                 query_params: None,
@@ -579,7 +581,10 @@ pub fn built_in_model_providers() -> HashMap<String, ModelProviderInfo> {
                     .filter(|v| !v.trim().is_empty())
                     .or_else(|| Some("http://localhost:1234/v1".into())),
                 env_key: None,
-                env_key_instructions: Some("LM Studio runs locally - no API key needed. Enable local server in LM Studio.".into()),
+                env_key_instructions: Some(
+                    "LM Studio runs locally - no API key needed. Enable local server in LM Studio."
+                        .into(),
+                ),
                 experimental_bearer_token: None,
                 wire_api: WireApi::Chat,
                 query_params: None,
@@ -602,7 +607,9 @@ pub fn built_in_model_providers() -> HashMap<String, ModelProviderInfo> {
                     .filter(|v| !v.trim().is_empty())
                     .or_else(|| Some("http://localhost:8787/v1".into())),
                 env_key: Some("HANZO_API_KEY".into()),
-                env_key_instructions: Some("Get your Hanzo API key at https://hanzo.ai or run a local Hanzo Node".into()),
+                env_key_instructions: Some(
+                    "Get your Hanzo API key at https://hanzo.ai or run a local Hanzo Node".into(),
+                ),
                 experimental_bearer_token: None,
                 wire_api: WireApi::Chat,
                 query_params: None,
@@ -622,7 +629,9 @@ pub fn built_in_model_providers() -> HashMap<String, ModelProviderInfo> {
                 name: "OpenRouter".into(),
                 base_url: Some("https://openrouter.ai/api/v1".into()),
                 env_key: Some("OPENROUTER_API_KEY".into()),
-                env_key_instructions: Some("Get your OpenRouter API key at https://openrouter.ai/keys".into()),
+                env_key_instructions: Some(
+                    "Get your OpenRouter API key at https://openrouter.ai/keys".into(),
+                ),
                 experimental_bearer_token: None,
                 wire_api: WireApi::Chat,
                 query_params: None,
@@ -649,7 +658,9 @@ pub fn built_in_model_providers() -> HashMap<String, ModelProviderInfo> {
                 name: "Groq".into(),
                 base_url: Some("https://api.groq.com/openai/v1".into()),
                 env_key: Some("GROQ_API_KEY".into()),
-                env_key_instructions: Some("Get your Groq API key at https://console.groq.com/keys".into()),
+                env_key_instructions: Some(
+                    "Get your Groq API key at https://console.groq.com/keys".into(),
+                ),
                 experimental_bearer_token: None,
                 wire_api: WireApi::Chat,
                 query_params: None,
@@ -669,7 +680,10 @@ pub fn built_in_model_providers() -> HashMap<String, ModelProviderInfo> {
                 name: "Together.ai".into(),
                 base_url: Some("https://api.together.xyz/v1".into()),
                 env_key: Some("TOGETHER_API_KEY".into()),
-                env_key_instructions: Some("Get your Together API key at https://api.together.xyz/settings/api-keys".into()),
+                env_key_instructions: Some(
+                    "Get your Together API key at https://api.together.xyz/settings/api-keys"
+                        .into(),
+                ),
                 experimental_bearer_token: None,
                 wire_api: WireApi::Chat,
                 query_params: None,
@@ -689,7 +703,10 @@ pub fn built_in_model_providers() -> HashMap<String, ModelProviderInfo> {
                 name: "Anthropic".into(),
                 base_url: Some("https://api.anthropic.com/v1".into()),
                 env_key: Some("ANTHROPIC_API_KEY".into()),
-                env_key_instructions: Some("Get your Anthropic API key at https://console.anthropic.com/settings/keys".into()),
+                env_key_instructions: Some(
+                    "Get your Anthropic API key at https://console.anthropic.com/settings/keys"
+                        .into(),
+                ),
                 experimental_bearer_token: None,
                 wire_api: WireApi::Chat,
                 query_params: None,
@@ -713,7 +730,9 @@ pub fn built_in_model_providers() -> HashMap<String, ModelProviderInfo> {
                 name: "Fireworks AI".into(),
                 base_url: Some("https://api.fireworks.ai/inference/v1".into()),
                 env_key: Some("FIREWORKS_API_KEY".into()),
-                env_key_instructions: Some("Get your Fireworks API key at https://fireworks.ai/account/api-keys".into()),
+                env_key_instructions: Some(
+                    "Get your Fireworks API key at https://fireworks.ai/account/api-keys".into(),
+                ),
                 experimental_bearer_token: None,
                 wire_api: WireApi::Chat,
                 query_params: None,
@@ -733,7 +752,9 @@ pub fn built_in_model_providers() -> HashMap<String, ModelProviderInfo> {
                 name: "DeepSeek".into(),
                 base_url: Some("https://api.deepseek.com/v1".into()),
                 env_key: Some("DEEPSEEK_API_KEY".into()),
-                env_key_instructions: Some("Get your DeepSeek API key at https://platform.deepseek.com/api_keys".into()),
+                env_key_instructions: Some(
+                    "Get your DeepSeek API key at https://platform.deepseek.com/api_keys".into(),
+                ),
                 experimental_bearer_token: None,
                 wire_api: WireApi::Chat,
                 query_params: None,

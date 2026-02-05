@@ -596,7 +596,7 @@ impl Session {
         let output_stderr;
         let borrowed: &ExecToolCallOutput = match &result {
             Ok(output) => output,
-            Err(CodexErr::Sandbox(SandboxErr::Timeout { output })) => output,
+            Err(CodeErr::Sandbox(SandboxErr::Timeout { output })) => output,
             Err(e) => {
                 output_stderr = ExecToolCallOutput {
                     exit_code: -1,

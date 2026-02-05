@@ -8,7 +8,7 @@ use super::compact::response_input_from_core_items;
 use super::compact::sanitize_items_for_compact;
 use super::compact::send_compaction_checkpoint_warning;
 use crate::Prompt;
-use crate::error::CodexErr;
+use crate::error::CodeErr;
 use crate::error::Result as CodexResult;
 use crate::error::RetryAfter;
 use crate::protocol::AgentMessageEvent;
@@ -126,7 +126,7 @@ async fn run_remote_compact_task_inner(
 
                 return Err(err);
             }
-            Err(CodexErr::UsageLimitReached(limit_err)) => {
+            Err(CodeErr::UsageLimitReached(limit_err)) => {
                 let now = chrono::Utc::now();
                 let retry_after = limit_err
                     .retry_after(now)

@@ -92,15 +92,17 @@ pub fn is_path_writable(path: &Path, sandbox: &SandboxPolicy, cwd: &Path) -> boo
 pub fn operation_level(tool_name: &str) -> PermissionLevel {
     match tool_name {
         // Read operations
-        "read_file" | "glob" | "grep" | "list_dir" | "git_status" | "git_diff"
-        | "git_log" | "git_blame" | "list_processes" | "get_env" | "fetch_url"
-        | "port_check" | "dns_lookup" | "cache_lookup" => PermissionLevel::Read,
+        "read_file" | "glob" | "grep" | "list_dir" | "git_status" | "git_diff" | "git_log"
+        | "git_blame" | "list_processes" | "get_env" | "fetch_url" | "port_check"
+        | "dns_lookup" | "cache_lookup" => PermissionLevel::Read,
 
         // Write operations
         "write_file" | "edit_file" | "git_commit" | "git_branch" => PermissionLevel::Write,
 
         // Execute operations
-        "exec" | "build" | "test" | "lint" | "typecheck" | "http_request" => PermissionLevel::Execute,
+        "exec" | "build" | "test" | "lint" | "typecheck" | "http_request" => {
+            PermissionLevel::Execute
+        }
 
         // Admin operations
         "kill_process" => PermissionLevel::Admin,
@@ -137,7 +139,15 @@ mod tests {
             allow_git_writes: true,
         };
 
-        assert!(is_path_writable(&PathBuf::from("/project/src/main.rs"), &sandbox, &cwd));
-        assert!(!is_path_writable(&PathBuf::from("/etc/passwd"), &sandbox, &cwd));
+        assert!(is_path_writable(
+            &PathBuf::from("/project/src/main.rs"),
+            &sandbox,
+            &cwd
+        ));
+        assert!(!is_path_writable(
+            &PathBuf::from("/etc/passwd"),
+            &sandbox,
+            &cwd
+        ));
     }
 }

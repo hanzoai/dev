@@ -1,6 +1,6 @@
 #![cfg(target_os = "linux")]
 use hanzo_core::config_types::ShellEnvironmentPolicy;
-use hanzo_core::error::CodexErr;
+use hanzo_core::error::CodeErr;
 use hanzo_core::error::SandboxErr;
 use hanzo_core::exec::ExecParams;
 use hanzo_core::exec::SandboxType;
@@ -164,7 +164,7 @@ async fn assert_network_blocked(cmd: &[&str]) {
 
     let output = match result {
         Ok(output) => output,
-        Err(CodexErr::Sandbox(SandboxErr::Denied { output })) => *output,
+        Err(CodeErr::Sandbox(SandboxErr::Denied { output })) => *output,
         _ => {
             panic!("expected sandbox denied error, got: {result:?}");
         }

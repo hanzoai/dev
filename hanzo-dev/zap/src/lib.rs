@@ -98,10 +98,10 @@ pub use buffer::{Buffer, BufferPool};
 pub use client::Client;
 pub use config::{Auth, GatewayConfig, McpServerConfig, Transport};
 pub use error::{Error, Result};
-pub use executor::{default_dispatcher, ExecutorContext, ToolDispatcher, ToolExecutor};
+pub use executor::{ExecutorContext, ToolDispatcher, ToolExecutor, default_dispatcher};
 pub use gateway::Gateway;
 pub use message::{Message, MessageType, Tool, ToolCall, ToolResult};
-pub use tools::{default_tools, ToolCategory, ToolDef};
+pub use tools::{ToolCategory, ToolDef, default_tools};
 pub use transport::ZapTransport;
 pub use wire::{Reader, Writer};
 

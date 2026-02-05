@@ -3,9 +3,9 @@
 //! Provides HTTP requests, SSH, and network operations.
 
 use crate::error::{Error, Result};
-use crate::message::ToolResult;
-use crate::tools::{network, ToolCategory};
 use crate::executor::{ExecutorContext, ToolExecutor};
+use crate::message::ToolResult;
+use crate::tools::{ToolCategory, network};
 use async_trait::async_trait;
 use serde_json::Value;
 use std::collections::HashMap;
@@ -36,7 +36,11 @@ impl NetworkExecutor {
         })
     }
 
-    async fn http_request(&self, args: network::HttpRequestArgs, _ctx: &ExecutorContext) -> Result<ToolResult> {
+    async fn http_request(
+        &self,
+        args: network::HttpRequestArgs,
+        _ctx: &ExecutorContext,
+    ) -> Result<ToolResult> {
         let method = match args.method.to_uppercase().as_str() {
             "GET" => reqwest::Method::GET,
             "POST" => reqwest::Method::POST,
@@ -68,7 +72,9 @@ impl NetworkExecutor {
         }
 
         let start = Instant::now();
-        let response = request.send().await
+        let response = request
+            .send()
+            .await
             .map_err(|e| Error::Tool(format!("HTTP request failed: {}", e)))?;
 
         let duration_ms = start.elapsed().as_millis() as u64;
@@ -79,7 +85,9 @@ impl NetworkExecutor {
             .map(|(k, v)| (k.to_string(), v.to_str().unwrap_or("").to_string()))
             .collect();
 
-        let body = response.text().await
+        let body = response
+            .text()
+            .await
             .map_err(|e| Error::Tool(format!("Failed to read response body: {}", e)))?;
 
         let result = network::HttpResponse {
@@ -98,7 +106,11 @@ impl NetworkExecutor {
         Self::result(result, error)
     }
 
-    async fn fetch_url(&self, args: network::FetchUrlArgs, _ctx: &ExecutorContext) -> Result<ToolResult> {
+    async fn fetch_url(
+        &self,
+        args: network::FetchUrlArgs,
+        _ctx: &ExecutorContext,
+    ) -> Result<ToolResult> {
         let start = Instant::now();
 
         let mut request = self.client.get(&args.url);
@@ -108,18 +120,24 @@ impl NetworkExecutor {
             }
         }
 
-        let response = request.send().await
+        let response = request
+            .send()
+            .await
             .map_err(|e| Error::Tool(format!("Fetch failed: {}", e)))?;
 
         let duration_ms = start.elapsed().as_millis() as u64;
         let status = response.status().as_u16();
 
         let content = if args.binary.unwrap_or(false) {
-            let bytes = response.bytes().await
+            let bytes = response
+                .bytes()
+                .await
                 .map_err(|e| Error::Tool(format!("Failed to read response: {}", e)))?;
             base64::Engine::encode(&base64::engine::general_purpose::STANDARD, &bytes)
         } else {
-            response.text().await
+            response
+                .text()
+                .await
                 .map_err(|e| Error::Tool(format!("Failed to read response: {}", e)))?
         };
 
@@ -139,17 +157,21 @@ impl NetworkExecutor {
         Self::result(result, error)
     }
 
-    async fn port_check(&self, args: network::PortCheckArgs, _ctx: &ExecutorContext) -> Result<ToolResult> {
+    async fn port_check(
+        &self,
+        args: network::PortCheckArgs,
+        _ctx: &ExecutorContext,
+    ) -> Result<ToolResult> {
         use tokio::net::TcpStream;
-        use tokio::time::{timeout, Duration};
+        use tokio::time::{Duration, timeout};
 
         let timeout_ms = args.timeout_ms.unwrap_or(5000);
         let addr = format!("{}:{}", args.host, args.port);
 
-        let is_open = timeout(
-            Duration::from_millis(timeout_ms),
-            TcpStream::connect(&addr)
-        ).await.map(|r| r.is_ok()).unwrap_or(false);
+        let is_open = timeout(Duration::from_millis(timeout_ms), TcpStream::connect(&addr))
+            .await
+            .map(|r| r.is_ok())
+            .unwrap_or(false);
 
         let result = network::PortCheckResult {
             host: args.host,
@@ -160,11 +182,16 @@ impl NetworkExecutor {
         Self::result(result, None)
     }
 
-    async fn dns_lookup(&self, args: network::DnsLookupArgs, _ctx: &ExecutorContext) -> Result<ToolResult> {
+    async fn dns_lookup(
+        &self,
+        args: network::DnsLookupArgs,
+        _ctx: &ExecutorContext,
+    ) -> Result<ToolResult> {
         use tokio::net::lookup_host;
 
         let host_with_port = format!("{}:0", args.host);
-        let addrs: Vec<String> = lookup_host(&host_with_port).await
+        let addrs: Vec<String> = lookup_host(&host_with_port)
+            .await
             .map_err(|e| Error::Tool(format!("DNS lookup failed: {}", e)))?
             .map(|addr| addr.ip().to_string())
             .collect();
