@@ -38175,8 +38175,8 @@ impl WidgetRef for &ChatWidget<'_> {
             .last_bottom_reserved_rows
             .set(bottom_pane_area.height);
 
-        // Render status bar and HUD only in full TUI mode
-        if !self.standard_terminal_mode {
+        // Render status bar and HUD only in full TUI mode when enabled
+        if !self.standard_terminal_mode && self.config.tui.show_status_bar {
             self.render_status_bar(status_bar_area, buf);
         }
 
