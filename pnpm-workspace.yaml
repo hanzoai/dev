@@ -1,10 +1,12 @@
 packages:
-  - docs
+  - codex-cli
+  - codex-rs/responses-api-proxy/npm
   - sdk/typescript
   - shell-tool-mcp
-  - codex-cli
-  - dev-cli
-  - hanzo-node
 
 ignoredBuiltDependencies:
   - esbuild
+
+minimumReleaseAge: 10080
+
+blockExoticSubdeps: true

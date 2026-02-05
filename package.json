@@ -1,19 +1,13 @@
 {
-  "name": "code-monorepo",
+  "name": "codex-monorepo",
   "private": true,
   "description": "Tools for repo-wide maintenance.",
   "scripts": {
-    "format": "prettier --check *.json *.md .github/workflows/*.yml **/*.js",
-    "format:fix": "prettier --write *.json *.md .github/workflows/*.yml **/*.js",
-    "build": "cd code-rs && cargo build --release --bin code --bin code-tui --bin code-exec",
-    "build:dev": "cd code-rs && cargo build --bin code --bin code-tui --bin code-exec",
-    "build:quick": "cd code-rs && cargo build --release --bin code",
-    "test:local": "if [ -d code-rs ]; then (cd code-rs && cargo run -p code-cli -- --version); elif [ -d codex-cli ]; then (cd codex-cli && npm link && codex --version); else echo 'no CLI workspace found' >&2; exit 1; fi",
-    "fix": "cargo fmt && cargo fix --allow-dirty && cargo clippy --fix --allow-dirty"
+    "format": "prettier --check *.json *.md docs/*.md .github/workflows/*.yml **/*.js",
+    "format:fix": "prettier --write *.json *.md docs/*.md .github/workflows/*.yml **/*.js"
   },
   "devDependencies": {
-    "prettier": "^3.6.2",
-    "typescript": "^5.9.2"
+    "prettier": "^3.5.3"
   },
   "resolutions": {
     "braces": "^3.0.3",
@@ -25,7 +19,7 @@
   },
   "engines": {
     "node": ">=22",
-    "pnpm": ">=9.0.0"
+    "pnpm": ">=10.28.0"
   },
-  "packageManager": "pnpm@10.8.1"
+  "packageManager": "pnpm@10.28.2+sha512.41872f037ad22f7348e3b1debbaf7e867cfd448f2726d9cf74c08f19507c31d2c8e7a11525b983febc2df640b5438dee6023ebb1f84ed43cc2d654d2bc326264"
 }
