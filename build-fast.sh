@@ -110,7 +110,7 @@ resolve_bin_path() {
   fi
 
   TARGET_DIR_ABS="${target_root}"
-  # code-rs binary is named "dev", codex-rs binary matches crate prefix
+  # hanzo-dev binary is named "dev", codex-rs binary matches crate prefix
   if [ "${CRATE_PREFIX}" = "code" ]; then
     BIN_CARGO_FILENAME="dev"
     BIN_FILENAME="dev"
@@ -200,7 +200,7 @@ fi
 
 REPO_ROOT="${SCRIPT_DIR}"
 
-# Guard against regressions where a code-rs crate references ../codex-rs.
+# Guard against regressions where a hanzo-dev crate references ../codex-rs.
 if [ "${BUILD_FAST_SKIP_CODEX_GUARD:-0}" != "1" ]; then
   echo "Running codex path dependency guard..."
   (
@@ -243,8 +243,8 @@ case "$WORKSPACE_CHOICE" in
     WORKSPACE_DIR="codex-rs"
     CRATE_PREFIX="codex"
     ;;
-  code|code-rs)
-    WORKSPACE_DIR="code-rs"
+  code|hanzo-dev)
+    WORKSPACE_DIR="hanzo-dev"
     CRATE_PREFIX="code"
     ;;
   *)
@@ -327,7 +327,7 @@ if [ -n "${BUILD_FAST_BINS:-}" ]; then
   done
 fi
 if [ "${#TARGET_BINS[@]}" -eq 0 ]; then
-  # code-rs binary is named "dev", codex-rs binary matches prefix
+  # hanzo-dev binary is named "dev", codex-rs binary matches prefix
   if [ "${CRATE_PREFIX}" = "code" ]; then
     TARGET_BINS=("dev")
   else
@@ -335,7 +335,7 @@ if [ "${#TARGET_BINS[@]}" -eq 0 ]; then
   fi
 fi
 PRIMARY_PRESENT=0
-# For code-rs, primary bin is "dev"; for codex-rs, it's the crate prefix
+# For hanzo-dev, primary bin is "dev"; for codex-rs, it's the crate prefix
 PRIMARY_BIN_NAME="${CRATE_PREFIX}"
 if [ "${CRATE_PREFIX}" = "code" ]; then
   PRIMARY_BIN_NAME="dev"
@@ -695,7 +695,7 @@ if [ $? -eq 0 ]; then
 
     SYMLINK_PREFIXES=("${CRATE_PREFIX}")
     if [ "${CRATE_PREFIX}" = "code" ]; then
-      # code-rs binary is named "dev", add symlinks for both
+      # hanzo-dev binary is named "dev", add symlinks for both
       SYMLINK_PREFIXES=("dev" "code" "coder")
     fi
 
