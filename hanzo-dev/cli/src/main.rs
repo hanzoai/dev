@@ -1729,17 +1729,13 @@ mod tests {
     use hanzo_protocol::protocol::UserMessageEvent;
 
     #[test]
-    fn bash_completion_uses_code_command_name() {
+    fn bash_completion_uses_dev_command_name() {
         let mut buf = Vec::new();
         write_completion(Shell::Bash, &mut buf);
         let script = String::from_utf8(buf).expect("completion output should be valid UTF-8");
         assert!(
-            script.contains("_code()"),
-            "expected bash completion function to be named _code"
-        );
-        assert!(
-            !script.contains("_dev()"),
-            "bash completion output should not use legacy dev prefix"
+            script.contains("_dev()"),
+            "expected bash completion function to be named _dev"
         );
     }
 
