@@ -152,12 +152,12 @@ pub fn browser_dark_theme() -> CardThemeDefinition {
     CardThemeDefinition {
         name: "Browser Dark",
         theme: CardTheme {
-            gradient: gradient((1, 13, 33), (1, 23, 60), -0.05),
+            gradient: gradient((6, 7, 10), (12, 14, 18), -0.05),
             palette: palette(
-                (110, 150, 210),
-                (230, 242, 255),
-                (244, 248, 255),
-                (180, 205, 236),
+                (94, 106, 124),
+                (232, 236, 240),
+                (244, 246, 248),
+                (168, 176, 188),
             ),
             reveal: None,
         },
@@ -271,11 +271,35 @@ pub fn auto_drive_theme_catalog() -> Vec<CardThemeDefinition> {
 }
 
 pub fn agent_read_only_dark_theme() -> CardThemeDefinition {
-    agent_green_dark_theme()
+    CardThemeDefinition {
+        name: "Agent Read Only Dark",
+        theme: CardTheme {
+            gradient: gradient((6, 7, 9), (14, 15, 18), -0.05),
+            palette: palette(
+                (94, 104, 116),
+                (232, 236, 240),
+                (244, 246, 248),
+                (168, 176, 188),
+            ),
+            reveal: None,
+        },
+    }
 }
 
 pub fn agent_read_only_light_theme() -> CardThemeDefinition {
-    agent_green_light_theme()
+    CardThemeDefinition {
+        name: "Agent Read Only Light",
+        theme: CardTheme {
+            gradient: gradient((240, 242, 244), (252, 252, 253), -0.05),
+            palette: palette(
+                (182, 190, 198),
+                (62, 70, 78),
+                (44, 50, 56),
+                (112, 120, 130),
+            ),
+            reveal: None,
+        },
+    }
 }
 
 pub fn agent_write_dark_theme() -> CardThemeDefinition {

@@ -22,6 +22,7 @@ use image::ImageReader;
 use ratatui::buffer::Buffer;
 use ratatui::layout::Rect;
 use ratatui::prelude::Style;
+use ratatui::style::Color;
 use ratatui::text::Line;
 use ratatui::text::Text;
 use ratatui::widgets::Paragraph;
@@ -32,6 +33,7 @@ use ratatui_image::Image;
 use ratatui_image::Resize;
 use ratatui_image::picker::Picker;
 use ratatui_image::picker::ProtocolType;
+use crate::util::buffer::fill_rect;
 use std::cell::RefCell;
 use std::path::Path;
 use std::path::PathBuf;
@@ -1247,6 +1249,13 @@ impl BrowserSessionCell {
             height: rows_to_copy,
         };
 
+        fill_rect(
+            buf,
+            placeholder_area,
+            Some(' '),
+            Style::default().bg(Color::Black),
+        );
+
         if !path.exists() {
             self.render_screenshot_placeholder(path, placeholder_area, buf);
             return;
@@ -1337,7 +1346,8 @@ impl BrowserSessionCell {
         let block = Block::default()
             .borders(Borders::ALL)
             .border_style(Style::default().fg(colors::info()))
-            .title("Browser");
+            .title("Browser")
+            .style(Style::default().bg(Color::Black));
         let inner = block.inner(area);
         block.render(area, buf);
         Paragraph::new(placeholder_text)
