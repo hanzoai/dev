@@ -689,6 +689,11 @@ pub struct Tui {
     /// Run a background `/review` after turns that modify code.
     #[serde(default = "default_true")]
     pub auto_review_enabled: bool,
+
+    /// Show the status bar at the top with model and directory info.
+    /// Defaults to `false` to match minimal Codex-style layout.
+    #[serde(default)]
+    pub show_status_bar: bool,
 }
 
 // Important: Provide a manual Default so that when no config file exists and we
@@ -710,6 +715,7 @@ impl Default for Tui {
             alternate_screen: true,
             review_auto_resolve: true,
             auto_review_enabled: true,
+            show_status_bar: false,
         }
     }
 }

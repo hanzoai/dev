@@ -20,7 +20,7 @@ use tokio::process::Child;
 use tokio::time::Sleep;
 
 use crate::codex::Session;
-use crate::error::CodexErr;
+use crate::error::CodeErr;
 use crate::error::Result;
 use crate::error::SandboxErr;
 use crate::landlock::spawn_command_under_linux_sandbox;
@@ -147,7 +147,7 @@ pub async fn process_exec_tool_call(
 
     let timeout_duration = params.maybe_timeout_duration();
 
-    let raw_output_result: std::result::Result<RawExecToolCallOutput, CodexErr> = match sandbox_type
+    let raw_output_result: std::result::Result<RawExecToolCallOutput, CodeErr> = match sandbox_type
     {
         SandboxType::None => exec(params, sandbox_policy, stdout_stream.clone()).await,
         SandboxType::MacosSeatbelt => {
@@ -178,7 +178,7 @@ pub async fn process_exec_tool_call(
 
             let code_linux_sandbox_exe = code_linux_sandbox_exe
                 .as_ref()
-                .ok_or(CodexErr::LandlockSandboxExecutableNotProvided)?;
+                .ok_or(CodeErr::LandlockSandboxExecutableNotProvided)?;
             let child = spawn_command_under_linux_sandbox(
                 code_linux_sandbox_exe,
                 command,
@@ -231,23 +231,23 @@ pub async fn process_exec_tool_call(
             };
 
             if timed_out {
-                return Err(CodexErr::Sandbox(SandboxErr::Timeout {
+                return Err(CodeErr::Sandbox(SandboxErr::Timeout {
                     output: Box::new(exec_output),
                 }));
             }
 
             if let Some(signal) = exit_signal {
                 if raw_output.oom_killed {
-                    return Err(CodexErr::Sandbox(SandboxErr::OutOfMemory {
+                    return Err(CodeErr::Sandbox(SandboxErr::OutOfMemory {
                         output: Box::new(exec_output),
                         memory_max_bytes: raw_output.cgroup_memory_max_bytes,
                     }));
                 }
-                return Err(CodexErr::Sandbox(SandboxErr::Signal(signal)));
+                return Err(CodeErr::Sandbox(SandboxErr::Signal(signal)));
             }
 
             if exit_code != 0 && is_likely_sandbox_denied(sandbox_type, exit_code) {
-                return Err(CodexErr::Sandbox(SandboxErr::Denied {
+                return Err(CodeErr::Sandbox(SandboxErr::Denied {
                     output: Box::new(exec_output),
                 }));
             }
@@ -336,7 +336,7 @@ async fn exec(
     } = params;
 
     let (program, args) = command.split_first().ok_or_else(|| {
-        CodexErr::Io(io::Error::new(
+        CodeErr::Io(io::Error::new(
             io::ErrorKind::InvalidInput,
             "command args are empty",
         ))
@@ -369,12 +369,12 @@ async fn consume_truncated_output(
     let mut killer = KillOnDrop::new(child);
 
     let stdout_reader = killer.as_mut().stdout.take().ok_or_else(|| {
-        CodexErr::Io(io::Error::other(
+        CodeErr::Io(io::Error::other(
             "stdout pipe was unexpectedly not available",
         ))
     })?;
     let stderr_reader = killer.as_mut().stderr.take().ok_or_else(|| {
-        CodexErr::Io(io::Error::other(
+        CodeErr::Io(io::Error::other(
             "stderr pipe was unexpectedly not available",
         ))
     })?;
@@ -560,7 +560,7 @@ async fn consume_truncated_output(
             truncated_before_bytes: None,
         }
     } else {
-        combined_handle.await.map_err(CodexErr::from)?
+        combined_handle.await.map_err(CodeErr::from)?
     };
 
     let (oom_killed, cgroup_memory_max_bytes) = {

@@ -132,7 +132,7 @@ impl OtelEventManager {
     ) {
         tracing::event!(
             tracing::Level::INFO,
-            event.name = "codex.conversation_starts",
+            event.name = "dev.conversation_starts",
             event.timestamp = %timestamp(),
             conversation.id = %self.metadata.conversation_id,
             app.version = %self.metadata.app_version,
@@ -170,7 +170,7 @@ impl OtelEventManager {
 
         tracing::event!(
             tracing::Level::INFO,
-            event.name = "codex.api_request",
+            event.name = "dev.api_request",
             event.timestamp = %timestamp(),
             conversation.id = %self.metadata.conversation_id,
             app.version = %self.metadata.app_version,
@@ -246,7 +246,7 @@ impl OtelEventManager {
     fn sse_event(&self, kind: &str, duration: Duration) {
         tracing::event!(
             tracing::Level::INFO,
-            event.name = "codex.sse_event",
+            event.name = "dev.sse_event",
             event.timestamp = %timestamp(),
             event.kind = %kind,
             conversation.id = %self.metadata.conversation_id,
@@ -267,7 +267,7 @@ impl OtelEventManager {
         match kind {
             Some(kind) => tracing::event!(
                 tracing::Level::INFO,
-                event.name = "codex.sse_event",
+                event.name = "dev.sse_event",
                 event.timestamp = %timestamp(),
                 event.kind = %kind,
                 conversation.id = %self.metadata.conversation_id,
@@ -282,7 +282,7 @@ impl OtelEventManager {
             ),
             None => tracing::event!(
                 tracing::Level::INFO,
-                event.name = "codex.sse_event",
+                event.name = "dev.sse_event",
                 event.timestamp = %timestamp(),
                 conversation.id = %self.metadata.conversation_id,
                 app.version = %self.metadata.app_version,
@@ -303,7 +303,7 @@ impl OtelEventManager {
     {
         tracing::event!(
             tracing::Level::INFO,
-            event.name = "codex.sse_event",
+            event.name = "dev.sse_event",
             event.kind = %"response.completed",
             event.timestamp = %timestamp(),
             conversation.id = %self.metadata.conversation_id,
@@ -327,7 +327,7 @@ impl OtelEventManager {
     ) {
         tracing::event!(
             tracing::Level::INFO,
-            event.name = "codex.sse_event",
+            event.name = "dev.sse_event",
             event.timestamp = %timestamp(),
             event.kind = %"response.completed",
             conversation.id = %self.metadata.conversation_id,
@@ -362,7 +362,7 @@ impl OtelEventManager {
 
         tracing::event!(
             tracing::Level::INFO,
-            event.name = "codex.user_prompt",
+            event.name = "dev.user_prompt",
             event.timestamp = %timestamp(),
             conversation.id = %self.metadata.conversation_id,
             app.version = %self.metadata.app_version,
@@ -385,7 +385,7 @@ impl OtelEventManager {
     ) {
         tracing::event!(
             tracing::Level::INFO,
-            event.name = "codex.tool_decision",
+            event.name = "dev.tool_decision",
             event.timestamp = %timestamp(),
             conversation.id = %self.metadata.conversation_id,
             app.version = %self.metadata.app_version,
@@ -424,7 +424,7 @@ impl OtelEventManager {
 
         tracing::event!(
             tracing::Level::INFO,
-            event.name = "codex.tool_result",
+            event.name = "dev.tool_result",
             event.timestamp = %timestamp(),
             conversation.id = %self.metadata.conversation_id,
             app.version = %self.metadata.app_version,
@@ -447,7 +447,7 @@ impl OtelEventManager {
     pub fn log_tool_failed(&self, tool_name: &str, error: &str) {
         tracing::event!(
             tracing::Level::INFO,
-            event.name = "codex.tool_result",
+            event.name = "dev.tool_result",
             event.timestamp = %timestamp(),
             conversation.id = %self.metadata.conversation_id,
             app.version = %self.metadata.app_version,
@@ -476,7 +476,7 @@ impl OtelEventManager {
 
         tracing::event!(
             tracing::Level::INFO,
-            event.name = "codex.tool_result",
+            event.name = "dev.tool_result",
             event.timestamp = %timestamp(),
             conversation.id = %self.metadata.conversation_id,
             app.version = %self.metadata.app_version,
@@ -497,7 +497,7 @@ impl OtelEventManager {
     pub fn turn_latency_event(&self, payload: TurnLatencyPayload) {
         tracing::event!(
             tracing::Level::INFO,
-            event.name = "codex.turn_latency",
+            event.name = "dev.turn_latency",
             event.timestamp = %timestamp(),
             conversation.id = %self.metadata.conversation_id,
             app.version = %self.metadata.app_version,

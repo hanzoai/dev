@@ -273,7 +273,7 @@ pub mod test_helpers {
             |events| {
                 events
                     .iter()
-                    .any(|event| matches!(event, AppEvent::CodexEvent(_)))
+                    .any(|event| matches!(event, AppEvent::CodeEvent(_)))
             },
             Duration::from_millis(200),
         );

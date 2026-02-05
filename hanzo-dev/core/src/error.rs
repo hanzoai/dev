@@ -10,7 +10,7 @@ use thiserror::Error;
 use tokio::task::JoinError;
 use uuid::Uuid;
 
-pub type Result<T> = std::result::Result<T, CodexErr>;
+pub type Result<T> = std::result::Result<T, CodeErr>;
 
 #[derive(Error, Debug)]
 pub enum SandboxErr {
@@ -83,7 +83,7 @@ impl RetryAfter {
 }
 
 #[derive(Error, Debug)]
-pub enum CodexErr {
+pub enum CodeErr {
     /// Returned by ResponsesClient when the SSE stream disconnects or errors out **after** the HTTP
     /// handshake has succeeded but **before** it finished emitting `response.completed`.
     ///
@@ -104,7 +104,7 @@ pub enum CodexErr {
     Timeout,
 
     /// Returned by run_command_stream when the child could not be spawned (its stdout/stderr pipes
-    /// could not be captured). Analogous to the previous `CodexError::Spawn` variant.
+    /// could not be captured). Analogous to the previous `CodeError::Spawn` variant.
     #[error("spawn failed: child stdout/stderr not captured")]
     Spawn,
 
@@ -324,8 +324,8 @@ impl std::fmt::Display for EnvVarError {
     }
 }
 
-impl CodexErr {
-    /// Minimal shim so that existing `e.downcast_ref::<CodexErr>()` checks continue to compile
+impl CodeErr {
+    /// Minimal shim so that existing `e.downcast_ref::<CodeErr>()` checks continue to compile
     /// after replacing `anyhow::Error` in the return signature. This mirrors the behavior of
     /// `anyhow::Error::downcast_ref` but works directly on our concrete enum.
     pub fn downcast_ref<T: std::any::Any>(&self) -> Option<&T> {
@@ -333,10 +333,10 @@ impl CodexErr {
     }
 }
 
-pub fn get_error_message_ui(e: &CodexErr) -> String {
+pub fn get_error_message_ui(e: &CodeErr) -> String {
     match e {
-        CodexErr::Sandbox(SandboxErr::Denied { output }) => output.stderr.text.clone(),
-        CodexErr::Sandbox(SandboxErr::OutOfMemory {
+        CodeErr::Sandbox(SandboxErr::Denied { output }) => output.stderr.text.clone(),
+        CodeErr::Sandbox(SandboxErr::OutOfMemory {
             output,
             memory_max_bytes,
         }) => {
@@ -349,7 +349,7 @@ pub fn get_error_message_ui(e: &CodexErr) -> String {
             )
         }
         // Timeouts are not sandbox errors from a UX perspective; present them plainly
-        CodexErr::Sandbox(SandboxErr::Timeout { output }) => format!(
+        CodeErr::Sandbox(SandboxErr::Timeout { output }) => format!(
             "error: command timed out after {} ms",
             output.duration.as_millis()
         ),

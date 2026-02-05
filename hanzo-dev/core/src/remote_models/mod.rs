@@ -324,9 +324,7 @@ impl RemoteModelsManager {
         });
 
         let mut url = Url::parse(&base_url).map_err(|err| {
-            crate::error::CodexErr::ServerError(format!(
-                "invalid models base_url {base_url}: {err}"
-            ))
+            crate::error::CodeErr::ServerError(format!("invalid models base_url {base_url}: {err}"))
         })?;
         let base_path = url.path().trim_end_matches('/');
         url.set_path(&format!("{base_path}/models"));

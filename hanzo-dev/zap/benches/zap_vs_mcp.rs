@@ -7,8 +7,8 @@
 //!
 //! Run with: cargo bench --bench zap_vs_mcp
 
-use std::time::{Duration, Instant};
 use std::collections::HashMap;
+use std::time::{Duration, Instant};
 
 /// Benchmark result
 #[derive(Debug, Clone)]
@@ -189,8 +189,12 @@ fn main() {
     let results = vec![
         run_benchmark("MCP Single Server", iterations, mcp_single_server_call),
         run_benchmark("ZAP Native", iterations, zap_native_call),
-        run_benchmark("ZAP + 10 MCP Servers", iterations, || zap_mcp_gateway_call(10)),
-        run_benchmark("ZAP + 20 MCP Servers", iterations, || zap_mcp_gateway_call(20)),
+        run_benchmark("ZAP + 10 MCP Servers", iterations, || {
+            zap_mcp_gateway_call(10)
+        }),
+        run_benchmark("ZAP + 20 MCP Servers", iterations, || {
+            zap_mcp_gateway_call(20)
+        }),
         run_benchmark("ZAP + Consensus (3/5)", iterations, || {
             let zap_time = zap_native_call();
             let consensus_time = consensus_verification();
@@ -203,7 +207,8 @@ fn main() {
     println!("\n{:=<80}", "");
     println!("{:^80}", "SUMMARY");
     println!("{:=<80}", "");
-    println!("
+    println!(
+        "
 Key Findings:
   • ZAP native is ~5-10x faster than MCP (zero-copy vs JSON-RPC)
   • ZAP gateway scales to 20+ MCP servers with <5% overhead
@@ -214,7 +219,8 @@ Recommendations:
   • Use ZAP native for hot paths (block building, P2P messaging)
   • Use ZAP gateway for MCP server aggregation
   • Enable consensus only for critical operations
-");
+"
+    );
 }
 
 #[cfg(test)]

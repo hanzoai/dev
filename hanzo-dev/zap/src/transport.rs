@@ -8,7 +8,7 @@
 use crate::buffer::Buffer;
 use crate::error::{Error, Result};
 use crate::message::MessageType;
-use crate::wire::{parse_frame, MAX_MESSAGE_SIZE};
+use crate::wire::{MAX_MESSAGE_SIZE, parse_frame};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::TcpStream;
 use tracing::{debug, trace};
