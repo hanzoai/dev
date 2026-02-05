@@ -1,81 +1,72 @@
 //! A live status indicator that shows the *latest* log line emitted by the
 //! application while the agent is processing a long‑running task.
 
-use std::cell::Cell;
 use std::time::Duration;
 use std::time::Instant;
 
 use code_core::protocol::Op;
 use ratatui::buffer::Buffer;
 use ratatui::layout::Rect;
-use ratatui::style::{Style, Stylize};
+use ratatui::style::Stylize;
 use ratatui::text::Line;
+use ratatui::text::Span;
 use ratatui::widgets::Paragraph;
 use ratatui::widgets::WidgetRef;
+use unicode_width::UnicodeWidthStr;
 
 use crate::app_event::AppEvent;
 use crate::app_event_sender::AppEventSender;
-use textwrap::Options as TwOptions;
-use textwrap::WordSplitter;
+use crate::shimmer::shimmer_spans;
+use crate::text_formatting::capitalize_first;
 
-#[allow(dead_code)]
+const DETAILS_MAX_LINES: usize = 3;
+const DETAILS_PREFIX: &str = "  └ ";
+
 pub(crate) struct StatusIndicatorWidget {
     /// Animated header text (defaults to "Working").
     header: String,
-    /// Queued user messages to display under the status line.
-    queued_messages: Vec<String>,
+    details: Option<String>,
+    show_interrupt_hint: bool,
 
-    start_time: Instant,
-    /// Last time we scheduled a follow-up frame; used to throttle redraws.
-    last_schedule: Cell<Instant>,
-    last_rendered_second: Cell<u64>,
+    elapsed_running: Duration,
+    last_resume_at: Instant,
+    is_paused: bool,
     app_event_tx: AppEventSender,
-    // We schedule frames via AppEventSender; no direct frame requester.
+    animations_enabled: bool,
 }
 
-#[allow(dead_code)]
+// Format elapsed seconds into a compact human-friendly form used by the status line.
+// Examples: 0s, 59s, 1m 00s, 59m 59s, 1h 00m 00s, 2h 03m 09s
+pub fn fmt_elapsed_compact(elapsed_secs: u64) -> String {
+    if elapsed_secs < 60 {
+        return format!("{elapsed_secs}s");
+    }
+    if elapsed_secs < 3600 {
+        let minutes = elapsed_secs / 60;
+        let seconds = elapsed_secs % 60;
+        return format!("{minutes}m {seconds:02}s");
+    }
+    let hours = elapsed_secs / 3600;
+    let minutes = (elapsed_secs % 3600) / 60;
+    let seconds = elapsed_secs % 60;
+    format!("{hours}h {minutes:02}m {seconds:02}s")
+}
+
 impl StatusIndicatorWidget {
-    pub(crate) fn new(app_event_tx: AppEventSender) -> Self {
+    pub(crate) fn new(
+        app_event_tx: AppEventSender,
+        animations_enabled: bool,
+    ) -> Self {
         Self {
             header: String::from("Working"),
-            queued_messages: Vec::new(),
-            start_time: Instant::now(),
-            last_schedule: Cell::new(Instant::now()),
-            last_rendered_second: Cell::new(u64::MAX),
-
+            details: None,
+            show_interrupt_hint: true,
+            elapsed_running: Duration::ZERO,
+            last_resume_at: Instant::now(),
+            is_paused: false,
             app_event_tx,
+            animations_enabled,
         }
-    }
-
-    pub fn desired_height(&self, width: u16) -> u16 {
-        // Status line + optional blank line + wrapped queued messages (up to 3 lines per message)
-        // + optional ellipsis line per truncated message + 1 spacer line
-        let inner_width = width.max(1) as usize;
-        let mut total: u16 = 1; // status line
-        if !self.queued_messages.is_empty() {
-            total = total.saturating_add(1); // blank line between status and queued messages
-        }
-        let text_width = inner_width.saturating_sub(3); // account for " ↳ " prefix
-        if text_width > 0 {
-            let opts = TwOptions::new(text_width)
-                .break_words(false)
-                .word_splitter(WordSplitter::NoHyphenation);
-            for q in &self.queued_messages {
-                let wrapped = textwrap::wrap(q, &opts);
-                let lines = wrapped.len().min(3) as u16;
-                total = total.saturating_add(lines);
-                if wrapped.len() > 3 {
-                    total = total.saturating_add(1); // ellipsis line
-                }
-            }
-            if !self.queued_messages.is_empty() {
-                total = total.saturating_add(1); // keybind hint line
-            }
-        } else {
-            // At least one line per message if width is extremely narrow
-            total = total.saturating_add(self.queued_messages.len() as u16);
-        }
-        total.saturating_add(1) // spacer line
     }
 
     pub(crate) fn interrupt(&self) {
@@ -84,17 +75,161 @@ impl StatusIndicatorWidget {
 
     /// Update the animated header label (left of the brackets).
     pub(crate) fn update_header(&mut self, header: String) {
-        if self.header != header {
-            self.header = header;
-        }
+        self.header = header;
     }
 
-    /// Replace the queued messages displayed beneath the header.
-    pub(crate) fn set_queued_messages(&mut self, queued: Vec<String>) {
-        self.queued_messages = queued;
-        // Ensure a redraw so changes are visible.
-        // Use the app's debounced redraw path; no need to arm a fast timer here.
+    /// Update the details text shown below the header.
+    pub(crate) fn update_details(&mut self, details: Option<String>) {
+        self.details = details
+            .filter(|details| !details.is_empty())
+            .map(|details| capitalize_first(details.trim_start()));
+    }
+
+    #[cfg(test)]
+    pub(crate) fn header(&self) -> &str {
+        &self.header
+    }
+
+    #[cfg(test)]
+    pub(crate) fn details(&self) -> Option<&str> {
+        self.details.as_deref()
+    }
+
+    pub(crate) fn set_interrupt_hint_visible(&mut self, visible: bool) {
+        self.show_interrupt_hint = visible;
+    }
+
+    #[cfg(test)]
+    pub(crate) fn interrupt_hint_visible(&self) -> bool {
+        self.show_interrupt_hint
+    }
+
+    pub(crate) fn pause_timer(&mut self) {
+        self.pause_timer_at(Instant::now());
+    }
+
+    pub(crate) fn resume_timer(&mut self) {
+        self.resume_timer_at(Instant::now());
+    }
+
+    pub(crate) fn pause_timer_at(&mut self, now: Instant) {
+        if self.is_paused {
+            return;
+        }
+        self.elapsed_running += now.saturating_duration_since(self.last_resume_at);
+        self.is_paused = true;
+    }
+
+    pub(crate) fn resume_timer_at(&mut self, now: Instant) {
+        if !self.is_paused {
+            return;
+        }
+        self.last_resume_at = now;
+        self.is_paused = false;
+        // Schedule frame for animation updates
         self.app_event_tx.send(AppEvent::RequestRedraw);
+    }
+
+    fn elapsed_duration_at(&self, now: Instant) -> Duration {
+        let mut elapsed = self.elapsed_running;
+        if !self.is_paused {
+            elapsed += now.saturating_duration_since(self.last_resume_at);
+        }
+        elapsed
+    }
+
+    fn elapsed_seconds_at(&self, now: Instant) -> u64 {
+        self.elapsed_duration_at(now).as_secs()
+    }
+
+    pub fn elapsed_seconds(&self) -> u64 {
+        self.elapsed_seconds_at(Instant::now())
+    }
+
+    pub fn desired_height(&self, width: u16) -> u16 {
+        1 + self.wrapped_details_lines(width).len() as u16
+    }
+
+    /// Wrap the details text into a fixed width and return the lines, truncating if necessary.
+    fn wrapped_details_lines(&self, width: u16) -> Vec<Line<'static>> {
+        let Some(details) = self.details.as_deref() else {
+            return Vec::new();
+        };
+        if width == 0 {
+            return Vec::new();
+        }
+
+        let prefix_width = UnicodeWidthStr::width(DETAILS_PREFIX);
+        let content_width = (width as usize).saturating_sub(prefix_width).max(1);
+        
+        let mut lines = Vec::new();
+        for line in details.lines() {
+            if line.is_empty() {
+                lines.push(Line::from(vec![
+                    Span::from(DETAILS_PREFIX).dim(),
+                ]));
+                continue;
+            }
+            
+            // Simple word wrapping - split on spaces
+            let words: Vec<&str> = line.split_whitespace().collect();
+            let mut current_line = String::new();
+            
+            for word in words {
+                if current_line.is_empty() {
+                    current_line = word.to_string();
+                } else if current_line.len() + 1 + word.len() <= content_width {
+                    current_line.push(' ');
+                    current_line.push_str(word);
+                } else {
+                    lines.push(Line::from(vec![
+                        Span::from(DETAILS_PREFIX).dim(),
+                        Span::from(current_line.clone()).dim(),
+                    ]));
+                    current_line = word.to_string();
+                }
+            }
+            
+            if !current_line.is_empty() {
+                lines.push(Line::from(vec![
+                    Span::from(DETAILS_PREFIX).dim(),
+                    Span::from(current_line).dim(),
+                ]));
+            }
+        }
+
+        // Truncate if too many lines
+        if lines.len() > DETAILS_MAX_LINES {
+            lines.truncate(DETAILS_MAX_LINES);
+            if let Some(last) = lines.last_mut() {
+                if let Some(span) = last.spans.last_mut() {
+                    let content = span.content.to_string();
+                    let max_len = content_width.saturating_sub(1);
+                    if content.len() > max_len {
+                        let trimmed: String = content.chars().take(max_len).collect();
+                        *span = format!("{trimmed}…").dim().into();
+                    } else {
+                        *span = format!("{content}…").dim().into();
+                    }
+                }
+            }
+        }
+
+        lines
+    }
+
+    /// Generate a spinning character that changes based on time
+    fn spinner_char(&self, now: Instant) -> Span<'static> {
+        if !self.animations_enabled {
+            return "•".into();
+        }
+        
+        // Create a flashing/spinning effect
+        let spinner_chars = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"];
+        let elapsed_millis = now.duration_since(self.last_resume_at).as_millis();
+        let index = (elapsed_millis / 100) as usize % spinner_chars.len();
+        
+        Span::from(spinner_chars[index]).style(crate::colors::primary())
     }
 }
 
@@ -104,97 +239,50 @@ impl WidgetRef for StatusIndicatorWidget {
             return;
         }
 
-        let viewport = buf.area();
-        let area_right = area.x.saturating_add(area.width);
-        let area_bottom = area.y.saturating_add(area.height);
-        let view_right = viewport.x.saturating_add(viewport.width);
-        let view_bottom = viewport.y.saturating_add(viewport.height);
-        let intersects = area.x < view_right
-            && viewport.x < area_right
-            && area.y < view_bottom
-            && viewport.y < area_bottom;
-        if !intersects {
-            return;
+        // Schedule next animation frame if animations are enabled
+        if self.animations_enabled && !self.is_paused {
+            self.app_event_tx.send(AppEvent::RequestRedraw);
         }
-
-        // Schedule periodic refreshes so the elapsed timer stays up to date without
-        // forcing a high-FPS redraw of the entire UI.
+        
         let now = Instant::now();
-        let elapsed_since_start = self.start_time.elapsed();
-        let elapsed = elapsed_since_start.as_secs();
-        if elapsed != self.last_rendered_second.get()
-            || now.duration_since(self.last_schedule.get()) >= Duration::from_secs(1)
-        {
-            self.last_schedule.set(now);
-            self.last_rendered_second.set(elapsed);
-            self.app_event_tx
-                .send(AppEvent::ScheduleFrameIn(Duration::from_secs(1)));
+        let elapsed_duration = self.elapsed_duration_at(now);
+        let pretty_elapsed = fmt_elapsed_compact(elapsed_duration.as_secs());
+
+        let mut spans = Vec::with_capacity(5);
+        
+        // Add spinner (flashing dot)
+        spans.push(self.spinner_char(now));
+        spans.push(" ".into());
+        
+        // Add header with shimmer effect if animations enabled
+        if self.animations_enabled {
+            spans.extend(shimmer_spans(&self.header));
+        } else if !self.header.is_empty() {
+            spans.push(self.header.clone().into());
+        }
+        spans.push(" ".into());
+        
+        // Add timing and interrupt hint
+        if self.show_interrupt_hint {
+            spans.extend(vec![
+                format!("({pretty_elapsed} • ").dim(),
+                "esc".bold(),
+                " to interrupt)".dim(),
+            ]);
+        } else {
+            spans.push(format!("({pretty_elapsed})").dim());
         }
 
-        // Plain rendering: no borders or padding so the live cell is visually indistinguishable from terminal scrollback.
-        // Theme-aware base styles
-        let bg = crate::colors::background();
-        let text = crate::colors::text();
-        let text_dim = crate::colors::text_dim();
-        let accent = crate::colors::info();
-
-        // Build header spans using theme colors (no terminal-default cyan/dim)
-        let mut spans = vec![
-            ratatui::text::Span::raw(" "),
-            ratatui::text::Span::raw("• ").style(Style::default().fg(text_dim)),
-            ratatui::text::Span::styled(
-                self.header.clone(),
-                Style::default()
-                    .fg(accent)
-                    .add_modifier(ratatui::style::Modifier::BOLD),
-            ),
-            ratatui::text::Span::raw(" "),
-        ];
-        spans.extend(vec![
-            ratatui::text::Span::raw(" "),
-            // (12s • Esc to interrupt)
-            ratatui::text::Span::raw(format!("({elapsed}s • ")).style(Style::default().fg(text_dim)),
-            ratatui::text::Span::raw("Esc").style(Style::default().fg(accent).add_modifier(ratatui::style::Modifier::BOLD)),
-            ratatui::text::Span::raw(")").style(Style::default().fg(text_dim)),
-        ]);
-
-        // Build lines: status, then queued messages, then spacer.
-        let mut lines: Vec<Line<'static>> = Vec::new();
+        let mut lines = Vec::new();
         lines.push(Line::from(spans));
-        if !self.queued_messages.is_empty() {
-            lines.push(Line::from(""));
-        }
-        // Wrap queued messages using textwrap and show up to the first 3 lines per message.
-        let text_width = area.width.saturating_sub(3); // " ↳ " prefix
-        let opts = TwOptions::new(text_width as usize)
-            .break_words(false)
-            .word_splitter(WordSplitter::NoHyphenation);
-        for q in &self.queued_messages {
-            let wrapped = textwrap::wrap(q, &opts);
-            for (i, piece) in wrapped.iter().take(3).enumerate() {
-                let prefix = if i == 0 { " ↳ " } else { "   " };
-                let content = format!("{prefix}{piece}");
-                lines.push(Line::from(content).style(Style::default().fg(text_dim).italic()));
-            }
-            if wrapped.len() > 3 {
-                lines.push(Line::from("   …").style(Style::default().fg(text_dim).italic()));
-            }
-        }
-        if !self.queued_messages.is_empty() {
-            lines.push(
-                Line::from(vec![
-                    ratatui::text::Span::raw("   "),
-                    // Key hint in accent, label in dim text
-                    ratatui::text::Span::raw("Alt+↑").style(Style::default().fg(accent)),
-                    ratatui::text::Span::raw(" edit").style(Style::default().fg(text_dim)),
-                ])
-                .style(Style::default()),
-            );
+        
+        // Add details lines if there's space
+        if area.height > 1 {
+            let details = self.wrapped_details_lines(area.width);
+            let max_details = usize::from(area.height.saturating_sub(1));
+            lines.extend(details.into_iter().take(max_details));
         }
 
-        // Ensure background/foreground reflect theme
-        let paragraph = Paragraph::new(lines).style(Style::default().bg(bg).fg(text));
-        paragraph.render_ref(area, buf);
+        Paragraph::new(lines).render_ref(area, buf);
     }
 }
-
