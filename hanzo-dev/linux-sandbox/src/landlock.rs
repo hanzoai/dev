@@ -2,7 +2,7 @@ use std::collections::BTreeMap;
 use std::path::Path;
 use std::path::PathBuf;
 
-use hanzo_core::error::CodexErr;
+use hanzo_core::error::CodeErr;
 use hanzo_core::error::Result;
 use hanzo_core::error::SandboxErr;
 use hanzo_core::protocol::SandboxPolicy;
@@ -55,7 +55,7 @@ pub(crate) fn apply_sandbox_policy_to_current_thread(
 /// `/dev/null` and the provided list of `writable_roots`.
 ///
 /// # Errors
-/// Returns [`CodexErr::Sandbox`] variants when the ruleset fails to apply.
+/// Returns [`CodeErr::Sandbox`] variants when the ruleset fails to apply.
 fn install_filesystem_landlock_rules_on_current_thread(writable_roots: Vec<PathBuf>) -> Result<()> {
     let abi = ABI::V5;
     let access_rw = AccessFs::from_all(abi);
@@ -76,7 +76,7 @@ fn install_filesystem_landlock_rules_on_current_thread(writable_roots: Vec<PathB
     let status = ruleset.restrict_self()?;
 
     if status.ruleset == landlock::RulesetStatus::NotEnforced {
-        return Err(CodexErr::Sandbox(SandboxErr::LandlockRestrict));
+        return Err(CodeErr::Sandbox(SandboxErr::LandlockRestrict));
     }
 
     Ok(())

@@ -624,7 +624,7 @@ pub mod browser {
     #[derive(Debug, Clone, Serialize, Deserialize)]
     pub struct PdfPrintArgs {
         pub path: String,
-        pub format: Option<String>,        // "A4", "Letter"
+        pub format: Option<String>, // "A4", "Letter"
         pub margin: Option<PdfMargin>,
         pub print_background: Option<bool>,
     }
@@ -661,7 +661,7 @@ pub mod vision {
 
     #[derive(Debug, Clone, Serialize, Deserialize)]
     pub struct DetectElementsArgs {
-        pub screenshot: Option<String>, // Base64 or path
+        pub screenshot: Option<String>,         // Base64 or path
         pub element_types: Option<Vec<String>>, // "button", "input", "link"
     }
 
@@ -996,7 +996,7 @@ pub mod codemod {
     #[derive(Debug, Clone, Serialize, Deserialize)]
     pub struct Transform {
         pub kind: String,
-        pub target: String,    // Selector for nodes
+        pub target: String, // Selector for nodes
         pub replacement: String,
     }
 

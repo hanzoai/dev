@@ -9,7 +9,7 @@ use super::streaming::get_last_assistant_message_from_turn;
 use crate::Prompt;
 use crate::client_common::ResponseEvent;
 use crate::environment_context::EnvironmentContext;
-use crate::error::CodexErr;
+use crate::error::CodeErr;
 use crate::error::Result as CodexResult;
 use crate::error::RetryAfter;
 use crate::protocol::AgentMessageEvent;
@@ -259,8 +259,8 @@ pub(super) async fn perform_compaction(
                 }
                 break;
             }
-            Err(CodexErr::Interrupted) => return Err(CodexErr::Interrupted),
-            Err(CodexErr::UsageLimitReached(limit_err)) => {
+            Err(CodeErr::Interrupted) => return Err(CodeErr::Interrupted),
+            Err(CodeErr::UsageLimitReached(limit_err)) => {
                 let now = Utc::now();
                 let retry_after = limit_err
                     .retry_after(now)
@@ -420,8 +420,8 @@ async fn run_compact_task_inner_inline(
                 }
                 break;
             }
-            Err(CodexErr::Interrupted) => return Vec::new(),
-            Err(CodexErr::UsageLimitReached(limit_err)) => {
+            Err(CodeErr::Interrupted) => return Vec::new(),
+            Err(CodeErr::UsageLimitReached(limit_err)) => {
                 let now = Utc::now();
                 let retry_after = limit_err
                     .retry_after(now)
@@ -586,10 +586,10 @@ fn looks_like_context_overflow(message: &str) -> bool {
         || lower.contains("exceeds the context window")
 }
 
-pub(super) fn is_context_overflow_error(err: &CodexErr) -> bool {
+pub(super) fn is_context_overflow_error(err: &CodeErr) -> bool {
     match err {
-        CodexErr::UnexpectedStatus(resp) => looks_like_context_overflow(&resp.body),
-        CodexErr::Stream(msg, _, _) => looks_like_context_overflow(msg),
+        CodeErr::UnexpectedStatus(resp) => looks_like_context_overflow(&resp.body),
+        CodeErr::Stream(msg, _, _) => looks_like_context_overflow(msg),
         _ => false,
     }
 }
@@ -794,7 +794,7 @@ async fn drain_to_completed(
     loop {
         let maybe_event = stream.next().await;
         let Some(event) = maybe_event else {
-            return Err(CodexErr::Stream(
+            return Err(CodeErr::Stream(
                 "stream closed before response.completed".into(),
                 None,
                 None,

@@ -5,7 +5,7 @@ use crate::codex::Codex;
 use crate::codex::CodexSpawnOk;
 use crate::codex::INITIAL_SUBMIT_ID;
 use crate::config::Config;
-use crate::error::CodexErr;
+use crate::error::CodeErr;
 use crate::error::Result as CodexResult;
 use crate::protocol::Event;
 use crate::protocol::EventMsg;
@@ -97,7 +97,7 @@ impl ConversationManager {
                 ..
             } if id == INITIAL_SUBMIT_ID => session_configured,
             _ => {
-                return Err(CodexErr::SessionConfiguredNotFirstEvent);
+                return Err(CodeErr::SessionConfiguredNotFirstEvent);
             }
         };
 
@@ -122,7 +122,7 @@ impl ConversationManager {
         conversations
             .get(&conversation_id)
             .cloned()
-            .ok_or_else(|| CodexErr::ConversationNotFound(conversation_id.into()))
+            .ok_or_else(|| CodeErr::ConversationNotFound(conversation_id.into()))
     }
 
     pub async fn resume_conversation_from_rollout(
@@ -186,7 +186,7 @@ impl ConversationManager {
             ),
         )
         .await
-        .map_err(CodexErr::Io)?;
+        .map_err(CodeErr::Io)?;
 
         // Persist rollout items to seed the resumed conversation.
         let rollout_items = history.get_rollout_items();
@@ -194,10 +194,10 @@ impl ConversationManager {
             recorder
                 .record_items(&rollout_items)
                 .await
-                .map_err(CodexErr::Io)?;
+                .map_err(CodeErr::Io)?;
         }
         // Ensure data is flushed to disk before resuming.
-        recorder.shutdown().await.map_err(CodexErr::Io)?;
+        recorder.shutdown().await.map_err(CodeErr::Io)?;
 
         // Now spawn a conversation resuming from the newly created rollout.
         config.experimental_resume = Some(recorder.rollout_path.clone());

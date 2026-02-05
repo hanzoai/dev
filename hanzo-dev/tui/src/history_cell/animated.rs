@@ -1,9 +1,9 @@
 use super::*;
+use ratatui::style::Stylize;
 use std::cell::Cell;
 use std::cell::RefCell;
 use std::time::Duration;
 use std::time::Instant;
-use ratatui::style::Stylize;
 
 /// Simplified welcome cell that renders a Codex-style bordered card
 /// with version and model info instead of complex glitch animations.
@@ -80,11 +80,7 @@ impl HistoryCell for AnimatedWelcomeCell {
             Span::from(crate::greeting::greeting_placeholder()),
         ]);
 
-        vec![
-            title_line,
-            Line::from(""),
-            greeting_line,
-        ]
+        vec![title_line, Line::from(""), greeting_line]
     }
 
     fn desired_height(&self, _width: u16) -> u16 {

@@ -3,9 +3,9 @@
 //! Provides build, test, lint, and validation operations.
 
 use crate::error::{Error, Result};
-use crate::message::ToolResult;
-use crate::tools::{build, ToolCategory};
 use crate::executor::{ExecutorContext, ToolExecutor};
+use crate::message::ToolResult;
+use crate::tools::{ToolCategory, build};
 use async_trait::async_trait;
 use serde_json::Value;
 use std::time::Instant;
@@ -53,11 +53,19 @@ impl BuildExecutor {
             artifacts: vec![], // Would need to parse build output for artifacts
         };
 
-        let error = if success { None } else { Some("Build failed".to_string()) };
+        let error = if success {
+            None
+        } else {
+            Some("Build failed".to_string())
+        };
         Self::result(result, error)
     }
 
-    async fn detect_build_command(&self, cwd: &str, args: &build::BuildArgs) -> Result<(String, Vec<String>)> {
+    async fn detect_build_command(
+        &self,
+        cwd: &str,
+        args: &build::BuildArgs,
+    ) -> Result<(String, Vec<String>)> {
         use tokio::fs;
 
         // Check for various build files
@@ -75,7 +83,10 @@ impl BuildExecutor {
 
         if fs::metadata(format!("{}/package.json", cwd)).await.is_ok() {
             let script = args.target.as_deref().unwrap_or("build");
-            return Ok(("npm".to_string(), vec!["run".to_string(), script.to_string()]));
+            return Ok((
+                "npm".to_string(),
+                vec!["run".to_string(), script.to_string()],
+            ));
         }
 
         if fs::metadata(format!("{}/go.mod", cwd)).await.is_ok() {
@@ -90,7 +101,14 @@ impl BuildExecutor {
 
         if fs::metadata(format!("{}/Makefile", cwd)).await.is_ok() {
             let target = args.target.clone().unwrap_or_default();
-            return Ok(("make".to_string(), if target.is_empty() { vec![] } else { vec![target] }));
+            return Ok((
+                "make".to_string(),
+                if target.is_empty() {
+                    vec![]
+                } else {
+                    vec![target]
+                },
+            ));
         }
 
         Err(Error::Tool("Could not detect build system".to_string()))
@@ -116,18 +134,26 @@ impl BuildExecutor {
         let result = build::TestResult {
             success,
             duration_ms,
-            passed: 0,  // Would need to parse output
+            passed: 0, // Would need to parse output
             failed: 0,
             skipped: 0,
             stdout: String::from_utf8_lossy(&output.stdout).to_string(),
             stderr: String::from_utf8_lossy(&output.stderr).to_string(),
         };
 
-        let error = if success { None } else { Some("Tests failed".to_string()) };
+        let error = if success {
+            None
+        } else {
+            Some("Tests failed".to_string())
+        };
         Self::result(result, error)
     }
 
-    async fn detect_test_command(&self, cwd: &str, args: &build::TestArgs) -> Result<(String, Vec<String>)> {
+    async fn detect_test_command(
+        &self,
+        cwd: &str,
+        args: &build::TestArgs,
+    ) -> Result<(String, Vec<String>)> {
         use tokio::fs;
 
         if fs::metadata(format!("{}/Cargo.toml", cwd)).await.is_ok() {
@@ -155,7 +181,9 @@ impl BuildExecutor {
             return Ok(("go".to_string(), cmd_args));
         }
 
-        if fs::metadata(format!("{}/pyproject.toml", cwd)).await.is_ok()
+        if fs::metadata(format!("{}/pyproject.toml", cwd))
+            .await
+            .is_ok()
             || fs::metadata(format!("{}/pytest.ini", cwd)).await.is_ok()
         {
             let mut cmd_args = vec!["-m".to_string(), "pytest".to_string()];
@@ -195,11 +223,19 @@ impl BuildExecutor {
             stderr: String::from_utf8_lossy(&output.stderr).to_string(),
         };
 
-        let error = if success { None } else { Some("Lint errors found".to_string()) };
+        let error = if success {
+            None
+        } else {
+            Some("Lint errors found".to_string())
+        };
         Self::result(result, error)
     }
 
-    async fn detect_lint_command(&self, cwd: &str, args: &build::LintArgs) -> Result<(String, Vec<String>)> {
+    async fn detect_lint_command(
+        &self,
+        cwd: &str,
+        args: &build::LintArgs,
+    ) -> Result<(String, Vec<String>)> {
         use tokio::fs;
 
         if fs::metadata(format!("{}/Cargo.toml", cwd)).await.is_ok() {
@@ -223,7 +259,10 @@ impl BuildExecutor {
             return Ok(("golangci-lint".to_string(), vec!["run".to_string()]));
         }
 
-        if fs::metadata(format!("{}/pyproject.toml", cwd)).await.is_ok() {
+        if fs::metadata(format!("{}/pyproject.toml", cwd))
+            .await
+            .is_ok()
+        {
             let mut cmd_args = vec!["check".to_string(), ".".to_string()];
             if args.fix.unwrap_or(false) {
                 cmd_args = vec!["format".to_string(), ".".to_string()];
@@ -234,17 +273,30 @@ impl BuildExecutor {
         Err(Error::Tool("Could not detect linter".to_string()))
     }
 
-    async fn typecheck(&self, _args: build::TypecheckArgs, ctx: &ExecutorContext) -> Result<ToolResult> {
+    async fn typecheck(
+        &self,
+        _args: build::TypecheckArgs,
+        ctx: &ExecutorContext,
+    ) -> Result<ToolResult> {
         let cwd = ctx.cwd.as_deref().unwrap_or(".");
         use tokio::fs;
 
         // Detect typecheck command
         let (cmd, cmd_args) = if fs::metadata(format!("{}/tsconfig.json", cwd)).await.is_ok() {
-            ("npx".to_string(), vec!["tsc".to_string(), "--noEmit".to_string()])
-        } else if fs::metadata(format!("{}/pyproject.toml", cwd)).await.is_ok() {
+            (
+                "npx".to_string(),
+                vec!["tsc".to_string(), "--noEmit".to_string()],
+            )
+        } else if fs::metadata(format!("{}/pyproject.toml", cwd))
+            .await
+            .is_ok()
+        {
             ("mypy".to_string(), vec![".".to_string()])
         } else if fs::metadata(format!("{}/go.mod", cwd)).await.is_ok() {
-            ("go".to_string(), vec!["vet".to_string(), "./...".to_string()])
+            (
+                "go".to_string(),
+                vec!["vet".to_string(), "./...".to_string()],
+            )
         } else {
             return Err(Error::Tool("Could not detect type checker".to_string()));
         };
@@ -265,7 +317,11 @@ impl BuildExecutor {
             stderr: String::from_utf8_lossy(&output.stderr).to_string(),
         };
 
-        let error = if success { None } else { Some("Type errors found".to_string()) };
+        let error = if success {
+            None
+        } else {
+            Some("Type errors found".to_string())
+        };
         Self::result(result, error)
     }
 }

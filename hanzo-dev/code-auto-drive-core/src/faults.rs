@@ -3,7 +3,7 @@
 use anyhow::anyhow;
 use chrono::Duration as ChronoDuration;
 use chrono::Utc;
-use hanzo_core::error::CodexErr;
+use hanzo_core::error::CodeErr;
 use hanzo_core::error::UnexpectedResponseError;
 use hanzo_core::error::UsageLimitReachedError;
 use once_cell::sync::OnceCell;
@@ -146,7 +146,7 @@ pub fn fault_to_error(fault: InjectedFault) -> anyhow::Error {
         }
         InjectedFault::RateLimit { reset_hint } => match reset_hint {
             Some(FaultReset::Seconds(secs)) => {
-                anyhow!(CodexErr::UsageLimitReached(UsageLimitReachedError {
+                anyhow!(CodeErr::UsageLimitReached(UsageLimitReachedError {
                     plan_type: None,
                     resets_in_seconds: Some(secs),
                 }))
@@ -161,13 +161,13 @@ pub fn fault_to_error(fault: InjectedFault) -> anyhow::Error {
                     }
                 })
                 .to_string();
-                anyhow!(CodexErr::UnexpectedStatus(UnexpectedResponseError {
+                anyhow!(CodeErr::UnexpectedStatus(UnexpectedResponseError {
                     status: StatusCode::TOO_MANY_REQUESTS,
                     body,
                     request_id: None,
                 }))
             }
-            None => anyhow!(CodexErr::UnexpectedStatus(UnexpectedResponseError {
+            None => anyhow!(CodeErr::UnexpectedStatus(UnexpectedResponseError {
                 status: StatusCode::TOO_MANY_REQUESTS,
                 body: json!({ "error": { "message": "fault injector 429" } }).to_string(),
                 request_id: None,

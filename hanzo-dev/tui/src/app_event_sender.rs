@@ -41,7 +41,7 @@ impl AppEventSender {
     pub(crate) fn send_with_result(&self, event: AppEvent) -> bool {
         // Record inbound events for high-fidelity session replay.
         // Avoid double-logging Ops; those are logged at the point of submission.
-        if !matches!(event, AppEvent::CodexOp(_)) {
+        if !matches!(event, AppEvent::CodeOp(_)) {
             session_log::log_inbound_app_event(&event);
         }
         let is_high = matches!(

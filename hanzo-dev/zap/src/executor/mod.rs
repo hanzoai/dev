@@ -27,23 +27,23 @@ use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::Arc;
 
+mod build;
 mod computer;
 mod filesystem;
-mod vcs;
-mod build;
 mod network;
-mod plan;
 pub mod permissions;
+mod plan;
+mod vcs;
 
+pub use build::BuildExecutor;
 pub use computer::ComputerExecutor;
 pub use filesystem::FilesystemExecutor;
-pub use vcs::VcsExecutor;
-pub use build::BuildExecutor;
 pub use network::NetworkExecutor;
 pub use plan::PlanExecutor;
+pub use vcs::VcsExecutor;
 
 // Re-export permission types from hanzo-protocol
-pub use permissions::{AskForApproval, SandboxPolicy, PermissionLevel, PermissionResult};
+pub use permissions::{AskForApproval, PermissionLevel, PermissionResult, SandboxPolicy};
 pub use permissions::{check_approval, is_path_writable, operation_level};
 
 /// Context passed to tool executors.
@@ -97,12 +97,19 @@ impl ExecutorContext {
     /// Check if an operation should be approved
     pub fn check_approval(&self, operation: &str) -> PermissionResult {
         let level = operation_level(operation);
-        check_approval(operation, level, &self.approval_policy, &self.sandbox_policy)
+        check_approval(
+            operation,
+            level,
+            &self.approval_policy,
+            &self.sandbox_policy,
+        )
     }
 
     /// Check if a path is writable under current sandbox policy
     pub fn is_path_writable(&self, path: &std::path::Path) -> bool {
-        let cwd = self.cwd.as_ref()
+        let cwd = self
+            .cwd
+            .as_ref()
             .map(PathBuf::from)
             .unwrap_or_else(|| PathBuf::from("."));
         is_path_writable(path, &self.sandbox_policy, &cwd)
@@ -137,12 +144,7 @@ impl ExecutorContext {
 #[async_trait]
 pub trait ToolExecutor: Send + Sync {
     /// Execute a tool by name with JSON arguments
-    async fn execute(
-        &self,
-        name: &str,
-        args: Value,
-        ctx: &ExecutorContext,
-    ) -> Result<ToolResult>;
+    async fn execute(&self, name: &str, args: Value, ctx: &ExecutorContext) -> Result<ToolResult>;
 
     /// List tools provided by this executor
     fn tools(&self) -> Vec<&'static str>;

@@ -4,7 +4,7 @@
 //! including code suggestions, chat interactions, and workflow automation.
 
 use crate::config::Config;
-use crate::error::CodexErr;
+use crate::error::CodeErr;
 use crate::error::Result;
 use serde::Deserialize;
 use serde::Serialize;
@@ -142,7 +142,7 @@ impl CopilotIntegration {
         let output = cmd.arg(context).output().await?;
 
         if !output.status.success() {
-            return Err(CodexErr::UnsupportedOperation(format!(
+            return Err(CodeErr::UnsupportedOperation(format!(
                 "Copilot command failed: {}",
                 String::from_utf8_lossy(&output.stderr)
             )));
@@ -168,7 +168,7 @@ impl CopilotIntegration {
         context: Option<HashMap<String, String>>,
     ) -> Result<String> {
         if !self.config.enabled || !self.config.chat_enabled {
-            return Err(CodexErr::UnsupportedOperation(
+            return Err(CodeErr::UnsupportedOperation(
                 "Copilot chat is disabled".to_string(),
             ));
         }
@@ -186,7 +186,7 @@ impl CopilotIntegration {
         let output = cmd.arg(initial_message).output().await?;
 
         if !output.status.success() {
-            return Err(CodexErr::UnsupportedOperation(format!(
+            return Err(CodeErr::UnsupportedOperation(format!(
                 "Copilot chat failed: {}",
                 String::from_utf8_lossy(&output.stderr)
             )));
@@ -198,7 +198,7 @@ impl CopilotIntegration {
     /// Get code review suggestions for a file or diff
     pub async fn review_code(&self, file_path: &str, diff: Option<&str>) -> Result<String> {
         if !self.config.enabled || !self.config.code_review {
-            return Err(CodexErr::UnsupportedOperation(
+            return Err(CodeErr::UnsupportedOperation(
                 "Copilot code review is disabled".to_string(),
             ));
         }
@@ -222,7 +222,7 @@ impl CopilotIntegration {
         doc_type: &str, // "comment", "readme", "api"
     ) -> Result<String> {
         if !self.config.enabled {
-            return Err(CodexErr::UnsupportedOperation(
+            return Err(CodeErr::UnsupportedOperation(
                 "Copilot is disabled".to_string(),
             ));
         }
@@ -235,7 +235,7 @@ impl CopilotIntegration {
     /// Explain code functionality
     pub async fn explain_code(&self, code: &str) -> Result<String> {
         if !self.config.enabled {
-            return Err(CodexErr::UnsupportedOperation(
+            return Err(CodeErr::UnsupportedOperation(
                 "Copilot is disabled".to_string(),
             ));
         }
@@ -257,7 +257,7 @@ impl CopilotIntegration {
         let output = cmd.output().await?;
 
         if !output.status.success() {
-            return Err(CodexErr::UnsupportedOperation(format!(
+            return Err(CodeErr::UnsupportedOperation(format!(
                 "Copilot command suggestion failed: {}",
                 String::from_utf8_lossy(&output.stderr)
             )));
@@ -278,7 +278,7 @@ impl CopilotIntegration {
     /// Generate Git commit messages
     pub async fn generate_commit_message(&self, diff: &str) -> Result<String> {
         if !self.config.enabled {
-            return Err(CodexErr::UnsupportedOperation(
+            return Err(CodeErr::UnsupportedOperation(
                 "Copilot is disabled".to_string(),
             ));
         }
@@ -323,7 +323,7 @@ impl CopilotIntegration {
             .await?;
 
         if !output.status.success() {
-            return Err(CodexErr::UnsupportedOperation(format!(
+            return Err(CodeErr::UnsupportedOperation(format!(
                 "Failed to install Copilot extension: {}",
                 String::from_utf8_lossy(&output.stderr)
             )));
@@ -341,7 +341,7 @@ impl CopilotIntegration {
             .await?;
 
         if !output.status.success() {
-            return Err(CodexErr::UnsupportedOperation(format!(
+            return Err(CodeErr::UnsupportedOperation(format!(
                 "Failed to configure Copilot: {}",
                 String::from_utf8_lossy(&output.stderr)
             )));

@@ -41,7 +41,7 @@ pub(crate) fn spawn_agent(
             id: "".to_string(),
             msg: hanzo_core::protocol::EventMsg::SessionConfigured(session_configured),
         };
-        app_event_tx_clone.send(AppEvent::CodexEvent(ev));
+        app_event_tx_clone.send(AppEvent::CodeEvent(ev));
 
         let conversation_clone = conversation.clone();
         tokio::spawn(async move {
@@ -54,7 +54,7 @@ pub(crate) fn spawn_agent(
         });
 
         while let Ok(event) = conversation.next_event().await {
-            app_event_tx_clone.send(AppEvent::CodexEvent(event));
+            app_event_tx_clone.send(AppEvent::CodeEvent(event));
         }
     });
 
@@ -78,7 +78,7 @@ pub(crate) fn spawn_agent_from_existing(
             id: "".to_string(),
             msg: hanzo_core::protocol::EventMsg::SessionConfigured(session_configured),
         };
-        app_event_tx_clone.send(AppEvent::CodexEvent(ev));
+        app_event_tx_clone.send(AppEvent::CodeEvent(ev));
 
         let conversation_clone = conversation.clone();
         tokio::spawn(async move {
@@ -91,7 +91,7 @@ pub(crate) fn spawn_agent_from_existing(
         });
 
         while let Ok(event) = conversation.next_event().await {
-            app_event_tx_clone.send(AppEvent::CodexEvent(event));
+            app_event_tx_clone.send(AppEvent::CodeEvent(event));
         }
     });
 
