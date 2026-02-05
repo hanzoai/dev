@@ -3,48 +3,71 @@
 
   inputs = {
     nixpkgs.url = "github:NixOS/nixpkgs/nixos-unstable";
-    flake-utils.url = "github:numtide/flake-utils";
     rust-overlay = {
       url = "github:oxalica/rust-overlay";
       inputs.nixpkgs.follows = "nixpkgs";
     };
   };
 
-  outputs = { nixpkgs, flake-utils, rust-overlay, ... }: 
-    flake-utils.lib.eachDefaultSystem (system:
-      let
-        pkgs = import nixpkgs {
-          inherit system;
-        };
-        pkgsWithRust = import nixpkgs {
-          inherit system;
-          overlays = [ rust-overlay.overlays.default ];
-        };
-        monorepo-deps = with pkgs; [
-          # for precommit hook
-          pnpm
-          husky
-        ];
-        code-rs = import ./code-rs {
-          pkgs = pkgsWithRust;
-          inherit monorepo-deps;
-        };
-      in
-      {
-        packages = {
-          code-rs = code-rs.package;
-          default = code-rs.package;
-        };
+  outputs = { nixpkgs, rust-overlay, ... }:
+    let
+      systems = [
+        "x86_64-linux"
+        "aarch64-linux"
+        "x86_64-darwin"
+        "aarch64-darwin"
+      ];
+      forAllSystems = f: nixpkgs.lib.genAttrs systems f;
+    in
+    {
+      packages = forAllSystems (system:
+        let
+          pkgs = import nixpkgs {
+            inherit system;
+            overlays = [ rust-overlay.overlays.default ];
+          };
+          codex-rs = pkgs.callPackage ./codex-rs {
+            rustPlatform = pkgs.makeRustPlatform {
+              cargo = pkgs.rust-bin.stable.latest.minimal;
+              rustc = pkgs.rust-bin.stable.latest.minimal;
+            };
+          };
+        in
+        {
+          codex-rs = codex-rs;
+          default = codex-rs;
+        }
+      );
 
-        devShells = {
-          code-rs = code-rs.devShell;
-          default = code-rs.devShell;
-        };
-
-        apps = {
-          code-rs = code-rs.app;
-          default = code-rs.app;
-        };
-      }
-    );
+      devShells = forAllSystems (system:
+        let
+          pkgs = import nixpkgs {
+            inherit system;
+            overlays = [ rust-overlay.overlays.default ];
+          };
+          rust = pkgs.rust-bin.stable.latest.default.override {
+            extensions = [ "rust-src" "rust-analyzer" ];
+          };
+        in
+        {
+          default = pkgs.mkShell {
+            buildInputs = [
+              rust
+              pkgs.pkg-config
+              pkgs.openssl
+              pkgs.cmake
+              pkgs.llvmPackages.clang
+              pkgs.llvmPackages.libclang.lib
+            ];
+            PKG_CONFIG_PATH = "${pkgs.openssl.dev}/lib/pkgconfig";
+            LIBCLANG_PATH = "${pkgs.llvmPackages.libclang.lib}/lib";
+            # Use clang for BoringSSL compilation (avoids GCC 15 warnings-as-errors)
+            shellHook = ''
+              export CC=clang
+              export CXX=clang++
+            '';
+          };
+        }
+      );
+    };
 }

@@ -1,44 +1,22 @@
 {
-  "name": "@just-every/code",
-  "version": "3.0.6",
+  "name": "@openai/codex",
+  "version": "0.0.0-dev",
   "license": "Apache-2.0",
-  "description": "Lightweight coding agent that runs in your terminal - fork of OpenAI Codex",
   "bin": {
-    "coder": "bin/coder.js"
+    "codex": "bin/codex.js"
   },
   "type": "module",
   "engines": {
     "node": ">=16"
   },
   "files": [
-    "bin/coder.js",
-    "bin/codex.js",
-    "postinstall.js",
-    "scripts/preinstall.js",
-    "scripts/windows-cleanup.ps1",
-    "dist"
+    "bin",
+    "vendor"
   ],
-  "scripts": {
-    "preinstall": "node scripts/preinstall.js",
-    "postinstall": "node postinstall.js",
-    "prepublishOnly": "node -e \"const fs=require('fs'),path=require('path'); const repoGit=path.join(__dirname,'..','.git'); const inCi=process.env.GITHUB_ACTIONS==='true'||process.env.CI==='true'; if(fs.existsSync(repoGit) && !inCi){ console.error('Refusing to publish from codex-cli. Publishing happens via release.yml.'); process.exit(1);} else { console.log(inCi ? 'CI publish detected.' : 'Publishing staged package...'); }\""
-  },
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/just-every/code.git"
+    "url": "git+https://github.com/openai/codex.git",
+    "directory": "codex-cli"
   },
-  "publishConfig": {
-    "access": "public"
-  },
-  "dependencies": {},
-  "devDependencies": {
-    "prettier": "^3.3.3"
-  },
-  "optionalDependencies": {
-    "@just-every/code-darwin-arm64": "0.6.51",
-    "@just-every/code-darwin-x64": "0.6.51",
-    "@just-every/code-linux-x64-musl": "0.6.51",
-    "@just-every/code-linux-arm64-musl": "0.6.51",
-    "@just-every/code-win32-x64": "0.6.51"
-  }
+  "packageManager": "pnpm@10.28.2+sha512.41872f037ad22f7348e3b1debbaf7e867cfd448f2726d9cf74c08f19507c31d2c8e7a11525b983febc2df640b5438dee6023ebb1f84ed43cc2d654d2bc326264"
 }
