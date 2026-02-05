@@ -18,8 +18,8 @@ sanitize_version() {
 
 version="$(sanitize_version "$version")"
 
-if [ -z "$version" ] && [ -f "code-rs/Cargo.toml" ]; then
-  raw="$(awk -F '"' '/^\[workspace.package\]/{f=1; next} f && $1 ~ /version/ {print $2; exit}' code-rs/Cargo.toml)"
+if [ -z "$version" ] && [ -f "hanzo-dev/Cargo.toml" ]; then
+  raw="$(awk -F '"' '/^\[workspace.package\]/{f=1; next} f && $1 ~ /version/ {print $2; exit}' hanzo-dev/Cargo.toml)"
   version="$(sanitize_version "$raw")"
 fi
 if [ -z "$version" ] && [ -f "codex-cli/package.json" ]; then
