@@ -40,16 +40,16 @@ CRITICAL_PATTERN_KEYS=(
 
 CRITICAL_PATTERN_REGEXES=(
     'prompts/.*\.md'
-    'codex-rs/core/src/openai_tools\.rs|code-rs/core/src/openai_tools\.rs'
-    'codex-rs/core/src/agent_tool\.rs|code-rs/core/src/agent_tool\.rs'
-    'codex-rs/core/src/protocol\.rs|code-rs/core/src/protocol\.rs'
-    'codex-rs/app-server-protocol/src/.*|code-rs/app-server-protocol/src/.*'
-    'codex-rs/mcp-types/src/.*|code-rs/mcp-types/src/.*'
-    'codex-rs/core/src/codex\.rs|code-rs/core/src/codex\.rs'
-    'codex-rs/exec/src/.*|code-rs/exec/src/.*'
-    'codex-rs/apply-patch/src/.*|code-rs/apply-patch/src/.*'
-    'codex-rs/core/src/acp\.rs|code-rs/core/src/acp\.rs'
-    'codex-rs/core/src/config.*\.rs|code-rs/core/src/config.*\.rs'
+    'codex-rs/core/src/openai_tools\.rs|hanzo-dev/core/src/openai_tools\.rs'
+    'codex-rs/core/src/agent_tool\.rs|hanzo-dev/core/src/agent_tool\.rs'
+    'codex-rs/core/src/protocol\.rs|hanzo-dev/core/src/protocol\.rs'
+    'codex-rs/app-server-protocol/src/.*|hanzo-dev/app-server-protocol/src/.*'
+    'codex-rs/mcp-types/src/.*|hanzo-dev/mcp-types/src/.*'
+    'codex-rs/core/src/codex\.rs|hanzo-dev/core/src/codex\.rs'
+    'codex-rs/exec/src/.*|hanzo-dev/exec/src/.*'
+    'codex-rs/apply-patch/src/.*|hanzo-dev/apply-patch/src/.*'
+    'codex-rs/core/src/acp\.rs|hanzo-dev/core/src/acp\.rs'
+    'codex-rs/core/src/config.*\.rs|hanzo-dev/core/src/config.*\.rs'
 )
 
 pattern_for_category() {
