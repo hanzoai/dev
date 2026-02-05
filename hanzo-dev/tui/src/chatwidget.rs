@@ -3240,7 +3240,7 @@ impl ChatWidget<'_> {
                 msg: EventMsg::SessionConfigured(new_conversation.session_configured),
                 order: None,
             };
-            app_event_tx_clone.send(AppEvent::CodexEvent(event));
+            app_event_tx_clone.send(AppEvent::CodeEvent(event));
 
             let conversation = new_conversation.conversation;
             let conversation_clone = conversation.clone();
@@ -3260,7 +3260,7 @@ impl ChatWidget<'_> {
             });
 
             while let Ok(event) = conversation.next_event().await {
-                app_event_tx_clone.send(AppEvent::CodexEvent(event));
+                app_event_tx_clone.send(AppEvent::CodeEvent(event));
             }
             // (debug end notice removed)
         });
@@ -6790,7 +6790,7 @@ impl ChatWidget<'_> {
                 msg: EventMsg::SessionConfigured(session_configured),
                 order: None,
             };
-            app_event_tx_clone.send(AppEvent::CodexEvent(event));
+            app_event_tx_clone.send(AppEvent::CodeEvent(event));
 
             let conversation_clone = conversation.clone();
             tokio::spawn(async move {
@@ -6803,7 +6803,7 @@ impl ChatWidget<'_> {
             });
 
             while let Ok(event) = conversation.next_event().await {
-                app_event_tx_clone.send(AppEvent::CodexEvent(event));
+                app_event_tx_clone.send(AppEvent::CodeEvent(event));
             }
         });
 
@@ -26275,7 +26275,7 @@ Have we met every part of this goal and is there no further work to do?"#
                                                     BrowserScreenshotUpdateEvent, Event, EventMsg,
                                                 };
                                                 let _ = app_event_tx_inner.send(
-                                                    AppEvent::CodexEvent(Event {
+                                                    AppEvent::CodeEvent(Event {
                                                         id: uuid::Uuid::new_v4().to_string(),
                                                         event_seq: 0,
                                                         msg: EventMsg::BrowserScreenshotUpdate(
@@ -26346,7 +26346,7 @@ Have we met every part of this goal and is there no further work to do?"#
                                             use hanzo_core::protocol::Event;
                                             use hanzo_core::protocol::EventMsg;
                                             let _ =
-                                                app_event_tx_bg.send(AppEvent::CodexEvent(Event {
+                                                app_event_tx_bg.send(AppEvent::CodeEvent(Event {
                                                     id: uuid::Uuid::new_v4().to_string(),
                                                     event_seq: 0,
                                                     msg: EventMsg::BrowserScreenshotUpdate(
@@ -26480,7 +26480,7 @@ Have we met every part of this goal and is there no further work to do?"#
                                                                 *latest = Some((first_path.clone(), url_inner.clone()));
                                                             }
                                                             use hanzo_core::protocol::{BrowserScreenshotUpdateEvent, Event, EventMsg};
-                                                            let _ = app_event_tx_inner.send(AppEvent::CodexEvent(Event {
+                                                            let _ = app_event_tx_inner.send(AppEvent::CodeEvent(Event {
                                                                 id: uuid::Uuid::new_v4().to_string(),
                                                                 event_seq: 0,
                                                                 msg: EventMsg::BrowserScreenshotUpdate(BrowserScreenshotUpdateEvent {
@@ -26544,13 +26544,19 @@ Have we met every part of this goal and is there no further work to do?"#
                                                         use hanzo_core::protocol::BrowserScreenshotUpdateEvent;
                                                         use hanzo_core::protocol::Event;
                                                         use hanzo_core::protocol::EventMsg;
-                                                        let _ = app_event_tx_bg.send(AppEvent::CodexEvent(Event {
+                                                        let _ = app_event_tx_bg
+                                                            .send(AppEvent::CodeEvent(Event {
                                                             id: uuid::Uuid::new_v4().to_string(),
                                                             event_seq: 0,
-                                                            msg: EventMsg::BrowserScreenshotUpdate(BrowserScreenshotUpdateEvent {
-                                                                screenshot_path: first_path.clone(),
-                                                                url: url.unwrap_or_else(|| "Chrome".to_string()),
-                                                            }),
+                                                            msg: EventMsg::BrowserScreenshotUpdate(
+                                                                BrowserScreenshotUpdateEvent {
+                                                                    screenshot_path: first_path
+                                                                        .clone(),
+                                                                    url: url.unwrap_or_else(|| {
+                                                                        "Chrome".to_string()
+                                                                    }),
+                                                                },
+                                                            ),
                                                             order: None,
                                                         }));
                                                         break;
@@ -26974,7 +26980,7 @@ Have we met every part of this goal and is there no further work to do?"#
                                                     BrowserScreenshotUpdateEvent, EventMsg,
                                                 };
                                                 let _ = app_event_tx_inner.send(
-                                                    AppEvent::CodexEvent(Event {
+                                                    AppEvent::CodeEvent(Event {
                                                         id: uuid::Uuid::new_v4().to_string(),
                                                         event_seq: 0,
                                                         msg: EventMsg::BrowserScreenshotUpdate(
@@ -27035,7 +27041,7 @@ Have we met every part of this goal and is there no further work to do?"#
 
                                                 // Send update event
                                                 use hanzo_core::protocol::{BrowserScreenshotUpdateEvent, EventMsg};
-                                                let _ = app_event_tx_inner.send(AppEvent::CodexEvent(Event { id: uuid::Uuid::new_v4().to_string(), event_seq: 0, msg: EventMsg::BrowserScreenshotUpdate(BrowserScreenshotUpdateEvent {
+                                                let _ = app_event_tx_inner.send(AppEvent::CodeEvent(Event { id: uuid::Uuid::new_v4().to_string(), event_seq: 0, msg: EventMsg::BrowserScreenshotUpdate(BrowserScreenshotUpdateEvent {
                                                         screenshot_path: first_path.clone(),
                                                         url: url_inner,
                                                     }), order: None }));
@@ -27086,7 +27092,7 @@ Have we met every part of this goal and is there no further work to do?"#
                                         // Send update event
                                         use hanzo_core::protocol::BrowserScreenshotUpdateEvent;
                                         use hanzo_core::protocol::EventMsg;
-                                        let _ = app_event_tx.send(AppEvent::CodexEvent(Event {
+                                        let _ = app_event_tx.send(AppEvent::CodeEvent(Event {
                                             id: uuid::Uuid::new_v4().to_string(),
                                             event_seq: 0,
                                             msg: EventMsg::BrowserScreenshotUpdate(
@@ -27577,7 +27583,9 @@ Have we met every part of this goal and is there no further work to do?"#
                 // List configured MCP servers and their tool prefixes
                 // Note: Runtime tool details are loaded when a session starts
                 if self.config.mcp_servers.is_empty() {
-                    self.push_background_tail("No MCP servers configured. Use /mcp add … to add one.".to_string());
+                    self.push_background_tail(
+                        "No MCP servers configured. Use /mcp add … to add one.".to_string(),
+                    );
                 } else {
                     let mut lines = format!("MCP Servers ({}):\n", self.config.mcp_servers.len());
                     let mut sorted_servers: Vec<_> = self.config.mcp_servers.iter().collect();
@@ -27804,8 +27812,8 @@ Have we met every part of this goal and is there no further work to do?"#
         let subcommand = parts.first().map(|s| s.to_ascii_lowercase());
 
         // Get account counts per provider
-        let account_counts = auth_accounts::count_accounts_by_provider(&self.config.code_home)
-            .unwrap_or_default();
+        let account_counts =
+            auth_accounts::count_accounts_by_provider(&self.config.code_home).unwrap_or_default();
 
         if trimmed.is_empty() || subcommand.as_deref() == Some("list") {
             // List all available providers
@@ -27828,10 +27836,18 @@ Have we met every part of this goal and is there no further work to do?"#
                     .unwrap_or_default();
 
                 // Show account count for this provider
-                let provider_id_key = if id == "openai" { None } else { Some(id.clone()) };
+                let provider_id_key = if id == "openai" {
+                    None
+                } else {
+                    Some(id.clone())
+                };
                 let acct_count = account_counts.get(&provider_id_key).copied().unwrap_or(0);
                 let acct_info = if acct_count > 0 {
-                    format!(" ({} account{})", acct_count, if acct_count == 1 { "" } else { "s" })
+                    format!(
+                        " ({} account{})",
+                        acct_count,
+                        if acct_count == 1 { "" } else { "s" }
+                    )
                 } else {
                     String::new()
                 };
@@ -27985,17 +28001,18 @@ Have we met every part of this goal and is there no further work to do?"#
         // Check if provider's env key is set (if required)
         if let Some(info) = self.config.model_providers.get(&provider_id) {
             if let Some(env_key) = &info.env_key {
-                if std::env::var(env_key).map(|v| v.trim().is_empty()).unwrap_or(true) {
+                if std::env::var(env_key)
+                    .map(|v| v.trim().is_empty())
+                    .unwrap_or(true)
+                {
                     // Check if we have stored accounts for this provider
                     let provider_key = if provider_id == "openai" {
                         None
                     } else {
                         Some(provider_id.clone())
                     };
-                    let has_stored_accounts = account_counts
-                        .get(&provider_key)
-                        .copied()
-                        .unwrap_or(0) > 0;
+                    let has_stored_accounts =
+                        account_counts.get(&provider_key).copied().unwrap_or(0) > 0;
 
                     if !has_stored_accounts {
                         let instructions = info
@@ -28079,7 +28096,8 @@ Note: Free ngrok accounts have connection limits."#;
             self.history_push_plain_state(history_cell::new_error_event(
                 "No tunnel tool found. Install ngrok or localxpose:\n\n\
                  ngrok: brew install ngrok (macOS) or https://ngrok.com\n\
-                 localxpose: https://localxpose.io".to_string()
+                 localxpose: https://localxpose.io"
+                    .to_string(),
             ));
             return;
         }
@@ -28137,21 +28155,19 @@ Note: Free ngrok accounts have connection limits."#;
             Some("ollama") => OLLAMA_PORT,
             Some("lmstudio") | Some("lm-studio") => LMSTUDIO_PORT,
             Some("hanzo") | Some("hanzo-node") => HANZO_NODE_PORT,
-            Some(port_str) => {
-                match port_str.parse::<u16>() {
-                    Ok(p) => p,
-                    Err(_) => {
-                        self.history_push_plain_state(history_cell::new_error_event(format!(
-                            "Invalid port or service: '{}'. Use /share help for usage.",
-                            port_str
-                        )));
-                        return;
-                    }
+            Some(port_str) => match port_str.parse::<u16>() {
+                Ok(p) => p,
+                Err(_) => {
+                    self.history_push_plain_state(history_cell::new_error_event(format!(
+                        "Invalid port or service: '{}'. Use /share help for usage.",
+                        port_str
+                    )));
+                    return;
                 }
-            }
+            },
             None => {
                 self.history_push_plain_state(history_cell::new_error_event(
-                    "Please specify a service or port. Use /share help for usage.".to_string()
+                    "Please specify a service or port. Use /share help for usage.".to_string(),
                 ));
                 return;
             }
@@ -28224,7 +28240,8 @@ Note: Free ngrok accounts have connection limits."#;
                     if let Ok(json) = serde_json::from_str::<serde_json::Value>(&body) {
                         if let Some(tunnels) = json.get("tunnels").and_then(|t| t.as_array()) {
                             for tunnel in tunnels {
-                                if let Some(url) = tunnel.get("public_url").and_then(|u| u.as_str()) {
+                                if let Some(url) = tunnel.get("public_url").and_then(|u| u.as_str())
+                                {
                                     if url.starts_with("https://") {
                                         let msg = format!(
                                             "Tunnel active!\n\n\
@@ -28234,7 +28251,8 @@ Note: Free ngrok accounts have connection limits."#;
                                              Use /share stop to close the tunnel.",
                                             url, service_name, url
                                         );
-                                        app_event_tx.send_background_event_with_ticket(&ticket, msg);
+                                        app_event_tx
+                                            .send_background_event_with_ticket(&ticket, msg);
                                         return;
                                     }
                                 }
@@ -28320,7 +28338,7 @@ Note: Free ngrok accounts have connection limits."#;
                         }
                         use hanzo_core::protocol::BrowserScreenshotUpdateEvent;
                         use hanzo_core::protocol::EventMsg;
-                        let _ = app_event_tx.send(AppEvent::CodexEvent(Event {
+                        let _ = app_event_tx.send(AppEvent::CodeEvent(Event {
                             id: uuid::Uuid::new_v4().to_string(),
                             event_seq: 0,
                             msg: EventMsg::BrowserScreenshotUpdate(BrowserScreenshotUpdateEvent {
@@ -28509,7 +28527,7 @@ Note: Free ngrok accounts have connection limits."#;
                             }
                             use hanzo_core::protocol::BrowserScreenshotUpdateEvent;
                             use hanzo_core::protocol::EventMsg;
-                            let _ = app_event_tx.send(AppEvent::CodexEvent(Event {
+                            let _ = app_event_tx.send(AppEvent::CodeEvent(Event {
                                 id: uuid::Uuid::new_v4().to_string(),
                                 event_seq: 0,
                                 msg: EventMsg::BrowserScreenshotUpdate(
@@ -29212,9 +29230,9 @@ Note: Free ngrok accounts have connection limits."#;
     }
 
     fn render_screenshot_highlevel(&self, path: &PathBuf, area: Rect, buf: &mut Buffer) {
-        use ratatui::widgets::Widget;
         use ratatui::style::Color;
         use ratatui::style::Style;
+        use ratatui::widgets::Widget;
         use ratatui_image::Image;
         use ratatui_image::Resize;
         use ratatui_image::picker::Picker;
@@ -29351,9 +29369,9 @@ Note: Free ngrok accounts have connection limits."#;
     }
 
     fn render_screenshot_placeholder(&self, path: &PathBuf, area: Rect, buf: &mut Buffer) {
+        use ratatui::style::Color;
         use ratatui::style::Modifier;
         use ratatui::style::Style;
-        use ratatui::style::Color;
         use ratatui::widgets::Block;
         use ratatui::widgets::Borders;
         use ratatui::widgets::Paragraph;
@@ -32193,7 +32211,7 @@ mod tests {
             events
                 .iter()
                 .any(|event| matches!(event, AppEvent::DispatchCommand(_, _))
-                    || matches!(event, AppEvent::CodexOp(_))),
+                    || matches!(event, AppEvent::CodeOp(_))),
             "slash command should follow existing dispatch path"
         );
     }
@@ -38496,10 +38514,11 @@ impl WidgetRef for &ChatWidget<'_> {
             .last_bottom_reserved_rows
             .set(bottom_pane_area.height);
 
-        // Status bar is disabled to match Codex-style layout.
-        // The status info is shown in the session header card in the history area instead.
-        // Note: status_bar_area will be 0 height since status is disabled in layout_areas.
-        let _ = status_bar_area; // Suppress unused warning
+        // Render status bar if enabled in config.
+        // When disabled, status_bar_area will have 0 height from layout_areas.
+        if self.config.tui.show_status_bar && status_bar_area.height > 0 {
+            self.render_status_bar(status_bar_area, buf);
+        }
 
         // In standard-terminal mode, do not paint the history region: committed
         // content is appended to the terminal's own scrollback via

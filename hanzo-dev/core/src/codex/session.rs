@@ -278,10 +278,10 @@ pub(super) fn format_retry_eta(retry_after: &RetryAfter) -> Option<String> {
     Some(formatted)
 }
 
-pub(super) fn is_connectivity_error(err: &CodexErr) -> bool {
+pub(super) fn is_connectivity_error(err: &CodeErr) -> bool {
     match err {
-        CodexErr::Reqwest(e) => e.is_connect() || e.is_timeout() || e.is_request(),
-        CodexErr::Stream(msg, _, _) => {
+        CodeErr::Reqwest(e) => e.is_connect() || e.is_timeout() || e.is_request(),
+        CodeErr::Stream(msg, _, _) => {
             let lower = msg.to_ascii_lowercase();
             msg.starts_with("[transport]")
                 || lower.contains("network")

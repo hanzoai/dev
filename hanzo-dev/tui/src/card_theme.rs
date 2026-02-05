@@ -291,12 +291,7 @@ pub fn agent_read_only_light_theme() -> CardThemeDefinition {
         name: "Agent Read Only Light",
         theme: CardTheme {
             gradient: gradient((240, 242, 244), (252, 252, 253), -0.05),
-            palette: palette(
-                (182, 190, 198),
-                (62, 70, 78),
-                (44, 50, 56),
-                (112, 120, 130),
-            ),
+            palette: palette((182, 190, 198), (62, 70, 78), (44, 50, 56), (112, 120, 130)),
             reveal: None,
         },
     }
