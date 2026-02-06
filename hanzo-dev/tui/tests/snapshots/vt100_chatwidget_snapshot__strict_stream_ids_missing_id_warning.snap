@@ -2,14 +2,14 @@
 source: tui/tests/vt100_chatwidget_snapshot.rs
 expression: output
 ---
- +----------------------------------------------------------------------------+
- |                                 Every Code                                 |
- +----------------------------------------------------------------------------+
+   - Writing code
+   - Reading files
+   - Running commands
 
 
  » Missing stream id for assistant answer delta
 
- +----------------------------------------------------------------------------+
- | What can I code for you today?                                             |
- +----------------------------------------------------------------------------+
- Read Only  (Shift+Tab change)                        Ctrl+G guide  •  API key
+  What can I code for you today?
+
+
+ Read Only  (Shift+Tab change)                                   ?  •  API key

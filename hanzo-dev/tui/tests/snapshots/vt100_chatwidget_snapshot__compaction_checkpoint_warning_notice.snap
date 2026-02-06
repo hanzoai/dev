@@ -2,9 +2,8 @@
 source: tui/tests/vt100_chatwidget_snapshot.rs
 expression: frame
 ---
- +----------------------------------------------------------------------------+
- |                                 Every Code                                 |
- +----------------------------------------------------------------------------+
+
+ • Hello! How can I help you today?
 
 
 
@@ -15,9 +14,10 @@ expression: frame
    - Running commands
 
 
- ★ History checkpoint: earlier conversation compacted.
+   History checkpoint: earlier conversation compacted.
 
- +----------------------------------------------------------------------------+
- | What can I code for you today?                                             |
- +----------------------------------------------------------------------------+
- Read Only  (Shift+Tab change)                        Ctrl+G guide  •  API key
+
+  What can I code for you today?
+
+
+ Read Only  (Shift+Tab change)                                   ?  •  API key

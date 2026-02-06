@@ -2,9 +2,6 @@
 source: tui/tests/vt100_chatwidget_snapshot.rs
 expression: output
 ---
- +--------------------------------------------------------+
- |                       Every Code                       |
- +--------------------------------------------------------+
  +Settings ▸ Overview-------------------------------------+
  |                                                        |
  | › Model              Model: GPT-5.1-Codex-Max (Medium) |
@@ -13,11 +10,14 @@ expression: output
  |   Theme              Theme: Light - Photon (16-colo... |
  |   + Switch between preset color palettes and ad...     |
  |                                                        |
+ |   Updates            Auto update: Disabled             |
+ |   + Control CLI auto-update cadence and release...     |
+ |                                                        |
  | ↑ ↓ Move    Enter Open    Esc Close    ? Help          |
  |                                                        |
  +--------------------------------------------------------+
 
- +--------------------------------------------------------+
- | What can I code for you today?                         |
- +--------------------------------------------------------+
- Read Only  (Shift+Tab change)    Ctrl+G guide  •  API key
+  What can I code for you today?
+
+
+ Read Only  (Shift+Tab change)               ?  •  API key

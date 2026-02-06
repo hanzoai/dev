@@ -2,9 +2,9 @@
 source: tui/tests/vt100_chatwidget_snapshot.rs
 expression: scrolled
 ---
- +----------------------------------------------------------------------------+
- |                                 Every Code                                 |
- +----------------------------------------------------------------------------+
+   scroll.
+
+   Assistant reply number two with multiple paragraphs.
  •
    Here is another paragraph to expand height.
 
@@ -21,7 +21,7 @@ expression: scrolled
  › Fourth user prompt to guarantee overflow beyond the viewport height.
 
 
- +----------------------------------------------------------------------------+
- | What can I code for you today?                                             |
- +----------------------------------------------------------------------------+
- Read Only  (Shift+Tab change)                        Ctrl+G guide  •  API key
+  What can I code for you today?
+
+
+ Read Only  (Shift+Tab change)                                   ?  •  API key
