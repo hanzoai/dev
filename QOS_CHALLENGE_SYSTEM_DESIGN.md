@@ -20,6 +20,7 @@ This document specifies the Quality of Service (QoS) Challenge System for Hanzo 
 ## Problem Statement
 
 In a decentralized compute marketplace, providers may:
+
 - Claim capabilities they do not possess (GPU TFLOPS, VRAM, etc.)
 - Provide inconsistent service quality over time
 - Game the reputation system through selective performance
@@ -32,6 +33,7 @@ The QoS Challenge System addresses these issues by continuously verifying provid
 ## Design Goals
 
 ### Primary Goals
+
 1. **Verifiable Performance**: Prove providers can deliver claimed compute capabilities
 2. **Continuous Monitoring**: Ongoing verification, not just registration-time
 3. **Sybil Resistance**: Prevent gaming through multiple identities
@@ -39,6 +41,7 @@ The QoS Challenge System addresses these issues by continuously verifying provid
 5. **Low Overhead**: Minimal impact on actual compute workloads
 
 ### Non-Goals
+
 - Real-time latency guarantees (handled by SLA monitoring)
 - Content verification (handled by result verifier)
 - Network topology optimization (handled by routing layer)
@@ -81,12 +84,12 @@ The QoS Challenge System addresses these issues by continuously verifying provid
 
 The QoS Challenge System integrates with:
 
-| Component | Integration Point | Purpose |
-|-----------|------------------|---------|
-| `hanzo-compute` | `ComputeSwarm`, `Peer` | Challenge issuance, result collection |
-| `hanzo-mining` | `MiningManager`, `Consensus` | On-chain settlement, stake management |
-| `hanzo-libp2p` | P2P messaging | Challenge delivery, proof collection |
-| `hanzo-pqc` | Cryptographic primitives | Quantum-safe signatures for proofs |
+| Component       | Integration Point            | Purpose                               |
+| --------------- | ---------------------------- | ------------------------------------- |
+| `hanzo-compute` | `ComputeSwarm`, `Peer`       | Challenge issuance, result collection |
+| `hanzo-mining`  | `MiningManager`, `Consensus` | On-chain settlement, stake management |
+| `hanzo-libp2p`  | P2P messaging                | Challenge delivery, proof collection  |
+| `hanzo-pqc`     | Cryptographic primitives     | Quantum-safe signatures for proofs    |
 
 ---
 
@@ -95,6 +98,7 @@ The QoS Challenge System integrates with:
 ### Challenge Types
 
 #### 1. Compute Challenge (CC)
+
 Verifies actual compute capability (TFLOPS/GFLOPS)
 
 ```rust
@@ -144,6 +148,7 @@ pub enum ChallengeType {
 **Verification Method**: Provider executes a deterministic computation kernel (e.g., matrix multiplication with specific seed). Result hash and execution time are submitted.
 
 **Difficulty Scaling**:
+
 ```python
 # Difficulty determines problem size
 def compute_problem_size(difficulty: int, metric: str) -> int:
@@ -161,6 +166,7 @@ def compute_problem_size(difficulty: int, metric: str) -> int:
 ```
 
 #### 2. Latency Challenge (LC)
+
 Verifies network latency and response time
 
 ```rust
@@ -181,6 +187,7 @@ pub struct LatencyChallenge {
 **Verification Method**: Echo-response pattern with cryptographic binding. Provider must respond within deadline with signed nonce.
 
 #### 3. Bandwidth Challenge (BC)
+
 Verifies data transfer capabilities
 
 ```rust
@@ -205,6 +212,7 @@ pub enum TransferDirection {
 ```
 
 #### 4. Availability Challenge (AC)
+
 Verifies provider is online and ready to serve
 
 ```rust
@@ -223,6 +231,7 @@ pub struct AvailabilityChallenge {
 **Verification Method**: Heartbeat-style challenges issued at random intervals. Missing responses count against availability score.
 
 #### 5. Model Capability Challenge (MC)
+
 Verifies provider can run specific AI models
 
 ```rust
@@ -280,12 +289,12 @@ pub struct ModelChallenge {
 
 ### Challenge Frequency
 
-| Provider Tier | Challenge Frequency | Challenge Mix |
-|---------------|--------------------|--------------|
-| New (< 10 jobs) | Every 10 minutes | 40% Compute, 30% Avail, 20% Latency, 10% Model |
-| Established (10-100) | Every 30 minutes | 30% Compute, 30% Avail, 25% Latency, 15% Model |
-| Trusted (100+) | Every 60 minutes | 25% Compute, 35% Avail, 20% Latency, 20% Model |
-| Elite (1000+, TEE) | Every 2 hours | 20% Compute, 40% Avail, 20% Latency, 20% Model |
+| Provider Tier        | Challenge Frequency | Challenge Mix                                  |
+| -------------------- | ------------------- | ---------------------------------------------- |
+| New (< 10 jobs)      | Every 10 minutes    | 40% Compute, 30% Avail, 20% Latency, 10% Model |
+| Established (10-100) | Every 30 minutes    | 30% Compute, 30% Avail, 25% Latency, 15% Model |
+| Trusted (100+)       | Every 60 minutes    | 25% Compute, 35% Avail, 20% Latency, 20% Model |
+| Elite (1000+, TEE)   | Every 2 hours       | 20% Compute, 40% Avail, 20% Latency, 20% Model |
 
 ### Proof Structure
 
@@ -348,6 +357,7 @@ pub enum ProofData {
 ### Verification Methods
 
 #### 1. Hash Verification
+
 For compute challenges, verifiers execute the same deterministic computation:
 
 ```rust
@@ -387,6 +397,7 @@ impl ComputeChallengeVerifier {
 ```
 
 #### 2. Optimistic Verification with Fraud Proofs
+
 For efficiency, most verifications are optimistic:
 
 ```rust
@@ -427,6 +438,7 @@ pub struct FraudProof {
 ```
 
 #### 3. TEE Attestation Verification
+
 For TEE-enabled providers:
 
 ```rust
@@ -1081,15 +1093,15 @@ contract QoSChallengeSettlement is ReentrancyGuard {
 
 ### Threat Model
 
-| Threat | Impact | Mitigation |
-|--------|--------|------------|
-| **Sybil Attack** | Multiple fake identities to game reputation | Minimum stake requirement, unique hardware attestation |
+| Threat                      | Impact                                       | Mitigation                                                  |
+| --------------------------- | -------------------------------------------- | ----------------------------------------------------------- |
+| **Sybil Attack**            | Multiple fake identities to game reputation  | Minimum stake requirement, unique hardware attestation      |
 | **Computation Outsourcing** | Provider outsources challenge to faster node | Strict deadlines, random challenge timing, TEE verification |
-| **Selective Participation** | Only respond to easy challenges | Random assignment, penalty for missed challenges |
-| **Collusion** | Verifiers and providers collude | Multiple independent verifiers, fraud proofs, slashing |
-| **Replay Attacks** | Reuse old challenge responses | Unique nonces, timestamp validation, challenge expiry |
-| **Eclipse Attack** | Isolate provider from network | Multiple bootstrap nodes, diverse verifier set |
-| **TEE Compromise** | Fake attestation quotes | Quote freshness checks, revocation lists, multi-vendor TEE |
+| **Selective Participation** | Only respond to easy challenges              | Random assignment, penalty for missed challenges            |
+| **Collusion**               | Verifiers and providers collude              | Multiple independent verifiers, fraud proofs, slashing      |
+| **Replay Attacks**          | Reuse old challenge responses                | Unique nonces, timestamp validation, challenge expiry       |
+| **Eclipse Attack**          | Isolate provider from network                | Multiple bootstrap nodes, diverse verifier set              |
+| **TEE Compromise**          | Fake attestation quotes                      | Quote freshness checks, revocation lists, multi-vendor TEE  |
 
 ### Security Properties
 
@@ -1165,12 +1177,14 @@ impl ChallengeSelector {
 ### Phase 1: Foundation (Weeks 1-4)
 
 #### Week 1-2: Core Data Structures
+
 - [ ] Define `Challenge`, `Proof`, `ChallengeResult` types in `hanzo-compute`
 - [ ] Implement `ChallengeGenerator` with VRF-based randomness
 - [ ] Add `QoSScore` and `ProviderState` to peer management
 - [ ] Unit tests for all data structures
 
 #### Week 3-4: Challenge Protocol
+
 - [ ] Implement P2P challenge delivery via `hanzo-libp2p`
 - [ ] Build `ComputeChallengeVerifier` with reference computation
 - [ ] Implement `LatencyChallengeVerifier` with timing verification
@@ -1179,12 +1193,14 @@ impl ChallengeSelector {
 ### Phase 2: Verification (Weeks 5-8)
 
 #### Week 5-6: Verification Engine
+
 - [ ] Build optimistic verification framework
 - [ ] Implement fraud proof generation and validation
 - [ ] Add TEE attestation verification (Intel SGX, AMD SEV)
 - [ ] Integration with `hanzo-pqc` for quantum-safe signatures
 
 #### Week 7-8: Scoring System
+
 - [ ] Implement `QoSScoreCalculator` with component weighting
 - [ ] Build `ConsistencyCalculator` with time-series analysis
 - [ ] Add score persistence to `hanzo-database`
@@ -1193,12 +1209,14 @@ impl ChallengeSelector {
 ### Phase 3: Economics (Weeks 9-12)
 
 #### Week 9-10: On-Chain Contracts
+
 - [ ] Deploy `QoSChallengeSettlement` contract to testnet
 - [ ] Implement reward distribution logic
 - [ ] Add slashing mechanics with circuit breakers
 - [ ] Security audit of smart contracts
 
 #### Week 11-12: Integration & Testing
+
 - [ ] End-to-end integration with `hanzo-mining`
 - [ ] Stress testing with simulated adversaries
 - [ ] Documentation and API reference
@@ -1206,24 +1224,24 @@ impl ChallengeSelector {
 
 ### Milestones
 
-| Milestone | Deliverable | Date |
-|-----------|-------------|------|
-| M1 | Challenge protocol specification finalized | Week 2 |
-| M2 | Testnet deployment with basic challenges | Week 6 |
-| M3 | Full verification engine operational | Week 8 |
-| M4 | Economic settlement on testnet | Week 10 |
-| M5 | Security audit complete | Week 11 |
-| M6 | Mainnet launch | Week 12 |
+| Milestone | Deliverable                                | Date    |
+| --------- | ------------------------------------------ | ------- |
+| M1        | Challenge protocol specification finalized | Week 2  |
+| M2        | Testnet deployment with basic challenges   | Week 6  |
+| M3        | Full verification engine operational       | Week 8  |
+| M4        | Economic settlement on testnet             | Week 10 |
+| M5        | Security audit complete                    | Week 11 |
+| M6        | Mainnet launch                             | Week 12 |
 
 ### Success Metrics
 
-| Metric | Target | Measurement |
-|--------|--------|-------------|
-| Challenge completion rate | > 98% | Successful responses / total challenges |
-| False positive rate | < 0.1% | Incorrect failures / total failures |
-| Verification latency | < 5 seconds | Time from proof submission to verification |
-| Provider churn | < 5% monthly | Providers leaving due to failed challenges |
-| Fraud detection rate | > 99% | Detected fraudulent proofs / total fraudulent |
+| Metric                    | Target       | Measurement                                   |
+| ------------------------- | ------------ | --------------------------------------------- |
+| Challenge completion rate | > 98%        | Successful responses / total challenges       |
+| False positive rate       | < 0.1%       | Incorrect failures / total failures           |
+| Verification latency      | < 5 seconds  | Time from proof submission to verification    |
+| Provider churn            | < 5% monthly | Providers leaving due to failed challenges    |
+| Fraud detection rate      | > 99%        | Detected fraudulent proofs / total fraudulent |
 
 ---
 
@@ -1313,14 +1331,14 @@ paths:
           schema:
             type: string
       responses:
-        '200':
+        "200":
           description: Active challenges
           content:
             application/json:
               schema:
                 type: array
                 items:
-                  $ref: '#/components/schemas/Challenge'
+                  $ref: "#/components/schemas/Challenge"
 
   /v1/challenges/{challenge_id}/proof:
     post:
@@ -1336,11 +1354,11 @@ paths:
         content:
           application/json:
             schema:
-              $ref: '#/components/schemas/ChallengeProof'
+              $ref: "#/components/schemas/ChallengeProof"
       responses:
-        '200':
+        "200":
           description: Proof accepted
-        '400':
+        "400":
           description: Invalid proof
 
   /v1/providers/{provider_id}/qos:
@@ -1353,12 +1371,12 @@ paths:
           schema:
             type: string
       responses:
-        '200':
+        "200":
           description: QoS score
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/QoSScore'
+                $ref: "#/components/schemas/QoSScore"
 
   /v1/providers/{provider_id}/history:
     get:
@@ -1375,14 +1393,14 @@ paths:
             type: integer
             default: 100
       responses:
-        '200':
+        "200":
           description: Challenge history
           content:
             application/json:
               schema:
                 type: array
                 items:
-                  $ref: '#/components/schemas/ChallengeResult'
+                  $ref: "#/components/schemas/ChallengeResult"
 
 components:
   schemas:
@@ -1581,9 +1599,9 @@ ChallengeProof execute_compute_challenge(ComputeChallenge* challenge) {
 
 ## Document History
 
-| Version | Date | Author | Changes |
-|---------|------|--------|---------|
-| 1.0 | 2026-01-24 | Architecture Team | Initial design document |
+| Version | Date       | Author            | Changes                 |
+| ------- | ---------- | ----------------- | ----------------------- |
+| 1.0     | 2026-01-24 | Architecture Team | Initial design document |
 
 ---
 

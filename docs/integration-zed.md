@@ -7,9 +7,9 @@ To point Zed at Every Code's (Code) ACP server, add this block to `settings.json
   "agent_servers": {
     "Code": {
       "command": "npx",
-      "args": ["-y", "@just-every/code", "acp"]
-    }
-  }
+      "args": ["-y", "@just-every/code", "acp"],
+    },
+  },
 }
 ```
 
@@ -35,6 +35,7 @@ write_text_file = { mcp_server = "zed", tool_name = "writeTextFile" }
 ```
 
 Zed wires these tools automatically when you add the Code (Every Code) agent, so the identifiers above match the defaults.
+
 - The CLI entry point (`npx @just-every/code acp`) is a thin wrapper over the Rust binary (`cargo run -p code-mcp-server -- --stdio`) that ships alongside the rest of Every Code. Build-from-source workflows plug in by swapping `command` for an absolute path to that binary.
 
 ## Tips and troubleshooting
