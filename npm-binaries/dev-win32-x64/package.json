@@ -1,0 +1,10 @@
+{
+  "name": "@hanzo/dev-win32-x64",
+  "version": "3.0.9",
+  "license": "Apache-2.0",
+  "description": "Platform binary for @hanzo/dev (x86_64-pc-windows-msvc.exe)",
+  "os": ["win32"],
+  "cpu": ["x64"],
+  "files": ["bin/"],
+  "private": false
+}

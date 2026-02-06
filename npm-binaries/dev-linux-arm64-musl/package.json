@@ -1,0 +1,10 @@
+{
+  "name": "@hanzo/dev-linux-arm64-musl",
+  "version": "3.0.9",
+  "license": "Apache-2.0",
+  "description": "Platform binary for @hanzo/dev (aarch64-unknown-linux-musl)",
+  "os": ["linux"],
+  "cpu": ["arm64"],
+  "files": ["bin/"],
+  "private": false
+}

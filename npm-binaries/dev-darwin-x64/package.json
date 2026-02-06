@@ -1,0 +1,10 @@
+{
+  "name": "@hanzo/dev-darwin-x64",
+  "version": "3.0.9",
+  "license": "Apache-2.0",
+  "description": "Platform binary for @hanzo/dev (x86_64-apple-darwin)",
+  "os": ["darwin"],
+  "cpu": ["x64"],
+  "files": ["bin/"],
+  "private": false
+}
