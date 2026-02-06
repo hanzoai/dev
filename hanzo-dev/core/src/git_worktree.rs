@@ -189,7 +189,7 @@ pub async fn setup_worktree(
         }
 
         if reuse_allowed {
-            // Re-use existing worktree for speed when it does not need to be
+            // Reuse existing worktree for speed when it does not need to be
             // pinned to a specific snapshot.
             record_worktree_in_session(git_root, &worktree_path).await;
             return Ok((worktree_path, effective_branch));
