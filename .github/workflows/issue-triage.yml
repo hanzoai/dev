@@ -62,9 +62,9 @@ jobs:
       # Default is strict (no fallback) to preserve bot authorship.
       # Authorship: PAT only (no fallbacks). Ensure CODE_GH_PAT has org repo write perms.
       # Rate limiting configuration
-      RATE_WINDOW_HOURS: '24'
-      RATE_PER_ACTOR: '5'         # Max issues per actor in window to auto-act
-      RATE_TOTAL_AUTO_PRS: '50'   # Max auto PRs opened by bot in window
+      RATE_WINDOW_HOURS: "24"
+      RATE_PER_ACTOR: "5" # Max issues per actor in window to auto-act
+      RATE_TOTAL_AUTO_PRS: "50" # Max auto PRs opened by bot in window
       # Path policy configuration
       PROTECTED_GLOBS: |
         .github/**
@@ -117,7 +117,7 @@ jobs:
         timeout-minutes: 5
         uses: actions/setup-node@v4
         with:
-          node-version: '20'
+          node-version: "20"
 
       # No Rust or heavy npm usage in triage; skip related caches and toolchains.
 
