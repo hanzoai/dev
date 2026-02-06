@@ -10,7 +10,7 @@ This document describes Hanzo Dev’s experimental MCP interface: a JSON‑RPC A
 
 ## Overview
 
-Hanzo Dev exposes a small set of MCP‑compatible methods to create and manage conversations, send user input, receive live events, and handle approval prompts. The types are defined in `app-server-protocol/src/protocol.rs` and re-used by the MCP server implementation in `mcp-server/`.
+Hanzo Dev exposes a small set of MCP‑compatible methods to create and manage conversations, send user input, receive live events, and handle approval prompts. The types are defined in `app-server-protocol/src/protocol.rs` and reused by the MCP server implementation in `mcp-server/`.
 
 At a glance:
 
