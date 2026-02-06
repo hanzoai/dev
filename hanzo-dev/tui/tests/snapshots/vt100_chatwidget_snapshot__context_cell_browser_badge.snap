@@ -2,9 +2,8 @@
 source: tui/tests/vt100_chatwidget_snapshot.rs
 expression: output
 ---
- +----------------------------------------------------------------------------+
- |                                 Every Code                                 |
- +----------------------------------------------------------------------------+
+
+ • I can help with various tasks including:
 
    - Writing code
    - Reading files
@@ -15,7 +14,8 @@ expression: output
    🖼 Example Domain  1280×720  2025-11-05T12:00:00Z  browser_type=chromium,
    cursor_position=120,340
 
- +----------------------------------------------------------------------------+
- | What can I code for you today?                                             |
- +----------------------------------------------------------------------------+
- Read Only  (Shift+Tab change)                        Ctrl+G guide  •  API key
+
+  What can I code for you today?
+
+
+ Read Only  (Shift+Tab change)                                   ?  •  API key
