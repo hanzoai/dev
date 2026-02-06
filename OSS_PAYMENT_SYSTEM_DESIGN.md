@@ -698,11 +698,13 @@ code oss payments --period 2026-01
 ### Phase 1: Foundation (2 weeks)
 
 1. **Database Schema Setup**
+
    - Create PostgreSQL tables
    - Create ClickHouse events tables
    - Set up migrations
 
 2. **Dependency Scanner**
+
    - Implement Cargo.lock parser
    - Implement package-lock.json parser
    - Build dependency graph construction
@@ -715,11 +717,13 @@ code oss payments --period 2026-01
 ### Phase 2: Attribution Engine (2 weeks)
 
 1. **Author Resolution**
+
    - GitHub username to profile mapping
    - Email deduplication
    - Payment address discovery
 
 2. **Share Calculation**
+
    - Implement attribution algorithm
    - GitHub contributor fetching
    - Share normalization
@@ -732,11 +736,13 @@ code oss payments --period 2026-01
 ### Phase 3: Distribution System (2 weeks)
 
 1. **Scoring Algorithm**
+
    - Implement weighting factors
    - Criticality assessment
    - Activity scoring
 
 2. **Payment Generation**
+
    - Distribution calculation
    - Payment batching
    - Threshold handling
@@ -749,6 +755,7 @@ code oss payments --period 2026-01
 ### Phase 4: API & CLI (1 week)
 
 1. **REST API**
+
    - Endpoint implementation
    - Authentication/authorization
    - Documentation
@@ -761,6 +768,7 @@ code oss payments --period 2026-01
 ### Phase 5: Testing & Launch (1 week)
 
 1. **Testing**
+
    - Unit tests
    - Integration tests
    - End-to-end tests
