@@ -2,16 +2,16 @@
 source: tui/tests/vt100_chatwidget_snapshot.rs
 expression: "frames.join(\"\\n---FRAME---\\n\")"
 ---
- +----------------------------------------------------------------------------+
- |                                 Every Code                                 |
- +----------------------------------------------------------------------------+
+
+ • Hello! How can I help you today?
+
+
 
  • I can help with various tasks including:
 
    - Writing code
    - Reading files
    - Running commands
-
 
 
   Auto Drive > Comparing diffs against last run.  ✶ Thinking (Xs)
@@ -21,16 +21,16 @@ expression: "frames.join(\"\\n---FRAME---\\n\")"
   • Agents Enabled  • Diagnostics Enabled                              API key
 
 ---FRAME---
- +----------------------------------------------------------------------------+
- |                                 Every Code                                 |
- +----------------------------------------------------------------------------+
+
+ • Hello! How can I help you today?
+
+
 
  • I can help with various tasks including:
 
    - Writing code
    - Reading files
    - Running commands
-
 
 
   Auto Drive > Ready: run cargo test --workspace  ✶ Running (Xs)
@@ -40,16 +40,16 @@ expression: "frames.join(\"\\n---FRAME---\\n\")"
   • Agents Enabled  • Diagnostics Enabled                              API key
 
 ---FRAME---
- +----------------------------------------------------------------------------+
- |                                 Every Code                                 |
- +----------------------------------------------------------------------------+
+
+ • Hello! How can I help you today?
+
+
 
  • I can help with various tasks including:
 
    - Writing code
    - Reading files
    - Running commands
-
 
 
   Auto Drive > waiting for code review...  ✶ Awaiting review (Xs)
@@ -59,16 +59,16 @@ expression: "frames.join(\"\\n---FRAME---\\n\")"
   • Agents Enabled  • Diagnostics Enabled                              API key
 
 ---FRAME---
- +----------------------------------------------------------------------------+
- |                                 Every Code                                 |
- +----------------------------------------------------------------------------+
+
+ • Hello! How can I help you today?
+
+
 
  • I can help with various tasks including:
 
    - Writing code
    - Reading files
    - Running commands
-
 
 
   Auto Drive > Queued new command for execution.  ✶ Thinking (Xs)

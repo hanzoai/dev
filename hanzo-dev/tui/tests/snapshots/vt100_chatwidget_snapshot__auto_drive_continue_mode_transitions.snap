@@ -2,16 +2,16 @@
 source: tui/tests/vt100_chatwidget_snapshot.rs
 expression: "frames.join(\"\\n---FRAME---\\n\")"
 ---
- +----------------------------------------------------------------------------+
- |                                 Every Code                                 |
- +----------------------------------------------------------------------------+
+
+ • Hello! How can I help you today?
+
+
 
  • I can help with various tasks including:
 
    - Writing code
    - Reading files
    - Running commands
-
 
 
   Auto Drive > Auto Drive ready to run cargo nextest  ✶ Running (Xs)
@@ -21,16 +21,16 @@ expression: "frames.join(\"\\n---FRAME---\\n\")"
   • Agents Enabled  • Diagnostics Enabled                              API key
 
 ---FRAME---
- +----------------------------------------------------------------------------+
- |                                 Every Code                                 |
- +----------------------------------------------------------------------------+
+
+ • Hello! How can I help you today?
+
+
 
  • I can help with various tasks including:
 
    - Writing code
    - Reading files
    - Running commands
-
 
 
   Auto Drive > Auto Drive ready to run cargo nextest  ✶ Running (Xs)
@@ -40,16 +40,16 @@ expression: "frames.join(\"\\n---FRAME---\\n\")"
   • Agents Enabled  • Diagnostics Enabled                              API key
 
 ---FRAME---
- +----------------------------------------------------------------------------+
- |                                 Every Code                                 |
- +----------------------------------------------------------------------------+
+
+ • Hello! How can I help you today?
+
+
 
  • I can help with various tasks including:
 
    - Writing code
    - Reading files
    - Running commands
-
 
 
   Auto Drive > Auto Drive ready to run cargo nextest  ✶ Running (Xs)

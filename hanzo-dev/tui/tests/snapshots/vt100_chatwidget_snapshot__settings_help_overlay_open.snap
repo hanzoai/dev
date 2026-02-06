@@ -2,30 +2,30 @@
 source: tui/tests/vt100_chatwidget_snapshot.rs
 expression: open
 ---
- +------------------------------------------------------------------------------------------------+
- |                                           Every Code                                           |
- +------------------------------------------------------------------------------------------------+
  +Settings ▸ Overview-----------------------------------------------------------------------------+
  |                                                                                                |
  | › Model              Model: GPT-5.1-Codex-Max (Medium)                                         |
  |   + Choose the language model used for new completions.                                        |
- |                           +----------------------------------------+                           |
- |   Theme              Theme|Settings Overview                       |mond                       |
- |   + Switch between preset |                                        |                           |
- |                           |• ↑/↓  Move between sections            |                           |
- |   Updates            Auto |• Enter  Open selected section          |                           |
- |   + Control CLI auto-updat|• Tab    Jump forward between sections  |                           |
- |                           |• Esc    Close settings                 |                           |
- |   ------------------------|• ?      Toggle this help               |-------------------------- |
+ |                                                                                                |
+ |   Theme              Theme+----------------------------------------+mond                       |
+ |   + Switch between preset |Settings Overview                       |                           |
  |                           |                                        |                           |
- |   Accounts           Auto-|Press Esc to close                      |                           |
- |   + Configure account swit+----------------------------------------+.                          |
+ |   Updates            Auto |• ↑/↓  Move between sections            |                           |
+ |   + Control CLI auto-updat|• Enter  Open selected section          |                           |
+ |                           |• Tab    Jump forward between sections  |                           |
+ |   ------------------------|• Esc    Close settings                 |-------------------------- |
+ |                           |• ?      Toggle this help               |                           |
+ |   Accounts           Auto-|                                        |                           |
+ |   + Configure account swit|Press Esc to close                      |.                          |
+ |                           +----------------------------------------+                           |
+ |   Agents             Enabled: 11/12                                                            |
+ |   + Configure linked agents and default task permissions.                                      |
  |                                                                                                |
  | ↑ ↓ Move    Enter Open    Esc Close    ? Help                                                  |
  |                                                                                                |
  +------------------------------------------------------------------------------------------------+
 
- +------------------------------------------------------------------------------------------------+
- | What can I code for you today?                                                                 |
- +------------------------------------------------------------------------------------------------+
- Read Only  (Shift+Tab change)                                            Ctrl+G guide  •  API key
+  What can I code for you today?
+
+
+ Read Only  (Shift+Tab change)                                                       ?  •  API key

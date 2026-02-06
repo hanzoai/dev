@@ -2,9 +2,8 @@
 source: tui/tests/vt100_chatwidget_snapshot.rs
 expression: output
 ---
- +----------------------------------------------------------------------------+
- |                                 Every Code                                 |
- +----------------------------------------------------------------------------+
+
+ • Hello! How can I help you today?
 
 
 
@@ -29,7 +28,8 @@ expression: output
    |
    +- [Ctrl+A] Expand · [Esc] Stop
 
- +----------------------------- ✶ Responding... -----------------------------+
- | What can I code for you today?                                             |
- +----------------------------------------------------------------------------+
- Read Only  (Shift+Tab change)                        Ctrl+G guide  •  API key
+
+                                ✶ Responding...
+  What can I code for you today?
+
+ Read Only  (Shift+Tab change)                                   ?  •  API key
