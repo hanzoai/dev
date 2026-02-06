@@ -1735,7 +1735,7 @@ pub(crate) struct ChatWidget<'a> {
     // normal history within the new turn window.
     queued_user_messages: std::collections::VecDeque<UserMessage>,
     pending_dispatched_user_messages: std::collections::VecDeque<String>,
-    // Number of user prompts we pre-pended to history just before starting
+    // Number of user prompts we prepended to history just before starting
     // a new turn; used to anchor the next turn window so assistant output
     // appears after them.
     pending_user_prompts_for_next_turn: usize,
