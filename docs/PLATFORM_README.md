@@ -270,6 +270,7 @@ code-rs/core/
 ```
 
 **Key Capabilities:**
+
 - Multi-model conversation management
 - Streaming response handling
 - Token usage tracking and rate limiting
@@ -293,6 +294,7 @@ code-rs/tui/
 ```
 
 **Features:**
+
 - Real-time streaming with syntax highlighting
 - Fuzzy file search with `@` mention
 - Image paste support (Ctrl+V / Cmd+V)
@@ -378,11 +380,11 @@ flowchart TB
 
 **Sandbox Policies:**
 
-| Policy | Description | Use Case |
-|--------|-------------|----------|
-| `read-only` | No file modifications | Code review, analysis |
-| `workspace-write` | Write only to CWD + TMPDIR | Safe development |
-| `danger-full-access` | No restrictions | Trusted automation |
+| Policy               | Description                | Use Case              |
+| -------------------- | -------------------------- | --------------------- |
+| `read-only`          | No file modifications      | Code review, analysis |
+| `workspace-write`    | Write only to CWD + TMPDIR | Safe development      |
+| `danger-full-access` | No restrictions            | Trusted automation    |
 
 ### 5. Auto Drive (`code-auto-drive-core`)
 
@@ -540,16 +542,16 @@ agent-instructions = "Write minimal, focused changes with clear rationale."
 
 ### Environment Variables
 
-| Variable | Description | Default |
-|----------|-------------|---------|
-| `CODE_HOME` | Config directory override | `~/.code` |
-| `OPENAI_API_KEY` | OpenAI API key | - |
-| `OPENAI_BASE_URL` | Custom OpenAI-compatible endpoint | - |
-| `OPENAI_WIRE_API` | Force `chat` or `responses` API | auto |
-| `ANTHROPIC_API_KEY` | Anthropic API key | - |
-| `GOOGLE_API_KEY` | Google AI API key | - |
-| `DASHSCOPE_API_KEY` | Alibaba DashScope API key | - |
-| `CODE_ENABLE_CLOUD_AGENT_MODEL` | Enable cloud agent variants | false |
+| Variable                        | Description                       | Default   |
+| ------------------------------- | --------------------------------- | --------- |
+| `CODE_HOME`                     | Config directory override         | `~/.code` |
+| `OPENAI_API_KEY`                | OpenAI API key                    | -         |
+| `OPENAI_BASE_URL`               | Custom OpenAI-compatible endpoint | -         |
+| `OPENAI_WIRE_API`               | Force `chat` or `responses` API   | auto      |
+| `ANTHROPIC_API_KEY`             | Anthropic API key                 | -         |
+| `GOOGLE_API_KEY`                | Google AI API key                 | -         |
+| `DASHSCOPE_API_KEY`             | Alibaba DashScope API key         | -         |
+| `CODE_ENABLE_CLOUD_AGENT_MODEL` | Enable cloud agent variants       | false     |
 
 ---
 
@@ -557,67 +559,72 @@ agent-instructions = "Write minimal, focused changes with clear rationale."
 
 ### Protocol Operations (Op)
 
-| Operation | Description | Response Event |
-|-----------|-------------|----------------|
-| `Interrupt` | Abort current task | `TurnAborted` |
-| `UserInput` | Send user message | `AgentMessage*` |
-| `UserTurn` | Full turn with context | `AgentMessage*` |
-| `ExecApproval` | Approve/deny command | `ExecCommandEnd` |
-| `PatchApproval` | Approve/deny patch | `PatchApplyEnd` |
-| `ListMcpTools` | List available MCP tools | `McpListToolsResponse` |
-| `ListSkills` | List available skills | `ListSkillsResponse` |
-| `Compact` | Summarize conversation | `AgentMessage` |
-| `Review` | Request code review | `ReviewOutput` |
-| `Shutdown` | Graceful shutdown | `ShutdownComplete` |
+| Operation       | Description              | Response Event         |
+| --------------- | ------------------------ | ---------------------- |
+| `Interrupt`     | Abort current task       | `TurnAborted`          |
+| `UserInput`     | Send user message        | `AgentMessage*`        |
+| `UserTurn`      | Full turn with context   | `AgentMessage*`        |
+| `ExecApproval`  | Approve/deny command     | `ExecCommandEnd`       |
+| `PatchApproval` | Approve/deny patch       | `PatchApplyEnd`        |
+| `ListMcpTools`  | List available MCP tools | `McpListToolsResponse` |
+| `ListSkills`    | List available skills    | `ListSkillsResponse`   |
+| `Compact`       | Summarize conversation   | `AgentMessage`         |
+| `Review`        | Request code review      | `ReviewOutput`         |
+| `Shutdown`      | Graceful shutdown        | `ShutdownComplete`     |
 
 ### Event Types (EventMsg)
 
 **Lifecycle Events:**
+
 - `TaskStarted` - Agent began processing
 - `TaskComplete` - Agent finished all actions
 - `SessionConfigured` - Session initialized
 - `ShutdownComplete` - Clean shutdown
 
 **Message Events:**
+
 - `AgentMessage` - Complete agent response
 - `AgentMessageDelta` - Streaming response chunk
 - `AgentReasoning` - Reasoning output
 - `UserMessage` - Echo of user input
 
 **Execution Events:**
+
 - `ExecCommandBegin` - Command starting
 - `ExecCommandOutputDelta` - Streaming command output
 - `ExecCommandEnd` - Command completed
 - `ExecApprovalRequest` - Approval needed
 
 **Patch Events:**
+
 - `PatchApplyBegin` - Patch starting
 - `PatchApplyEnd` - Patch completed
 - `ApplyPatchApprovalRequest` - Patch approval needed
 
 **MCP Events:**
+
 - `McpToolCallBegin` - Tool call starting
 - `McpToolCallEnd` - Tool call completed
 - `McpListToolsResponse` - Available tools list
 
 ### Slash Commands
 
-| Command | Description | Example |
-|---------|-------------|---------|
-| `/new` | Start new conversation | `/new` |
-| `/resume` | Resume past session | `/resume` |
-| `/auto [goal]` | Start Auto Drive | `/auto refactor auth` |
-| `/plan <task>` | Multi-agent planning | `/plan new feature` |
-| `/solve <problem>` | Multi-agent problem solving | `/solve this bug` |
-| `/code <task>` | Multi-agent coding | `/code add tests` |
-| `/review [focus]` | Code review | `/review security` |
-| `/diff` | Show git diff | `/diff` |
-| `/undo` | Restore previous state | `/undo` |
-| `/settings` | Open settings panel | `/settings model` |
-| `/model` | Change model | `/model` |
-| `/reasoning` | Change reasoning level | `/reasoning high` |
-| `/theme` | Change theme | `/theme` |
-| `/mcp` | Manage MCP servers | `/mcp status` |
+| Command            | Description                 | Example               |
+| ------------------ | --------------------------- | --------------------- |
+| `/new`             | Start new conversation      | `/new`                |
+| `/resume`          | Resume past session         | `/resume`             |
+| `/auto [goal]`     | Start Auto Drive            | `/auto refactor auth` |
+| `/plan <task>`     | Multi-agent planning        | `/plan new feature`   |
+| `/solve <problem>` | Multi-agent problem solving | `/solve this bug`     |
+| `/code <task>`     | Multi-agent coding          | `/code add tests`     |
+| `/review [focus]`  | Code review                 | `/review security`    |
+| `/diff`            | Show git diff               | `/diff`               |
+| `/undo`            | Restore previous state      | `/undo`               |
+| `/settings`        | Open settings panel         | `/settings model`     |
+| `/model`           | Change model                | `/model`              |
+| `/reasoning`       | Change reasoning level      | `/reasoning high`     |
+| `/theme`           | Change theme                | `/theme`              |
+| `/mcp`             | Manage MCP servers          | `/mcp status`         |
 
 ---
 
@@ -680,6 +687,7 @@ hanzo-dev --help
 ```
 
 **Platform packages:**
+
 - `hanzo-node-darwin-arm64` - macOS Apple Silicon
 - `hanzo-node-darwin-x64` - macOS Intel
 - `hanzo-node-linux-x64-musl` - Linux x64
@@ -784,23 +792,25 @@ flowchart TB
 ### Performance Optimization
 
 **Token Management:**
+
 - Automatic context compaction when approaching limits
 - Cached input token tracking
 - Reasoning token separation
 
 **Streaming:**
+
 - Real-time delta streaming for responsive UI
 - Buffered command output
 - Async event processing
 
 **Build Profiles:**
 
-| Profile | Use Case | Optimization |
-|---------|----------|--------------|
-| `dev` | Development | Incremental |
-| `dev-fast` | Fast iteration | opt-level=1 |
-| `perf` | Profiling | debug symbols |
-| `release` | Production | LTO + strip |
+| Profile    | Use Case       | Optimization  |
+| ---------- | -------------- | ------------- |
+| `dev`      | Development    | Incremental   |
+| `dev-fast` | Fast iteration | opt-level=1   |
+| `perf`     | Profiling      | debug symbols |
+| `release`  | Production     | LTO + strip   |
 
 ### Extending with MCP Tools
 
@@ -809,24 +819,29 @@ Create custom MCP servers to extend Hanzo Dev:
 ```typescript
 import { Server } from "@modelcontextprotocol/sdk/server/index.js";
 
-const server = new Server({
-  name: "my-custom-tools",
-  version: "1.0.0",
-}, {
-  capabilities: { tools: {} }
-});
+const server = new Server(
+  {
+    name: "my-custom-tools",
+    version: "1.0.0",
+  },
+  {
+    capabilities: { tools: {} },
+  },
+);
 
 server.setRequestHandler("tools/list", async () => ({
-  tools: [{
-    name: "my_tool",
-    description: "Does something useful",
-    inputSchema: {
-      type: "object",
-      properties: {
-        input: { type: "string" }
-      }
-    }
-  }]
+  tools: [
+    {
+      name: "my_tool",
+      description: "Does something useful",
+      inputSchema: {
+        type: "object",
+        properties: {
+          input: { type: "string" },
+        },
+      },
+    },
+  ],
 }));
 
 server.setRequestHandler("tools/call", async (request) => {
@@ -888,4 +903,4 @@ Hanzo Dev is a community fork of the original Codex CLI, maintaining compatibili
 
 ---
 
-*Built with love by [Hanzo AI](https://hanzo.ai) - Frontier AI for Developers*
+_Built with love by [Hanzo AI](https://hanzo.ai) - Frontier AI for Developers_

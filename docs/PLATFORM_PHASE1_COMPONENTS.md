@@ -277,7 +277,10 @@ import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { AlertBlock } from "@/components/shared/alert-block";
 import { api } from "@/utils/api";
 import { formatBigInt, parseBigInt } from "@/lib/pools/format";
-import { calculateSlippage, calculatePriceImpact } from "@/lib/pools/calculations";
+import {
+  calculateSlippage,
+  calculatePriceImpact,
+} from "@/lib/pools/calculations";
 
 interface SwapInterfaceProps {
   open: boolean;
@@ -306,7 +309,7 @@ export function SwapInterface({ open, onClose, poolId }: SwapInterfaceProps) {
     {
       enabled: !!selectedPool && !!amountIn && parseFloat(amountIn) > 0,
       refetchInterval: 5000,
-    }
+    },
   );
 
   // Update output amount when quote changes
@@ -345,7 +348,7 @@ export function SwapInterface({ open, onClose, poolId }: SwapInterfaceProps) {
     ? calculatePriceImpact(
         parseBigInt(amountIn),
         BigInt(quote.expectedOutput),
-        selectedPool?.lastPrice || 0n
+        selectedPool?.lastPrice || 0n,
       )
     : 0;
 
@@ -359,7 +362,8 @@ export function SwapInterface({ open, onClose, poolId }: SwapInterfaceProps) {
         <DialogHeader>
           <DialogTitle>Swap Resources</DialogTitle>
           <DialogDescription>
-            Trade compute resources on the {selectedPool?.name || "selected"} pool
+            Trade compute resources on the {selectedPool?.name || "selected"}{" "}
+            pool
           </DialogDescription>
         </DialogHeader>
 
@@ -380,7 +384,8 @@ export function SwapInterface({ open, onClose, poolId }: SwapInterfaceProps) {
             <div className="flex justify-between">
               <Label>You Pay</Label>
               <span className="text-sm text-muted-foreground">
-                Balance: {formatBigInt(balance || "0")} {isBuying ? "HANZO" : "units"}
+                Balance: {formatBigInt(balance || "0")}{" "}
+                {isBuying ? "HANZO" : "units"}
               </span>
             </div>
             <div className="flex gap-2">
@@ -394,9 +399,7 @@ export function SwapInterface({ open, onClose, poolId }: SwapInterfaceProps) {
               <Button
                 variant="outline"
                 size="sm"
-                onClick={() =>
-                  setAmountIn(formatBigInt(balance || "0"))
-                }
+                onClick={() => setAmountIn(formatBigInt(balance || "0"))}
               >
                 MAX
               </Button>
@@ -444,16 +447,16 @@ export function SwapInterface({ open, onClose, poolId }: SwapInterfaceProps) {
               <div className="flex justify-between">
                 <span className="text-muted-foreground">Minimum Received</span>
                 <span>
-                  {formatBigInt(calculateSlippage(quote.expectedOutput, slippage))}{" "}
+                  {formatBigInt(
+                    calculateSlippage(quote.expectedOutput, slippage),
+                  )}{" "}
                   {isBuying ? "units" : "HANZO"}
                 </span>
               </div>
               <div className="flex justify-between">
                 <span className="text-muted-foreground">Trading Fee</span>
                 <span>
-                  {formatBigInt(
-                    (parseBigInt(amountIn) * 3n) / 1000n
-                  )}{" "}
+                  {formatBigInt((parseBigInt(amountIn) * 3n) / 1000n)}{" "}
                   {isBuying ? "HANZO" : "units"} (0.3%)
                 </span>
               </div>
@@ -555,7 +558,8 @@ export function AddLiquidityModal({
   const { data: pools } = api.pools.getAll.useQuery();
   const { data: tokenBalance } = api.user.getTokenBalance.useQuery();
   const { data: resourceBalance } = api.user.getResourceBalance.useQuery({
-    resourceType: pools?.find((p) => p.id === selectedPoolId)?.resourceType || 0,
+    resourceType:
+      pools?.find((p) => p.id === selectedPoolId)?.resourceType || 0,
   });
 
   const selectedPool = pools?.find((p) => p.id === selectedPoolId);
@@ -623,10 +627,7 @@ export function AddLiquidityModal({
           {!poolId && (
             <div className="space-y-2">
               <Label>Select Pool</Label>
-              <Select
-                value={selectedPoolId}
-                onValueChange={setSelectedPoolId}
-              >
+              <Select value={selectedPoolId} onValueChange={setSelectedPoolId}>
                 <SelectTrigger>
                   <SelectValue placeholder="Select a pool" />
                 </SelectTrigger>
@@ -710,9 +711,7 @@ export function AddLiquidityModal({
             </AlertBlock>
           )}
           {insufficientResources && (
-            <AlertBlock type="error">
-              Insufficient resource balance.
-            </AlertBlock>
+            <AlertBlock type="error">Insufficient resource balance.</AlertBlock>
           )}
         </div>
 
@@ -777,7 +776,10 @@ import { api } from "@/utils/api";
 import { PoolSelector } from "./PoolSelector";
 import { ResourceEstimator } from "./ResourceEstimator";
 import { DeploymentBudget } from "./DeploymentBudget";
-import { HANZO_CLOUD_CONFIG, isHanzoCloudEnabled } from "@/lib/hanzo-cloud-config";
+import {
+  HANZO_CLOUD_CONFIG,
+  isHanzoCloudEnabled,
+} from "@/lib/hanzo-cloud-config";
 
 interface DeploymentTarget {
   type: "local" | "cloud" | "pool";
@@ -828,7 +830,8 @@ export function DeploymentTargetSelector({
   const { deploymentTargets } = HANZO_CLOUD_CONFIG;
 
   // Fetch available pools
-  const { data: pools, isLoading: isLoadingPools } = api.pools.getAll.useQuery();
+  const { data: pools, isLoading: isLoadingPools } =
+    api.pools.getAll.useQuery();
 
   const handleTargetChange = (value: string) => {
     const target = value as "local" | "cloud" | "pool";
@@ -927,28 +930,32 @@ export function DeploymentTargetSelector({
           </RadioGroup>
 
           {/* Region Selection (Cloud) */}
-          {selectedTarget === "cloud" && deploymentTargets.hanzoCloud.regions && (
-            <div className="pt-4 border-t">
-              <Label htmlFor="region" className="text-sm font-medium">
-                Select Region
-              </Label>
-              <Select value={selectedRegion} onValueChange={handleRegionChange}>
-                <SelectTrigger id="region" className="mt-2">
-                  <SelectValue placeholder="Select a region" />
-                </SelectTrigger>
-                <SelectContent>
-                  {deploymentTargets.hanzoCloud.regions.map((region) => (
-                    <SelectItem key={region.id} value={region.id}>
-                      {region.name}
-                      <span className="text-xs text-muted-foreground ml-2">
-                        ({region.id})
-                      </span>
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            </div>
-          )}
+          {selectedTarget === "cloud" &&
+            deploymentTargets.hanzoCloud.regions && (
+              <div className="pt-4 border-t">
+                <Label htmlFor="region" className="text-sm font-medium">
+                  Select Region
+                </Label>
+                <Select
+                  value={selectedRegion}
+                  onValueChange={handleRegionChange}
+                >
+                  <SelectTrigger id="region" className="mt-2">
+                    <SelectValue placeholder="Select a region" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {deploymentTargets.hanzoCloud.regions.map((region) => (
+                      <SelectItem key={region.id} value={region.id}>
+                        {region.name}
+                        <span className="text-xs text-muted-foreground ml-2">
+                          ({region.id})
+                        </span>
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+            )}
 
           {/* Pool Selection */}
           {selectedTarget === "pool" && (
@@ -999,7 +1006,15 @@ export function DeploymentTargetSelector({
 ```tsx
 // /app/platform/components/deployment/PoolSelector.tsx
 
-import { Check, Activity, Zap, HardDrive, Cpu, Container, Box } from "lucide-react";
+import {
+  Check,
+  Activity,
+  Zap,
+  HardDrive,
+  Cpu,
+  Container,
+  Box,
+} from "lucide-react";
 import { cn } from "@/lib/utils";
 import type { Pool } from "@/lib/pools/types";
 import { formatBigInt } from "@/lib/pools/format";
@@ -1040,7 +1055,7 @@ export function PoolSelector({
                 "w-full flex items-center gap-4 p-4 rounded-lg border transition-all text-left",
                 isSelected
                   ? "border-primary bg-primary/5"
-                  : "border-border hover:border-primary/50 hover:bg-muted/50"
+                  : "border-border hover:border-primary/50 hover:bg-muted/50",
               )}
             >
               {/* Selection Indicator */}
@@ -1049,7 +1064,7 @@ export function PoolSelector({
                   "flex h-5 w-5 shrink-0 items-center justify-center rounded-full border",
                   isSelected
                     ? "border-primary bg-primary text-primary-foreground"
-                    : "border-muted-foreground"
+                    : "border-muted-foreground",
                 )}
               >
                 {isSelected && <Check className="h-3 w-3" />}
@@ -1059,7 +1074,7 @@ export function PoolSelector({
               <div
                 className={cn(
                   "p-2 rounded-lg",
-                  isSelected ? "bg-primary/10" : "bg-muted"
+                  isSelected ? "bg-primary/10" : "bg-muted",
                 )}
               >
                 {Icon}
@@ -1073,7 +1088,9 @@ export function PoolSelector({
                 <div className="flex items-center gap-4 mt-1 text-sm text-muted-foreground">
                   <span>{formatBigInt(pool.lastPrice)} HANZO/unit/hr</span>
                   <span>|</span>
-                  <span>{formatBigInt(pool.resourceAmount)} units available</span>
+                  <span>
+                    {formatBigInt(pool.resourceAmount)} units available
+                  </span>
                 </div>
               </div>
 
@@ -1140,7 +1157,7 @@ export function ResourceEstimator({
     },
     {
       enabled: !!pool,
-    }
+    },
   );
 
   const updateResource = (key: keyof ResourceRequirements, value: number) => {
@@ -1262,7 +1279,7 @@ function calculateTotalResources(resources: ResourceRequirements): bigint {
     resources.cpu * 10 +
       Math.floor(resources.memory / 1024) * 5 +
       Math.floor(resources.storage / 10) +
-      (resources.gpu || 0) * 100
+      (resources.gpu || 0) * 100,
   );
 }
 ```
@@ -1274,7 +1291,10 @@ function calculateTotalResources(resources: ResourceRequirements): bigint {
 ```typescript
 // /lib/pools/format.ts
 
-export function formatBigInt(value: string | bigint, decimals: number = 2): string {
+export function formatBigInt(
+  value: string | bigint,
+  decimals: number = 2,
+): string {
   const bn = typeof value === "string" ? BigInt(value) : value;
   const divisor = BigInt(10 ** 18);
   const whole = bn / divisor;
@@ -1306,10 +1326,12 @@ export function formatUSD(value: bigint): string {
   }).format(usd);
 }
 
-
 // /lib/pools/calculations.ts
 
-export function calculateSlippage(amount: string | bigint, slippagePercent: number): bigint {
+export function calculateSlippage(
+  amount: string | bigint,
+  slippagePercent: number,
+): bigint {
   const bn = typeof amount === "string" ? BigInt(amount) : amount;
   const slippageBps = BigInt(Math.floor(slippagePercent * 100));
   return bn - (bn * slippageBps) / 10000n;
@@ -1318,7 +1340,7 @@ export function calculateSlippage(amount: string | bigint, slippagePercent: numb
 export function calculatePriceImpact(
   amountIn: bigint,
   amountOut: bigint,
-  spotPrice: bigint
+  spotPrice: bigint,
 ): number {
   if (spotPrice === 0n || amountIn === 0n) return 0;
 
@@ -1330,7 +1352,7 @@ export function calculatePriceImpact(
 }
 
 export function calculateImpermanentLoss(
-  priceRatio: number // currentPrice / entryPrice
+  priceRatio: number, // currentPrice / entryPrice
 ): number {
   // IL = 2 * sqrt(priceRatio) / (1 + priceRatio) - 1
   const sqrtRatio = Math.sqrt(priceRatio);
@@ -1340,7 +1362,7 @@ export function calculateImpermanentLoss(
 export function calculateAPR(
   volume24h: bigint,
   liquidity: bigint,
-  feeRate: number = 0.003
+  feeRate: number = 0.003,
 ): number {
   if (liquidity === 0n) return 0;
 
@@ -1348,7 +1370,6 @@ export function calculateAPR(
   const dailyReturn = dailyFees / Number(liquidity);
   return dailyReturn * 365 * 100; // Annual percentage
 }
-
 
 // /lib/pools/types.ts
 
@@ -1428,6 +1449,7 @@ This implementation reference provides:
 8. **Utility functions** - Formatting and calculations
 
 All components follow the existing platform patterns using:
+
 - Radix UI primitives
 - Tailwind CSS styling
 - tRPC for API calls

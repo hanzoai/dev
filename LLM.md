@@ -1,6 +1,7 @@
 # Hanzo Dev - LLM Context
 
 ## Project Overview
+
 Hanzo Dev is a powerful fork of OpenAI's Codex CLI, enhanced with enterprise features and maintained by Hanzo AI. This is a Rust-based CLI tool that provides AI-powered development assistance directly in the terminal.
 
 ## Recent Updates (January 2026)
@@ -35,6 +36,7 @@ Added `hanzo-node` npm package for Node.js project integration:
    - Validates binary headers (ELF/Mach-O/PE)
 
 5. **Usage**
+
    ```bash
    # Global installation
    npm install -g hanzo-node
@@ -48,6 +50,7 @@ Added `hanzo-node` npm package for Node.js project integration:
    ```
 
 ### Branding + Tooling Refresh (January 2026)
+
 - Updated docs and CLI guidance to use Hanzo Dev branding, `dev` command, and `~/.hanzo` as primary config home (legacy `~/.code`/`~/.codex` still read).
 - MCP Rust crate moved to Rust 2024 edition with a `rust-toolchain.toml` pinned to `stable`.
 
@@ -77,7 +80,8 @@ Added `hanzo-node` npm package for Node.js project integration:
 
 ## Hanzod - Unified AI Blockchain with Lux Consensus (January 2025)
 
-### Complete AI Blockchain Infrastructure  
+### Complete AI Blockchain Infrastructure
+
 Hanzod has evolved into a complete AI blockchain system with native KuzuDB ledger and full Lux consensus integration:
 
 1. **Native KuzuDB Ledger Integration**
@@ -87,7 +91,7 @@ Hanzod has evolved into a complete AI blockchain system with native KuzuDB ledge
    - Cypher queries for complex graph analysis
    - In-process execution with zero network overhead
 
-2. **Lux Consensus Protocol** 
+2. **Lux Consensus Protocol**
    - Full compatibility with luxfi/consensus
    - Snow consensus with parameters: k=20, α=15, β=15/20
    - Quantum finality for immutable state
@@ -120,6 +124,7 @@ Hanzod has evolved into a complete AI blockchain system with native KuzuDB ledge
 ## Unified Chain Architecture (December 2025)
 
 ### Clean Architecture Refactoring
+
 Complete blockchain system with KuzuDB as the default database backend implementation. Major refactoring to remove branding and use generic, concise names:
 
 1. **Naming Convention Updates** (Completed)
@@ -166,16 +171,17 @@ Complete blockchain system with KuzuDB as the default database backend implement
    - **Architecture**: Clean abstraction with KuzuDB as default backend
    - **Tests**: Pure Rust tests in `/tests` directory
 
-3. **AI Blockchain Pipeline** (`/src/rs/hanzod/src/ai_blockchain.rs`)
+5. **AI Blockchain Pipeline** (`/src/rs/hanzod/src/ai_blockchain.rs`)
    - **Single Process**: Text → Embedding → Storage → Search → Inference
    - **Zero Latency**: All operations in-memory with no network calls
    - **Integrated Engine**: Embedded Hanzo Engine with mistralrs
    - **Metal Acceleration**: Native Apple Silicon GPU support
+
    ```rust
    pub async fn process_text(&self, text: &str, search_similar: bool, run_inference: bool)
    ```
 
-4. **API Gateway System** (`/src/rs/hanzod/src/api_gateway.rs`)
+6. **API Gateway System** (`/src/rs/hanzod/src/api_gateway.rs`)
    - **Key-Based Billing**: Usage tracking and rate limiting per API key
    - **Multi-Tenant**: Encrypted namespaces with data isolation
    - **Privacy Modes**:
@@ -190,11 +196,12 @@ Complete blockchain system with KuzuDB as the default database backend implement
    - **Pricing Tiers**: Pay-as-you-go and subscription plans
    - **Service Types**: Native agents, LLMs, compute, VPN, vector search
 
-5. **KuzuDB Vector Store** (`/src/rs/hanzod/src/kuzu_vector.rs`)
+7. **KuzuDB Vector Store** (`/src/rs/hanzod/src/kuzu_vector.rs`)
    - **HNSW Index**: Fast k-NN similarity search
    - **Graph Embeddings**: Connect vectors in knowledge graphs
    - **Blockchain Checkpoints**: Immutable snapshots with merkle roots
    - **Cypher Queries**: Complex graph traversals
+
    ```rust
    // Unified operations
    store.add_vector(id, embedding, content, metadata).await?;
@@ -202,7 +209,7 @@ Complete blockchain system with KuzuDB as the default database backend implement
    store.cypher_query("MATCH (n:Node)-[r]->(m) RETURN n,r,m").await?;
    ```
 
-6. **Key Features Implemented**
+8. **Key Features Implemented**
    - ✅ Real Ed25519 cryptographic signatures (no placeholders)
    - ✅ Real embedding engine with Snowflake Arctic Embed L model
    - ✅ Real mistralrs integration for embedded inference
@@ -213,22 +220,27 @@ Complete blockchain system with KuzuDB as the default database backend implement
    - ✅ TEE/confidential computing support
 
 ### Service Architecture
+
 - **Port 3690**: Unified hanzod service endpoint
 - **Embedded Engine**: Hanzo Engine with Metal acceleration
-- **Models**: 
+- **Models**:
   - `phi-3.5-mini` for inference (embedded)
   - `snowflake-arctic-embed-l` for embeddings (1536 dimensions)
 - **Database**: KuzuDB with full graph/vector/blockchain capabilities
 
 ### Testing & Integration
+
 Created comprehensive test infrastructure:
+
 - `test_integration.sh` - Shell script for endpoint testing
 - `test_ai_blockchain.py` - Python integration test suite
 - Unit tests for all major components
 - End-to-end pipeline validation
 
 ### Vision Realized
+
 The system demonstrates the "absolutely fastest execution path" requested:
+
 - **Native Agents**: Direct in-process execution
 - **LLM Operations**: Embedded inference with Metal acceleration
 - **Vector Search**: HNSW index with sub-millisecond queries
@@ -239,6 +251,7 @@ The system demonstrates the "absolutely fastest execution path" requested:
 ## Hanzo Compute Integration (December 2025)
 
 ### Unified Compute Layer Infrastructure
+
 The dev project now uses hanzod as its primary compute layer:
 
 1. **Hanzod Connection**
@@ -265,7 +278,9 @@ The dev project now uses hanzod as its primary compute layer:
    - Post-quantum secure for future-proof infrastructure
 
 ### Post-Quantum Cryptography Stack
+
 Implemented comprehensive post-quantum security:
+
 - **HPKE** (Hybrid Public Key Encryption) for secure channels
 - **ML-KEM-768** (NIST FIPS 203) for key encapsulation
 - **ChaCha20-Poly1305** for authenticated encryption
@@ -274,6 +289,7 @@ Implemented comprehensive post-quantum security:
 - All cryptographic tests passing
 
 ### Compute SDK Enhancement
+
 ```rust
 use hanzo_inference::{HanzoManager, HanzoConfig};
 
@@ -289,7 +305,9 @@ let results = manager.vector.search(query, 10, None).await?;
 ```
 
 ### TUI Compilation Fixes
+
 Resolved major compilation issues after merge:
+
 - Added `standard_terminal_mode` field
 - Implemented `maybe_show_history_nav_hint_on_first_scroll` method
 - Fixed pulldown-cmark API compatibility for v0.9
@@ -301,6 +319,7 @@ Resolved major compilation issues after merge:
 ### Running with Hanzod Compute Layer
 
 1. **Start Hanzod**:
+
    ```bash
    cd /Users/z/work/hanzo/hanzod
    cargo build --release
@@ -309,6 +328,7 @@ Resolved major compilation issues after merge:
    ```
 
 2. **Run Dev with Unified Compute**:
+
    ```bash
    cd /Users/z/work/hanzo/dev
    cargo build --release
@@ -322,6 +342,7 @@ Resolved major compilation issues after merge:
    ```
 
 ### Environment Configuration
+
 ```bash
 # Hanzod compute layer settings
 HANZOD_HTTP_URL=http://localhost:8080
@@ -340,6 +361,7 @@ HANZOD_ENABLE_BITDELTA=true      # Model personalization
 ## Recent Updates (September 2025)
 
 ### Merged from OpenAI Codex Upstream
+
 Successfully incorporated key improvements from OpenAI Codex (up to commit 9bbeb75361):
 
 1. **Reasoning Effort Tracking**
@@ -361,6 +383,7 @@ Successfully incorporated key improvements from OpenAI Codex (up to commit 9bbeb
 ## Architecture
 
 ### Directory Structure
+
 ```
 /Users/z/work/hanzo/dev/
 ├── src/
@@ -378,6 +401,7 @@ Successfully incorporated key improvements from OpenAI Codex (up to commit 9bbeb
 ```
 
 ### Key Components
+
 - **Core** (`dev-core`): Main business logic, config, auth
 - **TUI** (`dev-tui`): Terminal interface with Ratatui 0.29.0
 - **MCP** (`mcp-server/client/types`): Full MCP protocol support
@@ -388,17 +412,20 @@ Successfully incorporated key improvements from OpenAI Codex (up to commit 9bbeb
 ## Technical Decisions
 
 ### Build System
+
 - Using Rust 2024 edition across all crates
 - Fast development profile with incremental compilation
 - Production profile with full LTO and symbol stripping
 - Workspace-level lints: `unwrap_used = "deny"`, `expect_used = "deny"`
 
 ### Package Distribution
+
 - npm package: `@hanzo/dev` v3.0.0
 - Platform-specific binaries via optionalDependencies
 - GitHub Actions for multi-platform builds (Linux musl, macOS, Windows)
 
 ### Testing Strategy
+
 - Unit tests per crate
 - Integration tests in `tests/suite/`
 - Snapshot testing with insta (from upstream)
@@ -409,6 +436,7 @@ Successfully incorporated key improvements from OpenAI Codex (up to commit 9bbeb
 Based on analysis of OpenAI Codex at `/Users/z/work/openai/codex`:
 
 ### High Priority
+
 1. **Unified Execution** (commit c09ed74a1)
    - PTY-backed interactive exec with session reuse
    - Bounded output (128 KiB) and timeout clamping
@@ -425,6 +453,7 @@ Based on analysis of OpenAI Codex at `/Users/z/work/openai/codex`:
    - Better ChatGPT/API key reconciliation
 
 ### Medium Priority
+
 1. **IDE Integration**
    - UriBasedFileOpener for VS Code, Cursor, Windsurf
    - Already partially implemented
@@ -438,6 +467,7 @@ Based on analysis of OpenAI Codex at `/Users/z/work/openai/codex`:
 ## Development Notes
 
 ### Compilation
+
 ```bash
 # Fast development build
 ./build-fast.sh
@@ -450,18 +480,22 @@ cargo test --all
 ```
 
 ### Known Issues
+
 - Build takes significant time on first compilation
 - Some upstream features require config flags to enable
 - Directory structure differs from upstream (codex-rs/ → src/rs/)
 
 ### Next Steps
+
 1. Complete testing of current merge
 2. Consider importing unified execution feature
 3. Evaluate TUI onboarding improvements
 4. Update documentation for new features
 
 ## Merge Strategy
+
 When syncing with upstream:
+
 1. Fetch from `https://github.com/openai/codex`
 2. Cherry-pick or manually apply changes
 3. Update paths from `codex-rs/` to `src/rs/`
@@ -469,6 +503,7 @@ When syncing with upstream:
 5. Test thoroughly with `./build-fast.sh`
 
 ## Contact
+
 - Repository: https://github.com/hanzoai/dev
 - Organization: Hanzo AI (https://hanzo.ai)
 - Upstream: https://github.com/openai/codex (for reference)
@@ -476,6 +511,7 @@ When syncing with upstream:
 ## Context for All AI Assistants
 
 This file (`LLM.md`) is symlinked as:
+
 - `.AGENTS.md`
 - `CLAUDE.md`
 - `QWEN.md`

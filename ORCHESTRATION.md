@@ -163,11 +163,11 @@ extractor.export(ConversationFormat::Jsonl).await?;
 Located at: `github.com/hanzoai/mcp`
 
 ```typescript
-import { createMCPServer, Guard } from '@hanzo/mcp';
+import { createMCPServer, Guard } from "@hanzo/mcp";
 
 const server = await createMCPServer({
-  tools: ['filesystem', 'git', 'docker'],
-  guard: { enabled: true, pii: true }
+  tools: ["filesystem", "git", "docker"],
+  guard: { enabled: true, pii: true },
 });
 ```
 
@@ -194,15 +194,15 @@ interface ProviderCapabilities {
 
 ### Implemented Adapters
 
-| Provider | Package | CLI Tool | Status |
-|----------|---------|----------|--------|
-| Claude | `@anthropic-ai/claude-code` | `claude` | ✅ |
-| Codex | `@hanzo/dev` | `dev/codex` | ✅ |
-| Qwen | `qwen-cli` | `qwen` | ✅ |
-| Gemini | `@google/gemini-cli` | `gemini` | ✅ |
-| Vibe | `vibe` | `vibe` | ✅ |
-| Copilot | `gh (extension)` | `gh copilot` | ✅ |
-| Ollama | `ollama` | `ollama` | ✅ |
+| Provider | Package                     | CLI Tool     | Status |
+| -------- | --------------------------- | ------------ | ------ |
+| Claude   | `@anthropic-ai/claude-code` | `claude`     | ✅     |
+| Codex    | `@hanzo/dev`                | `dev/codex`  | ✅     |
+| Qwen     | `qwen-cli`                  | `qwen`       | ✅     |
+| Gemini   | `@google/gemini-cli`        | `gemini`     | ✅     |
+| Vibe     | `vibe`                      | `vibe`       | ✅     |
+| Copilot  | `gh (extension)`            | `gh copilot` | ✅     |
+| Ollama   | `ollama`                    | `ollama`     | ✅     |
 
 ## Data Flow
 
@@ -281,11 +281,11 @@ guard:
 
 # Extract settings
 extract:
-  enabled: false  # opt-in
+  enabled: false # opt-in
   anonymize: true
   output: ~/.hanzo/conversations/
   format: jsonl
-  
+
 # MCP settings
 mcp:
   servers:

@@ -8,33 +8,33 @@ on:
     branches:
       - main
     paths:
-      - 'hanzo-node/**'
-      - 'console/**'
-      - 'platform/**'
-      - 'deploy/**'
-      - '.github/workflows/do-deploy.yml'
+      - "hanzo-node/**"
+      - "console/**"
+      - "platform/**"
+      - "deploy/**"
+      - ".github/workflows/do-deploy.yml"
 
   pull_request:
     branches:
       - main
     paths:
-      - 'deploy/terraform/**'
-      - 'deploy/do/**'
+      - "deploy/terraform/**"
+      - "deploy/do/**"
 
   workflow_dispatch:
     inputs:
       environment:
-        description: 'Deployment environment'
+        description: "Deployment environment"
         required: true
-        default: 'staging'
+        default: "staging"
         type: choice
         options:
           - staging
           - production
       action:
-        description: 'Deployment action'
+        description: "Deployment action"
         required: true
-        default: 'deploy'
+        default: "deploy"
         type: choice
         options:
           - deploy
@@ -43,10 +43,10 @@ on:
           - destroy
 
 env:
-  DOCTL_VERSION: '1.101.0'
-  TERRAFORM_VERSION: '1.6.6'
-  NODE_VERSION: '20'
-  RUST_VERSION: '1.82'
+  DOCTL_VERSION: "1.101.0"
+  TERRAFORM_VERSION: "1.6.6"
+  NODE_VERSION: "20"
+  RUST_VERSION: "1.82"
 
 jobs:
   # ==========================================================================
@@ -223,7 +223,6 @@ jobs:
       (github.event_name == 'push' && github.ref == 'refs/heads/main') ||
       github.event.inputs.action == 'apply'
     environment: ${{ github.event.inputs.environment || 'staging' }}
-
     env:
       TF_VAR_do_token: ${{ secrets.DIGITALOCEAN_ACCESS_TOKEN }}
       TF_VAR_spaces_access_id: ${{ secrets.SPACES_ACCESS_ID }}
@@ -260,7 +259,6 @@ jobs:
       (github.event_name == 'push' && github.ref == 'refs/heads/main') ||
       github.event.inputs.action == 'deploy'
     environment: ${{ github.event.inputs.environment || 'staging' }}
-
     steps:
       - name: Checkout
         uses: actions/checkout@v4
