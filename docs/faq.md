@@ -47,11 +47,13 @@ Replace `YourUser` with your actual Windows username.
 **2. Find your npm global install location:**
 
 Run this command to find where npm installs global packages:
+
 ```cmd
 npm config get prefix
 ```
 
 The executables will be in the returned directory. For example, if it returns `C:\Users\YourUser\AppData\Roaming\npm`, your agent commands will be at:
+
 - `C:\Users\YourUser\AppData\Roaming\npm\claude.cmd`
 - `C:\Users\YourUser\AppData\Roaming\npm\gemini.cmd`
 - `C:\Users\YourUser\AppData\Roaming\npm\coder.cmd`
@@ -59,16 +61,19 @@ The executables will be in the returned directory. For example, if it returns `C
 **3. Verify PATH includes npm directory:**
 
 In PowerShell:
+
 ```powershell
 $env:PATH -split ';' | Select-String "npm"
 ```
 
 In Command Prompt:
+
 ```cmd
 echo %PATH% | findstr npm
 ```
 
 If npm's directory isn't in your PATH, you can either:
+
 - Add it to your system PATH (requires restart)
 - Use absolute paths in your config (recommended)
 

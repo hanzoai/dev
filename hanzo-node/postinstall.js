@@ -3,7 +3,15 @@
 import { platform as nodePlatform, arch as nodeArch } from "os";
 import path from "path";
 import { fileURLToPath } from "url";
-import { existsSync, mkdirSync, copyFileSync, chmodSync, readFileSync, unlinkSync, createWriteStream } from "fs";
+import {
+  existsSync,
+  mkdirSync,
+  copyFileSync,
+  chmodSync,
+  readFileSync,
+  unlinkSync,
+  createWriteStream,
+} from "fs";
 import { execSync } from "child_process";
 import { get as httpsGet } from "https";
 
@@ -79,38 +87,45 @@ const getCacheDir = (version) => {
   return dir;
 };
 
-const httpsDownload = (url, dest) => new Promise((resolve, reject) => {
-  const req = httpsGet(url, (res) => {
-    const status = res.statusCode || 0;
-    if (status >= 300 && status < 400 && res.headers.location) {
-      return resolve(httpsDownload(res.headers.location, dest));
-    }
-    if (status !== 200) {
-      return reject(new Error(`HTTP ${status}`));
-    }
-    const out = createWriteStream(dest);
-    res.pipe(out);
-    out.on("finish", () => out.close(resolve));
-    out.on("error", (e) => {
-      try { unlinkSync(dest); } catch {}
+const httpsDownload = (url, dest) =>
+  new Promise((resolve, reject) => {
+    const req = httpsGet(url, (res) => {
+      const status = res.statusCode || 0;
+      if (status >= 300 && status < 400 && res.headers.location) {
+        return resolve(httpsDownload(res.headers.location, dest));
+      }
+      if (status !== 200) {
+        return reject(new Error(`HTTP ${status}`));
+      }
+      const out = createWriteStream(dest);
+      res.pipe(out);
+      out.on("finish", () => out.close(resolve));
+      out.on("error", (e) => {
+        try {
+          unlinkSync(dest);
+        } catch {}
+        reject(e);
+      });
+    });
+    req.on("error", (e) => {
+      try {
+        unlinkSync(dest);
+      } catch {}
       reject(e);
     });
+    req.setTimeout(120000, () => {
+      req.destroy(new Error("download timed out"));
+    });
   });
-  req.on("error", (e) => {
-    try { unlinkSync(dest); } catch {}
-    reject(e);
-  });
-  req.setTimeout(120000, () => {
-    req.destroy(new Error("download timed out"));
-  });
-});
 
 export async function runPostinstall(opts = {}) {
   const { invokedByRuntime = false, skipGlobalAlias = false } = opts;
 
   if (!targetTriple) {
     if (!invokedByRuntime) {
-      console.log(`hanzo-node: unsupported platform ${platform}/${arch}, skipping postinstall`);
+      console.log(
+        `hanzo-node: unsupported platform ${platform}/${arch}, skipping postinstall`,
+      );
     }
     return;
   }
@@ -140,7 +155,9 @@ export async function runPostinstall(opts = {}) {
       if (existsSync(src)) {
         copyFileSync(src, binaryPath);
         if (platform !== "win32") {
-          try { chmodSync(binaryPath, 0o755); } catch {}
+          try {
+            chmodSync(binaryPath, 0o755);
+          } catch {}
         }
         if (!invokedByRuntime) {
           console.log(`hanzo-node: installed from ${pkgName}`);
@@ -154,14 +171,23 @@ export async function runPostinstall(opts = {}) {
 
   // Download from GitHub release
   try {
-    const pkg = JSON.parse(readFileSync(path.join(__dirname, "package.json"), "utf8"));
+    const pkg = JSON.parse(
+      readFileSync(path.join(__dirname, "package.json"), "utf8"),
+    );
     const version = pkg.version;
 
     const isWin = platform === "win32";
     const binaryName = `code-${targetTriple}`;
     const archiveName = isWin
       ? `${binaryName}.zip`
-      : (() => { try { execSync("zstd --version", { stdio: "ignore", shell: true }); return `${binaryName}.zst`; } catch { return `${binaryName}.tar.gz`; } })();
+      : (() => {
+          try {
+            execSync("zstd --version", { stdio: "ignore", shell: true });
+            return `${binaryName}.zst`;
+          } catch {
+            return `${binaryName}.tar.gz`;
+          }
+        })();
     const url = `https://github.com/hanzoai/dev/releases/download/v${version}/${archiveName}`;
 
     if (!invokedByRuntime) {
@@ -172,30 +198,78 @@ export async function runPostinstall(opts = {}) {
     await httpsDownload(url, tmp);
 
     if (isWin) {
-      const sysRoot = process.env.SystemRoot || process.env.windir || 'C:\\Windows';
-      const psFull = path.join(sysRoot, 'System32', 'WindowsPowerShell', 'v1.0', 'powershell.exe');
+      const sysRoot =
+        process.env.SystemRoot || process.env.windir || "C:\\Windows";
+      const psFull = path.join(
+        sysRoot,
+        "System32",
+        "WindowsPowerShell",
+        "v1.0",
+        "powershell.exe",
+      );
       const psCmd = `Expand-Archive -Path '${tmp}' -DestinationPath '${binDir}' -Force`;
       let ok = false;
-      try { execSync(`"${psFull}" -NoProfile -NonInteractive -Command "${psCmd}"`, { stdio: 'ignore' }); ok = true; } catch {}
-      if (!ok) { try { execSync(`powershell -NoProfile -NonInteractive -Command "${psCmd}"`, { stdio: 'ignore' }); ok = true; } catch {} }
-      if (!ok) { try { execSync(`pwsh -NoProfile -NonInteractive -Command "${psCmd}"`, { stdio: 'ignore' }); ok = true; } catch {} }
-      if (!ok) { execSync(`tar -xf "${tmp}" -C "${binDir}"`, { stdio: 'ignore', shell: true }); }
-      try { unlinkSync(tmp); } catch {}
+      try {
+        execSync(`"${psFull}" -NoProfile -NonInteractive -Command "${psCmd}"`, {
+          stdio: "ignore",
+        });
+        ok = true;
+      } catch {}
+      if (!ok) {
+        try {
+          execSync(
+            `powershell -NoProfile -NonInteractive -Command "${psCmd}"`,
+            { stdio: "ignore" },
+          );
+          ok = true;
+        } catch {}
+      }
+      if (!ok) {
+        try {
+          execSync(`pwsh -NoProfile -NonInteractive -Command "${psCmd}"`, {
+            stdio: "ignore",
+          });
+          ok = true;
+        } catch {}
+      }
+      if (!ok) {
+        execSync(`tar -xf "${tmp}" -C "${binDir}"`, {
+          stdio: "ignore",
+          shell: true,
+        });
+      }
+      try {
+        unlinkSync(tmp);
+      } catch {}
     } else {
       if (archiveName.endsWith(".zst")) {
-        execSync(`zstd -d '${tmp}' -o '${binaryPath}'`, { stdio: 'ignore', shell: true });
-        try { unlinkSync(tmp); } catch {}
+        execSync(`zstd -d '${tmp}' -o '${binaryPath}'`, {
+          stdio: "ignore",
+          shell: true,
+        });
+        try {
+          unlinkSync(tmp);
+        } catch {}
       } else {
-        execSync(`tar -xzf '${tmp}' -C '${binDir}'`, { stdio: 'ignore', shell: true });
-        try { unlinkSync(tmp); } catch {}
+        execSync(`tar -xzf '${tmp}' -C '${binDir}'`, {
+          stdio: "ignore",
+          shell: true,
+        });
+        try {
+          unlinkSync(tmp);
+        } catch {}
       }
-      try { chmodSync(binaryPath, 0o755); } catch {}
+      try {
+        chmodSync(binaryPath, 0o755);
+      } catch {}
     }
 
     // Cache for future use
     const cacheDir = getCacheDir(version);
     const cachePath = path.join(cacheDir, `hanzo-${targetTriple}`);
-    try { copyFileSync(binaryPath, cachePath); } catch {}
+    try {
+      copyFileSync(binaryPath, cachePath);
+    } catch {}
 
     if (!invokedByRuntime) {
       console.log("hanzo-node: installation complete");
@@ -203,7 +277,9 @@ export async function runPostinstall(opts = {}) {
   } catch (e) {
     if (!invokedByRuntime) {
       console.error(`hanzo-node: postinstall failed: ${e.message}`);
-      console.error("You can try running the CLI directly, which will attempt to bootstrap the binary.");
+      console.error(
+        "You can try running the CLI directly, which will attempt to bootstrap the binary.",
+      );
     }
     throw e;
   }

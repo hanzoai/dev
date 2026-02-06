@@ -43,6 +43,7 @@ The Hanzo compute marketplace (hanzo.network) requires a robust economic incenti
 ### Current State
 
 Hanzo already has foundational components:
+
 - **HIP-004 (HMM)**: Hamiltonian Market Maker for compute pricing
 - **HIP-006 (AI Mining)**: NVTrust-based work attestation and chain-binding
 - **PAT-DEAI-004**: Compute reputation system design from Zoo Labs
@@ -90,14 +91,14 @@ HCU = weighted_sum(
 
 **Normalization Reference** (H100 = 1.0):
 
-| Resource | Reference | HCU Weight |
-|----------|-----------|------------|
-| GPU FP16 | H100 (1.98 PFLOPS) | 0.50 |
-| GPU VRAM | 80GB | 0.15 |
-| CPU | 64 cores @ 3GHz | 0.10 |
-| Memory | 512GB @ 400GB/s | 0.10 |
-| Storage | 10TB NVMe @ 7GB/s | 0.10 |
-| Network | 100Gbps | 0.05 |
+| Resource | Reference          | HCU Weight |
+| -------- | ------------------ | ---------- |
+| GPU FP16 | H100 (1.98 PFLOPS) | 0.50       |
+| GPU VRAM | 80GB               | 0.15       |
+| CPU      | 64 cores @ 3GHz    | 0.10       |
+| Memory   | 512GB @ 400GB/s    | 0.10       |
+| Storage  | 10TB NVMe @ 7GB/s  | 0.10       |
+| Network  | 100Gbps            | 0.05       |
 
 ### 3.2 Contribution Metrics
 
@@ -157,12 +158,12 @@ pub struct AttestationProof {
 
 **Trust Scores by GPU Type** (from HIP-006):
 
-| GPU | NVTrust Support | Trust Score | Reward Multiplier |
-|-----|-----------------|-------------|-------------------|
-| B200/GB200 | Full + TEE-I/O | 100 | 1.00x |
-| H100/H200 | Full NVTrust | 95 | 0.95x |
-| RTX PRO 6000 | NVTrust | 85 | 0.85x |
-| RTX 5090/4090 | Software only | 60 | 0.60x |
+| GPU           | NVTrust Support | Trust Score | Reward Multiplier |
+| ------------- | --------------- | ----------- | ----------------- |
+| B200/GB200    | Full + TEE-I/O  | 100         | 1.00x             |
+| H100/H200     | Full NVTrust    | 95          | 0.95x             |
+| RTX PRO 6000  | NVTrust         | 85          | 0.85x             |
+| RTX 5090/4090 | Software only   | 60          | 0.60x             |
 
 ### 3.4 On-Chain Contribution Records
 
@@ -207,6 +208,7 @@ contract ContributionRegistry {
 ### 4.1 Epoch-Based Distribution
 
 Rewards are distributed in **epochs** (24 hours) to:
+
 - Smooth out variance in job availability
 - Allow time for quality verification
 - Prevent gaming through rapid state changes
@@ -227,11 +229,11 @@ Where:
 **Emission Schedule**:
 
 | Year | Daily Base Emission | Annual Inflation Cap |
-|------|---------------------|---------------------|
-| 1 | 1,000,000 AI | 10% |
-| 2 | 750,000 AI | 7.5% |
-| 3 | 500,000 AI | 5% |
-| 4+ | 250,000 AI | 3% |
+| ---- | ------------------- | -------------------- |
+| 1    | 1,000,000 AI        | 10%                  |
+| 2    | 750,000 AI          | 7.5%                 |
+| 3    | 500,000 AI          | 5%                   |
+| 4+   | 250,000 AI          | 3%                   |
 
 ### 4.3 Provider Reward Formula
 
@@ -279,6 +281,7 @@ UptimeRatio = uptime_seconds / total_registered_seconds
 ```
 
 **Bonus for consistent uptime**:
+
 - 7+ consecutive days at 99%+ uptime: +5% bonus
 - 30+ consecutive days at 99%+ uptime: +10% bonus
 
@@ -293,6 +296,7 @@ MAX_STAKE = 1,000,000 AI (diminishing returns after this)
 ### 4.4 Worked Example
 
 **Provider Profile**:
+
 - Contributed: 100 HCU-hours this epoch
 - Quality Score: 8500 (85%)
 - Trust Score: 95 (H100 with NVTrust)
@@ -300,6 +304,7 @@ MAX_STAKE = 1,000,000 AI (diminishing returns after this)
 - Stake: 100,000 AI
 
 **Calculation**:
+
 ```
 Quality_multiplier = 0.5 + 1.5 * (8500/10000) = 1.775
 Trust_multiplier = 95/100 = 0.95
@@ -316,13 +321,13 @@ R_provider = 1,000,000 * (285.5 / 10,000) = 28,550 AI
 
 To receive rewards, providers must meet:
 
-| Metric | Minimum Threshold |
-|--------|-------------------|
-| Quality Score | 5000 (50%) |
-| Uptime Ratio | 9000 (90%) |
-| Stake | 1000 AI |
-| HCU-hours/epoch | 1.0 |
-| Hardware Attestation | Required |
+| Metric               | Minimum Threshold |
+| -------------------- | ----------------- |
+| Quality Score        | 5000 (50%)        |
+| Uptime Ratio         | 9000 (90%)        |
+| Stake                | 1000 AI           |
+| HCU-hours/epoch      | 1.0               |
+| Hardware Attestation | Required          |
 
 ---
 
@@ -364,15 +369,16 @@ To receive rewards, providers must meet:
 
 ### 5.2 Reward Allocation
 
-| Allocation | Percentage | Purpose |
-|------------|------------|---------|
-| Provider Rewards | 70% | Direct rewards to compute providers |
-| Treasury | 20% | Protocol development, grants, insurance |
-| Burn | 10% | Deflationary pressure |
+| Allocation       | Percentage | Purpose                                 |
+| ---------------- | ---------- | --------------------------------------- |
+| Provider Rewards | 70%        | Direct rewards to compute providers     |
+| Treasury         | 20%        | Protocol development, grants, insurance |
+| Burn             | 10%        | Deflationary pressure                   |
 
 ### 5.3 Vesting and Claiming
 
 **Vesting Schedule**:
+
 - 50% available immediately
 - 25% vests over 7 days
 - 25% vests over 30 days
@@ -582,44 +588,44 @@ impl RewardDistributor {
 
 **Year 1 Projection** (assuming 100 providers):
 
-| Metric | Value |
-|--------|-------|
-| Daily Emission | 1,000,000 AI |
-| Daily Burn (10%) | 100,000 AI |
-| Net Daily Inflation | 900,000 AI |
-| Annual Net Inflation | 328,500,000 AI |
-| Effective Inflation Rate | ~10% |
+| Metric                   | Value          |
+| ------------------------ | -------------- |
+| Daily Emission           | 1,000,000 AI   |
+| Daily Burn (10%)         | 100,000 AI     |
+| Net Daily Inflation      | 900,000 AI     |
+| Annual Net Inflation     | 328,500,000 AI |
+| Effective Inflation Rate | ~10%           |
 
 **Year 5 Projection** (assuming 1000 providers):
 
-| Metric | Value |
-|--------|-------|
-| Daily Emission | 250,000 AI |
-| Daily Burn (10%) | 25,000 AI |
-| Fee Recycling (estimated) | 50,000 AI |
-| Net Daily Inflation | 275,000 AI |
-| Effective Inflation Rate | ~3% |
+| Metric                    | Value      |
+| ------------------------- | ---------- |
+| Daily Emission            | 250,000 AI |
+| Daily Burn (10%)          | 25,000 AI  |
+| Fee Recycling (estimated) | 50,000 AI  |
+| Net Daily Inflation       | 275,000 AI |
+| Effective Inflation Rate  | ~3%        |
 
 ### 8.2 Provider Economics
 
 **Break-Even Analysis** for H100 provider:
 
-| Cost Item | Monthly |
-|-----------|---------|
-| Hardware Depreciation | $2,000 |
-| Electricity (0.7kW avg) | $400 |
-| Bandwidth (1TB) | $100 |
-| Maintenance | $200 |
-| **Total Cost** | **$2,700** |
+| Cost Item               | Monthly    |
+| ----------------------- | ---------- |
+| Hardware Depreciation   | $2,000     |
+| Electricity (0.7kW avg) | $400       |
+| Bandwidth (1TB)         | $100       |
+| Maintenance             | $200       |
+| **Total Cost**          | **$2,700** |
 
 **Revenue at Various Utilization Rates**:
 
 | Utilization | HCU-hours/month | Est. Reward (AI) | USD Value (@$0.10/AI) |
-|-------------|-----------------|------------------|----------------------|
-| 25% | 180 | 50,000 | $5,000 |
-| 50% | 360 | 100,000 | $10,000 |
-| 75% | 540 | 150,000 | $15,000 |
-| 100% | 720 | 200,000 | $20,000 |
+| ----------- | --------------- | ---------------- | --------------------- |
+| 25%         | 180             | 50,000           | $5,000                |
+| 50%         | 360             | 100,000          | $10,000               |
+| 75%         | 540             | 150,000          | $15,000               |
+| 100%        | 720             | 200,000          | $20,000               |
 
 **Conclusion**: Profitable at >15% utilization at current prices.
 
@@ -628,6 +634,7 @@ impl RewardDistributor {
 **Dominant Strategy**: Provide high-quality compute honestly.
 
 **Rationale**:
+
 1. Gaming quality reduces Quality_multiplier (0.5x vs 2.0x)
 2. Low trust hardware reduces Trust_multiplier (0.6x vs 1.0x)
 3. Downtime reduces Uptime_multiplier (0.7x vs 1.2x)
@@ -650,6 +657,7 @@ Sustainable when:
 ```
 
 **Self-Correcting Mechanisms**:
+
 1. If rewards too high → new providers join → dilution → equilibrium
 2. If rewards too low → providers leave → scarcity → price increase → equilibrium
 3. Burn rate creates deflationary pressure balancing inflation
@@ -661,12 +669,14 @@ Sustainable when:
 ### Phase 1: Foundation (Q1 2026)
 
 **Deliverables**:
+
 - [ ] ContributionRegistry smart contract
 - [ ] Basic HCU calculation service
 - [ ] Integration with existing compute_usage table
 - [ ] Manual epoch distribution (admin-triggered)
 
 **Success Criteria**:
+
 - 10 providers onboarded
 - 100,000 AI distributed in first epoch
 - No critical bugs in 30-day audit
@@ -674,12 +684,14 @@ Sustainable when:
 ### Phase 2: Automation (Q2 2026)
 
 **Deliverables**:
+
 - [ ] Automated epoch distribution
 - [ ] Quality score integration (PoAI)
 - [ ] NVTrust attestation verification
 - [ ] Vesting contract deployment
 
 **Success Criteria**:
+
 - 50 providers onboarded
 - 99.9% uptime for distribution
 - <1% reward calculation variance
@@ -687,12 +699,14 @@ Sustainable when:
 ### Phase 3: Scaling (Q3 2026)
 
 **Deliverables**:
+
 - [ ] Cross-chain Teleport distribution
 - [ ] Auto-compound staking option
 - [ ] Advanced anti-gaming ML models
 - [ ] Public dashboard and analytics
 
 **Success Criteria**:
+
 - 200 providers onboarded
 - $10M+ monthly compute volume
 - <0.1% fraudulent claims
@@ -700,12 +714,14 @@ Sustainable when:
 ### Phase 4: Decentralization (Q4 2026)
 
 **Deliverables**:
+
 - [ ] DAO governance for parameters
 - [ ] Decentralized epoch triggers
 - [ ] Community-run validators
 - [ ] Open-source all components
 
 **Success Criteria**:
+
 - 500+ providers
 - 0 admin key dependencies
 - Community-approved parameter changes
@@ -716,30 +732,30 @@ Sustainable when:
 
 ### 10.1 Smart Contract Risks
 
-| Risk | Mitigation |
-|------|------------|
-| Reentrancy | Checks-effects-interactions, ReentrancyGuard |
-| Integer Overflow | SafeMath, Solidity 0.8+ |
-| Access Control | OpenZeppelin AccessControl |
-| Upgrade Risks | Transparent proxy with timelock |
+| Risk             | Mitigation                                   |
+| ---------------- | -------------------------------------------- |
+| Reentrancy       | Checks-effects-interactions, ReentrancyGuard |
+| Integer Overflow | SafeMath, Solidity 0.8+                      |
+| Access Control   | OpenZeppelin AccessControl                   |
+| Upgrade Risks    | Transparent proxy with timelock              |
 
 ### 10.2 Economic Attacks
 
-| Attack | Mitigation |
-|--------|------------|
-| Flash Loan Stake | Minimum stake duration (7 days) |
+| Attack              | Mitigation                           |
+| ------------------- | ------------------------------------ |
+| Flash Loan Stake    | Minimum stake duration (7 days)      |
 | Reward Manipulation | Epoch-based distribution (24h delay) |
-| Front-running | Commit-reveal for claims |
-| MEV Extraction | Batch distribution transactions |
+| Front-running       | Commit-reveal for claims             |
+| MEV Extraction      | Batch distribution transactions      |
 
 ### 10.3 Operational Risks
 
-| Risk | Mitigation |
-|------|------------|
-| Oracle Failure | On-chain contribution records |
-| Key Compromise | Multi-sig treasury, timelock |
-| Network Congestion | L2 distribution, batching |
-| Bug Discovery | Bug bounty program, insurance fund |
+| Risk               | Mitigation                         |
+| ------------------ | ---------------------------------- |
+| Oracle Failure     | On-chain contribution records      |
+| Key Compromise     | Multi-sig treasury, timelock       |
+| Network Congestion | L2 distribution, batching          |
+| Bug Discovery      | Bug bounty program, insurance fund |
 
 ### 10.4 Privacy Considerations
 
@@ -774,17 +790,17 @@ Sustainable when:
 
 ## Appendix A: Parameter Reference
 
-| Parameter | Default | Range | Governance |
-|-----------|---------|-------|------------|
-| EPOCH_DURATION | 86400s (24h) | 3600-604800 | DAO |
-| MIN_STAKE | 1000 AI | 100-10000 | DAO |
-| PROVIDER_SHARE | 70% | 50-80% | DAO |
-| TREASURY_SHARE | 20% | 10-30% | DAO |
-| BURN_SHARE | 10% | 5-20% | DAO |
-| MIN_QUALITY_SCORE | 5000 | 3000-7000 | DAO |
-| MIN_UPTIME_RATIO | 9000 | 8000-9500 | DAO |
-| BASE_EMISSION_YEAR1 | 1M AI/day | Fixed | N/A |
-| MAX_STAKE_EFFECT | 1M AI | 100K-10M | DAO |
+| Parameter           | Default      | Range       | Governance |
+| ------------------- | ------------ | ----------- | ---------- |
+| EPOCH_DURATION      | 86400s (24h) | 3600-604800 | DAO        |
+| MIN_STAKE           | 1000 AI      | 100-10000   | DAO        |
+| PROVIDER_SHARE      | 70%          | 50-80%      | DAO        |
+| TREASURY_SHARE      | 20%          | 10-30%      | DAO        |
+| BURN_SHARE          | 10%          | 5-20%       | DAO        |
+| MIN_QUALITY_SCORE   | 5000         | 3000-7000   | DAO        |
+| MIN_UPTIME_RATIO    | 9000         | 8000-9500   | DAO        |
+| BASE_EMISSION_YEAR1 | 1M AI/day    | Fixed       | N/A        |
+| MAX_STAKE_EFFECT    | 1M AI        | 100K-10M    | DAO        |
 
 ---
 
@@ -854,6 +870,6 @@ Copyright 2026 Hanzo AI Inc. Released under MIT License.
 
 ---
 
-*HIP-XXX Created: January 24, 2026*
-*Status: Draft*
-*Contact: research@hanzo.ai*
+_HIP-XXX Created: January 24, 2026_
+_Status: Draft_
+_Contact: research@hanzo.ai_
