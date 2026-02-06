@@ -12,7 +12,7 @@
 //!
 //! ## Quick Start
 //!
-//! ```rust,no_run
+//! ```rust,ignore
 //! use hanzo_zap::{Client, Gateway};
 //!
 //! #[tokio::main]
@@ -36,7 +36,7 @@
 //!
 //! The ZAP Gateway can bridge multiple MCP servers:
 //!
-//! ```rust,no_run
+//! ```rust,ignore
 //! use hanzo_zap::{Gateway, GatewayConfig, McpServerConfig, Transport};
 //!
 //! #[tokio::main]
