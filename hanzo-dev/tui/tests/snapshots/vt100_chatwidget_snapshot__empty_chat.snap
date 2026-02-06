@@ -2,12 +2,12 @@
 source: tui/tests/vt100_chatwidget_snapshot.rs
 expression: output
 ---
- +----------------------------------------------------------------------------+
- |                                 Every Code                                 |
- +----------------------------------------------------------------------------+
 
 
- ★   /code - perform a coding task (multiple agents)
+
+   >_ hanzo dev (v0.6.0)
+
+      What can I code for you today?
 
 
  • Hello! How can I help you today?
@@ -21,7 +21,7 @@ expression: output
    - Running commands
 
 
- +----------------------------------------------------------------------------+
- | What can I code for you today?                                             |
- +----------------------------------------------------------------------------+
- Read Only  (Shift+Tab change)                        Ctrl+G guide  •  API key
+  What can I code for you today?
+
+
+ Read Only  (Shift+Tab change)                                   ?  •  API key
