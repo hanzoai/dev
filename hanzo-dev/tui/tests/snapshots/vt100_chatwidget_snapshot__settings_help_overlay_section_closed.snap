@@ -2,9 +2,6 @@
 source: tui/tests/vt100_chatwidget_snapshot.rs
 expression: section_closed
 ---
- +------------------------------------------------------------------------------------------------+
- |                                           Every Code                                           |
- +------------------------------------------------------------------------------------------------+
  +Settings ▸ Model--------------------------------------------------------------------------------+
  |                                                                                                |
  | ›  Model              + Select Model & Reasoning --------------------------------------------+ |
@@ -19,13 +16,16 @@ expression: section_closed
  |    Planning           |     Medium - Provides a solid balance of reasoning depth and latency | |
  |    Validation         |     Low - Balances speed with some reasoning; useful for straightfor | |
  |    Chrome             |                                                                      | |
- |    MCP                |                                                                      | |
- |  ↓ Notifications      +----------------------------------------------------------------------+ |
+ |    MCP                |  GPT-5.1-Codex-Max                                                   | |
+ |    Notifications      |  Latest Codex-optimized flagship for deep and fast reasoning.        | |
+ |    Limits             |     XHigh - Extra high reasoning depth for complex problems          | |
+ |                       |                                                                      | |
+ |                       +----------------------------------------------------------------------+ |
  | ↑ ↓ Move    Enter Open    Esc Close    ? Help                                                  |
  |                                                                                                |
  +------------------------------------------------------------------------------------------------+
 
- +------------------------------------------------------------------------------------------------+
- | What can I code for you today?                                                                 |
- +------------------------------------------------------------------------------------------------+
- Read Only  (Shift+Tab change)                                            Ctrl+G guide  •  API key
+  What can I code for you today?
+
+
+ Read Only  (Shift+Tab change)                                                       ?  •  API key
