@@ -5,3 +5,6 @@ pnpm-lock.yaml
 prompt.md
 *_prompt.md
 *_instructions.md
+
+# Symlinks (prettier errors on symlinks)
+CLAUDE.md
