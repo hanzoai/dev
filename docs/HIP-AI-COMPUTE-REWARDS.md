@@ -429,11 +429,13 @@ function setRewardDestination(RewardDestination dest) external;
 **Solutions**:
 
 1. **Hardware Attestation (Primary)**
+
    - Each GPU has unique NVTrust device ID
    - Same device cannot attest to multiple providers
    - Hardware IDs are chain-bound (HIP-006)
 
 2. **Stake Requirements**
+
    - Minimum 1000 AI stake to participate
    - Stake increases linearly with claimed capacity
    - Economic cost to create fake identities
@@ -449,11 +451,13 @@ function setRewardDestination(RewardDestination dest) external;
 **Solutions**:
 
 1. **PoAI Verification (ZIP-002)**
+
    - Independent validators verify AI work
    - Redundant execution for high-value jobs
    - Statistical anomaly detection
 
 2. **Randomized Verification**
+
    - 10% of jobs receive additional verification
    - Providers don't know which jobs are audited
 
@@ -468,10 +472,12 @@ function setRewardDestination(RewardDestination dest) external;
 **Solutions**:
 
 1. **NVTrust Attestation**
+
    - Hardware capacity cryptographically attested
    - Cannot claim more than physical limits
 
 2. **Utilization Verification**
+
    - Actual utilization tracked and verified
    - Rewards based on utilized, not claimed capacity
 
@@ -486,10 +492,12 @@ function setRewardDestination(RewardDestination dest) external;
 **Solutions**:
 
 1. **Job Value Weighting**
+
    - Rewards weighted by actual job payment
    - Self-dealing is economically irrational
 
 2. **Network-Wide Analysis**
+
    - Graph analysis for suspicious job patterns
    - Statistical detection of circular flows
 
