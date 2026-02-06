@@ -11,12 +11,14 @@ Hanzo Dev is a powerful fork of OpenAI's Codex CLI, enhanced with enterprise fea
 Added `hanzo-node` npm package for Node.js project integration:
 
 1. **Package Structure** (`/hanzo-node/`)
+
    - `package.json`: Main package with optionalDependencies for platform binaries
    - `bin/hanzo.js`: Entry point that spawns native binary
    - `postinstall.js`: Downloads platform binary from GitHub releases
    - `scripts/preinstall.js`: Node.js version check (requires 18+)
 
 2. **Platform Packages**
+
    - `hanzo-node-darwin-arm64`: macOS Apple Silicon
    - `hanzo-node-darwin-x64`: macOS Intel
    - `hanzo-node-linux-x64-musl`: Linux x64 (static musl)
@@ -24,12 +26,14 @@ Added `hanzo-node` npm package for Node.js project integration:
    - `hanzo-node-win32-x64`: Windows x64
 
 3. **Release Workflow** (`.github/workflows/hanzo-node-release.yml`)
+
    - Triggered by successful main Release workflow
    - Reuses binary artifacts from main release
    - Publishes all platform packages then main package
    - Supports manual trigger with version override
 
 4. **Binary Resolution Strategy**
+
    - First checks user cache (`~/.cache/hanzo/node/<version>/`)
    - Falls back to platform optionalDependency package
    - Downloads from GitHub releases as last resort
@@ -57,6 +61,7 @@ Added `hanzo-node` npm package for Node.js project integration:
 ### Major Architecture Improvements
 
 1. **Compilation Fixes and Code Quality**
+
    - Fixed all Rust compilation warnings in core module
    - Resolved TUI interface compilation issues including:
      - Added missing `LIVE_PREFIX_COLS` constant
@@ -85,6 +90,7 @@ Added `hanzo-node` npm package for Node.js project integration:
 Hanzod has evolved into a complete AI blockchain system with native KuzuDB ledger and full Lux consensus integration:
 
 1. **Native KuzuDB Ledger Integration**
+
    - Unified graph + vector + KV database backend (no branding, pure implementation)
    - ACID transactions for blockchain integrity
    - 1536-dimensional vector storage for AI embeddings
@@ -92,6 +98,7 @@ Hanzod has evolved into a complete AI blockchain system with native KuzuDB ledge
    - In-process execution with zero network overhead
 
 2. **Lux Consensus Protocol**
+
    - Full compatibility with luxfi/consensus
    - Snow consensus with parameters: k=20, α=15, β=15/20
    - Quantum finality for immutable state
@@ -100,6 +107,7 @@ Hanzod has evolved into a complete AI blockchain system with native KuzuDB ledge
    - Network IDs: 43114 (mainnet), 43113 (testnet), 1337 (local)
 
 3. **RPC Server Architecture**
+
    - **gRPC Port**: 50051 (Proto-based high-performance)
    - **HTTP Port**: 8545 (JSON-RPC compatibility)
    - **WebSocket Port**: 8546 (Real-time subscriptions)
@@ -128,6 +136,7 @@ Hanzod has evolved into a complete AI blockchain system with native KuzuDB ledge
 Complete blockchain system with KuzuDB as the default database backend implementation. Major refactoring to remove branding and use generic, concise names:
 
 1. **Naming Convention Updates** (Completed)
+
    - Renamed modules to use generic names:
      - `ai_blockchain.rs` → `chain.rs` (AIBlockchain → Chain)
      - `kuzu_ledger.rs` → `ledger.rs` (KuzuLedger → Ledger)
@@ -137,6 +146,7 @@ Complete blockchain system with KuzuDB as the default database backend implement
    - No branding in code - KuzuDB is just the default implementation
 
 2. **Database Layer** (`/src/rs/hanzod/src/ledger.rs`)
+
    - **KuzuDB Backend**: Default graph/vector/KV database (requires cmake to build)
    - **Graph Capabilities**: Native Cypher queries for relationships
    - **Vector Search**: Built-in HNSW index for similarity
@@ -144,12 +154,14 @@ Complete blockchain system with KuzuDB as the default database backend implement
    - **In-Process**: Zero network hops for all operations
 
 3. **Database Abstraction** (`/src/rs/hanzod/src/database/mod.rs`)
+
    - **Multiple Backends**: KuzuDB (default), Sled, RocksDB, PostgreSQL
    - **Unified Interface**: Consistent API across all database types
    - Database layer is required, not optional
    - Pure Rust implementation with no Python tests
 
 4. **Integration Status** (December 2025)
+
    - **Repository Cleanup**: ✅ Complete
      - Renamed all modules to generic names (chain, ledger, vector_store, staking)
      - Removed Python test files and shell scripts
@@ -172,6 +184,7 @@ Complete blockchain system with KuzuDB as the default database backend implement
    - **Tests**: Pure Rust tests in `/tests` directory
 
 5. **AI Blockchain Pipeline** (`/src/rs/hanzod/src/ai_blockchain.rs`)
+
    - **Single Process**: Text → Embedding → Storage → Search → Inference
    - **Zero Latency**: All operations in-memory with no network calls
    - **Integrated Engine**: Embedded Hanzo Engine with mistralrs
@@ -182,6 +195,7 @@ Complete blockchain system with KuzuDB as the default database backend implement
    ```
 
 6. **API Gateway System** (`/src/rs/hanzod/src/api_gateway.rs`)
+
    - **Key-Based Billing**: Usage tracking and rate limiting per API key
    - **Multi-Tenant**: Encrypted namespaces with data isolation
    - **Privacy Modes**:
@@ -197,6 +211,7 @@ Complete blockchain system with KuzuDB as the default database backend implement
    - **Service Types**: Native agents, LLMs, compute, VPN, vector search
 
 7. **KuzuDB Vector Store** (`/src/rs/hanzod/src/kuzu_vector.rs`)
+
    - **HNSW Index**: Fast k-NN similarity search
    - **Graph Embeddings**: Connect vectors in knowledge graphs
    - **Blockchain Checkpoints**: Immutable snapshots with merkle roots
@@ -255,12 +270,14 @@ The system demonstrates the "absolutely fastest execution path" requested:
 The dev project now uses hanzod as its primary compute layer:
 
 1. **Hanzod Connection**
+
    - **HTTP Port**: 8080 for REST API
    - **gRPC Port**: 50051 for high-performance RPC
    - **Configuration**: `hanzo_inference.rs` with `HanzoComputeEndpoint`
    - **Model**: Default to `qwen3:8b` with MLX acceleration
 
 2. **HanzoComputeEndpoint** (`/src/rs/core/src/hanzo_inference.rs`)
+
    - Manages unified hanzod compute layer
    - Provides comprehensive AI capabilities:
      - LLM inference with streaming support
@@ -365,12 +382,14 @@ HANZOD_ENABLE_BITDELTA=true      # Model personalization
 Successfully incorporated key improvements from OpenAI Codex (up to commit 9bbeb75361):
 
 1. **Reasoning Effort Tracking**
+
    - Added `reasoning_effort` field to `SessionConfiguredEvent` and `NewConversationResponse`
    - Tracks reasoning level (Minimal/Low/Medium/High) throughout session lifecycle
    - Properly communicated through MCP protocol
    - Maintains backward compatibility
 
 2. **Apply-Patch Stability**
+
    - Fixed replacement sorting to ensure deterministic application order
    - Prevents panics when applying complex patches
    - Based on fix from commit 377af7573
@@ -438,11 +457,13 @@ Based on analysis of OpenAI Codex at `/Users/z/work/openai/codex`:
 ### High Priority
 
 1. **Unified Execution** (commit c09ed74a1)
+
    - PTY-backed interactive exec with session reuse
    - Bounded output (128 KiB) and timeout clamping
    - Requires `use_experimental_unified_exec_tool=true`
 
 2. **TUI Onboarding** (commit 8453915e0)
+
    - New model popup and configuration flow
    - Enhanced first-run experience
    - Internal storage for preferences
@@ -455,10 +476,12 @@ Based on analysis of OpenAI Codex at `/Users/z/work/openai/codex`:
 ### Medium Priority
 
 1. **IDE Integration**
+
    - UriBasedFileOpener for VS Code, Cursor, Windsurf
    - Already partially implemented
 
 2. **Enhanced Markdown Rendering**
+
    - We have markdown files but could adopt their latest improvements
 
 3. **Compact and Turn Context** (commit 674e3d3c9)
