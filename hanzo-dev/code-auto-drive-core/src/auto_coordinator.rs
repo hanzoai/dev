@@ -1889,7 +1889,7 @@ fn build_schema(active_agents: &[String], features: SchemaFeatures) -> Value {
         json!({
             "type": ["string", "null"],
             "minLength": CLI_PROMPT_MIN_CHARS,
-            "description": "Instruction sent to the CLI to push it forward with the task (4-600 chars). Write this like a human maintainer pushing the CLI forwards, without digging too deep into the technical side. Provide when finish_status is 'continue'. Keep it high-level; the CLI has more context and tools than you do. e.g. 'Execute the first two steps of the plan you provided in parellel using agents.' NEVER ask the CLI to show you files so you solve problems directly. ALWAYS allow the CLI to take control. You are the COORDINATOR not the WORKER. Prompts over 600 characters will be rejected as this indicates the CLI is not being given sufficient autonomy."
+            "description": "Instruction sent to the CLI to push it forward with the task (4-600 chars). Write this like a human maintainer pushing the CLI forwards, without digging too deep into the technical side. Provide when finish_status is 'continue'. Keep it high-level; the CLI has more context and tools than you do. e.g. 'Execute the first two steps of the plan you provided in parallel using agents.' NEVER ask the CLI to show you files so you solve problems directly. ALWAYS allow the CLI to take control. You are the COORDINATOR not the WORKER. Prompts over 600 characters will be rejected as this indicates the CLI is not being given sufficient autonomy."
         }),
     );
     required.push(Value::String("prompt_sent_to_cli".to_string()));
@@ -1921,7 +1921,7 @@ fn build_schema(active_agents: &[String], features: SchemaFeatures) -> Value {
                                 "context": {
                                     "type": ["string", "null"],
                                     "maxLength": 1500,
-                                    "description": "Background details (agents can not see the conversation - you must provide ALL neccessary information here). You might want to include parts of the plan or conversation history relevant to the work given to the agent."
+                                    "description": "Background details (agents can not see the conversation - you must provide ALL necessary information here). You might want to include parts of the plan or conversation history relevant to the work given to the agent."
                                 },
                                 "prompt": {
                                     "type": "string",
@@ -1933,7 +1933,7 @@ fn build_schema(active_agents: &[String], features: SchemaFeatures) -> Value {
                             },
                             "required": ["prompt", "context", "write", "models"]
                         },
-                        "description": "Up to 3 batches per turn with up to 4 agents in each. Use agents whenever it will help to source a variety of opinions when planning/researching or when there a mulitple workstreams which can be extecuted at once. Instruct the agent to carefully merge in the results of the agents work. Another great reason to use agents is that it helps to split the work up in small batches with a new context history - this speeds up work and dramatically improve focus. Having said that, the CLI has to be responible for merging in the results and producing the final product, so you need to balance the work given to the agents vs work given to the CLI at each step."
+                        "description": "Up to 3 batches per turn with up to 4 agents in each. Use agents whenever it will help to source a variety of opinions when planning/researching or when there are multiple workstreams which can be executed at once. Instruct the agent to carefully merge in the results of the agents work. Another great reason to use agents is that it helps to split the work up in small batches with a new context history - this speeds up work and dramatically improve focus. Having said that, the CLI has to be responsible for merging in the results and producing the final product, so you need to balance the work given to the agents vs work given to the CLI at each step."
                     },
                 },
                 "required": ["timing", "list"]

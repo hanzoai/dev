@@ -17,23 +17,23 @@ Hanzo Dev is an AI-powered coding assistant that runs in your terminal. When inv
 
 These options can be used with any subcommand or in interactive mode:
 
-| Option | Short | Description |
-|--------|-------|-------------|
-| `--model <MODEL>` | `-m` | Model the agent should use |
-| `--profile <PROFILE>` | `-p` | Configuration profile from config.toml |
-| `--sandbox <MODE>` | `-s` | Sandbox policy for shell commands |
-| `--ask-for-approval <POLICY>` | `-a` | When to require human approval |
-| `--cd <DIR>` | `-C` | Working directory for the agent |
-| `--image <FILE>` | `-i` | Attach image(s) to initial prompt (comma-separated) |
-| `--oss` | | Use local open source model provider (Ollama) |
-| `--full-auto` | | Enable low-friction sandboxed automatic execution |
-| `--dangerously-bypass-approvals-and-sandbox` | | Skip all safety checks (DANGEROUS) |
-| `--auto` | | Run Auto Drive for non-interactive sessions |
-| `--demo <TEXT>` | | Developer message to prepend for demos |
-| `--debug` | `-d` | Enable debug logging of LLM requests |
-| `-c <KEY=VALUE>` | | Override configuration values |
-| `--version` | | Print version information |
-| `--help` | `-h` | Print help information |
+| Option                                       | Short | Description                                         |
+| -------------------------------------------- | ----- | --------------------------------------------------- |
+| `--model <MODEL>`                            | `-m`  | Model the agent should use                          |
+| `--profile <PROFILE>`                        | `-p`  | Configuration profile from config.toml              |
+| `--sandbox <MODE>`                           | `-s`  | Sandbox policy for shell commands                   |
+| `--ask-for-approval <POLICY>`                | `-a`  | When to require human approval                      |
+| `--cd <DIR>`                                 | `-C`  | Working directory for the agent                     |
+| `--image <FILE>`                             | `-i`  | Attach image(s) to initial prompt (comma-separated) |
+| `--oss`                                      |       | Use local open source model provider (Ollama)       |
+| `--full-auto`                                |       | Enable low-friction sandboxed automatic execution   |
+| `--dangerously-bypass-approvals-and-sandbox` |       | Skip all safety checks (DANGEROUS)                  |
+| `--auto`                                     |       | Run Auto Drive for non-interactive sessions         |
+| `--demo <TEXT>`                              |       | Developer message to prepend for demos              |
+| `--debug`                                    | `-d`  | Enable debug logging of LLM requests                |
+| `-c <KEY=VALUE>`                             |       | Override configuration values                       |
+| `--version`                                  |       | Print version information                           |
+| `--help`                                     | `-h`  | Print help information                              |
 
 ### Sandbox Modes
 
@@ -63,14 +63,14 @@ Launch the interactive TUI interface. If PROMPT is provided, it starts the conve
 
 **TUI-Specific Options:**
 
-| Option | Description |
-|--------|-------------|
-| `--search` | Enable web search (default: enabled) |
-| `--no-search` | Disable web search |
-| `--compact-prompt <TEXT>` | Override compaction prompt text |
-| `--compact-prompt-file <FILE>` | Read compaction prompt from file |
-| `--order` | Show ordering debug overlays |
-| `--timing` | Enable timing diagnostics |
+| Option                         | Description                          |
+| ------------------------------ | ------------------------------------ |
+| `--search`                     | Enable web search (default: enabled) |
+| `--no-search`                  | Disable web search                   |
+| `--compact-prompt <TEXT>`      | Override compaction prompt text      |
+| `--compact-prompt-file <FILE>` | Read compaction prompt from file     |
+| `--order`                      | Show ordering debug overlays         |
+| `--timing`                     | Enable timing diagnostics            |
 
 **Examples:**
 
@@ -102,19 +102,19 @@ dev exec [OPTIONS] [PROMPT]
 
 **Options:**
 
-| Option | Description |
-|--------|-------------|
-| `--auto` | Run Auto Drive instead of single turn |
-| `--auto-review` | Use Auto Review models and limits |
-| `--json` | Print events to stdout as JSONL |
-| `--color <MODE>` | Color output: `always`, `never`, `auto` |
-| `--max-seconds <N>` | Maximum wall-clock time budget |
-| `--turn-cap <N>` | Maximum Auto Drive coordinator turns |
-| `--include-plan-tool` | Include planning tool in conversation |
-| `--output-last-message <FILE>` | Write final message to file |
-| `--output-schema <FILE>` | JSON Schema for structured output |
-| `--review-output-json <FILE>` | Write review output JSON |
-| `--skip-git-repo-check` | Allow running outside Git repos |
+| Option                         | Description                             |
+| ------------------------------ | --------------------------------------- |
+| `--auto`                       | Run Auto Drive instead of single turn   |
+| `--auto-review`                | Use Auto Review models and limits       |
+| `--json`                       | Print events to stdout as JSONL         |
+| `--color <MODE>`               | Color output: `always`, `never`, `auto` |
+| `--max-seconds <N>`            | Maximum wall-clock time budget          |
+| `--turn-cap <N>`               | Maximum Auto Drive coordinator turns    |
+| `--include-plan-tool`          | Include planning tool in conversation   |
+| `--output-last-message <FILE>` | Write final message to file             |
+| `--output-schema <FILE>`       | JSON Schema for structured output       |
+| `--review-output-json <FILE>`  | Write review output JSON                |
+| `--skip-git-repo-check`        | Allow running outside Git repos         |
 
 **Examples:**
 
@@ -164,10 +164,10 @@ dev resume [SESSION_ID] [OPTIONS]
 
 **Options:**
 
-| Option | Description |
-|--------|-------------|
-| `--last` | Continue the most recent session |
-| All TUI options | Inherited from interactive mode |
+| Option          | Description                      |
+| --------------- | -------------------------------- |
+| `--last`        | Continue the most recent session |
+| All TUI options | Inherited from interactive mode  |
 
 **Examples:**
 
@@ -198,8 +198,8 @@ dev login status
 
 **Options:**
 
-| Option | Description |
-|--------|-------------|
+| Option           | Description             |
+| ---------------- | ----------------------- |
 | `--with-api-key` | Read API key from stdin |
 
 **Examples:**
@@ -284,11 +284,11 @@ dev mcp add <NAME> [OPTIONS] [-- COMMAND...]
 
 **Options:**
 
-| Option | Description |
-|--------|-------------|
-| `--url <URL>` | URL of remote MCP server |
-| `--bearer-token <TOKEN>` | Bearer token for authentication |
-| `--env <KEY=VALUE>` | Environment variables (repeatable) |
+| Option                   | Description                        |
+| ------------------------ | ---------------------------------- |
+| `--url <URL>`            | URL of remote MCP server           |
+| `--bearer-token <TOKEN>` | Bearer token for authentication    |
+| `--env <KEY=VALUE>`      | Environment variables (repeatable) |
 
 **Examples:**
 
@@ -336,13 +336,13 @@ dev bridge subscription [OPTIONS]
 
 **Options:**
 
-| Option | Description |
-|--------|-------------|
-| `--show` | Display current subscription |
-| `--levels <CSV>` | Set log levels: errors,warn,info,trace |
+| Option                 | Description                                                 |
+| ---------------------- | ----------------------------------------------------------- |
+| `--show`               | Display current subscription                                |
+| `--levels <CSV>`       | Set log levels: errors,warn,info,trace                      |
 | `--capabilities <CSV>` | Set capabilities: screenshot,pageview,control,console,error |
-| `--filter <MODE>` | LLM filter: off, minimal, aggressive |
-| `--clear` | Remove override and revert to defaults |
+| `--filter <MODE>`      | LLM filter: off, minimal, aggressive                        |
+| `--clear`              | Remove override and revert to defaults                      |
 
 #### bridge list
 
@@ -364,11 +364,11 @@ dev bridge tail [OPTIONS]
 
 **Options:**
 
-| Option | Description |
-|--------|-------------|
-| `--level <LEVEL>` | Minimum level: errors, warn, info, trace |
-| `--bridge <PATH\|INDEX>` | Select specific bridge target |
-| `--raw` | Print raw JSON frames |
+| Option                   | Description                              |
+| ------------------------ | ---------------------------------------- |
+| `--level <LEVEL>`        | Minimum level: errors, warn, info, trace |
+| `--bridge <PATH\|INDEX>` | Select specific bridge target            |
+| `--raw`                  | Print raw JSON frames                    |
 
 #### bridge screenshot
 
@@ -380,9 +380,9 @@ dev bridge screenshot [OPTIONS]
 
 **Options:**
 
-| Option | Description |
-|--------|-------------|
-| `--timeout <SECONDS>` | Wait timeout (default: 10) |
+| Option                   | Description                   |
+| ------------------------ | ----------------------------- |
+| `--timeout <SECONDS>`    | Wait timeout (default: 10)    |
 | `--bridge <PATH\|INDEX>` | Select specific bridge target |
 
 #### bridge javascript
@@ -397,9 +397,9 @@ dev bridge javascript <CODE> [OPTIONS]
 
 **Options:**
 
-| Option | Description |
-|--------|-------------|
-| `--timeout <SECONDS>` | Wait timeout (default: 10) |
+| Option                   | Description                   |
+| ------------------------ | ----------------------------- |
+| `--timeout <SECONDS>`    | Wait timeout (default: 10)    |
 | `--bridge <PATH\|INDEX>` | Select specific bridge target |
 
 ---
@@ -424,13 +424,13 @@ dev cloud submit <PROMPT> [OPTIONS]
 
 **Options:**
 
-| Option | Description |
-|--------|-------------|
-| `--env <ENV_ID>` | Environment ID |
-| `--best-of <N>` | Best-of-N attempts (default: 1) |
-| `--qa` | Enable QA/review mode |
-| `--git-ref <REF>` | Git ref (default: main) |
-| `--wait` | Wait for completion |
+| Option            | Description                     |
+| ----------------- | ------------------------------- |
+| `--env <ENV_ID>`  | Environment ID                  |
+| `--best-of <N>`   | Best-of-N attempts (default: 1) |
+| `--qa`            | Enable QA/review mode           |
+| `--git-ref <REF>` | Git ref (default: main)         |
+| `--wait`          | Wait for completion             |
 
 ---
 
@@ -452,16 +452,16 @@ dev llm request [OPTIONS]
 
 **Options:**
 
-| Option | Description |
-|--------|-------------|
-| `--developer <TEXT>` | Developer message |
-| `--message <TEXT>` | User message |
-| `--model <MODEL>` | Model override |
+| Option                 | Description                               |
+| ---------------------- | ----------------------------------------- |
+| `--developer <TEXT>`   | Developer message                         |
+| `--message <TEXT>`     | User message                              |
+| `--model <MODEL>`      | Model override                            |
 | `--format-type <TYPE>` | Output format type (default: json_schema) |
-| `--format-name <NAME>` | Output format name |
-| `--format-strict` | Enable strict format (default: true) |
-| `--schema-json <JSON>` | Inline JSON schema |
-| `--schema-file <FILE>` | Path to JSON schema file |
+| `--format-name <NAME>` | Output format name                        |
+| `--format-strict`      | Enable strict format (default: true)      |
+| `--schema-json <JSON>` | Inline JSON schema                        |
+| `--schema-file <FILE>` | Path to JSON schema file                  |
 
 ---
 
@@ -499,6 +499,7 @@ dev doctor
 ```
 
 **Output includes:**
+
 - Current executable path and version
 - PATH environment variable
 - All `dev` and `coder` binaries found
@@ -517,10 +518,10 @@ dev preview <SLUG> [OPTIONS] [-- EXTRA_ARGS...]
 
 **Options:**
 
-| Option | Description |
-|--------|-------------|
+| Option                | Description         |
+| --------------------- | ------------------- |
 | `--repo <OWNER/REPO>` | Override repository |
-| `--out <DIR>` | Output directory |
+| `--out <DIR>`         | Output directory    |
 
 ---
 
@@ -563,12 +564,12 @@ dev exec -c model=gpt-4.1 "Your prompt"
 
 ## Environment Variables
 
-| Variable | Description |
-|----------|-------------|
-| `OPENAI_API_KEY` | OpenAI API key |
-| `CODE_HOME` | Override config directory (default: ~/.code) |
-| `CODEX_HOME` | Legacy config directory (fallback) |
-| `CODEX_SECURE_MODE` | Enable security hardening when set to "1" |
+| Variable            | Description                                  |
+| ------------------- | -------------------------------------------- |
+| `OPENAI_API_KEY`    | OpenAI API key                               |
+| `CODE_HOME`         | Override config directory (default: ~/.code) |
+| `CODEX_HOME`        | Legacy config directory (fallback)           |
+| `CODEX_SECURE_MODE` | Enable security hardening when set to "1"    |
 
 ---
 
@@ -624,11 +625,11 @@ dev mcp remove my-search
 
 ## Exit Codes
 
-| Code | Description |
-|------|-------------|
-| 0 | Success |
-| 1 | General error |
-| 130 | Interrupted (SIGINT) |
+| Code | Description          |
+| ---- | -------------------- |
+| 0    | Success              |
+| 1    | General error        |
+| 130  | Interrupted (SIGINT) |
 
 ---
 

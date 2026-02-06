@@ -35250,7 +35250,7 @@ impl ChatWidget<'_> {
 
             let prompt = if let Some(current) = current_trimmed.as_ref() {
                 format!(
-                    "Review the code changes between the current branch '{current}' and '{branch_trimmed}'. Identify the intent of the changes in '{current}' and ensure no obvious gaps remain. Find all geniune bugs or regressions which need to be addressed before merging. Return ALL issues which need to be addressed, not just the first one you find."
+                    "Review the code changes between the current branch '{current}' and '{branch_trimmed}'. Identify the intent of the changes in '{current}' and ensure no obvious gaps remain. Find all genuine bugs or regressions which need to be addressed before merging. Return ALL issues which need to be addressed, not just the first one you find."
                 )
             } else {
                 format!(
@@ -35371,7 +35371,7 @@ impl ChatWidget<'_> {
                         {
                             if base_branch != current_branch {
                                 let prompt = format!(
-                                    "Review the code changes between the current branch '{current_branch}' and '{base_branch}'. Identify the intent of the changes in '{current_branch}' and ensure no obvious gaps remain. Find all geniune bugs or regressions which need to be addressed before merging. Return ALL issues which need to be addressed, not just the first one you find."
+                                    "Review the code changes between the current branch '{current_branch}' and '{base_branch}'. Identify the intent of the changes in '{current_branch}' and ensure no obvious gaps remain. Find all genuine bugs or regressions which need to be addressed before merging. Return ALL issues which need to be addressed, not just the first one you find."
                                 );
                                 let hint = format!("against {base_branch}");
                                 let preparation_label =
@@ -36626,7 +36626,7 @@ impl ChatWidget<'_> {
             let mut steps = Vec::new();
             if has_dirty_changes {
                 steps.push(
-                    "Briefly clean this repo (add working files/secrets to .gitignore, delete any temporary files) if neccessary, then commit all remaining dirty files."
+                    "Briefly clean this repo (add working files/secrets to .gitignore, delete any temporary files) if necessary, then commit all remaining dirty files."
                         .to_string(),
                 );
             }
@@ -36654,7 +36654,7 @@ impl ChatWidget<'_> {
                 let _ = writeln!(message, "{}. {}", idx + 1, step);
             }
             message.push_str(
-                "You must ensure all workflows complete successfully. Do not yeild or respond until this has been completed.",
+                "You must ensure all workflows complete successfully. Do not yield or respond until this has been completed.",
             );
 
             tx.send(AppEvent::SubmitHiddenTextWithPreface {

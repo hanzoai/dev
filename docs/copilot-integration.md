@@ -5,31 +5,37 @@ The Hanzo Dev CLI now includes comprehensive GitHub Copilot integration, making 
 ## Features
 
 ### 🤖 Interactive Chat
+
 - Real-time conversations with GitHub Copilot
 - Context-aware responses with file integration
 - Continuous session support
 
 ### 💡 Code Suggestions
+
 - AI-powered code completions and suggestions
 - Language-aware context understanding
 - Multiple suggestion alternatives
 
 ### 🔍 Code Review & Analysis
+
 - Automated code review and suggestions
 - Git diff analysis and feedback
 - Quality improvement recommendations
 
 ### 📚 Documentation Generation
+
 - Auto-generate comments, README files, and API docs
 - Multiple documentation formats
 - Context-aware explanations
 
 ### 🐚 Shell Command Assistance
+
 - Natural language to shell commands
 - OS-specific command suggestions
 - Command explanations and safety tips
 
 ### 🎯 Git Integration
+
 - Auto-generate commit messages from diffs
 - Conventional commit format support
 - Change analysis and categorization
@@ -196,6 +202,7 @@ dev copilot complete main.rs --line 42 --column 15 --context 20
 The Copilot CLI commands can be integrated into your favorite editor:
 
 #### Vim/Neovim
+
 ```vim
 " Add to your .vimrc or init.vim
 command! CopilotChat !dev copilot chat
@@ -204,18 +211,17 @@ command! CopilotExplain !dev copilot explain --file %
 ```
 
 #### VS Code
+
 ```json
 {
-  "terminal.integrated.shellArgs.osx": [
-    "-c",
-    "alias cop='dev copilot'"
-  ]
+  "terminal.integrated.shellArgs.osx": ["-c", "alias cop='dev copilot'"]
 }
 ```
 
 ### Git Hooks
 
 #### Pre-commit Hook
+
 ```bash
 #!/bin/sh
 # .git/hooks/pre-commit
@@ -223,6 +229,7 @@ dev copilot review --diff $(git diff --cached --name-only)
 ```
 
 #### Commit Message Hook
+
 ```bash
 #!/bin/sh
 # .git/hooks/prepare-commit-msg
@@ -234,6 +241,7 @@ fi
 ### CI/CD Integration
 
 #### GitHub Actions
+
 ```yaml
 name: AI Code Review
 on: [pull_request]
@@ -285,6 +293,7 @@ context_window = 20000
 ### Custom Workflows
 
 #### Code Refactoring Workflow
+
 ```bash
 #!/bin/bash
 # refactor.sh - AI-assisted refactoring workflow
@@ -310,6 +319,7 @@ dev copilot docs "$FILE" --type comment
 ```
 
 #### Documentation Generation Pipeline
+
 ```bash
 #!/bin/bash
 # docs-gen.sh - Comprehensive documentation generation
@@ -327,21 +337,25 @@ find src/ -name "*.rs" -exec dev copilot docs {} --type comment \;
 ## Tips and Best Practices
 
 ### 1. Effective Prompting
+
 - **Be specific**: Instead of "help with code", say "optimize this sorting algorithm for large datasets"
 - **Provide context**: Include relevant file paths and project information
 - **Ask follow-up questions**: Build on previous responses for deeper insights
 
 ### 2. Code Review Integration
+
 - Use `--diff` flag for reviewing changes before committing
 - Combine with your existing code review process
 - Focus on security, performance, and maintainability suggestions
 
 ### 3. Documentation Workflow
+
 - Generate docs incrementally as you write code
 - Use different doc types for different audiences
 - Review and edit AI-generated documentation for accuracy
 
 ### 4. Shell Command Safety
+
 - Always review suggested commands before execution
 - Use `--explain` flag to understand what commands do
 - Test in safe environments first
@@ -351,6 +365,7 @@ find src/ -name "*.rs" -exec dev copilot docs {} --type comment \;
 ### Common Issues
 
 #### "Copilot is not available"
+
 ```bash
 # Check installation status
 dev copilot setup --check
@@ -360,6 +375,7 @@ dev copilot setup --install --auth
 ```
 
 #### Authentication Issues
+
 ```bash
 # Re-authenticate with GitHub
 gh auth login
@@ -369,11 +385,13 @@ gh auth refresh -s copilot
 ```
 
 #### Performance Issues
+
 - Reduce context window size for faster responses
 - Use shorter prompts for simple questions
 - Check internet connectivity
 
 ### Debug Mode
+
 ```bash
 # Enable verbose logging
 RUST_LOG=debug dev copilot chat "debug prompt"
@@ -384,6 +402,7 @@ RUST_LOG=debug dev copilot chat "debug prompt"
 ### Real-world Scenarios
 
 #### 1. Bug Investigation
+
 ```bash
 # Get suggestions for fixing a bug
 dev copilot chat --file buggy_function.rs "This function sometimes returns None unexpectedly. What could be wrong?"
@@ -393,6 +412,7 @@ dev copilot review buggy_function.rs --diff
 ```
 
 #### 2. Performance Optimization
+
 ```bash
 # Get optimization suggestions
 dev copilot suggest --file slow_algorithm.rs "optimize for performance"
@@ -402,6 +422,7 @@ dev copilot explain --file slow_algorithm.rs --level expert
 ```
 
 #### 3. Testing Strategy
+
 ```bash
 # Generate test suggestions
 dev copilot chat "What tests should I write for this authentication module?" --file auth.rs
@@ -411,6 +432,7 @@ dev copilot review tests/ --format markdown
 ```
 
 #### 4. Documentation Sprint
+
 ```bash
 # Document entire project
 find src/ -name "*.rs" | xargs -I {} dev copilot docs {} --type comment
@@ -424,6 +446,7 @@ dev copilot docs . --type readme --output README.md
 The Copilot integration is part of the open-source Hanzo Dev project. Contributions are welcome!
 
 ### Development
+
 ```bash
 # Build from source
 git clone https://github.com/hanzoai/dev
@@ -435,6 +458,7 @@ cargo test copilot
 ```
 
 ### Feature Requests
+
 - File issues on the [Hanzo Dev repository](https://github.com/hanzoai/dev/issues)
 - Use the "enhancement" label for new feature requests
 - Provide use cases and examples
@@ -446,6 +470,7 @@ This integration is part of Hanzo Dev and follows the same licensing terms as th
 ---
 
 **Need Help?**
+
 - 📖 [Full Documentation](https://hanzo.ai/dev/docs)
 - 💬 [Community Discord](https://discord.gg/hanzo)
 - 🐛 [Report Issues](https://github.com/hanzoai/dev/issues)

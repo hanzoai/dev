@@ -31,12 +31,12 @@ This document outlines the design for the Pools UI and Deployment Flow for the H
 
 ### 1.2 Integration Points
 
-| Component | Protocol | Port | Purpose |
-|-----------|----------|------|---------|
-| Platform API | HTTP/tRPC | 3000 | UI backend |
-| hanzo-node | HTTP/gRPC | 8080/50051 | Compute operations |
-| ComputeDEX | Ethereum JSON-RPC | 8545 | Smart contract interactions |
-| Redis/BullMQ | Redis | 6379 | Job queue |
+| Component    | Protocol          | Port       | Purpose                     |
+| ------------ | ----------------- | ---------- | --------------------------- |
+| Platform API | HTTP/tRPC         | 3000       | UI backend                  |
+| hanzo-node   | HTTP/gRPC         | 8080/50051 | Compute operations          |
+| ComputeDEX   | Ethereum JSON-RPC | 8545       | Smart contract interactions |
+| Redis/BullMQ | Redis             | 6379       | Job queue                   |
 
 ---
 
@@ -61,37 +61,37 @@ enum ResourceType {
 interface Pool {
   id: string;
   resourceType: ResourceType;
-  resourceAmount: bigint;      // Total resource units in pool
-  tokenAmount: bigint;         // HANZO tokens in pool
-  totalLiquidity: bigint;      // LP token supply
-  feeRate: number;             // Trading fee (e.g., 0.003 = 0.3%)
-  utilization: number;         // Current utilization percentage
-  lastPrice: bigint;           // Last traded price
-  volume24h: bigint;           // 24-hour trading volume
+  resourceAmount: bigint; // Total resource units in pool
+  tokenAmount: bigint; // HANZO tokens in pool
+  totalLiquidity: bigint; // LP token supply
+  feeRate: number; // Trading fee (e.g., 0.003 = 0.3%)
+  utilization: number; // Current utilization percentage
+  lastPrice: bigint; // Last traded price
+  volume24h: bigint; // 24-hour trading volume
 }
 
 // User's liquidity position
 interface LiquidityPosition {
   poolId: string;
   resourceType: ResourceType;
-  liquidityShares: bigint;     // LP tokens held
-  resourceAmount: bigint;      // Underlying resource
-  tokenAmount: bigint;         // Underlying HANZO tokens
-  pendingRewards: bigint;      // Unclaimed rewards
-  entryPrice: bigint;          // Price at entry
-  impermanentLoss: number;     // Current IL percentage
+  liquidityShares: bigint; // LP tokens held
+  resourceAmount: bigint; // Underlying resource
+  tokenAmount: bigint; // Underlying HANZO tokens
+  pendingRewards: bigint; // Unclaimed rewards
+  entryPrice: bigint; // Price at entry
+  impermanentLoss: number; // Current IL percentage
 }
 
 // Order book entry
 interface OrderBookEntry {
   orderId: string;
-  provider: string;            // Provider address
+  provider: string; // Provider address
   resourceType: ResourceType;
   amount: bigint;
   pricePerUnit: bigint;
-  duration: number;            // Seconds
-  slaScore: number;            // 0-100
-  attestation?: string;        // TEE attestation hash
+  duration: number; // Seconds
+  slaScore: number; // 0-100
+  attestation?: string; // TEE attestation hash
   createdAt: Date;
   expiresAt: Date;
 }
@@ -101,20 +101,20 @@ interface OrderBookEntry {
 
 ```typescript
 interface DeploymentTarget {
-  type: 'local' | 'cloud' | 'pool';
-  poolId?: string;             // If type === 'pool'
-  region?: string;             // If type === 'cloud'
-  serverId?: string;           // If type === 'local'
+  type: "local" | "cloud" | "pool";
+  poolId?: string; // If type === 'pool'
+  region?: string; // If type === 'cloud'
+  serverId?: string; // If type === 'local'
 }
 
 interface DeploymentConfig {
   applicationId: string;
   target: DeploymentTarget;
   resources: {
-    cpu: number;               // CPU units requested
-    memory: number;            // MB
-    storage: number;           // GB
-    gpu?: number;              // GPU units (optional)
+    cpu: number; // CPU units requested
+    memory: number; // MB
+    storage: number; // GB
+    gpu?: number; // GPU units (optional)
   };
   scaling: {
     minReplicas: number;
@@ -380,53 +380,63 @@ export const poolsRouter = createTRPCRouter({
 
   // Get pool price history
   getPriceHistory: protectedProcedure
-    .input(z.object({
-      poolId: z.string(),
-      timeframe: z.enum(["1H", "24H", "7D", "30D", "ALL"]),
-    }))
+    .input(
+      z.object({
+        poolId: z.string(),
+        timeframe: z.enum(["1H", "24H", "7D", "30D", "ALL"]),
+      }),
+    )
     .query(async ({ ctx, input }) => {
       return await ctx.hanzoNode.pools.getPriceHistory(input);
     }),
 
   // Get order book depth
   getOrderBook: protectedProcedure
-    .input(z.object({
-      resourceType: z.number(),
-      levels: z.number().default(10),
-    }))
+    .input(
+      z.object({
+        resourceType: z.number(),
+        levels: z.number().default(10),
+      }),
+    )
     .query(async ({ ctx, input }) => {
       return await ctx.hanzoNode.pools.getOrderBookDepth(input);
     }),
 
   // Swap resources
   swap: protectedProcedure
-    .input(z.object({
-      resourceType: z.number(),
-      isBuying: z.boolean(),
-      amountIn: z.string(),  // BigInt as string
-      minAmountOut: z.string(),
-    }))
+    .input(
+      z.object({
+        resourceType: z.number(),
+        isBuying: z.boolean(),
+        amountIn: z.string(), // BigInt as string
+        minAmountOut: z.string(),
+      }),
+    )
     .mutation(async ({ ctx, input }) => {
       return await ctx.hanzoNode.pools.swap(input);
     }),
 
   // Add liquidity
   addLiquidity: protectedProcedure
-    .input(z.object({
-      resourceType: z.number(),
-      resourceAmount: z.string(),
-      tokenAmount: z.string(),
-    }))
+    .input(
+      z.object({
+        resourceType: z.number(),
+        resourceAmount: z.string(),
+        tokenAmount: z.string(),
+      }),
+    )
     .mutation(async ({ ctx, input }) => {
       return await ctx.hanzoNode.pools.addLiquidity(input);
     }),
 
   // Remove liquidity
   removeLiquidity: protectedProcedure
-    .input(z.object({
-      resourceType: z.number(),
-      liquidityAmount: z.string(),
-    }))
+    .input(
+      z.object({
+        resourceType: z.number(),
+        liquidityAmount: z.string(),
+      }),
+    )
     .mutation(async ({ ctx, input }) => {
       return await ctx.hanzoNode.pools.removeLiquidity(input);
     }),
@@ -445,11 +455,13 @@ export const poolsRouter = createTRPCRouter({
 
   // Get best execution price
   getBestPrice: protectedProcedure
-    .input(z.object({
-      resourceType: z.number(),
-      isBuying: z.boolean(),
-      amount: z.string(),
-    }))
+    .input(
+      z.object({
+        resourceType: z.number(),
+        isBuying: z.boolean(),
+        amount: z.string(),
+      }),
+    )
     .query(async ({ ctx, input }) => {
       return await ctx.hanzoNode.pools.getBestPrice(input);
     }),
@@ -609,23 +621,42 @@ User selects "Deploy"
 ```typescript
 enum PoolDeploymentState {
   CREATED = "created",
-  MATCHING = "matching",      // Finding providers
-  MATCHED = "matched",        // Providers found
+  MATCHING = "matching", // Finding providers
+  MATCHED = "matched", // Providers found
   PROVISIONING = "provisioning", // Setting up resources
-  RUNNING = "running",        // Workload active
-  SCALING = "scaling",        // Auto-scaling in progress
-  STOPPING = "stopping",      // Graceful shutdown
-  STOPPED = "stopped",        // Deployment stopped
-  FAILED = "failed",          // Deployment failed
+  RUNNING = "running", // Workload active
+  SCALING = "scaling", // Auto-scaling in progress
+  STOPPING = "stopping", // Graceful shutdown
+  STOPPED = "stopped", // Deployment stopped
+  FAILED = "failed", // Deployment failed
 }
 
 const transitions: Record<PoolDeploymentState, PoolDeploymentState[]> = {
-  [PoolDeploymentState.CREATED]: [PoolDeploymentState.MATCHING, PoolDeploymentState.FAILED],
-  [PoolDeploymentState.MATCHING]: [PoolDeploymentState.MATCHED, PoolDeploymentState.FAILED],
-  [PoolDeploymentState.MATCHED]: [PoolDeploymentState.PROVISIONING, PoolDeploymentState.FAILED],
-  [PoolDeploymentState.PROVISIONING]: [PoolDeploymentState.RUNNING, PoolDeploymentState.FAILED],
-  [PoolDeploymentState.RUNNING]: [PoolDeploymentState.SCALING, PoolDeploymentState.STOPPING, PoolDeploymentState.FAILED],
-  [PoolDeploymentState.SCALING]: [PoolDeploymentState.RUNNING, PoolDeploymentState.FAILED],
+  [PoolDeploymentState.CREATED]: [
+    PoolDeploymentState.MATCHING,
+    PoolDeploymentState.FAILED,
+  ],
+  [PoolDeploymentState.MATCHING]: [
+    PoolDeploymentState.MATCHED,
+    PoolDeploymentState.FAILED,
+  ],
+  [PoolDeploymentState.MATCHED]: [
+    PoolDeploymentState.PROVISIONING,
+    PoolDeploymentState.FAILED,
+  ],
+  [PoolDeploymentState.PROVISIONING]: [
+    PoolDeploymentState.RUNNING,
+    PoolDeploymentState.FAILED,
+  ],
+  [PoolDeploymentState.RUNNING]: [
+    PoolDeploymentState.SCALING,
+    PoolDeploymentState.STOPPING,
+    PoolDeploymentState.FAILED,
+  ],
+  [PoolDeploymentState.SCALING]: [
+    PoolDeploymentState.RUNNING,
+    PoolDeploymentState.FAILED,
+  ],
   [PoolDeploymentState.STOPPING]: [PoolDeploymentState.STOPPED],
   [PoolDeploymentState.STOPPED]: [],
   [PoolDeploymentState.FAILED]: [],
@@ -688,7 +719,7 @@ export class HanzoNodeClient {
   constructor(config: HanzoNodeConfig) {
     this.poolsClient = new PoolsServiceClient(
       config.grpcEndpoint,
-      credentials.createSsl()
+      credentials.createSsl(),
     );
   }
 
@@ -723,7 +754,9 @@ export class HanzoNodeClient {
         return {
           async next() {
             return new Promise((resolve, reject) => {
-              stream.on("data", (update) => resolve({ value: update, done: false }));
+              stream.on("data", (update) =>
+                resolve({ value: update, done: false }),
+              );
               stream.on("end", () => resolve({ value: undefined, done: true }));
               stream.on("error", reject);
             });
@@ -841,7 +874,7 @@ export function handlePoolsWebSocket(wss: WebSocketServer) {
 // Transaction validation before submission
 async function validatePoolTransaction(
   tx: PoolTransaction,
-  user: User
+  user: User,
 ): Promise<ValidationResult> {
   // 1. Verify user balance
   const balance = await getTokenBalance(user.walletAddress);
@@ -853,7 +886,7 @@ async function validatePoolTransaction(
   const currentPrice = await getCurrentPrice(tx.poolId);
   const maxSlippage = 0.05; // 5%
   const priceDeviation = Math.abs(
-    (Number(tx.expectedPrice) - Number(currentPrice)) / Number(currentPrice)
+    (Number(tx.expectedPrice) - Number(currentPrice)) / Number(currentPrice),
   );
   if (priceDeviation > maxSlippage) {
     return { valid: false, error: "Price moved too much" };
@@ -862,7 +895,11 @@ async function validatePoolTransaction(
   // 3. Verify allowance
   const allowance = await getTokenAllowance(user.walletAddress, POOL_CONTRACT);
   if (BigInt(allowance) < BigInt(tx.tokenAmount)) {
-    return { valid: false, error: "Insufficient allowance", needsApproval: true };
+    return {
+      valid: false,
+      error: "Insufficient allowance",
+      needsApproval: true,
+    };
   }
 
   return { valid: true };
@@ -928,9 +965,9 @@ describe("Pool Swap", () => {
 
   it("rejects swap with excessive slippage", async () => {
     const pool = mockPool({ resourceAmount: "100", tokenAmount: "100000" });
-    await expect(
-      validateSwap(pool, "50000", "40", true)
-    ).rejects.toThrow("Price impact too high");
+    await expect(validateSwap(pool, "50000", "40", true)).rejects.toThrow(
+      "Price impact too high",
+    );
   });
 });
 ```
@@ -956,7 +993,9 @@ describe("Pool Deployment", () => {
 
     // Wait for matching
     await waitFor(() => {
-      const status = api.deployment.getPoolDeploymentStatus.query({ orderId: result.orderId });
+      const status = api.deployment.getPoolDeploymentStatus.query({
+        orderId: result.orderId,
+      });
       return status.state === "matched";
     });
   });
@@ -969,14 +1008,14 @@ describe("Pool Deployment", () => {
 
 ### 11.1 Key Metrics
 
-| Metric | Description | Alert Threshold |
-|--------|-------------|-----------------|
-| pool_liquidity_total | Total liquidity across all pools | < $100K |
-| pool_utilization | Resource utilization per pool | > 90% |
-| swap_volume_24h | 24-hour trading volume | N/A |
-| deployment_success_rate | Pool deployment success rate | < 95% |
-| provider_sla_score | Average provider SLA score | < 97% |
-| transaction_latency_p99 | 99th percentile tx latency | > 5s |
+| Metric                  | Description                      | Alert Threshold |
+| ----------------------- | -------------------------------- | --------------- |
+| pool_liquidity_total    | Total liquidity across all pools | < $100K         |
+| pool_utilization        | Resource utilization per pool    | > 90%           |
+| swap_volume_24h         | 24-hour trading volume           | N/A             |
+| deployment_success_rate | Pool deployment success rate     | < 95%           |
+| provider_sla_score      | Average provider SLA score       | < 97%           |
+| transaction_latency_p99 | 99th percentile tx latency       | > 5s            |
 
 ### 11.2 Grafana Dashboard
 
