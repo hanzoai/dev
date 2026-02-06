@@ -2,9 +2,6 @@
 source: tui/tests/vt100_chatwidget_snapshot.rs
 expression: output
 ---
- +------------------------------------------------------------------------------------------------+
- |                                           Every Code                                           |
- +------------------------------------------------------------------------------------------------+
  +Settings ▸ Overview-----------------------------------------------------------------------------+
  |                                                                                                |
  | › Model              Model: GPT-5.1-Codex-Max (Medium)                                         |
@@ -15,11 +12,14 @@ expression: output
  |                                                                                                |
  |   Updates            Auto update: Disabled                                                     |
  |   + Control CLI auto-update cadence and release channels.                                      |
+ |                                                                                                |
+ |                                                                                                |
+
  | ↑ ↓ Move    Enter Open    Esc Close    ? Help                                                  |
  |                                                                                                |
  +------------------------------------------------------------------------------------------------+
 
- +------------------------------------------------------------------------------------------------+
- | What can I code for you today?                                                                 |
- +------------------------------------------------------------------------------------------------+
- Read Only  (Shift+Tab change)                                            Ctrl+G guide  •  API key
+  What can I code for you today?
+
+
+ Read Only  (Shift+Tab change)                                                       ?  •  API key
