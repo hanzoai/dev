@@ -18,6 +18,7 @@ This document outlines the architecture for an automated system that tracks open
 Modern software projects depend on hundreds of open-source packages, yet the authors of these packages are rarely compensated. Current funding mechanisms (GitHub Sponsors, Open Collective) are fragmented and require manual setup by each maintainer.
 
 **Goals**:
+
 1. Automatically identify all OSS dependencies in a project
 2. Attribute contributions to their authors
 3. Calculate fair distribution weights
@@ -29,6 +30,7 @@ Modern software projects depend on hundreds of open-source packages, yet the aut
 ### 3.1 Dependency Tracking Patterns
 
 **Rust/Cargo Ecosystem**:
+
 ```toml
 # Cargo.toml metadata provides:
 [package]
@@ -39,6 +41,7 @@ license = "MIT OR Apache-2.0"
 ```
 
 **Node.js/npm Ecosystem**:
+
 ```json
 {
   "name": "package-name",
@@ -53,6 +56,7 @@ license = "MIT OR Apache-2.0"
 ```
 
 **GitHub FUNDING.yml Standard**:
+
 ```yaml
 github: [dtolnay]
 open_collective: project-name
@@ -62,14 +66,14 @@ custom: ["https://example.com/donate"]
 
 ### 3.2 Existing Hanzo Infrastructure
 
-| Component | Location | Capabilities |
-|-----------|----------|--------------|
-| **Commerce** | `/hanzo/commerce` | Payment processing, wallets, transactions |
-| **PaymentProcessor** | `commerce/payment/processor` | Stripe, PayPal, Bitcoin, Ethereum |
-| **CryptoProcessor** | `commerce/payment/processor` | Address generation, balance checking |
-| **Wallet Model** | `commerce/models/wallet` | Multi-chain account management |
-| **Events System** | `commerce/events` | ClickHouse-based analytics |
-| **Lux Network** | `/lux/wallet` | Blockchain settlement layer |
+| Component            | Location                     | Capabilities                              |
+| -------------------- | ---------------------------- | ----------------------------------------- |
+| **Commerce**         | `/hanzo/commerce`            | Payment processing, wallets, transactions |
+| **PaymentProcessor** | `commerce/payment/processor` | Stripe, PayPal, Bitcoin, Ethereum         |
+| **CryptoProcessor**  | `commerce/payment/processor` | Address generation, balance checking      |
+| **Wallet Model**     | `commerce/models/wallet`     | Multi-chain account management            |
+| **Events System**    | `commerce/events`            | ClickHouse-based analytics                |
+| **Lux Network**      | `/lux/wallet`                | Blockchain settlement layer               |
 
 ### 3.3 Attribution Challenges
 
@@ -115,12 +119,14 @@ custom: ["https://example.com/donate"]
 **Purpose**: Extract dependency graphs from project manifests
 
 **Supported Formats**:
+
 - `Cargo.toml` + `Cargo.lock` (Rust)
 - `package.json` + `package-lock.json` / `pnpm-lock.yaml` (Node.js)
 - `pyproject.toml` + `uv.lock` / `requirements.txt` (Python)
 - `go.mod` + `go.sum` (Go)
 
 **Data Model**:
+
 ```rust
 struct Dependency {
     name: String,
@@ -146,6 +152,7 @@ struct DependencyGraph {
 **Purpose**: Map dependencies to their authors and funding information
 
 **Data Sources**:
+
 1. Package registry metadata (crates.io, npm, PyPI)
 2. GitHub repository FUNDING.yml files
 3. Package manifest author/contributors fields
@@ -153,6 +160,7 @@ struct DependencyGraph {
 5. Open Collective API
 
 **Data Model**:
+
 ```rust
 struct Author {
     id: Uuid,
@@ -188,6 +196,7 @@ struct AuthorShare {
 ```
 
 **Attribution Algorithm**:
+
 ```python
 def calculate_author_shares(package: Package) -> List[AuthorShare]:
     """
@@ -243,16 +252,17 @@ def calculate_author_shares(package: Package) -> List[AuthorShare]:
 
 **Weighting Factors**:
 
-| Factor | Weight | Description |
-|--------|--------|-------------|
-| **Direct Dependency** | 1.5x | Explicitly chosen by developer |
-| **Transitive Depth** | 1.0 / depth | Deeper = less weight |
-| **Usage Frequency** | log(n) | Import/require counts in codebase |
-| **Criticality** | 1.0-3.0x | Security, performance, or core functionality |
-| **Maintenance Activity** | 0.5-1.5x | Active vs abandoned |
-| **License Compatibility** | 1.0x or 0x | Exclude non-OSS |
+| Factor                    | Weight      | Description                                  |
+| ------------------------- | ----------- | -------------------------------------------- |
+| **Direct Dependency**     | 1.5x        | Explicitly chosen by developer               |
+| **Transitive Depth**      | 1.0 / depth | Deeper = less weight                         |
+| **Usage Frequency**       | log(n)      | Import/require counts in codebase            |
+| **Criticality**           | 1.0-3.0x    | Security, performance, or core functionality |
+| **Maintenance Activity**  | 0.5-1.5x    | Active vs abandoned                          |
+| **License Compatibility** | 1.0x or 0x  | Exclude non-OSS                              |
 
 **Distribution Algorithm**:
+
 ```python
 def calculate_distribution(
     project: Project,
@@ -597,7 +607,7 @@ paths:
                 package_lock: { type: string, format: binary }
                 pyproject_toml: { type: string, format: binary }
       responses:
-        '202':
+        "202":
           description: Scan initiated
 
   /api/v1/oss/projects/{project_id}/dependencies:
@@ -791,13 +801,13 @@ code oss payments --period 2026-01
 
 ### 9.1 Key Metrics
 
-| Metric | Description | Target |
-|--------|-------------|--------|
-| Scan Coverage | % of dependencies with attribution | >95% |
-| Payment Success Rate | Successful / Total payments | >99% |
-| Author Coverage | Authors with payment addresses | >70% |
-| Distribution Latency | Time from trigger to completion | <1 hour |
-| Author Onboarding | New authors claiming packages | Growing |
+| Metric               | Description                        | Target  |
+| -------------------- | ---------------------------------- | ------- |
+| Scan Coverage        | % of dependencies with attribution | >95%    |
+| Payment Success Rate | Successful / Total payments        | >99%    |
+| Author Coverage      | Authors with payment addresses     | >70%    |
+| Distribution Latency | Time from trigger to completion    | <1 hour |
+| Author Onboarding    | New authors claiming packages      | Growing |
 
 ### 9.2 Alerting
 
@@ -844,11 +854,11 @@ code oss payments --period 2026-01
 For a project with 100 dependencies and $500 monthly budget:
 
 | Package | Depth | Usage | Activity | Score | Amount |
-|---------|-------|-------|----------|-------|--------|
-| tokio | 0 | 45 | Active | 8.25 | $41.25 |
-| serde | 0 | 120 | Active | 11.22 | $56.10 |
-| rand | 1 | 12 | Active | 3.12 | $15.60 |
-| ... | ... | ... | ... | ... | ... |
+| ------- | ----- | ----- | -------- | ----- | ------ |
+| tokio   | 0     | 45    | Active   | 8.25  | $41.25 |
+| serde   | 0     | 120   | Active   | 11.22 | $56.10 |
+| rand    | 1     | 12    | Active   | 3.12  | $15.60 |
+| ...     | ...   | ...   | ...      | ...   | ...    |
 
 ### C. Integration with Lux Network
 
@@ -861,4 +871,4 @@ The system integrates with Lux Network for crypto-native settlements:
 
 ---
 
-*This document is maintained as part of the Hanzo Dev project. Updates should be reflected in LLM.md.*
+_This document is maintained as part of the Hanzo Dev project. Updates should be reflected in LLM.md._

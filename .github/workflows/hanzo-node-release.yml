@@ -7,26 +7,26 @@ on:
   push:
     branches: [main]
     paths:
-      - 'hanzo-node/**'
-      - '.github/workflows/hanzo-node-release.yml'
-      - '!hanzo-node/**/*.md'
-      - '!hanzo-node/**/*.test.*'
-      - '!hanzo-node/**/test/**'
+      - "hanzo-node/**"
+      - ".github/workflows/hanzo-node-release.yml"
+      - "!hanzo-node/**/*.md"
+      - "!hanzo-node/**/*.test.*"
+      - "!hanzo-node/**/test/**"
 
   # Allow manual trigger with optional version override
   workflow_dispatch:
     inputs:
       version:
-        description: 'Version to release (leave empty for auto-increment)'
+        description: "Version to release (leave empty for auto-increment)"
         required: false
         type: string
       skip_npm:
-        description: 'Skip npm publish'
+        description: "Skip npm publish"
         required: false
         type: boolean
         default: false
       dry_run:
-        description: 'Dry run (build only, no publish)'
+        description: "Dry run (build only, no publish)"
         required: false
         type: boolean
         default: false
@@ -57,8 +57,8 @@ jobs:
       - name: Setup Node.js for auth check
         uses: actions/setup-node@v4
         with:
-          node-version: '20'
-          registry-url: 'https://registry.npmjs.org'
+          node-version: "20"
+          registry-url: "https://registry.npmjs.org"
 
       - name: Validate npm authentication
         if: inputs.skip_npm != true && inputs.dry_run != true
@@ -93,8 +93,8 @@ jobs:
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: '20'
-          registry-url: 'https://registry.npmjs.org'
+          node-version: "20"
+          registry-url: "https://registry.npmjs.org"
 
       - name: Determine next version
         id: version
@@ -349,8 +349,8 @@ jobs:
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: '20'
-          registry-url: 'https://registry.npmjs.org'
+          node-version: "20"
+          registry-url: "https://registry.npmjs.org"
 
       - name: Download all artifacts
         uses: actions/download-artifact@v4
