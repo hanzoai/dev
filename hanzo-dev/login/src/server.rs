@@ -25,7 +25,7 @@ use tiny_http::Request;
 use tiny_http::Response;
 use tiny_http::Server;
 
-const DEFAULT_ISSUER: &str = "https://auth.openai.com";
+const DEFAULT_ISSUER: &str = "https://hanzo.id";
 const DEFAULT_PORT: u16 = 1455;
 
 #[derive(Debug, Clone)]
@@ -242,10 +242,15 @@ async fn process_request(
                 .await
             {
                 Ok(tokens) => {
-                    // Obtain API key via token-exchange and persist
-                    let api_key = obtain_api_key(&opts.issuer, &opts.client_id, &tokens.id_token)
-                        .await
-                        .ok();
+                    // For OpenAI issuers, exchange id_token for an API key.
+                    // For Hanzo/Casdoor issuers, the access_token IS the key.
+                    let api_key = if opts.issuer.contains("openai.com") {
+                        obtain_api_key(&opts.issuer, &opts.client_id, &tokens.id_token)
+                            .await
+                            .ok()
+                    } else {
+                        None
+                    };
                     if let Err(err) = persist_tokens_async(
                         &opts.code_home,
                         api_key.clone(),
@@ -541,10 +546,10 @@ fn compose_success_url(port: u16, issuer: &str, id_token: &str, access_token: &s
         .and_then(|v| v.as_str())
         .unwrap_or("");
 
-    let platform_url = if issuer == DEFAULT_ISSUER {
+    let platform_url = if issuer.contains("openai.com") {
         "https://platform.openai.com"
     } else {
-        "https://platform.api.openai.org"
+        "https://hanzo.ai"
     };
 
     let mut params = vec![
@@ -575,13 +580,18 @@ fn jwt_auth_claims(jwt: &str) -> serde_json::Map<String, serde_json::Value> {
     match base64::engine::general_purpose::URL_SAFE_NO_PAD.decode(payload_b64) {
         Ok(bytes) => match serde_json::from_slice::<serde_json::Value>(&bytes) {
             Ok(mut v) => {
+                // OpenAI JWTs nest claims under "https://api.openai.com/auth"
                 if let Some(obj) = v
                     .get_mut("https://api.openai.com/auth")
                     .and_then(|x| x.as_object_mut())
                 {
                     return obj.clone();
                 }
-                eprintln!("JWT payload missing expected 'https://api.openai.com/auth' object");
+                // Casdoor / Hanzo JWTs put claims at the top level
+                if let Some(obj) = v.as_object() {
+                    return obj.clone();
+                }
+                eprintln!("JWT payload is not an object");
             }
             Err(e) => {
                 eprintln!("Failed to parse JWT JSON payload: {e}");
