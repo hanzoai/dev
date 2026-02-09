@@ -12,7 +12,7 @@ use hanzo_dev::SeatbeltCommand;
 use hanzo_dev::login::read_api_key_from_stdin;
 use hanzo_dev::login::run_login_status;
 use hanzo_dev::login::run_login_with_api_key;
-use hanzo_dev::login::run_login_with_chatgpt;
+use hanzo_dev::login::run_login_with_chatgpt_opts;
 use hanzo_dev::login::run_login_with_device_code;
 use hanzo_dev::login::run_logout;
 mod bridge;
@@ -344,18 +344,16 @@ struct LoginCommand {
     )]
     api_key: Option<String>,
 
-    /// EXPERIMENTAL: Use device code flow (not yet supported)
-    /// This feature is experimental and may changed in future releases.
-    #[arg(long = "experimental_use-device-code", hide = true)]
+    /// Use device code flow instead of browser (for SSH / headless environments)
+    #[arg(long = "device-code")]
     use_device_code: bool,
 
-    /// EXPERIMENTAL: Use custom OAuth issuer base URL (advanced)
     /// Override the OAuth issuer base URL (advanced)
-    #[arg(long = "experimental_issuer", value_name = "URL", hide = true)]
+    #[arg(long = "issuer", value_name = "URL", hide = true)]
     issuer_base_url: Option<String>,
 
-    /// EXPERIMENTAL: Use custom OAuth client ID (advanced)
-    #[arg(long = "experimental_client-id", value_name = "CLIENT_ID", hide = true)]
+    /// Override the OAuth client ID (advanced)
+    #[arg(long = "client-id", value_name = "CLIENT_ID", hide = true)]
     client_id: Option<String>,
 
     #[command(subcommand)]
@@ -549,14 +547,19 @@ async fn cli_main(code_linux_sandbox_exe: Option<PathBuf>) -> anyhow::Result<()>
                         .await;
                     } else if login_cli.api_key.is_some() {
                         eprintln!(
-                            "The --api-key flag is no longer supported. Pipe the key instead, e.g. `printenv OPENAI_API_KEY | dev login --with-api-key`."
+                            "The --api-key flag is no longer supported. Pipe the key instead, e.g. `printenv HANZO_API_KEY | dev login --with-api-key`."
                         );
                         std::process::exit(1);
                     } else if login_cli.with_api_key {
                         let api_key = read_api_key_from_stdin();
                         run_login_with_api_key(login_cli.config_overrides, api_key).await;
                     } else {
-                        run_login_with_chatgpt(login_cli.config_overrides).await;
+                        run_login_with_chatgpt_opts(
+                            login_cli.config_overrides,
+                            login_cli.issuer_base_url,
+                            login_cli.client_id,
+                        )
+                        .await;
                     }
                 }
             }

@@ -2,6 +2,7 @@ use hanzo_app_server_protocol::AuthMode;
 use hanzo_common::CliConfigOverrides;
 use hanzo_core::CodexAuth;
 use hanzo_core::auth::CLIENT_ID;
+use hanzo_core::auth::HANZO_API_KEY_ENV_VAR;
 use hanzo_core::auth::OPENAI_API_KEY_ENV_VAR;
 use hanzo_core::auth::login_with_api_key;
 use hanzo_core::auth::logout;
@@ -15,24 +16,53 @@ use std::io::IsTerminal;
 use std::io::Read;
 use std::path::PathBuf;
 
-pub async fn login_with_chatgpt(code_home: PathBuf, originator: String) -> std::io::Result<()> {
-    let opts = ServerOptions::new(code_home, CLIENT_ID.to_string(), originator);
+pub async fn login_with_chatgpt(
+    code_home: PathBuf,
+    originator: String,
+    issuer: Option<String>,
+    client_id: Option<String>,
+) -> std::io::Result<()> {
+    let mut opts = ServerOptions::new(
+        code_home,
+        client_id.unwrap_or_else(|| CLIENT_ID.to_string()),
+        originator,
+    );
+    if let Some(iss) = issuer {
+        opts.issuer = iss;
+    }
     let server = run_login_server(opts)?;
 
-    eprintln!(
-        "Starting local login server on http://localhost:{}.\nIf your browser did not open, navigate to this URL to authenticate:\n\n{}",
-        server.actual_port, server.auth_url,
-    );
+    eprintln!("Your browser has been opened to visit:\n");
+    eprintln!("    {}\n", server.auth_url);
 
     server.block_until_done().await
 }
 
-pub async fn run_login_with_chatgpt(cli_config_overrides: CliConfigOverrides) -> ! {
+/// Browser-based OAuth login (default flow, like `gcloud auth login`).
+pub async fn run_login_with_chatgpt_opts(
+    cli_config_overrides: CliConfigOverrides,
+    issuer: Option<String>,
+    client_id: Option<String>,
+) -> ! {
     let config = load_config_or_exit(cli_config_overrides);
 
-    match login_with_chatgpt(config.code_home, config.responses_originator_header.clone()).await {
+    match login_with_chatgpt(
+        config.code_home.clone(),
+        config.responses_originator_header.clone(),
+        issuer,
+        client_id,
+    )
+    .await
+    {
         Ok(_) => {
-            eprintln!("Successfully logged in");
+            // Try to show the email from the stored auth
+            let email = get_logged_in_email(&config.code_home, &config.responses_originator_header);
+            if let Some(email) = email {
+                eprintln!("\nYou are now logged in as [{email}].");
+            } else {
+                eprintln!("\nYou are now logged in.");
+            }
+            eprintln!("Your credentials have been saved to: ~/.hanzo/auth.json");
             std::process::exit(0);
         }
         Err(e) => {
@@ -50,7 +80,7 @@ pub async fn run_login_with_api_key(
 
     match login_with_api_key(&config.code_home, &api_key) {
         Ok(_) => {
-            eprintln!("Successfully logged in");
+            eprintln!("You are now logged in with API key {}.", safe_format_key(&api_key));
             std::process::exit(0);
         }
         Err(e) => {
@@ -65,7 +95,7 @@ pub fn read_api_key_from_stdin() -> String {
 
     if stdin.is_terminal() {
         eprintln!(
-            "--with-api-key expects the API key on stdin. Try piping it, e.g. `printenv OPENAI_API_KEY | codex login --with-api-key`."
+            "--with-api-key expects the API key on stdin. Try piping it, e.g. `printenv HANZO_API_KEY | hanzo login --with-api-key`."
         );
         std::process::exit(1);
     }
@@ -95,8 +125,8 @@ pub async fn run_login_with_device_code(
 ) -> ! {
     let config = load_config_or_exit(cli_config_overrides);
     let mut opts = ServerOptions::new(
-        config.code_home,
-        client_id.unwrap_or(CLIENT_ID.to_string()),
+        config.code_home.clone(),
+        client_id.unwrap_or_else(|| CLIENT_ID.to_string()),
         config.responses_originator_header.clone(),
     );
     if let Some(iss) = issuer_base_url {
@@ -104,7 +134,12 @@ pub async fn run_login_with_device_code(
     }
     match run_device_code_login(opts).await {
         Ok(()) => {
-            eprintln!("Successfully logged in");
+            let email = get_logged_in_email(&config.code_home, &config.responses_originator_header);
+            if let Some(email) = email {
+                eprintln!("\nYou are now logged in as [{email}].");
+            } else {
+                eprintln!("\nYou are now logged in.");
+            }
             std::process::exit(0);
         }
         Err(e) => {
@@ -125,14 +160,16 @@ pub async fn run_login_status(cli_config_overrides: CliConfigOverrides) -> ! {
         Ok(Some(auth)) => match auth.mode {
             AuthMode::ApiKey => match auth.get_token().await {
                 Ok(api_key) => {
-                    eprintln!("Logged in using an API key - {}", safe_format_key(&api_key));
+                    eprintln!("Logged in with API key: {}", safe_format_key(&api_key));
 
                     if let Ok(env_api_key) = env::var(OPENAI_API_KEY_ENV_VAR)
                         && env_api_key == api_key
                     {
-                        eprintln!(
-                            "   API loaded from OPENAI_API_KEY environment variable or .env file"
-                        );
+                        eprintln!("  (from OPENAI_API_KEY environment variable)");
+                    } else if let Ok(env_api_key) = env::var(HANZO_API_KEY_ENV_VAR)
+                        && env_api_key == api_key
+                    {
+                        eprintln!("  (from HANZO_API_KEY environment variable)");
                     }
                     std::process::exit(0);
                 }
@@ -142,12 +179,18 @@ pub async fn run_login_status(cli_config_overrides: CliConfigOverrides) -> ! {
                 }
             },
             AuthMode::ChatGPT => {
-                eprintln!("Logged in using ChatGPT");
+                let email =
+                    get_logged_in_email(&config.code_home, &config.responses_originator_header);
+                if let Some(email) = email {
+                    eprintln!("Logged in as [{email}]");
+                } else {
+                    eprintln!("Logged in via OAuth");
+                }
                 std::process::exit(0);
             }
         },
         Ok(None) => {
-            eprintln!("Not logged in");
+            eprintln!("Not logged in. Run `hanzo login` to authenticate.");
             std::process::exit(1);
         }
         Err(e) => {
@@ -162,11 +205,11 @@ pub async fn run_logout(cli_config_overrides: CliConfigOverrides) -> ! {
 
     match logout(&config.code_home) {
         Ok(true) => {
-            eprintln!("Successfully logged out");
+            eprintln!("Logged out successfully.");
             std::process::exit(0);
         }
         Ok(false) => {
-            eprintln!("Not logged in");
+            eprintln!("Not logged in.");
             std::process::exit(0);
         }
         Err(e) => {
@@ -193,6 +236,20 @@ fn load_config_or_exit(cli_config_overrides: CliConfigOverrides) -> Config {
             std::process::exit(1);
         }
     }
+}
+
+/// Try to extract the logged-in user's email from the stored auth.
+fn get_logged_in_email(code_home: &std::path::Path, originator: &str) -> Option<String> {
+    let auth = CodexAuth::from_code_home(code_home, AuthMode::ChatGPT, originator)
+        .ok()
+        .flatten()?;
+    // Try to get token data which contains the parsed id_token with email
+    let rt = tokio::runtime::Handle::try_current().ok()?;
+    let token_data = std::thread::spawn(move || rt.block_on(auth.get_token_data()))
+        .join()
+        .ok()?
+        .ok()?;
+    token_data.id_token.email
 }
 
 fn safe_format_key(key: &str) -> String {
