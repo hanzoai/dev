@@ -645,9 +645,11 @@ async fn try_refresh_token(
         scope: "openid profile email",
     };
 
-    // Use shared client factory to include standard headers
+    // Use shared client factory to include standard headers.
+    // Default to hanzo.id; the worker proxies /oauth/token to Casdoor's token endpoint.
+    let token_url = "https://hanzo.id/oauth/token";
     let response = client
-        .post("https://auth.openai.com/oauth/token")
+        .post(token_url)
         .header("Content-Type", "application/json")
         .json(&refresh_request)
         .send()
@@ -781,7 +783,7 @@ fn summarize_body(body: &str) -> String {
 /// Expected structure for $HANZO_HOME/auth.json.
 #[derive(Deserialize, Serialize, Clone, Debug, PartialEq)]
 pub struct AuthDotJson {
-    #[serde(rename = "OPENAI_API_KEY")]
+    #[serde(rename = "OPENAI_API_KEY", alias = "HANZO_API_KEY")]
     pub openai_api_key: Option<String>,
 
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -792,7 +794,7 @@ pub struct AuthDotJson {
 }
 
 // Shared constant for token refresh (client id used for oauth token refresh flow)
-pub const CLIENT_ID: &str = "app_EMoamEEZ73f0CkXaXp7hrann";
+pub const CLIENT_ID: &str = "app-hanzo";
 
 use std::sync::RwLock;
 
