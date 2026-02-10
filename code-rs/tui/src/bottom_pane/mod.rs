@@ -180,7 +180,7 @@ impl BottomPane<'_> {
             is_task_running: false,
             ctrl_c_quit_hint: false,
             status_view_active: false,
-            top_spacer_enabled: true,
+            top_spacer_enabled: false,
             using_chatgpt_auth: params.using_chatgpt_auth,
             auto_drive_variant: params.auto_drive_variant,
             auto_drive_active: false,
