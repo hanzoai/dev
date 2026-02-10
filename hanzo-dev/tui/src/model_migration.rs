@@ -67,6 +67,17 @@ pub(crate) fn migration_copy_for_key(key: &str) -> ModelMigrationCopy {
                 can_opt_out: true,
             }
         }
+        hanzo_common::model_presets::HIDE_GPT_5_3_CODEX_MIGRATION_PROMPT_CONFIG => {
+            ModelMigrationCopy {
+                heading: "Upgrade available: GPT-5.3 Codex",
+                content: &[
+                    "OpenAI's latest frontier agentic coding model is here: gpt-5.3-codex.",
+                    "Switch now for better coding results; you can keep your current model if you prefer.",
+                    "Learn more: www.openai.com",
+                ],
+                can_opt_out: true,
+            }
+        }
         _ => ModelMigrationCopy {
             heading: "Codex just got an upgrade: meet gpt-5.1-codex-max",
             content: &[
@@ -165,7 +176,10 @@ fn render_prompt(
     stdout.execute(Clear(ClearType::All))?;
     stdout.execute(MoveTo(0, 0))?;
 
-    if copy.heading == "Upgrade available: GPT-5.2 Codex" {
+    if matches!(
+        copy.heading,
+        "Upgrade available: GPT-5.2 Codex" | "Upgrade available: GPT-5.3 Codex"
+    ) {
         let success_fg = colors::success().into_crossterm();
         write_line_fg_bold(stdout, copy.heading, success_fg)?;
     } else {

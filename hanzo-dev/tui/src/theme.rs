@@ -9,7 +9,7 @@ use std::sync::RwLock;
 
 lazy_static! {
     static ref CURRENT_THEME: RwLock<Theme> = RwLock::new(Theme::default());
-    static ref CURRENT_THEME_NAME: RwLock<ThemeName> = RwLock::new(ThemeName::LightPhoton);
+    static ref CURRENT_THEME_NAME: RwLock<ThemeName> = RwLock::new(ThemeName::DarkMonochrome);
     static ref CUSTOM_THEME_LABEL: RwLock<Option<String>> = RwLock::new(None);
     static ref CUSTOM_THEME_COLORS: RwLock<Option<hanzo_core::config_types::ThemeColors>> =
         RwLock::new(None);
@@ -55,7 +55,7 @@ pub struct Theme {
 
 impl Default for Theme {
     fn default() -> Self {
-        get_predefined_theme(ThemeName::LightPhoton)
+        get_predefined_theme(ThemeName::DarkMonochrome)
     }
 }
 
@@ -1456,27 +1456,27 @@ fn get_predefined_theme(name: ThemeName) -> Theme {
 
         ThemeName::DarkMonochrome => Theme {
             // Pure grayscale monochrome theme - no colors
-            primary: Color::Rgb(230, 230, 230),    // Near-white
-            secondary: Color::Rgb(190, 190, 190),  // Light gray
-            background: Color::Rgb(0, 0, 0),       // Black
-            foreground: Color::Rgb(210, 210, 210), // Near-white
-            border: Color::Rgb(50, 50, 50),        // Dark gray
+            primary: Color::Rgb(230, 230, 230),     // Near-white
+            secondary: Color::Rgb(190, 190, 190),   // Light gray
+            background: Color::Rgb(0, 0, 0),        // Black
+            foreground: Color::Rgb(210, 210, 210),  // Near-white
+            border: Color::Rgb(50, 50, 50),         // Dark gray
             border_focused: Color::Rgb(90, 90, 90), // Medium gray
-            selection: Color::Rgb(20, 20, 20),     // Very dark gray
-            cursor: Color::Rgb(230, 230, 230),     // Near-white
-            success: Color::Rgb(210, 210, 210),    // Light gray
-            warning: Color::Rgb(210, 210, 210),    // Light gray
-            error: Color::Rgb(235, 235, 235),      // Bright for visibility
-            info: Color::Rgb(230, 230, 230),       // White accent
-            text: Color::Rgb(210, 210, 210),       // Primary text
-            text_dim: Color::Rgb(90, 90, 90),      // Darker secondary
+            selection: Color::Rgb(20, 20, 20),      // Very dark gray
+            cursor: Color::Rgb(230, 230, 230),      // Near-white
+            success: Color::Rgb(210, 210, 210),     // Light gray
+            warning: Color::Rgb(210, 210, 210),     // Light gray
+            error: Color::Rgb(235, 235, 235),       // Bright for visibility
+            info: Color::Rgb(230, 230, 230),        // White accent
+            text: Color::Rgb(210, 210, 210),        // Primary text
+            text_dim: Color::Rgb(90, 90, 90),       // Darker secondary
             text_bright: Color::Rgb(240, 240, 240), // Bright emphasis
-            keyword: Color::Rgb(235, 235, 235),    // Off-white
-            string: Color::Rgb(210, 210, 210),     // Light gray
-            comment: Color::Rgb(80, 80, 80),       // Dark gray
-            function: Color::Rgb(230, 230, 230),   // Light gray
-            spinner: Color::Rgb(70, 70, 70),       // Dark gray
-            progress: Color::Rgb(210, 210, 210),   // Light gray
+            keyword: Color::Rgb(235, 235, 235),     // Off-white
+            string: Color::Rgb(210, 210, 210),      // Light gray
+            comment: Color::Rgb(80, 80, 80),        // Dark gray
+            function: Color::Rgb(230, 230, 230),    // Light gray
+            spinner: Color::Rgb(70, 70, 70),        // Dark gray
+            progress: Color::Rgb(210, 210, 210),    // Light gray
         },
 
         ThemeName::Custom => {
