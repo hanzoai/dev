@@ -1,0 +1,42 @@
+[package]
+edition = "2024"
+name = "code-app-server"
+version = { workspace = true }
+
+[[bin]]
+name = "code-app-server"
+path = "src/main.rs"
+
+[lib]
+name = "code_app_server"
+path = "src/lib.rs"
+
+[lints]
+workspace = true
+
+[dependencies]
+anyhow = { workspace = true }
+code-arg0 = { workspace = true }
+code-common = { workspace = true, features = ["cli"] }
+code-core = { workspace = true }
+code-file-search = { workspace = true }
+code-login = { workspace = true }
+code-protocol = { workspace = true }
+code-utils-json-to-toml = { workspace = true }
+# We should only be using mcp-types for JSON-RPC types: it would be nice to
+# split this out into a separate crate at some point.
+mcp-types = { workspace = true }
+serde = { workspace = true, features = ["derive"] }
+serde_json = { workspace = true }
+tokio = { workspace = true, features = [
+    "io-std",
+    "macros",
+    "process",
+    "rt-multi-thread",
+    "signal",
+] }
+tracing = { workspace = true, features = ["log"] }
+tracing-subscriber = { workspace = true, features = ["env-filter", "fmt"] }
+uuid = { workspace = true, features = ["serde", "v7"] }
+
+[dev-dependencies]

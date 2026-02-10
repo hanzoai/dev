@@ -7,29 +7,22 @@ body:
   - type: markdown
     attributes:
       value: |
-        Before submitting a new issue, please search for existing issues to see if your issue has already been reported.
-        If it has, please add a 👍 reaction (no need to leave a comment) to the existing issue instead of creating a new one.
+        Thank you for submitting a bug report! It helps make Code better for everyone.
 
-        Make sure you are running the [latest](https://npmjs.com/package/@openai/codex) version of Codex CLI. The bug you are experiencing may already have been fixed.
+        If you need help or support using Code, and are not reporting a bug, please post on [code/discussions](https://github.com/just-every/code/discussions), where you can ask questions or engage with others on ideas for how to improve Code.
+
+        Make sure you are running the [latest](https://npmjs.com/package/@just-every/code) version of the Code CLI. The bug you are experiencing may already have been fixed.
 
   - type: input
     id: version
     attributes:
-      label: What version of Codex CLI is running?
-      description: use `codex --version`
-    validations:
-      required: true
-  - type: input
-    id: plan
-    attributes:
-      label: What subscription do you have?
-    validations:
-      required: true
+      label: What version of Code is running?
+      description: Copy the output of `code --version` (or `coder --version`)
   - type: input
     id: model
     attributes:
       label: Which model were you using?
-      description: Like `gpt-5.2`, `gpt-5.2-codex`, etc.
+      description: Like `gpt-5`, `o3`, etc.
   - type: input
     id: platform
     attributes:
@@ -45,23 +38,21 @@ body:
       description: |
         E.g, VSCode, Terminal.app, iTerm2, Ghostty, Windows Terminal (WSL / PowerShell)
   - type: textarea
-    id: actual
-    attributes:
-      label: What issue are you seeing?
-      description: Please include the full error messages and prompts with PII redacted. If possible, please provide text instead of a screenshot.
-    validations:
-      required: true
-  - type: textarea
     id: steps
     attributes:
       label: What steps can reproduce the bug?
-      description: Explain the bug and provide a code snippet that can reproduce it. Please include thread id if applicable.
+      description: Explain the bug and provide a code snippet that can reproduce it.
     validations:
       required: true
   - type: textarea
     id: expected
     attributes:
       label: What is the expected behavior?
+      description: If possible, please provide text instead of a screenshot.
+  - type: textarea
+    id: actual
+    attributes:
+      label: What do you see instead?
       description: If possible, please provide text instead of a screenshot.
   - type: textarea
     id: notes

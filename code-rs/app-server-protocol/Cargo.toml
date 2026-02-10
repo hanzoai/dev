@@ -1,0 +1,11 @@
+[package]
+name = "code-app-server-protocol"
+version = { workspace = true }
+edition = "2024"
+
+[lints]
+workspace = true
+
+[dependencies]
+code-protocol = { workspace = true }
+mcp-types = { workspace = true }
