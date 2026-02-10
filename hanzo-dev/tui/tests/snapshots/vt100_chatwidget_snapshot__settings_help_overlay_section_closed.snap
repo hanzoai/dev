@@ -9,15 +9,15 @@ expression: section_closed
  |    Updates            |  Current model: GPT-5.1-Codex-Max                                    | |
  |    Accounts           |  Reasoning effort: Medium                                            | |
  |    Agents             |                                                                      | |
- |    Prompts            |  GPT-5.2                                                             | |
- |    Skills             |  Latest frontier model with improvements across knowledge, reasoning | |
+ |    Prompts            |  GPT-5.1-Codex-Max                                                   | |
+ |    Skills             |  Codex-optimized flagship for deep and fast reasoning.               | |
  |    Auto Drive         |     XHigh - Extra high reasoning depth for complex problems          | |
- |    Review             |     High - Maximizes reasoning depth for complex or ambiguous proble | |
- |    Planning           |     Medium - Provides a solid balance of reasoning depth and latency | |
- |    Validation         |     Low - Balances speed with some reasoning; useful for straightfor | |
+ |    Review             |     High - Maximizes reasoning depth for complex problems            | |
+ |    Planning           |     Medium (current) - Balances speed and reasoning depth for everyd | |
+ |    Validation         |     Low - Fast responses with lighter reasoning                      | |
  |    Chrome             |                                                                      | |
- |    MCP                |  GPT-5.1-Codex-Max                                                   | |
- |    Notifications      |  Latest Codex-optimized flagship for deep and fast reasoning.        | |
+ |    MCP                |  GPT-5.2                                                             | |
+ |    Notifications      |  Latest frontier model with improvements across knowledge, reasoning | |
  |    Limits             |     XHigh - Extra high reasoning depth for complex problems          | |
  |                       |                                                                      | |
  |                       +----------------------------------------------------------------------+ |
@@ -28,4 +28,4 @@ expression: section_closed
   What can I code for you today?
 
 
- Read Only  (Shift+Tab change)                                                       ?  •  API key
+ Plan Mode  (Shift+Tab change)   ? for shortcuts                                           API key
