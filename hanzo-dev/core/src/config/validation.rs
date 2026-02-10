@@ -155,7 +155,7 @@ pub(crate) fn upgrade_legacy_model_slugs(cfg: &mut ConfigToml) {
 }
 
 fn upgrade_legacy_model_slug(slug: &str) -> Option<String> {
-    if slug.starts_with("gpt-5.2") || slug.starts_with("test-gpt-5.2") {
+    if slug.starts_with("gpt-5.3") || slug.starts_with("test-gpt-5.3") {
         return None;
     }
 
@@ -194,24 +194,38 @@ fn upgrade_legacy_model_slug(slug: &str) -> Option<String> {
 
     // Keep codex variants on their existing line; upgrades are surfaced via the
     // migration prompt instead of silently rewriting explicit config.
-    if slug.starts_with("gpt-5.1-codex") || slug.starts_with("test-gpt-5.1-codex") {
+    if slug.starts_with("gpt-5.1-codex")
+        || slug.starts_with("test-gpt-5.1-codex")
+        || slug.starts_with("gpt-5.2-codex")
+        || slug.starts_with("test-gpt-5.2-codex")
+        || slug.starts_with("gpt-5.3-codex")
+        || slug.starts_with("test-gpt-5.3-codex")
+    {
         return None;
     }
 
+    if let Some(rest) = slug.strip_prefix("test-gpt-5.2") {
+        return Some(format!("test-gpt-5.3{rest}"));
+    }
+
+    if let Some(rest) = slug.strip_prefix("gpt-5.2") {
+        return Some(format!("gpt-5.3{rest}"));
+    }
+
     if let Some(rest) = slug.strip_prefix("test-gpt-5.1") {
-        return Some(format!("test-gpt-5.2{rest}"));
+        return Some(format!("test-gpt-5.3{rest}"));
     }
 
     if let Some(rest) = slug.strip_prefix("gpt-5.1") {
-        return Some(format!("gpt-5.2{rest}"));
+        return Some(format!("gpt-5.3{rest}"));
     }
 
     if let Some(rest) = slug.strip_prefix("test-gpt-5") {
-        return Some(format!("test-gpt-5.2{rest}"));
+        return Some(format!("test-gpt-5.3{rest}"));
     }
 
     if let Some(rest) = slug.strip_prefix("gpt-5") {
-        return Some(format!("gpt-5.2{rest}"));
+        return Some(format!("gpt-5.3{rest}"));
     }
 
     None

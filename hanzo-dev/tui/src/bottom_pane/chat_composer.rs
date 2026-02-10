@@ -487,109 +487,40 @@ impl ChatComposer {
         self.reasoning_shown = shown;
     }
 
-    // Map technical status messages to user-friendly ones
+    // Map technical status messages to user-friendly ones.
     pub(crate) fn map_status_message(technical_message: &str) -> String {
-        if technical_message.trim().is_empty() {
+        let trimmed = technical_message.trim();
+        if trimmed.is_empty() {
             return String::new();
         }
 
-        let lower = technical_message.to_lowercase();
+        let lower = trimmed.to_lowercase();
 
-        // Auto Review: preserve the phase text so the footer shows
-        // "Auto Review: Reviewing/Resolving" instead of a generic label.
+        if lower.contains("auto drive goal") {
+            return "Auto Drive Goal".to_string();
+        }
+
+        if lower.contains("auto drive") {
+            return "Auto Drive".to_string();
+        }
+
         if lower.contains("auto review") {
-            let cleaned = technical_message.trim();
-            if cleaned.is_empty() {
-                "Auto Review".to_string()
-            } else {
-                cleaned.to_string()
+            return trimmed.to_string();
+        }
+
+        if trimmed.split_whitespace().count() == 1 {
+            match lower.as_str() {
+                "working" => return "Working".to_string(),
+                "thinking" => return "Thinking".to_string(),
+                "planning" => return "Planning".to_string(),
+                "running" => return "Running".to_string(),
+                "responding" => return "Responding".to_string(),
+                "reading" => return "Reading".to_string(),
+                _ => {}
             }
-        } else if lower.contains("auto drive goal") {
-            "Auto Drive Goal".to_string()
-        } else if lower.contains("auto drive") {
-            "Auto Drive".to_string()
         }
-        // Thinking/reasoning patterns
-        else if lower.contains("reasoning")
-            || lower.contains("thinking")
-            || lower.contains("planning")
-            || lower.contains("waiting for model")
-            || lower.contains("model")
-        {
-            "Thinking".to_string()
-        }
-        // Tool/command execution patterns
-        else if lower.contains("tool")
-            || lower.contains("command")
-            || lower.contains("running command")
-            || lower.contains("running")
-            || lower.contains("bash")
-            || lower.contains("shell")
-        {
-            "Using tools".to_string()
-        }
-        // Browser activity
-        else if lower.contains("browser")
-            || lower.contains("chrome")
-            || lower.contains("cdp")
-            || lower.contains("navigate")
-            || lower.contains("url")
-            || lower.contains("screenshot")
-        {
-            "Browsing".to_string()
-        }
-        // Multi-agent orchestration
-        else if lower.contains("agent")
-            || lower.contains("agents")
-            || lower.contains("orchestrating")
-            || lower.contains("coordinating")
-        {
-            "Agents".to_string()
-        }
-        // Response generation patterns
-        else if lower.contains("generating")
-            || lower.contains("responding")
-            || lower.contains("streaming")
-            || lower.contains("writing response")
-            || lower.contains("assistant")
-            || lower.contains("chat completions")
-            || lower.contains("completion")
-        {
-            "Responding".to_string()
-        }
-        // Transient network/stream retry patterns → keep spinner visible with a
-        // clear reconnecting message so the user knows we are still working.
-        else if lower.contains("retrying")
-            || lower.contains("reconnecting")
-            || lower.contains("disconnected")
-            || lower.contains("stream error")
-            || lower.contains("stream closed")
-            || lower.contains("timeout")
-            || lower.contains("transport")
-            || lower.contains("network")
-            || lower.contains("connection")
-        {
-            "Reconnecting".to_string()
-        }
-        // File/code editing patterns
-        else if lower.contains("editing")
-            || lower.contains("writing")
-            || lower.contains("modifying")
-            || lower.contains("creating file")
-            || lower.contains("updating")
-            || lower.contains("patch")
-        {
-            "Coding".to_string()
-        }
-        // Catch some common technical terms
-        else if lower.contains("processing") || lower.contains("analyzing") {
-            "Thinking".to_string()
-        } else if lower.contains("reading") || lower.contains("searching") {
-            "Reading".to_string()
-        } else {
-            // Default fallback - use "working" for unknown status
-            "Working".to_string()
-        }
+
+        trimmed.to_string()
     }
 
     pub fn desired_height(&self, width: u16) -> u16 {
@@ -1639,6 +1570,17 @@ impl ChatComposer {
                     .send(crate::app_event::AppEvent::CycleAutoDriveVariant);
                 (InputResult::None, true)
             }
+            KeyEvent {
+                code: KeyCode::Tab,
+                modifiers: KeyModifiers::NONE,
+                ..
+            } if self.is_task_running
+                && self.has_focus
+                && !self.auto_drive_active
+                && !self.textarea.text().trim().is_empty() =>
+            {
+                self.handle_submit_key()
+            }
             // -------------------------------------------------------------
             // Tab-press file search when not using @ or ./ and not in slash cmd
             // -------------------------------------------------------------
@@ -1762,65 +1704,67 @@ impl ChatComposer {
                 modifiers: KeyModifiers::NONE,
                 kind: KeyEventKind::Press | KeyEventKind::Repeat,
                 ..
-            } => {
-                if self.handle_backslash_continuation() {
-                    return (InputResult::None, true);
-                }
-                let command_text = self.textarea.text().to_string();
-                let first_line = command_text.lines().next().unwrap_or("");
-                if let Some((name, rest)) = parse_slash_name(first_line)
-                    && rest.is_empty()
-                    && let Some((_label, cmd)) = built_in_slash_commands()
-                        .into_iter()
-                        .find(|(n, _)| *n == name)
-                {
-                    if cmd.is_prompt_expanding() {
-                        self.app_event_tx
-                            .send(crate::app_event::AppEvent::PrepareAgents);
-                    }
-                    self.history.record_local_submission(&command_text);
-                    self.app_event_tx
-                        .send(crate::app_event::AppEvent::DispatchCommand(
-                            cmd,
-                            command_text,
-                        ));
-                    self.textarea.set_text("");
-                    self.active_popup = ActivePopup::None;
-                    return (InputResult::Command(cmd), true);
-                }
-
-                // Record the exact text that was typed (before replacement)
-                let original_text = self.textarea.text().to_string();
-
-                let mut text = self.textarea.text().to_string();
-                self.textarea.set_text("");
-
-                // Replace all pending pastes in the text
-                for (placeholder, actual) in &self.pending_pastes {
-                    if text.contains(placeholder) {
-                        text = text.replace(placeholder, actual);
-                    }
-                }
-                self.pending_pastes.clear();
-
-                if text.is_empty() {
-                    (InputResult::None, true)
-                } else {
-                    // Check if this is a prompt-expanding command that will trigger agents
-                    let trimmed = original_text.trim();
-                    if trimmed.starts_with("/plan ")
-                        || trimmed.starts_with("/solve ")
-                        || trimmed.starts_with("/code ")
-                    {
-                        self.app_event_tx
-                            .send(crate::app_event::AppEvent::PrepareAgents);
-                    }
-
-                    self.history.record_local_submission(&original_text);
-                    (InputResult::Submitted(text), true)
-                }
-            }
+            } => self.handle_submit_key(),
             input => self.handle_input_basic(input),
+        }
+    }
+
+    fn handle_submit_key(&mut self) -> (InputResult, bool) {
+        if self.handle_backslash_continuation() {
+            return (InputResult::None, true);
+        }
+        let command_text = self.textarea.text().to_string();
+        let first_line = command_text.lines().next().unwrap_or("");
+        if let Some((name, rest)) = parse_slash_name(first_line)
+            && rest.is_empty()
+            && let Some((_label, cmd)) = built_in_slash_commands()
+                .into_iter()
+                .find(|(n, _)| *n == name)
+        {
+            if cmd.is_prompt_expanding() {
+                self.app_event_tx
+                    .send(crate::app_event::AppEvent::PrepareAgents);
+            }
+            self.history.record_local_submission(&command_text);
+            self.app_event_tx
+                .send(crate::app_event::AppEvent::DispatchCommand(
+                    cmd,
+                    command_text,
+                ));
+            self.textarea.set_text("");
+            self.active_popup = ActivePopup::None;
+            return (InputResult::Command(cmd), true);
+        }
+
+        // Record the exact text that was typed (before replacement)
+        let original_text = self.textarea.text().to_string();
+
+        let mut text = self.textarea.text().to_string();
+        self.textarea.set_text("");
+
+        // Replace all pending pastes in the text
+        for (placeholder, actual) in &self.pending_pastes {
+            if text.contains(placeholder) {
+                text = text.replace(placeholder, actual);
+            }
+        }
+        self.pending_pastes.clear();
+
+        if text.is_empty() {
+            (InputResult::None, true)
+        } else {
+            // Check if this is a prompt-expanding command that will trigger agents
+            let trimmed = original_text.trim();
+            if trimmed.starts_with("/plan ")
+                || trimmed.starts_with("/solve ")
+                || trimmed.starts_with("/code ")
+            {
+                self.app_event_tx
+                    .send(crate::app_event::AppEvent::PrepareAgents);
+            }
+
+            self.history.record_local_submission(&original_text);
+            (InputResult::Submitted(text), true)
         }
     }
 
@@ -2551,7 +2495,7 @@ impl ChatComposer {
                 }
 
                 let has_draft = !self.textarea.text().trim().is_empty();
-                let show_queue_hint = self.is_task_running && has_draft;
+                let show_queue_hint = self.is_task_running && has_draft && !self.auto_drive_active;
                 let mut left_hint: Vec<Span<'static>> = Vec::new();
                 if show_queue_hint {
                     left_hint.push(Span::from("Tab").style(key_hint_style));

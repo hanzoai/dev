@@ -14,13 +14,22 @@ use super::*;
 use crate::account_switching::RateLimitSwitchState;
 use crate::auth;
 use crate::auth_accounts;
+use crate::task_feed;
 use hanzo_app_server_protocol::AuthMode as AppAuthMode;
 
-#[derive(Clone, Debug, Eq, PartialEq)]
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
 enum AgentTaskKind {
     Regular,
     Review,
     Compact,
+}
+
+fn task_kind_label(kind: AgentTaskKind) -> &'static str {
+    match kind {
+        AgentTaskKind::Regular => "standard",
+        AgentTaskKind::Review => "review",
+        AgentTaskKind::Compact => "compact",
+    }
 }
 
 /// A series of Turns in response to user input.
@@ -43,7 +52,14 @@ impl AgentTask {
             let tc_clone = Arc::clone(&turn_context);
             let sub_clone = sub_id.clone();
             tokio::spawn(async move {
-                run_agent(sess_clone, tc_clone, sub_clone, input).await;
+                run_agent(
+                    sess_clone,
+                    tc_clone,
+                    sub_clone,
+                    input,
+                    AgentTaskKind::Regular,
+                )
+                .await;
             })
             .abort_handle()
         };
@@ -89,7 +105,14 @@ impl AgentTask {
             let tc_clone = Arc::clone(&turn_context);
             let sub_clone = sub_id.clone();
             tokio::spawn(async move {
-                run_agent(sess_clone, tc_clone, sub_clone, input).await;
+                run_agent(
+                    sess_clone,
+                    tc_clone,
+                    sub_clone,
+                    input,
+                    AgentTaskKind::Review,
+                )
+                .await;
             })
             .abort_handle()
         };
@@ -104,9 +127,24 @@ impl AgentTask {
     pub(super) fn abort(self, reason: TurnAbortReason) {
         if !self.handle.is_finished() {
             self.handle.abort();
+            let abort_reason = abort_reason_label(&reason).to_string();
             let event = self.sess.make_event(
                 &self.sub_id,
                 EventMsg::TurnAborted(TurnAbortedEvent { reason }),
+            );
+            task_feed::spawn_task_feed_entry(
+                self.sess.client.code_home().to_path_buf(),
+                task_feed::TaskFeedSeed {
+                    event: task_feed::TaskFeedEvent::TaskAborted,
+                    status: task_feed::TaskFeedStatus::Cancelled,
+                    session_id: self.sess.id.to_string(),
+                    task_id: self.sub_id.clone(),
+                    task_kind: task_kind_label(self.kind).to_string(),
+                    model: self.sess.client.get_model(),
+                    cwd: self.sess.cwd.clone(),
+                    last_agent_message: None,
+                    abort_reason: Some(abort_reason),
+                },
             );
             let sess = self.sess.clone();
             let sub_id = self.sub_id.clone();
@@ -1434,6 +1472,7 @@ async fn run_agent(
     turn_context: Arc<TurnContext>,
     sub_id: String,
     input: Vec<InputItem>,
+    task_kind: AgentTaskKind,
 ) {
     if input.is_empty() {
         return;
@@ -1442,6 +1481,20 @@ async fn run_agent(
     if sess.tx_event.send(event).await.is_err() {
         return;
     }
+    task_feed::spawn_task_feed_entry(
+        sess.client.code_home().to_path_buf(),
+        task_feed::TaskFeedSeed {
+            event: task_feed::TaskFeedEvent::TaskStarted,
+            status: task_feed::TaskFeedStatus::Running,
+            session_id: sess.id.to_string(),
+            task_id: sub_id.clone(),
+            task_kind: task_kind_label(task_kind).to_string(),
+            model: sess.client.get_model(),
+            cwd: sess.cwd.clone(),
+            last_agent_message: None,
+            abort_reason: None,
+        },
+    );
     // Continue with our fork's history and input handling.
 
     let is_review_mode = turn_context.is_review_mode;
@@ -1811,6 +1864,21 @@ async fn run_agent(
     }
 
     sess.remove_task(&sub_id);
+    let last_agent_message = last_task_message.clone();
+    task_feed::spawn_task_feed_entry(
+        sess.client.code_home().to_path_buf(),
+        task_feed::TaskFeedSeed {
+            event: task_feed::TaskFeedEvent::TaskCompleted,
+            status: task_feed::TaskFeedStatus::Succeeded,
+            session_id: sess.id.to_string(),
+            task_id: sub_id.clone(),
+            task_kind: task_kind_label(task_kind).to_string(),
+            model: sess.client.get_model(),
+            cwd: sess.cwd.clone(),
+            last_agent_message,
+            abort_reason: None,
+        },
+    );
     let event = sess.make_event(
         &sub_id,
         EventMsg::TaskComplete(TaskCompleteEvent {
@@ -1848,6 +1916,14 @@ async fn run_agent(
                 AgentTask::spawn(Arc::clone(&sess_clone), turn_context, submission_id, items);
             sess_clone.set_task(agent);
         });
+    }
+}
+
+fn abort_reason_label(reason: &TurnAbortReason) -> &'static str {
+    match reason {
+        TurnAbortReason::Interrupted => "interrupted",
+        TurnAbortReason::Replaced => "replaced",
+        TurnAbortReason::ReviewEnded => "review_ended",
     }
 }
 
