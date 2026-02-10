@@ -2,6 +2,7 @@
 
 use crate::app_event::AppEvent;
 use crate::app_event_sender::AppEventSender;
+use crate::status_indicator_widget::StatusIndicatorWidget;
 use crate::auto_drive_style::AutoDriveVariant;
 use crate::bottom_pane::chat_composer::ComposerRenderMode;
 use crate::chatwidget::BackgroundOrderTicket;
@@ -141,6 +142,13 @@ pub(crate) struct BottomPane<'a> {
     /// composer during a running task.
     status_view_active: bool,
 
+    /// Inline status indicator shown above the composer while a task is running.
+    status: Option<StatusIndicatorWidget>,
+    /// Latest status text to keep the indicator updated across re-renders.
+    status_text: String,
+    /// Queued user messages to show in the status indicator.
+    queued_messages: Vec<String>,
+
     /// Whether to reserve an empty spacer line above the input composer.
     /// Defaults to true for visual breathing room, but can be disabled when
     /// the chat history is scrolled up to allow history to reclaim that row.
@@ -184,6 +192,9 @@ impl BottomPane<'_> {
             is_task_running: false,
             ctrl_c_quit_hint: false,
             status_view_active: false,
+            status: None,
+            status_text: String::from("Working"),
+            queued_messages: Vec::new(),
             top_spacer_enabled: true,
             using_chatgpt_auth: params.using_chatgpt_auth,
             auto_drive_variant: params.auto_drive_variant,
@@ -305,9 +316,18 @@ impl BottomPane<'_> {
     }
 
     pub fn desired_height(&self, width: u16) -> u16 {
+        let show_status = self.status.is_some() && self.active_view_kind != ActiveViewKind::AutoCoordinator;
+        let status_height = if show_status {
+            self.status
+                .as_ref()
+                .map(|status| status.desired_height(width))
+                .unwrap_or(0)
+        } else {
+            0
+        };
         let (view_height, pad_lines) = if let Some(view) = self.active_view.as_ref() {
             let is_auto = matches!(self.active_view_kind, ActiveViewKind::AutoCoordinator);
-            let top_spacer = if is_auto {
+            let top_spacer = if is_auto || status_height > 0 {
                 0
             } else if self.top_spacer_enabled {
                 1
@@ -337,14 +357,19 @@ impl BottomPane<'_> {
             let base_height = view
                 .desired_height(width)
                 .saturating_add(top_spacer)
+                .saturating_add(status_height)
                 .saturating_add(composer_height);
 
             (base_height, pad)
         } else {
             // Optionally add 1 for the empty line above the composer
-            let spacer = if self.top_spacer_enabled { 1 } else { 0 };
+            let spacer = if self.top_spacer_enabled && status_height == 0 {
+                1
+            } else {
+                0
+            };
             (
-                spacer + self.composer.desired_height(width),
+                spacer + status_height + self.composer.desired_height(width),
                 Self::BOTTOM_PAD_LINES,
             )
         };
@@ -358,8 +383,17 @@ impl BottomPane<'_> {
         if self.active_view.is_some() {
             None
         } else {
-            // Account for the optional empty line above the composer
-            let y_offset = if self.top_spacer_enabled { 1u16 } else { 0u16 };
+            let status_height = self
+                .status
+                .as_ref()
+                .map(|status| status.desired_height(area.width))
+                .unwrap_or(0);
+            let spacer = if self.top_spacer_enabled && status_height == 0 {
+                1u16
+            } else {
+                0u16
+            };
+            let y_offset = status_height.saturating_add(spacer);
 
             // Adjust composer area to account for empty line and padding
             let horizontal_padding = 1u16; // Message input uses 1 char padding
@@ -428,6 +462,13 @@ impl BottomPane<'_> {
 
             InputResult::None
         } else {
+            if let Some(status) = &self.status
+                && matches!(key_event.kind, KeyEventKind::Press | KeyEventKind::Repeat)
+                && matches!(key_event.code, KeyCode::Esc)
+            {
+                status.interrupt();
+                return InputResult::None;
+            }
             self.handle_composer_key_event(key_event)
         }
     }
@@ -601,13 +642,41 @@ impl BottomPane<'_> {
     /// Update the status indicator text. Shows status as overlay above composer
     /// to allow continued input while processing.
     pub(crate) fn update_status_text(&mut self, text: String) {
+        let message = if text.trim().is_empty() && self.is_task_running {
+            "Working".to_string()
+        } else {
+            text
+        };
+
         if let Some(view) = self.active_view.as_mut() {
-            let _ = view.update_status_text(text.clone());
+            let _ = view.update_status_text(message.clone());
         }
 
         // Pass status message to composer for dynamic title display
-        self.composer.update_status_message(text);
+        self.status_text = message.clone();
+        if let Some(status) = self.status.as_mut() {
+            status.update_header(message.clone());
+        }
+        self.composer.update_status_message(message);
         self.request_redraw();
+    }
+
+    pub(crate) fn set_queued_user_messages(&mut self, queued: Vec<String>) {
+        self.queued_messages = queued.clone();
+        if let Some(status) = self.status.as_mut() {
+            status.set_queued_messages(queued);
+        }
+        self.request_redraw();
+    }
+
+    fn ensure_status_indicator(&mut self) {
+        if self.status.is_none() {
+            self.status = Some(StatusIndicatorWidget::new(self.app_event_tx.clone()));
+        }
+        if let Some(status) = self.status.as_mut() {
+            status.update_header(self.status_text.clone());
+            status.set_queued_messages(self.queued_messages.clone());
+        }
     }
 
     /// Show an ephemeral footer notice for a custom duration.
@@ -668,10 +737,15 @@ impl BottomPane<'_> {
         self.composer.set_task_running(running);
 
         if running {
-            // No longer need separate status widget - title shows in composer
+            if self.status_text.trim().is_empty() {
+                self.status_text = String::from("Working");
+            }
+            self.ensure_status_indicator();
+            self.composer.set_show_status_title(self.status.is_none());
             self.request_redraw();
         } else {
-            // Status now shown in composer title
+            self.status = None;
+            self.composer.set_show_status_title(true);
             // Drop the status view when a task completes, but keep other
             // modal views (e.g. approval dialogs).
             if let Some(mut view) = self.active_view.take() {
@@ -695,6 +769,11 @@ impl BottomPane<'_> {
 
     pub(crate) fn composer_text(&self) -> String {
         self.composer.text().to_string()
+    }
+
+    pub(crate) fn set_composer_text(&mut self, text: String) {
+        self.composer.set_text_content(text);
+        self.request_redraw();
     }
 
     pub(crate) fn is_task_running(&self) -> bool {
@@ -1154,7 +1233,32 @@ impl WidgetRef for &BottomPane<'_> {
             .fg(crate::colors::text());
         fill_rect(buf, area, Some(' '), base_style);
 
-        let mut composer_rect = compute_composer_rect(area, self.top_spacer_enabled);
+        let mut content_area = area;
+        let mut status_height = 0u16;
+        let show_status = self.active_view_kind != ActiveViewKind::AutoCoordinator;
+        if show_status {
+            if let Some(status) = &self.status {
+                status_height = status.desired_height(area.width).min(area.height);
+                if status_height > 0 {
+                    let status_rect = Rect {
+                        x: area.x,
+                        y: area.y,
+                        width: area.width,
+                        height: status_height,
+                    };
+                    status.render_ref(status_rect, buf);
+                    content_area = Rect {
+                        x: area.x,
+                        y: area.y.saturating_add(status_height),
+                        width: area.width,
+                        height: area.height.saturating_sub(status_height),
+                    };
+                }
+            }
+        }
+        let top_spacer_enabled = self.top_spacer_enabled && status_height == 0;
+
+        let mut composer_rect = compute_composer_rect(content_area, top_spacer_enabled);
         let mut composer_needs_render = true;
         let horizontal_padding = 1u16;
 
@@ -1162,7 +1266,8 @@ impl WidgetRef for &BottomPane<'_> {
             if !view.is_complete() {
                 let is_auto = matches!(self.active_view_kind, ActiveViewKind::AutoCoordinator);
                 if is_auto {
-                    let content_width = area.width.saturating_sub(horizontal_padding * 2);
+                    let content_width =
+                        content_area.width.saturating_sub(horizontal_padding * 2);
                     let composer_visible = view
                         .as_ref()
                         .as_any()
@@ -1170,12 +1275,12 @@ impl WidgetRef for &BottomPane<'_> {
                         .map(|auto_view| auto_view.composer_visible())
                         .unwrap_or(true);
                     let composer_height = if composer_visible {
-                        self.composer.desired_height(area.width)
+                        self.composer.desired_height(content_area.width)
                     } else {
                         self.composer.footer_height()
                     };
                     let pad = BottomPane::BOTTOM_PAD_LINES;
-                    let max_view_height = area
+                    let max_view_height = content_area
                         .height
                         .saturating_sub(composer_height)
                         .saturating_sub(pad);
@@ -1184,8 +1289,8 @@ impl WidgetRef for &BottomPane<'_> {
 
                     if view_height > 0 {
                         let view_rect = Rect {
-                            x: area.x + horizontal_padding,
-                            y: area.y,
+                            x: content_area.x + horizontal_padding,
+                            y: content_area.y,
                             width: content_width,
                             height: view_height,
                         };
@@ -1193,37 +1298,41 @@ impl WidgetRef for &BottomPane<'_> {
                             ratatui::style::Style::default().bg(crate::colors::background());
                         fill_rect(buf, view_rect, None, view_bg);
                         view.render(view_rect, buf);
-                        let remaining_height = area.height.saturating_sub(view_height);
+                        let remaining_height =
+                            content_area.height.saturating_sub(view_height);
                         if remaining_height > 0 {
                             let composer_area = Rect {
-                                x: area.x,
+                                x: content_area.x,
                                 y: view_rect.y.saturating_add(view_rect.height),
-                                width: area.width,
+                                width: content_area.width,
                                 height: remaining_height,
                             };
                             composer_rect = compute_composer_rect(composer_area, false);
                         }
                     } else {
-                        composer_rect = compute_composer_rect(area, self.top_spacer_enabled);
+                        composer_rect =
+                            compute_composer_rect(content_area, top_spacer_enabled);
                     }
                 } else {
-                    let mut avail = area.height;
-                    if self.top_spacer_enabled && avail > 0 {
+                    let mut avail = content_area.height;
+                    if top_spacer_enabled && avail > 0 {
                         avail = avail.saturating_sub(1);
                     }
                     if avail > 0 {
                         let pad = BottomPane::BOTTOM_PAD_LINES.min(avail.saturating_sub(1));
                         let view_height = avail.saturating_sub(pad);
                         if view_height > 0 {
-                            let y_base = if self.top_spacer_enabled {
-                                area.y + 1
+                            let y_base = if top_spacer_enabled {
+                                content_area.y + 1
                             } else {
-                                area.y
+                                content_area.y
                             };
                             let view_rect = Rect {
-                                x: area.x + horizontal_padding,
+                                x: content_area.x + horizontal_padding,
                                 y: y_base,
-                                width: area.width.saturating_sub(horizontal_padding * 2),
+                                width: content_area
+                                    .width
+                                    .saturating_sub(horizontal_padding * 2),
                                 height: view_height,
                             };
                             let view_bg =

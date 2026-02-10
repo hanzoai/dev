@@ -8121,6 +8121,21 @@ impl ChatWidget<'_> {
             }
         }
 
+        if let KeyEvent {
+            code: KeyCode::Up,
+            modifiers: KeyModifiers::ALT,
+            kind: KeyEventKind::Press,
+            ..
+        } = key_event
+        {
+            if let Some(user_message) = self.queued_user_messages.pop_back() {
+                self.restore_user_message_to_composer(user_message);
+                self.refresh_queued_user_messages(false);
+                self.request_redraw();
+            }
+            return;
+        }
+
         let composer_was_empty = self.bottom_pane.composer_is_empty();
         let input_result = self.bottom_pane.handle_key_event(key_event);
         let composer_is_empty = self.bottom_pane.composer_is_empty();
@@ -12878,8 +12893,43 @@ impl ChatWidget<'_> {
                 }
             }
         }
-
+        let messages: Vec<String> = self
+            .queued_user_messages
+            .iter()
+            .map(|message| message.display_text.clone())
+            .collect();
+        self.bottom_pane.set_queued_user_messages(messages);
         self.request_redraw();
+    }
+
+    fn restore_user_message_to_composer(&mut self, message: UserMessage) {
+        let UserMessage {
+            display_text,
+            ordered_items,
+            suppress_persistence: _,
+        } = message;
+
+        let placeholder_regex = regex_lite::Regex::new(r"\[image: [^\]]+\]")
+            .expect("valid image placeholder regex");
+        let placeholders: Vec<String> = placeholder_regex
+            .find_iter(&display_text)
+            .map(|mat| mat.as_str().to_string())
+            .collect();
+
+        let image_paths: Vec<PathBuf> = ordered_items
+            .into_iter()
+            .filter_map(|item| match item {
+                InputItem::LocalImage { path } => Some(path),
+                _ => None,
+            })
+            .collect();
+
+        self.pending_images.clear();
+        for (placeholder, path) in placeholders.into_iter().zip(image_paths.into_iter()) {
+            self.pending_images.insert(placeholder, path);
+        }
+
+        self.bottom_pane.set_composer_text(display_text);
     }
 
     #[allow(dead_code)]
@@ -21552,7 +21602,7 @@ Have we met every part of this goal and is there no further work to do?"#
         // Top quick action
         lines.push(kv(
             "Shift+Tab",
-            "Rotate agent between Read Only / Write with Approval / Full Access",
+            "Rotate access mode: Plan Mode / Auto Accept / Bypass permissions",
         ));
 
         // Global
@@ -24271,20 +24321,25 @@ Have we met every part of this goal and is there no further work to do?"#
         use hanzo_core::protocol::AskForApproval;
         use hanzo_core::protocol::SandboxPolicy;
         let label = match (&self.config.sandbox_policy, self.config.approval_policy) {
-            (SandboxPolicy::ReadOnly, _) => Some("Read Only".to_string()),
+            (SandboxPolicy::ReadOnly, _) => Some("Plan Mode".to_string()),
             (
                 SandboxPolicy::WorkspaceWrite {
                     network_access: false,
                     ..
                 },
-                AskForApproval::UnlessTrusted,
-            ) => Some("Write with Approval".to_string()),
+                AskForApproval::OnFailure
+                | AskForApproval::OnRequest
+                | AskForApproval::UnlessTrusted,
+            ) => Some("Auto Accept".to_string()),
+            (SandboxPolicy::DangerFullAccess, AskForApproval::Never) => {
+                Some("Bypass permissions on".to_string())
+            }
             _ => None,
         };
         self.bottom_pane.set_access_mode_label(label);
     }
 
-    /// Rotate the access preset: Read Only (Plan Mode) → Write with Approval → Full Access
+    /// Rotate the access preset: Plan Mode → Auto Accept → Bypass permissions
     pub(crate) fn cycle_access_mode(&mut self) {
         use hanzo_core::config::set_project_access_mode;
         use hanzo_core::protocol::AskForApproval;
@@ -24298,7 +24353,9 @@ Have we met every part of this goal and is there no further work to do?"#
                     network_access: false,
                     ..
                 },
-                AskForApproval::UnlessTrusted,
+                AskForApproval::OnFailure
+                | AskForApproval::OnRequest
+                | AskForApproval::UnlessTrusted,
             ) => 1,
             (SandboxPolicy::DangerFullAccess, AskForApproval::Never) => 2,
             _ => 0,
@@ -24308,17 +24365,17 @@ Have we met every part of this goal and is there no further work to do?"#
         // Apply mapping
         let (label, approval, sandbox) = match next {
             0 => (
-                "Read Only (Plan Mode)",
+                "Plan Mode",
                 AskForApproval::OnRequest,
                 SandboxPolicy::ReadOnly,
             ),
             1 => (
-                "Write with Approval",
-                AskForApproval::UnlessTrusted,
+                "Auto Accept",
+                AskForApproval::OnFailure,
                 SandboxPolicy::new_workspace_write_policy(),
             ),
             _ => (
-                "Full Access",
+                "Bypass permissions on",
                 AskForApproval::Never,
                 SandboxPolicy::DangerFullAccess,
             ),
@@ -24372,21 +24429,9 @@ Have we met every part of this goal and is there no further work to do?"#
             },
         );
 
-        // Footer indicator: persistent for RO/Approval; ephemeral for Full Access
-        if next == 2 {
-            self.bottom_pane.set_access_mode_label_ephemeral(
-                "Full Access".to_string(),
-                std::time::Duration::from_secs(4),
-            );
-        } else {
-            let persistent = if next == 0 {
-                "Read Only"
-            } else {
-                "Write with Approval"
-            };
-            self.bottom_pane
-                .set_access_mode_label(Some(persistent.to_string()));
-        }
+        // Footer indicator: keep the active access label visible.
+        self.bottom_pane
+            .set_access_mode_label(Some(label.to_string()));
 
         // Announce in history: replace the last access-mode status, inserting early
         // in the current request so it appears above upcoming commands.
@@ -24397,13 +24442,9 @@ Have we met every part of this goal and is there no further work to do?"#
         // Prepare a single consolidated note for the agent to see before the
         // next turn begins. Subsequent cycles will overwrite this note.
         let agent_note = match next {
-            0 => {
-                "System: access mode changed to Read Only. Do not attempt write operations or apply_patch."
-            }
-            1 => {
-                "System: access mode changed to Write with Approval. Request approval before writes."
-            }
-            _ => "System: access mode changed to Full Access. Writes and network are allowed.",
+            0 => "System: access mode changed to Plan Mode. Do not attempt write operations or apply_patch.",
+            1 => "System: access mode changed to Auto Accept. Commands run in the workspace without prompts.",
+            _ => "System: access mode changed to Bypass permissions. Writes and network are allowed.",
         };
         self.queue_agent_note(agent_note);
     }
