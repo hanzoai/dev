@@ -23,7 +23,7 @@ use crate::protocol::ExecCommandEndEvent;
 use crate::protocol::ExecCommandSource;
 use crate::protocol::SandboxPolicy;
 use crate::protocol::TurnStartedEvent;
-use crate::sandboxing::ExecEnv;
+use crate::sandboxing::ExecRequest;
 use crate::sandboxing::SandboxPermissions;
 use crate::state::TaskKind;
 use crate::tools::format_exec_output_str;
@@ -136,13 +136,14 @@ pub(crate) async fn execute_user_shell_command(
         )
         .await;
 
-    let exec_env = ExecEnv {
+    let exec_env = ExecRequest {
         command: exec_command.clone(),
         cwd: cwd.clone(),
         env: create_env(
             &turn_context.shell_environment_policy,
             Some(session.conversation_id),
         ),
+        network: turn_context.network.clone(),
         // TODO(zhao-oai): Now that we have ExecExpiration::Cancellation, we
         // should use that instead of an "arbitrarily large" timeout here.
         expiration: USER_SHELL_TIMEOUT_MS.into(),
