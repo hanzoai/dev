@@ -58,7 +58,7 @@ mod agent_summary_counts_tests {
     #[test]
     fn missing_builtins_default_to_disabled() {
         let agents = vec![
-            make_agent("code-gpt-5.2-codex", true),
+            make_agent("code-gpt-5.3-codex", true),
             make_agent("code-gpt-5.2", true),
         ];
 
@@ -72,7 +72,7 @@ mod agent_summary_counts_tests {
     #[test]
     fn custom_agents_are_counted() {
         let agents = vec![
-            make_agent("code-gpt-5.2-codex", true),
+            make_agent("code-gpt-5.3-codex", true),
             make_agent("my-custom-agent", false),
         ];
 
