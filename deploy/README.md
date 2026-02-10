@@ -1,6 +1,8 @@
 # Hanzo Platform - Deployment Guide
 
-This directory contains deployment configurations for the Hanzo Platform on Digital Ocean.
+> **February 2026**: Production services run on DOKS K8s clusters (hanzo-k8s, lux-k8s). DO App Platform is decommissioned. The configs below are for **local development** and reference.
+
+This directory contains deployment configurations for the Hanzo Platform.
 
 ## Architecture
 
