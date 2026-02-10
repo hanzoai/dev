@@ -27,9 +27,9 @@ expression: output
    |   Console: cdp warning: Refused to load script from cdn.example.com
    |
    +- [Ctrl+B] View · [Esc] Stop
+ • using browser  (Xs • esc to interrupt)
 
-
-                                 ✶ Browsing...
   What can I code for you today?
 
- Read Only  (Shift+Tab change)                                   ?  •  API key
+
+ Plan Mode  (Shift+Tab change)   ? for shortcuts                       API key
