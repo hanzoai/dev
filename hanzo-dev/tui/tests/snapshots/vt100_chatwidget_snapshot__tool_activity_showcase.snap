@@ -2,7 +2,6 @@
 source: tui/tests/vt100_chatwidget_snapshot.rs
 expression: output
 ---
-   - Reading files
    - Running commands
 
 
@@ -36,8 +35,9 @@ expression: output
    |   MM:SS  Waiting for agents
    |
    +- [Ctrl+A] Expand
+ • agents coordinating  (Xs • esc to interrupt)
 
-                                  ✶ Agents...
   What can I code for you today?
 
- Read Only  (Shift+Tab change)                                   ?  •  API key
+
+ Plan Mode  (Shift+Tab change)   ? for shortcuts                       API key
