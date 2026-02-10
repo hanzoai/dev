@@ -527,10 +527,17 @@ pub async fn run_main(
         };
         if let Some(plan) = determine_migration_plan(&config, auth_mode) {
             let should_auto_accept = matches!(auth_mode, AuthMode::ChatGPT)
-                && (plan.hide_key
-                    != hanzo_common::model_presets::HIDE_GPT_5_2_CODEX_MIGRATION_PROMPT_CONFIG
-                    || (plan.current.id.eq_ignore_ascii_case("gpt-5.1-codex")
-                        && plan.target.id.eq_ignore_ascii_case("gpt-5.2-codex")));
+                && match plan.hide_key {
+                    hanzo_common::model_presets::HIDE_GPT_5_2_CODEX_MIGRATION_PROMPT_CONFIG => {
+                        plan.current.id.eq_ignore_ascii_case("gpt-5.1-codex")
+                            && plan.target.id.eq_ignore_ascii_case("gpt-5.2-codex")
+                    }
+                    hanzo_common::model_presets::HIDE_GPT_5_3_CODEX_MIGRATION_PROMPT_CONFIG => {
+                        plan.current.id.eq_ignore_ascii_case("gpt-5.2-codex")
+                            && plan.target.id.eq_ignore_ascii_case("gpt-5.3-codex")
+                    }
+                    _ => true,
+                };
 
             if should_auto_accept {
                 if let Err(err) =
@@ -1194,6 +1201,8 @@ fn set_notice_flag(notices: &mut Notice, key: &str) {
         notices.hide_gpt5_2_migration_prompt = Some(true);
     } else if key == hanzo_common::model_presets::HIDE_GPT_5_2_CODEX_MIGRATION_PROMPT_CONFIG {
         notices.hide_gpt5_2_codex_migration_prompt = Some(true);
+    } else if key == hanzo_common::model_presets::HIDE_GPT_5_3_CODEX_MIGRATION_PROMPT_CONFIG {
+        notices.hide_gpt5_3_codex_migration_prompt = Some(true);
     }
 }
 
@@ -1208,13 +1217,17 @@ fn notice_hidden(notices: &Notice, key: &str) -> bool {
         notices.hide_gpt5_2_migration_prompt.unwrap_or(false)
     } else if key == hanzo_common::model_presets::HIDE_GPT_5_2_CODEX_MIGRATION_PROMPT_CONFIG {
         notices.hide_gpt5_2_codex_migration_prompt.unwrap_or(false)
+    } else if key == hanzo_common::model_presets::HIDE_GPT_5_3_CODEX_MIGRATION_PROMPT_CONFIG {
+        notices.hide_gpt5_3_codex_migration_prompt.unwrap_or(false)
     } else {
         false
     }
 }
 
 fn auth_allows_target(auth_mode: AuthMode, target: &ModelPreset) -> bool {
-    !(matches!(auth_mode, AuthMode::ApiKey) && target.id.eq_ignore_ascii_case("gpt-5.2-codex"))
+    !(matches!(auth_mode, AuthMode::ApiKey)
+        && (target.id.eq_ignore_ascii_case("gpt-5.3-codex")
+            || target.id.eq_ignore_ascii_case("gpt-5.2-codex")))
 }
 
 fn reasoning_effort_to_str(effort: ReasoningEffort) -> &'static str {
