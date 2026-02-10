@@ -1086,6 +1086,11 @@ struct MigrationPlan {
 }
 
 fn determine_migration_plan(config: &Config, auth_mode: AuthMode) -> Option<MigrationPlan> {
+    // Hanzo fork: disable all OpenAI model migration prompts.
+    let _ = (config, auth_mode);
+    return None;
+
+    #[allow(unreachable_code)]
     let current_slug = config.model.to_ascii_lowercase();
     let presets = all_model_presets();
     let current = find_migration_preset(presets, &current_slug)?;
