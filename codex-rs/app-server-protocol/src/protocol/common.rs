@@ -190,10 +190,12 @@ client_request_definitions! {
     },
     ThreadResume => "thread/resume" {
         params: v2::ThreadResumeParams,
+        inspect_params: true,
         response: v2::ThreadResumeResponse,
     },
     ThreadFork => "thread/fork" {
         params: v2::ThreadForkParams,
+        inspect_params: true,
         response: v2::ThreadForkResponse,
     },
     ThreadArchive => "thread/archive" {
@@ -211,6 +213,11 @@ client_request_definitions! {
     ThreadCompactStart => "thread/compact/start" {
         params: v2::ThreadCompactStartParams,
         response: v2::ThreadCompactStartResponse,
+    },
+    #[experimental("thread/backgroundTerminals/clean")]
+    ThreadBackgroundTerminalsClean => "thread/backgroundTerminals/clean" {
+        params: v2::ThreadBackgroundTerminalsCleanParams,
+        response: v2::ThreadBackgroundTerminalsCleanResponse,
     },
     ThreadRollback => "thread/rollback" {
         params: v2::ThreadRollbackParams,
@@ -250,6 +257,7 @@ client_request_definitions! {
     },
     TurnStart => "turn/start" {
         params: v2::TurnStartParams,
+        inspect_params: true,
         response: v2::TurnStartResponse,
     },
     TurnSteer => "turn/steer" {
@@ -303,6 +311,7 @@ client_request_definitions! {
 
     LoginAccount => "account/login/start" {
         params: v2::LoginAccountParams,
+        inspect_params: true,
         response: v2::LoginAccountResponse,
     },
 
@@ -717,6 +726,7 @@ server_notification_definitions! {
     McpServerOauthLoginCompleted => "mcpServer/oauthLogin/completed" (v2::McpServerOauthLoginCompletedNotification),
     AccountUpdated => "account/updated" (v2::AccountUpdatedNotification),
     AccountRateLimitsUpdated => "account/rateLimits/updated" (v2::AccountRateLimitsUpdatedNotification),
+    AppListUpdated => "app/list/updated" (v2::AppListUpdatedNotification),
     ReasoningSummaryTextDelta => "item/reasoning/summaryTextDelta" (v2::ReasoningSummaryTextDeltaNotification),
     ReasoningSummaryPartAdded => "item/reasoning/summaryPartAdded" (v2::ReasoningSummaryPartAddedNotification),
     ReasoningTextDelta => "item/reasoning/textDelta" (v2::ReasoningTextDeltaNotification),
@@ -993,7 +1003,8 @@ mod tests {
             request_id: RequestId::Integer(5),
             params: v2::LoginAccountParams::ChatgptAuthTokens {
                 access_token: "access-token".to_string(),
-                id_token: "id-token".to_string(),
+                chatgpt_account_id: "org-123".to_string(),
+                chatgpt_plan_type: Some("business".to_string()),
             },
         };
         assert_eq!(
@@ -1003,7 +1014,8 @@ mod tests {
                 "params": {
                     "type": "chatgptAuthTokens",
                     "accessToken": "access-token",
-                    "idToken": "id-token"
+                    "chatgptAccountId": "org-123",
+                    "chatgptPlanType": "business"
                 }
             }),
             serde_json::to_value(&request)?,

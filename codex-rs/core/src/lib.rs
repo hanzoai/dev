@@ -8,6 +8,7 @@
 mod analytics_client;
 pub mod api_bridge;
 mod apply_patch;
+mod apps;
 pub mod auth;
 pub mod bash;
 mod client;
@@ -42,6 +43,7 @@ pub mod landlock;
 pub mod mcp;
 mod mcp_connection_manager;
 pub mod models_manager;
+pub mod network_proxy_loader;
 pub use mcp_connection_manager::MCP_SANDBOX_STATE_CAPABILITY;
 pub use mcp_connection_manager::MCP_SANDBOX_STATE_METHOD;
 pub use mcp_connection_manager::SandboxState;
