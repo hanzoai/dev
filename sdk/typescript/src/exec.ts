@@ -1,10 +1,11 @@
 import { spawn } from "node:child_process";
-import path from "node:path";
-import readline from "node:readline";
-import { fileURLToPath } from "node:url";
 
-import type { CodexConfigObject, CodexConfigValue } from "./codexOptions";
-import { SandboxMode, ModelReasoningEffort, ApprovalMode, WebSearchMode } from "./threadOptions";
+import readline from "node:readline";
+
+import { CodexConfigObject, CodexConfigValue } from "./codexOptions";
+import { SandboxMode } from "./threadOptions";
+import path from "node:path";
+import { fileURLToPath } from "node:url";
 
 export type CodexExecArgs = {
   input: string;
@@ -12,53 +13,27 @@ export type CodexExecArgs = {
   baseUrl?: string;
   apiKey?: string;
   threadId?: string | null;
-  images?: string[];
   // --model
   model?: string;
   // --sandbox
   sandboxMode?: SandboxMode;
   // --cd
   workingDirectory?: string;
-  // --add-dir
-  additionalDirectories?: string[];
   // --skip-git-repo-check
   skipGitRepoCheck?: boolean;
-  // --output-schema
-  outputSchemaFile?: string;
-  // --config model_reasoning_effort
-  modelReasoningEffort?: ModelReasoningEffort;
-  // AbortSignal to cancel the execution
-  signal?: AbortSignal;
-  // --config sandbox_workspace_write.network_access
-  networkAccessEnabled?: boolean;
-  // --config web_search
-  webSearchMode?: WebSearchMode;
-  // legacy --config features.web_search_request
-  webSearchEnabled?: boolean;
-  // --config approval_policy
-  approvalPolicy?: ApprovalMode;
 };
-
-const INTERNAL_ORIGINATOR_ENV = "CODEX_INTERNAL_ORIGINATOR_OVERRIDE";
-const TYPESCRIPT_SDK_ORIGINATOR = "codex_sdk_ts";
 
 export class CodexExec {
   private executablePath: string;
-  private envOverride?: Record<string, string>;
   private configOverrides?: CodexConfigObject;
 
-  constructor(
-    executablePath: string | null = null,
-    env?: Record<string, string>,
-    configOverrides?: CodexConfigObject,
-  ) {
+  constructor(executablePath: string | null = null, configOverrides?: CodexConfigObject) {
     this.executablePath = executablePath || findCodexPath();
-    this.envOverride = env;
     this.configOverrides = configOverrides;
   }
 
   async *run(args: CodexExecArgs): AsyncGenerator<string> {
-    const commandArgs: string[] = ["exec", "--experimental-json"];
+    const commandArgs: string[] = ["exec", "--json"];
 
     if (this.configOverrides) {
       for (const override of serializeConfigOverrides(this.configOverrides)) {
@@ -78,66 +53,17 @@ export class CodexExec {
       commandArgs.push("--cd", args.workingDirectory);
     }
 
-    if (args.additionalDirectories?.length) {
-      for (const dir of args.additionalDirectories) {
-        commandArgs.push("--add-dir", dir);
-      }
-    }
-
     if (args.skipGitRepoCheck) {
       commandArgs.push("--skip-git-repo-check");
-    }
-
-    if (args.outputSchemaFile) {
-      commandArgs.push("--output-schema", args.outputSchemaFile);
-    }
-
-    if (args.modelReasoningEffort) {
-      commandArgs.push("--config", `model_reasoning_effort="${args.modelReasoningEffort}"`);
-    }
-
-    if (args.networkAccessEnabled !== undefined) {
-      commandArgs.push(
-        "--config",
-        `sandbox_workspace_write.network_access=${args.networkAccessEnabled}`,
-      );
-    }
-
-    if (args.webSearchMode) {
-      commandArgs.push("--config", `web_search="${args.webSearchMode}"`);
-    } else if (args.webSearchEnabled === true) {
-      commandArgs.push("--config", `web_search="live"`);
-    } else if (args.webSearchEnabled === false) {
-      commandArgs.push("--config", `web_search="disabled"`);
-    }
-
-    if (args.approvalPolicy) {
-      commandArgs.push("--config", `approval_policy="${args.approvalPolicy}"`);
     }
 
     if (args.threadId) {
       commandArgs.push("resume", args.threadId);
     }
 
-    if (args.images?.length) {
-      for (const image of args.images) {
-        commandArgs.push("--image", image);
-      }
-    }
-
-    const env: Record<string, string> = {};
-    if (this.envOverride) {
-      Object.assign(env, this.envOverride);
-    } else {
-      for (const [key, value] of Object.entries(process.env)) {
-        if (value !== undefined) {
-          env[key] = value;
-        }
-      }
-    }
-    if (!env[INTERNAL_ORIGINATOR_ENV]) {
-      env[INTERNAL_ORIGINATOR_ENV] = TYPESCRIPT_SDK_ORIGINATOR;
-    }
+    const env = {
+      ...process.env,
+    };
     if (args.baseUrl) {
       env.OPENAI_BASE_URL = args.baseUrl;
     }
@@ -147,7 +73,6 @@ export class CodexExec {
 
     const child = spawn(this.executablePath, commandArgs, {
       env,
-      signal: args.signal,
     });
 
     let spawnError: unknown | null = null;
