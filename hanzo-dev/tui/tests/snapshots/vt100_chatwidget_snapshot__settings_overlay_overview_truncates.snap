@@ -7,7 +7,7 @@ expression: output
  | › Model              Model: GPT-5.1-Codex-Max (Medium) |
  |   + Choose the language model used for new comp...     |
  |                                                        |
- |   Theme              Theme: Light - Photon (16-colo... |
+ |   Theme              Theme: Dark - Carbon (16-color... |
  |   + Switch between preset color palettes and ad...     |
  |                                                        |
  |   Updates            Auto update: Disabled             |
@@ -20,4 +20,4 @@ expression: output
   What can I code for you today?
 
 
- Read Only  (Shift+Tab change)               ?  •  API key
+ Plan Mode  (Shift+Tab change)   ? for shortcuts   API key

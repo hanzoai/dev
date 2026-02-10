@@ -10,14 +10,14 @@ expression: section_open
  |    Accounts           |  Reasoning effort: Medium                                            | |
  |    Agents             |        +------------------------------+                              | |
  |    Prompts            |  GPT-5.|Model Shortcuts               |                              | |
- |    Skills             |  Latest|                              |s across knowledge, reasoning | |
+ |    Skills             |  Codex-|                              |fast reasoning.               | |
  |    Auto Drive         |     XHi|• Esc    Return to overview   |for complex problems          | |
- |    Review             |     Hig|• Tab    Cycle sections       |r complex or ambiguous proble | |
- |    Planning           |     Med|• Shift+Tab  Cycle backwards  |f reasoning depth and latency | |
- |    Validation         |     Low|• ?      Toggle this help     |oning; useful for straightfor | |
+ |    Review             |     Hig|• Tab    Cycle sections       |r complex problems            | |
+ |    Planning           |     Med|• Shift+Tab  Cycle backwards  |nd reasoning depth for everyd | |
+ |    Validation         |     Low|• ?      Toggle this help     |easoning                      | |
  |    Chrome             |        |                              |                              | |
  |    MCP                |  GPT-5.|Press Esc to close            |                              | |
- |    Notifications      |  Latest+------------------------------+ep and fast reasoning.        | |
+ |    Notifications      |  Latest+------------------------------+s across knowledge, reasoning | |
  |    Limits             |     XHigh - Extra high reasoning depth for complex problems          | |
  |                       |                                                                      | |
  |                       +----------------------------------------------------------------------+ |
@@ -28,4 +28,4 @@ expression: section_open
   What can I code for you today?
 
 
- Read Only  (Shift+Tab change)                                                       ?  •  API key
+ Plan Mode  (Shift+Tab change)   ? for shortcuts                                           API key
