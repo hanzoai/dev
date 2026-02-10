@@ -1008,7 +1008,6 @@ pub struct HighlightConfig {
 #[serde(rename_all = "kebab-case")]
 pub enum ThemeName {
     // Light themes (at top)
-    #[default]
     LightPhoton,
     LightPhotonAnsi16,
     LightPrismRainbow,
@@ -1026,6 +1025,7 @@ pub enum ThemeName {
     DarkCharcoalRainbow,
     DarkZenGarden,
     DarkPaperLightPro,
+    #[default]
     DarkMonochrome,
     Custom,
 }

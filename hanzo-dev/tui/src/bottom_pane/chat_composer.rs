@@ -163,6 +163,7 @@ pub(crate) struct ChatComposer {
     /// Tracks whether the user has typed or pasted any content since startup.
     typed_anything: bool,
     is_task_running: bool,
+    show_status_title: bool,
     // Current status message to display when task is running
     status_message: String,
     // Animation thread for spinning icon when task is running
@@ -239,6 +240,7 @@ impl ChatComposer {
             typed_anything: false,
             // no double‑Esc handling here; App manages Esc policy
             is_task_running: false,
+            show_status_title: true,
             status_message: String::from("coding"),
             animation_running: None,
             using_chatgpt_auth,
@@ -385,6 +387,10 @@ impl ChatComposer {
                 animation_flag.store(false, Ordering::Relaxed);
             }
         }
+    }
+
+    pub fn set_show_status_title(&mut self, show: bool) {
+        self.show_status_title = show;
     }
 
     pub fn update_status_message(&mut self, message: String) {
@@ -1614,7 +1620,7 @@ impl ChatComposer {
                 (InputResult::None, true)
             }
             // -------------------------------------------------------------
-            // Shift+Tab — rotate access preset (Read Only → Write with Approval → Full Access)
+            // Shift+Tab — rotate access preset (Plan Mode → Auto Accept → Bypass permissions)
             // -------------------------------------------------------------
             KeyEvent {
                 code: KeyCode::BackTab,
@@ -2544,6 +2550,20 @@ impl ChatComposer {
                     left_sections.push((6, left_misc_after_ctrlc, true));
                 }
 
+                let has_draft = !self.textarea.text().trim().is_empty();
+                let show_queue_hint = self.is_task_running && has_draft;
+                let mut left_hint: Vec<Span<'static>> = Vec::new();
+                if show_queue_hint {
+                    left_hint.push(Span::from("Tab").style(key_hint_style));
+                    left_hint.push(Span::from(" to queue message").style(label_style));
+                } else if !self.auto_drive_active && !self.ctrl_c_quit_hint {
+                    left_hint.push(Span::from("?").style(key_hint_style));
+                    left_hint.push(Span::from(" for shortcuts").style(label_style));
+                }
+                if !left_hint.is_empty() {
+                    left_sections.push((6, left_hint, true));
+                }
+
                 // Tokens (priority 1) with compact fallback
                 let token_spans_full: Vec<Span<'static>> = self.token_usage_spans(label_style);
                 let token_spans_compact: Vec<Span<'static>> =
@@ -2553,12 +2573,7 @@ impl ChatComposer {
                 let mut token_use_compact = false;
 
                 // Guide hint (priority 4) — only when not auto-drive and not showing quit hint
-                let guide_spans: Vec<Span<'static>> =
-                    if !self.auto_drive_active && !self.ctrl_c_quit_hint {
-                        vec![Span::from("?").style(key_hint_style)]
-                    } else {
-                        Vec::new()
-                    };
+                let guide_spans: Vec<Span<'static>> = Vec::new();
                 let guide_present = !guide_spans.is_empty();
                 if guide_present {
                     right_sections.push((4, guide_spans, true));
@@ -2949,7 +2964,7 @@ impl WidgetRef for ChatComposer {
                 .style(Style::default().bg(crate::colors::input_background()));
         }
 
-        if self.is_task_running && !self.embedded_mode {
+        if self.is_task_running && !self.embedded_mode && self.show_status_title {
             if self.auto_drive_active {
                 if let Some(style) = self.auto_drive_style.as_ref() {
                     if self.status_message.eq_ignore_ascii_case("auto drive goal") {
