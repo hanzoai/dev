@@ -8,6 +8,7 @@ use std::time::Instant;
 use hanzo_core::protocol::Op;
 use ratatui::buffer::Buffer;
 use ratatui::layout::Rect;
+use ratatui::style::Modifier;
 use ratatui::style::Style;
 use ratatui::text::Line;
 use ratatui::widgets::Paragraph;
@@ -99,6 +100,34 @@ impl StatusIndicatorWidget {
     }
 }
 
+// Format elapsed seconds into a compact human-friendly form used by the status line.
+// Examples: 0s, 59s, 1m 00s, 59m 59s, 1h 00m 00s, 2h 03m 09s
+fn fmt_elapsed_compact(elapsed_secs: u64) -> String {
+    if elapsed_secs < 60 {
+        return format!("{elapsed_secs}s");
+    }
+    if elapsed_secs < 3600 {
+        let minutes = elapsed_secs / 60;
+        let seconds = elapsed_secs % 60;
+        return format!("{minutes}m {seconds:02}s");
+    }
+    let hours = elapsed_secs / 3600;
+    let minutes = (elapsed_secs % 3600) / 60;
+    let seconds = elapsed_secs % 60;
+    format!("{hours}h {minutes:02}m {seconds:02}s")
+}
+
+#[cfg(all(not(test), target_os = "macos"))]
+const ALT_PREFIX: &str = "\u2315 + ";
+#[cfg(all(not(test), not(target_os = "macos")))]
+const ALT_PREFIX: &str = "Alt+";
+#[cfg(test)]
+const ALT_PREFIX: &str = "Alt+";
+
+fn alt_up_hint() -> String {
+    format!("{ALT_PREFIX}\u2191")
+}
+
 impl WidgetRef for StatusIndicatorWidget {
     fn render_ref(&self, area: Rect, buf: &mut Buffer) {
         if area.is_empty() {
@@ -137,31 +166,33 @@ impl WidgetRef for StatusIndicatorWidget {
         let bg = crate::colors::background();
         let text = crate::colors::text();
         let text_dim = crate::colors::text_dim();
-        let accent = crate::colors::info();
+        let accent = crate::colors::text_bright();
+        let secondary = Style::default()
+            .fg(text_dim)
+            .add_modifier(Modifier::DIM);
+
+        let pretty_elapsed = fmt_elapsed_compact(elapsed);
 
         // Build header spans using theme colors (no terminal-default cyan/dim)
         let mut spans = vec![
             ratatui::text::Span::raw(" "),
-            ratatui::text::Span::raw("• ").style(Style::default().fg(text_dim)),
+            ratatui::text::Span::raw("• ").style(secondary),
             ratatui::text::Span::styled(
                 self.header.clone(),
-                Style::default()
-                    .fg(accent)
-                    .add_modifier(ratatui::style::Modifier::BOLD),
+                Style::default().fg(accent).add_modifier(Modifier::BOLD),
             ),
             ratatui::text::Span::raw(" "),
         ];
         spans.extend(vec![
             ratatui::text::Span::raw(" "),
-            // (12s • Esc to interrupt)
-            ratatui::text::Span::raw(format!("({elapsed}s • "))
-                .style(Style::default().fg(text_dim)),
-            ratatui::text::Span::raw("Esc").style(
+            // (12s • esc to interrupt)
+            ratatui::text::Span::raw(format!("({pretty_elapsed} • ")).style(secondary),
+            ratatui::text::Span::raw("esc").style(
                 Style::default()
                     .fg(accent)
-                    .add_modifier(ratatui::style::Modifier::BOLD),
+                    .add_modifier(Modifier::BOLD),
             ),
-            ratatui::text::Span::raw(")").style(Style::default().fg(text_dim)),
+            ratatui::text::Span::raw(" to interrupt)").style(secondary),
         ]);
 
         // Build lines: status, then queued messages, then spacer.
@@ -180,10 +211,24 @@ impl WidgetRef for StatusIndicatorWidget {
             for (i, piece) in wrapped.iter().take(3).enumerate() {
                 let prefix = if i == 0 { " ↳ " } else { "   " };
                 let content = format!("{prefix}{piece}");
-                lines.push(Line::from(content).style(Style::default().fg(text_dim).italic()));
+                lines.push(
+                    Line::from(content).style(
+                        Style::default()
+                            .fg(text_dim)
+                            .add_modifier(Modifier::DIM)
+                            .italic(),
+                    ),
+                );
             }
             if wrapped.len() > 3 {
-                lines.push(Line::from("   …").style(Style::default().fg(text_dim).italic()));
+                lines.push(
+                    Line::from("   …").style(
+                        Style::default()
+                            .fg(text_dim)
+                            .add_modifier(Modifier::DIM)
+                            .italic(),
+                    ),
+                );
             }
         }
         if !self.queued_messages.is_empty() {
@@ -191,8 +236,12 @@ impl WidgetRef for StatusIndicatorWidget {
                 Line::from(vec![
                     ratatui::text::Span::raw("   "),
                     // Key hint in accent, label in dim text
-                    ratatui::text::Span::raw("Alt+↑").style(Style::default().fg(accent)),
-                    ratatui::text::Span::raw(" edit").style(Style::default().fg(text_dim)),
+                    ratatui::text::Span::raw(alt_up_hint()).style(
+                        Style::default()
+                            .fg(accent)
+                            .add_modifier(Modifier::BOLD),
+                    ),
+                    ratatui::text::Span::raw(" edit").style(secondary),
                 ])
                 .style(Style::default()),
             );
