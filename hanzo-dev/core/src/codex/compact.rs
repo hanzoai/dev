@@ -17,6 +17,7 @@ use crate::protocol::ErrorEvent;
 use crate::protocol::EventMsg;
 use crate::protocol::InputItem;
 use crate::protocol::TaskCompleteEvent;
+use crate::task_feed;
 use crate::truncate::truncate_middle;
 use crate::util::backoff;
 use askama::Template;
@@ -191,6 +192,20 @@ pub(super) async fn run_compact_task(
 ) {
     let start_event = sess.make_event(&sub_id, EventMsg::TaskStarted);
     sess.send_event(start_event).await;
+    task_feed::spawn_task_feed_entry(
+        sess.client.code_home().to_path_buf(),
+        task_feed::TaskFeedSeed {
+            event: task_feed::TaskFeedEvent::TaskStarted,
+            status: task_feed::TaskFeedStatus::Running,
+            session_id: sess.id.to_string(),
+            task_id: sub_id.clone(),
+            task_kind: "compact".to_string(),
+            model: sess.client.get_model(),
+            cwd: sess.cwd.clone(),
+            last_agent_message: None,
+            abort_reason: None,
+        },
+    );
     let compaction_result = if should_use_remote_compact_task(&sess).await {
         compact_remote::run_remote_compact_task(
             Arc::clone(&sess),
@@ -204,6 +219,20 @@ pub(super) async fn run_compact_task(
     };
 
     let _ = compaction_result;
+    task_feed::spawn_task_feed_entry(
+        sess.client.code_home().to_path_buf(),
+        task_feed::TaskFeedSeed {
+            event: task_feed::TaskFeedEvent::TaskCompleted,
+            status: task_feed::TaskFeedStatus::Succeeded,
+            session_id: sess.id.to_string(),
+            task_id: sub_id.clone(),
+            task_kind: "compact".to_string(),
+            model: sess.client.get_model(),
+            cwd: sess.cwd.clone(),
+            last_agent_message: None,
+            abort_reason: None,
+        },
+    );
     let event = sess.make_event(
         &sub_id,
         EventMsg::TaskComplete(TaskCompleteEvent {

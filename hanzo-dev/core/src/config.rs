@@ -106,7 +106,7 @@ pub(crate) use validation::upgrade_legacy_model_slugs;
 
 pub(crate) const OPENAI_DEFAULT_MODEL: &str = "gpt-5.1-codex-max";
 const OPENAI_DEFAULT_REVIEW_MODEL: &str = "gpt-5.1-codex-max";
-pub const GPT_5_CODEX_MEDIUM_MODEL: &str = "gpt-5.2-codex";
+pub const GPT_5_CODEX_MEDIUM_MODEL: &str = "gpt-5.3-codex";
 
 /// Maximum number of bytes of the documentation that will be embedded. Larger
 /// files are *silently truncated* to this size so we do not take up too much of
@@ -1142,7 +1142,7 @@ impl Config {
                 || agent.name.eq_ignore_ascii_case("cloud")
             {
                 tracing::warn!(
-                    "legacy agent name '{}' detected; update config to use model slugs (e.g., code-gpt-5.2-codex)",
+                    "legacy agent name '{}' detected; update config to use model slugs (e.g., code-gpt-5.3-codex)",
                     agent.name
                 );
             }
@@ -2349,7 +2349,7 @@ model_verbosity = "high"
             gpt5_profile_overrides,
             fixture.code_home(),
         )?;
-        assert_eq!("gpt-5.2", gpt5_profile_config.model);
+        assert_eq!("gpt-5.3", gpt5_profile_config.model);
         assert_eq!(
             OPENAI_DEFAULT_REVIEW_MODEL,
             gpt5_profile_config.review_model
@@ -2359,7 +2359,7 @@ model_verbosity = "high"
             gpt5_profile_config.review_model_reasoning_effort
         );
         assert_eq!(
-            find_family_for_model("gpt-5.2").expect("known model slug"),
+            find_family_for_model("gpt-5.3").expect("known model slug"),
             gpt5_profile_config.model_family
         );
         assert!(gpt5_profile_config.model_context_window.is_some());
@@ -2562,7 +2562,7 @@ model_verbosity = "high"
         upgrade_legacy_model_slugs(&mut cfg);
 
         assert_eq!(cfg.model.as_deref(), Some("gpt-5.1-codex"));
-        assert_eq!(cfg.review_model.as_deref(), Some("gpt-5.2"));
+        assert_eq!(cfg.review_model.as_deref(), Some("gpt-5.3"));
     }
 
     #[test]
@@ -2638,7 +2638,7 @@ model_verbosity = "high"
 
         let mut cfg = fixture.cfg.clone();
         cfg.agents = vec![AgentConfig {
-            name: "code-gpt-5.2-codex".to_string(),
+            name: "code-gpt-5.3-codex".to_string(),
             command: String::new(),
             args: Vec::new(),
             read_only: false,
@@ -2665,7 +2665,7 @@ model_verbosity = "high"
             .map(|agent| agent.name.to_ascii_lowercase())
             .collect();
 
-        assert!(enabled_names.contains("code-gpt-5.2-codex"));
+        assert!(enabled_names.contains("code-gpt-5.3-codex"));
         assert!(enabled_names.contains("code-gpt-5.2"));
         assert!(enabled_names.contains("claude-sonnet-4.5"));
         assert!(enabled_names.contains("gemini-3-pro"));
