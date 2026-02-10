@@ -495,6 +495,15 @@ if [ "${DEBUG_SYMBOLS:-}" = "1" ]; then
   export CARGO_PROFILE_RELEASE_PROD_STRIP="none"
 fi
 
+# Auto-detect version from git tag when CODE_VERSION is not set
+if [ -z "${CODE_VERSION:-}" ]; then
+  GIT_TAG_VERSION="$(git describe --tags --abbrev=0 2>/dev/null || true)"
+  if [ -n "${GIT_TAG_VERSION}" ]; then
+    export CODE_VERSION="${GIT_TAG_VERSION#v}"
+    echo "Version: ${CODE_VERSION} (from git tag ${GIT_TAG_VERSION})"
+  fi
+fi
+
 echo "Building ${CRATE_PREFIX} binary (${PROFILE} mode)..."
 
 # Ensure Cargo cache locations are stable.
@@ -753,6 +762,18 @@ if [ $? -eq 0 ]; then
       fi
     done
     RUN_BIN_PATH="${BIN_DIR_ABS}/${PRIMARY_BIN}"
+
+    # Install primary binary to ~/.local/bin/dev for local testing
+    LOCAL_BIN_DIR="${HOME}/.local/bin"
+    mkdir -p "${LOCAL_BIN_DIR}"
+    LOCAL_DEV_BIN="${LOCAL_BIN_DIR}/dev"
+    if [ -e "${BIN_DIR}/${PRIMARY_BIN}" ]; then
+      # Remove any pre-existing symlink so cp writes a real file
+      [ -L "${LOCAL_DEV_BIN}" ] && rm -f "${LOCAL_DEV_BIN}"
+      cp -f "${BIN_DIR}/${PRIMARY_BIN}" "${LOCAL_DEV_BIN}"
+      chmod +x "${LOCAL_DEV_BIN}"
+      echo "Installed: ${LOCAL_DEV_BIN}"
+    fi
 
     # Ensure repo-local developer alias stays mapped to latest build output
     # so the user's `${CRATE_PREFIX}-dev` alias keeps working when pointing at target/dev-fast/${CRATE_PREFIX}

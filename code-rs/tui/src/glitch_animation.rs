@@ -1,6 +1,5 @@
 use ratatui::buffer::Buffer;
 use ratatui::prelude::*;
-// Paragraph/Widget previously used; manual cell writes now keep static layer intact.
 
 #[derive(Copy, Clone, Debug, PartialEq, Eq)]
 pub enum IntroArtSize {

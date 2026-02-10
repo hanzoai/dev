@@ -9,7 +9,7 @@ use std::sync::RwLock;
 
 lazy_static! {
     static ref CURRENT_THEME: RwLock<Theme> = RwLock::new(Theme::default());
-    static ref CURRENT_THEME_NAME: RwLock<ThemeName> = RwLock::new(ThemeName::LightPhoton);
+    static ref CURRENT_THEME_NAME: RwLock<ThemeName> = RwLock::new(ThemeName::Zen);
     static ref CUSTOM_THEME_LABEL: RwLock<Option<String>> = RwLock::new(None);
     static ref CUSTOM_THEME_COLORS: RwLock<Option<code_core::config_types::ThemeColors>> = RwLock::new(None);
     static ref CUSTOM_THEME_IS_DARK: RwLock<Option<bool>> = RwLock::new(None);
@@ -54,7 +54,7 @@ pub struct Theme {
 
 impl Default for Theme {
     fn default() -> Self {
-        get_predefined_theme(ThemeName::LightPhoton)
+        get_predefined_theme(ThemeName::Zen)
     }
 }
 
@@ -390,6 +390,10 @@ pub(crate) fn map_theme_for_palette(
     name: ThemeName,
     custom_is_dark_hint: Option<bool>,
 ) -> ThemeName {
+    // Zen uses Color::Reset and adapts to any terminal; skip palette remapping.
+    if matches!(name, ThemeName::Zen) {
+        return name;
+    }
     match palette_mode() {
         PaletteMode::Ansi16 => match name {
             ThemeName::LightPhotonAnsi16 | ThemeName::DarkCarbonAnsi16 => name,
@@ -977,6 +981,31 @@ fn ansi256_to_rgb(idx: u8) -> (u8, u8, u8) {
 /// Get a predefined theme by name
 fn get_predefined_theme(name: ThemeName) -> Theme {
     match name {
+        ThemeName::Zen => Theme {
+            // Zen — minimal, calm theme for the agentic coding developer.
+            // Transparent background adapts to both dark and light terminals.
+            primary: Color::White,
+            secondary: Color::Gray,
+            background: Color::Reset,                 // transparent (terminal default)
+            foreground: Color::White,
+            border: Color::DarkGray,
+            border_focused: Color::Gray,
+            selection: Color::DarkGray,
+            cursor: Color::White,
+            success: Color::White,
+            warning: Color::White,
+            error: Color::Rgb(248, 81, 73),           // #F85149
+            info: Color::White,
+            text: Color::White,
+            text_dim: Color::DarkGray,
+            text_bright: Color::White,
+            keyword: Color::White,
+            string: Color::White,
+            comment: Color::DarkGray,
+            function: Color::White,
+            spinner: Color::DarkGray,
+            progress: Color::White,
+        },
         ThemeName::DarkCarbonNight => Theme {
             // Dark default - sleek modern dark theme
             primary: Color::Rgb(37, 194, 255),        // #25C2FF
@@ -1374,8 +1403,8 @@ fn get_predefined_theme(name: ThemeName) -> Theme {
         },
 
         ThemeName::Custom => {
-            // Use DarkCarbonNight (dark default) as base for custom
-            get_predefined_theme(ThemeName::DarkCarbonNight)
+            // Use Zen (default) as base for custom themes
+            get_predefined_theme(ThemeName::Zen)
         }
     }
 }

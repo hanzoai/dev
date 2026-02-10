@@ -337,6 +337,8 @@ pub(crate) async fn stream_chat_completions(
     let mut attempt = 0;
     let max_retries = provider.request_max_retries();
     let mut request_id = String::new();
+    let mut rate_limit_retries: u64 = 0;
+    const MAX_RATE_LIMIT_RETRIES: u64 = 10;
     loop {
         attempt += 1;
 
@@ -425,6 +427,26 @@ pub(crate) async fn stream_chat_completions(
                     }));
                 }
 
+                let retry_after_secs = res
+                    .headers()
+                    .get(reqwest::header::RETRY_AFTER)
+                    .and_then(|v| v.to_str().ok())
+                    .and_then(|s| s.parse::<u64>().ok());
+
+                // For 429 responses with a Retry-After hint, use a separate
+                // rate-limit retry budget so transient throttling doesn't
+                // exhaust the normal retry limit.
+                if status == StatusCode::TOO_MANY_REQUESTS
+                    && rate_limit_retries < MAX_RATE_LIMIT_RETRIES
+                {
+                    rate_limit_retries += 1;
+                    let delay = retry_after_secs
+                        .map(|s| Duration::from_millis(s * 1_000))
+                        .unwrap_or_else(|| backoff(attempt));
+                    tokio::time::sleep(delay).await;
+                    continue;
+                }
+
                 if attempt > max_retries {
                     return Err(CodexErr::RetryLimit(RetryLimitReachedError {
                         status,
@@ -432,12 +454,6 @@ pub(crate) async fn stream_chat_completions(
                         retryable: status.is_server_error() || status == StatusCode::TOO_MANY_REQUESTS,
                     }));
                 }
-
-                let retry_after_secs = res
-                    .headers()
-                    .get(reqwest::header::RETRY_AFTER)
-                    .and_then(|v| v.to_str().ok())
-                    .and_then(|s| s.parse::<u64>().ok());
 
                 let delay = retry_after_secs
                     .map(|s| Duration::from_millis(s * 1_000))

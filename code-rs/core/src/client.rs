@@ -970,6 +970,8 @@ impl ModelClient {
         let max_retries = self.provider.request_max_retries();
         let mut request_id = String::new();
         let mut rate_limit_switch_state = crate::account_switching::RateLimitSwitchState::default();
+        let mut rate_limit_retries: u64 = 0;
+        const MAX_RATE_LIMIT_RETRIES: u64 = 10;
 
         // Compute endpoint with the latest available auth (may be None at this point).
         let endpoint = self
@@ -1493,8 +1495,28 @@ impl ModelClient {
                         }
                     }
 
+                    // For 429 responses, use a separate rate-limit retry budget
+                    // so transient throttling doesn't exhaust the normal retry limit.
+                    let mut retry_after_delay = retry_after_hint;
+                    if retry_after_delay.is_none() {
+                        if let Some(ErrorResponse { ref error }) = body {
+                            retry_after_delay = try_parse_retry_after(error, now);
+                        }
+                    }
+
+                    if status == StatusCode::TOO_MANY_REQUESTS
+                        && rate_limit_retries < MAX_RATE_LIMIT_RETRIES
+                    {
+                        rate_limit_retries += 1;
+                        let delay = retry_after_delay
+                            .as_ref()
+                            .map(|info| info.delay)
+                            .unwrap_or_else(|| backoff(attempt));
+                        tokio::time::sleep(delay).await;
+                        continue;
+                    }
+
                     if attempt > max_retries {
-                        // On final attempt, surface rich diagnostics for server errors.
                         // On final attempt, surface rich diagnostics for server errors.
                         if status.is_server_error() {
                             let (message, body_excerpt) =
@@ -1554,13 +1576,6 @@ impl ModelClient {
                             request_id: None,
                             retryable: status.is_server_error() || status == StatusCode::TOO_MANY_REQUESTS,
                         }));
-                    }
-
-                    let mut retry_after_delay = retry_after_hint;
-                    if retry_after_delay.is_none() {
-                        if let Some(ErrorResponse { ref error }) = body {
-                            retry_after_delay = try_parse_retry_after(error, now);
-                        }
                     }
 
                     let delay = retry_after_delay
