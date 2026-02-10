@@ -2352,6 +2352,7 @@ impl ChatComposer {
                     Line::from(line_spans)
                         .style(
                             Style::default()
+                                .bg(Color::Reset)
                                 .fg(crate::colors::text_dim())
                                 .add_modifier(Modifier::DIM),
                         )
@@ -2826,6 +2827,7 @@ impl ChatComposer {
                 Line::from(line_spans)
                     .style(
                         Style::default()
+                            .bg(Color::Reset)
                             .fg(crate::colors::text_dim())
                             .add_modifier(Modifier::DIM),
                     )
