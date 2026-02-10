@@ -1,6 +1,7 @@
 use crate::auth::AuthCredentialsStoreMode;
 use crate::config::edit::ConfigEdit;
 use crate::config::edit::ConfigEditsBuilder;
+use crate::config::types::AppsConfigToml;
 use crate::config::types::DEFAULT_OTEL_ENVIRONMENT;
 use crate::config::types::History;
 use crate::config::types::McpServerConfig;
@@ -46,6 +47,7 @@ use crate::protocol::SandboxPolicy;
 use crate::windows_sandbox::WindowsSandboxLevelExt;
 use codex_app_server_protocol::Tools;
 use codex_app_server_protocol::UserSavedConfig;
+use codex_network_proxy::NetworkProxy;
 use codex_protocol::config_types::AltScreenMode;
 use codex_protocol::config_types::ForcedLoginMethod;
 use codex_protocol::config_types::ModeKind;
@@ -150,6 +152,9 @@ pub struct Config {
     /// particular geography. HTTP clients should direct their requests
     /// using backend-specific headers or URLs to enforce this.
     pub enforce_residency: Constrained<Option<ResidencyRequirement>>,
+
+    /// Effective network configuration applied to all spawned processes.
+    pub network: Option<NetworkProxy>,
 
     /// True if the user passed in an override or set a value in config.toml
     /// for either of approval_policy or sandbox_mode.
@@ -328,7 +333,7 @@ pub struct Config {
     pub include_apply_patch_tool: bool,
 
     /// Explicit or feature-derived web search mode.
-    pub web_search_mode: Option<WebSearchMode>,
+    pub web_search_mode: Constrained<WebSearchMode>,
 
     /// If set to `true`, used only the experimental unified exec tool.
     pub use_experimental_unified_exec_tool: bool,
@@ -1024,6 +1029,10 @@ pub struct ConfigToml {
     /// Defaults to `true`.
     pub feedback: Option<crate::config::types::FeedbackConfigToml>,
 
+    /// Settings for app-specific controls.
+    #[serde(default)]
+    pub apps: Option<AppsConfigToml>,
+
     /// OTEL configuration.
     pub otel: Option<crate::config::types::OtelConfigToml>,
 
@@ -1335,8 +1344,21 @@ pub(crate) fn resolve_web_search_mode_for_turn(
     if matches!(sandbox_policy, SandboxPolicy::DangerFullAccess) {
         WebSearchMode::Live
     } else {
-        WebSearchMode::Cached
+        if web_search_mode.can_set(&preferred).is_ok() {
+            return preferred;
+        }
+        for mode in [
+            WebSearchMode::Cached,
+            WebSearchMode::Live,
+            WebSearchMode::Disabled,
+        ] {
+            if web_search_mode.can_set(&mode).is_ok() {
+                return mode;
+            }
+        }
     }
+
+    WebSearchMode::Disabled
 }
 
 impl Config {
@@ -1477,7 +1499,8 @@ impl Config {
             );
             approval_policy = requirements.approval_policy.value();
         }
-        let web_search_mode = resolve_web_search_mode(&cfg, &config_profile, &features);
+        let web_search_mode = resolve_web_search_mode(&cfg, &config_profile, &features)
+            .unwrap_or(WebSearchMode::Cached);
         // TODO(dylan): We should be able to leverage ConfigLayerStack so that
         // we can reliably check this at every config level.
         let did_user_set_custom_approval_policy_or_sandbox_mode =
@@ -1621,9 +1644,11 @@ impl Config {
         let ConfigRequirements {
             approval_policy: mut constrained_approval_policy,
             sandbox_policy: mut constrained_sandbox_policy,
+            web_search_mode: mut constrained_web_search_mode,
             mcp_servers,
             exec_policy: _,
             enforce_residency,
+            network: _network_requirements,
         } = requirements;
 
         apply_requirement_constrained_value(
@@ -1654,6 +1679,7 @@ impl Config {
             approval_policy: constrained_approval_policy.value,
             sandbox_policy: constrained_sandbox_policy.value,
             enforce_residency: enforce_residency.value,
+            network: None,
             did_user_set_custom_approval_policy_or_sandbox_mode,
             forced_auto_mode_downgraded_on_windows,
             shell_environment_policy,
@@ -1717,7 +1743,7 @@ impl Config {
             forced_chatgpt_workspace_id,
             forced_login_method,
             include_apply_patch_tool: include_apply_patch_tool_flag,
-            web_search_mode,
+            web_search_mode: constrained_web_search_mode.value,
             use_experimental_unified_exec_tool,
             ghost_snapshot,
             features,
@@ -1916,6 +1942,7 @@ mod tests {
                 cwd: None,
             },
             enabled: true,
+            required: false,
             disabled_reason: None,
             startup_timeout_sec: None,
             tool_timeout_sec: None,
@@ -1934,6 +1961,7 @@ mod tests {
                 env_http_headers: None,
             },
             enabled: true,
+            required: false,
             disabled_reason: None,
             startup_timeout_sec: None,
             tool_timeout_sec: None,
@@ -2475,7 +2503,7 @@ trust_level = "trusted"
             &SandboxPolicy::DangerFullAccess,
         );
 
-        assert_eq!(mode, WebSearchMode::Cached);
+        assert_eq!(mode, WebSearchMode::Disabled);
     }
 
     #[test]
@@ -2678,25 +2706,27 @@ profile = "project"
     }
 
     #[test]
-    fn responses_websockets_feature_does_not_change_wire_api() -> std::io::Result<()> {
-        let codex_home = TempDir::new()?;
-        let mut entries = BTreeMap::new();
-        entries.insert("responses_websockets".to_string(), true);
-        let cfg = ConfigToml {
-            features: Some(crate::features::FeaturesToml { entries }),
-            ..Default::default()
-        };
+    fn responses_websocket_features_do_not_change_wire_api() -> std::io::Result<()> {
+        for feature_key in ["responses_websockets", "responses_websockets_v2"] {
+            let codex_home = TempDir::new()?;
+            let mut entries = BTreeMap::new();
+            entries.insert(feature_key.to_string(), true);
+            let cfg = ConfigToml {
+                features: Some(crate::features::FeaturesToml { entries }),
+                ..Default::default()
+            };
 
-        let config = Config::load_from_base_config_with_overrides(
-            cfg,
-            ConfigOverrides::default(),
-            codex_home.path().to_path_buf(),
-        )?;
+            let config = Config::load_from_base_config_with_overrides(
+                cfg,
+                ConfigOverrides::default(),
+                codex_home.path().to_path_buf(),
+            )?;
 
-        assert_eq!(
-            config.model_provider.wire_api,
-            crate::model_provider_info::WireApi::Responses
-        );
+            assert_eq!(
+                config.model_provider.wire_api,
+                crate::model_provider_info::WireApi::Responses
+            );
+        }
 
         Ok(())
     }
@@ -2800,6 +2830,7 @@ profile = "project"
                     cwd: None,
                 },
                 enabled: true,
+                required: false,
                 disabled_reason: None,
                 startup_timeout_sec: Some(Duration::from_secs(3)),
                 tool_timeout_sec: Some(Duration::from_secs(5)),
@@ -2956,6 +2987,7 @@ bearer_token = "secret"
                     cwd: None,
                 },
                 enabled: true,
+                required: false,
                 disabled_reason: None,
                 startup_timeout_sec: None,
                 tool_timeout_sec: None,
@@ -3026,6 +3058,7 @@ ZIG_VAR = "3"
                     cwd: None,
                 },
                 enabled: true,
+                required: false,
                 disabled_reason: None,
                 startup_timeout_sec: None,
                 tool_timeout_sec: None,
@@ -3076,6 +3109,7 @@ ZIG_VAR = "3"
                     cwd: Some(cwd_path.clone()),
                 },
                 enabled: true,
+                required: false,
                 disabled_reason: None,
                 startup_timeout_sec: None,
                 tool_timeout_sec: None,
@@ -3124,6 +3158,7 @@ ZIG_VAR = "3"
                     env_http_headers: None,
                 },
                 enabled: true,
+                required: false,
                 disabled_reason: None,
                 startup_timeout_sec: Some(Duration::from_secs(2)),
                 tool_timeout_sec: None,
@@ -3188,6 +3223,7 @@ startup_timeout_sec = 2.0
                     )])),
                 },
                 enabled: true,
+                required: false,
                 disabled_reason: None,
                 startup_timeout_sec: Some(Duration::from_secs(2)),
                 tool_timeout_sec: None,
@@ -3264,6 +3300,7 @@ X-Auth = "DOCS_AUTH"
                     )])),
                 },
                 enabled: true,
+                required: false,
                 disabled_reason: None,
                 startup_timeout_sec: Some(Duration::from_secs(2)),
                 tool_timeout_sec: None,
@@ -3293,6 +3330,7 @@ X-Auth = "DOCS_AUTH"
                     env_http_headers: None,
                 },
                 enabled: true,
+                required: false,
                 disabled_reason: None,
                 startup_timeout_sec: None,
                 tool_timeout_sec: None,
@@ -3360,6 +3398,7 @@ url = "https://example.com/mcp"
                         )])),
                     },
                     enabled: true,
+                    required: false,
                     disabled_reason: None,
                     startup_timeout_sec: Some(Duration::from_secs(2)),
                     tool_timeout_sec: None,
@@ -3379,6 +3418,7 @@ url = "https://example.com/mcp"
                         cwd: None,
                     },
                     enabled: true,
+                    required: false,
                     disabled_reason: None,
                     startup_timeout_sec: None,
                     tool_timeout_sec: None,
@@ -3461,6 +3501,7 @@ url = "https://example.com/mcp"
                     cwd: None,
                 },
                 enabled: false,
+                required: false,
                 disabled_reason: None,
                 startup_timeout_sec: None,
                 tool_timeout_sec: None,
@@ -3491,6 +3532,51 @@ url = "https://example.com/mcp"
     }
 
     #[tokio::test]
+    async fn replace_mcp_servers_serializes_required_flag() -> anyhow::Result<()> {
+        let codex_home = TempDir::new()?;
+
+        let servers = BTreeMap::from([(
+            "docs".to_string(),
+            McpServerConfig {
+                transport: McpServerTransportConfig::Stdio {
+                    command: "docs-server".to_string(),
+                    args: Vec::new(),
+                    env: None,
+                    env_vars: Vec::new(),
+                    cwd: None,
+                },
+                enabled: true,
+                required: true,
+                disabled_reason: None,
+                startup_timeout_sec: None,
+                tool_timeout_sec: None,
+                enabled_tools: None,
+                disabled_tools: None,
+                scopes: None,
+            },
+        )]);
+
+        apply_blocking(
+            codex_home.path(),
+            None,
+            &[ConfigEdit::ReplaceMcpServers(servers.clone())],
+        )?;
+
+        let config_path = codex_home.path().join(CONFIG_TOML_FILE);
+        let serialized = std::fs::read_to_string(&config_path)?;
+        assert!(
+            serialized.contains("required = true"),
+            "serialized config missing required flag:\n{serialized}"
+        );
+
+        let loaded = load_global_mcp_servers(codex_home.path()).await?;
+        let docs = loaded.get("docs").expect("docs entry");
+        assert!(docs.required);
+
+        Ok(())
+    }
+
+    #[tokio::test]
     async fn replace_mcp_servers_serializes_tool_filters() -> anyhow::Result<()> {
         let codex_home = TempDir::new()?;
 
@@ -3505,6 +3591,7 @@ url = "https://example.com/mcp"
                     cwd: None,
                 },
                 enabled: true,
+                required: false,
                 disabled_reason: None,
                 startup_timeout_sec: None,
                 tool_timeout_sec: None,
@@ -3882,6 +3969,7 @@ model_verbosity = "high"
                 approval_policy: Constrained::allow_any(AskForApproval::Never),
                 sandbox_policy: Constrained::allow_any(SandboxPolicy::new_read_only_policy()),
                 enforce_residency: Constrained::allow_any(None),
+                network: None,
                 did_user_set_custom_approval_policy_or_sandbox_mode: true,
                 forced_auto_mode_downgraded_on_windows: false,
                 shell_environment_policy: ShellEnvironmentPolicy::default(),
@@ -3919,7 +4007,7 @@ model_verbosity = "high"
                 forced_chatgpt_workspace_id: None,
                 forced_login_method: None,
                 include_apply_patch_tool: false,
-                web_search_mode: None,
+                web_search_mode: Constrained::allow_any(WebSearchMode::Cached),
                 use_experimental_unified_exec_tool: !cfg!(windows),
                 ghost_snapshot: GhostSnapshotConfig::default(),
                 features: Features::with_defaults(),
@@ -3970,6 +4058,7 @@ model_verbosity = "high"
             approval_policy: Constrained::allow_any(AskForApproval::UnlessTrusted),
             sandbox_policy: Constrained::allow_any(SandboxPolicy::new_read_only_policy()),
             enforce_residency: Constrained::allow_any(None),
+            network: None,
             did_user_set_custom_approval_policy_or_sandbox_mode: true,
             forced_auto_mode_downgraded_on_windows: false,
             shell_environment_policy: ShellEnvironmentPolicy::default(),
@@ -4007,7 +4096,7 @@ model_verbosity = "high"
             forced_chatgpt_workspace_id: None,
             forced_login_method: None,
             include_apply_patch_tool: false,
-            web_search_mode: None,
+            web_search_mode: Constrained::allow_any(WebSearchMode::Cached),
             use_experimental_unified_exec_tool: !cfg!(windows),
             ghost_snapshot: GhostSnapshotConfig::default(),
             features: Features::with_defaults(),
@@ -4073,6 +4162,7 @@ model_verbosity = "high"
             approval_policy: Constrained::allow_any(AskForApproval::OnFailure),
             sandbox_policy: Constrained::allow_any(SandboxPolicy::new_read_only_policy()),
             enforce_residency: Constrained::allow_any(None),
+            network: None,
             did_user_set_custom_approval_policy_or_sandbox_mode: true,
             forced_auto_mode_downgraded_on_windows: false,
             shell_environment_policy: ShellEnvironmentPolicy::default(),
@@ -4110,7 +4200,7 @@ model_verbosity = "high"
             forced_chatgpt_workspace_id: None,
             forced_login_method: None,
             include_apply_patch_tool: false,
-            web_search_mode: None,
+            web_search_mode: Constrained::allow_any(WebSearchMode::Cached),
             use_experimental_unified_exec_tool: !cfg!(windows),
             ghost_snapshot: GhostSnapshotConfig::default(),
             features: Features::with_defaults(),
@@ -4162,6 +4252,7 @@ model_verbosity = "high"
             approval_policy: Constrained::allow_any(AskForApproval::OnFailure),
             sandbox_policy: Constrained::allow_any(SandboxPolicy::new_read_only_policy()),
             enforce_residency: Constrained::allow_any(None),
+            network: None,
             did_user_set_custom_approval_policy_or_sandbox_mode: true,
             forced_auto_mode_downgraded_on_windows: false,
             shell_environment_policy: ShellEnvironmentPolicy::default(),
@@ -4199,7 +4290,7 @@ model_verbosity = "high"
             forced_chatgpt_workspace_id: None,
             forced_login_method: None,
             include_apply_patch_tool: false,
-            web_search_mode: None,
+            web_search_mode: Constrained::allow_any(WebSearchMode::Cached),
             use_experimental_unified_exec_tool: !cfg!(windows),
             ghost_snapshot: GhostSnapshotConfig::default(),
             features: Features::with_defaults(),
@@ -4241,6 +4332,73 @@ model_verbosity = "high"
         )?;
 
         assert!(config.did_user_set_custom_approval_policy_or_sandbox_mode);
+
+        Ok(())
+    }
+
+    #[test]
+    fn test_requirements_web_search_mode_allowlist_does_not_warn_when_unset() -> anyhow::Result<()>
+    {
+        let fixture = create_test_fixture()?;
+
+        let requirements_toml = crate::config_loader::ConfigRequirementsToml {
+            allowed_approval_policies: None,
+            allowed_sandbox_modes: None,
+            allowed_web_search_modes: Some(vec![
+                crate::config_loader::WebSearchModeRequirement::Cached,
+            ]),
+            mcp_servers: None,
+            rules: None,
+            enforce_residency: None,
+            network: None,
+        };
+        let requirement_source = crate::config_loader::RequirementSource::Unknown;
+        let requirement_source_for_error = requirement_source.clone();
+        let allowed = vec![WebSearchMode::Disabled, WebSearchMode::Cached];
+        let constrained = Constrained::new(WebSearchMode::Cached, move |candidate| {
+            if matches!(candidate, WebSearchMode::Cached | WebSearchMode::Disabled) {
+                Ok(())
+            } else {
+                Err(ConstraintError::InvalidValue {
+                    field_name: "web_search_mode",
+                    candidate: format!("{candidate:?}"),
+                    allowed: format!("{allowed:?}"),
+                    requirement_source: requirement_source_for_error.clone(),
+                })
+            }
+        })?;
+        let requirements = crate::config_loader::ConfigRequirements {
+            web_search_mode: crate::config_loader::ConstrainedWithSource::new(
+                constrained,
+                Some(requirement_source),
+            ),
+            ..Default::default()
+        };
+        let config_layer_stack = crate::config_loader::ConfigLayerStack::new(
+            Vec::new(),
+            requirements,
+            requirements_toml,
+        )
+        .expect("config layer stack");
+
+        let config = Config::load_config_with_layer_stack(
+            fixture.cfg.clone(),
+            ConfigOverrides {
+                cwd: Some(fixture.cwd()),
+                ..Default::default()
+            },
+            fixture.codex_home(),
+            config_layer_stack,
+        )?;
+
+        assert!(
+            !config
+                .startup_warnings
+                .iter()
+                .any(|warning| warning.contains("Configured value for `web_search_mode`")),
+            "{:?}",
+            config.startup_warnings
+        );
 
         Ok(())
     }
@@ -4746,9 +4904,11 @@ mcp_oauth_callback_port = 5678
             allowed_sandbox_modes: Some(vec![
                 crate::config_loader::SandboxModeRequirement::ReadOnly,
             ]),
+            allowed_web_search_modes: None,
             mcp_servers: None,
             rules: None,
             enforce_residency: None,
+            network: None,
         };
 
         let config = ConfigBuilder::default()
