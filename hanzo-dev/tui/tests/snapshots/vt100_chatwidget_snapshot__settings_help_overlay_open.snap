@@ -7,7 +7,7 @@ expression: open
  | › Model              Model: GPT-5.1-Codex-Max (Medium)                                         |
  |   + Choose the language model used for new completions.                                        |
  |                                                                                                |
- |   Theme              Theme+----------------------------------------+mond                       |
+ |   Theme              Theme+----------------------------------------+ond                        |
  |   + Switch between preset |Settings Overview                       |                           |
  |                           |                                        |                           |
  |   Updates            Auto |• ↑/↓  Move between sections            |                           |
@@ -28,4 +28,4 @@ expression: open
   What can I code for you today?
 
 
- Read Only  (Shift+Tab change)                                                       ?  •  API key
+ Plan Mode  (Shift+Tab change)   ? for shortcuts                                           API key

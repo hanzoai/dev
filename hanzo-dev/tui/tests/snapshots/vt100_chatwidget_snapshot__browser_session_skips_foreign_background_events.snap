@@ -2,7 +2,6 @@
 source: tui/tests/vt100_chatwidget_snapshot.rs
 expression: output
 ---
-
    - Writing code
    - Reading files
    - Running commands
@@ -20,8 +19,9 @@ expression: output
    |   Console: Encountering captcha challenge on checkout
    |
    +- [Ctrl+B] View · [Esc] Stop
+ • using browser  (Xs • esc to interrupt)
 
-                                 ✶ Browsing...
   What can I code for you today?
 
- Read Only  (Shift+Tab change)                                   ?  •  API key
+
+ Plan Mode  (Shift+Tab change)   ? for shortcuts                       API key
