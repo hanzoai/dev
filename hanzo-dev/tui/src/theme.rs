@@ -1456,27 +1456,27 @@ fn get_predefined_theme(name: ThemeName) -> Theme {
 
         ThemeName::DarkMonochrome => Theme {
             // Pure grayscale monochrome theme - no colors
-            primary: Color::Rgb(170, 170, 170),    // Softer gray
-            secondary: Color::Rgb(150, 150, 150),  // Medium gray
+            primary: Color::Rgb(230, 230, 230),    // Near-white
+            secondary: Color::Rgb(190, 190, 190),  // Light gray
             background: Color::Rgb(0, 0, 0),       // Black
-            foreground: Color::Rgb(175, 175, 175), // Softer
-            border: Color::Rgb(68, 68, 68),        // Dark gray
-            border_focused: Color::Rgb(100, 100, 100), // Medium gray
-            selection: Color::Rgb(32, 32, 32),     // Very dark gray
-            cursor: Color::Rgb(175, 175, 175),     // Softer
-            success: Color::Rgb(160, 160, 160),    // Softer gray
-            warning: Color::Rgb(180, 180, 180),    // Softer gray
-            error: Color::Rgb(220, 220, 220),      // Light gray for visibility
-            info: Color::Rgb(160, 160, 160),       // Softer gray
-            text: Color::Rgb(165, 165, 165),       // Softer gray
-            text_dim: Color::Rgb(120, 120, 120),   // Medium gray
-            text_bright: Color::Rgb(200, 200, 200), // For emphasis, not pure white
-            keyword: Color::Rgb(220, 220, 220),    // Off-white
-            string: Color::Rgb(180, 180, 180),     // Light gray
-            comment: Color::Rgb(100, 100, 100),    // Dark gray
-            function: Color::Rgb(200, 200, 200),   // Light gray
-            spinner: Color::Rgb(80, 80, 80),       // Dark gray
-            progress: Color::Rgb(180, 180, 180),   // Light gray
+            foreground: Color::Rgb(210, 210, 210), // Near-white
+            border: Color::Rgb(50, 50, 50),        // Dark gray
+            border_focused: Color::Rgb(90, 90, 90), // Medium gray
+            selection: Color::Rgb(20, 20, 20),     // Very dark gray
+            cursor: Color::Rgb(230, 230, 230),     // Near-white
+            success: Color::Rgb(210, 210, 210),    // Light gray
+            warning: Color::Rgb(210, 210, 210),    // Light gray
+            error: Color::Rgb(235, 235, 235),      // Bright for visibility
+            info: Color::Rgb(230, 230, 230),       // White accent
+            text: Color::Rgb(210, 210, 210),       // Primary text
+            text_dim: Color::Rgb(90, 90, 90),      // Darker secondary
+            text_bright: Color::Rgb(240, 240, 240), // Bright emphasis
+            keyword: Color::Rgb(235, 235, 235),    // Off-white
+            string: Color::Rgb(210, 210, 210),     // Light gray
+            comment: Color::Rgb(80, 80, 80),       // Dark gray
+            function: Color::Rgb(230, 230, 230),   // Light gray
+            spinner: Color::Rgb(70, 70, 70),       // Dark gray
+            progress: Color::Rgb(210, 210, 210),   // Light gray
         },
 
         ThemeName::Custom => {

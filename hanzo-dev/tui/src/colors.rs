@@ -126,13 +126,16 @@ pub(crate) fn background() -> Color {
 /// Input area background - slightly lighter than main background for contrast
 /// (Codex-style grey input bar)
 pub(crate) fn input_background() -> Color {
+    let bg = current_theme().background;
+    if color_to_rgb(bg) == (0, 0, 0) {
+        return bg;
+    }
     match palette_mode() {
         PaletteMode::Ansi16 => {
             // Use dark grey for ANSI terminals
             Color::Indexed(8)
         }
         PaletteMode::Ansi256 => {
-            let bg = current_theme().background;
             let (r, g, b) = color_to_rgb(bg);
             // Lighten dark backgrounds, darken light backgrounds
             let is_dark = (r as u16 + g as u16 + b as u16) < 384;
