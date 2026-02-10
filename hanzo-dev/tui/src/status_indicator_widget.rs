@@ -118,14 +118,14 @@ fn fmt_elapsed_compact(elapsed_secs: u64) -> String {
 }
 
 #[cfg(all(not(test), target_os = "macos"))]
-const ALT_PREFIX: &str = "\u2315 + ";
+const ALT_PREFIX: &str = "\u{2315} + ";
 #[cfg(all(not(test), not(target_os = "macos")))]
 const ALT_PREFIX: &str = "Alt+";
 #[cfg(test)]
 const ALT_PREFIX: &str = "Alt+";
 
 fn alt_up_hint() -> String {
-    format!("{ALT_PREFIX}\u2191")
+    format!("{ALT_PREFIX}\u{2191}")
 }
 
 impl WidgetRef for StatusIndicatorWidget {
@@ -167,9 +167,7 @@ impl WidgetRef for StatusIndicatorWidget {
         let text = crate::colors::text();
         let text_dim = crate::colors::text_dim();
         let accent = crate::colors::text_bright();
-        let secondary = Style::default()
-            .fg(text_dim)
-            .add_modifier(Modifier::DIM);
+        let secondary = Style::default().fg(text_dim).add_modifier(Modifier::DIM);
 
         let pretty_elapsed = fmt_elapsed_compact(elapsed);
 
@@ -187,11 +185,8 @@ impl WidgetRef for StatusIndicatorWidget {
             ratatui::text::Span::raw(" "),
             // (12s • esc to interrupt)
             ratatui::text::Span::raw(format!("({pretty_elapsed} • ")).style(secondary),
-            ratatui::text::Span::raw("esc").style(
-                Style::default()
-                    .fg(accent)
-                    .add_modifier(Modifier::BOLD),
-            ),
+            ratatui::text::Span::raw("esc")
+                .style(Style::default().fg(accent).add_modifier(Modifier::BOLD)),
             ratatui::text::Span::raw(" to interrupt)").style(secondary),
         ]);
 
@@ -236,11 +231,8 @@ impl WidgetRef for StatusIndicatorWidget {
                 Line::from(vec![
                     ratatui::text::Span::raw("   "),
                     // Key hint in accent, label in dim text
-                    ratatui::text::Span::raw(alt_up_hint()).style(
-                        Style::default()
-                            .fg(accent)
-                            .add_modifier(Modifier::BOLD),
-                    ),
+                    ratatui::text::Span::raw(alt_up_hint())
+                        .style(Style::default().fg(accent).add_modifier(Modifier::BOLD)),
                     ratatui::text::Span::raw(" edit").style(secondary),
                 ])
                 .style(Style::default()),
