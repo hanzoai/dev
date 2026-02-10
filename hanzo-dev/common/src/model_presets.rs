@@ -435,9 +435,7 @@ pub fn builtin_model_presets(auth_mode: Option<AuthMode>) -> Vec<ModelPreset> {
     PRESETS
         .iter()
         .filter(|preset| match auth_mode {
-            Some(AuthMode::ApiKey) => {
-                preset.id != "gpt-5.3-codex" && preset.id != "gpt-5.2-codex"
-            }
+            Some(AuthMode::ApiKey) => preset.id != "gpt-5.3-codex" && preset.id != "gpt-5.2-codex",
             _ => true,
         })
         .filter(|preset| preset.show_in_picker)
@@ -517,9 +515,11 @@ mod tests {
     #[test]
     fn gpt_5_codex_hidden_for_api_key_auth() {
         let presets = builtin_model_presets(Some(AuthMode::ApiKey));
-        assert!(presets
-            .iter()
-            .all(|preset| preset.id != "gpt-5.3-codex" && preset.id != "gpt-5.2-codex"));
+        assert!(
+            presets
+                .iter()
+                .all(|preset| preset.id != "gpt-5.3-codex" && preset.id != "gpt-5.2-codex")
+        );
     }
 
     #[test]
