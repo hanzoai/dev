@@ -1,0 +1,126 @@
+[package]
+edition = "2024"
+name = "code-tui"
+version = { workspace = true }
+
+[[bin]]
+name = "code-tui"
+path = "src/main.rs"
+
+[lib]
+name = "code_tui"
+path = "src/lib.rs"
+
+[features]
+default = ["code-fork"]
+# Gate verbose debug logging inside the TUI implementation.
+debug-logs = []
+dev-faults = ["code-auto-drive-core/dev-faults"]
+# Fork-specific extensions layered on top of upstream history rendering.
+code-fork = []
+test-helpers = ["code-auto-drive-core/test-helpers"]
+
+[lints]
+workspace = true
+
+[dependencies]
+anyhow = "1"
+base64 = "0.22.1"
+chrono = { version = "0.4", features = ["serde"] }
+clap = { version = "4", features = ["derive"] }
+code-ansi-escape = { path = "../ansi-escape" }
+code-arg0 = { path = "../arg0" }
+code-browser = { path = "../browser" }
+code-common = { path = "../common", features = [
+    "cli",
+    "elapsed",
+    "sandbox_summary",
+] }
+code-core = { path = "../core" }
+code-file-search = { path = "../file-search" }
+code-git-tooling = { path = "../git-tooling" }
+code-login = { path = "../login" }
+code-ollama = { path = "../ollama" }
+code-protocol = { path = "../protocol" }
+code-version = { path = "../code-version" }
+code-cloud-tasks-client = { path = "../cloud-tasks-client", features = ["mock"] }
+code-auto-drive-diagnostics = { path = "../code-auto-drive-diagnostics" }
+code-auto-drive-core = { workspace = true }
+color-eyre = "0.6.3"
+crossterm = { version = "0.28.1", features = ["bracketed-paste"] }
+diffy = "0.4.2"
+image = { version = "^0.25.6", default-features = false, features = ["jpeg", "png"] }
+lazy_static = "1"
+libc = "0.2"
+mcp-types = { workspace = true }
+once_cell = "1"
+path-clean = "1.0.1"
+rand = "0.9"
+ratatui = { version = "0.29.0", features = [
+    "scrolling-regions",
+    "unstable-rendered-line-info",
+    "unstable-widget-ref",
+    "underline-color",
+    "unstable-backend-writer",
+] }
+ratatui-image = "8.0.0"
+regex-lite = "0.1"
+reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = { version = "1", features = ["preserve_order"] }
+shlex = "1.3.0"
+sha2 = { workspace = true }
+tempfile = "3"
+arboard = "3"
+strum = "0.27.2"
+strum_macros = "0.27.2"
+supports-color = "3.0.2"
+textwrap = "0.16.2"
+tokio = { version = "1", features = [
+    "io-std",
+    "macros",
+    "process",
+    "rt-multi-thread",
+    "signal",
+] }
+tokio-util = { version = "0.7", features = ["rt"] }
+tracing = { version = "0.1.41", features = ["log"] }
+tracing-appender = "0.2.3"
+tracing-subscriber = { version = "0.3.19", features = ["env-filter"] }
+tui-input = "0.14.0"
+tui-markdown = "=0.3.3"
+unicode-segmentation = "1.12.0"
+unicode-width = "0.1"
+url = "2"
+uuid = "1"
+futures = "0.3"
+fs2 = "0.4"
+syntect = { version = "5", features = ["yaml-load", "plist-load", "parsing", "default-syntaxes"] }
+which = "6"
+urlencoding = "2.1"
+pulldown-cmark = "0.13"
+portable-pty = "0.9.0"
+thiserror = "1"
+time = { workspace = true, features = ["formatting", "macros", "local-offset"] }
+# vt100 0.16+ depends on unicode-width 0.2.1 which conflicts with ratatui 0.29.x.
+# Stick to 0.15.x until ratatui upgrades.
+vt100 = "0.15.0"
+
+[target.'cfg(unix)'.dependencies]
+libc = "0.2"
+signal-hook = "0.3"
+
+
+[dev-dependencies]
+chrono = { version = "0.4", features = ["serde"] }
+filetime = { workspace = true }
+indoc = "2.0"
+insta = "1.43.1"
+pretty_assertions = "1"
+rand = "0.9"
+strip-ansi-escapes = "0.1"
+serde_bytes = "0.11"
+code-tui = { path = ".", features = ["test-helpers"] }
+[build-dependencies]
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"

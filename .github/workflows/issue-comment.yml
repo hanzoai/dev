@@ -51,8 +51,8 @@ jobs:
     runs-on: ubuntu-latest
     env:
       OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
-      RUST_WORKSPACE_DIR: hanzo-dev
-      CARGO_TARGET_DIR: ${{ github.workspace }}/hanzo-dev/target
+      RUST_WORKSPACE_DIR: code-rs
+      CARGO_TARGET_DIR: ${{ github.workspace }}/code-rs/target
 
     steps:
       - name: Checkout repository
@@ -291,6 +291,7 @@ jobs:
         run: |
           echo '### openai-proxy.log (tail)' >> "$GITHUB_STEP_SUMMARY"
           { echo '```'; tail -n 80 .github/auto/openai-proxy.log || true; echo '```'; } >> "$GITHUB_STEP_SUMMARY"
+
 
       - name: Generate comment with Code (read-only)
         id: gen
