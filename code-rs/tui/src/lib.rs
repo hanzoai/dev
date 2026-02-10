@@ -68,6 +68,7 @@ mod external_editor;
 mod file_search;
 pub mod gradient_background;
 mod get_git_diff;
+#[allow(dead_code)]
 mod glitch_animation;
 mod auto_drive_strings;
 mod auto_drive_style;

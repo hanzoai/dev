@@ -20,6 +20,8 @@ codex-cli/README.md
 
 # legacy build artifacts
 code-rs/bin/
+codex-cli/bin/
+codex-cli/bin/
 
 # ignore Nix derivation results
 result

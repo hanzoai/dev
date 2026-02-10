@@ -111,7 +111,13 @@ impl ThemeSelectionView {
         }
 
         let mut v = vec![
-            // Light themes (at top)
+            // Zen — default, adapts to terminal background
+            (
+                ThemeName::Zen,
+                "Zen",
+                "Minimal, calm — adapts to terminal",
+            ),
+            // Light themes
             (
                 ThemeName::LightPhoton,
                 "Light - Photon",
