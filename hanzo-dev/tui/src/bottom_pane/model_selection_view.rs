@@ -514,9 +514,9 @@ impl ModelSelectionView {
         } else if model.eq_ignore_ascii_case("gpt-5.2-codex") {
             Some("Frontier agentic coding model.")
         } else if model.eq_ignore_ascii_case("gpt-5.2") {
-            Some("Latest frontier model with improvements across knowledge, reasoning, and coding.")
+            Some("Latest frontier model with improvements across knowledge, reasoning and coding.")
         } else if model.eq_ignore_ascii_case("gpt-5.1-codex-max") {
-            Some("Latest Codex-optimized flagship for deep and fast reasoning.")
+            Some("Codex-optimized flagship for deep and fast reasoning.")
         } else if model.eq_ignore_ascii_case("gpt-5.1-codex") {
             Some("Optimized for Code.")
         } else if model.eq_ignore_ascii_case("gpt-5.1-codex-mini") {
