@@ -42,6 +42,20 @@ impl PanelFrameStyle {
         }
     }
 
+    pub(crate) fn overlay_transparent() -> Self {
+        Self {
+            title_alignment: Alignment::Left,
+            title_style: Style::default()
+                .fg(colors::text())
+                .add_modifier(Modifier::BOLD),
+            border_style: Style::default().fg(colors::border()),
+            background_style: Style::default().fg(colors::text()),
+            content_margin: Margin::new(0, 0),
+            clear_background: false,
+            fill_inner: false,
+        }
+    }
+
     pub(crate) fn bottom_pane() -> Self {
         Self {
             title_alignment: Alignment::Center,

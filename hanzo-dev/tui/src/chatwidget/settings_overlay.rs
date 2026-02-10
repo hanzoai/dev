@@ -1997,7 +1997,7 @@ impl SettingsOverlayView {
             area,
             buf,
             title,
-            PanelFrameStyle::overlay().with_margin(Margin::new(1, 1)),
+            PanelFrameStyle::overlay_transparent().with_margin(Margin::new(1, 1)),
             |inner, buf| {
                 self.render_content(inner, buf);
                 self.strip_child_border(inner, buf);
@@ -2030,9 +2030,7 @@ impl SettingsOverlayView {
             return;
         }
 
-        let background = Style::default()
-            .bg(crate::colors::background())
-            .fg(crate::colors::text());
+        let background = Style::default().fg(crate::colors::text());
         let end_x = area.x + area.width - 1;
         let end_y = area.y + area.height - 1;
 
