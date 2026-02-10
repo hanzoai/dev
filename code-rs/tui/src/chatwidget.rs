@@ -6718,8 +6718,15 @@ impl ChatWidget<'_> {
             let notice_key = w.next_req_key_top();
             let _ = w.history_insert_plain_state_with_key(notice_state, notice_key, "prelude");
             if connecting_mcp && !w.test_mode {
-                // Render connecting status as a separate cell with standard gutter and spacing
-                w.history_push_top_next_req(history_cell::new_connecting_mcp_status());
+                // Render connecting status as a separate cell with standard gutter and spacing.
+                // Use "background" tag since BackgroundEvent cells require it.
+                let mcp_key = w.next_req_key_top();
+                let _ = w.history_insert_with_key_global_tagged(
+                    Box::new(history_cell::new_connecting_mcp_status()),
+                    mcp_key,
+                    "background",
+                    None,
+                );
             }
             // Mark welcome as shown to avoid duplicating the Popular commands section
             // when SessionConfigured arrives shortly after.
@@ -12501,7 +12508,7 @@ impl ChatWidget<'_> {
     fn conversation_line(role: UndoPreviewRole, text: &str) -> Line<'static> {
         let (label, color) = match role {
             UndoPreviewRole::User => ("You", crate::colors::text_bright()),
-            UndoPreviewRole::Assistant => ("Code", crate::colors::primary()),
+            UndoPreviewRole::Assistant => ("Hanzo", crate::colors::primary()),
         };
         let label_span = Span::styled(
             format!("{label}: "),
@@ -22058,8 +22065,8 @@ Have we met every part of this goal and is there no further work to do?"#
             if cmd_str == "test-approval" {
                 continue;
             }
-            // Prefer "Code" branding in the Help panel
-            let desc = cmd.description().replace("Codex", "Code");
+            // Prefer "Hanzo Dev" branding in the Help panel
+            let desc = cmd.description().replace("Codex", "Hanzo Dev");
             // Render as "/command  —  description"
             lines.push(RtLine::from(vec![
                 RtSpan::styled(format!("/{cmd_str:<12}"), t_fg),
@@ -24453,6 +24460,7 @@ Have we met every part of this goal and is there no further work to do?"#
 
     fn theme_display_name(theme: code_core::config_types::ThemeName) -> String {
         match theme {
+            code_core::config_types::ThemeName::Zen => "Zen".to_string(),
             code_core::config_types::ThemeName::LightPhoton => "Light - Photon".to_string(),
             code_core::config_types::ThemeName::LightPhotonAnsi16 => {
                 "Light - Photon (16-color)".to_string()
@@ -24680,14 +24688,14 @@ Have we met every part of this goal and is there no further work to do?"#
         use code_core::protocol::AskForApproval;
         use code_core::protocol::SandboxPolicy;
         let label = match (&self.config.sandbox_policy, self.config.approval_policy) {
-            (SandboxPolicy::ReadOnly, _) => Some("Read Only".to_string()),
+            (SandboxPolicy::ReadOnly, _) => Some("\u{23f8} Read Only".to_string()),
             (
                 SandboxPolicy::WorkspaceWrite {
                     network_access: false,
                     ..
                 },
                 AskForApproval::UnlessTrusted,
-            ) => Some("Write with Approval".to_string()),
+            ) => Some("\u{23f5}\u{23f5} Write with Approval".to_string()),
             _ => None,
         };
         self.bottom_pane.set_access_mode_label(label);
@@ -24717,17 +24725,17 @@ Have we met every part of this goal and is there no further work to do?"#
         // Apply mapping
         let (label, approval, sandbox) = match next {
             0 => (
-                "Read Only (Plan Mode)",
+                "\u{23f8} Read Only (Plan Mode)",
                 AskForApproval::OnRequest,
                 SandboxPolicy::ReadOnly,
             ),
             1 => (
-                "Write with Approval",
+                "\u{23f5}\u{23f5} Write with Approval",
                 AskForApproval::UnlessTrusted,
                 SandboxPolicy::new_workspace_write_policy(),
             ),
             _ => (
-                "Full Access",
+                "\u{23f5}\u{23f5} Full Access",
                 AskForApproval::Never,
                 SandboxPolicy::DangerFullAccess,
             ),
@@ -24785,14 +24793,14 @@ Have we met every part of this goal and is there no further work to do?"#
         // Footer indicator: persistent for RO/Approval; ephemeral for Full Access
         if next == 2 {
             self.bottom_pane.set_access_mode_label_ephemeral(
-                "Full Access".to_string(),
+                "\u{23f5}\u{23f5} Full Access".to_string(),
                 std::time::Duration::from_secs(4),
             );
         } else {
             let persistent = if next == 0 {
-                "Read Only"
+                "\u{23f8} Read Only"
             } else {
-                "Write with Approval"
+                "\u{23f5}\u{23f5} Write with Approval"
             };
             self.bottom_pane
                 .set_access_mode_label(Some(persistent.to_string()));
@@ -29064,7 +29072,7 @@ Have we met every part of this goal and is there no further work to do?"#
             let mut spans: Vec<Span> = Vec::new();
             // Title follows theme text color
             spans.push(Span::styled(
-                "Every Code",
+                "Hanzo Dev",
                 Style::default()
                     .fg(crate::colors::text())
                     .add_modifier(Modifier::BOLD),
@@ -38492,10 +38500,8 @@ impl WidgetRef for &ChatWidget<'_> {
             .last_bottom_reserved_rows
             .set(bottom_pane_area.height);
 
-        // Render status bar and HUD only in full TUI mode
-        if !self.standard_terminal_mode {
-            self.render_status_bar(status_bar_area, buf);
-        }
+        // Status bar disabled for Hanzo Dev minimal theme
+        let _ = status_bar_area;
 
         // In standard-terminal mode, do not paint the history region: committed
         // content is appended to the terminal's own scrollback via
@@ -41019,7 +41025,7 @@ impl ChatWidget<'_> {
             .filter(|text| !text.is_empty());
 
         self.app_event_tx.send(AppEvent::EmitTuiNotification {
-            title: "Code".to_string(),
+            title: "Hanzo Dev".to_string(),
             body: snippet,
         });
     }

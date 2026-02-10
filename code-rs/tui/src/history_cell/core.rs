@@ -45,11 +45,10 @@ pub(crate) enum HistoryCellType {
 pub(crate) fn gutter_symbol_for_kind(kind: HistoryCellType) -> Option<&'static str> {
     match kind {
         HistoryCellType::Plain => None,
-        HistoryCellType::User => Some("›"),
-        // Restore assistant gutter icon
-        HistoryCellType::Assistant => Some("•"),
+        HistoryCellType::User => Some("▶"),
+        HistoryCellType::Assistant => Some("🌐"),
         HistoryCellType::Reasoning => None,
-        HistoryCellType::Error => Some("✖"),
+        HistoryCellType::Error => Some("✗"),
         HistoryCellType::Tool { status } => Some(match status {
             ToolCellStatus::Running => "⚙",
             ToolCellStatus::Success => "✔",
@@ -58,7 +57,7 @@ pub(crate) fn gutter_symbol_for_kind(kind: HistoryCellType) -> Option<&'static s
         HistoryCellType::Exec { kind, status } => {
             // Show ❯ only for Run executions; hide for read/search/list summaries
             match (kind, status) {
-                (ExecKind::Run, ExecStatus::Error) => Some("✖"),
+                (ExecKind::Run, ExecStatus::Error) => Some("✗"),
                 (ExecKind::Run, _) => Some("❯"),
                 _ => None,
             }
