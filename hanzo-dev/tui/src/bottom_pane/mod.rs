@@ -2,10 +2,10 @@
 
 use crate::app_event::AppEvent;
 use crate::app_event_sender::AppEventSender;
-use crate::status_indicator_widget::StatusIndicatorWidget;
 use crate::auto_drive_style::AutoDriveVariant;
 use crate::bottom_pane::chat_composer::ComposerRenderMode;
 use crate::chatwidget::BackgroundOrderTicket;
+use crate::status_indicator_widget::StatusIndicatorWidget;
 use crate::thread_spawner;
 use crate::user_approval_widget::ApprovalRequest;
 use crate::user_approval_widget::UserApprovalWidget;
@@ -316,7 +316,8 @@ impl BottomPane<'_> {
     }
 
     pub fn desired_height(&self, width: u16) -> u16 {
-        let show_status = self.status.is_some() && self.active_view_kind != ActiveViewKind::AutoCoordinator;
+        let show_status =
+            self.status.is_some() && self.active_view_kind != ActiveViewKind::AutoCoordinator;
         let status_height = if show_status {
             self.status
                 .as_ref()
@@ -642,11 +643,12 @@ impl BottomPane<'_> {
     /// Update the status indicator text. Shows status as overlay above composer
     /// to allow continued input while processing.
     pub(crate) fn update_status_text(&mut self, text: String) {
-        let message = if text.trim().is_empty() && self.is_task_running {
+        let raw_message = if text.trim().is_empty() && self.is_task_running {
             "Working".to_string()
         } else {
             text
         };
+        let message = ChatComposer::map_status_message(&raw_message);
 
         if let Some(view) = self.active_view.as_mut() {
             let _ = view.update_status_text(message.clone());
@@ -1266,8 +1268,7 @@ impl WidgetRef for &BottomPane<'_> {
             if !view.is_complete() {
                 let is_auto = matches!(self.active_view_kind, ActiveViewKind::AutoCoordinator);
                 if is_auto {
-                    let content_width =
-                        content_area.width.saturating_sub(horizontal_padding * 2);
+                    let content_width = content_area.width.saturating_sub(horizontal_padding * 2);
                     let composer_visible = view
                         .as_ref()
                         .as_any()
@@ -1298,8 +1299,7 @@ impl WidgetRef for &BottomPane<'_> {
                             ratatui::style::Style::default().bg(crate::colors::background());
                         fill_rect(buf, view_rect, None, view_bg);
                         view.render(view_rect, buf);
-                        let remaining_height =
-                            content_area.height.saturating_sub(view_height);
+                        let remaining_height = content_area.height.saturating_sub(view_height);
                         if remaining_height > 0 {
                             let composer_area = Rect {
                                 x: content_area.x,
@@ -1310,8 +1310,7 @@ impl WidgetRef for &BottomPane<'_> {
                             composer_rect = compute_composer_rect(composer_area, false);
                         }
                     } else {
-                        composer_rect =
-                            compute_composer_rect(content_area, top_spacer_enabled);
+                        composer_rect = compute_composer_rect(content_area, top_spacer_enabled);
                     }
                 } else {
                     let mut avail = content_area.height;
@@ -1330,9 +1329,7 @@ impl WidgetRef for &BottomPane<'_> {
                             let view_rect = Rect {
                                 x: content_area.x + horizontal_padding,
                                 y: y_base,
-                                width: content_area
-                                    .width
-                                    .saturating_sub(horizontal_padding * 2),
+                                width: content_area.width.saturating_sub(horizontal_padding * 2),
                                 height: view_height,
                             };
                             let view_bg =

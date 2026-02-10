@@ -68,6 +68,7 @@ mod mcp_tool_call;
 mod message_history;
 mod model_provider_info;
 pub mod remote_models;
+mod task_feed;
 // Remote model discovery caches its own on-disk state within the module.
 pub mod agent_defaults;
 mod agent_tool;
