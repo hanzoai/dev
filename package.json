@@ -1,13 +1,19 @@
 {
-  "name": "codex-monorepo",
+  "name": "code-monorepo",
   "private": true,
   "description": "Tools for repo-wide maintenance.",
   "scripts": {
-    "format": "prettier --check *.json '[A-BDE-Z]*.md' docs/*.md .github/workflows/*.yml **/*.js",
-    "format:fix": "prettier --write *.json '[A-BDE-Z]*.md' docs/*.md .github/workflows/*.yml **/*.js"
+    "format": "prettier --check *.json *.md .github/workflows/*.yml **/*.js",
+    "format:fix": "prettier --write *.json *.md .github/workflows/*.yml **/*.js",
+    "build": "cd code-rs && cargo build --release --bin code --bin code-tui --bin code-exec",
+    "build:dev": "cd code-rs && cargo build --bin code --bin code-tui --bin code-exec",
+    "build:quick": "cd code-rs && cargo build --release --bin code",
+    "test:local": "if [ -d code-rs ]; then (cd code-rs && cargo run -p code-cli -- --version); elif [ -d codex-cli ]; then (cd codex-cli && npm link && codex --version); else echo 'no CLI workspace found' >&2; exit 1; fi",
+    "fix": "cargo fmt && cargo fix --allow-dirty && cargo clippy --fix --allow-dirty"
   },
   "devDependencies": {
-    "prettier": "^3.5.3"
+    "prettier": "^3.6.2",
+    "typescript": "^5.9.2"
   },
   "resolutions": {
     "braces": "^3.0.3",
