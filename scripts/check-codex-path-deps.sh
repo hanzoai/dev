@@ -11,17 +11,17 @@ if command -v git >/dev/null 2>&1; then
   fi
 fi
 
-CODE_RS_DIR="$ROOT_DIR/hanzo-dev"
+CODE_RS_DIR="$ROOT_DIR/code-rs"
 FORBIDDEN_DIR="$ROOT_DIR/codex-rs"
 
 if [[ ! -d "$CODE_RS_DIR" || ! -d "$FORBIDDEN_DIR" ]]; then
-  echo "ERROR: Expected both hanzo-dev/ and codex-rs/ to exist next to this script." >&2
+  echo "ERROR: Expected both code-rs/ and codex-rs/ to exist next to this script." >&2
   exit 1
 fi
 
 violations=0
 
-echo "Scanning Cargo manifests under hanzo-dev/ for forbidden ../codex-rs references…"
+echo "Scanning Cargo manifests under code-rs/ for forbidden ../codex-rs references…"
 while IFS= read -r -d '' cargo_file; do
   matches=$(grep -nE '\\.\\./codex-rs|codex-[^\"]*\s*=\s*\{[^}]*path' "$cargo_file" || true)
   if [[ -z "$matches" ]]; then
@@ -59,4 +59,4 @@ if [[ $violations -ne 0 ]]; then
   exit 1
 fi
 
-echo "✅ No forbidden ../codex-rs dependencies detected in hanzo-dev/."
+echo "✅ No forbidden ../codex-rs dependencies detected in code-rs/."

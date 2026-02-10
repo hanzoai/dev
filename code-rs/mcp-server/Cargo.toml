@@ -1,0 +1,44 @@
+[package]
+edition = "2024"
+name = "code-mcp-server"
+version = { workspace = true }
+
+[[bin]]
+name = "code-mcp-server"
+path = "src/main.rs"
+
+[lib]
+name = "code_mcp_server"
+path = "src/lib.rs"
+
+[lints]
+workspace = true
+
+[dependencies]
+anyhow = { workspace = true }
+agent-client-protocol = { version = "0.4.3", features = ["unstable"] }
+code-arg0 = { workspace = true }
+code-common = { workspace = true, features = ["cli"] }
+code-core = { workspace = true }
+code-protocol = { workspace = true }
+code-app-server-protocol = { workspace = true }
+code-utils-json-to-toml = { workspace = true }
+code-app-server = { workspace = true }
+mcp-types = { workspace = true }
+schemars = { workspace = true }
+serde = { workspace = true, features = ["derive"] }
+serde_json = { workspace = true }
+shlex = { workspace = true }
+tokio = { workspace = true, features = [
+    "io-std",
+    "macros",
+    "process",
+    "rt-multi-thread",
+    "signal",
+] }
+tracing = { workspace = true, features = ["log"] }
+tracing-subscriber = { workspace = true, features = ["env-filter", "fmt"] }
+uuid = { workspace = true, features = ["serde", "v7"] }
+
+[dev-dependencies]
+pretty_assertions = { workspace = true }
