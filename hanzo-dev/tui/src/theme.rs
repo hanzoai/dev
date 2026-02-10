@@ -1455,7 +1455,7 @@ fn get_predefined_theme(name: ThemeName) -> Theme {
         },
 
         ThemeName::DarkMonochrome => Theme {
-            // Minimal dark theme — mostly grayscale with muted semantic colors
+            // Pure grayscale monochrome theme - no colors
             primary: Color::Rgb(230, 230, 230),     // Near-white
             secondary: Color::Rgb(190, 190, 190),   // Light gray
             background: Color::Rgb(0, 0, 0),        // Black
@@ -1464,9 +1464,9 @@ fn get_predefined_theme(name: ThemeName) -> Theme {
             border_focused: Color::Rgb(90, 90, 90), // Medium gray
             selection: Color::Rgb(20, 20, 20),      // Very dark gray
             cursor: Color::Rgb(230, 230, 230),      // Near-white
-            success: Color::Rgb(100, 180, 100),     // Muted green (diffs, etc.)
-            warning: Color::Rgb(190, 170, 100),     // Muted amber
-            error: Color::Rgb(190, 100, 100),       // Muted red (diffs, etc.)
+            success: Color::Rgb(210, 210, 210),     // Light gray
+            warning: Color::Rgb(210, 210, 210),     // Light gray
+            error: Color::Rgb(235, 235, 235),       // Bright for visibility
             info: Color::Rgb(230, 230, 230),        // White accent
             text: Color::Rgb(210, 210, 210),        // Primary text
             text_dim: Color::Rgb(90, 90, 90),       // Darker secondary
