@@ -554,7 +554,7 @@ pub(crate) enum AppEvent {
     /// Preview loading spinner (no history event)
     #[allow(dead_code)]
     PreviewSpinner(String),
-    /// Rotate access/safety preset (Read Only → Write with Approval → Full Access)
+    /// Rotate access/safety preset (Plan Mode → Auto Accept → Bypass permissions)
     CycleAccessMode,
     /// Cycle Auto Drive composer styling variants (Sentinel → Whisper → …)
     CycleAutoDriveVariant,
