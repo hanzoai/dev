@@ -12909,8 +12909,8 @@ impl ChatWidget<'_> {
             suppress_persistence: _,
         } = message;
 
-        let placeholder_regex = regex_lite::Regex::new(r"\[image: [^\]]+\]")
-            .expect("valid image placeholder regex");
+        let placeholder_regex =
+            regex_lite::Regex::new(r"\[image: [^\]]+\]").expect("valid image placeholder regex");
         let placeholders: Vec<String> = placeholder_regex
             .find_iter(&display_text)
             .map(|mat| mat.as_str().to_string())
@@ -24442,9 +24442,15 @@ Have we met every part of this goal and is there no further work to do?"#
         // Prepare a single consolidated note for the agent to see before the
         // next turn begins. Subsequent cycles will overwrite this note.
         let agent_note = match next {
-            0 => "System: access mode changed to Plan Mode. Do not attempt write operations or apply_patch.",
-            1 => "System: access mode changed to Auto Accept. Commands run in the workspace without prompts.",
-            _ => "System: access mode changed to Bypass permissions. Writes and network are allowed.",
+            0 => {
+                "System: access mode changed to Plan Mode. Do not attempt write operations or apply_patch."
+            }
+            1 => {
+                "System: access mode changed to Auto Accept. Commands run in the workspace without prompts."
+            }
+            _ => {
+                "System: access mode changed to Bypass permissions. Writes and network are allowed."
+            }
         };
         self.queue_agent_note(agent_note);
     }

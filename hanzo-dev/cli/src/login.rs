@@ -80,7 +80,10 @@ pub async fn run_login_with_api_key(
 
     match login_with_api_key(&config.code_home, &api_key) {
         Ok(_) => {
-            eprintln!("You are now logged in with API key {}.", safe_format_key(&api_key));
+            eprintln!(
+                "You are now logged in with API key {}.",
+                safe_format_key(&api_key)
+            );
             std::process::exit(0);
         }
         Err(e) => {
