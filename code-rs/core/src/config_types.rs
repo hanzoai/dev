@@ -1024,8 +1024,10 @@ pub struct HighlightConfig {
 #[derive(Deserialize, Debug, Clone, Copy, PartialEq, Default)]
 #[serde(rename_all = "kebab-case")]
 pub enum ThemeName {
-    // Light themes (at top)
+    // Hanzo default — minimal, calm, transparent
     #[default]
+    Zen,
+    // Light themes
     LightPhoton,
     LightPhotonAnsi16,
     LightPrismRainbow,
@@ -1033,7 +1035,7 @@ pub enum ThemeName {
     LightPorcelain,
     LightSandbar,
     LightGlacier,
-    // Dark themes (below)
+    // Dark themes
     DarkCarbonNight,
     DarkCarbonAnsi16,
     DarkShinobiDusk,

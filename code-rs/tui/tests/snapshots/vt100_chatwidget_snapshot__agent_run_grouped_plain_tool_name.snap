@@ -8,14 +8,14 @@ expression: output
 
 
 
- • I can help with various tasks including:
+ ⏺ I can help with various tasks including:
 
    - Writing code
    - Reading files
    - Running commands
 
 
- › Kick off QA bot regression run
+ ▶ Kick off QA bot regression run
 
    +- qa-bot
    |
@@ -32,4 +32,4 @@ expression: output
  +----------------------------- ✶ Responding... -----------------------------+
  | What can I code for you today?                                             |
  +----------------------------------------------------------------------------+
- Read Only  (Shift+Tab change)                       Ctrl+G editor  •  API key
+ ⏸ Read Only  (Shift+Tab change)                     Ctrl+G editor  •  API key

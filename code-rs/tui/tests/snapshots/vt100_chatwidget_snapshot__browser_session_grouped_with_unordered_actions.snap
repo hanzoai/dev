@@ -5,18 +5,18 @@ expression: output
  +----------------------------------------------------------------------------+
  |                                 Every Code                                 |
  +----------------------------------------------------------------------------+
- • Hello! How can I help you today?
+ ⏺ Hello! How can I help you today?
 
 
 
- • I can help with various tasks including:
+ ⏺ I can help with various tasks including:
 
    - Writing code
    - Reading files
    - Running commands
 
 
- › Handle captcha gracefully
+ ▶ Handle captcha gracefully
 
    +- Browser (headless): example.com
    |
@@ -32,4 +32,4 @@ expression: output
  +----------------------------- ✶ Browsing... -----------------------------+
  | What can I code for you today?                                             |
  +----------------------------------------------------------------------------+
- Read Only  (Shift+Tab change)                       Ctrl+G editor  •  API key
+ ⏸ Read Only  (Shift+Tab change)                     Ctrl+G editor  •  API key
