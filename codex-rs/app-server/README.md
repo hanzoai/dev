@@ -93,6 +93,7 @@ Example (from OpenAI's official VSCode extension):
 - `thread/name/set` — set or update a thread’s user-facing name; returns `{}` on success. Thread names are not required to be unique; name lookups resolve to the most recently updated thread.
 - `thread/unarchive` — move an archived rollout file back into the sessions directory; returns the restored `thread` on success.
 - `thread/compact/start` — trigger conversation history compaction for a thread; returns `{}` immediately while progress streams through standard turn/item notifications.
+- `thread/backgroundTerminals/clean` — terminate all running background terminals for a thread (experimental; requires `capabilities.experimentalApi`); returns `{}` when the cleanup request is accepted.
 - `thread/rollback` — drop the last N turns from the agent’s in-memory context and persist a rollback marker in the rollout so future resumes see the pruned history; returns the updated `thread` (with `turns` populated) on success.
 - `turn/start` — add user input to a thread and begin Codex generation; responds with the initial `turn` object and streams `turn/started`, `item/*`, and `turn/completed` notifications.
 - `turn/steer` — add user input to an already in-flight turn without starting a new turn; returns the active `turnId` that accepted the input.
@@ -116,7 +117,7 @@ Example (from OpenAI's official VSCode extension):
 - `config/read` — fetch the effective config on disk after resolving config layering.
 - `config/value/write` — write a single config key/value to the user's config.toml on disk.
 - `config/batchWrite` — apply multiple config edits atomically to the user's config.toml on disk.
-- `configRequirements/read` — fetch the loaded requirements allow-lists and `enforceResidency` from `requirements.toml` and/or MDM (or `null` if none are configured).
+- `configRequirements/read` — fetch loaded requirements constraints from `requirements.toml` and/or MDM (or `null` if none are configured), including allow-lists (`allowedApprovalPolicies`, `allowedSandboxModes`, `allowedWebSearchModes`), `enforceResidency`, and `network` constraints.
 
 ### Example: Start or resume a thread
 
@@ -497,7 +498,7 @@ Today both notifications carry an empty `items` array even when item events were
 - `commandExecution` — `{id, command, cwd, status, commandActions, aggregatedOutput?, exitCode?, durationMs?}` for sandboxed commands; `status` is `inProgress`, `completed`, `failed`, or `declined`.
 - `fileChange` — `{id, changes, status}` describing proposed edits; `changes` list `{path, kind, diff}` and `status` is `inProgress`, `completed`, `failed`, or `declined`.
 - `mcpToolCall` — `{id, server, tool, status, arguments, result?, error?}` describing MCP calls; `status` is `inProgress`, `completed`, or `failed`.
-- `collabToolCall` — `{id, tool, status, senderThreadId, receiverThreadId?, newThreadId?, prompt?, agentStatus?}` describing collab tool calls (`spawn_agent`, `send_input`, `wait`, `close_agent`); `status` is `inProgress`, `completed`, or `failed`.
+- `collabToolCall` — `{id, tool, status, senderThreadId, receiverThreadId?, newThreadId?, prompt?, agentStatus?}` describing collab tool calls (`spawn_agent`, `send_input`, `resume_agent`, `wait`, `close_agent`); `status` is `inProgress`, `completed`, or `failed`.
 - `webSearch` — `{id, query, action?}` for a web search request issued by the agent; `action` mirrors the Responses API web_search action payload (`search`, `open_page`, `find_in_page`) and may be omitted until completion.
 - `imageView` — `{id, path}` emitted when the agent invokes the image viewer tool.
 - `enteredReviewMode` — `{id, review}` sent when the reviewer starts; `review` is a short user-facing label such as `"current changes"` or the requested target description.
@@ -651,11 +652,20 @@ $skill-creator Add a new skill for triaging flaky CI and include step-by-step us
 ```
 
 Use `skills/list` to fetch the available skills (optionally scoped by `cwds`, with `forceReload`).
+You can also add `perCwdExtraUserRoots` to scan additional absolute paths as `user` scope for specific `cwd` entries.
+Entries whose `cwd` is not present in `cwds` are ignored.
+`skills/list` might reuse a cached skills result per `cwd`; setting `forceReload` to `true` refreshes the result from disk.
 
 ```json
 { "method": "skills/list", "id": 25, "params": {
-    "cwds": ["/Users/me/project"],
-    "forceReload": false
+    "cwds": ["/Users/me/project", "/Users/me/other-project"],
+    "forceReload": true,
+    "perCwdExtraUserRoots": [
+      {
+        "cwd": "/Users/me/project",
+        "extraUserRoots": ["/Users/me/shared-skills"]
+      }
+    ]
 } }
 { "id": 25, "result": {
     "data": [{
@@ -700,7 +710,8 @@ Use `app/list` to fetch available apps (connectors). Each entry includes metadat
 ```json
 { "method": "app/list", "id": 50, "params": {
     "cursor": null,
-    "limit": 50
+    "limit": 50,
+    "forceRefetch": false
 } }
 { "id": 50, "result": {
     "data": [
@@ -717,6 +728,30 @@ Use `app/list` to fetch available apps (connectors). Each entry includes metadat
     ],
     "nextCursor": null
 } }
+```
+
+`app/list` returns after both accessible apps and directory apps are loaded. Set `forceRefetch: true` to bypass app caches and fetch fresh data from sources. Cache entries are only replaced when those refetches succeed.
+
+The server also emits `app/list/updated` notifications whenever either source (accessible apps or directory apps) finishes loading. Each notification includes the latest merged app list.
+
+```json
+{
+  "method": "app/list/updated",
+  "params": {
+    "data": [
+      {
+        "id": "demo-app",
+        "name": "Demo App",
+        "description": "Example connector for documentation.",
+        "logoUrl": "https://example.com/demo-app.png",
+        "logoUrlDark": null,
+        "distributionChannel": null,
+        "installUrl": "https://chatgpt.com/apps/demo-app/demo-app",
+        "isAccessible": true
+      }
+    ]
+  }
+}
 ```
 
 Invoke an app by inserting `$<app-slug>` in the text input. The slug is derived from the app name and lowercased with non-alphanumeric characters replaced by `-` (for example, "Demo App" becomes `$demo-app`). Add a `mention` input item (recommended) so the server uses the exact `app://<connector-id>` path rather than guessing by name.

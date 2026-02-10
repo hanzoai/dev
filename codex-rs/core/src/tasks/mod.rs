@@ -46,7 +46,7 @@ pub(crate) use user_shell::UserShellCommandTask;
 pub(crate) use user_shell::execute_user_shell_command;
 
 const GRACEFULL_INTERRUPTION_TIMEOUT_MS: u64 = 100;
-const TURN_ABORTED_INTERRUPTED_GUIDANCE: &str = "The user interrupted the previous turn on purpose. If any tools/commands were aborted, they may have partially executed; verify current state before retrying.";
+const TURN_ABORTED_INTERRUPTED_GUIDANCE: &str = "The user interrupted the previous turn on purpose. Any running unified exec processes were terminated. If any tools/commands were aborted, they may have partially executed; verify current state before retrying.";
 
 /// Thin wrapper that exposes the parts of [`Session`] task runners need.
 #[derive(Clone)]
@@ -120,6 +120,7 @@ impl Session {
         task: T,
     ) {
         self.abort_all_tasks(TurnAbortReason::Replaced).await;
+        self.clear_mcp_tool_selection().await;
         self.seed_initial_context_if_needed(turn_context.as_ref())
             .await;
 
@@ -181,7 +182,9 @@ impl Session {
         for task in self.take_all_running_tasks().await {
             self.handle_task_abort(task, reason.clone()).await;
         }
-        self.close_unified_exec_processes().await;
+        if reason == TurnAbortReason::Interrupted {
+            self.close_unified_exec_processes().await;
+        }
     }
 
     pub async fn on_task_finished(
@@ -237,7 +240,7 @@ impl Session {
         }
     }
 
-    async fn close_unified_exec_processes(&self) {
+    pub(crate) async fn close_unified_exec_processes(&self) {
         self.services
             .unified_exec_manager
             .terminate_all_processes()
