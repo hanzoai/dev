@@ -1,0 +1,88 @@
+{
+  "config": {
+    "chainId": 36963,
+    "homesteadBlock": 0,
+    "eip150Block": 0,
+    "eip155Block": 0,
+    "eip158Block": 0,
+    "byzantiumBlock": 0,
+    "constantinopleBlock": 0,
+    "petersburgBlock": 0,
+    "istanbulBlock": 0,
+    "muirGlacierBlock": 0,
+    "berlinBlock": 0,
+    "londonBlock": 0,
+    "shanghaiTime": 0,
+    "hanzoConfig": {
+      "pqCryptoEnabled": true,
+      "aiPrecompilesEnabled": true,
+      "quasarConsensus": true
+    }
+  },
+  "nonce": "0x0",
+  "timestamp": "0x0",
+  "extraData": "0x00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000",
+  "gasLimit": "0x1c9c380",
+  "difficulty": "0x0",
+  "mixHash": "0x0000000000000000000000000000000000000000000000000000000000000000",
+  "coinbase": "0x0000000000000000000000000000000000000000",
+  "baseFeePerGas": "0x3b9aca00",
+  "alloc": {
+    "35D64Ff3f618f7a17DF34DCb21be375A4686a8de": {
+      "comment": "dev account 0 - m/44'/60'/0'/0/0",
+      "balance": "0x3635c9adc5dea00000"
+    },
+    "dAF82928dE0ABBAE133322020B253283d335d3A8": {
+      "comment": "dev account 1 - m/44'/60'/0'/0/1",
+      "balance": "0x3635c9adc5dea00000"
+    },
+    "Bb5D7C55DbbB353f9e7667dbCC43B228B857998a": {
+      "comment": "dev account 2 - m/44'/60'/0'/0/2",
+      "balance": "0x3635c9adc5dea00000"
+    },
+    "6828eAa708F40c11C121C25BdbB4a6fd1415fB24": {
+      "comment": "dev account 3 - m/44'/60'/0'/0/3",
+      "balance": "0x3635c9adc5dea00000"
+    },
+    "a238C9E15C4AD9b10441fe9f7afFa6A131F4Cc37": {
+      "comment": "dev account 4 - m/44'/60'/0'/0/4",
+      "balance": "0x3635c9adc5dea00000"
+    },
+    "0100000000000000000000000000000000000001": {
+      "comment": "PQ Signature Verify (ML-DSA) precompile",
+      "balance": "0x0",
+      "code": "0x",
+      "precompiled": {
+        "name": "pqSigVerify",
+        "activate": 0
+      }
+    },
+    "0100000000000000000000000000000000000002": {
+      "comment": "Quasar Committee Query precompile",
+      "balance": "0x0",
+      "code": "0x",
+      "precompiled": {
+        "name": "quasarCommitteeQuery",
+        "activate": 0
+      }
+    },
+    "0200000000000000000000000000000000000001": {
+      "comment": "AI Inference Call precompile",
+      "balance": "0x0",
+      "code": "0x",
+      "precompiled": {
+        "name": "aiInferenceCall",
+        "activate": 0
+      }
+    },
+    "0200000000000000000000000000000000000002": {
+      "comment": "AI Embedding Computation precompile",
+      "balance": "0x0",
+      "code": "0x",
+      "precompiled": {
+        "name": "aiEmbeddingComputation",
+        "activate": 0
+      }
+    }
+  }
+}
