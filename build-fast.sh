@@ -110,16 +110,10 @@ resolve_bin_path() {
   fi
 
   TARGET_DIR_ABS="${target_root}"
-  # hanzo-dev binary is named "dev", codex-rs binary matches crate prefix
-  if [ "${CRATE_PREFIX}" = "code" ]; then
-    BIN_CARGO_FILENAME="dev"
-    BIN_FILENAME="dev"
-  else
-    BIN_CARGO_FILENAME="${CRATE_PREFIX}"
-    BIN_FILENAME="${CRATE_PREFIX}"
-  fi
+  BIN_CARGO_FILENAME="${CRATE_PREFIX}"
+  BIN_FILENAME="${CRATE_PREFIX}"
   if [ "$PROFILE" = "perf" ]; then
-    BIN_FILENAME="${BIN_FILENAME}-perf"
+    BIN_FILENAME="${CRATE_PREFIX}-perf"
   fi
   BIN_SUBPATH="${BIN_SUBDIR}/${BIN_FILENAME}"
   BIN_CARGO_SUBPATH="${BIN_SUBDIR}/${BIN_CARGO_FILENAME}"
@@ -200,7 +194,7 @@ fi
 
 REPO_ROOT="${SCRIPT_DIR}"
 
-# Guard against regressions where a hanzo-dev crate references ../codex-rs.
+# Guard against regressions where a code-rs crate references ../codex-rs.
 if [ "${BUILD_FAST_SKIP_CODEX_GUARD:-0}" != "1" ]; then
   echo "Running codex path dependency guard..."
   (
@@ -243,8 +237,8 @@ case "$WORKSPACE_CHOICE" in
     WORKSPACE_DIR="codex-rs"
     CRATE_PREFIX="codex"
     ;;
-  code|hanzo-dev)
-    WORKSPACE_DIR="hanzo-dev"
+  code|code-rs)
+    WORKSPACE_DIR="code-rs"
     CRATE_PREFIX="code"
     ;;
   *)
@@ -327,27 +321,17 @@ if [ -n "${BUILD_FAST_BINS:-}" ]; then
   done
 fi
 if [ "${#TARGET_BINS[@]}" -eq 0 ]; then
-  # hanzo-dev binary is named "dev", codex-rs binary matches prefix
-  if [ "${CRATE_PREFIX}" = "code" ]; then
-    TARGET_BINS=("dev")
-  else
-    TARGET_BINS=("${CRATE_PREFIX}")
-  fi
+  TARGET_BINS=("${CRATE_PREFIX}")
 fi
 PRIMARY_PRESENT=0
-# For hanzo-dev, primary bin is "dev"; for codex-rs, it's the crate prefix
-PRIMARY_BIN_NAME="${CRATE_PREFIX}"
-if [ "${CRATE_PREFIX}" = "code" ]; then
-  PRIMARY_BIN_NAME="dev"
-fi
 for candidate in "${TARGET_BINS[@]}"; do
-  if [ "${candidate}" = "${PRIMARY_BIN_NAME}" ]; then
+  if [ "${candidate}" = "${CRATE_PREFIX}" ]; then
     PRIMARY_PRESENT=1
     break
   fi
 done
 if [ "$PRIMARY_PRESENT" -eq 0 ]; then
-  TARGET_BINS=("${PRIMARY_BIN_NAME}" "${TARGET_BINS[@]}")
+  TARGET_BINS=("${CRATE_PREFIX}" "${TARGET_BINS[@]}")
 fi
 PRIMARY_BIN="${TARGET_BINS[0]}"
 
@@ -510,6 +494,8 @@ if [ "${DEBUG_SYMBOLS:-}" = "1" ]; then
   export CARGO_PROFILE_RELEASE_STRIP="none"
   export CARGO_PROFILE_RELEASE_PROD_STRIP="none"
 fi
+
+echo "Building ${CRATE_PREFIX} binary (${PROFILE} mode)..."
 
 # Ensure Cargo cache locations are stable.
 # In CI, we can optionally enforce a specific CARGO_HOME regardless of caller env
@@ -695,8 +681,7 @@ if [ $? -eq 0 ]; then
 
     SYMLINK_PREFIXES=("${CRATE_PREFIX}")
     if [ "${CRATE_PREFIX}" = "code" ]; then
-      # hanzo-dev binary is named "dev", add symlinks for both
-      SYMLINK_PREFIXES=("dev" "code" "coder")
+      SYMLINK_PREFIXES+=("coder")
     fi
 
     create_cli_symlinks() {

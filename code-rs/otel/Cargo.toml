@@ -1,0 +1,50 @@
+[package]
+edition = "2024"
+name = "code-otel"
+version = { workspace = true }
+
+[lib]
+doctest = false
+name = "code_otel"
+path = "src/lib.rs"
+
+[lints]
+workspace = true
+
+[features]
+# Compile-time gate for OTLP support; enabled by default. Downstream crates can
+# disable `otel` and enable `otel-shim` for environments without OTLP exporters.
+default = ["otel"]
+otel = [
+    "opentelemetry",
+    "opentelemetry_sdk",
+    "opentelemetry-otlp",
+    "tonic",
+]
+otel-shim = []
+
+[dependencies]
+chrono = { workspace = true }
+code-app-server-protocol = { workspace = true }
+code-protocol = { workspace = true }
+eventsource-stream = { workspace = true }
+opentelemetry = { workspace = true, features = ["logs"], optional = true }
+opentelemetry-otlp = { workspace = true, features = [
+    "grpc-tonic",
+    "http-proto",
+    "http-json",
+    "reqwest",
+    "reqwest-rustls",
+], optional = true }
+opentelemetry-semantic-conventions = { workspace = true }
+opentelemetry_sdk = { workspace = true, features = [
+    "logs",
+    "rt-tokio",
+], optional = true }
+reqwest = { workspace = true }
+serde = { workspace = true, features = ["derive"] }
+serde_json = { workspace = true }
+strum_macros = { workspace = true }
+tokio = { workspace = true }
+tonic = { workspace = true, optional = true }
+tracing = { workspace = true }
