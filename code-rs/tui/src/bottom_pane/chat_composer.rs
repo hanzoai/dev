@@ -2824,7 +2824,7 @@ impl WidgetRef for ChatComposer {
             self.render_footer(area, buf);
         }
         // Draw border around input area with optional variant title when task is running
-        let mut input_block = Block::default().borders(Borders::ALL);
+        let mut input_block = Block::default().borders(Borders::NONE);
         let mut auto_drive_border_gradient = None;
         if let Some(style) = self
             .auto_drive_style
@@ -2833,13 +2833,12 @@ impl WidgetRef for ChatComposer {
         {
             auto_drive_border_gradient = style.border_gradient;
             input_block = input_block
+                .borders(Borders::ALL)
                 .border_style(style.border_style.clone())
                 .border_type(style.border_type)
                 .style(style.background_style.clone());
         } else {
             input_block = input_block
-                .border_style(Style::default().fg(crate::colors::border()))
-                .border_type(BorderType::Plain)
                 .style(Style::default().bg(crate::colors::background()));
         }
 
