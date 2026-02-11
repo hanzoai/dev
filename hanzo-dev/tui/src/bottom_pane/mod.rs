@@ -396,7 +396,7 @@ impl BottomPane<'_> {
             let y_offset = status_height.saturating_add(spacer);
 
             // Adjust composer area to account for empty line and padding
-            let horizontal_padding = 1u16; // Message input uses 1 char padding
+            let horizontal_padding = crate::theme::content_padding();
             let composer_rect = Rect {
                 x: area.x + horizontal_padding,
                 y: area.y + y_offset,
