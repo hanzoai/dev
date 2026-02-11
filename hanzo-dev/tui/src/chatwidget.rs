@@ -6237,15 +6237,14 @@ impl ChatWidget<'_> {
             || lower.contains("retries exhausted")
             || lower.contains("retry limit reached");
         let provider_429 = lower.contains("429") || lower.contains("too many requests");
+        // Track exhaustion state before rewriting the message so the
+        // human-friendly text doesn't erase the retry-limit keywords.
+        let retries_exhausted = provider_retry_limit;
         if provider_retry_limit && provider_429 {
             message = "Rate limit reached (429 Too Many Requests). Please wait and try again."
                 .to_string();
             lower = message.to_lowercase();
         }
-
-        let retries_exhausted = lower.contains("exceeded retry limit")
-            || lower.contains("retries exhausted")
-            || lower.contains("retry limit reached");
         let is_transient = lower.contains("retrying")
             || lower.contains("reconnecting")
             || lower.contains("disconnected")
