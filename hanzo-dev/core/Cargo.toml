@@ -33,6 +33,7 @@ hanzo-apply-patch = { workspace = true }
 hanzo-file-search = { workspace = true }
 hanzo-protocol = { workspace = true }
 hanzo-rmcp-client = { workspace = true }
+hanzo-zap = { workspace = true }
 hanzo-app-server-protocol = { workspace = true }
 hanzo-otel = { workspace = true, features = ["otel"] }
 hanzo-browser = { path = "../browser" }

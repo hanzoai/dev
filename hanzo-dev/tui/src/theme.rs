@@ -1,3 +1,4 @@
+use hanzo_core::config_types::GutterMode;
 use hanzo_core::config_types::ThemeColors;
 use hanzo_core::config_types::ThemeConfig;
 use hanzo_core::config_types::ThemeName;
@@ -15,6 +16,7 @@ lazy_static! {
         RwLock::new(None);
     static ref CUSTOM_THEME_IS_DARK: RwLock<Option<bool>> = RwLock::new(None);
     static ref ZEN_MODE: RwLock<bool> = RwLock::new(true);
+    static ref GUTTER_MODE: RwLock<GutterMode> = RwLock::new(GutterMode::None);
 }
 
 /// Represents a complete theme with all colors resolved
@@ -60,7 +62,8 @@ pub struct Theme {
 }
 
 impl Theme {
-    /// Apply zen mode layout: no borders, no gutter, flush-left.
+    /// Apply zen mode layout: no borders, flush-left.
+    /// Gutter visibility is controlled by the global GUTTER_MODE.
     fn apply_zen(&mut self, zen: bool) {
         self.show_borders = !zen;
         self.show_gutter = !zen;
@@ -104,6 +107,7 @@ pub fn init_theme(config: &ThemeConfig) {
         *CUSTOM_THEME_IS_DARK.write().unwrap() = config.is_dark;
     }
     *ZEN_MODE.write().unwrap() = config.zen;
+    *GUTTER_MODE.write().unwrap() = if config.zen { GutterMode::None } else { GutterMode::Full };
 }
 
 /// Get the current theme
@@ -162,14 +166,19 @@ pub fn show_borders() -> bool {
     CURRENT_THEME.read().unwrap().show_borders
 }
 
-/// Whether gutter symbols (▶, ⏺, etc.) should be drawn.
+/// Whether the gutter area is visible (Spacing or Full mode).
 pub fn show_gutter() -> bool {
-    CURRENT_THEME.read().unwrap().show_gutter
+    *GUTTER_MODE.read().unwrap() != GutterMode::None
+}
+
+/// Current gutter display mode.
+pub fn gutter_mode() -> GutterMode {
+    *GUTTER_MODE.read().unwrap()
 }
 
 /// Width in columns of the gutter prefix area (0 when hidden).
 pub fn gutter_width() -> u16 {
-    if CURRENT_THEME.read().unwrap().show_gutter { 2 } else { 0 }
+    if *GUTTER_MODE.read().unwrap() != GutterMode::None { 2 } else { 0 }
 }
 
 /// Content padding (horizontal inset from container edges).
@@ -188,6 +197,7 @@ pub fn zen_left_borders() -> ratatui::widgets::Borders {
 }
 
 /// Toggle zen mode on/off at runtime. Returns the new state.
+#[allow(dead_code)]
 pub fn toggle_zen_mode() -> bool {
     let mut zen = ZEN_MODE.write().unwrap();
     *zen = !*zen;
@@ -196,7 +206,17 @@ pub fn toggle_zen_mode() -> bool {
     // Update theme layout properties to match
     let mut theme = CURRENT_THEME.write().unwrap();
     theme.apply_zen(new_zen);
+    // Sync gutter mode: zen → None, non-zen → Full
+    *GUTTER_MODE.write().unwrap() = if new_zen { GutterMode::None } else { GutterMode::Full };
     new_zen
+}
+
+/// Cycle gutter mode: None → Spacing → Full → None.
+/// Returns the new mode. Does NOT change zen/border state.
+pub fn cycle_gutter_mode() -> GutterMode {
+    let mut mode = GUTTER_MODE.write().unwrap();
+    *mode = mode.next();
+    *mode
 }
 
 /// Switch to a different predefined theme
@@ -1595,6 +1615,64 @@ fn get_predefined_theme(name: ThemeName) -> Theme {
             function: Color::Rgb(222, 225, 231),
             spinner: Color::Rgb(118, 126, 140),
             progress: Color::Rgb(214, 218, 225),
+            show_borders: true,
+            show_gutter: true,
+            content_padding: 1,
+        },
+
+        ThemeName::DarkCode => Theme {
+            // Terminal-adaptive minimal theme (hanzoai/dev style)
+            // Uses terminal default bg, green accent, restrained palette
+            primary: Color::Rgb(74, 222, 128),          // #4ADE80  green-400
+            secondary: Color::Rgb(148, 163, 184),       // #94A3B8  slate-400
+            background: Color::Reset,                   // terminal default
+            foreground: Color::Rgb(226, 232, 240),      // #E2E8F0  slate-200
+            border: Color::Rgb(51, 65, 85),             // #334155  slate-700
+            border_focused: Color::Rgb(100, 116, 139),  // #64748B  slate-500
+            selection: Color::Rgb(30, 41, 59),          // #1E293B  slate-800
+            cursor: Color::Rgb(226, 232, 240),          // #E2E8F0
+            success: Color::Rgb(74, 222, 128),          // #4ADE80
+            warning: Color::Rgb(250, 204, 21),          // #FACC15
+            error: Color::Rgb(248, 113, 113),           // #F87171
+            info: Color::Rgb(96, 165, 250),             // #60A5FA
+            text: Color::Rgb(203, 213, 225),            // #CBD5E1  slate-300
+            text_dim: Color::Rgb(100, 116, 139),        // #64748B  slate-500
+            text_bright: Color::Rgb(241, 245, 249),     // #F1F5F9  slate-100
+            keyword: Color::Rgb(148, 163, 184),         // #94A3B8
+            string: Color::Rgb(134, 239, 172),          // #86EFAC  green-300
+            comment: Color::Rgb(71, 85, 105),           // #475569  slate-600
+            function: Color::Rgb(74, 222, 128),          // #4ADE80
+            spinner: Color::Rgb(51, 65, 85),            // #334155
+            progress: Color::Rgb(74, 222, 128),          // #4ADE80
+            show_borders: true,
+            show_gutter: true,
+            content_padding: 1,
+        },
+
+        ThemeName::DarkCodex => Theme {
+            // Terminal-adaptive warm theme (openai/codex style)
+            // Warm off-black bg, orange/amber accents
+            primary: Color::Rgb(251, 146, 60),           // #FB923C  orange-400
+            secondary: Color::Rgb(253, 186, 116),        // #FDBA74  orange-300
+            background: Color::Rgb(15, 13, 12),          // #0F0D0C  warm black
+            foreground: Color::Rgb(231, 229, 228),       // #E7E5E4  stone-200
+            border: Color::Rgb(68, 64, 60),              // #44403C  stone-700
+            border_focused: Color::Rgb(120, 113, 108),   // #78716C  stone-500
+            selection: Color::Rgb(28, 25, 23),           // #1C1917  stone-900
+            cursor: Color::Rgb(231, 229, 228),           // #E7E5E4
+            success: Color::Rgb(163, 230, 53),           // #A3E635  lime-400
+            warning: Color::Rgb(250, 204, 21),           // #FACC15  yellow-400
+            error: Color::Rgb(248, 113, 113),            // #F87171  red-400
+            info: Color::Rgb(251, 146, 60),              // #FB923C
+            text: Color::Rgb(214, 211, 209),             // #D6D3D1  stone-300
+            text_dim: Color::Rgb(120, 113, 108),         // #78716C  stone-500
+            text_bright: Color::Rgb(245, 245, 244),      // #F5F5F4  stone-100
+            keyword: Color::Rgb(253, 186, 116),          // #FDBA74
+            string: Color::Rgb(254, 215, 170),           // #FED7AA  orange-200
+            comment: Color::Rgb(87, 83, 78),             // #57534E  stone-600
+            function: Color::Rgb(251, 146, 60),          // #FB923C
+            spinner: Color::Rgb(68, 64, 60),             // #44403C
+            progress: Color::Rgb(251, 146, 60),          // #FB923C
             show_borders: true,
             show_gutter: true,
             content_padding: 1,

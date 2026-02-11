@@ -9,9 +9,9 @@ body:
       value: |
         Thank you for submitting a bug report! It helps make Code better for everyone.
 
-        If you need help or support using Code, and are not reporting a bug, please post on [code/discussions](https://github.com/just-every/code/discussions), where you can ask questions or engage with others on ideas for how to improve Code.
+        If you need help or support using Code, and are not reporting a bug, please post on [code/discussions](https://github.com/hanzoai/dev/discussions), where you can ask questions or engage with others on ideas for how to improve Code.
 
-        Make sure you are running the [latest](https://npmjs.com/package/@just-every/code) version of the Code CLI. The bug you are experiencing may already have been fixed.
+        Make sure you are running the [latest](https://npmjs.com/package/@hanzo/dev) version of the Code CLI. The bug you are experiencing may already have been fixed.
 
         Please try to include as much information as possible.
 

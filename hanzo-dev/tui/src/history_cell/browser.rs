@@ -1116,7 +1116,7 @@ impl HistoryCell for BrowserSessionCell {
     }
 
     fn gutter_symbol(&self) -> Option<&'static str> {
-        if !crate::theme::show_gutter() { return None; }
+        if crate::theme::gutter_mode() != hanzo_core::config_types::GutterMode::Full { return None; }
         if self.completed { Some("✔") } else { None }
     }
 

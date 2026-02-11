@@ -156,10 +156,18 @@ impl<'de> Deserialize<'de> for McpServerConfig {
                 env,
                 ..
             } => {
-                throw_if_set("streamable_http", "command", command.as_ref())?;
-                throw_if_set("streamable_http", "args", args.as_ref())?;
-                throw_if_set("streamable_http", "env", env.as_ref())?;
-                McpServerTransportConfig::StreamableHttp { url, bearer_token }
+                if url.starts_with("zap://") || url.starts_with("zaps://") {
+                    throw_if_set("zap", "command", command.as_ref())?;
+                    throw_if_set("zap", "args", args.as_ref())?;
+                    throw_if_set("zap", "env", env.as_ref())?;
+                    throw_if_set("zap", "bearer_token", bearer_token.as_ref())?;
+                    McpServerTransportConfig::Zap { url }
+                } else {
+                    throw_if_set("streamable_http", "command", command.as_ref())?;
+                    throw_if_set("streamable_http", "args", args.as_ref())?;
+                    throw_if_set("streamable_http", "env", env.as_ref())?;
+                    McpServerTransportConfig::StreamableHttp { url, bearer_token }
+                }
             }
             _ => return Err(SerdeError::custom("invalid transport")),
         };
@@ -191,6 +199,11 @@ pub enum McpServerTransportConfig {
         /// This should be used with caution because it lives on disk in clear text.
         #[serde(default, skip_serializing_if = "Option::is_none")]
         bearer_token: Option<String>,
+    },
+    /// ZAP (Zero-copy Agent Protocol) transport via a ZAP gateway.
+    /// Uses `zap://` or `zaps://` URL scheme.
+    Zap {
+        url: String,
     },
 }
 
@@ -1014,6 +1027,38 @@ pub struct HighlightConfig {
     pub theme: Option<String>,
 }
 
+/// Gutter display mode — cycles via Alt+G
+#[derive(Deserialize, Debug, Clone, Copy, PartialEq, Default)]
+#[serde(rename_all = "kebab-case")]
+pub enum GutterMode {
+    /// No gutter at all — flush-left text (zen default)
+    #[default]
+    None,
+    /// Whitespace padding gutter, no icons
+    Spacing,
+    /// Full gutter with icons + spacing
+    Full,
+}
+
+impl GutterMode {
+    /// Cycle to the next mode: None → Spacing → Full → None
+    pub fn next(self) -> Self {
+        match self {
+            Self::None => Self::Spacing,
+            Self::Spacing => Self::Full,
+            Self::Full => Self::None,
+        }
+    }
+
+    pub fn label(self) -> &'static str {
+        match self {
+            Self::None => "Gutter off",
+            Self::Spacing => "Gutter spacing",
+            Self::Full => "Gutter + icons",
+        }
+    }
+}
+
 /// Available predefined themes
 #[derive(Deserialize, Debug, Clone, Copy, PartialEq, Default)]
 #[serde(rename_all = "kebab-case")]
@@ -1036,6 +1081,10 @@ pub enum ThemeName {
     DarkCharcoalRainbow,
     DarkZenGarden,
     DarkPaperLightPro,
+    /// Terminal-adaptive dark theme (hanzoai/dev style)
+    DarkCode,
+    /// Terminal-adaptive dark theme (openai/codex style)
+    DarkCodex,
     #[default]
     DarkMonochrome,
     Custom,
@@ -1613,5 +1662,50 @@ mod tests {
         "#,
         )
         .expect_err("should reject bearer token for stdio transport");
+    }
+
+    #[test]
+    fn deserialize_zap_server_config() {
+        let cfg: McpServerConfig = toml::from_str(
+            r#"
+            url = "zap://localhost:9999"
+        "#,
+        )
+        .expect("should deserialize zap config");
+
+        assert_eq!(
+            cfg.transport,
+            McpServerTransportConfig::Zap {
+                url: "zap://localhost:9999".to_string(),
+            }
+        );
+    }
+
+    #[test]
+    fn deserialize_zaps_server_config() {
+        let cfg: McpServerConfig = toml::from_str(
+            r#"
+            url = "zaps://example.com:9999"
+        "#,
+        )
+        .expect("should deserialize zaps config");
+
+        assert_eq!(
+            cfg.transport,
+            McpServerTransportConfig::Zap {
+                url: "zaps://example.com:9999".to_string(),
+            }
+        );
+    }
+
+    #[test]
+    fn deserialize_rejects_bearer_token_for_zap_transport() {
+        toml::from_str::<McpServerConfig>(
+            r#"
+            url = "zap://localhost:9999"
+            bearer_token = "secret"
+        "#,
+        )
+        .expect_err("should reject bearer token for zap transport");
     }
 }

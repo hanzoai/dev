@@ -8189,17 +8189,10 @@ impl ChatWidget<'_> {
             }
         );
         if is_alt_g {
-            let zen = crate::theme::toggle_zen_mode();
+            let mode = crate::theme::cycle_gutter_mode();
             self.invalidate_height_cache();
-            let label = if zen { "Gutter hidden" } else { "Gutter visible" };
-            self.bottom_pane.flash_footer_notice(label.to_string());
+            self.bottom_pane.flash_footer_notice(mode.label().to_string());
             self.request_redraw();
-            // Persist zen preference to config.toml so it survives restarts.
-            if let Ok(home) = hanzo_core::config::find_code_home() {
-                if let Err(e) = hanzo_core::config::set_tui_zen_mode(&home, zen) {
-                    tracing::warn!("Failed to persist zen mode to config.toml: {e}");
-                }
-            }
             return;
         }
 
@@ -24245,6 +24238,8 @@ Have we met every part of this goal and is there no further work to do?"#
             hanzo_core::config_types::ThemeName::DarkPaperLightPro => {
                 "Dark - Paper Light Pro".to_string()
             }
+            hanzo_core::config_types::ThemeName::DarkCode => "Dark - Code".to_string(),
+            hanzo_core::config_types::ThemeName::DarkCodex => "Dark - Codex".to_string(),
             hanzo_core::config_types::ThemeName::DarkMonochrome => "Dark - Monochrome".to_string(),
             hanzo_core::config_types::ThemeName::Custom => {
                 let mut label =
@@ -27690,7 +27685,8 @@ Have we met every part of this goal and is there no further work to do?"#
                     format!("{} {}", command, args.join(" "))
                 }
             }
-            McpServerTransportConfig::StreamableHttp { url, .. } => format!("HTTP {}", url),
+            McpServerTransportConfig::StreamableHttp { url, .. } => format!("HTTP {url}"),
+            McpServerTransportConfig::Zap { url } => format!("ZAP {url}"),
         }
     }
 
@@ -39353,12 +39349,11 @@ impl WidgetRef for &ChatWidget<'_> {
             let visible_height = item_height.saturating_sub(skip_top).min(available_height);
 
             if visible_height > 0 {
-                // Reserve a gutter only for cells that actually render a symbol.
-                let gutter_width = if item.gutter_symbol().is_some() {
-                    2u16.min(content_area.width)
-                } else {
-                    0
-                };
+                // Reserve gutter space based on gutter mode:
+                // - None: 0 (flush-left)
+                // - Spacing: 2 (whitespace indent, no icons)
+                // - Full: 2 (icons + spacing)
+                let gutter_width = crate::theme::gutter_width().min(content_area.width);
 
                 // Split area into gutter and content
                 let gutter_area = Rect {

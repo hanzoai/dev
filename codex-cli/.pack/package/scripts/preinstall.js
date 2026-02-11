@@ -37,13 +37,13 @@ if (isWin) {
 }
 
 // 2) Remove stale staging dirs from previous failed installs under the global
-//    @just-every scope, which npm will reuse (e.g., .code-XXXXX). Remove only
+//    @hanzo scope, which npm will reuse (e.g., .code-XXXXX). Remove only
 //    old entries and never the current staging or live package.
 try {
   let scopeDir = '';
   try {
     const root = execSync('npm root -g', { stdio: ['ignore', 'pipe', 'ignore'], shell: true }).toString().trim();
-    scopeDir = path.join(root, '@just-every');
+    scopeDir = path.join(root, '@hanzo');
   } catch {
     // Fall back to guessing from this script location: <staging>\..\..\
     const here = path.resolve(path.dirname(fileURLToPath(import.meta.url)));

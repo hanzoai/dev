@@ -70,7 +70,7 @@ ARTIFACTS_DIR="$(mktemp -d)"
 trap 'rm -rf "$ARTIFACTS_DIR"' EXIT
 
 # NB: The GitHub CLI `gh` must be installed and authenticated.
-gh run download --dir "$ARTIFACTS_DIR" --repo just-every/code "$WORKFLOW_ID"
+gh run download --dir "$ARTIFACTS_DIR" --repo hanzoai/dev "$WORKFLOW_ID"
 
 # x64 Linux
 zstd -d "$ARTIFACTS_DIR/x86_64-unknown-linux-musl/code-x86_64-unknown-linux-musl.zst" \

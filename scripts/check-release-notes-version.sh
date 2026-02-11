@@ -24,8 +24,8 @@ if [ -z "$package_version" ]; then
   exit 1
 fi
 
-expected_header="## @just-every/code v${package_version}"
-actual_header=$(grep -m1 '^## @just-every/code v' "$notes_file" || true)
+expected_header="## @hanzo/dev v${package_version}"
+actual_header=$(grep -m1 '^## @hanzo/dev v' "$notes_file" || true)
 
 if [ "$actual_header" != "$expected_header" ]; then
   echo "release notes header mismatch" >&2

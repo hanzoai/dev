@@ -7,25 +7,22 @@ expression: open
  | › Model              Model: GPT-5.1-Codex-Max (Medium)                                         |
  |   + Choose the language model used for new completions.                                        |
  |                                                                                                |
- |   Theme              Theme+----------------------------------------+ond                        |
- |   + Switch between preset |Settings Overview                       |                           |
- |                           |                                        |                           |
- |   Updates            Auto |• ↑/↓  Move between sections            |                           |
- |   + Control CLI auto-updat|• Enter  Open selected section          |                           |
- |                           |• Tab    Jump forward between sections  |                           |
- |   ------------------------|• Esc    Close settings                 |-------------------------- |
- |                           |• ?      Toggle this help               |                           |
- |   Accounts           Auto-|                                        |                           |
- |   + Configure account swit|Press Esc to close                      |.                          |
- |                           +----------------------------------------+                           |
- |   Agents             Enabled: 11/12                                                            |
+ |   Theme              Theme: Dark - Carbon (16-color) · Spinner: Diamond                        |
+ |   + Switch between preset +----------------------------------------+                           |
+ |                           |Settings Overview                       |                           |
+ |   Updates            Auto |                                        |                           |
+ |   + Control CLI auto-updat|• ↑/↓  Move between sections            |                           |
+ |                           |• Enter  Open selected section          |                           |
+ |   ------------------------|• Tab    Jump forward between sections  |-------------------------- |
+ |                           |• Esc    Close settings                 |                           |
+ |   Accounts           Auto-|• ?      Toggle this help               |                           |
+ |   + Configure account swit|                                        |.                          |
+ |                           |Press Esc to close                      |                           |
+ |   Agents             Enabl+----------------------------------------+                           |
  |   + Configure linked agents and default task permissions.                                      |
  |                                                                                                |
+ |   Prompts            Prompts enabled: 0                                                        |
+ |   + Create and edit custom prompt snippets.                                                    |
  | ↑ ↓ Move    Enter Open    Esc Close    ? Help                                                  |
  |                                                                                                |
  +------------------------------------------------------------------------------------------------+
-
-  What can I code for you today?
-
-
- Plan Mode  (Shift+Tab change)   ? for shortcuts                                           API key

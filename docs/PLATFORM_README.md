@@ -192,10 +192,10 @@ graph LR
 
 ```bash
 # NPX (fastest - no install required)
-npx -y @hanzoai/dev
+npx -y @hanzo/dev
 
 # Global Installation
-npm install -g @hanzoai/dev
+npm install -g @hanzo/dev
 
 # Run the CLI
 code  # or 'coder' if 'code' conflicts with VS Code

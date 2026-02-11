@@ -2,26 +2,23 @@
 source: tui/tests/vt100_chatwidget_snapshot.rs
 expression: scrolled
 ---
-   scroll.
+ spacing stays visible while at the bottom of the viewport.
 
-   Assistant reply number two with multiple paragraphs.
- •
-   Here is another paragraph to expand height.
+ Second user follow-up that also contributes to the total height so we can
+ scroll.
 
-   Yet another paragraph for good measure.
+ Assistant reply number two with multiple paragraphs.
 
- › Third user prompt to push history further.
+ Here is another paragraph to expand height.
 
-   Assistant reply number three, still going strong.
- •
-   - Bullet one
-   - Bullet two
-   - Bullet three
+ Yet another paragraph for good measure.
 
- › Fourth user prompt to guarantee overflow beyond the viewport height.
+ Third user prompt to push history further.
 
+ Assistant reply number three, still going strong.
 
-  What can I code for you today?
+ - Bullet one
+ - Bullet two
+ - Bullet three
 
-
- Plan Mode  (Shift+Tab change)   ? for shortcuts                       API key
+ Fourth user prompt to guarantee overflow beyond the viewport height.

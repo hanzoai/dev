@@ -5,23 +5,19 @@ expression: output
 
 
 
-   >_ hanzo dev (v0.6.0)
-
-      What can I code for you today?
 
 
- • Hello! How can I help you today?
+ >_ hanzo dev (v0.6.61)
+
+ What would you like to work on?
+
+
+ Hello! How can I help you today?
 
 
 
- • I can help with various tasks including:
+ I can help with various tasks including:
 
-   - Writing code
-   - Reading files
-   - Running commands
-
-
-  What can I code for you today?
-
-
- Plan Mode  (Shift+Tab change)   ? for shortcuts                       API key
+ - Writing code
+ - Reading files
+ - Running commands

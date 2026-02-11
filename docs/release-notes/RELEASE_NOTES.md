@@ -1,4 +1,4 @@
-## @just-every/code v0.6.61
+## @hanzo/dev v0.6.61
 
 This release improves authentication handling, sandbox networking, and skills policy support.
 
@@ -10,6 +10,6 @@ This release improves authentication handling, sandbox networking, and skills po
 
 ### Install
 ```
-npm install -g @just-every/code@latest
+npm install -g @hanzo/dev@latest
 code
 ```
