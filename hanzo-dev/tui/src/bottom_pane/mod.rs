@@ -1245,7 +1245,7 @@ impl WidgetRef for &BottomPane<'_> {
 
         let mut composer_rect = compute_composer_rect(content_area, top_spacer_enabled);
         let mut composer_needs_render = true;
-        let horizontal_padding = 1u16;
+        let horizontal_padding = crate::theme::content_padding();
 
         if let Some(view) = &self.active_view {
             if !view.is_complete() {
@@ -1335,7 +1335,7 @@ impl WidgetRef for &BottomPane<'_> {
 }
 
 fn compute_composer_rect(area: Rect, top_spacer_enabled: bool) -> Rect {
-    let horizontal_padding = 1u16;
+    let horizontal_padding = crate::theme::content_padding();
     let mut y_offset = 0u16;
     if top_spacer_enabled {
         y_offset = y_offset.saturating_add(1);
