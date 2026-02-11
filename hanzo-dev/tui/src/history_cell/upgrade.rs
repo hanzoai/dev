@@ -139,7 +139,7 @@ impl HistoryCell for UpgradeNoticeCell {
         fill_rect(buf, area, Some(' '), bg_style);
 
         let block = Block::default()
-            .borders(Borders::ALL)
+            .borders(if crate::theme::is_zen_mode() { Borders::NONE } else { Borders::ALL })
             .border_style(self.border_style)
             .style(Style::default().bg(self.backdrop));
 

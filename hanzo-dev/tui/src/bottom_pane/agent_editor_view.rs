@@ -725,15 +725,16 @@ impl<'a> BottomPaneView<'a> for AgentEditorView {
 
     fn render(&self, area: Rect, buf: &mut Buffer) {
         Clear.render(area, buf);
+        let zen = crate::theme::is_zen_mode();
         let block = Block::default()
-            .borders(Borders::ALL)
+            .borders(if zen { Borders::NONE } else { Borders::ALL })
             .border_style(Style::default().fg(crate::colors::border()))
             .style(
                 Style::default()
                     .bg(crate::colors::background())
                     .fg(crate::colors::text()),
             )
-            .title(" Configure Agent ")
+            .title(if zen { "" } else { " Configure Agent " })
             .title_alignment(Alignment::Center);
         let inner = block.inner(area);
         block.render(area, buf);
@@ -792,7 +793,7 @@ impl<'a> BottomPaneView<'a> for AgentEditorView {
                 name_border = name_border.fg(crate::colors::error());
             }
             let name_block = Block::default()
-                .borders(Borders::ALL)
+                .borders(if zen { Borders::NONE } else { Borders::ALL })
                 .title(Line::from(" ID "))
                 .border_style(name_border);
             let name_inner = name_block.inner(name_rect);
@@ -815,7 +816,7 @@ impl<'a> BottomPaneView<'a> for AgentEditorView {
         let command_rect = command_rect.intersection(*buf.area());
         if command_rect.width > 0 && command_rect.height > 0 {
             let command_block = Block::default()
-                .borders(Borders::ALL)
+                .borders(if zen { Borders::NONE } else { Borders::ALL })
                 .title(Line::from(" Command "))
                 .border_style(if self.field == FIELD_COMMAND {
                     Style::default()
@@ -841,7 +842,7 @@ impl<'a> BottomPaneView<'a> for AgentEditorView {
         };
         let ro_rect = ro_rect.intersection(*buf.area());
         let ro_block = Block::default()
-            .borders(Borders::ALL)
+            .borders(if zen { Borders::NONE } else { Borders::ALL })
             .title(Line::from(" Read-only Params "))
             .border_style(if self.field == FIELD_READ_ONLY {
                 Style::default()
@@ -868,7 +869,7 @@ impl<'a> BottomPaneView<'a> for AgentEditorView {
         };
         let wr_rect = wr_rect.intersection(*buf.area());
         let wr_block = Block::default()
-            .borders(Borders::ALL)
+            .borders(if zen { Borders::NONE } else { Borders::ALL })
             .title(Line::from(" Write Params "))
             .border_style(if self.field == FIELD_WRITE {
                 Style::default()
@@ -904,7 +905,7 @@ impl<'a> BottomPaneView<'a> for AgentEditorView {
             desc_border_style = desc_border_style.fg(crate::colors::error());
         }
         let desc_block = Block::default()
-            .borders(Borders::ALL)
+            .borders(if zen { Borders::NONE } else { Borders::ALL })
             .title(Line::from(" What is this agent good at? "))
             .border_style(desc_border_style);
         if desc_rect.width > 0 && desc_rect.height > 0 {
@@ -925,7 +926,7 @@ impl<'a> BottomPaneView<'a> for AgentEditorView {
         };
         let instr_rect = instr_rect.intersection(*buf.area());
         let instr_block = Block::default()
-            .borders(Borders::ALL)
+            .borders(if zen { Borders::NONE } else { Borders::ALL })
             .title(Line::from(" Instructions "))
             .border_style(if self.field == FIELD_INSTRUCTIONS {
                 Style::default()

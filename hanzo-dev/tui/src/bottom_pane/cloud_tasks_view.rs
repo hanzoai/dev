@@ -134,11 +134,12 @@ impl BottomPaneView<'_> for CloudTasksView {
             return;
         }
 
+        let zen = crate::theme::is_zen_mode();
         let title = format!(" Cloud tasks — {} ", self.env_label);
         let block = Block::default()
-            .borders(Borders::ALL)
+            .borders(if zen { Borders::NONE } else { Borders::ALL })
             .border_style(Style::default().fg(crate::colors::border()))
-            .title(title);
+            .title(if zen { String::new() } else { title });
         let inner = block.inner(area);
         block.render(area, buf);
 
