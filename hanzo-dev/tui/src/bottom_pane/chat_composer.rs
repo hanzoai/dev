@@ -568,7 +568,8 @@ impl ChatComposer {
             (ActivePopup::None, false) => 0,
         };
         // Calculate dynamic height based on content
-        let content_width = area.width.saturating_sub(4); // Account for border and padding
+        let border_pad = if crate::theme::show_borders() { 4 } else { 0 }; // border + padding
+        let content_width = area.width.saturating_sub(border_pad);
         let content_lines = self.textarea.desired_height(content_width).max(1);
         let desired_input_height = (content_lines + 2).max(3); // Parent layout enforces max
 
