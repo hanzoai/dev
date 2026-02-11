@@ -52,6 +52,7 @@ pub(crate) use auto_drive::AutoDriveCardCell;
 pub(crate) use auto_drive::AutoDriveStatus;
 pub(crate) use background::BackgroundEventCell;
 pub(crate) use background::new_background_event;
+pub(crate) use background::new_connected_mcp_status;
 pub(crate) use background::new_connecting_mcp_status;
 pub(crate) use browser::BrowserSessionCell;
 pub(crate) use context::ContextCell;
