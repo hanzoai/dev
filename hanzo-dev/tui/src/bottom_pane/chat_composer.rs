@@ -14,7 +14,6 @@ use ratatui::style::Style;
 use ratatui::text::Line;
 use ratatui::text::Span;
 use ratatui::widgets::Block;
-use ratatui::widgets::BorderType;
 use ratatui::widgets::Borders;
 use ratatui::widgets::StatefulWidgetRef;
 use ratatui::widgets::Widget;
@@ -571,10 +570,14 @@ impl ChatComposer {
         let textarea_rect = input_block.inner(input_area);
 
         // Apply the same inner padding as in render (horizontal only).
-        let padded_textarea_rect = textarea_rect.inner(Margin::new(
+        let mut padded_textarea_rect = textarea_rect.inner(Margin::new(
             crate::layout_consts::COMPOSER_INNER_HPAD.into(),
             0,
         ));
+        if padded_textarea_rect.x > textarea_rect.x {
+            padded_textarea_rect.x = padded_textarea_rect.x.saturating_sub(1);
+            padded_textarea_rect.width = padded_textarea_rect.width.saturating_add(1);
+        }
 
         let state = self.textarea_state.borrow();
         self.textarea
@@ -2924,24 +2927,14 @@ impl WidgetRef for ChatComposer {
                     }
                 }
             } else {
-                use std::time::SystemTime;
-                use std::time::UNIX_EPOCH;
-                let now_ms = SystemTime::now()
-                    .duration_since(UNIX_EPOCH)
-                    .unwrap_or_default()
-                    .as_millis();
-                let def = crate::spinner::current_spinner();
-                let spinner_str = crate::spinner::frame_at_time(def, now_ms);
-
                 let title_line = Line::from(vec![
                     Span::raw(" "),
-                    Span::styled(spinner_str, Style::default().fg(crate::colors::info())),
+                    Span::styled("⏺", Style::default().fg(crate::colors::text_dim())),
                     Span::styled(
-                        format!(" {}... ", self.status_message),
-                        Style::default().fg(crate::colors::info()),
+                        format!(" {} ", self.status_message),
+                        Style::default().fg(crate::colors::text()),
                     ),
-                ])
-                .centered();
+                ]);
                 input_block = input_block.title(title_line);
             }
         }
@@ -2953,12 +2946,16 @@ impl WidgetRef for ChatComposer {
         }
 
         // Add padding inside the text area (1 char horizontal only, no vertical padding)
-        let padded_textarea_rect = textarea_rect.inner(Margin::new(1, 0));
+        let mut padded_textarea_rect = textarea_rect.inner(Margin::new(1, 0));
+        if padded_textarea_rect.x > textarea_rect.x {
+            padded_textarea_rect.x = padded_textarea_rect.x.saturating_sub(1);
+            padded_textarea_rect.width = padded_textarea_rect.width.saturating_add(1);
+        }
 
         let mut state = self.textarea_state.borrow_mut();
         StatefulWidgetRef::render_ref(&(&self.textarea), padded_textarea_rect, buf, &mut state);
-        // Only show placeholder if there's no chat history AND no text typed
-        if !self.typed_anything && self.textarea.text().is_empty() {
+        // Only show placeholder before conversation history exists.
+        if !self.has_chat_history && !self.typed_anything && self.textarea.text().is_empty() {
             let placeholder = crate::greeting::greeting_placeholder();
             Line::from(placeholder)
                 .style(Style::default().dim())

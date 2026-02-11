@@ -14,8 +14,8 @@ Environment flags:
   DETERMINISTIC=1                     Add -C debuginfo=0; promotes to release-prod unless DETERMINISTIC_FORCE_RELEASE=0
   DETERMINISTIC_FORCE_RELEASE=0|1     Keep dev-fast (0) or switch to release-prod (1, default)
   DETERMINISTIC_NO_UUID=1             macOS only: strip LC_UUID on final executables
-  BUILD_FAST_BINS="code code-tui"      Override bins to build (space or comma separated)
-  --workspace codex|code|both         Select workspace to build (default: code)
+  BUILD_FAST_BINS="dev dev-tui"         Override bins to build (space or comma separated)
+  --workspace codex|dev|both          Select workspace to build (default: dev)
 
 Examples:
   ./build-fast.sh
@@ -167,7 +167,7 @@ while [ $# -gt 0 ]; do
 done
 
 if [ -z "$WORKSPACE_CHOICE" ]; then
-  WORKSPACE_CHOICE="code"
+  WORKSPACE_CHOICE="dev"
 fi
 
 if [ "$ARG_PROFILE" = "pref" ]; then
@@ -176,9 +176,9 @@ fi
 
 # Resolve repository paths relative to this script so absolute invocation works
 SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" >/dev/null 2>&1 && pwd)"
-if [ -n "${CODE_CALLER_CWD:-}" ]; then
-  if ! CALLER_CWD="$(cd "${CODE_CALLER_CWD}" >/dev/null 2>&1 && pwd)"; then
-    echo "Error: CODE_CALLER_CWD is not a valid directory: ${CODE_CALLER_CWD}" >&2
+if [ -n "${HANZO_CALLER_CWD:-}" ]; then
+  if ! CALLER_CWD="$(cd "${HANZO_CALLER_CWD}" >/dev/null 2>&1 && pwd)"; then
+    echo "Error: HANZO_CALLER_CWD is not a valid directory: ${HANZO_CALLER_CWD}" >&2
     exit 1
   fi
 else
@@ -194,7 +194,7 @@ fi
 
 REPO_ROOT="${SCRIPT_DIR}"
 
-# Guard against regressions where a code-rs crate references ../codex-rs.
+# Guard against regressions where a hanzo-dev crate references ../codex-rs.
 if [ "${BUILD_FAST_SKIP_CODEX_GUARD:-0}" != "1" ]; then
   echo "Running codex path dependency guard..."
   (
@@ -214,15 +214,15 @@ if [ "$WORKSPACE_CHOICE" = "both" ]; then
   exit 0
 fi
 
-if [ -n "${CODE_HOME:-}" ] && [ -n "${CODE_HOME}" ]; then
-  CACHE_HOME="${CODE_HOME%/}"
+if [ -n "${HANZO_HOME:-}" ] && [ -n "${HANZO_HOME}" ]; then
+  CACHE_HOME="${HANZO_HOME%/}"
 elif [ -n "${CODEX_HOME:-}" ] && [ -n "${CODEX_HOME}" ]; then
   CACHE_HOME="${CODEX_HOME%/}"
 else
   if [ -d "/mnt/data" ] && [ -w "/mnt/data" ]; then
-    CACHE_HOME="/mnt/data/.code"
+    CACHE_HOME="/mnt/data/.hanzo"
   else
-    CACHE_HOME="${REPO_ROOT}/.code"
+    CACHE_HOME="${REPO_ROOT}/.hanzo"
   fi
 fi
 case "${CACHE_HOME}" in
@@ -237,12 +237,12 @@ case "$WORKSPACE_CHOICE" in
     WORKSPACE_DIR="codex-rs"
     CRATE_PREFIX="codex"
     ;;
-  code|code-rs)
-    WORKSPACE_DIR="code-rs"
-    CRATE_PREFIX="code"
+  dev|hanzo-dev)
+    WORKSPACE_DIR="hanzo-dev"
+    CRATE_PREFIX="dev"
     ;;
   *)
-    echo "Error: Unknown workspace '${WORKSPACE_CHOICE}'. Use codex, code, or both." >&2
+    echo "Error: Unknown workspace '${WORKSPACE_CHOICE}'. Use codex, dev, or both." >&2
     exit 1
     ;;
 esac
@@ -305,7 +305,12 @@ echo "Cache bucket: ${CACHE_KEY} (${CACHE_KEY_SOURCE})"
 CLI_PACKAGE="$(sed -En 's/^name[[:space:]]*=[[:space:]]*"(.*)"/\1/p' cli/Cargo.toml | head -n1)"
 TUI_PACKAGE="$(sed -En 's/^name[[:space:]]*=[[:space:]]*"(.*)"/\1/p' tui/Cargo.toml | head -n1)"
 EXEC_PACKAGE="$(sed -En 's/^name[[:space:]]*=[[:space:]]*"(.*)"/\1/p' exec/Cargo.toml | head -n1)"
-CRATE_PREFIX="${CLI_PACKAGE%%-*}"
+PRIMARY_CLI_BIN="$(awk 'BEGIN{inbin=0} /^\[\[bin\]\]/{inbin=1; next} inbin && /^name[[:space:]]*=/{gsub(/.*"/,"",$0); gsub(/"/,"",$0); print; exit}' cli/Cargo.toml)"
+if [ -n "${PRIMARY_CLI_BIN}" ]; then
+  CRATE_PREFIX="${PRIMARY_CLI_BIN}"
+else
+  CRATE_PREFIX="${CLI_PACKAGE##*-}"
+fi
 EXEC_BIN="$(awk 'BEGIN{inbin=0} /^\[\[bin\]\]/{inbin=1; next} inbin && /^name[[:space:]]*=/{gsub(/.*"/,"",$0); gsub(/"/,"",$0); print; exit}' exec/Cargo.toml)"
 if [ -z "${EXEC_BIN}" ]; then
   EXEC_BIN="${EXEC_PACKAGE}"
@@ -584,8 +589,8 @@ if [ "${TRACE_BUILD:-}" = "1" ]; then
     rustup run "$TOOLCHAIN" cargo -vV || true
   fi
   echo "CANONICAL_ENV_APPLIED: ${CANONICAL_ENV_APPLIED} (KEEP_ENV=${KEEP_ENV})"
-  echo "Filtered env (CARGO|RUST*|PROFILE|CODE_HOME|CODEX_HOME):"
-  env | egrep '^(CARGO|RUST|RUSTUP|PROFILE|CODE_HOME|CODEX_HOME)=' | sort || true
+  echo "Filtered env (CARGO|RUST*|PROFILE|HANZO_HOME|CODEX_HOME):"
+  env | egrep '^(CARGO|RUST|RUSTUP|PROFILE|HANZO_HOME|CODEX_HOME)=' | sort || true
   echo "--------------------------------"
 fi
 
@@ -618,7 +623,7 @@ SCCACHE=${SCCACHE:-}
 SCCACHE_BIN=${SCCACHE_BIN:-}
 CARGO_INCREMENTAL=${CARGO_INCREMENTAL:-}
 MACOSX_DEPLOYMENT_TARGET=${MACOSX_DEPLOYMENT_TARGET:-}
-CODE_HOME=${CODE_HOME:-}
+HANZO_HOME=${HANZO_HOME:-}
 CODEX_HOME=${CODEX_HOME:-}
 FP
 }
@@ -689,8 +694,8 @@ if [ $? -eq 0 ]; then
     dev_fast_link_target="../${BIN_SUBDIR}/${BIN_FILENAME}"
 
     SYMLINK_PREFIXES=("${CRATE_PREFIX}")
-    if [ "${CRATE_PREFIX}" = "code" ]; then
-      SYMLINK_PREFIXES+=("coder")
+    if [ "${CRATE_PREFIX}" = "dev" ]; then
+      SYMLINK_PREFIXES+=("hanzo-dev")
     fi
 
     create_cli_symlinks() {
@@ -742,8 +747,8 @@ if [ $? -eq 0 ]; then
     if [ -d "../codex-cli/bin" ]; then
       create_cli_symlinks "../codex-cli/bin" "${CLI_TARGET_CODEX}"
     fi
-    if [ -d "./code-cli/bin" ]; then
-      create_cli_symlinks "./code-cli/bin" "${CLI_TARGET_CODE}"
+    if [ -d "./dev-cli/bin" ]; then
+      create_cli_symlinks "./dev-cli/bin" "${CLI_TARGET_CODE}"
     fi
 
     BIN_DIR="./bin"
@@ -763,15 +768,20 @@ if [ $? -eq 0 ]; then
     done
     RUN_BIN_PATH="${BIN_DIR_ABS}/${PRIMARY_BIN}"
 
-    # Install primary binary to ~/.local/bin/dev for local testing
+    # Install primary binary to ~/.local/bin/dev for local testing.
+    # Use a symlink instead of copying the executable. Some macOS setups
+    # can terminate copied binaries in ~/.local/bin with SIGKILL while the
+    # original artifact runs normally.
     LOCAL_BIN_DIR="${HOME}/.local/bin"
     mkdir -p "${LOCAL_BIN_DIR}"
     LOCAL_DEV_BIN="${LOCAL_BIN_DIR}/dev"
-    if [ -e "${BIN_DIR}/${PRIMARY_BIN}" ]; then
-      # Remove any pre-existing symlink so cp writes a real file
-      [ -L "${LOCAL_DEV_BIN}" ] && rm -f "${LOCAL_DEV_BIN}"
-      cp -f "${BIN_DIR}/${PRIMARY_BIN}" "${LOCAL_DEV_BIN}"
-      chmod +x "${LOCAL_DEV_BIN}"
+    LOCAL_DEV_SOURCE="${TARGET_DIR_ABS}/${BIN_SUBDIR}/${PRIMARY_BIN}"
+    if [ ! -e "${LOCAL_DEV_SOURCE}" ] && [ -e "${BIN_DIR}/${PRIMARY_BIN}" ]; then
+      LOCAL_DEV_SOURCE="${BIN_DIR_ABS}/${PRIMARY_BIN}"
+    fi
+    if [ -e "${LOCAL_DEV_SOURCE}" ]; then
+      rm -f "${LOCAL_DEV_BIN}"
+      ln -sf "${LOCAL_DEV_SOURCE}" "${LOCAL_DEV_BIN}"
       echo "Installed: ${LOCAL_DEV_BIN}"
     fi
 

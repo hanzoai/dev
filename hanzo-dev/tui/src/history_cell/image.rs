@@ -14,10 +14,12 @@ use super::card_style::truncate_with_ellipsis;
 use super::*;
 use crate::colors;
 use crate::history::state::ImageRecord;
+use crate::theme::current_theme_name;
 use crate::theme::PaletteMode;
 use crate::theme::palette_mode;
 use ::image::ImageReader;
 use ::image::image_dimensions;
+use hanzo_core::config_types::ThemeName;
 use hanzo_protocol::num_format::format_with_separators;
 use ratatui::widgets::Paragraph;
 use ratatui::widgets::Wrap;
@@ -123,6 +125,9 @@ impl ImageOutputCell {
     }
 
     fn accent_style(style: &CardStyle) -> Style {
+        if matches!(current_theme_name(), ThemeName::DarkMonochrome) {
+            return Style::default().fg(colors::background());
+        }
         if palette_mode() == PaletteMode::Ansi16 {
             return Style::default().fg(ansi16_inverse_color());
         }

@@ -20,14 +20,14 @@
 //   # 3) Run the local Codex binary with the proxy (dummy key to client)
 //   #    Build the binary first: ./build-fast.sh
 //   OPENAI_API_KEY="x" OPENAI_BASE_URL="http://127.0.0.1:${PORT:-5055}/v1" \
-//     ./code-rs/target/dev-fast/code llm request \
+//     ./hanzo-dev/target/dev-fast/dev llm request \
 //       --developer "Say 'pong' as plain text" \
 //       --message "ping" \
 //       --format-type json_schema \
 //       --schema-json '{"type":"object","properties":{},"additionalProperties":false}' \
 //       --model gpt-4o-mini
 //
-//   # Or run your usual `code` subcommand (Exec/TUI) with the same env vars.
+//   # Or run your usual `dev` subcommand (Exec/TUI) with the same env vars.
 
 const http = require('http');
 const https = require('https');

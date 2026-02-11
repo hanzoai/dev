@@ -1,7 +1,9 @@
 use crate::theme::PaletteMode;
 use crate::theme::current_theme;
+use crate::theme::current_theme_name;
 use crate::theme::palette_mode;
 use crate::theme::quantize_color_for_palette;
+use hanzo_core::config_types::ThemeName;
 use ratatui::style::Color;
 
 // Legacy color constants - now redirect to theme
@@ -127,6 +129,9 @@ pub(crate) fn background() -> Color {
 /// (Codex-style grey input bar)
 pub(crate) fn input_background() -> Color {
     let bg = current_theme().background;
+    if matches!(current_theme_name(), ThemeName::DarkMonochrome) {
+        return bg;
+    }
     if color_to_rgb(bg) == (0, 0, 0) {
         return bg;
     }

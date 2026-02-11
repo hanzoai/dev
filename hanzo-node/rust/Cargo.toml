@@ -94,7 +94,7 @@ full = ["mlx"]
 mlx = []  # Optional MLX acceleration support
 
 [lints.rust]
-# Match code-rs linting style
+# Match hanzo-dev linting style
 
 [lints.clippy]
 expect_used = "deny"
