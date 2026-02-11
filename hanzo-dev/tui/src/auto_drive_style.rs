@@ -70,13 +70,24 @@ impl AutoDriveVariant {
     }
 
     pub fn style(self) -> AutoDriveStyle {
-        match self {
+        let mut s = match self {
             Self::Sentinel => sentinel_style(),
             Self::Whisper => whisper_style(),
             Self::Beacon => beacon_style(),
             Self::Horizon => horizon_style(),
             Self::Pulse => pulse_style(),
+        };
+        if crate::theme::is_zen_mode() {
+            s.frame.title_prefix = " ";
+            s.frame.title_suffix = "";
+            s.frame.border_type = BorderType::Plain;
+            s.frame.accent = None;
+            s.composer.goal_title_prefix = " Goal ";
+            s.composer.goal_title_suffix = " ";
+            s.composer.border_type = BorderType::Plain;
+            s.composer.border_gradient = None;
         }
+        s
     }
 }
 
