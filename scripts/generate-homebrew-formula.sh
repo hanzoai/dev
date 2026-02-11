@@ -5,7 +5,7 @@ set -euo pipefail
 # Writes Formula/Code.rb into the repo root (not a tap); you can copy it
 # into a tap repo to publish.
 
-owner_repo="just-every/code"
+owner_repo="hanzoai/dev"
 version="${1:-}"
 
 # Helper to treat placeholder versions as unset
@@ -79,7 +79,7 @@ mkdir -p Formula
 cat > Formula/Code.rb <<'RUBY'
 class Code < Formula
   desc "Terminal coding agent"
-  homepage "https://github.com/just-every/code"
+  homepage "https://github.com/hanzoai/dev"
 RUBY
 
 echo "  version \"v${version}\"" >> Formula/Code.rb

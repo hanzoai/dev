@@ -2,20 +2,17 @@
 source: tui/tests/vt100_chatwidget_snapshot.rs
 expression: output
 ---
-
- • I can help with various tasks including:
-
-   - Writing code
-   - Reading files
-   - Running commands
+ Hello! How can I help you today?
 
 
- ✶ 📁 /workspace  1 change
-   🖼 Example Domain  1280×720  2025-11-05T12:00:00Z  browser_type=chromium,
-   cursor_position=120,340
+
+ I can help with various tasks including:
+
+ - Writing code
+ - Reading files
+ - Running commands
 
 
-  What can I code for you today?
-
-
- Plan Mode  (Shift+Tab change)   ? for shortcuts                       API key
+ 📁 /workspace  1 change
+ 🖼 Example Domain  1280×720  2025-11-05T12:00:00Z  browser_type=chromium,
+ cursor_position=120,340

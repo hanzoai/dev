@@ -185,6 +185,16 @@ impl ThemeSelectionView {
                 "Dark - Zen Garden",
                 "Calm and peaceful",
             ),
+            (
+                ThemeName::DarkCode,
+                "Dark - Code",
+                "Terminal-adaptive minimal (green)",
+            ),
+            (
+                ThemeName::DarkCodex,
+                "Dark - Codex",
+                "Terminal-adaptive warm (amber)",
+            ),
         ];
         // Append custom theme if available (use saved label and light/dark prefix)
         if let Some(label0) = crate::theme::custom_theme_label() {

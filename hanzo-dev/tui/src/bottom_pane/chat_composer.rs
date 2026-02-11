@@ -547,13 +547,13 @@ impl ChatComposer {
         };
 
         // IMPORTANT: `width` here is the full BottomPane width. Subtract the
-        // configured outer padding, border, and inner padding to match wrapping.
+        // configured outer padding, border, inner padding, and gutter to match wrapping.
         let offset = if crate::theme::show_borders() {
             crate::layout_consts::COMPOSER_CONTENT_WIDTH_OFFSET
         } else {
             0
         };
-        let content_width = width.saturating_sub(offset);
+        let content_width = width.saturating_sub(offset).saturating_sub(crate::theme::gutter_width());
         let content_lines = self.textarea.desired_height(content_width).max(1); // At least 1 line
 
         // Total input height: content + border (2 when bordered) only, no vertical padding.
@@ -577,7 +577,7 @@ impl ChatComposer {
         };
         // Calculate dynamic height based on content
         let border_pad = if crate::theme::show_borders() { 4 } else { 0 }; // border + padding
-        let content_width = area.width.saturating_sub(border_pad);
+        let content_width = area.width.saturating_sub(border_pad).saturating_sub(crate::theme::gutter_width());
         let content_lines = self.textarea.desired_height(content_width).max(1);
         let desired_input_height = if crate::theme::show_borders() {
             (content_lines + 2).max(3)
@@ -600,11 +600,15 @@ impl ChatComposer {
         // Apply the same inner padding as in render (horizontal only).
         // In zen mode use zero horizontal padding for flush-left text.
         let hpad: u16 = if crate::theme::show_borders() { crate::layout_consts::COMPOSER_INNER_HPAD } else { 0 };
+        let gw = crate::theme::gutter_width();
         let mut padded_textarea_rect = textarea_rect.inner(Margin::new(hpad, 0));
         if padded_textarea_rect.x > textarea_rect.x {
             padded_textarea_rect.x = padded_textarea_rect.x.saturating_sub(1);
             padded_textarea_rect.width = padded_textarea_rect.width.saturating_add(1);
         }
+        // Indent by gutter width to align with history cells
+        padded_textarea_rect.x = padded_textarea_rect.x.saturating_add(gw);
+        padded_textarea_rect.width = padded_textarea_rect.width.saturating_sub(gw);
 
         let state = self.textarea_state.borrow();
         self.textarea
@@ -2894,7 +2898,7 @@ impl WidgetRef for ChatComposer {
         let footer_height = self.footer_height();
 
         let border_pad = if crate::theme::show_borders() { 4 } else { 0 };
-        let content_width = area.width.saturating_sub(border_pad);
+        let content_width = area.width.saturating_sub(border_pad).saturating_sub(crate::theme::gutter_width());
         let content_lines = self.textarea.desired_height(content_width).max(1);
         let desired_input_height = if crate::theme::show_borders() {
             (content_lines + 2).max(3)
@@ -2996,11 +3000,15 @@ impl WidgetRef for ChatComposer {
         // Add padding inside the text area (horizontal only, no vertical padding).
         // In zen mode use zero padding for flush-left text.
         let hpad: u16 = crate::theme::content_padding();
+        let gw = crate::theme::gutter_width();
         let mut padded_textarea_rect = textarea_rect.inner(Margin::new(hpad, 0));
         if padded_textarea_rect.x > textarea_rect.x {
             padded_textarea_rect.x = padded_textarea_rect.x.saturating_sub(1);
             padded_textarea_rect.width = padded_textarea_rect.width.saturating_add(1);
         }
+        // Indent by gutter width to align with history cells
+        padded_textarea_rect.x = padded_textarea_rect.x.saturating_add(gw);
+        padded_textarea_rect.width = padded_textarea_rect.width.saturating_sub(gw);
 
         let mut state = self.textarea_state.borrow_mut();
         StatefulWidgetRef::render_ref(&(&self.textarea), padded_textarea_rect, buf, &mut state);

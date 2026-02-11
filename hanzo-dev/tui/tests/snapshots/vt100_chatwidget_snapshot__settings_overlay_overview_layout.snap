@@ -21,11 +21,8 @@ expression: output
  |   Agents             Enabled: 11/12                                                            |
  |   + Configure linked agents and default task permissions.                                      |
  |                                                                                                |
+ |   Prompts            Prompts enabled: 0                                                        |
+ |   + Create and edit custom prompt snippets.                                                    |
  | ↑ ↓ Move    Enter Open    Esc Close    ? Help                                                  |
  |                                                                                                |
  +------------------------------------------------------------------------------------------------+
-
-  What can I code for you today?
-
-
- Plan Mode  (Shift+Tab change)   ? for shortcuts                                           API key
