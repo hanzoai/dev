@@ -654,10 +654,11 @@ impl ImageOutputCell {
         let filename = path.file_name().and_then(|n| n.to_str()).unwrap_or("image");
         let placeholder_text = format!("Image:\n{filename}");
 
+        let zen = crate::theme::is_zen_mode();
         let block = Block::default()
-            .borders(Borders::ALL)
+            .borders(if zen { Borders::NONE } else { Borders::ALL })
             .border_style(Style::default().fg(colors::info()))
-            .title("Image");
+            .title(if zen { "" } else { "Image" });
         let inner = block.inner(area);
         block.render(area, buf);
         Paragraph::new(placeholder_text)

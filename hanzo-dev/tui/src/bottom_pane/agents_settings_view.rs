@@ -676,8 +676,9 @@ impl<'a> BottomPaneView<'a> for SubagentEditorView {
         } else {
             Style::default().fg(crate::colors::border())
         };
+        let zen = crate::theme::is_zen_mode();
         let name_block = Block::default()
-            .borders(Borders::ALL)
+            .borders(if zen { Borders::NONE } else { Borders::ALL })
             .border_style(name_border)
             .title(Line::from(" ID "));
         let name_inner = name_block.inner(name_box_rect);
@@ -711,7 +712,7 @@ impl<'a> BottomPaneView<'a> for SubagentEditorView {
             Style::default().fg(crate::colors::border())
         };
         let orch_block = Block::default()
-            .borders(Borders::ALL)
+            .borders(if zen { Borders::NONE } else { Borders::ALL })
             .border_style(orch_border)
             .title(Line::from(" Instructions "));
         if orch_box_h >= 2 {

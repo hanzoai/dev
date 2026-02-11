@@ -436,7 +436,7 @@ impl HistoryCell for MergedExecCell {
                             height: out_height,
                         };
                         let block = Block::default()
-                            .borders(Borders::LEFT)
+                            .borders(if crate::theme::is_zen_mode() { Borders::NONE } else { Borders::LEFT })
                             .border_style(
                                 Style::default()
                                     .fg(crate::colors::border_dim())
@@ -536,7 +536,7 @@ impl HistoryCell for MergedExecCell {
                     height: out_height,
                 };
                 let block = Block::default()
-                    .borders(Borders::LEFT)
+                    .borders(if crate::theme::is_zen_mode() { Borders::NONE } else { Borders::LEFT })
                     .border_style(
                         Style::default()
                             .fg(crate::colors::border_dim())

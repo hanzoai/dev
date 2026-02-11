@@ -2262,9 +2262,10 @@ impl<'a> BottomPaneView<'a> for ThemeSelectionView {
             title_spans.push(Span::styled(" back ", t_dim));
         }
 
+        let zen = crate::theme::is_zen_mode();
         let outer = Block::default()
-            .borders(Borders::ALL)
-            .title(Line::from(title_spans))
+            .borders(if zen { Borders::NONE } else { Borders::ALL })
+            .title(if zen { Line::from("") } else { Line::from(title_spans) })
             .style(Style::default().bg(crate::colors::background()))
             .border_style(
                 Style::default()
