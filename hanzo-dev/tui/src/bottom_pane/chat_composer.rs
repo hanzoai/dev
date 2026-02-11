@@ -548,13 +548,21 @@ impl ChatComposer {
 
         // IMPORTANT: `width` here is the full BottomPane width. Subtract the
         // configured outer padding, border, and inner padding to match wrapping.
-        let content_width =
-            width.saturating_sub(crate::layout_consts::COMPOSER_CONTENT_WIDTH_OFFSET);
+        let offset = if crate::theme::show_borders() {
+            crate::layout_consts::COMPOSER_CONTENT_WIDTH_OFFSET
+        } else {
+            0
+        };
+        let content_width = width.saturating_sub(offset);
         let content_lines = self.textarea.desired_height(content_width).max(1); // At least 1 line
 
-        // Total input height: content + border (2) only, no vertical padding
-        // Minimum of 3 ensures at least 1 visible line with border
-        let input_height = (content_lines + 2).max(3);
+        // Total input height: content + border (2 when bordered) only, no vertical padding.
+        // Minimum of 3 with borders ensures at least 1 visible line; 1 without.
+        let input_height = if crate::theme::show_borders() {
+            (content_lines + 2).max(3)
+        } else {
+            content_lines.max(1)
+        };
 
         input_height + hint_height
     }
@@ -571,7 +579,11 @@ impl ChatComposer {
         let border_pad = if crate::theme::show_borders() { 4 } else { 0 }; // border + padding
         let content_width = area.width.saturating_sub(border_pad);
         let content_lines = self.textarea.desired_height(content_width).max(1);
-        let desired_input_height = (content_lines + 2).max(3); // Parent layout enforces max
+        let desired_input_height = if crate::theme::show_borders() {
+            (content_lines + 2).max(3)
+        } else {
+            content_lines.max(1)
+        };
 
         // Use desired height but don't exceed available space
         let input_height = desired_input_height.min(area.height.saturating_sub(hint_height));
@@ -2881,9 +2893,14 @@ impl WidgetRef for ChatComposer {
 
         let footer_height = self.footer_height();
 
-        let content_width = area.width.saturating_sub(4);
+        let border_pad = if crate::theme::show_borders() { 4 } else { 0 };
+        let content_width = area.width.saturating_sub(border_pad);
         let content_lines = self.textarea.desired_height(content_width).max(1);
-        let desired_input_height = (content_lines + 2).max(3);
+        let desired_input_height = if crate::theme::show_borders() {
+            (content_lines + 2).max(3)
+        } else {
+            content_lines.max(1)
+        };
 
         let available_height = area.height.saturating_sub(footer_height);
         if available_height == 0 {
