@@ -16,7 +16,7 @@ exec *args:
 
 # Run the CLI version of the file-search crate.
 file-search *args:
-    cargo run --bin code-file-search -- "$@"
+    cargo run --bin hanzo-file-search -- "$@"
 
 # format code
 fmt:
@@ -57,4 +57,4 @@ build-for-release:
 
 # Run the MCP server
 mcp-server-run *args:
-    cargo run -p code-mcp-server -- "$@"
+    cargo run -p hanzo-mcp-server -- "$@"

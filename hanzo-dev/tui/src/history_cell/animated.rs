@@ -76,7 +76,6 @@ impl HistoryCell for AnimatedWelcomeCell {
         ]);
 
         let greeting_line = Line::from(vec![
-            Span::from("   "), // Indent to align with text after ">_ "
             Span::from(crate::greeting::greeting_placeholder()),
         ]);
 

@@ -117,6 +117,6 @@ Composite QoS scores use weighted geometric mean:
 
 ## Related Documentation
 
-- [Phase 1 RPC Design](../../code-rs/docs/architecture/phase1-rpc-design.md)
-- [QoS Challenge Crate](../../code-rs/qos-challenge/)
+- [Phase 1 RPC Design](../../hanzo-dev/docs/architecture/phase1-rpc-design.md)
+- [QoS Challenge Crate](../../hanzo-dev/qos-challenge/)
 - [Proto Definitions](../rust/proto/hanzo.node.v1.proto)
