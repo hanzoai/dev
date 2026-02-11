@@ -739,7 +739,7 @@ impl ChatWidget<'_> {
         total: Duration,
     ) -> Line<'static> {
         let width = width.max(20) as usize;
-        let prefix = "▶ ";
+        let prefix = if crate::theme::is_zen_mode() { "" } else { "▶ " };
         let suffix = format!(
             " {} / {}",
             self.format_overlay_mm_ss(current),
@@ -2615,6 +2615,15 @@ fn agent_status_label(status: AgentStatus) -> &'static str {
 }
 
 fn agent_status_icon(status: AgentStatus) -> &'static str {
+    if crate::theme::is_zen_mode() {
+        return match status {
+            AgentStatus::Completed => "done",
+            AgentStatus::Running => "run",
+            AgentStatus::Pending => "...",
+            AgentStatus::Failed => "err",
+            AgentStatus::Cancelled => "stop",
+        };
+    }
     match status {
         AgentStatus::Completed => "✔",
         AgentStatus::Running => "▶",
@@ -16835,8 +16844,9 @@ impl ChatWidget<'_> {
         let header_style = ratatui::style::Style::default()
             .fg(crate::colors::text())
             .add_modifier(ratatui::style::Modifier::BOLD);
-        let chevron = if collapsed { "▶" } else { "▼" };
-        let title = format!("╭ Highlights (h) {chevron} ");
+        let zen = crate::theme::is_zen_mode();
+        let chevron = if collapsed { if zen { ">" } else { "▶" } } else { if zen { "v" } else { "▼" } };
+        let title = if zen { format!("Highlights (h) {chevron} ") } else { format!("╭ Highlights (h) {chevron} ") };
         let title_width = unicode_width::UnicodeWidthStr::width(title.as_str()) as u16;
         let pad = available_width
             .saturating_sub(title_width)
@@ -27930,7 +27940,7 @@ Have we met every part of this goal and is there no further work to do?"#
             sorted_providers.sort_by(|a, b| a.0.cmp(b.0));
 
             for (id, info) in sorted_providers {
-                let marker = if id == current { "▶ " } else { "  " };
+                let marker = if id == current { if crate::theme::is_zen_mode() { "> " } else { "▶ " } } else { "  " };
                 let base_url = info.base_url.as_deref().unwrap_or("(default)");
                 let env_key = info
                     .env_key
@@ -28948,11 +28958,13 @@ Note: Free ngrok accounts have connection limits."#;
             .collect::<Vec<_>>();
         if !streaming_lines.is_empty() {
             // Apply gutter to streaming preview (first line gets " ⏺ ", continuations get 3 spaces)
-            if let Some(first) = streaming_lines.first_mut() {
-                first.spans.insert(0, ratatui::text::Span::raw(" ⏺ "));
-            }
-            for line in streaming_lines.iter_mut().skip(1) {
-                line.spans.insert(0, ratatui::text::Span::raw("   "));
+            if !crate::theme::is_zen_mode() {
+                if let Some(first) = streaming_lines.first_mut() {
+                    first.spans.insert(0, ratatui::text::Span::raw(" ⏺ "));
+                }
+                for line in streaming_lines.iter_mut().skip(1) {
+                    line.spans.insert(0, ratatui::text::Span::raw("   "));
+                }
             }
             out.extend(streaming_lines);
             out.push(ratatui::text::Line::from(""));
@@ -37869,13 +37881,17 @@ impl ChatWidget<'_> {
                     let action_header_style = Style::default()
                         .fg(crate::colors::text())
                         .add_modifier(Modifier::BOLD);
+                    let zen = crate::theme::is_zen_mode();
                     let chevron = if self.agents_terminal.actions_collapsed {
-                        "▶"
+                        if zen { ">" } else { "▶" }
                     } else {
-                        "▼"
+                        if zen { "v" } else { "▼" }
                     };
-                    let header_text =
-                        format!("╭ Action Log (a) {chevron} — {} entries ", entry.logs.len());
+                    let header_text = if zen {
+                        format!("Action Log (a) {chevron} — {} entries ", entry.logs.len())
+                    } else {
+                        format!("╭ Action Log (a) {chevron} — {} entries ", entry.logs.len())
+                    };
                     let header_width = UnicodeWidthStr::width(header_text.as_str()) as u16;
                     let pad = detail_width.saturating_sub(header_width).saturating_sub(1);
                     let mut action_header = header_text;
@@ -39898,9 +39914,10 @@ impl WidgetRef for &ChatWidget<'_> {
                         self.app_event_tx
                             .send(AppEvent::ScheduleFrameIn(Duration::from_millis(interval)));
                     } else {
+                        let zen = crate::theme::is_zen_mode();
                         let (icon, color, status_text) = match overlay.exit_code {
                             Some(0) => (
-                                "✔",
+                                if zen { "" } else { "✔" },
                                 crate::colors::success(),
                                 overlay
                                     .duration
@@ -39908,7 +39925,7 @@ impl WidgetRef for &ChatWidget<'_> {
                                     .unwrap_or_else(|| "Completed".to_string()),
                             ),
                             Some(code) => (
-                                "✖",
+                                if zen { "" } else { "✖" },
                                 crate::colors::error(),
                                 overlay
                                     .duration

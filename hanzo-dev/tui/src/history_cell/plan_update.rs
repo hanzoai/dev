@@ -147,6 +147,9 @@ impl HistoryCell for PlanUpdateCell {
     }
 
     fn gutter_symbol(&self) -> Option<&'static str> {
+        if crate::theme::is_zen_mode() {
+            return None;
+        }
         Some(icon_symbol(&self.state.icon))
     }
 }
