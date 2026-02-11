@@ -438,7 +438,15 @@ pub(crate) async fn stream_chat_completions(
 
                 let delay = retry_after_secs
                     .map(|s| Duration::from_millis(s * 1_000))
-                    .unwrap_or_else(|| backoff(attempt));
+                    .unwrap_or_else(|| {
+                        let d = backoff(attempt);
+                        // For 429 rate limits, use at least 5s backoff
+                        if status == StatusCode::TOO_MANY_REQUESTS {
+                            d.max(Duration::from_secs(5))
+                        } else {
+                            d
+                        }
+                    });
                 tokio::time::sleep(delay).await;
             }
             Err(e) => {
