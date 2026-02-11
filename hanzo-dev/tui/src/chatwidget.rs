@@ -6789,7 +6789,8 @@ impl ChatWidget<'_> {
             let _ = w.history_insert_plain_state_with_key(notice_state, notice_key, "prelude");
             if connecting_mcp && !w.test_mode {
                 // Render connecting status as a separate cell with standard gutter and spacing
-                w.history_push_top_next_req(history_cell::new_connecting_mcp_status());
+                let names: Vec<&str> = w.config.mcp_servers.keys().map(|s| s.as_str()).collect();
+                w.history_push_top_next_req(history_cell::new_connecting_mcp_status(&names));
             }
             // Mark welcome as shown to avoid duplicating the Popular commands section
             // when SessionConfigured arrives shortly after.
@@ -10855,21 +10856,20 @@ impl ChatWidget<'_> {
         // Animation cleanup is now handled differently
     }
 
-    /// Replace the initial Popular Commands notice that includes
-    /// the transient "Connecting MCP servers…" line with a version
-    /// that omits it.
+    /// Replace the transient "Connecting MCP servers…" cell with either
+    /// a brief "Connected: X, Y" summary or remove it entirely.
     fn remove_connecting_mcp_notice(&mut self) {
         if self.test_mode {
             return;
         }
-        let needle = "Connecting MCP servers…";
+        let needle_prefix = "Connecting MCP server";
         if let Some((idx, cell)) = self.history_cells.iter().enumerate().find(|(idx, cell)| {
             self.cell_lines_for_index(*idx, cell.as_ref())
                 .iter()
                 .any(|line| {
                     line.spans
                         .iter()
-                        .any(|span| span.content.as_ref() == needle)
+                        .any(|span| span.content.as_ref().contains(needle_prefix))
                 })
         }) {
             match cell.kind() {
@@ -10887,8 +10887,22 @@ impl ChatWidget<'_> {
                     );
                 }
                 _ => {
-                    // New layout: status is a separate BackgroundEvent cell — remove it
-                    self.history_remove_at(idx);
+                    // Replace with connected status showing server names
+                    let names: Vec<&str> =
+                        self.config.mcp_servers.keys().map(|s| s.as_str()).collect();
+                    if names.is_empty() {
+                        self.history_remove_at(idx);
+                    } else {
+                        let connected_cell = history_cell::new_connected_mcp_status(&names);
+                        let record = HistoryDomainRecord::BackgroundEvent(
+                            connected_cell.state().clone(),
+                        );
+                        self.history_replace_with_record(
+                            idx,
+                            Box::new(connected_cell),
+                            record,
+                        );
+                    }
                 }
             }
         }
@@ -38639,8 +38653,9 @@ impl WidgetRef for &ChatWidget<'_> {
         }
 
         // Create a unified scrollable container for all chat content
-        // Use consistent padding throughout
-        let padding = 1u16;
+        // Use consistent padding throughout; flush-left in zen mode
+        let theme = crate::theme::current_theme();
+        let padding = theme.content_padding;
         let content_area = Rect {
             x: history_area.x + padding,
             y: history_area.y,
@@ -38694,7 +38709,7 @@ impl WidgetRef for &ChatWidget<'_> {
 
         // Calculate total content height using prefix sums; build if needed
         let spacing = 1u16; // Standard spacing between cells
-        let gutter_w: u16 = if crate::theme::is_zen_mode() { 0 } else { 2 };
+        let gutter_w: u16 = if theme.show_gutter { 2 } else { 0 };
         let reasoning_visible = self.is_reasoning_shown();
         let cache_width = content_area.width.saturating_sub(gutter_w);
 
