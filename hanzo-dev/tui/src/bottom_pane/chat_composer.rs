@@ -2260,15 +2260,17 @@ impl ChatComposer {
             }
             AutoReviewIndicatorStatus::Clean => {
                 let icon_style = key_hint_style;
+                let zen = crate::theme::is_zen_mode();
                 vec![
                     Span::styled("Auto Review: ", label_style),
-                    Span::styled("✔", icon_style),
-                    Span::from(" "),
+                    Span::styled(if zen { "" } else { "✔" }, icon_style),
+                    Span::from(if zen { "" } else { " " }),
                     Span::styled("Correct", icon_style),
                 ]
             }
             AutoReviewIndicatorStatus::Fixed => {
                 let icon_style = Style::default().fg(crate::colors::success());
+                let zen = crate::theme::is_zen_mode();
                 let text = if let Some(count) = status.findings {
                     let plural = if count == 1 { "Issue" } else { "Issues" };
                     format!("{count} {plural} Fixed")
@@ -2277,17 +2279,18 @@ impl ChatComposer {
                 };
                 vec![
                     Span::styled("Auto Review: ", label_style),
-                    Span::styled("✔", icon_style),
-                    Span::from(" "),
+                    Span::styled(if zen { "" } else { "✔" }, icon_style),
+                    Span::from(if zen { "" } else { " " }),
                     Span::styled(text, icon_style),
                 ]
             }
             AutoReviewIndicatorStatus::Failed => {
                 let icon_style = Style::default().fg(crate::colors::error());
+                let zen = crate::theme::is_zen_mode();
                 vec![
                     Span::styled("Auto Review: ", label_style),
-                    Span::styled("✖", icon_style),
-                    Span::from(" "),
+                    Span::styled(if zen { "" } else { "✖" }, icon_style),
+                    Span::from(if zen { "" } else { " " }),
                     Span::styled("Failed", icon_style),
                 ]
             }
@@ -2946,14 +2949,23 @@ impl WidgetRef for ChatComposer {
                     }
                 }
             } else {
-                let title_line = Line::from(vec![
-                    Span::raw(" "),
-                    Span::styled("⏺", Style::default().fg(crate::colors::text_dim())),
-                    Span::styled(
-                        format!(" {} ", self.status_message),
-                        Style::default().fg(crate::colors::text()),
-                    ),
-                ]);
+                let title_line = Line::from(if crate::theme::is_zen_mode() {
+                    vec![
+                        Span::styled(
+                            format!(" {} ", self.status_message),
+                            Style::default().fg(crate::colors::text()),
+                        ),
+                    ]
+                } else {
+                    vec![
+                        Span::raw(" "),
+                        Span::styled("⏺", Style::default().fg(crate::colors::text_dim())),
+                        Span::styled(
+                            format!(" {} ", self.status_message),
+                            Style::default().fg(crate::colors::text()),
+                        ),
+                    ]
+                });
                 input_block = input_block.title(title_line);
             }
         }

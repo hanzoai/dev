@@ -94,6 +94,15 @@ pub(crate) enum AgentStatusKind {
 
 impl AgentStatusKind {
     fn glyph(self) -> &'static str {
+        if crate::theme::is_zen_mode() {
+            return match self {
+                AgentStatusKind::Running => "run",
+                AgentStatusKind::Completed => "ok",
+                AgentStatusKind::Failed => "err",
+                AgentStatusKind::Cancelled => "stop",
+                AgentStatusKind::Pending => "...",
+            };
+        }
         match self {
             AgentStatusKind::Running => "▶",
             AgentStatusKind::Completed => "✓",
