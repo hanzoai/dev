@@ -8,24 +8,21 @@ expression: section_open
  |    Theme              |                                                                      | |
  |    Updates            |  Current model: GPT-5.1-Codex-Max                                    | |
  |    Accounts           |  Reasoning effort: Medium                                            | |
- |    Agents             |        +------------------------------+                              | |
- |    Prompts            |  GPT-5.|Model Shortcuts               |                              | |
- |    Skills             |  Codex-|                              |fast reasoning.               | |
- |    Auto Drive         |     XHi|• Esc    Return to overview   |for complex problems          | |
- |    Review             |     Hig|• Tab    Cycle sections       |r complex problems            | |
- |    Planning           |     Med|• Shift+Tab  Cycle backwards  |nd reasoning depth for everyd | |
- |    Validation         |     Low|• ?      Toggle this help     |easoning                      | |
- |    Chrome             |        |                              |                              | |
- |    MCP                |  GPT-5.|Press Esc to close            |                              | |
- |    Notifications      |  Latest+------------------------------+s across knowledge, reasoning | |
- |    Limits             |     XHigh - Extra high reasoning depth for complex problems          | |
+ |    Agents             |                                                                      | |
+ |    Prompts            |  GPT-5.+------------------------------+                              | |
+ |    Skills             |  Codex-|Model Shortcuts               |fast reasoning.               | |
+ |    Auto Drive         |     XHi|                              |for complex problems          | |
+ |    Review             |     Hig|• Esc    Return to overview   |r complex problems            | |
+ |    Planning           |     Med|• Tab    Cycle sections       |nd reasoning depth for everyd | |
+ |    Validation         |     Low|• Shift+Tab  Cycle backwards  |easoning                      | |
+ |    Chrome             |        |• ?      Toggle this help     |                              | |
+ |    MCP                |  GPT-5.|                              |                              | |
+ |    Notifications      |  Latest|Press Esc to close            |s across knowledge, reasoning | |
+ |    Limits             |     XHi+------------------------------+for complex problems          | |
+ |                       |     High - Maximizes reasoning depth for complex or ambiguous proble | |
+ |                       |     Medium - Provides a solid balance of reasoning depth and latency | |
  |                       |                                                                      | |
  |                       +----------------------------------------------------------------------+ |
  | ↑ ↓ Move    Enter Open    Esc Close    ? Help                                                  |
  |                                                                                                |
  +------------------------------------------------------------------------------------------------+
-
-  What can I code for you today?
-
-
- Plan Mode  (Shift+Tab change)   ? for shortcuts                                           API key

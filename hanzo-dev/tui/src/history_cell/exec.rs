@@ -197,7 +197,7 @@ impl HistoryCell for ExecCell {
         HistoryCellType::Exec { kind, status }
     }
     fn gutter_symbol(&self) -> Option<&'static str> {
-        if !crate::theme::show_gutter() {
+        if crate::theme::gutter_mode() != hanzo_core::config_types::GutterMode::Full {
             return None;
         }
         match self.kind() {

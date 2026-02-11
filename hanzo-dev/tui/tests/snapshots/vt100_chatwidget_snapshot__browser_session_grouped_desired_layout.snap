@@ -3,33 +3,30 @@ source: tui/tests/vt100_chatwidget_snapshot.rs
 expression: output
 ---
 
- • Hello! How can I help you today?
+ Hello! How can I help you today?
 
 
 
- • I can help with various tasks including:
+ I can help with various tasks including:
 
-   - Writing code
-   - Reading files
-   - Running commands
-
-
- › Open docs and find login button
-
-   +- Browser (headless): example.com
-   |
-   |   Actions
-   |    MM:SS  Opened    https://example.com/docs
-   |    MM:SS  Clicked   Sign in button
-   |    MM:SS  Scrolled  dy=640
-   |    MM:SS  Typed     docs search
-   |
-   |   Console: cdp warning: Refused to load script from cdn.example.com
-   |
-   +- [Ctrl+B] View · [Esc] Stop
- • using browser  (Xs • esc to interrupt)
-
-  What can I code for you today?
+ - Writing code
+ - Reading files
+ - Running commands
 
 
- Plan Mode  (Shift+Tab change)   ? for shortcuts                       API key
+ Open docs and find login button
+
+ +- Browser (headless): example.com
+ |
+ |   Actions
+ |    MM:SS  Opened    https://example.com/docs
+ |    MM:SS  Clicked   Sign in button
+ |    MM:SS  Scrolled  dy=640
+ |    MM:SS  Typed     docs search
+ |
+ |   Console: cdp warning: Refused to load script from cdn.example.com
+ |
+ +- [Ctrl+B] View · [Esc] Stop
+
+
+Using browser (Xs • esc to interrupt)
