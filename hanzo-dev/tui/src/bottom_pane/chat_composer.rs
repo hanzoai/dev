@@ -472,12 +472,7 @@ impl ChatComposer {
         self.access_mode_label_expiry = None;
         self.access_mode_hint_expiry = None;
     }
-    pub fn set_access_mode_label_ephemeral(&mut self, label: String, dur: std::time::Duration) {
-        self.access_mode_label = Some(label);
-        let expiry = std::time::Instant::now() + dur;
-        self.access_mode_label_expiry = Some(expiry);
-        self.access_mode_hint_expiry = Some(expiry);
-    }
+
     pub fn set_access_mode_hint_for(&mut self, dur: std::time::Duration) {
         self.access_mode_hint_expiry = Some(std::time::Instant::now() + dur);
     }
@@ -528,7 +523,7 @@ impl ChatComposer {
             (ActivePopup::Command(c), _) => c.calculate_required_height(),
             (ActivePopup::File(c), _) => c.calculate_required_height(),
             (ActivePopup::None, true) => 0,
-            (ActivePopup::None, false) => 1,
+            (ActivePopup::None, false) => 0,
         };
 
         // IMPORTANT: `width` here is the full BottomPane width. Subtract the
@@ -550,7 +545,7 @@ impl ChatComposer {
             (ActivePopup::Command(popup), _) => popup.calculate_required_height(),
             (ActivePopup::File(popup), _) => popup.calculate_required_height(),
             (ActivePopup::None, true) => 0,
-            (ActivePopup::None, false) => 1,
+            (ActivePopup::None, false) => 0,
         };
         // Calculate dynamic height based on content
         let content_width = area.width.saturating_sub(4); // Account for border and padding
@@ -2290,7 +2285,7 @@ impl ChatComposer {
             (ActivePopup::Command(popup), _) => popup.calculate_required_height(),
             (ActivePopup::File(popup), _) => popup.calculate_required_height(),
             (ActivePopup::None, true) => 0,
-            (ActivePopup::None, false) => 1,
+            (ActivePopup::None, false) => 0,
         }
     }
 

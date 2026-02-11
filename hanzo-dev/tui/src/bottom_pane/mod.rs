@@ -1184,22 +1184,6 @@ impl BottomPane<'_> {
         self.request_redraw();
     }
 
-    pub(crate) fn set_access_mode_label_ephemeral(&mut self, label: String, dur: Duration) {
-        self.composer.set_access_mode_label_ephemeral(label, dur);
-        // Schedule a redraw after expiry without blocking other scheduled frames.
-        let tx = self.app_event_tx.clone();
-        let fallback_tx = self.app_event_tx.clone();
-        if thread_spawner::spawn_lightweight("access-hint-ephemeral", move || {
-            std::thread::sleep(dur + Duration::from_millis(120));
-            tx.send(AppEvent::RequestRedraw);
-        })
-        .is_none()
-        {
-            fallback_tx.send(AppEvent::RequestRedraw);
-        }
-        self.request_redraw();
-    }
-
     #[allow(dead_code)]
     fn render_auto_coordinator_footer(&self, _area: Rect, _buf: &mut Buffer) {}
 
