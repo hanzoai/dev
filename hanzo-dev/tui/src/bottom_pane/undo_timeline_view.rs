@@ -13,7 +13,6 @@ use ratatui::style::Style;
 use ratatui::text::Line;
 use ratatui::text::Span;
 use ratatui::widgets::Block;
-use ratatui::widgets::Borders;
 use ratatui::widgets::Clear;
 use ratatui::widgets::Paragraph;
 use ratatui::widgets::Widget;
@@ -441,10 +440,9 @@ impl UndoTimelineView {
         ])
         .areas(area);
 
-        let zen = crate::theme::is_zen_mode();
         let conversation_block = Block::default()
-            .borders(if zen { Borders::NONE } else { Borders::ALL })
-            .title(if zen { "" } else { " Conversation preview " })
+            .borders(crate::theme::zen_borders())
+            .title(if crate::theme::show_borders() { " Conversation preview " } else { "" })
             .border_style(Style::default().fg(crate::colors::border()))
             .style(
                 Style::default()
@@ -460,8 +458,8 @@ impl UndoTimelineView {
         conversation.render(conversation_inner, buf);
 
         let files_block = Block::default()
-            .borders(if zen { Borders::NONE } else { Borders::ALL })
-            .title(if zen { "" } else { " File changes " })
+            .borders(crate::theme::zen_borders())
+            .title(if crate::theme::show_borders() { " File changes " } else { "" })
             .border_style(Style::default().fg(crate::colors::border()))
             .style(
                 Style::default()
@@ -608,10 +606,9 @@ impl<'a> BottomPaneView<'a> for UndoTimelineView {
         }
 
         Clear.render(area, buf);
-        let zen = crate::theme::is_zen_mode();
         let block = Block::default()
-            .borders(if zen { Borders::NONE } else { Borders::ALL })
-            .title(if zen { "" } else { " Restore workspace snapshot " })
+            .borders(crate::theme::zen_borders())
+            .title(if crate::theme::show_borders() { " Restore workspace snapshot " } else { "" })
             .border_style(Style::default().fg(crate::colors::border()))
             .style(
                 Style::default()
@@ -625,8 +622,8 @@ impl<'a> BottomPaneView<'a> for UndoTimelineView {
             Layout::horizontal([Constraint::Percentage(38), Constraint::Fill(1)]).areas(inner);
 
         let list_block = Block::default()
-            .borders(if zen { Borders::NONE } else { Borders::ALL })
-            .title(if zen { "" } else { " Snapshots " })
+            .borders(crate::theme::zen_borders())
+            .title(if crate::theme::show_borders() { " Snapshots " } else { "" })
             .border_style(Style::default().fg(crate::colors::border()))
             .style(
                 Style::default()

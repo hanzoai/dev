@@ -739,7 +739,7 @@ impl ChatWidget<'_> {
         total: Duration,
     ) -> Line<'static> {
         let width = width.max(20) as usize;
-        let prefix = if crate::theme::is_zen_mode() { "" } else { "▶ " };
+        let prefix = if crate::theme::show_gutter() { "▶ " } else { "" };
         let suffix = format!(
             " {} / {}",
             self.format_overlay_mm_ss(current),
@@ -2615,7 +2615,7 @@ fn agent_status_label(status: AgentStatus) -> &'static str {
 }
 
 fn agent_status_icon(status: AgentStatus) -> &'static str {
-    if crate::theme::is_zen_mode() {
+    if !crate::theme::show_gutter() {
         return match status {
             AgentStatus::Completed => "done",
             AgentStatus::Running => "run",
@@ -8195,6 +8195,12 @@ impl ChatWidget<'_> {
             let label = if zen { "Gutter hidden" } else { "Gutter visible" };
             self.bottom_pane.flash_footer_notice(label.to_string());
             self.request_redraw();
+            // Persist zen preference to config.toml so it survives restarts.
+            if let Ok(home) = hanzo_core::config::find_code_home() {
+                if let Err(e) = hanzo_core::config::set_tui_zen_mode(&home, zen) {
+                    tracing::warn!("Failed to persist zen mode to config.toml: {e}");
+                }
+            }
             return;
         }
 
@@ -16886,9 +16892,8 @@ impl ChatWidget<'_> {
         let header_style = ratatui::style::Style::default()
             .fg(crate::colors::text())
             .add_modifier(ratatui::style::Modifier::BOLD);
-        let zen = crate::theme::is_zen_mode();
-        let chevron = if collapsed { if zen { ">" } else { "▶" } } else { if zen { "v" } else { "▼" } };
-        let title = if zen { format!("Highlights (h) {chevron} ") } else { format!("╭ Highlights (h) {chevron} ") };
+        let chevron = if collapsed { if crate::theme::show_gutter() { "▶" } else { ">" } } else { if crate::theme::show_gutter() { "▼" } else { "v" } };
+        let title = if crate::theme::show_borders() { format!("╭ Highlights (h) {chevron} ") } else { format!("Highlights (h) {chevron} ") };
         let title_width = unicode_width::UnicodeWidthStr::width(title.as_str()) as u16;
         let pad = available_width
             .saturating_sub(title_width)
@@ -27986,7 +27991,7 @@ Have we met every part of this goal and is there no further work to do?"#
             sorted_providers.sort_by(|a, b| a.0.cmp(b.0));
 
             for (id, info) in sorted_providers {
-                let marker = if id == current { if crate::theme::is_zen_mode() { "> " } else { "▶ " } } else { "  " };
+                let marker = if id == current { if crate::theme::show_gutter() { "▶ " } else { "> " } } else { "  " };
                 let base_url = info.base_url.as_deref().unwrap_or("(default)");
                 let env_key = info
                     .env_key
@@ -29004,7 +29009,7 @@ Note: Free ngrok accounts have connection limits."#;
             .collect::<Vec<_>>();
         if !streaming_lines.is_empty() {
             // Apply gutter to streaming preview (first line gets " ⏺ ", continuations get 3 spaces)
-            if !crate::theme::is_zen_mode() {
+            if crate::theme::show_borders() {
                 if let Some(first) = streaming_lines.first_mut() {
                     first.spans.insert(0, ratatui::text::Span::raw(" ⏺ "));
                 }
@@ -29473,7 +29478,6 @@ Note: Free ngrok accounts have connection limits."#;
         use ratatui::style::Modifier;
         use ratatui::style::Style;
         use ratatui::widgets::Block;
-        use ratatui::widgets::Borders;
         use ratatui::widgets::Paragraph;
 
         // Show a placeholder box with screenshot info
@@ -29486,9 +29490,9 @@ Note: Free ngrok accounts have connection limits."#;
         let placeholder_widget = Paragraph::new(placeholder_text)
             .block(
                 Block::default()
-                    .borders(if crate::theme::is_zen_mode() { Borders::NONE } else { Borders::ALL })
+                    .borders(crate::theme::zen_borders())
                     .border_style(Style::default().fg(crate::colors::info()))
-                    .title(if crate::theme::is_zen_mode() { "" } else { "Browser" })
+                    .title(if crate::theme::show_borders() { "Browser" } else { "" })
                     .style(Style::default().bg(Color::Black)),
             )
             .style(
@@ -34789,7 +34793,7 @@ impl ChatWidget<'_> {
             line.push(' ');
             line.push_str(&format!("Merge {path_text} to apply fixes."));
         }
-        if !crate::theme::is_zen_mode() {
+        if crate::theme::show_borders() {
             line.push_str(" [Ctrl+A] Show");
         }
 
@@ -37089,7 +37093,6 @@ impl ChatWidget<'_> {
         use ratatui::text::Line as RLine;
         use ratatui::text::Span;
         use ratatui::widgets::Block;
-        use ratatui::widgets::Borders;
         use ratatui::widgets::Clear;
         use ratatui::widgets::Paragraph;
         use ratatui::widgets::Widget;
@@ -37117,9 +37120,8 @@ impl ChatWidget<'_> {
         };
         Clear.render(window_area, buf);
 
-        let zen = crate::theme::is_zen_mode();
         let block = Block::default()
-            .borders(if zen { Borders::NONE } else { Borders::ALL })
+            .borders(crate::theme::zen_borders())
             .title(RLine::from(vec![
                 Span::styled(
                     format!(" {} ", self.browser_title()),
@@ -37517,7 +37519,6 @@ impl ChatWidget<'_> {
         use ratatui::text::Line;
         use ratatui::text::Span;
         use ratatui::widgets::Block;
-        use ratatui::widgets::Borders;
         use ratatui::widgets::Clear;
         use ratatui::widgets::HighlightSpacing;
         use ratatui::widgets::List;
@@ -37551,9 +37552,8 @@ impl ChatWidget<'_> {
             Span::styled(" Agents ", Style::default().fg(crate::colors::text())),
         ];
 
-        let zen = crate::theme::is_zen_mode();
         let block = Block::default()
-            .borders(if zen { Borders::NONE } else { Borders::ALL })
+            .borders(crate::theme::zen_borders())
             .title(Line::from(title_spans))
             .style(Style::default().bg(crate::colors::background()))
             .border_style(
@@ -37807,9 +37807,8 @@ impl ChatWidget<'_> {
             .highlight_style(highlight_style)
             .highlight_spacing(HighlightSpacing::Never);
 
-        let zen = crate::theme::is_zen_mode();
         let sidebar_block = Block::default()
-            .borders(if zen { Borders::NONE } else { Borders::ALL })
+            .borders(crate::theme::zen_borders())
             .style(Style::default().bg(crate::colors::background()))
             .border_style(Style::default().fg(sidebar_border_color));
 
@@ -37927,16 +37926,15 @@ impl ChatWidget<'_> {
                     let action_header_style = Style::default()
                         .fg(crate::colors::text())
                         .add_modifier(Modifier::BOLD);
-                    let zen = crate::theme::is_zen_mode();
                     let chevron = if self.agents_terminal.actions_collapsed {
-                        if zen { ">" } else { "▶" }
+                        if crate::theme::show_gutter() { "▶" } else { ">" }
                     } else {
-                        if zen { "v" } else { "▼" }
+                        if crate::theme::show_gutter() { "▼" } else { "v" }
                     };
-                    let header_text = if zen {
-                        format!("Action Log (a) {chevron} — {} entries ", entry.logs.len())
-                    } else {
+                    let header_text = if crate::theme::show_borders() {
                         format!("╭ Action Log (a) {chevron} — {} entries ", entry.logs.len())
+                    } else {
+                        format!("Action Log (a) {chevron} — {} entries ", entry.logs.len())
                     };
                     let header_width = UnicodeWidthStr::width(header_text.as_str()) as u16;
                     let pad = detail_width.saturating_sub(header_width).saturating_sub(1);
@@ -38038,7 +38036,7 @@ impl ChatWidget<'_> {
             crate::colors::border()
         };
         let history_block = Block::default()
-            .borders(if crate::theme::is_zen_mode() { Borders::NONE } else { Borders::ALL })
+            .borders(crate::theme::zen_borders())
             .border_style(Style::default().fg(detail_border_color));
 
         Paragraph::new(wrapped_lines)
@@ -38087,11 +38085,11 @@ impl ChatWidget<'_> {
                     Span::styled("[X]", Style::default().fg(crate::colors::function())),
                     Span::styled(" Stop   ", Style::default().fg(crate::colors::text_dim())),
                     Span::styled(
-                        if crate::theme::is_zen_mode() { "" } else { "[Ctrl+A]" },
+                        if crate::theme::show_gutter() { "[Ctrl+A]" } else { "" },
                         Style::default().fg(crate::colors::function()),
                     ),
                     Span::styled(
-                        if crate::theme::is_zen_mode() { "" } else { " Exit" },
+                        if crate::theme::show_gutter() { " Exit" } else { "" },
                         Style::default().fg(crate::colors::text_dim()),
                     ),
                 ])
@@ -38110,7 +38108,6 @@ impl ChatWidget<'_> {
         use ratatui::text::Span;
         use ratatui::text::Text;
         use ratatui::widgets::Block;
-        use ratatui::widgets::Borders;
         use ratatui::widgets::Paragraph;
         use ratatui::widgets::Sparkline;
         use ratatui::widgets::SparklineBar;
@@ -38126,10 +38123,9 @@ impl ChatWidget<'_> {
         let mut rendered_batches = std::collections::HashSet::new();
 
         // Agent status block
-        let zen = crate::theme::is_zen_mode();
         let agent_block = Block::default()
-            .borders(if zen { Borders::NONE } else { Borders::ALL })
-            .title(if zen { "" } else { " Agents " })
+            .borders(crate::theme::zen_borders())
+            .title(if crate::theme::show_borders() { " Agents " } else { "" })
             .border_style(Style::default().fg(crate::colors::border()));
 
         let inner_agent = agent_block.inner(area);
@@ -38182,7 +38178,7 @@ impl ChatWidget<'_> {
         // single space between dot and summary; no label/separator
         left_spans.push(Span::raw(" "));
         left_spans.push(Span::raw(summary));
-        let right_spans: Vec<Span> = if crate::theme::is_zen_mode() {
+        let right_spans: Vec<Span> = if !crate::theme::show_gutter() {
             vec![]
         } else {
             vec![
@@ -39274,7 +39270,7 @@ impl WidgetRef for &ChatWidget<'_> {
                 .cell
                 .expect("visible cell missing backing cell for render");
             // Calculate height with reduced width due to gutter
-            let gw: u16 = if crate::theme::is_zen_mode() { 0 } else { 2 };
+            let gw: u16 = crate::theme::gutter_width();
             let content_width = content_area.width.saturating_sub(gw);
             let maybe_assistant = item
                 .as_any()
@@ -39867,10 +39863,9 @@ impl WidgetRef for &ChatWidget<'_> {
             };
             Clear.render(window_area, buf);
 
-            let zen = crate::theme::is_zen_mode();
             let block = Block::default()
-                .borders(if zen { Borders::NONE } else { Borders::ALL })
-                .title(ratatui::text::Line::from(if zen {
+                .borders(crate::theme::zen_borders())
+                .title(ratatui::text::Line::from(if !crate::theme::show_borders() {
                     vec![]
                 } else {
                     vec![ratatui::text::Span::styled(
@@ -39928,8 +39923,7 @@ impl WidgetRef for &ChatWidget<'_> {
                     let mut consumed_width: usize = 0;
 
                     if overlay.running {
-                        let zen = crate::theme::is_zen_mode();
-                        if !zen {
+                        if crate::theme::show_borders() {
                             let now_ms = std::time::SystemTime::now()
                                 .duration_since(std::time::UNIX_EPOCH)
                                 .unwrap_or_default()
@@ -39964,10 +39958,10 @@ impl WidgetRef for &ChatWidget<'_> {
                         self.app_event_tx
                             .send(AppEvent::ScheduleFrameIn(Duration::from_millis(interval)));
                     } else {
-                        let zen = crate::theme::is_zen_mode();
+                        let show_icons = crate::theme::show_gutter();
                         let (icon, color, status_text) = match overlay.exit_code {
                             Some(0) => (
-                                if zen { "" } else { "✔" },
+                                if show_icons { "✔" } else { "" },
                                 crate::colors::success(),
                                 overlay
                                     .duration
@@ -39975,7 +39969,7 @@ impl WidgetRef for &ChatWidget<'_> {
                                     .unwrap_or_else(|| "Completed".to_string()),
                             ),
                             Some(code) => (
-                                if zen { "" } else { "✖" },
+                                if show_icons { "✖" } else { "" },
                                 crate::colors::error(),
                                 overlay
                                     .duration
@@ -40270,10 +40264,9 @@ impl WidgetRef for &ChatWidget<'_> {
                     ratatui::text::Span::styled("Esc", t_fg),
                     ratatui::text::Span::styled(" close ", t_dim),
                 ]);
-                let zen = crate::theme::is_zen_mode();
                 let block = Block::default()
-                    .borders(if zen { Borders::NONE } else { Borders::ALL })
-                    .title(if zen { ratatui::text::Line::from("") } else { ratatui::text::Line::from(title_spans) })
+                    .borders(crate::theme::zen_borders())
+                    .title(if crate::theme::show_borders() { ratatui::text::Line::from(title_spans) } else { ratatui::text::Line::from("") })
                     // Use normal background for the window itself so it contrasts against the
                     // dimmed scrim behind
                     .style(Style::default().bg(crate::colors::background()))
@@ -40339,7 +40332,7 @@ impl WidgetRef for &ChatWidget<'_> {
                     constraints.push(Constraint::Fill(1));
                     let chunks = Layout::horizontal(constraints).split(tabs_area);
                     // Draw a light bottom border across the entire tabs strip
-                    if !crate::theme::is_zen_mode() {
+                    if crate::theme::show_borders() {
                         let tabs_bottom_rule = Block::default()
                             .borders(Borders::BOTTOM)
                             .border_style(Style::default().fg(crate::colors::border()));
@@ -40396,7 +40389,7 @@ impl WidgetRef for &ChatWidget<'_> {
                                 width: accent_w,
                                 height: 1,
                             };
-                            if !crate::theme::is_zen_mode() {
+                            if crate::theme::show_borders() {
                                 let underline = Block::default()
                                     .borders(Borders::BOTTOM)
                                     .border_style(Style::default().fg(crate::colors::text_bright()));
@@ -40500,10 +40493,9 @@ impl WidgetRef for &ChatWidget<'_> {
                             height: h,
                         };
                         Clear.render(dialog, buf);
-                        let zen = crate::theme::is_zen_mode();
                         let dlg_block = Block::default()
-                            .borders(if zen { Borders::NONE } else { Borders::ALL })
-                            .title(if zen { "" } else { "Confirm Undo" })
+                            .borders(crate::theme::zen_borders())
+                            .title(if crate::theme::show_borders() { "Confirm Undo" } else { "" })
                             .style(
                                 Style::default()
                                     .bg(crate::colors::background())
@@ -40557,10 +40549,9 @@ impl WidgetRef for &ChatWidget<'_> {
                         height: history_area.height,
                     };
                     Clear.render(window_area, buf);
-                    let zen = crate::theme::is_zen_mode();
                     let block = Block::default()
-                        .borders(if zen { Borders::NONE } else { Borders::ALL })
-                        .title(ratatui::text::Line::from(if zen {
+                        .borders(crate::theme::zen_borders())
+                        .title(ratatui::text::Line::from(if !crate::theme::show_borders() {
                             vec![]
                         } else {
                             vec![
@@ -41112,15 +41103,14 @@ fn render_text_box(
     lines: Vec<RtLine<'static>>,
     buf: &mut Buffer,
 ) {
-    let zen = crate::theme::is_zen_mode();
     let block = Block::default()
-        .borders(if zen { Borders::NONE } else { Borders::ALL })
+        .borders(crate::theme::zen_borders())
         .style(Style::default().bg(crate::colors::background()))
         .border_style(Style::default().fg(border_color))
-        .title(if zen {
-            ratatui::text::Span::styled("", Style::default())
-        } else {
+        .title(if crate::theme::show_borders() {
             ratatui::text::Span::styled(title.to_string(), Style::default().fg(border_color))
+        } else {
+            ratatui::text::Span::styled("", Style::default())
         });
     block.render(area, buf);
 

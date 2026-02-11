@@ -153,6 +153,40 @@ pub fn is_zen_mode() -> bool {
     *ZEN_MODE.read().unwrap()
 }
 
+// ── Theme layout accessors ──────────────────────────────────────────────
+// These read directly from the current Theme struct so that callers don't
+// need to check `is_zen_mode()` and re-derive layout decisions themselves.
+
+/// Whether decorative borders should be drawn (driven by theme engine).
+pub fn show_borders() -> bool {
+    CURRENT_THEME.read().unwrap().show_borders
+}
+
+/// Whether gutter symbols (▶, ⏺, etc.) should be drawn.
+pub fn show_gutter() -> bool {
+    CURRENT_THEME.read().unwrap().show_gutter
+}
+
+/// Width in columns of the gutter prefix area (0 when hidden).
+pub fn gutter_width() -> u16 {
+    if CURRENT_THEME.read().unwrap().show_gutter { 2 } else { 0 }
+}
+
+/// Content padding (horizontal inset from container edges).
+pub fn content_padding() -> u16 {
+    CURRENT_THEME.read().unwrap().content_padding
+}
+
+/// Returns `Borders::ALL` or `Borders::NONE` based on theme.
+pub fn zen_borders() -> ratatui::widgets::Borders {
+    if show_borders() { ratatui::widgets::Borders::ALL } else { ratatui::widgets::Borders::NONE }
+}
+
+/// Returns `Borders::LEFT` or `Borders::NONE` based on theme.
+pub fn zen_left_borders() -> ratatui::widgets::Borders {
+    if show_borders() { ratatui::widgets::Borders::LEFT } else { ratatui::widgets::Borders::NONE }
+}
+
 /// Toggle zen mode on/off at runtime. Returns the new state.
 pub fn toggle_zen_mode() -> bool {
     let mut zen = ZEN_MODE.write().unwrap();

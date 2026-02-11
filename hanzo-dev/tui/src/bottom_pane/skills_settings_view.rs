@@ -17,7 +17,6 @@ use ratatui::style::Style;
 use ratatui::text::Line;
 use ratatui::text::Span;
 use ratatui::widgets::Block;
-use ratatui::widgets::Borders;
 use ratatui::widgets::Paragraph;
 use ratatui::widgets::Wrap;
 use std::fs;
@@ -245,9 +244,8 @@ impl SkillsSettingsView {
             .alignment(Alignment::Left)
             .style(Style::default().bg(colors::background()));
 
-        let zen = crate::theme::is_zen_mode();
         let outer = Block::default()
-            .borders(if zen { Borders::NONE } else { Borders::ALL })
+            .borders(crate::theme::zen_borders())
             .style(Style::default().bg(colors::background()));
         let inner = outer.inner(area);
         outer.render(area, buf);
@@ -261,10 +259,9 @@ impl SkillsSettingsView {
     }
 
     fn render_form(&self, area: Rect, buf: &mut Buffer) {
-        let zen = crate::theme::is_zen_mode();
         let outer = Block::default()
-            .borders(if zen { Borders::NONE } else { Borders::ALL })
-            .title(if zen { "" } else { "Skill" })
+            .borders(crate::theme::zen_borders())
+            .title(if crate::theme::show_borders() { "Skill" } else { "" })
             .style(Style::default().bg(colors::background()));
         let inner = outer.inner(area);
         outer.render(area, buf);

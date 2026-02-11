@@ -20,7 +20,6 @@ use ratatui::style::Style;
 use ratatui::text::Line;
 use ratatui::text::Span;
 use ratatui::widgets::Block;
-use ratatui::widgets::Borders;
 use ratatui::widgets::Clear;
 use ratatui::widgets::Paragraph;
 use ratatui::widgets::Widget;
@@ -462,16 +461,15 @@ impl LoginAccountsState {
 
     fn render(&self, area: Rect, buf: &mut Buffer) {
         Clear.render(area, buf);
-        let zen = crate::theme::is_zen_mode();
         let block = Block::default()
-            .borders(if zen { Borders::NONE } else { Borders::ALL })
+            .borders(crate::theme::zen_borders())
             .border_style(Style::default().fg(crate::colors::border()))
             .style(
                 Style::default()
                     .bg(crate::colors::background())
                     .fg(crate::colors::text()),
             )
-            .title(if zen { "" } else { " Manage Accounts " })
+            .title(if crate::theme::show_borders() { " Manage Accounts " } else { "" })
             .title_alignment(Alignment::Center);
         let inner = block.inner(area);
         block.render(area, buf);
@@ -872,16 +870,15 @@ impl LoginAddAccountState {
 
     fn render(&self, area: Rect, buf: &mut Buffer) {
         Clear.render(area, buf);
-        let zen = crate::theme::is_zen_mode();
         let block = Block::default()
-            .borders(if zen { Borders::NONE } else { Borders::ALL })
+            .borders(crate::theme::zen_borders())
             .border_style(Style::default().fg(crate::colors::border()))
             .style(
                 Style::default()
                     .bg(crate::colors::background())
                     .fg(crate::colors::text()),
             )
-            .title(if zen { "" } else { " Add Account " })
+            .title(if crate::theme::show_borders() { " Add Account " } else { "" })
             .title_alignment(Alignment::Center);
         let inner = block.inner(area);
         block.render(area, buf);
