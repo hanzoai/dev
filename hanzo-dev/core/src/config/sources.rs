@@ -119,6 +119,9 @@ pub fn write_global_mcp_servers(
                         entry["bearer_token"] = toml_edit::value(token.clone());
                     }
                 }
+                McpServerTransportConfig::Zap { url } => {
+                    entry["url"] = toml_edit::value(url.clone());
+                }
             }
 
             if let Some(timeout) = config.startup_timeout_sec {
@@ -353,6 +356,8 @@ pub fn set_tui_theme_name(code_home: &Path, theme: ThemeName) -> anyhow::Result<
         ThemeName::DarkCharcoalRainbow => "dark-charcoal-rainbow",
         ThemeName::DarkZenGarden => "dark-zen-garden",
         ThemeName::DarkPaperLightPro => "dark-paper-light-pro",
+        ThemeName::DarkCode => "dark-code",
+        ThemeName::DarkCodex => "dark-codex",
         ThemeName::DarkMonochrome => "dark-monochrome",
         ThemeName::Custom => "custom",
     };
@@ -1265,14 +1270,20 @@ pub fn list_mcp_servers(
                         env,
                     }
                 } else if let Some(url) = t.get("url").and_then(|v| v.as_str()) {
-                    let bearer_token = t
-                        .get("bearer_token")
-                        .and_then(|v| v.as_str())
-                        .map(std::string::ToString::to_string);
+                    if url.starts_with("zap://") || url.starts_with("zaps://") {
+                        McpServerTransportConfig::Zap {
+                            url: url.to_string(),
+                        }
+                    } else {
+                        let bearer_token = t
+                            .get("bearer_token")
+                            .and_then(|v| v.as_str())
+                            .map(std::string::ToString::to_string);
 
-                    McpServerTransportConfig::StreamableHttp {
-                        url: url.to_string(),
-                        bearer_token,
+                        McpServerTransportConfig::StreamableHttp {
+                            url: url.to_string(),
+                            bearer_token,
+                        }
                     }
                 } else {
                     continue;
@@ -1389,6 +1400,9 @@ pub fn add_mcp_server(code_home: &Path, name: &str, cfg: McpServerConfig) -> any
             if let Some(token) = bearer_token {
                 server_tbl.insert("bearer_token", toml_edit::value(token));
             }
+        }
+        McpServerTransportConfig::Zap { url } => {
+            server_tbl.insert("url", toml_edit::value(url));
         }
     }
 

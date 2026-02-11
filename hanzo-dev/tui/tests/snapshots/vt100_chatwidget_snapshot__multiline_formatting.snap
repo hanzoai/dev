@@ -2,26 +2,22 @@
 source: tui/tests/vt100_chatwidget_snapshot.rs
 expression: output
 ---
-
- • I can help with various tasks including:
-
-   - Writing code
-   - Reading files
-   - Running commands
+ Hello! How can I help you today?
 
 
 
- • Here's a simple function:
+ I can help with various tasks including:
 
-   + rust ----------------------------+
-   |  fn hello() {                    |
-   |      println!("Hello, world!");  |
-   |  }                               |
-   +----------------------------------+
+ - Writing code
+ - Reading files
+ - Running commands
 
 
 
-  What can I code for you today?
+ Here's a simple function:
 
-
- Plan Mode  (Shift+Tab change)   ? for shortcuts                       API key
+ + rust ----------------------------+
+ |  fn hello() {                    |
+ |      println!("Hello, world!");  |
+ |  }                               |
+ +----------------------------------+

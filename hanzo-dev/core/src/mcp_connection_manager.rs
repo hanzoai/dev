@@ -141,6 +141,7 @@ struct ManagedClient {
 #[derive(Clone)]
 enum McpClientAdapter {
     Rmcp(Arc<RmcpClient>),
+    Zap(Arc<tokio::sync::Mutex<hanzo_zap::Client>>),
 }
 
 impl McpClientAdapter {
@@ -170,6 +171,16 @@ impl McpClientAdapter {
         Ok(McpClientAdapter::Rmcp(client))
     }
 
+    async fn new_zap_client(url: String, startup_timeout: Duration) -> Result<Self> {
+        let client = tokio::time::timeout(
+            startup_timeout,
+            hanzo_zap::Client::connect(&url),
+        )
+        .await
+        .map_err(|_| anyhow!("ZAP connection to {url} timed out after {startup_timeout:?}"))??;
+        Ok(McpClientAdapter::Zap(Arc::new(tokio::sync::Mutex::new(client))))
+    }
+
     async fn list_tools(
         &self,
         params: Option<mcp_types::ListToolsRequestParams>,
@@ -177,6 +188,24 @@ impl McpClientAdapter {
     ) -> Result<mcp_types::ListToolsResult> {
         match self {
             McpClientAdapter::Rmcp(client) => client.list_tools(params, timeout).await,
+            McpClientAdapter::Zap(client) => {
+                let _ = params;
+                let fut = async {
+                    let mut guard = client.lock().await;
+                    guard.list_tools().await
+                };
+                let zap_tools = match timeout {
+                    Some(t) => tokio::time::timeout(t, fut)
+                        .await
+                        .map_err(|_| anyhow!("ZAP list_tools timed out"))??,
+                    None => fut.await?,
+                };
+                let tools = zap_tools.into_iter().map(zap_tool_to_mcp).collect();
+                Ok(mcp_types::ListToolsResult {
+                    tools,
+                    next_cursor: None,
+                })
+            }
         }
     }
 
@@ -188,6 +217,20 @@ impl McpClientAdapter {
     ) -> Result<mcp_types::CallToolResult> {
         match self {
             McpClientAdapter::Rmcp(client) => client.call_tool(name, arguments, timeout).await,
+            McpClientAdapter::Zap(client) => {
+                let args = arguments.unwrap_or(serde_json::Value::Object(Default::default()));
+                let fut = async {
+                    let mut guard = client.lock().await;
+                    guard.call_tool(&name, args).await
+                };
+                let result = match timeout {
+                    Some(t) => tokio::time::timeout(t, fut)
+                        .await
+                        .map_err(|_| anyhow!("ZAP call_tool timed out"))?,
+                    None => fut.await,
+                }?;
+                Ok(zap_result_to_mcp(result))
+            }
         }
     }
 
@@ -195,6 +238,14 @@ impl McpClientAdapter {
         match self {
             McpClientAdapter::Rmcp(client) => {
                 client.shutdown().await;
+            }
+            McpClientAdapter::Zap(client) => {
+                if let Ok(guard) = Arc::try_unwrap(client) {
+                    let client = guard.into_inner();
+                    if let Err(e) = client.close().await {
+                        warn!("ZAP client close error: {e:#}");
+                    }
+                }
             }
         }
     }
@@ -306,6 +357,15 @@ impl McpConnectionManager {
                             startup_timeout,
                         )
                         .await
+                    }
+                    McpServerTransportConfig::Zap { url } => {
+                        McpClientAdapter::new_zap_client(url, startup_timeout)
+                            .await
+                            .with_context(|| {
+                                format!(
+                                    "failed to connect to ZAP server `{server_name_for_error}`"
+                                )
+                            })
                     }
                 }
                 .map(|c| (c, startup_timeout));
@@ -470,6 +530,67 @@ async fn list_all_tools(
     );
 
     aggregated
+}
+
+/// Convert a ZAP tool definition into an MCP tool definition.
+fn zap_tool_to_mcp(tool: hanzo_zap::Tool) -> mcp_types::Tool {
+    // The ZAP `input_schema` is a serde_json::Value; MCP expects a
+    // `ToolInputSchema` with explicit `type`, `properties`, and `required` fields.
+    let (r#type, properties, required) = match tool.input_schema {
+        serde_json::Value::Object(ref map) => {
+            let t = map
+                .get("type")
+                .and_then(|v| v.as_str())
+                .unwrap_or("object")
+                .to_string();
+            let props = map.get("properties").cloned();
+            let req = map.get("required").and_then(|v| {
+                v.as_array().map(|arr| {
+                    arr.iter()
+                        .filter_map(|s| s.as_str().map(String::from))
+                        .collect::<Vec<_>>()
+                })
+            });
+            (t, props, req)
+        }
+        _ => ("object".to_string(), None, None),
+    };
+
+    mcp_types::Tool {
+        name: tool.name,
+        description: Some(tool.description),
+        input_schema: mcp_types::ToolInputSchema {
+            r#type,
+            properties,
+            required,
+        },
+        annotations: None,
+        output_schema: None,
+        title: None,
+    }
+}
+
+/// Convert a ZAP tool result into an MCP call-tool result.
+fn zap_result_to_mcp(result: hanzo_zap::ToolResult) -> mcp_types::CallToolResult {
+    let text = match &result.content {
+        serde_json::Value::String(s) => s.clone(),
+        other => other.to_string(),
+    };
+    mcp_types::CallToolResult {
+        content: vec![mcp_types::ContentBlock::TextContent(
+            mcp_types::TextContent {
+                text,
+                annotations: None,
+                r#type: "text".to_string(),
+            },
+        )],
+        is_error: if result.error.is_some() {
+            Some(true)
+        } else {
+            None
+        },
+        structured_content: None,
+    }
 }
 
 fn is_valid_mcp_server_name(server_name: &str) -> bool {

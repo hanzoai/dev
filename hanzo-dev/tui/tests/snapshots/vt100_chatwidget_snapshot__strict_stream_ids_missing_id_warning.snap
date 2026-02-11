@@ -2,14 +2,11 @@
 source: tui/tests/vt100_chatwidget_snapshot.rs
 expression: output
 ---
-   - Writing code
-   - Reading files
-   - Running commands
+ I can help with various tasks including:
+
+ - Writing code
+ - Reading files
+ - Running commands
 
 
- » Missing stream id for assistant answer delta
-
-  What can I code for you today?
-
-
- Plan Mode  (Shift+Tab change)   ? for shortcuts                       API key
+ Missing stream id for assistant answer delta

@@ -16,7 +16,7 @@ GitHub Releases also contain a [DotSlash](https://dotslash-cli.com/) shim named 
 
 ```bash
 # Clone the repository and navigate to the workspace root.
-git clone https://github.com/just-every/code.git
+git clone https://github.com/hanzoai/dev.git
 cd code
 
 # Install the Rust toolchain, if necessary.

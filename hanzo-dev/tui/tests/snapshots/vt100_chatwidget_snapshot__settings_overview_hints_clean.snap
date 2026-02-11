@@ -15,11 +15,8 @@ expression: output
  |                                                                                                |
  |                                                                                                |
 
+ |   Accounts           Auto-switch: On · API key fallback: Off                                   |
+ |   + Configure account switching behavior under rate and usage limits.                          |
  | ↑ ↓ Move    Enter Open    Esc Close    ? Help                                                  |
  |                                                                                                |
  +------------------------------------------------------------------------------------------------+
-
-  What can I code for you today?
-
-
- Plan Mode  (Shift+Tab change)   ? for shortcuts                                           API key
