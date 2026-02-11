@@ -956,7 +956,8 @@ pub struct ThemeConfig {
 
     /// Zen mode: hides gutter icons (▶ ⏺ etc), removes gutter indent so text
     /// sits flush left, and hides decorative borders for a minimal UI.
-    #[serde(default)]
+    /// Defaults to true for a clean, minimal look out of the box.
+    #[serde(default = "default_zen")]
     pub zen: bool,
 }
 
@@ -971,6 +972,10 @@ pub struct SpinnerSelection {
     /// Custom spinner definitions saved by the user
     #[serde(default)]
     pub custom: std::collections::HashMap<String, CustomSpinner>,
+}
+
+fn default_zen() -> bool {
+    true
 }
 
 fn default_spinner_name() -> String {

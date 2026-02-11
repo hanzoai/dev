@@ -106,7 +106,8 @@ impl AssistantMarkdownCell {
         } else {
             crate::colors::assistant_bg()
         };
-        let bg_style = Style::default().bg(cell_bg);
+        // Dim assistant text so it contrasts with brighter human input
+        let bg_style = Style::default().bg(cell_bg).fg(crate::colors::text_dim());
         fill_rect(buf, area, Some(' '), bg_style);
 
         if area.width == 0 || area.height == 0 {
