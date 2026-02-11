@@ -245,8 +245,9 @@ impl SkillsSettingsView {
             .alignment(Alignment::Left)
             .style(Style::default().bg(colors::background()));
 
+        let zen = crate::theme::is_zen_mode();
         let outer = Block::default()
-            .borders(Borders::ALL)
+            .borders(if zen { Borders::NONE } else { Borders::ALL })
             .style(Style::default().bg(colors::background()));
         let inner = outer.inner(area);
         outer.render(area, buf);
@@ -260,9 +261,10 @@ impl SkillsSettingsView {
     }
 
     fn render_form(&self, area: Rect, buf: &mut Buffer) {
+        let zen = crate::theme::is_zen_mode();
         let outer = Block::default()
-            .borders(Borders::ALL)
-            .title("Skill")
+            .borders(if zen { Borders::NONE } else { Borders::ALL })
+            .title(if zen { "" } else { "Skill" })
             .style(Style::default().bg(colors::background()));
         let inner = outer.inner(area);
         outer.render(area, buf);

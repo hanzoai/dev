@@ -39804,14 +39804,17 @@ impl WidgetRef for &ChatWidget<'_> {
             };
             Clear.render(window_area, buf);
 
+            let zen = crate::theme::is_zen_mode();
             let block = Block::default()
-                .borders(Borders::ALL)
-                .title(ratatui::text::Line::from(vec![
-                    ratatui::text::Span::styled(
+                .borders(if zen { Borders::NONE } else { Borders::ALL })
+                .title(ratatui::text::Line::from(if zen {
+                    vec![]
+                } else {
+                    vec![ratatui::text::Span::styled(
                         format!(" Terminal - {} ", overlay.title),
                         Style::default().fg(crate::colors::text()),
-                    ),
-                ]))
+                    )]
+                }))
                 .style(Style::default().bg(crate::colors::background()))
                 .border_style(
                     Style::default()
@@ -40200,9 +40203,10 @@ impl WidgetRef for &ChatWidget<'_> {
                     ratatui::text::Span::styled("Esc", t_fg),
                     ratatui::text::Span::styled(" close ", t_dim),
                 ]);
+                let zen = crate::theme::is_zen_mode();
                 let block = Block::default()
-                    .borders(Borders::ALL)
-                    .title(ratatui::text::Line::from(title_spans))
+                    .borders(if zen { Borders::NONE } else { Borders::ALL })
+                    .title(if zen { ratatui::text::Line::from("") } else { ratatui::text::Line::from(title_spans) })
                     // Use normal background for the window itself so it contrasts against the
                     // dimmed scrim behind
                     .style(Style::default().bg(crate::colors::background()))
@@ -40268,10 +40272,12 @@ impl WidgetRef for &ChatWidget<'_> {
                     constraints.push(Constraint::Fill(1));
                     let chunks = Layout::horizontal(constraints).split(tabs_area);
                     // Draw a light bottom border across the entire tabs strip
-                    let tabs_bottom_rule = Block::default()
-                        .borders(Borders::BOTTOM)
-                        .border_style(Style::default().fg(crate::colors::border()));
-                    tabs_bottom_rule.render(tabs_area, buf);
+                    if !crate::theme::is_zen_mode() {
+                        let tabs_bottom_rule = Block::default()
+                            .borders(Borders::BOTTOM)
+                            .border_style(Style::default().fg(crate::colors::border()));
+                        tabs_bottom_rule.render(tabs_area, buf);
+                    }
                     for i in 0..labels.len() {
                         // last chunk is filler; guard below
                         if i >= chunks.len().saturating_sub(1) {
@@ -40323,10 +40329,12 @@ impl WidgetRef for &ChatWidget<'_> {
                                 width: accent_w,
                                 height: 1,
                             };
-                            let underline = Block::default()
-                                .borders(Borders::BOTTOM)
-                                .border_style(Style::default().fg(crate::colors::text_bright()));
-                            underline.render(accent_rect, buf);
+                            if !crate::theme::is_zen_mode() {
+                                let underline = Block::default()
+                                    .borders(Borders::BOTTOM)
+                                    .border_style(Style::default().fg(crate::colors::text_bright()));
+                                underline.render(accent_rect, buf);
+                            }
                         }
                     }
                 } else {
@@ -40425,9 +40433,10 @@ impl WidgetRef for &ChatWidget<'_> {
                             height: h,
                         };
                         Clear.render(dialog, buf);
+                        let zen = crate::theme::is_zen_mode();
                         let dlg_block = Block::default()
-                            .borders(Borders::ALL)
-                            .title("Confirm Undo")
+                            .borders(if zen { Borders::NONE } else { Borders::ALL })
+                            .title(if zen { "" } else { "Confirm Undo" })
                             .style(
                                 Style::default()
                                     .bg(crate::colors::background())
@@ -40481,9 +40490,13 @@ impl WidgetRef for &ChatWidget<'_> {
                         height: history_area.height,
                     };
                     Clear.render(window_area, buf);
+                    let zen = crate::theme::is_zen_mode();
                     let block = Block::default()
-                        .borders(Borders::ALL)
-                        .title(ratatui::text::Line::from(vec![
+                        .borders(if zen { Borders::NONE } else { Borders::ALL })
+                        .title(ratatui::text::Line::from(if zen {
+                            vec![]
+                        } else {
+                            vec![
                             ratatui::text::Span::styled(
                                 " ",
                                 Style::default().fg(crate::colors::text_dim()),
@@ -40504,7 +40517,7 @@ impl WidgetRef for &ChatWidget<'_> {
                                 " close ",
                                 Style::default().fg(crate::colors::text_dim()),
                             ),
-                        ]))
+                        ]}))
                         .style(Style::default().bg(crate::colors::background()))
                         .border_style(
                             Style::default()
@@ -41032,14 +41045,16 @@ fn render_text_box(
     lines: Vec<RtLine<'static>>,
     buf: &mut Buffer,
 ) {
+    let zen = crate::theme::is_zen_mode();
     let block = Block::default()
-        .borders(Borders::ALL)
+        .borders(if zen { Borders::NONE } else { Borders::ALL })
         .style(Style::default().bg(crate::colors::background()))
         .border_style(Style::default().fg(border_color))
-        .title(ratatui::text::Span::styled(
-            title.to_string(),
-            Style::default().fg(border_color),
-        ));
+        .title(if zen {
+            ratatui::text::Span::styled("", Style::default())
+        } else {
+            ratatui::text::Span::styled(title.to_string(), Style::default().fg(border_color))
+        });
     block.render(area, buf);
 
     let inner = area.inner(ratatui::layout::Margin::new(1, 1));
