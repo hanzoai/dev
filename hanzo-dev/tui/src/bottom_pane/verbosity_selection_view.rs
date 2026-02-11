@@ -10,7 +10,6 @@ use ratatui::style::Style;
 use ratatui::text::Line;
 use ratatui::text::Span;
 use ratatui::widgets::Block;
-use ratatui::widgets::Borders;
 use ratatui::widgets::Clear;
 use ratatui::widgets::Paragraph;
 use ratatui::widgets::Widget;
@@ -130,16 +129,15 @@ impl<'a> BottomPaneView<'a> for VerbositySelectionView {
         Clear.render(area, buf);
 
         // Create a centered box with theme-aware styling
-        let zen = crate::theme::is_zen_mode();
         let block = Block::default()
-            .borders(if zen { Borders::NONE } else { Borders::ALL })
+            .borders(crate::theme::zen_borders())
             .border_style(Style::default().fg(crate::colors::border()))
             .style(
                 Style::default()
                     .bg(crate::colors::background())
                     .fg(crate::colors::text()),
             )
-            .title(if zen { "" } else { " Select Text Verbosity " })
+            .title(if crate::theme::show_borders() { " Select Text Verbosity " } else { "" })
             .title_alignment(Alignment::Center);
 
         let inner_area = block.inner(area);

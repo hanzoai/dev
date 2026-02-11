@@ -86,6 +86,7 @@ pub use sources::set_review_model;
 pub use sources::set_review_resolve_model;
 pub use sources::set_tui_alternate_screen;
 pub use sources::set_tui_auto_review_enabled;
+pub use sources::set_tui_zen_mode;
 pub use sources::set_tui_notifications;
 pub use sources::set_tui_review_auto_resolve;
 pub use sources::set_tui_spinner_name;
