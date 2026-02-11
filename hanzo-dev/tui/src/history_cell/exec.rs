@@ -198,6 +198,9 @@ impl HistoryCell for ExecCell {
         HistoryCellType::Exec { kind, status }
     }
     fn gutter_symbol(&self) -> Option<&'static str> {
+        if crate::theme::is_zen_mode() {
+            return None;
+        }
         match self.kind() {
             HistoryCellType::Exec {
                 kind: ExecKind::Run,

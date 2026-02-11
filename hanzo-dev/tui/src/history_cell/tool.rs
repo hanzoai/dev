@@ -259,6 +259,7 @@ impl HistoryCell for RunningToolCallCell {
     }
 
     fn gutter_symbol(&self) -> Option<&'static str> {
+        if crate::theme::is_zen_mode() { return None; }
         if self.state.title == "Waiting" {
             if self.state.wait_has_call_id {
                 None
