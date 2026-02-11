@@ -167,7 +167,14 @@ impl PlainHistoryCell {
             _ if is_auto_review => Self::auto_review_bg(),
             _ => crate::colors::background(),
         };
-        let bg_style = Style::default().bg(cell_bg).fg(crate::colors::text());
+        // User messages get bright text so they stand out from assistant (dim)
+        // and status (dim) text.
+        let cell_fg = if matches!(self.state.kind, HistoryCellType::User) {
+            crate::colors::text_bright()
+        } else {
+            crate::colors::text()
+        };
+        let bg_style = Style::default().bg(cell_bg).fg(cell_fg);
 
         let trimmed_lines = self.display_lines_trimmed();
         let text = Text::from(trimmed_lines.clone());
@@ -204,7 +211,7 @@ impl PlainHistoryCell {
             &mut buffer,
             render_area,
             Some(' '),
-            Style::default().bg(cell_bg).fg(crate::colors::text()),
+            Style::default().bg(cell_bg).fg(cell_fg),
         );
 
         let paragraph_lines = Text::from(trimmed_lines);
