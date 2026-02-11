@@ -50,7 +50,7 @@ impl StatusIndicatorWidget {
 
     pub fn desired_height(&self, width: u16) -> u16 {
         let inner_width = width.max(1) as usize;
-        let mut total: u16 = 1; // status line
+        let mut total: u16 = 2; // leading blank row + status line
         if !self.queued_messages.is_empty() {
             total = total.saturating_add(1);
         }
@@ -222,8 +222,9 @@ impl WidgetRef for StatusIndicatorWidget {
         );
         spans.push(Span::raw(" to interrupt)").style(secondary));
 
-        // Build lines
+        // Build lines — leading blank row separates status from history above
         let mut lines: Vec<Line<'static>> = Vec::new();
+        lines.push(Line::from(""));
         lines.push(Line::from(spans));
         if !self.queued_messages.is_empty() {
             lines.push(Line::from(""));
