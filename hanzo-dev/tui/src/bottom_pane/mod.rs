@@ -172,8 +172,7 @@ pub(crate) struct BottomPaneParams {
 }
 
 impl BottomPane<'_> {
-    // Reduce bottom padding so footer sits one line lower
-    const BOTTOM_PAD_LINES: u16 = 1;
+    const BOTTOM_PAD_LINES: u16 = 0;
     pub fn new(params: BottomPaneParams) -> Self {
         let enhanced_keys_supported = params.enhanced_keys_supported;
         let composer = ChatComposer::new(

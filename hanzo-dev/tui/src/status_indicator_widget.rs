@@ -174,7 +174,7 @@ impl WidgetRef for StatusIndicatorWidget {
         // Build header spans using theme colors (no terminal-default cyan/dim)
         let mut spans = vec![
             ratatui::text::Span::raw(" "),
-            ratatui::text::Span::raw("⏺ ").style(secondary),
+            ratatui::text::Span::raw(if crate::theme::is_zen_mode() { "" } else { "⏺ " }).style(secondary),
             ratatui::text::Span::styled(
                 self.header.clone(),
                 Style::default().fg(accent).add_modifier(Modifier::BOLD),
