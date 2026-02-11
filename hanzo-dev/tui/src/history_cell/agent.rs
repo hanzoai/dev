@@ -600,7 +600,9 @@ impl AgentRunCell {
             )
         });
 
-        let text_value = if has_running_agents {
+        let text_value = if crate::theme::is_zen_mode() {
+            if has_running_agents { " [Esc] Stop".to_string() } else { String::new() }
+        } else if has_running_agents {
             " [Ctrl+A] Expand · [Esc] Stop".to_string()
         } else {
             " [Ctrl+A] Expand".to_string()

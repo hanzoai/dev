@@ -1343,10 +1343,11 @@ impl BrowserSessionCell {
             .unwrap_or("screenshot");
         let placeholder_text = format!("Screenshot:\n{}", filename);
 
+        let zen = crate::theme::is_zen_mode();
         let block = Block::default()
-            .borders(Borders::ALL)
+            .borders(if zen { Borders::NONE } else { Borders::ALL })
             .border_style(Style::default().fg(colors::info()))
-            .title("Browser")
+            .title(if zen { "" } else { "Browser" })
             .style(Style::default().bg(Color::Black));
         let inner = block.inner(area);
         block.render(area, buf);
