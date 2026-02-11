@@ -1,10 +1,11 @@
-# Rust/codex-rs
+# Rust/hanzo-dev
 
-In the codex-rs folder where the rust code lives:
+The primary Rust workspace lives in `hanzo-dev/`:
 
-- Crate names are prefixed with `codex-`. For example, the `core` folder's crate is named `codex-core`
+- Crate names are prefixed with `hanzo-`. For example, the `core` folder's crate is named `hanzo-core`
+- The CLI binary is named `dev` (crate: `hanzo-dev`)
 - When using format! and you can inline variables into {}, always do that.
-- Treat `codex-rs` as a read-only mirror of `openai/codex:main`; edit Rust sources under `code-rs` instead.
+- Treat `codex-rs` as a read-only mirror of `openai/codex:main`; edit Rust sources under `hanzo-dev/` instead.
 
 Completion/build step
 
@@ -18,7 +19,7 @@ Completion/build step
 Optional regression checks (recommended when touching the Rust workspace):
 
 - `cargo nextest run --no-fail-fast` — runs all workspace tests with the TUI helpers automatically enabled. The suite is green after the resume fixtures/git-init fallback updates; older Git builds may print a warning when falling back from `--initial-branch`, but tests still pass.
-- Focused sweeps stay quick and green: `cargo test -p code-tui --features test-helpers`, `cargo test -p code-cloud-tasks --tests`, and `cargo test -p mcp-types --tests`.
+- Focused sweeps stay quick and green: `cargo test -p hanzo-tui --features test-helpers`, `cargo test -p hanzo-cloud-tasks --tests`, and `cargo test -p mcp-types --tests`.
 
 When debugging regressions or bugs, write a failing test (or targeted reproduction script) first and confirm it captures the issue before touching code—if it can’t fail, you can’t be confident the fix works.
 
@@ -103,12 +104,12 @@ This architecture separates concerns between execution logic (core), UI state ma
 
 ### Auto Drive Escape Handling
 
-- All Auto Drive escape routing lives in `code-rs/tui/src/chatwidget.rs`. The
+- All Auto Drive escape routing lives in `hanzo-dev/tui/src/chatwidget.rs`. The
   `ChatWidget::auto_should_handle_global_esc` helper decides whether the global
   Esc handler in `app.rs` should defer to Auto Drive, and
   `ChatWidget::handle_key_event` owns the actual stop / pause behaviour. When
   you need to tweak Esc semantics, update those two locations together.
-- The approval pane must *never* swallow Esc. `code-rs/tui/src/bottom_pane/auto_coordinator_view.rs`
+- The approval pane must *never* swallow Esc. `hanzo-dev/tui/src/bottom_pane/auto_coordinator_view.rs`
   intentionally lets Esc (and the other approval shortcuts) bubble back to the
   chat widget; keep this contract intact when editing the view layer.
 - Avoid adding additional Esc handlers elsewhere for Auto Drive flows. Doing
@@ -125,14 +126,14 @@ This architecture separates concerns between execution logic (core), UI state ma
 
 ## VT100 Snapshot Harness
 
-- The VT100 harness lives under `code-rs/tui/tests/vt100_chatwidget_snapshot.rs`. It renders the live `ChatWidget` UI into a `Terminal<VT100Backend>` so snapshots capture the exact PTY output the user sees (including frame chrome, composer rows, and streaming inserts).
+- The VT100 harness lives under `hanzo-dev/tui/tests/vt100_chatwidget_snapshot.rs`. It renders the live `ChatWidget` UI into a `Terminal<VT100Backend>` so snapshots capture the exact PTY output the user sees (including frame chrome, composer rows, and streaming inserts).
 - Use `ChatWidgetHarness` helpers from `code_tui::test_helpers` to seed history events and drain `AppEvent`s. Call `render_chat_widget_to_vt100(width, height)` for a single frame, or `render_chat_widget_frames_to_vt100(&[(w,h), ...])` to simulate successive draws while streaming.
 - The harness now exports `layout_metrics()` so tests can assert scroll offsets and viewport heights without spelunking through private fields.
 - Snapshots are deterministic: tests set `CODEX_TUI_FAKE_HOUR=12` automatically so greeting text (“What can I code for you today?”) doesn’t oscillate. If you need a different hour in a test, override the env var before constructing the harness.
 - To add a new scenario, push history/events onto the harness, call `render_*_to_vt100`, and either `insta::assert_snapshot!` the frame(s) or manually assert string contents. For multi-frame streaming, push deltas/events first, then capture frames in the order the UI would display them.
 - Run all VT100 snapshots via:
   - `cargo test -p code-tui --test vt100_chatwidget_snapshot --features test-helpers -- --nocapture`
-- When you intentionally change rendering, review the `.snap.new` files that appear in `code-rs/tui/tests/snapshots/` and accept them with `cargo insta review` / `cargo insta accept` (limit to this test where possible).
+- When you intentionally change rendering, review the `.snap.new` files that appear in `hanzo-dev/tui/tests/snapshots/` and accept them with `cargo insta review` / `cargo insta accept` (limit to this test where possible).
 
 ### Monitor Release Workflows After Pushing
 

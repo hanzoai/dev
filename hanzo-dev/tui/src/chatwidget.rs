@@ -6222,6 +6222,9 @@ impl ChatWidget<'_> {
         // Treat transient stream errors (which the core will retry) differently
         // from fatal errors so the status spinner remains visible while we wait.
         let lower = message.to_lowercase();
+        let retries_exhausted = lower.contains("exceeded retry limit")
+            || lower.contains("retries exhausted")
+            || lower.contains("retry limit reached");
         let is_transient = lower.contains("retrying")
             || lower.contains("reconnecting")
             || lower.contains("disconnected")
@@ -6234,7 +6237,7 @@ impl ChatWidget<'_> {
             || lower.contains("connection")
             || lower.contains("failed to start stream");
 
-        if is_transient {
+        if is_transient && !retries_exhausted {
             self.mark_reconnecting(message);
             return;
         }
@@ -6276,13 +6279,35 @@ impl ChatWidget<'_> {
 
     fn mark_reconnecting(&mut self, message: String) {
         // Keep task running and surface a concise status in the input header.
+        let lower = message.to_lowercase();
+        let rate_limited = lower.contains("429")
+            || lower.contains("too many requests")
+            || lower.contains("rate limit");
+        let connection_issue = lower.contains("network")
+            || lower.contains("connection")
+            || lower.contains("transport")
+            || lower.contains("failed to start stream");
+
         self.bottom_pane.set_task_running(true);
-        self.bottom_pane
-            .update_status_text("Retrying...".to_string());
+        let status = if rate_limited {
+            "Rate limited..."
+        } else if connection_issue {
+            "Reconnecting..."
+        } else {
+            "Retrying..."
+        };
+        self.bottom_pane.update_status_text(status.to_string());
 
         if !self.reconnect_notice_active {
             self.reconnect_notice_active = true;
-            self.push_background_tail(format!("Auto-retrying… ({message})"));
+            let notice = if rate_limited {
+                "Rate limit reached. Retrying automatically...".to_string()
+            } else if connection_issue {
+                "Connection issue. Retrying automatically...".to_string()
+            } else {
+                "Temporary stream issue. Retrying automatically...".to_string()
+            };
+            self.push_background_tail(notice);
         }
 
         // Do NOT clear running state or streams; the retry will resume them.
@@ -6758,6 +6783,8 @@ impl ChatWidget<'_> {
             #[cfg(any(test, feature = "test-helpers"))]
             w.seed_test_mode_greeting();
         }
+        w.bottom_pane
+            .set_has_chat_history(!w.history_cells.is_empty());
         w.maybe_start_auto_upgrade_task();
         w
     }
@@ -28891,9 +28918,9 @@ Note: Free ngrok accounts have connection limits."#;
             .map(|r| ratatui::text::Line::from(r.text))
             .collect::<Vec<_>>();
         if !streaming_lines.is_empty() {
-            // Apply gutter to streaming preview (first line gets " • ", continuations get 3 spaces)
+            // Apply gutter to streaming preview (first line gets " ⏺ ", continuations get 3 spaces)
             if let Some(first) = streaming_lines.first_mut() {
-                first.spans.insert(0, ratatui::text::Span::raw(" • "));
+                first.spans.insert(0, ratatui::text::Span::raw(" ⏺ "));
             }
             for line in streaming_lines.iter_mut().skip(1) {
                 line.spans.insert(0, ratatui::text::Span::raw("   "));
@@ -29045,25 +29072,32 @@ Note: Free ngrok accounts have connection limits."#;
 
     fn render_status_bar(&self, area: Rect, buf: &mut Buffer) {
         use crate::exec_command::relativize_to_home;
-        use ratatui::layout::Margin;
         use ratatui::style::Modifier;
         use ratatui::style::Style;
         use ratatui::text::Line;
         use ratatui::text::Span;
-        use ratatui::widgets::Block;
-        use ratatui::widgets::Borders;
         use ratatui::widgets::Paragraph;
+        use ratatui::widgets::Widget;
 
-        // Add same horizontal padding as the Message input (2 chars on each side)
-        let horizontal_padding = 1u16;
+        if area.width == 0 || area.height == 0 {
+            return;
+        }
+
+        let base_style = Style::default()
+            .bg(crate::colors::background())
+            .fg(crate::colors::text());
+        fill_rect(buf, area, Some(' '), base_style);
+
         let padded_area = Rect {
-            x: area.x + horizontal_padding,
+            x: area.x.saturating_add(1),
             y: area.y,
-            width: area.width.saturating_sub(horizontal_padding * 2),
+            width: area.width.saturating_sub(2),
             height: area.height,
         };
+        if padded_area.width == 0 || padded_area.height == 0 {
+            return;
+        }
 
-        // Get current working directory string
         let cwd_str = match relativize_to_home(&self.config.cwd) {
             Some(rel) if !rel.as_os_str().is_empty() => format!("~/{}", rel.display()),
             Some(_) => "~".to_string(),
@@ -29076,43 +29110,23 @@ Note: Free ngrok accounts have connection limits."#;
             .unwrap_or(cwd_str.as_str())
             .to_string();
 
-        // Build status line spans with dynamic elision based on width.
-        // Removal priority when space is tight:
-        //   1) Reasoning level
-        //   2) Model
-        //   3) Branch
-        //   4) Directory
         let branch_opt = self.get_git_branch();
-
-        // Helper to assemble spans based on include flags
-        let version = env!("CARGO_PKG_VERSION");
         let build_spans = |include_reasoning: bool,
                            include_model: bool,
                            include_branch: bool,
                            include_dir: bool,
                            dir_display: &str| {
-            let mut spans: Vec<Span> = Vec::new();
-            // Title with >_ prefix and version, follows theme text color
-            spans.push(Span::styled(
-                ">_ ",
-                Style::default().fg(crate::colors::text_dim()),
-            ));
-            spans.push(Span::styled(
-                format!("Hanzo Dev (v{})", version),
+            let separator = Span::styled(" | ", Style::default().fg(crate::colors::text_dim()));
+            let mut spans: Vec<Span> = vec![Span::styled(
+                "Hanzo Dev",
                 Style::default()
-                    .fg(crate::colors::text())
+                    .fg(crate::colors::text_bright())
                     .add_modifier(Modifier::BOLD),
-            ));
+            )];
 
             if include_model {
-                spans.push(Span::styled(
-                    "  •  ",
-                    Style::default().fg(crate::colors::text_dim()),
-                ));
-                spans.push(Span::styled(
-                    "Model: ",
-                    Style::default().fg(crate::colors::text_dim()),
-                ));
+                spans.push(separator.clone());
+                spans.push(Span::styled("Model ", Style::default().fg(crate::colors::text_dim())));
                 spans.push(Span::styled(
                     self.format_model_name(&self.config.model),
                     Style::default().fg(crate::colors::text()),
@@ -29120,12 +29134,9 @@ Note: Free ngrok accounts have connection limits."#;
             }
 
             if include_reasoning {
+                spans.push(separator.clone());
                 spans.push(Span::styled(
-                    "  •  ",
-                    Style::default().fg(crate::colors::text_dim()),
-                ));
-                spans.push(Span::styled(
-                    "Reasoning: ",
+                    "Reasoning ",
                     Style::default().fg(crate::colors::text_dim()),
                 ));
                 spans.push(Span::styled(
@@ -29135,14 +29146,8 @@ Note: Free ngrok accounts have connection limits."#;
             }
 
             if include_dir {
-                spans.push(Span::styled(
-                    "  •  ",
-                    Style::default().fg(crate::colors::text_dim()),
-                ));
-                spans.push(Span::styled(
-                    "Directory: ",
-                    Style::default().fg(crate::colors::text_dim()),
-                ));
+                spans.push(separator.clone());
+                spans.push(Span::styled("Dir ", Style::default().fg(crate::colors::text_dim())));
                 spans.push(Span::styled(
                     dir_display.to_string(),
                     Style::default().fg(crate::colors::text()),
@@ -29151,12 +29156,9 @@ Note: Free ngrok accounts have connection limits."#;
 
             if include_branch {
                 if let Some(branch) = &branch_opt {
+                    spans.push(separator);
                     spans.push(Span::styled(
-                        "  •  ",
-                        Style::default().fg(crate::colors::text_dim()),
-                    ));
-                    spans.push(Span::styled(
-                        "Branch: ",
+                        "Branch ",
                         Style::default().fg(crate::colors::text_dim()),
                     ));
                     spans.push(Span::styled(
@@ -29166,12 +29168,9 @@ Note: Free ngrok accounts have connection limits."#;
                 }
             }
 
-            // Footer already shows the Ctrl+R hint; avoid duplicating it here.
-
             spans
         };
 
-        // Start with all items in production; tests can opt-in to a minimal header via env flag.
         let minimal_header = std::env::var_os("HANZO_TUI_FORCE_MINIMAL_HEADER").is_some();
         let demo_mode = self.config.demo_developer_message.is_some();
         let mut include_reasoning = !minimal_header;
@@ -29187,19 +29186,9 @@ Note: Free ngrok accounts have connection limits."#;
             &cwd_str,
         );
 
-        // Now recompute exact available width inside the border + padding before measuring
-        // Render status block with border outline (no grey bg - that's only for inputs).
-        let status_block = Block::default()
-            .borders(Borders::ALL)
-            .border_type(ratatui::widgets::BorderType::Rounded)
-            .border_style(Style::default().fg(crate::colors::border_dim()));
-        let inner_area = status_block.inner(padded_area);
-        let padded_inner = inner_area.inner(Margin::new(1, 0));
-        let inner_width = padded_inner.width as usize;
-
-        // Helper to measure current spans width
+        let inner_width = padded_area.width as usize;
         let measure =
-            |spans: &Vec<Span>| -> usize { spans.iter().map(|s| s.content.chars().count()).sum() };
+            |spans: &[Span]| -> usize { spans.iter().map(|s| s.content.chars().count()).sum() };
 
         if include_dir && !use_short_dir && measure(&status_spans) > inner_width {
             use_short_dir = true;
@@ -29212,7 +29201,6 @@ Note: Free ngrok accounts have connection limits."#;
             );
         }
 
-        // Elide items in priority order until content fits
         while measure(&status_spans) > inner_width {
             if include_reasoning {
                 include_reasoning = false;
@@ -29225,6 +29213,7 @@ Note: Free ngrok accounts have connection limits."#;
             } else {
                 break;
             }
+
             status_spans = build_spans(
                 include_reasoning,
                 include_model,
@@ -29238,42 +29227,19 @@ Note: Free ngrok accounts have connection limits."#;
             );
         }
 
-        // Note: The reasoning visibility hint is appended inside `build_spans`
-        // so it participates in width measurement and elision. Do not append
-        // it again here to avoid overflow that caused corrupted glyph boxes on
-        // some terminals.
-
-        let status_line = Line::from(status_spans);
-
         let now = Instant::now();
-        let mut frame_needed = false;
         if ENABLE_WARP_STRIPES && self.header_wave.schedule_if_needed(now) {
-            frame_needed = true;
-        }
-        if frame_needed {
             self.app_event_tx
                 .send(AppEvent::ScheduleFrameIn(HeaderWaveEffect::FRAME_INTERVAL));
         }
-
-        // Render the block first
-        status_block.render(padded_area, buf);
-        let wave_enabled = self.header_wave.is_enabled();
-        if wave_enabled {
+        if self.header_wave.is_enabled() {
             self.header_wave.render(padded_area, buf, now);
         }
 
-        // Then render the text inside with padding, centered
-        let effect_enabled = wave_enabled;
-        let status_style = if effect_enabled {
-            Style::default().fg(crate::colors::text())
-        } else {
-            Style::default().fg(crate::colors::text())
-        };
-
-        let status_widget = Paragraph::new(vec![status_line])
-            .alignment(ratatui::layout::Alignment::Center)
-            .style(status_style);
-        ratatui::widgets::Widget::render(status_widget, padded_inner, buf);
+        Paragraph::new(Line::from(status_spans))
+            .style(base_style)
+            .alignment(ratatui::layout::Alignment::Left)
+            .render(padded_area, buf);
     }
 
     fn render_screenshot_highlevel(&self, path: &PathBuf, area: Rect, buf: &mut Buffer) {
@@ -39292,21 +39258,26 @@ impl WidgetRef for &ChatWidget<'_> {
             let visible_height = item_height.saturating_sub(skip_top).min(available_height);
 
             if visible_height > 0 {
-                // Define gutter width (2 chars: symbol + space)
+                // Reserve a gutter only for cells that actually render a symbol.
                 const GUTTER_WIDTH: u16 = 2;
+                let gutter_width = if item.gutter_symbol().is_some() {
+                    GUTTER_WIDTH.min(content_area.width)
+                } else {
+                    0
+                };
 
                 // Split area into gutter and content
                 let gutter_area = Rect {
                     x: content_area.x,
                     y: screen_y,
-                    width: GUTTER_WIDTH.min(content_area.width),
+                    width: gutter_width,
                     height: visible_height,
                 };
 
                 let item_area = Rect {
-                    x: content_area.x + GUTTER_WIDTH.min(content_area.width),
+                    x: content_area.x + gutter_width,
                     y: screen_y,
-                    width: content_area.width.saturating_sub(GUTTER_WIDTH),
+                    width: content_area.width.saturating_sub(gutter_width),
                     height: visible_height,
                 };
 
@@ -39467,9 +39438,9 @@ impl WidgetRef for &ChatWidget<'_> {
                         }
                     } else {
                         match symbol {
-                            "›" => crate::colors::text(),        // user
+                            "›" | "▶" => crate::colors::text(), // user
                             "⋮" => crate::colors::primary(),     // thinking
-                            "•" => crate::colors::text_bright(), // codex/agent
+                            "•" | "⏺" => crate::colors::text_bright(), // codex/agent
                             "⚙" => crate::colors::info(),        // tool working
                             "✔" => crate::colors::success(),     // tool complete
                             "✖" => crate::colors::error(),       // error

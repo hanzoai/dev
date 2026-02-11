@@ -9,9 +9,11 @@ use crate::card_theme::CardThemeDefinition;
 use crate::card_theme::GradientSpec;
 use crate::colors;
 use crate::gradient_background::GradientBackground;
+use crate::theme::current_theme_name;
 use crate::theme::PaletteMode;
 use crate::theme::palette_mode;
 use crate::util::buffer::fill_rect;
+use hanzo_core::config_types::ThemeName;
 
 #[derive(Clone, Copy)]
 pub(crate) struct CardStyle {
@@ -153,6 +155,21 @@ fn strip_ansi16_background(style: &mut CardStyle) {
 }
 
 fn style_from_theme(definition: CardThemeDefinition, is_dark: bool) -> CardStyle {
+    if matches!(current_theme_name(), ThemeName::DarkMonochrome) {
+        let bg = colors::background();
+        return CardStyle {
+            accent_fg: colors::text_dim(),
+            text_primary: colors::text(),
+            text_secondary: colors::text_dim(),
+            title_text: colors::text_bright(),
+            gradient: GradientSpec {
+                left: bg,
+                right: bg,
+                bias: 0.0,
+            },
+        };
+    }
+
     let theme = definition.theme;
     let mut text_primary = theme.palette.text;
     let mut text_secondary = theme.palette.footer;

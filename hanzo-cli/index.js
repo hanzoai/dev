@@ -108,8 +108,8 @@ function findExecutable() {
   // Check for Rust binary first
   const possiblePaths = [
     path.join(__dirname, "..", "bin", "dev"),
-    path.join(__dirname, "..", "code-rs", "target", "release", "dev"),
-    path.join(__dirname, "..", "code-rs", "target", "debug", "dev"),
+    path.join(__dirname, "..", "hanzo-dev", "target", "release", "dev"),
+    path.join(__dirname, "..", "hanzo-dev", "target", "debug", "dev"),
     // Fallback to system paths
     "/usr/local/bin/dev",
     "/opt/homebrew/bin/dev",

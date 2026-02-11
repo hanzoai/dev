@@ -11,19 +11,19 @@ if command -v git >/dev/null 2>&1; then
   fi
 fi
 
-CODE_RS_DIR="$ROOT_DIR/code-rs"
+HANZO_DEV_DIR="$ROOT_DIR/hanzo-dev"
 FORBIDDEN_DIR="$ROOT_DIR/codex-rs"
 
-if [[ ! -d "$CODE_RS_DIR" || ! -d "$FORBIDDEN_DIR" ]]; then
-  echo "ERROR: Expected both code-rs/ and codex-rs/ to exist next to this script." >&2
+if [[ ! -d "$HANZO_DEV_DIR" || ! -d "$FORBIDDEN_DIR" ]]; then
+  echo "ERROR: Expected both hanzo-dev/ and codex-rs/ to exist next to this script." >&2
   exit 1
 fi
 
 violations=0
 
-echo "Scanning Cargo manifests under code-rs/ for forbidden ../codex-rs references…"
+echo "Scanning Cargo manifests under hanzo-dev/ for forbidden ../codex-rs references…"
 while IFS= read -r -d '' cargo_file; do
-  matches=$(grep -nE '\\.\\./codex-rs|codex-[^\"]*\s*=\s*\{[^}]*path' "$cargo_file" || true)
+  matches=$(grep -nE '\.\./codex-rs|codex-[^\"]*\s*=\s*\{[^}]*path' "$cargo_file" || true)
   if [[ -z "$matches" ]]; then
     continue
   fi
@@ -32,11 +32,11 @@ while IFS= read -r -d '' cargo_file; do
     echo "❌ $cargo_file:$line" >&2
     violations=1
   done <<<"$matches"
-done < <(find "$CODE_RS_DIR" -name Cargo.toml -print0)
+done < <(find "$HANZO_DEV_DIR" -name Cargo.toml -print0)
 
 if command -v jq >/dev/null 2>&1; then
   echo "Running cargo metadata guard…"
-  metadata=$(cd "$CODE_RS_DIR" && cargo metadata --format-version 1 --all-features 2>/dev/null)
+  metadata=$(cd "$HANZO_DEV_DIR" && cargo metadata --format-version 1 --all-features 2>/dev/null)
   if [[ -n "$metadata" ]]; then
     offenders=$(jq -r \
       --arg forbidden "$FORBIDDEN_DIR" \
@@ -59,4 +59,4 @@ if [[ $violations -ne 0 ]]; then
   exit 1
 fi
 
-echo "✅ No forbidden ../codex-rs dependencies detected in code-rs/."
+echo "✅ No forbidden ../codex-rs dependencies detected in hanzo-dev/."
