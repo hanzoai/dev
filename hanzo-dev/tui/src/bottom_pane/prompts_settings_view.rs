@@ -258,8 +258,9 @@ impl PromptsSettingsView {
             .alignment(Alignment::Left)
             .style(Style::default().bg(colors::background()));
 
+        let zen = crate::theme::is_zen_mode();
         let outer = Block::default()
-            .borders(Borders::ALL)
+            .borders(if zen { Borders::NONE } else { Borders::ALL })
             .style(Style::default().bg(colors::background()));
         let inner = outer.inner(area);
         outer.render(area, buf);
@@ -276,6 +277,7 @@ impl PromptsSettingsView {
         if area.width == 0 || area.height == 0 {
             return;
         }
+        let zen = crate::theme::is_zen_mode();
         let vertical = Layout::default()
             .direction(Direction::Vertical)
             .constraints([
@@ -292,7 +294,7 @@ impl PromptsSettingsView {
         } else {
             "Name (slug)"
         };
-        let mut name_block = Block::default().borders(Borders::ALL).title(name_title);
+        let mut name_block = Block::default().borders(if zen { Borders::NONE } else { Borders::ALL }).title(name_title);
         if matches!(self.focus, Focus::Name) {
             name_block = name_block.border_style(Style::default().fg(colors::primary()));
         }
@@ -307,7 +309,7 @@ impl PromptsSettingsView {
         } else {
             "Content"
         };
-        let mut body_block = Block::default().borders(Borders::ALL).title(body_title);
+        let mut body_block = Block::default().borders(if zen { Borders::NONE } else { Borders::ALL }).title(body_title);
         if matches!(self.focus, Focus::Body) {
             body_block = body_block.border_style(Style::default().fg(colors::primary()));
         }
