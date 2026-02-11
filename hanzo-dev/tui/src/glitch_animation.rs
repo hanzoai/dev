@@ -1,3 +1,5 @@
+#![allow(dead_code)]
+
 use ratatui::buffer::Buffer;
 use ratatui::prelude::*;
 // Paragraph/Widget previously used; manual cell writes now keep static layer intact.
