@@ -13,7 +13,6 @@ pub(crate) struct AnimatedWelcomeCell {
     fade_start: RefCell<Option<Instant>>,
     faded_out: Cell<bool>,
     version_label: String,
-    hidden: Cell<bool>,
 }
 
 impl AnimatedWelcomeCell {
@@ -24,7 +23,6 @@ impl AnimatedWelcomeCell {
             fade_start: RefCell::new(None),
             faded_out: Cell::new(false),
             version_label: format!("v{}", env!("CARGO_PKG_VERSION")),
-            hidden: Cell::new(false),
         }
     }
 

@@ -1381,6 +1381,7 @@ impl ThemeSelectionView {
                                                     colors,
                                                     label: Some(name),
                                                     is_dark: s.proposed_is_dark.get(),
+                                                    zen: crate::theme::is_zen_mode(),
                                                 },
                                             );
                                         }
@@ -1420,6 +1421,7 @@ impl ThemeSelectionView {
                                                     colors: colors.clone(),
                                                     label: Some(name.clone()),
                                                     is_dark: s.proposed_is_dark.get(),
+                                                    zen: crate::theme::is_zen_mode(),
                                                 },
                                             );
                                             self.revert_theme_on_back = ThemeName::Custom;
@@ -2039,6 +2041,7 @@ impl<'a> BottomPaneView<'a> for ThemeSelectionView {
                                                     colors,
                                                     label: Some(name),
                                                     is_dark: s.proposed_is_dark.get(),
+                                                    zen: crate::theme::is_zen_mode(),
                                                 },
                                             );
                                         }
@@ -2081,6 +2084,7 @@ impl<'a> BottomPaneView<'a> for ThemeSelectionView {
                                                     colors: colors.clone(),
                                                     label: Some(name.clone()),
                                                     is_dark: s.proposed_is_dark.get(),
+                                                    zen: crate::theme::is_zen_mode(),
                                                 },
                                             );
                                             self.revert_theme_on_back = ThemeName::Custom;
@@ -2905,6 +2909,7 @@ impl<'a> BottomPaneView<'a> for ThemeSelectionView {
                                             colors: colors.clone(),
                                             label: Some(name),
                                             is_dark,
+                                            zen: crate::theme::is_zen_mode(),
                                         },
                                     );
                                 }

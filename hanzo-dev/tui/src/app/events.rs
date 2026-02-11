@@ -1974,6 +1974,7 @@ impl App<'_> {
                                 colors,
                                 label: crate::theme::custom_theme_label(),
                                 is_dark: crate::theme::custom_theme_is_dark(),
+                                zen: crate::theme::is_zen_mode(),
                             });
                         } else if let Ok(cfg) = hanzo_core::config::Config::load_with_cli_overrides(
                             vec![],
@@ -2023,6 +2024,7 @@ impl App<'_> {
                                 colors,
                                 label: crate::theme::custom_theme_label(),
                                 is_dark: crate::theme::custom_theme_is_dark(),
+                                zen: crate::theme::is_zen_mode(),
                             });
                         } else if let Ok(cfg) = hanzo_core::config::Config::load_with_cli_overrides(
                             vec![],

@@ -136,7 +136,7 @@ impl HeightManager {
         // Cap the bottom pane to a percentage of screen height.
         // Keep a small floor so one-line input + footer fit, but avoid the
         // extra trailing blank row in the borderless composer layout.
-        const MIN_BOTTOM_ROWS: u16 = 4;
+        const MIN_BOTTOM_ROWS: u16 = 3;
         let percent_cap: u16 =
             ((area.height as u32).saturating_mul(self.cfg.bottom_percent_cap as u32) / 100) as u16;
         let bottom_cap = percent_cap.max(MIN_BOTTOM_ROWS);
