@@ -12,7 +12,6 @@ use ratatui::style::Style;
 use ratatui::text::Line;
 use ratatui::text::Span;
 use ratatui::widgets::Block;
-use ratatui::widgets::Borders;
 use ratatui::widgets::Paragraph;
 use unicode_segmentation::UnicodeSegmentation;
 // Cleanup: remove unused imports to satisfy warning-as-error policy
@@ -2264,7 +2263,7 @@ impl<'a> BottomPaneView<'a> for ThemeSelectionView {
 
         let zen = crate::theme::is_zen_mode();
         let outer = Block::default()
-            .borders(if zen { Borders::NONE } else { Borders::ALL })
+            .borders(crate::theme::zen_borders())
             .title(if zen { Line::from("") } else { Line::from(title_spans) })
             .style(Style::default().bg(crate::colors::background()))
             .border_style(

@@ -585,10 +585,9 @@ impl ChatComposer {
         let textarea_rect = input_block.inner(input_area);
 
         // Apply the same inner padding as in render (horizontal only).
-        let mut padded_textarea_rect = textarea_rect.inner(Margin::new(
-            crate::layout_consts::COMPOSER_INNER_HPAD.into(),
-            0,
-        ));
+        // In zen mode use zero horizontal padding for flush-left text.
+        let hpad: u16 = if crate::theme::show_borders() { crate::layout_consts::COMPOSER_INNER_HPAD } else { 0 };
+        let mut padded_textarea_rect = textarea_rect.inner(Margin::new(hpad, 0));
         if padded_textarea_rect.x > textarea_rect.x {
             padded_textarea_rect.x = padded_textarea_rect.x.saturating_sub(1);
             padded_textarea_rect.width = padded_textarea_rect.width.saturating_add(1);
@@ -2232,7 +2231,7 @@ impl ChatComposer {
             AgentHintLabel::Agents => " show agents",
         };
 
-        let agent_hint_spans = if crate::theme::is_zen_mode() {
+        let agent_hint_spans = if !crate::theme::show_gutter() {
             vec![]
         } else {
             vec![
@@ -2260,17 +2259,17 @@ impl ChatComposer {
             }
             AutoReviewIndicatorStatus::Clean => {
                 let icon_style = key_hint_style;
-                let zen = crate::theme::is_zen_mode();
+                let show_icons = crate::theme::show_gutter();
                 vec![
                     Span::styled("Auto Review: ", label_style),
-                    Span::styled(if zen { "" } else { "✔" }, icon_style),
-                    Span::from(if zen { "" } else { " " }),
+                    Span::styled(if show_icons { "✔" } else { "" }, icon_style),
+                    Span::from(if show_icons { " " } else { "" }),
                     Span::styled("Correct", icon_style),
                 ]
             }
             AutoReviewIndicatorStatus::Fixed => {
                 let icon_style = Style::default().fg(crate::colors::success());
-                let zen = crate::theme::is_zen_mode();
+                let show_icons = crate::theme::show_gutter();
                 let text = if let Some(count) = status.findings {
                     let plural = if count == 1 { "Issue" } else { "Issues" };
                     format!("{count} {plural} Fixed")
@@ -2279,18 +2278,18 @@ impl ChatComposer {
                 };
                 vec![
                     Span::styled("Auto Review: ", label_style),
-                    Span::styled(if zen { "" } else { "✔" }, icon_style),
-                    Span::from(if zen { "" } else { " " }),
+                    Span::styled(if show_icons { "✔" } else { "" }, icon_style),
+                    Span::from(if show_icons { " " } else { "" }),
                     Span::styled(text, icon_style),
                 ]
             }
             AutoReviewIndicatorStatus::Failed => {
                 let icon_style = Style::default().fg(crate::colors::error());
-                let zen = crate::theme::is_zen_mode();
+                let show_icons = crate::theme::show_gutter();
                 vec![
                     Span::styled("Auto Review: ", label_style),
-                    Span::styled(if zen { "" } else { "✖" }, icon_style),
-                    Span::from(if zen { "" } else { " " }),
+                    Span::styled(if show_icons { "✖" } else { "" }, icon_style),
+                    Span::from(if show_icons { " " } else { "" }),
                     Span::styled("Failed", icon_style),
                 ]
             }
@@ -2949,7 +2948,7 @@ impl WidgetRef for ChatComposer {
                     }
                 }
             } else {
-                let title_line = Line::from(if crate::theme::is_zen_mode() {
+                let title_line = Line::from(if !crate::theme::show_borders() {
                     vec![
                         Span::styled(
                             format!(" {} ", self.status_message),
@@ -2976,8 +2975,10 @@ impl WidgetRef for ChatComposer {
             apply_auto_drive_border_gradient(buf, input_area, gradient);
         }
 
-        // Add padding inside the text area (1 char horizontal only, no vertical padding)
-        let mut padded_textarea_rect = textarea_rect.inner(Margin::new(1, 0));
+        // Add padding inside the text area (horizontal only, no vertical padding).
+        // In zen mode use zero padding for flush-left text.
+        let hpad: u16 = crate::theme::content_padding();
+        let mut padded_textarea_rect = textarea_rect.inner(Margin::new(hpad, 0));
         if padded_textarea_rect.x > textarea_rect.x {
             padded_textarea_rect.x = padded_textarea_rect.x.saturating_sub(1);
             padded_textarea_rect.width = padded_textarea_rect.width.saturating_add(1);

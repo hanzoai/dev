@@ -11,7 +11,6 @@ use ratatui::style::Style;
 use ratatui::text::Line;
 use ratatui::text::Span;
 use ratatui::widgets::Block;
-use ratatui::widgets::Borders;
 use ratatui::widgets::Clear;
 use ratatui::widgets::Paragraph;
 use ratatui::widgets::Widget;
@@ -831,12 +830,11 @@ impl<'a> BottomPaneView<'a> for ReviewSettingsView {
             return;
         }
         Clear.render(area, buf);
-        let zen = crate::theme::is_zen_mode();
         let block = Block::default()
-            .borders(if zen { Borders::NONE } else { Borders::ALL })
+            .borders(crate::theme::zen_borders())
             .border_style(Style::default().fg(colors::border()))
             .style(Style::default().bg(colors::background()).fg(colors::text()))
-            .title(if zen { "" } else { " Review Settings " })
+            .title(if crate::theme::show_borders() { " Review Settings " } else { "" })
             .title_alignment(Alignment::Center);
         let inner = block.inner(area);
         block.render(area, buf);

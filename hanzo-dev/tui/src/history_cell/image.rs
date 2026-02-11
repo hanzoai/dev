@@ -649,16 +649,14 @@ impl ImageOutputCell {
         use ratatui::style::Modifier;
         use ratatui::style::Style;
         use ratatui::widgets::Block;
-        use ratatui::widgets::Borders;
 
         let filename = path.file_name().and_then(|n| n.to_str()).unwrap_or("image");
         let placeholder_text = format!("Image:\n{filename}");
 
-        let zen = crate::theme::is_zen_mode();
         let block = Block::default()
-            .borders(if zen { Borders::NONE } else { Borders::ALL })
+            .borders(crate::theme::zen_borders())
             .border_style(Style::default().fg(colors::info()))
-            .title(if zen { "" } else { "Image" });
+            .title(if crate::theme::show_borders() { "Image" } else { "" });
         let inner = block.inner(area);
         block.render(area, buf);
         Paragraph::new(placeholder_text)

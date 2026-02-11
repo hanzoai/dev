@@ -16,7 +16,6 @@ use ratatui::style::Style;
 use ratatui::text::Line;
 use ratatui::text::Span;
 use ratatui::widgets::Block;
-use ratatui::widgets::Borders;
 use ratatui::widgets::Paragraph;
 use ratatui::widgets::Widget;
 
@@ -134,12 +133,11 @@ impl BottomPaneView<'_> for CloudTasksView {
             return;
         }
 
-        let zen = crate::theme::is_zen_mode();
         let title = format!(" Cloud tasks — {} ", self.env_label);
         let block = Block::default()
-            .borders(if zen { Borders::NONE } else { Borders::ALL })
+            .borders(crate::theme::zen_borders())
             .border_style(Style::default().fg(crate::colors::border()))
-            .title(if zen { String::new() } else { title });
+            .title(if crate::theme::show_borders() { title } else { String::new() });
         let inner = block.inner(area);
         block.render(area, buf);
 

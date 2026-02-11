@@ -77,7 +77,7 @@ impl AutoDriveVariant {
             Self::Horizon => horizon_style(),
             Self::Pulse => pulse_style(),
         };
-        if crate::theme::is_zen_mode() {
+        if !crate::theme::show_borders() {
             s.frame.title_prefix = " ";
             s.frame.title_suffix = "";
             s.frame.border_type = BorderType::Plain;

@@ -10,7 +10,6 @@ use ratatui::text::Line;
 use ratatui::text::Span;
 use ratatui::text::Text;
 use ratatui::widgets::Block;
-use ratatui::widgets::Borders;
 use ratatui::widgets::Clear;
 use ratatui::widgets::Paragraph;
 use ratatui::widgets::Tabs;
@@ -87,10 +86,9 @@ impl<'a> BottomPaneView<'a> for DiffPopupView {
         Clear.render(inner, buf);
 
         // Outer popup: use selection-colored background with border styling
-        let zen = crate::theme::is_zen_mode();
         let outer_block = Block::default()
-            .borders(if zen { Borders::NONE } else { Borders::ALL })
-            .title(if zen { "" } else { "Diffs – Esc close, ◂ ▸ change tabs" })
+            .borders(crate::theme::zen_borders())
+            .title(if crate::theme::show_borders() { "Diffs – Esc close, ◂ ▸ change tabs" } else { "" })
             .border_style(Style::default().fg(crate::colors::border()))
             .style(Style::default().bg(crate::colors::selection()));
         outer_block.clone().render(inner, buf);
