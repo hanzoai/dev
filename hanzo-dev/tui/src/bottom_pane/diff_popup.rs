@@ -87,9 +87,10 @@ impl<'a> BottomPaneView<'a> for DiffPopupView {
         Clear.render(inner, buf);
 
         // Outer popup: use selection-colored background with border styling
+        let zen = crate::theme::is_zen_mode();
         let outer_block = Block::default()
-            .borders(Borders::ALL)
-            .title("Diffs – Esc close, ◂ ▸ change tabs")
+            .borders(if zen { Borders::NONE } else { Borders::ALL })
+            .title(if zen { "" } else { "Diffs – Esc close, ◂ ▸ change tabs" })
             .border_style(Style::default().fg(crate::colors::border()))
             .style(Style::default().bg(crate::colors::selection()));
         outer_block.clone().render(inner, buf);

@@ -831,11 +831,12 @@ impl<'a> BottomPaneView<'a> for ReviewSettingsView {
             return;
         }
         Clear.render(area, buf);
+        let zen = crate::theme::is_zen_mode();
         let block = Block::default()
-            .borders(Borders::ALL)
+            .borders(if zen { Borders::NONE } else { Borders::ALL })
             .border_style(Style::default().fg(colors::border()))
             .style(Style::default().bg(colors::background()).fg(colors::text()))
-            .title(" Review Settings ")
+            .title(if zen { "" } else { " Review Settings " })
             .title_alignment(Alignment::Center);
         let inner = block.inner(area);
         block.render(area, buf);

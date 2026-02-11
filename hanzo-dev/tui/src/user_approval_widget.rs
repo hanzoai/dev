@@ -414,11 +414,13 @@ impl WidgetRef for &UserApprovalWidget<'_> {
             .wrap(Wrap { trim: false })
             .render(options_chunk.inner(Margin::new(1, 0)), buf);
 
-        Block::bordered()
-            .border_type(BorderType::QuadrantOutside)
-            .border_style(Style::default().fg(crate::colors::light_blue()))
-            .borders(Borders::LEFT)
-            .render(Rect::new(0, options_chunk.y, 1, options_chunk.height), buf);
+        if !crate::theme::is_zen_mode() {
+            Block::bordered()
+                .border_type(BorderType::QuadrantOutside)
+                .border_style(Style::default().fg(crate::colors::light_blue()))
+                .borders(Borders::LEFT)
+                .render(Rect::new(0, options_chunk.y, 1, options_chunk.height), buf);
+        }
     }
 }
 
