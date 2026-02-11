@@ -39928,22 +39928,25 @@ impl WidgetRef for &ChatWidget<'_> {
                     let mut consumed_width: usize = 0;
 
                     if overlay.running {
-                        let now_ms = std::time::SystemTime::now()
-                            .duration_since(std::time::UNIX_EPOCH)
-                            .unwrap_or_default()
-                            .as_millis();
-                        let frame = crate::spinner::frame_at_time(
-                            crate::spinner::current_spinner(),
-                            now_ms,
-                        );
-                        if !frame.is_empty() {
-                            consumed_width += frame.chars().count();
-                            header_spans.push(ratatui::text::Span::styled(
-                                frame,
-                                Style::default().fg(crate::colors::spinner()),
-                            ));
-                            header_spans.push(ratatui::text::Span::raw(" "));
-                            consumed_width = consumed_width.saturating_add(1);
+                        let zen = crate::theme::is_zen_mode();
+                        if !zen {
+                            let now_ms = std::time::SystemTime::now()
+                                .duration_since(std::time::UNIX_EPOCH)
+                                .unwrap_or_default()
+                                .as_millis();
+                            let frame = crate::spinner::frame_at_time(
+                                crate::spinner::current_spinner(),
+                                now_ms,
+                            );
+                            if !frame.is_empty() {
+                                consumed_width += frame.chars().count();
+                                header_spans.push(ratatui::text::Span::styled(
+                                    frame,
+                                    Style::default().fg(crate::colors::spinner()),
+                                ));
+                                header_spans.push(ratatui::text::Span::raw(" "));
+                                consumed_width = consumed_width.saturating_add(1);
+                            }
                         }
 
                         let status_text = overlay
