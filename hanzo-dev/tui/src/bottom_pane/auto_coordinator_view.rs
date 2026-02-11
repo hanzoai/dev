@@ -526,16 +526,18 @@ impl AutoCoordinatorView {
             colors::text_dim()
         };
         let mut right_spans: Vec<Span<'static>> = Vec::new();
-        let now_ms = SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .unwrap_or_default()
-            .as_millis();
-        let spinner_frame = spinner::frame_at_time(spinner::current_spinner(), now_ms);
-        right_spans.push(Span::raw(" "));
-        right_spans.push(Span::styled(
-            spinner_frame,
-            Style::default().fg(runtime_color),
-        ));
+        if !crate::theme::is_zen_mode() {
+            let now_ms = SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .unwrap_or_default()
+                .as_millis();
+            let spinner_frame = spinner::frame_at_time(spinner::current_spinner(), now_ms);
+            right_spans.push(Span::raw(" "));
+            right_spans.push(Span::styled(
+                spinner_frame,
+                Style::default().fg(runtime_color),
+            ));
+        }
         if !runtime_text.is_empty() {
             right_spans.push(Span::raw(" "));
             right_spans.push(Span::styled(
