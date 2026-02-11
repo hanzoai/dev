@@ -43,7 +43,7 @@ function getCacheDir(version) {
   } else {
     base = process.env.XDG_CACHE_HOME || join(home, '.cache');
   }
-  const dir = join(base, 'just-every', 'code', version);
+  const dir = join(base, 'hanzo', 'dev', version);
   if (!existsSync(dir)) mkdirSync(dir, { recursive: true });
   return dir;
 }
@@ -55,7 +55,7 @@ function getCachedBinaryPath(version, targetTriple, isWindows) {
 }
 
 const CODE_SHIM_SIGNATURES = [
-  '@just-every/code',
+  '@hanzo/dev',
   'bin/coder.js',
   '$(dirname "$0")/coder',
   '%~dp0coder'
@@ -319,7 +319,7 @@ export async function runPostinstall(options = {}) {
           console.warn(`         ${resolved}`);
           console.warn('[notice] We will still install our CLI, also available as `coder`.');
           console.warn('         If `code` runs another tool, prefer using: coder');
-          console.warn('         Or run our CLI explicitly via: npx -y @just-every/code');
+          console.warn('         Or run our CLI explicitly via: npx -y @hanzo/dev');
         }
       }
     } catch {
@@ -343,7 +343,7 @@ export async function runPostinstall(options = {}) {
   // Download only the primary binary; we'll create wrappers for legacy names.
   const binaries = ['code'];
   
-  console.log(`Installing @just-every/code v${version} for ${targetTriple}...`);
+  console.log(`Installing @hanzo/dev v${version} for ${targetTriple}...`);
   
   for (const binary of binaries) {
     const binaryName = `${binary}-${targetTriple}${binaryExt}`;
@@ -381,13 +381,13 @@ export async function runPostinstall(options = {}) {
     const require = createRequire(import.meta.url);
     const platformPkg = (() => {
       const name = (() => {
-        if (isWindows) return '@just-every/code-win32-x64';
+        if (isWindows) return '@hanzo/dev-win32-x64';
         const plt = platform();
         const cpu = arch();
-        if (plt === 'darwin' && cpu === 'arm64') return '@just-every/code-darwin-arm64';
-        if (plt === 'darwin' && cpu === 'x64') return '@just-every/code-darwin-x64';
-        if (plt === 'linux' && cpu === 'x64') return '@just-every/code-linux-x64-musl';
-        if (plt === 'linux' && cpu === 'arm64') return '@just-every/code-linux-arm64-musl';
+        if (plt === 'darwin' && cpu === 'arm64') return '@hanzo/dev-darwin-arm64';
+        if (plt === 'darwin' && cpu === 'x64') return '@hanzo/dev-darwin-x64';
+        if (plt === 'linux' && cpu === 'x64') return '@hanzo/dev-linux-x64-musl';
+        if (plt === 'linux' && cpu === 'arm64') return '@hanzo/dev-linux-arm64-musl';
         return null;
       })();
       if (!name) return null;
@@ -447,12 +447,12 @@ export async function runPostinstall(options = {}) {
       }
     }
     const archiveName = isWin ? `${binaryName}.zip` : (useZst ? `${binaryName}.zst` : `${binaryName}.tar.gz`);
-    const downloadUrl = `https://github.com/just-every/code/releases/download/v${version}/${archiveName}`;
+    const downloadUrl = `https://github.com/hanzoai/dev/releases/download/v${version}/${archiveName}`;
 
     console.log(`Downloading ${archiveName}...`);
     try {
       const needsIsolation = isWin || (!isWin && !mirrorToLocal); // Windows or WSL-on-NTFS
-      let safeTempDir = needsIsolation ? join(tmpdir(), 'just-every', 'code', version) : binDir;
+      let safeTempDir = needsIsolation ? join(tmpdir(), 'hanzo', 'dev', version) : binDir;
       // Ensure staging dir exists; if tmp fails (permissions/space), fall back to user cache.
       if (needsIsolation) {
         try {

@@ -3,39 +3,40 @@ source: tui/tests/vt100_chatwidget_snapshot.rs
 expression: "frames.join(\"\\n---FRAME---\\n\")"
 ---
 
-   - Writing code
-   - Reading files
-   - Running commands
+ I can help with various tasks including:
+
+ - Writing code
+ - Reading files
+ - Running commands
 
 
   Auto Drive > Ready: run cargo check  ✶ Running (Xs)
  +----------------------------------------------------------------------------+
- | What can I code for you today?                                             |
+ |                                                                            |
  +----------------------------------------------------------------------------+
-  • Agents Enabled  • Diagnostics Enabled                              API key
-
 ---FRAME---
 
-   - Writing code
-   - Reading files
-   - Running commands
+ I can help with various tasks including:
+
+ - Writing code
+ - Reading files
+ - Running commands
 
 
   Auto Drive > Running cargo check... · Installed dependencies  ✶ Thinking (Xs)
  +----------------------------------------------------------------------------+
- | What can I code for you today?                                             |
+ |                                                                            |
  +----------------------------------------------------------------------------+
-  • Agents Enabled  • Diagnostics Enabled                              API key
-
 ---FRAME---
 
-   - Writing code
-   - Reading files
-   - Running commands
+ I can help with various tasks including:
+
+ - Writing code
+ - Reading files
+ - Running commands
 
 
   Auto Drive > Running cargo check... · Installed dependencies  ✶ Running (Xs)
  +----------------------------------------------------------------------------+
- | What can I code for you today?                                             |
+ |                                                                            |
  +----------------------------------------------------------------------------+
-  • Agents Enabled  • Diagnostics Enabled                              API key

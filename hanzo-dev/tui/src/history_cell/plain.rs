@@ -162,7 +162,7 @@ impl PlainHistoryCell {
 
         let is_auto_review = self.is_auto_review_notice();
         let cell_bg = match self.state.kind {
-            HistoryCellType::Assistant => crate::colors::assistant_bg(),
+            HistoryCellType::Assistant | HistoryCellType::Error => crate::colors::assistant_bg(),
             HistoryCellType::CompactionSummary => crate::colors::background(),
             _ if is_auto_review => Self::auto_review_bg(),
             _ => crate::colors::background(),
@@ -286,7 +286,7 @@ impl HistoryCell for PlainHistoryCell {
     }
 
     fn gutter_symbol(&self) -> Option<&'static str> {
-        if !crate::theme::show_gutter() { return None; }
+        if crate::theme::gutter_mode() != hanzo_core::config_types::GutterMode::Full { return None; }
         if let Some(header) = self.state.header() {
             let label = header.label.trim().to_lowercase();
             if label == "auto review" {
@@ -339,11 +339,13 @@ impl HistoryCell for PlainHistoryCell {
 
         let is_auto_review = self.is_auto_review_notice();
         let cell_bg = match self.state.kind {
-            HistoryCellType::Assistant => crate::colors::assistant_bg(),
+            HistoryCellType::Assistant | HistoryCellType::Error => crate::colors::assistant_bg(),
             _ if is_auto_review => Self::auto_review_bg(),
             _ => crate::colors::background(),
         };
-        if matches!(self.state.kind, HistoryCellType::Assistant) || is_auto_review {
+        if matches!(self.state.kind, HistoryCellType::Assistant | HistoryCellType::Error)
+            || is_auto_review
+        {
             let bg_style = Style::default().bg(cell_bg).fg(crate::colors::text());
             fill_rect(buf, area, Some(' '), bg_style);
         }

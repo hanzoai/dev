@@ -2587,6 +2587,7 @@ dependencies = [
  "hanzo-protocol",
  "hanzo-rmcp-client",
  "hanzo-version",
+ "hanzo-zap",
  "htmd",
  "httpdate",
  "img_hash",
