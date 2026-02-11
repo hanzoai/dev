@@ -3,33 +3,30 @@ source: tui/tests/vt100_chatwidget_snapshot.rs
 expression: output
 ---
 
- • Hello! How can I help you today?
+ Hello! How can I help you today?
 
 
 
- • I can help with various tasks including:
+ I can help with various tasks including:
 
-   - Writing code
-   - Reading files
-   - Running commands
-
-
- › Kick off QA bot regression run
-
-   +- qa-bot
-   |
-   |  Run targeted regression suite
-   |
-   |  Agents
-   |    • claude  running  (Xs)
-   |
-   |  Actions
-   |   MM:SS  Started agent run for qa-bot
-   |
-   +- [Ctrl+A] Expand · [Esc] Stop
- • Responding  (Xs • esc to interrupt)
-
-  What can I code for you today?
+ - Writing code
+ - Reading files
+ - Running commands
 
 
- Plan Mode  (Shift+Tab change)   ? for shortcuts                       API key
+ Kick off QA bot regression run
+
+ +- qa-bot
+ |
+ |  Run targeted regression suite
+ |
+ |  Agents
+ |    • claude  running  (Xs)
+ |
+ |  Actions
+ |   MM:SS  Started agent run for qa-bot
+ |
+ +- [Esc] Stop
+
+
+Responding (Xs • esc to interrupt)

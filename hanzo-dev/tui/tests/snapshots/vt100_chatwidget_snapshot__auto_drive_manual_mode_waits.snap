@@ -2,20 +2,21 @@
 source: tui/tests/vt100_chatwidget_snapshot.rs
 expression: frame
 ---
-
- • Hello! How can I help you today?
-
+ What would you like to work on?
 
 
- • I can help with various tasks including:
+ Hello! How can I help you today?
 
-   - Writing code
-   - Reading files
-   - Running commands
+
+
+ I can help with various tasks including:
+
+ - Writing code
+ - Reading files
+ - Running commands
 
 
   Auto Drive > Auto Drive prepared to run justfile target  ✶ Running (Xs)
  +----------------------------------------------------------------------------+
- | What can I code for you today?                                             |
+ |                                                                            |
  +----------------------------------------------------------------------------+
-  • Agents Enabled  • Diagnostics Enabled                              API key

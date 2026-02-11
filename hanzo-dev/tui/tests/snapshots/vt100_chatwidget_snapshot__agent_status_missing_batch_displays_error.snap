@@ -3,21 +3,18 @@ source: tui/tests/vt100_chatwidget_snapshot.rs
 expression: output
 ---
 
- • I can help with various tasks including:
-
-   - Writing code
-   - Reading files
-   - Running commands
 
 
- › /agents
+ I can help with various tasks including:
 
- ✖ ⚠️  status_update: missing agent batch_id. tool=agent_status
-   agents=orphan-agent
-
- • agents: running (1)  (Xs • esc to interrupt)
-
-  What can I code for you today?
+ - Writing code
+ - Reading files
+ - Running commands
 
 
- Plan Mode  (Shift+Tab change)   ? for shortcuts                       API key
+ /agents
+
+ ⚠️  status_update: missing agent batch_id. tool=agent_status
+ agents=orphan-agent
+
+agents: running (1) (Xs • esc to interrupt)

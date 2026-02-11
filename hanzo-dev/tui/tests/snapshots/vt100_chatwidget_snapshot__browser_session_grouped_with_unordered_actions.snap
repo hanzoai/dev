@@ -2,34 +2,31 @@
 source: tui/tests/vt100_chatwidget_snapshot.rs
 expression: output
 ---
-
- • Hello! How can I help you today?
-
+ What would you like to work on?
 
 
- • I can help with various tasks including:
-
-   - Writing code
-   - Reading files
-   - Running commands
+ Hello! How can I help you today?
 
 
- › Handle captcha gracefully
 
-   +- Browser (headless): example.com
-   |
-   |   Actions
-   |    MM:SS  Opened   https://example.com
-   |    MM:SS  Typed    pizza
-   |    MM:SS  Pressed  Enter
-   |
-   |   Console: Encountering captcha block
-   |
-   +- [Ctrl+B] View · [Esc] Stop
+ I can help with various tasks including:
 
- • using browser  (Xs • esc to interrupt)
-
-  What can I code for you today?
+ - Writing code
+ - Reading files
+ - Running commands
 
 
- Plan Mode  (Shift+Tab change)   ? for shortcuts                       API key
+ Handle captcha gracefully
+
+ +- Browser (headless): example.com
+ |
+ |   Actions
+ |    MM:SS  Opened   https://example.com
+ |    MM:SS  Typed    pizza
+ |    MM:SS  Pressed  Enter
+ |
+ |   Console: Encountering captcha block
+ |
+ +- [Ctrl+B] View · [Esc] Stop
+
+Using browser (Xs • esc to interrupt)

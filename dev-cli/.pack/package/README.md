@@ -8,7 +8,7 @@
 ## What's new in v0.6.0 (December 2025)
 
 - **Auto Review** – background ghost-commit watcher runs reviews in a separate worktree whenever a turn changes code; uses `codex-5.1-mini-high` and reports issues plus ready-to-apply fixes without blocking the main thread.
-- **Code Bridge** – Sentry-style local bridge that streams errors, console, screenshots, and control from running apps into Code; ships an MCP server; install by asking Code to pull `https://github.com/just-every/code-bridge`.
+- **Code Bridge** – Sentry-style local bridge that streams errors, console, screenshots, and control from running apps into Code; ships an MCP server; install by asking Code to pull `https://github.com/hanzoai/dev-bridge`.
 - **Plays well with Auto Drive** – reviews run in parallel with long Auto Drive tasks so quality checks land while the flow keeps moving.
 - **Quality-first focus** – the release shifts emphasis from "can the model write this file" to "did we verify it works".
 - _From v0.5.0:_ rename to Every Code, upgraded `/auto` planning/recovery, unified `/settings`, faster streaming/history with card-based activity, and more reliable `/resume` + `/undo`.
@@ -61,13 +61,13 @@
 ### Run
 
 ```bash
-npx -y @just-every/code
+npx -y @hanzo/dev
 ```
 
 ### Install & Run
 
 ```bash
-npm install -g @just-every/code
+npm install -g @hanzo/dev
 code // or `coder` if you're using VS Code
 ```
 
@@ -294,7 +294,7 @@ We welcome contributions! Every Code maintains compatibility with upstream while
 
 ```bash
 # Clone and setup
-git clone https://github.com/just-every/code.git
+git clone https://github.com/hanzoai/dev.git
 cd code
 npm install
 
@@ -355,4 +355,4 @@ Every Code is a community fork of the original Codex CLI. We maintain compatibil
 
 &ensp;
 ---
-**Need help?** Open an issue on [GitHub](https://github.com/just-every/code/issues) or check our documentation.
+**Need help?** Open an issue on [GitHub](https://github.com/hanzoai/dev/issues) or check our documentation.
