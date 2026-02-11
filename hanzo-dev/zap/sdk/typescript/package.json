@@ -1,6 +1,6 @@
 {
   "name": "@hanzo/zap",
-  "version": "0.6.0",
+  "version": "0.6.61",
   "description": "Zero-copy Agent Protocol (ZAP) SDK for TypeScript - 1000x faster than MCP",
   "type": "module",
   "main": "./dist/index.js",
