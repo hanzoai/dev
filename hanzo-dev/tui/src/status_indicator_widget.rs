@@ -197,7 +197,7 @@ impl WidgetRef for StatusIndicatorWidget {
         let zen = crate::theme::is_zen_mode();
 
         // Build header spans with shimmer on the header text
-        let mut spans: Vec<Span<'static>> = vec![Span::raw(" ")];
+        let mut spans: Vec<Span<'static>> = vec![Span::raw(if zen { "" } else { " " })];
 
         // Simple bullet — hidden in zen mode
         if !zen {
