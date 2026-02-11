@@ -441,9 +441,10 @@ impl UndoTimelineView {
         ])
         .areas(area);
 
+        let zen = crate::theme::is_zen_mode();
         let conversation_block = Block::default()
-            .borders(Borders::ALL)
-            .title(" Conversation preview ")
+            .borders(if zen { Borders::NONE } else { Borders::ALL })
+            .title(if zen { "" } else { " Conversation preview " })
             .border_style(Style::default().fg(crate::colors::border()))
             .style(
                 Style::default()
@@ -459,8 +460,8 @@ impl UndoTimelineView {
         conversation.render(conversation_inner, buf);
 
         let files_block = Block::default()
-            .borders(Borders::ALL)
-            .title(" File changes ")
+            .borders(if zen { Borders::NONE } else { Borders::ALL })
+            .title(if zen { "" } else { " File changes " })
             .border_style(Style::default().fg(crate::colors::border()))
             .style(
                 Style::default()
@@ -607,9 +608,10 @@ impl<'a> BottomPaneView<'a> for UndoTimelineView {
         }
 
         Clear.render(area, buf);
+        let zen = crate::theme::is_zen_mode();
         let block = Block::default()
-            .borders(Borders::ALL)
-            .title(" Restore workspace snapshot ")
+            .borders(if zen { Borders::NONE } else { Borders::ALL })
+            .title(if zen { "" } else { " Restore workspace snapshot " })
             .border_style(Style::default().fg(crate::colors::border()))
             .style(
                 Style::default()
@@ -623,8 +625,8 @@ impl<'a> BottomPaneView<'a> for UndoTimelineView {
             Layout::horizontal([Constraint::Percentage(38), Constraint::Fill(1)]).areas(inner);
 
         let list_block = Block::default()
-            .borders(Borders::ALL)
-            .title(" Snapshots ")
+            .borders(if zen { Borders::NONE } else { Borders::ALL })
+            .title(if zen { "" } else { " Snapshots " })
             .border_style(Style::default().fg(crate::colors::border()))
             .style(
                 Style::default()

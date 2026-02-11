@@ -130,15 +130,16 @@ impl<'a> BottomPaneView<'a> for VerbositySelectionView {
         Clear.render(area, buf);
 
         // Create a centered box with theme-aware styling
+        let zen = crate::theme::is_zen_mode();
         let block = Block::default()
-            .borders(Borders::ALL)
+            .borders(if zen { Borders::NONE } else { Borders::ALL })
             .border_style(Style::default().fg(crate::colors::border()))
             .style(
                 Style::default()
                     .bg(crate::colors::background())
                     .fg(crate::colors::text()),
             )
-            .title(" Select Text Verbosity ")
+            .title(if zen { "" } else { " Select Text Verbosity " })
             .title_alignment(Alignment::Center);
 
         let inner_area = block.inner(area);
