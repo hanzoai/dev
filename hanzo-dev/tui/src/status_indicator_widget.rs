@@ -17,6 +17,7 @@ use ratatui::widgets::WidgetRef;
 
 use crate::app_event::AppEvent;
 use crate::app_event_sender::AppEventSender;
+use crate::spinner;
 use textwrap::Options as TwOptions;
 use textwrap::WordSplitter;
 
@@ -147,18 +148,23 @@ impl WidgetRef for StatusIndicatorWidget {
             return;
         }
 
-        // Schedule periodic refreshes so the elapsed timer stays up to date without
-        // forcing a high-FPS redraw of the entire UI.
+        // Schedule periodic refreshes for both the elapsed timer and the spinner animation.
         let now = Instant::now();
         let elapsed_since_start = self.start_time.elapsed();
         let elapsed = elapsed_since_start.as_secs();
+        let elapsed_ms = elapsed_since_start.as_millis();
+
+        // Use the spinner's interval for smooth animation redraws
+        let spin = spinner::current_spinner();
+        let spinner_interval = Duration::from_millis(spin.interval_ms.max(80));
+
         if elapsed != self.last_rendered_second.get()
-            || now.duration_since(self.last_schedule.get()) >= Duration::from_secs(1)
+            || now.duration_since(self.last_schedule.get()) >= spinner_interval
         {
             self.last_schedule.set(now);
             self.last_rendered_second.set(elapsed);
             self.app_event_tx
-                .send(AppEvent::ScheduleFrameIn(Duration::from_secs(1)));
+                .send(AppEvent::ScheduleFrameIn(spinner_interval));
         }
 
         // Plain rendering: no borders or padding so the live cell is visually indistinguishable from terminal scrollback.
@@ -171,19 +177,28 @@ impl WidgetRef for StatusIndicatorWidget {
 
         let pretty_elapsed = fmt_elapsed_compact(elapsed);
 
-        // Build header spans using theme colors (no terminal-default cyan/dim)
+        // Animated spinner frame from the spinner system
+        let spinner_frame = spinner::frame_at_time(spin, elapsed_ms);
+
+        // Build header spans — "◐ Thinking (14s • esc to interrupt)"
         let mut spans = vec![
             ratatui::text::Span::raw(" "),
-            ratatui::text::Span::raw(if crate::theme::is_zen_mode() { "" } else { "⏺ " }).style(secondary),
+        ];
+        // Show animated spinner frame (or nothing in zen with no spinner)
+        if !spinner_frame.is_empty() {
+            spans.push(
+                ratatui::text::Span::raw(format!("{spinner_frame} "))
+                    .style(Style::default().fg(accent)),
+            );
+        }
+        spans.extend(vec![
             ratatui::text::Span::styled(
                 self.header.clone(),
                 Style::default().fg(accent).add_modifier(Modifier::BOLD),
             ),
             ratatui::text::Span::raw(" "),
-        ];
-        spans.extend(vec![
-            ratatui::text::Span::raw(" "),
-            ratatui::text::Span::raw(format!("({pretty_elapsed}, ")).style(secondary),
+            ratatui::text::Span::raw(format!("({pretty_elapsed} ")).style(secondary),
+            ratatui::text::Span::raw("• ").style(secondary),
             ratatui::text::Span::raw("esc")
                 .style(Style::default().fg(accent).add_modifier(Modifier::BOLD)),
             ratatui::text::Span::raw(" to interrupt)").style(secondary),
