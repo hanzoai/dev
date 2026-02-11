@@ -6,11 +6,11 @@ export CARGO_TARGET_DIR=${CARGO_TARGET_DIR:-"$ROOT_DIR/target"}
 unset GIT_DIR GIT_WORK_TREE GIT_INDEX_FILE GIT_COMMON_DIR
 
 echo "[pre-release] building CLI (dev-fast)"
-cd "$ROOT_DIR/code-rs"
-cargo build --locked --profile dev-fast --bin code
+cd "$ROOT_DIR/hanzo-dev"
+cargo build --locked --profile dev-fast --bin dev
 
 echo "[pre-release] running CLI smokes (skip cargo tests)"
-SKIP_CARGO_TESTS=1 CI_CLI_BIN="$CARGO_TARGET_DIR/dev-fast/code" \
+SKIP_CARGO_TESTS=1 CI_CLI_BIN="$CARGO_TARGET_DIR/dev-fast/dev" \
   bash "$ROOT_DIR/scripts/ci-tests.sh"
 
 echo "[pre-release] running workspace tests (nextest)"

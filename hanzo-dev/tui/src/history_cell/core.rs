@@ -50,9 +50,9 @@ pub(crate) enum HistoryCellType {
 pub(crate) fn gutter_symbol_for_kind(kind: HistoryCellType) -> Option<&'static str> {
     match kind {
         HistoryCellType::Plain => None,
-        HistoryCellType::User => Some("›"),
+        HistoryCellType::User => Some("▶"),
         // Restore assistant gutter icon
-        HistoryCellType::Assistant => Some("•"),
+        HistoryCellType::Assistant => Some("⏺"),
         HistoryCellType::Reasoning => None,
         HistoryCellType::Error => Some("✖"),
         HistoryCellType::Tool { status } => Some(match status {
@@ -71,7 +71,7 @@ pub(crate) fn gutter_symbol_for_kind(kind: HistoryCellType) -> Option<&'static s
         HistoryCellType::Patch { .. } => Some("↯"),
         // Plan updates supply their own gutter glyph dynamically.
         HistoryCellType::PlanUpdate => None,
-        HistoryCellType::BackgroundEvent => Some("»"),
+        HistoryCellType::BackgroundEvent => Some("⏺"),
         HistoryCellType::Notice => None,
         HistoryCellType::CompactionSummary => Some("📍"),
         HistoryCellType::Diff => Some("↯"),

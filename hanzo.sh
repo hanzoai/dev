@@ -519,7 +519,7 @@ install_dev() {
             cd "$source_dir"
 
             if ./build-fast.sh; then
-                local bin_path="./code-rs/target/dev-fast/code"
+                local bin_path="./hanzo-dev/target/dev-fast/dev"
                 if [[ -f "$bin_path" ]]; then
                     cp "$bin_path" "$HANZO_BIN/dev"
                     chmod +x "$HANZO_BIN/dev"
