@@ -48,9 +48,9 @@ pub(crate) enum HistoryCellType {
 }
 
 pub(crate) fn gutter_symbol_for_kind(kind: HistoryCellType) -> Option<&'static str> {
-    if crate::theme::is_zen_mode() {
-        return None;
-    }
+    if !crate::theme::show_gutter() {
+            return None;
+        }
     match kind {
         HistoryCellType::Plain => None,
         HistoryCellType::User => Some("▶"),

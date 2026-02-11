@@ -1630,11 +1630,10 @@ impl SettingsOverlayView {
             return;
         }
 
-        let zen = crate::theme::is_zen_mode();
         let block = Block::default()
             .title(self.block_title_line())
             .title_alignment(Alignment::Left)
-            .borders(if zen { Borders::NONE } else { Borders::ALL })
+            .borders(crate::theme::zen_borders())
             .style(Style::default().bg(crate::colors::background()))
             .border_style(
                 Style::default()

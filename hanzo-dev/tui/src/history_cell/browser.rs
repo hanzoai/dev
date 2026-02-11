@@ -1116,7 +1116,7 @@ impl HistoryCell for BrowserSessionCell {
     }
 
     fn gutter_symbol(&self) -> Option<&'static str> {
-        if crate::theme::is_zen_mode() { return None; }
+        if !crate::theme::show_gutter() { return None; }
         if self.completed { Some("✔") } else { None }
     }
 
@@ -1336,7 +1336,6 @@ impl BrowserSessionCell {
         use ratatui::style::Modifier;
         use ratatui::style::Style;
         use ratatui::widgets::Block;
-        use ratatui::widgets::Borders;
 
         let filename = path
             .file_name()
@@ -1344,11 +1343,10 @@ impl BrowserSessionCell {
             .unwrap_or("screenshot");
         let placeholder_text = format!("Screenshot:\n{}", filename);
 
-        let zen = crate::theme::is_zen_mode();
         let block = Block::default()
-            .borders(if zen { Borders::NONE } else { Borders::ALL })
+            .borders(crate::theme::zen_borders())
             .border_style(Style::default().fg(colors::info()))
-            .title(if zen { "" } else { "Browser" })
+            .title(if crate::theme::show_borders() { "Browser" } else { "" })
             .style(Style::default().bg(Color::Black));
         let inner = block.inner(area);
         block.render(area, buf);

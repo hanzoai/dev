@@ -13,7 +13,6 @@ use ratatui::style::Style;
 use ratatui::text::Line;
 use ratatui::text::Span;
 use ratatui::widgets::Block;
-use ratatui::widgets::Borders;
 use ratatui::widgets::Padding;
 use ratatui::widgets::Widget;
 
@@ -198,7 +197,7 @@ impl HistoryCell for ExecCell {
         HistoryCellType::Exec { kind, status }
     }
     fn gutter_symbol(&self) -> Option<&'static str> {
-        if crate::theme::is_zen_mode() {
+        if !crate::theme::show_gutter() {
             return None;
         }
         match self.kind() {
@@ -308,7 +307,7 @@ impl HistoryCell for ExecCell {
                 .fg(crate::colors::text_dim());
             fill_rect(buf, out_area, Some(' '), bg_style);
             let block = Block::default()
-                .borders(if crate::theme::is_zen_mode() { Borders::NONE } else { Borders::LEFT })
+                .borders(crate::theme::zen_left_borders())
                 .border_style(
                     Style::default()
                         .fg(crate::colors::border_dim())
