@@ -953,6 +953,11 @@ pub struct ThemeConfig {
     /// or "Light - <label>" in lists.
     #[serde(default)]
     pub is_dark: Option<bool>,
+
+    /// Zen mode: hides gutter icons (▶ ⏺ etc), removes gutter indent so text
+    /// sits flush left, and hides decorative borders for a minimal UI.
+    #[serde(default)]
+    pub zen: bool,
 }
 
 /// Selected loading spinner style.

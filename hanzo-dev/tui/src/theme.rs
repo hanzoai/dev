@@ -14,6 +14,7 @@ lazy_static! {
     static ref CUSTOM_THEME_COLORS: RwLock<Option<hanzo_core::config_types::ThemeColors>> =
         RwLock::new(None);
     static ref CUSTOM_THEME_IS_DARK: RwLock<Option<bool>> = RwLock::new(None);
+    static ref ZEN_MODE: RwLock<bool> = RwLock::new(false);
 }
 
 /// Represents a complete theme with all colors resolved
@@ -86,6 +87,7 @@ pub fn init_theme(config: &ThemeConfig) {
         *CUSTOM_THEME_COLORS.write().unwrap() = Some(config.colors.clone());
         *CUSTOM_THEME_IS_DARK.write().unwrap() = config.is_dark;
     }
+    *ZEN_MODE.write().unwrap() = config.zen;
 }
 
 /// Get the current theme
@@ -127,6 +129,12 @@ pub fn set_custom_theme_is_dark(is_dark: Option<bool>) {
 
 pub fn custom_theme_is_dark() -> Option<bool> {
     CUSTOM_THEME_IS_DARK.read().unwrap().clone()
+}
+
+/// Returns true when zen mode is active (no gutter icons, flush-left text,
+/// hidden decorative borders).
+pub fn is_zen_mode() -> bool {
+    *ZEN_MODE.read().unwrap()
 }
 
 /// Switch to a different predefined theme

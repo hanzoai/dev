@@ -6221,7 +6221,19 @@ impl ChatWidget<'_> {
     fn on_error(&mut self, message: String) {
         // Treat transient stream errors (which the core will retry) differently
         // from fatal errors so the status spinner remains visible while we wait.
-        let lower = message.to_lowercase();
+        let mut message = message;
+        let mut lower = message.to_lowercase();
+
+        let provider_retry_limit = lower.contains("exceeded retry limit")
+            || lower.contains("retries exhausted")
+            || lower.contains("retry limit reached");
+        let provider_429 = lower.contains("429") || lower.contains("too many requests");
+        if provider_retry_limit && provider_429 {
+            message = "Rate limit reached (429 Too Many Requests). Please wait and try again."
+                .to_string();
+            lower = message.to_lowercase();
+        }
+
         let retries_exhausted = lower.contains("exceeded retry limit")
             || lower.contains("retries exhausted")
             || lower.contains("retry limit reached");
@@ -38609,9 +38621,9 @@ impl WidgetRef for &ChatWidget<'_> {
 
         // Calculate total content height using prefix sums; build if needed
         let spacing = 1u16; // Standard spacing between cells
-        const GUTTER_WIDTH: u16 = 2; // Same as in render loop
+        let gutter_w: u16 = if crate::theme::is_zen_mode() { 0 } else { 2 };
         let reasoning_visible = self.is_reasoning_shown();
-        let cache_width = content_area.width.saturating_sub(GUTTER_WIDTH);
+        let cache_width = content_area.width.saturating_sub(gutter_w);
 
         // Opportunistically clear height cache if width changed
         self.history_render.handle_width_change(cache_width);
@@ -38729,7 +38741,7 @@ impl WidgetRef for &ChatWidget<'_> {
                 let mut prefix: Vec<u16> = Vec::with_capacity(cells.len().saturating_add(1));
                 prefix.push(0);
                 let mut acc = 0u16;
-                let content_width = content_area.width.saturating_sub(GUTTER_WIDTH);
+                let content_width = content_area.width.saturating_sub(gutter_w);
                 let mut spacing_ranges: Vec<(u16, u16)> = Vec::new();
 
                 for (idx, vis) in cells.iter().enumerate() {
@@ -39174,8 +39186,8 @@ impl WidgetRef for &ChatWidget<'_> {
                 .cell
                 .expect("visible cell missing backing cell for render");
             // Calculate height with reduced width due to gutter
-            const GUTTER_WIDTH: u16 = 2;
-            let content_width = content_area.width.saturating_sub(GUTTER_WIDTH);
+            let gw: u16 = if crate::theme::is_zen_mode() { 0 } else { 2 };
+            let content_width = content_area.width.saturating_sub(gw);
             let maybe_assistant = item
                 .as_any()
                 .downcast_ref::<crate::history_cell::AssistantMarkdownCell>();
@@ -39259,9 +39271,8 @@ impl WidgetRef for &ChatWidget<'_> {
 
             if visible_height > 0 {
                 // Reserve a gutter only for cells that actually render a symbol.
-                const GUTTER_WIDTH: u16 = 2;
                 let gutter_width = if item.gutter_symbol().is_some() {
-                    GUTTER_WIDTH.min(content_area.width)
+                    2u16.min(content_area.width)
                 } else {
                     0
                 };

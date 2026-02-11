@@ -2616,8 +2616,19 @@ async fn try_run_turn(
         Ok(stream) => stream,
         Err(e) => {
             turn_latency_guard.mark_failed(Some(format!("stream_init_failed: {e}")));
-            sess.notify_stream_error(sub_id, format!("[transport] failed to start stream: {e}"))
-                .await;
+            // Avoid duplicate top-level fatal errors for provider-side limits.
+            // `run_agent` will emit the final Error event for these cases.
+            let suppress_transport_notice = matches!(
+                &e,
+                CodeErr::RetryLimit(_)
+                    | CodeErr::UsageLimitReached(_)
+                    | CodeErr::QuotaExceeded
+                    | CodeErr::UsageNotIncluded
+            );
+            if !suppress_transport_notice {
+                sess.notify_stream_error(sub_id, format!("[transport] failed to start stream: {e}"))
+                    .await;
+            }
             return Err(e);
         }
     };
