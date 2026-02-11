@@ -86,8 +86,9 @@ pub(crate) fn render_panel<F>(
         Clear.render(area, buf);
     }
 
+    let zen = crate::theme::is_zen_mode();
     let mut block = Block::default()
-        .borders(Borders::ALL)
+        .borders(if zen { Borders::NONE } else { Borders::ALL })
         .border_style(style.border_style)
         .style(style.background_style)
         .title_alignment(style.title_alignment);

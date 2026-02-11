@@ -558,7 +558,7 @@ impl HistoryCell for WebFetchToolCell {
                 .fg(crate::colors::text_dim());
             fill_rect(buf, body_area, Some(' '), bg_style);
             let block = Block::default()
-                .borders(Borders::LEFT)
+                .borders(if crate::theme::is_zen_mode() { Borders::NONE } else { Borders::LEFT })
                 .border_style(
                     Style::default()
                         .fg(crate::colors::border_dim())

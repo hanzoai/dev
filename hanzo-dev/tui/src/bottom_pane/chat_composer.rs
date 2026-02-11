@@ -502,6 +502,7 @@ impl ChatComposer {
             return trimmed.to_string();
         }
 
+        // Map single-word technical statuses to capitalized form
         if trimmed.split_whitespace().count() == 1 {
             match lower.as_str() {
                 "working" => return "Working".to_string(),
@@ -512,6 +513,25 @@ impl ChatComposer {
                 "reading" => return "Reading".to_string(),
                 _ => {}
             }
+        }
+
+        // Map multi-word technical statuses to friendly descriptions
+        match lower.as_str() {
+            "waiting for model" => return "Waiting for model".to_string(),
+            "waiting for command" => return "Running command".to_string(),
+            "cancelling command" => return "Cancelling command".to_string(),
+            "agents coordinating" => return "Agents coordinating".to_string(),
+            "using browser" => return "Using browser".to_string(),
+            "waiting in background" => return "Working in background".to_string(),
+            "wait cancelled" => return "Cancelled".to_string(),
+            "command status unavailable" => return "Command pending".to_string(),
+            _ => {}
+        }
+
+        // "using tool: X" → "Using tool: X"
+        if lower.starts_with("using tool:") {
+            let tool_name = trimmed.get("using tool:".len()..).unwrap_or("").trim();
+            return format!("Using {tool_name}");
         }
 
         trimmed.to_string()
@@ -2212,10 +2232,14 @@ impl ChatComposer {
             AgentHintLabel::Agents => " show agents",
         };
 
-        let agent_hint_spans = vec![
-            Span::styled("Ctrl+A", key_hint_style),
-            Span::from(agent_hint_label_text).style(label_style),
-        ];
+        let agent_hint_spans = if crate::theme::is_zen_mode() {
+            vec![]
+        } else {
+            vec![
+                Span::styled("Ctrl+A", key_hint_style),
+                Span::from(agent_hint_label_text).style(label_style),
+            ]
+        };
 
         let status_spans = match status.status {
             AutoReviewIndicatorStatus::Running => {

@@ -8175,6 +8175,23 @@ impl ChatWidget<'_> {
             return;
         }
 
+        // `?` as first character in an empty composer opens the help popup
+        // instead of inserting text (like `/` opens the command menu).
+        if self.bottom_pane.composer_is_empty() {
+            if let KeyEvent {
+                code: KeyCode::Char('?'),
+                kind: KeyEventKind::Press,
+                modifiers,
+                ..
+            } = key_event
+            {
+                if modifiers.is_empty() || modifiers == KeyModifiers::SHIFT {
+                    self.toggle_help_popup();
+                    return;
+                }
+            }
+        }
+
         let composer_was_empty = self.bottom_pane.composer_is_empty();
         let input_result = self.bottom_pane.handle_key_event(key_event);
         let composer_is_empty = self.bottom_pane.composer_is_empty();
@@ -29411,9 +29428,9 @@ Note: Free ngrok accounts have connection limits."#;
         let placeholder_widget = Paragraph::new(placeholder_text)
             .block(
                 Block::default()
-                    .borders(Borders::ALL)
+                    .borders(if crate::theme::is_zen_mode() { Borders::NONE } else { Borders::ALL })
                     .border_style(Style::default().fg(crate::colors::info()))
-                    .title("Browser")
+                    .title(if crate::theme::is_zen_mode() { "" } else { "Browser" })
                     .style(Style::default().bg(Color::Black)),
             )
             .style(
@@ -34714,7 +34731,9 @@ impl ChatWidget<'_> {
             line.push(' ');
             line.push_str(&format!("Merge {path_text} to apply fixes."));
         }
-        line.push_str(" [Ctrl+A] Show");
+        if !crate::theme::is_zen_mode() {
+            line.push_str(" [Ctrl+A] Show");
+        }
 
         let message_lines = vec![MessageLine {
             kind: MessageLineKind::Paragraph,
@@ -37040,16 +37059,13 @@ impl ChatWidget<'_> {
         };
         Clear.render(window_area, buf);
 
+        let zen = crate::theme::is_zen_mode();
         let block = Block::default()
-            .borders(Borders::ALL)
+            .borders(if zen { Borders::NONE } else { Borders::ALL })
             .title(RLine::from(vec![
                 Span::styled(
                     format!(" {} ", self.browser_title()),
                     Style::default().fg(crate::colors::text()),
-                ),
-                Span::styled(
-                    "— Ctrl+B to close",
-                    Style::default().fg(crate::colors::text_dim()),
                 ),
             ]))
             .style(Style::default().bg(crate::colors::background()))
@@ -37475,14 +37491,11 @@ impl ChatWidget<'_> {
 
         let title_spans = vec![
             Span::styled(" Agents ", Style::default().fg(crate::colors::text())),
-            Span::styled(
-                "— Ctrl+A to close",
-                Style::default().fg(crate::colors::text_dim()),
-            ),
         ];
 
+        let zen = crate::theme::is_zen_mode();
         let block = Block::default()
-            .borders(Borders::ALL)
+            .borders(if zen { Borders::NONE } else { Borders::ALL })
             .title(Line::from(title_spans))
             .style(Style::default().bg(crate::colors::background()))
             .border_style(
@@ -37736,8 +37749,9 @@ impl ChatWidget<'_> {
             .highlight_style(highlight_style)
             .highlight_spacing(HighlightSpacing::Never);
 
+        let zen = crate::theme::is_zen_mode();
         let sidebar_block = Block::default()
-            .borders(Borders::ALL)
+            .borders(if zen { Borders::NONE } else { Borders::ALL })
             .style(Style::default().bg(crate::colors::background()))
             .border_style(Style::default().fg(sidebar_border_color));
 
@@ -37962,7 +37976,7 @@ impl ChatWidget<'_> {
             crate::colors::border()
         };
         let history_block = Block::default()
-            .borders(Borders::ALL)
+            .borders(if crate::theme::is_zen_mode() { Borders::NONE } else { Borders::ALL })
             .border_style(Style::default().fg(detail_border_color));
 
         Paragraph::new(wrapped_lines)
@@ -38010,8 +38024,14 @@ impl ChatWidget<'_> {
                     ),
                     Span::styled("[X]", Style::default().fg(crate::colors::function())),
                     Span::styled(" Stop   ", Style::default().fg(crate::colors::text_dim())),
-                    Span::styled("[Ctrl+A]", Style::default().fg(crate::colors::function())),
-                    Span::styled(" Exit", Style::default().fg(crate::colors::text_dim())),
+                    Span::styled(
+                        if crate::theme::is_zen_mode() { "" } else { "[Ctrl+A]" },
+                        Style::default().fg(crate::colors::function()),
+                    ),
+                    Span::styled(
+                        if crate::theme::is_zen_mode() { "" } else { " Exit" },
+                        Style::default().fg(crate::colors::text_dim()),
+                    ),
                 ])
             };
             Paragraph::new(hint_line)
@@ -38044,9 +38064,10 @@ impl ChatWidget<'_> {
         let mut rendered_batches = std::collections::HashSet::new();
 
         // Agent status block
+        let zen = crate::theme::is_zen_mode();
         let agent_block = Block::default()
-            .borders(Borders::ALL)
-            .title(" Agents ")
+            .borders(if zen { Borders::NONE } else { Borders::ALL })
+            .title(if zen { "" } else { " Agents " })
             .border_style(Style::default().fg(crate::colors::border()));
 
         let inner_agent = agent_block.inner(area);
@@ -38099,10 +38120,14 @@ impl ChatWidget<'_> {
         // single space between dot and summary; no label/separator
         left_spans.push(Span::raw(" "));
         left_spans.push(Span::raw(summary));
-        let right_spans: Vec<Span> = vec![
-            Span::from("Ctrl+A").style(key_hint_style),
-            Span::styled(" open terminal", label_style),
-        ];
+        let right_spans: Vec<Span> = if crate::theme::is_zen_mode() {
+            vec![]
+        } else {
+            vec![
+                Span::from("Ctrl+A").style(key_hint_style),
+                Span::styled(" open terminal", label_style),
+            ]
+        };
         let measure =
             |spans: &Vec<Span>| -> usize { spans.iter().map(|s| s.content.chars().count()).sum() };
         let left_len = measure(&left_spans);

@@ -510,15 +510,16 @@ impl<'a> BottomPaneView<'a> for SubagentEditorView {
 
     fn render(&self, area: Rect, buf: &mut Buffer) {
         Clear.render(area, buf);
+        let zen = crate::theme::is_zen_mode();
         let block = Block::default()
-            .borders(Borders::ALL)
+            .borders(if zen { Borders::NONE } else { Borders::ALL })
             .border_style(Style::default().fg(crate::colors::border()))
             .style(
                 Style::default()
                     .bg(crate::colors::background())
                     .fg(crate::colors::text()),
             )
-            .title(" Configure Agent Command ")
+            .title(if zen { "" } else { " Configure Agent Command " })
             .title_alignment(Alignment::Center);
         let inner = block.inner(area);
         block.render(area, buf);
