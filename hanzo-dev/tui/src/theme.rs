@@ -137,6 +137,13 @@ pub fn is_zen_mode() -> bool {
     *ZEN_MODE.read().unwrap()
 }
 
+/// Toggle zen mode on/off at runtime. Returns the new state.
+pub fn toggle_zen_mode() -> bool {
+    let mut zen = ZEN_MODE.write().unwrap();
+    *zen = !*zen;
+    *zen
+}
+
 /// Switch to a different predefined theme
 pub fn switch_theme(theme_name: ThemeName) {
     let mapped_name = map_theme_for_palette(theme_name, custom_theme_is_dark());

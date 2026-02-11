@@ -8169,6 +8169,34 @@ impl ChatWidget<'_> {
             }
         }
 
+        // Alt+G / Option+G: toggle gutter (icons, borders, decorative chrome)
+        // On macOS, Option+G may arrive as the `©` character when "Option sends
+        // Esc+" is disabled; match both forms so the shortcut works everywhere.
+        let is_alt_g = matches!(
+            key_event,
+            KeyEvent {
+                code: KeyCode::Char('g'),
+                modifiers: KeyModifiers::ALT,
+                kind: KeyEventKind::Press,
+                ..
+            }
+        ) || matches!(
+            key_event,
+            KeyEvent {
+                code: KeyCode::Char('©'),
+                kind: KeyEventKind::Press,
+                ..
+            }
+        );
+        if is_alt_g {
+            let zen = crate::theme::toggle_zen_mode();
+            self.invalidate_height_cache();
+            let label = if zen { "Gutter hidden" } else { "Gutter visible" };
+            self.bottom_pane.flash_footer_notice(label.to_string());
+            self.request_redraw();
+            return;
+        }
+
         if let KeyEvent {
             code: KeyCode::Up,
             modifiers: KeyModifiers::ALT,
@@ -21673,6 +21701,10 @@ Have we met every part of this goal and is there no further work to do?"#
 
         // Global
         lines.push(kv("Ctrl+G", "Guide overlay"));
+        lines.push(kv(
+            if cfg!(target_os = "macos") { "Opt+G" } else { "Alt+G" },
+            "Toggle gutter icons and borders",
+        ));
         lines.push(kv("Ctrl+R", "Toggle reasoning"));
         lines.push(kv("Ctrl+T", "Toggle screen"));
         lines.push(kv("Ctrl+D", "Diff viewer"));
