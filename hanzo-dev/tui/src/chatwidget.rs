@@ -39984,7 +39984,7 @@ impl WidgetRef for &ChatWidget<'_> {
                             .saturating_add(UnicodeWidthStr::width(status_text.as_str()));
                         header_spans.push(ratatui::text::Span::styled(
                             status_text,
-                            Style::default().fg(crate::colors::text_dim()),
+                            Style::default().fg(color),
                         ));
                     }
 
