@@ -2938,10 +2938,10 @@ impl WidgetRef for ChatComposer {
             .as_ref()
             .filter(|_| self.auto_drive_active)
         {
-            // Auto-drive mode keeps its borders
+            // Auto-drive mode: respect zen borders
             auto_drive_border_gradient = style.border_gradient;
             input_block = input_block
-                .borders(Borders::ALL)
+                .borders(crate::theme::zen_borders())
                 .border_style(style.border_style.clone())
                 .border_type(style.border_type)
                 .style(style.background_style.clone());
@@ -3012,55 +3012,10 @@ impl WidgetRef for ChatComposer {
                 .render(padded_textarea_rect, buf);
         }
 
-        // Draw a high-contrast cursor overlay under the terminal cursor using the theme's
-        // `cursor` color. This improves visibility on dark themes where the terminal's own
-        // cursor color may be hard to see or user-defined.
-        //
-        // Implementation notes:
-        // - We compute the visible cursor position using the same `state` (scroll) used to
-        //   render the textarea so the overlay aligns with wrapped lines.
-        // - We paint the underlying cell with bg=theme.cursor and fg=theme.background.
-        //   This provides contrast regardless of light/dark theme.
-        // - The hardware cursor is still positioned via `frame.set_cursor_position` at the
-        //   app layer; this overlay ensures visibility independent of terminal settings.
-        drop(state); // release the borrow before computing position again
-        if let Some((cx, cy)) = self
-            .textarea
-            .cursor_pos_with_state(padded_textarea_rect, *self.textarea_state.borrow())
-        {
-            let theme = crate::theme::current_theme();
-            let cursor_bg = theme.cursor;
-            if cx < buf.area.width.saturating_add(buf.area.x)
-                && cy < buf.area.height.saturating_add(buf.area.y)
-            {
-                let cell = &mut buf[(cx, cy)];
-                // Only tint the background so the foreground glyph stays intact. Some
-                // terminals (e.g. GNOME Terminal/VTE) temporarily hide the hardware
-                // cursor while processing arrow keys; preserving the foreground color
-                // keeps the caret location visible instead of flashing blank cells.
-                cell.set_bg(cursor_bg);
-                let fg_bg_ratio = contrast_ratio(theme.background, cursor_bg);
-                let fg_text_ratio = contrast_ratio(theme.text_bright, cursor_bg);
-                let cursor_fg = if fg_text_ratio >= fg_bg_ratio {
-                    theme.text_bright
-                } else {
-                    theme.background
-                };
-                cell.set_fg(cursor_fg);
-            }
-        }
+        // The hardware cursor is positioned via `frame.set_cursor_position` at the
+        // app layer; no painted overlay needed — the terminal cursor is sufficient.
+        drop(state);
     }
-}
-
-fn relative_luminance(rgb: (u8, u8, u8)) -> f32 {
-    (0.2126 * rgb.0 as f32 + 0.7152 * rgb.1 as f32 + 0.0722 * rgb.2 as f32) / 255.0
-}
-
-fn contrast_ratio(foreground: Color, background: Color) -> f32 {
-    let lf = relative_luminance(crate::colors::color_to_rgb(foreground));
-    let lb = relative_luminance(crate::colors::color_to_rgb(background));
-    let (bright, dark) = if lf >= lb { (lf, lb) } else { (lb, lf) };
-    (bright + 0.05) / (dark + 0.05)
 }
 
 fn apply_auto_drive_border_gradient(buf: &mut Buffer, area: Rect, gradient: BorderGradient) {
