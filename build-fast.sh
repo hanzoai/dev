@@ -509,6 +509,30 @@ if [ -z "${CODE_VERSION:-}" ]; then
   fi
 fi
 
+# Keep compile-time build metadata in sync with the current checkout so
+# `dev --version` can always be matched back to git tag/hash/date.
+if [ -z "${CODE_GIT_DESCRIBE:-}" ]; then
+  CODE_GIT_DESCRIBE="$(git describe --tags --always --dirty 2>/dev/null || true)"
+  if [ -n "${CODE_GIT_DESCRIBE}" ]; then
+    export CODE_GIT_DESCRIBE
+  fi
+fi
+if [ -z "${CODE_GIT_SHA:-}" ]; then
+  CODE_GIT_SHA="$(git rev-parse --short=12 HEAD 2>/dev/null || true)"
+  if [ -n "${CODE_GIT_SHA}" ]; then
+    export CODE_GIT_SHA
+  fi
+fi
+if [ -z "${CODE_GIT_DATE:-}" ]; then
+  CODE_GIT_DATE="$(git show -s --format=%cs HEAD 2>/dev/null || true)"
+  if [ -n "${CODE_GIT_DATE}" ]; then
+    export CODE_GIT_DATE
+  fi
+fi
+if [ -n "${CODE_GIT_DESCRIBE:-}" ] || [ -n "${CODE_GIT_SHA:-}" ] || [ -n "${CODE_GIT_DATE:-}" ]; then
+  echo "Build metadata: ${CODE_GIT_DESCRIBE:-unknown} ${CODE_GIT_SHA:+(${CODE_GIT_SHA})} ${CODE_GIT_DATE:+${CODE_GIT_DATE}}"
+fi
+
 echo "Building ${CRATE_PREFIX} binary (${PROFILE} mode)..."
 
 # Ensure Cargo cache locations are stable.
