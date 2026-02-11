@@ -77,6 +77,7 @@ fn pre_main_hardening() {
     author,
     name = "hanzo dev",
     version = hanzo_version::version(),
+    long_version = hanzo_version::long_version(),
     // If a sub‑command is given, ignore requirements of the default args.
     subcommand_negates_reqs = true,
     // The executable is sometimes invoked via a platform‑specific name like
@@ -1572,6 +1573,15 @@ async fn doctor_main() -> anyhow::Result<()> {
         .map(|p| p.display().to_string())
         .unwrap_or_else(|_| "<unknown>".to_string());
     println!("hanzo dev version: {}", hanzo_version::version());
+    if let Some(desc) = hanzo_version::git_describe() {
+        println!("git describe: {desc}");
+    }
+    if let Some(sha) = hanzo_version::git_sha() {
+        println!("git sha: {sha}");
+    }
+    if let Some(date) = hanzo_version::git_date() {
+        println!("last updated: {date}");
+    }
     println!("current_exe: {exe}");
 
     // PATH
