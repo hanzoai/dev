@@ -11,13 +11,13 @@ use ratatui::layout::Rect;
 use ratatui::style::Modifier;
 use ratatui::style::Style;
 use ratatui::text::Line;
+use ratatui::text::Span;
 use ratatui::widgets::Paragraph;
 use ratatui::widgets::Widget;
 use ratatui::widgets::WidgetRef;
 
 use crate::app_event::AppEvent;
 use crate::app_event_sender::AppEventSender;
-use crate::spinner;
 use textwrap::Options as TwOptions;
 use textwrap::WordSplitter;
 
@@ -33,7 +33,6 @@ pub(crate) struct StatusIndicatorWidget {
     last_schedule: Cell<Instant>,
     last_rendered_second: Cell<u64>,
     app_event_tx: AppEventSender,
-    // We schedule frames via AppEventSender; no direct frame requester.
 }
 
 #[allow(dead_code)]
@@ -45,20 +44,17 @@ impl StatusIndicatorWidget {
             start_time: Instant::now(),
             last_schedule: Cell::new(Instant::now()),
             last_rendered_second: Cell::new(u64::MAX),
-
             app_event_tx,
         }
     }
 
     pub fn desired_height(&self, width: u16) -> u16 {
-        // Status line + optional blank line + wrapped queued messages (up to 3 lines per message)
-        // + optional ellipsis line per truncated message + 1 spacer line
         let inner_width = width.max(1) as usize;
         let mut total: u16 = 1; // status line
         if !self.queued_messages.is_empty() {
-            total = total.saturating_add(1); // blank line between status and queued messages
+            total = total.saturating_add(1);
         }
-        let text_width = inner_width.saturating_sub(3); // account for " ↳ " prefix
+        let text_width = inner_width.saturating_sub(3);
         if text_width > 0 {
             let opts = TwOptions::new(text_width)
                 .break_words(false)
@@ -68,41 +64,34 @@ impl StatusIndicatorWidget {
                 let lines = wrapped.len().min(3) as u16;
                 total = total.saturating_add(lines);
                 if wrapped.len() > 3 {
-                    total = total.saturating_add(1); // ellipsis line
+                    total = total.saturating_add(1);
                 }
             }
             if !self.queued_messages.is_empty() {
-                total = total.saturating_add(1); // keybind hint line
+                total = total.saturating_add(1);
             }
         } else {
-            // At least one line per message if width is extremely narrow
             total = total.saturating_add(self.queued_messages.len() as u16);
         }
-        total.saturating_add(1) // spacer line
+        total.saturating_add(1)
     }
 
     pub(crate) fn interrupt(&self) {
         self.app_event_tx.send(AppEvent::CodeOp(Op::Interrupt));
     }
 
-    /// Update the animated header label (left of the brackets).
     pub(crate) fn update_header(&mut self, header: String) {
         if self.header != header {
             self.header = header;
         }
     }
 
-    /// Replace the queued messages displayed beneath the header.
     pub(crate) fn set_queued_messages(&mut self, queued: Vec<String>) {
         self.queued_messages = queued;
-        // Ensure a redraw so changes are visible.
-        // Use the app's debounced redraw path; no need to arm a fast timer here.
         self.app_event_tx.send(AppEvent::RequestRedraw);
     }
 }
 
-// Format elapsed seconds into a compact human-friendly form used by the status line.
-// Examples: 0s, 59s, 1m 00s, 59m 59s, 1h 00m 00s, 2h 03m 09s
 fn fmt_elapsed_compact(elapsed_secs: u64) -> String {
     if elapsed_secs < 60 {
         return format!("{elapsed_secs}s");
@@ -116,6 +105,40 @@ fn fmt_elapsed_compact(elapsed_secs: u64) -> String {
     let minutes = (elapsed_secs % 3600) / 60;
     let seconds = elapsed_secs % 60;
     format!("{hours}h {minutes:02}m {seconds:02}s")
+}
+
+/// Build shimmer spans for text: a brightness band sweeps across the characters.
+/// Uses the accent color at the peak and text_dim everywhere else, creating a
+/// subtle pulsing/sweeping effect on the whole line.
+fn shimmer_text(text: &str, elapsed_ms: u128, accent: ratatui::style::Color, dim: ratatui::style::Color) -> Vec<Span<'static>> {
+    let chars: Vec<char> = text.chars().collect();
+    if chars.is_empty() {
+        return Vec::new();
+    }
+    let padding = 6usize;
+    let period = chars.len() + padding * 2;
+    let sweep_secs = 2.0f32;
+    let pos_f = ((elapsed_ms as f32 / 1000.0) % sweep_secs) / sweep_secs * (period as f32);
+    let band_half = 4.0f32;
+
+    let mut spans = Vec::with_capacity(chars.len());
+    for (i, ch) in chars.iter().enumerate() {
+        let dist = ((i as f32 + padding as f32) - pos_f).abs();
+        let intensity = if dist <= band_half {
+            0.5 * (1.0 + (std::f32::consts::PI * dist / band_half).cos())
+        } else {
+            0.0
+        };
+        let style = if intensity > 0.5 {
+            Style::default().fg(accent).add_modifier(Modifier::BOLD)
+        } else if intensity > 0.15 {
+            Style::default().fg(accent)
+        } else {
+            Style::default().fg(dim)
+        };
+        spans.push(Span::styled(ch.to_string(), style));
+    }
+    spans
 }
 
 #[cfg(all(not(test), target_os = "macos"))]
@@ -148,27 +171,22 @@ impl WidgetRef for StatusIndicatorWidget {
             return;
         }
 
-        // Schedule periodic refreshes for both the elapsed timer and the spinner animation.
+        // Schedule animation redraws at ~30fps for smooth shimmer
         let now = Instant::now();
         let elapsed_since_start = self.start_time.elapsed();
         let elapsed = elapsed_since_start.as_secs();
         let elapsed_ms = elapsed_since_start.as_millis();
-
-        // Use the spinner's interval for smooth animation redraws
-        let spin = spinner::current_spinner();
-        let spinner_interval = Duration::from_millis(spin.interval_ms.max(80));
+        let anim_interval = Duration::from_millis(33);
 
         if elapsed != self.last_rendered_second.get()
-            || now.duration_since(self.last_schedule.get()) >= spinner_interval
+            || now.duration_since(self.last_schedule.get()) >= anim_interval
         {
             self.last_schedule.set(now);
             self.last_rendered_second.set(elapsed);
             self.app_event_tx
-                .send(AppEvent::ScheduleFrameIn(spinner_interval));
+                .send(AppEvent::ScheduleFrameIn(anim_interval));
         }
 
-        // Plain rendering: no borders or padding so the live cell is visually indistinguishable from terminal scrollback.
-        // Theme-aware base styles
         let bg = crate::colors::background();
         let text = crate::colors::text();
         let text_dim = crate::colors::text_dim();
@@ -176,42 +194,41 @@ impl WidgetRef for StatusIndicatorWidget {
         let secondary = Style::default().fg(text_dim).add_modifier(Modifier::DIM);
 
         let pretty_elapsed = fmt_elapsed_compact(elapsed);
+        let zen = crate::theme::is_zen_mode();
 
-        // Animated spinner frame from the spinner system
-        let spinner_frame = spinner::frame_at_time(spin, elapsed_ms);
+        // Build header spans with shimmer on the header text
+        let mut spans: Vec<Span<'static>> = vec![Span::raw(" ")];
 
-        // Build header spans — "◐ Thinking (14s • esc to interrupt)"
-        let mut spans = vec![
-            ratatui::text::Span::raw(" "),
-        ];
-        // Show animated spinner frame (or nothing in zen with no spinner)
-        if !spinner_frame.is_empty() {
-            spans.push(
-                ratatui::text::Span::raw(format!("{spinner_frame} "))
-                    .style(Style::default().fg(accent)),
-            );
+        // Simple bullet — hidden in zen mode
+        if !zen {
+            // Blink the bullet: alternate • / ◦ every 600ms
+            let blink_on = (elapsed_ms / 600) % 2 == 0;
+            if blink_on {
+                spans.push(Span::styled("• ", Style::default().fg(accent)));
+            } else {
+                spans.push(Span::styled("• ", secondary));
+            }
         }
-        spans.extend(vec![
-            ratatui::text::Span::styled(
-                self.header.clone(),
-                Style::default().fg(accent).add_modifier(Modifier::BOLD),
-            ),
-            ratatui::text::Span::raw(" "),
-            ratatui::text::Span::raw(format!("({pretty_elapsed} ")).style(secondary),
-            ratatui::text::Span::raw("• ").style(secondary),
-            ratatui::text::Span::raw("esc")
-                .style(Style::default().fg(accent).add_modifier(Modifier::BOLD)),
-            ratatui::text::Span::raw(" to interrupt)").style(secondary),
-        ]);
 
-        // Build lines: status, then queued messages, then spacer.
+        // Shimmer the header text for a subtle pulse effect
+        spans.extend(shimmer_text(&self.header, elapsed_ms, accent, text_dim));
+
+        // Elapsed time and interrupt hint
+        spans.push(Span::raw(" "));
+        spans.push(Span::raw(format!("({pretty_elapsed} ")).style(secondary));
+        spans.push(Span::raw("• ").style(secondary));
+        spans.push(
+            Span::raw("esc").style(Style::default().fg(accent).add_modifier(Modifier::BOLD)),
+        );
+        spans.push(Span::raw(" to interrupt)").style(secondary));
+
+        // Build lines
         let mut lines: Vec<Line<'static>> = Vec::new();
         lines.push(Line::from(spans));
         if !self.queued_messages.is_empty() {
             lines.push(Line::from(""));
         }
-        // Wrap queued messages using textwrap and show up to the first 3 lines per message.
-        let text_width = area.width.saturating_sub(3); // " ↳ " prefix
+        let text_width = area.width.saturating_sub(3);
         let opts = TwOptions::new(text_width as usize)
             .break_words(false)
             .word_splitter(WordSplitter::NoHyphenation);
@@ -243,17 +260,15 @@ impl WidgetRef for StatusIndicatorWidget {
         if !self.queued_messages.is_empty() {
             lines.push(
                 Line::from(vec![
-                    ratatui::text::Span::raw("   "),
-                    // Key hint in accent, label in dim text
-                    ratatui::text::Span::raw(alt_up_hint())
+                    Span::raw("   "),
+                    Span::raw(alt_up_hint())
                         .style(Style::default().fg(accent).add_modifier(Modifier::BOLD)),
-                    ratatui::text::Span::raw(" edit").style(secondary),
+                    Span::raw(" edit").style(secondary),
                 ])
                 .style(Style::default()),
             );
         }
 
-        // Ensure background/foreground reflect theme
         let paragraph = Paragraph::new(lines).style(Style::default().bg(bg).fg(text));
         paragraph.render(area, buf);
     }
