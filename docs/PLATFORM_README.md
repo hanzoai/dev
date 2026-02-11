@@ -192,10 +192,10 @@ graph LR
 
 ```bash
 # NPX (fastest - no install required)
-npx -y @just-every/code
+npx -y @hanzoai/dev
 
 # Global Installation
-npm install -g @just-every/code
+npm install -g @hanzoai/dev
 
 # Run the CLI
 code  # or 'coder' if 'code' conflicts with VS Code
@@ -256,7 +256,7 @@ qwen --version
 The heart of Hanzo Dev - handles conversation management, model communication, and tool orchestration.
 
 ```
-code-rs/core/
+hanzo-dev/core/
 ├── src/
 │   ├── lib.rs              # Main library exports
 │   ├── codex.rs            # Core Codex engine
@@ -282,7 +282,7 @@ code-rs/core/
 A rich terminal interface built with Ratatui providing an IDE-like experience.
 
 ```
-code-rs/tui/
+hanzo-dev/tui/
 ├── src/
 │   ├── app.rs              # Application state
 │   ├── chatwidget.rs       # Main chat interface
@@ -430,7 +430,7 @@ auto_resolve_review_attempts = 5
 Full Model Context Protocol support for tool extensibility.
 
 ```
-code-rs/
+hanzo-dev/
 ├── mcp-client/      # MCP client implementation
 ├── mcp-server/      # MCP server for external tools
 ├── mcp-types/       # Shared type definitions
@@ -644,19 +644,19 @@ pnpm install
 ./build-fast.sh
 
 # Run locally
-./code-rs/target/dev-fast/code
+./hanzo-dev/target/dev-fast/code
 ```
 
 ### Production Build
 
 ```bash
 # Full release build with LTO
-cd code-rs && cargo build --release
+cd hanzo-dev && cargo build --release
 
 # Binaries located at:
-# ./code-rs/target/release/code
-# ./code-rs/target/release/code-tui
-# ./code-rs/target/release/code-exec
+# ./hanzo-dev/target/release/dev
+# ./hanzo-dev/target/release/dev-tui
+# ./hanzo-dev/target/release/dev-exec
 ```
 
 ### Docker Deployment

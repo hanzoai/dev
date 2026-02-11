@@ -198,7 +198,7 @@ approval_policy = "never"
 
 Use `[[agents]]` blocks to register additional CLI programs that Code can launch as peers. Each block maps a short `name` (referenced elsewhere in the config) to the command to execute, optional default flags, and environment variables.
 
-> **Note:** Built-in model slugs (for example `code-gpt-5.3-codex`, `claude-sonnet-4.5`) automatically inject the correct `--model` or `-m` flag. To avoid conflicting arguments, Code strips any `--model`/`-m` flags you place in `args`, `args_read_only`, or `args_write` before launching the agent. If you need a new model variant, add a slug in `code-rs/core/src/agent_defaults.rs` (or set an environment variable consumed by the CLI) rather than pinning the flag here.
+> **Note:** Built-in model slugs (for example `code-gpt-5.3-codex`, `claude-sonnet-4.5`) automatically inject the correct `--model` or `-m` flag. To avoid conflicting arguments, Code strips any `--model`/`-m` flags you place in `args`, `args_read_only`, or `args_write` before launching the agent. If you need a new model variant, add a slug in `hanzo-dev/core/src/agent_defaults.rs` (or set an environment variable consumed by the CLI) rather than pinning the flag here.
 
 ```toml
 [[agents]]
@@ -422,7 +422,7 @@ command = "npx"
 args = ["-y", "mcp-server"]
 # Optional: propagate additional env vars to the MCP server.
 # A default whitelist of env vars will be propagated to the MCP server.
-# https://github.com/just-every/code/blob/main/code-rs/rmcp-client/src/utils.rs#L82
+# https://github.com/hanzoai/dev/blob/main/hanzo-dev/rmcp-client/src/utils.rs#L82
 env = { "API_KEY" = "value" }
 ```
 

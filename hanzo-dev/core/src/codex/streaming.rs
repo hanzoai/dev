@@ -2134,6 +2134,14 @@ async fn run_turn(
             }
             Err(CodeErr::UsageNotIncluded) => return Err(CodeErr::UsageNotIncluded),
             Err(CodeErr::QuotaExceeded) => return Err(CodeErr::QuotaExceeded),
+            Err(CodeErr::RetryLimit(limit_err)) => {
+                warn!(
+                    status = %limit_err.status,
+                    retryable = limit_err.retryable,
+                    "provider retry limit reached; skipping outer turn retry"
+                );
+                return Err(CodeErr::RetryLimit(limit_err));
+            }
             Err(e) => {
                 // Detect context-window overflow and auto-run a compact summarization once
                 if !did_auto_compact && let CodeErr::Stream(msg, _maybe_delay, _req_id) = &e {
