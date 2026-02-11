@@ -52,6 +52,20 @@ pub struct Theme {
     // Animation colors
     pub spinner: Color,
     pub progress: Color,
+
+    // Layout / chrome (driven by zen mode, set in init_theme)
+    pub show_borders: bool,
+    pub show_gutter: bool,
+    pub content_padding: u16,
+}
+
+impl Theme {
+    /// Apply zen mode layout: no borders, no gutter, flush-left.
+    fn apply_zen(&mut self, zen: bool) {
+        self.show_borders = !zen;
+        self.show_gutter = !zen;
+        self.content_padding = if zen { 0 } else { 1 };
+    }
 }
 
 impl Default for Theme {
@@ -77,6 +91,8 @@ pub fn init_theme(config: &ThemeConfig) {
     if needs_ansi256_fallback() {
         quantize_theme_to_ansi256(&mut theme);
     }
+
+    theme.apply_zen(config.zen);
 
     let mut current = CURRENT_THEME.write().unwrap();
     *current = theme.clone();
@@ -141,7 +157,12 @@ pub fn is_zen_mode() -> bool {
 pub fn toggle_zen_mode() -> bool {
     let mut zen = ZEN_MODE.write().unwrap();
     *zen = !*zen;
-    *zen
+    let new_zen = *zen;
+    drop(zen);
+    // Update theme layout properties to match
+    let mut theme = CURRENT_THEME.write().unwrap();
+    theme.apply_zen(new_zen);
+    new_zen
 }
 
 /// Switch to a different predefined theme
@@ -1072,7 +1093,7 @@ fn ansi256_to_rgb(idx: u8) -> (u8, u8, u8) {
 
 /// Get a predefined theme by name
 fn get_predefined_theme(name: ThemeName) -> Theme {
-    match name {
+    let mut theme = match name {
         ThemeName::DarkCarbonNight => Theme {
             // Dark default - sleek modern dark theme
             primary: Color::Rgb(37, 194, 255),         // #25C2FF
@@ -1096,6 +1117,9 @@ fn get_predefined_theme(name: ThemeName) -> Theme {
             function: Color::Rgb(126, 231, 135),       // #7EE787
             spinner: Color::Rgb(59, 67, 79),           // #3B434F
             progress: Color::Rgb(37, 194, 255),        // #25C2FF
+            show_borders: true,
+            show_gutter: true,
+            content_padding: 1,
         },
         ThemeName::DarkCarbonAnsi16 => Theme {
             primary: Color::Indexed(12),
@@ -1119,6 +1143,9 @@ fn get_predefined_theme(name: ThemeName) -> Theme {
             function: Color::Indexed(10),
             spinner: Color::Indexed(7),
             progress: Color::Indexed(12),
+            show_borders: true,
+            show_gutter: true,
+            content_padding: 1,
         },
 
         ThemeName::LightPhoton => Theme {
@@ -1144,6 +1171,9 @@ fn get_predefined_theme(name: ThemeName) -> Theme {
             function: Color::Rgb(0, 95, 204),          // #005FCC
             spinner: Color::Rgb(156, 163, 175),        // #9CA3AF
             progress: Color::Rgb(0, 95, 204),          // #005FCC
+            show_borders: true,
+            show_gutter: true,
+            content_padding: 1,
         },
         ThemeName::LightPhotonAnsi16 => Theme {
             primary: Color::Indexed(12),
@@ -1167,6 +1197,9 @@ fn get_predefined_theme(name: ThemeName) -> Theme {
             function: Color::Indexed(10),
             spinner: Color::Indexed(4),
             progress: Color::Indexed(12),
+            show_borders: true,
+            show_gutter: true,
+            content_padding: 1,
         },
 
         ThemeName::LightPrismRainbow => Theme {
@@ -1192,6 +1225,9 @@ fn get_predefined_theme(name: ThemeName) -> Theme {
             function: Color::Rgb(58, 134, 255),        // #3A86FF
             spinner: Color::Rgb(165, 174, 192),        // #A5AEC0
             progress: Color::Rgb(58, 134, 255),        // #3A86FF
+            show_borders: true,
+            show_gutter: true,
+            content_padding: 1,
         },
 
         ThemeName::LightVividTriad => Theme {
@@ -1217,6 +1253,9 @@ fn get_predefined_theme(name: ThemeName) -> Theme {
             function: Color::Rgb(0, 224, 255),         // #00E0FF
             spinner: Color::Rgb(154, 163, 175),        // #9AA3AF
             progress: Color::Rgb(0, 224, 255),         // #00E0FF
+            show_borders: true,
+            show_gutter: true,
+            content_padding: 1,
         },
 
         ThemeName::LightPorcelain => Theme {
@@ -1242,6 +1281,9 @@ fn get_predefined_theme(name: ThemeName) -> Theme {
             function: Color::Rgb(39, 110, 241),        // #276EF1
             spinner: Color::Rgb(154, 168, 181),        // #9AA8B5
             progress: Color::Rgb(39, 110, 241),        // #276EF1
+            show_borders: true,
+            show_gutter: true,
+            content_padding: 1,
         },
 
         ThemeName::LightSandbar => Theme {
@@ -1267,6 +1309,9 @@ fn get_predefined_theme(name: ThemeName) -> Theme {
             function: Color::Rgb(201, 122, 0),         // #C97A00
             spinner: Color::Rgb(183, 172, 158),        // #B7AC9E
             progress: Color::Rgb(201, 122, 0),         // #C97A00
+            show_borders: true,
+            show_gutter: true,
+            content_padding: 1,
         },
 
         ThemeName::LightGlacier => Theme {
@@ -1292,6 +1337,9 @@ fn get_predefined_theme(name: ThemeName) -> Theme {
             function: Color::Rgb(14, 165, 233),        // #0EA5E9
             spinner: Color::Rgb(156, 178, 199),        // #9CB2C7
             progress: Color::Rgb(14, 165, 233),        // #0EA5E9
+            show_borders: true,
+            show_gutter: true,
+            content_padding: 1,
         },
 
         ThemeName::DarkShinobiDusk => Theme {
@@ -1317,6 +1365,9 @@ fn get_predefined_theme(name: ThemeName) -> Theme {
             function: Color::Rgb(122, 162, 247),       // #7AA2F7
             spinner: Color::Rgb(42, 49, 64),           // #2A3140
             progress: Color::Rgb(122, 162, 247),       // #7AA2F7
+            show_borders: true,
+            show_gutter: true,
+            content_padding: 1,
         },
 
         ThemeName::DarkOledBlackPro => Theme {
@@ -1342,6 +1393,9 @@ fn get_predefined_theme(name: ThemeName) -> Theme {
             function: Color::Rgb(37, 194, 255),        // #25C2FF
             spinner: Color::Rgb(45, 45, 45),           // #2D2D2D
             progress: Color::Rgb(0, 209, 255),         // #00D1FF
+            show_borders: true,
+            show_gutter: true,
+            content_padding: 1,
         },
 
         ThemeName::DarkAmberTerminal => Theme {
@@ -1367,6 +1421,9 @@ fn get_predefined_theme(name: ThemeName) -> Theme {
             function: Color::Rgb(255, 176, 0),         // #FFB000
             spinner: Color::Rgb(58, 45, 23),           // #3A2D17
             progress: Color::Rgb(255, 176, 0),         // #FFB000
+            show_borders: true,
+            show_gutter: true,
+            content_padding: 1,
         },
 
         ThemeName::DarkAuroraFlux => Theme {
@@ -1392,6 +1449,9 @@ fn get_predefined_theme(name: ThemeName) -> Theme {
             function: Color::Rgb(142, 202, 255),       // #8ECAFF
             spinner: Color::Rgb(37, 48, 74),           // #25304A
             progress: Color::Rgb(142, 202, 255),       // #8ECAFF
+            show_borders: true,
+            show_gutter: true,
+            content_padding: 1,
         },
 
         ThemeName::DarkCharcoalRainbow => Theme {
@@ -1417,6 +1477,9 @@ fn get_predefined_theme(name: ThemeName) -> Theme {
             function: Color::Rgb(179, 136, 255),       // #B388FF
             spinner: Color::Rgb(42, 42, 42),           // #2A2A2A
             progress: Color::Rgb(26, 209, 255),        // #1AD1FF
+            show_borders: true,
+            show_gutter: true,
+            content_padding: 1,
         },
 
         ThemeName::DarkZenGarden => Theme {
@@ -1442,6 +1505,9 @@ fn get_predefined_theme(name: ThemeName) -> Theme {
             function: Color::Rgb(137, 220, 235),       // #89DCEB
             spinner: Color::Rgb(37, 49, 58),           // #25313A
             progress: Color::Rgb(148, 226, 213),       // #94E2D5
+            show_borders: true,
+            show_gutter: true,
+            content_padding: 1,
         },
 
         ThemeName::DarkPaperLightPro => Theme {
@@ -1467,6 +1533,9 @@ fn get_predefined_theme(name: ThemeName) -> Theme {
             function: Color::Rgb(0, 95, 204),          // #005FCC
             spinner: Color::Rgb(140, 149, 159),        // #8C959F
             progress: Color::Rgb(0, 95, 204),          // #005FCC
+            show_borders: true,
+            show_gutter: true,
+            content_padding: 1,
         },
 
         ThemeName::DarkMonochrome => Theme {
@@ -1492,11 +1561,19 @@ fn get_predefined_theme(name: ThemeName) -> Theme {
             function: Color::Rgb(222, 225, 231),
             spinner: Color::Rgb(118, 126, 140),
             progress: Color::Rgb(214, 218, 225),
+            show_borders: true,
+            show_gutter: true,
+            content_padding: 1,
         },
 
         ThemeName::Custom => {
             // Use DarkCarbonNight (dark default) as base for custom
             get_predefined_theme(ThemeName::DarkCarbonNight)
         }
-    }
+    };
+    // Layout defaults — overridden by apply_zen() in init_theme
+    theme.show_borders = true;
+    theme.show_gutter = true;
+    theme.content_padding = 1;
+    theme
 }
