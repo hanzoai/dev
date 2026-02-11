@@ -93,12 +93,11 @@ impl<'a> BottomPaneView<'a> for GithubSettingsView {
 
     fn render(&self, area: Rect, buf: &mut Buffer) {
         Clear.render(area, buf);
-        let zen = crate::theme::is_zen_mode();
         let block = Block::default()
-            .borders(if zen { Borders::NONE } else { Borders::ALL })
+            .borders(crate::theme::zen_borders())
             .border_style(Style::default().fg(crate::colors::border()))
             .style(Style::default().bg(crate::colors::background()).fg(crate::colors::text()))
-            .title(if zen { "" } else { " GitHub Settings " })
+            .title(if crate::theme::show_borders() { " GitHub Settings " } else { "" })
             .title_alignment(Alignment::Center);
         let inner = block.inner(area);
         block.render(area, buf);

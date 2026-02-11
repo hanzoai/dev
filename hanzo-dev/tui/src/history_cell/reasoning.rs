@@ -311,7 +311,7 @@ impl HistoryCell for CollapsibleReasoningCell {
         fill_rect(buf, area, Some(' '), bg_style);
 
         let block = Block::default()
-            .borders(if crate::theme::is_zen_mode() { Borders::NONE } else { Borders::LEFT })
+            .borders(crate::theme::zen_left_borders())
             .border_style(Style::default().fg(crate::colors::border_dim()).bg(bg))
             .style(Style::default().bg(bg))
             .padding(Padding {

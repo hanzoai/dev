@@ -8,7 +8,6 @@ use ratatui::style::Style;
 use ratatui::text::Line;
 use ratatui::text::Span;
 use ratatui::widgets::Block;
-use ratatui::widgets::Borders;
 use ratatui::widgets::Clear;
 
 use crate::colors;
@@ -86,9 +85,8 @@ pub(crate) fn render_panel<F>(
         Clear.render(area, buf);
     }
 
-    let zen = crate::theme::is_zen_mode();
     let mut block = Block::default()
-        .borders(if zen { Borders::NONE } else { Borders::ALL })
+        .borders(crate::theme::zen_borders())
         .border_style(style.border_style)
         .style(style.background_style)
         .title_alignment(style.title_alignment);

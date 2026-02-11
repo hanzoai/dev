@@ -10,7 +10,6 @@ use ratatui::style::Style;
 use ratatui::text::Line;
 use ratatui::text::Span;
 use ratatui::widgets::Block;
-use ratatui::widgets::Borders;
 use ratatui::widgets::Clear;
 use ratatui::widgets::Paragraph;
 use ratatui::widgets::Widget;
@@ -510,16 +509,15 @@ impl<'a> BottomPaneView<'a> for SubagentEditorView {
 
     fn render(&self, area: Rect, buf: &mut Buffer) {
         Clear.render(area, buf);
-        let zen = crate::theme::is_zen_mode();
         let block = Block::default()
-            .borders(if zen { Borders::NONE } else { Borders::ALL })
+            .borders(crate::theme::zen_borders())
             .border_style(Style::default().fg(crate::colors::border()))
             .style(
                 Style::default()
                     .bg(crate::colors::background())
                     .fg(crate::colors::text()),
             )
-            .title(if zen { "" } else { " Configure Agent Command " })
+            .title(if crate::theme::show_borders() { " Configure Agent Command " } else { "" })
             .title_alignment(Alignment::Center);
         let inner = block.inner(area);
         block.render(area, buf);
@@ -676,9 +674,8 @@ impl<'a> BottomPaneView<'a> for SubagentEditorView {
         } else {
             Style::default().fg(crate::colors::border())
         };
-        let zen = crate::theme::is_zen_mode();
         let name_block = Block::default()
-            .borders(if zen { Borders::NONE } else { Borders::ALL })
+            .borders(crate::theme::zen_borders())
             .border_style(name_border)
             .title(Line::from(" ID "));
         let name_inner = name_block.inner(name_box_rect);
@@ -712,7 +709,7 @@ impl<'a> BottomPaneView<'a> for SubagentEditorView {
             Style::default().fg(crate::colors::border())
         };
         let orch_block = Block::default()
-            .borders(if zen { Borders::NONE } else { Borders::ALL })
+            .borders(crate::theme::zen_borders())
             .border_style(orch_border)
             .title(Line::from(" Instructions "));
         if orch_box_h >= 2 {

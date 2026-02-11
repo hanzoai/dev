@@ -146,7 +146,6 @@ pub(crate) use ratatui::text::Line;
 pub(crate) use ratatui::text::Span;
 pub(crate) use ratatui::text::Text;
 pub(crate) use ratatui::widgets::Block;
-pub(crate) use ratatui::widgets::Borders;
 pub(crate) use ratatui::widgets::Padding;
 pub(crate) use ratatui::widgets::Paragraph;
 pub(crate) use ratatui::widgets::Widget;

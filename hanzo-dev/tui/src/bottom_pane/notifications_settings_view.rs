@@ -11,7 +11,6 @@ use ratatui::style::Style;
 use ratatui::text::Line;
 use ratatui::text::Span;
 use ratatui::widgets::Block;
-use ratatui::widgets::Borders;
 use ratatui::widgets::Clear;
 use ratatui::widgets::Paragraph;
 use ratatui::widgets::Widget;
@@ -229,16 +228,15 @@ impl<'a> BottomPaneView<'a> for NotificationsSettingsView {
 
     fn render(&self, area: Rect, buf: &mut Buffer) {
         Clear.render(area, buf);
-        let zen = crate::theme::is_zen_mode();
         let block = Block::default()
-            .borders(if zen { Borders::NONE } else { Borders::ALL })
+            .borders(crate::theme::zen_borders())
             .border_style(Style::default().fg(crate::colors::border()))
             .style(
                 Style::default()
                     .bg(crate::colors::background())
                     .fg(crate::colors::text()),
             )
-            .title(if zen { "" } else { " Notifications " })
+            .title(if crate::theme::show_borders() { " Notifications " } else { "" })
             .title_alignment(Alignment::Center);
         let inner = block.inner(area);
         block.render(area, buf);

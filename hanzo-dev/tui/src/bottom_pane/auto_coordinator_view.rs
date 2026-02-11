@@ -526,7 +526,7 @@ impl AutoCoordinatorView {
             colors::text_dim()
         };
         let mut right_spans: Vec<Span<'static>> = Vec::new();
-        if !crate::theme::is_zen_mode() {
+        if crate::theme::show_borders() {
             let now_ms = SystemTime::now()
                 .duration_since(UNIX_EPOCH)
                 .unwrap_or_default()

@@ -67,7 +67,7 @@ impl HistoryCell for WaitStatusCell {
     }
 
     fn gutter_symbol(&self) -> Option<&'static str> {
-        if crate::theme::is_zen_mode() { return None; }
+        if !crate::theme::show_gutter() { return None; }
         Some("◓")
     }
 }

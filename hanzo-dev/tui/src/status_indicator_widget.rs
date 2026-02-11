@@ -194,13 +194,11 @@ impl WidgetRef for StatusIndicatorWidget {
         let secondary = Style::default().fg(text_dim).add_modifier(Modifier::DIM);
 
         let pretty_elapsed = fmt_elapsed_compact(elapsed);
-        let zen = crate::theme::is_zen_mode();
-
         // Build header spans with shimmer on the header text
-        let mut spans: Vec<Span<'static>> = vec![Span::raw(if zen { "" } else { " " })];
+        let mut spans: Vec<Span<'static>> = vec![Span::raw(if crate::theme::show_gutter() { " " } else { "" })];
 
-        // Simple bullet — hidden in zen mode
-        if !zen {
+        // Simple bullet — hidden when gutter is off
+        if crate::theme::show_gutter() {
             // Blink the bullet: alternate • / ◦ every 600ms
             let blink_on = (elapsed_ms / 600) % 2 == 0;
             if blink_on {

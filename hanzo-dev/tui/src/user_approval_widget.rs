@@ -414,7 +414,7 @@ impl WidgetRef for &UserApprovalWidget<'_> {
             .wrap(Wrap { trim: false })
             .render(options_chunk.inner(Margin::new(1, 0)), buf);
 
-        if !crate::theme::is_zen_mode() {
+        if crate::theme::show_borders() {
             Block::bordered()
                 .border_type(BorderType::QuadrantOutside)
                 .border_style(Style::default().fg(crate::colors::light_blue()))

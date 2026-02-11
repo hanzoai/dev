@@ -6,7 +6,6 @@ use ratatui::text::Line;
 use ratatui::text::Span;
 use ratatui::text::Text;
 use ratatui::widgets::Block;
-use ratatui::widgets::Borders;
 use ratatui::widgets::Padding;
 use ratatui::widgets::Paragraph;
 use ratatui::widgets::Widget;
@@ -436,7 +435,7 @@ impl HistoryCell for MergedExecCell {
                             height: out_height,
                         };
                         let block = Block::default()
-                            .borders(if crate::theme::is_zen_mode() { Borders::NONE } else { Borders::LEFT })
+                            .borders(crate::theme::zen_left_borders())
                             .border_style(
                                 Style::default()
                                     .fg(crate::colors::border_dim())
@@ -536,7 +535,7 @@ impl HistoryCell for MergedExecCell {
                     height: out_height,
                 };
                 let block = Block::default()
-                    .borders(if crate::theme::is_zen_mode() { Borders::NONE } else { Borders::LEFT })
+                    .borders(crate::theme::zen_left_borders())
                     .border_style(
                         Style::default()
                             .fg(crate::colors::border_dim())

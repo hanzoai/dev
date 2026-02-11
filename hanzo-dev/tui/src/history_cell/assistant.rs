@@ -179,7 +179,7 @@ impl AssistantMarkdownCell {
                         crate::colors::code_block_bg()
                     };
                     let blk = Block::default()
-                        .borders(if crate::theme::is_zen_mode() { Borders::NONE } else { Borders::ALL })
+                        .borders(crate::theme::zen_borders())
                         .border_style(Style::default().fg(crate::colors::border()))
                         .style(Style::default().bg(code_bg))
                         .padding(Padding {
