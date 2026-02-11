@@ -14,7 +14,7 @@ lazy_static! {
     static ref CUSTOM_THEME_COLORS: RwLock<Option<hanzo_core::config_types::ThemeColors>> =
         RwLock::new(None);
     static ref CUSTOM_THEME_IS_DARK: RwLock<Option<bool>> = RwLock::new(None);
-    static ref ZEN_MODE: RwLock<bool> = RwLock::new(false);
+    static ref ZEN_MODE: RwLock<bool> = RwLock::new(true);
 }
 
 /// Represents a complete theme with all colors resolved
