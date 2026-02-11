@@ -48,10 +48,12 @@ pub(crate) enum HistoryCellType {
 }
 
 pub(crate) fn gutter_symbol_for_kind(kind: HistoryCellType) -> Option<&'static str> {
+    if crate::theme::is_zen_mode() {
+        return None;
+    }
     match kind {
         HistoryCellType::Plain => None,
         HistoryCellType::User => Some("▶"),
-        // Restore assistant gutter icon
         HistoryCellType::Assistant => Some("⏺"),
         HistoryCellType::Reasoning => None,
         HistoryCellType::Error => Some("✖"),
@@ -61,7 +63,6 @@ pub(crate) fn gutter_symbol_for_kind(kind: HistoryCellType) -> Option<&'static s
             ToolCellStatus::Failed => "✖",
         }),
         HistoryCellType::Exec { kind, status } => {
-            // Show ❯ only for Run executions; hide for read/search/list summaries
             match (kind, status) {
                 (ExecKind::Run, ExecStatus::Error) => Some("✖"),
                 (ExecKind::Run, _) => Some("❯"),
@@ -69,7 +70,6 @@ pub(crate) fn gutter_symbol_for_kind(kind: HistoryCellType) -> Option<&'static s
             }
         }
         HistoryCellType::Patch { .. } => Some("↯"),
-        // Plan updates supply their own gutter glyph dynamically.
         HistoryCellType::PlanUpdate => None,
         HistoryCellType::BackgroundEvent => Some("⏺"),
         HistoryCellType::Notice => None,
