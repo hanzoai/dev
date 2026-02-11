@@ -13,7 +13,6 @@ use ratatui::style::Style;
 use ratatui::text::Line;
 use ratatui::text::Span;
 use ratatui::widgets::Block;
-use ratatui::widgets::Borders;
 use ratatui::widgets::Clear;
 use ratatui::widgets::Paragraph;
 use ratatui::widgets::Widget;
@@ -1275,7 +1274,7 @@ impl SettingsContent for ChromeSettingsContent {
         Clear.render(area, buf);
 
         let block = Block::default()
-            .borders(Borders::ALL)
+            .borders(crate::theme::zen_borders())
             .title(Line::from(" Chrome Launch Options "))
             .title_alignment(Alignment::Center)
             .style(
@@ -2197,7 +2196,7 @@ impl SettingsOverlayView {
         );
 
         Block::default()
-            .borders(Borders::ALL)
+            .borders(crate::theme::zen_borders())
             .border_style(Style::default().fg(crate::colors::border()))
             .style(Style::default().bg(crate::colors::background()))
             .render(box_area, buf);
