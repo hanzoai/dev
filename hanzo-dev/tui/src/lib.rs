@@ -1243,9 +1243,9 @@ fn reasoning_effort_to_str(effort: ReasoningEffort) -> &'static str {
 
 fn apply_detected_theme(theme: &mut ThemeConfig, is_dark: bool) {
     if is_dark {
-        theme.name = ThemeName::DarkCarbonNight;
+        theme.name = ThemeName::DarkMonochrome;
         tracing::info!(
-            "Detected dark terminal background; switching default theme to Dark - Carbon Night"
+            "Detected dark terminal background; switching default theme to Dark - Monochrome"
         );
     } else {
         tracing::info!("Detected light terminal background; keeping default Light - Photon theme");

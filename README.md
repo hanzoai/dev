@@ -302,7 +302,7 @@ npm install
 ./build-fast.sh
 
 # Run locally
-./code-rs/target/dev-fast/code
+./hanzo-dev/target/dev-fast/dev
 ```
 
 #### Git hooks

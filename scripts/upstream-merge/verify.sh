@@ -38,11 +38,11 @@ fi
   echo "[verify] STEP 2: cargo check (core tests compile)"
 }
 # Respect pre-set CARGO_HOME/TARGET_DIR to share caches across steps
-CODE_TARGET_DIR="$ROOT_DIR/code-rs/target"
+CODE_TARGET_DIR="$ROOT_DIR/hanzo-dev/target"
 CODEX_TARGET_DIR="$ROOT_DIR/codex-rs/target"
 export CARGO_HOME="${CARGO_HOME:-$ROOT_DIR/.cargo-home}"
 if [ -z "${CARGO_TARGET_DIR:-}" ]; then
-  if [ -d "$ROOT_DIR/code-rs" ]; then
+  if [ -d "$ROOT_DIR/hanzo-dev" ]; then
     export CARGO_TARGET_DIR="$CODE_TARGET_DIR"
   else
     export CARGO_TARGET_DIR="$CODEX_TARGET_DIR"

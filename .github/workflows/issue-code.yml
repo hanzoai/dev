@@ -30,8 +30,8 @@ jobs:
       # Consistent Cargo/rustup homes for caching across all workflows
       CARGO_HOME: ${{ github.workspace }}/.cargo-home
       RUSTUP_HOME: ${{ github.workspace }}/.cargo-home/rustup
-      RUST_WORKSPACE_DIR: code-rs
-      CARGO_TARGET_DIR: ${{ github.workspace }}/code-rs/target
+      RUST_WORKSPACE_DIR: hanzo-dev
+      CARGO_TARGET_DIR: ${{ github.workspace }}/hanzo-dev/target
       DEFAULT_BRANCH: ${{ github.event.repository.default_branch || 'main' }}
       PROTECTED_GLOBS: |
         .github/**
@@ -157,7 +157,7 @@ jobs:
         uses: Swatinem/rust-cache@v2
         with:
           workspaces: |
-            code-rs -> target
+            hanzo-dev -> target
             codex-rs -> target
           save-if: true
           cache-on-failure: true

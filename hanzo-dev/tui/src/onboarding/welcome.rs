@@ -30,7 +30,6 @@ impl WidgetRef for &WelcomeWidget {
         // Render second line below the first
         if area.height > 1 {
             let line2 = Line::from(vec![
-                Span::raw("   "), // Indent to align with text after ">_ "
                 Span::raw(crate::greeting::greeting_placeholder()),
             ]);
             let line2_area = Rect {
