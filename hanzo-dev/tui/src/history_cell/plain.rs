@@ -709,17 +709,19 @@ pub(crate) fn new_text_line(line: Line<'static>) -> PlainMessageState {
 
 pub(crate) fn new_error_event(message: String) -> PlainMessageState {
     let mut lines: Vec<Line<'static>> = Vec::new();
+    // Dim "error" label — visible but doesn't compete with user text.
+    let dim_error = crate::colors::text_dim();
     lines.push(Line::styled(
         "error",
         Style::default()
-            .fg(crate::colors::error())
+            .fg(dim_error)
             .add_modifier(Modifier::BOLD),
     ));
     let msg_norm = normalize_overwrite_sequences(&message);
     lines.extend(
         msg_norm
             .lines()
-            .map(|line| ansi_escape_line(line).style(Style::default().fg(crate::colors::error()))),
+            .map(|line| ansi_escape_line(line).style(Style::default().fg(dim_error))),
     );
     // No empty line at end - trimming and spacing handled by renderer
     plain_message_state_from_lines(lines, HistoryCellType::Error)
