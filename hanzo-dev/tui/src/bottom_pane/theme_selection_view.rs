@@ -192,7 +192,7 @@ impl ThemeSelectionView {
             ),
             (
                 ThemeName::DarkCodex,
-                "Dark - Codex",
+                "Dark - Hanzo",
                 "Terminal-adaptive warm (amber)",
             ),
         ];
