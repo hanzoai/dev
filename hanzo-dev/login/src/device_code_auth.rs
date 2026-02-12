@@ -80,7 +80,7 @@ async fn request_user_code(
     if !status.is_success() {
         if status == StatusCode::NOT_FOUND {
             return Err(std::io::Error::other(
-                "device code login is not enabled for this Codex server. Use the browser login or verify the server URL.",
+                "device code login is not enabled for this server. Use the browser login or verify the server URL.",
             ));
         }
 
