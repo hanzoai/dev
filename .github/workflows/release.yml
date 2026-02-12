@@ -177,13 +177,13 @@ jobs:
           node-version: '20'
           registry-url: 'https://registry.npmjs.org'
 
-      - name: Determine next version (across all npm packages; ensure unique)
+      - name: Determine next version (package.json is authoritative)
         id: version
         working-directory: codex-cli
         shell: bash
         run: |
           set -euo pipefail
-          CURRENT_VERSION=$(node -p "require('./package.json').version")
+          CANDIDATE=$(node -p "require('./package.json').version")
           PKGS=(
             "@hanzo/dev"
             "@hanzo/dev-darwin-arm64"
@@ -192,21 +192,7 @@ jobs:
             "@hanzo/dev-linux-arm64-musl"
             "@hanzo/dev-win32-x64"
           )
-          # Find the highest published version across all packages
-          MAX_PUBLISHED="0.0.0"
-          for p in "${PKGS[@]}"; do
-            v=$(npm view "$p" version 2>/dev/null || echo "0.0.0")
-            if [ "$(printf '%s\n%s\n' "$MAX_PUBLISHED" "$v" | sort -V | tail -n1)" != "$MAX_PUBLISHED" ]; then
-              MAX_PUBLISHED="$v"
-            fi
-          done
-          # Start with whichever is higher: CURRENT_VERSION or MAX_PUBLISHED
-          CANDIDATE=$(printf '%s\n%s\n' "$CURRENT_VERSION" "$MAX_PUBLISHED" | sort -V | tail -n1)
-          # If equal to MAX_PUBLISHED, bump patch once
-          if [ "$CANDIDATE" = "$MAX_PUBLISHED" ]; then
-            IFS='.' read -ra V <<< "$CANDIDATE"; CANDIDATE="${V[0]}.${V[1]}.$((${V[2]} + 1))"
-          fi
-          # Ensure candidate is globally unused; keep bumping until unique
+          # Use package.json version as-is; only bump patch if already published
           while :; do
             used=false
             for p in "${PKGS[@]}"; do

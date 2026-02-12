@@ -14,7 +14,7 @@
 - **Browser integration** — CDP support, headless browsing, screenshots captured inline.
 - **MCP support** — 260+ tools via Model Context Protocol. Extend with filesystem, databases, APIs, or custom servers.
 - **Skills system** — Dynamic tool injection with live reload. Define custom skills in `.agents/skills/`.
-- **Upstream sync** — Automated 30-minute polling merges OpenAI Codex improvements while preserving Hanzo features.
+- **Upstream sync** — Automated 30-minute polling merges upstream improvements while preserving Hanzo features.
 
 [Full changelog](CHANGELOG.md) | [Release notes](docs/release-notes/RELEASE_NOTES.md)
 
