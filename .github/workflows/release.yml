@@ -1004,6 +1004,7 @@ jobs:
           test -s Formula/Code.rb || { echo "Formula/Code.rb missing" >&2; exit 1; }
 
       - name: Publish Homebrew formula to hanzoai/homebrew-tap
+        continue-on-error: true
         shell: bash
         env:
           GH_PAT: ${{ secrets.GH_PAT || secrets.GITHUB_TOKEN }}
