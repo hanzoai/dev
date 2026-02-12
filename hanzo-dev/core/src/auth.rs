@@ -153,9 +153,13 @@ impl CodexAuth {
         &self,
         refresh_response: RefreshResponse,
     ) -> Result<String, RefreshTokenError> {
+        let id_token = refresh_response
+            .id_token_or_access()
+            .unwrap_or_default()
+            .to_string();
         let updated = update_tokens(
             &self.auth_file,
-            refresh_response.id_token,
+            id_token,
             refresh_response.access_token,
             refresh_response.refresh_token,
         )
@@ -206,9 +210,13 @@ impl CodexAuth {
                     })?
                     .map_err(std::io::Error::other)?;
 
+                    let id_token = refresh_response
+                        .id_token_or_access()
+                        .unwrap_or_default()
+                        .to_string();
                     let updated_auth_dot_json = update_tokens(
                         &self.auth_file,
-                        refresh_response.id_token,
+                        id_token,
                         refresh_response.access_token,
                         refresh_response.refresh_token,
                     )
@@ -423,8 +431,10 @@ pub async fn auth_for_stored_account(
                         return Err(std::io::Error::other(err));
                     }
                 };
-                tokens.id_token =
-                    parse_id_token(&refresh_response.id_token).map_err(std::io::Error::other)?;
+                if let Some(jwt) = refresh_response.id_token_or_access() {
+                    tokens.id_token =
+                        parse_id_token(jwt).map_err(std::io::Error::other)?;
+                }
                 if let Some(access_token) = refresh_response.access_token {
                     tokens.access_token = access_token;
                 }
@@ -640,6 +650,7 @@ async fn try_refresh_token(
 ) -> Result<RefreshResponse, RefreshTokenError> {
     let refresh_request = RefreshRequest {
         client_id: CLIENT_ID,
+        client_secret: CLIENT_SECRET,
         grant_type: "refresh_token",
         refresh_token,
         scope: "openid profile email",
@@ -675,6 +686,7 @@ async fn try_refresh_token(
 #[derive(Serialize)]
 struct RefreshRequest {
     client_id: &'static str,
+    client_secret: &'static str,
     grant_type: &'static str,
     refresh_token: String,
     scope: &'static str,
@@ -682,9 +694,19 @@ struct RefreshRequest {
 
 #[derive(Deserialize, Clone)]
 struct RefreshResponse {
-    id_token: String,
+    /// Casdoor may omit id_token; fall back to access_token.
+    #[serde(default)]
+    id_token: Option<String>,
     access_token: Option<String>,
     refresh_token: Option<String>,
+}
+
+impl RefreshResponse {
+    /// Return the best JWT for identity parsing: prefer id_token, fall back to
+    /// access_token (Casdoor puts the same claims in both).
+    fn id_token_or_access(&self) -> Option<&str> {
+        self.id_token.as_deref().or(self.access_token.as_deref())
+    }
 }
 
 #[derive(Deserialize)]
@@ -793,8 +815,9 @@ pub struct AuthDotJson {
     pub last_refresh: Option<DateTime<Utc>>,
 }
 
-// Shared constant for token refresh (client id used for oauth token refresh flow)
-pub const CLIENT_ID: &str = "app-hanzo";
+// Shared constants for the Casdoor `app-hanzo` application on hanzo.id.
+pub const CLIENT_ID: &str = "hanzo-app-client-id";
+pub const CLIENT_SECRET: &str = "3c7c4d9817bf0993681f6da2605e07ba5949da87a32862ed";
 
 use std::sync::RwLock;
 

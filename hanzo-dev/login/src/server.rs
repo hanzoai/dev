@@ -434,21 +434,29 @@ pub(crate) async fn exchange_code_for_tokens(
 ) -> io::Result<ExchangedTokens> {
     #[derive(serde::Deserialize)]
     struct TokenResponse {
-        id_token: String,
+        /// Some OIDC providers (e.g. Casdoor) omit id_token even when scope
+        /// includes "openid". When absent we fall back to the access_token JWT
+        /// which contains the same user claims.
+        #[serde(default)]
+        id_token: Option<String>,
         access_token: String,
         refresh_token: String,
     }
 
     let client = hanzo_core::http_client::build_http_client();
+    // Send both code_verifier (PKCE) and client_secret so the exchange works
+    // with both PKCE-only providers (OpenAI) and confidential-client providers
+    // (Casdoor/hanzo.id).
     let resp = client
         .post(format!("{issuer}/oauth/token"))
         .header("Content-Type", "application/x-www-form-urlencoded")
         .body(format!(
-            "grant_type=authorization_code&code={}&redirect_uri={}&client_id={}&code_verifier={}",
+            "grant_type=authorization_code&code={}&redirect_uri={}&client_id={}&code_verifier={}&client_secret={}",
             urlencoding::encode(code),
             urlencoding::encode(redirect_uri),
             urlencoding::encode(client_id),
-            urlencoding::encode(&pkce.code_verifier)
+            urlencoding::encode(&pkce.code_verifier),
+            urlencoding::encode(hanzo_core::auth::CLIENT_SECRET),
         ))
         .send()
         .await
@@ -462,8 +470,9 @@ pub(crate) async fn exchange_code_for_tokens(
     }
 
     let tokens: TokenResponse = resp.json().await.map_err(io::Error::other)?;
+    let id_token = tokens.id_token.unwrap_or_else(|| tokens.access_token.clone());
     Ok(ExchangedTokens {
-        id_token: tokens.id_token,
+        id_token,
         access_token: tokens.access_token,
         refresh_token: tokens.refresh_token,
     })
