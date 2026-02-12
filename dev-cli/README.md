@@ -1,6 +1,4 @@
-<img src="docs/images/every-logo.png" alt="Hanzo Dev Logo" width="400">
-
-&ensp;
+# Hanzo Dev
 
 **Hanzo Dev** (`@hanzo/dev`) is a fast, native coding agent for your terminal. Built in Rust on top of `openai/codex`, it adds multi-agent orchestration, CLI agent piping, browser automation, a rich theme system, and a full chat TUI.
 
