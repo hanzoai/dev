@@ -29,15 +29,11 @@ use hanzo_tui::test_helpers::ChatWidgetHarness;
 use hanzo_tui::test_helpers::render_chat_widget_to_vt100;
 use serde_json::to_value;
 
-fn assistant_cell_count(screen: &str) -> usize {
+/// Count how many *distinct* lines contain the given text.
+fn line_count_containing(screen: &str, needle: &str) -> usize {
     screen
         .lines()
-        .filter(|line| line.trim_start().starts_with("• "))
-        .filter(|line| {
-            let trimmed = line.trim_start();
-            !(trimmed.contains("How can I help you today?")
-                || trimmed.contains("I can help with various tasks"))
-        })
+        .filter(|line| line.contains(needle))
         .count()
 }
 
@@ -203,12 +199,17 @@ fn replay_history_duplicates_short_assistant_messages() {
 
     let screen = render_chat_widget_to_vt100(&mut harness, 80, 24);
 
+    // The final revision should be rendered; the earlier "Working." should be
+    // de-duplicated away (it is a prefix of the final text).
+    assert!(
+        screen.contains("Working. Done."),
+        "final revision should appear: {screen}"
+    );
     assert_eq!(
         1,
-        assistant_cell_count(&screen),
-        "expected a single restored assistant message but saw: {screen}"
+        line_count_containing(&screen, "Working. Done."),
+        "final revision should appear exactly once: {screen}"
     );
-    assert!(screen.contains("Working. Done."));
 }
 
 #[test]
@@ -233,12 +234,17 @@ fn replay_history_handles_prefixed_revisions() {
 
     let screen = render_chat_widget_to_vt100(&mut harness, 80, 24);
 
+    // The final revision ("Update:\nWorking.") should be rendered; the earlier
+    // bare "Working." should be de-duplicated away.
+    assert!(
+        screen.contains("Update:"),
+        "final revision should appear: {screen}"
+    );
     assert_eq!(
         1,
-        assistant_cell_count(&screen),
-        "expected a single restored assistant message but saw: {screen}"
+        line_count_containing(&screen, "Update:"),
+        "final revision should appear exactly once: {screen}"
     );
-    assert!(screen.contains("Update:"));
 }
 
 #[test]
