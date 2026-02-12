@@ -7707,8 +7707,8 @@ impl ChatWidget<'_> {
     /// Format model name with proper capitalization (e.g., "gpt-4" -> "GPT-4")
     fn format_model_name(&self, model_name: &str) -> String {
         fn format_segment(segment: &str) -> String {
-            if segment.eq_ignore_ascii_case("codex") {
-                return "Codex".to_string();
+            if segment.eq_ignore_ascii_case("codex") || segment.eq_ignore_ascii_case("hanzo") {
+                return segment.to_uppercase();
             }
 
             let mut chars = segment.chars();
@@ -24242,7 +24242,7 @@ Have we met every part of this goal and is there no further work to do?"#
                 "Dark - Paper Light Pro".to_string()
             }
             hanzo_core::config_types::ThemeName::DarkCode => "Dark - Code".to_string(),
-            hanzo_core::config_types::ThemeName::DarkCodex => "Dark - Codex".to_string(),
+            hanzo_core::config_types::ThemeName::DarkCodex => "Dark - Hanzo".to_string(),
             hanzo_core::config_types::ThemeName::DarkMonochrome => "Dark - Monochrome".to_string(),
             hanzo_core::config_types::ThemeName::Custom => {
                 let mut label =
@@ -24410,7 +24410,7 @@ Have we met every part of this goal and is there no further work to do?"#
                 tracing::info!("Persisted TUI spinner selection to config.toml");
             }
         } else {
-            tracing::warn!("Could not locate Codex home to persist spinner selection");
+            tracing::warn!("Could not locate config home to persist spinner selection");
         }
 
         // Confirmation message (replaceable system notice)
@@ -24676,7 +24676,7 @@ Have we met every part of this goal and is there no further work to do?"#
                 }
             }
             Err(e) => {
-                tracing::warn!("Could not locate Codex home to persist theme: {}", e);
+                tracing::warn!("Could not locate config home to persist theme: {}", e);
             }
         }
     }
@@ -34210,7 +34210,7 @@ impl ChatWidget<'_> {
                 }
             }
         } else {
-            tracing::warn!("Could not locate Codex home to persist review auto resolve toggle");
+            tracing::warn!("Could not locate config home to persist review auto resolve toggle");
             if enabled {
                 "Auto Resolve enabled for this session."
             } else {
@@ -34251,7 +34251,7 @@ impl ChatWidget<'_> {
                 }
             }
         } else {
-            tracing::warn!("Could not locate Codex home to persist auto review toggle");
+            tracing::warn!("Could not locate config home to persist auto review toggle");
             if enabled {
                 "Auto Review enabled for this session."
             } else {
@@ -35072,7 +35072,7 @@ impl ChatWidget<'_> {
                 }
             }
         } else {
-            tracing::warn!("Could not locate Codex home to persist auto resolve attempts");
+            tracing::warn!("Could not locate config home to persist auto resolve attempts");
             format!("Max re-reviews set to {} for this session.", limit.get())
         };
 
