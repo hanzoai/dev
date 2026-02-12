@@ -6245,7 +6245,10 @@ impl ChatWidget<'_> {
                 .to_string();
             lower = message.to_lowercase();
         }
-        let is_transient = lower.contains("retrying")
+        // A bare 429 is always retryable — treat it as transient so the
+        // core retry loop can attempt again instead of killing the session.
+        let is_transient = provider_429
+            || lower.contains("retrying")
             || lower.contains("reconnecting")
             || lower.contains("disconnected")
             || lower.contains("stream error")
