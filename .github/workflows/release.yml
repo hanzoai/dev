@@ -1063,3 +1063,35 @@ jobs:
             exit 0
           fi
           npm publish --access public
+
+      - name: Force latest dist-tag to published version
+        if: steps.should_publish.outputs.publish == 'true'
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          config_path="${NPM_CONFIG_USERCONFIG:-$HOME/.npmrc}"
+          echo "//registry.npmjs.org/:_authToken=${NODE_AUTH_TOKEN}" > "$config_path"
+          version="${{ needs.determine-version.outputs.version }}"
+          echo "Setting @hanzo/dev@${version} as latest"
+          npm dist-tag add "@hanzo/dev@${version}" latest || true
+          # Also set latest for platform packages
+          for pkg in @hanzo/dev-darwin-arm64 @hanzo/dev-darwin-x64 @hanzo/dev-linux-x64-musl @hanzo/dev-linux-arm64-musl @hanzo/dev-win32-x64; do
+            npm dist-tag add "${pkg}@${version}" latest 2>/dev/null || true
+          done
+
+      - name: Deprecate old version series (1.x, 2.x, 3.x)
+        if: steps.should_publish.outputs.publish == 'true'
+        continue-on-error: true
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          config_path="${NPM_CONFIG_USERCONFIG:-$HOME/.npmrc}"
+          echo "//registry.npmjs.org/:_authToken=${NODE_AUTH_TOKEN}" > "$config_path"
+          npm deprecate "@hanzo/dev@>=1.0.0 <0.6.0 || >0.6.99" "Deprecated: version series reset to 0.6.x. Install @hanzo/dev@latest" || true
+          for pkg in @hanzo/dev-darwin-arm64 @hanzo/dev-darwin-x64 @hanzo/dev-linux-x64-musl @hanzo/dev-linux-arm64-musl @hanzo/dev-win32-x64; do
+            npm deprecate "${pkg}@>=1.0.0 <0.6.0 || >0.6.99" "Deprecated: version series reset to 0.6.x" 2>/dev/null || true
+          done
