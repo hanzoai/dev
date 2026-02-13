@@ -37,9 +37,6 @@ use hanzo_login::AuthMode;
 use hanzo_login::CodexAuth;
 use hanzo_ollama::DEFAULT_OSS_MODEL;
 use hanzo_protocol::config_types::SandboxMode;
-use model_migration::ModelMigrationOutcome;
-use model_migration::migration_copy_for_key;
-use model_migration::run_model_migration_prompt;
 use regex_lite::Regex;
 use std::fs::OpenOptions;
 use std::io;
@@ -85,6 +82,7 @@ mod markdown;
 mod markdown_render;
 mod markdown_renderer;
 mod markdown_stream;
+#[allow(dead_code)]
 mod model_migration;
 pub mod onboarding;
 pub mod public_widgets;
@@ -345,6 +343,7 @@ pub struct ExitSummary {
     pub session_id: Option<Uuid>,
 }
 
+#[allow(dead_code)]
 fn empty_exit_summary() -> ExitSummary {
     ExitSummary {
         token_usage: hanzo_core::protocol::TokenUsage::default(),
@@ -519,93 +518,9 @@ pub async fn run_main(
         || cli_kv_overrides
             .iter()
             .any(|(path, _)| path == "model" || path.ends_with(".model"));
-    if !cli_model_override && !cli.oss {
-        let auth_mode = if config.using_chatgpt_auth {
-            AuthMode::ChatGPT
-        } else {
-            AuthMode::ApiKey
-        };
-        if let Some(plan) = determine_migration_plan(&config, auth_mode) {
-            let should_auto_accept = matches!(auth_mode, AuthMode::ChatGPT)
-                && match plan.hide_key {
-                    hanzo_common::model_presets::HIDE_GPT_5_2_CODEX_MIGRATION_PROMPT_CONFIG => {
-                        plan.current.id.eq_ignore_ascii_case("gpt-5.1-codex")
-                            && plan.target.id.eq_ignore_ascii_case("gpt-5.2-codex")
-                    }
-                    hanzo_common::model_presets::HIDE_GPT_5_3_CODEX_MIGRATION_PROMPT_CONFIG => {
-                        plan.current.id.eq_ignore_ascii_case("gpt-5.2-codex")
-                            && plan.target.id.eq_ignore_ascii_case("gpt-5.3-codex")
-                    }
-                    _ => true,
-                };
-
-            if should_auto_accept {
-                if let Err(err) =
-                    persist_migration_acceptance(&code_home, cli.config_profile.as_deref(), plan)
-                        .await
-                {
-                    tracing::warn!("failed to persist migration acceptance: {err}");
-                } else {
-                    match Config::load_with_cli_overrides(
-                        cli_kv_overrides.clone(),
-                        overrides.clone(),
-                    ) {
-                        Ok(updated) => {
-                            config = updated;
-                            config.demo_developer_message = cli.demo_developer_message.clone();
-                        }
-                        Err(err) => {
-                            eprintln!("Error reloading configuration: {err}");
-                            std::process::exit(1);
-                        }
-                    }
-                }
-            } else {
-                let copy = migration_copy_for_key(plan.hide_key);
-                match run_model_migration_prompt(&copy)? {
-                    ModelMigrationOutcome::Accepted => {
-                        if let Err(err) = persist_migration_acceptance(
-                            &code_home,
-                            cli.config_profile.as_deref(),
-                            plan,
-                        )
-                        .await
-                        {
-                            tracing::warn!("failed to persist migration acceptance: {err}");
-                        } else {
-                            match Config::load_with_cli_overrides(
-                                cli_kv_overrides.clone(),
-                                overrides.clone(),
-                            ) {
-                                Ok(updated) => {
-                                    config = updated;
-                                    config.demo_developer_message =
-                                        cli.demo_developer_message.clone();
-                                }
-                                Err(err) => {
-                                    eprintln!("Error reloading configuration: {err}");
-                                    std::process::exit(1);
-                                }
-                            }
-                        }
-                    }
-                    ModelMigrationOutcome::Rejected => {
-                        let hide_key = plan.hide_key;
-                        if let Err(err) =
-                            persist_notice_hide(&code_home, cli.config_profile.as_deref(), hide_key)
-                                .await
-                        {
-                            tracing::warn!("failed to persist migration opt-out: {err}");
-                        }
-                        set_notice_flag(&mut config.notices, hide_key);
-                    }
-                    ModelMigrationOutcome::Exit => {
-                        return Ok(empty_exit_summary());
-                    }
-                }
-            }
-        }
-    }
+    // Hanzo Dev: skip upstream OpenAI model migration prompts.
+    // Users choose their own model via /model or config.toml.
+    let _ = (&cli_model_override, &determine_migration_plan);
 
     let startup_footer_notice = None;
 
@@ -1077,6 +992,9 @@ fn maybe_apply_terminal_theme_detection(config: &mut Config, theme_configured_ex
     }
 }
 
+// Migration infrastructure kept for upstream merge compatibility but unused
+// in Hanzo Dev (we skip the interactive migration prompt).
+#[allow(dead_code)]
 #[derive(Clone, Copy)]
 struct MigrationPlan {
     current: &'static ModelPreset,
@@ -1153,6 +1071,7 @@ fn find_migration_preset<'a>(
 
 const NOTICE_TABLE: &str = "notice";
 
+#[allow(dead_code)]
 async fn persist_migration_acceptance(
     code_home: &Path,
     profile: Option<&str>,
@@ -1180,6 +1099,7 @@ async fn persist_migration_acceptance(
         .map_err(|err| io::Error::other(err.to_string()))
 }
 
+#[allow(dead_code)]
 async fn persist_notice_hide(
     code_home: &Path,
     profile: Option<&str>,
@@ -1192,6 +1112,7 @@ async fn persist_notice_hide(
         .map_err(|err| io::Error::other(err.to_string()))
 }
 
+#[allow(dead_code)]
 fn set_notice_flag(notices: &mut Notice, key: &str) {
     if key == HIDE_GPT5_1_MIGRATION_PROMPT_CONFIG {
         notices.hide_gpt5_1_migration_prompt = Some(true);
