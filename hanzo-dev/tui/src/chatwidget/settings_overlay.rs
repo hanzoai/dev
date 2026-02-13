@@ -2017,7 +2017,7 @@ impl SettingsOverlayView {
             SettingsSection::Review => "Review Settings",
             SettingsSection::Validation => "Validation Settings",
             SettingsSection::Limits => "Rate Limits",
-            SettingsSection::Chrome => "Chrome Launch Options",
+            SettingsSection::Chrome => "Browser Launch Options",
             SettingsSection::Notifications => "Notifications",
             SettingsSection::Mcp => "MCP Servers",
             SettingsSection::Prompts => "Custom Prompts",

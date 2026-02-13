@@ -177,11 +177,13 @@ Use with `/use my-reviewer` or reference in multi-agent orchestration.
 
 ### Browser
 ```bash
-/chrome              # Connect to external Chrome (CDP auto-detect)
+/browser             # Open built-in headless browser
+/browser <url>       # Open URL in built-in browser
+/chrome              # Connect to external browser via CDP (auto-detect)
 /chrome 9222         # Connect to specific CDP port
-/browser             # Use internal headless browser
-/browser <url>       # Open URL in internal browser
 ```
+
+> **Tip:** Install [Enso](https://enso.hanzo.ai) for the best browser integration with Hanzo Dev.
 
 ### Session
 ```bash

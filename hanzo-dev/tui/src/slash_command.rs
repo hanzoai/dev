@@ -98,8 +98,8 @@ impl SlashCommand {
     /// User-visible description shown in the popup.
     pub fn description(self) -> &'static str {
         match self {
-            SlashCommand::Chrome => "connect to your Chrome browser",
-            SlashCommand::Browser => "open internal browser",
+            SlashCommand::Chrome => "connect to external browser via CDP",
+            SlashCommand::Browser => "open built-in browser",
             SlashCommand::Resume => "resume a past session for this folder",
             SlashCommand::Plan => "create a comprehensive plan (multiple agents)",
             SlashCommand::Solve => "solve a challenging problem (multiple agents)",

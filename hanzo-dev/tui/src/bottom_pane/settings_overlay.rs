@@ -48,7 +48,7 @@ impl SettingsSection {
             SettingsSection::Review => "Review",
             SettingsSection::Validation => "Validation",
             SettingsSection::Limits => "Limits",
-            SettingsSection::Chrome => "Chrome",
+            SettingsSection::Chrome => "Browser",
             SettingsSection::Mcp => "MCP",
             SettingsSection::Notifications => "Notifications",
             SettingsSection::Prompts => "Prompts",
@@ -72,7 +72,7 @@ impl SettingsSection {
             }
             SettingsSection::Validation => "Toggle validation groups and tool availability.",
             SettingsSection::Limits => "Inspect API usage, rate limits, and reset windows.",
-            SettingsSection::Chrome => "Connect to Chrome or switch browser integrations.",
+            SettingsSection::Chrome => "Connect to a browser via CDP or use the built-in browser.",
             SettingsSection::Mcp => "Enable and manage local MCP servers for tooling.",
             SettingsSection::Notifications => {
                 "Adjust desktop and terminal notification preferences."
