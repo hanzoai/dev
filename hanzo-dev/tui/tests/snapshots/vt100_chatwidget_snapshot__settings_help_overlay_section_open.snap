@@ -15,7 +15,7 @@ expression: section_open
  |    Review             |     Hig|• Esc    Return to overview   |r complex problems            | |
  |    Planning           |     Med|• Tab    Cycle sections       |nd reasoning depth for everyd | |
  |    Validation         |     Low|• Shift+Tab  Cycle backwards  |easoning                      | |
- |    Chrome             |        |• ?      Toggle this help     |                              | |
+ |    Browser            |        |• ?      Toggle this help     |                              | |
  |    MCP                |  GPT-5.|                              |                              | |
  |    Notifications      |  Latest|Press Esc to close            |s across knowledge, reasoning | |
  |    Limits             |     XHi+------------------------------+for complex problems          | |
