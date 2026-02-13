@@ -15,7 +15,7 @@ expression: section_closed
  |    Review             |     High - Maximizes reasoning depth for complex problems            | |
  |    Planning           |     Medium (current) - Balances speed and reasoning depth for everyd | |
  |    Validation         |     Low - Fast responses with lighter reasoning                      | |
- |    Chrome             |                                                                      | |
+ |    Browser            |                                                                      | |
  |    MCP                |  GPT-5.2                                                             | |
  |    Notifications      |  Latest frontier model with improvements across knowledge, reasoning | |
  |    Limits             |     XHigh - Extra high reasoning depth for complex problems          | |
