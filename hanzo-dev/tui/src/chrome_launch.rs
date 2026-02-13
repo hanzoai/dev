@@ -9,18 +9,18 @@ pub enum ChromeLaunchOption {
 pub const CHROME_LAUNCH_CHOICES: &[(ChromeLaunchOption, &str, &str)] = &[
     (
         ChromeLaunchOption::CloseAndUseProfile,
-        "Close existing Chrome & use your profile",
-        "Closes any running Chrome and launches with your profile",
+        "Close existing browser & use your profile",
+        "Closes running browser and launches with your profile",
     ),
     (
         ChromeLaunchOption::UseTempProfile,
         "Use temporary profile",
-        "Launches Chrome with a clean profile (no saved logins)",
+        "Launches browser with a clean profile (no saved logins)",
     ),
     (
         ChromeLaunchOption::UseInternalBrowser,
-        "Use internal browser (/browser)",
-        "Uses the built-in browser instead of Chrome",
+        "Use built-in browser (/browser)",
+        "Uses the built-in headless browser",
     ),
     (
         ChromeLaunchOption::Cancel,
