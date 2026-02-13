@@ -14670,7 +14670,7 @@ impl ChatWidget<'_> {
                 self.restore_reasoning_in_progress_if_streaming();
 
                 // Also reflect CDP connect success in the status line.
-                if message.starts_with("✅ Connected to Chrome via CDP") {
+                if message.starts_with("✅ Connected to browser via CDP") {
                     self.bottom_pane
                         .update_status_text("using browser (CDP)".to_string());
                 }
@@ -26229,7 +26229,7 @@ Have we met every part of this goal and is there no further work to do?"#
         }
 
         // Add status message
-        self.push_background_tail("✅ Chrome launched with user profile".to_string());
+        self.push_background_tail("✅ Browser launched with user profile".to_string());
         // Show browsing state in input border after launch
         self.bottom_pane
             .update_status_text("using browser".to_string());
@@ -26342,7 +26342,7 @@ Have we met every part of this goal and is there no further work to do?"#
                 app_event_tx.send_background_event_with_ticket(
                     &ticket,
                     format!(
-                        "❌ CDP connect timed out after {}s. Ensure Chrome is running with --remote-debugging-port={} and http://127.0.0.1:{}/json/version is reachable",
+                        "❌ CDP connect timed out after {}s. Ensure your browser is running with --remote-debugging-port={} and http://127.0.0.1:{}/json/version is reachable",
                         connect_deadline.as_secs(),
                         port.unwrap_or(0),
                         port.unwrap_or(0)
@@ -26354,7 +26354,7 @@ Have we met every part of this goal and is there no further work to do?"#
             }
             Ok(result) => match result {
                 Ok(_) => {
-                    tracing::info!("[cdp] Connected to Chrome via CDP");
+                    tracing::info!("[cdp] Connected to browser via CDP");
 
                     // Build a detailed success message including CDP port and current URL when available
                     let (detected_port, detected_ws) =
@@ -26381,13 +26381,13 @@ Have we met every part of this goal and is there no further work to do?"#
 
                     let success_msg = match (port_num, current_url) {
                         (Some(p), Some(url)) if !url.is_empty() => {
-                            format!("✅ Connected to Chrome via CDP (port {}) to {}", p, url)
+                            format!("✅ Connected to browser via CDP (port {}) to {}", p, url)
                         }
-                        (Some(p), _) => format!("✅ Connected to Chrome via CDP (port {})", p),
+                        (Some(p), _) => format!("✅ Connected to browser via CDP (port {})", p),
                         (None, Some(url)) if !url.is_empty() => {
-                            format!("✅ Connected to Chrome via CDP to {}", url)
+                            format!("✅ Connected to browser via CDP to {}", url)
                         }
-                        _ => "✅ Connected to Chrome via CDP".to_string(),
+                        _ => "✅ Connected to browser via CDP".to_string(),
                     };
 
                     // Immediately notify success (do not block on screenshots)
@@ -26598,17 +26598,17 @@ Have we met every part of this goal and is there no further work to do?"#
                                 let success_msg = match (port_num, current_url) {
                                     (Some(p), Some(url)) if !url.is_empty() => {
                                         format!(
-                                            "✅ Connected to Chrome via CDP (port {}) to {}",
+                                            "✅ Connected to browser via CDP (port {}) to {}",
                                             p, url
                                         )
                                     }
                                     (Some(p), _) => {
-                                        format!("✅ Connected to Chrome via CDP (port {})", p)
+                                        format!("✅ Connected to browser via CDP (port {})", p)
                                     }
                                     (None, Some(url)) if !url.is_empty() => {
-                                        format!("✅ Connected to Chrome via CDP to {}", url)
+                                        format!("✅ Connected to browser via CDP to {}", url)
                                     }
-                                    _ => "✅ Connected to Chrome via CDP".to_string(),
+                                    _ => "✅ Connected to browser via CDP".to_string(),
                                 };
                                 app_event_tx
                                     .send_background_event_with_ticket(&ticket, success_msg);
@@ -26767,7 +26767,7 @@ Have we met every part of this goal and is there no further work to do?"#
                                 app_event_tx.send_background_event_with_ticket(
                                     &ticket,
                                     format!(
-                                        "❌ CDP connect timed out after {}s during fallback. Ensure Chrome is running with --remote-debugging-port and /json/version is reachable",
+                                        "❌ CDP connect timed out after {}s during fallback. Ensure your browser is running with --remote-debugging-port and /json/version is reachable",
                                         retry_deadline.as_secs()
                                     ),
                                 );
@@ -26888,7 +26888,7 @@ Have we met every part of this goal and is there no further work to do?"#
 
         // Add status message
         self.push_background_tail(format!(
-            "✅ Chrome launched with temporary profile at {}",
+            "✅ Browser launched with temporary profile at {}",
             profile_dir.display()
         ));
     }
