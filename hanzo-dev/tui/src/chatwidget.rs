@@ -7707,8 +7707,11 @@ impl ChatWidget<'_> {
     /// Format model name with proper capitalization (e.g., "gpt-4" -> "GPT-4")
     fn format_model_name(&self, model_name: &str) -> String {
         fn format_segment(segment: &str) -> String {
-            if segment.eq_ignore_ascii_case("codex") || segment.eq_ignore_ascii_case("hanzo") {
-                return segment.to_uppercase();
+            if segment.eq_ignore_ascii_case("codex") {
+                return "Codex".to_string();
+            }
+            if segment.eq_ignore_ascii_case("hanzo") {
+                return "Hanzo".to_string();
             }
 
             let mut chars = segment.chars();
