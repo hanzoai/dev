@@ -12,10 +12,8 @@ on:
       - 'examples/**'
       - '**/*.test.ts'
       - 'test/**'
-      - '*.md'
       - 'CHANGELOG.md'
       - 'docs/release-notes/**'
-      - 'codex-cli/package.json'
 
 concurrency:
   group: release-${{ github.ref }}
