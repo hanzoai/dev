@@ -176,15 +176,9 @@ fn render_prompt(
     stdout.execute(Clear(ClearType::All))?;
     stdout.execute(MoveTo(0, 0))?;
 
-    if matches!(
-        copy.heading,
-        "Upgrade available: GPT-5.2 Codex" | "Upgrade available: GPT-5.3 Codex"
-    ) {
-        let success_fg = colors::success().into_crossterm();
-        write_line_fg_bold(stdout, copy.heading, success_fg)?;
-    } else {
-        write_line(stdout, copy.heading)?;
-    }
+    // Monochromatic: use bright text for heading, no colored accents.
+    let bright_fg = colors::text_bright().into_crossterm();
+    write_line_fg_bold(stdout, copy.heading, bright_fg)?;
     write_blank(stdout)?;
     for line in copy.content {
         write_line(stdout, line)?;
@@ -192,7 +186,6 @@ fn render_prompt(
 
     if copy.can_opt_out {
         write_blank(stdout)?;
-        let primary_fg = colors::primary().into_crossterm();
         for (idx, label) in ["Try new model (recommended)", "Use existing model"]
             .iter()
             .enumerate()
@@ -200,7 +193,7 @@ fn render_prompt(
             if idx == highlighted {
                 queue!(
                     stdout,
-                    SetForegroundColor(primary_fg),
+                    SetForegroundColor(bright_fg),
                     Print("> "),
                     Print(*label),
                     ResetColor,
@@ -236,19 +229,20 @@ fn write_line_fg_bold(stdout: &mut io::Stdout, line: &str, fg: CtColor) -> io::R
 }
 
 fn write_key_tip_line(stdout: &mut io::Stdout) -> io::Result<()> {
-    let tip_fg = colors::function().into_crossterm();
+    // Monochromatic: bright text for key names, no colored accents.
+    let bright_fg = colors::text_bright().into_crossterm();
     queue!(
         stdout,
         Print("Use "),
-        SetForegroundColor(tip_fg),
+        SetForegroundColor(bright_fg),
         Print("↑/↓"),
         ResetColor,
         Print(" to move, "),
-        SetForegroundColor(tip_fg),
+        SetForegroundColor(bright_fg),
         Print("Enter"),
         ResetColor,
         Print(" to confirm, "),
-        SetForegroundColor(tip_fg),
+        SetForegroundColor(bright_fg),
         Print("Esc"),
         ResetColor,
         Print(" to keep current model.\r\n")
