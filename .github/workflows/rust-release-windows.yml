@@ -41,14 +41,14 @@ jobs:
             target: x86_64-pc-windows-msvc
             build_args: --bin dev --bin hanzo-responses-api-proxy
             runs_on:
-              group: codex-runners
-              labels: codex-windows-x64
+              group: dev-runners
+              labels: dev-windows-x64
           - runner: windows-arm64
             target: aarch64-pc-windows-msvc
             build_args: --bin dev --bin hanzo-responses-api-proxy
             runs_on:
-              group: codex-runners
-              labels: codex-windows-arm64
+              group: dev-runners
+              labels: dev-windows-arm64
 
     steps:
       - uses: actions/checkout@v6
@@ -117,13 +117,13 @@ jobs:
           - runner: windows-x64
             target: x86_64-pc-windows-msvc
             runs_on:
-              group: codex-runners
-              labels: codex-windows-x64
+              group: dev-runners
+              labels: dev-windows-x64
           - runner: windows-arm64
             target: aarch64-pc-windows-msvc
             runs_on:
-              group: codex-runners
-              labels: codex-windows-arm64
+              group: dev-runners
+              labels: dev-windows-arm64
 
     steps:
       - uses: actions/checkout@v6
