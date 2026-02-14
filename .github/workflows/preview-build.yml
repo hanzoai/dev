@@ -80,7 +80,6 @@ jobs:
           shared-key: preview-${{ matrix.target }}-rust-1.90
           workspaces: |
             hanzo-dev -> target
-            codex-rs -> target
           cache-targets: true
           cache-workspace-crates: true
           cache-on-failure: true
