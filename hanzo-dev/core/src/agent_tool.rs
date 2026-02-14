@@ -1544,6 +1544,7 @@ async fn execute_model_with_permissions(
     // CLIs that require ~/.gemini and ~/.claude continue to work with your
     // existing config.
     maybe_set_gemini_config_dir(&mut env, orig_home.clone());
+    apply_ignore_api_key_env(&mut env);
 
     let output = if !read_only {
         // Resolve the command and args we prepared above into Vec<String> for spawn helpers.
@@ -1745,6 +1746,25 @@ fn maybe_set_gemini_config_dir(env: &mut HashMap<String, String>, orig_home: Opt
             host_gem_cfg.to_string_lossy().to_string(),
         );
     }
+}
+
+fn apply_ignore_api_key_env(env: &mut HashMap<String, String>) {
+    if !crate::auth::should_ignore_api_keys_from_env() {
+        return;
+    }
+
+    for key in [
+        crate::auth::OPENAI_API_KEY_ENV_VAR,
+        crate::auth::HANZO_API_KEY_ENV_VAR,
+        "CODEX_API_KEY",
+    ] {
+        env.remove(key);
+    }
+
+    env.insert(
+        crate::auth::HANZO_IGNORE_API_KEYS_ENV_VAR.to_string(),
+        "1".to_string(),
+    );
 }
 
 pub(crate) fn should_use_current_exe_for_agent(
@@ -2525,6 +2545,7 @@ where
 mod tests {
     use super::current_code_binary_path;
     use super::execute_model_with_permissions;
+    use super::apply_ignore_api_key_env;
     use super::maybe_set_gemini_config_dir;
     use super::normalize_agent_name;
     use super::prefer_json_result;
@@ -2756,6 +2777,28 @@ mod tests {
         maybe_set_gemini_config_dir(&mut env, Some(tmp.path().to_string_lossy().to_string()));
 
         assert!(!env.contains_key("GEMINI_CONFIG_DIR"));
+    }
+
+    #[test]
+    fn ignore_api_keys_mode_strips_openai_style_keys() {
+        let _lock = env_lock().lock().expect("env lock");
+        let _reset_ignore = EnvReset::capture("HANZO_IGNORE_API_KEYS");
+
+        unsafe {
+            std::env::set_var("HANZO_IGNORE_API_KEYS", "1");
+        }
+
+        let mut env: HashMap<String, String> = HashMap::new();
+        env.insert("OPENAI_API_KEY".to_string(), "sk-openai".to_string());
+        env.insert("HANZO_API_KEY".to_string(), "sk-hanzo".to_string());
+        env.insert("CODEX_API_KEY".to_string(), "sk-codex".to_string());
+
+        apply_ignore_api_key_env(&mut env);
+
+        assert!(!env.contains_key("OPENAI_API_KEY"));
+        assert!(!env.contains_key("HANZO_API_KEY"));
+        assert!(!env.contains_key("CODEX_API_KEY"));
+        assert_eq!(env.get("HANZO_IGNORE_API_KEYS"), Some(&"1".to_string()));
     }
 }
 
