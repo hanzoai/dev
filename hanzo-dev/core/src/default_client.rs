@@ -72,6 +72,7 @@ fn sanitize_user_agent(candidate: String, fallback: &str) -> String {
 pub fn create_client(originator: &str) -> reqwest::Client {
     use reqwest::header::HeaderMap;
     use reqwest::header::HeaderValue;
+    use std::panic::AssertUnwindSafe;
 
     let mut headers = HeaderMap::new();
     let originator_value = HeaderValue::from_str(originator)
@@ -79,15 +80,69 @@ pub fn create_client(originator: &str) -> reqwest::Client {
     headers.insert("originator", originator_value);
     let ua = get_code_user_agent(Some(originator));
 
-    match reqwest::Client::builder()
-        // Set UA via dedicated helper to avoid header validation pitfalls
-        .user_agent(ua)
-        .default_headers(headers)
-        .build()
-    {
-        Ok(client) => client,
-        Err(_) => reqwest::Client::new(),
+    let primary = std::panic::catch_unwind(AssertUnwindSafe(|| {
+        build_client_with_headers(&ua, headers.clone(), false)
+    }));
+    match primary {
+        Ok(Ok(client)) => client,
+        Ok(Err(err)) => {
+            tracing::warn!(
+                "failed to create reqwest client with system proxy settings ({err}); retrying without proxy autodetection"
+            );
+            build_client_with_headers(&ua, headers, true).unwrap_or_else(|fallback_err| {
+                tracing::warn!(
+                    "failed to create reqwest client without system proxy settings ({fallback_err}); falling back to default reqwest client"
+                );
+                build_fallback_client()
+            })
+        }
+        Err(_) => {
+            tracing::warn!(
+                "reqwest client creation panicked while resolving system proxy settings; retrying without proxy autodetection"
+            );
+            build_client_with_headers(&ua, headers, true).unwrap_or_else(|fallback_err| {
+                tracing::warn!(
+                    "failed to create reqwest client without system proxy settings ({fallback_err}); falling back to default reqwest client"
+                );
+                build_fallback_client()
+            })
+        }
     }
+}
+
+fn build_client_with_headers(
+    user_agent: &str,
+    headers: reqwest::header::HeaderMap,
+    disable_system_proxy: bool,
+) -> Result<reqwest::Client, reqwest::Error> {
+    let mut builder = reqwest::Client::builder()
+        // Set UA via dedicated helper to avoid header validation pitfalls.
+        .user_agent(user_agent.to_string())
+        .default_headers(headers);
+
+    #[cfg(target_os = "macos")]
+    {
+        // Avoid reqwest's system proxy autodetection on macOS. In headless or
+        // restricted runtime contexts this can panic inside system-configuration.
+        builder = builder.no_proxy();
+    }
+
+    if disable_system_proxy {
+        builder = builder.no_proxy();
+    }
+
+    builder.build()
+}
+
+fn build_fallback_client() -> reqwest::Client {
+    let mut builder = reqwest::Client::builder();
+
+    #[cfg(target_os = "macos")]
+    {
+        builder = builder.no_proxy();
+    }
+
+    builder.build().unwrap_or_else(|_| reqwest::Client::new())
 }
 
 #[cfg(test)]
@@ -145,6 +200,18 @@ mod tests {
             .get("user-agent")
             .expect("user-agent header missing");
         assert_eq!(ua_header.to_str().unwrap(), expected_ua);
+    }
+
+    #[test]
+    fn test_build_client_with_headers_no_proxy() {
+        let mut headers = reqwest::header::HeaderMap::new();
+        headers.insert(
+            "originator",
+            reqwest::header::HeaderValue::from_static("test_originator"),
+        );
+
+        let client = build_client_with_headers("test_agent/0.0.0", headers, true);
+        assert!(client.is_ok());
     }
 
     #[test]
