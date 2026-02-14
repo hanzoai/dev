@@ -1,5 +1,5 @@
 name: 💻 CLI Bug
-description: Report an issue in the Codex CLI
+description: Report an issue in the Dev CLI
 labels:
   - bug
   - needs triage

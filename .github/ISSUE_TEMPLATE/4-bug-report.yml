@@ -1,5 +1,5 @@
 name: 🪲 Other Bug
-description: Report an issue in Codex Web, integrations, or other Codex components
+description: Report an issue in Dev Web, integrations, or other Dev components
 labels:
   - bug
 body:
@@ -9,7 +9,7 @@ body:
         Before submitting a new issue, please search for existing issues to see if your issue has already been reported.
         If it has, please add a 👍 reaction (no need to leave a comment) to the existing issue instead of creating a new one.
 
-        If you need help or support using Codex and are not reporting a bug, please post on [codex/discussions](https://github.com/openai/codex/discussions), where you can ask questions or engage with others on ideas for how to improve codex.
+        If you need help or support using Dev and are not reporting a bug, please post on [dev/discussions](https://github.com/hanzoai/dev/discussions), where you can ask questions or engage with others on ideas for how to improve Dev.
 
   - type: textarea
     id: actual
