@@ -8,7 +8,8 @@
 //! Run with: cargo bench --bench zap_vs_mcp
 
 use std::collections::HashMap;
-use std::time::{Duration, Instant};
+use std::time::Duration;
+use std::time::Instant;
 
 /// Benchmark result
 #[derive(Debug, Clone)]

@@ -2,17 +2,21 @@
 //!
 //! Provides process execution and system operations.
 
-use crate::error::{Error, Result};
-use crate::executor::{ExecutorContext, ToolExecutor};
+use crate::error::Error;
+use crate::error::Result;
+use crate::executor::ExecutorContext;
+use crate::executor::ToolExecutor;
 use crate::message::ToolResult;
-use crate::tools::{ToolCategory, process};
+use crate::tools::ToolCategory;
+use crate::tools::process;
 use async_trait::async_trait;
 use serde_json::Value;
 use std::collections::HashMap;
 use std::process::Stdio;
 use std::time::Instant;
 use tokio::process::Command;
-use tokio::time::{Duration, timeout};
+use tokio::time::Duration;
+use tokio::time::timeout;
 
 /// Computer executor for process and system operations
 pub struct ComputerExecutor {

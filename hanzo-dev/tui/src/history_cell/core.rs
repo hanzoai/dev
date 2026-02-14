@@ -63,13 +63,11 @@ pub(crate) fn gutter_symbol_for_kind(kind: HistoryCellType) -> Option<&'static s
             ToolCellStatus::Success => "✔",
             ToolCellStatus::Failed => "✖",
         }),
-        HistoryCellType::Exec { kind, status } => {
-            match (kind, status) {
-                (ExecKind::Run, ExecStatus::Error) => Some("✖"),
-                (ExecKind::Run, _) => Some("❯"),
-                _ => None,
-            }
-        }
+        HistoryCellType::Exec { kind, status } => match (kind, status) {
+            (ExecKind::Run, ExecStatus::Error) => Some("✖"),
+            (ExecKind::Run, _) => Some("❯"),
+            _ => None,
+        },
         HistoryCellType::Patch { .. } => Some("↯"),
         HistoryCellType::PlanUpdate => None,
         HistoryCellType::BackgroundEvent => Some("⏺"),

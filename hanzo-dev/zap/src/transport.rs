@@ -6,12 +6,16 @@
 //! - Unix domain socket (`zap+unix://`)
 
 use crate::buffer::Buffer;
-use crate::error::{Error, Result};
+use crate::error::Error;
+use crate::error::Result;
 use crate::message::MessageType;
-use crate::wire::{MAX_MESSAGE_SIZE, parse_frame};
-use tokio::io::{AsyncReadExt, AsyncWriteExt};
+use crate::wire::MAX_MESSAGE_SIZE;
+use crate::wire::parse_frame;
+use tokio::io::AsyncReadExt;
+use tokio::io::AsyncWriteExt;
 use tokio::net::TcpStream;
-use tracing::{debug, trace};
+use tracing::debug;
+use tracing::trace;
 
 /// A ZAP transport connection.
 pub struct ZapTransport {

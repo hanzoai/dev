@@ -2543,9 +2543,9 @@ where
 
 #[cfg(test)]
 mod tests {
+    use super::apply_ignore_api_key_env;
     use super::current_code_binary_path;
     use super::execute_model_with_permissions;
-    use super::apply_ignore_api_key_env;
     use super::maybe_set_gemini_config_dir;
     use super::normalize_agent_name;
     use super::prefer_json_result;

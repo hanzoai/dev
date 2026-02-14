@@ -1,6 +1,7 @@
 //! Configuration types for ZAP gateway and servers.
 
-use serde::{Deserialize, Serialize};
+use serde::Deserialize;
+use serde::Serialize;
 
 /// Gateway configuration.
 #[derive(Debug, Clone, Serialize, Deserialize)]

@@ -259,7 +259,9 @@ impl HistoryCell for RunningToolCallCell {
     }
 
     fn gutter_symbol(&self) -> Option<&'static str> {
-        if crate::theme::gutter_mode() != hanzo_core::config_types::GutterMode::Full { return None; }
+        if crate::theme::gutter_mode() != hanzo_core::config_types::GutterMode::Full {
+            return None;
+        }
         if self.state.title == "Waiting" {
             if self.state.wait_has_call_id {
                 None

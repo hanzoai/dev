@@ -2,10 +2,13 @@
 //!
 //! Provides HTTP requests, SSH, and network operations.
 
-use crate::error::{Error, Result};
-use crate::executor::{ExecutorContext, ToolExecutor};
+use crate::error::Error;
+use crate::error::Result;
+use crate::executor::ExecutorContext;
+use crate::executor::ToolExecutor;
 use crate::message::ToolResult;
-use crate::tools::{ToolCategory, network};
+use crate::tools::ToolCategory;
+use crate::tools::network;
 use async_trait::async_trait;
 use serde_json::Value;
 use std::collections::HashMap;
@@ -163,7 +166,8 @@ impl NetworkExecutor {
         _ctx: &ExecutorContext,
     ) -> Result<ToolResult> {
         use tokio::net::TcpStream;
-        use tokio::time::{Duration, timeout};
+        use tokio::time::Duration;
+        use tokio::time::timeout;
 
         let timeout_ms = args.timeout_ms.unwrap_or(5000);
         let addr = format!("{}:{}", args.host, args.port);

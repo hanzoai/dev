@@ -94,16 +94,31 @@ mod tools;
 mod transport;
 mod wire;
 
-pub use buffer::{Buffer, BufferPool};
+pub use buffer::Buffer;
+pub use buffer::BufferPool;
 pub use client::Client;
-pub use config::{Auth, GatewayConfig, McpServerConfig, Transport};
-pub use error::{Error, Result};
-pub use executor::{ExecutorContext, ToolDispatcher, ToolExecutor, default_dispatcher};
+pub use config::Auth;
+pub use config::GatewayConfig;
+pub use config::McpServerConfig;
+pub use config::Transport;
+pub use error::Error;
+pub use error::Result;
+pub use executor::ExecutorContext;
+pub use executor::ToolDispatcher;
+pub use executor::ToolExecutor;
+pub use executor::default_dispatcher;
 pub use gateway::Gateway;
-pub use message::{Message, MessageType, Tool, ToolCall, ToolResult};
-pub use tools::{ToolCategory, ToolDef, default_tools};
+pub use message::Message;
+pub use message::MessageType;
+pub use message::Tool;
+pub use message::ToolCall;
+pub use message::ToolResult;
+pub use tools::ToolCategory;
+pub use tools::ToolDef;
+pub use tools::default_tools;
 pub use transport::ZapTransport;
-pub use wire::{Reader, Writer};
+pub use wire::Reader;
+pub use wire::Writer;
 
 /// Tool modules for native tool implementations
 pub mod native {

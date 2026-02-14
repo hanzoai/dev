@@ -354,6 +354,7 @@ impl LoginAccountsState {
                 self.feedback = Some(Feedback {
                     message: match mode {
                         AuthMode::ChatGPT => "ChatGPT account selected".to_string(),
+                        AuthMode::Hanzo => "Hanzo account selected".to_string(),
                         AuthMode::ApiKey => "API key selected".to_string(),
                     },
                     is_error: false,
@@ -469,7 +470,11 @@ impl LoginAccountsState {
                     .bg(crate::colors::background())
                     .fg(crate::colors::text()),
             )
-            .title(if crate::theme::show_borders() { " Manage Accounts " } else { "" })
+            .title(if crate::theme::show_borders() {
+                " Manage Accounts "
+            } else {
+                ""
+            })
             .title_alignment(Alignment::Center);
         let inner = block.inner(area);
         block.render(area, buf);
@@ -878,7 +883,11 @@ impl LoginAddAccountState {
                     .bg(crate::colors::background())
                     .fg(crate::colors::text()),
             )
-            .title(if crate::theme::show_borders() { " Add Account " } else { "" })
+            .title(if crate::theme::show_borders() {
+                " Add Account "
+            } else {
+                ""
+            })
             .title_alignment(Alignment::Center);
         let inner = block.inner(area);
         block.render(area, buf);

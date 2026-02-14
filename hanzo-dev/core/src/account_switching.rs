@@ -59,7 +59,7 @@ struct CandidateScore {
 
 fn account_has_credentials(account: &auth_accounts::StoredAccount) -> bool {
     match account.mode {
-        AuthMode::ChatGPT => account.tokens.is_some(),
+        AuthMode::ChatGPT | AuthMode::Hanzo => account.tokens.is_some(),
         AuthMode::ApiKey => account.openai_api_key.is_some(),
     }
 }
@@ -270,6 +270,7 @@ mod tests {
         TokenData {
             id_token: IdTokenInfo {
                 email: Some(email.to_string()),
+                issuer: None,
                 chatgpt_plan_type: None,
                 raw_jwt: fake_jwt(email, "pro"),
             },
