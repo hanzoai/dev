@@ -1,5 +1,4 @@
 use crate::config::Config;
-use crate::config::resolve_code_path_for_read;
 use crate::git_info::resolve_root_git_project_for_trust;
 use crate::skills::model::SkillError;
 use crate::skills::model::SkillLoadOutcome;
@@ -91,7 +90,7 @@ where
 }
 
 pub(crate) fn user_skills_root(config: &Config) -> SkillRoot {
-    let root = resolve_code_path_for_read(&config.code_home, Path::new(SKILLS_DIR_NAME));
+    let root = config.code_home.join(SKILLS_DIR_NAME);
     SkillRoot {
         path: root,
         scope: SkillScope::User,
