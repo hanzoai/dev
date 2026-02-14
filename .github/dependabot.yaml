@@ -8,8 +8,8 @@ updates:
       interval: weekly
   - package-ecosystem: cargo
     directories:
-      - codex-rs
-      - codex-rs/*
+      - hanzo-dev
+      - hanzo-dev/*
     schedule:
       interval: weekly
   - package-ecosystem: devcontainers
@@ -25,6 +25,6 @@ updates:
     schedule:
       interval: weekly
   - package-ecosystem: rust-toolchain
-    directory: codex-rs
+    directory: hanzo-dev
     schedule:
       interval: weekly
