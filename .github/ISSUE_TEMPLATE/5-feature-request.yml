@@ -15,7 +15,7 @@ body:
   - type: input
     id: variant
     attributes:
-      label: What variant of Codex are you using?
+      label: What variant of Dev are you using?
       description: (e.g., App, IDE Extension, CLI, Web)
     validations:
       required: true

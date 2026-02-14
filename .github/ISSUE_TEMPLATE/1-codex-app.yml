@@ -1,5 +1,5 @@
-name: 🖥️ Codex App Bug
-description: Report an issue with the Codex App
+name: 🖥️ Dev App Bug
+description: Report an issue with the Hanzo Dev App
 labels:
   - app
 body:
@@ -12,7 +12,7 @@ body:
   - type: input
     id: version
     attributes:
-      label: What version of the Codex App are you using (From “About Codex” dialog)?
+      label: What version of the Dev App are you using (From "About Dev" dialog)?
     validations:
       required: true
   - type: input
