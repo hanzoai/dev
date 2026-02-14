@@ -1,11 +1,10 @@
 import { spawn } from "node:child_process";
-
-import readline from "node:readline";
-
-import { CodexConfigObject, CodexConfigValue } from "./codexOptions";
-import { SandboxMode } from "./threadOptions";
 import path from "node:path";
-import { fileURLToPath } from "node:url";
+import readline from "node:readline";
+import { createRequire } from "node:module";
+
+import type { CodexConfigObject, CodexConfigValue } from "./codexOptions";
+import { SandboxMode, ModelReasoningEffort, ApprovalMode, WebSearchMode } from "./threadOptions";
 
 export type CodexExecArgs = {
   input: string;
@@ -13,27 +12,65 @@ export type CodexExecArgs = {
   baseUrl?: string;
   apiKey?: string;
   threadId?: string | null;
+  images?: string[];
   // --model
   model?: string;
   // --sandbox
   sandboxMode?: SandboxMode;
   // --cd
   workingDirectory?: string;
+  // --add-dir
+  additionalDirectories?: string[];
   // --skip-git-repo-check
   skipGitRepoCheck?: boolean;
+  // --output-schema
+  outputSchemaFile?: string;
+  // --config model_reasoning_effort
+  modelReasoningEffort?: ModelReasoningEffort;
+  // AbortSignal to cancel the execution
+  signal?: AbortSignal;
+  // --config sandbox_workspace_write.network_access
+  networkAccessEnabled?: boolean;
+  // --config web_search
+  webSearchMode?: WebSearchMode;
+  // legacy --config features.web_search_request
+  webSearchEnabled?: boolean;
+  // --config approval_policy
+  approvalPolicy?: ApprovalMode;
 };
+
+const INTERNAL_ORIGINATOR_ENV = "CODEX_INTERNAL_ORIGINATOR_OVERRIDE";
+const TYPESCRIPT_SDK_ORIGINATOR = "codex_sdk_ts";
+const CODEX_NPM_NAME = "@openai/codex";
+
+const PLATFORM_PACKAGE_BY_TARGET: Record<string, string> = {
+  "x86_64-unknown-linux-musl": "@openai/codex-linux-x64",
+  "aarch64-unknown-linux-musl": "@openai/codex-linux-arm64",
+  "x86_64-apple-darwin": "@openai/codex-darwin-x64",
+  "aarch64-apple-darwin": "@openai/codex-darwin-arm64",
+  "x86_64-pc-windows-msvc": "@openai/codex-win32-x64",
+  "aarch64-pc-windows-msvc": "@openai/codex-win32-arm64",
+};
+
+const moduleRequire = createRequire(import.meta.url);
 
 export class CodexExec {
   private executablePath: string;
+  private envOverride?: Record<string, string>;
   private configOverrides?: CodexConfigObject;
 
-  constructor(executablePath: string | null = null, configOverrides?: CodexConfigObject) {
+  constructor(
+    executablePath: string | null = null,
+    env?: Record<string, string>,
+    configOverrides?: CodexConfigObject,
+  ) {
     this.executablePath = executablePath || findCodexPath();
+    this.envOverride = env;
     this.configOverrides = configOverrides;
   }
 
   async *run(args: CodexExecArgs): AsyncGenerator<string> {
-    const commandArgs: string[] = ["exec", "--json"];
+    const commandArgs: string[] = ["exec", "--experimental-json"];
 
     if (this.configOverrides) {
       for (const override of serializeConfigOverrides(this.configOverrides)) {
@@ -53,17 +90,66 @@ export class CodexExec {
       commandArgs.push("--cd", args.workingDirectory);
     }
 
+    if (args.additionalDirectories?.length) {
+      for (const dir of args.additionalDirectories) {
+        commandArgs.push("--add-dir", dir);
+      }
+    }
+
     if (args.skipGitRepoCheck) {
       commandArgs.push("--skip-git-repo-check");
+    }
+
+    if (args.outputSchemaFile) {
+      commandArgs.push("--output-schema", args.outputSchemaFile);
+    }
+
+    if (args.modelReasoningEffort) {
+      commandArgs.push("--config", `model_reasoning_effort="${args.modelReasoningEffort}"`);
+    }
+
+    if (args.networkAccessEnabled !== undefined) {
+      commandArgs.push(
+        "--config",
+        `sandbox_workspace_write.network_access=${args.networkAccessEnabled}`,
+      );
+    }
+
+    if (args.webSearchMode) {
+      commandArgs.push("--config", `web_search="${args.webSearchMode}"`);
+    } else if (args.webSearchEnabled === true) {
+      commandArgs.push("--config", `web_search="live"`);
+    } else if (args.webSearchEnabled === false) {
+      commandArgs.push("--config", `web_search="disabled"`);
+    }
+
+    if (args.approvalPolicy) {
+      commandArgs.push("--config", `approval_policy="${args.approvalPolicy}"`);
     }
 
     if (args.threadId) {
       commandArgs.push("resume", args.threadId);
     }
 
-    const env = {
-      ...process.env,
-    };
+    if (args.images?.length) {
+      for (const image of args.images) {
+        commandArgs.push("--image", image);
+      }
+    }
+
+    const env: Record<string, string> = {};
+    if (this.envOverride) {
+      Object.assign(env, this.envOverride);
+    } else {
+      for (const [key, value] of Object.entries(process.env)) {
+        if (value !== undefined) {
+          env[key] = value;
+        }
+      }
+    }
+    if (!env[INTERNAL_ORIGINATOR_ENV]) {
+      env[INTERNAL_ORIGINATOR_ENV] = TYPESCRIPT_SDK_ORIGINATOR;
+    }
     if (args.baseUrl) {
       env.OPENAI_BASE_URL = args.baseUrl;
     }
@@ -73,6 +159,7 @@ export class CodexExec {
 
     const child = spawn(this.executablePath, commandArgs, {
       env,
+      signal: args.signal,
     });
 
     let spawnError: unknown | null = null;
@@ -223,9 +310,6 @@ function isPlainObject(value: unknown): value is CodexConfigObject {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
-const scriptFileName = fileURLToPath(import.meta.url);
-const scriptDirName = path.dirname(scriptFileName);
-
 function findCodexPath() {
   const { platform, arch } = process;
 
@@ -276,7 +360,23 @@ function findCodexPath() {
     throw new Error(`Unsupported platform: ${platform} (${arch})`);
   }
 
-  const vendorRoot = path.join(scriptDirName, "..", "vendor");
+  const platformPackage = PLATFORM_PACKAGE_BY_TARGET[targetTriple];
+  if (!platformPackage) {
+    throw new Error(`Unsupported target triple: ${targetTriple}`);
+  }
+
+  let vendorRoot: string;
+  try {
+    const codexPackageJsonPath = moduleRequire.resolve(`${CODEX_NPM_NAME}/package.json`);
+    const codexRequire = createRequire(codexPackageJsonPath);
+    const platformPackageJsonPath = codexRequire.resolve(`${platformPackage}/package.json`);
+    vendorRoot = path.join(path.dirname(platformPackageJsonPath), "vendor");
+  } catch {
+    throw new Error(
+      `Unable to locate Codex CLI binaries. Ensure ${CODEX_NPM_NAME} is installed with optional dependencies.`,
+    );
+  }
+
   const archRoot = path.join(vendorRoot, targetTriple);
   const codexBinaryName = process.platform === "win32" ? "codex.exe" : "codex";
   const binaryPath = path.join(archRoot, "codex", codexBinaryName);
