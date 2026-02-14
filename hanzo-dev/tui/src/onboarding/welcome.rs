@@ -29,9 +29,7 @@ impl WidgetRef for &WelcomeWidget {
 
         // Render second line below the first
         if area.height > 1 {
-            let line2 = Line::from(vec![
-                Span::raw(crate::greeting::greeting_placeholder()),
-            ]);
+            let line2 = Line::from(vec![Span::raw(crate::greeting::greeting_placeholder())]);
             let line2_area = Rect {
                 x: area.x,
                 y: area.y + 1,

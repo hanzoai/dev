@@ -77,7 +77,7 @@ impl KeyboardHandler for AuthModeWidget {
             KeyCode::Char('2') => self.verify_api_key(),
             KeyCode::Enter => match self.sign_in_state {
                 SignInState::PickMode => match self.highlighted_mode {
-                    AuthMode::ChatGPT => self.start_chatgpt_login(),
+                    AuthMode::ChatGPT | AuthMode::Hanzo => self.start_chatgpt_login(),
                     AuthMode::ApiKey => self.verify_api_key(),
                 },
                 SignInState::EnvVarMissing => self.sign_in_state = SignInState::PickMode,
@@ -135,6 +135,7 @@ impl AuthModeWidget {
                 let to_label = |mode: AuthMode| match mode {
                     AuthMode::ApiKey => "API key",
                     AuthMode::ChatGPT => "ChatGPT",
+                    AuthMode::Hanzo => "Hanzo",
                 };
                 let msg = format!(
                     "  You’re currently using {} while your preferred method is {}.",

@@ -375,6 +375,50 @@ HANZOD_ENABLE_BITDELTA=true      # Model personalization
    - Added TUI-specific test suite
    - All crypto module tests passing (100% success rate)
 
+## Unified Auth Phase 2 (February 2026)
+
+### AuthMode::Hanzo — Native hanzo.id Authentication
+
+Added `Hanzo` as a first-class auth mode alongside `ApiKey` and `ChatGPT`:
+
+1. **AuthMode Enum** (`protocol/src/mcp_protocol.rs`)
+   - New `Hanzo` variant with `is_oauth()` helper method
+   - Serializes as `"hanzo"` on the wire (serde `rename_all = "lowercase"`)
+
+2. **JWT Issuer Detection** (`core/src/token_data.rs`)
+   - `IdTokenInfo.issuer` field parsed from JWT `iss` claim
+   - `is_hanzo_issuer()` detects `hanzo.id` or `hanzo.ai` issuers
+   - Auto-detects mode when loading auth from disk
+
+3. **Auth Flow** (`core/src/auth.rs`, `login/src/server.rs`)
+   - `load_auth()` auto-detects Hanzo mode from JWT issuer
+   - `from_tokens_with_originator()` sets mode based on issuer
+   - `persist_tokens_async()` now takes `issuer` parameter
+   - Hanzo logins saved via `upsert_hanzo_account()` with `provider_id: "hanzo"`
+   - ChatGPT login still works via `--issuer https://auth.openai.com`
+
+4. **CLI Status** (`cli/src/login.rs`)
+   - `dev /login` → "Logged in to Hanzo as [z@hanzo.ai]"
+   - Distinct from ChatGPT: "Logged in as [user@example.com]"
+
+5. **TUI Integration**
+   - Account labels show "Hanzo (email)" format
+   - Hanzo accounts have highest priority (sort order 0)
+   - All exhaustive match statements updated across 10+ TUI files
+
+6. **Provider Config** (`core/src/model_provider_info.rs`)
+   - Default provider: `hanzo` → `https://api.hanzo.ai/v1`
+   - Env: `HANZO_API_KEY` or OAuth JWT from `dev /login`
+   - Routes through Gateway → Cloud → DO AI (28 models)
+
+### Auth Mode Behavior Matrix
+
+| Mode | Token Source | Refresh URL | Display |
+|------|-------------|-------------|---------|
+| `ApiKey` | `HANZO_API_KEY` / `OPENAI_API_KEY` env | N/A | "API key (…xxxxx)" |
+| `ChatGPT` | OpenAI OAuth JWT | `hanzo.id/oauth/token` | "Logged in as [email]" |
+| `Hanzo` | hanzo.id Casdoor JWT | `hanzo.id/oauth/token` | "Logged in to Hanzo as [email]" |
+
 ## Recent Updates (September 2025)
 
 ### Merged from OpenAI Codex Upstream

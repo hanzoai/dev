@@ -31,10 +31,7 @@ use serde_json::to_value;
 
 /// Count how many *distinct* lines contain the given text.
 fn line_count_containing(screen: &str, needle: &str) -> usize {
-    screen
-        .lines()
-        .filter(|line| line.contains(needle))
-        .count()
+    screen.lines().filter(|line| line.contains(needle)).count()
 }
 
 fn message(role: &str, text: &str) -> ResponseItem {

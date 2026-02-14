@@ -99,6 +99,14 @@ impl GitSha {
 pub enum AuthMode {
     ApiKey,
     ChatGPT,
+    Hanzo,
+}
+
+impl AuthMode {
+    /// Returns `true` for OAuth/JWT-based auth modes (ChatGPT and Hanzo).
+    pub fn is_oauth(self) -> bool {
+        matches!(self, Self::ChatGPT | Self::Hanzo)
+    }
 }
 
 /// Request from the client to the server.

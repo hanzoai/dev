@@ -2,13 +2,17 @@
 //!
 //! Provides intent creation, routing, DAG composition, and execution.
 
-use crate::error::{Error, Result};
-use crate::executor::{ExecutorContext, ToolExecutor};
+use crate::error::Error;
+use crate::error::Result;
+use crate::executor::ExecutorContext;
+use crate::executor::ToolExecutor;
 use crate::message::ToolResult;
-use crate::tools::{ToolCategory, plan};
+use crate::tools::ToolCategory;
+use crate::tools::plan;
 use async_trait::async_trait;
 use serde_json::Value;
-use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::atomic::AtomicU64;
+use std::sync::atomic::Ordering;
 
 /// Plan executor for orchestration operations
 pub struct PlanExecutor {

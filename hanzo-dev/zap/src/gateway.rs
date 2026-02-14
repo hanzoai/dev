@@ -3,18 +3,31 @@
 //! The Gateway aggregates multiple MCP servers (stdio, HTTP, WebSocket)
 //! and exposes them through a single ZAP interface.
 
-use crate::config::{GatewayConfig, McpServerConfig, Transport};
-use crate::error::{Error, Result};
-use crate::message::{
-    Capabilities, ClientInfo, ConnectedServer, MessageType, ServerInfo, ServerStatus, Tool,
-    ToolCall, ToolResult,
-};
+use crate::config::GatewayConfig;
+use crate::config::McpServerConfig;
+use crate::config::Transport;
+use crate::error::Error;
+use crate::error::Result;
+use crate::message::Capabilities;
+use crate::message::ClientInfo;
+use crate::message::ConnectedServer;
+use crate::message::MessageType;
+use crate::message::ServerInfo;
+use crate::message::ServerStatus;
+use crate::message::Tool;
+use crate::message::ToolCall;
+use crate::message::ToolResult;
 use std::collections::HashMap;
 use std::sync::Arc;
-use tokio::io::{AsyncReadExt, AsyncWriteExt};
-use tokio::net::{TcpListener, TcpStream};
+use tokio::io::AsyncReadExt;
+use tokio::io::AsyncWriteExt;
+use tokio::net::TcpListener;
+use tokio::net::TcpStream;
 use tokio::sync::RwLock;
-use tracing::{debug, error, info, warn};
+use tracing::debug;
+use tracing::error;
+use tracing::info;
+use tracing::warn;
 
 /// A bridged MCP server.
 struct BridgedServer {

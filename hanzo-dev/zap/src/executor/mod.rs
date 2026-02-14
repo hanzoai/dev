@@ -18,7 +18,8 @@
 //!
 //! All implementations share the same tool schemas defined in `crate::tools`.
 
-use crate::error::{Error, Result};
+use crate::error::Error;
+use crate::error::Result;
 use crate::message::ToolResult;
 use crate::tools::ToolCategory;
 use async_trait::async_trait;
@@ -43,8 +44,13 @@ pub use plan::PlanExecutor;
 pub use vcs::VcsExecutor;
 
 // Re-export permission types from hanzo-protocol
-pub use permissions::{AskForApproval, PermissionLevel, PermissionResult, SandboxPolicy};
-pub use permissions::{check_approval, is_path_writable, operation_level};
+pub use permissions::AskForApproval;
+pub use permissions::PermissionLevel;
+pub use permissions::PermissionResult;
+pub use permissions::SandboxPolicy;
+pub use permissions::check_approval;
+pub use permissions::is_path_writable;
+pub use permissions::operation_level;
 
 /// Context passed to tool executors.
 ///

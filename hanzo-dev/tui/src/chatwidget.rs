@@ -739,7 +739,11 @@ impl ChatWidget<'_> {
         total: Duration,
     ) -> Line<'static> {
         let width = width.max(20) as usize;
-        let prefix = if crate::theme::show_gutter() { "▶ " } else { "" };
+        let prefix = if crate::theme::show_gutter() {
+            "▶ "
+        } else {
+            ""
+        };
         let suffix = format!(
             " {} / {}",
             self.format_overlay_mm_ss(current),
@@ -8197,7 +8201,8 @@ impl ChatWidget<'_> {
         if is_alt_g {
             let mode = crate::theme::cycle_gutter_mode();
             self.invalidate_height_cache();
-            self.bottom_pane.flash_footer_notice(mode.label().to_string());
+            self.bottom_pane
+                .flash_footer_notice(mode.label().to_string());
             self.request_redraw();
             return;
         }
@@ -8842,6 +8847,7 @@ impl ChatWidget<'_> {
         let account_type = account
             .map(|acc| match acc.mode {
                 McpAuthMode::ChatGPT => "ChatGPT account",
+                McpAuthMode::Hanzo => "Hanzo account",
                 McpAuthMode::ApiKey => "API key",
             })
             .unwrap_or("Unknown account");
@@ -10898,14 +10904,9 @@ impl ChatWidget<'_> {
                         self.history_remove_at(idx);
                     } else {
                         let connected_cell = history_cell::new_connected_mcp_status(&names);
-                        let record = HistoryDomainRecord::BackgroundEvent(
-                            connected_cell.state().clone(),
-                        );
-                        self.history_replace_with_record(
-                            idx,
-                            Box::new(connected_cell),
-                            record,
-                        );
+                        let record =
+                            HistoryDomainRecord::BackgroundEvent(connected_cell.state().clone());
+                        self.history_replace_with_record(idx, Box::new(connected_cell), record);
                     }
                 }
             }
@@ -16890,8 +16891,24 @@ impl ChatWidget<'_> {
         let header_style = ratatui::style::Style::default()
             .fg(crate::colors::text())
             .add_modifier(ratatui::style::Modifier::BOLD);
-        let chevron = if collapsed { if crate::theme::show_gutter() { "▶" } else { ">" } } else { if crate::theme::show_gutter() { "▼" } else { "v" } };
-        let title = if crate::theme::show_borders() { format!("╭ Highlights (h) {chevron} ") } else { format!("Highlights (h) {chevron} ") };
+        let chevron = if collapsed {
+            if crate::theme::show_gutter() {
+                "▶"
+            } else {
+                ">"
+            }
+        } else {
+            if crate::theme::show_gutter() {
+                "▼"
+            } else {
+                "v"
+            }
+        };
+        let title = if crate::theme::show_borders() {
+            format!("╭ Highlights (h) {chevron} ")
+        } else {
+            format!("Highlights (h) {chevron} ")
+        };
         let title_width = unicode_width::UnicodeWidthStr::width(title.as_str()) as u16;
         let pad = available_width
             .saturating_sub(title_width)
@@ -21719,7 +21736,11 @@ Have we met every part of this goal and is there no further work to do?"#
         // Global
         lines.push(kv("Ctrl+G", "Guide overlay"));
         lines.push(kv(
-            if cfg!(target_os = "macos") { "Opt+G" } else { "Alt+G" },
+            if cfg!(target_os = "macos") {
+                "Opt+G"
+            } else {
+                "Alt+G"
+            },
             "Toggle gutter icons and borders",
         ));
         lines.push(kv("Ctrl+R", "Toggle reasoning"));
@@ -27992,7 +28013,15 @@ Have we met every part of this goal and is there no further work to do?"#
             sorted_providers.sort_by(|a, b| a.0.cmp(b.0));
 
             for (id, info) in sorted_providers {
-                let marker = if id == current { if crate::theme::show_gutter() { "▶ " } else { "> " } } else { "  " };
+                let marker = if id == current {
+                    if crate::theme::show_gutter() {
+                        "▶ "
+                    } else {
+                        "> "
+                    }
+                } else {
+                    "  "
+                };
                 let base_url = info.base_url.as_deref().unwrap_or("(default)");
                 let env_key = info
                     .env_key
@@ -29219,7 +29248,10 @@ Note: Free ngrok accounts have connection limits."#;
 
             if include_model {
                 spans.push(separator.clone());
-                spans.push(Span::styled("Model ", Style::default().fg(crate::colors::text_dim())));
+                spans.push(Span::styled(
+                    "Model ",
+                    Style::default().fg(crate::colors::text_dim()),
+                ));
                 spans.push(Span::styled(
                     self.format_model_name(&self.config.model),
                     Style::default().fg(crate::colors::text()),
@@ -29240,7 +29272,10 @@ Note: Free ngrok accounts have connection limits."#;
 
             if include_dir {
                 spans.push(separator.clone());
-                spans.push(Span::styled("Dir ", Style::default().fg(crate::colors::text_dim())));
+                spans.push(Span::styled(
+                    "Dir ",
+                    Style::default().fg(crate::colors::text_dim()),
+                ));
                 spans.push(Span::styled(
                     dir_display.to_string(),
                     Style::default().fg(crate::colors::text()),
@@ -29493,7 +29528,11 @@ Note: Free ngrok accounts have connection limits."#;
                 Block::default()
                     .borders(crate::theme::zen_borders())
                     .border_style(Style::default().fg(crate::colors::info()))
-                    .title(if crate::theme::show_borders() { "Browser" } else { "" })
+                    .title(if crate::theme::show_borders() {
+                        "Browser"
+                    } else {
+                        ""
+                    })
                     .style(Style::default().bg(Color::Black)),
             )
             .style(
@@ -37123,12 +37162,10 @@ impl ChatWidget<'_> {
 
         let block = Block::default()
             .borders(crate::theme::zen_borders())
-            .title(RLine::from(vec![
-                Span::styled(
-                    format!(" {} ", self.browser_title()),
-                    Style::default().fg(crate::colors::text()),
-                ),
-            ]))
+            .title(RLine::from(vec![Span::styled(
+                format!(" {} ", self.browser_title()),
+                Style::default().fg(crate::colors::text()),
+            )]))
             .style(Style::default().bg(crate::colors::background()))
             .border_style(
                 Style::default()
@@ -37549,9 +37586,10 @@ impl ChatWidget<'_> {
         };
         Clear.render(window_area, buf);
 
-        let title_spans = vec![
-            Span::styled(" Agents ", Style::default().fg(crate::colors::text())),
-        ];
+        let title_spans = vec![Span::styled(
+            " Agents ",
+            Style::default().fg(crate::colors::text()),
+        )];
 
         let block = Block::default()
             .borders(crate::theme::zen_borders())
@@ -37928,9 +37966,17 @@ impl ChatWidget<'_> {
                         .fg(crate::colors::text())
                         .add_modifier(Modifier::BOLD);
                     let chevron = if self.agents_terminal.actions_collapsed {
-                        if crate::theme::show_gutter() { "▶" } else { ">" }
+                        if crate::theme::show_gutter() {
+                            "▶"
+                        } else {
+                            ">"
+                        }
                     } else {
-                        if crate::theme::show_gutter() { "▼" } else { "v" }
+                        if crate::theme::show_gutter() {
+                            "▼"
+                        } else {
+                            "v"
+                        }
                     };
                     let header_text = if crate::theme::show_borders() {
                         format!("╭ Action Log (a) {chevron} — {} entries ", entry.logs.len())
@@ -38086,11 +38132,19 @@ impl ChatWidget<'_> {
                     Span::styled("[X]", Style::default().fg(crate::colors::function())),
                     Span::styled(" Stop   ", Style::default().fg(crate::colors::text_dim())),
                     Span::styled(
-                        if crate::theme::show_gutter() { "[Ctrl+A]" } else { "" },
+                        if crate::theme::show_gutter() {
+                            "[Ctrl+A]"
+                        } else {
+                            ""
+                        },
                         Style::default().fg(crate::colors::function()),
                     ),
                     Span::styled(
-                        if crate::theme::show_gutter() { " Exit" } else { "" },
+                        if crate::theme::show_gutter() {
+                            " Exit"
+                        } else {
+                            ""
+                        },
                         Style::default().fg(crate::colors::text_dim()),
                     ),
                 ])
@@ -38126,7 +38180,11 @@ impl ChatWidget<'_> {
         // Agent status block
         let agent_block = Block::default()
             .borders(crate::theme::zen_borders())
-            .title(if crate::theme::show_borders() { " Agents " } else { "" })
+            .title(if crate::theme::show_borders() {
+                " Agents "
+            } else {
+                ""
+            })
             .border_style(Style::default().fg(crate::colors::border()));
 
         let inner_agent = agent_block.inner(area);
@@ -39533,13 +39591,13 @@ impl WidgetRef for &ChatWidget<'_> {
                         }
                     } else {
                         match symbol {
-                            "›" | "▶" => crate::colors::text(), // user
-                            "⋮" => crate::colors::primary(),     // thinking
+                            "›" | "▶" => crate::colors::text(),        // user
+                            "⋮" => crate::colors::primary(),           // thinking
                             "•" | "⏺" => crate::colors::text_bright(), // codex/agent
-                            "⚙" => crate::colors::info(),        // tool working
-                            "✔" => crate::colors::success(),     // tool complete
-                            "✖" => crate::colors::error(),       // error
-                            "★" => crate::colors::text_bright(), // notice/popular
+                            "⚙" => crate::colors::info(),              // tool working
+                            "✔" => crate::colors::success(),           // tool complete
+                            "✖" => crate::colors::error(),             // error
+                            "★" => crate::colors::text_bright(),       // notice/popular
                             _ => crate::colors::text_dim(),
                         }
                     };
@@ -39865,14 +39923,16 @@ impl WidgetRef for &ChatWidget<'_> {
 
             let block = Block::default()
                 .borders(crate::theme::zen_borders())
-                .title(ratatui::text::Line::from(if !crate::theme::show_borders() {
-                    vec![]
-                } else {
-                    vec![ratatui::text::Span::styled(
-                        format!(" Terminal - {} ", overlay.title),
-                        Style::default().fg(crate::colors::text()),
-                    )]
-                }))
+                .title(ratatui::text::Line::from(
+                    if !crate::theme::show_borders() {
+                        vec![]
+                    } else {
+                        vec![ratatui::text::Span::styled(
+                            format!(" Terminal - {} ", overlay.title),
+                            Style::default().fg(crate::colors::text()),
+                        )]
+                    },
+                ))
                 .style(Style::default().bg(crate::colors::background()))
                 .border_style(
                     Style::default()
@@ -40266,7 +40326,11 @@ impl WidgetRef for &ChatWidget<'_> {
                 ]);
                 let block = Block::default()
                     .borders(crate::theme::zen_borders())
-                    .title(if crate::theme::show_borders() { ratatui::text::Line::from(title_spans) } else { ratatui::text::Line::from("") })
+                    .title(if crate::theme::show_borders() {
+                        ratatui::text::Line::from(title_spans)
+                    } else {
+                        ratatui::text::Line::from("")
+                    })
                     // Use normal background for the window itself so it contrasts against the
                     // dimmed scrim behind
                     .style(Style::default().bg(crate::colors::background()))
@@ -40390,9 +40454,10 @@ impl WidgetRef for &ChatWidget<'_> {
                                 height: 1,
                             };
                             if crate::theme::show_borders() {
-                                let underline = Block::default()
-                                    .borders(Borders::BOTTOM)
-                                    .border_style(Style::default().fg(crate::colors::text_bright()));
+                                let underline =
+                                    Block::default().borders(Borders::BOTTOM).border_style(
+                                        Style::default().fg(crate::colors::text_bright()),
+                                    );
                                 underline.render(accent_rect, buf);
                             }
                         }
@@ -40495,7 +40560,11 @@ impl WidgetRef for &ChatWidget<'_> {
                         Clear.render(dialog, buf);
                         let dlg_block = Block::default()
                             .borders(crate::theme::zen_borders())
-                            .title(if crate::theme::show_borders() { "Confirm Undo" } else { "" })
+                            .title(if crate::theme::show_borders() {
+                                "Confirm Undo"
+                            } else {
+                                ""
+                            })
                             .style(
                                 Style::default()
                                     .bg(crate::colors::background())
@@ -40551,31 +40620,34 @@ impl WidgetRef for &ChatWidget<'_> {
                     Clear.render(window_area, buf);
                     let block = Block::default()
                         .borders(crate::theme::zen_borders())
-                        .title(ratatui::text::Line::from(if !crate::theme::show_borders() {
-                            vec![]
-                        } else {
-                            vec![
-                            ratatui::text::Span::styled(
-                                " ",
-                                Style::default().fg(crate::colors::text_dim()),
-                            ),
-                            ratatui::text::Span::styled(
-                                "Guide",
-                                Style::default().fg(crate::colors::text()),
-                            ),
-                            ratatui::text::Span::styled(
-                                " ——— ",
-                                Style::default().fg(crate::colors::text_dim()),
-                            ),
-                            ratatui::text::Span::styled(
-                                "Esc",
-                                Style::default().fg(crate::colors::text()),
-                            ),
-                            ratatui::text::Span::styled(
-                                " close ",
-                                Style::default().fg(crate::colors::text_dim()),
-                            ),
-                        ]}))
+                        .title(ratatui::text::Line::from(
+                            if !crate::theme::show_borders() {
+                                vec![]
+                            } else {
+                                vec![
+                                    ratatui::text::Span::styled(
+                                        " ",
+                                        Style::default().fg(crate::colors::text_dim()),
+                                    ),
+                                    ratatui::text::Span::styled(
+                                        "Guide",
+                                        Style::default().fg(crate::colors::text()),
+                                    ),
+                                    ratatui::text::Span::styled(
+                                        " ——— ",
+                                        Style::default().fg(crate::colors::text_dim()),
+                                    ),
+                                    ratatui::text::Span::styled(
+                                        "Esc",
+                                        Style::default().fg(crate::colors::text()),
+                                    ),
+                                    ratatui::text::Span::styled(
+                                        " close ",
+                                        Style::default().fg(crate::colors::text_dim()),
+                                    ),
+                                ]
+                            },
+                        ))
                         .style(Style::default().bg(crate::colors::background()))
                         .border_style(
                             Style::default()

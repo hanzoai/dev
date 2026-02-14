@@ -202,9 +202,7 @@ pub enum McpServerTransportConfig {
     },
     /// ZAP (Zero-copy Agent Protocol) transport via a ZAP gateway.
     /// Uses `zap://` or `zaps://` URL scheme.
-    Zap {
-        url: String,
-    },
+    Zap { url: String },
 }
 
 mod option_duration_secs {

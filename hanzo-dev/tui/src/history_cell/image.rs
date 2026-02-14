@@ -14,8 +14,8 @@ use super::card_style::truncate_with_ellipsis;
 use super::*;
 use crate::colors;
 use crate::history::state::ImageRecord;
-use crate::theme::current_theme_name;
 use crate::theme::PaletteMode;
+use crate::theme::current_theme_name;
 use crate::theme::palette_mode;
 use ::image::ImageReader;
 use ::image::image_dimensions;
@@ -656,7 +656,11 @@ impl ImageOutputCell {
         let block = Block::default()
             .borders(crate::theme::zen_borders())
             .border_style(Style::default().fg(colors::info()))
-            .title(if crate::theme::show_borders() { "Image" } else { "" });
+            .title(if crate::theme::show_borders() {
+                "Image"
+            } else {
+                ""
+            });
         let inner = block.inner(area);
         block.render(area, buf);
         Paragraph::new(placeholder_text)

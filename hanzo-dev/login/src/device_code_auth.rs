@@ -247,6 +247,7 @@ impl DeviceCodeSession {
 
         persist_tokens_async(
             &self.opts.code_home,
+            &self.opts.issuer,
             None,
             tokens.id_token,
             tokens.access_token,

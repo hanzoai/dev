@@ -11,7 +11,8 @@
 //! ```
 
 use crate::buffer::Buffer;
-use crate::error::{Error, Result};
+use crate::error::Error;
+use crate::error::Result;
 use crate::message::MessageType;
 
 /// Maximum message size (16MB).

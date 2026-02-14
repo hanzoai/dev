@@ -20,7 +20,8 @@
 //! 13. **Knowledge** - Search, docs, embeddings, citations
 //! 14. **Plan** - Intent, routing, DAG composition, scheduling
 
-use serde::{Deserialize, Serialize};
+use serde::Deserialize;
+use serde::Serialize;
 use std::collections::HashMap;
 
 // ============================================================================

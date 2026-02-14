@@ -442,7 +442,11 @@ impl UndoTimelineView {
 
         let conversation_block = Block::default()
             .borders(crate::theme::zen_borders())
-            .title(if crate::theme::show_borders() { " Conversation preview " } else { "" })
+            .title(if crate::theme::show_borders() {
+                " Conversation preview "
+            } else {
+                ""
+            })
             .border_style(Style::default().fg(crate::colors::border()))
             .style(
                 Style::default()
@@ -459,7 +463,11 @@ impl UndoTimelineView {
 
         let files_block = Block::default()
             .borders(crate::theme::zen_borders())
-            .title(if crate::theme::show_borders() { " File changes " } else { "" })
+            .title(if crate::theme::show_borders() {
+                " File changes "
+            } else {
+                ""
+            })
             .border_style(Style::default().fg(crate::colors::border()))
             .style(
                 Style::default()
@@ -608,7 +616,11 @@ impl<'a> BottomPaneView<'a> for UndoTimelineView {
         Clear.render(area, buf);
         let block = Block::default()
             .borders(crate::theme::zen_borders())
-            .title(if crate::theme::show_borders() { " Restore workspace snapshot " } else { "" })
+            .title(if crate::theme::show_borders() {
+                " Restore workspace snapshot "
+            } else {
+                ""
+            })
             .border_style(Style::default().fg(crate::colors::border()))
             .style(
                 Style::default()
@@ -623,7 +635,11 @@ impl<'a> BottomPaneView<'a> for UndoTimelineView {
 
         let list_block = Block::default()
             .borders(crate::theme::zen_borders())
-            .title(if crate::theme::show_borders() { " Snapshots " } else { "" })
+            .title(if crate::theme::show_borders() {
+                " Snapshots "
+            } else {
+                ""
+            })
             .border_style(Style::default().fg(crate::colors::border()))
             .style(
                 Style::default()

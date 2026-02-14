@@ -610,7 +610,11 @@ impl AgentRunCell {
         });
 
         let text_value = if !crate::theme::show_gutter() {
-            if has_running_agents { " [Esc] Stop".to_string() } else { String::new() }
+            if has_running_agents {
+                " [Esc] Stop".to_string()
+            } else {
+                String::new()
+            }
         } else if has_running_agents {
             " [Ctrl+A] Expand · [Esc] Stop".to_string()
         } else {

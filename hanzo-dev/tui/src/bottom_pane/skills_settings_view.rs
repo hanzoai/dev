@@ -261,7 +261,11 @@ impl SkillsSettingsView {
     fn render_form(&self, area: Rect, buf: &mut Buffer) {
         let outer = Block::default()
             .borders(crate::theme::zen_borders())
-            .title(if crate::theme::show_borders() { "Skill" } else { "" })
+            .title(if crate::theme::show_borders() {
+                "Skill"
+            } else {
+                ""
+            })
             .style(Style::default().bg(colors::background()));
         let inner = outer.inner(area);
         outer.render(area, buf);

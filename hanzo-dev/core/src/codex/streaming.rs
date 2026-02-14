@@ -2626,8 +2626,11 @@ async fn try_run_turn(
                     | CodeErr::UsageNotIncluded
             );
             if !suppress_transport_notice {
-                sess.notify_stream_error(sub_id, format!("[transport] failed to start stream: {e}"))
-                    .await;
+                sess.notify_stream_error(
+                    sub_id,
+                    format!("[transport] failed to start stream: {e}"),
+                )
+                .await;
             }
             return Err(e);
         }

@@ -291,7 +291,9 @@ impl PromptsSettingsView {
         } else {
             "Name (slug)"
         };
-        let mut name_block = Block::default().borders(crate::theme::zen_borders()).title(name_title);
+        let mut name_block = Block::default()
+            .borders(crate::theme::zen_borders())
+            .title(name_title);
         if matches!(self.focus, Focus::Name) {
             name_block = name_block.border_style(Style::default().fg(colors::primary()));
         }
@@ -306,7 +308,9 @@ impl PromptsSettingsView {
         } else {
             "Content"
         };
-        let mut body_block = Block::default().borders(crate::theme::zen_borders()).title(body_title);
+        let mut body_block = Block::default()
+            .borders(crate::theme::zen_borders())
+            .title(body_title);
         if matches!(self.focus, Focus::Body) {
             body_block = body_block.border_style(Style::default().fg(colors::primary()));
         }

@@ -10,13 +10,13 @@ pub(crate) fn account_display_label(account: &StoredAccount) -> String {
         let trimmed = label.trim();
         if !trimmed.is_empty() {
             match account.mode {
-                AuthMode::ChatGPT => {
+                AuthMode::ChatGPT | AuthMode::Hanzo => {
                     let default_email = account
                         .tokens
                         .as_ref()
                         .and_then(|tokens| tokens.id_token.email.as_deref());
                     if default_email.is_some_and(|email| trimmed.eq_ignore_ascii_case(email)) {
-                        // Fall back to the default ChatGPT label format when the stored
+                        // Fall back to the default label format when the stored
                         // label is just the raw email we persist automatically.
                     } else {
                         return trimmed.to_string();
@@ -29,13 +29,18 @@ pub(crate) fn account_display_label(account: &StoredAccount) -> String {
         }
     }
 
+    let mode_label = match account.mode {
+        AuthMode::ChatGPT => "ChatGPT",
+        AuthMode::Hanzo => "Hanzo",
+        AuthMode::ApiKey => "API key",
+    };
     match account.mode {
-        AuthMode::ChatGPT => account
+        AuthMode::ChatGPT | AuthMode::Hanzo => account
             .tokens
             .as_ref()
             .and_then(|tokens| tokens.id_token.email.clone())
-            .map(|email| format!("ChatGPT ({email})"))
-            .unwrap_or_else(|| "ChatGPT".to_string()),
+            .map(|email| format!("{mode_label} ({email})"))
+            .unwrap_or_else(|| mode_label.to_string()),
         AuthMode::ApiKey => account
             .openai_api_key
             .as_ref()
@@ -53,7 +58,8 @@ pub(crate) fn key_suffix(text: &str) -> String {
 /// Returns an ordering priority for accounts. ChatGPT accounts should appear first.
 pub(crate) fn account_mode_priority(mode: AuthMode) -> u8 {
     match mode {
-        AuthMode::ChatGPT => 0,
-        AuthMode::ApiKey => 1,
+        AuthMode::Hanzo => 0,
+        AuthMode::ChatGPT => 1,
+        AuthMode::ApiKey => 2,
     }
 }
