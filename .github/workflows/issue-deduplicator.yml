@@ -10,16 +10,16 @@ jobs:
   gather-duplicates:
     name: Identify potential duplicates
     # Prevent runs on forks (requires OpenAI API key, wastes Actions minutes)
-    if: github.repository == 'openai/codex' && (github.event.action == 'opened' || (github.event.action == 'labeled' && github.event.label.name == 'codex-deduplicate'))
+    if: github.repository == 'openai/codex' && (github.event.action == 'opened' || (github.event.action == 'labeled' && github.event.label.name == 'dev-deduplicate'))
     runs-on: ubuntu-latest
     permissions:
       contents: read
     outputs:
-      codex_output: ${{ steps.select-final.outputs.codex_output }}
+      dev_output: ${{ steps.select-final.outputs.dev_output }}
     steps:
       - uses: actions/checkout@v6
 
-      - name: Prepare Codex inputs
+      - name: Prepare Dev inputs
         env:
           GH_TOKEN: ${{ github.token }}
           REPO: ${{ github.repository }}
@@ -27,9 +27,9 @@ jobs:
         run: |
           set -eo pipefail
 
-          CURRENT_ISSUE_FILE=codex-current-issue.json
-          EXISTING_ALL_FILE=codex-existing-issues-all.json
-          EXISTING_OPEN_FILE=codex-existing-issues-open.json
+          CURRENT_ISSUE_FILE=dev-current-issue.json
+          EXISTING_ALL_FILE=dev-existing-issues-all.json
+          EXISTING_OPEN_FILE=dev-existing-issues-open.json
 
           gh issue list --repo "$REPO" \
             --json number,title,body,createdAt,updatedAt,state,labels \
@@ -75,7 +75,7 @@ jobs:
 
       # Prompt instructions are intentionally inline in this workflow. The old
       # .github/prompts/issue-deduplicator.txt file is obsolete and removed.
-      - id: codex-all
+      - id: dev-all
         name: Find duplicates (pass 1, all issues)
         uses: openai/codex-action@main
         with:
@@ -85,8 +85,8 @@ jobs:
             You are an assistant that triages new GitHub issues by identifying potential duplicates.
 
             You will receive the following JSON files located in the current working directory:
-            - `codex-current-issue.json`: JSON object describing the newly created issue (fields: number, title, body).
-            - `codex-existing-issues-all.json`: JSON array of recent issues with states, timestamps, and labels.
+            - `dev-current-issue.json`: JSON object describing the newly created issue (fields: number, title, body).
+            - `dev-existing-issues-all.json`: JSON array of recent issues with states, timestamps, and labels.
 
             Instructions:
             - Compare the current issue against the existing issues to find up to five that appear to describe the same underlying problem or request.
@@ -117,12 +117,12 @@ jobs:
       - id: normalize-all
         name: Normalize pass 1 output
         env:
-          CODEX_OUTPUT: ${{ steps.codex-all.outputs.final-message }}
+          DEV_OUTPUT: ${{ steps.dev-all.outputs.final-message }}
           CURRENT_ISSUE_NUMBER: ${{ github.event.issue.number }}
         run: |
           set -eo pipefail
 
-          raw=${CODEX_OUTPUT//$'\r'/}
+          raw=${DEV_OUTPUT//$'\r'/}
           parsed=false
           issues='[]'
           reason=''
@@ -158,7 +158,7 @@ jobs:
             echo "has_matches=$has_matches"
           } >> "$GITHUB_OUTPUT"
 
-      - id: codex-open
+      - id: dev-open
         name: Find duplicates (pass 2, open issues)
         if: ${{ steps.normalize-all.outputs.has_matches != 'true' }}
         uses: openai/codex-action@main
@@ -171,8 +171,8 @@ jobs:
             This is a fallback pass because a broad search did not find convincing matches.
 
             You will receive the following JSON files located in the current working directory:
-            - `codex-current-issue.json`: JSON object describing the newly created issue (fields: number, title, body).
-            - `codex-existing-issues-open.json`: JSON array of open issues only.
+            - `dev-current-issue.json`: JSON object describing the newly created issue (fields: number, title, body).
+            - `dev-existing-issues-open.json`: JSON array of open issues only.
 
             Instructions:
             - Search only these active unresolved issues for duplicates of the current issue.
@@ -202,12 +202,12 @@ jobs:
         name: Normalize pass 2 output
         if: ${{ steps.normalize-all.outputs.has_matches != 'true' }}
         env:
-          CODEX_OUTPUT: ${{ steps.codex-open.outputs.final-message }}
+          DEV_OUTPUT: ${{ steps.dev-open.outputs.final-message }}
           CURRENT_ISSUE_NUMBER: ${{ github.event.issue.number }}
         run: |
           set -eo pipefail
 
-          raw=${CODEX_OUTPUT//$'\r'/}
+          raw=${DEV_OUTPUT//$'\r'/}
           parsed=false
           issues='[]'
           reason=''
@@ -282,7 +282,7 @@ jobs:
           echo "Final reason: $(jq -r '.reason' <<< "$final_json")"
 
           {
-            echo "codex_output<<EOF"
+            echo "dev_output<<EOF"
             echo "$final_json"
             echo "EOF"
           } >> "$GITHUB_OUTPUT"
@@ -299,16 +299,16 @@ jobs:
       - name: Comment on issue
         uses: actions/github-script@v8
         env:
-          CODEX_OUTPUT: ${{ needs.gather-duplicates.outputs.codex_output }}
+          DEV_OUTPUT: ${{ needs.gather-duplicates.outputs.dev_output }}
         with:
           github-token: ${{ github.token }}
           script: |
-            const raw = process.env.CODEX_OUTPUT ?? '';
+            const raw = process.env.DEV_OUTPUT ?? '';
             let parsed;
             try {
               parsed = JSON.parse(raw);
             } catch (error) {
-              core.info(`Codex output was not valid JSON. Raw output: ${raw}`);
+              core.info(`Dev output was not valid JSON. Raw output: ${raw}`);
               core.info(`Parse error: ${error.message}`);
               return;
             }
@@ -328,7 +328,7 @@ jobs:
             const filteredIssues = [...new Set(issues.map((value) => String(value)))].filter((value) => value !== currentIssueNumber).slice(0, 5);
 
             if (filteredIssues.length === 0) {
-              core.info('Codex reported no potential duplicates.');
+              core.info('Dev reported no potential duplicates.');
               return;
             }
 
@@ -337,7 +337,7 @@ jobs:
               '',
               ...filteredIssues.map((value) => `- #${String(value)}`),
               '',
-              '*Powered by [Codex Action](https://github.com/openai/codex-action)*'];
+              '*Powered by [Dev Action](https://github.com/openai/codex-action)*'];
 
             await github.rest.issues.createComment({
               owner: context.repo.owner,
@@ -346,11 +346,11 @@ jobs:
               body: lines.join("\n"),
             });
 
-      - name: Remove codex-deduplicate label
-        if: ${{ always() && github.event.action == 'labeled' && github.event.label.name == 'codex-deduplicate' }}
+      - name: Remove dev-deduplicate label
+        if: ${{ always() && github.event.action == 'labeled' && github.event.label.name == 'dev-deduplicate' }}
         env:
           GH_TOKEN: ${{ github.token }}
           GH_REPO: ${{ github.repository }}
         run: |
-          gh issue edit "${{ github.event.issue.number }}" --remove-label codex-deduplicate || true
-          echo "Attempted to remove label: codex-deduplicate"
+          gh issue edit "${{ github.event.issue.number }}" --remove-label dev-deduplicate || true
+          echo "Attempted to remove label: dev-deduplicate"

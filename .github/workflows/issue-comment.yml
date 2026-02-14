@@ -171,7 +171,7 @@ jobs:
             const issue_number = Number(process.env.ISSUE_NUMBER || 0);
             // resolve slug
             const { data: pull } = await github.rest.pulls.get({ owner, repo, pull_number: pr });
-            const marker = /<!--\s*codex-id:\s*([a-z0-9-]{3,})\s*-->/i;
+            const marker = /<!--\s*dev-id:\s*([a-z0-9-]{3,})\s*-->/i;
             function normalizeSlug(s){ if(!s) return ''; let x=String(s).toLowerCase().trim(); if(x.startsWith('code/')) x=x.slice(5); if(x.startsWith('id/')) x=x.slice(3); x=x.replace(/[^a-z0-9-]+/g,'-').replace(/-+/g,'-').replace(/^-|-$/g,''); return /^[a-z0-9-]{3,}$/.test(x)?x:''; }
             let slug = '';
             // PR labels first
@@ -205,7 +205,7 @@ jobs:
                 }
               } catch {}
             }
-            if (!slug) throw new Error('Missing ID. Add code/<slug> label or <!-- codex-id: <slug> -->.');
+            if (!slug) throw new Error('Missing ID. Add code/<slug> label or <!-- dev-id: <slug> -->.');
             // resolve latest tag for slug
             const baseTag = `preview-${slug}`;
             const rels = await github.paginate(github.rest.repos.listReleases, { owner, repo, per_page: 100 });
@@ -405,7 +405,7 @@ jobs:
             if (!body) {
               // derive slug + latest tag (PR labels → PR body → PR comments → linked issue)
               const { data: pull } = await github.rest.pulls.get({ owner, repo, pull_number: pr });
-              const slugRe = /<!--\s*codex-id:\s*([a-z0-9-]{3,})\s*-->/i;
+              const slugRe = /<!--\s*dev-id:\s*([a-z0-9-]{3,})\s*-->/i;
               const normalize = s => { if(!s) return ''; let x=String(s).toLowerCase().trim(); if(x.startsWith('code/')) x=x.slice(5); if(x.startsWith('id/')) x=x.slice(3); x=x.replace(/[^a-z0-9-]+/g,'-').replace(/-+/g,'-').replace(/^-|-$/g,''); return /^[a-z0-9-]{3,}$/.test(x)?x:''; };
               let slug = '';
               try { const labs = await github.paginate(github.rest.issues.listLabelsOnIssue, { owner, repo, issue_number: pr, per_page: 100 });
