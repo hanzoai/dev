@@ -172,13 +172,14 @@ impl McpClientAdapter {
     }
 
     async fn new_zap_client(url: String, startup_timeout: Duration) -> Result<Self> {
-        let client = tokio::time::timeout(
-            startup_timeout,
-            hanzo_zap::Client::connect(&url),
-        )
-        .await
-        .map_err(|_| anyhow!("ZAP connection to {url} timed out after {startup_timeout:?}"))??;
-        Ok(McpClientAdapter::Zap(Arc::new(tokio::sync::Mutex::new(client))))
+        let client = tokio::time::timeout(startup_timeout, hanzo_zap::Client::connect(&url))
+            .await
+            .map_err(|_| {
+                anyhow!("ZAP connection to {url} timed out after {startup_timeout:?}")
+            })??;
+        Ok(McpClientAdapter::Zap(Arc::new(tokio::sync::Mutex::new(
+            client,
+        ))))
     }
 
     async fn list_tools(

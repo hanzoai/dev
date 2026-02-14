@@ -164,7 +164,11 @@ impl<'a> BottomPaneView<'a> for McpSettingsView {
                     .bg(crate::colors::background())
                     .fg(crate::colors::text()),
             )
-            .title(if crate::theme::show_borders() { " MCP Servers " } else { "" })
+            .title(if crate::theme::show_borders() {
+                " MCP Servers "
+            } else {
+                ""
+            })
             .title_alignment(Alignment::Center);
         let inner = block.inner(area);
         block.render(area, buf);

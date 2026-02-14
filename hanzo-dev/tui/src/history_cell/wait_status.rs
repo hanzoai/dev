@@ -67,7 +67,9 @@ impl HistoryCell for WaitStatusCell {
     }
 
     fn gutter_symbol(&self) -> Option<&'static str> {
-        if crate::theme::gutter_mode() != hanzo_core::config_types::GutterMode::Full { return None; }
+        if crate::theme::gutter_mode() != hanzo_core::config_types::GutterMode::Full {
+            return None;
+        }
         Some("◓")
     }
 }

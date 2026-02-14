@@ -286,7 +286,9 @@ impl HistoryCell for PlainHistoryCell {
     }
 
     fn gutter_symbol(&self) -> Option<&'static str> {
-        if crate::theme::gutter_mode() != hanzo_core::config_types::GutterMode::Full { return None; }
+        if crate::theme::gutter_mode() != hanzo_core::config_types::GutterMode::Full {
+            return None;
+        }
         if let Some(header) = self.state.header() {
             let label = header.label.trim().to_lowercase();
             if label == "auto review" {
@@ -343,8 +345,10 @@ impl HistoryCell for PlainHistoryCell {
             _ if is_auto_review => Self::auto_review_bg(),
             _ => crate::colors::background(),
         };
-        if matches!(self.state.kind, HistoryCellType::Assistant | HistoryCellType::Error)
-            || is_auto_review
+        if matches!(
+            self.state.kind,
+            HistoryCellType::Assistant | HistoryCellType::Error
+        ) || is_auto_review
         {
             let bg_style = Style::default().bg(cell_bg).fg(crate::colors::text());
             fill_rect(buf, area, Some(' '), bg_style);
@@ -713,9 +717,7 @@ pub(crate) fn new_error_event(message: String) -> PlainMessageState {
     let dim_error = crate::colors::text_dim();
     lines.push(Line::styled(
         "error",
-        Style::default()
-            .fg(dim_error)
-            .add_modifier(Modifier::BOLD),
+        Style::default().fg(dim_error).add_modifier(Modifier::BOLD),
     ));
     let msg_norm = normalize_overwrite_sequences(&message);
     lines.extend(
@@ -851,6 +853,14 @@ pub(crate) fn new_status_output(
                         .unwrap_or_else(|| "unknown".to_string());
                     lines.push(Line::from(format!(
                         "  • Method: ChatGPT account (account_id: {account_id})"
+                    )));
+                }
+                AuthMode::Hanzo => {
+                    let account_id = auth
+                        .get_account_id()
+                        .unwrap_or_else(|| "unknown".to_string());
+                    lines.push(Line::from(format!(
+                        "  • Method: Hanzo account (account_id: {account_id})"
                     )));
                 }
             },

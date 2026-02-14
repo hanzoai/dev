@@ -553,7 +553,9 @@ impl ChatComposer {
         } else {
             0
         };
-        let content_width = width.saturating_sub(offset).saturating_sub(crate::theme::gutter_width());
+        let content_width = width
+            .saturating_sub(offset)
+            .saturating_sub(crate::theme::gutter_width());
         let content_lines = self.textarea.desired_height(content_width).max(1); // At least 1 line
 
         // Total input height: content + border (2 when bordered) only, no vertical padding.
@@ -577,7 +579,10 @@ impl ChatComposer {
         };
         // Calculate dynamic height based on content
         let border_pad = if crate::theme::show_borders() { 4 } else { 0 }; // border + padding
-        let content_width = area.width.saturating_sub(border_pad).saturating_sub(crate::theme::gutter_width());
+        let content_width = area
+            .width
+            .saturating_sub(border_pad)
+            .saturating_sub(crate::theme::gutter_width());
         let content_lines = self.textarea.desired_height(content_width).max(1);
         let desired_input_height = if crate::theme::show_borders() {
             (content_lines + 2).max(3)
@@ -599,7 +604,11 @@ impl ChatComposer {
 
         // Apply the same inner padding as in render (horizontal only).
         // In zen mode use zero horizontal padding for flush-left text.
-        let hpad: u16 = if crate::theme::show_borders() { crate::layout_consts::COMPOSER_INNER_HPAD } else { 0 };
+        let hpad: u16 = if crate::theme::show_borders() {
+            crate::layout_consts::COMPOSER_INNER_HPAD
+        } else {
+            0
+        };
         let gw = crate::theme::gutter_width();
         let mut padded_textarea_rect = textarea_rect.inner(Margin::new(hpad, 0));
         if padded_textarea_rect.x > textarea_rect.x {
@@ -2898,7 +2907,10 @@ impl WidgetRef for ChatComposer {
         let footer_height = self.footer_height();
 
         let border_pad = if crate::theme::show_borders() { 4 } else { 0 };
-        let content_width = area.width.saturating_sub(border_pad).saturating_sub(crate::theme::gutter_width());
+        let content_width = area
+            .width
+            .saturating_sub(border_pad)
+            .saturating_sub(crate::theme::gutter_width());
         let content_lines = self.textarea.desired_height(content_width).max(1);
         let desired_input_height = if crate::theme::show_borders() {
             (content_lines + 2).max(3)
@@ -2971,12 +2983,10 @@ impl WidgetRef for ChatComposer {
                 }
             } else {
                 let title_line = Line::from(if !crate::theme::show_borders() {
-                    vec![
-                        Span::styled(
-                            format!(" {} ", self.status_message),
-                            Style::default().fg(crate::colors::text()),
-                        ),
-                    ]
+                    vec![Span::styled(
+                        format!(" {} ", self.status_message),
+                        Style::default().fg(crate::colors::text()),
+                    )]
                 } else {
                     vec![
                         Span::raw(" "),

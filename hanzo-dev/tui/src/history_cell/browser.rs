@@ -1116,7 +1116,9 @@ impl HistoryCell for BrowserSessionCell {
     }
 
     fn gutter_symbol(&self) -> Option<&'static str> {
-        if crate::theme::gutter_mode() != hanzo_core::config_types::GutterMode::Full { return None; }
+        if crate::theme::gutter_mode() != hanzo_core::config_types::GutterMode::Full {
+            return None;
+        }
         if self.completed { Some("✔") } else { None }
     }
 
@@ -1346,7 +1348,11 @@ impl BrowserSessionCell {
         let block = Block::default()
             .borders(crate::theme::zen_borders())
             .border_style(Style::default().fg(colors::info()))
-            .title(if crate::theme::show_borders() { "Browser" } else { "" })
+            .title(if crate::theme::show_borders() {
+                "Browser"
+            } else {
+                ""
+            })
             .style(Style::default().bg(Color::Black));
         let inner = block.inner(area);
         block.render(area, buf);

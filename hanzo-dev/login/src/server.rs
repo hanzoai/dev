@@ -253,6 +253,7 @@ async fn process_request(
                     };
                     if let Err(err) = persist_tokens_async(
                         &opts.code_home,
+                        &opts.issuer,
                         api_key.clone(),
                         tokens.id_token.clone(),
                         tokens.access_token.clone(),
@@ -470,7 +471,9 @@ pub(crate) async fn exchange_code_for_tokens(
     }
 
     let tokens: TokenResponse = resp.json().await.map_err(io::Error::other)?;
-    let id_token = tokens.id_token.unwrap_or_else(|| tokens.access_token.clone());
+    let id_token = tokens
+        .id_token
+        .unwrap_or_else(|| tokens.access_token.clone());
     Ok(ExchangedTokens {
         id_token,
         access_token: tokens.access_token,
@@ -480,6 +483,7 @@ pub(crate) async fn exchange_code_for_tokens(
 
 pub(crate) async fn persist_tokens_async(
     code_home: &Path,
+    issuer: &str,
     api_key: Option<String>,
     id_token: String,
     access_token: String,
@@ -487,6 +491,7 @@ pub(crate) async fn persist_tokens_async(
 ) -> io::Result<()> {
     // Reuse existing synchronous logic but run it off the async runtime.
     let code_home = code_home.to_path_buf();
+    let is_hanzo_issuer = issuer.contains("hanzo.id") || issuer.contains("hanzo.ai");
     tokio::task::spawn_blocking(move || {
         let auth_file = get_auth_file(&code_home);
         if let Some(parent) = auth_file.parent()
@@ -516,13 +521,23 @@ pub(crate) async fn persist_tokens_async(
         };
         hanzo_core::auth::write_auth_json(&auth_file, &auth)?;
         let email_for_store = tokens_for_store.id_token.email.clone();
-        let _ = hanzo_core::auth_accounts::upsert_chatgpt_account(
-            &code_home,
-            tokens_for_store,
-            last_refresh,
-            email_for_store,
-            true,
-        )?;
+        if is_hanzo_issuer {
+            let _ = hanzo_core::auth_accounts::upsert_hanzo_account(
+                &code_home,
+                tokens_for_store,
+                last_refresh,
+                email_for_store,
+                true,
+            )?;
+        } else {
+            let _ = hanzo_core::auth_accounts::upsert_chatgpt_account(
+                &code_home,
+                tokens_for_store,
+                last_refresh,
+                email_for_store,
+                true,
+            )?;
+        }
         Ok(())
     })
     .await
