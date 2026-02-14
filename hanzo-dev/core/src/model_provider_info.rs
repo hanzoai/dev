@@ -597,27 +597,52 @@ pub fn built_in_model_providers() -> HashMap<String, ModelProviderInfo> {
                 openrouter: None,
             },
         ),
-        // Hanzo Node - Hanzo AI local/cloud inference
+        // Hanzo - Hanzo AI unified gateway (api.hanzo.ai)
         (
             "hanzo",
             P {
-                name: "Hanzo Node".into(),
+                name: "Hanzo".into(),
                 base_url: std::env::var("HANZO_BASE_URL")
                     .ok()
                     .filter(|v| !v.trim().is_empty())
-                    .or_else(|| Some("http://localhost:8787/v1".into())),
+                    .or_else(|| Some("https://api.hanzo.ai/v1".into())),
                 env_key: Some("HANZO_API_KEY".into()),
                 env_key_instructions: Some(
-                    "Get your Hanzo API key at https://hanzo.ai or run a local Hanzo Node".into(),
+                    "Log in with `dev /login` or set HANZO_API_KEY from https://hanzo.ai".into(),
                 ),
                 experimental_bearer_token: None,
                 wire_api: WireApi::Chat,
                 query_params: None,
                 http_headers: None,
                 env_http_headers: None,
-                request_max_retries: None,
-                stream_max_retries: None,
-                stream_idle_timeout_ms: None,
+                request_max_retries: Some(2),
+                stream_max_retries: Some(2),
+                stream_idle_timeout_ms: Some(60_000),
+                requires_openai_auth: false,
+                openrouter: None,
+            },
+        ),
+        // Hanzo Engine - local private inference (mistral.rs)
+        (
+            "engine",
+            P {
+                name: "Hanzo Engine".into(),
+                base_url: std::env::var("HANZO_ENGINE_URL")
+                    .ok()
+                    .filter(|v| !v.trim().is_empty())
+                    .or_else(|| Some("http://localhost:36900/v1".into())),
+                env_key: None,
+                env_key_instructions: Some(
+                    "Install Hanzo Engine: cargo install hanzo-engine, then run: hanzo-engine serve".into(),
+                ),
+                experimental_bearer_token: None,
+                wire_api: WireApi::Chat,
+                query_params: None,
+                http_headers: None,
+                env_http_headers: None,
+                request_max_retries: Some(1),
+                stream_max_retries: Some(1),
+                stream_idle_timeout_ms: Some(120_000),
                 requires_openai_auth: false,
                 openrouter: None,
             },
