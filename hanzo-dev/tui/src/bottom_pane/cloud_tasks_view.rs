@@ -137,7 +137,11 @@ impl BottomPaneView<'_> for CloudTasksView {
         let block = Block::default()
             .borders(crate::theme::zen_borders())
             .border_style(Style::default().fg(crate::colors::border()))
-            .title(if crate::theme::show_borders() { title } else { String::new() });
+            .title(if crate::theme::show_borders() {
+                title
+            } else {
+                String::new()
+            });
         let inner = block.inner(area);
         block.render(area, buf);
 

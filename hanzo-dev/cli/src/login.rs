@@ -16,7 +16,7 @@ use std::io::IsTerminal;
 use std::io::Read;
 use std::path::PathBuf;
 
-pub async fn login_with_chatgpt(
+pub async fn login_with_oauth(
     code_home: PathBuf,
     originator: String,
     issuer: Option<String>,
@@ -38,15 +38,19 @@ pub async fn login_with_chatgpt(
     server.block_until_done().await
 }
 
-/// Browser-based OAuth login (default flow, like `gcloud auth login`).
-pub async fn run_login_with_chatgpt_opts(
+/// Browser-based OAuth login (default flow). Defaults to hanzo.id; use
+/// `--chatgpt` to authenticate via auth.openai.com instead.
+pub async fn run_login_with_oauth(
     cli_config_overrides: CliConfigOverrides,
     issuer: Option<String>,
     client_id: Option<String>,
 ) -> ! {
     let config = load_config_or_exit(cli_config_overrides);
+    let is_chatgpt = issuer
+        .as_deref()
+        .is_some_and(|iss| iss.contains("openai.com"));
 
-    match login_with_chatgpt(
+    match login_with_oauth(
         config.code_home.clone(),
         config.responses_originator_header.clone(),
         issuer,
@@ -55,12 +59,12 @@ pub async fn run_login_with_chatgpt_opts(
     .await
     {
         Ok(_) => {
-            // Try to show the email from the stored auth
             let email = get_logged_in_email(&config.code_home, &config.responses_originator_header);
+            let provider = if is_chatgpt { "ChatGPT" } else { "Hanzo" };
             if let Some(email) = email {
-                eprintln!("\nYou are now logged in as [{email}].");
+                eprintln!("\nLogged in to {provider} as [{email}].");
             } else {
-                eprintln!("\nYou are now logged in.");
+                eprintln!("\nLogged in to {provider}.");
             }
             eprintln!("Your credentials have been saved to: ~/.hanzo/auth.json");
             std::process::exit(0);
@@ -188,6 +192,16 @@ pub async fn run_login_status(cli_config_overrides: CliConfigOverrides) -> ! {
                     eprintln!("Logged in as [{email}]");
                 } else {
                     eprintln!("Logged in via OAuth");
+                }
+                std::process::exit(0);
+            }
+            AuthMode::Hanzo => {
+                let email =
+                    get_logged_in_email(&config.code_home, &config.responses_originator_header);
+                if let Some(email) = email {
+                    eprintln!("Logged in to Hanzo as [{email}]");
+                } else {
+                    eprintln!("Logged in to Hanzo via OAuth");
                 }
                 std::process::exit(0);
             }

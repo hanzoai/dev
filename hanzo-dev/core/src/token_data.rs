@@ -34,6 +34,9 @@ impl TokenData {
 #[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize)]
 pub struct IdTokenInfo {
     pub email: Option<String>,
+    /// JWT issuer claim (`iss`). Used to distinguish Hanzo from ChatGPT tokens.
+    #[serde(default, skip_serializing)]
+    pub issuer: Option<String>,
     /// The ChatGPT subscription plan type
     /// (e.g., "free", "plus", "pro", "business", "enterprise", "edu").
     /// (Note: values may vary by backend.)
@@ -47,6 +50,13 @@ impl IdTokenInfo {
             PlanType::Known(plan) => format!("{plan:?}"),
             PlanType::Unknown(s) => s.clone(),
         })
+    }
+
+    /// Returns `true` if this token was issued by a Hanzo/Casdoor issuer.
+    pub fn is_hanzo_issuer(&self) -> bool {
+        self.issuer
+            .as_deref()
+            .is_some_and(|iss| iss.contains("hanzo.id") || iss.contains("hanzo.ai"))
     }
 }
 
@@ -80,6 +90,8 @@ pub(crate) enum KnownPlan {
 
 #[derive(Deserialize)]
 struct IdClaims {
+    #[serde(default)]
+    iss: Option<String>,
     #[serde(default)]
     email: Option<String>,
     #[serde(rename = "https://api.openai.com/auth", default)]
@@ -124,10 +136,11 @@ pub fn parse_id_token(id_token: &str) -> Result<IdTokenInfo, IdTokenInfoError> {
             "decoded ChatGPT id_token claims"
         );
     }
-    let IdClaims { email, auth } = claims;
+    let IdClaims { iss, email, auth } = claims;
 
     Ok(IdTokenInfo {
         email,
+        issuer: iss,
         chatgpt_plan_type: auth.and_then(|a| a.chatgpt_plan_type),
         raw_jwt: id_token.to_string(),
     })

@@ -137,7 +137,11 @@ impl<'a> BottomPaneView<'a> for VerbositySelectionView {
                     .bg(crate::colors::background())
                     .fg(crate::colors::text()),
             )
-            .title(if crate::theme::show_borders() { " Select Text Verbosity " } else { "" })
+            .title(if crate::theme::show_borders() {
+                " Select Text Verbosity "
+            } else {
+                ""
+            })
             .title_alignment(Alignment::Center);
 
         let inner_area = block.inner(area);

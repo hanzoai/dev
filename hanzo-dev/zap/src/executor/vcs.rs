@@ -2,10 +2,13 @@
 //!
 //! Provides git operations: status, diff, commit, log, etc.
 
-use crate::error::{Error, Result};
-use crate::executor::{ExecutorContext, ToolExecutor};
+use crate::error::Error;
+use crate::error::Result;
+use crate::executor::ExecutorContext;
+use crate::executor::ToolExecutor;
 use crate::message::ToolResult;
-use crate::tools::{ToolCategory, vcs};
+use crate::tools::ToolCategory;
+use crate::tools::vcs;
 use async_trait::async_trait;
 use serde_json::Value;
 use tokio::process::Command;
