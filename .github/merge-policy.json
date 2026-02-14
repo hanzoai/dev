@@ -1,12 +1,12 @@
 {
   "prefer_ours_globs": [
-    "codex-rs/tui/**",
+    "hanzo-dev/tui/**",
     "codex-cli/**",
-    "codex-rs/core/src/openai_tools.rs",
-    "codex-rs/core/src/codex.rs",
-    "codex-rs/core/src/agent_tool.rs",
-    "codex-rs/core/src/default_client.rs",
-    "codex-rs/protocol/src/models.rs",
+    "hanzo-dev/core/src/openai_tools.rs",
+    "hanzo-dev/core/src/codex.rs",
+    "hanzo-dev/core/src/agent_tool.rs",
+    "hanzo-dev/core/src/default_client.rs",
+    "hanzo-dev/protocol/src/models.rs",
     ".github/workflows/**",
     "docs/**",
     "AGENTS.md",
@@ -14,9 +14,9 @@
     "CHANGELOG.md"
   ],
   "prefer_theirs_globs": [
-    "codex-rs/common/**",
-    "codex-rs/exec/**",
-    "codex-rs/file-search/**"
+    "hanzo-dev/common/**",
+    "hanzo-dev/exec/**",
+    "hanzo-dev/file-search/**"
   ],
   "purge_globs": [
     ".github/codex-cli-*.png",
