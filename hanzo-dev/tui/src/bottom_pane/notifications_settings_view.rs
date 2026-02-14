@@ -236,7 +236,11 @@ impl<'a> BottomPaneView<'a> for NotificationsSettingsView {
                     .bg(crate::colors::background())
                     .fg(crate::colors::text()),
             )
-            .title(if crate::theme::show_borders() { " Notifications " } else { "" })
+            .title(if crate::theme::show_borders() {
+                " Notifications "
+            } else {
+                ""
+            })
             .title_alignment(Alignment::Center);
         let inner = block.inner(area);
         block.render(area, buf);

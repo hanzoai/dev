@@ -12,8 +12,8 @@ use hanzo_dev::SeatbeltCommand;
 use hanzo_dev::login::read_api_key_from_stdin;
 use hanzo_dev::login::run_login_status;
 use hanzo_dev::login::run_login_with_api_key;
-use hanzo_dev::login::run_login_with_chatgpt_opts;
 use hanzo_dev::login::run_login_with_device_code;
+use hanzo_dev::login::run_login_with_oauth;
 use hanzo_dev::login::run_logout;
 mod bridge;
 mod llm;
@@ -349,6 +349,10 @@ struct LoginCommand {
     )]
     api_key: Option<String>,
 
+    /// Log in via ChatGPT instead of Hanzo (uses auth.openai.com)
+    #[arg(long = "chatgpt")]
+    chatgpt: bool,
+
     /// Use device code flow instead of browser (for SSH / headless environments)
     #[arg(long = "device-code")]
     use_device_code: bool,
@@ -549,9 +553,18 @@ async fn cli_main(code_linux_sandbox_exe: Option<PathBuf>) -> anyhow::Result<()>
                 }
                 None => {
                     if login_cli.use_device_code {
+                        let issuer = if login_cli.chatgpt {
+                            Some(
+                                login_cli
+                                    .issuer_base_url
+                                    .unwrap_or_else(|| "https://auth.openai.com".to_string()),
+                            )
+                        } else {
+                            login_cli.issuer_base_url
+                        };
                         run_login_with_device_code(
                             login_cli.config_overrides,
-                            login_cli.issuer_base_url,
+                            issuer,
                             login_cli.client_id,
                         )
                         .await;
@@ -564,9 +577,19 @@ async fn cli_main(code_linux_sandbox_exe: Option<PathBuf>) -> anyhow::Result<()>
                         let api_key = read_api_key_from_stdin();
                         run_login_with_api_key(login_cli.config_overrides, api_key).await;
                     } else {
-                        run_login_with_chatgpt_opts(
+                        // --chatgpt overrides the issuer to OpenAI; default is Hanzo
+                        let issuer = if login_cli.chatgpt {
+                            Some(
+                                login_cli
+                                    .issuer_base_url
+                                    .unwrap_or_else(|| "https://auth.openai.com".to_string()),
+                            )
+                        } else {
+                            login_cli.issuer_base_url
+                        };
+                        run_login_with_oauth(
                             login_cli.config_overrides,
-                            login_cli.issuer_base_url,
+                            issuer,
                             login_cli.client_id,
                         )
                         .await;

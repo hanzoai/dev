@@ -3,7 +3,8 @@
 //! Re-exports and adapts hanzo-protocol types for ZAP executor context.
 //! This ensures a single source of truth for approval and sandbox policies.
 
-pub use hanzo_protocol::protocol::{AskForApproval, SandboxPolicy};
+pub use hanzo_protocol::protocol::AskForApproval;
+pub use hanzo_protocol::protocol::SandboxPolicy;
 
 use std::path::Path;
 

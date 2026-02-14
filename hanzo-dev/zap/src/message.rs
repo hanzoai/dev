@@ -2,8 +2,10 @@
 //!
 //! These types are compatible with MCP semantics but use binary encoding.
 
-use crate::error::{Error, Result};
-use serde::{Deserialize, Serialize};
+use crate::error::Error;
+use crate::error::Result;
+use serde::Deserialize;
+use serde::Serialize;
 
 /// Message types for ZAP protocol.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

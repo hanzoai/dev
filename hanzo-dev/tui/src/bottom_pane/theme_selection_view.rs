@@ -2274,7 +2274,11 @@ impl<'a> BottomPaneView<'a> for ThemeSelectionView {
         let zen = crate::theme::is_zen_mode();
         let outer = Block::default()
             .borders(crate::theme::zen_borders())
-            .title(if zen { Line::from("") } else { Line::from(title_spans) })
+            .title(if zen {
+                Line::from("")
+            } else {
+                Line::from(title_spans)
+            })
             .style(Style::default().bg(crate::colors::background()))
             .border_style(
                 Style::default()

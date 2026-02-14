@@ -110,7 +110,12 @@ fn fmt_elapsed_compact(elapsed_secs: u64) -> String {
 /// Build shimmer spans for text: a brightness band sweeps across the characters.
 /// Uses the accent color at the peak and text_dim everywhere else, creating a
 /// subtle pulsing/sweeping effect on the whole line.
-fn shimmer_text(text: &str, elapsed_ms: u128, accent: ratatui::style::Color, dim: ratatui::style::Color) -> Vec<Span<'static>> {
+fn shimmer_text(
+    text: &str,
+    elapsed_ms: u128,
+    accent: ratatui::style::Color,
+    dim: ratatui::style::Color,
+) -> Vec<Span<'static>> {
     let chars: Vec<char> = text.chars().collect();
     if chars.is_empty() {
         return Vec::new();
@@ -195,7 +200,11 @@ impl WidgetRef for StatusIndicatorWidget {
 
         let pretty_elapsed = fmt_elapsed_compact(elapsed);
         // Build header spans with shimmer on the header text
-        let mut spans: Vec<Span<'static>> = vec![Span::raw(if crate::theme::show_gutter() { " " } else { "" })];
+        let mut spans: Vec<Span<'static>> = vec![Span::raw(if crate::theme::show_gutter() {
+            " "
+        } else {
+            ""
+        })];
 
         // Simple bullet — hidden when gutter is off
         if crate::theme::show_gutter() {
@@ -215,9 +224,8 @@ impl WidgetRef for StatusIndicatorWidget {
         spans.push(Span::raw(" "));
         spans.push(Span::raw(format!("({pretty_elapsed} ")).style(secondary));
         spans.push(Span::raw("• ").style(secondary));
-        spans.push(
-            Span::raw("esc").style(Style::default().fg(accent).add_modifier(Modifier::BOLD)),
-        );
+        spans
+            .push(Span::raw("esc").style(Style::default().fg(accent).add_modifier(Modifier::BOLD)));
         spans.push(Span::raw(" to interrupt)").style(secondary));
 
         // Build lines — leading blank row separates status from history above

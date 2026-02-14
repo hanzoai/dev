@@ -647,6 +647,31 @@ pub fn built_in_model_providers() -> HashMap<String, ModelProviderInfo> {
                 openrouter: None,
             },
         ),
+        // Hanzo Node - local AI node with OpenAI-compatible API (port 9550)
+        (
+            "hanzo-node",
+            P {
+                name: "Hanzo Node".into(),
+                base_url: std::env::var("HANZO_NODE_BASE_URL")
+                    .ok()
+                    .filter(|v| !v.trim().is_empty())
+                    .or_else(|| Some("http://localhost:9550/v1".into())),
+                env_key: None,
+                env_key_instructions: Some(
+                    "Hanzo Node runs locally - start with Hanzo Desktop or: hanzo-node".into(),
+                ),
+                experimental_bearer_token: None,
+                wire_api: WireApi::Chat,
+                query_params: None,
+                http_headers: None,
+                env_http_headers: None,
+                request_max_retries: Some(2),
+                stream_max_retries: Some(2),
+                stream_idle_timeout_ms: Some(120_000),
+                requires_openai_auth: false,
+                openrouter: None,
+            },
+        ),
         // OpenRouter - multi-provider router
         (
             "openrouter",
