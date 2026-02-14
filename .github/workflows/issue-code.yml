@@ -68,7 +68,7 @@ jobs:
             core.setOutput('issue_body', issue.body || '');
             core.setOutput('branch', `issue-${issue.number}`);
 
-      - name: Resolve codex slug
+      - name: Resolve dev slug
         id: slug
         uses: actions/github-script@v7
         with:
@@ -77,7 +77,7 @@ jobs:
             const issue_number = Number(`${{ steps.meta.outputs.issue_number }}`);
             // Prefer repository_dispatch payload
             let slug = (context.eventName === 'repository_dispatch' && context.payload.client_payload && context.payload.client_payload.slug) ? String(context.payload.client_payload.slug).toLowerCase() : '';
-            const markerRe = /<!--\s*codex-id:\s*([a-z0-9-]{3,})\s*-->/i;
+            const markerRe = /<!--\s*dev-id:\s*([a-z0-9-]{3,})\s*-->/i;
             if (!slug) {
               // Try issue label code/<slug> (fallback id/<slug>)
               try {
@@ -158,7 +158,7 @@ jobs:
         with:
           workspaces: |
             hanzo-dev -> target
-            codex-rs -> target
+            hanzo-dev -> target
           save-if: true
           cache-on-failure: true
 
@@ -404,7 +404,7 @@ jobs:
             const titleRaw = readOrDefault('.github/auto/PR_TITLE.txt', defaultTitle);
             const bodyBase = readOrDefault('.github/auto/PR_BODY.md', '');
             const slug = `${{ steps.slug.outputs.slug }}`;
-            const marker = slug ? `<!-- codex-id: ${slug} -->` : '';
+            const marker = slug ? `<!-- dev-id: ${slug} -->` : '';
             const footer = ['','---',`Auto-generated for issue #${{ steps.meta.outputs.issue_number }} by a workflow.`,`Author: @${context.actor}`, marker].filter(Boolean).join('\n');
             const body = (bodyBase ? `${bodyBase}\n${footer}` : footer);
             let title = titleRaw;

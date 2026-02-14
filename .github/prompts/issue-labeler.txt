@@ -8,12 +8,12 @@ Follow these rules:
 - Output must be a JSON array of label names (strings) with no additional commentary.
 
 Labels to apply:
-1. bug — Reproducible defects in Codex products (CLI, VS Code extension, web, auth).
+1. bug — Reproducible defects in Dev products (CLI, VS Code extension, web, auth).
 2. enhancement — Feature requests or usability improvements that ask for new capabilities, better ergonomics, or quality-of-life tweaks.
 3. extension — VS Code (or other IDE) extension-specific issues.
 4. windows-os — Bugs or friction specific to Windows environments (PowerShell behavior, path handling, copy/paste, OS-specific auth or tooling failures).
 5. mcp — Topics involving Model Context Protocol servers/clients.
-6. codex-web — Issues targeting the Codex web UI/Cloud experience.
+6. dev-web — Issues targeting the Dev web UI/Cloud experience.
 8. azure — Problems or requests tied to Azure OpenAI deployments.
 9. documentation — Updates or corrections needed in docs/README/config references (broken links, missing examples, outdated keys, clarification requests).
 10. model-behavior — Undesirable LLM behavior: forgetting goals, refusing work, hallucinating environment details, quota misreports, or other reasoning/performance anomalies.
