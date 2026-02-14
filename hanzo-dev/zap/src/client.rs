@@ -1,11 +1,19 @@
 //! ZAP client for connecting to ZAP servers and gateways.
 
-use crate::error::{Error, Result};
-use crate::message::{ClientInfo, MessageType, ServerInfo, Tool, ToolCall, ToolResult};
+use crate::error::Error;
+use crate::error::Result;
+use crate::message::ClientInfo;
+use crate::message::MessageType;
+use crate::message::ServerInfo;
+use crate::message::Tool;
+use crate::message::ToolCall;
+use crate::message::ToolResult;
 use crate::transport::ZapTransport;
 use serde_json::Value;
-use std::sync::atomic::{AtomicU64, Ordering};
-use tracing::{debug, info};
+use std::sync::atomic::AtomicU64;
+use std::sync::atomic::Ordering;
+use tracing::debug;
+use tracing::info;
 
 /// A ZAP client for connecting to ZAP servers.
 pub struct Client {

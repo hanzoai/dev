@@ -243,7 +243,7 @@ impl CodexAuth {
     pub async fn get_token(&self) -> Result<String, std::io::Error> {
         match self.mode {
             AuthMode::ApiKey => Ok(self.api_key.clone().unwrap_or_default()),
-            AuthMode::ChatGPT => {
+            AuthMode::ChatGPT | AuthMode::Hanzo => {
                 let id_token = self.get_token_data().await?.access_token;
                 Ok(id_token)
             }
@@ -317,6 +317,11 @@ impl CodexAuth {
         last_refresh: Option<DateTime<Utc>>,
         originator: &str,
     ) -> Self {
+        let mode = if tokens.id_token.is_hanzo_issuer() {
+            AuthMode::Hanzo
+        } else {
+            AuthMode::ChatGPT
+        };
         let auth_dot_json = AuthDotJson {
             openai_api_key: None,
             tokens: Some(tokens),
@@ -325,7 +330,7 @@ impl CodexAuth {
 
         Self {
             api_key: None,
-            mode: AuthMode::ChatGPT,
+            mode,
             auth_file: PathBuf::new(),
             auth_dot_json: Arc::new(Mutex::new(Some(auth_dot_json))),
             client: crate::default_client::create_client(originator),
@@ -414,9 +419,9 @@ pub async fn auth_for_stored_account(
                 crate::default_client::create_client(originator),
             ))
         }
-        AuthMode::ChatGPT => {
+        AuthMode::ChatGPT | AuthMode::Hanzo => {
             let mut tokens = account.tokens.clone().ok_or_else(|| {
-                std::io::Error::other("stored ChatGPT account is missing token data")
+                std::io::Error::other("stored OAuth account is missing token data")
             })?;
             let mut last_refresh = account.last_refresh;
             let now = Utc::now();
@@ -451,8 +456,7 @@ pub async fn auth_for_stored_account(
                     }
                 };
                 if let Some(jwt) = refresh_response.id_token_or_access() {
-                    tokens.id_token =
-                        parse_id_token(jwt).map_err(std::io::Error::other)?;
+                    tokens.id_token = parse_id_token(jwt).map_err(std::io::Error::other)?;
                 }
                 if let Some(access_token) = refresh_response.access_token {
                     tokens.access_token = access_token;
@@ -502,9 +506,9 @@ pub fn activate_account(code_home: &Path, account_id: &str) -> std::io::Result<(
             };
             write_auth_json(&auth_file, &auth)?;
         }
-        AuthMode::ChatGPT => {
+        AuthMode::ChatGPT | AuthMode::Hanzo => {
             let tokens = account.tokens.clone().ok_or_else(|| {
-                std::io::Error::other("stored ChatGPT account is missing token data")
+                std::io::Error::other("stored OAuth account is missing token data")
             })?;
             let auth = AuthDotJson {
                 openai_api_key: None,
@@ -588,11 +592,15 @@ fn load_auth(
         }
     }
 
-    // For the AuthMode::ChatGPT variant, perhaps neither api_key nor
-    // openai_api_key should exist?
+    // For OAuth variants, detect issuer from the JWT to distinguish Hanzo from ChatGPT.
+    let oauth_mode = tokens
+        .as_ref()
+        .filter(|t| t.id_token.is_hanzo_issuer())
+        .map_or(AuthMode::ChatGPT, |_| AuthMode::Hanzo);
+
     Ok(Some(CodexAuth {
         api_key: None,
-        mode: AuthMode::ChatGPT,
+        mode: oauth_mode,
         auth_file,
         auth_dot_json: Arc::new(Mutex::new(Some(AuthDotJson {
             openai_api_key: None,
@@ -940,6 +948,7 @@ mod tests {
                 tokens: Some(TokenData {
                     id_token: IdTokenInfo {
                         email: Some("user@example.com".to_string()),
+                        issuer: None,
                         chatgpt_plan_type: Some(PlanType::Known(KnownPlan::Pro)),
                         raw_jwt: fake_jwt,
                     },
@@ -992,6 +1001,7 @@ mod tests {
                 tokens: Some(TokenData {
                     id_token: IdTokenInfo {
                         email: Some("user@example.com".to_string()),
+                        issuer: None,
                         chatgpt_plan_type: Some(PlanType::Known(KnownPlan::Pro)),
                         raw_jwt: fake_jwt,
                     },

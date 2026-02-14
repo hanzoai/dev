@@ -199,7 +199,11 @@ impl BottomPaneView<'_> for ResumeSelectionView {
                     .bg(crate::colors::background())
                     .fg(crate::colors::text()),
             )
-            .title(if crate::theme::show_borders() { self.title.clone() } else { String::new() })
+            .title(if crate::theme::show_borders() {
+                self.title.clone()
+            } else {
+                String::new()
+            })
             .title_alignment(Alignment::Center);
         let inner = block.inner(area);
         block.render(area, buf);

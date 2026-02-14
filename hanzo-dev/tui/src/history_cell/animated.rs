@@ -73,9 +73,7 @@ impl HistoryCell for AnimatedWelcomeCell {
             Span::from(format!("({})", self.version_label)).dim(),
         ]);
 
-        let greeting_line = Line::from(vec![
-            Span::from(crate::greeting::greeting_placeholder()),
-        ]);
+        let greeting_line = Line::from(vec![Span::from(crate::greeting::greeting_placeholder())]);
 
         vec![title_line, Line::from(""), greeting_line]
     }

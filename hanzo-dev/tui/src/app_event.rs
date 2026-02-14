@@ -622,7 +622,7 @@ pub(crate) enum AppEvent {
     StopCommitAnimation,
     CommitTick,
 
-    /// Onboarding: result of login_with_chatgpt.
+    /// Onboarding: result of login_with_oauth.
     OnboardingAuthComplete(Result<(), String>),
     OnboardingComplete(ChatWidgetArgs),
 

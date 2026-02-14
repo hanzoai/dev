@@ -732,7 +732,11 @@ impl<'a> BottomPaneView<'a> for AgentEditorView {
                     .bg(crate::colors::background())
                     .fg(crate::colors::text()),
             )
-            .title(if crate::theme::show_borders() { " Configure Agent " } else { "" })
+            .title(if crate::theme::show_borders() {
+                " Configure Agent "
+            } else {
+                ""
+            })
             .title_alignment(Alignment::Center);
         let inner = block.inner(area);
         block.render(area, buf);
