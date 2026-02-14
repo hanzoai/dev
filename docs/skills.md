@@ -1,80 +1,69 @@
 # Skills
 
-> **Warning:** This is an experimental and non-stable feature. If you depend on it, please expect breaking changes over the coming weeks and understand that there is currently no guarantee that this works well. Use at your own risk!
+> Warning: this is an experimental feature and may change.
 
-Codex can automatically discover reusable "skills" you keep on disk. A skill is a small bundle with a name, a short description (what it does and when to use it), and an optional body of instructions you can open when needed. Codex injects only the name, description, and file path into the runtime context; the body stays on disk.
+Hanzo Dev can discover reusable "skills" on disk. A skill is a small bundle with a name, short description, and optional body instructions. Runtime context includes only name, description, and file path; the full body stays on disk.
 
 ## Enable skills
 
-Skills are behind the experimental `skills` feature flag and are enabled by default.
+Skills are behind the `skills` feature flag and enabled by default.
 
-- Disable in config (preferred): add the following to `$CODEX_HOME/config.toml` (usually `~/.codex/config.toml`) and restart Codex:
+- Disable in config (preferred): add to `$HANZO_HOME/config.toml` (usually `~/.hanzo/config.toml`):
 
   ```toml
   [features]
   skills = false
   ```
 
-- Override for a single run when disabled in config: launch Codex with `codex --enable skills`
+- Override for a single run:
+
+  ```bash
+  dev -c features.skills=true
+  ```
 
 ## Where skills live
 
-- Location (v1): `~/.codex/skills/**/SKILL.md` (recursive). Hidden entries and symlinks are skipped. Only files named exactly `SKILL.md` count.
-- Sorting: rendered by name, then path for stability.
+Discovery roots (highest precedence first):
+
+- Repo: nearest `.hanzo/skills/**/SKILL.md` from current directory up to repo root.
+- User: `$HANZO_HOME/skills/**/SKILL.md` (default: `~/.hanzo/skills/**/SKILL.md`).
+- System: bundled skills under `$HANZO_HOME/skills/.system/**/SKILL.md`.
+
+Behavior:
+
+- Recursive scan; only files named exactly `SKILL.md` are loaded.
+- Hidden entries are skipped.
+- Symlinks are skipped.
+- Duplicate skill names are deduped by precedence above (first match wins).
+- Render order is by name, then path.
 
 ## File format
 
 - YAML frontmatter + body.
-  - Required:
-    - `name` (non-empty, ≤100 chars, sanitized to one line)
-    - `description` (non-empty, ≤500 chars, sanitized to one line)
-  - Extra keys are ignored. The body can contain any Markdown; it is not injected into context.
+- Required frontmatter fields:
+  - `name` (non-empty, <= 64 chars, single-line normalized)
+  - `description` (non-empty, <= 1024 chars, single-line normalized)
+- Extra keys are ignored.
 
 ## Loading and rendering
 
-- Loaded once at startup.
-- If valid skills exist, Codex appends a runtime-only `## Skills` section after `AGENTS.md`, one bullet per skill: `- <name>: <description> (file: /absolute/path/to/SKILL.md)`.
-- If no valid skills exist, the section is omitted. On-disk files are never modified.
-
-## Using skills
-
-- Mention a skill by name in a message using `$<skill-name>`.
-- In the TUI, you can also use `/skills` to browse and insert skills.
-
-## Validation and errors
-
-- Invalid skills (missing/invalid YAML, empty/over-length fields) trigger a blocking, dismissible startup modal in the TUI that lists each path and error. Errors are also logged. You can dismiss to continue (invalid skills are ignored) or exit. Fix SKILL.md files and restart to clear the modal.
+- Skills load once at startup.
+- When valid skills exist, Hanzo Dev appends a runtime-only `## Skills` section after `AGENTS.md`.
+- Invalid skills are ignored and surfaced as startup errors in the TUI.
 
 ## Create a skill
 
-1. Create `~/.codex/skills/<skill-name>/`.
+1. Create `~/.hanzo/skills/<skill-name>/`.
 2. Add `SKILL.md`:
 
-   ```
+   ```markdown
    ---
    name: your-skill-name
-   description: what it does and when to use it (<=500 chars)
+   description: what it does and when to use it
    ---
 
    # Optional body
    Add instructions, references, examples, or scripts (kept on disk).
    ```
 
-3. Keep `name`/`description` within the limits; avoid newlines in those fields.
-4. Restart Codex to load the new skill.
-
-## Example
-
-```
-mkdir -p ~/.codex/skills/pdf-processing
-cat <<'SKILL_EXAMPLE' > ~/.codex/skills/pdf-processing/SKILL.md
----
-name: pdf-processing
-description: Extract text and tables from PDFs; use when PDFs, forms, or document extraction are mentioned.
----
-
-# PDF Processing
-- Use pdfplumber to extract text.
-- For form filling, see FORMS.md.
-SKILL_EXAMPLE
-```
+3. Restart Hanzo Dev.
