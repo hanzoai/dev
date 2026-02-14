@@ -508,4 +508,11 @@ mod tests {
         let mid = agent_model_spec("gpt-5.1").expect("mid alias present");
         assert_eq!(mid.slug, "code-gpt-5.2");
     }
+
+    #[test]
+    fn claude_alias_resolves_to_claude_cli() {
+        let claude = agent_model_spec("claude").expect("claude alias should resolve");
+        assert_eq!(claude.family, "claude");
+        assert_eq!(claude.cli, "claude");
+    }
 }

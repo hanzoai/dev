@@ -100,6 +100,10 @@ struct MultitoolCli {
     #[clap(long = "demo", global = true, value_name = "TEXT")]
     demo_developer_message: Option<String>,
 
+    /// Ignore API key env vars and force non-env auth resolution.
+    #[clap(long = "ignore-api-keys", global = true, default_value_t = false)]
+    ignore_api_keys: bool,
+
     #[clap(subcommand)]
     subcommand: Option<Subcommand>,
 }
@@ -421,8 +425,13 @@ async fn cli_main(code_linux_sandbox_exe: Option<PathBuf>) -> anyhow::Result<()>
         mut interactive,
         auto_drive,
         demo_developer_message,
+        ignore_api_keys,
         subcommand,
     } = MultitoolCli::parse();
+
+    if ignore_api_keys {
+        apply_ignore_api_keys_mode();
+    }
 
     interactive.finalize_defaults();
     interactive.demo_developer_message = demo_developer_message.clone();
@@ -649,6 +658,15 @@ async fn cli_main(code_linux_sandbox_exe: Option<PathBuf>) -> anyhow::Result<()>
     }
 
     Ok(())
+}
+
+fn apply_ignore_api_keys_mode() {
+    unsafe {
+        std::env::set_var(hanzo_core::auth::HANZO_IGNORE_API_KEYS_ENV_VAR, "1");
+        std::env::remove_var(hanzo_core::auth::OPENAI_API_KEY_ENV_VAR);
+        std::env::remove_var(hanzo_core::auth::HANZO_API_KEY_ENV_VAR);
+        std::env::remove_var("CODEX_API_KEY");
+    }
 }
 
 /// Prepend root-level overrides so they have lower precedence than

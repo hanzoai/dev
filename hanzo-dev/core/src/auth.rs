@@ -335,14 +335,33 @@ impl CodexAuth {
 
 pub const OPENAI_API_KEY_ENV_VAR: &str = "OPENAI_API_KEY";
 pub const HANZO_API_KEY_ENV_VAR: &str = "HANZO_API_KEY";
+pub const HANZO_IGNORE_API_KEYS_ENV_VAR: &str = "HANZO_IGNORE_API_KEYS";
+
+pub fn should_ignore_api_keys_from_env() -> bool {
+    match env::var(HANZO_IGNORE_API_KEYS_ENV_VAR) {
+        Ok(value) => {
+            let normalized = value.trim().to_ascii_lowercase();
+            matches!(normalized.as_str(), "1" | "true" | "yes" | "on")
+        }
+        Err(_) => false,
+    }
+}
 
 fn read_openai_api_key_from_env() -> Option<String> {
+    if should_ignore_api_keys_from_env() {
+        return None;
+    }
+
     env::var(OPENAI_API_KEY_ENV_VAR)
         .ok()
         .filter(|s| !s.is_empty())
 }
 
 pub fn read_code_api_key_from_env() -> Option<String> {
+    if should_ignore_api_keys_from_env() {
+        return None;
+    }
+
     env::var(HANZO_API_KEY_ENV_VAR)
         .ok()
         .map(|value| value.trim().to_string())
@@ -1040,6 +1059,41 @@ mod tests {
     }
 
     #[test]
+    fn read_openai_api_key_from_env_respects_ignore_flag() {
+        let _openai_key = ScopedEnvVar::set(super::OPENAI_API_KEY_ENV_VAR, "sk-env-openai");
+        let _ignore = ScopedEnvVar::unset(super::HANZO_IGNORE_API_KEYS_ENV_VAR);
+
+        assert_eq!(
+            super::read_openai_api_key_from_env().as_deref(),
+            Some("sk-env-openai")
+        );
+
+        unsafe {
+            std::env::set_var(super::HANZO_IGNORE_API_KEYS_ENV_VAR, "1");
+        }
+        assert_eq!(super::read_openai_api_key_from_env(), None);
+    }
+
+    #[test]
+    fn read_code_api_key_from_env_ignores_when_flag_enabled() {
+        let _hanzo_key = ScopedEnvVar::set(super::HANZO_API_KEY_ENV_VAR, "hanzo-env-key");
+        let _ignore = ScopedEnvVar::set(super::HANZO_IGNORE_API_KEYS_ENV_VAR, "true");
+
+        assert_eq!(super::read_code_api_key_from_env(), None);
+    }
+
+    #[test]
+    fn should_ignore_api_keys_from_env_accepts_truthy_values() {
+        let _ignore = ScopedEnvVar::set(super::HANZO_IGNORE_API_KEYS_ENV_VAR, "yes");
+        assert!(super::should_ignore_api_keys_from_env());
+
+        unsafe {
+            std::env::set_var(super::HANZO_IGNORE_API_KEYS_ENV_VAR, "0");
+        }
+        assert!(!super::should_ignore_api_keys_from_env());
+    }
+
+    #[test]
     fn logout_removes_auth_file() -> Result<(), std::io::Error> {
         let dir = tempdir()?;
         let auth_dot_json = AuthDotJson {
@@ -1234,6 +1288,41 @@ mod tests {
         let auth_json = serde_json::to_string_pretty(&auth_json_data)?;
         std::fs::write(auth_file, auth_json)?;
         Ok(fake_jwt)
+    }
+
+    struct ScopedEnvVar {
+        key: &'static str,
+        previous: Option<String>,
+    }
+
+    impl ScopedEnvVar {
+        fn set(key: &'static str, value: &str) -> Self {
+            let previous = std::env::var(key).ok();
+            unsafe {
+                std::env::set_var(key, value);
+            }
+            Self { key, previous }
+        }
+
+        fn unset(key: &'static str) -> Self {
+            let previous = std::env::var(key).ok();
+            unsafe {
+                std::env::remove_var(key);
+            }
+            Self { key, previous }
+        }
+    }
+
+    impl Drop for ScopedEnvVar {
+        fn drop(&mut self) {
+            unsafe {
+                if let Some(previous) = &self.previous {
+                    std::env::set_var(self.key, previous);
+                } else {
+                    std::env::remove_var(self.key);
+                }
+            }
+        }
     }
 }
 
