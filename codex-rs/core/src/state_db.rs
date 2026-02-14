@@ -66,9 +66,15 @@ pub(crate) async fn init_if_enabled(
         }
     };
     if backfill_state.status != codex_state::BackfillStatus::Complete {
-        metadata::backfill_sessions(runtime.as_ref(), config, otel).await;
+        let runtime_for_backfill = runtime.clone();
+        let config = config.clone();
+        let otel = otel.cloned();
+        tokio::spawn(async move {
+            metadata::backfill_sessions(runtime_for_backfill.as_ref(), &config, otel.as_ref())
+                .await;
+        });
     }
-    require_backfill_complete(runtime, config.codex_home.as_path()).await
+    Some(runtime)
 }
 
 /// Get the DB if the feature is enabled and the DB exists.
@@ -254,7 +260,27 @@ pub async fn list_threads_db(
         )
         .await
     {
-        Ok(page) => Some(page),
+        Ok(mut page) => {
+            let mut valid_items = Vec::with_capacity(page.items.len());
+            for item in page.items {
+                if tokio::fs::try_exists(&item.rollout_path)
+                    .await
+                    .unwrap_or(false)
+                {
+                    valid_items.push(item);
+                } else {
+                    warn!(
+                        "state db list_threads returned stale rollout path for thread {}: {}",
+                        item.id,
+                        item.rollout_path.display()
+                    );
+                    record_discrepancy("list_threads_db", "stale_db_path_dropped");
+                    let _ = ctx.delete_thread(item.id).await;
+                }
+            }
+            page.items = valid_items;
+            Some(page)
+        }
         Err(err) => {
             warn!("state db list_threads failed: {err}");
             None
@@ -345,6 +371,7 @@ pub async fn reconcile_rollout(
             }
         };
     let mut metadata = outcome.metadata;
+    metadata.cwd = normalize_cwd_for_state_db(&metadata.cwd);
     match archived_only {
         Some(true) if metadata.archived_at.is_none() => {
             metadata.archived_at = Some(metadata.updated_at);
@@ -388,20 +415,30 @@ pub async fn read_repair_rollout_path(
         return;
     };
 
+    // Fast path: update an existing metadata row in place, but avoid writes when
+    // read-repair computes no effective change.
+    let mut saw_existing_metadata = false;
     if let Some(thread_id) = thread_id
-        && let Ok(Some(mut metadata)) = ctx.get_thread(thread_id).await
+        && let Ok(Some(metadata)) = ctx.get_thread(thread_id).await
     {
-        metadata.rollout_path = rollout_path.to_path_buf();
+        saw_existing_metadata = true;
+        let mut repaired = metadata.clone();
+        repaired.rollout_path = rollout_path.to_path_buf();
+        repaired.cwd = normalize_cwd_for_state_db(&repaired.cwd);
         match archived_only {
-            Some(true) if metadata.archived_at.is_none() => {
-                metadata.archived_at = Some(metadata.updated_at);
+            Some(true) if repaired.archived_at.is_none() => {
+                repaired.archived_at = Some(repaired.updated_at);
             }
             Some(false) => {
-                metadata.archived_at = None;
+                repaired.archived_at = None;
             }
             Some(true) | None => {}
         }
-        if let Err(err) = ctx.upsert_thread(&metadata).await {
+        if repaired == metadata {
+            return;
+        }
+        record_discrepancy("read_repair_rollout_path", "upsert_needed");
+        if let Err(err) = ctx.upsert_thread(&repaired).await {
             warn!(
                 "state db read-repair upsert failed for {}: {err}",
                 rollout_path.display()
@@ -411,6 +448,11 @@ pub async fn read_repair_rollout_path(
         }
     }
 
+    // Slow path: when the row is missing/unreadable (or direct upsert failed),
+    // rebuild metadata from rollout contents and reconcile it into SQLite.
+    if !saw_existing_metadata {
+        record_discrepancy("read_repair_rollout_path", "upsert_needed");
+    }
     let default_provider = crate::rollout::list::read_session_meta_line(rollout_path)
         .await
         .ok()
