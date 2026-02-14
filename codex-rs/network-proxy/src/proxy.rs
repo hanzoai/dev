@@ -1,7 +1,9 @@
 use crate::admin;
 use crate::config;
 use crate::http_proxy;
+use crate::metadata::proxy_username_for_attempt_id;
 use crate::network_policy::NetworkPolicyDecider;
+use crate::runtime::BlockedRequest;
 use crate::runtime::unix_socket_permissions_supported;
 use crate::socks5;
 use crate::state::NetworkProxyState;
@@ -29,10 +31,10 @@ struct ReservedListeners {
 }
 
 impl ReservedListeners {
-    fn new(http: StdTcpListener, socks: StdTcpListener, admin: StdTcpListener) -> Self {
+    fn new(http: StdTcpListener, socks: Option<StdTcpListener>, admin: StdTcpListener) -> Self {
         Self {
             http: Mutex::new(Some(http)),
-            socks: Mutex::new(Some(socks)),
+            socks: Mutex::new(socks),
             admin: Mutex::new(Some(admin)),
         }
     }
@@ -133,15 +135,20 @@ impl NetworkProxyBuilder {
         let current_cfg = state.current_cfg().await?;
         let (requested_http_addr, requested_socks_addr, requested_admin_addr, reserved_listeners) =
             if self.managed_by_codex {
+                let runtime = config::resolve_runtime(&current_cfg)?;
                 let (http_listener, socks_listener, admin_listener) =
-                    reserve_loopback_ephemeral_listeners()
+                    reserve_loopback_ephemeral_listeners(current_cfg.network.enable_socks5)
                         .context("reserve managed loopback proxy listeners")?;
                 let http_addr = http_listener
                     .local_addr()
                     .context("failed to read reserved HTTP proxy address")?;
-                let socks_addr = socks_listener
-                    .local_addr()
-                    .context("failed to read reserved SOCKS5 proxy address")?;
+                let socks_addr = if let Some(socks_listener) = socks_listener.as_ref() {
+                    socks_listener
+                        .local_addr()
+                        .context("failed to read reserved SOCKS5 proxy address")?
+                } else {
+                    runtime.socks_addr
+                };
                 let admin_addr = admin_listener
                     .local_addr()
                     .context("failed to read reserved admin API address")?;
@@ -186,13 +193,19 @@ impl NetworkProxyBuilder {
     }
 }
 
-fn reserve_loopback_ephemeral_listeners() -> Result<(StdTcpListener, StdTcpListener, StdTcpListener)>
-{
-    Ok((
-        reserve_loopback_ephemeral_listener().context("reserve HTTP proxy listener")?,
-        reserve_loopback_ephemeral_listener().context("reserve SOCKS5 proxy listener")?,
-        reserve_loopback_ephemeral_listener().context("reserve admin API listener")?,
-    ))
+fn reserve_loopback_ephemeral_listeners(
+    reserve_socks_listener: bool,
+) -> Result<(StdTcpListener, Option<StdTcpListener>, StdTcpListener)> {
+    let http_listener =
+        reserve_loopback_ephemeral_listener().context("reserve HTTP proxy listener")?;
+    let socks_listener = if reserve_socks_listener {
+        Some(reserve_loopback_ephemeral_listener().context("reserve SOCKS5 proxy listener")?)
+    } else {
+        None
+    };
+    let admin_listener =
+        reserve_loopback_ephemeral_listener().context("reserve admin API listener")?;
+    Ok((http_listener, socks_listener, admin_listener))
 }
 
 fn reserve_loopback_ephemeral_listener() -> Result<StdTcpListener> {
@@ -301,8 +314,12 @@ fn apply_proxy_env_overrides(
     socks_addr: SocketAddr,
     socks_enabled: bool,
     allow_local_binding: bool,
+    network_attempt_id: Option<&str>,
 ) {
-    let http_proxy_url = format!("http://{http_addr}");
+    let http_proxy_url = network_attempt_id
+        .map(proxy_username_for_attempt_id)
+        .map(|username| format!("http://{username}@{http_addr}"))
+        .unwrap_or_else(|| format!("http://{http_addr}"));
     let socks_proxy_url = format!("socks5h://{socks_addr}");
     env.insert(
         ALLOW_LOCAL_BINDING_ENV_KEY.to_string(),
@@ -343,18 +360,25 @@ fn apply_proxy_env_overrides(
 
     env.insert("ELECTRON_GET_USE_PROXY".to_string(), "true".to_string());
 
-    if socks_enabled {
+    // Keep HTTP_PROXY/HTTPS_PROXY as HTTP endpoints. A lot of clients break if
+    // those vars contain SOCKS URLs. We only switch ALL_PROXY here.
+    //
+    // For attempt-scoped runs, point ALL_PROXY at the HTTP proxy URL so the
+    // attempt metadata survives in proxy credentials for correlation.
+    if socks_enabled && network_attempt_id.is_none() {
         set_env_keys(env, ALL_PROXY_ENV_KEYS, &socks_proxy_url);
         set_env_keys(env, FTP_PROXY_ENV_KEYS, &socks_proxy_url);
-        #[cfg(target_os = "macos")]
-        {
-            // Preserve existing SSH wrappers (for example: Secretive/Teleport setups)
-            // and only provide a SOCKS ProxyCommand fallback when one is not present.
-            env.entry("GIT_SSH_COMMAND".to_string())
-                .or_insert_with(|| format!("ssh -o ProxyCommand='nc -X 5 -x {socks_addr} %h %p'"));
-        }
     } else {
         set_env_keys(env, ALL_PROXY_ENV_KEYS, &http_proxy_url);
+        set_env_keys(env, FTP_PROXY_ENV_KEYS, &http_proxy_url);
+    }
+
+    #[cfg(target_os = "macos")]
+    if socks_enabled {
+        // Preserve existing SSH wrappers (for example: Secretive/Teleport setups)
+        // and only provide a SOCKS ProxyCommand fallback when one is not present.
+        env.entry("GIT_SSH_COMMAND".to_string())
+            .or_insert_with(|| format!("ssh -o ProxyCommand='nc -X 5 -x {socks_addr} %h %p'"));
     }
 }
 
@@ -375,7 +399,22 @@ impl NetworkProxy {
         self.admin_addr
     }
 
+    pub async fn latest_blocked_request_for_attempt(
+        &self,
+        attempt_id: &str,
+    ) -> Result<Option<BlockedRequest>> {
+        self.state.latest_blocked_for_attempt(attempt_id).await
+    }
+
     pub fn apply_to_env(&self, env: &mut HashMap<String, String>) {
+        self.apply_to_env_for_attempt(env, None);
+    }
+
+    pub fn apply_to_env_for_attempt(
+        &self,
+        env: &mut HashMap<String, String>,
+        network_attempt_id: Option<&str>,
+    ) {
         // Enforce proxying for child processes. We intentionally override existing values so
         // command-level environment cannot bypass the managed proxy endpoint.
         apply_proxy_env_overrides(
@@ -384,6 +423,7 @@ impl NetworkProxy {
             self.socks_addr,
             self.socks_enabled,
             self.allow_local_binding,
+            network_attempt_id,
         );
     }
 
@@ -612,6 +652,43 @@ mod tests {
         );
     }
 
+    #[tokio::test]
+    async fn managed_proxy_builder_does_not_reserve_socks_listener_when_disabled() {
+        let settings = NetworkProxySettings {
+            enable_socks5: false,
+            socks_url: "http://127.0.0.1:43129".to_string(),
+            ..NetworkProxySettings::default()
+        };
+        let state = Arc::new(network_proxy_state_for_policy(settings));
+        let proxy = match NetworkProxy::builder().state(state).build().await {
+            Ok(proxy) => proxy,
+            Err(err) => {
+                if err
+                    .chain()
+                    .any(|cause| cause.to_string().contains("Operation not permitted"))
+                {
+                    return;
+                }
+                panic!("failed to build managed proxy: {err:#}");
+            }
+        };
+
+        assert!(proxy.http_addr.ip().is_loopback());
+        assert!(proxy.admin_addr.ip().is_loopback());
+        assert_eq!(
+            proxy.socks_addr,
+            "127.0.0.1:43129".parse::<SocketAddr>().unwrap()
+        );
+        assert!(
+            proxy
+                .reserved_listeners
+                .as_ref()
+                .expect("managed builder should reserve listeners")
+                .take_socks()
+                .is_none()
+        );
+    }
+
     #[test]
     fn proxy_url_env_value_resolves_lowercase_aliases() {
         let mut env = HashMap::new();
@@ -646,6 +723,7 @@ mod tests {
             SocketAddr::new(IpAddr::V4(Ipv4Addr::LOCALHOST), 8081),
             true,
             false,
+            None,
         );
 
         assert_eq!(
@@ -688,6 +766,7 @@ mod tests {
             SocketAddr::new(IpAddr::V4(Ipv4Addr::LOCALHOST), 8081),
             false,
             true,
+            None,
         );
 
         assert_eq!(
@@ -695,6 +774,39 @@ mod tests {
             Some(&"http://127.0.0.1:3128".to_string())
         );
         assert_eq!(env.get(ALLOW_LOCAL_BINDING_ENV_KEY), Some(&"1".to_string()));
+    }
+
+    #[test]
+    fn apply_proxy_env_overrides_embeds_attempt_id_in_http_proxy_url() {
+        let mut env = HashMap::new();
+        apply_proxy_env_overrides(
+            &mut env,
+            SocketAddr::new(IpAddr::V4(Ipv4Addr::LOCALHOST), 3128),
+            SocketAddr::new(IpAddr::V4(Ipv4Addr::LOCALHOST), 8081),
+            true,
+            false,
+            Some("attempt-123"),
+        );
+
+        assert_eq!(
+            env.get("HTTP_PROXY"),
+            Some(&"http://codex-net-attempt-attempt-123@127.0.0.1:3128".to_string())
+        );
+        assert_eq!(
+            env.get("HTTPS_PROXY"),
+            Some(&"http://codex-net-attempt-attempt-123@127.0.0.1:3128".to_string())
+        );
+        assert_eq!(
+            env.get("ALL_PROXY"),
+            Some(&"http://codex-net-attempt-attempt-123@127.0.0.1:3128".to_string())
+        );
+        #[cfg(target_os = "macos")]
+        assert_eq!(
+            env.get("GIT_SSH_COMMAND"),
+            Some(&"ssh -o ProxyCommand='nc -X 5 -x 127.0.0.1:8081 %h %p'".to_string())
+        );
+        #[cfg(not(target_os = "macos"))]
+        assert_eq!(env.get("GIT_SSH_COMMAND"), None);
     }
 
     #[cfg(target_os = "macos")]
@@ -711,6 +823,7 @@ mod tests {
             SocketAddr::new(IpAddr::V4(Ipv4Addr::LOCALHOST), 8081),
             true,
             false,
+            None,
         );
 
         assert_eq!(
