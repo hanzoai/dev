@@ -8,6 +8,11 @@ use std::path::PathBuf;
 pub fn build_http_client() -> reqwest::Client {
     let mut builder = reqwest::Client::builder();
 
+    #[cfg(target_os = "macos")]
+    {
+        builder = builder.no_proxy();
+    }
+
     // Helper to load a PEM or DER certificate file if it exists and is readable.
     fn load_cert(path: PathBuf) -> Option<reqwest::Certificate> {
         if !path.exists() || !path.is_file() {
@@ -49,5 +54,12 @@ pub fn build_http_client() -> reqwest::Client {
         }
     }
 
-    builder.build().unwrap_or_else(|_| reqwest::Client::new())
+    builder.build().unwrap_or_else(|_| {
+        let mut fallback = reqwest::Client::builder();
+        #[cfg(target_os = "macos")]
+        {
+            fallback = fallback.no_proxy();
+        }
+        fallback.build().unwrap_or_else(|_| reqwest::Client::new())
+    })
 }
