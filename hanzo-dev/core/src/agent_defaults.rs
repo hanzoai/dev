@@ -47,6 +47,14 @@ const GEMINI_FLASH_READ_ONLY: &[&str] = &[];
 const GEMINI_FLASH_WRITE: &[&str] = &["-y"];
 const QWEN_3_CODER_READ_ONLY: &[&str] = &[];
 const QWEN_3_CODER_WRITE: &[&str] = &["-y"];
+const ZEN_4_CODER_READ_ONLY: &[&str] = &["-s", "read-only", "exec", "--skip-git-repo-check"];
+const ZEN_4_CODER_WRITE: &[&str] = &[
+    "-s",
+    "workspace-write",
+    "--dangerously-bypass-approvals-and-sandbox",
+    "exec",
+    "--skip-git-repo-check",
+];
 const CLOUD_GPT5_CODEX_READ_ONLY: &[&str] = &[];
 const CLOUD_GPT5_CODEX_WRITE: &[&str] = &[];
 
@@ -59,10 +67,12 @@ pub const DEFAULT_AGENT_NAMES: &[&str] = &[
     "code-gpt-5.3-codex",
     "claude-opus-4.5",
     "gemini-3-pro",
+    "zen-4-coder",
     // Straightforward / cost-aware
     "code-gpt-5.1-codex-mini",
     "claude-sonnet-4.5",
     "gemini-3-flash",
+    "zen-4",
     // Mixed/general and alternates
     "claude-haiku-4.5",
     "qwen-3-coder",
@@ -257,6 +267,27 @@ const AGENT_MODEL_SPECS: &[AgentModelSpec] = &[
         aliases: &["qwen", "qwen3"],
         gating_env: None,
         is_frontline: false,
+    },
+    AgentModelSpec {
+        slug: "zen-4-coder",
+        family: "zen",
+        cli: "coder",
+        read_only_args: ZEN_4_CODER_READ_ONLY,
+        write_args: ZEN_4_CODER_WRITE,
+        model_args: &["--model", "zen-4-coder"],
+        description: "Hanzo Zen frontier coding agent; qwen3-based, strong at multi-file edits and agentic workflows.",
+        enabled_by_default: true,
+        aliases: &[
+            "zen-4",
+            "zen4-coder",
+            "zen4",
+            "zen-coder",
+            "zen",
+            "hanzo-zen",
+            "hanzo",
+        ],
+        gating_env: None,
+        is_frontline: true,
     },
     AgentModelSpec {
         slug: "cloud-gpt-5.1-codex-max",
