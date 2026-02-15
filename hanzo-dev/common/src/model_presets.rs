@@ -336,6 +336,57 @@ static PRESETS: Lazy<Vec<ModelPreset>> = Lazy::new(|| {
             }),
             show_in_picker: false,
         },
+        // Hanzo Zen models (qwen3+ based, served via api.hanzo.ai)
+        ModelPreset {
+            id: "zen-4-coder".to_string(),
+            model: "zen-4-coder".to_string(),
+            display_name: "zen-4-coder".to_string(),
+            description: "Frontier Zen coding model optimized for agentic workflows.".to_string(),
+            default_reasoning_effort: ReasoningEffort::Medium,
+            supported_reasoning_efforts: vec![
+                ReasoningEffortPreset {
+                    effort: ReasoningEffort::Low,
+                    description: "Fast responses with lighter reasoning".to_string(),
+                },
+                ReasoningEffortPreset {
+                    effort: ReasoningEffort::Medium,
+                    description: "Balances speed and reasoning depth for everyday tasks".to_string(),
+                },
+                ReasoningEffortPreset {
+                    effort: ReasoningEffort::High,
+                    description: "Maximizes reasoning depth for complex problems".to_string(),
+                },
+            ],
+            supported_text_verbosity: ALL_TEXT_VERBOSITY,
+            is_default: false,
+            upgrade: None,
+            show_in_picker: true,
+        },
+        ModelPreset {
+            id: "zen-4".to_string(),
+            model: "zen-4".to_string(),
+            display_name: "zen-4".to_string(),
+            description: "General purpose Zen model with broad knowledge and strong reasoning.".to_string(),
+            default_reasoning_effort: ReasoningEffort::Medium,
+            supported_reasoning_efforts: vec![
+                ReasoningEffortPreset {
+                    effort: ReasoningEffort::Low,
+                    description: "Balances speed with some reasoning; useful for straightforward queries".to_string(),
+                },
+                ReasoningEffortPreset {
+                    effort: ReasoningEffort::Medium,
+                    description: "Provides a solid balance of reasoning depth and latency".to_string(),
+                },
+                ReasoningEffortPreset {
+                    effort: ReasoningEffort::High,
+                    description: "Maximizes reasoning depth for complex or ambiguous problems".to_string(),
+                },
+            ],
+            supported_text_verbosity: ALL_TEXT_VERBOSITY,
+            is_default: false,
+            upgrade: None,
+            show_in_picker: true,
+        },
         // Deprecated GPT-5 variants kept for migrations / config compatibility.
         ModelPreset {
             id: "gpt-5-codex".to_string(),

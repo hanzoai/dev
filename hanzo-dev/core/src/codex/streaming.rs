@@ -708,6 +708,7 @@ pub(super) async fn submission_loop(
                     env_ctx_v2: config.env_ctx_v2,
                     retention_config: config.retention.clone(),
                     model_descriptions,
+                    zap_dispatcher: std::sync::Arc::new(hanzo_zap::default_dispatcher()),
                 });
                 let weak_handle = Arc::downgrade(&new_session);
                 if let Some(inner) = Arc::get_mut(&mut new_session) {
@@ -2002,9 +2003,10 @@ async fn run_turn(
             tc.sandbox_policy.clone(),
             effective_family,
         );
-        prompt.tools = get_openai_tools(
+        prompt.tools = crate::openai_tools::get_openai_tools_with_zap(
             &tools_config,
             Some(sess.mcp_connection_manager.list_all_tools()),
+            Some(sess.zap_dispatcher.all_tool_schemas()),
             browser_enabled,
             agents_active,
         );
@@ -3240,6 +3242,10 @@ async fn handle_function_call(
         "code_bridge" | "code_bridge_subscription" => {
             handle_code_bridge(sess, &ctx, arguments).await
         }
+        // ZAP native tools: filesystem, VCS, build, network, LSP — no MCP required.
+        _ if name.starts_with("zap_") => {
+            handle_zap_tool_call(sess, &name, arguments, call_id).await
+        }
         _ => {
             match sess.mcp_connection_manager.parse_tool_name(&name) {
                 Some((server, tool_name)) => {
@@ -3258,6 +3264,81 @@ async fn handle_function_call(
                 }
             }
         }
+    }
+}
+
+/// Dispatch a `zap_*` tool call to the ZAP native executor.
+///
+/// Strips the `zap_` prefix from the tool name, parses the JSON arguments,
+/// builds an [`hanzo_zap::ExecutorContext`] from the session state, and calls
+/// the dispatcher. Returns the result as a `FunctionCallOutput`.
+async fn handle_zap_tool_call(
+    sess: &Session,
+    prefixed_name: &str,
+    arguments: String,
+    call_id: String,
+) -> ResponseInputItem {
+    let tool_name = prefixed_name.strip_prefix("zap_").unwrap_or(prefixed_name);
+
+    let args: serde_json::Value = match serde_json::from_str(&arguments) {
+        Ok(v) => v,
+        Err(e) => {
+            return ResponseInputItem::FunctionCallOutput {
+                call_id,
+                output: FunctionCallOutputPayload {
+                    content: format!("invalid JSON arguments: {e}"),
+                    success: Some(false),
+                },
+            };
+        }
+    };
+
+    let ctx = hanzo_zap::ExecutorContext {
+        cwd: Some(sess.cwd.to_string_lossy().to_string()),
+        env: std::env::vars().collect(),
+        session_id: Some(sess.id.to_string()),
+        approval_policy: hanzo_zap::executor::permissions::AskForApproval::OnRequest,
+        sandbox_policy: match &sess.sandbox_policy {
+            SandboxPolicy::DangerFullAccess => {
+                hanzo_zap::executor::permissions::SandboxPolicy::DangerFullAccess
+            }
+            SandboxPolicy::ReadOnly => hanzo_zap::executor::permissions::SandboxPolicy::ReadOnly,
+            SandboxPolicy::WorkspaceWrite {
+                writable_roots,
+                network_access,
+                exclude_tmpdir_env_var,
+                exclude_slash_tmp,
+                allow_git_writes,
+            } => hanzo_zap::executor::permissions::SandboxPolicy::WorkspaceWrite {
+                writable_roots: writable_roots.clone(),
+                network_access: *network_access,
+                exclude_tmpdir_env_var: *exclude_tmpdir_env_var,
+                exclude_slash_tmp: *exclude_slash_tmp,
+                allow_git_writes: *allow_git_writes,
+            },
+        },
+        timeout_ms: Some(30_000),
+    };
+
+    match sess.zap_dispatcher.execute(tool_name, args, &ctx).await {
+        Ok(result) => {
+            let (content, success) = if let Some(err) = result.error {
+                (format!("Error: {err}"), Some(false))
+            } else {
+                (result.content.to_string(), Some(true))
+            };
+            ResponseInputItem::FunctionCallOutput {
+                call_id,
+                output: FunctionCallOutputPayload { content, success },
+            }
+        }
+        Err(e) => ResponseInputItem::FunctionCallOutput {
+            call_id,
+            output: FunctionCallOutputPayload {
+                content: format!("ZAP executor error: {e}"),
+                success: Some(false),
+            },
+        },
     }
 }
 

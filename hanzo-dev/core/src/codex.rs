@@ -985,7 +985,6 @@ use crate::mcp_tool_call::handle_mcp_tool_call;
 use crate::model_family::derive_default_model_family;
 use crate::model_family::find_family_for_model;
 use crate::openai_tools::ToolsConfig;
-use crate::openai_tools::get_openai_tools;
 use crate::parse_command::parse_command;
 use crate::plan_tool::handle_update_plan;
 use crate::project_doc::get_user_instructions;
