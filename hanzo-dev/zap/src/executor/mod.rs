@@ -22,6 +22,7 @@ use crate::error::Error;
 use crate::error::Result;
 use crate::message::ToolResult;
 use crate::tools::ToolCategory;
+use crate::tools::ToolDef;
 use async_trait::async_trait;
 use serde_json::Value;
 use std::collections::HashMap;
@@ -209,6 +210,20 @@ impl ToolDispatcher {
     /// List tools by category
     pub fn tools_by_category(&self, category: &ToolCategory) -> Vec<String> {
         self.category_map.get(category).cloned().unwrap_or_default()
+    }
+
+    /// Return tool schemas for all registered tools.
+    ///
+    /// Looks up each registered tool name in `default_tools()` and returns the
+    /// matching `ToolDef` entries. Tools without a schema definition are skipped.
+    pub fn all_tool_schemas(&self) -> Vec<ToolDef> {
+        let all_defs = crate::tools::default_tools();
+        let registered: std::collections::HashSet<&str> =
+            self.executors.keys().map(String::as_str).collect();
+        all_defs
+            .into_iter()
+            .filter(|def| registered.contains(def.name.as_str()))
+            .collect()
     }
 }
 
