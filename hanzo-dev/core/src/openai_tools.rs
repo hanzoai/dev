@@ -584,6 +584,29 @@ pub(crate) fn mcp_tool_to_openai_tool(
     })
 }
 
+/// Convert a ZAP [`hanzo_zap::ToolDef`] into a [`ResponsesApiTool`].
+///
+/// The tool name is prefixed with `zap_` so the model (and dispatch logic) can
+/// distinguish ZAP-native tools from built-in and MCP tools.
+fn zap_tool_to_openai_tool(
+    tool_def: &hanzo_zap::ToolDef,
+) -> Result<ResponsesApiTool, serde_json::Error> {
+    let mut schema = tool_def.input_schema.clone();
+    // Ensure "properties" exists (OpenAI requirement).
+    if let Some(obj) = schema.as_object_mut() {
+        obj.entry("properties")
+            .or_insert_with(|| serde_json::Value::Object(serde_json::Map::new()));
+    }
+    sanitize_json_schema(&mut schema);
+    let parameters = serde_json::from_value::<JsonSchema>(schema)?;
+    Ok(ResponsesApiTool {
+        name: format!("zap_{}", tool_def.name),
+        description: tool_def.description.clone(),
+        strict: false,
+        parameters,
+    })
+}
+
 /// Sanitize a JSON Schema (as serde_json::Value) so it can fit our limited
 /// JsonSchema enum. This function:
 /// - Ensures every schema object has a "type". If missing, infers it from
@@ -704,6 +727,17 @@ pub fn get_openai_tools(
     browser_enabled: bool,
     _agents_active: bool,
 ) -> Vec<OpenAiTool> {
+    get_openai_tools_with_zap(config, mcp_tools, None, browser_enabled, _agents_active)
+}
+
+/// Like [`get_openai_tools`] but also accepts ZAP native tool definitions.
+pub fn get_openai_tools_with_zap(
+    config: &ToolsConfig,
+    mcp_tools: Option<HashMap<String, mcp_types::Tool>>,
+    zap_tools: Option<Vec<hanzo_zap::ToolDef>>,
+    browser_enabled: bool,
+    _agents_active: bool,
+) -> Vec<OpenAiTool> {
     let mut tools: Vec<OpenAiTool> = Vec::new();
 
     match &config.shell_type {
@@ -776,6 +810,37 @@ pub fn get_openai_tools(
                 Ok(converted_tool) => tools.push(OpenAiTool::Function(converted_tool)),
                 Err(e) => {
                     tracing::error!("Failed to convert {name:?} MCP tool to OpenAI tool: {e:?}");
+                }
+            }
+        }
+    }
+
+    // Add ZAP native tools (filesystem, VCS, build, network, LSP).
+    // These are prefixed with "zap_" to avoid collisions with built-in tools.
+    if let Some(zap_tools) = zap_tools {
+        for tool_def in zap_tools {
+            // Skip tools that duplicate built-in functionality.
+            if matches!(
+                tool_def.name.as_str(),
+                "exec"
+                    | "browser_navigate"
+                    | "browser_click"
+                    | "browser_fill"
+                    | "browser_screenshot"
+                    | "browser_a11y_tree"
+                    | "plan_intent"
+                    | "plan_route"
+                    | "plan_compose"
+            ) {
+                continue;
+            }
+            match zap_tool_to_openai_tool(&tool_def) {
+                Ok(converted) => tools.push(OpenAiTool::Function(converted)),
+                Err(e) => {
+                    tracing::error!(
+                        "Failed to convert ZAP tool {:?} to OpenAI tool: {e:?}",
+                        tool_def.name
+                    );
                 }
             }
         }
