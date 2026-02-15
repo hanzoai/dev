@@ -1,12 +1,12 @@
-## @hanzo/dev v0.6.61
+## @hanzo/dev v0.6.71
 
-This release improves authentication handling, sandbox networking, and skills policy support.
+This release adds Zen model support and ZAP-native tool wiring while carrying forward the latest upstream fixes.
 
 ### Changes
-- Core: align auth token schema and websocket errors.
-- Sandbox: enforce proxy-aware network routing in sandbox.
-- Skills: add SkillPolicy metadata with allow_implicit_invocation support.
-- App Server: use chatgpt_account_id/chatgpt_plan_type for external auth.
+- Models: add `zen-4-coder` and `zen-4` presets in picker and model family routing.
+- Core: expose ZAP native tool schemas to tool selection and route `zap_*` calls through the in-process dispatcher.
+- Agent Defaults: add Zen aliases and tuned read/write presets for agent workflows.
+- Upstream: includes latest release metadata and app-server protocol/schema updates.
 
 ### Install
 ```
