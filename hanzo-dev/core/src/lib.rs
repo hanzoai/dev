@@ -178,4 +178,5 @@ pub use hanzo_protocol::models::ResponseItem;
 pub use openai_tools::OpenAiTool;
 pub use openai_tools::ToolsConfig;
 pub use openai_tools::get_openai_tools;
+pub use openai_tools::get_openai_tools_with_zap;
 pub use otel_init::*;

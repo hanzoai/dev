@@ -503,8 +503,12 @@ impl ModelSelectionView {
             5
         } else if model.eq_ignore_ascii_case("gpt-5.1") {
             6
-        } else {
+        } else if model.eq_ignore_ascii_case("zen-4-coder") {
             7
+        } else if model.eq_ignore_ascii_case("zen-4") {
+            8
+        } else {
+            9
         }
     }
 
@@ -523,6 +527,10 @@ impl ModelSelectionView {
             Some("Optimized for Code. Cheaper, faster, but less capable.")
         } else if model.eq_ignore_ascii_case("gpt-5.1") {
             Some("Broad world knowledge with strong general reasoning.")
+        } else if model.eq_ignore_ascii_case("zen-4-coder") {
+            Some("Frontier Zen coding model optimized for agentic workflows.")
+        } else if model.eq_ignore_ascii_case("zen-4") {
+            Some("General purpose Zen model with broad knowledge and strong reasoning.")
         } else {
             None
         }
