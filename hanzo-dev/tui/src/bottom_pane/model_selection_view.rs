@@ -528,9 +528,9 @@ impl ModelSelectionView {
         } else if model.eq_ignore_ascii_case("gpt-5.1") {
             Some("Broad world knowledge with strong general reasoning.")
         } else if model.eq_ignore_ascii_case("zen-4-coder") {
-            Some("Frontier Zen coding model optimized for agentic workflows.")
+            Some("Zen coding model for multi-file edits and agentic workflows.")
         } else if model.eq_ignore_ascii_case("zen-4") {
-            Some("General purpose Zen model with broad knowledge and strong reasoning.")
+            Some("General-purpose Zen model; broad knowledge with strong reasoning.")
         } else {
             None
         }
