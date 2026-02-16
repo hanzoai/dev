@@ -336,12 +336,12 @@ static PRESETS: Lazy<Vec<ModelPreset>> = Lazy::new(|| {
             }),
             show_in_picker: false,
         },
-        // Hanzo Zen models (qwen3+ based, served via api.hanzo.ai)
+        // Zen models (qwen3+ based)
         ModelPreset {
             id: "zen-4-coder".to_string(),
             model: "zen-4-coder".to_string(),
             display_name: "zen-4-coder".to_string(),
-            description: "Frontier Zen coding model optimized for agentic workflows.".to_string(),
+            description: "Zen coding model for multi-file edits and agentic workflows.".to_string(),
             default_reasoning_effort: ReasoningEffort::Medium,
             supported_reasoning_efforts: vec![
                 ReasoningEffortPreset {
@@ -366,7 +366,7 @@ static PRESETS: Lazy<Vec<ModelPreset>> = Lazy::new(|| {
             id: "zen-4".to_string(),
             model: "zen-4".to_string(),
             display_name: "zen-4".to_string(),
-            description: "General purpose Zen model with broad knowledge and strong reasoning.".to_string(),
+            description: "General-purpose Zen model; broad knowledge with strong reasoning.".to_string(),
             default_reasoning_effort: ReasoningEffort::Medium,
             supported_reasoning_efforts: vec![
                 ReasoningEffortPreset {

@@ -3242,7 +3242,6 @@ async fn handle_function_call(
         "code_bridge" | "code_bridge_subscription" => {
             handle_code_bridge(sess, &ctx, arguments).await
         }
-        // ZAP native tools: filesystem, VCS, build, network, LSP — no MCP required.
         _ if name.starts_with("zap_") => {
             handle_zap_tool_call(sess, &name, arguments, call_id).await
         }
@@ -3267,11 +3266,6 @@ async fn handle_function_call(
     }
 }
 
-/// Dispatch a `zap_*` tool call to the ZAP native executor.
-///
-/// Strips the `zap_` prefix from the tool name, parses the JSON arguments,
-/// builds an [`hanzo_zap::ExecutorContext`] from the session state, and calls
-/// the dispatcher. Returns the result as a `FunctionCallOutput`.
 async fn handle_zap_tool_call(
     sess: &Session,
     prefixed_name: &str,
