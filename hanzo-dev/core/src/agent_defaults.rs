@@ -275,7 +275,7 @@ const AGENT_MODEL_SPECS: &[AgentModelSpec] = &[
         read_only_args: ZEN_4_CODER_READ_ONLY,
         write_args: ZEN_4_CODER_WRITE,
         model_args: &["--model", "zen-4-coder"],
-        description: "Hanzo Zen frontier coding agent; qwen3-based, strong at multi-file edits and agentic workflows.",
+        description: "Zen coding agent (qwen3-based); strong at multi-file edits and agentic workflows.",
         enabled_by_default: true,
         aliases: &[
             "zen-4",

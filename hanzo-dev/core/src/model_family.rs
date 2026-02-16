@@ -272,7 +272,7 @@ pub fn find_family_for_model(slug: &str) -> Option<ModelFamily> {
             max_output_tokens: Some(MAX_OUTPUT_DEFAULT),
         )
     } else if slug.starts_with("zen-") || slug.starts_with("zen4") || slug.starts_with("qwen") {
-        // Hanzo Zen models (qwen3+ based, served via api.hanzo.ai)
+        // Zen models (qwen3+ based)
         model_family!(
             slug, "zen-4",
             needs_special_apply_patch_instructions: true,

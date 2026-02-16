@@ -212,10 +212,6 @@ impl ToolDispatcher {
         self.category_map.get(category).cloned().unwrap_or_default()
     }
 
-    /// Return tool schemas for all registered tools.
-    ///
-    /// Looks up each registered tool name in `default_tools()` and returns the
-    /// matching `ToolDef` entries. Tools without a schema definition are skipped.
     pub fn all_tool_schemas(&self) -> Vec<ToolDef> {
         let all_defs = crate::tools::default_tools();
         let registered: std::collections::HashSet<&str> =

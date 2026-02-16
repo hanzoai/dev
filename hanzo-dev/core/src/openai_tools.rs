@@ -584,10 +584,6 @@ pub(crate) fn mcp_tool_to_openai_tool(
     })
 }
 
-/// Convert a ZAP [`hanzo_zap::ToolDef`] into a [`ResponsesApiTool`].
-///
-/// The tool name is prefixed with `zap_` so the model (and dispatch logic) can
-/// distinguish ZAP-native tools from built-in and MCP tools.
 fn zap_tool_to_openai_tool(
     tool_def: &hanzo_zap::ToolDef,
 ) -> Result<ResponsesApiTool, serde_json::Error> {
@@ -730,7 +726,6 @@ pub fn get_openai_tools(
     get_openai_tools_with_zap(config, mcp_tools, None, browser_enabled, _agents_active)
 }
 
-/// Like [`get_openai_tools`] but also accepts ZAP native tool definitions.
 pub fn get_openai_tools_with_zap(
     config: &ToolsConfig,
     mcp_tools: Option<HashMap<String, mcp_types::Tool>>,
@@ -815,11 +810,9 @@ pub fn get_openai_tools_with_zap(
         }
     }
 
-    // Add ZAP native tools (filesystem, VCS, build, network, LSP).
-    // These are prefixed with "zap_" to avoid collisions with built-in tools.
     if let Some(zap_tools) = zap_tools {
         for tool_def in zap_tools {
-            // Skip tools that duplicate built-in functionality.
+            // Skip tools that overlap with built-ins.
             if matches!(
                 tool_def.name.as_str(),
                 "exec"

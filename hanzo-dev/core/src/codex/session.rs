@@ -375,8 +375,6 @@ pub(crate) struct Session {
     pub(super) retention_config: crate::config_types::RetentionConfig,
     pub(super) model_descriptions: Option<String>,
 
-    /// ZAP native tool dispatcher for in-process filesystem, VCS, build,
-    /// network, and LSP tools — no MCP server required.
     pub(super) zap_dispatcher: std::sync::Arc<hanzo_zap::ToolDispatcher>,
 }
 pub(super) struct HookGuard<'a> {
