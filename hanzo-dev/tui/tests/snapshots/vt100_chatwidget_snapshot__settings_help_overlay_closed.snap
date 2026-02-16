@@ -1,5 +1,6 @@
 ---
 source: tui/tests/vt100_chatwidget_snapshot.rs
+assertion_line: 2304
 expression: closed
 ---
  +Settings ▸ Overview-----------------------------------------------------------------------------+
@@ -18,7 +19,7 @@ expression: closed
  |   Accounts           Auto-switch: On · API key fallback: Off                                   |
  |   + Configure account switching behavior under rate and usage limits.                          |
  |                                                                                                |
- |   Agents             Enabled: 11/12                                                            |
+ |   Agents             Enabled: 12/13                                                            |
  |   + Configure linked agents and default task permissions.                                      |
  |                                                                                                |
  |   Prompts            Prompts enabled: 0                                                        |

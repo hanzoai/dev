@@ -1,12 +1,12 @@
-## @hanzo/dev v0.6.71
+## @hanzo/dev v0.6.72
 
-This release adds Zen model support and ZAP-native tool wiring while carrying forward the latest upstream fixes.
+This release rolls in the latest upstream sync markers, Zen model copy refinements, and release metadata updates.
 
 ### Changes
-- Models: add `zen-4-coder` and `zen-4` presets in picker and model family routing.
-- Core: expose ZAP native tool schemas to tool selection and route `zap_*` calls through the in-process dispatcher.
-- Agent Defaults: add Zen aliases and tuned read/write presets for agent workflows.
-- Upstream: includes latest release metadata and app-server protocol/schema updates.
+- Upstream Sync: merge latest `just-every-local/main` into `main` while preserving fork stability.
+- Models: refine Zen model naming/description copy in presets and picker metadata.
+- Core: clean up comments/doc text in ZAP tool schema bridging and dispatcher paths.
+- Release: bump package/workspace versions to `0.6.72`.
 
 ### Install
 ```
