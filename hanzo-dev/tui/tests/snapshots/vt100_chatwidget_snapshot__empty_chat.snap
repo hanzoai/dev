@@ -1,5 +1,6 @@
 ---
 source: tui/tests/vt100_chatwidget_snapshot.rs
+assertion_line: 486
 expression: output
 ---
 
@@ -7,7 +8,7 @@ expression: output
 
 
 
- >_ hanzo dev (v0.6.67)
+ >_ hanzo dev (v0.6.72)
 
  What would you like to work on?
 
