@@ -67,6 +67,7 @@ impl OtelManager {
         account_id: Option<String>,
         account_email: Option<String>,
         auth_mode: Option<TelemetryAuthMode>,
+        originator: String,
         log_user_prompts: bool,
         terminal_type: String,
         session_source: SessionSource,
@@ -747,6 +748,7 @@ impl OtelManager {
             ResponseEvent::ReasoningSummaryPartAdded { .. } => {
                 "reasoning_summary_part_added".into()
             }
+            ResponseEvent::ServerModel(_) => "server_model".into(),
             ResponseEvent::ServerReasoningIncluded(_) => "server_reasoning_included".into(),
             ResponseEvent::RateLimits(_) => "rate_limits".into(),
             ResponseEvent::ModelsEtag(_) => "models_etag".into(),
