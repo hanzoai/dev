@@ -1,12 +1,13 @@
-## @hanzo/dev v0.6.72
+## @hanzo/dev v0.6.74
 
-This release rolls in the latest upstream sync markers, Zen model copy refinements, and release metadata updates.
+Sync latest from openai/codex and just-every/code upstreams. All Hanzo branding, zen model presets, zap integration, and custom features preserved.
 
 ### Changes
-- Upstream Sync: merge latest `just-every-local/main` into `main` while preserving fork stability.
-- Models: refine Zen model naming/description copy in presets and picker metadata.
-- Core: clean up comments/doc text in ZAP tool schema bridging and dispatcher paths.
-- Release: bump package/workspace versions to `0.6.72`.
+- Upstream Sync: merge latest `openai/codex` main (citation fix, Windows sandbox, file watcher, token refresh, memory/rollout improvements)
+- Upstream Sync: merge latest `just-every/code` main (v0.6.70, GPU landlock fix, search persistence, auto-drive routing)
+- ZAP: split transport into module with HTTP/SSE support
+- Core: refine zen model wording and cleanup comments
+- Release: bump package/workspace versions to `0.6.74`
 
 ### Install
 ```
