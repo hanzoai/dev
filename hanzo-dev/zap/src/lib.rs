@@ -116,6 +116,7 @@ pub use message::ToolResult;
 pub use tools::ToolCategory;
 pub use tools::ToolDef;
 pub use tools::default_tools;
+pub use transport::HttpTransport;
 pub use transport::ZapTransport;
 pub use wire::Reader;
 pub use wire::Writer;
