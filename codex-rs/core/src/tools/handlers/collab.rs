@@ -90,7 +90,7 @@ impl ToolHandler for CollabHandler {
 
 mod spawn {
     use super::*;
-    use crate::agent::AgentRole;
+    use crate::agent::role::apply_role_to_config;
 
     use crate::agent::exceeds_thread_spawn_depth_limit;
     use crate::agent::next_thread_spawn_depth;
@@ -100,7 +100,7 @@ mod spawn {
     struct SpawnAgentArgs {
         message: Option<String>,
         items: Option<Vec<UserInput>>,
-        agent_type: Option<AgentRole>,
+        agent_type: Option<String>,
     }
 
     #[derive(Debug, Serialize)]
@@ -115,7 +115,6 @@ mod spawn {
         arguments: String,
     ) -> Result<ToolOutput, FunctionCallError> {
         let args: SpawnAgentArgs = parse_arguments(&arguments)?;
-        let agent_role = args.agent_type.unwrap_or(AgentRole::Default);
         let input_items = parse_collab_input(args.message, args.items)?;
         let prompt = input_preview(&input_items);
         let session_source = turn.session_source.clone();
@@ -141,8 +140,8 @@ mod spawn {
             turn.as_ref(),
             child_depth,
         )?;
-        agent_role
-            .apply_to_config(&mut config)
+        apply_role_to_config(&mut config, args.agent_type.as_deref())
+            .await
             .map_err(FunctionCallError::RespondToModel)?;
 
         let result = session
@@ -980,6 +979,57 @@ mod tests {
                 "Provide either message or items, but not both".to_string()
             )
         );
+    }
+
+    #[tokio::test]
+    async fn spawn_agent_uses_explorer_role_and_sets_never_approval_policy() {
+        #[derive(Debug, Deserialize)]
+        struct SpawnAgentResult {
+            agent_id: String,
+        }
+
+        let (mut session, mut turn) = make_session_and_context().await;
+        let manager = thread_manager();
+        session.services.agent_control = manager.agent_control();
+        let mut config = (*turn.config).clone();
+        config
+            .permissions
+            .approval_policy
+            .set(AskForApproval::OnRequest)
+            .expect("approval policy should be set");
+        turn.config = Arc::new(config);
+
+        let invocation = invocation(
+            Arc::new(session),
+            Arc::new(turn),
+            "spawn_agent",
+            function_payload(json!({
+                "message": "inspect this repo",
+                "agent_type": "explorer"
+            })),
+        );
+        let output = MultiAgentHandler
+            .handle(invocation)
+            .await
+            .expect("spawn_agent should succeed");
+        let ToolOutput::Function {
+            body: FunctionCallOutputBody::Text(content),
+            ..
+        } = output
+        else {
+            panic!("expected function output");
+        };
+        let result: SpawnAgentResult =
+            serde_json::from_str(&content).expect("spawn_agent result should be json");
+        let agent_id = agent_id(&result.agent_id).expect("agent_id should be valid");
+        let snapshot = manager
+            .get_thread(agent_id)
+            .await
+            .expect("spawned agent thread should exist")
+            .config_snapshot()
+            .await;
+        assert_eq!(snapshot.model, "gpt-5.1-codex-mini");
+        assert_eq!(snapshot.approval_policy, AskForApproval::Never);
     }
 
     #[tokio::test]
