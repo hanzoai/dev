@@ -113,13 +113,6 @@ impl ContextManager {
         let base_tokens =
             i64::try_from(approx_token_count(&base_instructions.text)).unwrap_or(i64::MAX);
 
-    pub(crate) fn estimate_token_count_with_base_instructions(
-        &self,
-        base_instructions: &BaseInstructions,
-    ) -> Option<i64> {
-        let base_tokens =
-            i64::try_from(approx_token_count(&base_instructions.text)).unwrap_or(i64::MAX);
-
         let items_tokens = self
             .items
             .iter()

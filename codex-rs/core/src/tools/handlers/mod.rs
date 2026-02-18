@@ -1,7 +1,6 @@
 pub mod apply_patch;
 pub(crate) mod collab;
 mod dynamic;
-mod get_memory;
 mod grep_files;
 mod js_repl;
 mod list_dir;
@@ -13,7 +12,7 @@ mod request_user_input;
 mod search_tool_bm25;
 mod shell;
 mod test_sync;
-mod unified_exec;
+pub(crate) mod unified_exec;
 mod view_image;
 
 pub use plan::PLAN_TOOL;
@@ -23,7 +22,6 @@ use crate::function_tool::FunctionCallError;
 pub use apply_patch::ApplyPatchHandler;
 pub use collab::CollabHandler;
 pub use dynamic::DynamicToolHandler;
-pub use get_memory::GetMemoryHandler;
 pub use grep_files::GrepFilesHandler;
 pub use js_repl::JsReplHandler;
 pub use js_repl::JsReplResetHandler;
