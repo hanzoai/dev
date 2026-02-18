@@ -4,6 +4,10 @@
 //! - TCP (`zap://`)
 //! - TLS (`zaps://`)
 //! - Unix domain socket (`zap+unix://`)
+//! - HTTP/SSE (`http://`, `https://`) — default for Hanzo services
+
+pub mod http;
+pub use http::HttpTransport;
 
 use crate::buffer::Buffer;
 use crate::error::Error;
