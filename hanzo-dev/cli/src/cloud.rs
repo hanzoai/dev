@@ -19,7 +19,7 @@ use hanzo_tunnel::terminal::TerminalManager;
 use hanzo_tunnel::{AppKind, TunnelConfig, TunnelConnection};
 use std::sync::Arc;
 use tokio::sync::mpsc;
-use tracing::{info, warn};
+use tracing::{debug, info, warn};
 
 const DEFAULT_RELAY_URL: &str = "wss://api.hanzo.ai/v1/relay";
 const DEFAULT_GATEWAY_URL: &str = "ws://127.0.0.1:18789/v1/tunnel";
@@ -100,8 +100,9 @@ impl Drop for CloudHandle {
 
 /// Connect to the cloud relay or bot gateway if enabled.
 ///
-/// Connects via the tunnel protocol and spawns a background dispatch loop
-/// that handles incoming commands (terminal.*, system.*, dev.*).
+/// Connects via the tunnel protocol, waits for registration confirmation,
+/// and spawns a background dispatch loop that handles incoming commands
+/// (terminal.*, system.*, dev.*).
 pub async fn maybe_connect(args: &CloudArgs) -> Option<CloudHandle> {
     if !args.is_enabled() {
         return None;
@@ -129,10 +130,17 @@ pub async fn maybe_connect(args: &CloudArgs) -> Option<CloudHandle> {
         ..Default::default()
     };
 
-    match hanzo_tunnel::connect(config).await {
-        Ok(connection) => {
+    match hanzo_tunnel::connect_and_register(config).await {
+        Ok((connection, session_url)) => {
             let conn = Arc::new(connection);
-            info!(instance_id = %conn.instance_id, "registered with cloud");
+
+            if let Some(ref url) = session_url {
+                // Show the user where their instance is available.
+                eprintln!("\x1b[2m  cloud: {url}\x1b[0m");
+                info!(instance_id = %conn.instance_id, session_url = %url, "registered with cloud");
+            } else {
+                debug!(instance_id = %conn.instance_id, "connected (no session URL)");
+            }
 
             // Set up command dispatch — terminal sessions, system commands, dev launch.
             let (terminal_tx, terminal_rx) = mpsc::channel(256);
