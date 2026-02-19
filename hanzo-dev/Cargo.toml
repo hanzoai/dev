@@ -37,6 +37,7 @@ members = [
     "utils/readiness",
     "tunnel-bridge",
     "zap",
+    "zt",
 ]
 resolver = "2"
 
@@ -84,6 +85,7 @@ hanzo-utils-readiness = { path = "utils/readiness" }
 hanzo-auto-drive-core = { path = "code-auto-drive-core" }
 hanzo-tunnel-bridge = { path = "tunnel-bridge" }
 hanzo-zap = { path = "zap", version = "0.6.61" }
+hanzo-zt = { path = "zt" }
 mcp-types = { path = "mcp-types", package = "hanzo-mcp-types", version = "0.6.61" }
 upstream-mcp-types = { package = "codex-mcp-types", version = "0.63.0" }
 
