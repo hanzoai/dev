@@ -2682,6 +2682,8 @@ dependencies = [
  "hanzo-protocol-ts",
  "hanzo-responses-api-proxy",
  "hanzo-tui",
+ "hanzo-tunnel",
+ "hanzo-tunnel-bridge",
  "hanzo-version",
  "owo-colors",
  "regex",
@@ -3069,6 +3071,37 @@ dependencies = [
  "uuid",
  "vt100",
  "which",
+]
+
+[[package]]
+name = "hanzo-tunnel"
+version = "0.1.0"
+dependencies = [
+ "chrono",
+ "futures",
+ "http",
+ "serde",
+ "serde_json",
+ "thiserror 2.0.18",
+ "tokio",
+ "tokio-tungstenite",
+ "tracing",
+ "url",
+ "uuid",
+]
+
+[[package]]
+name = "hanzo-tunnel-bridge"
+version = "0.6.74"
+dependencies = [
+ "hanzo-app-server-protocol",
+ "hanzo-mcp-types",
+ "hanzo-tunnel",
+ "serde",
+ "serde_json",
+ "tokio",
+ "tracing",
+ "uuid",
 ]
 
 [[package]]
@@ -7457,9 +7490,11 @@ checksum = "c6989540ced10490aaf14e6bad2e3d33728a2813310a0c71d1574304c49631cd"
 dependencies = [
  "futures-util",
  "log",
+ "native-tls",
  "rustls",
  "rustls-pki-types",
  "tokio",
+ "tokio-native-tls",
  "tokio-rustls",
  "tungstenite",
  "webpki-roots 0.26.11",
@@ -7843,6 +7878,7 @@ dependencies = [
  "http",
  "httparse",
  "log",
+ "native-tls",
  "rand 0.8.5",
  "rustls",
  "rustls-pki-types",
