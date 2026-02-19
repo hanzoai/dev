@@ -1,0 +1,36 @@
+[package]
+name = "hanzo-zt"
+version.workspace = true
+edition.workspace = true
+description = "Zero Trust networking SDK with ZAP transport for Hanzo"
+license = "Apache-2.0"
+
+[dependencies]
+reqwest = { version = "0.12", features = ["json", "rustls-tls"], default-features = false }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+tokio = { version = "1", features = ["sync", "time", "io-util", "net"] }
+tracing = "0.1"
+thiserror = "2"
+url = "2"
+base64 = "0.22"
+chrono = { version = "0.4", features = ["serde"] }
+uuid = { version = "1", features = ["v4"] }
+async-trait = "0.1"
+pin-project-lite = "0.2"
+
+# Optional ZAP integration
+hanzo-zap = { package = "zap-schema", path = "../../../../zap/zap", optional = true }
+
+# Optional tunnel integration — uncomment when hanzo-tunnel crate exists
+# hanzo-tunnel = { path = "../../../../tunnel", optional = true }
+
+[dev-dependencies]
+tokio = { version = "1", features = ["full"] }
+wiremock = "0.6"
+
+[features]
+default = ["zap"]
+zap = ["dep:hanzo-zap"]
+tunnel = []
+# full = ["zap", "tunnel"]
