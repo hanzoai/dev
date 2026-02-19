@@ -111,6 +111,77 @@ Binary resolution: user cache -> optionalDependency package -> GitHub release do
 
 Primary config home: `~/.hanzo` (legacy `~/.code`/`~/.codex` still read).
 
+## Zero Trust SDK (`hanzo-zt`)
+
+Crate at `hanzo-dev/zt/` providing ZT overlay networking with ZAP transport.
+
+### Architecture
+
+```
+App → ZAP Client → ZT Transport → ZT Fabric → ZT Service
+          ↓                          ↓
+    Cap'n Proto RPC         x509 mTLS overlay
+    (zero-copy binary)      (NAT traversal built-in)
+```
+
+### Auth Flow
+
+1. Hanzo IAM JWT (from `HANZO_API_KEY` env or `~/.hanzo/auth.json`)
+2. JWT → ZT controller ext-jwt auth (`/edge/client/v1/authenticate?method=ext-jwt`)
+3. Controller returns ZT session token
+4. Commerce API balance check (no free tier)
+5. Session used to dial/bind services
+
+### Key Types
+
+| Type | Module | Purpose |
+|------|--------|---------|
+| `ZtContext` | `context.rs` | Main entry: authenticate, dial, listen, services |
+| `Config` / `ConfigBuilder` | `config.rs` | Controller URL, credentials, billing, timeouts |
+| `HanzoJwtCredentials` | `auth.rs` | Resolves JWT from env/file, implements Credentials |
+| `BillingGuard` | `billing.rs` | Balance check + usage recording (no free tier) |
+| `ZtTransport` | `transport.rs` | ZAP Transport trait impl (feature-gated `zap`) |
+| `ControllerClient` | `controller.rs` | REST client for `/edge/client/v1` |
+| `ZtConnection` | `connection.rs` | AsyncRead + AsyncWrite over channels |
+
+### Features
+
+- `zap` (default) — ZAP Transport trait impl, depends on `zap-schema`
+- `tunnel` — Reserved for future hanzo-tunnel integration
+
+### CLI Integration
+
+`hanzo-dev/cli/src/cloud.rs` has `#[cfg(feature = "zt")]` branch:
+- URLs starting with `zt://` use ZtContext.dial() instead of WebSocket
+- Feature `zt = ["dep:hanzo-zt"]` in cli's Cargo.toml
+
+### Testing
+
+```bash
+cargo check -p hanzo-zt       # 0 warnings
+cargo test -p hanzo-zt        # 9 tests (auth, config, controller, doctest)
+```
+
+### Cross-Language SDK Suite
+
+All SDKs follow the same pattern (ZT REST API + ZAP framing + Hanzo IAM + billing):
+
+| Language | Location | Status |
+|----------|----------|--------|
+| **Rust** | `hanzo-dev/zt/` | 9 tests pass, 0 warnings |
+| **Go** | `~/work/hanzozt/sdk-golang/{zap,auth/hanzo,billing}/` | 5 tests pass (fork deps need module path fix) |
+| **TypeScript** | `~/work/hanzozt/zt-sdk-nodejs/src/{zap,auth,billing}/` | Complete |
+| **Python** | `~/work/hanzozt/zt-sdk-py/hanzozt/{zap,auth,billing}/` | 11 tests pass |
+| **C++** | `~/work/hanzozt/zt-sdk-cpp/` | Builds clean (CMake + libzt) |
+| **C** | `~/work/hanzozt/zt-sdk-c/{includes/zt/zt_zap.h,library/zt_zap.c}` | Syntax checks pass |
+
+ZAP `zt://` scheme registered at `~/work/zap/zap/src/transport.rs` (7 tests pass, feature-gated).
+
+### Known Issues
+
+- Go SDK: `hanzozt` fork deps still declare `openziti` module paths in go.mod
+- Tunnel feature: path to `hanzo-tunnel` crate TBD (commented out in Cargo.toml)
+
 ## Rules for AI Assistants
 
 1. ALWAYS update LLM.md with significant discoveries
