@@ -44,6 +44,8 @@ hanzo-responses-api-proxy = { workspace = true }
 hanzo-tui = { workspace = true }
 hanzo-version = { path = "../code-version" }
 hanzo-cloud-tasks = { workspace = true }
+hanzo-tunnel = { path = "../../../tunnel" }
+hanzo-tunnel-bridge = { workspace = true }
 ctor = { workspace = true }
 futures = { workspace = true }
 reqwest = { version = "0.12", default-features = false, features = ["rustls-tls", "gzip", "json"] }

@@ -24,6 +24,8 @@ use copilot_cmd::CopilotArgs;
 use copilot_cmd::execute_copilot_command;
 use hanzo_cloud_tasks::Cli as CloudTasksCli;
 use hanzo_common::CliConfigOverrides;
+mod cloud;
+use cloud::CloudArgs;
 use hanzo_core::SessionCatalog;
 use hanzo_core::SessionQuery;
 use hanzo_core::entry_to_rollout_path;
@@ -103,6 +105,11 @@ struct MultitoolCli {
     /// Ignore API key env vars and force non-env auth resolution.
     #[clap(long = "ignore-api-keys", global = true, default_value_t = false)]
     ignore_api_keys: bool,
+
+    /// Connect to the Hanzo cloud relay for remote management from app.hanzo.bot.
+    /// Also enabled by HANZO_CLOUD=1. Optionally pass a URL: --cloud wss://...
+    #[clap(flatten)]
+    cloud: CloudArgs,
 
     #[clap(subcommand)]
     subcommand: Option<Subcommand>,
@@ -430,6 +437,7 @@ async fn cli_main(code_linux_sandbox_exe: Option<PathBuf>) -> anyhow::Result<()>
         auto_drive,
         demo_developer_message,
         ignore_api_keys,
+        cloud: cloud_args,
         subcommand,
     } = MultitoolCli::parse();
 
@@ -458,6 +466,9 @@ async fn cli_main(code_linux_sandbox_exe: Option<PathBuf>) -> anyhow::Result<()>
         }
         _ => None,
     };
+
+    // Spawn cloud tunnel connection if --cloud or HANZO_CLOUD=1.
+    let _cloud_handle = cloud::maybe_connect(&cloud_args).await;
 
     match subcommand {
         None => {
