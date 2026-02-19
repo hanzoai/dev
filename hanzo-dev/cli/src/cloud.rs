@@ -21,6 +21,9 @@ use std::sync::Arc;
 use tokio::sync::mpsc;
 use tracing::{debug, info, warn};
 
+#[cfg(feature = "zt")]
+use hanzo_zt::{ZtContext, ConfigBuilder, HanzoJwtCredentials};
+
 const DEFAULT_RELAY_URL: &str = "wss://api.hanzo.ai/v1/relay";
 const DEFAULT_GATEWAY_URL: &str = "ws://127.0.0.1:18789/v1/tunnel";
 
@@ -114,6 +117,38 @@ pub async fn maybe_connect(args: &CloudArgs) -> Option<CloudHandle> {
     if auth_token.is_empty() {
         warn!("no auth token found for cloud tunnel (set HANZO_API_KEY or run `dev login`)");
         return None;
+    }
+
+    #[cfg(feature = "zt")]
+    if relay_url.starts_with("zt://") {
+        let service_name = relay_url.strip_prefix("zt://").unwrap_or("hanzo-relay");
+        tracing::info!(%service_name, "connecting via ZT fabric");
+
+        let creds = HanzoJwtCredentials::resolve()
+            .map_err(|e| format!("ZT auth failed: {e}"))
+            .ok()?;
+
+        let config = ConfigBuilder::new()
+            .controller_url("https://zt-api.hanzo.ai")
+            .credentials(creds)
+            .billing(true)
+            .build()
+            .map_err(|e| format!("ZT config error: {e}"))
+            .ok()?;
+
+        let ctx = ZtContext::new(config).await
+            .map_err(|e| format!("ZT init failed: {e}"))
+            .ok()?;
+        ctx.authenticate().await
+            .map_err(|e| format!("ZT auth failed: {e}"))
+            .ok()?;
+
+        let conn = ctx.dial(service_name).await
+            .map_err(|e| format!("ZT dial failed: {e}"))
+            .ok()?;
+
+        tracing::info!("connected to ZT service: {service_name}");
+        // TODO: Wire ZT connection into tunnel transport
     }
 
     info!(relay_url = %relay_url, "connecting to cloud");
