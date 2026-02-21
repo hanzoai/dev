@@ -10,7 +10,7 @@
 # Options:
 #   --dev          Install development dependencies and build from source
 #   --prod         Production mode (use pre-built binaries) [default]
-#   --components   Comma-separated list: dev,llm,chat,mcp,hanzod (default: dev,mcp)
+#   --components   Comma-separated list: dev,cli,llm,chat,mcp,hanzod (default: dev,cli,mcp)
 #   --no-docker    Skip Docker-based services
 #   --uninstall    Remove Hanzo installation
 #   --version      Show version information
@@ -55,7 +55,7 @@ HANZO_LOGS="${HANZO_LOGS:-$HANZO_HOME/logs}"
 
 # Default options
 MODE="prod"
-COMPONENTS="dev,mcp"
+COMPONENTS="dev,cli,mcp"
 SKIP_DOCKER=false
 VERBOSE=false
 QUIET=false
@@ -126,7 +126,7 @@ OPTIONS:
     --dev               Development mode (build from source)
     --prod              Production mode (pre-built binaries) [default]
     --components LIST   Components to install (comma-separated)
-                        Available: dev,llm,chat,mcp,hanzod,all
+                        Available: dev,cli,llm,chat,mcp,hanzod,all
                         Default: dev,mcp
     --no-docker         Skip Docker-based services (llm, chat)
     --uninstall         Remove Hanzo installation
@@ -138,6 +138,7 @@ OPTIONS:
 
 COMPONENTS:
     dev                 Hanzo Dev CLI - AI coding assistant
+    cli                 Hanzo Python CLI - Unified platform CLI (hanzo command)
     llm                 LLM Gateway - Unified proxy for 100+ LLM providers
     chat                Hanzo Chat - LibreChat fork with MCP integration
     mcp                 MCP Tools - Model Context Protocol server
@@ -830,6 +831,38 @@ ENV
     log_success "Hanzo Chat installed"
 }
 
+# Install Hanzo Python CLI
+install_hanzo_cli() {
+    log_step "Installing Hanzo CLI (Python)..."
+
+    # Ensure Python and uv are available
+    install_python
+
+    if check_command uv; then
+        log_info "Installing via uv..."
+        uv tool install "hanzo[all]" --force 2>/dev/null && {
+            log_success "Hanzo CLI installed via uv"
+            return 0
+        }
+        # Fallback: uv pip
+        uv pip install --system "hanzo[all]" 2>/dev/null && {
+            log_success "Hanzo CLI installed via uv pip"
+            return 0
+        }
+    fi
+
+    if check_command pip3; then
+        log_info "Installing via pip3..."
+        pip3 install "hanzo[all]" 2>/dev/null && {
+            log_success "Hanzo CLI installed via pip3"
+            return 0
+        }
+    fi
+
+    log_warn "Failed to install Hanzo CLI - install manually: pip install hanzo[all]"
+    return 1
+}
+
 # Install Hanzod
 install_hanzod() {
     log_step "Installing Hanzod..."
@@ -1048,11 +1081,11 @@ parse_args() {
 
     # Handle 'all' components
     if [[ "$COMPONENTS" == "all" ]]; then
-        COMPONENTS="dev,llm,chat,mcp,hanzod"
+        COMPONENTS="dev,cli,llm,chat,mcp,hanzod"
     fi
 
     # Validate components
-    local valid_components="dev llm chat mcp hanzod"
+    local valid_components="dev cli llm chat mcp hanzod"
     for component in ${COMPONENTS//,/ }; do
         # shellcheck disable=SC2076
         if [[ ! " $valid_components " =~ " $component " ]]; then
@@ -1080,6 +1113,16 @@ verify_installation() {
             log_success "dev CLI found in PATH"
         else
             log_warn "dev CLI not found - may need shell restart"
+            failed=true
+        fi
+    fi
+
+    # Check Hanzo CLI if installed
+    if [[ "$COMPONENTS" == *"cli"* ]]; then
+        if check_command hanzo; then
+            log_success "Hanzo CLI found in PATH"
+        else
+            log_warn "Hanzo CLI not found - may need shell restart"
             failed=true
         fi
     fi
@@ -1147,6 +1190,11 @@ main() {
     install_system_deps
     install_nodejs
 
+    # Install Python if CLI component requested
+    if [[ "$COMPONENTS" == *"cli"* ]]; then
+        install_python
+    fi
+
     # Install optional dependencies based on mode
     if [[ "$MODE" == "dev" ]]; then
         install_rust
@@ -1169,6 +1217,9 @@ main() {
                 ;;
             chat)
                 install_chat || install_failed=true
+                ;;
+            cli)
+                install_hanzo_cli || install_failed=true
                 ;;
             mcp)
                 install_mcp || install_failed=true
