@@ -3,8 +3,8 @@
 # Supports macOS (arm64/x64) and Linux (x64/arm64)
 #
 # Usage:
-#   curl -fsSL https://get.hanzo.ai | bash
-#   curl -fsSL https://get.hanzo.ai | bash -s -- --components all
+#   curl -fsSL https://hanzo.sh | bash
+#   curl -fsSL https://hanzo.sh | bash -s -- --components all
 #   ./hanzo.sh [options]
 #
 # Options:
@@ -99,7 +99,7 @@ print_banner() {
  / __  / /_/ / / / / / /_/ /_/ /
 /_/ /_/\__,_/_/ /_/ /___/\____/
 
-    AI Infrastructure Platform
+    AI Development Platform
 EOF
     echo -e "${NC}"
     echo -e "${BOLD}Hanzo Full-Stack Installer v${SCRIPT_VERSION}${NC}"
@@ -119,8 +119,8 @@ Hanzo Full-Stack Installation Script
 
 USAGE:
     hanzo.sh [OPTIONS]
-    curl -fsSL https://get.hanzo.ai | bash
-    curl -fsSL https://get.hanzo.ai | bash -s -- [OPTIONS]
+    curl -fsSL https://hanzo.sh | bash
+    curl -fsSL https://hanzo.sh | bash -s -- [OPTIONS]
 
 OPTIONS:
     --dev               Development mode (build from source)
@@ -163,7 +163,7 @@ EXAMPLES:
     ./hanzo.sh --prod --components dev,llm,chat
 
     # Scripted install (quiet mode)
-    curl -fsSL https://get.hanzo.ai | bash -s -- --quiet --force
+    curl -fsSL https://hanzo.sh | bash -s -- --quiet --force
 
     # Uninstall
     ./hanzo.sh --uninstall
