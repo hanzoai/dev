@@ -177,10 +177,22 @@ All SDKs follow the same pattern (ZT REST API + ZAP framing + Hanzo IAM + billin
 
 ZAP `zt://` scheme registered at `~/work/zap/zap/src/transport.rs` (7 tests pass, feature-gated).
 
+### Documentation Site (`zt-docs`)
+
+Full docs app at `~/work/hanzo/docs/apps/zt-docs/` → `zerotrust.hanzo.ai`
+
+- 16 static pages: landing + 12 docs pages + sitemap + 404
+- ~4,900 lines of documentation across 12 MDX files
+- SDK docs: Rust (436L), Go (902L), TypeScript (908L), Python (606L), C++ (587L), C (655L)
+- Core docs: Overview, Getting Started, Architecture, Integration
+- Build: `pnpm build --webpack` (static export), dev on port 3004
+- DNS: `zerotrust.hanzo.ai` A → `24.199.76.156` (hanzo-k8s LB), CF proxied
+
 ### Known Issues
 
 - Go SDK: `hanzozt` fork deps still declare `openziti` module paths in go.mod
 - Tunnel feature: path to `hanzo-tunnel` crate TBD (commented out in Cargo.toml)
+- K8s ingress for `zerotrust.hanzo.ai` not yet created (DNS points to LB but no ingress rule)
 
 ## Rules for AI Assistants
 
