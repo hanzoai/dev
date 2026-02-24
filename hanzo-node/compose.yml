@@ -137,21 +137,21 @@ services:
 
   # IAM Service (Casdoor) - Optional authentication provider
   iam-db:
-    image: mysql:8.0
-    platform: linux/amd64
+    image: ghcr.io/hanzoai/sql:latest
     container_name: hanzo-iam-db
     profiles:
       - iam
     restart: unless-stopped
     environment:
-      MYSQL_ROOT_PASSWORD: ${IAM_DB_PASSWORD:-hanzo123}
-      MYSQL_DATABASE: hanzo_node
+      POSTGRES_USER: hanzo
+      POSTGRES_PASSWORD: ${IAM_DB_PASSWORD:-hanzo}
+      POSTGRES_DB: hanzo_iam
     ports:
-      - "${IAM_DB_PORT:-3306}:3306"
+      - "${IAM_DB_PORT:-5433}:5432"
     volumes:
-      - iam-db-data:/var/lib/mysql
+      - iam-db-data:/var/lib/postgresql/data
     healthcheck:
-      test: ["CMD", "mysqladmin", "ping", "-h", "localhost", "-u", "root", "-p${IAM_DB_PASSWORD:-hanzo123}"]
+      test: ["CMD-SHELL", "pg_isready -U hanzo -d hanzo_iam"]
       interval: 10s
       timeout: 5s
       retries: 10
@@ -160,7 +160,7 @@ services:
       - hanzo-network
 
   iam-redis:
-    image: redis:7-alpine
+    image: ghcr.io/hanzoai/kv:latest
     container_name: hanzo-iam-redis
     profiles:
       - iam
@@ -178,8 +178,7 @@ services:
       - hanzo-network
 
   iam:
-    image: casbin/casdoor:latest
-    platform: linux/amd64
+    image: ghcr.io/hanzoai/iam:latest
     container_name: hanzo-iam
     profiles:
       - iam
