@@ -62,6 +62,7 @@ pub(crate) async fn handle_create_conversation(
         experimental_client_tools: None,
         compact_prompt_override: None,
         compact_prompt_override_file: None,
+        wire_api: None,
     };
 
     let cfg: CodexConfig = match CodexConfig::load_with_cli_overrides(cli_overrides, overrides) {

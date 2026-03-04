@@ -852,6 +852,7 @@ pub struct ConfigOverrides {
     pub experimental_client_tools: Option<ClientTools>,
     pub compact_prompt_override: Option<String>,
     pub compact_prompt_override_file: Option<PathBuf>,
+    pub wire_api: Option<crate::WireApi>,
 }
 
 impl Config {
@@ -889,6 +890,7 @@ impl Config {
             experimental_client_tools,
             compact_prompt_override,
             compact_prompt_override_file,
+            wire_api,
         } = overrides;
 
         if let Some(mcp_servers) = mcp_servers {
@@ -929,7 +931,7 @@ impl Config {
             .or(config_profile.model_provider)
             .or(cfg.model_provider)
             .unwrap_or_else(|| "hanzo".to_string());
-        let model_provider = model_providers
+        let mut model_provider = model_providers
             .get(&model_provider_id)
             .ok_or_else(|| {
                 std::io::Error::new(
@@ -938,6 +940,11 @@ impl Config {
                 )
             })?
             .clone();
+
+        // Apply wire API override from CLI flag.
+        if let Some(api) = wire_api {
+            model_provider.wire_api = api;
+        }
 
         // Capture workspace-write details early to avoid borrow after partial moves
         let cfg_workspace = cfg.sandbox_workspace_write.clone();
@@ -2617,6 +2624,7 @@ model_verbosity = "high"
         let overrides = ConfigOverrides {
             cwd: Some(fixture.cwd()),
             compact_prompt_override_file: Some(file.path().to_path_buf()),
+            wire_api: None,
             ..Default::default()
         };
 
