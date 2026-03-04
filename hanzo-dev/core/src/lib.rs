@@ -20,6 +20,8 @@ mod bridge_client;
 mod chat_completions;
 mod client;
 mod client_common;
+mod zap_client;
+mod zap_wire;
 mod code_conversation;
 pub mod codex;
 pub mod token_data;
