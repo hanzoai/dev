@@ -73,6 +73,7 @@ async fn run_command_under_sandbox(
             code_linux_sandbox_exe,
             compact_prompt_override: None,
             compact_prompt_override_file: None,
+            wire_api: None,
             ..Default::default()
         },
     )?;

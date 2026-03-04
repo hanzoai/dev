@@ -667,6 +667,7 @@ fn derive_config_from_params(
         experimental_client_tools: None,
         compact_prompt_override: None,
         compact_prompt_override_file: None,
+        wire_api: None,
     };
 
     let cli_overrides = cli_overrides

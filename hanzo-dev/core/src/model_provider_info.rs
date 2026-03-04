@@ -44,6 +44,11 @@ pub enum WireApi {
     /// Regular Chat Completions compatible with `/v1/chat/completions`.
     #[default]
     Chat,
+
+    /// Native ZAP binary transport over TLS 1.3+PQ.
+    /// Connects to zap.hanzo.ai:9651 (or ZAP_ENDPOINT env) and sends
+    /// chat completions as MsgType 100 (native cloud service) messages.
+    Zap,
 }
 
 /// Serializable representation of a provider definition.
@@ -321,6 +326,11 @@ impl ModelProviderInfo {
                 format!("{base_url}/responses{query_string}")
             }
             WireApi::Chat => format!("{base_url}/chat/completions{query_string}"),
+            WireApi::Zap => {
+                // ZAP transport uses a separate endpoint; the URL here is used
+                // for fallback/display only. Actual connection goes to ZAP_ENDPOINT.
+                format!("{base_url}/chat/completions{query_string}")
+            }
         }
     }
 
@@ -483,6 +493,7 @@ fn wire_api_override_from_env(env_key: &str) -> Option<WireApi> {
             "chat" => Some(WireApi::Chat),
             "responses" => Some(WireApi::Responses),
             "responses_websocket" => Some(WireApi::ResponsesWebsocket),
+            "zap" => Some(WireApi::Zap),
             other if !other.is_empty() => {
                 tracing::warn!(
                     "Ignoring unknown {env_key} value '{other}'; falling back to default wire API"
@@ -611,7 +622,8 @@ pub fn built_in_model_providers() -> HashMap<String, ModelProviderInfo> {
                     "Log in with `dev /login` or set HANZO_API_KEY from https://hanzo.ai".into(),
                 ),
                 experimental_bearer_token: None,
-                wire_api: WireApi::Chat,
+                wire_api: wire_api_override_from_env("HANZO_WIRE_API")
+                    .unwrap_or(WireApi::Chat),
                 query_params: None,
                 http_headers: None,
                 env_http_headers: None,

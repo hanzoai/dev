@@ -15,31 +15,111 @@ use crate::error::Result;
 use crate::message::MessageType;
 use crate::wire::MAX_MESSAGE_SIZE;
 use crate::wire::parse_frame;
+use std::sync::Arc;
+use tokio::io::AsyncRead;
 use tokio::io::AsyncReadExt;
+use tokio::io::AsyncWrite;
 use tokio::io::AsyncWriteExt;
 use tokio::net::TcpStream;
 use tracing::debug;
 use tracing::trace;
 
-/// A ZAP transport connection.
+/// Inner stream — either plain TCP or TLS.
+enum StreamInner {
+    Tcp(TcpStream),
+    Tls(tokio_rustls::client::TlsStream<TcpStream>),
+}
+
+impl AsyncRead for StreamInner {
+    fn poll_read(
+        self: std::pin::Pin<&mut Self>,
+        cx: &mut std::task::Context<'_>,
+        buf: &mut tokio::io::ReadBuf<'_>,
+    ) -> std::task::Poll<std::io::Result<()>> {
+        match self.get_mut() {
+            StreamInner::Tcp(s) => std::pin::Pin::new(s).poll_read(cx, buf),
+            StreamInner::Tls(s) => std::pin::Pin::new(s).poll_read(cx, buf),
+        }
+    }
+}
+
+impl AsyncWrite for StreamInner {
+    fn poll_write(
+        self: std::pin::Pin<&mut Self>,
+        cx: &mut std::task::Context<'_>,
+        buf: &[u8],
+    ) -> std::task::Poll<std::io::Result<usize>> {
+        match self.get_mut() {
+            StreamInner::Tcp(s) => std::pin::Pin::new(s).poll_write(cx, buf),
+            StreamInner::Tls(s) => std::pin::Pin::new(s).poll_write(cx, buf),
+        }
+    }
+
+    fn poll_flush(
+        self: std::pin::Pin<&mut Self>,
+        cx: &mut std::task::Context<'_>,
+    ) -> std::task::Poll<std::io::Result<()>> {
+        match self.get_mut() {
+            StreamInner::Tcp(s) => std::pin::Pin::new(s).poll_flush(cx),
+            StreamInner::Tls(s) => std::pin::Pin::new(s).poll_flush(cx),
+        }
+    }
+
+    fn poll_shutdown(
+        self: std::pin::Pin<&mut Self>,
+        cx: &mut std::task::Context<'_>,
+    ) -> std::task::Poll<std::io::Result<()>> {
+        match self.get_mut() {
+            StreamInner::Tcp(s) => std::pin::Pin::new(s).poll_shutdown(cx),
+            StreamInner::Tls(s) => std::pin::Pin::new(s).poll_shutdown(cx),
+        }
+    }
+}
+
+/// A ZAP transport connection. Supports both plain TCP and TLS 1.3.
 pub struct ZapTransport {
-    stream: TcpStream,
+    stream: StreamInner,
     read_buf: Vec<u8>,
     write_buf: Buffer,
 }
 
 impl ZapTransport {
     /// Connect to a ZAP server.
+    ///
+    /// URL schemes:
+    /// - `zap://host:port` — plain TCP
+    /// - `zaps://host:port` — TLS 1.3 (with PQ key exchange when available)
     pub async fn connect(url: &str) -> Result<Self> {
-        let (host, port, _tls) = parse_url(url)?;
+        let (host, port, tls) = parse_url(url)?;
 
-        debug!("connecting to {}:{}", host, port);
-        let stream = TcpStream::connect(format!("{}:{}", host, port))
+        debug!("connecting to {}:{} (tls={})", host, port, tls);
+        let tcp_stream = TcpStream::connect(format!("{}:{}", host, port))
             .await
             .map_err(|e| Error::Connection(e.to_string()))?;
+        tcp_stream.set_nodelay(true).ok();
 
-        // Set TCP options for low latency
-        stream.set_nodelay(true).ok();
+        let stream = if tls {
+            let mut root_store = rustls::RootCertStore::empty();
+            root_store.extend(webpki_roots::TLS_SERVER_ROOTS.iter().cloned());
+
+            let config = rustls::ClientConfig::builder()
+                .with_root_certificates(root_store)
+                .with_no_client_auth();
+
+            let connector = tokio_rustls::TlsConnector::from(Arc::new(config));
+            let server_name = rustls::pki_types::ServerName::try_from(host.clone())
+                .map_err(|e| Error::Connection(format!("invalid server name: {e}")))?;
+
+            let tls_stream = connector
+                .connect(server_name, tcp_stream)
+                .await
+                .map_err(|e| Error::Connection(format!("TLS handshake failed: {e}")))?;
+
+            debug!("TLS 1.3 connection established to {}:{}", host, port);
+            StreamInner::Tls(tls_stream)
+        } else {
+            StreamInner::Tcp(tcp_stream)
+        };
 
         Ok(Self {
             stream,

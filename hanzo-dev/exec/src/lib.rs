@@ -301,6 +301,7 @@ pub async fn run_main(cli: Cli, code_linux_sandbox_exe: Option<PathBuf>) -> anyh
         experimental_client_tools: None,
         compact_prompt_override: None,
         compact_prompt_override_file: None,
+        wire_api: None,
     };
     // Parse `-c` overrides.
     let cli_kv_overrides = match config_overrides.parse_overrides() {

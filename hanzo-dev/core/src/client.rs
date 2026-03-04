@@ -444,6 +444,94 @@ impl ModelClient {
         match self.provider.wire_api {
             WireApi::Responses => self.stream_responses(prompt, log_tag).await,
             WireApi::ResponsesWebsocket => self.stream_responses_websocket(prompt, log_tag).await,
+            // Native ZAP binary transport to zap.hanzo.ai:9651.
+            // Uses luxfi/zap wire protocol: TLS connect → handshake →
+            // MsgType 100 Call (method="chat.completions") → parse response.
+            WireApi::Zap => {
+                debug!("ZAP transport: native binary protocol");
+
+                let model_slug = prompt
+                    .model_override
+                    .as_deref()
+                    .unwrap_or(self.config.model.as_str());
+
+                // Get auth token
+                let auth_manager = self.auth_manager.clone();
+                let auth = auth_manager.as_ref().and_then(|m| m.auth());
+                let token = match auth.as_ref() {
+                    Some(a) => a
+                        .get_token()
+                        .await
+                        .map_err(|e| CodeErr::ServerError(format!("ZAP auth: {e}")))?,
+                    None => {
+                        return Err(CodeErr::ServerError(
+                            AUTH_REQUIRED_MESSAGE.to_string(),
+                        ))
+                    }
+                };
+
+                // Build messages array from prompt input
+                let effective_family = prompt
+                    .model_family_override
+                    .as_ref()
+                    .unwrap_or(&self.config.model_family);
+                let full_instructions = prompt.get_full_instructions(effective_family);
+                let mut messages = vec![serde_json::json!({
+                    "role": "system",
+                    "content": full_instructions
+                })];
+
+                let input = prompt.get_formatted_input();
+                for item in &input {
+                    match item {
+                        hanzo_protocol::models::ResponseItem::Message {
+                            role, content, ..
+                        } => {
+                            let text_parts: Vec<&str> = content
+                                .iter()
+                                .filter_map(|c| match c {
+                                    hanzo_protocol::models::ContentItem::InputText {
+                                        text,
+                                    } => Some(text.as_str()),
+                                    hanzo_protocol::models::ContentItem::OutputText {
+                                        text,
+                                        ..
+                                    } => Some(text.as_str()),
+                                    _ => None,
+                                })
+                                .collect();
+                            if !text_parts.is_empty() {
+                                messages.push(serde_json::json!({
+                                    "role": role,
+                                    "content": text_parts.join("\n")
+                                }));
+                            }
+                        }
+                        hanzo_protocol::models::ResponseItem::CompactionSummary {
+                            encrypted_content,
+                            ..
+                        } => {
+                            messages.push(serde_json::json!({
+                                "role": "assistant",
+                                "content": encrypted_content
+                            }));
+                        }
+                        _ => {}
+                    }
+                }
+
+                // ZAP endpoint from env (default: zap.hanzo.ai:9651)
+                let endpoint = std::env::var("ZAP_ENDPOINT").ok();
+
+                crate::zap_client::stream_zap(
+                    model_slug,
+                    serde_json::Value::Array(messages),
+                    &token,
+                    endpoint.as_deref(),
+                    None,
+                )
+                .await
+            }
             WireApi::Chat => {
                 let effective_family = prompt
                     .model_family_override
