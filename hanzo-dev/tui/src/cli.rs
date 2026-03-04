@@ -24,6 +24,11 @@ pub struct Cli {
     #[arg(long, short = 'm')]
     pub model: Option<String>,
 
+    /// Wire protocol for LLM communication.
+    /// Options: chat (default), responses, responses_websocket, zap (native binary).
+    #[arg(long = "wire-api", value_name = "PROTOCOL")]
+    pub wire_api: Option<String>,
+
     /// Convenience flag to select the local open source model provider.
     /// Equivalent to -c model_provider=oss; verifies a local Ollama server is
     /// running.

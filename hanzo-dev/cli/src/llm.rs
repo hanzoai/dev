@@ -84,6 +84,7 @@ async fn run_llm_request(
             model: Some(model.clone()),
             compact_prompt_override: None,
             compact_prompt_override_file: None,
+            wire_api: None,
             ..ConfigOverrides::default()
         }
     } else {

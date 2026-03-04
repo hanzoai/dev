@@ -448,6 +448,13 @@ pub async fn run_main(
         experimental_client_tools: None,
         compact_prompt_override: cli.compact_prompt_override.clone(),
         compact_prompt_override_file: cli.compact_prompt_file.clone(),
+        wire_api: cli.wire_api.as_deref().and_then(|v| match v {
+            "chat" => Some(hanzo_core::WireApi::Chat),
+            "responses" => Some(hanzo_core::WireApi::Responses),
+            "responses_websocket" => Some(hanzo_core::WireApi::ResponsesWebsocket),
+            "zap" => Some(hanzo_core::WireApi::Zap),
+            _ => None,
+        }),
     };
 
     // Parse `-c` overrides from the CLI.
@@ -1328,6 +1335,7 @@ mod tests {
             cwd: Some(workspace.path().to_path_buf()),
             compact_prompt_override: None,
             compact_prompt_override_file: None,
+            wire_api: None,
             ..Default::default()
         };
 

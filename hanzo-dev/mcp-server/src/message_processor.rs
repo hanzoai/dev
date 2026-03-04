@@ -978,6 +978,7 @@ impl MessageProcessor {
             experimental_client_tools: client_tools,
             compact_prompt_override: None,
             compact_prompt_override_file: None,
+            wire_api: None,
             ..Default::default()
         };
 
