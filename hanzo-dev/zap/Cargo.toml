@@ -49,6 +49,11 @@ hanzo-protocol = { workspace = true }
 # Utilities
 bytes = { workspace = true }
 
+# TLS 1.3 support for ZAP transport (zaps:// scheme)
+tokio-rustls = "0.26"
+rustls = { version = "0.23", default-features = false, features = ["std", "tls12", "ring"] }
+webpki-roots = "0.26"
+
 # Executor dependencies
 async-trait = "0.1"
 reqwest = { version = "0.12", features = ["json"] }
