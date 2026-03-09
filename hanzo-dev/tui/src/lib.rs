@@ -1,103 +1,104 @@
 // Forbid accidental stdout/stderr writes in the *library* portion of the TUI.
 // The standalone `codex-tui` binary prints a short help message before the
 // alternate‑screen mode starts; that file opts‑out locally via `allow`.
-// Changed from deny to warn for gradual cleanup.
-#![warn(clippy::print_stdout, clippy::print_stderr)]
-#![warn(clippy::disallowed_methods)]
+#![deny(clippy::print_stdout, clippy::print_stderr)]
+#![deny(clippy::disallowed_methods)]
 use app::App;
-use hanzo_common::model_presets::HIDE_GPT_5_1_CODEX_MAX_MIGRATION_PROMPT_CONFIG;
-use hanzo_common::model_presets::HIDE_GPT_5_2_MIGRATION_PROMPT_CONFIG;
-use hanzo_common::model_presets::HIDE_GPT5_1_MIGRATION_PROMPT_CONFIG;
-use hanzo_common::model_presets::ModelPreset;
-use hanzo_common::model_presets::all_model_presets;
-use hanzo_core::BUILT_IN_OSS_MODEL_PROVIDER_ID;
-use hanzo_core::config::Config;
-use hanzo_core::config::ConfigOverrides;
-use hanzo_core::config::ConfigToml;
-use hanzo_core::config::find_code_home;
-use hanzo_core::config::load_config_as_toml;
-use hanzo_core::config::load_config_as_toml_with_cli_overrides;
-use hanzo_core::config::set_cached_terminal_background;
-use hanzo_core::config_edit::CONFIG_KEY_EFFORT;
-use hanzo_core::config_edit::CONFIG_KEY_MODEL;
-use hanzo_core::config_edit::{self};
-use hanzo_core::config_types::CachedTerminalBackground;
-use hanzo_core::config_types::Notice;
-use hanzo_core::config_types::ReasoningEffort;
-use hanzo_core::config_types::ThemeColors;
-use hanzo_core::config_types::ThemeConfig;
-use hanzo_core::config_types::ThemeName;
-use hanzo_core::protocol::AskForApproval;
-use hanzo_core::protocol::SandboxPolicy;
-use hanzo_core::review_coord::bump_snapshot_epoch;
-use hanzo_core::review_coord::clear_stale_lock_if_dead;
-use hanzo_core::review_coord::read_lock_info;
-use hanzo_core::review_coord::try_acquire_lock;
-use hanzo_login::AuthMode;
-use hanzo_login::CodexAuth;
-use hanzo_ollama::DEFAULT_OSS_MODEL;
-use hanzo_protocol::config_types::SandboxMode;
+use code_common::model_presets::{
+    all_model_presets,
+    ModelPreset,
+    HIDE_GPT5_1_MIGRATION_PROMPT_CONFIG,
+    HIDE_GPT_5_1_CODEX_MAX_MIGRATION_PROMPT_CONFIG,
+    HIDE_GPT_5_2_MIGRATION_PROMPT_CONFIG,
+};
+use code_core::config_edit::{self, CONFIG_KEY_EFFORT, CONFIG_KEY_MODEL};
+use code_core::config_types::Notice;
+use code_core::config_types::ReasoningEffort;
+use code_core::BUILT_IN_OSS_MODEL_PROVIDER_ID;
+use code_core::config::set_cached_terminal_background;
+use code_core::config::Config;
+use code_core::config::ConfigOverrides;
+use code_core::config::ConfigToml;
+use code_core::config::find_code_home;
+use code_core::config::load_config_as_toml;
+use code_core::config::load_config_as_toml_with_cli_overrides;
+use code_core::protocol::AskForApproval;
+use code_core::protocol::SandboxPolicy;
+use code_core::config_types::CachedTerminalBackground;
+use code_core::config_types::ThemeColors;
+use code_core::config_types::ThemeConfig;
+use code_core::config_types::ThemeName;
 use regex_lite::Regex;
+use code_login::AuthMode;
+use code_login::CodexAuth;
+use model_migration::{migration_copy_for_key, run_model_migration_prompt, ModelMigrationOutcome};
+use code_ollama::DEFAULT_OSS_MODEL;
+use code_protocol::config_types::SandboxMode;
 use std::fs::OpenOptions;
 use std::io;
-use std::path::Path;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
+use code_core::review_coord::{
+    bump_snapshot_epoch, clear_stale_lock_if_dead, read_lock_info, try_acquire_lock,
+};
 use std::sync::Once;
 use std::sync::OnceLock;
+use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::time::{Duration, Instant};
 use tracing_appender::non_blocking;
 use tracing_appender::rolling;
-use tracing_subscriber::EnvFilter;
 use tracing_subscriber::filter::LevelFilter;
 use tracing_subscriber::prelude::*;
+use tracing_subscriber::EnvFilter;
 use uuid::Uuid;
 
-mod account_label;
 mod app;
 mod app_event;
 mod app_event_sender;
-mod auto_drive_strings;
-mod auto_drive_style;
+mod account_label;
 mod bottom_pane;
-pub mod card_theme;
-mod chatwidget;
 mod chrome_launch;
+mod chatwidget;
 mod citation_regex;
-mod cli;
 mod cloud_tasks_service;
-mod colors;
+mod cli;
 mod common;
+mod colors;
+pub mod card_theme;
 mod diff_render;
 mod exec_command;
+mod external_editor;
 mod file_search;
+pub mod gradient_background;
 mod get_git_diff;
 mod glitch_animation;
-pub mod gradient_background;
+mod auto_drive_strings;
+mod auto_drive_style;
 mod header_wave;
-mod history;
 mod history_cell;
+mod history;
 mod insert_history;
-pub mod intro_art_variants;
 pub mod live_wrap;
 mod markdown;
 mod markdown_render;
 mod markdown_renderer;
+mod memory_citation;
+mod remote_model_presets;
 mod markdown_stream;
-#[allow(dead_code)]
-mod model_migration;
+mod syntax_highlight;
 pub mod onboarding;
 pub mod public_widgets;
-mod remote_model_presets;
 mod render;
-mod syntax_highlight;
+mod model_migration;
 // mod scroll_view; // Orphaned after trait-based HistoryCell migration
-mod layout_consts;
-mod rate_limits_view;
-pub mod resume;
-mod sanitize;
 mod session_log;
 mod shimmer;
 mod slash_command;
+mod rate_limits_view;
+pub mod resume;
 mod streaming;
+mod sanitize;
+mod layout_consts;
 mod terminal_info;
 // mod text_block; // Orphaned after trait-based HistoryCell migration
 mod text_formatting;
@@ -108,33 +109,32 @@ mod util {
     pub mod buffer;
     pub mod list_window;
 }
-mod clipboard_paste;
-#[cfg(feature = "hanzo-fork")]
-mod foundation;
-mod greeting;
-mod height_manager;
 mod spinner;
 mod tui;
-#[cfg(feature = "hanzo-fork")]
+#[cfg(feature = "code-fork")]
 mod tui_event_extensions;
+#[cfg(feature = "code-fork")]
+mod foundation;
 mod ui_consts;
 mod user_approval_widget;
+mod height_manager;
+mod clipboard_paste;
+mod greeting;
 // Upstream introduced a standalone status indicator widget. Our fork renders
 // status within the composer title; keep the module private unless tests need it.
+mod status_indicator_widget;
 #[cfg(target_os = "macos")]
 mod agent_install_helpers;
-mod status_indicator_widget;
 
 // Internal vt100-based replay tests live as a separate source file to keep them
 // close to the widget code. Include them in unit tests.
+mod updates;
 #[cfg(any(test, feature = "test-helpers"))]
 pub mod test_backend;
-mod updates;
 
-pub use self::markdown_render::render_markdown_text;
 pub use cli::Cli;
-pub use public_widgets::composer_input::ComposerAction;
-pub use public_widgets::composer_input::ComposerInput;
+pub use self::markdown_render::render_markdown_text;
+pub use public_widgets::composer_input::{ComposerAction, ComposerInput};
 
 const TUI_LOG_MAX_BYTES: u64 = 50 * 1024 * 1024;
 const TUI_LOG_BACKUPS: usize = 2;
@@ -180,10 +180,9 @@ pub mod test_helpers {
     pub use crate::test_backend::VT100Backend;
 
     use crate::app_event::AppEvent;
-    use hanzo_core::history::state::HistoryRecord;
+    use code_core::history::state::HistoryRecord;
     use std::time::Duration;
 
-    use ratatui::widgets::FrameExt;
     use std::io::Write;
 
     /// Render successive frames of the chat widget into a VT100-backed terminal.
@@ -238,14 +237,19 @@ pub mod test_helpers {
             .unwrap_or_default()
     }
 
-    pub fn assert_has_terminal_chunk_containing(harness: &mut ChatWidgetHarness, needle: &str) {
+    pub fn assert_has_terminal_chunk_containing(
+        harness: &mut ChatWidgetHarness,
+        needle: &str,
+    ) {
         let events = harness.poll_until(
             |events| {
-                events.iter().any(|event| match event {
-                    AppEvent::TerminalChunk { chunk, .. } => {
-                        String::from_utf8_lossy(chunk).contains(needle)
+                events.iter().any(|event| {
+                    match event {
+                        AppEvent::TerminalChunk { chunk, .. } => {
+                            String::from_utf8_lossy(chunk).contains(needle)
+                        }
+                        _ => false,
                     }
-                    _ => false,
                 })
             },
             Duration::from_millis(200),
@@ -253,12 +257,19 @@ pub mod test_helpers {
         crate::chatwidget::smoke_helpers::assert_has_terminal_chunk_containing(&events, needle);
     }
 
-    pub fn assert_has_background_event_containing(harness: &mut ChatWidgetHarness, needle: &str) {
+    pub fn assert_has_background_event_containing(
+        harness: &mut ChatWidgetHarness,
+        needle: &str,
+    ) {
         let events = harness.poll_until(
             |events| {
-                events.iter().any(|event| match event {
-                    AppEvent::InsertBackgroundEvent { message, .. } => message.contains(needle),
-                    _ => false,
+                events.iter().any(|event| {
+                    match event {
+                        AppEvent::InsertBackgroundEvent { message, .. } => {
+                            message.contains(needle)
+                        }
+                        _ => false,
+                    }
                 })
             },
             Duration::from_millis(200),
@@ -268,11 +279,9 @@ pub mod test_helpers {
 
     pub fn assert_has_codex_event(harness: &mut ChatWidgetHarness) {
         let events = harness.poll_until(
-            |events| {
-                events
-                    .iter()
-                    .any(|event| matches!(event, AppEvent::CodeEvent(_)))
-            },
+            |events| events
+                .iter()
+                .any(|event| matches!(event, AppEvent::CodexEvent(_))),
             Duration::from_millis(200),
         );
         crate::chatwidget::smoke_helpers::assert_has_codex_event(&events);
@@ -300,7 +309,10 @@ pub mod test_helpers {
     }
 
     pub fn assert_no_events(harness: &mut ChatWidgetHarness) {
-        let events = harness.poll_until(|events| !events.is_empty(), Duration::from_millis(100));
+        let events = harness.poll_until(
+            |events| !events.is_empty(),
+            Duration::from_millis(100),
+        );
         crate::chatwidget::smoke_helpers::assert_no_events(&events);
     }
 
@@ -339,14 +351,13 @@ fn theme_configured_in_config_file(code_home: &std::path::Path) -> bool {
 
 #[derive(Debug)]
 pub struct ExitSummary {
-    pub token_usage: hanzo_core::protocol::TokenUsage,
+    pub token_usage: code_core::protocol::TokenUsage,
     pub session_id: Option<Uuid>,
 }
 
-#[allow(dead_code)]
 fn empty_exit_summary() -> ExitSummary {
     ExitSummary {
-        token_usage: hanzo_core::protocol::TokenUsage::default(),
+        token_usage: code_core::protocol::TokenUsage::default(),
         session_id: None,
     }
 }
@@ -446,15 +457,9 @@ pub async fn run_main(
         tools_web_search_request: Some(cli.web_search),
         mcp_servers: None,
         experimental_client_tools: None,
+        dynamic_tools: None,
         compact_prompt_override: cli.compact_prompt_override.clone(),
         compact_prompt_override_file: cli.compact_prompt_file.clone(),
-        wire_api: cli.wire_api.as_deref().and_then(|v| match v {
-            "chat" => Some(hanzo_core::WireApi::Chat),
-            "responses" => Some(hanzo_core::WireApi::Responses),
-            "responses_websocket" => Some(hanzo_core::WireApi::ResponsesWebsocket),
-            "zap" => Some(hanzo_core::WireApi::Zap),
-            _ => None,
-        }),
     };
 
     // Parse `-c` overrides from the CLI.
@@ -479,12 +484,26 @@ pub async fn run_main(
         }
     };
 
-    hanzo_core::config::migrate_legacy_log_dirs(&code_home);
+    code_core::config::migrate_legacy_log_dirs(&code_home);
 
     let housekeeping_home = code_home.clone();
+    let housekeeping_stop = Arc::new(AtomicBool::new(false));
+    let housekeeping_stop_worker = Arc::clone(&housekeeping_stop);
     let housekeeping_handle = thread_spawner::spawn_lightweight("housekeeping", move || {
-        if let Err(err) = hanzo_core::run_housekeeping_if_due(&housekeeping_home) {
-            tracing::warn!("hanzo home housekeeping failed: {err}");
+        const HOUSEKEEPING_INTERVAL: Duration = Duration::from_secs(30 * 60);
+        const HOUSEKEEPING_POLL_INTERVAL: Duration = Duration::from_secs(10);
+
+        let mut next_run_at = Instant::now();
+        while !housekeeping_stop_worker.load(Ordering::Relaxed) {
+            let now = Instant::now();
+            if now >= next_run_at {
+                if let Err(err) = code_core::run_housekeeping_if_due(&housekeeping_home) {
+                    tracing::warn!("code home housekeeping failed: {err}");
+                }
+                next_run_at = now + HOUSEKEEPING_INTERVAL;
+            }
+
+            std::thread::sleep(HOUSEKEEPING_POLL_INTERVAL);
         }
     });
 
@@ -525,9 +544,93 @@ pub async fn run_main(
         || cli_kv_overrides
             .iter()
             .any(|(path, _)| path == "model" || path.ends_with(".model"));
-    // Hanzo Dev: skip upstream OpenAI model migration prompts.
-    // Users choose their own model via /model or config.toml.
-    let _ = (&cli_model_override, &determine_migration_plan);
+    if !cli_model_override && !cli.oss {
+        let auth_mode = if config.using_chatgpt_auth {
+            AuthMode::ChatGPT
+        } else {
+            AuthMode::ApiKey
+        };
+        if let Some(plan) = determine_migration_plan(&config, auth_mode) {
+            let should_auto_accept = auth_mode.is_chatgpt()
+                && (plan.hide_key != code_common::model_presets::HIDE_GPT_5_2_CODEX_MIGRATION_PROMPT_CONFIG
+                    || (plan.current.id.eq_ignore_ascii_case("gpt-5.1-codex")
+                        && plan
+                            .target
+                            .id
+                            .eq_ignore_ascii_case("gpt-5.2-codex")));
+
+            if should_auto_accept {
+                if let Err(err) = persist_migration_acceptance(
+                    &code_home,
+                    cli.config_profile.as_deref(),
+                    plan,
+                )
+                .await
+                {
+                    tracing::warn!("failed to persist migration acceptance: {err}");
+                } else {
+                    match Config::load_with_cli_overrides(
+                        cli_kv_overrides.clone(),
+                        overrides.clone(),
+                    ) {
+                        Ok(updated) => {
+                            config = updated;
+                            config.demo_developer_message = cli.demo_developer_message.clone();
+                        }
+                        Err(err) => {
+                            eprintln!("Error reloading configuration: {err}");
+                            std::process::exit(1);
+                        }
+                    }
+                }
+            } else {
+                let copy = migration_copy_for_key(plan.hide_key);
+                match run_model_migration_prompt(&copy)? {
+                    ModelMigrationOutcome::Accepted => {
+                        if let Err(err) = persist_migration_acceptance(
+                            &code_home,
+                            cli.config_profile.as_deref(),
+                            plan,
+                        )
+                        .await
+                        {
+                            tracing::warn!("failed to persist migration acceptance: {err}");
+                        } else {
+                            match Config::load_with_cli_overrides(
+                                cli_kv_overrides.clone(),
+                                overrides.clone(),
+                            ) {
+                                Ok(updated) => {
+                                    config = updated;
+                                    config.demo_developer_message = cli.demo_developer_message.clone();
+                                }
+                                Err(err) => {
+                                    eprintln!("Error reloading configuration: {err}");
+                                    std::process::exit(1);
+                                }
+                            }
+                        }
+                    }
+                    ModelMigrationOutcome::Rejected => {
+                        let hide_key = plan.hide_key;
+                        if let Err(err) = persist_notice_hide(
+                            &code_home,
+                            cli.config_profile.as_deref(),
+                            hide_key,
+                        )
+                        .await
+                        {
+                            tracing::warn!("failed to persist migration opt-out: {err}");
+                        }
+                        set_notice_flag(&mut config.notices, hide_key);
+                    }
+                    ModelMigrationOutcome::Exit => {
+                        return Ok(empty_exit_summary());
+                    }
+                }
+            }
+        }
+    }
 
     let startup_footer_notice = None;
 
@@ -556,7 +659,7 @@ pub async fn run_main(
         workspace_write_network_access_explicit,
     )?;
 
-    let log_dir = hanzo_core::config::log_dir(&config)?;
+    let log_dir = code_core::config::log_dir(&config)?;
     std::fs::create_dir_all(&log_dir)?;
 
     let (env_layer, _log_guard) = if cli.debug {
@@ -580,12 +683,12 @@ pub async fn run_main(
         // Wrap file in non‑blocking writer.
         let (log_writer, log_guard) = non_blocking(log_file);
 
-        let default_filter =
-            "hanzo_core=info,hanzo_tui=info,hanzo_browser=warn,hanzo_auto_drive_core=info";
+        let default_filter = "code_core=info,code_tui=info,code_browser=warn,code_auto_drive_core=info";
 
         // use RUST_LOG env var, defaulting based on debug flag.
-        let env_filter =
-            || EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new(default_filter));
+        let env_filter = || {
+            EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new(default_filter))
+        };
 
         let env_layer = tracing_subscriber::fmt::layer()
             .with_target(false)
@@ -617,17 +720,12 @@ pub async fn run_main(
         .try_init();
 
     if cli.oss {
-        hanzo_ollama::ensure_oss_ready(&config)
+        code_ollama::ensure_oss_ready(&config)
             .await
             .map_err(|e| std::io::Error::other(format!("OSS setup failed: {e}")))?;
     }
 
-    let _otel = hanzo_core::otel_init::build_provider(&config, env!("CARGO_PKG_VERSION"));
-
-    // Initialize upgrade notice visibility from config
-    if config.notices.hide_upgrade_notice.unwrap_or(false) {
-        crate::updates::set_hide_upgrade_notice(true);
-    }
+    let _otel = code_core::otel_init::build_provider(&config, env!("CARGO_PKG_VERSION"));
 
     let latest_upgrade_version = if crate::updates::upgrade_ui_enabled() {
         updates::get_upgrade_version(&config)
@@ -644,9 +742,10 @@ pub async fn run_main(
         theme_configured_explicitly,
     );
 
+    housekeeping_stop.store(true, Ordering::Relaxed);
     if let Some(handle) = housekeeping_handle {
         if let Err(err) = handle.join() {
-            tracing::warn!("hanzo home housekeeping task panicked: {err:?}");
+            tracing::warn!("code home housekeeping task panicked: {err:?}");
         }
     } else {
         tracing::warn!("housekeeping thread spawn skipped: background thread limit reached");
@@ -805,11 +904,8 @@ fn print_timing_summary(summary: &str) {
 #[allow(clippy::print_stdout, clippy::print_stderr)]
 fn cleanup_session_worktrees_and_print() {
     let pid = std::process::id();
-    let home = match std::env::var_os("HOME") {
-        Some(h) => std::path::PathBuf::from(h),
-        None => return,
-    };
-    let session_dir = home.join(".hanzo").join("working").join("_session");
+    let home = match std::env::var_os("HOME") { Some(h) => std::path::PathBuf::from(h), None => return };
+    let session_dir = home.join(".code").join("working").join("_session");
     let file = session_dir.join(format!("pid-{}.txt", pid));
     reclaim_worktrees_from_file(&file, "current session");
 }
@@ -824,14 +920,9 @@ fn reclaim_worktrees_from_file(path: &std::path::Path, label: &str) {
 
     let mut entries: Vec<(std::path::PathBuf, std::path::PathBuf)> = Vec::new();
     for line in data.lines() {
-        if line.trim().is_empty() {
-            continue;
-        }
+        if line.trim().is_empty() { continue; }
         if let Some((root_s, path_s)) = line.split_once('\t') {
-            entries.push((
-                std::path::PathBuf::from(root_s),
-                std::path::PathBuf::from(path_s),
-            ));
+            entries.push((std::path::PathBuf::from(root_s), std::path::PathBuf::from(path_s)));
         }
     }
 
@@ -843,16 +934,10 @@ fn reclaim_worktrees_from_file(path: &std::path::Path, label: &str) {
         return;
     }
 
-    eprintln!(
-        "Cleaning remaining worktrees for {} ({}).",
-        label,
-        entries.len()
-    );
+    eprintln!("Cleaning remaining worktrees for {} ({}).", label, entries.len());
     let current_pid = std::process::id();
     for (git_root, worktree) in entries {
-        let Some(wt_str) = worktree.to_str() else {
-            continue;
-        };
+        let Some(wt_str) = worktree.to_str() else { continue };
 
         // Retry a few times if the global review lock is busy.
         let mut acquired = None;
@@ -911,7 +996,9 @@ fn reclaim_worktrees_from_file(path: &std::path::Path, label: &str) {
 
 fn maybe_apply_terminal_theme_detection(config: &mut Config, theme_configured_explicitly: bool) {
     if theme_configured_explicitly {
-        tracing::info!("Terminal theme autodetect skipped due to explicit theme configuration");
+        tracing::info!(
+            "Terminal theme autodetect skipped due to explicit theme configuration"
+        );
         return;
     }
 
@@ -938,15 +1025,10 @@ fn maybe_apply_terminal_theme_detection(config: &mut Config, theme_configured_ex
     }
 
     let term = std::env::var("TERM").ok().filter(|value| !value.is_empty());
-    let term_program = std::env::var("TERM_PROGRAM")
-        .ok()
-        .filter(|value| !value.is_empty());
-    let term_program_version = std::env::var("TERM_PROGRAM_VERSION")
-        .ok()
-        .filter(|value| !value.is_empty());
-    let colorfgbg = std::env::var("COLORFGBG")
-        .ok()
-        .filter(|value| !value.is_empty());
+    let term_program = std::env::var("TERM_PROGRAM").ok().filter(|value| !value.is_empty());
+    let term_program_version =
+        std::env::var("TERM_PROGRAM_VERSION").ok().filter(|value| !value.is_empty());
+    let colorfgbg = std::env::var("COLORFGBG").ok().filter(|value| !value.is_empty());
 
     if let Some(cached) = config.tui.cached_terminal_background.as_ref() {
         if cached_background_matches_env(
@@ -999,9 +1081,6 @@ fn maybe_apply_terminal_theme_detection(config: &mut Config, theme_configured_ex
     }
 }
 
-// Migration infrastructure kept for upstream merge compatibility but unused
-// in Hanzo Dev (we skip the interactive migration prompt).
-#[allow(dead_code)]
 #[derive(Clone, Copy)]
 struct MigrationPlan {
     current: &'static ModelPreset,
@@ -1033,10 +1112,7 @@ fn determine_migration_plan(config: &Config, auth_mode: AuthMode) -> Option<Migr
     })
 }
 
-fn find_migration_preset<'a>(
-    presets: &'a [ModelPreset],
-    slug_lower: &str,
-) -> Option<&'a ModelPreset> {
+fn find_migration_preset<'a>(presets: &'a [ModelPreset], slug_lower: &str) -> Option<&'a ModelPreset> {
     let slug_no_prefix = slug_lower
         .rsplit_once(':')
         .map(|(_, rest)| rest)
@@ -1045,9 +1121,7 @@ fn find_migration_preset<'a>(
         .rsplit_once('/')
         .map(|(_, rest)| rest)
         .unwrap_or(slug_no_prefix);
-    let slug_no_test = slug_no_prefix
-        .strip_prefix("test-")
-        .unwrap_or(slug_no_prefix);
+    let slug_no_test = slug_no_prefix.strip_prefix("test-").unwrap_or(slug_no_prefix);
 
     if let Some(preset) = presets.iter().find(|preset| {
         preset.id.eq_ignore_ascii_case(slug_no_test)
@@ -1078,7 +1152,6 @@ fn find_migration_preset<'a>(
 
 const NOTICE_TABLE: &str = "notice";
 
-#[allow(dead_code)]
 async fn persist_migration_acceptance(
     code_home: &Path,
     profile: Option<&str>,
@@ -1106,7 +1179,6 @@ async fn persist_migration_acceptance(
         .map_err(|err| io::Error::other(err.to_string()))
 }
 
-#[allow(dead_code)]
 async fn persist_notice_hide(
     code_home: &Path,
     profile: Option<&str>,
@@ -1119,7 +1191,6 @@ async fn persist_notice_hide(
         .map_err(|err| io::Error::other(err.to_string()))
 }
 
-#[allow(dead_code)]
 fn set_notice_flag(notices: &mut Notice, key: &str) {
     if key == HIDE_GPT5_1_MIGRATION_PROMPT_CONFIG {
         notices.hide_gpt5_1_migration_prompt = Some(true);
@@ -1127,10 +1198,8 @@ fn set_notice_flag(notices: &mut Notice, key: &str) {
         notices.hide_gpt_5_1_codex_max_migration_prompt = Some(true);
     } else if key == HIDE_GPT_5_2_MIGRATION_PROMPT_CONFIG {
         notices.hide_gpt5_2_migration_prompt = Some(true);
-    } else if key == hanzo_common::model_presets::HIDE_GPT_5_2_CODEX_MIGRATION_PROMPT_CONFIG {
+    } else if key == code_common::model_presets::HIDE_GPT_5_2_CODEX_MIGRATION_PROMPT_CONFIG {
         notices.hide_gpt5_2_codex_migration_prompt = Some(true);
-    } else if key == hanzo_common::model_presets::HIDE_GPT_5_3_CODEX_MIGRATION_PROMPT_CONFIG {
-        notices.hide_gpt5_3_codex_migration_prompt = Some(true);
     }
 }
 
@@ -1138,24 +1207,18 @@ fn notice_hidden(notices: &Notice, key: &str) -> bool {
     if key == HIDE_GPT5_1_MIGRATION_PROMPT_CONFIG {
         notices.hide_gpt5_1_migration_prompt.unwrap_or(false)
     } else if key == HIDE_GPT_5_1_CODEX_MAX_MIGRATION_PROMPT_CONFIG {
-        notices
-            .hide_gpt_5_1_codex_max_migration_prompt
-            .unwrap_or(false)
+        notices.hide_gpt_5_1_codex_max_migration_prompt.unwrap_or(false)
     } else if key == HIDE_GPT_5_2_MIGRATION_PROMPT_CONFIG {
         notices.hide_gpt5_2_migration_prompt.unwrap_or(false)
-    } else if key == hanzo_common::model_presets::HIDE_GPT_5_2_CODEX_MIGRATION_PROMPT_CONFIG {
+    } else if key == code_common::model_presets::HIDE_GPT_5_2_CODEX_MIGRATION_PROMPT_CONFIG {
         notices.hide_gpt5_2_codex_migration_prompt.unwrap_or(false)
-    } else if key == hanzo_common::model_presets::HIDE_GPT_5_3_CODEX_MIGRATION_PROMPT_CONFIG {
-        notices.hide_gpt5_3_codex_migration_prompt.unwrap_or(false)
     } else {
         false
     }
 }
 
 fn auth_allows_target(auth_mode: AuthMode, target: &ModelPreset) -> bool {
-    !(matches!(auth_mode, AuthMode::ApiKey)
-        && (target.id.eq_ignore_ascii_case("gpt-5.3-codex")
-            || target.id.eq_ignore_ascii_case("gpt-5.2-codex")))
+    !(matches!(auth_mode, AuthMode::ApiKey) && target.id.eq_ignore_ascii_case("gpt-5.2-codex"))
 }
 
 fn reasoning_effort_to_str(effort: ReasoningEffort) -> &'static str {
@@ -1171,12 +1234,14 @@ fn reasoning_effort_to_str(effort: ReasoningEffort) -> &'static str {
 
 fn apply_detected_theme(theme: &mut ThemeConfig, is_dark: bool) {
     if is_dark {
-        theme.name = ThemeName::DarkMonochrome;
+        theme.name = ThemeName::DarkCarbonNight;
         tracing::info!(
-            "Detected dark terminal background; switching default theme to Dark - Monochrome"
+            "Detected dark terminal background; switching default theme to Dark - Carbon Night"
         );
     } else {
-        tracing::info!("Detected light terminal background; keeping default Light - Photon theme");
+        tracing::info!(
+            "Detected light terminal background; keeping default Light - Photon theme"
+        );
     }
 }
 
@@ -1189,10 +1254,7 @@ fn cached_background_matches_env(
 ) -> bool {
     fn matches(expected: &Option<String>, actual: &Option<String>) -> bool {
         match expected {
-            Some(expected) => actual
-                .as_ref()
-                .map(|value| value == expected)
-                .unwrap_or(false),
+            Some(expected) => actual.as_ref().map(|value| value == expected).unwrap_or(false),
             None => true,
         }
     }
@@ -1213,11 +1275,7 @@ pub enum LoginStatus {
 /// Determine current login status based on auth.json presence.
 pub fn get_login_status(config: &Config) -> LoginStatus {
     let code_home = config.code_home.clone();
-    match CodexAuth::from_code_home(
-        &code_home,
-        AuthMode::ChatGPT,
-        &config.responses_originator_header,
-    ) {
+    match CodexAuth::from_code_home(&code_home, AuthMode::ChatGPT, &config.responses_originator_header) {
         Ok(Some(auth)) => LoginStatus::AuthMode(auth.mode),
         _ => LoginStatus::NotAuthenticated,
     }
@@ -1302,9 +1360,9 @@ fn determine_repo_trust_state(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use hanzo_core::config::ProjectConfig;
-    use hanzo_core::config_types::SandboxWorkspaceWrite;
-    use hanzo_core::protocol::AskForApproval;
+    use code_core::config::ProjectConfig;
+    use code_core::config_types::SandboxWorkspaceWrite;
+    use code_core::protocol::AskForApproval;
     use std::collections::HashMap;
     use tempfile::TempDir;
 
@@ -1335,7 +1393,6 @@ mod tests {
             cwd: Some(workspace.path().to_path_buf()),
             compact_prompt_override: None,
             compact_prompt_override_file: None,
-            wire_api: None,
             ..Default::default()
         };
 
@@ -1355,8 +1412,14 @@ mod tests {
             ..Default::default()
         }))?;
 
-        let show_trust =
-            determine_repo_trust_state(&mut config, &config_toml, None, None, None, false)?;
+        let show_trust = determine_repo_trust_state(
+            &mut config,
+            &config_toml,
+            None,
+            None,
+            None,
+            false,
+        )?;
         assert!(!show_trust);
 
         match &config.sandbox_policy {
@@ -1366,10 +1429,7 @@ mod tests {
                 ..
             } => {
                 assert!(!allow_git_writes);
-                assert!(
-                    *network_access,
-                    "trusted WorkspaceWrite should retain network access"
-                );
+                assert!(*network_access, "trusted WorkspaceWrite should retain network access");
             }
             other => panic!("expected workspace-write sandbox, got {other:?}"),
         }
@@ -1383,14 +1443,17 @@ mod tests {
     fn trusted_workspace_default_stays_danger_full_access() -> std::io::Result<()> {
         let (mut config, config_toml) = make_trusted_config(None)?;
 
-        let show_trust =
-            determine_repo_trust_state(&mut config, &config_toml, None, None, None, false)?;
+        let show_trust = determine_repo_trust_state(
+            &mut config,
+            &config_toml,
+            None,
+            None,
+            None,
+            false,
+        )?;
         assert!(!show_trust);
 
-        assert!(matches!(
-            config.sandbox_policy,
-            SandboxPolicy::DangerFullAccess
-        ));
+        assert!(matches!(config.sandbox_policy, SandboxPolicy::DangerFullAccess));
         assert!(matches!(config.approval_policy, AskForApproval::Never));
 
         Ok(())
@@ -1404,8 +1467,14 @@ mod tests {
             ..Default::default()
         }))?;
 
-        let show_trust =
-            determine_repo_trust_state(&mut config, &config_toml, None, None, None, true)?;
+        let show_trust = determine_repo_trust_state(
+            &mut config,
+            &config_toml,
+            None,
+            None,
+            None,
+            true,
+        )?;
         assert!(!show_trust);
 
         match &config.sandbox_policy {
@@ -1415,10 +1484,7 @@ mod tests {
                 ..
             } => {
                 assert!(!allow_git_writes);
-                assert!(
-                    !network_access,
-                    "explicit opt-out should disable network access"
-                );
+                assert!(!network_access, "explicit opt-out should disable network access");
             }
             other => panic!("expected workspace-write sandbox, got {other:?}"),
         }
@@ -1428,8 +1494,9 @@ mod tests {
 
     #[test]
     fn resume_command_uses_invocation_basename() {
-        let derived =
-            derive_resume_command_name(Some(std::ffi::OsString::from("/usr/local/bin/coder")));
+        let derived = derive_resume_command_name(Some(std::ffi::OsString::from(
+            "/usr/local/bin/coder",
+        )));
         assert_eq!(derived, "coder");
     }
 

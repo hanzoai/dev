@@ -3,22 +3,111 @@
 // Note this file should generally be restricted to simple struct/enum
 // definitions that do not contain business logic.
 
-use schemars::JsonSchema;
 use std::collections::HashMap;
 use std::path::PathBuf;
 use std::time::Duration;
+use schemars::JsonSchema;
 use wildmatch::WildMatchPattern;
 
 use shlex::split as shlex_split;
 
+use serde::de::{self, Deserializer, Error as SerdeError};
 use serde::Deserialize;
 use serde::Serialize;
-use serde::de::Deserializer;
-use serde::de::Error as SerdeError;
-use serde::de::{self};
 use strum_macros::Display;
 
 pub const DEFAULT_OTEL_ENVIRONMENT: &str = "dev";
+pub const DEFAULT_MEMORIES_MAX_ROLLOUTS_PER_STARTUP: usize = 16;
+pub const DEFAULT_MEMORIES_MAX_ROLLOUT_AGE_DAYS: i64 = 30;
+pub const DEFAULT_MEMORIES_MIN_ROLLOUT_IDLE_HOURS: i64 = 6;
+pub const DEFAULT_MEMORIES_MAX_RAW_MEMORIES_FOR_GLOBAL: usize = 256;
+pub const DEFAULT_MEMORIES_MAX_UNUSED_DAYS: i64 = 30;
+
+#[derive(Deserialize, Debug, Clone, PartialEq, Eq, Default)]
+pub struct MemoriesToml {
+    #[serde(default)]
+    pub no_memories_if_mcp_or_web_search: Option<bool>,
+    pub generate_memories: Option<bool>,
+    pub use_memories: Option<bool>,
+    #[serde(default, alias = "max_raw_memories_for_consolidation")]
+    pub max_raw_memories_for_global: Option<usize>,
+    pub max_unused_days: Option<i64>,
+    pub max_rollout_age_days: Option<i64>,
+    pub max_rollouts_per_startup: Option<usize>,
+    pub min_rollout_idle_hours: Option<i64>,
+    /// Optional override for the model used by stage 1 extraction.
+    #[serde(default, alias = "extract_model")]
+    pub phase_1_model: Option<String>,
+    /// Optional override for the model used by stage 2 consolidation.
+    #[serde(default, alias = "consolidation_model")]
+    pub phase_2_model: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct MemoriesConfig {
+    pub no_memories_if_mcp_or_web_search: bool,
+    pub generate_memories: bool,
+    pub use_memories: bool,
+    pub max_raw_memories_for_global: usize,
+    pub max_unused_days: i64,
+    pub max_rollout_age_days: i64,
+    pub max_rollouts_per_startup: usize,
+    pub min_rollout_idle_hours: i64,
+    pub phase_1_model: Option<String>,
+    pub phase_2_model: Option<String>,
+}
+
+impl Default for MemoriesConfig {
+    fn default() -> Self {
+        Self {
+            no_memories_if_mcp_or_web_search: false,
+            generate_memories: true,
+            use_memories: true,
+            max_raw_memories_for_global: DEFAULT_MEMORIES_MAX_RAW_MEMORIES_FOR_GLOBAL,
+            max_unused_days: DEFAULT_MEMORIES_MAX_UNUSED_DAYS,
+            max_rollout_age_days: DEFAULT_MEMORIES_MAX_ROLLOUT_AGE_DAYS,
+            max_rollouts_per_startup: DEFAULT_MEMORIES_MAX_ROLLOUTS_PER_STARTUP,
+            min_rollout_idle_hours: DEFAULT_MEMORIES_MIN_ROLLOUT_IDLE_HOURS,
+            phase_1_model: None,
+            phase_2_model: None,
+        }
+    }
+}
+
+impl From<MemoriesToml> for MemoriesConfig {
+    fn from(toml: MemoriesToml) -> Self {
+        let defaults = Self::default();
+        Self {
+            no_memories_if_mcp_or_web_search: toml
+                .no_memories_if_mcp_or_web_search
+                .unwrap_or(defaults.no_memories_if_mcp_or_web_search),
+            generate_memories: toml.generate_memories.unwrap_or(defaults.generate_memories),
+            use_memories: toml.use_memories.unwrap_or(defaults.use_memories),
+            max_raw_memories_for_global: toml
+                .max_raw_memories_for_global
+                .unwrap_or(defaults.max_raw_memories_for_global)
+                .min(4096),
+            max_unused_days: toml
+                .max_unused_days
+                .unwrap_or(defaults.max_unused_days)
+                .clamp(0, 365),
+            max_rollout_age_days: toml
+                .max_rollout_age_days
+                .unwrap_or(defaults.max_rollout_age_days)
+                .clamp(0, 365),
+            max_rollouts_per_startup: toml
+                .max_rollouts_per_startup
+                .unwrap_or(defaults.max_rollouts_per_startup)
+                .clamp(1, 1024),
+            min_rollout_idle_hours: toml
+                .min_rollout_idle_hours
+                .unwrap_or(defaults.min_rollout_idle_hours)
+                .clamp(0, 168),
+            phase_1_model: toml.phase_1_model,
+            phase_2_model: toml.phase_2_model,
+        }
+    }
+}
 
 #[derive(Deserialize, Debug, Clone, PartialEq)]
 #[serde(rename_all = "kebab-case")]
@@ -99,6 +188,12 @@ impl<'de> Deserialize<'de> for McpServerConfig {
 
             url: Option<String>,
             bearer_token: Option<String>,
+            bearer_token_env_var: Option<String>,
+            #[serde(default)]
+            http_headers: Option<HashMap<String, String>>,
+            #[serde(default)]
+            env_http_headers: Option<HashMap<String, String>>,
+            oauth_resource: Option<String>,
 
             #[serde(default)]
             startup_timeout_sec: Option<f64>,
@@ -138,10 +233,22 @@ impl<'de> Deserialize<'de> for McpServerConfig {
                 env,
                 url,
                 bearer_token,
+                bearer_token_env_var,
+                http_headers,
+                env_http_headers,
+                oauth_resource,
                 ..
             } => {
                 throw_if_set("stdio", "url", url.as_ref())?;
                 throw_if_set("stdio", "bearer_token", bearer_token.as_ref())?;
+                throw_if_set(
+                    "stdio",
+                    "bearer_token_env_var",
+                    bearer_token_env_var.as_ref(),
+                )?;
+                throw_if_set("stdio", "http_headers", http_headers.as_ref())?;
+                throw_if_set("stdio", "env_http_headers", env_http_headers.as_ref())?;
+                throw_if_set("stdio", "oauth_resource", oauth_resource.as_ref())?;
                 McpServerTransportConfig::Stdio {
                     command,
                     args: args.unwrap_or_default(),
@@ -151,22 +258,25 @@ impl<'de> Deserialize<'de> for McpServerConfig {
             RawMcpServerConfig {
                 url: Some(url),
                 bearer_token,
+                bearer_token_env_var,
+                http_headers,
+                env_http_headers,
+                oauth_resource,
                 command,
                 args,
                 env,
                 ..
             } => {
-                if url.starts_with("zap://") || url.starts_with("zaps://") {
-                    throw_if_set("zap", "command", command.as_ref())?;
-                    throw_if_set("zap", "args", args.as_ref())?;
-                    throw_if_set("zap", "env", env.as_ref())?;
-                    throw_if_set("zap", "bearer_token", bearer_token.as_ref())?;
-                    McpServerTransportConfig::Zap { url }
-                } else {
-                    throw_if_set("streamable_http", "command", command.as_ref())?;
-                    throw_if_set("streamable_http", "args", args.as_ref())?;
-                    throw_if_set("streamable_http", "env", env.as_ref())?;
-                    McpServerTransportConfig::StreamableHttp { url, bearer_token }
+                throw_if_set("streamable_http", "command", command.as_ref())?;
+                throw_if_set("streamable_http", "args", args.as_ref())?;
+                throw_if_set("streamable_http", "env", env.as_ref())?;
+                McpServerTransportConfig::StreamableHttp {
+                    url,
+                    bearer_token,
+                    bearer_token_env_var,
+                    http_headers,
+                    env_http_headers,
+                    oauth_resource,
                 }
             }
             _ => return Err(SerdeError::custom("invalid transport")),
@@ -199,10 +309,19 @@ pub enum McpServerTransportConfig {
         /// This should be used with caution because it lives on disk in clear text.
         #[serde(default, skip_serializing_if = "Option::is_none")]
         bearer_token: Option<String>,
+        /// Name of the environment variable holding an HTTP bearer token.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        bearer_token_env_var: Option<String>,
+        /// Additional HTTP headers to include in requests to this server.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        http_headers: Option<HashMap<String, String>>,
+        /// HTTP headers where the value is sourced from an environment variable.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        env_http_headers: Option<HashMap<String, String>>,
+        /// Optional OAuth resource parameter (RFC 8707) for providers that require it.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        oauth_resource: Option<String>,
     },
-    /// ZAP (Zero-copy Agent Protocol) transport via a ZAP gateway.
-    /// Uses `zap://` or `zaps://` URL scheme.
-    Zap { url: String },
 }
 
 mod option_duration_secs {
@@ -242,9 +361,7 @@ pub struct ConfirmGuardConfig {
 
 impl Default for ConfirmGuardConfig {
     fn default() -> Self {
-        Self {
-            patterns: default_confirm_guard_patterns(),
-        }
+        Self { patterns: default_confirm_guard_patterns() }
     }
 }
 
@@ -338,9 +455,7 @@ pub enum AllowedCommandMatchKind {
 }
 
 impl Default for AllowedCommandMatchKind {
-    fn default() -> Self {
-        Self::Exact
-    }
+    fn default() -> Self { Self::Exact }
 }
 
 #[derive(Deserialize, Debug, Clone, PartialEq, Eq)]
@@ -382,6 +497,11 @@ pub struct SubagentCommandConfig {
 #[derive(Deserialize, Debug, Clone, PartialEq, Default)]
 #[serde(rename_all = "kebab-case")]
 pub struct SubagentsToml {
+    /// Maximum nesting depth for agent-spawned agent runs.
+    /// `1` allows root sessions to spawn agents, but blocks further nesting.
+    #[serde(default)]
+    pub max_depth: Option<i32>,
+
     #[serde(default)]
     pub commands: Vec<SubagentCommandConfig>,
 }
@@ -465,7 +585,7 @@ fn default_true() -> bool {
 pub struct GithubConfig {
     /// When true, Codex watches for GitHub Actions workflow runs after a
     /// successful `git push` and reports failures as background messages.
-    /// Enabled by default; can be disabled via `~/.hanzo/config.toml` under
+    /// Enabled by default; can be disabled via `~/.code/config.toml` under
     /// `[github]` with `check_workflows_on_push = false`.
     #[serde(default = "default_true")]
     pub check_workflows_on_push: bool,
@@ -483,7 +603,7 @@ pub struct GithubConfig {
     pub actionlint_strict: bool,
 }
 
-#[derive(Deserialize, Debug, Clone, PartialEq, Default)]
+#[derive(Deserialize, Debug, Clone, PartialEq)]
 pub struct ValidationConfig {
     /// Legacy master toggle for the validation harness (kept for config compatibility).
     /// `run_patch_harness` now relies solely on the functional/stylistic group toggles.
@@ -507,7 +627,19 @@ pub struct ValidationConfig {
     pub tools: ValidationTools,
 }
 
-#[derive(Deserialize, Debug, Clone, PartialEq, Default)]
+impl Default for ValidationConfig {
+    fn default() -> Self {
+        Self {
+            patch_harness: false,
+            tools_allowlist: None,
+            timeout_seconds: None,
+            groups: ValidationGroups::default(),
+            tools: ValidationTools::default(),
+        }
+    }
+}
+
+#[derive(Deserialize, Debug, Clone, PartialEq)]
 pub struct ValidationGroups {
     /// Functional checks catch correctness regressions.
     #[serde(default = "default_true")]
@@ -516,6 +648,12 @@ pub struct ValidationGroups {
     /// Stylistic checks enforce formatting and best practices.
     #[serde(default)]
     pub stylistic: bool,
+}
+
+impl Default for ValidationGroups {
+    fn default() -> Self {
+        Self { functional: false, stylistic: false }
+    }
 }
 
 #[derive(Deserialize, Debug, Clone, PartialEq, Default)]
@@ -558,8 +696,16 @@ impl ValidationCategory {
 /// Map a validation tool name to its category grouping.
 pub fn validation_tool_category(name: &str) -> ValidationCategory {
     match name {
-        "actionlint" | "shellcheck" | "cargo-check" | "tsc" | "eslint" | "phpstan" | "psalm"
-        | "mypy" | "pyright" | "golangci-lint" => ValidationCategory::Functional,
+        "actionlint"
+        | "shellcheck"
+        | "cargo-check"
+        | "tsc"
+        | "eslint"
+        | "phpstan"
+        | "psalm"
+        | "mypy"
+        | "pyright"
+        | "golangci-lint" => ValidationCategory::Functional,
         "markdownlint" | "hadolint" | "yamllint" | "shfmt" | "prettier" => {
             ValidationCategory::Stylistic
         }
@@ -598,8 +744,8 @@ impl UriBasedFileOpener {
     }
 }
 
-/// Settings that govern if and what will be written to `~/.hanzo/history.jsonl`
-/// (Hanzo Dev still reads legacy `~/.code/history.jsonl` and `~/.codex/history.jsonl`).
+/// Settings that govern if and what will be written to `~/.code/history.jsonl`
+/// (Code still reads legacy `~/.codex/history.jsonl`).
 #[derive(Deserialize, Debug, Clone, PartialEq, Default)]
 pub struct History {
     /// If true, history entries will not be written to disk.
@@ -700,17 +846,12 @@ pub struct Tui {
     /// Run a background `/review` after turns that modify code.
     #[serde(default = "default_true")]
     pub auto_review_enabled: bool,
-
-    /// Show the status bar at the top with model and directory info.
-    /// Defaults to `false` to match minimal Codex-style layout.
-    #[serde(default)]
-    pub show_status_bar: bool,
 }
 
 // Important: Provide a manual Default so that when no config file exists and we
 // construct `Config` via `unwrap_or_default()`, we still honor the intended
 // default of `alternate_screen = true`. Deriving `Default` would set booleans to
-// `false`, which caused fresh installs (or a temporary HANZO_HOME) to start in
+// `false`, which caused fresh installs (or a temporary CODEX_HOME) to start in
 // standard-terminal mode until the user pressed Ctrl+T.
 impl Default for Tui {
     fn default() -> Self {
@@ -726,7 +867,6 @@ impl Default for Tui {
             alternate_screen: true,
             review_auto_resolve: true,
             auto_review_enabled: true,
-            show_status_bar: false,
         }
     }
 }
@@ -740,11 +880,6 @@ pub struct Notice {
     pub hide_gpt_5_1_codex_max_migration_prompt: Option<bool>,
     pub hide_gpt5_2_migration_prompt: Option<bool>,
     pub hide_gpt5_2_codex_migration_prompt: Option<bool>,
-    pub hide_gpt5_3_codex_migration_prompt: Option<bool>,
-    /// Hide the upgrade available notification banner
-    pub hide_upgrade_notice: Option<bool>,
-    /// Hide the rate limit model nudge
-    pub hide_rate_limit_model_nudge: Option<bool>,
 }
 
 #[derive(Serialize, Debug, Clone, Copy, PartialEq, Eq)]
@@ -784,6 +919,41 @@ impl<'de> Deserialize<'de> for AutoResolveAttemptLimit {
     }
 }
 
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq)]
+pub struct AutoDriveModelRoutingEntry {
+    pub model: String,
+
+    #[serde(default = "default_true")]
+    pub enabled: bool,
+
+    #[serde(default = "default_auto_drive_model_routing_reasoning_levels")]
+    pub reasoning_levels: Vec<ReasoningEffort>,
+
+    #[serde(default)]
+    pub description: String,
+}
+
+fn default_auto_drive_model_routing_reasoning_levels() -> Vec<ReasoningEffort> {
+    vec![ReasoningEffort::High]
+}
+
+pub fn default_auto_drive_model_routing_entries() -> Vec<AutoDriveModelRoutingEntry> {
+    vec![
+        AutoDriveModelRoutingEntry {
+            model: "gpt-5.3-codex".to_string(),
+            enabled: true,
+            reasoning_levels: vec![ReasoningEffort::High, ReasoningEffort::XHigh],
+            description: "Hard planning and complex problem solving".to_string(),
+        },
+        AutoDriveModelRoutingEntry {
+            model: "gpt-5.3-codex-spark".to_string(),
+            enabled: true,
+            reasoning_levels: vec![ReasoningEffort::High],
+            description: "Fast implementation loops and failing-test iteration".to_string(),
+        },
+    ]
+}
+
 /// Auto Drive behavioral defaults persisted via `config.toml`.
 #[derive(Deserialize, Debug, Clone, PartialEq)]
 pub struct AutoDriveSettings {
@@ -805,6 +975,14 @@ pub struct AutoDriveSettings {
     /// Enable coordinator routing of user prompts during Auto Drive turns.
     #[serde(default = "default_true")]
     pub coordinator_routing: bool,
+
+    /// Allow the coordinator to select the CLI model and reasoning effort per turn.
+    #[serde(default = "default_true")]
+    pub model_routing_enabled: bool,
+
+    /// Per-model routing entries used by coordinator-driven CLI model routing.
+    #[serde(default = "default_auto_drive_model_routing_entries")]
+    pub model_routing_entries: Vec<AutoDriveModelRoutingEntry>,
 
     #[serde(default)]
     pub continue_mode: AutoDriveContinueMode,
@@ -837,6 +1015,8 @@ impl Default for AutoDriveSettings {
             cross_check_enabled: true,
             observer_enabled: true,
             coordinator_routing: true,
+            model_routing_enabled: true,
+            model_routing_entries: default_auto_drive_model_routing_entries(),
             continue_mode: AutoDriveContinueMode::TenSeconds,
             model: default_auto_drive_model(),
             model_reasoning_effort: default_auto_drive_reasoning_effort(),
@@ -925,6 +1105,7 @@ pub struct StreamConfig {
     /// Explicit values above still take precedence if set.
     #[serde(default)]
     pub responsive: bool,
+
 }
 
 impl Default for StreamConfig {
@@ -943,7 +1124,7 @@ impl Default for StreamConfig {
 }
 
 /// Theme configuration for the TUI
-#[derive(Deserialize, Debug, Clone, PartialEq, Default)]
+#[derive(Deserialize, Debug, Clone, PartialEq)]
 pub struct ThemeConfig {
     /// Name of the predefined theme to use
     #[serde(default)]
@@ -964,12 +1145,17 @@ pub struct ThemeConfig {
     /// or "Light - <label>" in lists.
     #[serde(default)]
     pub is_dark: Option<bool>,
+}
 
-    /// Zen mode: hides gutter icons (▶ ⏺ etc), removes gutter indent so text
-    /// sits flush left, and hides decorative borders for a minimal UI.
-    /// Defaults to true for a clean, minimal look out of the box.
-    #[serde(default = "default_zen")]
-    pub zen: bool,
+impl Default for ThemeConfig {
+    fn default() -> Self {
+        Self {
+            name: ThemeName::default(),
+            colors: ThemeColors::default(),
+            label: None,
+            is_dark: None,
+        }
+    }
 }
 
 /// Selected loading spinner style.
@@ -978,27 +1164,18 @@ pub struct SpinnerSelection {
     /// Name of the spinner to use. Accepts one of the names from
     /// sindresorhus/cli-spinners (kebab-case), or custom names supported
     /// by Codex. Defaults to "diamond".
-    #[serde(default = "default_spinner_name")]
+    #[serde(default = "default_spinner_name")] 
     pub name: String,
     /// Custom spinner definitions saved by the user
     #[serde(default)]
     pub custom: std::collections::HashMap<String, CustomSpinner>,
 }
 
-fn default_zen() -> bool {
-    true
-}
-
-fn default_spinner_name() -> String {
-    "diamond".to_string()
-}
+fn default_spinner_name() -> String { "diamond".to_string() }
 
 impl Default for SpinnerSelection {
     fn default() -> Self {
-        Self {
-            name: default_spinner_name(),
-            custom: Default::default(),
-        }
+        Self { name: default_spinner_name(), custom: Default::default() }
     }
 }
 
@@ -1025,43 +1202,12 @@ pub struct HighlightConfig {
     pub theme: Option<String>,
 }
 
-/// Gutter display mode — cycles via Alt+G
-#[derive(Deserialize, Debug, Clone, Copy, PartialEq, Default)]
-#[serde(rename_all = "kebab-case")]
-pub enum GutterMode {
-    /// No gutter at all — flush-left text (zen default)
-    #[default]
-    None,
-    /// Whitespace padding gutter, no icons
-    Spacing,
-    /// Full gutter with icons + spacing
-    Full,
-}
-
-impl GutterMode {
-    /// Cycle to the next mode: None → Spacing → Full → None
-    pub fn next(self) -> Self {
-        match self {
-            Self::None => Self::Spacing,
-            Self::Spacing => Self::Full,
-            Self::Full => Self::None,
-        }
-    }
-
-    pub fn label(self) -> &'static str {
-        match self {
-            Self::None => "Gutter off",
-            Self::Spacing => "Gutter spacing",
-            Self::Full => "Gutter + icons",
-        }
-    }
-}
-
 /// Available predefined themes
 #[derive(Deserialize, Debug, Clone, Copy, PartialEq, Default)]
 #[serde(rename_all = "kebab-case")]
 pub enum ThemeName {
     // Light themes (at top)
+    #[default]
     LightPhoton,
     LightPhotonAnsi16,
     LightPrismRainbow,
@@ -1079,12 +1225,6 @@ pub enum ThemeName {
     DarkCharcoalRainbow,
     DarkZenGarden,
     DarkPaperLightPro,
-    /// Terminal-adaptive dark theme (hanzoai/dev style)
-    DarkCode,
-    /// Terminal-adaptive dark theme (openai/codex style)
-    DarkCodex,
-    #[default]
-    DarkMonochrome,
     Custom,
 }
 
@@ -1193,9 +1333,7 @@ pub struct SandboxWorkspaceWrite {
 }
 
 // Serde helper: default to true for `allow_git_writes` when omitted.
-pub(crate) const fn default_true_bool() -> bool {
-    true
-}
+pub(crate) const fn default_true_bool() -> bool { true }
 
 #[derive(Deserialize, Debug, Clone, PartialEq, Default)]
 #[serde(rename_all = "kebab-case")]
@@ -1339,6 +1477,28 @@ pub enum ReasoningSummary {
     None,
 }
 
+#[derive(Debug, Serialize, Deserialize, Clone, Copy, PartialEq, Eq, Display)]
+#[serde(rename_all = "lowercase")]
+#[strum(serialize_all = "lowercase")]
+pub enum ServiceTier {
+    /// Legacy compatibility value for older local config files.
+    Standard,
+    Fast,
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone, Copy, PartialEq, Eq, Display)]
+#[serde(rename_all = "lowercase")]
+pub enum ContextMode {
+    #[serde(rename = "1m")]
+    #[serde(alias = "\"1m\"")]
+    #[strum(to_string = "1m")]
+    OneM,
+    #[serde(alias = "\"auto\"")]
+    Auto,
+    #[serde(alias = "\"disabled\"")]
+    Disabled,
+}
+
 /// Text verbosity level for OpenAI API responses.
 /// Controls the level of detail in the model's text responses.
 #[derive(Debug, Serialize, Deserialize, Default, Clone, Copy, PartialEq, Eq, Display)]
@@ -1349,6 +1509,15 @@ pub enum TextVerbosity {
     #[default]
     Medium,
     High,
+}
+
+#[derive(Debug, Serialize, Deserialize, Default, Clone, Copy, PartialEq, Eq)]
+#[serde(rename_all = "kebab-case")]
+pub enum Personality {
+    None,
+    Friendly,
+    #[default]
+    Pragmatic,
 }
 
 #[derive(Debug, Deserialize)]
@@ -1369,8 +1538,7 @@ where
             if text.trim().is_empty() {
                 Ok(Vec::new())
             } else {
-                shlex_split(&text)
-                    .ok_or_else(|| de::Error::custom("failed to parse command string"))
+                shlex_split(&text).ok_or_else(|| de::Error::custom("failed to parse command string"))
             }
         }
     }
@@ -1490,39 +1658,40 @@ impl Default for RetentionConfig {
     }
 }
 
-impl From<hanzo_protocol::config_types::ReasoningEffort> for ReasoningEffort {
-    fn from(v: hanzo_protocol::config_types::ReasoningEffort) -> Self {
+impl From<code_protocol::config_types::ReasoningEffort> for ReasoningEffort {
+    fn from(v: code_protocol::config_types::ReasoningEffort) -> Self {
         match v {
-            hanzo_protocol::config_types::ReasoningEffort::Minimal => ReasoningEffort::Minimal,
-            hanzo_protocol::config_types::ReasoningEffort::Low => ReasoningEffort::Low,
-            hanzo_protocol::config_types::ReasoningEffort::Medium => ReasoningEffort::Medium,
-            hanzo_protocol::config_types::ReasoningEffort::High => ReasoningEffort::High,
-            hanzo_protocol::config_types::ReasoningEffort::XHigh => ReasoningEffort::XHigh,
+            code_protocol::config_types::ReasoningEffort::None => ReasoningEffort::None,
+            code_protocol::config_types::ReasoningEffort::Minimal => ReasoningEffort::Minimal,
+            code_protocol::config_types::ReasoningEffort::Low => ReasoningEffort::Low,
+            code_protocol::config_types::ReasoningEffort::Medium => ReasoningEffort::Medium,
+            code_protocol::config_types::ReasoningEffort::High => ReasoningEffort::High,
+            code_protocol::config_types::ReasoningEffort::XHigh => ReasoningEffort::XHigh,
         }
     }
 }
 
-impl From<ReasoningEffort> for hanzo_protocol::config_types::ReasoningEffort {
+impl From<ReasoningEffort> for code_protocol::config_types::ReasoningEffort {
     fn from(v: ReasoningEffort) -> Self {
         match v {
             ReasoningEffort::Minimal | ReasoningEffort::None => {
-                hanzo_protocol::config_types::ReasoningEffort::Minimal
+                code_protocol::config_types::ReasoningEffort::Minimal
             }
-            ReasoningEffort::Low => hanzo_protocol::config_types::ReasoningEffort::Low,
-            ReasoningEffort::Medium => hanzo_protocol::config_types::ReasoningEffort::Medium,
-            ReasoningEffort::High => hanzo_protocol::config_types::ReasoningEffort::High,
-            ReasoningEffort::XHigh => hanzo_protocol::config_types::ReasoningEffort::XHigh,
+            ReasoningEffort::Low => code_protocol::config_types::ReasoningEffort::Low,
+            ReasoningEffort::Medium => code_protocol::config_types::ReasoningEffort::Medium,
+            ReasoningEffort::High => code_protocol::config_types::ReasoningEffort::High,
+            ReasoningEffort::XHigh => code_protocol::config_types::ReasoningEffort::XHigh,
         }
     }
 }
 
-impl From<hanzo_protocol::config_types::ReasoningSummary> for ReasoningSummary {
-    fn from(v: hanzo_protocol::config_types::ReasoningSummary) -> Self {
+impl From<code_protocol::config_types::ReasoningSummary> for ReasoningSummary {
+    fn from(v: code_protocol::config_types::ReasoningSummary) -> Self {
         match v {
-            hanzo_protocol::config_types::ReasoningSummary::Auto => ReasoningSummary::Auto,
-            hanzo_protocol::config_types::ReasoningSummary::Concise => ReasoningSummary::Concise,
-            hanzo_protocol::config_types::ReasoningSummary::Detailed => ReasoningSummary::Detailed,
-            hanzo_protocol::config_types::ReasoningSummary::None => ReasoningSummary::None,
+            code_protocol::config_types::ReasoningSummary::Auto => ReasoningSummary::Auto,
+            code_protocol::config_types::ReasoningSummary::Concise => ReasoningSummary::Concise,
+            code_protocol::config_types::ReasoningSummary::Detailed => ReasoningSummary::Detailed,
+            code_protocol::config_types::ReasoningSummary::None => ReasoningSummary::None,
         }
     }
 }
@@ -1605,7 +1774,11 @@ mod tests {
             cfg.transport,
             McpServerTransportConfig::StreamableHttp {
                 url: "https://example.com/mcp".to_string(),
-                bearer_token: None
+                bearer_token: None,
+                bearer_token_env_var: None,
+                http_headers: None,
+                env_http_headers: None,
+                oauth_resource: None
             }
         );
     }
@@ -1624,7 +1797,62 @@ mod tests {
             cfg.transport,
             McpServerTransportConfig::StreamableHttp {
                 url: "https://example.com/mcp".to_string(),
-                bearer_token: Some("secret".to_string())
+                bearer_token: Some("secret".to_string()),
+                bearer_token_env_var: None,
+                http_headers: None,
+                env_http_headers: None,
+                oauth_resource: None
+            }
+        );
+    }
+
+    #[test]
+    fn deserialize_streamable_http_server_config_with_header_sources() {
+        let cfg: McpServerConfig = toml::from_str(
+            r#"
+            url = "https://example.com/mcp"
+            bearer_token_env_var = "MCP_TOKEN"
+            http_headers = { "X-Foo" = "bar" }
+            env_http_headers = { "X-Token" = "MCP_HEADER" }
+        "#,
+        )
+        .expect("should deserialize http config with header sources");
+
+        assert_eq!(
+            cfg.transport,
+            McpServerTransportConfig::StreamableHttp {
+                url: "https://example.com/mcp".to_string(),
+                bearer_token: None,
+                bearer_token_env_var: Some("MCP_TOKEN".to_string()),
+                http_headers: Some(HashMap::from([("X-Foo".to_string(), "bar".to_string())])),
+                env_http_headers: Some(HashMap::from([(
+                    "X-Token".to_string(),
+                    "MCP_HEADER".to_string(),
+                )])),
+                oauth_resource: None,
+            }
+        );
+    }
+
+    #[test]
+    fn deserialize_streamable_http_server_config_with_oauth_resource() {
+        let cfg: McpServerConfig = toml::from_str(
+            r#"
+            url = "https://example.com/mcp"
+            oauth_resource = "https://api.example.com"
+        "#,
+        )
+        .expect("should deserialize http config with oauth_resource");
+
+        assert_eq!(
+            cfg.transport,
+            McpServerTransportConfig::StreamableHttp {
+                url: "https://example.com/mcp".to_string(),
+                bearer_token: None,
+                bearer_token_env_var: None,
+                http_headers: None,
+                env_http_headers: None,
+                oauth_resource: Some("https://api.example.com".to_string())
             }
         );
     }
@@ -1663,47 +1891,72 @@ mod tests {
     }
 
     #[test]
-    fn deserialize_zap_server_config() {
-        let cfg: McpServerConfig = toml::from_str(
-            r#"
-            url = "zap://localhost:9999"
-        "#,
-        )
-        .expect("should deserialize zap config");
-
-        assert_eq!(
-            cfg.transport,
-            McpServerTransportConfig::Zap {
-                url: "zap://localhost:9999".to_string(),
-            }
-        );
-    }
-
-    #[test]
-    fn deserialize_zaps_server_config() {
-        let cfg: McpServerConfig = toml::from_str(
-            r#"
-            url = "zaps://example.com:9999"
-        "#,
-        )
-        .expect("should deserialize zaps config");
-
-        assert_eq!(
-            cfg.transport,
-            McpServerTransportConfig::Zap {
-                url: "zaps://example.com:9999".to_string(),
-            }
-        );
-    }
-
-    #[test]
-    fn deserialize_rejects_bearer_token_for_zap_transport() {
+    fn deserialize_rejects_http_headers_for_stdio_transport() {
         toml::from_str::<McpServerConfig>(
             r#"
-            url = "zap://localhost:9999"
-            bearer_token = "secret"
+            command = "echo"
+            http_headers = { "X-Foo" = "bar" }
         "#,
         )
-        .expect_err("should reject bearer token for zap transport");
+        .expect_err("should reject http_headers for stdio transport");
+    }
+
+    #[test]
+    fn deserialize_rejects_oauth_resource_for_stdio_transport() {
+        let err = toml::from_str::<McpServerConfig>(
+            r#"
+            command = "echo"
+            oauth_resource = "https://api.example.com"
+        "#,
+        )
+        .expect_err("should reject oauth_resource for stdio transport");
+
+        assert!(
+            err.to_string()
+                .contains("oauth_resource is not supported for stdio"),
+            "unexpected error: {err}"
+        );
+    }
+
+    #[test]
+    fn deserialize_memories_upstream_aliases() {
+        let cfg: MemoriesToml = toml::from_str(
+            r#"
+            no_memories_if_mcp_or_web_search = true
+            max_raw_memories_for_consolidation = 7
+            extract_model = "gpt-5-mini"
+            consolidation_model = "gpt-5"
+        "#,
+        )
+        .expect("should deserialize memories aliases");
+
+        assert_eq!(cfg.no_memories_if_mcp_or_web_search, Some(true));
+        assert_eq!(cfg.max_raw_memories_for_global, Some(7));
+        assert_eq!(cfg.phase_1_model.as_deref(), Some("gpt-5-mini"));
+        assert_eq!(cfg.phase_2_model.as_deref(), Some("gpt-5"));
+    }
+
+    #[test]
+    fn memories_config_defaults_and_aliases_flow_through() {
+        let toml = MemoriesToml {
+            no_memories_if_mcp_or_web_search: Some(true),
+            generate_memories: None,
+            use_memories: Some(false),
+            max_raw_memories_for_global: Some(9),
+            max_unused_days: None,
+            max_rollout_age_days: None,
+            max_rollouts_per_startup: None,
+            min_rollout_idle_hours: None,
+            phase_1_model: Some("phase1".to_string()),
+            phase_2_model: Some("phase2".to_string()),
+        };
+
+        let cfg: MemoriesConfig = toml.into();
+        assert_eq!(cfg.no_memories_if_mcp_or_web_search, true);
+        assert_eq!(cfg.generate_memories, true);
+        assert_eq!(cfg.use_memories, false);
+        assert_eq!(cfg.max_raw_memories_for_global, 9);
+        assert_eq!(cfg.phase_1_model.as_deref(), Some("phase1"));
+        assert_eq!(cfg.phase_2_model.as_deref(), Some("phase2"));
     }
 }

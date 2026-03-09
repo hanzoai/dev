@@ -6,7 +6,7 @@ Only by name. The 2021 Codex model was deprecated in March 2023. Every Code is a
 
 ### Which models are supported?
 
-We recommend the built-in Code presets that wrap GPT-5.3 (for example `code-gpt-5.3-codex`). The default reasoning level is medium, and you can upgrade to high for complex tasks with `/model`.
+We recommend the built-in Code presets that wrap GPT-5.4 (for example `code-gpt-5.4`). The default reasoning level is medium, and you can upgrade to high for complex tasks with `/model`.
 
 You can also use older models by using API-based auth and launching Code with the `--model` flag.
 
@@ -76,4 +76,4 @@ If npm's directory isn't in your PATH, you can either:
 
 On Windows, Code looks for executables with these extensions: `.exe`, `.cmd`, `.bat`, `.com`. Ensure your agent command includes the correct extension when using absolute paths.
 
-**Related:** See the [Agent Configuration Guide](https://github.com/hanzoai/dev/blob/main/hanzo-dev/config.md#agents) for more details.
+**Related:** See the [Agent Configuration Guide](https://github.com/just-every/code/blob/main/code-rs/config.md#agents) for more details.

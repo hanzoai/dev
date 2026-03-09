@@ -1,49 +1,50 @@
 use std::collections::HashSet;
 use std::sync::Arc;
 
-use super::Session;
-use super::TurnContext;
-use super::compact_remote;
 use super::streaming::AgentTask;
+use super::Session;
+use super::compact_remote;
+use super::TurnContext;
 use super::streaming::get_last_assistant_message_from_turn;
 use crate::Prompt;
 use crate::client_common::ResponseEvent;
 use crate::environment_context::EnvironmentContext;
-use crate::error::CodeErr;
-use crate::error::Result as CodexResult;
+use crate::error::CodexErr;
 use crate::error::RetryAfter;
+use crate::error::Result as CodexResult;
 use crate::protocol::AgentMessageEvent;
 use crate::protocol::ErrorEvent;
 use crate::protocol::EventMsg;
+use code_protocol::protocol::CompactionCheckpointWarningEvent;
 use crate::protocol::InputItem;
 use crate::protocol::TaskCompleteEvent;
-use crate::task_feed;
 use crate::truncate::truncate_middle;
 use crate::util::backoff;
 use askama::Template;
+use code_protocol::models::ContentItem;
+use code_protocol::models::FunctionCallOutputPayload;
+use code_protocol::models::ResponseInputItem;
+use code_protocol::models::ResponseItem;
+use code_protocol::protocol::CompactedItem;
+use code_protocol::protocol::InputMessageKind;
+use code_protocol::protocol::RolloutItem;
 use base64::Engine;
 use chrono::Utc;
 use futures::prelude::*;
-use hanzo_app_server_protocol::AuthMode;
-use hanzo_protocol::models::ContentItem;
-use hanzo_protocol::models::FunctionCallOutputPayload;
-use hanzo_protocol::models::ResponseInputItem;
-use hanzo_protocol::models::ResponseItem;
-use hanzo_protocol::protocol::CompactedItem;
-use hanzo_protocol::protocol::CompactionCheckpointWarningEvent;
-use hanzo_protocol::protocol::InputMessageKind;
-use hanzo_protocol::protocol::RolloutItem;
 use std::time::Duration;
 
 pub const SUMMARIZATION_PROMPT: &str = include_str!("../../templates/compact/prompt.md");
-pub const COMPACTION_CHECKPOINT_MESSAGE: &str =
-    "History checkpoint: earlier conversation compacted.";
+pub const COMPACTION_CHECKPOINT_MESSAGE: &str = "History checkpoint: earlier conversation compacted.";
 const COMPACT_USER_MESSAGE_MAX_TOKENS: usize = 20_000;
 const COMPACT_TEXT_CONTENT_MAX_BYTES: usize = 8 * 1024;
 const COMPACT_TOOL_ARGS_MAX_BYTES: usize = 4 * 1024;
 const COMPACT_TOOL_OUTPUT_MAX_BYTES: usize = 4 * 1024;
 const COMPACT_IMAGE_URL_MAX_BYTES: usize = 512;
 const MAX_COMPACTION_SNIPPETS: usize = 12;
+const COMPACT_STREAM_TIMEOUT: Duration = Duration::from_secs(120);
+const MAX_COMPACT_CONTEXT_OVERFLOW_TRIMS: usize = 32;
+const MAX_COMPACT_USAGE_LIMIT_RETRIES: usize = 2;
+const COMPACTION_EMERGENCY_MESSAGE: &str = "⚠️ Compaction failed: The conversation history is too large to compact within the model's context limits. The history has been reset to prevent further errors. Please start a new session or manually reduce context by clearing history.";
 
 /// Determine whether to use remote compaction (ChatGPT-based) or local compaction.
 ///
@@ -65,7 +66,7 @@ pub(super) async fn should_use_remote_compact_task(session: &Session) -> bool {
         .client
         .get_auth_manager()
         .and_then(|manager| manager.auth())
-        .is_some_and(|auth| auth.mode == AuthMode::ChatGPT)
+        .is_some_and(|auth| auth.mode.is_chatgpt())
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -104,9 +105,7 @@ pub fn collect_compaction_snippets(items: &[ResponseItem]) -> Vec<CompactionSnip
                 break;
             }
             let snippet_len = truncated.len();
-            if !snippets.is_empty()
-                && total_bytes + snippet_len > COMPACT_USER_MESSAGE_MAX_TOKENS * 4
-            {
+            if !snippets.is_empty() && total_bytes + snippet_len > COMPACT_USER_MESSAGE_MAX_TOKENS * 4 {
                 break;
             }
             total_bytes += snippet_len;
@@ -144,8 +143,7 @@ pub fn make_compaction_summary_message(
     ResponseItem::Message {
         id: None,
         role: "user".to_string(),
-        content: vec![ContentItem::InputText { text }],
-    }
+        content: vec![ContentItem::InputText { text }], end_turn: None, phase: None}
 }
 
 /// Resolve the compaction prompt text based on an optional override.
@@ -153,10 +151,10 @@ pub fn make_compaction_summary_message(
 /// Empty strings are treated as missing so we always fall back to the embedded
 /// template instead of sending a blank developer message.
 pub fn resolve_compact_prompt_text(override_prompt: Option<&str>) -> String {
-    if let Some(text) = override_prompt
-        && !text.trim().is_empty()
-    {
-        return text.to_string();
+    if let Some(text) = override_prompt {
+        if !text.trim().is_empty() {
+            return text.to_string();
+        }
     }
     SUMMARIZATION_PROMPT.to_string()
 }
@@ -178,9 +176,7 @@ pub(super) async fn run_inline_auto_compact_task(
 ) -> Vec<ResponseItem> {
     let sub_id = sess.next_internal_sub_id();
     let prompt_text = resolve_compact_prompt_text(turn_context.compact_prompt_override.as_deref());
-    let input = vec![InputItem::Text {
-        text: prompt_text.clone(),
-    }];
+    let input = vec![InputItem::Text { text: prompt_text.clone() }];
     run_compact_task_inner_inline(sess, turn_context, sub_id, input).await
 }
 
@@ -192,20 +188,6 @@ pub(super) async fn run_compact_task(
 ) {
     let start_event = sess.make_event(&sub_id, EventMsg::TaskStarted);
     sess.send_event(start_event).await;
-    task_feed::spawn_task_feed_entry(
-        sess.client.code_home().to_path_buf(),
-        task_feed::TaskFeedSeed {
-            event: task_feed::TaskFeedEvent::TaskStarted,
-            status: task_feed::TaskFeedStatus::Running,
-            session_id: sess.id.to_string(),
-            task_id: sub_id.clone(),
-            task_kind: "compact".to_string(),
-            model: sess.client.get_model(),
-            cwd: sess.cwd.clone(),
-            last_agent_message: None,
-            abort_reason: None,
-        },
-    );
     let compaction_result = if should_use_remote_compact_task(&sess).await {
         compact_remote::run_remote_compact_task(
             Arc::clone(&sess),
@@ -215,24 +197,17 @@ pub(super) async fn run_compact_task(
         )
         .await
     } else {
-        perform_compaction(sess.clone(), turn_context, sub_id.clone(), input, true).await
+        perform_compaction(
+            sess.clone(),
+            turn_context,
+            sub_id.clone(),
+            input,
+            true,
+        )
+        .await
     };
 
     let _ = compaction_result;
-    task_feed::spawn_task_feed_entry(
-        sess.client.code_home().to_path_buf(),
-        task_feed::TaskFeedSeed {
-            event: task_feed::TaskFeedEvent::TaskCompleted,
-            status: task_feed::TaskFeedStatus::Succeeded,
-            session_id: sess.id.to_string(),
-            task_id: sub_id.clone(),
-            task_kind: "compact".to_string(),
-            model: sess.client.get_model(),
-            cwd: sess.cwd.clone(),
-            last_agent_message: None,
-            abort_reason: None,
-        },
-    );
     let event = sess.make_event(
         &sub_id,
         EventMsg::TaskComplete(TaskCompleteEvent {
@@ -240,6 +215,37 @@ pub(super) async fn run_compact_task(
         }),
     );
     sess.send_event(event).await;
+}
+
+pub(super) async fn apply_emergency_compaction_fallback(
+    sess: &Arc<Session>,
+    turn_context: &TurnContext,
+    sub_id: &str,
+    reason: &str,
+) -> Vec<ResponseItem> {
+    let message = if reason.trim().is_empty() {
+        COMPACTION_EMERGENCY_MESSAGE.to_string()
+    } else {
+        format!("{reason} {COMPACTION_EMERGENCY_MESSAGE}")
+    };
+
+    let event = sess.make_event(
+        sub_id,
+        EventMsg::Error(ErrorEvent {
+            message: message.clone(),
+        }),
+    );
+    sess.send_event(event).await;
+
+    let initial_context = sess.build_initial_context(turn_context);
+    let emergency_history = build_emergency_compacted_history(initial_context, &message);
+    sess.replace_history(emergency_history.clone());
+    {
+        let mut state = sess.state.lock().unwrap();
+        state.token_usage_info = None;
+    }
+
+    emergency_history
 }
 
 /// Perform compaction as a background task that updates session history in-place.
@@ -259,6 +265,7 @@ pub(super) async fn perform_compaction(
     let max_retries = turn_context.client.get_provider().stream_max_retries();
     let mut retries = 0;
     let mut truncated_count = 0usize;
+    let mut usage_limit_retries = 0usize;
 
     // Do not persist a TurnContext rollout item here; inline compaction is a
     // background maintenance task and should not affect rollout reconstruction.
@@ -288,8 +295,24 @@ pub(super) async fn perform_compaction(
                 }
                 break;
             }
-            Err(CodeErr::Interrupted) => return Err(CodeErr::Interrupted),
-            Err(CodeErr::UsageLimitReached(limit_err)) => {
+            Err(CodexErr::Interrupted) => return Err(CodexErr::Interrupted),
+            Err(CodexErr::UsageLimitReached(limit_err)) => {
+                if usage_limit_retries >= MAX_COMPACT_USAGE_LIMIT_RETRIES {
+                    tracing::error!(
+                        "Compaction aborted after {} usage-limit retries",
+                        MAX_COMPACT_USAGE_LIMIT_RETRIES
+                    );
+                    let reason = "Compaction hit persistent usage limits and cannot continue.";
+                    let _ = apply_emergency_compaction_fallback(
+                        &sess,
+                        turn_context.as_ref(),
+                        &sub_id,
+                        reason,
+                    )
+                    .await;
+                    return Err(CodexErr::UsageLimitReached(limit_err));
+                }
+                usage_limit_retries = usage_limit_retries.saturating_add(1);
                 let now = Utc::now();
                 let retry_after = limit_err
                     .retry_after(now)
@@ -302,7 +325,7 @@ pub(super) async fn perform_compaction(
                 continue;
             }
             Err(e) if is_context_overflow_error(&e) => {
-                if turn_input.len() > 1 {
+                if turn_input.len() > 1 && truncated_count < MAX_COMPACT_CONTEXT_OVERFLOW_TRIMS {
                     tracing::warn!(
                         "Context window exceeded while compacting; dropping oldest item ({} remaining)",
                         turn_input.len().saturating_sub(1)
@@ -310,50 +333,41 @@ pub(super) async fn perform_compaction(
                     turn_input.remove(0);
                     truncated_count = truncated_count.saturating_add(1);
                     retries = 0;
+                    usage_limit_retries = 0;
                     continue;
                 }
 
-                // Compaction cannot fit even with minimal input. Apply emergency
-                // fallback to prevent infinite retry loops: reset history to just
-                // initial context with a warning message.
-                tracing::error!(
-                    "Compaction failed: context overflow even with minimal input. \
-                     Applying emergency fallback history to prevent retry loop."
-                );
-
-                let emergency_message = "⚠️ Compaction failed: The conversation history is too large \
-                    to compact within the model's context limits. The history has been reset to prevent \
-                    further errors. Please start a new session or manually reduce context by clearing history.";
-
-                let event = sess.make_event(
+                let reason = if truncated_count >= MAX_COMPACT_CONTEXT_OVERFLOW_TRIMS {
+                    format!(
+                        "Compaction trimmed {} items but still exceeded the context window.",
+                        truncated_count
+                    )
+                } else {
+                    "Compaction failed: context overflow even with minimal input.".to_string()
+                };
+                tracing::error!("{reason}");
+                let _ = apply_emergency_compaction_fallback(
+                    &sess,
+                    turn_context.as_ref(),
                     &sub_id,
-                    EventMsg::Error(ErrorEvent {
-                        message: emergency_message.to_string(),
-                    }),
-                );
-                sess.send_event(event).await;
+                    &reason,
+                )
+                .await;
 
-                // Apply emergency fallback: reset history to minimal state
-                let initial_context = sess.build_initial_context(turn_context.as_ref());
-                let emergency_history =
-                    build_emergency_compacted_history(initial_context, emergency_message);
-                sess.replace_history(emergency_history);
-
-                // Still return error to signal compaction didn't complete normally,
-                // but history has been reset to prevent retry loops
                 return Err(e);
             }
             Err(e) => {
                 if retries < max_retries {
                     retries += 1;
                     let delay = backoff(retries);
-                    sess.notify_stream_error(
-                        &sub_id,
-                        format!(
-                            "stream error: {e}; retrying {retries}/{max_retries} in {delay:?}…"
-                        ),
-                    )
-                    .await;
+                    sess
+                        .notify_stream_error(
+                            &sub_id,
+                            format!(
+                                "stream error: {e}; retrying {retries}/{max_retries} in {delay:?}…"
+                            ),
+                        )
+                        .await;
                     tokio::time::sleep(delay).await;
                     continue;
                 } else {
@@ -392,6 +406,7 @@ pub(super) async fn perform_compaction(
 
     let rollout_item = RolloutItem::Compacted(CompactedItem {
         message: summary_text.clone(),
+        replacement_history: None,
     });
     sess.persist_rollout_items(&[rollout_item]).await;
 
@@ -426,6 +441,7 @@ async fn run_compact_task_inner_inline(
     let max_retries = turn_context.client.get_provider().stream_max_retries();
     let mut retries = 0;
     let mut truncated_count = 0usize;
+    let mut usage_limit_retries = 0usize;
     loop {
         let mut prompt = Prompt::default();
         prompt.input = turn_input.clone();
@@ -449,8 +465,23 @@ async fn run_compact_task_inner_inline(
                 }
                 break;
             }
-            Err(CodeErr::Interrupted) => return Vec::new(),
-            Err(CodeErr::UsageLimitReached(limit_err)) => {
+            Err(CodexErr::Interrupted) => return Vec::new(),
+            Err(CodexErr::UsageLimitReached(limit_err)) => {
+                if usage_limit_retries >= MAX_COMPACT_USAGE_LIMIT_RETRIES {
+                    tracing::error!(
+                        "Inline compaction aborted after {} usage-limit retries",
+                        MAX_COMPACT_USAGE_LIMIT_RETRIES
+                    );
+                    let reason = "Compaction hit persistent usage limits and cannot continue.";
+                    return apply_emergency_compaction_fallback(
+                        &sess,
+                        turn_context.as_ref(),
+                        &sub_id,
+                        reason,
+                    )
+                    .await;
+                }
+                usage_limit_retries = usage_limit_retries.saturating_add(1);
                 let now = Utc::now();
                 let retry_after = limit_err
                     .retry_after(now)
@@ -463,7 +494,7 @@ async fn run_compact_task_inner_inline(
                 continue;
             }
             Err(e) if is_context_overflow_error(&e) => {
-                if turn_input.len() > 1 {
+                if turn_input.len() > 1 && truncated_count < MAX_COMPACT_CONTEXT_OVERFLOW_TRIMS {
                     tracing::warn!(
                         "Context window exceeded while compacting; dropping oldest item ({} remaining)",
                         turn_input.len().saturating_sub(1)
@@ -471,56 +502,40 @@ async fn run_compact_task_inner_inline(
                     turn_input.remove(0);
                     truncated_count = truncated_count.saturating_add(1);
                     retries = 0;
+                    usage_limit_retries = 0;
                     continue;
                 }
 
-                // Compaction cannot fit even with minimal input. Return an emergency
-                // fallback history with just the initial context and a clear warning.
-                // This prevents infinite loops where compaction repeatedly fails and
-                // the system keeps retrying with the same oversized input.
-                tracing::error!(
-                    "Compaction failed: context overflow even with minimal input. \
-                     Returning emergency fallback history to prevent retry loop."
-                );
+                let reason = if truncated_count >= MAX_COMPACT_CONTEXT_OVERFLOW_TRIMS {
+                    format!(
+                        "Compaction trimmed {} items but still exceeded the context window.",
+                        truncated_count
+                    )
+                } else {
+                    "Compaction failed: context overflow even with minimal input.".to_string()
+                };
+                tracing::error!("{reason}");
 
-                let emergency_message = "⚠️ Compaction failed: The conversation history is too large \
-                    to compact within the model's context limits. The history has been reset to prevent \
-                    further errors. Please start a new session or manually reduce context by clearing history.";
-
-                let event = sess.make_event(
+                return apply_emergency_compaction_fallback(
+                    &sess,
+                    turn_context.as_ref(),
                     &sub_id,
-                    EventMsg::Error(ErrorEvent {
-                        message: emergency_message.to_string(),
-                    }),
-                );
-                sess.send_event(event).await;
-
-                // Return minimal emergency history: just initial context + warning message
-                let initial_context = sess.build_initial_context(turn_context.as_ref());
-                let emergency_history =
-                    build_emergency_compacted_history(initial_context, emergency_message);
-
-                // Update session history with emergency fallback
-                {
-                    let mut state = sess.state.lock().unwrap();
-                    state.history = crate::conversation_history::ConversationHistory::new();
-                    state.history.record_items(emergency_history.iter());
-                    state.token_usage_info = None;
-                }
-
-                return emergency_history;
+                    &reason,
+                )
+                .await;
             }
             Err(e) => {
                 if retries < max_retries {
                     retries += 1;
                     let delay = backoff(retries);
-                    sess.notify_stream_error(
-                        &sub_id,
-                        format!(
-                            "stream error: {e}; retrying {retries}/{max_retries} in {delay:?}…"
-                        ),
-                    )
-                    .await;
+                    sess
+                        .notify_stream_error(
+                            &sub_id,
+                            format!(
+                                "stream error: {e}; retrying {retries}/{max_retries} in {delay:?}…"
+                            ),
+                        )
+                        .await;
                     tokio::time::sleep(delay).await;
                     continue;
                 } else {
@@ -557,6 +572,7 @@ async fn run_compact_task_inner_inline(
 
     let rollout_item = RolloutItem::Compacted(CompactedItem {
         message: summary_text.clone(),
+        replacement_history: None,
     });
     sess.persist_rollout_items(&[rollout_item]).await;
 
@@ -615,10 +631,10 @@ fn looks_like_context_overflow(message: &str) -> bool {
         || lower.contains("exceeds the context window")
 }
 
-pub(super) fn is_context_overflow_error(err: &CodeErr) -> bool {
+pub(super) fn is_context_overflow_error(err: &CodexErr) -> bool {
     match err {
-        CodeErr::UnexpectedStatus(resp) => looks_like_context_overflow(&resp.body),
-        CodeErr::Stream(msg, _, _) => looks_like_context_overflow(msg),
+        CodexErr::UnexpectedStatus(resp) => looks_like_context_overflow(&resp.body),
+        CodexErr::Stream(msg, _, _) => looks_like_context_overflow(msg),
         _ => false,
     }
 }
@@ -627,7 +643,12 @@ pub fn sanitize_items_for_compact(items: Vec<ResponseItem>) -> Vec<ResponseItem>
     items
         .into_iter()
         .filter_map(|item| match item {
-            ResponseItem::Message { id, role, content } => {
+            ResponseItem::Message {
+                id,
+                role,
+                content,
+                ..
+            } => {
                 let mut filtered_content = Vec::with_capacity(content.len());
                 for content_item in content {
                     match content_item {
@@ -647,7 +668,9 @@ pub fn sanitize_items_for_compact(items: Vec<ResponseItem>) -> Vec<ResponseItem>
                             {
                                 let bytes = image_url.len();
                                 filtered_content.push(ContentItem::InputText {
-                                    text: format!("(image omitted for compaction; {bytes} bytes)",),
+                                    text: format!(
+                                        "(image omitted for compaction; {bytes} bytes)",
+                                    ),
                                 });
                             } else {
                                 filtered_content.push(ContentItem::InputImage { image_url });
@@ -661,8 +684,7 @@ pub fn sanitize_items_for_compact(items: Vec<ResponseItem>) -> Vec<ResponseItem>
                     Some(ResponseItem::Message {
                         id,
                         role,
-                        content: filtered_content,
-                    })
+                        content: filtered_content, end_turn: None, phase: None})
                 }
             }
             ResponseItem::FunctionCall {
@@ -680,11 +702,13 @@ pub fn sanitize_items_for_compact(items: Vec<ResponseItem>) -> Vec<ResponseItem>
                 })
             }
             ResponseItem::FunctionCallOutput { call_id, output } => {
-                let FunctionCallOutputPayload { content, success } = output;
-                let content = truncate_for_compact(content, COMPACT_TOOL_OUTPUT_MAX_BYTES);
+                let success = output.success;
+                let content = truncate_for_compact(output.to_string(), COMPACT_TOOL_OUTPUT_MAX_BYTES);
+                let mut output = FunctionCallOutputPayload::from_text(content);
+                output.success = success;
                 Some(ResponseItem::FunctionCallOutput {
                     call_id,
-                    output: FunctionCallOutputPayload { content, success },
+                    output,
                 })
             }
             ResponseItem::CustomToolCall {
@@ -704,7 +728,8 @@ pub fn sanitize_items_for_compact(items: Vec<ResponseItem>) -> Vec<ResponseItem>
                 })
             }
             ResponseItem::CustomToolCallOutput { call_id, output } => {
-                let output = truncate_for_compact(output, COMPACT_TOOL_OUTPUT_MAX_BYTES);
+                let output = truncate_for_compact(output.to_string(), COMPACT_TOOL_OUTPUT_MAX_BYTES);
+                let output = FunctionCallOutputPayload::from_text(output);
                 Some(ResponseItem::CustomToolCallOutput { call_id, output })
             }
             ResponseItem::Reasoning { id, summary, .. } => Some(ResponseItem::Reasoning {
@@ -731,7 +756,11 @@ pub fn prune_orphan_tool_outputs(items: &mut Vec<ResponseItem>) -> usize {
             | ResponseItem::CustomToolCall { call_id, .. } => {
                 seen_calls.insert(call_id.clone());
             }
-            ResponseItem::LocalShellCall { id, call_id, .. } => {
+            ResponseItem::LocalShellCall {
+                id,
+                call_id,
+                ..
+            } => {
                 if let Some(call_id) = call_id {
                     seen_calls.insert(call_id.clone());
                 }
@@ -809,8 +838,7 @@ pub(crate) fn build_emergency_compacted_history(
         role: "user".to_string(),
         content: vec![ContentItem::InputText {
             text: warning_message.to_string(),
-        }],
-    });
+        }], end_turn: None, phase: None});
     history
 }
 
@@ -820,26 +848,38 @@ async fn drain_to_completed(
     prompt: &Prompt,
 ) -> CodexResult<()> {
     let mut stream = turn_context.client.clone().stream(prompt).await?;
-    loop {
-        let maybe_event = stream.next().await;
-        let Some(event) = maybe_event else {
-            return Err(CodeErr::Stream(
-                "stream closed before response.completed".into(),
-                None,
-                None,
-            ));
-        };
-        match event {
-            Ok(ResponseEvent::OutputItemDone { item, .. }) => {
-                let mut state = sess.state.lock().unwrap();
-                state.history.record_items(std::slice::from_ref(&item));
+    let result = tokio::time::timeout(COMPACT_STREAM_TIMEOUT, async {
+        loop {
+            let maybe_event = stream.next().await;
+            let Some(event) = maybe_event else {
+                return Err(CodexErr::Stream(
+                    "stream closed before response.completed".into(),
+                    None,
+                    None,
+                ));
+            };
+            match event {
+                Ok(ResponseEvent::OutputItemDone { item, .. }) => {
+                    let mut state = sess.state.lock().unwrap();
+                    state.history.record_items(std::slice::from_ref(&item));
+                }
+                Ok(ResponseEvent::Completed { .. }) => {
+                    return Ok(());
+                }
+                Ok(_) => continue,
+                Err(e) => return Err(e),
             }
-            Ok(ResponseEvent::Completed { .. }) => {
-                return Ok(());
-            }
-            Ok(_) => continue,
-            Err(e) => return Err(e),
         }
+    })
+    .await;
+
+    match result {
+        Ok(res) => res,
+        Err(_) => Err(CodexErr::Stream(
+            "compaction stream timed out".into(),
+            None,
+            None,
+        )),
     }
 }
 
@@ -877,7 +917,7 @@ pub(super) fn response_input_from_core_items(items: Vec<InputItem>) -> ResponseI
             InputItem::EphemeralImage { path, metadata } => {
                 if let Some(meta) = metadata {
                     content_items.push(ContentItem::InputText {
-                        text: format!("[EPHEMERAL:{meta}]"),
+                        text: format!("[EPHEMERAL:{}]", meta),
                     });
                 }
                 match std::fs::read(&path) {
@@ -964,8 +1004,7 @@ mod tests {
                 role: "assistant".to_string(),
                 content: vec![ContentItem::OutputText {
                     text: "ignored".to_string(),
-                }],
-            },
+                }], end_turn: None, phase: None},
             ResponseItem::Message {
                 id: Some("user".to_string()),
                 role: "user".to_string(),
@@ -976,8 +1015,7 @@ mod tests {
                     ContentItem::OutputText {
                         text: "second".to_string(),
                     },
-                ],
-            },
+                ], end_turn: None, phase: None},
             ResponseItem::Other,
         ];
 
@@ -993,28 +1031,34 @@ mod tests {
                 id: None,
                 role: "user".to_string(),
                 content: vec![ContentItem::InputText {
-                    text: "<user_instructions>do things</user_instructions>".to_string(),
-                }],
-            },
+                    text: "# AGENTS.md instructions for /tmp\n\n<INSTRUCTIONS>\ndo things\n</INSTRUCTIONS>"
+                        .to_string(),
+                }], end_turn: None, phase: None},
             ResponseItem::Message {
                 id: None,
                 role: "user".to_string(),
                 content: vec![ContentItem::InputText {
                     text: "<ENVIRONMENT_CONTEXT>cwd=/tmp</ENVIRONMENT_CONTEXT>".to_string(),
-                }],
-            },
+                }], end_turn: None, phase: None},
             ResponseItem::Message {
                 id: None,
                 role: "user".to_string(),
                 content: vec![ContentItem::InputText {
                     text: "real user message".to_string(),
-                }],
-            },
+                }], end_turn: None, phase: None},
         ];
 
         let collected = collect_user_messages(&items);
 
-        assert_eq!(vec!["real user message".to_string()], collected);
+        assert_eq!(
+            vec![
+                "# AGENTS.md instructions for /tmp\n\n<INSTRUCTIONS>\ndo things\n</INSTRUCTIONS>"
+                    .to_string(),
+                "<ENVIRONMENT_CONTEXT>cwd=/tmp</ENVIRONMENT_CONTEXT>".to_string(),
+                "real user message".to_string(),
+            ],
+            collected
+        );
     }
 
     #[test]
@@ -1023,15 +1067,10 @@ mod tests {
         for idx in 0..15 {
             items.push(ResponseItem::Message {
                 id: None,
-                role: if idx % 2 == 0 {
-                    "user".to_string()
-                } else {
-                    "assistant".to_string()
-                },
+                role: if idx % 2 == 0 { "user".to_string() } else { "assistant".to_string() },
                 content: vec![ContentItem::InputText {
                     text: format!("Message #{idx} {}", "x".repeat(1024)),
-                }],
-            });
+                }], end_turn: None, phase: None});
         }
 
         let snippets = collect_compaction_snippets(&items);
@@ -1071,8 +1110,7 @@ mod tests {
         let snippet_source = vec![ResponseItem::Message {
             id: None,
             role: "user".to_string(),
-            content: vec![ContentItem::InputText { text: big.clone() }],
-        }];
+            content: vec![ContentItem::InputText { text: big.clone() }], end_turn: None, phase: None}];
         let snippets = collect_compaction_snippets(&snippet_source);
         let history = build_compacted_history(Vec::new(), &snippets, "SUMMARY");
 
@@ -1095,20 +1133,19 @@ mod tests {
     #[test]
     fn build_emergency_compacted_history_creates_minimal_history() {
         let initial_context = vec![
-            ResponseItem::Message {
-                id: None,
-                role: "user".to_string(),
-                content: vec![ContentItem::InputText {
-                    text: "<user_instructions>test</user_instructions>".to_string(),
-                }],
-            },
+                ResponseItem::Message {
+                    id: None,
+                    role: "user".to_string(),
+                    content: vec![ContentItem::InputText {
+                        text: "# AGENTS.md instructions for /tmp\n\n<INSTRUCTIONS>\ntest\n</INSTRUCTIONS>"
+                            .to_string(),
+                    }], end_turn: None, phase: None},
             ResponseItem::Message {
                 id: None,
                 role: "user".to_string(),
                 content: vec![ContentItem::InputText {
                     text: "<ENVIRONMENT_CONTEXT>cwd=/tmp</ENVIRONMENT_CONTEXT>".to_string(),
-                }],
-            },
+                }], end_turn: None, phase: None},
         ];
 
         let warning = "Emergency fallback";
