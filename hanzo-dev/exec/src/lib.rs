@@ -5,106 +5,107 @@ mod event_processor_with_json_output;
 mod slash;
 
 pub use cli::Cli;
-use event_processor::handle_last_message;
+use code_auto_drive_core::start_auto_coordinator;
+use code_auto_drive_core::AutoCoordinatorCommand;
+use code_auto_drive_core::AutoCoordinatorEvent;
+use code_auto_drive_core::AutoCoordinatorEventSender;
+use code_auto_drive_core::AutoCoordinatorStatus;
+use code_auto_drive_core::AutoDriveHistory;
+use code_auto_drive_core::AutoTurnAgentsAction;
+use code_auto_drive_core::AutoTurnAgentsTiming;
+use code_auto_drive_core::AutoTurnCliAction;
+use code_auto_drive_core::MODEL_SLUG;
+use code_core::AuthManager;
+use code_core::BUILT_IN_OSS_MODEL_PROVIDER_ID;
+use code_core::ConversationManager;
+use code_core::NewConversation;
+use code_core::CodexConversation;
+use code_core::config::set_default_originator;
+use code_core::config::Config;
+use code_core::config::ConfigOverrides;
+use code_core::config_types::AutoDriveContinueMode;
+use code_core::model_family::{derive_default_model_family, find_family_for_model};
+use code_core::git_info::get_git_repo_root;
+use code_core::review_coord::{
+    bump_snapshot_epoch_for,
+    clear_stale_lock_if_dead,
+    current_snapshot_epoch_for,
+    try_acquire_lock,
+};
+use code_core::protocol::AskForApproval;
+use code_core::protocol::AgentSourceKind;
+use code_core::protocol::AgentStatusUpdateEvent;
+use code_core::protocol::Event;
+use code_core::protocol::EventMsg;
+use code_core::protocol::InputItem;
+use code_core::protocol::Op;
+use code_core::protocol::ReviewOutputEvent;
+use code_core::protocol::ReviewRequest;
+use code_core::protocol::TaskCompleteEvent;
+use code_protocol::models::ContentItem;
+use code_protocol::models::ResponseItem;
+use code_protocol::protocol::SessionSource;
+use code_ollama::DEFAULT_OSS_MODEL;
+use code_protocol::config_types::SandboxMode;
 use event_processor_with_human_output::EventProcessorWithHumanOutput;
 use event_processor_with_json_output::EventProcessorWithJsonOutput;
-use hanzo_auto_drive_core::AutoCoordinatorCommand;
-use hanzo_auto_drive_core::AutoCoordinatorEvent;
-use hanzo_auto_drive_core::AutoCoordinatorEventSender;
-use hanzo_auto_drive_core::AutoCoordinatorStatus;
-use hanzo_auto_drive_core::AutoDriveHistory;
-use hanzo_auto_drive_core::AutoTurnAgentsAction;
-use hanzo_auto_drive_core::AutoTurnAgentsTiming;
-use hanzo_auto_drive_core::AutoTurnCliAction;
-use hanzo_auto_drive_core::MODEL_SLUG;
-use hanzo_auto_drive_core::start_auto_coordinator;
-use hanzo_core::AuthManager;
-use hanzo_core::BUILT_IN_OSS_MODEL_PROVIDER_ID;
-use hanzo_core::CodexConversation;
-use hanzo_core::ConversationManager;
-use hanzo_core::NewConversation;
-use hanzo_core::config::Config;
-use hanzo_core::config::ConfigOverrides;
-use hanzo_core::config::set_default_originator;
-use hanzo_core::config_types::AutoDriveContinueMode;
-use hanzo_core::git_info::get_git_repo_root;
-use hanzo_core::git_info::recent_commits;
-use hanzo_core::model_family::derive_default_model_family;
-use hanzo_core::model_family::find_family_for_model;
-use hanzo_core::protocol::AgentSourceKind;
-use hanzo_core::protocol::AgentStatusUpdateEvent;
-use hanzo_core::protocol::AskForApproval;
-use hanzo_core::protocol::Event;
-use hanzo_core::protocol::EventMsg;
-use hanzo_core::protocol::InputItem;
-use hanzo_core::protocol::Op;
-use hanzo_core::protocol::ReviewContextMetadata;
-use hanzo_core::protocol::ReviewOutputEvent;
-use hanzo_core::protocol::ReviewRequest;
-use hanzo_core::protocol::TaskCompleteEvent;
-use hanzo_core::review_coord::bump_snapshot_epoch_for;
-use hanzo_core::review_coord::clear_stale_lock_if_dead;
-use hanzo_core::review_coord::current_snapshot_epoch_for;
-use hanzo_core::review_coord::try_acquire_lock;
-use hanzo_git_tooling::CreateGhostCommitOptions;
-use hanzo_git_tooling::GhostCommit;
-use hanzo_git_tooling::create_ghost_commit;
-use hanzo_ollama::DEFAULT_OSS_MODEL;
-use hanzo_protocol::config_types::SandboxMode;
-use hanzo_protocol::models::ContentItem;
-use hanzo_protocol::models::ResponseItem;
-use hanzo_protocol::protocol::SessionSource;
+use event_processor::handle_last_message;
+use code_git_tooling::GhostCommit;
+use code_git_tooling::CreateGhostCommitOptions;
+use code_git_tooling::create_ghost_commit;
 use serde_json::Value;
 use std::collections::HashSet;
 use std::io::IsTerminal;
 use std::io::Read;
-use std::path::Path;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use supports_color::Stream;
-use tokio::time::Duration;
-use tokio::time::Instant;
+use tokio::time::{Duration, Instant};
 use tracing::debug;
 use tracing::error;
 use tracing::info;
 use tracing_subscriber::EnvFilter;
 
+use anyhow::Context;
 use crate::cli::Command as ExecCommand;
 use crate::event_processor::CodexStatus;
 use crate::event_processor::EventProcessor;
-use crate::slash::SlashContext;
-use crate::slash::SlashDispatch;
-use crate::slash::process_exec_slash_command;
-use anyhow::Context;
-use hanzo_auto_drive_core::AUTO_RESOLVE_REVIEW_FOLLOWUP;
-use hanzo_auto_drive_core::AutoResolvePhase;
-use hanzo_auto_drive_core::AutoResolveState;
-use hanzo_core::AutoDriveMode;
-use hanzo_core::AutoDrivePidFile;
-use hanzo_core::SessionCatalog;
-use hanzo_core::SessionQuery;
-use hanzo_core::entry_to_rollout_path;
-use hanzo_core::git_info::current_branch_name;
-use hanzo_core::protocol::SandboxPolicy;
-use hanzo_core::timeboxed_exec_guidance::AUTO_EXEC_TIMEBOXED_CLI_GUIDANCE;
-use hanzo_core::timeboxed_exec_guidance::AUTO_EXEC_TIMEBOXED_GOAL_SUFFIX;
+use crate::slash::{process_exec_slash_command, SlashContext, SlashDispatch};
+use code_auto_drive_core::AUTO_RESOLVE_REVIEW_FOLLOWUP;
+use code_auto_drive_core::AutoResolvePhase;
+use code_auto_drive_core::AutoResolveState;
+use code_core::{entry_to_rollout_path, AutoDriveMode, AutoDrivePidFile, SessionCatalog, SessionQuery};
+use code_core::protocol::SandboxPolicy;
+
+fn build_auto_drive_exec_config(config: &Config) -> Config {
+	    let mut auto_config = config.clone();
+	    auto_config.model = config.auto_drive.model.trim().to_string();
+	    if auto_config.model.is_empty() {
+	        auto_config.model = MODEL_SLUG.to_string();
+	    }
+	    auto_config.model_reasoning_effort = config.auto_drive.model_reasoning_effort;
+	    auto_config
+}
+use code_core::git_info::current_branch_name;
+use code_core::timeboxed_exec_guidance::{
+    AUTO_EXEC_TIMEBOXED_CLI_GUIDANCE,
+    AUTO_EXEC_TIMEBOXED_GOAL_SUFFIX,
+};
 
 /// How long exec waits after task completion before sending Shutdown when Auto Review
 /// may be about to start. Guarded so sub-agents are not delayed.
 const AUTO_REVIEW_SHUTDOWN_GRACE_MS: u64 = 1_500;
-
-fn build_auto_drive_exec_config(config: &Config) -> Config {
-    let mut auto_config = config.clone();
-    auto_config.model = config.auto_drive.model.trim().to_string();
-    if auto_config.model.is_empty() {
-        auto_config.model = MODEL_SLUG.to_string();
-    }
-    auto_config.model_reasoning_effort = config.auto_drive.model_reasoning_effort;
-    auto_config
-}
+const REVIEW_SCOPE_MAX_LISTED_PATHS: usize = 120;
+const REVIEW_SCOPE_EXCLUDED_PREFIXES: [&str; 5] = [
+    "codex-rs/",
+    "node_modules/",
+    "target/",
+    ".git/",
+    ".code/",
+];
 
 pub async fn run_main(cli: Cli, code_linux_sandbox_exe: Option<PathBuf>) -> anyhow::Result<()> {
-    if let Err(err) = set_default_originator("hanzo_exec") {
+    if let Err(err) = set_default_originator("code_exec") {
         tracing::warn!(?err, "Failed to set codex exec originator override {err:?}");
     }
 
@@ -135,7 +136,7 @@ pub async fn run_main(cli: Cli, code_linux_sandbox_exe: Option<PathBuf>) -> anyh
     } = cli;
 
     let run_deadline = max_seconds.map(|seconds| Instant::now() + Duration::from_secs(seconds));
-    let run_deadline_std = run_deadline.map(tokio::time::Instant::into_std);
+    let run_deadline_std = run_deadline.map(|deadline| deadline.into_std());
 
     // Determine the prompt source (parent or subcommand) and read from stdin if needed.
     let prompt_arg = match &command {
@@ -182,23 +183,16 @@ pub async fn run_main(cli: Cli, code_linux_sandbox_exe: Option<PathBuf>) -> anyh
     let mut auto_drive_goal: Option<String> = None;
     let trimmed_prompt = prompt.trim();
     if trimmed_prompt.starts_with("/auto") {
-        auto_drive_goal = Some(
-            trimmed_prompt
-                .trim_start_matches("/auto")
-                .trim()
-                .to_string(),
-        );
+        auto_drive_goal = Some(trimmed_prompt.trim_start_matches("/auto").trim().to_string());
     }
     if auto_drive {
         if trimmed_prompt.is_empty() {
-            eprintln!(
-                "Auto Drive requires a goal. Provide one after --auto or prefix the prompt with /auto."
-            );
+            eprintln!("Auto Drive requires a goal. Provide one after --auto or prefix the prompt with /auto.");
             std::process::exit(1);
         }
         if auto_drive_goal
             .as_ref()
-            .is_some_and(std::string::String::is_empty)
+            .is_some_and(|goal| goal.is_empty())
         {
             auto_drive_goal = Some(trimmed_prompt.to_string());
         } else if auto_drive_goal.is_none() {
@@ -215,8 +209,10 @@ pub async fn run_main(cli: Cli, code_linux_sandbox_exe: Option<PathBuf>) -> anyh
     }
 
     let timeboxed_auto_exec = auto_drive_goal.is_some() && max_seconds.is_some();
-    if timeboxed_auto_exec && let Some(goal) = auto_drive_goal.as_mut() {
-        *goal = append_timeboxed_auto_drive_goal(goal);
+    if timeboxed_auto_exec {
+        if let Some(goal) = auto_drive_goal.as_mut() {
+            *goal = append_timeboxed_auto_drive_goal(goal);
+        }
     }
 
     let mut prompt_to_send = prompt.clone();
@@ -249,7 +245,7 @@ pub async fn run_main(cli: Cli, code_linux_sandbox_exe: Option<PathBuf>) -> anyh
     let _ = tracing_subscriber::fmt()
         .with_env_filter(env_filter)
         .with_ansi(stderr_with_ansi)
-        .with_writer(std::io::stderr)
+        .with_writer(|| std::io::stderr())
         .try_init();
 
     let sandbox_mode = if full_auto {
@@ -299,9 +295,9 @@ pub async fn run_main(cli: Cli, code_linux_sandbox_exe: Option<PathBuf>) -> anyh
         tools_web_search_request: None,
         mcp_servers: None,
         experimental_client_tools: None,
+        dynamic_tools: None,
         compact_prompt_override: None,
         compact_prompt_override_file: None,
-        wire_api: None,
     };
     // Parse `-c` overrides.
     let cli_kv_overrides = match config_overrides.parse_overrides() {
@@ -355,17 +351,7 @@ pub async fn run_main(cli: Cli, code_linux_sandbox_exe: Option<PathBuf>) -> anyh
         }
     }
 
-    if auto_review && let Some(req) = review_request.as_mut() {
-        let mut metadata = req.metadata.clone().unwrap_or_default();
-        metadata.auto_review = Some(true);
-        req.metadata = Some(metadata);
-    }
-
-    let is_auto_review = review_request
-        .as_ref()
-        .and_then(|req| req.metadata.as_ref())
-        .and_then(|meta| meta.auto_review)
-        .unwrap_or(auto_review);
+    let is_auto_review = auto_review;
 
     if is_auto_review {
         if config.auto_review_use_chat_model {
@@ -401,8 +387,8 @@ pub async fn run_main(cli: Cli, code_linux_sandbox_exe: Option<PathBuf>) -> anyh
         );
     }
 
-    let mut review_outputs: Vec<hanzo_core::protocol::ReviewOutputEvent> = Vec::new();
-    let mut final_review_snapshot: Option<hanzo_core::protocol::ReviewSnapshotInfo> = None;
+    let mut review_outputs: Vec<code_core::protocol::ReviewOutputEvent> = Vec::new();
+    let mut final_review_snapshot: Option<code_core::protocol::ReviewSnapshotInfo> = None;
     let mut review_runs: u32 = 0;
     let mut last_review_epoch: Option<u64> = None;
     let max_auto_resolve_attempts: u32 = if is_auto_review {
@@ -410,21 +396,20 @@ pub async fn run_main(cli: Cli, code_linux_sandbox_exe: Option<PathBuf>) -> anyh
     } else {
         config.auto_drive.auto_resolve_review_attempts.get()
     };
-    let mut auto_resolve_state: Option<AutoResolveState> =
-        review_request.as_ref().and_then(|req| {
-            if review_auto_resolve_requested {
-                Some(AutoResolveState::new_with_limit(
-                    req.prompt.clone(),
-                    req.user_facing_hint.clone(),
-                    req.metadata.clone(),
-                    max_auto_resolve_attempts,
-                ))
-            } else {
-                None
-            }
-        });
-    let mut auto_resolve_fix_guard: Option<hanzo_core::review_coord::ReviewGuard> = None;
-    let mut auto_resolve_followup_guard: Option<hanzo_core::review_coord::ReviewGuard> = None;
+    let mut auto_resolve_state: Option<AutoResolveState> = review_request.as_ref().and_then(|req| {
+        if review_auto_resolve_requested {
+            Some(AutoResolveState::new_with_limit(
+                req.prompt.clone(),
+                req.user_facing_hint.clone().unwrap_or_default(),
+                None,
+                max_auto_resolve_attempts,
+            ))
+        } else {
+            None
+        }
+    });
+    let mut auto_resolve_fix_guard: Option<code_core::review_coord::ReviewGuard> = None;
+    let mut auto_resolve_followup_guard: Option<code_core::review_coord::ReviewGuard> = None;
     // Base snapshot captured at the start of auto-resolve; each review snapshot is parented to this.
     let mut auto_resolve_base_snapshot: Option<GhostCommit> = None;
     let resolve_model_for_auto_resolve = if is_auto_review {
@@ -479,7 +464,7 @@ pub async fn run_main(cli: Cli, code_linux_sandbox_exe: Option<PathBuf>) -> anyh
     };
 
     if oss {
-        hanzo_ollama::ensure_oss_ready(&config)
+        code_ollama::ensure_oss_ready(&config)
             .await
             .map_err(|e| anyhow::anyhow!("OSS setup failed: {e}"))?;
     }
@@ -500,7 +485,7 @@ pub async fn run_main(cli: Cli, code_linux_sandbox_exe: Option<PathBuf>) -> anyh
 
     let auth_manager = AuthManager::shared_with_mode_and_originator(
         config.code_home.clone(),
-        hanzo_protocol::mcp_protocol::AuthMode::ApiKey,
+        code_app_server_protocol::AuthMode::ApiKey,
         config.responses_originator_header.clone(),
     );
     let conversation_manager = ConversationManager::new(auth_manager.clone(), SessionSource::Exec);
@@ -553,14 +538,15 @@ pub async fn run_main(cli: Cli, code_linux_sandbox_exe: Option<PathBuf>) -> anyh
         let conversation = conversation.clone();
         tokio::spawn(async move {
             #[cfg(unix)]
-            let mut sigterm_stream =
-                match tokio::signal::unix::signal(tokio::signal::unix::SignalKind::terminate()) {
-                    Ok(stream) => Some(stream),
-                    Err(err) => {
-                        tracing::warn!("failed to install SIGTERM handler: {err}");
-                        None
-                    }
-                };
+            let mut sigterm_stream = match tokio::signal::unix::signal(
+                tokio::signal::unix::SignalKind::terminate(),
+            ) {
+                Ok(stream) => Some(stream),
+                Err(err) => {
+                    tracing::warn!("failed to install SIGTERM handler: {err}");
+                    None
+                }
+            };
             #[cfg(unix)]
             let mut sigterm_requested = false;
 
@@ -671,13 +657,12 @@ pub async fn run_main(cli: Cli, code_linux_sandbox_exe: Option<PathBuf>) -> anyh
     }
 
     // Send the prompt.
-    let mut _review_guard: Option<hanzo_core::review_coord::ReviewGuard> = None;
+    let mut _review_guard: Option<code_core::review_coord::ReviewGuard> = None;
 
     // Clear stale review lock in case a prior process crashed.
     let _ = clear_stale_lock_if_dead(Some(&config.cwd));
 
-    let skip_review_lock = std::env::var("HANZO_REVIEW_LOCK_LEASE")
-        .or_else(|_| std::env::var("CODE_REVIEW_LOCK_LEASE"))
+    let skip_review_lock = std::env::var("CODE_REVIEW_LOCK_LEASE")
         .map(|v| v == "1")
         .unwrap_or(false);
 
@@ -698,28 +683,23 @@ pub async fn run_main(cli: Cli, code_linux_sandbox_exe: Option<PathBuf>) -> anyh
 
         if auto_resolve_state.is_some() {
             if auto_resolve_base_snapshot.is_none() {
-                auto_resolve_base_snapshot =
-                    capture_auto_resolve_snapshot(&config.cwd, None, "auto-resolve base snapshot");
+                auto_resolve_base_snapshot = capture_auto_resolve_snapshot(&config.cwd, None, "auto-resolve base snapshot");
                 if let Some(state) = auto_resolve_state.as_mut() {
                     state.snapshot_epoch = Some(current_snapshot_epoch_for(&config.cwd));
                 }
             }
 
-            if let Some(base) = auto_resolve_base_snapshot.as_ref()
-                && let Some((snap, diff_paths)) = capture_snapshot_against_base(
-                    &config.cwd,
-                    base,
-                    "auto-resolve working snapshot",
-                )
-            {
-                review_request = apply_commit_scope_to_review_request(
-                    review_request,
-                    snap.id(),
-                    base.id(),
-                    Some(diff_paths.as_slice()),
-                );
-                if let Some(state) = auto_resolve_state.as_mut() {
-                    state.last_reviewed_commit = Some(snap.id().to_string());
+            if let Some(base) = auto_resolve_base_snapshot.as_ref() {
+                if let Some((snap, diff_paths)) = capture_snapshot_against_base(&config.cwd, base, "auto-resolve working snapshot") {
+                    review_request = apply_commit_scope_to_review_request(
+                        review_request,
+                        snap.id(),
+                        base.id(),
+                        Some(diff_paths.as_slice()),
+                    );
+                    if let Some(state) = auto_resolve_state.as_mut() {
+                        state.last_reviewed_commit = Some(snap.id().to_string());
+                    }
                 }
             }
         }
@@ -735,14 +715,8 @@ pub async fn run_main(cli: Cli, code_linux_sandbox_exe: Option<PathBuf>) -> anyh
         event_id
     } else {
         let mut items: Vec<InputItem> = Vec::new();
-        items.push(InputItem::Text {
-            text: prompt_to_send,
-        });
-        items.extend(
-            images
-                .into_iter()
-                .map(|path| InputItem::LocalImage { path }),
-        );
+        items.push(InputItem::Text { text: prompt_to_send });
+        items.extend(images.into_iter().map(|path| InputItem::LocalImage { path }));
         // Fallback for older core protocol: send only user input items.
         let event_id = conversation
             .submit(Op::UserInput {
@@ -972,8 +946,8 @@ pub async fn run_main(cli: Cli, code_linux_sandbox_exe: Option<PathBuf>) -> anyh
                                 }
                                 // stale epoch check
                                 if let Some(state) = auto_resolve_state.as_ref() {
-                                    if let Some(baseline) = state.snapshot_epoch
-                                        && current_epoch > baseline {
+                                    if let Some(baseline) = state.snapshot_epoch {
+                                        if current_epoch > baseline {
                                             eprintln!("Auto-resolve: snapshot epoch advanced; aborting follow-up review.");
                                             auto_resolve_state = None;
                                             auto_resolve_base_snapshot = None;
@@ -990,22 +964,6 @@ pub async fn run_main(cli: Cli, code_linux_sandbox_exe: Option<PathBuf>) -> anyh
                                             .await?;
                                             continue;
                                         }
-                                    if state.metadata.as_ref().and_then(|m| m.commit.as_ref()).is_some()
-                                        && state.snapshot_epoch.is_none()
-                                    {
-                                        eprintln!("Auto-resolve: snapshot epoch advanced; aborting follow-up review.");
-                                        auto_resolve_state = None;
-                                        auto_resolve_base_snapshot = None;
-                                        request_shutdown(
-                                            &conversation,
-                                            &auto_review_tracker,
-                                            &mut shutdown_pending,
-                                            &mut shutdown_sent,
-                                            &mut shutdown_deadline,
-                                            auto_review_grace_enabled,
-                                        )
-                                        .await?;
-                                        continue;
                                     }
                                 }
                                 match capture_snapshot_against_base(
@@ -1097,29 +1055,6 @@ pub async fn run_main(cli: Cli, code_linux_sandbox_exe: Option<PathBuf>) -> anyh
                                     .await?;
                                     continue;
                                 }
-                                let current_epoch = current_snapshot_epoch_for(&config.cwd);
-                                if let Some(state) = auto_resolve_state.as_ref()
-                                    && state
-                                        .metadata
-                                        .as_ref()
-                                        .and_then(|m| m.commit.as_ref())
-                                        .is_some()
-                                        && current_epoch > state.attempt as u64
-                                    {
-                                        eprintln!("Auto-resolve: snapshot epoch advanced; aborting follow-up review.");
-                                        auto_resolve_state = None;
-                                        auto_resolve_base_snapshot = None;
-                                        request_shutdown(
-                                            &conversation,
-                                            &auto_review_tracker,
-                                            &mut shutdown_pending,
-                                            &mut shutdown_sent,
-                                            &mut shutdown_deadline,
-                                            auto_review_grace_enabled,
-                                        )
-                                        .await?;
-                                        continue;
-                                    }
                                 match capture_snapshot_against_base(
                                     &config.cwd,
                                     base,
@@ -1242,16 +1177,13 @@ pub async fn run_main(cli: Cli, code_linux_sandbox_exe: Option<PathBuf>) -> anyh
             }
         }
     }
-    if let Some(path) = review_output_json
-        && !review_outputs.is_empty()
-    {
-        let _ = write_review_json(path, &review_outputs, final_review_snapshot.as_ref());
+    if let Some(path) = review_output_json {
+        if !review_outputs.is_empty() {
+            let _ = write_review_json(path, &review_outputs, final_review_snapshot.as_ref());
+        }
     }
     if review_runs > 0 {
-        eprintln!(
-            "Review runs: {} (auto_resolve={} max_attempts={})",
-            review_runs, config.tui.review_auto_resolve, max_auto_resolve_attempts
-        );
+        eprintln!("Review runs: {} (auto_resolve={} max_attempts={})", review_runs, config.tui.review_auto_resolve, max_auto_resolve_attempts);
     }
     if error_seen {
         std::process::exit(1);
@@ -1280,11 +1212,7 @@ async fn resolve_resume_path(
         let query = SessionQuery {
             cwd: None,
             git_root: None,
-            sources: vec![
-                SessionSource::Cli,
-                SessionSource::VSCode,
-                SessionSource::Exec,
-            ],
+            sources: vec![SessionSource::Cli, SessionSource::VSCode, SessionSource::Exec],
             min_user_messages: 1,
             include_archived: false,
             include_deleted: false,
@@ -1368,7 +1296,7 @@ async fn run_auto_drive_session(
     let mut auto_drive_pid_guard =
         AutoDrivePidFile::write(&config.code_home, Some(goal.as_str()), AutoDriveMode::Exec);
 
-    let auto_config = build_auto_drive_exec_config(&config);
+	    let auto_config = build_auto_drive_exec_config(&config);
 
     let (auto_tx, mut auto_rx) = tokio::sync::mpsc::unbounded_channel();
     let sender = AutoCoordinatorEventSender::new(move |event| {
@@ -1465,9 +1393,10 @@ async fn run_auto_drive_session(
                             history.append_raw(&[make_assistant_message(text.clone())]);
                             final_last_message = Some(text);
                         }
-                        let _ = handle.send(AutoCoordinatorCommand::UpdateConversation(
-                            history.raw_snapshot().into(),
-                        ));
+                        let _ = handle
+                            .send(AutoCoordinatorCommand::UpdateConversation(
+                                history.raw_snapshot().into(),
+                            ));
                     }
                 }
             }
@@ -1496,10 +1425,8 @@ async fn run_auto_drive_session(
                 }
 
                 let Some(cli_action) = cli else {
-                    if matches!(
-                        status,
-                        AutoCoordinatorStatus::Success | AutoCoordinatorStatus::Failed
-                    ) {
+                    if matches!(status, AutoCoordinatorStatus::Success | AutoCoordinatorStatus::Failed)
+                    {
                         let _ = handle.send(AutoCoordinatorCommand::Stop);
                     }
                     continue;
@@ -1740,7 +1667,10 @@ impl AutoReviewTracker {
                 continue;
             }
 
-            let is_terminal = matches!(status.as_str(), "completed" | "failed" | "cancelled");
+            let is_terminal = matches!(
+                status.as_str(),
+                "completed" | "failed" | "cancelled"
+            );
             if !is_terminal || self.processed.contains(&agent.id) {
                 continue;
             }
@@ -1796,7 +1726,9 @@ fn emit_auto_review_completion(completion: &AutoReviewCompletion) {
                 path.display()
             );
         } else {
-            eprintln!("[auto-review] {branch}: {count} issue(s) found. Summary: {summary_text}");
+            eprintln!(
+                "[auto-review] {branch}: {count} issue(s) found. Summary: {summary_text}"
+            );
         }
     } else if summary_text == "No issues reported." {
         eprintln!("[auto-review] {branch}: no issues found.");
@@ -1831,12 +1763,12 @@ fn parse_auto_review_summary(raw: &str) -> AutoReviewSummary {
         return summary_from_output(&output);
     }
 
-    if let Some(start) = trimmed.find("```")
-        && let Some((body, _)) = trimmed[start + 3..].split_once("```")
-    {
-        let candidate = body.trim_start_matches("json").trim();
-        if let Ok(output) = serde_json::from_str::<ReviewOutputEvent>(candidate) {
-            return summary_from_output(&output);
+    if let Some(start) = trimmed.find("```") {
+        if let Some((body, _)) = trimmed[start + 3..].split_once("```") {
+            let candidate = body.trim_start_matches("json").trim();
+            if let Ok(output) = serde_json::from_str::<ReviewOutputEvent>(candidate) {
+                return summary_from_output(&output);
+            }
         }
     }
 
@@ -1855,7 +1787,15 @@ fn parse_auto_review_summary(raw: &str) -> AutoReviewSummary {
         "skip this",
     ];
     let issue_markers = [
-        "issue", "issues", "finding", "findings", "bug", "bugs", "problem", "problems", "error",
+        "issue",
+        "issues",
+        "finding",
+        "findings",
+        "bug",
+        "bugs",
+        "problem",
+        "problems",
+        "error",
         "errors",
     ];
 
@@ -1946,7 +1886,7 @@ fn summary_from_output(output: &ReviewOutputEvent) -> AutoReviewSummary {
 
 fn auto_review_branches_dir(git_root: &Path) -> Option<PathBuf> {
     let repo_name = git_root.file_name()?.to_str()?;
-    let mut code_home = hanzo_core::config::find_code_home().ok()?;
+    let mut code_home = code_core::config::find_code_home().ok()?;
     code_home = code_home.join("working").join(repo_name).join("branches");
     std::fs::create_dir_all(&code_home).ok()?;
     Some(code_home)
@@ -2036,10 +1976,10 @@ fn shutdown_state_after_request(
         return (false, true, Some(deadline));
     }
 
-    if let Some(deadline) = shutdown_deadline
-        && deadline > now
-    {
-        return (false, true, Some(deadline));
+    if let Some(deadline) = shutdown_deadline {
+        if deadline > now {
+            return (false, true, Some(deadline));
+        }
     }
 
     (true, true, None)
@@ -2072,12 +2012,12 @@ fn build_auto_prompt(
         lines.push("Please use agents to help you complete this task.".to_string());
 
         for action in agents {
-            let prompt = action.prompt.trim().replace('\n', " ").replace('"', "\\\"");
-            let write_text = if action.write {
-                "write: true"
-            } else {
-                "write: false"
-            };
+            let prompt = action
+                .prompt
+                .trim()
+                .replace('\n', " ")
+                .replace('"', "\\\"");
+            let write_text = if action.write { "write: true" } else { "write: false" };
 
             lines.push(String::new());
             lines.push(format!("prompt: \"{prompt}\" ({write_text})"));
@@ -2116,7 +2056,7 @@ fn build_auto_prompt(
 
 async fn dispatch_auto_fix(
     conversation: &Arc<CodexConversation>,
-    review: &hanzo_core::protocol::ReviewOutputEvent,
+    review: &code_core::protocol::ReviewOutputEvent,
 ) -> anyhow::Result<()> {
     let fix_prompt = build_fix_prompt(review);
     let items: Vec<InputItem> = vec![InputItem::Text { text: fix_prompt }];
@@ -2165,10 +2105,16 @@ fn snapshot_parent_diff_paths(cwd: &Path, parent: &str, head: &str) -> Option<Ve
         .lines()
         .map(str::trim)
         .filter(|line| !line.is_empty())
-        .map(std::string::ToString::to_string)
+        .map(|line| line.to_string())
         .collect();
 
     Some(paths)
+}
+
+fn should_include_review_scope_path(path: &str) -> bool {
+    !REVIEW_SCOPE_EXCLUDED_PREFIXES
+        .iter()
+        .any(|prefix| path.starts_with(prefix))
 }
 
 fn apply_commit_scope_to_review_request(
@@ -2188,50 +2134,63 @@ fn apply_commit_scope_to_review_request(
     prompt.push(')');
     prompt.push('.');
 
-    if let Some(paths) = paths
-        && !paths.is_empty()
-    {
-        prompt.push_str("\nFiles changed in this snapshot:\n");
-        for path in paths {
-            prompt.push_str("- ");
-            prompt.push_str(path);
-            prompt.push('\n');
+    if let Some(paths) = paths {
+        if !paths.is_empty() {
+            let mut listed_paths: Vec<&str> = Vec::new();
+            let mut seen_paths: HashSet<&str> = HashSet::new();
+            let mut excluded_count = 0usize;
+            let mut truncated_count = 0usize;
+
+            for raw_path in paths {
+                let normalized = raw_path.trim().trim_start_matches("./");
+                if normalized.is_empty() {
+                    continue;
+                }
+                if !seen_paths.insert(normalized) {
+                    continue;
+                }
+                if !should_include_review_scope_path(normalized) {
+                    excluded_count = excluded_count.saturating_add(1);
+                    continue;
+                }
+                if listed_paths.len() < REVIEW_SCOPE_MAX_LISTED_PATHS {
+                    listed_paths.push(normalized);
+                } else {
+                    truncated_count = truncated_count.saturating_add(1);
+                }
+            }
+
+            if !listed_paths.is_empty() {
+                prompt.push_str("\nFiles changed in this snapshot:\n");
+                for path in listed_paths {
+                    prompt.push_str("- ");
+                    prompt.push_str(path);
+                    prompt.push('\n');
+                }
+            }
+
+            let omitted_count = excluded_count.saturating_add(truncated_count);
+            if omitted_count > 0 {
+                prompt.push_str(&format!(
+                    "\nOmitted {omitted_count} changed path(s) from this list ({excluded_count} excluded by path policy; {truncated_count} truncated for prompt size)."
+                ));
+            }
+
+            if excluded_count > 0 {
+                let excluded = REVIEW_SCOPE_EXCLUDED_PREFIXES.join(", ");
+                prompt.push_str(&format!(
+                    "\nExcluded prefixes: {excluded}. Do not spend review effort on those paths unless explicitly asked."
+                ));
+            }
         }
     }
 
     request.prompt = prompt;
-    request.user_facing_hint = format!("commit {short_commit} (parent {short_parent})");
-
-    let mut metadata = request.metadata.unwrap_or_default();
-    metadata.scope = Some("commit".to_string());
-    metadata.commit = Some(commit.to_string());
-    request.metadata = Some(metadata);
+    request.user_facing_hint = Some(format!("commit {short_commit} (parent {short_parent})"));
+    request.target = code_protocol::protocol::ReviewTarget::Custom {
+        instructions: request.prompt.clone(),
+    };
     request
-}
-
-fn extract_commit_from_prompt(prompt: &str) -> Option<String> {
-    let mut words = prompt.split_whitespace().peekable();
-    while let Some(word) = words.next() {
-        if word.eq_ignore_ascii_case("commit")
-            && let Some(next) = words.peek()
-        {
-            let candidate = next.trim_matches(|c: char| c == '.' || c == ',' || c == ';');
-            let len_ok = (7..=40).contains(&candidate.len());
-            let is_hex = candidate.chars().all(|c| c.is_ascii_hexdigit());
-            if len_ok && is_hex {
-                return Some(candidate.to_string());
-            }
-        }
-    }
-    None
-}
-
-async fn head_commit_with_subject(cwd: &Path) -> Option<(String, Option<String>)> {
-    let mut commits = recent_commits(cwd, 1).await.into_iter();
-    let entry = commits.next()?;
-    let subject = entry.subject.trim();
-    let subject = (!subject.is_empty()).then(|| subject.to_string());
-    Some((entry.sha, subject))
 }
 
 fn capture_snapshot_against_base(
@@ -2315,22 +2274,23 @@ fn head_is_ancestor_of_base(cwd: &Path, base_commit: &str) -> bool {
 
 async fn build_followup_review_request(
     state: &AutoResolveState,
-    cwd: &Path,
+    _cwd: &Path,
     snapshot: Option<&GhostCommit>,
     diff_paths: Option<&[String]>,
     parent_commit: Option<&str>,
 ) -> ReviewRequest {
     let mut prompt = strip_scope_from_prompt(&state.prompt);
 
-    let mut user_facing_hint = state.hint.clone();
-    let mut metadata = state.metadata.clone().unwrap_or_default();
+    let mut user_facing_hint = (!state.hint.trim().is_empty()).then(|| state.hint.clone());
 
     if let (Some(snapshot), Some(parent)) = (snapshot, parent_commit) {
         let updated = apply_commit_scope_to_review_request(
             ReviewRequest {
+                target: code_protocol::protocol::ReviewTarget::Custom {
+                    instructions: prompt.clone(),
+                },
                 prompt: prompt.clone(),
                 user_facing_hint: user_facing_hint.clone(),
-                metadata: Some(metadata.clone()),
             },
             snapshot.id(),
             parent,
@@ -2338,7 +2298,6 @@ async fn build_followup_review_request(
         );
         prompt = updated.prompt;
         user_facing_hint = updated.user_facing_hint;
-        metadata = updated.metadata.unwrap_or_default();
     }
 
     // Strip lingering references to earlier commits so follow-up /review scopes to
@@ -2348,42 +2307,10 @@ async fn build_followup_review_request(
     if let Some(last) = state.last_reviewed_commit.as_deref() {
         commit_ids.push(last);
     }
-    if let Some(meta_commit) = metadata.commit.as_deref() {
-        commit_ids.push(meta_commit);
-    }
     if let Some(parent) = parent_commit {
         commit_ids.push(parent);
     }
     prompt = strip_commit_mentions(&prompt, &commit_ids);
-
-    // Ensure commit metadata matches the snapshot we will review.
-    if let Some(snapshot) = snapshot {
-        metadata.commit = Some(snapshot.id().to_string());
-        metadata.scope = Some("commit".to_string());
-    } else if metadata.commit.is_none()
-        && let Some(commit) = extract_commit_from_prompt(&prompt)
-    {
-        metadata.commit = Some(commit);
-    }
-
-    if metadata.scope.is_none() && metadata.commit.is_some() {
-        metadata.scope = Some("commit".to_string());
-    }
-
-    let scope_is_commit = metadata
-        .scope
-        .as_ref()
-        .is_some_and(|scope| scope.eq_ignore_ascii_case("commit"));
-
-    if scope_is_commit
-        && metadata.commit.is_none()
-        && let Some((head_sha, _)) = head_commit_with_subject(cwd).await
-    {
-        metadata.commit = Some(head_sha.clone());
-        if metadata.current_branch.is_none() {
-            metadata.current_branch = current_branch_name(cwd).await;
-        }
-    }
 
     if let Some(last_review) = state.last_review.as_ref() {
         let recap = format_review_findings(last_review);
@@ -2398,24 +2325,21 @@ async fn build_followup_review_request(
         prompt.push_str(AUTO_RESOLVE_REVIEW_FOLLOWUP);
     }
 
-    let metadata = if metadata == ReviewContextMetadata::default() {
-        None
-    } else {
-        Some(metadata)
+    let target = code_protocol::protocol::ReviewTarget::Custom {
+        instructions: prompt.clone(),
     };
-
     ReviewRequest {
-        prompt,
+        target,
         user_facing_hint,
-        metadata,
+        prompt,
     }
 }
 
-fn build_fix_prompt(review: &hanzo_core::protocol::ReviewOutputEvent) -> String {
+fn build_fix_prompt(review: &code_core::protocol::ReviewOutputEvent) -> String {
     let summary = format_review_findings(review);
     let raw_json = serde_json::to_string_pretty(review).unwrap_or_else(|_| "{}".to_string());
     let mut preface = String::from(
-        "You are continuing an automated /review resolution loop. Review the listed findings and determine whether they represent real issues introduced by our changes. If they are, apply the necessary fixes and resolve any similar issues you can identify before responding.",
+        "You are continuing an automated /review resolution loop. Review the listed findings and determine whether they represent real issues introduced by our changes. If they are, apply the necessary fixes and resolve any similar issues you can identify before responding."
     );
     if !summary.is_empty() {
         preface.push_str("\n\nFindings:\n");
@@ -2428,7 +2352,7 @@ fn build_fix_prompt(review: &hanzo_core::protocol::ReviewOutputEvent) -> String 
     )
 }
 
-fn format_review_findings(output: &hanzo_core::protocol::ReviewOutputEvent) -> String {
+fn format_review_findings(output: &code_core::protocol::ReviewOutputEvent) -> String {
     if output.findings.is_empty() {
         return String::new();
     }
@@ -2438,7 +2362,10 @@ fn format_review_findings(output: &hanzo_core::protocol::ReviewOutputEvent) -> S
         let body = f.body.trim();
         let location = format!(
             "path: {}:{}-{}",
-            f.code_location.absolute_file_path.to_string_lossy(),
+            f.code_location
+                .absolute_file_path
+                .to_string_lossy()
+                .to_string(),
             f.code_location.line_range.start,
             f.code_location.line_range.end
         );
@@ -2451,7 +2378,7 @@ fn format_review_findings(output: &hanzo_core::protocol::ReviewOutputEvent) -> S
     parts.join("\n\n")
 }
 
-fn review_summary_line(output: &hanzo_core::protocol::ReviewOutputEvent) -> Option<String> {
+fn review_summary_line(output: &code_core::protocol::ReviewOutputEvent) -> Option<String> {
     let mut parts: Vec<String> = Vec::new();
     let explanation = output.overall_explanation.trim();
     if !explanation.is_empty() {
@@ -2484,6 +2411,8 @@ fn make_user_message(text: String) -> ResponseItem {
         id: None,
         role: "user".to_string(),
         content: vec![ContentItem::InputText { text }],
+        end_turn: None,
+        phase: None,
     }
 }
 
@@ -2492,13 +2421,15 @@ fn make_assistant_message(text: String) -> ResponseItem {
         id: None,
         role: "assistant".to_string(),
         content: vec![ContentItem::OutputText { text }],
+        end_turn: None,
+        phase: None,
     }
 }
 
 fn write_review_json(
     path: PathBuf,
-    outputs: &[hanzo_core::protocol::ReviewOutputEvent],
-    snapshot: Option<&hanzo_core::protocol::ReviewSnapshotInfo>,
+    outputs: &[code_core::protocol::ReviewOutputEvent],
+    snapshot: Option<&code_core::protocol::ReviewSnapshotInfo>,
 ) -> std::io::Result<()> {
     if outputs.is_empty() {
         return Ok(());
@@ -2508,17 +2439,17 @@ fn write_review_json(
     struct ReviewRun<'a> {
         index: usize,
         #[serde(flatten)]
-        output: &'a hanzo_core::protocol::ReviewOutputEvent,
+        output: &'a code_core::protocol::ReviewOutputEvent,
     }
 
     #[derive(serde::Serialize)]
     struct ReviewJsonOutput<'a> {
         #[serde(flatten)]
-        latest: &'a hanzo_core::protocol::ReviewOutputEvent,
+        latest: &'a code_core::protocol::ReviewOutputEvent,
         #[serde(skip_serializing_if = "Vec::is_empty")]
         runs: Vec<ReviewRun<'a>>,
         #[serde(flatten, skip_serializing_if = "Option::is_none")]
-        snapshot: Option<&'a hanzo_core::protocol::ReviewSnapshotInfo>,
+        snapshot: Option<&'a code_core::protocol::ReviewSnapshotInfo>,
     }
 
     let latest = outputs
@@ -2538,8 +2469,8 @@ fn write_review_json(
         runs,
         snapshot,
     };
-    let json =
-        serde_json::to_string_pretty(&payload).map_err(|e| std::io::Error::other(e.to_string()))?;
+    let json = serde_json::to_string_pretty(&payload)
+        .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e.to_string()))?;
     std::fs::write(path, json)
 }
 
@@ -2601,12 +2532,11 @@ async fn submit_and_wait(
             }
         }
 
-        let last_agent_message =
-            if let EventMsg::TaskComplete(TaskCompleteEvent { last_agent_message }) = &event.msg {
-                last_agent_message.clone()
-            } else {
-                None
-            };
+        let last_agent_message = if let EventMsg::TaskComplete(TaskCompleteEvent { last_agent_message }) = &event.msg {
+            last_agent_message.clone()
+        } else {
+            None
+        };
 
         let status = event_processor.process_event(event);
 
@@ -2656,85 +2586,96 @@ fn load_output_schema(path: Option<PathBuf>) -> Option<Value> {
 mod tests {
     use super::*;
     use std::io::Write;
-    use std::path::Path;
-    use std::path::PathBuf;
-    use std::time::Duration;
-    use std::time::SystemTime;
+    use std::path::{Path, PathBuf};
+    use std::time::{Duration, SystemTime};
 
-    use filetime::FileTime;
-    use filetime::set_file_mtime;
-    use hanzo_core::config::ConfigOverrides;
-    use hanzo_core::config::ConfigToml;
-    use hanzo_protocol::mcp_protocol::ConversationId;
-    use hanzo_protocol::models::ContentItem;
-    use hanzo_protocol::models::ResponseItem;
-    use hanzo_protocol::protocol::EventMsg as ProtoEventMsg;
-    use hanzo_protocol::protocol::RecordedEvent;
-    use hanzo_protocol::protocol::RolloutItem;
-    use hanzo_protocol::protocol::RolloutLine;
-    use hanzo_protocol::protocol::SessionMeta;
-    use hanzo_protocol::protocol::SessionMetaLine;
-    use hanzo_protocol::protocol::SessionSource;
-    use hanzo_protocol::protocol::UserMessageEvent;
-    use tempfile::TempDir;
-    use uuid::Uuid;
+    use code_core::config::{ConfigOverrides, ConfigToml};
+    use code_protocol::models::{ContentItem, ResponseItem};
+	    use code_protocol::ThreadId;
+	    use code_protocol::protocol::{
+	        EventMsg as ProtoEventMsg, RecordedEvent, RolloutItem, RolloutLine, SessionMeta,
+	        SessionMetaLine, SessionSource, UserMessageEvent,
+	    };
+	    use filetime::{set_file_mtime, FileTime};
+	    use tempfile::TempDir;
+	    use uuid::Uuid;
 
-    #[test]
-    fn shutdown_state_schedules_grace_on_first_request() {
-        let now = Instant::now();
-        let (attempt_send, pending, deadline) =
-            shutdown_state_after_request(false, false, None, now, true);
-        assert!(!attempt_send);
-        assert!(pending);
-        assert!(deadline.expect("deadline").gt(&now));
-    }
+	    #[test]
+	    fn shutdown_state_schedules_grace_on_first_request() {
+	        let now = Instant::now();
+	        let (attempt_send, pending, deadline) = shutdown_state_after_request(
+	            false,
+	            false,
+	            None,
+	            now,
+	            true,
+	        );
+	        assert!(!attempt_send);
+	        assert!(pending);
+	        assert!(deadline.expect("deadline").gt(&now));
+	    }
 
-    #[test]
-    fn shutdown_state_waits_until_deadline() {
-        let now = Instant::now();
-        let future_deadline = now + tokio::time::Duration::from_millis(100);
-        let (attempt_send, pending, deadline) =
-            shutdown_state_after_request(false, true, Some(future_deadline), now, true);
-        assert!(!attempt_send);
-        assert!(pending);
-        assert_eq!(deadline, Some(future_deadline));
-    }
+	    #[test]
+	    fn shutdown_state_waits_until_deadline() {
+	        let now = Instant::now();
+	        let future_deadline = now + tokio::time::Duration::from_millis(100);
+	        let (attempt_send, pending, deadline) = shutdown_state_after_request(
+	            false,
+	            true,
+	            Some(future_deadline),
+	            now,
+	            true,
+	        );
+	        assert!(!attempt_send);
+	        assert!(pending);
+	        assert_eq!(deadline, Some(future_deadline));
+	    }
 
-    #[test]
-    fn shutdown_state_attempts_send_after_grace_elapses() {
-        let now = Instant::now();
-        let expired_deadline = now - tokio::time::Duration::from_millis(1);
-        let (attempt_send, pending, deadline) =
-            shutdown_state_after_request(false, true, Some(expired_deadline), now, true);
-        assert!(attempt_send);
-        assert!(pending);
-        assert!(deadline.is_none());
-    }
+	    #[test]
+	    fn shutdown_state_attempts_send_after_grace_elapses() {
+	        let now = Instant::now();
+	        let expired_deadline = now - tokio::time::Duration::from_millis(1);
+	        let (attempt_send, pending, deadline) = shutdown_state_after_request(
+	            false,
+	            true,
+	            Some(expired_deadline),
+	            now,
+	            true,
+	        );
+	        assert!(attempt_send);
+	        assert!(pending);
+	        assert!(deadline.is_none());
+	    }
 
-    #[test]
-    fn shutdown_state_sends_immediately_without_grace() {
-        let now = Instant::now();
-        let (attempt_send, pending, deadline) =
-            shutdown_state_after_request(false, false, None, now, false);
-        assert!(attempt_send);
-        assert!(pending);
-        assert!(deadline.is_none());
-    }
+	    #[test]
+	    fn shutdown_state_sends_immediately_without_grace() {
+	        let now = Instant::now();
+	        let (attempt_send, pending, deadline) = shutdown_state_after_request(
+	            false,
+	            false,
+	            None,
+	            now,
+	            false,
+	        );
+	        assert!(attempt_send);
+	        assert!(pending);
+	        assert!(deadline.is_none());
+	    }
 
     #[test]
     fn write_review_json_includes_snapshot() {
         let dir = TempDir::new().unwrap();
         let path = dir.path().join("out.json");
 
-        let output = hanzo_core::protocol::ReviewOutputEvent {
-            findings: vec![hanzo_core::protocol::ReviewFinding {
+        let output = code_core::protocol::ReviewOutputEvent {
+            findings: vec![code_core::protocol::ReviewFinding {
                 title: "bug".into(),
                 body: "details".into(),
                 confidence_score: 0.5,
                 priority: 1,
-                code_location: hanzo_core::protocol::ReviewCodeLocation {
+                code_location: code_core::protocol::ReviewCodeLocation {
                     absolute_file_path: PathBuf::from("src/lib.rs"),
-                    line_range: hanzo_core::protocol::ReviewLineRange { start: 1, end: 2 },
+                    line_range: code_core::protocol::ReviewLineRange { start: 1, end: 2 },
                 },
             }],
             overall_correctness: "incorrect".into(),
@@ -2742,7 +2683,7 @@ mod tests {
             overall_confidence_score: 0.7,
         };
 
-        let snapshot = hanzo_core::protocol::ReviewSnapshotInfo {
+        let snapshot = code_core::protocol::ReviewSnapshotInfo {
             snapshot_commit: Some("abc123".into()),
             branch: Some("auto-review-branch".into()),
             worktree_path: Some(PathBuf::from("/tmp/wt")),
@@ -2767,15 +2708,15 @@ mod tests {
         let dir = TempDir::new().unwrap();
         let path = dir.path().join("multi.json");
 
-        let first = hanzo_core::protocol::ReviewOutputEvent {
-            findings: vec![hanzo_core::protocol::ReviewFinding {
+        let first = code_core::protocol::ReviewOutputEvent {
+            findings: vec![code_core::protocol::ReviewFinding {
                 title: "bug".into(),
                 body: "details".into(),
                 confidence_score: 0.6,
                 priority: 1,
-                code_location: hanzo_core::protocol::ReviewCodeLocation {
+                code_location: code_core::protocol::ReviewCodeLocation {
                     absolute_file_path: PathBuf::from("src/lib.rs"),
-                    line_range: hanzo_core::protocol::ReviewLineRange { start: 1, end: 2 },
+                    line_range: code_core::protocol::ReviewLineRange { start: 1, end: 2 },
                 },
             }],
             overall_correctness: "incorrect".into(),
@@ -2783,7 +2724,7 @@ mod tests {
             overall_confidence_score: 0.7,
         };
 
-        let second = hanzo_core::protocol::ReviewOutputEvent {
+        let second = code_core::protocol::ReviewOutputEvent {
             findings: Vec::new(),
             overall_correctness: "correct".into(),
             overall_explanation: "clean".into(),
@@ -2817,6 +2758,63 @@ mod tests {
     }
 
     #[test]
+    fn apply_commit_scope_filters_and_truncates_paths() {
+        let mut paths = vec![
+            "./src/main.rs".to_string(),
+            "codex-rs/Cargo.lock".to_string(),
+            "./src/main.rs".to_string(),
+        ];
+        for idx in 0..130 {
+            paths.push(format!("src/generated_{idx}.rs"));
+        }
+
+        let request = ReviewRequest {
+            target: code_protocol::protocol::ReviewTarget::Custom {
+                instructions: "baseline".to_string(),
+            },
+            user_facing_hint: None,
+            prompt: "baseline".to_string(),
+        };
+
+        let scoped = apply_commit_scope_to_review_request(request, "abc1234", "def5678", Some(&paths));
+        assert!(scoped.prompt.contains("Files changed in this snapshot:"));
+        assert!(scoped.prompt.contains("- src/main.rs"));
+        assert!(!scoped.prompt.contains("codex-rs/Cargo.lock"));
+        assert!(
+            scoped
+                .prompt
+                .contains("Omitted 12 changed path(s) from this list (1 excluded by path policy; 11 truncated for prompt size).")
+        );
+        assert!(scoped.prompt.contains("Excluded prefixes: codex-rs/"));
+    }
+
+    #[test]
+    fn apply_commit_scope_reports_when_all_paths_excluded() {
+        let paths = vec![
+            "codex-rs/Cargo.lock".to_string(),
+            "target/debug/code".to_string(),
+            "node_modules/pkg/index.js".to_string(),
+        ];
+
+        let request = ReviewRequest {
+            target: code_protocol::protocol::ReviewTarget::Custom {
+                instructions: "baseline".to_string(),
+            },
+            user_facing_hint: None,
+            prompt: "baseline".to_string(),
+        };
+
+        let scoped = apply_commit_scope_to_review_request(request, "abc1234", "def5678", Some(&paths));
+        assert!(!scoped.prompt.contains("Files changed in this snapshot:"));
+        assert!(
+            scoped
+                .prompt
+                .contains("Omitted 3 changed path(s) from this list (3 excluded by path policy; 0 truncated for prompt size).")
+        );
+        assert!(scoped.prompt.contains("Excluded prefixes: codex-rs/"));
+    }
+
+    #[test]
     fn should_skip_followup_detects_duplicate_snapshot() {
         let temp = TempDir::new().unwrap();
         std::process::Command::new("git")
@@ -2837,8 +2835,7 @@ mod tests {
             .unwrap();
 
         let base = capture_auto_resolve_snapshot(temp.path(), None, "base").expect("base snapshot");
-        let snap =
-            capture_auto_resolve_snapshot(temp.path(), Some(base.id()), "dup").expect("child");
+        let snap = capture_auto_resolve_snapshot(temp.path(), Some(base.id()), "dup").expect("child");
 
         assert!(should_skip_followup(Some(snap.id()), &snap));
         assert!(!should_skip_followup(Some("different"), &snap));
@@ -2873,9 +2870,11 @@ mod tests {
         // second commit (represents a snapshot captured off the current HEAD)
         std::fs::write(temp.path().join("a.txt"), "b").unwrap();
         run_git(["commit", "-am", "c2"].as_slice());
-        let base = String::from_utf8_lossy(&run_git(["rev-parse", "HEAD"].as_slice()).stdout)
-            .trim()
-            .to_string();
+        let base = String::from_utf8_lossy(
+            &run_git(["rev-parse", "HEAD"].as_slice()).stdout,
+        )
+        .trim()
+        .to_string();
 
         assert!(head_is_ancestor_of_base(temp.path(), &base));
 
@@ -2897,21 +2896,22 @@ mod tests {
         .unwrap()
     }
 
-    #[test]
-    fn auto_drive_exec_config_uses_auto_drive_reasoning_effort() {
-        let temp = TempDir::new().unwrap();
-        let mut config = test_config(temp.path());
-        config.model_reasoning_effort = hanzo_core::config_types::ReasoningEffort::Low;
-        config.auto_drive.model = "gpt-5.2".to_string();
-        config.auto_drive.model_reasoning_effort = hanzo_core::config_types::ReasoningEffort::XHigh;
+	    #[test]
+	    fn auto_drive_exec_config_uses_auto_drive_reasoning_effort() {
+	        let temp = TempDir::new().unwrap();
+	        let mut config = test_config(temp.path());
+	        config.model_reasoning_effort = code_core::config_types::ReasoningEffort::Low;
+	        config.auto_drive.model = "gpt-5.2".to_string();
+	        config.auto_drive.model_reasoning_effort =
+	            code_core::config_types::ReasoningEffort::XHigh;
 
-        let auto_config = build_auto_drive_exec_config(&config);
-        assert_eq!(auto_config.model, "gpt-5.2");
-        assert_eq!(
-            auto_config.model_reasoning_effort,
-            hanzo_core::config_types::ReasoningEffort::XHigh
-        );
-    }
+	        let auto_config = build_auto_drive_exec_config(&config);
+	        assert_eq!(auto_config.model, "gpt-5.2");
+	        assert_eq!(
+	            auto_config.model_reasoning_effort,
+	            code_core::config_types::ReasoningEffort::XHigh
+	        );
+	    }
 
     fn write_rollout(
         code_home: &Path,
@@ -2921,11 +2921,7 @@ mod tests {
         source: SessionSource,
         message: &str,
     ) -> PathBuf {
-        let sessions_dir = code_home
-            .join("sessions")
-            .join("2025")
-            .join("11")
-            .join("16");
+        let sessions_dir = code_home.join("sessions").join("2025").join("11").join("16");
         std::fs::create_dir_all(&sessions_dir).unwrap();
         let filename = format!(
             "rollout-{}-{}.jsonl",
@@ -2935,13 +2931,16 @@ mod tests {
         let path = sessions_dir.join(filename);
 
         let session_meta = SessionMeta {
-            id: ConversationId::from(session_id),
+            id: ThreadId::from_string(&session_id.to_string()).unwrap(),
             timestamp: created_at.to_string(),
             cwd: Path::new("/workspace/project").to_path_buf(),
             originator: "test".to_string(),
             cli_version: "0.0.0-test".to_string(),
-            instructions: None,
             source,
+            model_provider: None,
+            base_instructions: None,
+            dynamic_tools: None,
+            forked_from_id: None,
         };
 
         let session_line = RolloutLine {
@@ -2959,8 +2958,9 @@ mod tests {
                 order: None,
                 msg: ProtoEventMsg::UserMessage(UserMessageEvent {
                     message: message.to_string(),
-                    kind: None,
                     images: None,
+                    local_images: vec![],
+                    text_elements: vec![],
                 }),
             }),
         };
@@ -2972,6 +2972,8 @@ mod tests {
                 content: vec![ContentItem::InputText {
                     text: message.to_string(),
                 }],
+                end_turn: None,
+                phase: None,
             }),
         };
 
@@ -2983,6 +2985,8 @@ mod tests {
                 content: vec![ContentItem::OutputText {
                     text: format!("Ack: {}", message),
                 }],
+                end_turn: None,
+                phase: None,
             }),
         };
 
@@ -3098,16 +3102,8 @@ mod tests {
         );
 
         let base = SystemTime::now();
-        set_file_mtime(
-            &older_path,
-            FileTime::from_system_time(base + Duration::from_secs(500)),
-        )
-        .unwrap();
-        set_file_mtime(
-            &newer_path,
-            FileTime::from_system_time(base + Duration::from_secs(10)),
-        )
-        .unwrap();
+        set_file_mtime(&older_path, FileTime::from_system_time(base + Duration::from_secs(500))).unwrap();
+        set_file_mtime(&newer_path, FileTime::from_system_time(base + Duration::from_secs(10))).unwrap();
 
         let args = crate::cli::ResumeArgs {
             session_id: None,
@@ -3125,4 +3121,5 @@ mod tests {
             path_str
         );
     }
+
 }

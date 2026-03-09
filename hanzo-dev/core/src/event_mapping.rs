@@ -6,17 +6,17 @@ use crate::protocol::EnvironmentContextDeltaEvent;
 use crate::protocol::EnvironmentContextFullEvent;
 use crate::protocol::EventMsg;
 use crate::protocol::WebSearchCompleteEvent;
-use hanzo_protocol::models::ContentItem;
-use hanzo_protocol::models::ReasoningItemContent;
-use hanzo_protocol::models::ReasoningItemReasoningSummary;
-use hanzo_protocol::models::ResponseItem;
-use hanzo_protocol::models::WebSearchAction;
-use hanzo_protocol::protocol::BROWSER_SNAPSHOT_CLOSE_TAG;
-use hanzo_protocol::protocol::BROWSER_SNAPSHOT_OPEN_TAG;
-use hanzo_protocol::protocol::ENVIRONMENT_CONTEXT_CLOSE_TAG;
-use hanzo_protocol::protocol::ENVIRONMENT_CONTEXT_DELTA_CLOSE_TAG;
-use hanzo_protocol::protocol::ENVIRONMENT_CONTEXT_DELTA_OPEN_TAG;
-use hanzo_protocol::protocol::ENVIRONMENT_CONTEXT_OPEN_TAG;
+use code_protocol::models::ContentItem;
+use code_protocol::models::ReasoningItemContent;
+use code_protocol::models::ReasoningItemReasoningSummary;
+use code_protocol::models::ResponseItem;
+use code_protocol::models::WebSearchAction;
+use code_protocol::protocol::BROWSER_SNAPSHOT_CLOSE_TAG;
+use code_protocol::protocol::BROWSER_SNAPSHOT_OPEN_TAG;
+use code_protocol::protocol::ENVIRONMENT_CONTEXT_CLOSE_TAG;
+use code_protocol::protocol::ENVIRONMENT_CONTEXT_DELTA_CLOSE_TAG;
+use code_protocol::protocol::ENVIRONMENT_CONTEXT_DELTA_OPEN_TAG;
+use code_protocol::protocol::ENVIRONMENT_CONTEXT_OPEN_TAG;
 use serde_json::Value as JsonValue;
 
 /// Convert a `ResponseItem` into zero or more `EventMsg` values that the UI can render.
@@ -39,12 +39,8 @@ pub(crate) fn map_response_item_to_event_messages(
             for content_item in content.iter() {
                 match content_item {
                     ContentItem::InputText { text } => {
-                        if let Some(snapshot) = extract_tagged_json(
-                            text,
-                            ENVIRONMENT_CONTEXT_OPEN_TAG,
-                            ENVIRONMENT_CONTEXT_CLOSE_TAG,
-                        )
-                        .and_then(parse_json)
+                        if let Some(snapshot) = extract_tagged_json(text, ENVIRONMENT_CONTEXT_OPEN_TAG, ENVIRONMENT_CONTEXT_CLOSE_TAG)
+                            .and_then(parse_json)
                         {
                             events.push(EventMsg::EnvironmentContextFull(
                                 EnvironmentContextFullEvent {
@@ -65,7 +61,7 @@ pub(crate) fn map_response_item_to_event_messages(
                             let base_fingerprint = delta
                                 .get("base_fingerprint")
                                 .and_then(|value| value.as_str())
-                                .map(std::string::ToString::to_string);
+                                .map(|value| value.to_string());
                             events.push(EventMsg::EnvironmentContextDelta(
                                 EnvironmentContextDeltaEvent {
                                     base_fingerprint,
@@ -86,11 +82,11 @@ pub(crate) fn map_response_item_to_event_messages(
                             let url = snapshot
                                 .get("url")
                                 .and_then(|value| value.as_str())
-                                .map(std::string::ToString::to_string);
+                                .map(|value| value.to_string());
                             let captured_at = snapshot
                                 .get("captured_at")
                                 .and_then(|value| value.as_str())
-                                .map(std::string::ToString::to_string);
+                                .map(|value| value.to_string());
                             events.push(EventMsg::BrowserSnapshot(BrowserSnapshotEvent {
                                 snapshot,
                                 url,
@@ -137,14 +133,12 @@ pub(crate) fn map_response_item_to_event_messages(
         }
 
         ResponseItem::WebSearchCall { id, action, .. } => match action {
-            WebSearchAction::Search { query } => {
+            Some(WebSearchAction::Search { query, queries }) => {
                 let call_id = id.clone().unwrap_or_else(|| "".to_string());
-                vec![EventMsg::WebSearchComplete(WebSearchCompleteEvent {
-                    call_id,
-                    query: Some(query.clone()),
-                })]
+                let query = web_search_query(query, queries);
+                vec![EventMsg::WebSearchComplete(WebSearchCompleteEvent { call_id, query })]
             }
-            WebSearchAction::Other => Vec::new(),
+            _ => Vec::new(),
         },
 
         // Variants that require side effects are handled by higher layers and do not emit events here.
@@ -153,6 +147,8 @@ pub(crate) fn map_response_item_to_event_messages(
         | ResponseItem::LocalShellCall { .. }
         | ResponseItem::CustomToolCall { .. }
         | ResponseItem::CustomToolCallOutput { .. }
+        | ResponseItem::ImageGenerationCall { .. }
+        | ResponseItem::GhostSnapshot { .. }
         | ResponseItem::Other => Vec::new(),
     }
 }
@@ -172,6 +168,26 @@ fn parse_json(fragment: &str) -> Option<JsonValue> {
     serde_json::from_str(fragment).ok()
 }
 
+fn web_search_query(query: &Option<String>, queries: &Option<Vec<String>>) -> Option<String> {
+    if let Some(value) = query.clone().filter(|q| !q.is_empty()) {
+        return Some(value);
+    }
+
+    let items = queries.as_ref();
+    let first = items
+        .and_then(|queries| queries.first())
+        .cloned()
+        .unwrap_or_default();
+    if first.is_empty() {
+        return None;
+    }
+    if items.is_some_and(|queries| queries.len() > 1) {
+        Some(format!("{first} ..."))
+    } else {
+        Some(first)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::map_response_item_to_event_messages;
@@ -179,14 +195,14 @@ mod tests {
     use crate::protocol::EnvironmentContextDeltaEvent;
     use crate::protocol::EnvironmentContextFullEvent;
     use crate::protocol::EventMsg;
-    use hanzo_protocol::models::ContentItem;
-    use hanzo_protocol::models::ResponseItem;
-    use hanzo_protocol::protocol::BROWSER_SNAPSHOT_CLOSE_TAG;
-    use hanzo_protocol::protocol::BROWSER_SNAPSHOT_OPEN_TAG;
-    use hanzo_protocol::protocol::ENVIRONMENT_CONTEXT_CLOSE_TAG;
-    use hanzo_protocol::protocol::ENVIRONMENT_CONTEXT_DELTA_CLOSE_TAG;
-    use hanzo_protocol::protocol::ENVIRONMENT_CONTEXT_DELTA_OPEN_TAG;
-    use hanzo_protocol::protocol::ENVIRONMENT_CONTEXT_OPEN_TAG;
+    use code_protocol::models::ContentItem;
+    use code_protocol::models::ResponseItem;
+    use code_protocol::protocol::BROWSER_SNAPSHOT_CLOSE_TAG;
+    use code_protocol::protocol::BROWSER_SNAPSHOT_OPEN_TAG;
+    use code_protocol::protocol::ENVIRONMENT_CONTEXT_CLOSE_TAG;
+    use code_protocol::protocol::ENVIRONMENT_CONTEXT_DELTA_CLOSE_TAG;
+    use code_protocol::protocol::ENVIRONMENT_CONTEXT_DELTA_OPEN_TAG;
+    use code_protocol::protocol::ENVIRONMENT_CONTEXT_OPEN_TAG;
     use serde_json::json;
 
     #[test]
@@ -207,8 +223,7 @@ mod tests {
                 ContentItem::InputImage {
                     image_url: img2.clone(),
                 },
-            ],
-        };
+            ], end_turn: None, phase: None};
 
         let events = map_response_item_to_event_messages(&item, false);
         // No UI event is emitted for raw user input in this fork
@@ -232,16 +247,12 @@ mod tests {
                     serde_json::to_string_pretty(&payload).unwrap(),
                     ENVIRONMENT_CONTEXT_CLOSE_TAG
                 ),
-            }],
-        };
+            }], end_turn: None, phase: None};
 
         let events = map_response_item_to_event_messages(&item, false);
         assert_eq!(events.len(), 1);
         match &events[0] {
-            EventMsg::EnvironmentContextFull(EnvironmentContextFullEvent {
-                snapshot,
-                sequence,
-            }) => {
+            EventMsg::EnvironmentContextFull(EnvironmentContextFullEvent { snapshot, sequence }) => {
                 assert_eq!(snapshot, &payload);
                 assert_eq!(*sequence, None);
             }
@@ -269,8 +280,7 @@ mod tests {
                     serde_json::to_string_pretty(&payload).unwrap(),
                     ENVIRONMENT_CONTEXT_DELTA_CLOSE_TAG
                 ),
-            }],
-        };
+            }], end_turn: None, phase: None};
 
         let events = map_response_item_to_event_messages(&item, false);
         assert_eq!(events.len(), 1);
@@ -305,8 +315,7 @@ mod tests {
                     serde_json::to_string_pretty(&payload).unwrap(),
                     BROWSER_SNAPSHOT_CLOSE_TAG
                 ),
-            }],
-        };
+            }], end_turn: None, phase: None};
 
         let events = map_response_item_to_event_messages(&item, false);
         assert_eq!(events.len(), 1);

@@ -1,22 +1,20 @@
-use crate::config_loader::LoaderOverrides;
-use crate::config_loader::load_config_as_toml_blocking;
-use crate::config_types::AutoDriveContinueMode;
-use crate::config_types::AutoDriveSettings;
-use crate::config_types::CachedTerminalBackground;
-use crate::config_types::McpServerConfig;
-use crate::config_types::McpServerTransportConfig;
-use crate::config_types::ReasoningEffort;
-use crate::config_types::ThemeColors;
-use crate::config_types::ThemeName;
-use crate::protocol::ApprovedCommandMatchKind;
-use crate::protocol::AskForApproval;
+use crate::config_loader::{load_config_as_toml_blocking, LoaderOverrides};
+use crate::config_types::{
+    AutoDriveContinueMode,
+    AutoDriveSettings,
+    CachedTerminalBackground,
+    McpServerConfig,
+    McpServerTransportConfig,
+    ReasoningEffort,
+    ThemeColors,
+    ThemeName,
+};
+use crate::protocol::{ApprovedCommandMatchKind, AskForApproval};
+use code_protocol::config_types::SandboxMode;
 use dirs::home_dir;
-use hanzo_protocol::config_types::SandboxMode;
-use std::collections::BTreeMap;
-use std::collections::HashMap;
+use std::collections::{BTreeMap, HashMap};
 use std::io::ErrorKind;
-use std::path::Path;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::time::Duration;
 use tempfile::NamedTempFile;
 use toml::Value as TomlValue;
@@ -113,14 +111,48 @@ pub fn write_global_mcp_servers(
                         entry["env"] = TomlItem::Table(env_table);
                     }
                 }
-                McpServerTransportConfig::StreamableHttp { url, bearer_token } => {
+                McpServerTransportConfig::StreamableHttp {
+                    url,
+                    bearer_token,
+                    bearer_token_env_var,
+                    http_headers,
+                    env_http_headers,
+                    oauth_resource,
+                } => {
                     entry["url"] = toml_edit::value(url.clone());
                     if let Some(token) = bearer_token {
                         entry["bearer_token"] = toml_edit::value(token.clone());
                     }
-                }
-                McpServerTransportConfig::Zap { url } => {
-                    entry["url"] = toml_edit::value(url.clone());
+                    if let Some(token_env_var) = bearer_token_env_var {
+                        entry["bearer_token_env_var"] = toml_edit::value(token_env_var.clone());
+                    }
+                    if let Some(headers) = http_headers
+                        && !headers.is_empty()
+                    {
+                        let mut headers_table = TomlTable::new();
+                        headers_table.set_implicit(false);
+                        let mut pairs: Vec<_> = headers.iter().collect();
+                        pairs.sort_by(|(a, _), (b, _)| a.cmp(b));
+                        for (key, value) in pairs {
+                            headers_table.insert(key, toml_edit::value(value.clone()));
+                        }
+                        entry["http_headers"] = TomlItem::Table(headers_table);
+                    }
+                    if let Some(headers) = env_http_headers
+                        && !headers.is_empty()
+                    {
+                        let mut headers_table = TomlTable::new();
+                        headers_table.set_implicit(false);
+                        let mut pairs: Vec<_> = headers.iter().collect();
+                        pairs.sort_by(|(a, _), (b, _)| a.cmp(b));
+                        for (key, value) in pairs {
+                            headers_table.insert(key, toml_edit::value(value.clone()));
+                        }
+                        entry["env_http_headers"] = TomlItem::Table(headers_table);
+                    }
+                    if let Some(resource) = oauth_resource {
+                        entry["oauth_resource"] = toml_edit::value(resource.clone());
+                    }
                 }
             }
 
@@ -174,21 +206,25 @@ pub async fn persist_model_selection(
     {
         let root = doc.as_table_mut();
         if let Some(profile_name) = profile {
-            let profiles_item = root.entry("profiles").or_insert_with(|| {
-                let mut table = TomlTable::new();
-                table.set_implicit(true);
-                TomlItem::Table(table)
-            });
+            let profiles_item = root
+                .entry("profiles")
+                .or_insert_with(|| {
+                    let mut table = TomlTable::new();
+                    table.set_implicit(true);
+                    TomlItem::Table(table)
+                });
 
             let profiles_table = profiles_item
                 .as_table_mut()
                 .expect("profiles table should be a table");
 
-            let profile_item = profiles_table.entry(profile_name).or_insert_with(|| {
-                let mut table = TomlTable::new();
-                table.set_implicit(false);
-                TomlItem::Table(table)
-            });
+            let profile_item = profiles_table
+                .entry(profile_name)
+                .or_insert_with(|| {
+                    let mut table = TomlTable::new();
+                    table.set_implicit(false);
+                    TomlItem::Table(table)
+                });
 
             let profile_table = profile_item
                 .as_table_mut()
@@ -197,7 +233,8 @@ pub async fn persist_model_selection(
             profile_table["model"] = toml_edit::value(model.to_string());
 
             if let Some(effort) = effort {
-                profile_table["model_reasoning_effort"] = toml_edit::value(effort.to_string());
+                profile_table["model_reasoning_effort"] =
+                    toml_edit::value(effort.to_string());
             } else {
                 profile_table.remove("model_reasoning_effort");
             }
@@ -212,7 +249,8 @@ pub async fn persist_model_selection(
             root["model"] = toml_edit::value(model.to_string());
             match effort {
                 Some(effort) => {
-                    root["model_reasoning_effort"] = toml_edit::value(effort.to_string());
+                    root["model_reasoning_effort"] =
+                        toml_edit::value(effort.to_string());
                 }
                 None => {
                     root.remove("model_reasoning_effort");
@@ -239,7 +277,7 @@ pub async fn persist_model_selection(
     Ok(())
 }
 
-/// Patch `HANZO_HOME/config.toml` project state.
+/// Patch `CODEX_HOME/config.toml` project state.
 /// Use with caution.
 pub fn set_project_trusted(code_home: &Path, project_path: &Path) -> anyhow::Result<()> {
     let config_path = code_home.join(CONFIG_TOML_FILE);
@@ -318,7 +356,7 @@ fn set_project_trusted_inner(doc: &mut DocumentMut, project_path: &Path) -> anyh
         .get_mut(project_key.as_str())
         .and_then(|i| i.as_table_mut())
     else {
-        return Err(anyhow::anyhow!("project table missing for {project_key}"));
+        return Err(anyhow::anyhow!("project table missing for {}", project_key));
     };
     proj_tbl.set_implicit(false);
     proj_tbl["trust_level"] = toml_edit::value("trusted");
@@ -326,7 +364,7 @@ fn set_project_trusted_inner(doc: &mut DocumentMut, project_path: &Path) -> anyh
     Ok(())
 }
 
-/// Persist the selected TUI theme into `HANZO_HOME/config.toml` at `[tui.theme].name`.
+/// Persist the selected TUI theme into `CODEX_HOME/config.toml` at `[tui.theme].name`.
 pub fn set_tui_theme_name(code_home: &Path, theme: ThemeName) -> anyhow::Result<()> {
     let config_path = code_home.join(CONFIG_TOML_FILE);
 
@@ -356,9 +394,6 @@ pub fn set_tui_theme_name(code_home: &Path, theme: ThemeName) -> anyhow::Result<
         ThemeName::DarkCharcoalRainbow => "dark-charcoal-rainbow",
         ThemeName::DarkZenGarden => "dark-zen-garden",
         ThemeName::DarkPaperLightPro => "dark-paper-light-pro",
-        ThemeName::DarkCode => "dark-code",
-        ThemeName::DarkCodex => "dark-codex",
-        ThemeName::DarkMonochrome => "dark-monochrome",
         ThemeName::Custom => "custom",
     };
 
@@ -366,11 +401,11 @@ pub fn set_tui_theme_name(code_home: &Path, theme: ThemeName) -> anyhow::Result<
     doc["tui"]["theme"]["name"] = toml_edit::value(theme_str);
     // When switching away from the Custom theme, clear any lingering custom
     // overrides so built-in themes render true to spec on next startup.
-    if theme != ThemeName::Custom
-        && let Some(tbl) = doc["tui"]["theme"].as_table_mut()
-    {
-        tbl.remove("label");
-        tbl.remove("colors");
+    if theme != ThemeName::Custom {
+        if let Some(tbl) = doc["tui"]["theme"].as_table_mut() {
+            tbl.remove("label");
+            tbl.remove("colors");
+        }
     }
 
     // ensure code_home exists
@@ -433,7 +468,7 @@ pub fn set_cached_terminal_background(
     Ok(())
 }
 
-/// Persist the selected spinner into `HANZO_HOME/config.toml` at `[tui.spinner].name`.
+/// Persist the selected spinner into `CODEX_HOME/config.toml` at `[tui.spinner].name`.
 pub fn set_tui_spinner_name(code_home: &Path, spinner_name: &str) -> anyhow::Result<()> {
     let config_path = code_home.join(CONFIG_TOML_FILE);
 
@@ -481,9 +516,7 @@ pub fn set_custom_spinner(
     let node = &mut doc["tui"]["spinner"]["custom"][id];
     node["interval"] = toml_edit::value(interval as i64);
     let mut arr = toml_edit::Array::default();
-    for s in frames {
-        arr.push(s.as_str());
-    }
+    for s in frames { arr.push(s.as_str()); }
     node["frames"] = toml_edit::value(arr);
     node["label"] = toml_edit::value(label);
 
@@ -519,9 +552,7 @@ pub fn set_custom_theme(
         doc["tui"]["theme"]["name"] = toml_edit::value("custom");
     }
     doc["tui"]["theme"]["label"] = toml_edit::value(label);
-    if let Some(d) = is_dark {
-        doc["tui"]["theme"]["is_dark"] = toml_edit::value(d);
-    }
+    if let Some(d) = is_dark { doc["tui"]["theme"]["is_dark"] = toml_edit::value(d); }
 
     // Ensure colors table exists and write provided keys
     {
@@ -533,12 +564,10 @@ pub fn set_custom_theme(
         if !theme_tbl.contains_key("colors") {
             theme_tbl.insert("colors", It::Table(toml_edit::Table::new()));
         }
-        let colors_tbl = theme_tbl["colors"].as_table_mut().unwrap();
+    let colors_tbl = theme_tbl["colors"].as_table_mut().unwrap();
         macro_rules! set_opt {
             ($key:ident) => {
-                if let Some(ref v) = colors.$key {
-                    colors_tbl.insert(stringify!($key), toml_edit::value(v.clone()));
-                }
+                if let Some(ref v) = colors.$key { colors_tbl.insert(stringify!($key), toml_edit::value(v.clone())); }
             };
         }
         set_opt!(primary);
@@ -571,28 +600,7 @@ pub fn set_custom_theme(
     Ok(())
 }
 
-/// Persist the zen-mode preference into `HANZO_HOME/config.toml` at `[tui.theme].zen`.
-pub fn set_tui_zen_mode(code_home: &Path, zen: bool) -> anyhow::Result<()> {
-    let config_path = code_home.join(CONFIG_TOML_FILE);
-
-    let read_path = resolve_code_path_for_read(code_home, Path::new(CONFIG_TOML_FILE));
-    let mut doc = match std::fs::read_to_string(&read_path) {
-        Ok(s) => s.parse::<DocumentMut>()?,
-        Err(e) if e.kind() == std::io::ErrorKind::NotFound => DocumentMut::new(),
-        Err(e) => return Err(e.into()),
-    };
-
-    doc["tui"]["theme"]["zen"] = toml_edit::value(zen);
-
-    std::fs::create_dir_all(code_home)?;
-    let tmp_file = NamedTempFile::new_in(code_home)?;
-    std::fs::write(tmp_file.path(), doc.to_string())?;
-    tmp_file.persist(config_path)?;
-
-    Ok(())
-}
-
-/// Persist the alternate screen preference into `HANZO_HOME/config.toml` at `[tui].alternate_screen`.
+/// Persist the alternate screen preference into `CODEX_HOME/config.toml` at `[tui].alternate_screen`.
 pub fn set_tui_alternate_screen(code_home: &Path, enabled: bool) -> anyhow::Result<()> {
     let config_path = code_home.join(CONFIG_TOML_FILE);
 
@@ -620,7 +628,7 @@ pub fn set_tui_alternate_screen(code_home: &Path, enabled: bool) -> anyhow::Resu
     Ok(())
 }
 
-/// Persist the TUI notifications preference into `HANZO_HOME/config.toml` at `[tui].notifications`.
+/// Persist the TUI notifications preference into `CODEX_HOME/config.toml` at `[tui].notifications`.
 pub fn set_tui_notifications(
     code_home: &Path,
     notifications: crate::config_types::Notifications,
@@ -656,7 +664,7 @@ pub fn set_tui_notifications(
     Ok(())
 }
 
-/// Persist the review auto-resolve preference into `HANZO_HOME/config.toml` at `[tui].review_auto_resolve`.
+/// Persist the review auto-resolve preference into `CODEX_HOME/config.toml` at `[tui].review_auto_resolve`.
 pub fn set_tui_review_auto_resolve(code_home: &Path, enabled: bool) -> anyhow::Result<()> {
     let config_path = code_home.join(CONFIG_TOML_FILE);
     let read_path = resolve_code_path_for_read(code_home, Path::new(CONFIG_TOML_FILE));
@@ -677,7 +685,7 @@ pub fn set_tui_review_auto_resolve(code_home: &Path, enabled: bool) -> anyhow::R
     Ok(())
 }
 
-/// Persist the auto review preference into `HANZO_HOME/config.toml` at `[tui].auto_review_enabled`.
+/// Persist the auto review preference into `CODEX_HOME/config.toml` at `[tui].auto_review_enabled`.
 pub fn set_tui_auto_review_enabled(code_home: &Path, enabled: bool) -> anyhow::Result<()> {
     let config_path = code_home.join(CONFIG_TOML_FILE);
     let read_path = resolve_code_path_for_read(code_home, Path::new(CONFIG_TOML_FILE));
@@ -698,7 +706,7 @@ pub fn set_tui_auto_review_enabled(code_home: &Path, enabled: bool) -> anyhow::R
     Ok(())
 }
 
-/// Persist the review model + reasoning effort into `HANZO_HOME/config.toml`.
+/// Persist the review model + reasoning effort into `CODEX_HOME/config.toml`.
 pub fn set_review_model(
     code_home: &Path,
     model: &str,
@@ -768,7 +776,7 @@ pub fn set_review_resolve_model(
     Ok(())
 }
 
-/// Persist the planning model + reasoning effort into `HANZO_HOME/config.toml`.
+/// Persist the planning model + reasoning effort into `CODEX_HOME/config.toml`.
 pub fn set_planning_model(
     code_home: &Path,
     model: &str,
@@ -894,14 +902,53 @@ pub fn set_auto_drive_settings(
         tui_tbl.remove("auto_drive");
     }
 
+    if !doc.as_table().contains_key("auto_drive") || !doc["auto_drive"].is_table() {
+        doc["auto_drive"] = TomlItem::Table(TomlTable::new());
+    }
+
     doc["auto_drive_use_chat_model"] = toml_edit::value(use_chat_model);
 
     doc["auto_drive"]["review_enabled"] = toml_edit::value(settings.review_enabled);
     doc["auto_drive"]["agents_enabled"] = toml_edit::value(settings.agents_enabled);
-    doc["auto_drive"]["qa_automation_enabled"] = toml_edit::value(settings.qa_automation_enabled);
-    doc["auto_drive"]["cross_check_enabled"] = toml_edit::value(settings.cross_check_enabled);
-    doc["auto_drive"]["observer_enabled"] = toml_edit::value(settings.observer_enabled);
-    doc["auto_drive"]["coordinator_routing"] = toml_edit::value(settings.coordinator_routing);
+    doc["auto_drive"]["qa_automation_enabled"] =
+        toml_edit::value(settings.qa_automation_enabled);
+    doc["auto_drive"]["cross_check_enabled"] =
+        toml_edit::value(settings.cross_check_enabled);
+    doc["auto_drive"]["observer_enabled"] =
+        toml_edit::value(settings.observer_enabled);
+    doc["auto_drive"]["coordinator_routing"] =
+        toml_edit::value(settings.coordinator_routing);
+    doc["auto_drive"]["model_routing_enabled"] =
+        toml_edit::value(settings.model_routing_enabled);
+    if settings.model_routing_entries.is_empty() {
+        if let Some(auto_drive_tbl) = doc["auto_drive"].as_table_mut() {
+            auto_drive_tbl.remove("model_routing_entries");
+        }
+    } else {
+        let mut routing_entries = TomlArrayOfTables::new();
+        for entry in &settings.model_routing_entries {
+            let mut table = TomlTable::new();
+            table.insert("model", TomlItem::Value(entry.model.trim().into()));
+            table.insert("enabled", TomlItem::Value(entry.enabled.into()));
+
+            let mut reasoning_levels = TomlArray::new();
+            for level in &entry.reasoning_levels {
+                reasoning_levels.push(level.to_string().to_ascii_lowercase());
+            }
+            table.insert(
+                "reasoning_levels",
+                TomlItem::Value(toml_edit::Value::Array(reasoning_levels)),
+            );
+
+            table.insert(
+                "description",
+                TomlItem::Value(entry.description.trim().into()),
+            );
+
+            routing_entries.push(table);
+        }
+        doc["auto_drive"]["model_routing_entries"] = TomlItem::ArrayOfTables(routing_entries);
+    }
     doc["auto_drive"]["model"] = toml_edit::value(settings.model.trim());
     doc["auto_drive"]["model_reasoning_effort"] = toml_edit::value(
         settings
@@ -972,7 +1019,10 @@ pub fn set_github_check_on_push(code_home: &Path, enabled: bool) -> anyhow::Resu
 }
 
 /// Persist `github.actionlint_on_patch = <enabled>`.
-pub fn set_github_actionlint_on_patch(code_home: &Path, enabled: bool) -> anyhow::Result<()> {
+pub fn set_github_actionlint_on_patch(
+    code_home: &Path,
+    enabled: bool,
+) -> anyhow::Result<()> {
     let config_path = code_home.join(CONFIG_TOML_FILE);
     let read_path = resolve_code_path_for_read(code_home, Path::new(CONFIG_TOML_FILE));
     let mut doc = match std::fs::read_to_string(&read_path) {
@@ -1074,24 +1124,21 @@ pub fn set_project_access_mode(
         .and_then(|i| i.as_table())
         .is_none();
     if needs_proj_table {
-        projects_tbl.insert(
-            project_key.as_str(),
-            TomlItem::Table(toml_edit::Table::new()),
-        );
+        projects_tbl.insert(project_key.as_str(), TomlItem::Table(toml_edit::Table::new()));
     }
     let proj_tbl = projects_tbl
         .get_mut(project_key.as_str())
         .and_then(|i| i.as_table_mut())
-        .ok_or_else(|| anyhow::anyhow!(format!("failed to create projects.{project_key} table")))?;
+        .ok_or_else(|| anyhow::anyhow!(format!("failed to create projects.{} table", project_key)))?;
 
     // Write fields
     proj_tbl.insert(
         "approval_policy",
-        TomlItem::Value(toml_edit::Value::from(format!("{approval}"))),
+        TomlItem::Value(toml_edit::Value::from(format!("{}", approval))),
     );
     proj_tbl.insert(
         "sandbox_mode",
-        TomlItem::Value(toml_edit::Value::from(format!("{sandbox_mode}"))),
+        TomlItem::Value(toml_edit::Value::from(format!("{}", sandbox_mode))),
     );
 
     // Harmonize trust_level with selected access mode:
@@ -1160,7 +1207,7 @@ pub fn add_project_allowed_command(
     let project_tbl = projects_tbl
         .get_mut(project_key.as_str())
         .and_then(|i| i.as_table_mut())
-        .ok_or_else(|| anyhow::anyhow!(format!("failed to create projects.{project_key} table")))?;
+        .ok_or_else(|| anyhow::anyhow!(format!("failed to create projects.{} table", project_key)))?;
 
     let mut argv_array = TomlArray::new();
     for arg in command {
@@ -1215,19 +1262,15 @@ pub fn add_project_allowed_command(
     Ok(())
 }
 
-/// List MCP servers from `HANZO_HOME/config.toml`.
+/// List MCP servers from `CODEX_HOME/config.toml`.
 /// Returns `(enabled, disabled)` lists of `(name, McpServerConfig)`.
-pub fn list_mcp_servers(
-    code_home: &Path,
-) -> anyhow::Result<(
+pub fn list_mcp_servers(code_home: &Path) -> anyhow::Result<(
     Vec<(String, McpServerConfig)>,
     Vec<(String, McpServerConfig)>,
 )> {
     let read_path = resolve_code_path_for_read(code_home, Path::new(CONFIG_TOML_FILE));
     let doc_str = std::fs::read_to_string(&read_path).unwrap_or_default();
-    let doc = doc_str
-        .parse::<DocumentMut>()
-        .unwrap_or_else(|_| DocumentMut::new());
+    let doc = doc_str.parse::<DocumentMut>().unwrap_or_else(|_| DocumentMut::new());
 
     fn table_to_list(tbl: &toml_edit::Table) -> Vec<(String, McpServerConfig)> {
         let mut out = Vec::new();
@@ -1239,30 +1282,34 @@ pub fn list_mcp_servers(
                         .and_then(|v| v.as_array())
                         .map(|arr| {
                             arr.iter()
-                                .filter_map(|i| i.as_str().map(std::string::ToString::to_string))
+                                .filter_map(|i| i.as_str().map(|s| s.to_string()))
                                 .collect()
                         })
                         .unwrap_or_default();
-                    let env = t.get("env").and_then(|v| {
-                        if let Some(tbl) = v.as_inline_table() {
-                            Some(
-                                tbl.iter()
-                                    .filter_map(|(k, v)| {
-                                        v.as_str().map(|s| (k.to_string(), s.to_string()))
-                                    })
-                                    .collect::<HashMap<_, _>>(),
-                            )
-                        } else {
-                            v.as_table().map(|table| {
-                                table
-                                    .iter()
-                                    .filter_map(|(k, v)| {
-                                        v.as_str().map(|s| (k.to_string(), s.to_string()))
-                                    })
-                                    .collect::<HashMap<_, _>>()
-                            })
-                        }
-                    });
+                    let env = t
+                        .get("env")
+                        .and_then(|v| {
+                            if let Some(tbl) = v.as_inline_table() {
+                                Some(
+                                    tbl.iter()
+                                        .filter_map(|(k, v)| {
+                                            v.as_str().map(|s| (k.to_string(), s.to_string()))
+                                        })
+                                        .collect::<HashMap<_, _>>(),
+                                )
+                            } else if let Some(table) = v.as_table() {
+                                Some(
+                                    table
+                                        .iter()
+                                        .filter_map(|(k, v)| {
+                                            v.as_str().map(|s| (k.to_string(), s.to_string()))
+                                        })
+                                        .collect::<HashMap<_, _>>(),
+                                )
+                            } else {
+                                None
+                            }
+                        });
 
                     McpServerTransportConfig::Stdio {
                         command: command.to_string(),
@@ -1270,20 +1317,72 @@ pub fn list_mcp_servers(
                         env,
                     }
                 } else if let Some(url) = t.get("url").and_then(|v| v.as_str()) {
-                    if url.starts_with("zap://") || url.starts_with("zaps://") {
-                        McpServerTransportConfig::Zap {
-                            url: url.to_string(),
-                        }
-                    } else {
-                        let bearer_token = t
-                            .get("bearer_token")
-                            .and_then(|v| v.as_str())
-                            .map(std::string::ToString::to_string);
+                    let bearer_token = t
+                        .get("bearer_token")
+                        .and_then(|v| v.as_str())
+                        .map(|s| s.to_string());
+                    let bearer_token_env_var = t
+                        .get("bearer_token_env_var")
+                        .and_then(|v| v.as_str())
+                        .map(|s| s.to_string());
+                    let http_headers = t.get("http_headers").and_then(|v| {
+                        v.as_table()
+                            .map(|table| {
+                                table
+                                    .iter()
+                                    .filter_map(|(key, value)| {
+                                        value.as_str().map(|value| (key.to_string(), value.to_string()))
+                                    })
+                                    .collect::<HashMap<_, _>>()
+                            })
+                            .or_else(|| {
+                                v.as_inline_table().map(|table| {
+                                    table
+                                        .iter()
+                                        .filter_map(|(key, value)| {
+                                            value
+                                                .as_str()
+                                                .map(|value| (key.to_string(), value.to_string()))
+                                        })
+                                        .collect::<HashMap<_, _>>()
+                                })
+                            })
+                    });
+                    let env_http_headers = t.get("env_http_headers").and_then(|v| {
+                        v.as_table()
+                            .map(|table| {
+                                table
+                                    .iter()
+                                    .filter_map(|(key, value)| {
+                                        value.as_str().map(|value| (key.to_string(), value.to_string()))
+                                    })
+                                    .collect::<HashMap<_, _>>()
+                            })
+                            .or_else(|| {
+                                v.as_inline_table().map(|table| {
+                                    table
+                                        .iter()
+                                        .filter_map(|(key, value)| {
+                                            value
+                                                .as_str()
+                                                .map(|value| (key.to_string(), value.to_string()))
+                                        })
+                                        .collect::<HashMap<_, _>>()
+                                })
+                            })
+                    });
+                    let oauth_resource = t
+                        .get("oauth_resource")
+                        .and_then(|v| v.as_str())
+                        .map(|s| s.to_string());
 
-                        McpServerTransportConfig::StreamableHttp {
-                            url: url.to_string(),
-                            bearer_token,
-                        }
+                    McpServerTransportConfig::StreamableHttp {
+                        url: url.to_string(),
+                        bearer_token,
+                        bearer_token_env_var,
+                        http_headers,
+                        env_http_headers,
+                        oauth_resource,
                     }
                 } else {
                     continue;
@@ -1294,12 +1393,14 @@ pub fn list_mcp_servers(
                     .and_then(|v| {
                         v.as_float()
                             .map(|f| Duration::try_from_secs_f64(f).ok())
-                            .or_else(|| Some(v.as_integer().map(|i| Duration::from_secs(i as u64))))
+                            .or_else(|| {
+                                Some(v.as_integer().map(|i| Duration::from_secs(i as u64)))
+                            })
                     })
                     .flatten()
                     .or_else(|| {
                         t.get("startup_timeout_ms")
-                            .and_then(toml_edit::Item::as_integer)
+                            .and_then(|v| v.as_integer())
                             .map(|ms| Duration::from_millis(ms as u64))
                     });
 
@@ -1308,7 +1409,9 @@ pub fn list_mcp_servers(
                     .and_then(|v| {
                         v.as_float()
                             .map(|f| Duration::try_from_secs_f64(f).ok())
-                            .or_else(|| Some(v.as_integer().map(|i| Duration::from_secs(i as u64))))
+                            .or_else(|| {
+                                Some(v.as_integer().map(|i| Duration::from_secs(i as u64)))
+                            })
                     })
                     .flatten();
 
@@ -1344,14 +1447,16 @@ pub fn list_mcp_servers(
 
 /// Add or update an MCP server under `[mcp_servers.<name>]`. If the same
 /// server exists under `mcp_servers_disabled`, it will be removed from there.
-pub fn add_mcp_server(code_home: &Path, name: &str, cfg: McpServerConfig) -> anyhow::Result<()> {
+pub fn add_mcp_server(
+    code_home: &Path,
+    name: &str,
+    cfg: McpServerConfig,
+) -> anyhow::Result<()> {
     // Validate server name for safety and compatibility with MCP tool naming.
-    if !name
-        .chars()
-        .all(|c| c.is_ascii_alphanumeric() || c == '_' || c == '-')
-    {
+    if !name.chars().all(|c| c.is_ascii_alphanumeric() || c == '_' || c == '-') {
         return Err(anyhow::anyhow!(
-            "invalid server name '{name}': must match ^[a-zA-Z0-9_-]+$"
+            "invalid server name '{}': must match ^[a-zA-Z0-9_-]+$",
+            name
         ));
     }
 
@@ -1395,22 +1500,46 @@ pub fn add_mcp_server(code_home: &Path, name: &str, cfg: McpServerConfig) -> any
                 server_tbl.insert("env", TomlItem::Value(toml_edit::Value::InlineTable(it)));
             }
         }
-        McpServerTransportConfig::StreamableHttp { url, bearer_token } => {
+        McpServerTransportConfig::StreamableHttp {
+            url,
+            bearer_token,
+            bearer_token_env_var,
+            http_headers,
+            env_http_headers,
+            oauth_resource,
+        } => {
             server_tbl.insert("url", toml_edit::value(url));
             if let Some(token) = bearer_token {
                 server_tbl.insert("bearer_token", toml_edit::value(token));
             }
-        }
-        McpServerTransportConfig::Zap { url } => {
-            server_tbl.insert("url", toml_edit::value(url));
+            if let Some(token_env_var) = bearer_token_env_var {
+                server_tbl.insert("bearer_token_env_var", toml_edit::value(token_env_var));
+            }
+            if let Some(headers) = http_headers {
+                let mut it = toml_edit::InlineTable::new();
+                for (k, v) in headers {
+                    it.insert(&k, toml_edit::Value::from(v));
+                }
+                server_tbl.insert("http_headers", TomlItem::Value(toml_edit::Value::InlineTable(it)));
+            }
+            if let Some(headers) = env_http_headers {
+                let mut it = toml_edit::InlineTable::new();
+                for (k, v) in headers {
+                    it.insert(&k, toml_edit::Value::from(v));
+                }
+                server_tbl.insert(
+                    "env_http_headers",
+                    TomlItem::Value(toml_edit::Value::InlineTable(it)),
+                );
+            }
+            if let Some(resource) = oauth_resource {
+                server_tbl.insert("oauth_resource", toml_edit::value(resource));
+            }
         }
     }
 
     if let Some(duration) = startup_timeout_sec {
-        server_tbl.insert(
-            "startup_timeout_sec",
-            toml_edit::value(duration.as_secs_f64()),
-        );
+        server_tbl.insert("startup_timeout_sec", toml_edit::value(duration.as_secs_f64()));
     }
     if let Some(duration) = tool_timeout_sec {
         server_tbl.insert("tool_timeout_sec", toml_edit::value(duration.as_secs_f64()));
@@ -1434,7 +1563,11 @@ pub fn add_mcp_server(code_home: &Path, name: &str, cfg: McpServerConfig) -> any
 
 /// Enable/disable an MCP server by moving it between `[mcp_servers]` and
 /// `[mcp_servers_disabled]`. Returns `true` if a change was made.
-pub fn set_mcp_server_enabled(code_home: &Path, name: &str, enabled: bool) -> anyhow::Result<bool> {
+pub fn set_mcp_server_enabled(
+    code_home: &Path,
+    name: &str,
+    enabled: bool,
+) -> anyhow::Result<bool> {
     let config_path = code_home.join(CONFIG_TOML_FILE);
     let read_path = resolve_code_path_for_read(code_home, Path::new(CONFIG_TOML_FILE));
     let mut doc = match std::fs::read_to_string(&read_path) {
@@ -1499,14 +1632,13 @@ fn env_path(var: &str) -> std::io::Result<Option<PathBuf>> {
 }
 
 fn env_overrides_present() -> bool {
-    matches!(std::env::var("HANZO_HOME"), Ok(ref v) if !v.trim().is_empty())
-        || matches!(std::env::var("CODE_HOME"), Ok(ref v) if !v.trim().is_empty())
+    matches!(std::env::var("CODE_HOME"), Ok(ref v) if !v.trim().is_empty())
         || matches!(std::env::var("CODEX_HOME"), Ok(ref v) if !v.trim().is_empty())
 }
 
 fn default_code_home_dir() -> Option<PathBuf> {
     let mut path = home_dir()?;
-    path.push(".hanzo");
+    path.push(".code");
     Some(path)
 }
 
@@ -1517,13 +1649,12 @@ fn compute_legacy_code_home_dir() -> Option<PathBuf> {
     let Some(home) = home_dir() else {
         return None;
     };
-    let candidates = [home.join(".code"), home.join(".codex")];
-    for candidate in candidates {
-        if path_exists(&candidate) {
-            return Some(candidate);
-        }
+    let candidate = home.join(".codex");
+    if path_exists(&candidate) {
+        Some(candidate)
+    } else {
+        None
     }
-    None
 }
 
 fn legacy_code_home_dir() -> Option<PathBuf> {
@@ -1535,7 +1666,9 @@ fn legacy_code_home_dir() -> Option<PathBuf> {
     #[cfg(not(test))]
     {
         static LEGACY: std::sync::OnceLock<Option<PathBuf>> = std::sync::OnceLock::new();
-        LEGACY.get_or_init(compute_legacy_code_home_dir).clone()
+        LEGACY
+            .get_or_init(compute_legacy_code_home_dir)
+            .clone()
     }
 }
 
@@ -1543,8 +1676,8 @@ fn path_exists(path: &Path) -> bool {
     std::fs::metadata(path).is_ok()
 }
 
-/// Resolve the filesystem path used for *reading* Hanzo Dev state that may live in
-/// a legacy `~/.code` or `~/.codex` directory. Writes should continue targeting `code_home`.
+/// Resolve the filesystem path used for *reading* Codex state that may live in
+/// a legacy `~/.codex` directory. Writes should continue targeting `code_home`.
 pub fn resolve_code_path_for_read(code_home: &Path, relative: &Path) -> PathBuf {
     let default_path = code_home.join(relative);
 
@@ -1556,10 +1689,10 @@ pub fn resolve_code_path_for_read(code_home: &Path, relative: &Path) -> PathBuf 
         return default_path;
     }
 
-    if let Some(default_home) = default_code_home_dir()
-        && default_home != code_home
-    {
-        return default_path;
+    if let Some(default_home) = default_code_home_dir() {
+        if default_home != code_home {
+            return default_path;
+        }
     }
 
     if let Some(legacy) = legacy_code_home_dir() {
@@ -1572,18 +1705,14 @@ pub fn resolve_code_path_for_read(code_home: &Path, relative: &Path) -> PathBuf 
     default_path
 }
 
-/// Returns the path to the Hanzo configuration directory, which can be
-/// specified by the `HANZO_HOME` environment variable (legacy `CODE_HOME`/`HANZO_HOME`).
-/// If not set, defaults to `~/.hanzo`.
+/// Returns the path to the Code/Codex configuration directory, which can be
+/// specified by the `CODE_HOME` or `CODEX_HOME` environment variables. If not set,
+/// defaults to `~/.code` for the fork.
 ///
-/// - If `HANZO_HOME`/`CODE_HOME`/`CODEX_HOME` is set, the value will be canonicalized and this
+/// - If `CODE_HOME` or `CODEX_HOME` is set, the value will be canonicalized and this
 ///   function will Err if the path does not exist.
 /// - If neither is set, this function does not verify that the directory exists.
 pub fn find_code_home() -> std::io::Result<PathBuf> {
-    if let Some(path) = env_path("HANZO_HOME")? {
-        return Ok(path);
-    }
-
     if let Some(path) = env_path("CODE_HOME")? {
         return Ok(path);
     }
@@ -1600,7 +1729,7 @@ pub fn find_code_home() -> std::io::Result<PathBuf> {
     })?;
 
     let mut write_path = home;
-    write_path.push(".hanzo");
+    write_path.push(".code");
     Ok(write_path)
 }
 
