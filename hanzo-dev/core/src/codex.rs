@@ -12,70 +12,48 @@ use std::sync::Arc;
 use std::sync::Mutex;
 use std::sync::RwLock;
 use std::sync::Weak;
-use std::sync::atomic::AtomicBool;
-use std::sync::atomic::AtomicU64;
-use std::sync::atomic::Ordering;
-use std::time::Duration;
-use std::time::Instant;
-use time::OffsetDateTime;
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
+use std::time::{Duration, Instant};
 use time::format_description::well_known::Rfc3339;
+use time::OffsetDateTime;
 
-use crate::bridge_client::spawn_bridge_listener;
-use crate::config_types::ClientTools;
-use crate::config_types::ReasoningEffort as ReasoningEffortConfig;
-use crate::config_types::ReasoningSummary as ReasoningSummaryConfig;
 use async_channel::Receiver;
 use async_channel::Sender;
 use base64::Engine;
-use hanzo_apply_patch::ApplyPatchAction;
-use hanzo_apply_patch::MaybeApplyPatchVerified;
-use hanzo_browser::BrowserConfig as CodexBrowserConfig;
-use hanzo_browser::BrowserManager;
-use hanzo_otel::otel_event_manager::OtelEventManager;
-use hanzo_otel::otel_event_manager::ToolDecisionSource;
-use hanzo_otel::otel_event_manager::TurnLatencyPayload;
-use hanzo_otel::otel_event_manager::TurnLatencyPhase;
-use hanzo_protocol::config_types::ReasoningEffort as ProtoReasoningEffort;
-use hanzo_protocol::config_types::ReasoningSummary as ProtoReasoningSummary;
-use hanzo_protocol::protocol::AskForApproval as ProtoAskForApproval;
-use hanzo_protocol::protocol::BROWSER_SNAPSHOT_OPEN_TAG;
-use hanzo_protocol::protocol::ENVIRONMENT_CONTEXT_CLOSE_TAG;
-use hanzo_protocol::protocol::ENVIRONMENT_CONTEXT_DELTA_CLOSE_TAG;
-use hanzo_protocol::protocol::ENVIRONMENT_CONTEXT_DELTA_OPEN_TAG;
-use hanzo_protocol::protocol::ENVIRONMENT_CONTEXT_OPEN_TAG;
-use hanzo_protocol::protocol::ReviewDecision as ProtoReviewDecision;
-use hanzo_protocol::protocol::SandboxPolicy as ProtoSandboxPolicy;
+use code_apply_patch::ApplyPatchAction;
+use code_apply_patch::MaybeApplyPatchVerified;
+use crate::bridge_client::spawn_bridge_listener;
+use code_browser::BrowserConfig as CodexBrowserConfig;
+use code_browser::BrowserManager;
+use code_otel::otel_event_manager::{
+    OtelEventManager,
+    ToolDecisionSource,
+    TurnLatencyPayload,
+    TurnLatencyPhase,
+};
+use code_protocol::config_types::ReasoningEffort as ProtoReasoningEffort;
+use code_protocol::config_types::ReasoningSummary as ProtoReasoningSummary;
+use code_utils_absolute_path::AbsolutePathBuf as ProtoAbsolutePathBuf;
+use code_protocol::protocol::AskForApproval as ProtoAskForApproval;
+use code_protocol::protocol::RejectConfig as ProtoRejectConfig;
+use code_protocol::protocol::ReviewDecision as ProtoReviewDecision;
+use code_protocol::protocol::SandboxPolicy as ProtoSandboxPolicy;
+use code_protocol::protocol::BROWSER_SNAPSHOT_OPEN_TAG;
+use code_protocol::protocol::ENVIRONMENT_CONTEXT_CLOSE_TAG;
+use code_protocol::protocol::ENVIRONMENT_CONTEXT_DELTA_CLOSE_TAG;
+use code_protocol::protocol::ENVIRONMENT_CONTEXT_DELTA_OPEN_TAG;
+use code_protocol::protocol::ENVIRONMENT_CONTEXT_OPEN_TAG;
+use crate::config_types::ReasoningEffort as ReasoningEffortConfig;
+use crate::config_types::ReasoningSummary as ReasoningSummaryConfig;
+use crate::config_types::ClientTools;
 // unused: AuthManager
 // unused: ConversationHistoryResponseEvent
-use crate::AuthManager;
-use crate::CodexAuth;
-use crate::EnvironmentContextEmission;
-use crate::account_usage;
-use crate::agent_defaults::agent_model_spec;
-use crate::agent_defaults::default_agent_configs;
-use crate::agent_defaults::enabled_agent_model_specs;
-use crate::agent_tool::AgentStatusUpdatePayload;
-use crate::auth_accounts;
-use crate::git_worktree;
-use crate::protocol::ApprovedCommandMatchKind;
-use crate::protocol::WebSearchBeginEvent;
-use crate::protocol::WebSearchCompleteEvent;
-use crate::remote_models::RemoteModelsManager;
-use crate::split_command_and_args;
-use chrono::Local;
-use chrono::Utc;
+use code_protocol::protocol::TurnAbortReason;
+use code_protocol::protocol::TurnAbortedEvent;
 use futures::prelude::*;
-use hanzo_protocol::mcp_protocol::AuthMode;
-use hanzo_protocol::models::WebSearchAction;
-use hanzo_protocol::protocol::RolloutItem;
-use hanzo_protocol::protocol::TurnAbortReason;
-use hanzo_protocol::protocol::TurnAbortedEvent;
-use mcp_types::CallToolResult;
-use serde::Deserialize;
-use serde::Serialize;
+use code_protocol::mcp::CallToolResult;
+use serde::{Deserialize, Serialize};
 use serde_json::json;
-use shlex::split as shlex_split;
-use shlex::try_join as shlex_try_join;
 use tokio::sync::oneshot;
 use tokio::task::AbortHandle;
 use tracing::debug;
@@ -84,6 +62,30 @@ use tracing::info;
 use tracing::trace;
 use tracing::warn;
 use uuid::Uuid;
+use crate::EnvironmentContextEmission;
+use crate::AuthManager;
+use crate::CodexAuth;
+use crate::agent_tool::AgentStatusUpdatePayload;
+use crate::remote_models::RemoteModelsManager;
+use crate::split_command_and_args;
+use crate::git_worktree;
+use crate::protocol::ApprovedCommandMatchKind;
+use crate::protocol::WebSearchBeginEvent;
+use crate::protocol::WebSearchCompleteEvent;
+use crate::account_usage;
+use crate::auth_accounts;
+use crate::agent_defaults::{
+    agent_model_spec,
+    default_agent_configs,
+    enabled_agent_model_specs_for_auth,
+    filter_agent_model_names_for_auth,
+};
+use code_protocol::models::WebSearchAction;
+use code_protocol::protocol::RolloutItem;
+use shlex::split as shlex_split;
+use shlex::try_join as shlex_try_join;
+use chrono::Local;
+use chrono::Utc;
 
 pub mod compact;
 pub mod compact_remote;
@@ -92,20 +94,17 @@ mod exec;
 mod session;
 mod streaming;
 
-use self::compact::build_compacted_history;
-use self::compact::collect_compaction_snippets;
-use self::compact_remote::run_inline_remote_auto_compact_task;
-use self::streaming::add_pending_screenshot;
-use self::streaming::capture_browser_screenshot;
-use self::streaming::submission_loop;
 pub use session::ApprovedCommandPattern;
-pub(crate) use session::Session;
-pub(crate) use session::ToolCallCtx;
+pub(crate) use session::{Session, ToolCallCtx};
+use self::compact::{build_compacted_history, collect_compaction_snippets};
+use self::compact_remote::run_inline_remote_auto_compact_task;
+use self::streaming::{add_pending_screenshot, capture_browser_screenshot, submission_loop};
 
 /// Initial submission ID for session configuration
 pub(crate) const INITIAL_SUBMIT_ID: &str = "";
 const HOOK_OUTPUT_LIMIT: usize = 2048;
 const PENDING_ONLY_SENTINEL: &str = "__code_pending_only__";
+const POST_TURN_PENDING_ONLY_SENTINEL: &str = "__code_post_turn_pending_only__";
 const MIN_SHELL_TIMEOUT_MS: u64 = 30 * 60 * 1000;
 
 #[derive(Clone, Default)]
@@ -187,6 +186,11 @@ fn to_proto_approval_policy(policy: AskForApproval) -> ProtoAskForApproval {
         AskForApproval::UnlessTrusted => ProtoAskForApproval::UnlessTrusted,
         AskForApproval::OnFailure => ProtoAskForApproval::OnFailure,
         AskForApproval::OnRequest => ProtoAskForApproval::OnRequest,
+        AskForApproval::Reject(config) => ProtoAskForApproval::Reject(ProtoRejectConfig {
+            sandbox_approval: config.sandbox_approval,
+            rules: config.rules,
+            mcp_elicitations: config.mcp_elicitations,
+        }),
         AskForApproval::Never => ProtoAskForApproval::Never,
     }
 }
@@ -201,13 +205,28 @@ fn to_proto_sandbox_policy(policy: SandboxPolicy) -> ProtoSandboxPolicy {
             exclude_tmpdir_env_var,
             exclude_slash_tmp,
             allow_git_writes,
-        } => ProtoSandboxPolicy::WorkspaceWrite {
-            writable_roots,
-            network_access,
-            exclude_tmpdir_env_var,
-            exclude_slash_tmp,
-            allow_git_writes,
-        },
+        } => {
+            let writable_roots = writable_roots
+                .into_iter()
+                .filter_map(|root| match ProtoAbsolutePathBuf::from_absolute_path(&root) {
+                    Ok(abs) => Some(abs),
+                    Err(err) => {
+                        warn!(
+                            "Ignoring invalid writable root {} for sandbox policy: {err}",
+                            root.display()
+                        );
+                        None
+                    }
+                })
+                .collect();
+            ProtoSandboxPolicy::WorkspaceWrite {
+                writable_roots,
+                network_access,
+                exclude_tmpdir_env_var,
+                exclude_slash_tmp,
+                allow_git_writes,
+            }
+        }
     }
 }
 
@@ -308,7 +327,7 @@ fn response_input_from_core_items(items: Vec<InputItem>) -> ResponseInputItem {
 
                 if let Some(meta) = metadata {
                     content_items.push(ContentItem::InputText {
-                        text: format!("[EPHEMERAL:{meta}]"),
+                        text: format!("[EPHEMERAL:{}]", meta),
                     });
                 }
 
@@ -347,12 +366,14 @@ fn convert_call_tool_result_to_function_call_output_payload(
 ) -> FunctionCallOutputPayload {
     match result {
         Ok(ok) => FunctionCallOutputPayload {
-            content: serde_json::to_string(ok)
-                .unwrap_or_else(|e| format!("JSON serialization error: {e}")),
+            body: code_protocol::models::FunctionCallOutputBody::Text(
+                serde_json::to_string(ok)
+                    .unwrap_or_else(|e| format!("JSON serialization error: {e}")),
+            ),
             success: Some(true),
         },
         Err(e) => FunctionCallOutputPayload {
-            content: format!("err: {e:?}"),
+            body: code_protocol::models::FunctionCallOutputBody::Text(format!("err: {e:?}")),
             success: Some(false),
         },
     }
@@ -360,11 +381,12 @@ fn convert_call_tool_result_to_function_call_output_payload(
 
 fn get_git_branch(cwd: &std::path::Path) -> Option<String> {
     let head_path = cwd.join(".git/HEAD");
-    if let Ok(contents) = std::fs::read_to_string(&head_path)
-        && let Some(rest) = contents.trim().strip_prefix("ref: ")
-        && let Some(branch) = rest.trim().rsplit('/').next()
-    {
-        return Some(branch.to_string());
+    if let Ok(contents) = std::fs::read_to_string(&head_path) {
+        if let Some(rest) = contents.trim().strip_prefix("ref: ") {
+            if let Some(branch) = rest.trim().rsplit('/').next() {
+                return Some(branch.to_string());
+            }
+        }
     }
     None
 }
@@ -381,10 +403,10 @@ fn maybe_update_from_model_info<T: Copy + PartialEq>(
         return;
     }
 
-    if let (Some(current), Some(old_val)) = (*field, old_default)
-        && current == old_val
-    {
-        *field = new_default;
+    if let (Some(current), Some(old_val)) = (*field, old_default) {
+        if current == old_val {
+            *field = new_default;
+        }
     }
 }
 
@@ -467,8 +489,7 @@ fn maybe_time_budget_status_item(sess: &Session) -> Option<ResponseItem> {
     Some(ResponseItem::Message {
         id: Some(format!("run-budget-{}", sess.id)),
         role: "user".to_string(),
-        content: vec![ContentItem::InputText { text }],
-    })
+        content: vec![ContentItem::InputText { text }], end_turn: None, phase: None})
 }
 
 async fn build_turn_status_items(sess: &Session) -> Vec<ResponseItem> {
@@ -501,123 +522,127 @@ async fn build_turn_status_items_legacy(sess: &Session) -> Vec<ResponseItem> {
     let mut screenshot_content: Option<ContentItem> = None;
     let mut include_screenshot = false;
 
-    if let Some(browser_manager) = hanzo_browser::global::get_browser_manager().await
-        && browser_manager.is_enabled().await
-    {
-        if let Some((_, idle_timeout)) = browser_manager.idle_elapsed_past_timeout().await {
-            let idle_text = format!(
-                "Browser idle (timeout {idle_timeout:?}); screenshot capture paused until browser_* tools run again."
-            );
-            current_status.push('\n');
-            current_status.push_str(&idle_text);
-        } else {
-            // Get current URL and browser info
-            let url = browser_manager
-                .get_current_url()
-                .await
-                .unwrap_or_else(|| "unknown".to_string());
-
-            // Try to get a tab title if available
-            let title = match browser_manager.get_or_create_page().await {
-                Ok(page) => page.get_title().await,
-                Err(_) => None,
-            };
-
-            // Get browser type description
-            let browser_type = browser_manager.get_browser_type().await;
-
-            // Get viewport dimensions
-            let (viewport_width, viewport_height) = browser_manager.get_viewport_size().await;
-            let viewport_info = format!(" | Viewport: {viewport_width}x{viewport_height}");
-
-            // Get cursor position
-            let cursor_info = match browser_manager.get_cursor_position().await {
-                Ok((x, y)) => format!(
-                    " | Mouse position: ({x:.0}, {y:.0}) [shown as a blue cursor in the screenshot]"
-                ),
-                Err(_) => String::new(),
-            };
-
-            // Try to capture screenshot and compare with last one
-            let screenshot_status = match capture_browser_screenshot(sess).await {
-                Ok((screenshot_path, _url)) => {
-                    // Always update the UI with the latest screenshot, even if unchanged for LLM payload
-                    // This ensures the user sees that a fresh capture occurred each turn.
-                    add_pending_screenshot(sess, screenshot_path.clone(), url.clone());
-                    // Check if screenshot has changed using image hashing
-                    let mut last_screenshot_info = sess.last_screenshot_info.lock().unwrap();
-
-                    // Compute hash for current screenshot
-                    let current_hash =
-                        crate::image_comparison::compute_image_hash(&screenshot_path).ok();
-
-                    let should_include_screenshot = if let (
-                        Some((_last_path, last_phash, last_dhash)),
-                        Some((cur_phash, cur_dhash)),
-                    ) =
-                        (last_screenshot_info.as_ref(), current_hash.as_ref())
-                    {
-                        // Compare hashes to see if screenshots are similar
-                        let similar = crate::image_comparison::are_hashes_similar(
-                            last_phash, last_dhash, cur_phash, cur_dhash,
-                        );
-
-                        if !similar {
-                            // Screenshot has changed, include it
-                            *last_screenshot_info = Some((
-                                screenshot_path.clone(),
-                                cur_phash.clone(),
-                                cur_dhash.clone(),
-                            ));
-                            true
-                        } else {
-                            // Screenshot unchanged
-                            false
-                        }
-                    } else {
-                        // No previous screenshot or hash computation failed, include it
-                        if let Some((phash, dhash)) = current_hash {
-                            *last_screenshot_info = Some((screenshot_path.clone(), phash, dhash));
-                        }
-                        true
-                    };
-
-                    if should_include_screenshot {
-                        if let Ok(bytes) = std::fs::read(&screenshot_path) {
-                            let mime = mime_guess::from_path(&screenshot_path)
-                                .first()
-                                .map(|m| m.to_string())
-                                .unwrap_or_else(|| "image/png".to_string());
-                            let encoded = base64::engine::general_purpose::STANDARD.encode(bytes);
-                            screenshot_content = Some(ContentItem::InputImage {
-                                image_url: format!("data:{mime};base64,{encoded}"),
-                            });
-                            include_screenshot = true;
-                            ""
-                        } else {
-                            " [Screenshot file read failed]"
-                        }
-                    } else {
-                        " [Screenshot unchanged]"
-                    }
-                }
-                Err(err_msg) => {
-                    // Include error message so LLM knows screenshot failed
-                    format!(" [Screenshot unavailable: {err_msg}]").leak()
-                }
-            };
-
-            let status_line = if let Some(t) = title {
-                format!(
-                    "Browser url: {url} — {t} ({browser_type}){viewport_info}{cursor_info}{screenshot_status}. You can interact with it using browser_* tools."
-                )
+    if let Some(browser_manager) = code_browser::global::get_browser_manager().await {
+        if browser_manager.is_enabled().await {
+            if let Some((_, idle_timeout)) = browser_manager.idle_elapsed_past_timeout().await {
+                let idle_text = format!(
+                    "Browser idle (timeout {:?}); screenshot capture paused until browser_* tools run again.",
+                    idle_timeout
+                );
+                current_status.push_str("\n");
+                current_status.push_str(&idle_text);
             } else {
-                format!(
-                    "Browser url: {url} ({browser_type}){viewport_info}{cursor_info}{screenshot_status}. You can interact with it using browser_* tools."
-                )
-            };
-            current_status.push('\n');
-            current_status.push_str(&status_line);
+                // Get current URL and browser info
+                let url = browser_manager
+                    .get_current_url()
+                    .await
+                    .unwrap_or_else(|| "unknown".to_string());
+
+                // Try to get a tab title if available
+                let title = match browser_manager.get_or_create_page().await {
+                    Ok(page) => page.get_title().await,
+                    Err(_) => None,
+                };
+
+                // Get browser type description
+                let browser_type = browser_manager.get_browser_type().await;
+
+                // Get viewport dimensions
+                let (viewport_width, viewport_height) = browser_manager.get_viewport_size().await;
+                let viewport_info = format!(" | Viewport: {}x{}", viewport_width, viewport_height);
+
+                // Get cursor position
+                let cursor_info = match browser_manager.get_cursor_position().await {
+                    Ok((x, y)) => format!(
+                        " | Mouse position: ({:.0}, {:.0}) [shown as a blue cursor in the screenshot]",
+                        x, y
+                    ),
+                    Err(_) => String::new(),
+                };
+
+                // Try to capture screenshot and compare with last one
+                let screenshot_status = match capture_browser_screenshot(sess).await {
+                    Ok((screenshot_path, _url)) => {
+                        // Always update the UI with the latest screenshot, even if unchanged for LLM payload
+                        // This ensures the user sees that a fresh capture occurred each turn.
+                        add_pending_screenshot(sess, screenshot_path.clone(), url.clone());
+                        // Check if screenshot has changed using image hashing
+                        let mut last_screenshot_info = sess.last_screenshot_info.lock().unwrap();
+
+                        // Compute hash for current screenshot
+                        let current_hash =
+                            crate::image_comparison::compute_image_hash(&screenshot_path).ok();
+
+                        let should_include_screenshot = if let (
+                            Some((_last_path, last_phash, last_dhash)),
+                            Some((cur_phash, cur_dhash)),
+                        ) =
+                            (last_screenshot_info.as_ref(), current_hash.as_ref())
+                        {
+                            // Compare hashes to see if screenshots are similar
+                            let similar = crate::image_comparison::are_hashes_similar(
+                                last_phash, last_dhash, cur_phash, cur_dhash,
+                            );
+
+                            if !similar {
+                                // Screenshot has changed, include it
+                                *last_screenshot_info = Some((
+                                    screenshot_path.clone(),
+                                    cur_phash.clone(),
+                                    cur_dhash.clone(),
+                                ));
+                                true
+                            } else {
+                                // Screenshot unchanged
+                                false
+                            }
+                        } else {
+                            // No previous screenshot or hash computation failed, include it
+                            if let Some((phash, dhash)) = current_hash {
+                                *last_screenshot_info = Some((screenshot_path.clone(), phash, dhash));
+                            }
+                            true
+                        };
+
+                        if should_include_screenshot {
+                            if let Ok(bytes) = std::fs::read(&screenshot_path) {
+                                let mime = mime_guess::from_path(&screenshot_path)
+                                    .first()
+                                    .map(|m| m.to_string())
+                                    .unwrap_or_else(|| "image/png".to_string());
+                                let encoded = base64::engine::general_purpose::STANDARD.encode(bytes);
+                                screenshot_content = Some(ContentItem::InputImage {
+                                    image_url: format!("data:{mime};base64,{encoded}"),
+                                });
+                                include_screenshot = true;
+                                ""
+                            } else {
+                                " [Screenshot file read failed]"
+                            }
+                        } else {
+                            " [Screenshot unchanged]"
+                        }
+                    }
+                    Err(err_msg) => {
+                        // Include error message so LLM knows screenshot failed
+                        format!(" [Screenshot unavailable: {}]", err_msg).leak()
+                    }
+                };
+
+                let status_line = if let Some(t) = title {
+                    format!(
+                        "Browser url: {} — {} ({}){}{}{}. You can interact with it using browser_* tools.",
+                        url, t, browser_type, viewport_info, cursor_info, screenshot_status
+                    )
+                } else {
+                    format!(
+                        "Browser url: {} ({}){}{}{}. You can interact with it using browser_* tools.",
+                        url, browser_type, viewport_info, cursor_info, screenshot_status
+                    )
+                };
+                current_status.push_str("\n");
+                current_status.push_str(&status_line);
+            }
         }
     }
 
@@ -639,16 +664,17 @@ async fn build_turn_status_items_legacy(sess: &Session) -> Vec<ResponseItem> {
         });
     }
 
-    if include_screenshot && let Some(image) = screenshot_content {
-        content.push(image);
+    if include_screenshot {
+        if let Some(image) = screenshot_content {
+            content.push(image);
+        }
     }
 
     if !content.is_empty() {
         jar.items.push(ResponseItem::Message {
             id: None,
             role: "user".to_string(),
-            content,
-        });
+            content, end_turn: None, phase: None});
     }
 
     if let Some(item) = maybe_time_budget_status_item(sess) {
@@ -680,29 +706,30 @@ async fn build_turn_status_items_v2(sess: &Session) -> Vec<ResponseItem> {
         items.push(item);
     }
 
-    if let Some(browser_manager) = hanzo_browser::global::get_browser_manager().await
-        && browser_manager.is_enabled().await
-    {
-        let browser_stream_id = {
-            let mut state = sess.state.lock().unwrap();
-            state.context_stream_ids.browser_stream_id(sess.id)
-        };
+    if let Some(browser_manager) = code_browser::global::get_browser_manager().await {
+        if browser_manager.is_enabled().await {
+            let browser_stream_id = {
+                let mut state = sess.state.lock().unwrap();
+                state
+                    .context_stream_ids
+                    .browser_stream_id(sess.id)
+            };
 
-        if let Some((_, timeout)) = browser_manager.idle_elapsed_past_timeout().await {
-            let idle_text = format!(
-                "Browser idle (timeout {timeout:?}); screenshot capture paused until browser_* tools run again."
-            );
-            items.push(ResponseItem::Message {
-                id: Some(browser_stream_id),
-                role: "user".to_string(),
-                content: vec![ContentItem::InputText { text: idle_text }],
-            });
-            return items;
-        } else {
-            let url = browser_manager
-                .get_current_url()
-                .await
-                .unwrap_or_else(|| "unknown".to_string());
+            if let Some((_, timeout)) = browser_manager.idle_elapsed_past_timeout().await {
+                let idle_text = format!(
+                    "Browser idle (timeout {:?}); screenshot capture paused until browser_* tools run again.",
+                    timeout
+                );
+                items.push(ResponseItem::Message {
+                    id: Some(browser_stream_id),
+                    role: "user".to_string(),
+                    content: vec![ContentItem::InputText { text: idle_text }], end_turn: None, phase: None});
+                return items;
+            } else {
+                let url = browser_manager
+                    .get_current_url()
+                    .await
+                    .unwrap_or_else(|| "unknown".to_string());
 
             let title = match browser_manager.get_or_create_page().await {
                 Ok(page) => page.get_title().await,
@@ -716,13 +743,13 @@ async fn build_turn_status_items_v2(sess: &Session) -> Vec<ResponseItem> {
             let mut metadata = HashMap::new();
             metadata.insert("browser_type".to_string(), browser_type.clone());
             if let Some((x, y)) = cursor_position {
-                metadata.insert("cursor_position".to_string(), format!("{x:.0},{y:.0}"));
+                metadata.insert("cursor_position".to_string(), format!("{:.0},{:.0}", x, y));
             }
 
             let viewport = if viewport_width > 0 && viewport_height > 0 {
                 Some(ViewportDimensions {
-                    width: viewport_width,
-                    height: viewport_height,
+                    width: viewport_width as u32,
+                    height: viewport_height as u32,
                 })
             } else {
                 None
@@ -735,8 +762,11 @@ async fn build_turn_status_items_v2(sess: &Session) -> Vec<ResponseItem> {
                     add_pending_screenshot(sess, path.clone(), url.clone());
                     let current_hash = crate::image_comparison::compute_image_hash(&path).ok();
                     let mut last_info = sess.last_screenshot_info.lock().unwrap();
-                    let include_screenshot =
-                        should_include_browser_screenshot(&mut last_info, &path, current_hash);
+                    let include_screenshot = should_include_browser_screenshot(
+                        &mut last_info,
+                        &path,
+                        current_hash,
+                    );
                     drop(last_info);
                     if include_screenshot {
                         screenshot_path = Some(path);
@@ -747,12 +777,12 @@ async fn build_turn_status_items_v2(sess: &Session) -> Vec<ResponseItem> {
                 }
             }
 
-            if let Some(path) = screenshot_path {
-                let captured_at = OffsetDateTime::now_utc()
-                    .format(&Rfc3339)
-                    .unwrap_or_else(|_| "1970-01-01T00:00:00Z".to_string());
+                if let Some(path) = screenshot_path {
+                    let captured_at = OffsetDateTime::now_utc()
+                        .format(&Rfc3339)
+                        .unwrap_or_else(|_| "1970-01-01T00:00:00Z".to_string());
 
-                let mut snapshot = BrowserSnapshot::new(url.clone(), captured_at);
+                    let mut snapshot = BrowserSnapshot::new(url.clone(), captured_at);
                 snapshot.title = title.clone();
                 snapshot.viewport = viewport;
                 if !metadata.is_empty() {
@@ -761,9 +791,7 @@ async fn build_turn_status_items_v2(sess: &Session) -> Vec<ResponseItem> {
 
                 match snapshot.to_response_item_with_id(Some(&browser_stream_id)) {
                     Ok(item) => items.push(item),
-                    Err(err) => {
-                        warn!("env_ctx_v2: failed to serialize browser_snapshot JSON: {err}")
-                    }
+                    Err(err) => warn!("env_ctx_v2: failed to serialize browser_snapshot JSON: {err}"),
                 }
 
                 if *crate::flags::CTX_UI {
@@ -782,13 +810,13 @@ async fn build_turn_status_items_v2(sess: &Session) -> Vec<ResponseItem> {
                             role: "user".to_string(),
                             content: vec![ContentItem::InputImage {
                                 image_url: format!("data:{mime};base64,{encoded}"),
-                            }],
-                        });
+                            }], end_turn: None, phase: None});
                     }
                     Err(err) => warn!(
                         "env_ctx_v2: failed to read screenshot file {}: {err}",
                         path.display()
                     ),
+                }
                 }
             }
         }
@@ -803,12 +831,15 @@ fn should_include_browser_screenshot(
     current_hash: Option<(Vec<u8>, Vec<u8>)>,
 ) -> bool {
     if let Some((cur_phash, cur_dhash)) = current_hash {
-        if let Some((_, last_phash, last_dhash)) = last_info.as_ref()
-            && crate::image_comparison::are_hashes_similar(
-                last_phash, last_dhash, &cur_phash, &cur_dhash,
-            )
-        {
-            return false;
+        if let Some((_, last_phash, last_dhash)) = last_info.as_ref() {
+            if crate::image_comparison::are_hashes_similar(
+                last_phash,
+                last_dhash,
+                &cur_phash,
+                &cur_dhash,
+            ) {
+                return false;
+            }
         }
         *last_info = Some((path.clone(), cur_phash, cur_dhash));
         true
@@ -821,9 +852,8 @@ fn should_include_browser_screenshot(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::codex::streaming::TimelineReplayContext;
-    use crate::codex::streaming::process_rollout_env_item;
-    use hanzo_protocol::models::ContentItem;
+    use crate::codex::streaming::{process_rollout_env_item, TimelineReplayContext};
+    use code_protocol::models::ContentItem;
     use pretty_assertions::assert_eq;
 
     #[test]
@@ -833,21 +863,9 @@ mod tests {
         let hash_one = (vec![0xAAu8; 32], vec![0x55u8; 32]);
         let hash_two = (vec![0xABu8; 32], vec![0x56u8; 32]);
 
-        assert!(should_include_browser_screenshot(
-            &mut last,
-            &path,
-            Some(hash_one.clone())
-        ));
-        assert!(!should_include_browser_screenshot(
-            &mut last,
-            &path,
-            Some(hash_one.clone())
-        ));
-        assert!(should_include_browser_screenshot(
-            &mut last,
-            &path,
-            Some(hash_two)
-        ));
+        assert!(should_include_browser_screenshot(&mut last, &path, Some(hash_one.clone())));
+        assert!(!should_include_browser_screenshot(&mut last, &path, Some(hash_one.clone())));
+        assert!(should_include_browser_screenshot(&mut last, &path, Some(hash_two)));
     }
 
     fn make_snapshot(cwd: &str) -> EnvironmentContextSnapshot {
@@ -875,7 +893,9 @@ mod tests {
         let baseline_item = baseline
             .to_response_item()
             .expect("serialize baseline snapshot");
-        let delta_item = delta.to_response_item().expect("serialize delta snapshot");
+        let delta_item = delta
+            .to_response_item()
+            .expect("serialize delta snapshot");
 
         let mut ctx = TimelineReplayContext::default();
         process_rollout_env_item(&mut ctx, &baseline_item);
@@ -894,8 +914,7 @@ mod tests {
             role: "user".to_string(),
             content: vec![ContentItem::InputText {
                 text: "== System Status ==\n cwd: /legacy\n branch: main".to_string(),
-            }],
-        };
+            }], end_turn: None, phase: None};
 
         let mut ctx = TimelineReplayContext::default();
         process_rollout_env_item(&mut ctx, &legacy_item);
@@ -916,7 +935,9 @@ mod tests {
 
         let mut delta = make_snapshot("/other").diff_from(&baseline);
         delta.base_fingerprint = "mismatch".to_string();
-        let delta_item = delta.to_response_item().expect("serialize delta snapshot");
+        let delta_item = delta
+            .to_response_item()
+            .expect("serialize delta snapshot");
 
         process_rollout_env_item(&mut ctx, &delta_item);
 
@@ -925,145 +946,134 @@ mod tests {
         assert_eq!(ctx.next_sequence, 1);
     }
 }
-use crate::agent_defaults::model_guide_markdown_with_custom;
 use crate::agent_tool::AGENT_MANAGER;
 use crate::agent_tool::AgentStatus;
 use crate::agent_tool::AgentToolRequest;
+use crate::agent_defaults::model_guide_markdown_with_custom;
 use crate::agent_tool::CancelAgentParams;
 use crate::agent_tool::CheckAgentStatusParams;
 use crate::agent_tool::GetAgentResultParams;
 use crate::agent_tool::ListAgentsParams;
+use crate::agent_tool::normalize_agent_name;
 use crate::agent_tool::RunAgentParams;
 use crate::agent_tool::WaitForAgentParams;
-use crate::agent_tool::normalize_agent_name;
-use crate::apply_patch::ApplyPatchResult;
 use crate::apply_patch::convert_apply_patch_to_protocol;
 use crate::apply_patch::get_writable_roots;
-use crate::apply_patch::{self};
-use crate::bridge_client::get_effective_subscription;
-use crate::bridge_client::persist_workspace_subscription;
-use crate::bridge_client::send_bridge_control;
-use crate::bridge_client::set_session_subscription;
-use crate::bridge_client::set_workspace_subscription;
+use crate::apply_patch::{self, ApplyPatchResult};
+use crate::bridge_client::{
+    get_effective_subscription, persist_workspace_subscription, send_bridge_control,
+    set_session_subscription, set_workspace_subscription,
+};
 use crate::client::ModelClient;
-use crate::client_common::Prompt;
-use crate::client_common::REVIEW_PROMPT;
-use crate::client_common::ResponseEvent;
-use crate::client_common::TextFormat;
-use crate::config::Config;
-use crate::config::persist_model_selection;
+use crate::client_common::{Prompt, ResponseEvent, TextFormat, REVIEW_PROMPT};
+use crate::context_timeline::ContextTimeline;
+use crate::environment_context::{
+    BrowserSnapshot,
+    EnvironmentContext,
+    EnvironmentContextDelta,
+    EnvironmentContextSnapshot,
+    EnvironmentContextTracker,
+    ViewportDimensions,
+};
+use crate::user_instructions::UserInstructions;
+use crate::config::{persist_model_selection, Config};
+use crate::timeboxed_exec_guidance::{
+    AUTO_EXEC_TIMEBOXED_CLI_GUIDANCE,
+    AUTO_EXEC_TIMEBOXED_REVIEW_GUIDANCE,
+};
 use crate::config_types::ProjectHookEvent;
 use crate::config_types::ShellEnvironmentPolicy;
-use crate::context_timeline::ContextTimeline;
 use crate::conversation_history::ConversationHistory;
-use crate::dry_run_guard::DryRunAnalysis;
-use crate::dry_run_guard::DryRunDisposition;
-use crate::dry_run_guard::DryRunGuardState;
-use crate::dry_run_guard::analyze_command;
-use crate::environment_context::BrowserSnapshot;
-use crate::environment_context::EnvironmentContext;
-use crate::environment_context::EnvironmentContextDelta;
-use crate::environment_context::EnvironmentContextSnapshot;
-use crate::environment_context::EnvironmentContextTracker;
-use crate::environment_context::ViewportDimensions;
-use crate::error::CodeErr;
+use crate::error::{CodexErr, RetryAfter};
 use crate::error::Result as CodexResult;
-use crate::error::RetryAfter;
 use crate::error::SandboxErr;
 use crate::error::get_error_message_ui;
-use crate::exec::EXEC_CAPTURE_MAX_BYTES;
 use crate::exec::ExecParams;
 use crate::exec::ExecToolCallOutput;
 use crate::exec::SandboxType;
 use crate::exec::StdoutStream;
 use crate::exec::StreamOutput;
+use crate::exec::EXEC_CAPTURE_MAX_BYTES;
 use crate::exec::process_exec_tool_call;
-use crate::exec_command::ExecSessionManager;
+use crate::review_format::format_review_findings_block;
 use crate::exec_env::create_env;
 use crate::mcp_connection_manager::McpConnectionManager;
 use crate::mcp_tool_call::handle_mcp_tool_call;
-use crate::model_family::derive_default_model_family;
-use crate::model_family::find_family_for_model;
+use crate::model_family::{derive_default_model_family, find_family_for_model};
+use code_protocol::models::ContentItem;
+use code_protocol::models::FunctionCallOutputPayload;
+use code_protocol::models::LocalShellAction;
+use code_protocol::models::ReasoningItemContent;
+use code_protocol::models::ReasoningItemReasoningSummary;
+use code_protocol::models::ResponseInputItem;
+use code_protocol::models::ResponseItem;
+use code_protocol::models::ShellToolCallParams;
+use code_protocol::models::SandboxPermissions;
 use crate::openai_tools::ToolsConfig;
+use crate::openai_tools::get_openai_tools;
+use crate::slash_commands::get_enabled_agents;
+use crate::dry_run_guard::{analyze_command, DryRunAnalysis, DryRunDisposition, DryRunGuardState};
 use crate::parse_command::parse_command;
 use crate::plan_tool::handle_update_plan;
 use crate::project_doc::get_user_instructions;
-use crate::project_features::ProjectCommand;
-use crate::project_features::ProjectHook;
-use crate::project_features::ProjectHooks;
+use crate::skills::loader::load_skills;
+use crate::project_features::{ProjectCommand, ProjectHook, ProjectHooks};
 use crate::protocol::AgentMessageDeltaEvent;
 use crate::protocol::AgentMessageEvent;
 use crate::protocol::AgentReasoningDeltaEvent;
 use crate::protocol::AgentReasoningEvent;
+use crate::protocol::AgentSourceKind;
 use crate::protocol::AgentReasoningRawContentDeltaEvent;
 use crate::protocol::AgentReasoningRawContentEvent;
 use crate::protocol::AgentReasoningSectionBreakEvent;
-use crate::protocol::AgentSourceKind;
 use crate::protocol::AgentStatusUpdateEvent;
 use crate::protocol::ApplyPatchApprovalRequestEvent;
 use crate::protocol::AskForApproval;
 use crate::protocol::BackgroundEventEvent;
 use crate::protocol::BrowserScreenshotUpdateEvent;
-use crate::protocol::BrowserSnapshotEvent;
-use crate::protocol::EnvironmentContextDeltaEvent;
-use crate::protocol::EnvironmentContextFullEvent;
 use crate::protocol::ErrorEvent;
 use crate::protocol::Event;
 use crate::protocol::EventMsg;
+use crate::protocol::ExitedReviewModeEvent;
+use crate::protocol::ReviewSnapshotInfo;
+use crate::protocol::ListCustomPromptsResponseEvent;
+use crate::protocol::ListSkillsResponseEvent;
+use crate::protocol::{BrowserSnapshotEvent, EnvironmentContextDeltaEvent, EnvironmentContextFullEvent};
 use crate::protocol::ExecApprovalRequestEvent;
 use crate::protocol::ExecCommandBeginEvent;
 use crate::protocol::ExecCommandEndEvent;
-use crate::protocol::ExitedReviewModeEvent;
 use crate::protocol::FileChange;
 use crate::protocol::InputItem;
-use crate::protocol::ListCustomPromptsResponseEvent;
-use crate::protocol::ListSkillsResponseEvent;
 use crate::protocol::Op;
 use crate::protocol::PatchApplyBeginEvent;
 use crate::protocol::PatchApplyEndEvent;
 use crate::protocol::RateLimitSnapshotEvent;
+use crate::protocol::TokenCountEvent;
+use crate::protocol::TokenUsage;
+use crate::protocol::TokenUsageInfo;
 use crate::protocol::ReviewDecision;
+use crate::protocol::ValidationGroup;
 use crate::protocol::ReviewOutputEvent;
 use crate::protocol::ReviewRequest;
-use crate::protocol::ReviewSnapshotInfo;
 use crate::protocol::SandboxPolicy;
 use crate::protocol::SessionConfiguredEvent;
 use crate::protocol::Submission;
 use crate::protocol::TaskCompleteEvent;
-use crate::protocol::TokenCountEvent;
-use crate::protocol::TokenUsage;
-use crate::protocol::TokenUsageInfo;
+use std::sync::OnceLock;
+use tokio::sync::Notify;
 use crate::protocol::TurnDiffEvent;
-use crate::protocol::ValidationGroup;
-use crate::review_format::format_review_findings_block;
 use crate::rollout::RolloutRecorder;
-use crate::rollout::recorder::SessionStateSnapshot;
 use crate::safety::SafetyCheck;
 use crate::safety::assess_command_safety;
 use crate::safety::assess_safety_for_untrusted_command;
 use crate::shell;
-use crate::skills::loader::load_skills;
-use crate::slash_commands::get_enabled_agents;
-use crate::timeboxed_exec_guidance::AUTO_EXEC_TIMEBOXED_CLI_GUIDANCE;
-use crate::timeboxed_exec_guidance::AUTO_EXEC_TIMEBOXED_REVIEW_GUIDANCE;
 use crate::turn_diff_tracker::TurnDiffTracker;
-use crate::user_instructions::UserInstructions;
 use crate::user_notification::UserNotification;
-use crate::util::backoff;
-use crate::util::wait_for_connectivity;
-use hanzo_protocol::models::ContentItem;
-use hanzo_protocol::models::FunctionCallOutputPayload;
-use hanzo_protocol::models::LocalShellAction;
-use hanzo_protocol::models::ReasoningItemContent;
-use hanzo_protocol::models::ReasoningItemReasoningSummary;
-use hanzo_protocol::models::ResponseInputItem;
-use hanzo_protocol::models::ResponseItem;
-use hanzo_protocol::models::SandboxPermissions;
-use hanzo_protocol::models::ShellToolCallParams;
-use hanzo_protocol::protocol::SessionSource;
+use crate::util::{backoff, wait_for_connectivity};
+use code_protocol::protocol::SessionSource;
+use crate::rollout::recorder::SessionStateSnapshot;
 use serde_json::Value;
-use std::sync::OnceLock;
-use tokio::sync::Notify;
+use crate::exec_command::ExecSessionManager;
 
 /// The high-level interface to the Codex system.
 /// It operates as a queue pair where you send submissions and receive events.
@@ -1116,9 +1126,7 @@ impl Codex {
 
         let user_instructions = get_user_instructions(
             &config,
-            skills_outcome
-                .as_ref()
-                .map(|outcome| outcome.skills.as_slice()),
+            skills_outcome.as_ref().map(|outcome| outcome.skills.as_slice()),
         )
         .await;
 
@@ -1130,6 +1138,10 @@ impl Codex {
             preferred_model_reasoning_effort: config.preferred_model_reasoning_effort,
             model_reasoning_summary: config.model_reasoning_summary,
             model_text_verbosity: config.model_text_verbosity,
+            service_tier: config.service_tier,
+            context_mode: config.context_mode,
+            model_context_window: config.model_context_window,
+            model_auto_compact_token_limit: config.model_auto_compact_token_limit,
             user_instructions,
             base_instructions: config.base_instructions.clone(),
             approval_policy: config.approval_policy,
@@ -1139,6 +1151,7 @@ impl Codex {
             cwd: config.cwd.clone(),
             resume_path: resume_path.clone(),
             demo_developer_message: config.demo_developer_message.clone(),
+            dynamic_tools: config.dynamic_tools.clone(),
         };
 
         let config = Arc::new(config);
@@ -1188,7 +1201,7 @@ impl Codex {
         self.tx_sub
             .send(sub)
             .await
-            .map_err(|_| CodeErr::InternalAgentDied)?;
+            .map_err(|_| CodexErr::InternalAgentDied)?;
         Ok(())
     }
 
@@ -1197,7 +1210,7 @@ impl Codex {
             .rx_event
             .recv()
             .await
-            .map_err(|_| CodeErr::InternalAgentDied)?;
+            .map_err(|_| CodexErr::InternalAgentDied)?;
         Ok(event)
     }
 }

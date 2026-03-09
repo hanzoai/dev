@@ -1,5 +1,6 @@
 use std::collections::BTreeMap;
 
+use crate::openai_tools::create_additional_permissions_schema;
 use crate::openai_tools::JsonSchema;
 use crate::openai_tools::ResponsesApiTool;
 
@@ -60,10 +61,14 @@ pub fn create_exec_command_tool_for_responses_api() -> ResponsesApiTool {
         "sandbox_permissions".to_string(),
         JsonSchema::String {
             description: Some(
-                "Sandbox permissions for the command. Set to \"require_escalated\" to request running without sandbox restrictions; defaults to \"use_default\"."
+                "Sandbox permissions for the command. Use \"with_additional_permissions\" to request additional sandboxed filesystem, network, or macOS permissions (preferred), or \"require_escalated\" to request running without sandbox restrictions; defaults to \"use_default\"."
                     .to_string(),
             ),
-            allowed_values: None,
+            allowed_values: Some(vec![
+                "use_default".to_string(),
+                "with_additional_permissions".to_string(),
+                "require_escalated".to_string(),
+            ]),
         },
     );
     properties.insert(
@@ -75,6 +80,10 @@ pub fn create_exec_command_tool_for_responses_api() -> ResponsesApiTool {
             ),
             allowed_values: None,
         },
+    );
+    properties.insert(
+        "additional_permissions".to_string(),
+        create_additional_permissions_schema(),
     );
 
     ResponsesApiTool {

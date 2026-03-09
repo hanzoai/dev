@@ -1,11 +1,107 @@
 # Changelog
 
 > [!TIP]
-> We're constantly improving Code! This page documents the core changes. You can also check our [releases page](https://github.com/hanzoai/dev/releases) for additional information.
+> We're constantly improving Code! This page documents the core changes. You can also check our [releases page](https://github.com/just-every/code/releases) for additional information.
 
 ## [Unreleased]
 
 - (none)
+
+## [0.6.77] - 2026-03-07
+
+- Core/Context: default session context mode to `auto` for better out-of-the-box context selection. (9a24bc71)
+- Auto Context: enrich 1M-judge risk signals to improve context quality and decision reliability. (fde66502)
+- TUI/Context: persist explicit disabled state for 1M mode so settings stay consistent across sessions. (c99bb77d)
+
+## [0.6.75] - 2026-03-06
+
+- Models: add GPT-5.4 fast mode support and enable fast mode by default for quicker turns. (50821896, 394e5386)
+- Memories: add a settings pane with safer compaction fallback and improved workspace-write support. (be4e7f3c, f72ab43f)
+- Artifacts: expand artifact workflows with package manager bindings plus spreadsheet and presentation generation. (f304b2ef, 0cc68354, 8c5e50ef, 4874b929)
+- JS REPL: support local ESM imports, persist bindings after failed cells, and only allow `data:` image URLs. (ff0341dc, 657841e7, cfbbbb1d)
+- TUI/Core: show session speed in the header and surface diagnostics earlier in the workflow. (1ce1712a, 9fcbbeb5)
+
+## [0.6.74] - 2026-02-27
+
+- TUI/Auto Review: stop duplicating background review notes as `[developer]` history messages to keep transcript noise down. (114e4003)
+- TUI/Auto Review: keep review findings routed through the dedicated Auto Review notice while still forwarding hidden context to the coordinator. (114e4003)
+
+## [0.6.73] - 2026-02-27
+
+- TUI/Auto Review: parse embedded JSON review results from mixed runner output so summaries stay focused on findings. (8cc2ba18)
+- TUI/Auto Review: truncate plain-text fallback summaries to prevent raw log dumps in chat history. (8cc2ba18)
+
+## [0.6.72] - 2026-02-27
+
+- Agents/App Server: add external agent config migration API with import depth guards to safely bring configs forward. (1a8bd1ac)
+- TUI/Auto Review: dispatch idle review findings back to the model so automated review cycles continue reliably. (e57a1e0f)
+
+## [0.6.71] - 2026-02-26
+
+- Core/Realtime: prefer websocket v2, add fallback behavior, and improve timeout handling for more resilient sessions. (7e53c578, d5909f3b, 4fedef88, 9d7013ea)
+- TUI: add `/copy`, improve clear controls (`/clear` and Ctrl-L), and expand multi-agent progress and picker UX. (ee1520e7, ca556fa3, a606e858, dcab4012, 5a30cd3f)
+- Security/Approvals: persist network approval policy and tighten zsh-fork approval and sandbox enforcement paths. (c3048ff9, 14116ade, a6a5976c, 648a420c, 59398125)
+- JS REPL: lower Node minimum requirement, gate incompatible runtimes at startup, and improve error recovery in nested tool calls. (7326c097, 40ab71a9, 125fbec3, 63c2ac96)
+
+## [0.6.70] - 2026-02-16
+
+- Core/Search: persist and restore tool selection after search. (02abd9a8)
+- Core/Search: warn when falling back to default metadata and keep selection. (81a2a7eb, 060a320e)
+- Auto Drive: add configurable CLI routing entries. (2be7be99)
+- Linux Sandbox: allow GPU device paths in landlock. (d827c2d8)
+
+## [0.6.69] - 2026-02-15
+
+- TUI/Approvals: show structured network approval prompts with host/protocol context. (31646701, b527ee28, 2bced810)
+- Models: gate gpt-5.3-codex-spark behind pro-only auth capabilities. (d165389f)
+- Core/Auto Drive: add fallback routing when spark hits overflow or usage limits. (7973a790, 2a4c39fd)
+- TUI: preserve remote image attachments across resume and backtrack flows. (26a7cd21)
+
+## [0.6.68] - 2026-02-14
+
+- Auto Drive: add per-turn model routing and rename decision schema. (fb17527)
+- Auto Drive: enforce finish evidence with paste fallback. (46d537e)
+- Auto Drive: require strict decision fields without allOf and align coordinator schema. (e4559ac4, 873604d6)
+- Auto Drive: decouple auto review and cap long-session growth. (60727b0)
+
+## [0.6.67] - 2026-02-13
+
+- Skills: discover .agents and admin roots and remove deep-scan caps. (eff5ad73, 4b1faf08)
+- TUI: improve /model navigation and /resume popup visibility. (3248c705, adc2240d, 33b521b7, 99425efe)
+- App Server: surface JSON-RPC errors to avoid masked auth failures. (8d97b5c2)
+- Sandbox: add slash command to grant read access to inaccessible directories. (5c3ca739)
+
+## [0.6.66] - 2026-02-12
+
+- App Server: add websocket transport and protocol updates. (3ebd8b72)
+- Core/Websocket: bound ingress buffering and unblock spark exec/close readers. (6b6fab16, 1458e477)
+- TUI/Model: surface gpt-5.3-codex-spark in /model. (7d6b5915)
+- Core/JS REPL: add host helpers and exec end events. (466be55a)
+
+## [0.6.65] - 2026-02-11
+
+- CLI/Env: stop traversing parent .env files at startup. (04c45da1)
+- CLI/Env: exclude more provider keys from project dotenv. (3127a576)
+
+## [0.6.64] - 2026-02-11
+
+- TUI: normalize agent alias slugs in summary counts. (b8449aeb)
+- Core: default Codex to gpt-5.3 and align CLI checks. (9807d30d)
+
+## [0.6.63] - 2026-02-11
+
+- Core: support multiple rate limits. (fdd0cd1d)
+- Core/Protocol: add websocket preference and rate-limit metadata; serialize rate-limit ids as nullable. (c6cf7ff9, 807615dc)
+- Core/Websocket: avoid resending output items and tighten incrementality checks. (44731479, 0639c338)
+- TUI: queue rollback trims in app-event order and keep history recall cursor at line end. (8b46c0ce, e704f488)
+- Exec Policy: reject empty command lists and honor never-prompt approval policy. (cc8c2933, 693bac18)
+
+## [0.6.62] - 2026-02-11
+
+- App Server: add app-server support for client connections. (b86fcd5d)
+- App Server: wire the Linux sandbox executable into config. (6032603f)
+- Model Routing: surface reroute warnings and status models. (6dc748e8)
+- Core/Agents: resolve Claude from home fallback paths. (c560d6ac)
 
 ## [0.6.61] - 2026-02-10
 
@@ -903,7 +999,7 @@
 ## [0.2.119] - 2025-09-11
 
 - CLI/Windows: fix global upgrade failures (EBUSY/EPERM) by caching the native binary per-user and preferring the cached launcher. (faa712d3)
-- Installer: on Windows, install binary to %LocalAppData%\hanzo\dev\<version>; avoid leaving a copy in node_modules. (faa712d3)
+- Installer: on Windows, install binary to %LocalAppData%\just-every\code\<version>; avoid leaving a copy in node_modules. (faa712d3)
 - Launcher: prefer running from cache; mirror into node_modules only on Unix for smoother upgrades. (faa712d3)
 
 ## [0.2.118] - 2025-09-11

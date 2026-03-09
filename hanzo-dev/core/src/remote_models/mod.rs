@@ -3,23 +3,27 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use chrono::Utc;
-use hanzo_app_server_protocol::AuthMode;
-use hanzo_protocol::openai_models::ApplyPatchToolType as ProtocolApplyPatchToolType;
-use hanzo_protocol::openai_models::ModelInfo;
-use hanzo_protocol::openai_models::ModelsResponse;
-use hanzo_protocol::openai_models::ReasoningEffort as ProtocolReasoningEffort;
+use code_app_server_protocol::AuthMode;
+use code_protocol::config_types::ReasoningSummary as ProtocolReasoningSummary;
+use code_protocol::config_types::Personality as ProtocolPersonality;
+use code_protocol::openai_models::ApplyPatchToolType as ProtocolApplyPatchToolType;
+use code_protocol::openai_models::ModelInfo;
+use code_protocol::openai_models::ModelsResponse;
+use code_protocol::openai_models::ReasoningEffort as ProtocolReasoningEffort;
+use code_protocol::openai_models::TruncationMode as ProtocolTruncationMode;
+use code_protocol::openai_models::WebSearchToolType;
+use reqwest::header;
 use reqwest::Method;
 use reqwest::Url;
-use reqwest::header;
 use tokio::sync::RwLock;
 
-use crate::CodexAuth;
 use crate::auth::AuthManager;
-use crate::model_family::ModelFamily;
-use crate::model_family::derive_default_model_family;
-use crate::model_family::find_family_for_model;
+use crate::config_types::Personality as ConfigPersonality;
+use crate::config_types::ReasoningSummary as ConfigReasoningSummary;
+use crate::model_family::{derive_default_model_family, find_family_for_model, ModelFamily};
 use crate::model_provider_info::ModelProviderInfo;
 use crate::tool_apply_patch::ApplyPatchToolType;
+use crate::CodexAuth;
 
 mod cache;
 
@@ -27,6 +31,7 @@ const MODEL_CACHE_FILE: &str = "models_cache.json";
 const DEFAULT_MODEL_CACHE_TTL: Duration = Duration::from_secs(300);
 const REMOTE_MODELS_REQUEST_TIMEOUT: Duration = Duration::from_secs(10);
 const CODEX_AUTO_BALANCED_MODEL: &str = "codex-auto-balanced";
+const IMAGE_GENERATION_TOOL: &str = "image_generation";
 
 #[derive(Debug, Default, Clone)]
 struct RemoteModelsState {
@@ -51,11 +56,7 @@ pub struct RemoteModelsManager {
 }
 
 impl RemoteModelsManager {
-    pub fn new(
-        auth_manager: Arc<AuthManager>,
-        provider: ModelProviderInfo,
-        code_home: PathBuf,
-    ) -> Self {
+    pub fn new(auth_manager: Arc<AuthManager>, provider: ModelProviderInfo, code_home: PathBuf) -> Self {
         Self {
             state: RwLock::new(RemoteModelsState::default()),
             auth_manager,
@@ -82,12 +83,12 @@ impl RemoteModelsManager {
 
     /// Returns the remote default model slug when available.
     ///
-    /// When the user did not explicitly choose a model, Dev may adopt this
+    /// When the user did not explicitly choose a model, Code may adopt this
     /// server-provided default without persisting it.
     pub async fn default_model_slug(&self, auth_mode: Option<AuthMode>) -> Option<String> {
         self.ensure_loaded_from_disk().await;
 
-        if auth_mode != Some(AuthMode::ChatGPT) {
+        if !auth_mode.is_some_and(AuthMode::is_chatgpt) {
             return None;
         }
 
@@ -146,7 +147,7 @@ impl RemoteModelsManager {
     async fn refresh_remote_models_inner(&self, stale_etag: Option<String>) {
         let auth = self.auth_manager.auth();
         let auth_mode = auth.as_ref().map(|a| a.mode);
-        if auth_mode != Some(AuthMode::ChatGPT) {
+        if !auth_mode.is_some_and(AuthMode::is_chatgpt) {
             // Only the ChatGPT backend exposes the Codex `/models` schema.
             return;
         }
@@ -178,7 +179,7 @@ impl RemoteModelsManager {
         }
 
         if let Some(auth) = auth.as_ref()
-            && auth.mode == AuthMode::ChatGPT
+            && auth.mode.is_chatgpt()
             && let Some(account_id) = auth.get_account_id()
         {
             request = request.header("chatgpt-account-id", account_id);
@@ -195,24 +196,18 @@ impl RemoteModelsManager {
         if response.status() == reqwest::StatusCode::NOT_MODIFIED {
             let mut state = self.state.write().await;
             state.fetched_at = Some(Utc::now());
-            if let Err(err) = cache::save_cache(
-                &self.cache_path(),
-                &cache::ModelsCache {
-                    fetched_at: state.fetched_at.unwrap_or_else(Utc::now),
-                    etag: state.etag.clone(),
-                    models: state.models.clone(),
-                },
-            ) {
+            if let Err(err) = cache::save_cache(&self.cache_path(), &cache::ModelsCache {
+                fetched_at: state.fetched_at.unwrap_or_else(Utc::now),
+                etag: state.etag.clone(),
+                models: state.models.clone(),
+            }) {
                 tracing::debug!("failed to persist /models cache on 304: {err}");
             }
             return;
         }
 
         if !response.status().is_success() {
-            tracing::debug!(
-                "remote /models request failed with status {}",
-                response.status()
-            );
+            tracing::debug!("remote /models request failed with status {}", response.status());
             return;
         }
 
@@ -248,19 +243,26 @@ impl RemoteModelsManager {
             state.fetched_at = Some(fetched_at);
         }
 
-        if let Err(err) = cache::save_cache(
-            &self.cache_path(),
-            &cache::ModelsCache {
-                fetched_at,
-                etag,
-                models: self.state.read().await.models.clone(),
-            },
-        ) {
+        if let Err(err) = cache::save_cache(&self.cache_path(), &cache::ModelsCache {
+            fetched_at,
+            etag,
+            models: self.state.read().await.models.clone(),
+        }) {
             tracing::debug!("failed to write /models cache: {err}");
         }
     }
 
     pub async fn apply_remote_overrides(&self, model: &str, family: ModelFamily) -> ModelFamily {
+        self.apply_remote_overrides_with_personality(model, family, None)
+            .await
+    }
+
+    pub async fn apply_remote_overrides_with_personality(
+        &self,
+        model: &str,
+        family: ModelFamily,
+        personality: Option<ConfigPersonality>,
+    ) -> ModelFamily {
         self.ensure_loaded_from_disk().await;
 
         let info = {
@@ -275,13 +277,22 @@ impl RemoteModelsManager {
             return family;
         };
 
-        apply_model_info_overrides(&info, family)
+        apply_model_info_overrides_with_personality(&info, family, personality)
     }
 
     pub async fn construct_model_family(&self, model: &str) -> ModelFamily {
-        let base =
-            find_family_for_model(model).unwrap_or_else(|| derive_default_model_family(model));
+        let base = find_family_for_model(model).unwrap_or_else(|| derive_default_model_family(model));
         self.apply_remote_overrides(model, base).await
+    }
+
+    pub async fn has_model_slug(&self, model: &str) -> bool {
+        self.ensure_loaded_from_disk().await;
+        self.state
+            .read()
+            .await
+            .models
+            .iter()
+            .any(|info| info.slug.eq_ignore_ascii_case(model))
     }
 
     async fn ensure_loaded_from_disk(&self) {
@@ -313,7 +324,7 @@ impl RemoteModelsManager {
             if matches!(
                 auth,
                 Some(CodexAuth {
-                    mode: AuthMode::ChatGPT,
+                    mode: AuthMode::ChatGPT | AuthMode::ChatgptAuthTokens,
                     ..
                 })
             ) {
@@ -324,7 +335,7 @@ impl RemoteModelsManager {
         });
 
         let mut url = Url::parse(&base_url).map_err(|err| {
-            crate::error::CodeErr::ServerError(format!("invalid models base_url {base_url}: {err}"))
+            crate::error::CodexErr::ServerError(format!("invalid models base_url {base_url}: {err}"))
         })?;
         let base_path = url.path().trim_end_matches('/');
         url.set_path(&format!("{base_path}/models"));
@@ -347,17 +358,29 @@ impl RemoteModelsManager {
     }
 }
 
-pub fn apply_model_info_overrides(info: &ModelInfo, mut family: ModelFamily) -> ModelFamily {
-    if let Some(instructions) = info.base_instructions.as_ref() {
-        let trimmed = instructions.trim();
-        if !trimmed.is_empty() {
-            family.base_instructions = instructions.clone();
-        }
+pub fn apply_model_info_overrides(info: &ModelInfo, family: ModelFamily) -> ModelFamily {
+    apply_model_info_overrides_with_personality(info, family, None)
+}
+
+fn apply_model_info_overrides_with_personality(
+    info: &ModelInfo,
+    mut family: ModelFamily,
+    personality: Option<ConfigPersonality>,
+) -> ModelFamily {
+    let instructions = if info.model_messages.is_some() {
+        let mapped = personality.map(map_personality);
+        info.get_model_instructions(mapped)
+    } else {
+        info.base_instructions.clone()
+    };
+    let trimmed = instructions.trim();
+    if !trimmed.is_empty() {
+        family.base_instructions = instructions;
     }
 
     if let Some(context_window) = info
         .context_window
-        .and_then(|value| (value > 0).then_some(value as u64))
+        .and_then(|value| (value > 0).then(|| value as u64))
     {
         family.context_window = Some(context_window);
     }
@@ -366,10 +389,42 @@ pub fn apply_model_info_overrides(info: &ModelInfo, mut family: ModelFamily) -> 
         family.apply_patch_tool_type = Some(map_apply_patch_tool_type(tool_type));
     }
 
+    family.web_search_tool_type = map_web_search_tool_type(info.web_search_tool_type);
+    family.supports_image_detail_original = info.supports_image_detail_original;
+    family.supports_image_generation = info
+        .experimental_supported_tools
+        .iter()
+        .any(|tool| tool == IMAGE_GENERATION_TOOL);
+
+    if let Some(limit) = info.auto_compact_token_limit() {
+        family.set_auto_compact_token_limit(Some(limit));
+    }
+
+    family.set_truncation_policy(map_truncation_policy(&info.truncation_policy));
+
     family.supports_reasoning_summaries = info.supports_reasoning_summaries;
     family.supports_parallel_tool_calls = info.supports_parallel_tool_calls;
-    family.default_reasoning_effort = Some(map_reasoning_effort(info.default_reasoning_level));
+    family.prefer_websockets = info.prefer_websockets;
+    if let Some(effort) = info.default_reasoning_level {
+        family.default_reasoning_effort = Some(map_reasoning_effort(effort));
+    }
+    family.default_reasoning_summary = map_reasoning_summary(info.default_reasoning_summary);
     family
+}
+
+fn map_web_search_tool_type(tool_type: WebSearchToolType) -> WebSearchToolType {
+    match tool_type {
+        WebSearchToolType::Text => WebSearchToolType::Text,
+        WebSearchToolType::TextAndImage => WebSearchToolType::TextAndImage,
+    }
+}
+
+fn map_personality(personality: ConfigPersonality) -> ProtocolPersonality {
+    match personality {
+        ConfigPersonality::None => ProtocolPersonality::None,
+        ConfigPersonality::Friendly => ProtocolPersonality::Friendly,
+        ConfigPersonality::Pragmatic => ProtocolPersonality::Pragmatic,
+    }
 }
 
 fn map_apply_patch_tool_type(tool_type: &ProtocolApplyPatchToolType) -> ApplyPatchToolType {
@@ -392,12 +447,26 @@ fn map_reasoning_effort(effort: ProtocolReasoningEffort) -> crate::config_types:
     }
 }
 
-/// Convert the build's version triple into a whole semver string.
+fn map_reasoning_summary(summary: ProtocolReasoningSummary) -> ConfigReasoningSummary {
+    match summary {
+        ProtocolReasoningSummary::Auto => ConfigReasoningSummary::Auto,
+        ProtocolReasoningSummary::Concise => ConfigReasoningSummary::Concise,
+        ProtocolReasoningSummary::Detailed => ConfigReasoningSummary::Detailed,
+        ProtocolReasoningSummary::None => ConfigReasoningSummary::None,
+    }
+}
+
+fn map_truncation_policy(
+    policy: &code_protocol::openai_models::TruncationPolicyConfig,
+) -> code_protocol::protocol::TruncationPolicy {
+    let limit = usize::try_from(policy.limit).unwrap_or(usize::MAX);
+    match policy.mode {
+        ProtocolTruncationMode::Bytes => code_protocol::protocol::TruncationPolicy::Bytes(limit),
+        ProtocolTruncationMode::Tokens => code_protocol::protocol::TruncationPolicy::Tokens(limit),
+    }
+}
+
+/// Build a client version string that remains wire-compatible with hosted models.
 fn format_client_version_to_whole() -> String {
-    format!(
-        "{}.{}.{}",
-        env!("CARGO_PKG_VERSION_MAJOR"),
-        env!("CARGO_PKG_VERSION_MINOR"),
-        env!("CARGO_PKG_VERSION_PATCH")
-    )
+    code_version::wire_compatible_version().to_string()
 }

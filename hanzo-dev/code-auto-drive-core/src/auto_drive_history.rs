@@ -1,8 +1,9 @@
 use std::collections::VecDeque;
 
-use hanzo_core::protocol::TokenUsage;
-use hanzo_protocol::models::ContentItem;
-use hanzo_protocol::models::ResponseItem;
+use code_core::protocol::TokenUsage;
+use code_protocol::models::{
+    ContentItem, FunctionCallOutputBody, FunctionCallOutputContentItem, ResponseItem,
+};
 
 use crate::session_metrics::SessionMetrics;
 
@@ -24,12 +25,6 @@ pub struct AutoDriveHistory {
     session_metrics: SessionMetrics,
 }
 
-impl Default for AutoDriveHistory {
-    fn default() -> Self {
-        Self::new()
-    }
-}
-
 impl AutoDriveHistory {
     pub fn new() -> Self {
         Self {
@@ -49,7 +44,11 @@ impl AutoDriveHistory {
         let tail: Vec<_> = if self.converted.len() <= prev_len {
             Vec::new()
         } else {
-            self.converted.iter().skip(prev_len).cloned().collect()
+            self.converted
+                .iter()
+                .skip(prev_len)
+                .cloned()
+                .collect()
         };
 
         if tail.is_empty() {
@@ -57,7 +56,8 @@ impl AutoDriveHistory {
         }
 
         if self.should_skip_entire_tail(&tail) {
-            self.session_metrics
+            self
+                .session_metrics
                 .record_duplicate_items(tail.len().saturating_sub(1));
             self.session_metrics.record_replay();
             self.pending_duplicates.clear();
@@ -101,8 +101,7 @@ impl AutoDriveHistory {
             return false;
         }
 
-        let first_is_user =
-            matches!(tail.first(), Some(ResponseItem::Message { role, .. }) if role == "user");
+        let first_is_user = matches!(tail.first(), Some(ResponseItem::Message { role, .. }) if role == "user");
         if !first_is_user {
             return false;
         }
@@ -118,10 +117,16 @@ impl AutoDriveHistory {
                     return false;
                 }
 
-                let item_segments: Vec<&str> =
-                    message.content.iter().filter_map(content_text).collect();
-                let expected_segments: Vec<&str> =
-                    expected.content.iter().filter_map(content_text).collect();
+                let item_segments: Vec<&str> = message
+                    .content
+                    .iter()
+                    .filter_map(content_text)
+                    .collect();
+                let expected_segments: Vec<&str> = expected
+                    .content
+                    .iter()
+                    .filter_map(content_text)
+                    .collect();
 
                 item_segments == expected_segments
             })
@@ -215,15 +220,11 @@ impl AutoDriveHistory {
     /// the slice with a compact summary item.
     ///
     /// Returns `Ok(true)` if compaction was performed, `Ok(false)` if skipped, or an error.
-    pub fn compact_slice(
-        &mut self,
-        summarizer: impl FnOnce(&[ResponseItem]) -> String,
-    ) -> Result<bool, String> {
+    pub fn compact_slice(&mut self, summarizer: impl FnOnce(&[ResponseItem]) -> String) -> Result<bool, String> {
         // Find the goal message (first user message)
-        let goal_idx = self
-            .converted
-            .iter()
-            .position(|item| matches!(item, ResponseItem::Message { role, .. } if role == "user"));
+        let goal_idx = self.converted.iter().position(|item| {
+            matches!(item, ResponseItem::Message { role, .. } if role == "user")
+        });
 
         let Some(goal_idx) = goal_idx else {
             // No goal message found; nothing to compact
@@ -275,8 +276,13 @@ impl AutoDriveHistory {
             id: None,
             role: "user".to_string(),
             content: vec![ContentItem::InputText {
-                text: format!("<compact_summary>\n{summary_text}\n</compact_summary>"),
+                text: format!(
+                    "<compact_summary>\n{}\n</compact_summary>",
+                    summary_text
+                ),
             }],
+            end_turn: None,
+            phase: None,
         };
 
         // Replace the slice with the compact item
@@ -290,7 +296,9 @@ impl AutoDriveHistory {
 
         Ok(true)
     }
+
 }
+
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 struct NormalizedMessage {
@@ -342,53 +350,40 @@ fn estimate_tokens(items: &[ResponseItem]) -> usize {
 /// Estimate tokens for a single ResponseItem.
 /// Uses byte count divided by BYTES_PER_TOKEN (4) as fallback, same as core/truncate.rs.
 fn estimate_item_tokens(item: &ResponseItem) -> usize {
-    let byte_count =
-        match item {
-            ResponseItem::Message { content, .. } => {
-                content
-                    .iter()
-                    .map(|c| match c {
-                        ContentItem::InputText { text } | ContentItem::OutputText { text } => {
-                            text.len()
-                        }
-                        ContentItem::InputImage { image_url } => image_url.len() / 10, // images are less token-heavy
-                    })
-                    .sum()
-            }
-            ResponseItem::FunctionCall {
-                name, arguments, ..
-            } => name.len() + arguments.len(),
-            ResponseItem::FunctionCallOutput { output, .. } => output.content.len(),
-            ResponseItem::CustomToolCall { name, input, .. } => name.len() + input.len(),
-            ResponseItem::CustomToolCallOutput { output, .. } => output.len(),
-            ResponseItem::Reasoning {
-                summary, content, ..
-            } => {
-                summary
-                    .iter()
-                    .map(|s| match s {
-                        hanzo_protocol::models::ReasoningItemReasoningSummary::SummaryText {
-                            text,
-                        } => text.len(),
-                    })
-                    .sum::<usize>()
-                    + content
-                        .as_ref()
-                        .map(|c| {
-                            c.iter()
-                                .map(|item| {
-                                    match item {
-                    hanzo_protocol::models::ReasoningItemContent::ReasoningText { text } |
-                    hanzo_protocol::models::ReasoningItemContent::Text { text } => text.len(),
-                }
-                                })
-                                .sum()
-                        })
-                        .unwrap_or(0)
-            }
-            // Catch-all for other types: Other, LocalShellCall, WebSearchCall, etc.
-            _ => 0,
-        };
+    let byte_count = match item {
+        ResponseItem::Message { content, .. } => {
+            content.iter().map(|c| match c {
+                ContentItem::InputText { text } | ContentItem::OutputText { text } => text.len(),
+                ContentItem::InputImage { image_url } => image_url.len() / 10, // images are less token-heavy
+            }).sum()
+        }
+        ResponseItem::FunctionCall { name, arguments, .. } => name.len() + arguments.len(),
+        ResponseItem::FunctionCallOutput { output, .. } => match &output.body {
+            FunctionCallOutputBody::Text(text) => text.len(),
+            FunctionCallOutputBody::ContentItems(items) => items
+                .iter()
+                .map(|item| match item {
+                    FunctionCallOutputContentItem::InputText { text } => text.len(),
+                    FunctionCallOutputContentItem::InputImage { image_url, .. } => {
+                        image_url.len() / 10
+                    }
+                })
+                .sum(),
+        },
+        ResponseItem::CustomToolCall { name, input, .. } => name.len() + input.len(),
+        ResponseItem::CustomToolCallOutput { output, .. } => output.to_string().len(),
+        ResponseItem::Reasoning { summary, content, .. } => {
+            summary.iter().map(|s| match s {
+                code_protocol::models::ReasoningItemReasoningSummary::SummaryText { text } => text.len(),
+            }).sum::<usize>()
+                + content.as_ref().map(|c| c.iter().map(|item| match item {
+                    code_protocol::models::ReasoningItemContent::ReasoningText { text } |
+                    code_protocol::models::ReasoningItemContent::Text { text } => text.len(),
+                }).sum()).unwrap_or(0)
+        }
+        // Catch-all for other types: Other, LocalShellCall, WebSearchCall, etc.
+        _ => 0,
+    };
     byte_count.div_ceil(BYTES_PER_TOKEN)
 }
 
@@ -421,6 +416,8 @@ mod tests {
             content: vec![ContentItem::InputText {
                 text: text.to_string(),
             }],
+            end_turn: None,
+            phase: None,
         }
     }
 
@@ -431,6 +428,8 @@ mod tests {
             content: vec![ContentItem::OutputText {
                 text: text.to_string(),
             }],
+            end_turn: None,
+            phase: None,
         }
     }
 
@@ -447,7 +446,9 @@ mod tests {
     #[test]
     fn test_compact_slice_no_goal_message() {
         let mut history = AutoDriveHistory::new();
-        history.converted = vec![make_assistant_message("Hello")];
+        history.converted = vec![
+            make_assistant_message("Hello"),
+        ];
 
         let result = history.compact_slice(|_| "SUMMARY".to_string());
         assert!(result.is_ok());
@@ -480,24 +481,20 @@ mod tests {
             make_user_message("Turn 3"),
         ];
 
-        let result = history.compact_slice(|items| format!("Compacted {} items", items.len()));
+        let result = history.compact_slice(|items| {
+            format!("Compacted {} items", items.len())
+        });
 
         assert!(result.is_ok());
         assert!(result.unwrap()); // Compaction should occur
 
         // Verify structure: goal + compact summary inserted ahead of remaining turns
         assert_eq!(history.converted.len(), 5);
-        assert!(
-            matches!(&history.converted[0], ResponseItem::Message { role, .. } if role == "user")
-        );
-        assert!(
-            matches!(&history.converted[1], ResponseItem::Message { role, content, .. }
-            if role == "user" && content.iter().any(|c| matches!(c, ContentItem::InputText { text } if text.contains("<compact_summary>"))))
-        );
-        assert!(
-            matches!(&history.converted[2], ResponseItem::Message { role, content, .. }
-            if role == "user" && content.iter().any(|c| matches!(c, ContentItem::InputText { text } if text.contains("Turn 2"))))
-        );
+        assert!(matches!(&history.converted[0], ResponseItem::Message { role, .. } if role == "user"));
+        assert!(matches!(&history.converted[1], ResponseItem::Message { role, content, .. }
+            if role == "user" && content.iter().any(|c| matches!(c, ContentItem::InputText { text } if text.contains("<compact_summary>")))));
+        assert!(matches!(&history.converted[2], ResponseItem::Message { role, content, .. }
+            if role == "user" && content.iter().any(|c| matches!(c, ContentItem::InputText { text } if text.contains("Turn 2")))));
     }
 
     #[test]

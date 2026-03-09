@@ -6,6 +6,8 @@ use crate::config_types::ReasoningEffort;
 use crate::config_types::ReasoningSummary;
 use crate::config_types::SandboxMode;
 use crate::config_types::Verbosity;
+use crate::dynamic_tools::DynamicToolSpec;
+use crate::models::PermissionProfile;
 use crate::protocol::AskForApproval;
 use crate::protocol::EventMsg;
 use crate::protocol::FileChange;
@@ -99,13 +101,15 @@ impl GitSha {
 pub enum AuthMode {
     ApiKey,
     ChatGPT,
-    Hanzo,
+    #[serde(rename = "chatgptAuthTokens")]
+    #[ts(rename = "chatgptAuthTokens")]
+    #[strum(serialize = "chatgptAuthTokens")]
+    ChatgptAuthTokens,
 }
 
 impl AuthMode {
-    /// Returns `true` for OAuth/JWT-based auth modes (ChatGPT and Hanzo).
-    pub fn is_oauth(self) -> bool {
-        matches!(self, Self::ChatGPT | Self::Hanzo)
+    pub fn is_chatgpt(self) -> bool {
+        matches!(self, AuthMode::ChatGPT | AuthMode::ChatgptAuthTokens)
     }
 }
 
@@ -115,81 +119,68 @@ impl AuthMode {
 pub enum ClientRequest {
     Initialize {
         #[serde(rename = "id")]
-        #[ts(type = "string | number")]
         request_id: RequestId,
         params: InitializeParams,
     },
     NewConversation {
         #[serde(rename = "id")]
-        #[ts(type = "string | number")]
         request_id: RequestId,
         params: NewConversationParams,
     },
     /// List recorded Codex conversations (rollouts) with optional pagination and search.
     ListConversations {
         #[serde(rename = "id")]
-        #[ts(type = "string | number")]
         request_id: RequestId,
         params: ListConversationsParams,
     },
     /// Resume a recorded Codex conversation from a rollout file.
     ResumeConversation {
         #[serde(rename = "id")]
-        #[ts(type = "string | number")]
         request_id: RequestId,
         params: ResumeConversationParams,
     },
     ArchiveConversation {
         #[serde(rename = "id")]
-        #[ts(type = "string | number")]
         request_id: RequestId,
         params: ArchiveConversationParams,
     },
     SendUserMessage {
         #[serde(rename = "id")]
-        #[ts(type = "string | number")]
         request_id: RequestId,
         params: SendUserMessageParams,
     },
     SendUserTurn {
         #[serde(rename = "id")]
-        #[ts(type = "string | number")]
         request_id: RequestId,
         params: SendUserTurnParams,
     },
     InterruptConversation {
         #[serde(rename = "id")]
-        #[ts(type = "string | number")]
         request_id: RequestId,
         params: InterruptConversationParams,
     },
     AddConversationListener {
         #[serde(rename = "id")]
-        #[ts(type = "string | number")]
         request_id: RequestId,
         params: AddConversationListenerParams,
     },
     RemoveConversationListener {
         #[serde(rename = "id")]
-        #[ts(type = "string | number")]
         request_id: RequestId,
         params: RemoveConversationListenerParams,
     },
     GitDiffToRemote {
         #[serde(rename = "id")]
-        #[ts(type = "string | number")]
         request_id: RequestId,
         params: GitDiffToRemoteParams,
     },
     LoginApiKey {
         #[serde(rename = "id")]
-        #[ts(type = "string | number")]
         request_id: RequestId,
         params: LoginApiKeyParams,
     },
     LoginChatGpt {
         #[serde(rename = "id")]
-        #[ts(type = "string | number")]
         request_id: RequestId,
 
         #[ts(type = "undefined")]
@@ -198,13 +189,11 @@ pub enum ClientRequest {
     },
     CancelLoginChatGpt {
         #[serde(rename = "id")]
-        #[ts(type = "string | number")]
         request_id: RequestId,
         params: CancelLoginChatGptParams,
     },
     LogoutChatGpt {
         #[serde(rename = "id")]
-        #[ts(type = "string | number")]
         request_id: RequestId,
 
         #[ts(type = "undefined")]
@@ -213,13 +202,11 @@ pub enum ClientRequest {
     },
     GetAuthStatus {
         #[serde(rename = "id")]
-        #[ts(type = "string | number")]
         request_id: RequestId,
         params: GetAuthStatusParams,
     },
     GetUserSavedConfig {
         #[serde(rename = "id")]
-        #[ts(type = "string | number")]
         request_id: RequestId,
 
         #[ts(type = "undefined")]
@@ -228,13 +215,11 @@ pub enum ClientRequest {
     },
     SetDefaultModel {
         #[serde(rename = "id")]
-        #[ts(type = "string | number")]
         request_id: RequestId,
         params: SetDefaultModelParams,
     },
     GetUserAgent {
         #[serde(rename = "id")]
-        #[ts(type = "string | number")]
         request_id: RequestId,
 
         #[ts(type = "undefined")]
@@ -243,7 +228,6 @@ pub enum ClientRequest {
     },
     UserInfo {
         #[serde(rename = "id")]
-        #[ts(type = "string | number")]
         request_id: RequestId,
 
         #[ts(type = "undefined")]
@@ -252,14 +236,12 @@ pub enum ClientRequest {
     },
     FuzzyFileSearch {
         #[serde(rename = "id")]
-        #[ts(type = "string | number")]
         request_id: RequestId,
         params: FuzzyFileSearchParams,
     },
     /// Execute a command (argv vector) under the server's sandbox.
     ExecOneOffCommand {
         #[serde(rename = "id")]
-        #[ts(type = "string | number")]
         request_id: RequestId,
         params: ExecOneOffCommandParams,
     },
@@ -269,6 +251,22 @@ pub enum ClientRequest {
 #[serde(rename_all = "camelCase")]
 pub struct InitializeParams {
     pub client_info: ClientInfo,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub capabilities: Option<InitializeCapabilities>,
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq, Default, TS)]
+#[serde(rename_all = "camelCase")]
+pub struct InitializeCapabilities {
+    /// Opt into receiving experimental API methods and fields.
+    #[serde(default)]
+    pub experimental_api: bool,
+
+    /// Exact notification method names that should be suppressed for this
+    /// connection (for example `codex/event/session_configured`).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[ts(optional = nullable)]
+    pub opt_out_notification_methods: Option<Vec<String>>,
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Default, TS)]
@@ -312,7 +310,7 @@ pub struct NewConversationParams {
     pub sandbox: Option<SandboxMode>,
 
     /// Individual config settings that will override what is in
-    /// HANZO_HOME/config.toml.
+    /// CODEX_HOME/config.toml.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub config: Option<HashMap<String, serde_json::Value>>,
 
@@ -327,6 +325,10 @@ pub struct NewConversationParams {
     /// Whether to include the apply patch tool in the conversation.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub include_apply_patch_tool: Option<bool>,
+
+    /// Dynamic tool specifications injected by the client.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub dynamic_tools: Option<Vec<DynamicToolSpec>>,
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq, TS)]
@@ -585,7 +587,7 @@ pub struct UserSavedConfig {
     pub profiles: HashMap<String, Profile>,
 }
 
-/// MCP representation of a [`hanzo_core::config_profile::ConfigProfile`].
+/// MCP representation of a [`code_core::config_profile::ConfigProfile`].
 #[derive(Deserialize, Debug, Clone, PartialEq, Serialize, TS)]
 #[serde(rename_all = "camelCase")]
 pub struct Profile {
@@ -599,7 +601,7 @@ pub struct Profile {
     pub model_verbosity: Option<Verbosity>,
     pub chatgpt_base_url: Option<String>,
 }
-/// MCP representation of a [`hanzo_core::config::ToolsToml`].
+/// MCP representation of a [`code_core::config::ToolsToml`].
 #[derive(Deserialize, Debug, Clone, PartialEq, Serialize, TS)]
 #[serde(rename_all = "camelCase")]
 pub struct Tools {
@@ -609,7 +611,7 @@ pub struct Tools {
     pub view_image: Option<bool>,
 }
 
-/// MCP representation of a [`hanzo_core::config_types::SandboxWorkspaceWrite`].
+/// MCP representation of a [`code_core::config_types::SandboxWorkspaceWrite`].
 #[derive(Deserialize, Debug, Clone, PartialEq, Serialize, TS)]
 #[serde(rename_all = "camelCase")]
 pub struct SandboxSettings {
@@ -699,6 +701,7 @@ pub enum InputItem {
 
 pub const APPLY_PATCH_APPROVAL_METHOD: &str = "applyPatchApproval";
 pub const EXEC_COMMAND_APPROVAL_METHOD: &str = "execCommandApproval";
+pub const DYNAMIC_TOOL_CALL_METHOD: &str = "dynamicToolCall";
 
 /// Request initiated from the server and sent to the client.
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq, TS)]
@@ -707,24 +710,28 @@ pub enum ServerRequest {
     /// Request to approve a patch.
     ApplyPatchApproval {
         #[serde(rename = "id")]
-        #[ts(type = "string | number")]
         request_id: RequestId,
         params: ApplyPatchApprovalParams,
     },
     /// Request to exec a command.
     ExecCommandApproval {
         #[serde(rename = "id")]
-        #[ts(type = "string | number")]
         request_id: RequestId,
         params: ExecCommandApprovalParams,
+    },
+    /// Request to execute a dynamic tool.
+    DynamicToolCall {
+        #[serde(rename = "id")]
+        request_id: RequestId,
+        params: DynamicToolCallParams,
     },
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq, TS)]
 pub struct ApplyPatchApprovalParams {
     pub conversation_id: ConversationId,
-    /// Use to correlate this with [hanzo_core::protocol::PatchApplyBeginEvent]
-    /// and [hanzo_core::protocol::PatchApplyEndEvent].
+    /// Use to correlate this with [code_core::protocol::PatchApplyBeginEvent]
+    /// and [code_core::protocol::PatchApplyEndEvent].
     pub call_id: String,
     pub file_changes: HashMap<PathBuf, FileChange>,
     /// Optional explanatory reason (e.g. request for extra write access).
@@ -739,18 +746,38 @@ pub struct ApplyPatchApprovalParams {
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq, TS)]
 pub struct ExecCommandApprovalParams {
     pub conversation_id: ConversationId,
-    /// Use to correlate this with [hanzo_core::protocol::ExecCommandBeginEvent]
-    /// and [hanzo_core::protocol::ExecCommandEndEvent].
+    /// Use to correlate this with [code_core::protocol::ExecCommandBeginEvent]
+    /// and [code_core::protocol::ExecCommandEndEvent].
     pub call_id: String,
+    /// Identifier for this specific approval callback.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub approval_id: Option<String>,
     pub command: Vec<String>,
     pub cwd: PathBuf,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub reason: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub additional_permissions: Option<PermissionProfile>,
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq, TS)]
 pub struct ExecCommandApprovalResponse {
     pub decision: ReviewDecision,
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, TS)]
+pub struct DynamicToolCallParams {
+    pub conversation_id: ConversationId,
+    pub turn_id: String,
+    pub call_id: String,
+    pub tool: String,
+    pub arguments: serde_json::Value,
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, TS)]
+pub struct DynamicToolCallResponse {
+    pub output: String,
+    pub success: bool,
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq, TS)]
@@ -769,7 +796,7 @@ pub struct FuzzyFileSearchParams {
     pub cancellation_token: Option<String>,
 }
 
-/// Superset of [`hanzo_file_search::FileMatch`]
+/// Superset of [`code_file_search::FileMatch`]
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq, TS)]
 pub struct FuzzyFileSearchResult {
     pub root: String,
@@ -891,6 +918,7 @@ mod tests {
                 base_instructions: None,
                 include_plan_tool: None,
                 include_apply_patch_tool: None,
+                dynamic_tools: None,
             },
         };
         assert_eq!(

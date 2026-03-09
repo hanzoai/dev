@@ -11,42 +11,51 @@ use std::str::FromStr;
 use std::time::Duration;
 
 use mcp_types::CallToolResult;
+use serde::de::DeserializeOwned;
 use serde::Deserialize;
 use serde::Serialize;
-use serde::de::DeserializeOwned;
 use serde_bytes::ByteBuf;
 use serde_json::Value;
 use strum_macros::Display;
 use uuid::Uuid;
 
-use crate::client_common::TextFormat;
 use crate::config_types::ReasoningEffort as ReasoningEffortConfig;
 use crate::config_types::ReasoningSummary as ReasoningSummaryConfig;
+use crate::config_types::ContextMode as ContextModeConfig;
+use crate::config_types::ServiceTier as ServiceTierConfig;
 use crate::config_types::TextVerbosity as TextVerbosityConfig;
 use crate::message_history::HistoryEntry;
 use crate::model_provider_info::ModelProviderInfo;
+use crate::client_common::TextFormat;
 use crate::parse_command::ParsedCommand;
 use crate::plan_tool::UpdatePlanArgs;
+use code_protocol::dynamic_tools::DynamicToolCallRequest;
+use code_protocol::dynamic_tools::DynamicToolResponse;
+use code_protocol::dynamic_tools::DynamicToolSpec;
 
 // Re-export review types from the shared protocol crate so callers can use
-// `hanzo_core::protocol::ReviewFinding` and friends.
-pub use hanzo_protocol::protocol::ConversationPathResponseEvent;
-pub use hanzo_protocol::protocol::ENVIRONMENT_CONTEXT_OPEN_TAG;
-pub use hanzo_protocol::protocol::ExitedReviewModeEvent;
-pub use hanzo_protocol::protocol::GitInfo;
-pub use hanzo_protocol::protocol::ListCustomPromptsResponseEvent;
-pub use hanzo_protocol::protocol::ListSkillsResponseEvent;
-pub use hanzo_protocol::protocol::ReviewCodeLocation;
-pub use hanzo_protocol::protocol::ReviewContextMetadata;
-pub use hanzo_protocol::protocol::ReviewFinding;
-pub use hanzo_protocol::protocol::ReviewLineRange;
-pub use hanzo_protocol::protocol::ReviewOutputEvent;
-pub use hanzo_protocol::protocol::ReviewRequest;
-pub use hanzo_protocol::protocol::ReviewSnapshotInfo;
-pub use hanzo_protocol::protocol::RolloutItem;
-pub use hanzo_protocol::protocol::RolloutLine;
-pub use hanzo_protocol::protocol::ViewImageToolCallEvent;
-pub use hanzo_protocol::skills::Skill;
+// `code_core::protocol::ReviewFinding` and friends.
+pub use code_protocol::protocol::ReviewCodeLocation;
+pub use code_protocol::protocol::ReviewFinding;
+pub use code_protocol::protocol::ReviewLineRange;
+pub use code_protocol::protocol::ReviewOutputEvent;
+pub use code_protocol::protocol::{ReviewContextMetadata, ReviewRequest};
+pub use code_protocol::protocol::GitInfo;
+pub use code_protocol::protocol::RolloutItem;
+pub use code_protocol::protocol::RolloutLine;
+pub use code_protocol::protocol::ConversationPathResponseEvent;
+pub use code_protocol::protocol::McpListToolsResponseEvent;
+pub use code_protocol::protocol::McpServerFailure;
+pub use code_protocol::protocol::McpServerFailurePhase;
+pub use code_protocol::protocol::ListCustomPromptsResponseEvent;
+pub use code_protocol::protocol::ListSkillsResponseEvent;
+pub use code_protocol::protocol::ViewImageToolCallEvent;
+pub use code_protocol::skills::Skill;
+pub use code_protocol::protocol::ENVIRONMENT_CONTEXT_OPEN_TAG;
+pub use code_protocol::protocol::ExitedReviewModeEvent;
+pub use code_protocol::protocol::ReviewSnapshotInfo;
+pub use code_protocol::request_user_input::RequestUserInputEvent;
+pub use code_protocol::request_user_input::RequestUserInputResponse;
 
 /// Submission Queue Entry - requests from user
 #[derive(Debug, Clone, Deserialize, Serialize)]
@@ -94,6 +103,10 @@ pub enum Op {
         preferred_model_reasoning_effort: Option<ReasoningEffortConfig>,
         model_reasoning_summary: ReasoningSummaryConfig,
         model_text_verbosity: TextVerbosityConfig,
+        service_tier: Option<ServiceTierConfig>,
+        context_mode: Option<ContextModeConfig>,
+        model_context_window: Option<u64>,
+        model_auto_compact_token_limit: Option<i64>,
 
         /// Model instructions that are appended to the base instructions.
         user_instructions: Option<String>,
@@ -134,6 +147,10 @@ pub enum Op {
         #[serde(skip_serializing_if = "Option::is_none")]
         #[serde(default)]
         demo_developer_message: Option<String>,
+
+        /// Dynamic tools to include for this session.
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        dynamic_tools: Vec<DynamicToolSpec>,
     },
 
     /// Abort current task.
@@ -167,12 +184,17 @@ pub enum Op {
     },
 
     /// Set a one-off text format to apply on the next turn.
-    SetNextTextFormat { format: TextFormat },
+    SetNextTextFormat {
+        format: TextFormat,
+    },
 
     /// Approve a command execution
     ExecApproval {
         /// The id of the submission we are approving
         id: String,
+        /// Turn id associated with the approval event, when available.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        turn_id: Option<String>,
         /// The user's decision in response to the request.
         decision: ReviewDecision,
     },
@@ -194,8 +216,28 @@ pub enum Op {
         decision: ReviewDecision,
     },
 
+    /// Resolve a request_user_input tool call.
+    #[serde(rename = "user_input_answer", alias = "request_user_input_response")]
+    UserInputAnswer {
+        /// Turn id for the in-flight request.
+        id: String,
+        /// User-provided answers.
+        response: RequestUserInputResponse,
+    },
+
+    /// Resolve a dynamic tool call request.
+    DynamicToolResponse {
+        /// Call id for the in-flight request.
+        id: String,
+        /// Tool output payload.
+        response: DynamicToolResponse,
+    },
+
     /// Update a specific validation tool toggle for the session.
-    UpdateValidationTool { name: String, enable: bool },
+    UpdateValidationTool {
+        name: String,
+        enable: bool,
+    },
 
     /// Update a validation group toggle for the session.
     UpdateValidationGroup {
@@ -213,10 +255,14 @@ pub enum Op {
     },
 
     /// Persist the full chat history snapshot for the current session.
-    PersistHistorySnapshot { snapshot: serde_json::Value },
+    PersistHistorySnapshot {
+        snapshot: serde_json::Value,
+    },
 
     /// Execute a project-scoped custom command defined in configuration.
-    RunProjectCommand { name: String },
+    RunProjectCommand {
+        name: String,
+    },
 
     /// Internally queue a developer-role message to be included in the next turn.
     AddPendingInputDeveloper {
@@ -224,8 +270,19 @@ pub enum Op {
         text: String,
     },
 
+    /// Queue a developer-role message to run in a dedicated follow-up turn
+    /// immediately after the current turn completes.
+    AddPostTurnDeveloperInput {
+        /// The developer message text to add to the post-turn queue.
+        text: String,
+    },
+
     /// Request a single history entry identified by `log_id` + `offset`.
     GetHistoryEntryRequest { offset: usize, log_id: u64 },
+
+    /// Request the list of MCP tools available across configured servers.
+    /// Reply is delivered via `EventMsg::McpListToolsResponse`.
+    ListMcpTools,
 
     /// Request the list of available custom prompts.
     /// Reply is delivered via `EventMsg::ListCustomPromptsResponse`.
@@ -258,19 +315,51 @@ pub enum AskForApproval {
     #[strum(serialize = "untrusted")]
     UnlessTrusted,
 
-    /// *All* commands are auto‑approved, but they are expected to run inside a
-    /// sandbox where network access is disabled and writes are confined to a
-    /// specific set of paths. If the command fails, it will be escalated to
-    /// the user to approve execution without a sandbox.
+    /// DEPRECATED: *All* commands are auto‑approved, but they are expected to
+    /// run inside a sandbox where network access is disabled and writes are
+    /// confined to a specific set of paths. If the command fails, it will be
+    /// escalated to the user to approve execution without a sandbox.
+    /// Prefer `OnRequest` for interactive runs or `Never` for non-interactive
+    /// runs.
     OnFailure,
 
     /// The model decides when to ask the user for approval.
     #[default]
     OnRequest,
 
+    /// Fine-grained rejection controls for approval prompts.
+    ///
+    /// When a field is `true`, prompts of that category are automatically
+    /// rejected instead of shown to the user.
+    Reject(RejectConfig),
+
     /// Never ask the user to approve commands. Failures are immediately returned
     /// to the model, and never escalated to the user for approval.
     Never,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub struct RejectConfig {
+    /// Reject approval prompts related to sandbox escalation.
+    pub sandbox_approval: bool,
+    /// Reject prompts triggered by execpolicy `prompt` rules.
+    pub rules: bool,
+    /// Reject MCP elicitation prompts.
+    pub mcp_elicitations: bool,
+}
+
+impl RejectConfig {
+    pub const fn rejects_sandbox_approval(self) -> bool {
+        self.sandbox_approval
+    }
+
+    pub const fn rejects_rules_approval(self) -> bool {
+        self.rules
+    }
+
+    pub const fn rejects_mcp_elicitations(self) -> bool {
+        self.mcp_elicitations
+    }
 }
 
 #[derive(Debug, Clone, Copy, Deserialize, Serialize, PartialEq, Eq, Hash)]
@@ -326,9 +415,7 @@ pub enum SandboxPolicy {
 }
 
 // Serde helper: default to true for flags where we want historical permissive behavior.
-pub(crate) const fn default_true_bool() -> bool {
-    true
-}
+pub(crate) const fn default_true_bool() -> bool { true }
 
 /// A writable root path accompanied by a list of subpaths that should remain
 /// read‑only even when the root is writable. This is primarily used to ensure
@@ -439,11 +526,12 @@ impl SandboxPolicy {
                 // Linux or Windows, but supporting it here gives users a way to
                 // provide the model with their own temporary directory without
                 // having to hardcode it in the config.
-                if !exclude_tmpdir_env_var
-                    && let Some(tmpdir) = std::env::var_os("TMPDIR")
-                    && !tmpdir.is_empty()
-                {
-                    roots.push(PathBuf::from(tmpdir));
+                if !exclude_tmpdir_env_var {
+                    if let Some(tmpdir) = std::env::var_os("TMPDIR") {
+                        if !tmpdir.is_empty() {
+                            roots.push(PathBuf::from(tmpdir));
+                        }
+                    }
                 }
 
                 // For each root, compute subpaths that should remain read-only.
@@ -519,7 +607,7 @@ pub struct RecordedEvent {
     pub msg: EventMsg,
 }
 
-pub fn event_msg_to_protocol(msg: &EventMsg) -> Option<hanzo_protocol::protocol::EventMsg> {
+pub fn event_msg_to_protocol(msg: &EventMsg) -> Option<code_protocol::protocol::EventMsg> {
     match msg {
         EventMsg::ReplayHistory(_) => None,
         EventMsg::TokenCount(payload) => {
@@ -528,17 +616,18 @@ pub fn event_msg_to_protocol(msg: &EventMsg) -> Option<hanzo_protocol::protocol:
                 .rate_limits
                 .as_ref()
                 .map(rate_limit_snapshot_to_protocol);
-            Some(hanzo_protocol::protocol::EventMsg::TokenCount(
-                hanzo_protocol::protocol::TokenCountEvent { info, rate_limits },
+            Some(code_protocol::protocol::EventMsg::TokenCount(
+                code_protocol::protocol::TokenCountEvent { info, rate_limits },
             ))
         }
         _ => convert_value(msg),
     }
 }
 
-pub fn event_msg_from_protocol(msg: &hanzo_protocol::protocol::EventMsg) -> Option<EventMsg> {
+
+pub fn event_msg_from_protocol(msg: &code_protocol::protocol::EventMsg) -> Option<EventMsg> {
     match msg {
-        hanzo_protocol::protocol::EventMsg::TokenCount(payload) => {
+        code_protocol::protocol::EventMsg::TokenCount(payload) => {
             let info = convert_value(&payload.info).unwrap_or(None);
             let rate_limits = payload
                 .rate_limits
@@ -556,15 +645,20 @@ pub fn event_msg_from_protocol(msg: &hanzo_protocol::protocol::EventMsg) -> Opti
     }
 }
 
-pub fn order_meta_to_protocol(order: &OrderMeta) -> hanzo_protocol::protocol::OrderMeta {
-    hanzo_protocol::protocol::OrderMeta {
+
+pub fn order_meta_to_protocol(
+    order: &OrderMeta,
+) -> code_protocol::protocol::OrderMeta {
+    code_protocol::protocol::OrderMeta {
         request_ordinal: order.request_ordinal,
         output_index: order.output_index,
         sequence_number: order.sequence_number,
     }
 }
 
-pub fn order_meta_from_protocol(order: &hanzo_protocol::protocol::OrderMeta) -> OrderMeta {
+pub fn order_meta_from_protocol(
+    order: &code_protocol::protocol::OrderMeta,
+) -> OrderMeta {
     OrderMeta {
         request_ordinal: order.request_ordinal,
         output_index: order.output_index,
@@ -572,12 +666,16 @@ pub fn order_meta_from_protocol(order: &hanzo_protocol::protocol::OrderMeta) -> 
     }
 }
 
+
 pub fn recorded_event_to_protocol(
     event: &RecordedEvent,
-) -> Option<hanzo_protocol::protocol::RecordedEvent> {
+) -> Option<code_protocol::protocol::RecordedEvent> {
     let msg = event_msg_to_protocol(&event.msg)?;
-    let order = event.order.as_ref().map(order_meta_to_protocol);
-    Some(hanzo_protocol::protocol::RecordedEvent {
+    let order = event
+        .order
+        .as_ref()
+        .map(order_meta_to_protocol);
+    Some(code_protocol::protocol::RecordedEvent {
         id: event.id.clone(),
         event_seq: event.event_seq,
         order,
@@ -585,8 +683,9 @@ pub fn recorded_event_to_protocol(
     })
 }
 
+
 pub fn recorded_event_from_protocol(
-    src: hanzo_protocol::protocol::RecordedEvent,
+    src: code_protocol::protocol::RecordedEvent,
 ) -> Option<RecordedEvent> {
     let msg = event_msg_from_protocol(&src.msg)?;
     let order = src.order.as_ref().map(order_meta_from_protocol);
@@ -611,25 +710,31 @@ where
 
 fn rate_limit_snapshot_to_protocol(
     snapshot: &RateLimitSnapshotEvent,
-) -> hanzo_protocol::protocol::RateLimitSnapshot {
-    let primary = hanzo_protocol::protocol::RateLimitWindow {
+) -> code_protocol::protocol::RateLimitSnapshot {
+    let primary = code_protocol::protocol::RateLimitWindow {
         used_percent: snapshot.primary_used_percent,
         window_minutes: Some(snapshot.primary_window_minutes),
         resets_in_seconds: snapshot.primary_reset_after_seconds,
+        resets_at: None,
     };
-    let secondary = hanzo_protocol::protocol::RateLimitWindow {
+    let secondary = code_protocol::protocol::RateLimitWindow {
         used_percent: snapshot.secondary_used_percent,
         window_minutes: Some(snapshot.secondary_window_minutes),
         resets_in_seconds: snapshot.secondary_reset_after_seconds,
+        resets_at: None,
     };
-    hanzo_protocol::protocol::RateLimitSnapshot {
+    code_protocol::protocol::RateLimitSnapshot {
+        limit_id: None,
+        limit_name: None,
         primary: Some(primary),
         secondary: Some(secondary),
+        credits: None,
+        plan_type: None,
     }
 }
 
 fn rate_limit_snapshot_from_protocol(
-    snapshot: &hanzo_protocol::protocol::RateLimitSnapshot,
+    snapshot: &code_protocol::protocol::RateLimitSnapshot,
 ) -> RateLimitSnapshotEvent {
     let primary_used = snapshot
         .primary
@@ -701,6 +806,9 @@ pub enum EventMsg {
     /// Error while executing a submission
     Error(ErrorEvent),
 
+    /// Non-fatal warning surfaced to the user.
+    Warning(WarningEvent),
+
     /// Agent has started a task
     TaskStarted,
 
@@ -710,6 +818,9 @@ pub enum EventMsg {
     /// Token count event, sent periodically to report the number of tokens
     /// used in the current session and the latest rate limit snapshot.
     TokenCount(TokenCountEvent),
+
+    /// Auto Context is evaluating whether to compact before the next turn.
+    AutoContextCheck(AutoContextCheckEvent),
 
     /// Agent text output message
     AgentMessage(AgentMessageEvent),
@@ -741,7 +852,7 @@ pub enum EventMsg {
     BrowserSnapshot(BrowserSnapshotEvent),
 
     /// Warning that the platform compacted conversation history to stay within limits.
-    CompactionCheckpointWarning(hanzo_protocol::protocol::CompactionCheckpointWarningEvent),
+    CompactionCheckpointWarning(code_protocol::protocol::CompactionCheckpointWarningEvent),
 
     /// Ack the client's configure message.
     SessionConfigured(SessionConfiguredEvent),
@@ -757,6 +868,7 @@ pub enum EventMsg {
 
     /// Custom tool call events for non-MCP tools (browser, agent, etc)
     CustomToolCallBegin(CustomToolCallBeginEvent),
+    CustomToolCallUpdate(CustomToolCallUpdateEvent),
     CustomToolCallEnd(CustomToolCallEndEvent),
 
     /// Notification that the server is about to execute a command.
@@ -768,6 +880,10 @@ pub enum EventMsg {
     ExecCommandEnd(ExecCommandEndEvent),
 
     ExecApprovalRequest(ExecApprovalRequestEvent),
+
+    RequestUserInput(RequestUserInputEvent),
+
+    DynamicToolCallRequest(DynamicToolCallRequest),
 
     ApplyPatchApprovalRequest(ApplyPatchApprovalRequestEvent),
 
@@ -784,6 +900,9 @@ pub enum EventMsg {
 
     /// Response to GetHistoryEntryRequest.
     GetHistoryEntryResponse(GetHistoryEntryResponseEvent),
+
+    /// List of MCP tools available to the agent.
+    McpListToolsResponse(McpListToolsResponseEvent),
 
     /// List of custom prompts available to the agent.
     ListCustomPromptsResponse(ListCustomPromptsResponseEvent),
@@ -803,22 +922,22 @@ pub enum EventMsg {
     AgentStatusUpdate(AgentStatusUpdateEvent),
 
     /// User/system input message (what was sent to the model)
-    UserMessage(hanzo_protocol::protocol::UserMessageEvent),
+    UserMessage(code_protocol::protocol::UserMessageEvent),
 
     /// Notification that the agent is shutting down.
     ShutdownComplete,
 
     /// The system aborted the current turn (e.g., due to interruption).
-    TurnAborted(hanzo_protocol::protocol::TurnAbortedEvent),
+    TurnAborted(code_protocol::protocol::TurnAbortedEvent),
 
     /// Response to a conversation path request.
-    ConversationPath(hanzo_protocol::protocol::ConversationPathResponseEvent),
+    ConversationPath(code_protocol::protocol::ConversationPathResponseEvent),
 
     /// Entered review mode with the provided request.
-    EnteredReviewMode(hanzo_protocol::protocol::ReviewRequest),
+    EnteredReviewMode(code_protocol::protocol::ReviewRequest),
 
     /// Exited review mode with an optional final result to apply.
-    ExitedReviewMode(hanzo_protocol::protocol::ExitedReviewModeEvent),
+    ExitedReviewMode(code_protocol::protocol::ExitedReviewModeEvent),
 
     /// Replay a previously recorded transcript into the UI.
     /// Used after resuming from a rollout file so the user sees the full
@@ -834,8 +953,25 @@ pub struct ErrorEvent {
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
+pub struct WarningEvent {
+    pub message: String,
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct TaskCompleteEvent {
     pub last_agent_message: Option<String>,
+}
+
+#[derive(Debug, Clone, Copy, Deserialize, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum AutoContextPhase {
+    Checking,
+    Compacting,
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize)]
+pub struct AutoContextCheckEvent {
+    pub phase: Option<AutoContextPhase>,
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Eq, Deserialize, Serialize)]
@@ -905,6 +1041,10 @@ const BASELINE_TOKENS: u64 = 12_000;
 pub struct TokenUsageInfo {
     pub total_token_usage: TokenUsage,
     pub last_token_usage: TokenUsage,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub requested_model: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub latest_response_model: Option<String>,
     pub model_context_window: Option<u64>,
 }
 
@@ -923,6 +1063,8 @@ impl TokenUsageInfo {
             None => Self {
                 total_token_usage: TokenUsage::default(),
                 last_token_usage: TokenUsage::default(),
+                requested_model: None,
+                latest_response_model: None,
                 model_context_window,
             },
         };
@@ -980,7 +1122,7 @@ pub struct FinalOutput {
 pub struct ReplayHistoryEvent {
     /// Items to render in order. Front-ends should render these as static
     /// history without triggering any tool execution.
-    pub items: Vec<hanzo_protocol::models::ResponseItem>,
+    pub items: Vec<code_protocol::models::ResponseItem>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub history_snapshot: Option<serde_json::Value>,
 }
@@ -1108,6 +1250,16 @@ pub struct CustomToolCallBeginEvent {
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
+pub struct CustomToolCallUpdateEvent {
+    /// Identifier for the corresponding CustomToolCallBegin that is still running.
+    pub call_id: String,
+    /// Name of the tool
+    pub tool_name: String,
+    /// Parameters passed to the tool as JSON
+    pub parameters: Option<serde_json::Value>,
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct CustomToolCallEndEvent {
     /// Identifier for the corresponding CustomToolCallBegin that finished.
     pub call_id: String,
@@ -1153,6 +1305,22 @@ pub enum ExecOutputStream {
     Stderr,
 }
 
+#[derive(Debug, Clone, Copy, Deserialize, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum NetworkApprovalProtocol {
+    Http,
+    #[serde(alias = "https_connect", alias = "http-connect")]
+    Https,
+    Socks5Tcp,
+    Socks5Udp,
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize, PartialEq, Eq)]
+pub struct NetworkApprovalContext {
+    pub host: String,
+    pub protocol: NetworkApprovalProtocol,
+}
+
 #[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct ExecCommandOutputDeltaEvent {
     /// Identifier for the ExecCommandBegin that produced this chunk.
@@ -1166,8 +1334,18 @@ pub struct ExecCommandOutputDeltaEvent {
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct ExecApprovalRequestEvent {
-    /// Identifier for the associated exec call, if available.
+    /// Identifier for the associated command execution item.
     pub call_id: String,
+    /// Identifier for this specific approval callback.
+    ///
+    /// When absent, the approval is for the command item itself (`call_id`).
+    /// This is present for subcommand approvals (via execve intercept).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub approval_id: Option<String>,
+    /// Turn ID that this command belongs to.
+    /// Uses `#[serde(default)]` for backwards compatibility.
+    #[serde(default)]
+    pub turn_id: String,
     /// The command to be executed.
     pub command: Vec<String>,
     /// The command's working directory.
@@ -1175,6 +1353,20 @@ pub struct ExecApprovalRequestEvent {
     /// Optional human-readable reason for the approval (e.g. retry without sandbox).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub reason: Option<String>,
+    /// Optional network context for a blocked request that can be approved.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub network_approval_context: Option<NetworkApprovalContext>,
+    /// Optional additional permissions requested for this command.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub additional_permissions: Option<code_protocol::models::PermissionProfile>,
+}
+
+impl ExecApprovalRequestEvent {
+    pub fn effective_approval_id(&self) -> String {
+        self.approval_id
+            .clone()
+            .unwrap_or_else(|| self.call_id.clone())
+    }
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
