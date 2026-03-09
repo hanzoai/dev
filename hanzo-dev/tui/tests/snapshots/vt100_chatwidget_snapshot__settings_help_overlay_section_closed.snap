@@ -2,27 +2,30 @@
 source: tui/tests/vt100_chatwidget_snapshot.rs
 expression: section_closed
 ---
+ +------------------------------------------------------------------------------------------------+
+ |                                           Every Code                                           |
+ +------------------------------------------------------------------------------------------------+
  +Settings ▸ Model--------------------------------------------------------------------------------+
  |                                                                                                |
  | ›  Model              + Select Model & Reasoning --------------------------------------------+ |
  |    Theme              |                                                                      | |
- |    Updates            |  Current model: GPT-5.1-Codex-Max                                    | |
+ |    Updates            |  Current model: GPT-5.3-Codex                                        | |
  |    Accounts           |  Reasoning effort: Medium                                            | |
  |    Agents             |                                                                      | |
- |    Prompts            |  GPT-5.1-Codex-Max                                                   | |
- |    Skills             |  Codex-optimized flagship for deep and fast reasoning.               | |
- |    Auto Drive         |     XHigh - Extra high reasoning depth for complex problems          | |
- |    Review             |     High - Maximizes reasoning depth for complex problems            | |
- |    Planning           |     Medium (current) - Balances speed and reasoning depth for everyd | |
- |    Validation         |     Low - Fast responses with lighter reasoning                      | |
- |    Browser            |                                                                      | |
- |    MCP                |  GPT-5.2                                                             | |
- |    Notifications      |  Latest frontier model with improvements across knowledge, reasoning | |
- |    Limits             |     XHigh - Extra high reasoning depth for complex problems          | |
- |                       |     High - Maximizes reasoning depth for complex or ambiguous proble | |
- |                       |     Medium - Provides a solid balance of reasoning depth and latency | |
- |                       |                                                                      | |
- |                       +----------------------------------------------------------------------+ |
+ |    Prompts            |  Mode Settings                                                       | |
+ |    Memories           |  Fast mode speeds up replies. 1M Context is available on supported m | |
+ |    Skills             |  › Fast Mode: disabled                                               | |
+ |    Auto Drive         |    1M Context: auto                                                  | |
+ |    Review             |  Unavailable for this model. Saved settings apply automatically on s | |
+ |    Planning           |                                                                      | |
+ |    Validation         |  ↑↓ Navigate  Enter Select  Esc Cancel                               | |
+ |    Chrome             |                                                                      | |
+ |  ↓ MCP                +----------------------------------------------------------------------+ |
  | ↑ ↓ Move    Enter Open    Esc Close    ? Help                                                  |
  |                                                                                                |
  +------------------------------------------------------------------------------------------------+
+
+ +------------------------------------------------------------------------------------------------+
+ | What can I code for you today?                                                                 |
+ +------------------------------------------------------------------------------------------------+
+ Read Only  (Shift+Tab change)                                           Ctrl+G editor  •  API key

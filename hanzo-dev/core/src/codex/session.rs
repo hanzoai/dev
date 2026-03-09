@@ -1,15 +1,26 @@
-use super::streaming::AgentTask;
-use super::streaming::TRUNCATION_MARKER;
-use super::streaming::TimelineReplayContext;
-use super::streaming::debug_history;
-use super::streaming::ensure_user_dir;
-use super::streaming::parse_env_delta_from_response;
-use super::streaming::parse_env_snapshot_from_response;
-use super::streaming::process_rollout_env_item;
-use super::streaming::truncate_middle_bytes;
-use super::streaming::write_agent_file;
 use super::*;
 use serde_json::Value;
+use code_protocol::dynamic_tools::DynamicToolResponse;
+use code_protocol::dynamic_tools::DynamicToolSpec;
+use super::streaming::{
+    AgentTask,
+    TRUNCATION_MARKER,
+    TimelineReplayContext,
+    debug_history,
+    ensure_user_dir,
+    parse_env_delta_from_response,
+    parse_env_snapshot_from_response,
+    process_rollout_env_item,
+    truncate_middle_bytes,
+    write_agent_file,
+};
+
+pub(super) const MAX_EVENT_SEQ_SUB_IDS: usize = 1024;
+pub(super) const MAX_BACKGROUND_SEQ_SUB_IDS: usize = 1024;
+pub(super) const MAX_WAIT_TRACKED_BATCHES: usize = 1024;
+pub(super) const MAX_WAIT_TRACKED_AGENT_IDS_PER_BATCH: usize = 2048;
+pub(super) const MAX_AGENT_COMPLETION_WAKE_BATCHES: usize = 2048;
+pub(super) const MAX_PENDING_MANUAL_COMPACTS: usize = 64;
 
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub struct ApprovedCommandPattern {
@@ -43,9 +54,10 @@ impl ApprovedCommandPattern {
                 if command.starts_with(&self.argv) {
                     return true;
                 }
-                if let (Some(pattern), Some(candidate)) =
-                    (self.semantic_prefix.as_ref(), semantic_tokens(command))
-                {
+                if let (Some(pattern), Some(candidate)) = (
+                    self.semantic_prefix.as_ref(),
+                    semantic_tokens(command),
+                ) {
                     return candidate.starts_with(pattern);
                 }
                 false
@@ -53,13 +65,9 @@ impl ApprovedCommandPattern {
         }
     }
 
-    pub fn argv(&self) -> &[String] {
-        &self.argv
-    }
+    pub fn argv(&self) -> &[String] { &self.argv }
 
-    pub fn kind(&self) -> ApprovedCommandMatchKind {
-        self.kind
-    }
+    pub fn kind(&self) -> ApprovedCommandMatchKind { self.kind }
 }
 
 fn semantic_tokens(command: &[String]) -> Option<Vec<String>> {
@@ -117,13 +125,13 @@ pub(super) struct EnvironmentContextStreamRegistry {
 impl EnvironmentContextStreamRegistry {
     pub(super) fn env_stream_id(&mut self, session_id: Uuid) -> String {
         self.env_stream_id
-            .get_or_insert_with(|| format!("env-context-{session_id}"))
+            .get_or_insert_with(|| format!("env-context-{}", session_id))
             .clone()
     }
 
     pub(super) fn browser_stream_id(&mut self, session_id: Uuid) -> String {
         self.browser_stream_id
-            .get_or_insert_with(|| format!("browser-context-{session_id}"))
+            .get_or_insert_with(|| format!("browser-context-{}", session_id))
             .clone()
     }
 }
@@ -133,7 +141,11 @@ pub(super) struct State {
     pub(super) approved_commands: HashSet<ApprovedCommandPattern>,
     pub(super) current_task: Option<AgentTask>,
     pub(super) pending_approvals: HashMap<String, oneshot::Sender<ReviewDecision>>,
+    pub(super) pending_request_user_input: HashMap<String, oneshot::Sender<crate::protocol::RequestUserInputResponse>>,
+    pub(super) pending_dynamic_tools: HashMap<String, oneshot::Sender<DynamicToolResponse>>,
+    pub(super) selected_mcp_tools: Vec<String>,
     pub(super) pending_input: Vec<ResponseInputItem>,
+    pub(super) pending_post_turn_input: Vec<ResponseInputItem>,
     pub(super) pending_user_input: Vec<QueuedUserInput>,
     pub(super) history: ConversationHistory,
     /// Tracks which completed agents (by id) have already been returned to the
@@ -141,8 +153,13 @@ pub(super) struct State {
     /// `return_all=false`.
     /// This enables sequential waiting behavior across multiple calls.
     pub(super) seen_completed_agents_by_batch: HashMap<String, HashSet<String>>,
+    /// FIFO order for `seen_completed_agents_by_batch` so old batches can be
+    /// evicted under sustained long-session churn.
+    pub(super) seen_completed_batch_order: VecDeque<String>,
     /// Tracks agent batches that already triggered a wake-up after completion.
     pub(super) agent_completion_wake_batches: HashSet<String>,
+    /// FIFO order for wake-batch dedupe keys.
+    pub(super) agent_completion_wake_order: VecDeque<String>,
     /// Scratchpad that buffers streamed items/deltas for the current HTTP attempt
     /// so we can seed retries without losing progress.
     pub(super) turn_scratchpad: Option<TurnScratchpad>,
@@ -160,6 +177,7 @@ pub(super) struct State {
     pub(super) next_internal_sub_id: u64,
     pub(super) token_usage_info: Option<TokenUsageInfo>,
     pub(super) latest_rate_limits: Option<RateLimitSnapshotEvent>,
+    pub(super) last_model_reroute_notice: Option<(String, String)>,
     pub(super) pending_manual_compacts: VecDeque<String>,
     pub(super) wait_interrupt_epoch: u64,
     pub(super) wait_interrupt_reason: Option<WaitInterruptReason>,
@@ -216,6 +234,37 @@ pub(crate) struct QueuedUserInput {
     pub(super) core_items: Vec<InputItem>,
 }
 
+pub(super) enum FollowUpTurnAction {
+    PostTurnPendingInput,
+    ManualCompact(String),
+    PendingInput,
+    QueuedUserInput(QueuedUserInput),
+}
+
+fn take_follow_up_turn_action(state: &mut State) -> Option<FollowUpTurnAction> {
+    if !state.pending_post_turn_input.is_empty() {
+        let mut post_turn_input = std::mem::take(&mut state.pending_post_turn_input);
+        state.pending_input.append(&mut post_turn_input);
+        return Some(FollowUpTurnAction::PostTurnPendingInput);
+    }
+
+    if let Some(sub_id) = state.pending_manual_compacts.pop_front() {
+        return Some(FollowUpTurnAction::ManualCompact(sub_id));
+    }
+
+    if !state.pending_input.is_empty() {
+        return Some(FollowUpTurnAction::PendingInput);
+    }
+
+    if state.pending_user_input.is_empty() {
+        None
+    } else {
+        Some(FollowUpTurnAction::QueuedUserInput(
+            state.pending_user_input.remove(0),
+        ))
+    }
+}
+
 /// Buffers partial turn progress produced during a single HTTP streaming attempt.
 /// This is not recorded to persistent history. It is only used to seed retries
 /// when the SSE stream disconnects mid‑turn.
@@ -240,9 +289,7 @@ pub(super) struct AccountUsageContext {
 
 pub(super) fn account_usage_context(sess: &Session) -> Option<AccountUsageContext> {
     let code_home = sess.client.code_home().to_path_buf();
-    let account_id = auth_accounts::get_active_account_id(&code_home)
-        .ok()
-        .flatten()?;
+    let account_id = auth_accounts::get_active_account_id(&code_home).ok().flatten()?;
     let plan = auth_accounts::find_account(&code_home, &account_id)
         .ok()
         .flatten()
@@ -278,19 +325,104 @@ pub(super) fn format_retry_eta(retry_after: &RetryAfter) -> Option<String> {
     Some(formatted)
 }
 
-pub(super) fn is_connectivity_error(err: &CodeErr) -> bool {
+pub(super) fn is_connectivity_error(err: &CodexErr) -> bool {
     match err {
-        CodeErr::Reqwest(e) => e.is_connect() || e.is_timeout() || e.is_request(),
-        CodeErr::Stream(msg, _, _) => {
+        CodexErr::Reqwest(e) => e.is_connect() || e.is_timeout() || e.is_request(),
+        CodexErr::Stream(msg, _, _) => {
             let lower = msg.to_ascii_lowercase();
-            msg.starts_with("[transport]")
+            (msg.starts_with("[transport]")
+                || lower.contains("transport")
                 || lower.contains("network")
                 || lower.contains("connection")
                 || lower.contains("connectivity")
-                || lower.contains("timeout")
-                || lower.contains("transport")
+                || lower.contains("timeout"))
+                && !lower.contains("context window")
+                && !lower.contains("context length")
+                && !lower.contains("usage limit")
+                && !lower.contains("usage_not_included")
+                && !lower.contains("quota exceeded")
         }
         _ => false,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::is_connectivity_error;
+    use super::{FollowUpTurnAction, QueuedUserInput, State, take_follow_up_turn_action};
+    use crate::error::CodexErr;
+    use code_protocol::models::{ContentItem, ResponseInputItem};
+
+    fn developer_input(text: &str) -> ResponseInputItem {
+        ResponseInputItem::Message {
+            role: "developer".to_string(),
+            content: vec![ContentItem::InputText {
+                text: text.to_string(),
+            }],
+        }
+    }
+
+    #[test]
+    fn context_overflow_transport_stream_is_not_connectivity() {
+        let err = CodexErr::Stream(
+            "[transport] Transport error: stream disconnected before completion: Your input exceeds the context window of this model. Please adjust your input and try again.".to_string(),
+            None,
+            None,
+        );
+
+        assert!(!is_connectivity_error(&err));
+    }
+
+    #[test]
+    fn network_stream_is_connectivity() {
+        let err = CodexErr::Stream(
+            "[transport] network timeout while connecting to api".to_string(),
+            None,
+            None,
+        );
+
+        assert!(is_connectivity_error(&err));
+    }
+
+    #[test]
+    fn follow_up_turn_action_prioritizes_post_turn_input() {
+        let mut state = State::default();
+        state.pending_post_turn_input.push(developer_input("post-turn"));
+        state.pending_manual_compacts.push_back("compact-1".to_string());
+        state.pending_input.push(developer_input("pending"));
+        state.pending_user_input.push(QueuedUserInput {
+            submission_id: "queued-1".to_string(),
+            response_item: developer_input("queued"),
+            core_items: vec![],
+        });
+
+        let action = take_follow_up_turn_action(&mut state).expect("follow-up action");
+        assert!(matches!(action, FollowUpTurnAction::PostTurnPendingInput));
+        assert!(state.pending_post_turn_input.is_empty());
+        assert_eq!(state.pending_input.len(), 2);
+        assert_eq!(state.pending_manual_compacts.len(), 1);
+        assert_eq!(state.pending_user_input.len(), 1);
+    }
+
+    #[test]
+    fn follow_up_turn_action_preserves_queued_user_input_after_post_turn_input() {
+        let mut state = State::default();
+        state.pending_post_turn_input.push(developer_input("post-turn"));
+        state.pending_user_input.push(QueuedUserInput {
+            submission_id: "queued-1".to_string(),
+            response_item: developer_input("queued"),
+            core_items: vec![],
+        });
+
+        let first = take_follow_up_turn_action(&mut state).expect("post-turn action");
+        assert!(matches!(first, FollowUpTurnAction::PostTurnPendingInput));
+        assert_eq!(state.pending_user_input.len(), 1);
+
+        state.pending_input.clear();
+
+        let second = take_follow_up_turn_action(&mut state).expect("queued user action");
+        assert!(matches!(second, FollowUpTurnAction::QueuedUserInput(_)));
+        assert!(state.pending_user_input.is_empty());
     }
 }
 
@@ -329,6 +461,7 @@ pub(crate) struct Session {
     pub(super) _writable_roots: Vec<PathBuf>,
     pub(super) disable_response_storage: bool,
     pub(super) tools_config: ToolsConfig,
+    pub(super) dynamic_tools: Vec<DynamicToolSpec>,
 
     /// Manager for external MCP servers/tools.
     pub(super) mcp_connection_manager: McpConnectionManager,
@@ -338,6 +471,9 @@ pub(crate) struct Session {
 
     /// Configuration for available agent models
     pub(super) agents: Vec<crate::config_types::AgentConfig>,
+
+    /// Maximum allowed nesting depth for agent-spawned agent runs.
+    pub(super) subagent_max_depth: i32,
 
     /// Default reasoning effort for spawned agents and model calls in this session
     pub(super) model_reasoning_effort: ReasoningEffortConfig,
@@ -374,8 +510,6 @@ pub(crate) struct Session {
     pub(super) env_ctx_v2: bool,
     pub(super) retention_config: crate::config_types::RetentionConfig,
     pub(super) model_descriptions: Option<String>,
-
-    pub(super) zap_dispatcher: std::sync::Arc<hanzo_zap::ToolDispatcher>,
 }
 pub(super) struct HookGuard<'a> {
     flag: &'a AtomicBool,
@@ -383,7 +517,8 @@ pub(super) struct HookGuard<'a> {
 
 impl<'a> HookGuard<'a> {
     pub(super) fn try_acquire(flag: &'a AtomicBool) -> Option<Self> {
-        flag.compare_exchange(false, true, Ordering::SeqCst, Ordering::SeqCst)
+        flag
+            .compare_exchange(false, true, Ordering::SeqCst, Ordering::SeqCst)
             .ok()
             .map(|_| Self { flag })
     }
@@ -404,30 +539,24 @@ pub(crate) struct ToolCallCtx {
 }
 
 impl ToolCallCtx {
-    pub fn new(
-        sub_id: String,
-        call_id: String,
-        seq_hint: Option<u64>,
-        output_index: Option<u32>,
-    ) -> Self {
-        Self {
-            sub_id,
-            call_id,
-            seq_hint,
-            output_index,
-        }
+    pub fn new(sub_id: String, call_id: String, seq_hint: Option<u64>, output_index: Option<u32>) -> Self {
+        Self { sub_id, call_id, seq_hint, output_index }
     }
 
     pub fn order_meta(&self, req_ordinal: u64) -> crate::protocol::OrderMeta {
-        crate::protocol::OrderMeta {
-            request_ordinal: req_ordinal,
-            output_index: self.output_index,
-            sequence_number: self.seq_hint,
-        }
+        crate::protocol::OrderMeta { request_ordinal: req_ordinal, output_index: self.output_index, sequence_number: self.seq_hint }
     }
 }
 
 impl Session {
+    pub(crate) fn client(&self) -> &crate::ModelClient {
+        &self.client
+    }
+
+    pub(crate) fn remote_models_manager(&self) -> Option<&Arc<RemoteModelsManager>> {
+        self.remote_models_manager.as_ref()
+    }
+
     #[allow(dead_code)]
     pub(crate) fn get_writable_roots(&self) -> &[PathBuf] {
         &self._writable_roots
@@ -437,8 +566,19 @@ impl Session {
         self.approval_policy
     }
 
+    pub(crate) fn is_dynamic_tool(&self, name: &str) -> bool {
+        self.dynamic_tools.iter().any(|tool| tool.name == name)
+    }
+
     fn next_background_sequence(&self, sub_id: &str) -> u64 {
         let mut state = self.state.lock().unwrap();
+        if state.background_seq_by_sub_id.len() > MAX_BACKGROUND_SEQ_SUB_IDS {
+            trim_sub_id_sequence_map(
+                &mut state.background_seq_by_sub_id,
+                MAX_BACKGROUND_SEQ_SUB_IDS,
+                "background_seq_by_sub_id",
+            );
+        }
         let entry = state
             .background_seq_by_sub_id
             .entry(sub_id.to_string())
@@ -477,7 +617,7 @@ impl Session {
         &self.cwd
     }
 
-    pub(super) async fn apply_remote_model_overrides(&self, prompt: &mut Prompt) {
+    pub(super) async fn apply_remote_model_overrides(&self, prompt: &mut Prompt) -> bool {
         let configured_model = self.client.get_model();
 
         if prompt.model_override.is_none() {
@@ -489,12 +629,11 @@ impl Session {
                     .and_then(|mgr| mgr.auth())
                     .map(|auth| auth.mode);
 
-                let default_model_slug =
-                    if auth_mode == Some(hanzo_app_server_protocol::AuthMode::ChatGPT) {
-                        crate::config::GPT_5_CODEX_MEDIUM_MODEL
-                    } else {
-                        crate::config::OPENAI_DEFAULT_MODEL
-                    };
+                let default_model_slug = if auth_mode.is_some_and(code_app_server_protocol::AuthMode::is_chatgpt) {
+                    crate::config::GPT_5_CODEX_MEDIUM_MODEL
+                } else {
+                    crate::config::OPENAI_DEFAULT_MODEL
+                };
 
                 if let Some(remote) = self.remote_models_manager.as_ref()
                     && configured_model.eq_ignore_ascii_case(default_model_slug)
@@ -509,29 +648,44 @@ impl Session {
             }
         }
 
+        let mut used_fallback_model_metadata = false;
         if prompt.model_family_override.is_none() {
             let model_slug = prompt
                 .model_override
                 .as_deref()
                 .unwrap_or(configured_model.as_str());
-            let base_family = find_family_for_model(model_slug)
-                .unwrap_or_else(|| derive_default_model_family(model_slug));
+            let base_family = if let Some(family) = find_family_for_model(model_slug) {
+                family
+            } else {
+                used_fallback_model_metadata = true;
+                derive_default_model_family(model_slug)
+            };
+            let personality = self.client.model_personality();
 
             let family = if let Some(remote) = self.remote_models_manager.as_ref() {
-                remote.apply_remote_overrides(model_slug, base_family).await
+                if remote.has_model_slug(model_slug).await {
+                    used_fallback_model_metadata = false;
+                }
+                remote
+                    .apply_remote_overrides_with_personality(
+                        model_slug,
+                        base_family,
+                        personality,
+                    )
+                    .await
             } else {
                 base_family
             };
             prompt.model_family_override = Some(family);
         }
+        used_fallback_model_metadata
     }
 
     pub(crate) async fn record_bridge_event(&self, text: String) {
         let message = ResponseItem::Message {
             id: None,
             role: "developer".to_string(),
-            content: vec![ContentItem::InputText { text }],
-        };
+            content: vec![ContentItem::InputText { text }], end_turn: None, phase: None};
         self.record_conversation_items(&[message]).await;
     }
 
@@ -617,7 +771,7 @@ impl Session {
     ) -> MaybeApplyPatchVerified {
         // Upstream parser no longer needs a filesystem; it is pure and sync.
         let _ = self.client_tools.as_ref();
-        hanzo_apply_patch::maybe_parse_apply_patch_verified(argv, cwd)
+        code_apply_patch::maybe_parse_apply_patch_verified(argv, cwd)
     }
 
     // ────────────────────────────
@@ -698,22 +852,17 @@ impl Session {
         };
 
         let pending_browser_screenshots = self.pending_browser_screenshots.lock().unwrap().len();
-        let (
-            token_usage_input_tokens,
-            token_usage_cached_input_tokens,
-            token_usage_output_tokens,
-            token_usage_reasoning_output_tokens,
-            token_usage_total_tokens,
-        ) = match token_usage {
-            Some(usage) => (
-                Some(usage.input_tokens),
-                Some(usage.cached_input_tokens),
-                Some(usage.output_tokens),
-                Some(usage.reasoning_output_tokens),
-                Some(usage.total_tokens),
-            ),
-            None => (None, None, None, None, None),
-        };
+        let (token_usage_input_tokens, token_usage_cached_input_tokens, token_usage_output_tokens, token_usage_reasoning_output_tokens, token_usage_total_tokens) =
+            match token_usage {
+                Some(usage) => (
+                    Some(usage.input_tokens),
+                    Some(usage.cached_input_tokens),
+                    Some(usage.output_tokens),
+                    Some(usage.reasoning_output_tokens),
+                    Some(usage.total_tokens),
+                ),
+                None => (None, None, None, None, None),
+            };
         let payload = TurnLatencyPayload {
             phase: TurnLatencyPhase::RequestCompleted,
             attempt: attempt_req,
@@ -848,6 +997,25 @@ impl Session {
         state.turn_scratchpad = None;
     }
 }
+
+fn trim_sub_id_sequence_map(
+    map: &mut HashMap<String, u64>,
+    cap: usize,
+    label: &str,
+) {
+    while map.len() > cap {
+        let Some(key) = map.keys().next().cloned() else {
+            break;
+        };
+        map.remove(&key);
+    }
+    warn!(
+        label,
+        cap,
+        retained = map.len(),
+        "trimmed long-lived sequence map to cap memory growth"
+    );
+}
 impl Session {
     pub(super) fn set_task(&self, agent: AgentTask) {
         let mut state = self.state.lock().unwrap();
@@ -857,7 +1025,7 @@ impl Session {
         state.current_task = Some(agent);
     }
 
-    pub async fn start_pending_only_turn_if_idle(self: &Arc<Self>) -> bool {
+    pub(super) async fn start_internal_pending_only_turn(self: &Arc<Self>, sentinel: &str) -> bool {
         let should_start = {
             let state = self.state.lock().unwrap();
             state.current_task.is_none()
@@ -871,11 +1039,35 @@ impl Session {
         let turn_context = self.make_turn_context();
         let sub_id = self.next_internal_sub_id();
         let sentinel_input = vec![InputItem::Text {
-            text: PENDING_ONLY_SENTINEL.to_string(),
+            text: sentinel.to_string(),
         }];
         let agent = AgentTask::spawn(Arc::clone(self), turn_context, sub_id, sentinel_input);
         self.set_task(agent);
         true
+    }
+
+    pub async fn start_pending_only_turn_if_idle(self: &Arc<Self>) -> bool {
+        self.start_internal_pending_only_turn(PENDING_ONLY_SENTINEL).await
+    }
+
+    pub async fn start_post_turn_pending_only_turn_if_idle(self: &Arc<Self>) -> bool {
+        let should_start = {
+            let mut state = self.state.lock().unwrap();
+            if state.current_task.is_some() || state.pending_post_turn_input.is_empty() {
+                false
+            } else {
+                let mut post_turn_input = std::mem::take(&mut state.pending_post_turn_input);
+                state.pending_input.append(&mut post_turn_input);
+                true
+            }
+        };
+
+        if !should_start {
+            return false;
+        }
+
+        self.start_internal_pending_only_turn(POST_TURN_PENDING_ONLY_SENTINEL)
+            .await
     }
 
     pub fn replace_history(&self, items: Vec<ResponseItem>) {
@@ -885,11 +1077,23 @@ impl Session {
 
     pub fn remove_task(&self, sub_id: &str) {
         let mut state = self.state.lock().unwrap();
-        if let Some(agent) = &state.current_task
-            && agent.sub_id == sub_id
-        {
-            state.current_task.take();
+        if let Some(agent) = &state.current_task {
+            if agent.sub_id == sub_id {
+                state.current_task.take();
+            }
         }
+    }
+
+    pub fn enqueue_post_turn_item(&self, item: ResponseInputItem) -> bool {
+        let mut state = self.state.lock().unwrap();
+        let should_start_turn = state.current_task.is_none();
+        state.pending_post_turn_input.push(item);
+        should_start_turn
+    }
+
+    pub(super) fn take_follow_up_turn_action(&self) -> Option<FollowUpTurnAction> {
+        let mut state = self.state.lock().unwrap();
+        take_follow_up_turn_action(&mut state)
     }
 
     pub fn has_running_task(&self) -> bool {
@@ -910,6 +1114,42 @@ impl Session {
     pub(super) fn wait_interrupt_snapshot(&self) -> (u64, Option<WaitInterruptReason>) {
         let state = self.state.lock().unwrap();
         (state.wait_interrupt_epoch, state.wait_interrupt_reason)
+    }
+
+    pub(super) fn merge_mcp_tool_selection(&self, tool_names: Vec<String>) -> Vec<String> {
+        let mut state = self.state.lock().unwrap();
+        for tool_name in tool_names {
+            if !state.selected_mcp_tools.iter().any(|name| name == &tool_name) {
+                state.selected_mcp_tools.push(tool_name);
+            }
+        }
+        state.selected_mcp_tools.sort();
+        state.selected_mcp_tools.clone()
+    }
+
+    pub(super) fn set_mcp_tool_selection(&self, tool_names: Vec<String>) {
+        let mut state = self.state.lock().unwrap();
+        state.selected_mcp_tools.clear();
+        for tool_name in tool_names {
+            if !state.selected_mcp_tools.iter().any(|name| name == &tool_name) {
+                state.selected_mcp_tools.push(tool_name);
+            }
+        }
+        state.selected_mcp_tools.sort();
+    }
+
+    pub(super) fn get_mcp_tool_selection(&self) -> Option<Vec<String>> {
+        let state = self.state.lock().unwrap();
+        if state.selected_mcp_tools.is_empty() {
+            None
+        } else {
+            Some(state.selected_mcp_tools.clone())
+        }
+    }
+
+    pub(super) fn clear_mcp_tool_selection(&self) {
+        let mut state = self.state.lock().unwrap();
+        state.selected_mcp_tools.clear();
     }
 
     pub(super) fn enforce_user_message_limits(
@@ -953,9 +1193,7 @@ impl Session {
             .and_then(|dir| write_agent_file(&dir, &filename, &aggregated))
         {
             Ok(path) => format!("\n\n[Full output saved to: {}]", path.display()),
-            Err(e) => format!(
-                "\n\n[Full output was too large and truncation applied; failed to save file: {e}]"
-            ),
+            Err(e) => format!("\n\n[Full output was too large and truncation applied; failed to save file: {e}]")
         };
 
         let original = std::mem::take(content);
@@ -1021,15 +1259,6 @@ impl Session {
         *content = new_content;
     }
 
-    pub fn pop_next_queued_user_input(&self) -> Option<QueuedUserInput> {
-        let mut state = self.state.lock().unwrap();
-        if state.pending_user_input.is_empty() {
-            None
-        } else {
-            Some(state.pending_user_input.remove(0))
-        }
-    }
-
     /// Enqueue a response item that should be surfaced to the model at the start of the
     /// next turn. Returns `true` if no agent is currently running and a new turn should be
     /// scheduled immediately.
@@ -1074,33 +1303,43 @@ impl Session {
     }
 
     pub(super) fn compact_prompt_text(&self) -> String {
-        crate::codex::compact::resolve_compact_prompt_text(self.compact_prompt_override.as_deref())
+        crate::codex::compact::resolve_compact_prompt_text(
+            self.compact_prompt_override.as_deref(),
+        )
     }
 
     pub async fn request_command_approval(
         &self,
         sub_id: String,
         call_id: String,
+        approval_id: Option<String>,
         command: Vec<String>,
         cwd: PathBuf,
         reason: Option<String>,
+        network_approval_context: Option<crate::protocol::NetworkApprovalContext>,
+        additional_permissions: Option<code_protocol::models::PermissionProfile>,
     ) -> oneshot::Receiver<ReviewDecision> {
         let (tx_approve, rx_approve) = oneshot::channel();
+        let effective_approval_id = approval_id.clone().unwrap_or_else(|| call_id.clone());
         let event = self.make_event(
             &sub_id,
             EventMsg::ExecApprovalRequest(ExecApprovalRequestEvent {
                 call_id: call_id.clone(),
+                approval_id,
+                turn_id: sub_id.clone(),
                 command,
                 cwd,
                 reason,
+                network_approval_context,
+                additional_permissions,
             }),
         );
         let _ = self.tx_event.send(event).await;
         {
             let mut state = self.state.lock().unwrap();
-            // Track pending approval by call_id (unique per request) rather than sub_id
+            // Track pending approval by approval id (or call_id fallback) rather than sub_id
             // so parallel approvals in the same turn do not clobber each other.
-            state.pending_approvals.insert(call_id, tx_approve);
+            state.pending_approvals.insert(effective_approval_id, tx_approve);
         }
         rx_approve
     }
@@ -1143,6 +1382,60 @@ impl Session {
         }
     }
 
+    pub fn register_pending_user_input(
+        &self,
+        turn_id: String,
+    ) -> std::result::Result<oneshot::Receiver<crate::protocol::RequestUserInputResponse>, String> {
+        let (tx, rx) = oneshot::channel();
+        let mut state = self.state.lock().unwrap();
+        if state.pending_request_user_input.contains_key(&turn_id) {
+            return Err(format!("request_user_input already pending for turn_id={turn_id}"));
+        }
+        state.pending_request_user_input.insert(turn_id, tx);
+        Ok(rx)
+    }
+
+    pub fn notify_user_input_response(
+        &self,
+        turn_id: &str,
+        response: crate::protocol::RequestUserInputResponse,
+    ) {
+        let pending = {
+            let mut state = self.state.lock().unwrap();
+            state.pending_request_user_input.remove(turn_id)
+        };
+        if let Some(tx) = pending {
+            let _ = tx.send(response);
+        } else {
+            tracing::warn!("no pending request_user_input found for turn_id={turn_id}");
+        }
+    }
+
+    pub fn register_pending_dynamic_tool(
+        &self,
+        call_id: String,
+    ) -> std::result::Result<oneshot::Receiver<DynamicToolResponse>, String> {
+        let (tx, rx) = oneshot::channel();
+        let mut state = self.state.lock().unwrap();
+        if state.pending_dynamic_tools.contains_key(&call_id) {
+            return Err(format!("dynamic tool already pending for call_id={call_id}"));
+        }
+        state.pending_dynamic_tools.insert(call_id, tx);
+        Ok(rx)
+    }
+
+    pub fn notify_dynamic_tool_response(&self, call_id: &str, response: DynamicToolResponse) {
+        let pending = {
+            let mut state = self.state.lock().unwrap();
+            state.pending_dynamic_tools.remove(call_id)
+        };
+        if let Some(tx) = pending {
+            let _ = tx.send(response);
+        } else {
+            tracing::warn!("no pending dynamic tool found for call_id={call_id}");
+        }
+    }
+
     pub fn add_approved_command(&self, pattern: ApprovedCommandPattern) {
         let mut state = self.state.lock().unwrap();
         state.approved_commands.insert(pattern);
@@ -1155,6 +1448,7 @@ impl Session {
         self.record_state_snapshot(items).await;
 
         self.state.lock().unwrap().history.record_items(items);
+
     }
 
     /// Clean up old screenshots and system status messages from conversation history
@@ -1235,10 +1529,10 @@ impl Session {
             let guard = self.rollout.lock().unwrap();
             guard.as_ref().cloned()
         };
-        if let Some(rec) = recorder
-            && let Err(e) = rec.record_items(items).await
-        {
-            error!("failed to record rollout items: {e:#}");
+        if let Some(rec) = recorder {
+            if let Err(e) = rec.record_items(items).await {
+                error!("failed to record rollout items: {e:#}");
+            }
         }
     }
 
@@ -1283,16 +1577,16 @@ impl Session {
 
         // Helper closure to detect legacy XML environment context items
         let is_legacy_env_context = |item: &ResponseItem| -> bool {
-            if let ResponseItem::Message { role, content, .. } = item
-                && role == "user"
-            {
-                return content.iter().any(|c| {
-                    if let ContentItem::InputText { text } = c {
-                        text.contains("<environment_context>")
-                    } else {
-                        false
-                    }
-                });
+            if let ResponseItem::Message { role, content, .. } = item {
+                if role == "user" {
+                    return content.iter().any(|c| {
+                        if let ContentItem::InputText { text } = c {
+                            text.contains("<environment_context>")
+                        } else {
+                            false
+                        }
+                    });
+                }
             }
             false
         };
@@ -1310,7 +1604,13 @@ impl Session {
                 true
             })
             .map(|item| {
-                if let ResponseItem::Message { id, role, content } = item {
+                if let ResponseItem::Message {
+                    id,
+                    role,
+                    content,
+                    ..
+                } = item
+                {
                     if role == "user" {
                         // Filter out ephemeral content from user messages
                         let mut filtered_content: Vec<ContentItem> = Vec::new();
@@ -1325,7 +1625,9 @@ impl Session {
                                     skip_next_image = true;
                                     tracing::info!("Filtering out ephemeral marker: {}", text);
                                 }
-                                ContentItem::InputImage { .. } if skip_next_image => {
+                                ContentItem::InputImage { .. }
+                                    if skip_next_image =>
+                                {
                                     // Skip this image as it follows an ephemeral marker
                                     skip_next_image = false;
                                     tracing::info!("Filtering out ephemeral image from history");
@@ -1340,11 +1642,16 @@ impl Session {
                         ResponseItem::Message {
                             id,
                             role,
-                            content: filtered_content,
-                        }
+                            content: filtered_content, end_turn: None, phase: None}
                     } else {
                         // Keep assistant messages unchanged
-                        ResponseItem::Message { id, role, content }
+                        ResponseItem::Message {
+                            id,
+                            role,
+                            content,
+                            end_turn: None,
+                            phase: None,
+                        }
                     }
                 } else {
                     item
@@ -1377,7 +1684,7 @@ impl Session {
             .get_auth_manager()
             .and_then(|manager| manager.auth())
             .map(|auth| auth.mode);
-        let sanitize_encrypted_reasoning = !matches!(current_auth_mode, Some(AuthMode::ChatGPT));
+        let sanitize_encrypted_reasoning = !current_auth_mode.is_some_and(|mode| mode.is_chatgpt());
 
         if sanitize_encrypted_reasoning {
             let mut stripped = 0usize;
@@ -1437,7 +1744,13 @@ impl Session {
     pub(crate) fn build_initial_context(&self, turn_context: &TurnContext) -> Vec<ResponseItem> {
         let mut items = Vec::new();
         if let Some(user_instructions) = turn_context.user_instructions.as_deref() {
-            items.push(UserInstructions::new(user_instructions.to_string()).into());
+            items.push(
+                UserInstructions {
+                    text: user_instructions.to_string(),
+                    directory: turn_context.cwd.to_string_lossy().into_owned(),
+                }
+                .into(),
+            );
         }
 
         let env_context = EnvironmentContext::new(
@@ -1477,8 +1790,8 @@ impl Session {
             let stream = state.context_stream_ids.env_stream_id(self.id);
             let result = match state.environment_context_tracker.emit_response_items(
                 env_context,
-                git_branch,
-                reasoning_effort,
+                git_branch.clone(),
+                reasoning_effort.clone(),
                 Some(stream.as_str()),
             ) {
                 Ok(Some((emission, items))) => {
@@ -1487,12 +1800,8 @@ impl Session {
 
                     match &emission {
                         EnvironmentContextEmission::Full { snapshot, .. } => {
-                            if let Err(err) =
-                                state.context_timeline.add_baseline_once(snapshot.clone())
-                            {
-                                tracing::trace!(
-                                    "env_ctx_v2: baseline already set in context timeline: {err}"
-                                );
+                            if let Err(err) = state.context_timeline.add_baseline_once(snapshot.clone()) {
+                                tracing::trace!("env_ctx_v2: baseline already set in context timeline: {err}");
                             }
                             match state.context_timeline.record_snapshot(snapshot.clone()) {
                                 Ok(true) => {
@@ -1502,31 +1811,21 @@ impl Session {
                                     crate::telemetry::global_telemetry().record_dedup_drop();
                                 }
                                 Err(err) => {
-                                    tracing::trace!(
-                                        "env_ctx_v2: failed to record baseline snapshot: {err}"
-                                    );
+                                    tracing::trace!("env_ctx_v2: failed to record baseline snapshot: {err}");
                                 }
                             }
                         }
-                        EnvironmentContextEmission::Delta {
-                            sequence,
-                            delta,
-                            snapshot,
-                        } => {
-                            if state.context_timeline.baseline().is_none()
-                                && let Err(err) =
-                                    state.context_timeline.add_baseline_once(snapshot.clone())
-                            {
-                                tracing::warn!(
-                                    "env_ctx_v2: failed to seed baseline before delta: {err}"
-                                );
+                        EnvironmentContextEmission::Delta { sequence, delta, snapshot } => {
+                            if state.context_timeline.baseline().is_none() {
+                                if let Err(err) = state.context_timeline.add_baseline_once(snapshot.clone()) {
+                                    tracing::warn!("env_ctx_v2: failed to seed baseline before delta: {err}");
+                                }
                             }
-                            if let Err(err) =
-                                state.context_timeline.apply_delta(*sequence, delta.clone())
+                            if let Err(err) = state
+                                .context_timeline
+                                .apply_delta(*sequence, delta.clone())
                             {
-                                tracing::warn!(
-                                    "env_ctx_v2: failed to apply delta to timeline: {err}"
-                                );
+                                tracing::warn!("env_ctx_v2: failed to apply delta to timeline: {err}");
                                 if matches!(err, crate::context_timeline::TimelineError::DeltaSequenceOutOfOrder { .. }) {
                                     crate::telemetry::global_telemetry().record_delta_gap();
                                 }
@@ -1585,7 +1884,8 @@ impl Session {
 
         trace!(
             "env_ctx_v2: emitted environment_context message (seq={}, bytes={})",
-            sequence, bytes_sent
+            sequence,
+            bytes_sent
         );
 
         if *crate::flags::CTX_UI {
@@ -1624,7 +1924,11 @@ impl Session {
         }
     }
 
-    fn emit_env_context_event(&self, stream_id: &str, emission: &EnvironmentContextEmission) {
+    fn emit_env_context_event(
+        &self,
+        stream_id: &str,
+        emission: &EnvironmentContextEmission,
+    ) {
         use crate::protocol::OrderMeta;
 
         let sequence = emission.sequence();
@@ -1713,16 +2017,13 @@ impl Session {
                     );
                 }
                 RolloutItem::Event(recorded_event) => {
-                    if let hanzo_protocol::protocol::EventMsg::UserMessage(user_msg_event) =
-                        &recorded_event.msg
-                    {
+                    if let code_protocol::protocol::EventMsg::UserMessage(user_msg_event) = &recorded_event.msg {
                         let response_item = ResponseItem::Message {
                             id: Some(recorded_event.id.clone()),
                             role: "user".to_string(),
                             content: vec![ContentItem::InputText {
                                 text: user_msg_event.message.clone(),
-                            }],
-                        };
+                            }], end_turn: None, phase: None};
                         process_rollout_env_item(&mut replay_ctx, &response_item);
                         history.push(response_item);
                     }
@@ -1731,20 +2032,18 @@ impl Session {
             }
         }
 
-        if replay_ctx.timeline.baseline().is_none()
-            && let Some(snapshot) = replay_ctx.legacy_baseline.clone()
-        {
-            if let Err(err) = replay_ctx.timeline.add_baseline_once(snapshot.clone()) {
-                tracing::warn!("env_ctx_v2: failed to map legacy status to baseline: {err}");
-            }
-            match replay_ctx.timeline.record_snapshot(snapshot.clone()) {
-                Ok(true) => crate::telemetry::global_telemetry().record_snapshot_commit(),
-                Ok(false) => crate::telemetry::global_telemetry().record_dedup_drop(),
-                Err(err) => {
-                    tracing::warn!("env_ctx_v2: failed to record legacy baseline snapshot: {err}")
+        if replay_ctx.timeline.baseline().is_none() {
+            if let Some(snapshot) = replay_ctx.legacy_baseline.clone() {
+                if let Err(err) = replay_ctx.timeline.add_baseline_once(snapshot.clone()) {
+                    tracing::warn!("env_ctx_v2: failed to map legacy status to baseline: {err}");
                 }
+                match replay_ctx.timeline.record_snapshot(snapshot.clone()) {
+                    Ok(true) => crate::telemetry::global_telemetry().record_snapshot_commit(),
+                    Ok(false) => crate::telemetry::global_telemetry().record_dedup_drop(),
+                    Err(err) => tracing::warn!("env_ctx_v2: failed to record legacy baseline snapshot: {err}"),
+                }
+                replay_ctx.last_snapshot = Some(snapshot);
             }
-            replay_ctx.last_snapshot = Some(snapshot);
         }
 
         let restored_snapshot = replay_ctx.last_snapshot.clone();
@@ -1785,13 +2084,15 @@ impl Session {
     pub fn enqueue_manual_compact(&self, sub_id: String) -> bool {
         let mut state = self.state.lock().unwrap();
         let was_empty = state.pending_manual_compacts.is_empty();
+        while state.pending_manual_compacts.len() >= MAX_PENDING_MANUAL_COMPACTS {
+            state.pending_manual_compacts.pop_front();
+            warn!(
+                cap = MAX_PENDING_MANUAL_COMPACTS,
+                "dropped oldest pending manual compact request to cap queue growth"
+            );
+        }
         state.pending_manual_compacts.push_back(sub_id);
         was_empty
-    }
-
-    pub fn dequeue_manual_compact(&self) -> Option<String> {
-        let mut state = self.state.lock().unwrap();
-        state.pending_manual_compacts.pop_front()
     }
 
     pub fn get_pending_input(&self) -> Vec<ResponseInputItem> {
@@ -1852,7 +2153,7 @@ impl Session {
         tool: &str,
         arguments: Option<serde_json::Value>,
         timeout: Option<Duration>,
-    ) -> anyhow::Result<CallToolResult> {
+    ) -> anyhow::Result<mcp_types::CallToolResult> {
         self.mcp_connection_manager
             .call_tool(server, tool, arguments, timeout)
             .await
@@ -1865,6 +2166,8 @@ impl Session {
 
         let mut state = self.state.lock().unwrap();
         state.pending_approvals.clear();
+        state.pending_request_user_input.clear();
+        state.pending_dynamic_tools.clear();
         // Do not clear `pending_input` here. When a user submits a new message
         // immediately after an interrupt, it may have been routed to
         // `pending_input` by an earlier code path. Clearing it would drop the
@@ -2031,11 +2334,9 @@ pub(crate) fn prune_history_items(
     for &user_idx in real_user_messages.iter().rev().take(2) {
         for &status_idx in status_messages.iter() {
             if status_idx > user_idx {
-                if let Some(ResponseItem::Message { content, .. }) = current_items.get(status_idx) {
-                    if content
-                        .iter()
-                        .any(|c| matches!(c, ContentItem::InputImage { .. }))
-                    {
+                if let Some(ResponseItem::Message { content, .. }) = current_items.get(status_idx)
+                {
+                    if content.iter().any(|c| matches!(c, ContentItem::InputImage { .. })) {
                         screenshots_to_keep.insert(status_idx);
                         break;
                     }
@@ -2104,9 +2405,7 @@ pub(crate) fn prune_history_items(
     (items_to_keep, stats)
 }
 
-fn prune_history_items_owned(
-    current_items: Vec<ResponseItem>,
-) -> (Vec<ResponseItem>, CleanupStats) {
+fn prune_history_items_owned(current_items: Vec<ResponseItem>) -> (Vec<ResponseItem>, CleanupStats) {
     let mut real_user_messages = Vec::new();
     let mut status_messages = Vec::new();
     let mut env_baselines = Vec::new();
@@ -2199,14 +2498,14 @@ fn prune_history_items_owned(
     let mut screenshots_to_keep = std::collections::HashSet::new();
     for &user_idx in real_user_messages.iter().rev().take(2) {
         for &status_idx in status_messages.iter() {
-            if status_idx > user_idx
-                && let Some(ResponseItem::Message { content, .. }) = current_items.get(status_idx)
-                && content
-                    .iter()
-                    .any(|c| matches!(c, ContentItem::InputImage { .. }))
-            {
-                screenshots_to_keep.insert(status_idx);
-                break;
+            if status_idx > user_idx {
+                if let Some(ResponseItem::Message { content, .. }) = current_items.get(status_idx)
+                {
+                    if content.iter().any(|c| matches!(c, ContentItem::InputImage { .. })) {
+                        screenshots_to_keep.insert(status_idx);
+                        break;
+                    }
+                }
             }
         }
     }
@@ -2287,6 +2586,7 @@ impl State {
             // do not reset provider ordering mid-session.
             request_ordinal: self.request_ordinal,
             background_seq_by_sub_id: self.background_seq_by_sub_id.clone(),
+            selected_mcp_tools: self.selected_mcp_tools.clone(),
             dry_run_guard: self.dry_run_guard.clone(),
             next_internal_sub_id: self.next_internal_sub_id,
             context_timeline: self.context_timeline.clone(),

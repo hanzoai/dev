@@ -40,6 +40,7 @@ pub async fn run_conversation_loop(
                         command,
                         cwd,
                         call_id,
+                        approval_id,
                         reason: _,
                     }) => {
                         handle_exec_approval_request(
@@ -51,6 +52,7 @@ pub async fn run_conversation_loop(
                             request_id_str.clone(),
                             event.id.clone(),
                             call_id,
+                            approval_id,
                         )
                         .await;
                         continue;

@@ -5,67 +5,65 @@ use crate::app_event_sender::AppEventSender;
 use crate::auto_drive_style::AutoDriveVariant;
 use crate::bottom_pane::chat_composer::ComposerRenderMode;
 use crate::chatwidget::BackgroundOrderTicket;
-use crate::status_indicator_widget::StatusIndicatorWidget;
+use crate::user_approval_widget::{ApprovalRequest, UserApprovalWidget};
 use crate::thread_spawner;
-use crate::user_approval_widget::ApprovalRequest;
-use crate::user_approval_widget::UserApprovalWidget;
-use crate::util::buffer::fill_rect;
 pub(crate) use bottom_pane_view::BottomPaneView;
 pub(crate) use bottom_pane_view::ConditionalUpdate;
-use crossterm::event::KeyCode;
-use crossterm::event::KeyEvent;
-use crossterm::event::KeyEventKind;
-use hanzo_core::protocol::TokenUsage;
-use hanzo_file_search::FileMatch;
-use hanzo_protocol::custom_prompts::CustomPrompt;
-use hanzo_protocol::skills::Skill;
+use crate::util::buffer::fill_rect;
+use code_protocol::custom_prompts::CustomPrompt;
+use code_protocol::skills::Skill;
+use code_core::protocol::TokenUsage;
+use code_file_search::FileMatch;
+use crossterm::event::{KeyCode, KeyEvent, KeyEventKind};
 use ratatui::buffer::Buffer;
 use ratatui::layout::Rect;
 use ratatui::widgets::WidgetRef;
 use std::time::Duration;
 
-mod account_switch_settings_view;
-pub(crate) mod agent_editor_view;
 mod approval_modal_view;
-#[cfg(feature = "hanzo-fork")]
+#[cfg(feature = "code-fork")]
 mod approval_ui;
 mod auto_coordinator_view;
 mod auto_drive_settings_view;
+mod account_switch_settings_view;
+mod memories_settings_view;
 mod bottom_pane_view;
 mod chat_composer;
 mod chat_composer_history;
-mod command_popup;
-mod custom_prompt_view;
 mod diff_popup;
+mod custom_prompt_view;
+pub(crate) mod prompt_args;
+mod command_popup;
 mod file_search_popup;
-pub mod list_selection_view;
-pub(crate) mod model_selection_view;
 mod paste_burst;
 mod popup_consts;
-pub(crate) mod prompt_args;
+pub(crate) mod agent_editor_view;
+pub(crate) mod model_selection_view;
 mod scroll_state;
 mod selection_popup_common;
-pub(crate) use custom_prompt_view::CustomPromptView;
+pub mod list_selection_view;
 pub(crate) use list_selection_view::SelectionAction;
+pub(crate) use custom_prompt_view::CustomPromptView;
 mod cloud_tasks_view;
 pub(crate) use cloud_tasks_view::CloudTasksView;
-pub mod agents_settings_view;
-mod login_accounts_view;
-pub mod mcp_settings_view;
 pub mod resume_selection_view;
+pub mod agents_settings_view;
+pub mod mcp_settings_view;
+mod login_accounts_view;
 // no direct use of list_selection_view or its items here
-pub mod form_text_field;
-mod notifications_settings_view;
-mod planning_settings_view;
-pub mod prompts_settings_view;
-mod settings_overlay;
-pub mod skills_settings_view;
 mod textarea;
+pub mod form_text_field;
+pub mod prompts_settings_view;
+pub mod skills_settings_view;
 mod theme_selection_view;
-mod undo_timeline_view;
-mod update_settings_view;
-pub(crate) mod validation_settings_view;
+mod planning_settings_view;
 mod verbosity_selection_view;
+pub(crate) mod validation_settings_view;
+mod update_settings_view;
+mod undo_timeline_view;
+mod notifications_settings_view;
+mod settings_overlay;
+mod request_user_input_view;
 pub(crate) use settings_overlay::SettingsSection;
 pub(crate) mod review_settings_view;
 pub mod settings_panel;
@@ -76,45 +74,46 @@ pub(crate) enum CancellationEvent {
     Handled,
 }
 
-pub(crate) use account_switch_settings_view::AccountSwitchSettingsView;
-pub(crate) use auto_coordinator_view::AutoActiveViewModel;
-pub(crate) use auto_coordinator_view::AutoCoordinatorButton;
-pub(crate) use auto_coordinator_view::AutoCoordinatorView;
-pub(crate) use auto_coordinator_view::AutoCoordinatorViewModel;
-pub(crate) use auto_coordinator_view::CountdownState;
-pub(crate) use auto_drive_settings_view::AutoDriveSettingsView;
-pub(crate) use chat_composer::AgentHintLabel;
-pub(crate) use chat_composer::AutoReviewFooterStatus;
-pub(crate) use chat_composer::AutoReviewPhase;
-pub(crate) use chat_composer::ChatComposer;
+pub(crate) use chat_composer::{AgentHintLabel, AutoReviewFooterStatus, AutoReviewPhase, ChatComposer};
 pub(crate) use chat_composer::InputResult;
-pub(crate) use login_accounts_view::LoginAccountsState;
-pub(crate) use login_accounts_view::LoginAccountsView;
-pub(crate) use login_accounts_view::LoginAddAccountState;
-pub(crate) use login_accounts_view::LoginAddAccountView;
+pub(crate) use auto_coordinator_view::{
+    AutoActiveViewModel,
+    AutoCoordinatorButton,
+    AutoCoordinatorView,
+    AutoCoordinatorViewModel,
+    CountdownState,
+};
+pub(crate) use auto_drive_settings_view::AutoDriveSettingsView;
+pub(crate) use account_switch_settings_view::AccountSwitchSettingsView;
+pub(crate) use memories_settings_view::MemoriesSettingsView;
+pub(crate) use login_accounts_view::{
+    LoginAccountsState,
+    LoginAccountsView,
+    LoginAddAccountState,
+    LoginAddAccountView,
+};
 
-use approval_modal_view::ApprovalModalView;
-#[cfg(feature = "hanzo-fork")]
-use approval_ui::ApprovalUi;
-use hanzo_common::model_presets::ModelPreset;
-use hanzo_core::config_types::ReasoningEffort;
-use hanzo_core::config_types::TextVerbosity;
-use hanzo_core::config_types::ThemeName;
-pub(crate) use mcp_settings_view::McpSettingsView;
-pub(crate) use model_selection_view::ModelSelectionTarget;
-pub(crate) use model_selection_view::ModelSelectionView;
-pub(crate) use notifications_settings_view::NotificationsMode;
-pub(crate) use notifications_settings_view::NotificationsSettingsView;
-pub(crate) use planning_settings_view::PlanningSettingsView;
-pub(crate) use review_settings_view::ReviewSettingsView;
-pub(crate) use theme_selection_view::ThemeSelectionView;
-pub(crate) use undo_timeline_view::UndoTimelineEntry;
-pub(crate) use undo_timeline_view::UndoTimelineEntryKind;
-pub(crate) use undo_timeline_view::UndoTimelineView;
-pub(crate) use update_settings_view::UpdateSettingsView;
-pub(crate) use update_settings_view::UpdateSharedState;
+pub(crate) use update_settings_view::{UpdateSettingsView, UpdateSharedState};
+pub(crate) use notifications_settings_view::{NotificationsMode, NotificationsSettingsView};
 pub(crate) use validation_settings_view::ValidationSettingsView;
+pub(crate) use review_settings_view::ReviewSettingsView;
+pub(crate) use planning_settings_view::PlanningSettingsView;
+use approval_modal_view::ApprovalModalView;
+#[cfg(feature = "code-fork")]
+use approval_ui::ApprovalUi;
+use code_common::model_presets::ModelPreset;
+use code_core::config_types::ReasoningEffort;
+use code_core::config_types::ContextMode;
+use code_core::protocol::AutoContextPhase;
+use code_core::config_types::ServiceTier;
+use code_core::config_types::TextVerbosity;
+use code_core::config_types::ThemeName;
+pub(crate) use model_selection_view::{ModelSelectionTarget, ModelSelectionView};
+pub(crate) use mcp_settings_view::McpSettingsView;
+pub(crate) use theme_selection_view::ThemeSelectionView;
 use verbosity_selection_view::VerbositySelectionView;
+pub(crate) use undo_timeline_view::{UndoTimelineEntry, UndoTimelineEntryKind, UndoTimelineView};
+pub(crate) use request_user_input_view::RequestUserInputView;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum ActiveViewKind {
@@ -142,13 +141,6 @@ pub(crate) struct BottomPane<'a> {
     /// composer during a running task.
     status_view_active: bool,
 
-    /// Inline status indicator shown above the composer while a task is running.
-    status: Option<StatusIndicatorWidget>,
-    /// Latest status text to keep the indicator updated across re-renders.
-    status_text: String,
-    /// Queued user messages to show in the status indicator.
-    queued_messages: Vec<String>,
-
     /// Whether to reserve an empty spacer line above the input composer.
     /// Defaults to true for visual breathing room, but can be disabled when
     /// the chat history is scrolled up to allow history to reclaim that row.
@@ -161,6 +153,7 @@ pub(crate) struct BottomPane<'a> {
 
     custom_prompts: Vec<CustomPrompt>,
     skills: Vec<Skill>,
+
 }
 
 pub(crate) struct BottomPaneParams {
@@ -172,7 +165,8 @@ pub(crate) struct BottomPaneParams {
 }
 
 impl BottomPane<'_> {
-    const BOTTOM_PAD_LINES: u16 = 0;
+    // Reduce bottom padding so footer sits one line lower
+    const BOTTOM_PAD_LINES: u16 = 1;
     pub fn new(params: BottomPaneParams) -> Self {
         let enhanced_keys_supported = params.enhanced_keys_supported;
         let composer = ChatComposer::new(
@@ -191,9 +185,6 @@ impl BottomPane<'_> {
             is_task_running: false,
             ctrl_c_quit_hint: false,
             status_view_active: false,
-            status: None,
-            status_text: String::from("Working"),
-            queued_messages: Vec::new(),
             top_spacer_enabled: true,
             using_chatgpt_auth: params.using_chatgpt_auth,
             auto_drive_variant: params.auto_drive_variant,
@@ -315,19 +306,9 @@ impl BottomPane<'_> {
     }
 
     pub fn desired_height(&self, width: u16) -> u16 {
-        let show_status =
-            self.status.is_some() && self.active_view_kind != ActiveViewKind::AutoCoordinator;
-        let status_height = if show_status {
-            self.status
-                .as_ref()
-                .map(|status| status.desired_height(width))
-                .unwrap_or(0)
-        } else {
-            0
-        };
         let (view_height, pad_lines) = if let Some(view) = self.active_view.as_ref() {
             let is_auto = matches!(self.active_view_kind, ActiveViewKind::AutoCoordinator);
-            let top_spacer = if is_auto || status_height > 0 {
+            let top_spacer = if is_auto {
                 0
             } else if self.top_spacer_enabled {
                 1
@@ -357,21 +338,13 @@ impl BottomPane<'_> {
             let base_height = view
                 .desired_height(width)
                 .saturating_add(top_spacer)
-                .saturating_add(status_height)
                 .saturating_add(composer_height);
 
             (base_height, pad)
         } else {
             // Optionally add 1 for the empty line above the composer
-            let spacer = if self.top_spacer_enabled && status_height == 0 {
-                1
-            } else {
-                0
-            };
-            (
-                spacer + status_height + self.composer.desired_height(width),
-                Self::BOTTOM_PAD_LINES,
-            )
+            let spacer = if self.top_spacer_enabled { 1 } else { 0 };
+            (spacer + self.composer.desired_height(width), Self::BOTTOM_PAD_LINES)
         };
 
         view_height.saturating_add(pad_lines)
@@ -383,20 +356,11 @@ impl BottomPane<'_> {
         if self.active_view.is_some() {
             None
         } else {
-            let status_height = self
-                .status
-                .as_ref()
-                .map(|status| status.desired_height(area.width))
-                .unwrap_or(0);
-            let spacer = if self.top_spacer_enabled && status_height == 0 {
-                1u16
-            } else {
-                0u16
-            };
-            let y_offset = status_height.saturating_add(spacer);
+            // Account for the optional empty line above the composer
+            let y_offset = if self.top_spacer_enabled { 1u16 } else { 0u16 };
 
             // Adjust composer area to account for empty line and padding
-            let horizontal_padding = crate::theme::content_padding();
+            let horizontal_padding = 1u16; // Message input uses 1 char padding
             let composer_rect = Rect {
                 x: area.x + horizontal_padding,
                 y: area.y + y_offset,
@@ -462,13 +426,6 @@ impl BottomPane<'_> {
 
             InputResult::None
         } else {
-            if let Some(status) = &self.status
-                && matches!(key_event.kind, KeyEventKind::Press | KeyEventKind::Repeat)
-                && matches!(key_event.code, KeyCode::Esc)
-            {
-                status.interrupt();
-                return InputResult::None;
-            }
             self.handle_composer_key_event(key_event)
         }
     }
@@ -489,30 +446,22 @@ impl BottomPane<'_> {
     /// Attempt to navigate history upwards from the composer. Returns true if consumed.
     pub(crate) fn try_history_up(&mut self) -> bool {
         let consumed = self.composer.try_history_up();
-        if consumed {
-            self.request_redraw();
-        }
+        if consumed { self.request_redraw(); }
         consumed
     }
 
     /// Attempt to navigate history downwards from the composer. Returns true if consumed.
     pub(crate) fn try_history_down(&mut self) -> bool {
         let consumed = self.composer.try_history_down();
-        if consumed {
-            self.request_redraw();
-        }
+        if consumed { self.request_redraw(); }
         consumed
     }
 
     /// Returns true if the composer is currently browsing history.
-    pub(crate) fn history_is_browsing(&self) -> bool {
-        self.composer.history_is_browsing()
-    }
+    pub(crate) fn history_is_browsing(&self) -> bool { self.composer.history_is_browsing() }
 
     /// After a chat scroll-up, make the next Down key scroll chat instead of moving within input.
-    pub(crate) fn mark_next_down_scrolls_history(&mut self) {
-        self.composer.mark_next_down_scrolls_history();
-    }
+    pub(crate) fn mark_next_down_scrolls_history(&mut self) { self.composer.mark_next_down_scrolls_history(); }
 
     /// Handle Ctrl-C in the bottom pane. If a modal view is active it gets a
     /// chance to consume the event (e.g. to dismiss itself).
@@ -573,6 +522,11 @@ impl BottomPane<'_> {
         self.request_redraw();
     }
 
+    pub(crate) fn set_composer_text(&mut self, text: String) {
+        self.composer.set_text_content(text);
+        self.request_redraw();
+    }
+
     /// Clear the composer text and reset transient composer state.
     pub(crate) fn clear_composer(&mut self) {
         self.composer.clear_text();
@@ -582,9 +536,7 @@ impl BottomPane<'_> {
     /// Attempt to close the file-search popup if visible. Returns true if closed.
     pub(crate) fn close_file_popup_if_active(&mut self) -> bool {
         let closed = self.composer.close_file_popup_if_active();
-        if closed {
-            self.request_redraw();
-        }
+        if closed { self.request_redraw(); }
         closed
     }
 
@@ -642,42 +594,13 @@ impl BottomPane<'_> {
     /// Update the status indicator text. Shows status as overlay above composer
     /// to allow continued input while processing.
     pub(crate) fn update_status_text(&mut self, text: String) {
-        let raw_message = if text.trim().is_empty() && self.is_task_running {
-            "Working".to_string()
-        } else {
-            text
-        };
-        let message = ChatComposer::map_status_message(&raw_message);
-
         if let Some(view) = self.active_view.as_mut() {
-            let _ = view.update_status_text(message.clone());
+            let _ = view.update_status_text(text.clone());
         }
 
         // Pass status message to composer for dynamic title display
-        self.status_text = message.clone();
-        if let Some(status) = self.status.as_mut() {
-            status.update_header(message.clone());
-        }
-        self.composer.update_status_message(message);
+        self.composer.update_status_message(text);
         self.request_redraw();
-    }
-
-    pub(crate) fn set_queued_user_messages(&mut self, queued: Vec<String>) {
-        self.queued_messages = queued.clone();
-        if let Some(status) = self.status.as_mut() {
-            status.set_queued_messages(queued);
-        }
-        self.request_redraw();
-    }
-
-    fn ensure_status_indicator(&mut self) {
-        if self.status.is_none() {
-            self.status = Some(StatusIndicatorWidget::new(self.app_event_tx.clone()));
-        }
-        if let Some(status) = self.status.as_mut() {
-            status.update_header(self.status_text.clone());
-            status.set_queued_messages(self.queued_messages.clone());
-        }
     }
 
     /// Show an ephemeral footer notice for a custom duration.
@@ -738,15 +661,10 @@ impl BottomPane<'_> {
         self.composer.set_task_running(running);
 
         if running {
-            if self.status_text.trim().is_empty() {
-                self.status_text = String::from("Working");
-            }
-            self.ensure_status_indicator();
-            self.composer.set_show_status_title(self.status.is_none());
+            // No longer need separate status widget - title shows in composer
             self.request_redraw();
         } else {
-            self.status = None;
-            self.composer.set_show_status_title(true);
+            // Status now shown in composer title
             // Drop the status view when a task completes, but keep other
             // modal views (e.g. approval dialogs).
             if let Some(mut view) = self.active_view.take() {
@@ -772,11 +690,6 @@ impl BottomPane<'_> {
         self.composer.text().to_string()
     }
 
-    pub(crate) fn set_composer_text(&mut self, text: String) {
-        self.composer.set_text_content(text);
-        self.request_redraw();
-    }
-
     pub(crate) fn is_task_running(&self) -> bool {
         self.is_task_running
     }
@@ -790,9 +703,19 @@ impl BottomPane<'_> {
         total_token_usage: TokenUsage,
         last_token_usage: TokenUsage,
         model_context_window: Option<u64>,
+        context_mode: Option<ContextMode>,
     ) {
-        self.composer
-            .set_token_usage(total_token_usage, last_token_usage, model_context_window);
+        self.composer.set_token_usage(
+            total_token_usage,
+            last_token_usage,
+            model_context_window,
+            context_mode,
+        );
+        self.request_redraw();
+    }
+
+    pub(crate) fn set_auto_context_phase(&mut self, phase: Option<AutoContextPhase>) {
+        self.composer.set_auto_context_phase(phase);
         self.request_redraw();
     }
 
@@ -830,6 +753,8 @@ impl BottomPane<'_> {
         presets: Vec<ModelPreset>,
         current_model: String,
         current_effort: ReasoningEffort,
+        current_service_tier: Option<ServiceTier>,
+        current_context_mode: Option<ContextMode>,
         use_chat_model: bool,
         target: ModelSelectionTarget,
     ) {
@@ -837,6 +762,8 @@ impl BottomPane<'_> {
             presets,
             current_model,
             current_effort,
+            current_service_tier,
+            current_context_mode,
             use_chat_model,
             target,
             self.app_event_tx.clone(),
@@ -897,6 +824,29 @@ impl BottomPane<'_> {
         self.request_redraw();
     }
 
+    pub(crate) fn show_request_user_input(&mut self, view: RequestUserInputView) {
+        self.active_view = Some(Box::new(view));
+        self.active_view_kind = ActiveViewKind::Other;
+        self.status_view_active = false;
+        self.request_redraw();
+    }
+
+    pub(crate) fn close_request_user_input_view(&mut self) {
+        let should_close = self
+            .active_view
+            .as_ref()
+            .and_then(|view| view.as_any())
+            .is_some_and(|any| any.is::<RequestUserInputView>());
+        if !should_close {
+            return;
+        }
+
+        self.active_view = None;
+        self.active_view_kind = ActiveViewKind::None;
+        self.set_standard_terminal_hint(None);
+        self.status_view_active = false;
+    }
+
     /// Show a generic list selection popup with items and actions.
     pub fn show_list_selection(
         &mut self,
@@ -927,12 +877,7 @@ impl BottomPane<'_> {
         rows: Vec<resume_selection_view::ResumeRow>,
     ) {
         use resume_selection_view::ResumeSelectionView;
-        let view = ResumeSelectionView::new(
-            title,
-            subtitle.unwrap_or_default(),
-            rows,
-            self.app_event_tx.clone(),
-        );
+        let view = ResumeSelectionView::new(title, subtitle.unwrap_or_default(), rows, self.app_event_tx.clone());
         self.active_view = Some(Box::new(view));
         self.active_view_kind = ActiveViewKind::Other;
         self.status_view_active = false;
@@ -948,10 +893,7 @@ impl BottomPane<'_> {
 
     /// Show MCP servers status/toggle UI
     #[allow(dead_code)]
-    pub fn show_mcp_settings(
-        &mut self,
-        rows: crate::bottom_pane::mcp_settings_view::McpServerRows,
-    ) {
+    pub fn show_mcp_settings(&mut self, rows: crate::bottom_pane::mcp_settings_view::McpServerRows) {
         use mcp_settings_view::McpSettingsView;
         let view = McpSettingsView::new(rows, self.app_event_tx.clone());
         self.active_view = Some(Box::new(view));
@@ -1070,9 +1012,7 @@ impl BottomPane<'_> {
         self.composer.flash_footer_notice(text);
         // Ask app to schedule a redraw shortly to clear the notice automatically
         self.app_event_tx
-            .send(AppEvent::ScheduleFrameIn(std::time::Duration::from_millis(
-                2100,
-            )));
+            .send(AppEvent::ScheduleFrameIn(std::time::Duration::from_millis(2100)));
         self.request_redraw();
     }
 
@@ -1148,7 +1088,7 @@ impl BottomPane<'_> {
     }
 
     pub(crate) fn clear_live_ring(&mut self) {}
-
+    
     // test helper removed
 
     /// Ensure input focus is maintained, especially after redraws or content updates
@@ -1184,13 +1124,29 @@ impl BottomPane<'_> {
         self.request_redraw();
     }
 
+    pub(crate) fn set_access_mode_label_ephemeral(&mut self, label: String, dur: Duration) {
+        self.composer.set_access_mode_label_ephemeral(label, dur);
+        // Schedule a redraw after expiry without blocking other scheduled frames.
+        let tx = self.app_event_tx.clone();
+        let fallback_tx = self.app_event_tx.clone();
+        if thread_spawner::spawn_lightweight("access-hint-ephemeral", move || {
+            std::thread::sleep(dur + Duration::from_millis(120));
+            tx.send(AppEvent::RequestRedraw);
+        })
+        .is_none()
+        {
+            fallback_tx.send(AppEvent::RequestRedraw);
+        }
+        self.request_redraw();
+    }
+
     #[allow(dead_code)]
     fn render_auto_coordinator_footer(&self, _area: Rect, _buf: &mut Buffer) {}
 
     // Removed restart_live_status_with_text – no longer used by the current streaming UI.
 }
 
-#[cfg(feature = "hanzo-fork")]
+#[cfg(feature = "code-fork")]
 fn build_user_approval_widget<'a>(
     request: ApprovalRequest,
     ticket: BackgroundOrderTicket,
@@ -1199,7 +1155,7 @@ fn build_user_approval_widget<'a>(
     <UserApprovalWidget<'a> as ApprovalUi>::build(request, ticket, app_event_tx)
 }
 
-#[cfg(not(feature = "hanzo-fork"))]
+#[cfg(not(feature = "code-fork"))]
 fn build_user_approval_widget<'a>(
     request: ApprovalRequest,
     ticket: BackgroundOrderTicket,
@@ -1218,40 +1174,15 @@ impl WidgetRef for &BottomPane<'_> {
             .fg(crate::colors::text());
         fill_rect(buf, area, Some(' '), base_style);
 
-        let mut content_area = area;
-        let mut status_height = 0u16;
-        let show_status = self.active_view_kind != ActiveViewKind::AutoCoordinator;
-        if show_status {
-            if let Some(status) = &self.status {
-                status_height = status.desired_height(area.width).min(area.height);
-                if status_height > 0 {
-                    let status_rect = Rect {
-                        x: area.x,
-                        y: area.y,
-                        width: area.width,
-                        height: status_height,
-                    };
-                    status.render_ref(status_rect, buf);
-                    content_area = Rect {
-                        x: area.x,
-                        y: area.y.saturating_add(status_height),
-                        width: area.width,
-                        height: area.height.saturating_sub(status_height),
-                    };
-                }
-            }
-        }
-        let top_spacer_enabled = self.top_spacer_enabled && status_height == 0;
-
-        let mut composer_rect = compute_composer_rect(content_area, top_spacer_enabled);
+        let mut composer_rect = compute_composer_rect(area, self.top_spacer_enabled);
         let mut composer_needs_render = true;
-        let horizontal_padding = crate::theme::content_padding();
+        let horizontal_padding = 1u16;
 
         if let Some(view) = &self.active_view {
             if !view.is_complete() {
                 let is_auto = matches!(self.active_view_kind, ActiveViewKind::AutoCoordinator);
                 if is_auto {
-                    let content_width = content_area.width.saturating_sub(horizontal_padding * 2);
+                    let content_width = area.width.saturating_sub(horizontal_padding * 2);
                     let composer_visible = view
                         .as_ref()
                         .as_any()
@@ -1259,12 +1190,12 @@ impl WidgetRef for &BottomPane<'_> {
                         .map(|auto_view| auto_view.composer_visible())
                         .unwrap_or(true);
                     let composer_height = if composer_visible {
-                        self.composer.desired_height(content_area.width)
+                        self.composer.desired_height(area.width)
                     } else {
                         self.composer.footer_height()
                     };
                     let pad = BottomPane::BOTTOM_PAD_LINES;
-                    let max_view_height = content_area
+                    let max_view_height = area
                         .height
                         .saturating_sub(composer_height)
                         .saturating_sub(pad);
@@ -1273,50 +1204,48 @@ impl WidgetRef for &BottomPane<'_> {
 
                     if view_height > 0 {
                         let view_rect = Rect {
-                            x: content_area.x + horizontal_padding,
-                            y: content_area.y,
+                            x: area.x + horizontal_padding,
+                            y: area.y,
                             width: content_width,
                             height: view_height,
                         };
-                        let view_bg =
-                            ratatui::style::Style::default().bg(crate::colors::background());
+                        let view_bg = ratatui::style::Style::default().bg(crate::colors::background());
                         fill_rect(buf, view_rect, None, view_bg);
                         view.render(view_rect, buf);
-                        let remaining_height = content_area.height.saturating_sub(view_height);
+                        let remaining_height = area.height.saturating_sub(view_height);
                         if remaining_height > 0 {
                             let composer_area = Rect {
-                                x: content_area.x,
+                                x: area.x,
                                 y: view_rect.y.saturating_add(view_rect.height),
-                                width: content_area.width,
+                                width: area.width,
                                 height: remaining_height,
                             };
                             composer_rect = compute_composer_rect(composer_area, false);
                         }
                     } else {
-                        composer_rect = compute_composer_rect(content_area, top_spacer_enabled);
+                        composer_rect = compute_composer_rect(area, self.top_spacer_enabled);
                     }
                 } else {
-                    let mut avail = content_area.height;
-                    if top_spacer_enabled && avail > 0 {
+                    let mut avail = area.height;
+                    if self.top_spacer_enabled && avail > 0 {
                         avail = avail.saturating_sub(1);
                     }
                     if avail > 0 {
                         let pad = BottomPane::BOTTOM_PAD_LINES.min(avail.saturating_sub(1));
                         let view_height = avail.saturating_sub(pad);
                         if view_height > 0 {
-                            let y_base = if top_spacer_enabled {
-                                content_area.y + 1
+                            let y_base = if self.top_spacer_enabled {
+                                area.y + 1
                             } else {
-                                content_area.y
+                                area.y
                             };
                             let view_rect = Rect {
-                                x: content_area.x + horizontal_padding,
+                                x: area.x + horizontal_padding,
                                 y: y_base,
-                                width: content_area.width.saturating_sub(horizontal_padding * 2),
+                                width: area.width.saturating_sub(horizontal_padding * 2),
                                 height: view_height,
                             };
-                            let view_bg =
-                                ratatui::style::Style::default().bg(crate::colors::background());
+                            let view_bg = ratatui::style::Style::default().bg(crate::colors::background());
                             fill_rect(buf, view_rect, None, view_bg);
                             view.render_with_composer(view_rect, buf, &self.composer);
                             composer_needs_render = false;
@@ -1331,18 +1260,20 @@ impl WidgetRef for &BottomPane<'_> {
             fill_rect(buf, composer_rect, None, comp_bg);
             (&self.composer).render_ref(composer_rect, buf);
         }
+
     }
 }
 
 fn compute_composer_rect(area: Rect, top_spacer_enabled: bool) -> Rect {
-    let horizontal_padding = crate::theme::content_padding();
+    let horizontal_padding = 1u16;
     let mut y_offset = 0u16;
     if top_spacer_enabled {
         y_offset = y_offset.saturating_add(1);
     }
     let available = area.height.saturating_sub(y_offset);
-    let height =
-        available.saturating_sub(BottomPane::BOTTOM_PAD_LINES.min(available.saturating_sub(1)));
+    let height = available.saturating_sub(
+        BottomPane::BOTTOM_PAD_LINES.min(available.saturating_sub(1)),
+    );
     Rect {
         x: area.x + horizontal_padding,
         y: area.y + y_offset,

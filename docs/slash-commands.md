@@ -59,6 +59,7 @@ Notes
 - `/theme`: customize the app theme.
 - `/verbosity (high|medium|low)`: change text verbosity.
 - `/model`: choose your default model.
+- `/fast`: open the model selector and toggle Fast mode.
 - `/reasoning (minimal|low|medium|high)`: change reasoning effort.
 - `/prompts`: manage custom prompts.
 - `/skills`: manage skills.
@@ -110,12 +111,12 @@ typically start multiple agents. They require a task/problem description.
 Implementation Notes
 
 - The authoritative list of commands is defined in
-  `hanzo-dev/tui/src/slash_command.rs` (the `SlashCommand` enum). When adding a
+  `code-rs/tui/src/slash_command.rs` (the `SlashCommand` enum). When adding a
   new command, please update this document to keep the UI and docs in sync.
 - Prompt formatting for `/plan`, `/solve`, and `/code` lives in
-  `hanzo-dev/core/src/slash_commands.rs`.
+  `code-rs/core/src/slash_commands.rs`.
   When no `[[agents]]` are configured, the orchestrator advertises the
-  following model slugs to the LLM for multi-agent runs: `code-gpt-5.2`,
+  following model slugs to the LLM for multi-agent runs: `code-gpt-5.4`,
   `code-gpt-5.3-codex`, `claude-opus-4.6`, `gemini-3-pro`,
   `code-gpt-5.1-codex-mini`, `claude-sonnet-4.5`, `gemini-3-flash`,
   `claude-haiku-4.5`, and `qwen-3-coder` (with

@@ -1,518 +1,377 @@
-<img src="docs/images/hanzo-logo.svg" alt="Hanzo" width="48" height="48">
-
-# Hanzo Dev
-
-**Hanzo Dev** is a fast, native coding agent for your terminal. Built in Rust on top of `openai/codex`, it adds a full-featured chat TUI, multi-agent orchestration, browser automation, theming, and CLI agent piping — while syncing upstream improvements automatically.
+<img src="docs/images/every-logo.png" alt="Every Code Logo" width="400">
 
 &ensp;
 
-## Highlights (v0.6.61)
-
-- **Multi-agent orchestration** — `/plan`, `/solve`, `/code` coordinate Claude, Gemini, Qwen, and GPT simultaneously. Race for speed or reach consensus across models.
-- **Auto Drive** — Hand off complex tasks; the agent coordinates sub-agents, approvals, and recovery autonomously.
-- **Auto Review** — Background ghost-commit watcher reviews code in a separate worktree without blocking your flow.
-- **CLI agent piping** — Spawn and orchestrate `claude`, `gemini`, `qwen`, and custom agents as sub-processes. Works alongside Claude Code, Gemini CLI, and Qwen Code.
-- **Rich chat TUI** — Zen mode, 20+ themes, streaming markdown, syntax highlighting, session management, and card-based activity history.
-- **Browser integration** — CDP support, headless browsing, screenshots captured inline.
-- **MCP support** — 260+ tools via Model Context Protocol. Extend with filesystem, databases, APIs, or custom servers.
-- **Skills system** — Dynamic tool injection with live reload. Define custom skills in `.agents/skills/`.
-- **Upstream sync** — Automated 30-minute polling merges upstream improvements while preserving Hanzo features.
-
-[Full changelog](CHANGELOG.md) | [Release notes](docs/release-notes/RELEASE_NOTES.md)
+**Every Code** (Code for short) is a fast, local coding agent for your terminal. It's a community-driven fork of `openai/codex` focused on real developer ergonomics: Browser integration, multi-agents, theming, and reasoning control — all while staying compatible with upstream.
 
 &ensp;
+## What's new
 
+- **Latest long-session stability sweep** (post-0.6): Auto Drive and Auto Review are now decoupled so background reviews no longer block the command flow. `Esc` returns control immediately and typing works while review finalization continues.
+
+- **Operational upgrades in this cycle**
+  - Auto Review metadata (branch/worktree context) remains queryable through the active Auto Drive session after completion.
+  - Terminal agents are compacted and archived so heavy payloads are reduced while review linkage is preserved.
+  - Core `core`, coordinator, and TUI state maps now have hard caps with bounded drop/trim behavior.
+  - Auto Drive conversation/update queues are bounded in the coordinator; TUI has bounded prompt/agent/runtime caches.
+  - Background review notes are added as non-blocking history-visible notes instead of foreground task-injection.
+  - TUI housekeeping lifecycle is bounded with deterministic stop control.
+  - Stress tests now cover heavy agent churn plus concurrent Auto Review + Esc/typing responsiveness.
+
+- **New/updated models and agents**
+  - Auto Drive CLI model support includes `gpt-5.3-codex` (planning/problem-solving) and `gpt-5.3-codex-spark` (fast coding/fix loops), with `medium | high | xhigh` reasoning controls.
+  - Frontline and alias-aware agent model handling now includes `code-gpt-5.3-codex` and `code-gpt-5.3-codex-spark`, with compatibility alias upgrades for `gpt-5.1-codex`, `gpt-5.1-codex-mini`, `gpt-5.2-codex`, etc.
+  - Auto Drive decision schema and coordinator payloads now enforce bounded history while preserving goal and recent context.
+
+  See commit `60727b068` and related Auto Drive hardening commits in git history for details.
+
+
+- **Auto Review** – background ghost-commit watcher runs reviews in a separate worktree whenever a turn changes code; uses `codex-5.1-mini-high` and reports issues plus ready-to-apply fixes without blocking the main thread.
+- **Code Bridge** – Sentry-style local bridge that streams errors, console, screenshots, and control from running apps into Code; ships an MCP server; install by asking Code to pull `https://github.com/just-every/code-bridge`.
+- **Plays well with Auto Drive** – reviews run in parallel with long Auto Drive tasks so quality checks land while the flow keeps moving.
+- **Quality-first focus** – the release shifts emphasis from "can the model write this file" to "did we verify it works".
+- _From v0.5.0:_ rename to Every Code, upgraded `/auto` planning/recovery, unified `/settings`, faster streaming/history with card-based activity, and more reliable `/resume` + `/undo`.
+
+ [Read the full notes in RELEASE_NOTES.md](docs/release-notes/RELEASE_NOTES.md)
+
+&ensp;
+## Why Every Code
+
+- 🚀 **Auto Drive orchestration** – Multi-agent automation that now self-heals and ships complete tasks.
+- 🌐 **Browser Integration** – CDP support, headless browsing, screenshots captured inline.
+- 🤖 **Multi-agent commands** – `/plan`, `/code` and `/solve` coordinate multiple CLI agents.
+- 🧭 **Unified settings hub** – `/settings` overlay for limits, theming, approvals, and provider wiring.
+- 🎨 **Theme system** – Switch between accessible presets, customize accents, and preview live via `/themes`.
+- 🔌 **MCP support** – Extend with filesystem, DBs, APIs, or your own tools.
+- 🔒 **Safety modes** – Read-only, approvals, and workspace sandboxing.
+
+&ensp;
+## AI Videos
+
+&ensp;
+<p align="center">
+  <a href="https://www.youtube.com/watch?v=Ra3q8IVpIOc">
+    <img src="docs/images/video-auto-review-play.jpg" alt="Play Auto Review video" width="100%">
+  </a><br>
+  <strong>Auto Review</strong>
+</p>
+
+&ensp;
+<p align="center">
+  <a href="https://youtu.be/UOASHZPruQk">
+    <img src="docs/images/video-auto-drive-new-play.jpg" alt="Play Introducing Auto Drive video" width="100%">
+  </a><br>
+  <strong>Auto Drive Overview</strong>
+</p>
+
+&ensp;
+<p align="center">
+  <a href="https://youtu.be/sV317OhiysQ">
+    <img src="docs/images/video-v03-play.jpg" alt="Play Multi-Agent Support video" width="100%">
+  </a><br>
+  <strong>Multi-Agent Promo</strong>
+</p>
+
+
+
+&ensp;
 ## Quickstart
 
-### Install & run
+### Run
 
 ```bash
-# Via npm (installs native Rust binary)
-npm install -g @hanzo/dev
-dev
-
-# Or run directly
-npx -y @hanzo/dev
+npx -y @just-every/code
 ```
 
-The binary is named `dev`. The npm package also installs `coder` as an alias.
-
-### Authenticate
-
-- **ChatGPT sign-in** (Plus/Pro/Team) — run `dev` and pick "Sign in with ChatGPT"
-- **API key** — `export OPENAI_API_KEY=sk-... && dev`
-- **Device code** — for headless environments, `dev` prompts a device code flow automatically
-
-### Build from source
+### Install & Run
 
 ```bash
-git clone https://github.com/hanzoai/dev.git
-cd dev
-./build-fast.sh          # ~20 min cold, ~2 min incremental
-./hanzo-dev/target/dev-fast/dev
+npm install -g @just-every/code
+code // or `coder` if you're using VS Code
 ```
+
+Note: If another tool already provides a `code` command (e.g. VS Code), our CLI is also installed as `coder`. Use `coder` to avoid conflicts.
+
+**Authenticate** (one of the following):
+- **Sign in with ChatGPT** (Plus/Pro/Team; uses models available to your plan)
+  - Run `code` and pick "Sign in with ChatGPT"
+- **API key** (usage-based)
+  - Set `export OPENAI_API_KEY=xyz` and run `code`
+
+### Install Claude & Gemini (optional)
+
+Every Code supports orchestrating other AI CLI tools. Install these and config to use alongside Code.
+
+```bash
+# Ensure Node.js 20+ is available locally (installs into ~/.n)
+npm install -g n
+export N_PREFIX="$HOME/.n"
+export PATH="$N_PREFIX/bin:$PATH"
+n 20.18.1
+
+# Install the companion CLIs
+export npm_config_prefix="${npm_config_prefix:-$HOME/.npm-global}"
+mkdir -p "$npm_config_prefix/bin"
+export PATH="$npm_config_prefix/bin:$PATH"
+npm install -g @anthropic-ai/claude-code @google/gemini-cli @qwen-code/qwen-code
+
+# Quick smoke tests
+claude --version
+gemini --version
+qwen --version
+```
+
+> ℹ️ Add `export N_PREFIX="$HOME/.n"` and `export PATH="$N_PREFIX/bin:$PATH"` (plus the `npm_config_prefix` bin path) to your shell profile so the CLIs stay on `PATH` in future sessions.
 
 &ensp;
-
-## The Chat TUI
-
-Hanzo Dev ships a full terminal UI built with Ratatui. It's not just a prompt — it's a workspace.
-
-### Layout
-
-The TUI has three zones: a scrollable **history pane** (streamed markdown, code blocks, tool calls, exec output), a **composer** at the bottom for input, and an optional **status line** showing model, session, and agent state.
-
-### Key features
-
-| Feature | How |
-|---------|-----|
-| **Zen mode** | Minimal chrome, flush-left borders, animated spinner. Default on. Toggle: `Alt+G` |
-| **Themes** | 20+ presets (light/dark). `/themes` to browse and preview live |
-| **Streaming markdown** | Syntax-highlighted code blocks, inline images, reasoning traces |
-| **Card-based history** | Exec output, tool calls, diffs, browser screenshots — each in styled cards |
-| **Agent terminal** | `Ctrl+A` opens a split view of all running sub-agents with live output |
-| **Session management** | `/resume` to pick up where you left off, `/fork` to clone a session |
-| **Session nicknames** | `/nick <name>` to label sessions for easier identification |
-| **External editor** | `Ctrl+G` opens your `$EDITOR` for long prompts |
-| **Plan mode** | Streamed plan items with step-by-step approval |
-| **Undo timeline** | `Esc Esc` opens undo history to roll back changes |
-| **GH Actions viewer** | Live progress tracking for GitHub Actions runs |
-| **Status line** | `/statusline` to configure what's shown |
-| **Personality** | `/personality` to set the agent's communication style |
-
-### Keyboard shortcuts
-
-| Key | Action |
-|-----|--------|
-| `Enter` | Send message |
-| `Ctrl+C` | Cancel current operation |
-| `Esc` | Context-dependent: close overlay, pause Auto Drive, clear composer |
-| `Esc Esc` | Open undo timeline |
-| `Ctrl+A` | Toggle agent terminal overlay |
-| `Ctrl+G` | Open external editor |
-| `Alt+G` | Toggle Zen mode |
-| `Ctrl+L` | Clear screen |
-| `Up/Down` | Scroll history, navigate overlays |
-
-&ensp;
-
-## Multi-Agent Commands
-
-Hanzo Dev can orchestrate multiple CLI agents simultaneously. Each command spawns agents in isolated git worktrees.
-
-### `/plan` — Consensus planning
-
-All configured agents (Claude, Gemini, GPT) review the task and produce a consolidated plan.
-
-```
-/plan "Migrate the auth system from sessions to JWT"
-```
-
-### `/solve` — Racing mode
-
-Agents race to solve the problem. Fastest correct answer wins. Based on [arxiv.org/abs/2505.17813](https://arxiv.org/abs/2505.17813).
-
-```
-/solve "Why does deleting one user cascade-drop the entire users table?"
-```
-
-### `/code` — Consensus implementation
-
-Multiple agents implement the solution, then the best result is selected.
-
-```
-/code "Add dark mode support with system preference detection"
-```
-
-### `/auto` — Auto Drive
-
-Hand off a multi-step task. Auto Drive coordinates agents, manages approvals, and self-heals on failure.
-
-```
-/auto "Refactor the auth flow, add device login, and write tests"
-/auto status
-```
-
-&ensp;
-
-## CLI Agent Piping
-
-Hanzo Dev spawns external CLI agents as sub-processes and streams their output back into the TUI. This lets you use `dev` as an orchestration layer on top of other AI coding tools.
-
-### Supported agents
-
-| Agent | CLI | Install |
-|-------|-----|---------|
-| **Claude Code** | `claude` | `npm install -g @anthropic-ai/claude-code` |
-| **Gemini CLI** | `gemini` | `npm install -g @google/gemini-cli` |
-| **Qwen Code** | `qwen` | `npm install -g @qwen-code/qwen-code` |
-| **Custom** | any executable | define in `~/.hanzo/agents/` |
-
-### How it works
-
-1. Multi-agent commands (`/plan`, `/solve`, `/code`) detect installed CLIs on your `PATH`
-2. Each agent runs in its own git worktree with the task prompt
-3. Output streams into the TUI's agent terminal (`Ctrl+A` to view)
-4. Results are collected, compared, and the best outcome is applied
-
-### Custom agents
-
-Create YAML-frontmatter markdown files in `~/.hanzo/agents/`:
-
-```markdown
----
-name: my-reviewer
-model: claude
-args: ["--model", "claude-sonnet-4-5-20250929"]
----
-You are a code reviewer. Review the provided code for bugs, security issues,
-and style problems. Be concise and actionable.
-```
-
-Use with `/use my-reviewer` or reference in multi-agent orchestration.
-
-&ensp;
-
-## Commands Reference
+## Commands
 
 ### Browser
 ```bash
-/browser             # Open built-in headless browser
-/browser <url>       # Open URL in built-in browser
-/chrome              # Connect to external browser via CDP (auto-detect)
-/chrome 9222         # Connect to specific CDP port
+# Connect code to external Chrome browser (running CDP)
+/chrome        # Connect with auto-detect port
+/chrome 9222   # Connect to specific port
+
+# Switch to internal browser mode
+/browser       # Use internal headless browser
+/browser https://example.com  # Open URL in internal browser
 ```
 
-> **Tip:** Install [Enso](https://enso.hanzo.ai) for the best browser integration with Hanzo Dev.
-
-### Session
+### Agents
 ```bash
-/new                 # Start fresh conversation
-/resume              # Pick up a previous session (sortable picker)
-/fork                # Clone current session
-/nick <name>         # Label this session
-/status              # Show session info
-```
+# Plan code changes (Claude, Gemini and GPT-5 consensus)
+# All agents review task and create a consolidated plan
+/plan "Stop the AI from ordering pizza at 3AM"
 
-### Settings & UI
-```bash
-/themes              # Browse and preview themes
-/settings            # Full settings overlay
-/model               # Switch model or provider
-/reasoning low|medium|high
-/statusline          # Configure status line
-/personality         # Set agent communication style
-/permissions         # Configure approval policies
+# Solve complex problems (Claude, Gemini and GPT-5 race)
+# Fastest preferred (see https://arxiv.org/abs/2505.17813)
+/solve "Why does deleting one user drop the whole database?"
+
+# Write code! (Claude, Gemini and GPT-5 consensus)
+# Creates multiple worktrees then implements the optimal solution
+/code "Show dark mode when I feel cranky"
 ```
 
 ### Auto Drive
 ```bash
-/auto "task"         # Start autonomous multi-step task
-/auto status         # Check Auto Drive progress
+# Hand off a multi-step task; Auto Drive will coordinate agents and approvals
+/auto "Refactor the auth flow and add device login"
+
+# Resume or inspect an active Auto Drive run
+/auto status
 ```
 
-### Tools
+### General
 ```bash
-/use <agent>         # Run a custom agent
-/plan "task"         # Multi-agent consensus planning
-/solve "task"        # Multi-agent racing
-/code "task"         # Multi-agent consensus coding
+# Try a new theme!
+/themes
+
+# Change reasoning level
+/reasoning low|medium|high
+
+# Switch models or effort presets
+/model
+
+# Start new conversation
+/new
 ```
 
-&ensp;
-
-## CLI Reference
+## CLI reference
 
 ```shell
-dev [options] [prompt]
+code [options] [prompt]
 
 Options:
-  --model <name>        Override model (e.g. gpt-5.1, claude-opus-4-6)
-  --read-only           Prevent file modifications
-  --no-approval         Skip approval prompts
-  --config <key=val>    Override config values
-  --oss                 Use local open-source models (Ollama)
-  --sandbox <mode>      Sandbox level (read-only, workspace-write)
-  --url <endpoint>      Connect to custom API endpoint
-  --debug               Log API requests/responses to file
-  --help                Show help
-  --version             Show version
+  --model <name>        Override the model for the active provider (e.g. gpt-5.1)
+  --read-only          Prevent file modifications
+  --no-approval        Skip approval prompts (use with caution)
+  --config <key=val>   Override config values
+  --oss                Use local open source models
+  --sandbox <mode>     Set sandbox level (read-only, workspace-write, etc.)
+  --help              Show help information
+  --debug             Log API requests and responses to file
+  --version           Show version number
 ```
 
-`--model` changes the model name sent to the active provider. To switch providers, set `model_provider` in config. Any OpenAI-compatible API works (Chat Completions or Responses).
+Note: `--model` only changes the model name sent to the active provider. To use a different provider, set `model_provider` in `config.toml`. Providers must expose an OpenAI-compatible API (Chat Completions or Responses).
 
 &ensp;
+## Memory & project docs
 
-## Configuration
+Every Code can remember context across sessions:
 
-Config file: `~/.hanzo/config.toml`
+1. **Create an `AGENTS.md` or `CLAUDE.md` file** in your project root:
+```markdown
+# Project Context
+This is a React TypeScript application with:
+- Authentication via JWT
+- PostgreSQL database
+- Express.js backend
 
-> [!NOTE]
-> Hanzo Dev reads from `~/.hanzo/` (primary), `~/.code/`, and `~/.codex/` for backwards compatibility. It only writes to `~/.hanzo/`.
+## Key files:
+- `/src/auth/` - Authentication logic
+- `/src/api/` - API client code  
+- `/server/` - Backend services
+```
+
+2. **Session memory**: Every Code maintains conversation history
+3. **Codebase analysis**: Automatically understands project structure
+
+&ensp;
+## Non-interactive / CI mode
+
+For automation and CI/CD:
+
+```shell
+# Run a specific task
+code --no-approval "run tests and fix any failures"
+
+# Generate reports
+code --read-only "analyze code quality and generate report"
+
+# Batch processing
+code --config output_format=json "list all TODO comments"
+```
+
+&ensp;
+## Model Context Protocol (MCP)
+
+Every Code supports MCP for extended capabilities:
+
+- **File operations**: Advanced file system access
+- **Database connections**: Query and modify databases
+- **API integrations**: Connect to external services
+- **Custom tools**: Build your own extensions
+
+Configure MCP in `~/.code/config.toml` Define each server under a named table like `[mcp_servers.<name>]` (this maps to the JSON `mcpServers` object used by other clients):
 
 ```toml
-# Model settings
-model = "gpt-5.3-codex"
-model_provider = "openai"
-
-# Behavior
-approval_policy = "on-request"       # untrusted | on-failure | on-request | never
-model_reasoning_effort = "medium"    # low | medium | high
-model_reasoning_summary = "detailed"
-sandbox_mode = "workspace-write"
-
-# TUI preferences
-[tui]
-alternate_screen = true
-notifications = true
-auto_review_enabled = true
-
-[tui.theme]
-name = "dark-zen"
-zen = true
-
-[tui.spinner]
-name = "dots"
-
-# Model profiles
-[profiles.claude]
-model = "claude-opus-4-6"
-model_provider = "anthropic"
-model_reasoning_effort = "high"
-
-[profiles.fast]
-model = "gpt-5.1"
-model_provider = "openai"
-approval_policy = "never"
-
-# MCP servers
 [mcp_servers.filesystem]
 command = "npx"
 args = ["-y", "@modelcontextprotocol/server-filesystem", "/path/to/project"]
 ```
 
+&ensp;
+## Configuration
+
+Main config file: `~/.code/config.toml`
+
+> [!NOTE]
+> Every Code reads from both `~/.code/` and `~/.codex/` for backwards compatibility, but it only writes updates to `~/.code/`. If you switch back to Codex and it fails to start, remove `~/.codex/config.toml`. If Every Code appears to miss settings after upgrading, copy your legacy `~/.codex/config.toml` into `~/.code/`.
+
+```toml
+# Model settings
+model = "gpt-5.1"
+model_provider = "openai"
+
+# Behavior
+approval_policy = "on-request"  # untrusted | on-failure | on-request | never
+model_reasoning_effort = "medium" # low | medium | high
+sandbox_mode = "workspace-write"
+
+# UI preferences see THEME_CONFIG.md
+[tui.theme]
+name = "light-photon"
+
+# Add config for specific models
+[profiles.gpt-5]
+model = "gpt-5.1"
+model_provider = "openai"
+approval_policy = "never"
+model_reasoning_effort = "high"
+model_reasoning_summary = "detailed"
+```
+
 ### Environment variables
 
-| Variable | Purpose |
-|----------|---------|
-| `HANZO_HOME` | Override config directory (default: `~/.hanzo`) |
-| `OPENAI_API_KEY` | OpenAI API key |
-| `ANTHROPIC_API_KEY` | Anthropic API key (for Claude agent) |
-| `OPENAI_BASE_URL` | Custom OpenAI-compatible endpoint |
-| `OPENAI_WIRE_API` | Force `chat` or `responses` wiring |
-
-Legacy `CODE_HOME` and `CODEX_HOME` are still recognized.
+- `CODE_HOME`: Override config directory location
+- `OPENAI_API_KEY`: Use API key instead of ChatGPT auth
+- `OPENAI_BASE_URL`: Use OpenAI-compatible API endpoints (chat or responses)
+- `OPENAI_WIRE_API`: Force the built-in OpenAI provider to use `chat` or `responses` wiring
 
 &ensp;
-
-## Memory & Project Context
-
-Hanzo Dev reads project context from markdown files:
-
-1. **`AGENTS.md`** or **`CLAUDE.md`** in your project root — loaded automatically at session start
-2. **Session memory** — conversation history persists across `/resume`
-3. **Codebase analysis** — automatic project structure understanding
-4. **Skills** — custom tools in `.agents/skills/` with live reload
-
-&ensp;
-
-## Non-Interactive / CI Mode
-
-```shell
-# Run a task without approval prompts
-dev --no-approval "run tests and fix any failures"
-
-# Read-only analysis
-dev --read-only "analyze code quality and generate report"
-
-# With config overrides
-dev --config output_format=json "list all TODO comments"
-```
-
-&ensp;
-
-## Model Context Protocol (MCP)
-
-Hanzo Dev supports the full MCP specification for tool extensibility:
-
-- **Built-in tools** — file operations, shell exec, browser, apply-patch
-- **External servers** — filesystem, databases, APIs, custom tools
-- **Hot reload** — MCP servers reload without restarting the TUI
-- **OAuth scopes** — MCP server auth with configurable scopes
-
-Configure servers in `~/.hanzo/config.toml` under `[mcp_servers.<name>]`:
-
-```toml
-[mcp_servers.memory]
-command = "npx"
-args = ["-y", "@modelcontextprotocol/server-memory"]
-
-[mcp_servers.postgres]
-command = "npx"
-args = ["-y", "@modelcontextprotocol/server-postgres", "postgresql://localhost/mydb"]
-```
-
-&ensp;
-
-## Auto Review
-
-Auto Review runs in the background during coding sessions:
-
-1. Watches for code changes after each turn
-2. Creates ghost commits in a separate worktree
-3. Reviews changes using a fast model (configurable)
-4. Reports issues and suggests fixes without blocking your flow
-5. Runs parallel with Auto Drive tasks
-
-Configure in settings or `config.toml`:
-
-```toml
-[tui]
-auto_review_enabled = true
-review_auto_resolve = false  # true to auto-apply suggested fixes
-```
-
-&ensp;
-
-## What's Different from Upstream Codex
-
-| Feature | OpenAI Codex | Hanzo Dev |
-|---------|-------------|-----------|
-| **Multi-agent** | Single model | `/plan`, `/solve`, `/code` with Claude + Gemini + GPT |
-| **Agent piping** | None | Spawn `claude`, `gemini`, `qwen` as sub-processes |
-| **Custom agents** | None | YAML frontmatter loader, `/use` command |
-| **Theme system** | Basic | 20+ themes, Zen mode, live preview |
-| **Browser** | None | CDP + internal headless, screenshots inline |
-| **Auto Review** | None | Ghost-commit watcher with auto-resolve |
-| **Skills** | Static | Dynamic injection, live reload |
-| **Sandbox** | Seatbelt | + Bubblewrap (Linux), proxy-aware routing |
-| **Session mgmt** | Basic | Nicknames, forking, sortable resume picker |
-| **Plan mode** | None | Streamed plan items with step approval |
-| **Upstream sync** | N/A | Automated 30-min merge with policy-driven conflict resolution |
-
-Hanzo Dev stays compatible with upstream. The automated merge workflow polls `openai/codex` every 30 minutes and applies changes using a policy file that protects fork-specific code while adopting upstream improvements.
-
-&ensp;
-
-## Architecture
-
-Hanzo Dev is a Rust workspace with 39+ crates:
-
-```
-hanzo-dev/
-  cli/           # Binary entry point (produces `dev`)
-  tui/           # Terminal UI (Ratatui, 1.6MB of widget code)
-  core/          # Config, auth, exec, agents, MCP, git
-  protocol/      # Streaming protocol definitions
-  exec/          # Command execution + sandboxing
-  browser/       # CDP browser automation
-  mcp-client/    # MCP client implementation
-  mcp-server/    # MCP server
-  code-auto-drive-core/  # Auto Drive orchestration
-  cloud-tasks/   # Cloud task management
-  login/         # Auth (ChatGPT, API key, device code)
-  ...            # 28 more supporting crates
-```
-
-### Build & test
-
-```bash
-./build-fast.sh                           # Full build (required check)
-cargo nextest run --no-fail-fast          # All workspace tests
-cargo test -p hanzo-tui --features test-helpers  # TUI tests
-./pre-release.sh                          # Pre-push validation
-```
-
-&ensp;
-
-## Videos
-
-<p align="center">
-  <a href="https://www.youtube.com/watch?v=Ra3q8IVpIOc">
-    <img src="docs/images/video-auto-review-play.jpg" alt="Auto Review" width="100%">
-  </a><br>
-  <strong>Auto Review</strong>
-</p>
-
-<p align="center">
-  <a href="https://youtu.be/UOASHZPruQk">
-    <img src="docs/images/video-auto-drive-new-play.jpg" alt="Auto Drive" width="100%">
-  </a><br>
-  <strong>Auto Drive</strong>
-</p>
-
-<p align="center">
-  <a href="https://youtu.be/sV317OhiysQ">
-    <img src="docs/images/video-v03-play.jpg" alt="Multi-Agent" width="100%">
-  </a><br>
-  <strong>Multi-Agent Orchestration</strong>
-</p>
-
-&ensp;
-
 ## FAQ
 
-**How is this different from OpenAI Codex CLI?**
-> Hanzo Dev adds multi-agent orchestration, CLI agent piping (Claude/Gemini/Qwen), browser automation, a full theme engine, Auto Review, and skills — while auto-syncing upstream improvements.
+**How is this different from the original?**
+> This fork adds browser integration, multi-agent commands (`/plan`, `/solve`, `/code`), theme system, and enhanced reasoning controls while maintaining full compatibility.
 
-**Can I use it with Claude Code?**
-> Yes. Install `@anthropic-ai/claude-code` and Hanzo Dev will discover it automatically. Use `/plan`, `/solve`, or `/code` to include Claude in multi-agent workflows, or `/use` with a custom agent definition.
-
-**Can I use my existing Codex/Code configuration?**
-> Yes. Hanzo Dev reads from `~/.hanzo/` (primary), `~/.code/`, and `~/.codex/`. It only writes to `~/.hanzo/`.
+**Can I use my existing Codex configuration?**
+> Yes. Every Code reads from both `~/.code/` (primary) and legacy `~/.codex/` directories. We only write to `~/.code/`, so Codex will keep running if you switch back; copy or remove legacy files if you notice conflicts.
 
 **Does this work with ChatGPT Plus?**
-> Yes. Same "Sign in with ChatGPT" flow as upstream Codex.
-
-**Can I use local models?**
-> Yes. `dev --oss` connects to Ollama. Set `model_provider` and `OPENAI_BASE_URL` in config for any OpenAI-compatible endpoint.
+> Absolutely. Use the same "Sign in with ChatGPT" flow as the original.
 
 **Is my data secure?**
-> Auth stays on your machine. We don't proxy credentials or conversations.
+> Yes. Authentication stays on your machine, and we don't proxy your credentials or conversations.
 
 &ensp;
-
 ## Contributing
 
+We welcome contributions! Every Code maintains compatibility with upstream while adding community-requested features.
+
+### Development workflow
+
 ```bash
-git clone https://github.com/hanzoai/dev.git
-cd dev
+# Clone and setup
+git clone https://github.com/just-every/code.git
+cd code
+npm install
+
+# Build (use fast build for development)
 ./build-fast.sh
-./hanzo-dev/target/dev-fast/dev
+
+# Run locally
+./code-rs/target/dev-fast/code
 ```
 
-### Git hooks
+#### Git hooks
+
+This repo ships shared hooks under `.githooks/`. To enable them locally:
 
 ```bash
 git config core.hooksPath .githooks
 ```
 
-The `pre-push` hook runs `./pre-release.sh` when pushing to `main`.
+The `pre-push` hook runs `./pre-release.sh` automatically when pushing to `main`.
 
-### Pull requests
+### Opening a pull request
 
-1. Fork and create a feature branch
-2. Make changes
-3. `cargo nextest run --no-fail-fast` — tests pass
-4. `./build-fast.sh` — zero errors, zero warnings
-5. Submit PR
+1. Fork the repository
+2. Create a feature branch: `git checkout -b feature/amazing-feature`
+3. Make your changes
+4. Run tests: `cargo test`
+5. Build successfully: `./build-fast.sh`
+6. Submit a pull request
+
 
 &ensp;
+## Legal & Use
 
-## Legal
-
-### License
-Apache 2.0 — see [LICENSE](LICENSE). Community fork of `openai/codex`. Upstream LICENSE and NOTICE files preserved.
-
-**Hanzo Dev** is not affiliated with, sponsored by, or endorsed by OpenAI.
+### License & attribution
+- This project is a community fork of `openai/codex` under **Apache-2.0**. We preserve upstream LICENSE and NOTICE files.
+- **Every Code** (Code) is **not** affiliated with, sponsored by, or endorsed by OpenAI.
 
 ### Your responsibilities
-Using OpenAI, Anthropic, or Google services through Hanzo Dev means you agree to their respective Terms. Don't scrape, bypass rate limits, or share accounts.
+Using OpenAI, Anthropic or Google services through Every Code means you agree to **their Terms and policies**. In particular:
+- **Don't** programmatically scrape/extract content outside intended flows.
+- **Don't** bypass or interfere with rate limits, quotas, or safety mitigations.
+- Use your **own** account; don't share or rotate accounts to evade limits.
+- If you configure other model providers, you're responsible for their terms.
 
 ### Privacy
-Auth lives at `~/.hanzo/auth.json`. Inputs/outputs sent to AI providers are handled under their Privacy Policies.
+- Your auth file lives at `~/.code/auth.json`
+- Inputs/outputs you send to AI providers are handled under their Terms and Privacy Policy; consult those documents (and any org-level data-sharing settings).
+
+### Subject to change
+AI providers can change eligibility, limits, models, or authentication flows. Every Code supports **both** ChatGPT sign-in and API-key modes so you can pick what fits (local/hobby vs CI/automation).
 
 &ensp;
+## License
 
+Apache 2.0 - See [LICENSE](LICENSE) file for details.
+
+Every Code is a community fork of the original Codex CLI. We maintain compatibility while adding enhanced features requested by the developer community.
+
+&ensp;
 ---
-**Need help?** Open an issue on [GitHub](https://github.com/hanzoai/dev/issues) | **Hanzo AI** — [hanzo.ai](https://hanzo.ai)
+**Need help?** Open an issue on [GitHub](https://github.com/just-every/code/issues) or check our documentation.

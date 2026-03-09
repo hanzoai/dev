@@ -1,6 +1,6 @@
 use std::collections::HashMap;
 
-use hanzo_core::config_types::AgentConfig;
+use code_core::config_types::AgentConfig;
 
 pub(super) fn agent_summary_counts(config_agents: &[AgentConfig]) -> (usize, usize) {
     let mut enabled = 0usize;
@@ -8,10 +8,12 @@ pub(super) fn agent_summary_counts(config_agents: &[AgentConfig]) -> (usize, usi
 
     let mut config_by_name: HashMap<String, &AgentConfig> = HashMap::new();
     for cfg in config_agents {
-        config_by_name.insert(cfg.name.to_ascii_lowercase(), cfg);
+        let key = code_core::agent_defaults::agent_model_spec(&cfg.name)
+            .map_or_else(|| cfg.name.to_ascii_lowercase(), |spec| spec.slug.to_ascii_lowercase());
+        config_by_name.insert(key, cfg);
     }
 
-    for spec in hanzo_core::agent_defaults::agent_model_specs() {
+    for spec in code_core::agent_defaults::agent_model_specs() {
         total += 1;
         let key = spec.slug.to_ascii_lowercase();
         if let Some(cfg) = config_by_name.get(&key) {
@@ -23,7 +25,7 @@ pub(super) fn agent_summary_counts(config_agents: &[AgentConfig]) -> (usize, usi
 
     for cfg in config_agents {
         let key = cfg.name.to_ascii_lowercase();
-        if hanzo_core::agent_defaults::agent_model_spec(&key).is_some() {
+        if code_core::agent_defaults::agent_model_spec(&key).is_some() {
             continue;
         }
         total += 1;
@@ -38,7 +40,7 @@ pub(super) fn agent_summary_counts(config_agents: &[AgentConfig]) -> (usize, usi
 #[cfg(test)]
 mod agent_summary_counts_tests {
     use super::agent_summary_counts;
-    use hanzo_core::config_types::AgentConfig;
+    use code_core::config_types::AgentConfig;
 
     fn make_agent(name: &str, enabled: bool) -> AgentConfig {
         AgentConfig {
@@ -58,12 +60,12 @@ mod agent_summary_counts_tests {
     #[test]
     fn missing_builtins_default_to_disabled() {
         let agents = vec![
-            make_agent("code-gpt-5.3-codex", true),
-            make_agent("code-gpt-5.2", true),
+            make_agent("code-gpt-5.2-codex", true),
+            make_agent("code-gpt-5.4", true),
         ];
 
         let (enabled, total) = agent_summary_counts(&agents);
-        let builtins = hanzo_core::agent_defaults::agent_model_specs().len();
+        let builtins = code_core::agent_defaults::agent_model_specs().len();
 
         assert_eq!(enabled, 2);
         assert_eq!(total, builtins);
@@ -77,7 +79,7 @@ mod agent_summary_counts_tests {
         ];
 
         let (enabled, total) = agent_summary_counts(&agents);
-        let builtins = hanzo_core::agent_defaults::agent_model_specs().len();
+        let builtins = code_core::agent_defaults::agent_model_specs().len();
 
         assert_eq!(enabled, 1);
         assert_eq!(total, builtins + 1);
