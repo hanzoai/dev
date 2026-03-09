@@ -6,13 +6,46 @@
       "type": "string"
     },
     "AskForApproval": {
-      "enum": [
-        "untrusted",
-        "on-failure",
-        "on-request",
-        "never"
-      ],
-      "type": "string"
+      "oneOf": [
+        {
+          "enum": [
+            "untrusted",
+            "on-failure",
+            "on-request",
+            "never"
+          ],
+          "type": "string"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "reject": {
+              "properties": {
+                "mcp_elicitations": {
+                  "type": "boolean"
+                },
+                "rules": {
+                  "type": "boolean"
+                },
+                "sandbox_approval": {
+                  "type": "boolean"
+                }
+              },
+              "required": [
+                "mcp_elicitations",
+                "rules",
+                "sandbox_approval"
+              ],
+              "type": "object"
+            }
+          },
+          "required": [
+            "reject"
+          ],
+          "title": "RejectAskForApproval",
+          "type": "object"
+        }
+      ]
     },
     "ByteRange": {
       "properties": {
@@ -181,6 +214,10 @@
                 "type": "fullAccess"
               }
             },
+            "networkAccess": {
+              "default": false,
+              "type": "boolean"
+            },
             "type": {
               "enum": [
                 "readOnly"
@@ -265,6 +302,13 @@
           "type": "object"
         }
       ]
+    },
+    "ServiceTier": {
+      "enum": [
+        "fast",
+        "flex"
+      ],
+      "type": "string"
     },
     "Settings": {
       "description": "Settings for a collaboration mode.",
@@ -505,6 +549,24 @@
         }
       ],
       "description": "Override the sandbox policy for this turn and subsequent turns."
+    },
+    "serviceTier": {
+      "anyOf": [
+        {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/ServiceTier"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "description": "Override the service tier for this turn and subsequent turns."
     },
     "summary": {
       "anyOf": [
