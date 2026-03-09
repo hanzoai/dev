@@ -73,7 +73,8 @@ fn is_api_message(message: &ResponseItem) -> bool {
         | ResponseItem::LocalShellCall { .. }
         | ResponseItem::CompactionSummary { .. }
         | ResponseItem::Reasoning { .. }
-        | ResponseItem::WebSearchCall { .. } => true,
+        | ResponseItem::WebSearchCall { .. }
+        | ResponseItem::ImageGenerationCall { .. } => true,
         ResponseItem::Other => false,
     }
 }

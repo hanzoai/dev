@@ -1,16 +1,18 @@
-## @hanzo/dev v0.6.74
+## @just-every/code v0.6.77
 
-Sync latest from openai/codex and just-every/code upstreams. All Hanzo branding, zen model presets, zap integration, and custom features preserved.
+This release improves automatic context selection defaults and strengthens context-mode reliability.
 
 ### Changes
-- Upstream Sync: merge latest `openai/codex` main (citation fix, Windows sandbox, file watcher, token refresh, memory/rollout improvements)
-- Upstream Sync: merge latest `just-every/code` main (v0.6.70, GPU landlock fix, search persistence, auto-drive routing)
-- ZAP: split transport into module with HTTP/SSE support
-- Core: refine zen model wording and cleanup comments
-- Release: bump package/workspace versions to `0.6.74`
+
+- Core/Context: default session context mode to `auto` for better out-of-the-box context selection.
+- Auto Context: enrich 1M-judge risk signals to improve context quality and decision reliability.
+- TUI/Context: persist explicit disabled state for 1M mode so settings stay consistent across sessions.
 
 ### Install
-```
-npm install -g @hanzo/dev@latest
+
+```bash
+npm install -g @just-every/code@latest
 code
 ```
+
+Compare: https://github.com/just-every/code/compare/v0.6.76...v0.6.77

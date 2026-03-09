@@ -50,7 +50,6 @@ fn warn_on_suspicious_cli_overrides(cli_paths: &[String]) {
     }
 
     for cli_path in cli_paths {
-        #[allow(clippy::print_stderr)]
         if cli_path == "auto_drive.use_chat_model"
             || (cli_path.starts_with("auto_drive.") && cli_path.ends_with(".use_chat_model"))
         {
@@ -59,7 +58,6 @@ fn warn_on_suspicious_cli_overrides(cli_paths: &[String]) {
             );
         }
 
-        #[allow(clippy::print_stderr)]
         if cli_path == "auto_review_enabled" {
             eprintln!(
                 "Warning: unknown config override `{cli_path}` (ignored). Did you mean `tui.auto_review_enabled`?"
@@ -96,12 +94,7 @@ fn warn_on_unknown_cli_overrides(cli_paths: &[String], ignored_paths: &[String])
             continue;
         }
 
-        #[allow(clippy::print_stderr)]
-        {
-            eprintln!(
-                "Warning: unknown config override `{cli_path}` (ignored). See `dev exec --help` for valid keys."
-            );
-        }
+        eprintln!("Warning: unknown config override `{cli_path}` (ignored). See `code exec --help` for valid keys.");
     }
 }
 
@@ -132,16 +125,16 @@ pub(crate) fn deserialize_config_toml_with_cli_warnings(
 
 pub(crate) fn upgrade_legacy_model_slugs(cfg: &mut ConfigToml) {
     fn maybe_upgrade(field: &mut Option<String>) {
-        if let Some(old) = field.clone()
-            && let Some(new) = upgrade_legacy_model_slug(&old)
-        {
-            tracing::info!(
-                target: "code.config",
-                old,
-                new,
-                "upgrading legacy model slug to newer default",
-            );
-            *field = Some(new);
+        if let Some(old) = field.clone() {
+            if let Some(new) = upgrade_legacy_model_slug(&old) {
+                tracing::info!(
+                    target: "code.config",
+                    old,
+                    new,
+                    "upgrading legacy model slug to newer default",
+                );
+                *field = Some(new);
+            }
         }
     }
 
@@ -155,7 +148,32 @@ pub(crate) fn upgrade_legacy_model_slugs(cfg: &mut ConfigToml) {
 }
 
 fn upgrade_legacy_model_slug(slug: &str) -> Option<String> {
-    if slug.starts_with("gpt-5.3") || slug.starts_with("test-gpt-5.3") {
+    match slug {
+        "gpt-5.2.4" => return Some("gpt-5.4".to_string()),
+        "test-gpt-5.2.4" => return Some("test-gpt-5.4".to_string()),
+        _ => {}
+    }
+
+    fn is_current_or_newer_gpt5_slug(slug: &str) -> bool {
+        for prefix in ["gpt-5.", "test-gpt-5."] {
+            let Some(rest) = slug.strip_prefix(prefix) else {
+                continue;
+            };
+
+            let minor: String = rest.chars().take_while(|c| c.is_ascii_digit()).collect();
+            if minor.is_empty() {
+                continue;
+            }
+
+            if minor.parse::<u32>().is_ok_and(|value| value >= 2) {
+                return true;
+            }
+        }
+
+        false
+    }
+
+    if is_current_or_newer_gpt5_slug(slug) {
         return None;
     }
 
@@ -175,15 +193,14 @@ fn upgrade_legacy_model_slug(slug: &str) -> Option<String> {
         return Some(format!("gpt-5.1-codex{rest}"));
     }
 
-    // Upgrade Anthropic Opus 4.1 to 4.5
-    if slug.eq_ignore_ascii_case("claude-opus-4.1") {
-        return Some("claude-opus-4.5".to_string());
+    // Upgrade Anthropic Opus 4.1/4.5 to 4.6
+    if slug.eq_ignore_ascii_case("claude-opus-4.1") || slug.eq_ignore_ascii_case("claude-opus-4.5")
+    {
+        return Some("claude-opus-4.6".to_string());
     }
 
     // Upgrade Gemini 2.5 Pro to Gemini 3 Pro (or preview alias)
-    if slug.eq_ignore_ascii_case("gemini-2.5-pro")
-        || slug.eq_ignore_ascii_case("gemini-3-pro-preview")
-    {
+    if slug.eq_ignore_ascii_case("gemini-2.5-pro") || slug.eq_ignore_ascii_case("gemini-3-pro-preview") {
         return Some("gemini-3-pro".to_string());
     }
 
@@ -194,38 +211,24 @@ fn upgrade_legacy_model_slug(slug: &str) -> Option<String> {
 
     // Keep codex variants on their existing line; upgrades are surfaced via the
     // migration prompt instead of silently rewriting explicit config.
-    if slug.starts_with("gpt-5.1-codex")
-        || slug.starts_with("test-gpt-5.1-codex")
-        || slug.starts_with("gpt-5.2-codex")
-        || slug.starts_with("test-gpt-5.2-codex")
-        || slug.starts_with("gpt-5.3-codex")
-        || slug.starts_with("test-gpt-5.3-codex")
-    {
+    if slug.starts_with("gpt-5.1-codex") || slug.starts_with("test-gpt-5.1-codex") {
         return None;
     }
 
-    if let Some(rest) = slug.strip_prefix("test-gpt-5.2") {
-        return Some(format!("test-gpt-5.3{rest}"));
-    }
-
-    if let Some(rest) = slug.strip_prefix("gpt-5.2") {
-        return Some(format!("gpt-5.3{rest}"));
-    }
-
     if let Some(rest) = slug.strip_prefix("test-gpt-5.1") {
-        return Some(format!("test-gpt-5.3{rest}"));
+        return Some(format!("test-gpt-5.2{rest}"));
     }
 
     if let Some(rest) = slug.strip_prefix("gpt-5.1") {
-        return Some(format!("gpt-5.3{rest}"));
+        return Some(format!("gpt-5.2{rest}"));
     }
 
     if let Some(rest) = slug.strip_prefix("test-gpt-5") {
-        return Some(format!("test-gpt-5.3{rest}"));
+        return Some(format!("test-gpt-5.2{rest}"));
     }
 
     if let Some(rest) = slug.strip_prefix("gpt-5") {
-        return Some(format!("gpt-5.3{rest}"));
+        return Some(format!("gpt-5.2{rest}"));
     }
 
     None

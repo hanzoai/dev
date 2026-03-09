@@ -2,7 +2,7 @@ use crate::agent_defaults::agent_model_spec;
 use crate::agent_defaults::enabled_agent_model_specs;
 use crate::config_types::AgentConfig;
 use crate::config_types::SubagentCommandConfig;
-use crate::custom_agents::CustomAgentDef;
+use crate::external_agent_command_exists;
 
 // NOTE: These are the prompt formatters for the prompt‑expanding slash commands
 // (/plan, /solve, /code). If you add or change a slash command, please update
@@ -10,35 +10,7 @@ use crate::custom_agents::CustomAgentDef;
 // with the UI and behavior.
 
 fn command_exists(cmd: &str) -> bool {
-    if cmd.contains(std::path::MAIN_SEPARATOR) || cmd.contains('/') || cmd.contains('\\') {
-        return std::fs::metadata(cmd).map(|m| m.is_file()).unwrap_or(false);
-    }
-
-    #[cfg(target_os = "windows")]
-    {
-        which::which(cmd).map(|p| p.is_file()).unwrap_or(false)
-    }
-
-    #[cfg(not(target_os = "windows"))]
-    {
-        use std::os::unix::fs::PermissionsExt;
-        let Some(path_os) = std::env::var_os("PATH") else {
-            return false;
-        };
-        for dir in std::env::split_paths(&path_os) {
-            if dir.as_os_str().is_empty() {
-                continue;
-            }
-            let candidate = dir.join(cmd);
-            if let Ok(meta) = std::fs::metadata(&candidate)
-                && meta.is_file()
-                && (meta.permissions().mode() & 0o111 != 0)
-            {
-                return true;
-            }
-        }
-        false
-    }
+    external_agent_command_exists(cmd)
 }
 
 /// Get the list of enabled agent names from the configuration
@@ -49,18 +21,14 @@ pub fn get_enabled_agents(agents: &[AgentConfig]) -> Vec<String> {
 
     fn agent_is_runnable(agent: &AgentConfig) -> bool {
         let spec = agent_model_spec(&agent.name).or_else(|| agent_model_spec(&agent.command));
-        if let Some(spec) = spec
-            && matches!(spec.family, "code" | "codex" | "cloud")
-        {
-            return true;
+        if let Some(spec) = spec {
+            if matches!(spec.family, "code" | "codex" | "cloud") {
+                return true;
+            }
         }
 
         let cmd = agent.command.trim();
-        let cmd = if cmd.is_empty() {
-            agent.name.trim()
-        } else {
-            cmd
-        };
+        let cmd = if cmd.is_empty() { agent.name.trim() } else { cmd };
         let cmd = command_for_check(cmd);
         if !cmd.is_empty() && command_exists(cmd) {
             return true;
@@ -191,7 +159,7 @@ pub fn format_subagent_command(
     // Compose unified prompt used for all subagent commands (built-ins and custom)
     let models_str = models
         .iter()
-        .map(|m| format!("\"{m}\""))
+        .map(|m| format!("\"{}\"", m))
         .collect::<Vec<_>>()
         .join(", ");
 
@@ -202,7 +170,12 @@ pub fn format_subagent_command(
 
     let write_flag = !read_only;
     let prompt = format!(
-        "Please perform /{name} using the <tools>, <instructions> and <task> below.\n<tools>\n    To perform /{name} you must use `agent {{\"action\":\"create\",\"create\":{{\"models\":[{models_str}],\"write\":{write_flag}}}}}` to start a batch of agents.\n    Provide a comprehensive description of the task and context. You may need to briefly research the code base first and to give the agents a head start of where to look. You can include one or two key files but also allow the models to look up the files they need themselves. Using the create action starts all agents at once and returns a `batch_id`.\n\n    Each agent uses a different LLM which allows you to gather diverse results.\n    Monitor progress using `agent {{\"action\":\"wait\",\"wait\":{{\"batch_id\":\"<batch_id>\",\"return_all\":true}}}}` to wait for all agents to complete.\n    If an agent fails or times out, you can ignore it and continue with the other results.\n    Use `agent {{\"action\":\"result\",\"result\":{{\"agent_id\":\"<agent_id>\"}}}}` to fetch detailed output, or inspect the worktree directly when `write` is true.\n</tools>\n<instructions>\n    Instructions for /{name}:\n    {instr_text}\n</instructions>\n<task>\n    Task for /{name}:\n    {task}\n</task>",
+        "Please perform /{name} using the <tools>, <instructions> and <task> below.\n<tools>\n    To perform /{name} you must use `agent {{\"action\":\"create\",\"create\":{{\"models\":[{models}],\"write\":{write_flag}}}}}` to start a batch of agents.\n    Provide a comprehensive description of the task and context. You may need to briefly research the code base first and to give the agents a head start of where to look. You can include one or two key files but also allow the models to look up the files they need themselves. Using the create action starts all agents at once and returns a `batch_id`.\n\n    Each agent uses a different LLM which allows you to gather diverse results.\n    Monitor progress using `agent {{\"action\":\"wait\",\"wait\":{{\"batch_id\":\"<batch_id>\",\"return_all\":true}}}}` to wait for all agents to complete.\n    If an agent fails or times out, you can ignore it and continue with the other results.\n    Use `agent {{\"action\":\"result\",\"result\":{{\"agent_id\":\"<agent_id>\"}}}}` to fetch detailed output, or inspect the worktree directly when `write` is true.\n</tools>\n<instructions>\n    Instructions for /{name}:\n    {instructions}\n</instructions>\n<task>\n    Task for /{name}:\n    {task}\n</task>",
+        name = name,
+        models = models_str,
+        write_flag = write_flag,
+        instructions = instr_text,
+        task = task,
     );
 
     SubagentResolution {
@@ -248,177 +221,6 @@ pub fn format_code_command(
     res.prompt
 }
 
-/// Result of `/use <agent>` command resolution
-#[derive(Debug, Clone)]
-pub struct UseAgentResult {
-    pub agent_name: String,
-    pub found: bool,
-    pub instructions: Option<String>,
-    pub model: Option<String>,
-    pub description: Option<String>,
-    pub prompt: String,
-}
-
-/// Format help message for /use command
-pub fn format_use_help() -> String {
-    r#"Usage: /use <agent>
-
-Switch to a custom agent persona loaded from ~/.hanzo/agents or ~/.claude/agents.
-
-Available agents are loaded from:
-  - ~/.hanzo/agents/*.md (Hanzo format)
-  - ~/.claude/agents/*.md (Claude Code format)
-
-Agent files use YAML frontmatter:
-```
----
-name: cto
-description: Chief Technology Officer persona
-model: opus
----
-
-You are the CTO. Focus on architecture and technical leadership.
-```
-
-Examples:
-  /use cto        - Switch to CTO agent
-  /use vp         - Switch to VP of Engineering
-  /agent reviewer - Switch to code reviewer agent
-
-To list available agents, type /use without arguments."#
-        .to_string()
-}
-
-/// Format a /use command to switch to a custom agent
-pub fn format_use_command(agent_name: &str) -> String {
-    // The actual agent lookup is async, so we return a prompt that instructs
-    // the LLM to adopt the specified persona. The TUI/exec layer can perform
-    // the actual lookup and inject the agent's instructions.
-    let agent_name = agent_name.trim();
-
-    format!(
-        r#"Please adopt the "{agent_name}" agent persona. 
-
-Look up the custom agent definition for "{agent_name}" from the available agents directory. 
-If the agent exists, load its instructions and personality, then acknowledge the switch.
-If the agent is not found, list available custom agents.
-
-You are now acting as the "{agent_name}" agent."#,
-    )
-}
-
-/// Resolve a custom agent by name (async version for use with actual file lookup)
-pub async fn resolve_use_agent(agent_name: &str) -> UseAgentResult {
-    use crate::custom_agents::find_custom_agent;
-
-    let agent_name = agent_name.trim();
-
-    if let Some(agent) = find_custom_agent(agent_name).await {
-        UseAgentResult {
-            agent_name: agent.name.clone(),
-            found: true,
-            instructions: agent.instructions.clone(),
-            model: agent.model.clone(),
-            description: agent.description.clone(),
-            prompt: format_use_agent_prompt(&agent),
-        }
-    } else {
-        use crate::custom_agents::list_custom_agent_names;
-        let available = list_custom_agent_names().await;
-        let list_str = if available.is_empty() {
-            "No custom agents found. Create agents in ~/.hanzo/agents/ or ~/.claude/agents/"
-                .to_string()
-        } else {
-            format!("Available agents: {}", available.join(", "))
-        };
-
-        UseAgentResult {
-            agent_name: agent_name.to_string(),
-            found: false,
-            instructions: None,
-            model: None,
-            description: None,
-            prompt: format!("Agent '{}' not found. {}", agent_name, list_str),
-        }
-    }
-}
-
-/// Format a prompt that injects the custom agent's persona
-fn format_use_agent_prompt(agent: &CustomAgentDef) -> String {
-    let mut prompt = String::new();
-
-    prompt.push_str(&format!(
-        "You are now acting as the \"{}\" agent.\n\n",
-        agent.name
-    ));
-
-    if let Some(desc) = &agent.description {
-        prompt.push_str(&format!("**Role**: {}\n\n", desc));
-    }
-
-    if let Some(model) = &agent.model {
-        prompt.push_str(&format!("**Preferred Model**: {}\n\n", model));
-    }
-
-    if let Some(instructions) = &agent.instructions {
-        prompt.push_str("**Instructions**:\n");
-        prompt.push_str(instructions);
-        prompt.push_str("\n\n");
-    }
-
-    prompt.push_str("Acknowledge this persona switch and proceed with any pending tasks.");
-    prompt
-}
-
-/// Format a language-specific development command
-/// Uses the language-specific agent with subagent orchestration
-pub fn format_language_command(
-    language: &str,
-    task: &str,
-    _agents: Option<&[AgentConfig]>,
-) -> String {
-    let language_agents = match language {
-        "python" => vec!["python", "claude", "codex"],
-        "typescript" => vec!["typescript", "claude", "codex"],
-        "rust" => vec!["rust", "claude", "codex"],
-        "go" => vec!["go", "claude", "codex"],
-        _ => vec!["claude", "codex"],
-    };
-
-    let lang_display = match language {
-        "python" => "Python 3.12+",
-        "typescript" => "TypeScript",
-        "rust" => "Rust 1.75+",
-        "go" => "Go 1.21+",
-        _ => language,
-    };
-
-    let models_str = language_agents
-        .iter()
-        .map(|m| format!("\"{m}\""))
-        .collect::<Vec<_>>()
-        .join(", ");
-
-    format!(
-        r#"Please complete the following {lang_display} development task using specialized agents.
-
-<tools>
-Use `agent {{"action":"create","create":{{"models":[{models_str}],"write":true}}}}` to start {lang_display} expert agents.
-Each agent will work in a separate worktree and can read/write code, run tests, and install dependencies.
-Monitor with `agent {{"action":"wait","wait":{{"batch_id":"<batch_id>","return_all":true}}}}`.
-</tools>
-
-<language_context>
-Language: {lang_display}
-Focus: Use modern {language} idioms, tooling, and best practices.
-</language_context>
-
-<task>
-{task}
-</task>"#,
-    )
-}
-
 /// Parse a slash command and return the formatted prompt
 pub fn handle_slash_command(input: &str, agents: Option<&[AgentConfig]>) -> Option<String> {
     let input = input.trim();
@@ -431,10 +233,7 @@ pub fn handle_slash_command(input: &str, agents: Option<&[AgentConfig]>) -> Opti
     // Parse the command and arguments
     let parts: Vec<&str> = input.splitn(2, ' ').collect();
     let command = parts[0];
-    let args = parts
-        .get(1)
-        .map(std::string::ToString::to_string)
-        .unwrap_or_default();
+    let args = parts.get(1).map(|s| s.to_string()).unwrap_or_default();
 
     match command {
         "/plan" => {
@@ -461,42 +260,6 @@ pub fn handle_slash_command(input: &str, agents: Option<&[AgentConfig]>) -> Opti
                 Some(format_code_command(&args, None, agents))
             }
         }
-        "/use" | "/agent" => {
-            if args.is_empty() {
-                Some(format_use_help())
-            } else {
-                Some(format_use_command(&args))
-            }
-        }
-        // First-class language support
-        "/python" | "/py" => {
-            if args.is_empty() {
-                Some("Error: /python requires a task. Usage: /python <task>".to_string())
-            } else {
-                Some(format_language_command("python", &args, agents))
-            }
-        }
-        "/typescript" | "/ts" => {
-            if args.is_empty() {
-                Some("Error: /typescript requires a task. Usage: /typescript <task>".to_string())
-            } else {
-                Some(format_language_command("typescript", &args, agents))
-            }
-        }
-        "/rust" | "/rs" => {
-            if args.is_empty() {
-                Some("Error: /rust requires a task. Usage: /rust <task>".to_string())
-            } else {
-                Some(format_language_command("rust", &args, agents))
-            }
-        }
-        "/go" | "/golang" => {
-            if args.is_empty() {
-                Some("Error: /go requires a task. Usage: /go <task>".to_string())
-            } else {
-                Some(format_language_command("go", &args, agents))
-            }
-        }
         _ => None,
     }
 }
@@ -504,29 +267,78 @@ pub fn handle_slash_command(input: &str, agents: Option<&[AgentConfig]>) -> Opti
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::ffi::OsString;
+    use std::sync::{LazyLock, Mutex};
+    use tempfile::tempdir;
+
+    static ENV_LOCK: LazyLock<Mutex<()>> = LazyLock::new(|| Mutex::new(()));
+
+    fn restore_var(name: &str, value: Option<OsString>) {
+        match value {
+            Some(v) => unsafe { std::env::set_var(name, v) },
+            None => unsafe { std::env::remove_var(name) },
+        }
+    }
 
     #[test]
     fn default_models_skip_missing_agent_clis() {
+        let _guard = ENV_LOCK.lock().expect("env lock");
         let orig_path = std::env::var_os("PATH");
+        let orig_home = std::env::var_os("HOME");
+        let orig_claude_config_dir = std::env::var_os("CLAUDE_CONFIG_DIR");
+        let fake_home = tempdir().expect("temp home");
+
         unsafe {
             std::env::set_var("PATH", "");
+            std::env::set_var("HOME", fake_home.path());
+            std::env::remove_var("CLAUDE_CONFIG_DIR");
         }
 
         let defaults = get_default_models();
-        assert!(defaults.iter().any(|v| v == "code-gpt-5.2"));
+        assert!(defaults.iter().any(|v| v == "code-gpt-5.4"));
+        assert!(defaults.iter().any(|v| v == "code-gpt-5.3-codex"));
         assert!(!defaults.iter().any(|v| v == "qwen-3-coder"));
         assert!(!defaults.iter().any(|v| v == "gemini-3-flash"));
         assert!(!defaults.iter().any(|v| v == "claude-sonnet-4.5"));
 
-        if let Some(path) = orig_path {
-            unsafe {
-                std::env::set_var("PATH", path);
-            }
-        } else {
-            unsafe {
-                std::env::remove_var("PATH");
-            }
+        restore_var("PATH", orig_path);
+        restore_var("HOME", orig_home);
+        restore_var("CLAUDE_CONFIG_DIR", orig_claude_config_dir);
+    }
+
+    #[cfg(not(target_os = "windows"))]
+    #[test]
+    fn default_models_include_claude_when_home_fallback_exists() {
+        use std::os::unix::fs::PermissionsExt;
+
+        let _guard = ENV_LOCK.lock().expect("env lock");
+        let orig_path = std::env::var_os("PATH");
+        let orig_home = std::env::var_os("HOME");
+        let orig_claude_config_dir = std::env::var_os("CLAUDE_CONFIG_DIR");
+
+        let fake_home = tempdir().expect("temp home");
+        let claude_dir = fake_home.path().join(".claude").join("local");
+        std::fs::create_dir_all(&claude_dir).expect("create fallback dir");
+        let claude_path = claude_dir.join("claude");
+        std::fs::write(&claude_path, "#!/bin/sh\nexit 0\n").expect("write fallback binary");
+        let mut perms = std::fs::metadata(&claude_path)
+            .expect("stat fallback binary")
+            .permissions();
+        perms.set_mode(0o755);
+        std::fs::set_permissions(&claude_path, perms).expect("chmod fallback binary");
+
+        unsafe {
+            std::env::set_var("PATH", "");
+            std::env::set_var("HOME", fake_home.path());
+            std::env::remove_var("CLAUDE_CONFIG_DIR");
         }
+
+        let defaults = get_default_models();
+        assert!(defaults.iter().any(|v| v == "claude-sonnet-4.5"));
+
+        restore_var("PATH", orig_path);
+        restore_var("HOME", orig_home);
+        restore_var("CLAUDE_CONFIG_DIR", orig_claude_config_dir);
     }
 
     #[test]
@@ -537,7 +349,8 @@ mod tests {
         let plan_prompt = result.unwrap();
         assert!(plan_prompt.contains("final, comprehensive plan"));
         // Default agents list should include non-Codex providers when no [[agents]] configured
-        assert!(plan_prompt.contains("code-gpt-5.2"));
+        assert!(plan_prompt.contains("code-gpt-5.4"));
+        assert!(plan_prompt.contains("code-gpt-5.3-codex"));
         assert!(!plan_prompt.contains("cloud-gpt-5.1-codex-max"));
 
         // Test /solve command
@@ -570,7 +383,7 @@ mod tests {
         // Create test agent configurations
         let agents = vec![
             AgentConfig {
-                name: "code-gpt-5.2".to_string(),
+                name: "code-gpt-5.4".to_string(),
                 command: "code".to_string(),
                 args: vec![],
                 read_only: false,
@@ -599,7 +412,7 @@ mod tests {
         let result = handle_slash_command("/plan test task", Some(&agents));
         assert!(result.is_some());
         let prompt = result.unwrap();
-        assert!(prompt.contains("code-gpt-5.2"));
+        assert!(prompt.contains("code-gpt-5.4"));
         assert!(!prompt.contains("test-gemini"));
     }
 }

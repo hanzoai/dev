@@ -1,7 +1,8 @@
 use serde::Deserialize;
 use serde::Serialize;
 
-use hanzo_protocol::models::SandboxPermissions;
+use code_protocol::models::PermissionProfile;
+use code_protocol::models::SandboxPermissions;
 
 use crate::exec_command::session_id::SessionId;
 
@@ -26,6 +27,9 @@ pub struct ExecCommandParams {
 
     #[serde(default)]
     pub(crate) sandbox_permissions: Option<SandboxPermissions>,
+
+    #[serde(default)]
+    pub(crate) additional_permissions: Option<PermissionProfile>,
 
     #[serde(default)]
     pub(crate) justification: Option<String>,
