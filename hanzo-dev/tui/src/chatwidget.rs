@@ -1,236 +1,239 @@
-use base64::prelude::BASE64_STANDARD;
-use base64::prelude::Engine as _;
 use once_cell::sync::Lazy;
 use std::collections::BTreeSet;
 use std::collections::HashMap;
+use std::collections::hash_map::Entry;
 use std::collections::HashSet;
 use std::collections::VecDeque;
-use std::collections::hash_map::Entry;
-use std::fs;
 use std::io;
-use std::path::Path;
-use std::path::PathBuf;
-use std::process::Command;
-use std::process::Output;
-use std::rc::Rc;
-use std::rc::Weak;
-use std::str::FromStr;
+use std::path::{Path, PathBuf};
+use std::rc::{Rc, Weak};
 use std::sync::Arc;
+use std::sync::mpsc::Sender;
 use std::sync::Mutex;
-use std::sync::OnceLock;
 use std::sync::atomic::AtomicBool;
 use std::sync::atomic::AtomicU64;
 use std::sync::atomic::Ordering;
-use std::sync::mpsc::Sender;
-use std::time::Duration;
-use std::time::Instant;
-use std::time::SystemTime;
+use std::sync::OnceLock;
+use std::time::{Duration, Instant, SystemTime};
+use std::fs;
+use std::process::{Command, Output};
+use std::str::FromStr;
+use base64::prelude::{Engine as _, BASE64_STANDARD};
 
+use ratatui::style::{Modifier, Style};
+use crate::header_wave::HeaderWaveEffect;
 use crate::auto_drive_strings;
 use crate::auto_drive_style::AutoDriveVariant;
-use crate::header_wave::HeaderWaveEffect;
 use crate::spinner;
 use crate::thread_spawner;
-use ratatui::style::Modifier;
-use ratatui::style::Style;
 
-use hanzo_common::elapsed::format_duration;
-use hanzo_common::model_presets::ModelPreset;
-use hanzo_common::model_presets::builtin_model_presets;
-use hanzo_common::model_presets::clamp_reasoning_effort_for_model;
-use hanzo_core::account_usage::RateLimitWarningScope;
-use hanzo_core::account_usage::StoredRateLimitSnapshot;
-use hanzo_core::account_usage::StoredUsageSummary;
-use hanzo_core::account_usage::TokenTotals;
-use hanzo_core::account_usage::{self};
-use hanzo_core::agent_defaults::agent_model_spec;
-use hanzo_core::agent_defaults::enabled_agent_model_specs;
-use hanzo_core::auth_accounts::StoredAccount;
-use hanzo_core::auth_accounts::{self};
-use hanzo_core::config::Config;
-use hanzo_core::config_types::AgentConfig;
-use hanzo_core::config_types::AutoDriveContinueMode;
-use hanzo_core::config_types::Notifications;
-use hanzo_core::config_types::ReasoningEffort;
-use hanzo_core::config_types::TextVerbosity;
-use hanzo_core::git_info::CommitLogEntry;
-use hanzo_core::model_family::derive_default_model_family;
-use hanzo_core::model_family::find_family_for_model;
-use hanzo_core::plan_tool::PlanItemArg;
-use hanzo_core::plan_tool::StepStatus;
-use hanzo_core::plan_tool::UpdatePlanArgs;
-use hanzo_core::smoke_test_agent_blocking;
-use hanzo_core::spawn::spawn_std_command_with_retry;
-use hanzo_core::split_command_and_args;
-use hanzo_login::AuthManager;
-use hanzo_login::AuthMode;
-use hanzo_protocol::mcp_protocol::AuthMode as McpAuthMode;
-use hanzo_protocol::num_format::format_with_separators;
-use hanzo_protocol::protocol::SessionSource;
+use code_common::elapsed::format_duration;
+use code_common::model_presets::builtin_model_presets;
+use code_common::model_presets::clamp_reasoning_effort_for_model;
+use code_common::model_presets::ModelPreset;
+use code_core::agent_defaults::{agent_model_spec, enabled_agent_model_specs};
+use code_core::smoke_test_agent_blocking;
+use code_core::config::Config;
+use code_core::git_info::CommitLogEntry;
+use code_core::config_types::AgentConfig;
+use code_core::config_types::AutoDriveContinueMode;
+use code_core::config_types::AutoDriveModelRoutingEntry;
+use code_core::config_types::ContextMode;
+use code_core::config_types::Notifications;
+use code_core::config_types::ReasoningEffort;
+use code_core::config_types::ServiceTier;
+use code_core::config_types::TextVerbosity;
+use code_core::spawn::spawn_std_command_with_retry;
+use code_core::plan_tool::{PlanItemArg, StepStatus, UpdatePlanArgs};
+use code_core::model_family::derive_default_model_family;
+use code_core::model_family::find_family_for_model;
+use code_core::model_family::resolve_context_mode_limits;
+use code_core::account_usage::{
+    self,
+    RateLimitWarningScope,
+    StoredRateLimitSnapshot,
+    StoredUsageSummary,
+    TokenTotals,
+};
+use code_core::auth_accounts::{self, StoredAccount};
+use code_login::AuthManager;
+use code_login::AuthMode;
+use code_protocol::dynamic_tools::DynamicToolResponse;
+use code_protocol::protocol::SessionSource;
+use code_protocol::num_format::format_with_separators_u64;
+use code_core::external_agent_command_exists;
+use code_core::split_command_and_args;
 use serde_json::Value as JsonValue;
 
-mod agent_install;
-mod agent_runs;
-mod agent_summary;
-mod auto_drive_cards;
-mod browser_sessions;
+
 mod diff_handlers;
-mod diff_ui;
+mod agent_summary;
 mod esc;
+mod modals;
+mod agent_install;
+mod diff_ui;
 mod exec_tools;
 mod gh_actions;
-mod help_handlers;
 mod history_render;
-mod interrupts;
-mod layout_scroll;
-mod limits_overlay;
-mod message;
-mod modals;
-mod perf;
-mod rate_limit_refresh;
-mod running_tools;
+mod help_handlers;
 mod settings_handlers;
 mod settings_overlay;
+mod limits_overlay;
+mod interrupts;
+mod layout_scroll;
+mod message;
+mod perf;
+mod rate_limit_refresh;
+mod streaming;
+mod terminal_handlers;
+mod terminal;
+mod tools;
+mod browser_sessions;
+mod agent_runs;
+mod web_search_sessions;
+mod auto_drive_cards;
+pub(crate) mod tool_cards;
+mod running_tools;
 #[cfg(any(test, feature = "test-helpers"))]
 pub mod smoke_helpers;
-mod streaming;
-mod terminal;
-mod terminal_handlers;
-pub(crate) mod tool_cards;
-mod tools;
-mod web_search_sessions;
 
-use self::agent_install::start_agent_install_session;
-use self::agent_install::start_direct_terminal_session;
-use self::agent_install::start_prompt_terminal_session;
-use self::agent_install::start_upgrade_terminal_session;
-use self::agent_install::wrap_command;
-use self::agent_summary::agent_summary_counts;
-use self::esc::AutoGoalEscState;
 #[cfg(test)]
 pub(crate) use self::esc::EscIntent;
-use self::history_render::CachedLayout;
-use self::history_render::HistoryRenderState;
-use self::history_render::RenderRequest;
-use self::history_render::RenderRequestKind;
-use self::history_render::RenderSettings;
-use self::history_render::VisibleCell;
-use self::limits_overlay::LimitsOverlayContent;
-use self::limits_overlay::LimitsTab;
-use self::rate_limit_refresh::start_rate_limit_refresh;
-use self::rate_limit_refresh::start_rate_limit_refresh_for_account;
+use self::agent_summary::agent_summary_counts;
+use self::esc::AutoGoalEscState;
+use self::agent_install::{
+    start_agent_install_session,
+    start_direct_terminal_session,
+    start_prompt_terminal_session,
+    start_upgrade_terminal_session,
+    wrap_command,
+};
+use code_auto_drive_core::{
+    start_auto_coordinator,
+    AutoCoordinatorCommand,
+    AutoCoordinatorEvent,
+    AutoCoordinatorEventSender,
+    AutoCoordinatorHandle,
+    AutoCoordinatorStatus,
+    AutoDriveHistory,
+    AutoDriveController,
+    AutoRunSummary,
+    AutoRunPhase,
+    AutoControllerEffect,
+    AutoTurnAgentsAction,
+    AutoTurnAgentsTiming,
+    AutoTurnCliAction,
+    AutoTurnReviewState,
+    AutoResolveState,
+    AutoResolvePhase,
+    AUTO_RESOLVE_REVIEW_FOLLOWUP,
+    CoordinatorContext,
+    CoordinatorRouterResponse,
+    route_user_message,
+    TurnConfig,
+    TurnDescriptor,
+};
+use self::limits_overlay::{LimitsOverlayContent, LimitsTab};
 use crate::chrome_launch::ChromeLaunchOption;
 use crate::insert_history::word_wrap_lines;
-use hanzo_auto_drive_core::AUTO_RESOLVE_REVIEW_FOLLOWUP;
-use hanzo_auto_drive_core::AutoControllerEffect;
-use hanzo_auto_drive_core::AutoCoordinatorCommand;
-use hanzo_auto_drive_core::AutoCoordinatorEvent;
-use hanzo_auto_drive_core::AutoCoordinatorEventSender;
-use hanzo_auto_drive_core::AutoCoordinatorHandle;
-use hanzo_auto_drive_core::AutoCoordinatorStatus;
-use hanzo_auto_drive_core::AutoDriveController;
-use hanzo_auto_drive_core::AutoDriveHistory;
-use hanzo_auto_drive_core::AutoResolvePhase;
-use hanzo_auto_drive_core::AutoResolveState;
-use hanzo_auto_drive_core::AutoRunPhase;
-use hanzo_auto_drive_core::AutoRunSummary;
-use hanzo_auto_drive_core::AutoTurnAgentsAction;
-use hanzo_auto_drive_core::AutoTurnAgentsTiming;
-use hanzo_auto_drive_core::AutoTurnCliAction;
-use hanzo_auto_drive_core::AutoTurnReviewState;
-use hanzo_auto_drive_core::CoordinatorContext;
-use hanzo_auto_drive_core::CoordinatorRouterResponse;
-use hanzo_auto_drive_core::TurnConfig;
-use hanzo_auto_drive_core::TurnDescriptor;
-use hanzo_auto_drive_core::route_user_message;
-use hanzo_auto_drive_core::start_auto_coordinator;
-use hanzo_core::AutoDriveMode;
-use hanzo_core::AutoDrivePidFile;
-use hanzo_core::TextFormat;
-use hanzo_core::parse_command::ParsedCommand;
-use hanzo_core::protocol::AgentMessageDeltaEvent;
-use hanzo_core::protocol::AgentMessageEvent;
-use hanzo_core::protocol::AgentReasoningDeltaEvent;
-use hanzo_core::protocol::AgentReasoningEvent;
-use hanzo_core::protocol::AgentReasoningRawContentDeltaEvent;
-use hanzo_core::protocol::AgentReasoningRawContentEvent;
-use hanzo_core::protocol::AgentReasoningSectionBreakEvent;
-use hanzo_core::protocol::AgentSourceKind;
-use hanzo_core::protocol::AgentStatusUpdateEvent;
-use hanzo_core::protocol::ApplyPatchApprovalRequestEvent;
-use hanzo_core::protocol::ApprovedCommandMatchKind;
-use hanzo_core::protocol::AskForApproval;
-use hanzo_core::protocol::BackgroundEventEvent;
-use hanzo_core::protocol::BrowserScreenshotUpdateEvent;
-use hanzo_core::protocol::BrowserSnapshotEvent;
-use hanzo_core::protocol::CustomToolCallBeginEvent;
-use hanzo_core::protocol::CustomToolCallEndEvent;
-use hanzo_core::protocol::EnvironmentContextDeltaEvent;
-use hanzo_core::protocol::EnvironmentContextFullEvent;
-use hanzo_core::protocol::ErrorEvent;
-use hanzo_core::protocol::Event;
-use hanzo_core::protocol::EventMsg;
-use hanzo_core::protocol::ExecApprovalRequestEvent;
-use hanzo_core::protocol::ExecCommandBeginEvent;
-use hanzo_core::protocol::ExecCommandEndEvent;
-use hanzo_core::protocol::ExecOutputStream;
-use hanzo_core::protocol::InputItem;
-use hanzo_core::protocol::SandboxPolicy;
-use hanzo_core::protocol::SessionConfiguredEvent;
+use self::rate_limit_refresh::{
+    start_rate_limit_refresh,
+    start_rate_limit_refresh_for_account,
+};
+use self::history_render::{
+    CachedLayout, HistoryRenderState, RenderRequest, RenderRequestKind, RenderSettings, VisibleCell,
+};
+use code_core::parse_command::ParsedCommand;
+use code_core::{AutoDriveMode, AutoDrivePidFile};
+use code_core::TextFormat;
+use code_core::protocol::AgentMessageDeltaEvent;
+use code_core::protocol::ApprovedCommandMatchKind;
+use code_core::protocol::AskForApproval;
+use code_core::protocol::SandboxPolicy;
+use code_core::protocol::AgentSourceKind;
+use code_core::protocol::AgentMessageEvent;
+use code_core::protocol::AgentReasoningDeltaEvent;
+use code_core::protocol::AgentReasoningEvent;
+use code_core::protocol::AgentReasoningRawContentDeltaEvent;
+use code_core::protocol::AgentReasoningRawContentEvent;
+use code_core::protocol::AgentReasoningSectionBreakEvent;
+use code_core::protocol::AgentStatusUpdateEvent;
+use code_core::protocol::ApplyPatchApprovalRequestEvent;
+use code_core::protocol::BackgroundEventEvent;
+use code_core::protocol::BrowserScreenshotUpdateEvent;
+use code_core::protocol::BrowserSnapshotEvent;
+use code_core::protocol::CustomToolCallBeginEvent;
+use code_core::protocol::CustomToolCallEndEvent;
+use code_core::protocol::CustomToolCallUpdateEvent;
+use code_core::protocol::ErrorEvent;
+use code_core::protocol::Event;
+use code_core::protocol::EventMsg;
+use code_core::protocol::WarningEvent;
+use code_core::protocol::ExecApprovalRequestEvent;
+use code_core::protocol::ExecCommandBeginEvent;
+use code_core::protocol::ExecCommandEndEvent;
+use code_core::protocol::ExecOutputStream;
+use code_core::protocol::EnvironmentContextDeltaEvent;
+use code_core::protocol::EnvironmentContextFullEvent;
+use code_core::protocol::InputItem;
+use code_core::protocol::McpServerFailure;
+use code_core::protocol::McpServerFailurePhase;
+use code_core::protocol::SessionConfiguredEvent;
 // MCP tool call handlers moved into chatwidget::tools
-use crate::bottom_pane::AgentHintLabel;
-use crate::bottom_pane::AutoActiveViewModel;
-use crate::bottom_pane::AutoCoordinatorButton;
-use crate::bottom_pane::AutoCoordinatorViewModel;
-use crate::bottom_pane::AutoDriveSettingsView;
-use crate::bottom_pane::AutoReviewFooterStatus;
-use crate::bottom_pane::AutoReviewPhase;
-use crate::bottom_pane::CountdownState;
-use crate::bottom_pane::McpSettingsView;
-use crate::bottom_pane::ModelSelectionView;
-use crate::bottom_pane::NotificationsMode;
-use crate::bottom_pane::NotificationsSettingsView;
-use crate::bottom_pane::PlanningSettingsView;
-use crate::bottom_pane::ReviewSettingsView;
-use crate::bottom_pane::SettingsSection;
-use crate::bottom_pane::ThemeSelectionView;
-use crate::bottom_pane::UpdateSettingsView;
-use crate::bottom_pane::ValidationSettingsView;
-use crate::bottom_pane::agent_editor_view::AgentEditorView;
+use code_core::protocol::Op;
+use code_core::protocol::ReviewOutputEvent;
+use code_core::protocol::{ReviewContextMetadata, ReviewRequest};
+use code_core::protocol::PatchApplyBeginEvent;
+use code_core::protocol::PatchApplyEndEvent;
+use code_core::protocol::TaskCompleteEvent;
+use code_core::protocol::TokenUsage;
+use code_core::protocol::TurnDiffEvent;
+use code_core::protocol::ViewImageToolCallEvent;
+use code_core::review_coord::{bump_snapshot_epoch_for, try_acquire_lock, ReviewGuard};
+use code_core::ConversationManager;
+use code_core::codex::compact::COMPACTION_CHECKPOINT_MESSAGE;
+use crate::bottom_pane::{
+    AutoActiveViewModel,
+    AutoCoordinatorButton,
+    AutoCoordinatorViewModel,
+    CountdownState,
+    AgentHintLabel, AutoReviewFooterStatus, AutoReviewPhase,
+    prompts_settings_view::PromptsSettingsView,
+    skills_settings_view::SkillsSettingsView,
+    McpSettingsView,
+    ModelSelectionView,
+    NotificationsMode,
+    NotificationsSettingsView,
+    SettingsSection,
+    ThemeSelectionView,
+    agent_editor_view::AgentEditorView,
+    AutoDriveSettingsView,
+    PlanningSettingsView,
+    UpdateSettingsView,
+    ReviewSettingsView,
+    ValidationSettingsView,
+    prompt_args,
+};
 use crate::bottom_pane::agents_settings_view::SubagentEditorView;
-use crate::bottom_pane::mcp_settings_view::McpServerRow;
-use crate::bottom_pane::mcp_settings_view::McpServerRows;
-use crate::bottom_pane::prompt_args;
-use crate::bottom_pane::prompts_settings_view::PromptsSettingsView;
-use crate::bottom_pane::skills_settings_view::SkillsSettingsView;
-use crate::chatwidget::message::UserMessage;
+use crate::bottom_pane::mcp_settings_view::{McpServerRow, McpServerRows};
 use crate::exec_command::strip_bash_lc_and_escape;
-use crate::history::compat::ContextBrowserSnapshotRecord;
-use crate::history::compat::ContextDeltaField;
-use crate::history::compat::ContextDeltaRecord;
-use crate::history::compat::ContextRecord;
-#[cfg(feature = "hanzo-fork")]
+#[cfg(feature = "code-fork")]
 use crate::tui_event_extensions::handle_browser_screenshot;
-use hanzo_core::ConversationManager;
-use hanzo_core::codex::compact::COMPACTION_CHECKPOINT_MESSAGE;
-use hanzo_core::protocol::Op;
-use hanzo_core::protocol::PatchApplyBeginEvent;
-use hanzo_core::protocol::PatchApplyEndEvent;
-use hanzo_core::protocol::ReviewContextMetadata;
-use hanzo_core::protocol::ReviewOutputEvent;
-use hanzo_core::protocol::ReviewRequest;
-use hanzo_core::protocol::TaskCompleteEvent;
-use hanzo_core::protocol::TokenUsage;
-use hanzo_core::protocol::TurnDiffEvent;
-use hanzo_core::protocol::ViewImageToolCallEvent;
-use hanzo_core::review_coord::ReviewGuard;
-use hanzo_core::review_coord::bump_snapshot_epoch_for;
-use hanzo_core::review_coord::try_acquire_lock;
+use crate::chatwidget::message::UserMessage;
+use crate::history::compat::{
+    ContextBrowserSnapshotRecord,
+    ContextDeltaField,
+    ContextDeltaRecord,
+    ContextRecord,
+};
 
 pub(crate) const DOUBLE_ESC_HINT: &str = "undo timeline";
-const AUTO_ESC_EXIT_HINT: &str = "Press Esc again to exit Auto Drive";
+const AUTO_ESC_EXIT_HINT: &str = "Press Esc to exit Auto Drive";
+const AUTO_ESC_EXIT_HINT_DOUBLE: &str = "Press Esc again to exit Auto Drive";
 const AUTO_COMPLETION_CELEBRATION_DURATION: Duration = Duration::from_secs(5);
 const HISTORY_ANIMATION_FRAME_INTERVAL: Duration = Duration::from_millis(120);
+const IDLE_SPINNER_CLEAR_GRACE: Duration = Duration::from_millis(500);
+const MID_TURN_IDLE_SPINNER_CLEAR_GRACE: Duration = Duration::from_secs(15);
 const AUTO_BOOTSTRAP_GOAL_PLACEHOLDER: &str = "Deriving goal from recent conversation";
 const AUTO_DRIVE_SESSION_SUMMARY_NOTICE: &str = "Summarizing session";
 const AUTO_DRIVE_SESSION_SUMMARY_PROMPT: &str =
@@ -304,12 +307,12 @@ impl MergeRepoState {
             None
         };
 
-        let branch_metadata = hanzo_core::git_worktree::load_branch_metadata(&worktree_path);
+        let branch_metadata = code_core::git_worktree::load_branch_metadata(&worktree_path);
         let mut default_branch = branch_metadata
             .as_ref()
             .and_then(|meta| meta.base_branch.clone());
         if default_branch.is_none() {
-            default_branch = hanzo_core::git_worktree::detect_default_branch(&git_root).await;
+            default_branch = code_core::git_worktree::detect_default_branch(&git_root).await;
         }
 
         let repo_status_raw = ChatWidget::git_short_status(&git_root).await;
@@ -445,11 +448,7 @@ impl MergeRepoState {
             worktree_state,
             self.default_branch_label(),
             repo_state,
-            if self.fast_forward_possible {
-                "yes"
-            } else {
-                "no"
-            }
+            if self.fast_forward_possible { "yes" } else { "no" }
         )
     }
 
@@ -471,8 +470,9 @@ impl MergeRepoState {
             ));
         }
         if self.repo_has_in_progress_op {
-            reasons
-                .push("default checkout has an in-progress merge/rebase/cherry-pick".to_string());
+            reasons.push(
+                "default checkout has an in-progress merge/rebase/cherry-pick".to_string(),
+            );
         }
         if self.default_branch.is_none() {
             reasons.push("default branch is unknown".to_string());
@@ -489,10 +489,10 @@ impl MergeRepoState {
                 "repo root is on '{}' instead of '{}'",
                 head, default
             )),
-            (Some(_), None) => reasons
-                .push("repo root branch detected but default branch is still unknown".to_string()),
-            (None, _) => reasons
-                .push("unable to detect branch currently checked out in repo root".to_string()),
+            (Some(_), None) => reasons.push(
+                "repo root branch detected but default branch is still unknown".to_string(),
+            ),
+            (None, _) => reasons.push("unable to detect branch currently checked out in repo root".to_string()),
         }
         if !self.fast_forward_possible {
             reasons.push("fast-forward merge is not possible".to_string());
@@ -514,74 +514,63 @@ impl MergeRepoState {
             .unwrap_or("unknown default branch (determine before merging)");
         let worktree_status = Self::format_status_for_context(&self.worktree_status);
         let repo_status = Self::format_status_for_context(&self.repo_status);
-        let fast_forward_label = if self.fast_forward_possible {
-            "yes"
-        } else {
-            "no"
-        };
+        let fast_forward_label = if self.fast_forward_possible { "yes" } else { "no" };
         let mut preface = format!(
-            "[developer] Automation skipped because: {}. Finish the merge manually with the steps below.\n\nContext:\n- Worktree path (current cwd): {} — branch {} @ {}, status {}\n- Repo root path: {} — target {} checkout, status {}\n- Fast-forward possible: {}\n",
-            reason_text,
-            self.worktree_path.display(),
-            self.worktree_branch,
-            self.worktree_sha,
-            worktree_status,
-            self.git_root.display(),
-            default_branch_line,
-            repo_status,
-            fast_forward_label,
+            "[developer] Automation skipped because: {reason_text}. Finish the merge manually with the steps below.\n\nContext:\n- Worktree path: {worktree_path} — branch {worktree_branch} @ {worktree_sha}, status {worktree_status}\n- Repo root path (current cwd): {git_root} — target {default_branch_line} checkout, status {repo_status}\n- Fast-forward possible: {fast_forward_label}\n",
+            reason_text = reason_text,
+            worktree_path = self.worktree_path.display(),
+            worktree_branch = self.worktree_branch.as_str(),
+            worktree_sha = self.worktree_sha.as_str(),
+            worktree_status = worktree_status,
+            git_root = self.git_root.display(),
+            default_branch_line = default_branch_line,
+            repo_status = repo_status,
+            fast_forward_label = fast_forward_label,
         );
         preface.push_str(
-            "\nNOTE: Each command runs in its own shell. Use `cd <path> && <command>` (or `git -C <path> ...`) whenever you need to operate in a different directory.\n",
+            "\nNOTE: Each command runs in its own shell. `/merge` switches the working directory to the repo root; use `git -C <path> ...` or `cd <path> && ...` whenever you need to operate in a different directory.\n",
         );
         preface.push_str(&format!(
-            "\n1. Worktree prep (already in {} on {}):\n   - Review `git status`.\n   - Stage and commit every change that belongs in the merge. Use descriptive messages; no network commands and no resets.\n",
-            self.worktree_path.display(),
-            self.worktree_branch,
+            "\n1. Worktree prep (worktree {worktree_path} on {worktree_branch}):\n   - Review `git status`.\n   - Stage and commit every change that belongs in the merge. Use descriptive messages; no network commands and no resets.\n",
+            worktree_path = self.worktree_path.display(),
+            worktree_branch = self.worktree_branch.as_str(),
         ));
         preface.push_str(&format!(
-            "   - When running commands here, prefix them with `cd {} && ...` (or use `git -C {}`) so they actually execute inside the worktree.\n",
-            self.worktree_path.display(),
-            self.worktree_path.display(),
+            "   - Run worktree commands as `git -C {worktree_path}` (or `cd {worktree_path} && ...`) so they execute inside the worktree.\n",
+            worktree_path = self.worktree_path.display(),
         ));
         if let Some(ref default_branch) = self.default_branch {
             preface.push_str(&format!(
-                "2. Default-branch checkout prep:\n   - cd {}\n   - If HEAD is not {}, run `git checkout {}`.\n   - If this checkout is dirty, stash with a clear message before continuing.\n",
-                self.git_root.display(),
-                default_branch,
-                default_branch,
+                "2. Default-branch checkout prep (repo root {git_root}):\n   - If HEAD is not {default_branch}, run `git checkout {default_branch}`.\n   - If this checkout is dirty, stash with a clear message before continuing.\n",
+                git_root = self.git_root.display(),
+                default_branch = default_branch,
             ));
         } else {
             preface.push_str(&format!(
-                "2. Default-branch checkout prep:\n   - cd {}\n   - Determine the correct default branch for this repo (metadata missing) and check it out.\n   - If this checkout is dirty, stash with a clear message before continuing.\n",
-                self.git_root.display(),
+                "2. Default-branch checkout prep (repo root {git_root}):\n   - Determine the correct default branch for this repo (metadata missing) and check it out.\n   - If this checkout is dirty, stash with a clear message before continuing.\n",
+                git_root = self.git_root.display(),
             ));
         }
-        preface.push_str(&format!(
-            "   - Run these commands as `cd {} && ...` (or `git -C {}`) so they execute inside the repo root.\n",
-            self.git_root.display(),
-            self.git_root.display(),
-        ));
         let default_branch_for_copy = self
             .default_branch
             .as_deref()
             .unwrap_or("the default branch you selected");
         preface.push_str(&format!(
-            "3. Merge locally (still in {} on {}):\n   - Run `git merge --no-ff {}`.\n   - Resolve conflicts line by line; keep intent from both branches.\n   - No network commands, no `git reset --hard`, no `git checkout -- .`, no `git clean`, and no `-X ours/theirs`.\n   - WARNING: Do not delete files, rewrite them in full, or checkout/prefer commits from one branch over another. Instead use apply_patch to surgically resolve conflicts, even if they are large in scale. Work on each conflict, line by line, so both branches' changes survive.\n   - If you stashed in step 2, apply/pop it now and commit if needed.\n",
-            self.git_root.display(),
-            default_branch_for_copy,
-            self.worktree_branch,
+            "3. Merge locally (repo root {git_root} on {default_branch_for_copy}):\n   - Run `git merge --no-ff {worktree_branch}`.\n   - Resolve conflicts line by line; keep intent from both branches.\n   - No network commands, no `git reset --hard`, no `git checkout -- .`, no `git clean`, and no `-X ours/theirs`.\n   - WARNING: Do not delete files, rewrite them in full, or checkout/prefer commits from one branch over another. Instead use apply_patch to surgically resolve conflicts, even if they are large in scale. Work on each conflict, line by line, so both branches' changes survive.\n   - If you stashed in step 2, apply/pop it now and commit if needed.\n",
+            git_root = self.git_root.display(),
+            default_branch_for_copy = default_branch_for_copy,
+            worktree_branch = self.worktree_branch.as_str(),
         ));
         preface.push_str(&format!(
-            "4. Verify in {}:\n   - `git status` is clean.\n   - `git merge-base --is-ancestor {} HEAD` succeeds.\n   - No MERGE_HEAD/rebase/cherry-pick artifacts remain.\n",
-            self.git_root.display(),
-            self.worktree_branch,
+            "4. Verify in {git_root}:\n   - `git status` is clean.\n   - `git merge-base --is-ancestor {worktree_branch} HEAD` succeeds.\n   - No MERGE_HEAD/rebase/cherry-pick artifacts remain.\n",
+            git_root = self.git_root.display(),
+            worktree_branch = self.worktree_branch.as_str(),
         ));
         preface.push_str(&format!(
-            "5. Cleanup:\n   - `git worktree remove {}` (only after verification).\n   - `git branch -D {}` in {} if the branch still exists.\n",
-            self.worktree_path.display(),
-            self.worktree_branch,
-            self.git_root.display(),
+            "5. Cleanup:\n   - `git worktree remove {worktree_path}` (only after verification).\n   - `git branch -D {worktree_branch}` in {git_root} if the branch still exists.\n",
+            worktree_path = self.worktree_path.display(),
+            worktree_branch = self.worktree_branch.as_str(),
+            git_root = self.git_root.display(),
         ));
         preface.push_str(
             "6. Report back with a concise command log and any conflicts you resolved.\n\nAbsolute rules: no network operations, no resets, no dropping local history, no blanket \"ours/theirs\" strategies.\n",
@@ -600,13 +589,7 @@ impl MergeRepoState {
         status
             .lines()
             .enumerate()
-            .map(|(idx, line)| {
-                if idx == 0 {
-                    line.to_string()
-                } else {
-                    format!("  {}", line)
-                }
-            })
+            .map(|(idx, line)| if idx == 0 { line.to_string() } else { format!("  {}", line) })
             .collect::<Vec<_>>()
             .join("\n")
     }
@@ -675,7 +658,7 @@ fn describe_command_failure(out: &Output, fallback: &str) -> String {
 }
 
 impl ChatWidget<'_> {
-    fn is_auto_review_agent(agent: &hanzo_core::protocol::AgentInfo) -> bool {
+    fn is_auto_review_agent(agent: &code_core::protocol::AgentInfo) -> bool {
         if matches!(agent.source_kind, Some(AgentSourceKind::AutoReview)) {
             return true;
         }
@@ -688,7 +671,7 @@ impl ChatWidget<'_> {
     }
     fn format_code_bridge_call(&self, args: &JsonValue) -> Option<String> {
         let action = args.get("action")?.as_str()?.to_lowercase();
-        let mut out = String::from("Dev Bridge\n");
+        let mut out = String::from("Code Bridge\n");
         match action.as_str() {
             "subscribe" => {
                 out.push_str("└ Subscribe");
@@ -739,11 +722,7 @@ impl ChatWidget<'_> {
         total: Duration,
     ) -> Line<'static> {
         let width = width.max(20) as usize;
-        let prefix = if crate::theme::show_gutter() {
-            "▶ "
-        } else {
-            ""
-        };
+        let prefix = "▶ ";
         let suffix = format!(
             " {} / {}",
             self.format_overlay_mm_ss(current),
@@ -776,10 +755,7 @@ impl ChatWidget<'_> {
         }
 
         let mut spans: Vec<Span> = Vec::new();
-        spans.push(Span::styled(
-            prefix.to_string(),
-            Style::default().fg(crate::colors::text()),
-        ));
+        spans.push(Span::styled(prefix.to_string(), Style::default().fg(crate::colors::text())));
         spans.push(Span::styled(
             slider,
             Style::default()
@@ -820,13 +796,15 @@ impl ChatWidget<'_> {
         label.to_string()
     }
 }
+use code_git_tooling::{
+    create_ghost_commit,
+    restore_ghost_commit,
+    CreateGhostCommitOptions,
+    GhostCommit,
+    GitToolingError,
+};
 use crossterm::event::KeyEvent;
 use crossterm::event::KeyEventKind;
-use hanzo_git_tooling::CreateGhostCommitOptions;
-use hanzo_git_tooling::GhostCommit;
-use hanzo_git_tooling::GitToolingError;
-use hanzo_git_tooling::create_ghost_commit;
-use hanzo_git_tooling::restore_ghost_commit;
 use image::imageops::FilterType;
 use ratatui::buffer::Buffer;
 use ratatui::layout::Constraint;
@@ -836,18 +814,15 @@ use ratatui::text::Line;
 use ratatui::widgets::Widget;
 use ratatui::widgets::WidgetRef;
 use ratatui_image::picker::Picker;
-use std::cell::Cell;
-use std::cell::RefCell;
+use std::cell::{Cell, RefCell};
 use std::sync::mpsc;
-use tokio::sync::mpsc::UnboundedReceiver;
-use tokio::sync::mpsc::UnboundedSender;
-use tokio::sync::mpsc::unbounded_channel;
+use tokio::sync::mpsc::{unbounded_channel, UnboundedReceiver, UnboundedSender};
 use tokio::task;
 use uuid::Uuid;
 
 fn history_cell_logging_enabled() -> bool {
     static ENABLED: OnceLock<bool> = OnceLock::new();
-    if let Ok(value) = std::env::var("HANZO_TRACE_HISTORY") {
+    if let Ok(value) = std::env::var("CODEX_TRACE_HISTORY") {
         let trimmed = value.trim();
         if !matches!(trimmed, "" | "0") {
             return true;
@@ -889,9 +864,7 @@ pub(crate) fn is_test_mode() -> bool {
     }
 }
 use serde_json;
-use tracing::debug;
-use tracing::info;
-use tracing::warn;
+use tracing::{debug, info, warn};
 // use image::GenericImageView;
 
 const TOKENS_PER_MILLION: f64 = 1_000_000.0;
@@ -926,8 +899,8 @@ fn auto_continue_to_config(mode: AutoContinueMode) -> AutoDriveContinueMode {
 }
 
 fn status_field_prefix(label: &str) -> String {
-    let padding =
-        STATUS_LABEL_GAP.saturating_add(STATUS_LABEL_TARGET_WIDTH.saturating_sub(label.len()));
+    let padding = STATUS_LABEL_GAP
+        .saturating_add(STATUS_LABEL_TARGET_WIDTH.saturating_sub(label.len()));
     format!(
         "{indent}{label}:{spaces}",
         indent = STATUS_LABEL_INDENT,
@@ -947,85 +920,41 @@ fn describe_cloud_error(err: &CloudTaskError) -> String {
     }
 }
 
-pub(crate) use self::terminal::PendingCommand;
-pub(crate) use self::terminal::PendingCommandAction;
-pub(crate) use self::terminal::PendingManualTerminal;
-pub(crate) use self::terminal::TerminalOverlay;
-pub(crate) use self::terminal::TerminalState;
-use crate::account_label::account_display_label;
-use crate::account_label::account_mode_priority;
-#[cfg(target_os = "macos")]
-use crate::agent_install_helpers::macos_brew_formula_for_command;
-use crate::app_event::AppEvent;
-use crate::app_event::AutoContinueMode;
-use crate::app_event::BackgroundPlacement;
-use crate::app_event::GitInitResume;
-use crate::app_event::ModelSelectionKind;
-use crate::app_event::TerminalAfter;
-use crate::app_event::TerminalCommandGate;
-use crate::app_event::TerminalLaunch;
-use crate::app_event::TerminalRunController;
+use crate::account_label::{account_display_label, account_mode_priority};
+use crate::app_event::{
+    AppEvent,
+    AutoContinueMode,
+    BackgroundPlacement,
+    GitInitResume,
+    ModelSelectionKind,
+    TerminalAfter,
+    TerminalCommandGate,
+    TerminalLaunch,
+    TerminalRunController,
+};
 use crate::app_event_sender::AppEventSender;
+use crate::bottom_pane::CustomPromptView;
+use crate::bottom_pane::list_selection_view::{ListSelectionView, SelectionItem};
+use crate::bottom_pane::CloudTasksView;
+use crate::bottom_pane::validation_settings_view;
+use crate::bottom_pane::validation_settings_view::{GroupStatus, ToolRow};
+use crate::bottom_pane::model_selection_view::ModelSelectionTarget;
 use crate::bottom_pane::BottomPane;
 use crate::bottom_pane::BottomPaneParams;
+use crate::bottom_pane::{UndoTimelineEntry, UndoTimelineEntryKind, UndoTimelineView};
 use crate::bottom_pane::CancellationEvent;
-use crate::bottom_pane::CloudTasksView;
-use crate::bottom_pane::CustomPromptView;
 use crate::bottom_pane::InputResult;
 use crate::bottom_pane::LoginAccountsState;
 use crate::bottom_pane::LoginAccountsView;
 use crate::bottom_pane::LoginAddAccountState;
 use crate::bottom_pane::LoginAddAccountView;
-use crate::bottom_pane::UndoTimelineEntry;
-use crate::bottom_pane::UndoTimelineEntryKind;
-use crate::bottom_pane::UndoTimelineView;
 use crate::bottom_pane::UpdateSharedState;
-use crate::bottom_pane::list_selection_view::ListSelectionView;
-use crate::bottom_pane::list_selection_view::SelectionItem;
-use crate::bottom_pane::model_selection_view::ModelSelectionTarget;
-use crate::bottom_pane::validation_settings_view;
-use crate::bottom_pane::validation_settings_view::GroupStatus;
-use crate::bottom_pane::validation_settings_view::ToolRow;
-use crate::cloud_tasks_service::CloudEnvironment;
 use crate::height_manager::HeightEvent;
 use crate::height_manager::HeightManager;
-use crate::history::state::AssistantMessageState;
-use crate::history::state::AssistantStreamDelta;
-use crate::history::state::AssistantStreamState;
-use crate::history::state::DiffLineKind;
-use crate::history::state::DiffRecord;
-use crate::history::state::ExecStatus;
-use crate::history::state::ExecWaitNote;
-use crate::history::state::HistoryDomainEvent;
-use crate::history::state::HistoryDomainRecord;
-use crate::history::state::HistoryId;
-use crate::history::state::HistoryMutation;
-use crate::history::state::HistoryRecord;
-use crate::history::state::HistorySnapshot;
-use crate::history::state::HistoryState;
-use crate::history::state::ImageRecord;
-use crate::history::state::InlineSpan;
-use crate::history::state::MessageHeader;
-use crate::history::state::MessageLine;
-use crate::history::state::MessageLineKind;
-use crate::history::state::MessageMetadata;
-use crate::history::state::OrderKeySnapshot;
-use crate::history::state::PatchEventType as HistoryPatchEventType;
-use crate::history::state::PatchFailureMetadata;
-use crate::history::state::PatchRecord;
-use crate::history::state::PlainMessageKind;
-use crate::history::state::PlainMessageRole;
-use crate::history::state::PlainMessageState;
-use crate::history::state::RateLimitLegendEntry;
-use crate::history::state::RateLimitsRecord;
-use crate::history::state::TextEmphasis;
-use crate::history::state::TextTone;
-use crate::history::state::ToolStatus;
 use crate::history_cell;
-use crate::history_cell::AutoDriveActionKind;
-use crate::history_cell::AutoDriveStatus;
-use crate::history_cell::BrowserSessionCell;
-use crate::history_cell::DiffCell;
+use crate::history_cell::clean_wait_command;
+#[cfg(target_os = "macos")]
+use crate::agent_install_helpers::macos_brew_formula_for_command;
 use crate::history_cell::ExecCell;
 use crate::history_cell::FrozenHistoryCell;
 use crate::history_cell::HistoryCell;
@@ -1033,55 +962,90 @@ use crate::history_cell::HistoryCellType;
 use crate::history_cell::PatchEventType;
 use crate::history_cell::PlainHistoryCell;
 use crate::history_cell::PlanUpdateCell;
-use crate::history_cell::clean_wait_command;
+use crate::history_cell::DiffCell;
+use crate::history_cell::BrowserSessionCell;
+use crate::history_cell::{AutoDriveActionKind, AutoDriveStatus};
+use sha2::{Digest, Sha256};
+use crate::history::state::PatchEventType as HistoryPatchEventType;
+use crate::history::state::{
+    AssistantMessageState,
+    AssistantStreamDelta,
+    AssistantStreamState,
+    DiffLineKind,
+    DiffRecord,
+    ExecStatus,
+    ExecWaitNote,
+    HistoryDomainEvent,
+    HistoryDomainRecord,
+    HistoryId,
+    HistoryRecord,
+    HistoryMutation,
+    HistorySnapshot,
+    HistoryState,
+    InlineSpan,
+    MessageLine,
+    MessageLineKind,
+    MessageHeader,
+    ImageRecord,
+    PlainMessageKind,
+    PlainMessageRole,
+    PlainMessageState,
+    MessageMetadata,
+    OrderKeySnapshot,
+    PatchFailureMetadata,
+    PatchRecord,
+    RateLimitLegendEntry,
+    RateLimitsRecord,
+    TextTone,
+    TextEmphasis,
+    ToolArgument,
+    ToolStatus,
+};
+use crate::cloud_tasks_service::CloudEnvironment;
+use crate::sanitize::{sanitize_for_tui, Mode as SanitizeMode, Options as SanitizeOptions};
+use crate::slash_command::{ProcessedCommand, SlashCommand};
 use crate::live_wrap::RowBuilder;
-use crate::rate_limits_view::DEFAULT_DISPLAY_CONFIG;
-use crate::rate_limits_view::DEFAULT_GRID_CONFIG;
-use crate::rate_limits_view::RateLimitDisplayConfig;
-use crate::rate_limits_view::RateLimitResetInfo;
-use crate::rate_limits_view::build_limits_view;
-use crate::sanitize::Mode as SanitizeMode;
-use crate::sanitize::Options as SanitizeOptions;
-use crate::sanitize::sanitize_for_tui;
-use crate::session_log;
-use crate::slash_command::ProcessedCommand;
-use crate::slash_command::SlashCommand;
 use crate::streaming::StreamKind;
 use crate::streaming::controller::AppEventHistorySink;
-use crate::user_approval_widget::ApprovalRequest;
 use crate::util::buffer::fill_rect;
-use chrono::DateTime;
-use chrono::Datelike;
-use chrono::Duration as ChronoDuration;
-use chrono::Local;
-use chrono::TimeZone;
-use chrono::Timelike;
-use chrono::Utc;
+use crate::user_approval_widget::ApprovalRequest;
+use code_ansi_escape::ansi_escape_line;
+pub(crate) use self::terminal::{
+    PendingCommand,
+    PendingCommandAction,
+    PendingManualTerminal,
+    TerminalOverlay,
+    TerminalState,
+};
+use code_browser::BrowserManager;
+use code_core::config::find_code_home;
+use code_core::config::resolve_code_path_for_read;
+use code_core::config::set_github_actionlint_on_patch;
+use code_core::config::set_validation_group_enabled;
+use code_core::config::set_validation_tool_enabled;
+use code_file_search::FileMatch;
+use code_cloud_tasks_client::{ApplyOutcome, CloudTaskError, CreatedTask, TaskSummary};
+use code_protocol::models::ContentItem;
+use code_protocol::models::ResponseItem;
+use code_core::config_types::{validation_tool_category, ValidationCategory};
+use code_core::protocol::RateLimitSnapshotEvent;
+use code_core::protocol::ValidationGroup;
+use crate::rate_limits_view::{
+    build_limits_view, RateLimitDisplayConfig, RateLimitResetInfo, DEFAULT_DISPLAY_CONFIG,
+    DEFAULT_GRID_CONFIG,
+};
+use crate::session_log;
+use code_core::review_format::format_review_findings_block;
+use chrono::{DateTime, Datelike, Duration as ChronoDuration, Local, TimeZone, Timelike, Utc};
 use crossterm::event::KeyCode;
 use crossterm::event::KeyModifiers;
-use hanzo_ansi_escape::ansi_escape_line;
-use hanzo_browser::BrowserManager;
-use hanzo_cloud_tasks_client::ApplyOutcome;
-use hanzo_cloud_tasks_client::CloudTaskError;
-use hanzo_cloud_tasks_client::CreatedTask;
-use hanzo_cloud_tasks_client::TaskSummary;
-use hanzo_core::config::find_code_home;
-use hanzo_core::config::resolve_code_path_for_read;
-use hanzo_core::config::set_github_actionlint_on_patch;
-use hanzo_core::config::set_validation_group_enabled;
-use hanzo_core::config::set_validation_tool_enabled;
-use hanzo_core::config_types::ValidationCategory;
-use hanzo_core::config_types::validation_tool_category;
-use hanzo_core::protocol::RateLimitSnapshotEvent;
-use hanzo_core::protocol::ValidationGroup;
-use hanzo_core::review_format::format_review_findings_block;
-use hanzo_file_search::FileMatch;
-use hanzo_protocol::models::ContentItem;
-use hanzo_protocol::models::ResponseItem;
 use ratatui::style::Stylize;
 use ratatui::symbols::scrollbar as scrollbar_symbols;
 use ratatui::text::Span;
 use ratatui::text::Text as RtText;
+use textwrap::wrap;
+use unicode_segmentation::UnicodeSegmentation;
+use unicode_width::UnicodeWidthStr;
 use ratatui::widgets::Block;
 use ratatui::widgets::Borders;
 use ratatui::widgets::Clear;
@@ -1092,11 +1056,6 @@ use ratatui::widgets::ScrollbarState;
 use ratatui::widgets::StatefulWidget;
 use serde::Deserialize;
 use serde::Serialize;
-use sha2::Digest;
-use sha2::Sha256;
-use textwrap::wrap;
-use unicode_segmentation::UnicodeSegmentation;
-use unicode_width::UnicodeWidthStr;
 
 #[derive(Debug, Serialize, Deserialize)]
 struct CachedConnection {
@@ -1270,8 +1229,9 @@ enum AutoReviewOutcome {
 }
 
 #[cfg(test)]
-pub(super) type CaptureAutoTurnCommitStub =
-    Box<dyn Fn(&'static str, Option<String>) -> Result<GhostCommit, GitToolingError> + Send + Sync>;
+pub(super) type CaptureAutoTurnCommitStub = Box<
+    dyn Fn(&'static str, Option<String>) -> Result<GhostCommit, GitToolingError> + Send + Sync,
+>;
 
 #[cfg(test)]
 pub(super) static CAPTURE_AUTO_TURN_COMMIT_STUB: Lazy<Mutex<Option<CaptureAutoTurnCommitStub>>> =
@@ -1304,9 +1264,7 @@ struct PendingAgentUpdate {
 }
 
 impl PendingAgentUpdate {
-    fn key(&self) -> String {
-        format!("{}:{}", self.cfg.name.to_ascii_lowercase(), self.id)
-    }
+    fn key(&self) -> String { format!("{}:{}", self.cfg.name.to_ascii_lowercase(), self.id) }
 }
 
 #[derive(Clone, Debug)]
@@ -1353,25 +1311,210 @@ fn detect_auto_review_phase(progress: Option<&str>) -> AutoReviewPhase {
     AutoReviewPhase::Reviewing
 }
 
-const SKIP_REVIEW_PROGRESS_SENTINEL: &str =
-    "Another review is already running; skipping this /review.";
+const SKIP_REVIEW_PROGRESS_SENTINEL: &str = "Another review is already running; skipping this /review.";
 const AUTO_REVIEW_SHARED_WORKTREE: &str = "auto-review";
 const AUTO_REVIEW_FALLBACK_PREFIX: &str = "auto-review-";
+const AUTO_REVIEW_BASELINE_FILENAME: &str = "auto-review-baseline";
 const AUTO_REVIEW_FALLBACK_MAX: usize = 3;
 const AUTO_REVIEW_FALLBACK_MAX_AGE_SECS: u64 = 12 * 60 * 60; // 12h
 const AUTO_REVIEW_STALE_SECS: u64 = 5 * 60;
+const MAX_PROCESSED_AUTO_REVIEW_AGENTS: usize = 512;
+const MAX_AGENTS_TERMINAL_ENTRIES: usize = 256;
+const MAX_AGENT_RUNTIME_ENTRIES: usize = 768;
+const MAX_HISTORY_CELLS_HARD_LIMIT: usize = 2400;
+const HISTORY_CELLS_TRIM_TARGET: usize = 1800;
+const MAX_SESSION_PATCH_SETS: usize = 256;
+const HISTORY_SNAPSHOT_FLUSH_INTERVAL_IDLE_MS: u64 = 400;
+const HISTORY_SNAPSHOT_FLUSH_INTERVAL_ACTIVE_MS: u64 = 2_000;
+const MAX_PENDING_DISPATCHED_USER_MESSAGES: usize = 256;
+const MAX_PENDING_AUTO_REVIEW_NOTE_CHARS: usize = 2400;
+const MAX_AUTO_REVIEW_NOTE_CONTEXT_CHARS: usize = 1200;
+const MAX_AUTO_REVIEW_ERROR_SUMMARY_CHARS: usize = 320;
+const AUTO_REVIEW_FAILURE_DEDUPE_WINDOW_SECS: u64 = 300;
+const AUTO_REVIEW_CONTEXT_BLOCK_CHARS: usize = 600;
+const AUTO_REVIEW_SCOPE_MAX_LISTED_PATHS: usize = 40;
+const AUTO_REVIEW_DIFF_EXCERPT_CHARS: usize = 24_000;
+const AUTO_REVIEW_MAX_CHANGED_PATHS: usize = 120;
+const AUTO_REVIEW_MAX_RAW_DIFF_CHARS: usize = 120_000;
+const AUTO_REVIEW_SCOPE_EXCLUDED_PREFIXES: [&str; 5] = [
+    "codex-rs/",
+    "node_modules/",
+    "target/",
+    ".git/",
+    ".code/",
+];
 
-fn auto_review_branches_dir(git_root: &Path) -> Result<PathBuf, String> {
+fn compact_patch_change(
+    change: &code_core::protocol::FileChange,
+) -> code_core::protocol::FileChange {
+    match change {
+        code_core::protocol::FileChange::Add { .. } => {
+            code_core::protocol::FileChange::Add {
+                content: String::new(),
+            }
+        }
+        code_core::protocol::FileChange::Delete => code_core::protocol::FileChange::Delete,
+        code_core::protocol::FileChange::Update {
+            unified_diff,
+            move_path,
+            ..
+        } => code_core::protocol::FileChange::Update {
+            unified_diff: unified_diff.clone(),
+            move_path: move_path.clone(),
+            original_content: String::new(),
+            new_content: String::new(),
+        },
+    }
+}
+
+fn compact_patch_changes(
+    changes: &HashMap<PathBuf, code_core::protocol::FileChange>,
+) -> HashMap<PathBuf, code_core::protocol::FileChange> {
+    changes
+        .iter()
+        .map(|(path, change)| (path.clone(), compact_patch_change(change)))
+        .collect()
+}
+
+fn should_include_auto_review_scope_path(path: &str) -> bool {
+    !AUTO_REVIEW_SCOPE_EXCLUDED_PREFIXES
+        .iter()
+        .any(|prefix| path.starts_with(prefix))
+}
+
+fn format_background_review_scope_from_paths(snapshot_id: &str, paths: &[String]) -> Option<String> {
+    let mut listed_paths: Vec<&str> = Vec::new();
+    let mut seen_paths: HashSet<&str> = HashSet::new();
+    let mut excluded_count = 0usize;
+    let mut truncated_count = 0usize;
+
+    for raw_path in paths {
+        let normalized = raw_path.trim().trim_start_matches("./");
+        if normalized.is_empty() {
+            continue;
+        }
+        if !seen_paths.insert(normalized) {
+            continue;
+        }
+        if !should_include_auto_review_scope_path(normalized) {
+            excluded_count = excluded_count.saturating_add(1);
+            continue;
+        }
+        if listed_paths.len() < AUTO_REVIEW_SCOPE_MAX_LISTED_PATHS {
+            listed_paths.push(normalized);
+        } else {
+            truncated_count = truncated_count.saturating_add(1);
+        }
+    }
+
+    if listed_paths.is_empty() && excluded_count == 0 && truncated_count == 0 {
+        return None;
+    }
+
+    let mut scope = String::new();
+    scope.push_str("\n\nReview only the relevant changed files from commit ");
+    scope.push_str(snapshot_id);
+    scope.push_str(". Ignore unrelated files.\n");
+
+    if !listed_paths.is_empty() {
+        scope.push_str("Changed files to prioritize:\n");
+        for path in listed_paths {
+            scope.push_str("- ");
+            scope.push_str(path);
+            scope.push('\n');
+        }
+    }
+
+    let omitted_count = excluded_count.saturating_add(truncated_count);
+    if omitted_count > 0 {
+        scope.push_str(&format!(
+            "Omitted {omitted_count} changed path(s) from this list ({excluded_count} excluded by path policy; {truncated_count} truncated for prompt size)."
+        ));
+        scope.push('\n');
+    }
+
+    Some(scope.trim_end().to_string())
+}
+
+fn build_background_review_prompt(
+    snapshot_id: &str,
+    scope_note: Option<&str>,
+    diff_excerpt: Option<&str>,
+    turn_context: Option<&str>,
+) -> String {
+    let mut prompt = String::from(
+        "/review Review only the provided code change scope. Identify critical bugs, regressions, security/performance/concurrency risks, or incorrect assumptions. Provide actionable feedback and references to the changed code; ignore minor style or formatting nits.",
+    );
+
+    prompt.push_str("\n\nSnapshot: ");
+    prompt.push_str(snapshot_id);
+    prompt.push('.');
+
+    if let Some(scope_note) = scope_note
+        && !scope_note.trim().is_empty()
+    {
+        prompt.push_str("\n\n");
+        prompt.push_str(scope_note.trim());
+    }
+
+    if let Some(diff_excerpt) = diff_excerpt
+        && !diff_excerpt.trim().is_empty()
+    {
+        prompt.push_str("\n\nReview only this diff excerpt unless additional inspection is absolutely necessary:\n```diff\n");
+        prompt.push_str(diff_excerpt.trim());
+        prompt.push_str("\n```");
+    }
+
+    if let Some(context) = turn_context
+        && !context.trim().is_empty()
+    {
+        prompt.push_str("\n\n");
+        prompt.push_str(context.trim());
+    }
+
+    prompt
+}
+
+#[derive(Clone, Copy)]
+struct AutoReviewFailureClassification {
+    failure_class: &'static str,
+    phase: &'static str,
+    retryable: bool,
+    remediation_hint: &'static str,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+struct AutoReviewFailureRecord {
+    failure_class: &'static str,
+    phase: &'static str,
+    worktree_label: String,
+    worktree_path_label: String,
+    summarized_error: String,
+    observed_at: Instant,
+}
+
+fn auto_review_repo_dir(git_root: &Path) -> Result<PathBuf, String> {
     let repo_name = git_root
         .file_name()
         .and_then(|s| s.to_str())
         .unwrap_or("repo");
-    let mut code_home = hanzo_core::config::find_code_home()
-        .map_err(|e| format!("failed to locate hanzo home: {e}"))?;
-    code_home = code_home.join("working").join(repo_name).join("branches");
-    std::fs::create_dir_all(&code_home)
+    let code_home = code_core::config::find_code_home()
+        .map_err(|e| format!("failed to locate code home: {e}"))?;
+    let repo_dir = code_home.join("working").join(repo_name);
+    std::fs::create_dir_all(&repo_dir)
+        .map_err(|e| format!("failed to create auto review repo dir: {e}"))?;
+    Ok(repo_dir)
+}
+
+fn auto_review_branches_dir(git_root: &Path) -> Result<PathBuf, String> {
+    let branches_dir = auto_review_repo_dir(git_root)?.join("branches");
+    std::fs::create_dir_all(&branches_dir)
         .map_err(|e| format!("failed to create branches dir: {e}"))?;
-    Ok(code_home)
+    Ok(branches_dir)
+}
+
+fn auto_review_baseline_path_for_repo(git_root: &Path) -> Result<PathBuf, String> {
+    Ok(auto_review_repo_dir(git_root)?.join(AUTO_REVIEW_BASELINE_FILENAME))
 }
 
 fn resolve_auto_review_worktree_path(git_root: &Path, branch: &str) -> Option<PathBuf> {
@@ -1396,10 +1539,7 @@ async fn remove_worktree_path(git_root: &Path, path: &Path) -> Result<(), String
         .map_err(|e| format!("failed to remove worktree: {e}"))?;
     if !remove.status.success() {
         let stderr = String::from_utf8_lossy(&remove.stderr);
-        tracing::warn!(
-            "failed to remove fallback worktree via git: {}",
-            stderr.trim()
-        );
+        tracing::warn!("failed to remove fallback worktree via git: {}", stderr.trim());
     }
     if path.exists() {
         if let Err(e) = tokio::fs::remove_dir_all(path).await {
@@ -1415,9 +1555,11 @@ async fn cleanup_fallback_worktrees(git_root: &Path) -> Result<(), String> {
     if let Ok(read_dir) = fs::read_dir(&branches_dir) {
         for entry in read_dir.flatten() {
             let path = entry.path();
-            let name = entry.file_name().into_string().unwrap_or_default();
-            if !name.starts_with(AUTO_REVIEW_FALLBACK_PREFIX) || name == AUTO_REVIEW_SHARED_WORKTREE
-            {
+            let name = entry
+                .file_name()
+                .into_string()
+                .unwrap_or_default();
+            if !name.starts_with(AUTO_REVIEW_FALLBACK_PREFIX) || name == AUTO_REVIEW_SHARED_WORKTREE {
                 continue;
             }
             let meta = entry.metadata().ok();
@@ -1442,8 +1584,10 @@ async fn cleanup_fallback_worktrees(git_root: &Path) -> Result<(), String> {
     }
 
     // Count-based prune
-    let mut remaining: Vec<(PathBuf, SystemTime)> =
-        entries.into_iter().filter(|(p, _)| p.exists()).collect();
+    let mut remaining: Vec<(PathBuf, SystemTime)> = entries
+        .into_iter()
+        .filter(|(p, _)| p.exists())
+        .collect();
     remaining.sort_by_key(|(_, t)| *t);
     while remaining.len() > AUTO_REVIEW_FALLBACK_MAX {
         if let Some((path, _)) = remaining.first().cloned() {
@@ -1470,17 +1614,13 @@ async fn allocate_fallback_auto_review_worktree(
     let short = snapshot_id.chars().take(8).collect::<String>();
 
     for attempt in 0..AUTO_REVIEW_FALLBACK_MAX {
-        let suffix = if attempt == 0 {
-            String::new()
-        } else {
-            format!("-{}", attempt + 1)
-        };
+        let suffix = if attempt == 0 { String::new() } else { format!("-{}", attempt + 1) };
         let name = format!("{}{}{}", AUTO_REVIEW_FALLBACK_PREFIX, short, suffix);
         let path = branches_dir.join(&name);
 
         match try_acquire_lock("review-fallback", &path) {
             Ok(Some(guard)) => {
-                let worktree_path = hanzo_core::git_worktree::prepare_reusable_worktree(
+                let worktree_path = code_core::git_worktree::prepare_reusable_worktree(
                     git_root,
                     &name,
                     snapshot_id,
@@ -1507,6 +1647,14 @@ struct AutoReviewNotice {
 pub(crate) enum TurnOrigin {
     User,
     Developer,
+}
+
+#[derive(Clone, Debug)]
+struct PendingRequestUserInput {
+    turn_id: String,
+    call_id: String,
+    anchor_key: OrderKey,
+    questions: Vec<code_protocol::request_user_input::RequestUserInputQuestion>,
 }
 
 #[derive(Clone)]
@@ -1545,6 +1693,8 @@ pub(crate) struct ChatWidget<'a> {
     context_last_sequence: Option<u64>,
     context_browser_sequence: Option<u64>,
     config: Config,
+    mcp_tools_by_server: HashMap<String, Vec<String>>,
+    mcp_server_failures: HashMap<String, McpServerFailure>,
 
     /// Optional remote-merged presets list delivered asynchronously.
     /// When absent, the TUI falls back to built-in presets.
@@ -1562,6 +1712,8 @@ pub(crate) struct ChatWidget<'a> {
     initial_user_message: Option<UserMessage>,
     total_token_usage: TokenUsage,
     last_token_usage: TokenUsage,
+    session_requested_model: Option<String>,
+    session_latest_response_model: Option<String>,
     rate_limit_snapshot: Option<RateLimitSnapshotEvent>,
     rate_limit_warnings: RateLimitWarningState,
     rate_limit_fetch_inflight: bool,
@@ -1591,6 +1743,7 @@ pub(crate) struct ChatWidget<'a> {
     // Cache of the last developer/system note we injected (hidden messages)
     last_developer_message: Option<String>,
     pending_turn_origin: Option<TurnOrigin>,
+    pending_request_user_input: Option<PendingRequestUserInput>,
     current_turn_origin: Option<TurnOrigin>,
     // Tracks whether lingering running exec/tool cells have been cleared for the
     // current turn. Reset on TaskStarted; set after the first assistant message
@@ -1600,6 +1753,8 @@ pub(crate) struct ChatWidget<'a> {
     // Track the ID of the current streaming reasoning to prevent duplicates
     exec: ExecState,
     tools_state: ToolState,
+    idle_spinner_clear_started_at: Option<Instant>,
+    idle_spinner_recheck_scheduled: bool,
     live_builder: RowBuilder,
     header_wave: HeaderWaveEffect,
     browser_overlay_visible: bool,
@@ -1640,6 +1795,7 @@ pub(crate) struct ChatWidget<'a> {
     background_review: Option<BackgroundReviewState>,
     auto_review_status: Option<AutoReviewStatus>,
     auto_review_notice: Option<AutoReviewNotice>,
+    last_auto_review_failure: Option<AutoReviewFailureRecord>,
     auto_review_baseline: Option<GhostCommit>,
     auto_review_reviewed_marker: Option<GhostCommit>,
     pending_auto_review_range: Option<PendingAutoReviewRange>,
@@ -1647,6 +1803,8 @@ pub(crate) struct ChatWidget<'a> {
     review_guard: Option<ReviewGuard>,
     background_review_guard: Option<ReviewGuard>,
     processed_auto_review_agents: HashSet<String>,
+    processed_auto_review_agent_order: VecDeque<String>,
+    auto_review_processed_evicted_total: u64,
     // New: coordinator-provided hints for the next Auto turn
     pending_turn_descriptor: Option<TurnDescriptor>,
     pending_auto_turn_config: Option<TurnConfig>,
@@ -1654,6 +1812,10 @@ pub(crate) struct ChatWidget<'a> {
     active_plan_title: Option<String>,
     /// Runtime timing per-agent (by id) to improve visibility in the HUD
     agent_runtime: HashMap<String, AgentRuntime>,
+    agent_runtime_pruned_total: u64,
+    agents_terminal_pruned_total: u64,
+    history_cells_trimmed_total: u64,
+    pending_dispatched_trimmed_total: u64,
     pending_agent_updates: HashMap<String, PendingAgentUpdate>,
     // Sparkline data for showing agent activity (using RefCell for interior mutability)
     // Each tuple is (value, is_completed) where is_completed indicates if any agent was complete at that time
@@ -1739,7 +1901,7 @@ pub(crate) struct ChatWidget<'a> {
     // normal history within the new turn window.
     queued_user_messages: std::collections::VecDeque<UserMessage>,
     pending_dispatched_user_messages: std::collections::VecDeque<String>,
-    // Number of user prompts we prepended to history just before starting
+    // Number of user prompts we pre-pended to history just before starting
     // a new turn; used to anchor the next turn window so assistant output
     // appears after them.
     pending_user_prompts_for_next_turn: usize,
@@ -1805,9 +1967,7 @@ pub(crate) struct ChatWidget<'a> {
     /// When true, render without the top status bar and HUD so the normal
     /// terminal scrollback remains usable (Ctrl+T standard terminal mode).
     pub(crate) standard_terminal_mode: bool,
-    // Pending system notes to inject into the agent's conversation history
-    // before the next user turn. Each entry is sent in order ahead of the
-    // user's visible prompt.
+    // Pending system notes to append to persistent history.
     pending_agent_notes: Vec<String>,
 
     // Stable synthetic request bucket for pre‑turn system notices (set on first use)
@@ -1839,7 +1999,7 @@ struct AutoCompactionOverlay {
     /// Snapshot of the conversation prefix (including the latest compact summary)
     /// that should be injected ahead of any history-derived tail when exporting
     /// the next Auto Drive request.
-    prefix_items: Vec<hanzo_protocol::models::ResponseItem>,
+    prefix_items: Vec<code_protocol::models::ResponseItem>,
     /// History cell index that marks the beginning of the still-live tail that
     /// we continue to mirror directly from the UI.
     tail_start_cell: usize,
@@ -1852,9 +2012,9 @@ pub(crate) struct BackgroundOrderTicket {
 }
 
 impl BackgroundOrderTicket {
-    pub(crate) fn next_order(&self) -> hanzo_core::protocol::OrderMeta {
+    pub(crate) fn next_order(&self) -> code_core::protocol::OrderMeta {
         let seq = self.seq_counter.fetch_add(1, Ordering::SeqCst);
-        hanzo_core::protocol::OrderMeta {
+        code_core::protocol::OrderMeta {
             request_ordinal: self.request_ordinal,
             output_index: Some(i32::MAX as u32),
             sequence_number: Some(seq),
@@ -2001,6 +2161,7 @@ struct AgentTerminalEntry {
     result: Option<String>,
     error: Option<String>,
     logs: Vec<AgentLogEntry>,
+    last_seen_at: Instant,
 }
 
 impl AgentTerminalEntry {
@@ -2023,6 +2184,7 @@ impl AgentTerminalEntry {
             result: None,
             error: None,
             logs: Vec::new(),
+            last_seen_at: Instant::now(),
         }
     }
 
@@ -2126,11 +2288,7 @@ enum AgentsSortMode {
 
 fn short_batch_label(batch_id: &str) -> String {
     let compact: String = batch_id.chars().filter(|c| *c != '-').collect();
-    let source = if compact.is_empty() {
-        batch_id
-    } else {
-        compact.as_str()
-    };
+    let source = if compact.is_empty() { batch_id } else { compact.as_str() };
     let short: String = source.chars().take(8).collect();
     if short.is_empty() {
         "Batch".to_string()
@@ -2199,10 +2357,7 @@ impl AgentsTerminalState {
     }
 
     fn set_stop_prompt(&mut self, agent_id: String, agent_name: String) {
-        self.pending_stop = Some(PendingAgentStop {
-            agent_id,
-            agent_name,
-        });
+        self.pending_stop = Some(PendingAgentStop { agent_id, agent_name });
     }
 
     fn clear_stop_prompt(&mut self) {
@@ -2251,17 +2406,12 @@ impl AgentsTerminalState {
     fn tab_allows(&self, entry: &AgentTerminalEntry) -> bool {
         match self.active_tab {
             AgentsTerminalTab::All => true,
-            AgentsTerminalTab::Running => {
-                matches!(entry.status, AgentStatus::Pending | AgentStatus::Running)
-            }
+            AgentsTerminalTab::Running =>
+                matches!(entry.status, AgentStatus::Pending | AgentStatus::Running),
             AgentsTerminalTab::Failed => matches!(entry.status, AgentStatus::Failed),
-            AgentsTerminalTab::Completed => matches!(
-                entry.status,
-                AgentStatus::Completed | AgentStatus::Cancelled
-            ),
-            AgentsTerminalTab::Review => {
-                matches!(entry.source_kind, Some(AgentSourceKind::AutoReview))
-            }
+            AgentsTerminalTab::Completed =>
+                matches!(entry.status, AgentStatus::Completed | AgentStatus::Cancelled),
+            AgentsTerminalTab::Review => matches!(entry.source_kind, Some(AgentSourceKind::AutoReview)),
         }
     }
 
@@ -2349,7 +2499,9 @@ impl AgentsTerminalState {
                             let trimmed = value.trim();
                             (!trimmed.is_empty()).then(|| trimmed.to_string())
                         })
-                        .or_else(|| key.as_ref().map(|batch| short_batch_label(batch)))
+                        .or_else(|| {
+                            key.as_ref().map(|batch| short_batch_label(batch))
+                        })
                         .unwrap_or_else(|| "Ad-hoc Agents".to_string());
                     let idx = groups.len();
                     group_lookup.insert(key.clone(), idx);
@@ -2400,9 +2552,11 @@ impl AgentsTerminalState {
         idx = (idx + delta).rem_euclid(len);
         if let Some(target) = groups.get(idx as usize) {
             if let Some(first_agent) = target.agent_ids.first() {
-                if let Some(pos) = self.sidebar_entries().iter().position(
-                    |entry| matches!(entry, AgentsSidebarEntry::Agent(id) if id == first_agent),
-                ) {
+                if let Some(pos) = self
+                    .sidebar_entries()
+                    .iter()
+                    .position(|entry| matches!(entry, AgentsSidebarEntry::Agent(id) if id == first_agent))
+                {
                     self.selected_index = pos;
                     self.focus_sidebar();
                     self.clear_stop_prompt();
@@ -2434,7 +2588,7 @@ struct BrowserSessionOrderKey {
 }
 
 impl BrowserSessionOrderKey {
-    fn from_order_meta(meta: &hanzo_core::protocol::OrderMeta) -> Self {
+    fn from_order_meta(meta: &code_core::protocol::OrderMeta) -> Self {
         let out = meta
             .output_index
             .map(|value| {
@@ -2494,9 +2648,8 @@ impl From<OrderKey> for OrderKeySnapshot {
 
 // Global guard to prevent overlapping background screenshot captures and to rate-limit them
 static BG_SHOT_IN_FLIGHT: Lazy<AtomicBool> = Lazy::new(|| AtomicBool::new(false));
-static BACKGROUND_REVIEW_LOCKS: Lazy<
-    Mutex<HashMap<String, hanzo_core::review_coord::ReviewGuard>>,
-> = Lazy::new(|| Mutex::new(HashMap::new()));
+static BACKGROUND_REVIEW_LOCKS: Lazy<Mutex<HashMap<String, code_core::review_coord::ReviewGuard>>> =
+    Lazy::new(|| Mutex::new(HashMap::new()));
 static BG_SHOT_LAST_START_MS: Lazy<AtomicU64> = Lazy::new(|| AtomicU64::new(0));
 static MERGE_LOCKS: Lazy<Mutex<HashMap<PathBuf, Arc<tokio::sync::Mutex<()>>>>> =
     Lazy::new(|| Mutex::new(HashMap::new()));
@@ -2543,26 +2696,30 @@ fn last_existing_cwd(except: &Path) -> Option<PathBuf> {
 use self::diff_ui::DiffBlock;
 use self::diff_ui::DiffConfirm;
 use self::diff_ui::DiffOverlay;
-use self::settings_overlay::AccountsSettingsContent;
-use self::settings_overlay::AgentOverviewRow;
-use self::settings_overlay::AgentsSettingsContent;
-use self::settings_overlay::AutoDriveSettingsContent;
-use self::settings_overlay::ChromeSettingsContent;
-use self::settings_overlay::LimitsSettingsContent;
-use self::settings_overlay::McpSettingsContent;
-use self::settings_overlay::ModelSettingsContent;
-use self::settings_overlay::NotificationsSettingsContent;
-use self::settings_overlay::PlanningSettingsContent;
-use self::settings_overlay::PromptsSettingsContent;
-use self::settings_overlay::ReviewSettingsContent;
-use self::settings_overlay::SettingsOverlayView;
-use self::settings_overlay::SettingsOverviewRow;
-use self::settings_overlay::SkillsSettingsContent;
-use self::settings_overlay::ThemeSettingsContent;
-use self::settings_overlay::UpdatesSettingsContent;
-use self::settings_overlay::ValidationSettingsContent;
+use self::settings_overlay::{
+    AgentOverviewRow,
+    AccountsSettingsContent,
+    AutoDriveSettingsContent,
+    AgentsSettingsContent,
+    MemoriesSettingsContent,
+    LimitsSettingsContent,
+    ChromeSettingsContent,
+    McpSettingsContent,
+    ModelSettingsContent,
+    PlanningSettingsContent,
+    NotificationsSettingsContent,
+    PromptsSettingsContent,
+    SkillsSettingsContent,
+    ReviewSettingsContent,
+    ThemeSettingsContent,
+    UpdatesSettingsContent,
+    ValidationSettingsContent,
+    SettingsOverlayView,
+    SettingsOverviewRow,
+};
 use ratatui::text::Line as RtLine;
 use ratatui::text::Span as RtSpan;
+
 
 use self::perf::PerfStats;
 
@@ -2619,15 +2776,6 @@ fn agent_status_label(status: AgentStatus) -> &'static str {
 }
 
 fn agent_status_icon(status: AgentStatus) -> &'static str {
-    if !crate::theme::show_gutter() {
-        return match status {
-            AgentStatus::Completed => "done",
-            AgentStatus::Running => "run",
-            AgentStatus::Pending => "...",
-            AgentStatus::Failed => "err",
-            AgentStatus::Cancelled => "stop",
-        };
-    }
     match status {
         AgentStatus::Completed => "✔",
         AgentStatus::Running => "▶",
@@ -2716,11 +2864,7 @@ fn wait_target_from_params(params: Option<&String>, call_id: &str) -> String {
 fn wait_exec_call_id_from_params(params: Option<&String>) -> Option<ExecCallId> {
     params
         .and_then(|raw| serde_json::from_str::<serde_json::Value>(raw).ok())
-        .and_then(|json| {
-            json.get("call_id")
-                .and_then(|v| v.as_str())
-                .map(|s| ExecCallId(s.to_string()))
-        })
+        .and_then(|json| json.get("call_id").and_then(|v| v.as_str()).map(|s| ExecCallId(s.to_string())))
 }
 
 fn wait_result_missing_background_job(message: &str) -> bool {
@@ -2766,12 +2910,12 @@ fn image_record_from_path(path: &Path) -> Option<ImageRecord> {
         }
     };
     let (width, height) = match image::image_dimensions(path) {
-        Ok((w, h)) => (w.min(u16::MAX as u32) as u16, h.min(u16::MAX as u32) as u16),
+        Ok((w, h)) => (
+            w.min(u16::MAX as u32) as u16,
+            h.min(u16::MAX as u32) as u16,
+        ),
         Err(err) => {
-            tracing::warn!(
-                "Failed to read image dimensions for {}: {err}",
-                path.display()
-            );
+            tracing::warn!("Failed to read image dimensions for {}: {err}", path.display());
             (0, 0)
         }
     };
@@ -2905,10 +3049,7 @@ impl ChatWidget<'_> {
                 while let Some(dir) = higher {
                     if dir
                         .file_name()
-                        .map(|name| {
-                            name == std::ffi::OsStr::new(".hanzo")
-                                || name == std::ffi::OsStr::new(".code")
-                        })
+                        .map(|name| name == std::ffi::OsStr::new(".code"))
                         .unwrap_or(false)
                     {
                         return true;
@@ -2992,7 +3133,7 @@ impl ChatWidget<'_> {
     fn system_order_key(
         &mut self,
         placement: SystemPlacement,
-        order: Option<&hanzo_core::protocol::OrderMeta>,
+        order: Option<&code_core::protocol::OrderMeta>,
     ) -> OrderKey {
         // If the provider supplied OrderMeta, honor it strictly.
         if let Some(om) = order {
@@ -3216,19 +3357,15 @@ impl ChatWidget<'_> {
 
         tokio::spawn(async move {
             let mut code_op_rx = code_op_rx;
-            let conversation_manager =
-                ConversationManager::new(auth_manager.clone(), SessionSource::Cli);
+            let conversation_manager = ConversationManager::new(
+                auth_manager.clone(),
+                SessionSource::Cli,
+            );
             let resume_path = config.experimental_resume.clone();
             let new_conversation = match resume_path {
-                Some(path) => {
-                    conversation_manager
-                        .resume_conversation_from_rollout(
-                            config.clone(),
-                            path,
-                            auth_manager.clone(),
-                        )
-                        .await
-                }
+                Some(path) => conversation_manager
+                    .resume_conversation_from_rollout(config.clone(), path, auth_manager.clone())
+                    .await,
                 None => conversation_manager.new_conversation(config).await,
             };
 
@@ -3239,7 +3376,7 @@ impl ChatWidget<'_> {
                     app_event_tx_clone.send_background_event_with_ticket(
                         &ticket,
                         format!(
-                            "❌ Failed to initialize model session: {}.\n• Ensure an OpenAI API key is set (HANZO_OPENAI_API_KEY / OPENAI_API_KEY) or run `dev login`.\n• Also verify config.cwd is an absolute path.",
+                            "❌ Failed to initialize model session: {}.\n• Ensure an OpenAI API key is set (CODE_OPENAI_API_KEY / OPENAI_API_KEY) or run `code login`.\n• Also verify config.cwd is an absolute path.",
                             e
                         ),
                     );
@@ -3253,7 +3390,7 @@ impl ChatWidget<'_> {
                 msg: EventMsg::SessionConfigured(new_conversation.session_configured),
                 order: None,
             };
-            app_event_tx_clone.send(AppEvent::CodeEvent(event));
+            app_event_tx_clone.send(AppEvent::CodexEvent(event));
 
             let conversation = new_conversation.conversation;
             let conversation_clone = conversation.clone();
@@ -3273,7 +3410,7 @@ impl ChatWidget<'_> {
             });
 
             while let Ok(event) = conversation.next_event().await {
-                app_event_tx_clone.send(AppEvent::CodeEvent(event));
+                app_event_tx_clone.send(AppEvent::CodexEvent(event));
             }
             // (debug end notice removed)
         });
@@ -3288,7 +3425,7 @@ impl ChatWidget<'_> {
         }
     }
 
-    fn background_tail_order_meta(&mut self) -> hanzo_core::protocol::OrderMeta {
+    fn background_tail_order_meta(&mut self) -> code_core::protocol::OrderMeta {
         self.background_tail_order_ticket_internal().next_order()
     }
 
@@ -3321,7 +3458,7 @@ impl ChatWidget<'_> {
         cell: Box<dyn HistoryCell>,
         placement: SystemPlacement,
         id_for_replace: Option<String>,
-        order: Option<&hanzo_core::protocol::OrderMeta>,
+        order: Option<&code_core::protocol::OrderMeta>,
         tag: &'static str,
         record: Option<HistoryDomainRecord>,
     ) {
@@ -3360,7 +3497,7 @@ impl ChatWidget<'_> {
     }
     // Build an ordered key from model-provided OrderMeta. Callers must
     // guarantee presence by passing a concrete reference (compile-time guard).
-    fn raw_order_key_from_order_meta(om: &hanzo_core::protocol::OrderMeta) -> OrderKey {
+    fn raw_order_key_from_order_meta(om: &code_core::protocol::OrderMeta) -> OrderKey {
         // sequence_number can be None on some terminal events; treat as 0 for stable placement
         OrderKey {
             req: om.request_ordinal,
@@ -3369,10 +3506,7 @@ impl ChatWidget<'_> {
         }
     }
 
-    fn provider_order_key_from_order_meta(
-        &mut self,
-        om: &hanzo_core::protocol::OrderMeta,
-    ) -> OrderKey {
+    fn provider_order_key_from_order_meta(&mut self, om: &code_core::protocol::OrderMeta) -> OrderKey {
         let mut key = Self::raw_order_key_from_order_meta(om);
         key.req = self.apply_request_bias(key.req);
         key
@@ -3394,7 +3528,7 @@ impl ChatWidget<'_> {
     }
 
     // Track latest request index observed from provider so internal inserts can anchor to it.
-    fn note_order(&mut self, order: Option<&hanzo_core::protocol::OrderMeta>) {
+    fn note_order(&mut self, order: Option<&code_core::protocol::OrderMeta>) {
         if let Some(om) = order {
             let is_background_sentinel = om.output_index == Some(i32::MAX as u32);
             let is_initial_session = self.last_seen_request_index == 0;
@@ -3447,7 +3581,7 @@ impl ChatWidget<'_> {
     //     latest key in this request (req = last_seen, out/seq bumped).
     //   * If no cells exist for this request yet, place near the top of this
     //     request (after headers/prompts) so provider output can follow.
-    fn near_time_key(&mut self, order: Option<&hanzo_core::protocol::OrderMeta>) -> OrderKey {
+    fn near_time_key(&mut self, order: Option<&code_core::protocol::OrderMeta>) -> OrderKey {
         if let Some(om) = order {
             return self.provider_order_key_from_order_meta(om);
         }
@@ -3507,7 +3641,7 @@ impl ChatWidget<'_> {
     /// so they remain attached to the current/last request instead of jumping forward.
     fn near_time_key_current_req(
         &mut self,
-        order: Option<&hanzo_core::protocol::OrderMeta>,
+        order: Option<&code_core::protocol::OrderMeta>,
     ) -> OrderKey {
         if let Some(om) = order {
             return self.provider_order_key_from_order_meta(om);
@@ -3578,7 +3712,8 @@ impl ChatWidget<'_> {
             return;
         }
         self.active_plan_title = title.clone();
-        self.app_event_tx.send(AppEvent::SetTerminalTitle { title });
+        self.app_event_tx
+            .send(AppEvent::SetTerminalTitle { title });
     }
     // Allocate a new synthetic key for internal (non-LLM) messages at the bottom of the
     // current (active) request: (req = last_seen, out = +∞, seq = monotonic).
@@ -3692,20 +3827,26 @@ impl ChatWidget<'_> {
     /// Returns true if any agents are actively running (Pending or Running), or we're about to start them.
     /// Agents in terminal states (Completed/Failed) do not keep the spinner visible.
     fn agents_are_actively_running(&self) -> bool {
-        let has_running_non_auto_review = self.active_agents.iter().any(|a| {
-            matches!(a.status, AgentStatus::Pending | AgentStatus::Running)
-                && !matches!(a.source_kind, Some(AgentSourceKind::AutoReview))
-        });
+        let has_running_non_auto_review = self
+            .active_agents
+            .iter()
+            .any(|a| {
+                matches!(a.status, AgentStatus::Pending | AgentStatus::Running)
+                    && !matches!(a.source_kind, Some(AgentSourceKind::AutoReview))
+            });
 
         if has_running_non_auto_review {
             return true;
         }
 
         // If only Auto Review agents are active, don't drive the spinner.
-        let has_running_auto_review = self.active_agents.iter().any(|a| {
-            matches!(a.status, AgentStatus::Pending | AgentStatus::Running)
-                && matches!(a.source_kind, Some(AgentSourceKind::AutoReview))
-        });
+        let has_running_auto_review = self
+            .active_agents
+            .iter()
+            .any(|a| {
+                matches!(a.status, AgentStatus::Pending | AgentStatus::Running)
+                    && matches!(a.source_kind, Some(AgentSourceKind::AutoReview))
+            });
 
         if has_running_auto_review {
             return false;
@@ -3716,7 +3857,10 @@ impl ChatWidget<'_> {
     }
 
     fn has_cancelable_agents(&self) -> bool {
-        self.active_agents.iter().any(Self::agent_is_cancelable)
+        self
+            .active_agents
+            .iter()
+            .any(Self::agent_is_cancelable)
     }
 
     fn agent_is_cancelable(agent: &AgentInfo) -> bool {
@@ -3787,10 +3931,7 @@ impl ChatWidget<'_> {
         self.bottom_pane
             .update_status_text("Cancelling agents…".to_string());
         self.bottom_pane.set_task_running(true);
-        self.submit_op(Op::CancelAgents {
-            batch_ids,
-            agent_ids,
-        });
+        self.submit_op(Op::CancelAgents { batch_ids, agent_ids });
 
         self.agents_ready_to_start = false;
 
@@ -3799,7 +3940,7 @@ impl ChatWidget<'_> {
         } else if self
             .bottom_pane
             .standard_terminal_hint()
-            .is_some_and(|hint| hint == AUTO_ESC_EXIT_HINT)
+            .is_some_and(|hint| hint == AUTO_ESC_EXIT_HINT || hint == AUTO_ESC_EXIT_HINT_DOUBLE)
         {
             self.bottom_pane.set_standard_terminal_hint(None);
         }
@@ -3816,8 +3957,9 @@ impl ChatWidget<'_> {
         let any_streaming = self.stream.is_write_cycle_active();
         let any_agents_active = self.agents_are_actively_running();
         let mut any_tasks_active = !self.active_task_ids.is_empty();
-        let final_answer_seen = self.last_answer_history_id_in_turn.is_some()
-            || self.stream_state.seq_answer_final.is_some();
+        let final_answer_seen =
+            self.last_answer_history_id_in_turn.is_some() || self.stream_state.seq_answer_final.is_some();
+        let final_answer_is_mid_turn = self.last_answer_is_mid_turn();
         let terminal_running = self.terminal_is_running();
 
         // If the backend never emits TaskComplete but we already received the
@@ -3830,9 +3972,27 @@ impl ChatWidget<'_> {
             && !any_agents_active
             && !terminal_running;
         if stuck_on_completed_turn {
-            self.active_task_ids.clear();
-            any_tasks_active = false;
-            self.overall_task_status = "complete".to_string();
+            self.bottom_pane
+                .update_status_text("waiting for model".to_string());
+            let now = Instant::now();
+            let started_at = self.idle_spinner_clear_started_at.get_or_insert(now);
+            let elapsed = now.saturating_duration_since(*started_at);
+            let clear_grace = if final_answer_is_mid_turn {
+                MID_TURN_IDLE_SPINNER_CLEAR_GRACE
+            } else {
+                IDLE_SPINNER_CLEAR_GRACE
+            };
+
+            if elapsed >= clear_grace {
+                self.active_task_ids.clear();
+                any_tasks_active = false;
+                self.overall_task_status = "complete".to_string();
+                self.idle_spinner_clear_started_at = None;
+            } else {
+                self.schedule_idle_spinner_recheck(clear_grace.saturating_sub(elapsed));
+            }
+        } else {
+            self.idle_spinner_clear_started_at = None;
         }
         if !(any_tools_running
             || any_streaming
@@ -3845,8 +4005,23 @@ impl ChatWidget<'_> {
         }
     }
 
+    fn last_answer_is_mid_turn(&self) -> bool {
+        let Some(history_id) = self.last_answer_history_id_in_turn else {
+            return false;
+        };
+
+        self.history_state
+            .record(history_id)
+            .and_then(|record| match record {
+                HistoryRecord::AssistantMessage(state) => Some(state.mid_turn),
+                _ => None,
+            })
+            .unwrap_or(false)
+    }
+
     /// Ensure we show progress when work is visible but the spinner state drifted.
     fn ensure_spinner_for_activity(&mut self, reason: &'static str) {
+        self.idle_spinner_clear_started_at = None;
         if self.bottom_pane.auto_drive_style_active()
             && !self.bottom_pane.auto_drive_view_active()
             && !self.bottom_pane.has_active_modal_view()
@@ -3864,9 +4039,36 @@ impl ChatWidget<'_> {
 
     #[inline]
     fn stop_spinner(&mut self) {
+        self.idle_spinner_clear_started_at = None;
         self.bottom_pane.set_task_running(false);
         self.bottom_pane.update_status_text(String::new());
         self.maybe_hide_spinner();
+    }
+
+    fn schedule_idle_spinner_recheck(&mut self, delay: Duration) {
+        if self.idle_spinner_recheck_scheduled {
+            return;
+        }
+        self.idle_spinner_recheck_scheduled = true;
+        let tx = self.app_event_tx.clone();
+        let fallback_tx = tx.clone();
+        if thread_spawner::spawn_lightweight("spinner-idle-recheck", move || {
+            std::thread::sleep(delay);
+            tx.send(AppEvent::RecheckSpinnerIfIdle);
+        })
+        .is_none()
+        {
+            let _ = fallback_tx.send(AppEvent::RecheckSpinnerIfIdle);
+        }
+    }
+
+    pub(crate) fn recheck_spinner_if_idle(&mut self) {
+        self.idle_spinner_recheck_scheduled = false;
+        let was_running = self.bottom_pane.is_task_running();
+        self.maybe_hide_spinner();
+        if was_running != self.bottom_pane.is_task_running() {
+            self.request_redraw();
+        }
     }
 
     #[cfg(any(test, feature = "test-helpers"))]
@@ -3967,24 +4169,26 @@ impl ChatWidget<'_> {
         self.maybe_hide_spinner();
     }
 
+
     fn remove_background_completion_message(&mut self, call_id: &str) {
-        if let Some(idx) =
-            self.history_cells.iter().rposition(|cell| {
-                matches!(cell.kind(), HistoryCellType::BackgroundEvent)
-                    && cell
-                        .as_any()
-                        .downcast_ref::<PlainHistoryCell>()
-                        .map(|plain| {
-                            plain.state().lines.iter().any(|line| {
-                                line.spans.iter().any(|span| span.text.contains(call_id))
-                            })
+        if let Some(idx) = self.history_cells.iter().rposition(|cell| {
+            matches!(cell.kind(), HistoryCellType::BackgroundEvent)
+                && cell
+                    .as_any()
+                    .downcast_ref::<PlainHistoryCell>()
+                    .map(|plain| {
+                        plain.state().lines.iter().any(|line| {
+                            line.spans
+                                .iter()
+                                .any(|span| span.text.contains(call_id))
                         })
-                        .unwrap_or(false)
-            })
-        {
+                    })
+                    .unwrap_or(false)
+        }) {
             self.history_remove_at(idx);
         }
     }
+
 
     /// Flush any ExecEnd events that arrived before their matching ExecBegin.
     /// We briefly stash such ends to allow natural pairing when the Begin shows up
@@ -4082,8 +4286,8 @@ impl ChatWidget<'_> {
         self.cleared_lingering_execs_this_turn = true;
     }
     fn perf_label_for_item(&self, item: &dyn HistoryCell) -> String {
-        use crate::history::state::ExecStatus;
         use crate::history_cell::ExecKind;
+        use crate::history::state::ExecStatus;
         use crate::history_cell::HistoryCellType;
         use crate::history_cell::PatchKind;
         use crate::history_cell::ToolCellStatus;
@@ -4184,8 +4388,7 @@ impl ChatWidget<'_> {
         candidates: Vec<crate::resume::discovery::ResumeCandidate>,
     ) -> Vec<crate::bottom_pane::resume_selection_view::ResumeRow> {
         fn human_ago(ts: &str) -> String {
-            use chrono::DateTime;
-            use chrono::Local;
+            use chrono::{DateTime, Local};
             if let Ok(dt) = DateTime::parse_from_rfc3339(ts) {
                 let local_dt = dt.with_timezone(&Local);
                 let now = Local::now();
@@ -4216,9 +4419,22 @@ impl ChatWidget<'_> {
             .map(|c| {
                 let modified = human_ago(&c.modified_ts.unwrap_or_default());
                 let created = human_ago(&c.created_ts.unwrap_or_default());
-                let user_msgs = format!("{}", c.user_message_count);
+                let user_message_count = c.user_message_count;
+                let user_msgs = format!("{user_message_count}");
                 let branch = c.branch.unwrap_or_else(|| "-".to_string());
-                let mut summary = c.snippet.unwrap_or_else(|| c.subtitle.unwrap_or_default());
+                let nickname = c
+                    .nickname
+                    .and_then(|name| {
+                        let trimmed = name.trim();
+                        (!trimmed.is_empty()).then(|| trimmed.to_string())
+                    });
+                let snippet = c.snippet.or(c.subtitle);
+                let mut summary = match (nickname, snippet) {
+                    (Some(name), Some(snippet)) => format!("{name} - {snippet}"),
+                    (Some(name), None) => name,
+                    (None, Some(snippet)) => snippet,
+                    (None, None) => String::new(),
+                };
                 const SNIPPET_MAX: usize = 64;
                 if summary.chars().count() > SNIPPET_MAX {
                     summary = summary.chars().take(SNIPPET_MAX).collect::<String>() + "…";
@@ -4266,7 +4482,7 @@ impl ChatWidget<'_> {
     /// Render a single recorded ResponseItem into history without executing tools
     fn render_replay_item(&mut self, item: ResponseItem) {
         match item {
-            ResponseItem::Message { id, role, content } => {
+            ResponseItem::Message { id, role, content, .. } => {
                 let message_id = id;
                 let mut text = String::new();
                 for c in content {
@@ -4298,26 +4514,29 @@ impl ChatWidget<'_> {
                 }
                 if text.starts_with("== System Status ==") {
                     return;
-                }
-                if role == "assistant" {
-                    let normalized_new = Self::normalize_text(text);
-                    if let Some(last_cell) = self.history_cells.last() {
-                        if let Some(existing) = last_cell
-                            .as_any()
-                            .downcast_ref::<crate::history_cell::AssistantMarkdownCell>(
-                        ) {
-                            let normalized_existing = Self::normalize_text(existing.markdown());
-                            if normalized_existing == normalized_new {
-                                tracing::debug!("replay: skipping duplicate assistant message");
-                                return;
-                            }
+            }
+            if role == "assistant" {
+                let normalized_new = Self::normalize_text(text);
+                if let Some(last_cell) = self.history_cells.last() {
+                    if let Some(existing) = last_cell
+                        .as_any()
+                        .downcast_ref::<crate::history_cell::AssistantMarkdownCell>()
+                    {
+                        let normalized_existing =
+                            Self::normalize_text(existing.markdown());
+                        if normalized_existing == normalized_new {
+                            tracing::debug!(
+                                "replay: skipping duplicate assistant message"
+                            );
+                            return;
                         }
                     }
-                    let mut lines: Vec<ratatui::text::Line<'static>> = Vec::new();
-                    crate::markdown::append_markdown(text, &mut lines, &self.config);
-                    self.insert_final_answer_with_id(message_id, lines, text.to_string());
-                    return;
                 }
+                let mut lines: Vec<ratatui::text::Line<'static>> = Vec::new();
+                crate::markdown::append_markdown(text, &mut lines, &self.config);
+                self.insert_final_answer_with_id(message_id, lines, text.to_string());
+                return;
+            }
                 if role == "user" {
                     let key = self.next_internal_key();
                     let state = history_cell::new_user_prompt(text.to_string());
@@ -4340,12 +4559,7 @@ impl ChatWidget<'_> {
                     let _ = self.history_insert_plain_state_with_key(state, key, "epilogue");
                 }
             }
-            ResponseItem::FunctionCall {
-                name,
-                arguments,
-                call_id,
-                ..
-            } => {
+            ResponseItem::FunctionCall { name, arguments, call_id, .. } => {
                 let mut message = self
                     .format_tool_call_preview(&name, &arguments)
                     .unwrap_or_else(|| {
@@ -4372,7 +4586,7 @@ impl ChatWidget<'_> {
             }
             ResponseItem::Reasoning { summary, .. } => {
                 for s in summary {
-                    let hanzo_protocol::models::ReasoningItemReasoningSummary::SummaryText { text } =
+                    let code_protocol::models::ReasoningItemReasoningSummary::SummaryText { text } =
                         s;
                     // Reasoning cell – use the existing reasoning output styling
                     let sink = crate::streaming::controller::AppEventHistorySink(
@@ -4385,10 +4599,8 @@ impl ChatWidget<'_> {
                         .finalize(crate::streaming::StreamKind::Reasoning, true, &sink);
                 }
             }
-            ResponseItem::FunctionCallOutput {
-                output, call_id, ..
-            } => {
-                let mut content = output.content.clone();
+            ResponseItem::FunctionCallOutput { output, call_id, .. } => {
+                let mut content = output.body.to_text().unwrap_or_default();
                 let mut metadata_summary = String::new();
                 if let Ok(v) = serde_json::from_str::<JsonValue>(&content) {
                     if let Some(s) = v.get("output").and_then(|x| x.as_str()) {
@@ -4479,7 +4691,9 @@ impl ChatWidget<'_> {
         };
 
         if is_assistant || is_auto_review {
-            let bg_style = Style::default().bg(cell_bg).fg(crate::colors::text());
+            let bg_style = Style::default()
+                .bg(cell_bg)
+                .fg(crate::colors::text());
             fill_rect(buf, area, Some(' '), bg_style);
         }
 
@@ -4489,8 +4703,8 @@ impl ChatWidget<'_> {
         let offset_y = area.y.saturating_sub(buf.area.y) as usize;
         let row_width = area.width as usize;
 
-        for (visible_offset, src_index) in
-            (skip_rows as usize..skip_rows as usize + max_rows as usize).enumerate()
+        for (visible_offset, src_index) in (skip_rows as usize..skip_rows as usize + max_rows as usize)
+            .enumerate()
         {
             let src_row = layout
                 .rows
@@ -4541,23 +4755,22 @@ impl ChatWidget<'_> {
         }
         self.request_redraw();
     }
-    /// If the user is at or near the bottom, keep following new messages.
-    /// We treat "near" as within 3 rows, matching our scroll step.
+    /// If the user is at the bottom, keep following new messages.
     fn autoscroll_if_near_bottom(&mut self) {
         layout_scroll::autoscroll_if_near_bottom(self);
     }
 
     fn clear_reasoning_in_progress(&mut self) {
-        let last_reasoning_index =
-            self.history_cells
-                .iter()
-                .enumerate()
-                .rev()
-                .find_map(|(idx, cell)| {
-                    cell.as_any()
-                        .downcast_ref::<history_cell::CollapsibleReasoningCell>()
-                        .map(|_| idx)
-                });
+        let last_reasoning_index = self
+            .history_cells
+            .iter()
+            .enumerate()
+            .rev()
+            .find_map(|(idx, cell)| {
+                cell.as_any()
+                    .downcast_ref::<history_cell::CollapsibleReasoningCell>()
+                    .map(|_| idx)
+            });
 
         let mut changed = false;
         for (idx, cell) in self.history_cells.iter().enumerate() {
@@ -4588,7 +4801,6 @@ impl ChatWidget<'_> {
         }
     }
 
-    #[allow(dead_code)]
     fn reasoning_preview(lines: &[Line<'static>]) -> String {
         const MAX_LINES: usize = 3;
         const MAX_CHARS: usize = 120;
@@ -4825,19 +5037,12 @@ impl ChatWidget<'_> {
             .and_then(|frozen| self.history_state.record(frozen.history_id()))
     }
 
-    fn record_from_cell_or_state(
-        &self,
-        idx: usize,
-        cell: &dyn HistoryCell,
-    ) -> Option<HistoryRecord> {
-        history_cell::record_from_cell(cell).or_else(|| self.history_record_for_index(idx).cloned())
+    fn record_from_cell_or_state(&self, idx: usize, cell: &dyn HistoryCell) -> Option<HistoryRecord> {
+        history_cell::record_from_cell(cell)
+            .or_else(|| self.history_record_for_index(idx).cloned())
     }
 
-    fn render_request_seed_for_cell(
-        &self,
-        idx: usize,
-        cell: &dyn HistoryCell,
-    ) -> RenderRequestSeed {
+    fn render_request_seed_for_cell(&self, idx: usize, cell: &dyn HistoryCell) -> RenderRequestSeed {
         let (history_id, has_record) = if let Some(Some(id)) = self.history_cell_ids.get(idx) {
             let exists = self.history_state.index_of(*id).is_some();
             (*id, exists)
@@ -4898,9 +5103,7 @@ impl ChatWidget<'_> {
             if history_id != HistoryId::ZERO {
                 if let Some(record) = self.history_state.record(history_id) {
                     if let Some(lines) = self.fallback_lines_for_record(cell, record) {
-                        let cached = self
-                            .history_render
-                            .cached_fallback_lines(history_id, || lines);
+                        let cached = self.history_render.cached_fallback_lines(history_id, || lines);
                         fallback_lines = Some(cached);
                     }
                 }
@@ -5093,13 +5296,9 @@ impl ChatWidget<'_> {
         for idx in 0..self.history_cells.len() {
             let (history_id, cached_width, cached_height) = match self.history_cells[idx]
                 .as_any()
-                .downcast_ref::<FrozenHistoryCell>(
-            ) {
-                Some(frozen) => (
-                    frozen.history_id(),
-                    frozen.cached_width(),
-                    frozen.cached_height(),
-                ),
+                .downcast_ref::<FrozenHistoryCell>()
+            {
+                Some(frozen) => (frozen.history_id(), frozen.cached_width(), frozen.cached_height()),
                 None => continue,
             };
 
@@ -5111,13 +5310,10 @@ impl ChatWidget<'_> {
                 .history_render
                 .cached_height(history_id, render_settings)
                 .or_else(|| {
-                    self.history_state
-                        .record(history_id)
-                        .cloned()
-                        .and_then(|record| {
-                            self.build_cell_from_record(&record)
-                                .map(|cell| cell.desired_height(width))
-                        })
+                    self.history_state.record(history_id).cloned().and_then(|record| {
+                        self.build_cell_from_record(&record)
+                            .map(|cell| cell.desired_height(width))
+                    })
                 })
                 .unwrap_or(cached_height);
 
@@ -5255,7 +5451,7 @@ impl ChatWidget<'_> {
         }
         let total_height = self.history_render.last_total_height();
         let max_scroll = total_height.saturating_sub(viewport_rows);
-        let clamped_offset = self.layout.scroll_offset.min(max_scroll);
+        let clamped_offset = self.layout.scroll_offset.get().min(max_scroll);
         let scroll_pos = max_scroll.saturating_sub(clamped_offset);
         let history_len = self.history_cells.len();
         let history_total = {
@@ -5266,22 +5462,24 @@ impl ChatWidget<'_> {
             }
             ps_ref[history_len]
         };
-        self.update_history_live_window(scroll_pos, viewport_rows, history_total, render_settings);
+        self.update_history_live_window(
+            scroll_pos,
+            viewport_rows,
+            history_total,
+            render_settings,
+        );
     }
     /// Handle exec approval request immediately
     fn handle_exec_approval_now(&mut self, _id: String, ev: ExecApprovalRequestEvent) {
-        // Use call_id as the approval correlation id so responses map to the
-        // exact pending approval in core (supports multiple approvals per turn).
-        let approval_id = ev.call_id.clone();
+        // Use approval_id when present, otherwise fall back to call_id.
+        let approval_id = ev.effective_approval_id();
         let ticket = self.make_background_before_next_output_ticket();
-        self.bottom_pane.push_approval_request(
-            ApprovalRequest::Exec {
+        self.bottom_pane
+            .push_approval_request(ApprovalRequest::Exec {
                 id: approval_id,
                 command: ev.command,
                 reason: ev.reason,
-            },
-            ticket,
-        );
+            }, ticket);
     }
 
     /// Handle apply patch approval request immediately
@@ -5293,54 +5491,17 @@ impl ChatWidget<'_> {
             grant_root,
         } = ev;
 
-        // Clone for session storage before moving into history
-        let changes_clone = changes.clone();
+        let history_changes = compact_patch_changes(&changes);
         // Surface the patch summary in the main conversation
         let key = self.next_internal_key();
         let _ = self.history_insert_with_key_global(
             Box::new(history_cell::new_patch_event(
                 history_cell::PatchEventType::ApprovalRequest,
-                changes,
+                history_changes,
             )),
             key,
         );
-        // Record change set for session diff popup (latest last)
-        self.diffs.session_patch_sets.push(changes_clone);
-        // For any new paths, capture an original baseline snapshot the first time we see them
-        if let Some(last) = self.diffs.session_patch_sets.last() {
-            for (src_path, chg) in last.iter() {
-                match chg {
-                    hanzo_core::protocol::FileChange::Update {
-                        move_path: Some(dest_path),
-                        ..
-                    } => {
-                        if let Some(baseline) =
-                            self.diffs.baseline_file_contents.get(src_path).cloned()
-                        {
-                            // Mirror baseline under destination so tabs use the new path
-                            self.diffs
-                                .baseline_file_contents
-                                .entry(dest_path.clone())
-                                .or_insert(baseline);
-                        } else if !self.diffs.baseline_file_contents.contains_key(dest_path) {
-                            // Snapshot from source (pre-apply)
-                            let baseline = std::fs::read_to_string(src_path).unwrap_or_default();
-                            self.diffs
-                                .baseline_file_contents
-                                .insert(dest_path.clone(), baseline);
-                        }
-                    }
-                    _ => {
-                        if !self.diffs.baseline_file_contents.contains_key(src_path) {
-                            let baseline = std::fs::read_to_string(src_path).unwrap_or_default();
-                            self.diffs
-                                .baseline_file_contents
-                                .insert(src_path.clone(), baseline);
-                        }
-                    }
-                }
-            }
-        }
+        self.diffs.record_patch_set(&changes, false);
         // Enable Ctrl+D footer hint now that we have diffs to show
         self.bottom_pane.set_diffs_hint(true);
 
@@ -5358,7 +5519,7 @@ impl ChatWidget<'_> {
     fn handle_exec_begin_now(
         &mut self,
         ev: ExecCommandBeginEvent,
-        order: &hanzo_core::protocol::OrderMeta,
+        order: &code_core::protocol::OrderMeta,
     ) {
         exec_tools::handle_exec_begin_now(self, ev, order);
     }
@@ -5369,7 +5530,7 @@ impl ChatWidget<'_> {
     fn handle_exec_begin_ordered(
         &mut self,
         ev: ExecCommandBeginEvent,
-        order: hanzo_core::protocol::OrderMeta,
+        order: code_core::protocol::OrderMeta,
         seq: u64,
     ) {
         self.finalize_active_stream();
@@ -5396,7 +5557,7 @@ impl ChatWidget<'_> {
     fn handle_exec_end_now(
         &mut self,
         ev: ExecCommandEndEvent,
-        order: &hanzo_core::protocol::OrderMeta,
+        order: &code_core::protocol::OrderMeta,
     ) {
         exec_tools::handle_exec_end_now(self, ev, order);
     }
@@ -5407,7 +5568,7 @@ impl ChatWidget<'_> {
     fn enqueue_or_handle_exec_end(
         &mut self,
         ev: ExecCommandEndEvent,
-        order: hanzo_core::protocol::OrderMeta,
+        order: code_core::protocol::OrderMeta,
     ) {
         let call_id = ExecCallId(ev.call_id.clone());
         let has_running = self.exec.running_commands.contains_key(&call_id);
@@ -5544,12 +5705,12 @@ impl ChatWidget<'_> {
                         let record_index = self
                             .record_index_for_cell(idx)
                             .unwrap_or_else(|| self.record_index_for_position(idx));
-                        let mutation =
-                            self.history_state
-                                .apply_domain_event(HistoryDomainEvent::Replace {
-                                    index: record_index,
-                                    record: HistoryDomainRecord::Patch(patch_record.clone()),
-                                });
+                        let mutation = self
+                            .history_state
+                            .apply_domain_event(HistoryDomainEvent::Replace {
+                                index: record_index,
+                                record: HistoryDomainRecord::Patch(patch_record.clone()),
+                            });
                         if let Some(id) = self.apply_mutation_to_cell_index(idx, mutation) {
                             if idx < self.history_cell_ids.len() {
                                 self.history_cell_ids[idx] = Some(id);
@@ -5586,12 +5747,12 @@ impl ChatWidget<'_> {
                     let record_index = self
                         .record_index_for_cell(idx)
                         .unwrap_or_else(|| self.record_index_for_position(idx));
-                    let mutation =
-                        self.history_state
-                            .apply_domain_event(HistoryDomainEvent::Replace {
-                                index: record_index,
-                                record: HistoryDomainRecord::Patch(patch_record.clone()),
-                            });
+                    let mutation = self
+                        .history_state
+                        .apply_domain_event(HistoryDomainEvent::Replace {
+                            index: record_index,
+                            record: HistoryDomainRecord::Patch(patch_record.clone()),
+                        });
                     if let Some(_id) = self.apply_mutation_to_cell_index(idx, mutation) {
                         self.maybe_hide_spinner();
                         return;
@@ -5727,12 +5888,10 @@ impl ChatWidget<'_> {
 
         if let Some(id) = self.context_cell_id {
             if let Some(index) = self.history_state.index_of(id) {
-                let mutation = self
-                    .history_state
-                    .apply_domain_event(HistoryDomainEvent::Replace {
-                        index,
-                        record: HistoryDomainRecord::Context(record.clone()),
-                    });
+                let mutation = self.history_state.apply_domain_event(HistoryDomainEvent::Replace {
+                    index,
+                    record: HistoryDomainRecord::Context(record.clone()),
+                });
                 if let Some(cell_idx) = self.cell_index_for_history_id(id) {
                     if let Some(new_id) = self.apply_mutation_to_cell_index(cell_idx, mutation) {
                         self.context_cell_id = Some(new_id);
@@ -5744,12 +5903,10 @@ impl ChatWidget<'_> {
             }
         }
 
-        let insertion = self
-            .history_state
-            .apply_domain_event(HistoryDomainEvent::Insert {
-                index: 0,
-                record: HistoryDomainRecord::Context(record.clone()),
-            });
+        let insertion = self.history_state.apply_domain_event(HistoryDomainEvent::Insert {
+            index: 0,
+            record: HistoryDomainRecord::Context(record.clone()),
+        });
 
         if let HistoryMutation::Inserted { id, record, .. } = insertion {
             if let Some(mut cell) = self.build_cell_from_record(&record) {
@@ -5860,7 +6017,10 @@ impl ChatWidget<'_> {
         }
     }
 
-    fn handle_environment_context_full_event(&mut self, payload: &EnvironmentContextFullEvent) {
+    fn handle_environment_context_full_event(
+        &mut self,
+        payload: &EnvironmentContextFullEvent,
+    ) {
         if !self.context_ui_enabled() {
             return;
         }
@@ -5885,7 +6045,10 @@ impl ChatWidget<'_> {
         self.set_context_summary(summary, payload.sequence, true);
     }
 
-    fn handle_environment_context_delta_event(&mut self, payload: &EnvironmentContextDeltaEvent) {
+    fn handle_environment_context_delta_event(
+        &mut self,
+        payload: &EnvironmentContextDeltaEvent,
+    ) {
         if !self.context_ui_enabled() {
             return;
         }
@@ -5989,7 +6152,7 @@ impl ChatWidget<'_> {
 
     /// Get or create the global browser manager
     async fn get_browser_manager() -> Arc<BrowserManager> {
-        hanzo_browser::global::get_or_create_browser_manager().await
+        code_browser::global::get_or_create_browser_manager().await
     }
 
     pub(crate) fn insert_str(&mut self, s: &str) {
@@ -6000,6 +6163,16 @@ impl ChatWidget<'_> {
             self.auto_goal_escape_state = AutoGoalEscState::NeedsEnableEditing;
         }
         self.bottom_pane.insert_str(s);
+    }
+
+    pub(crate) fn set_composer_text(&mut self, text: String) {
+        if self.auto_state.should_show_goal_entry()
+            && matches!(self.auto_goal_escape_state, AutoGoalEscState::Inactive)
+            && !text.trim().is_empty()
+        {
+            self.auto_goal_escape_state = AutoGoalEscState::NeedsEnableEditing;
+        }
+        self.bottom_pane.set_composer_text(text);
     }
 
     // Removed: pending insert sequencing is not used under strict ordering.
@@ -6056,7 +6229,11 @@ impl ChatWidget<'_> {
             .unwrap_or("png")
             .to_string();
 
-        let mut dir = self.config.code_home.join("working").join("_pasted_images");
+        let mut dir = self
+            .config
+            .code_home
+            .join("working")
+            .join("_pasted_images");
         if let Some(session_id) = self.session_id {
             dir = dir.join(session_id.to_string());
         }
@@ -6111,6 +6288,7 @@ impl ChatWidget<'_> {
                     });
                 }
             }
+
 
             let placeholder = mat.as_str();
             if placeholder.starts_with("[image:") {
@@ -6220,6 +6398,7 @@ impl ChatWidget<'_> {
     /// animating the output.
     pub(crate) fn on_commit_tick(&mut self) {
         streaming::on_commit_tick(self);
+        self.maybe_enforce_queue_unblock();
     }
     fn is_write_cycle_active(&self) -> bool {
         streaming::is_write_cycle_active(self)
@@ -6234,25 +6413,8 @@ impl ChatWidget<'_> {
     fn on_error(&mut self, message: String) {
         // Treat transient stream errors (which the core will retry) differently
         // from fatal errors so the status spinner remains visible while we wait.
-        let mut message = message;
-        let mut lower = message.to_lowercase();
-
-        let provider_retry_limit = lower.contains("exceeded retry limit")
-            || lower.contains("retries exhausted")
-            || lower.contains("retry limit reached");
-        let provider_429 = lower.contains("429") || lower.contains("too many requests");
-        // Track exhaustion state before rewriting the message so the
-        // human-friendly text doesn't erase the retry-limit keywords.
-        let retries_exhausted = provider_retry_limit;
-        if provider_retry_limit && provider_429 {
-            message = "Rate limit reached (429 Too Many Requests). Please wait and try again."
-                .to_string();
-            lower = message.to_lowercase();
-        }
-        // A bare 429 is always retryable — treat it as transient so the
-        // core retry loop can attempt again instead of killing the session.
-        let is_transient = provider_429
-            || lower.contains("retrying")
+        let lower = message.to_lowercase();
+        let is_transient = lower.contains("retrying")
             || lower.contains("reconnecting")
             || lower.contains("disconnected")
             || lower.contains("stream error")
@@ -6264,7 +6426,7 @@ impl ChatWidget<'_> {
             || lower.contains("connection")
             || lower.contains("failed to start stream");
 
-        if is_transient && !retries_exhausted {
+        if is_transient {
             self.mark_reconnecting(message);
             return;
         }
@@ -6306,35 +6468,12 @@ impl ChatWidget<'_> {
 
     fn mark_reconnecting(&mut self, message: String) {
         // Keep task running and surface a concise status in the input header.
-        let lower = message.to_lowercase();
-        let rate_limited = lower.contains("429")
-            || lower.contains("too many requests")
-            || lower.contains("rate limit");
-        let connection_issue = lower.contains("network")
-            || lower.contains("connection")
-            || lower.contains("transport")
-            || lower.contains("failed to start stream");
-
         self.bottom_pane.set_task_running(true);
-        let status = if rate_limited {
-            "Rate limited..."
-        } else if connection_issue {
-            "Reconnecting..."
-        } else {
-            "Retrying..."
-        };
-        self.bottom_pane.update_status_text(status.to_string());
+        self.bottom_pane.update_status_text("Retrying...".to_string());
 
         if !self.reconnect_notice_active {
             self.reconnect_notice_active = true;
-            let notice = if rate_limited {
-                "Rate limit reached. Retrying automatically...".to_string()
-            } else if connection_issue {
-                "Connection issue. Retrying automatically...".to_string()
-            } else {
-                "Temporary stream issue. Retrying automatically...".to_string()
-            };
-            self.push_background_tail(notice);
+            self.push_background_tail(format!("Auto-retrying… ({message})"));
         }
 
         // Do NOT clear running state or streams; the retry will resume them.
@@ -6354,13 +6493,8 @@ impl ChatWidget<'_> {
 
     fn interrupt_running_task(&mut self) {
         let bottom_running = self.bottom_pane.is_task_running();
-        let exec_related_running = !self.exec.running_commands.is_empty()
-            || !self.tools_state.running_custom_tools.is_empty()
-            || !self.tools_state.web_search_sessions.is_empty()
-            || !self.tools_state.running_wait_tools.is_empty()
-            || !self.tools_state.running_kill_tools.is_empty();
-
-        if !(bottom_running || exec_related_running) {
+        let wait_running = self.wait_running();
+        if !self.is_task_running() && !wait_running {
             return;
         }
 
@@ -6382,11 +6516,12 @@ impl ChatWidget<'_> {
 
         let mut has_wait_running = false;
         for (call_id, entry) in self.tools_state.running_custom_tools.iter() {
-            if let Some(idx) = running_tools::resolve_entry_index(self, entry, &call_id.0) {
-                if let Some(cell) = self.history_cells.get(idx).and_then(|c| {
-                    c.as_any()
-                        .downcast_ref::<history_cell::RunningToolCallCell>()
-                }) {
+            if let Some(idx) = running_tools::resolve_entry_index(self, entry, &call_id.0)
+            {
+                if let Some(cell) = self.history_cells.get(idx).and_then(|c| c
+                    .as_any()
+                    .downcast_ref::<history_cell::RunningToolCallCell>())
+                {
                     if cell.has_title("Waiting") {
                         has_wait_running = true;
                         break;
@@ -6478,8 +6613,10 @@ impl ChatWidget<'_> {
         show_order_overlay: bool,
         latest_upgrade_version: Option<String>,
     ) -> Self {
-        let mapped_theme =
-            crate::theme::map_theme_for_palette(config.tui.theme.name, config.tui.theme.is_dark);
+        let mapped_theme = crate::theme::map_theme_for_palette(
+            config.tui.theme.name,
+            config.tui.theme.is_dark,
+        );
         config.tui.theme.name = mapped_theme;
         remember_cwd_history(&config.cwd);
 
@@ -6523,6 +6660,8 @@ impl ChatWidget<'_> {
             active_exec_cell: None,
             history_cells,
             config: config.clone(),
+            mcp_tools_by_server: HashMap::new(),
+            mcp_server_failures: HashMap::new(),
             remote_model_presets: None,
             allow_remote_default_at_startup: !config.model_explicit,
             chat_model_selected_explicitly: false,
@@ -6540,6 +6679,8 @@ impl ChatWidget<'_> {
             ),
             total_token_usage: TokenUsage::default(),
             last_token_usage: TokenUsage::default(),
+            session_requested_model: None,
+            session_latest_response_model: None,
             rate_limit_snapshot: None,
             rate_limit_warnings: RateLimitWarningState::default(),
             rate_limit_fetch_inflight: false,
@@ -6557,6 +6698,7 @@ impl ChatWidget<'_> {
             last_user_message: None,
             last_developer_message: None,
             pending_turn_origin: None,
+            pending_request_user_input: None,
             current_turn_origin: None,
             cleared_lingering_execs_this_turn: true,
             exec: ExecState {
@@ -6568,6 +6710,8 @@ impl ChatWidget<'_> {
             },
             canceled_exec_call_ids: HashSet::new(),
             tools_state: ToolState::default(),
+            idle_spinner_clear_started_at: None,
+            idle_spinner_recheck_scheduled: false,
             // Use max width to disable wrapping during streaming
             // Text will be properly wrapped when displayed based on terminal width
             live_builder: RowBuilder::new(usize::MAX),
@@ -6607,6 +6751,7 @@ impl ChatWidget<'_> {
             background_review: None,
             auto_review_status: None,
             auto_review_notice: None,
+            last_auto_review_failure: None,
             auto_review_baseline: None,
             auto_review_reviewed_marker: None,
             pending_auto_review_range: None,
@@ -6614,6 +6759,8 @@ impl ChatWidget<'_> {
             review_guard: None,
             background_review_guard: None,
             processed_auto_review_agents: HashSet::new(),
+            processed_auto_review_agent_order: VecDeque::new(),
+            auto_review_processed_evicted_total: 0,
             pending_turn_descriptor: None,
             render_request_cache: RefCell::new(Vec::new()),
             render_request_cache_dirty: Cell::new(true),
@@ -6622,6 +6769,10 @@ impl ChatWidget<'_> {
             overall_task_status: "preparing".to_string(),
             active_plan_title: None,
             agent_runtime: HashMap::new(),
+            agent_runtime_pruned_total: 0,
+            agents_terminal_pruned_total: 0,
+            history_cells_trimmed_total: 0,
+            pending_dispatched_trimmed_total: 0,
             pending_agent_updates: HashMap::new(),
             sparkline_data: std::cell::RefCell::new(Vec::new()),
             last_sparkline_update: std::cell::RefCell::new(std::time::Instant::now()),
@@ -6676,7 +6827,7 @@ impl ChatWidget<'_> {
                 crate::height_manager::HeightManagerConfig::default(),
             )),
             layout: LayoutState {
-                scroll_offset: 0,
+                scroll_offset: Cell::new(0),
                 last_max_scroll: std::cell::Cell::new(0),
                 last_history_viewport_height: std::cell::Cell::new(0),
                 vertical_scrollbar_state: std::cell::RefCell::new(ScrollbarState::default()),
@@ -6752,6 +6903,7 @@ impl ChatWidget<'_> {
             resume_placeholder_visible: false,
             resume_picker_loading: false,
         };
+        new_widget.load_auto_review_baseline_marker();
         new_widget.spawn_conversation_runtime(config.clone(), auth_manager.clone(), code_op_rx);
         if let Ok(Some(active_id)) = auth_accounts::get_active_account_id(&config.code_home) {
             if let Ok(records) = account_usage::list_rate_limit_snapshots(&config.code_home) {
@@ -6795,8 +6947,7 @@ impl ChatWidget<'_> {
             let _ = w.history_insert_plain_state_with_key(notice_state, notice_key, "prelude");
             if connecting_mcp && !w.test_mode {
                 // Render connecting status as a separate cell with standard gutter and spacing
-                let names: Vec<&str> = w.config.mcp_servers.keys().map(|s| s.as_str()).collect();
-                w.history_push_top_next_req(history_cell::new_connecting_mcp_status(&names));
+                w.history_push_top_next_req(history_cell::new_connecting_mcp_status());
             }
             // Mark welcome as shown to avoid duplicating the Popular commands section
             // when SessionConfigured arrives shortly after.
@@ -6811,8 +6962,6 @@ impl ChatWidget<'_> {
             #[cfg(any(test, feature = "test-helpers"))]
             w.seed_test_mode_greeting();
         }
-        w.bottom_pane
-            .set_has_chat_history(!w.history_cells.is_empty());
         w.maybe_start_auto_upgrade_task();
         w
     }
@@ -6820,7 +6969,7 @@ impl ChatWidget<'_> {
     /// Construct a ChatWidget from an existing conversation (forked session).
     pub(crate) fn new_from_existing(
         config: Config,
-        conversation: std::sync::Arc<hanzo_core::CodexConversation>,
+        conversation: std::sync::Arc<code_core::CodexConversation>,
         session_configured: SessionConfiguredEvent,
         app_event_tx: AppEventSender,
         enhanced_keys_supported: bool,
@@ -6845,7 +6994,7 @@ impl ChatWidget<'_> {
                 msg: EventMsg::SessionConfigured(session_configured),
                 order: None,
             };
-            app_event_tx_clone.send(AppEvent::CodeEvent(event));
+            app_event_tx_clone.send(AppEvent::CodexEvent(event));
 
             let conversation_clone = conversation.clone();
             tokio::spawn(async move {
@@ -6858,7 +7007,7 @@ impl ChatWidget<'_> {
             });
 
             while let Ok(event) = conversation.next_event().await {
-                app_event_tx_clone.send(AppEvent::CodeEvent(event));
+                app_event_tx_clone.send(AppEvent::CodexEvent(event));
             }
         });
 
@@ -6883,6 +7032,8 @@ impl ChatWidget<'_> {
             active_exec_cell: None,
             history_cells,
             config: config.clone(),
+            mcp_tools_by_server: HashMap::new(),
+            mcp_server_failures: HashMap::new(),
             remote_model_presets: None,
             allow_remote_default_at_startup: !config.model_explicit,
             chat_model_selected_explicitly: false,
@@ -6897,6 +7048,8 @@ impl ChatWidget<'_> {
             initial_user_message: None,
             total_token_usage: TokenUsage::default(),
             last_token_usage: TokenUsage::default(),
+            session_requested_model: None,
+            session_latest_response_model: None,
             rate_limit_snapshot: None,
             rate_limit_warnings: RateLimitWarningState::default(),
             rate_limit_fetch_inflight: false,
@@ -6914,6 +7067,7 @@ impl ChatWidget<'_> {
             last_user_message: None,
             last_developer_message: None,
             pending_turn_origin: None,
+            pending_request_user_input: None,
             current_turn_origin: None,
             cleared_lingering_execs_this_turn: true,
             exec: ExecState {
@@ -6944,6 +7098,8 @@ impl ChatWidget<'_> {
                 agent_last_key: None,
                 auto_drive_tracker: None,
             },
+            idle_spinner_clear_started_at: None,
+            idle_spinner_recheck_scheduled: false,
             live_builder: RowBuilder::new(usize::MAX),
             header_wave: {
                 let effect = HeaderWaveEffect::new();
@@ -6981,6 +7137,7 @@ impl ChatWidget<'_> {
             background_review: None,
             auto_review_status: None,
             auto_review_notice: None,
+            last_auto_review_failure: None,
             auto_review_baseline: None,
             auto_review_reviewed_marker: None,
             pending_auto_review_range: None,
@@ -6988,6 +7145,8 @@ impl ChatWidget<'_> {
             review_guard: None,
             background_review_guard: None,
             processed_auto_review_agents: HashSet::new(),
+            processed_auto_review_agent_order: VecDeque::new(),
+            auto_review_processed_evicted_total: 0,
             pending_turn_descriptor: None,
             render_request_cache: RefCell::new(Vec::new()),
             render_request_cache_dirty: Cell::new(true),
@@ -6996,6 +7155,10 @@ impl ChatWidget<'_> {
             overall_task_status: "preparing".to_string(),
             active_plan_title: None,
             agent_runtime: HashMap::new(),
+            agent_runtime_pruned_total: 0,
+            agents_terminal_pruned_total: 0,
+            history_cells_trimmed_total: 0,
+            pending_dispatched_trimmed_total: 0,
             pending_agent_updates: HashMap::new(),
             sparkline_data: std::cell::RefCell::new(Vec::new()),
             last_sparkline_update: std::cell::RefCell::new(std::time::Instant::now()),
@@ -7050,7 +7213,7 @@ impl ChatWidget<'_> {
                 crate::height_manager::HeightManagerConfig::default(),
             )),
             layout: LayoutState {
-                scroll_offset: 0,
+                scroll_offset: Cell::new(0),
                 last_max_scroll: std::cell::Cell::new(0),
                 last_history_viewport_height: std::cell::Cell::new(0),
                 vertical_scrollbar_state: std::cell::RefCell::new(ScrollbarState::default()),
@@ -7126,6 +7289,7 @@ impl ChatWidget<'_> {
             resume_placeholder_visible: false,
             resume_picker_loading: false,
         };
+        w.load_auto_review_baseline_marker();
         if let Ok(Some(active_id)) = auth_accounts::get_active_account_id(&config.code_home) {
             if let Ok(records) = account_usage::list_rate_limit_snapshots(&config.code_home) {
                 if let Some(record) = records.into_iter().find(|r| r.account_id == active_id) {
@@ -7169,8 +7333,7 @@ impl ChatWidget<'_> {
     }
 
     fn auto_drive_role_for_kind(kind: HistoryCellType) -> Option<AutoDriveRole> {
-        use AutoDriveRole::Assistant;
-        use AutoDriveRole::User;
+        use AutoDriveRole::{Assistant, User};
         match kind {
             HistoryCellType::User => Some(Assistant),
             HistoryCellType::Assistant
@@ -7205,23 +7368,26 @@ impl ChatWidget<'_> {
         }
     }
 
-    fn auto_drive_make_user_message(text: String) -> Option<hanzo_protocol::models::ResponseItem> {
+    fn auto_drive_make_user_message(
+        text: String,
+    ) -> Option<code_protocol::models::ResponseItem> {
         if text.trim().is_empty() {
             return None;
         }
-        use hanzo_protocol::models::ContentItem;
-        use hanzo_protocol::models::ResponseItem;
+        use code_protocol::models::{ContentItem, ResponseItem};
         Some(ResponseItem::Message {
             id: None,
             role: "user".to_string(),
             content: vec![ContentItem::InputText { text }],
+            end_turn: None,
+            phase: None,
         })
     }
 
     fn auto_drive_browser_screenshot_items(
         cell: &BrowserSessionCell,
-    ) -> Option<Vec<hanzo_protocol::models::ContentItem>> {
-        use hanzo_protocol::models::ContentItem;
+    ) -> Option<Vec<code_protocol::models::ContentItem>> {
+        use code_protocol::models::ContentItem;
 
         let record = cell.screenshot_history().last()?;
         let bytes = match std::fs::read(&record.path) {
@@ -7288,16 +7454,17 @@ impl ChatWidget<'_> {
 
     fn auto_drive_make_assistant_message(
         text: String,
-    ) -> Option<hanzo_protocol::models::ResponseItem> {
+    ) -> Option<code_protocol::models::ResponseItem> {
         if text.trim().is_empty() {
             return None;
         }
-        use hanzo_protocol::models::ContentItem;
-        use hanzo_protocol::models::ResponseItem;
+        use code_protocol::models::{ContentItem, ResponseItem};
         Some(ResponseItem::Message {
             id: None,
             role: "assistant".to_string(),
             content: vec![ContentItem::OutputText { text }],
+            end_turn: None,
+            phase: None,
         })
     }
 
@@ -7380,7 +7547,7 @@ impl ChatWidget<'_> {
         Some(lines.join("\n"))
     }
 
-    pub(crate) fn export_auto_drive_items(&self) -> Vec<hanzo_protocol::models::ResponseItem> {
+    pub(crate) fn export_auto_drive_items(&self) -> Vec<code_protocol::models::ResponseItem> {
         let (items, _) = self.export_auto_drive_items_with_indices();
         items
     }
@@ -7388,14 +7555,13 @@ impl ChatWidget<'_> {
     fn export_auto_drive_items_with_indices(
         &self,
     ) -> (
-        Vec<hanzo_protocol::models::ResponseItem>,
+        Vec<code_protocol::models::ResponseItem>,
         Vec<Option<usize>>,
     ) {
         if let Some(overlay) = &self.auto_compaction_overlay {
             let mut items = overlay.prefix_items.clone();
             let mut indices = vec![None; overlay.prefix_items.len()];
-            let tail =
-                self.export_auto_drive_items_from_index_with_indices(overlay.tail_start_cell);
+            let tail = self.export_auto_drive_items_from_index_with_indices(overlay.tail_start_cell);
             for (cell_idx, item) in tail {
                 indices.push(Some(cell_idx));
                 items.push(item);
@@ -7416,7 +7582,7 @@ impl ChatWidget<'_> {
     fn export_auto_drive_items_from_index_with_indices(
         &self,
         start_idx: usize,
-    ) -> Vec<(usize, hanzo_protocol::models::ResponseItem)> {
+    ) -> Vec<(usize, code_protocol::models::ResponseItem)> {
         let mut items = Vec::new();
         for (idx, cell) in self.history_cells.iter().enumerate().skip(start_idx) {
             let Some(role) = Self::auto_drive_role_for_kind(cell.kind()) else {
@@ -7480,23 +7646,26 @@ impl ChatWidget<'_> {
 
             let mut extra_content = None;
             if !is_reasoning && matches!(role, AutoDriveRole::User) {
-                if let Some(browser_cell) =
-                    cell.as_ref().as_any().downcast_ref::<BrowserSessionCell>()
+                if let Some(browser_cell) = cell
+                    .as_ref()
+                    .as_any()
+                    .downcast_ref::<BrowserSessionCell>()
                 {
                     extra_content = Self::auto_drive_browser_screenshot_items(browser_cell);
                 }
             }
 
             let mut item = if is_reasoning {
-                hanzo_protocol::models::ResponseItem::Message {
+                code_protocol::models::ResponseItem::Message {
                     id: Some("auto-drive-reasoning".to_string()),
                     role: "user".to_string(),
-                    content: vec![hanzo_protocol::models::ContentItem::InputText { text }],
+                    content: vec![code_protocol::models::ContentItem::InputText { text }],
+                    end_turn: None,
+                    phase: None,
                 }
             } else {
                 match role {
-                    AutoDriveRole::Assistant => match Self::auto_drive_make_assistant_message(text)
-                    {
+                    AutoDriveRole::Assistant => match Self::auto_drive_make_assistant_message(text) {
                         Some(item) => item,
                         None => continue,
                     },
@@ -7508,7 +7677,7 @@ impl ChatWidget<'_> {
             };
 
             if let Some(extra) = extra_content {
-                if let hanzo_protocol::models::ResponseItem::Message { content, .. } = &mut item {
+                if let code_protocol::models::ResponseItem::Message { content, .. } = &mut item {
                     content.extend(extra);
                 }
             }
@@ -7520,9 +7689,9 @@ impl ChatWidget<'_> {
 
     fn derive_compaction_overlay(
         &self,
-        previous_items: &[hanzo_protocol::models::ResponseItem],
+        previous_items: &[code_protocol::models::ResponseItem],
         previous_indices: &[Option<usize>],
-        new_items: &[hanzo_protocol::models::ResponseItem],
+        new_items: &[code_protocol::models::ResponseItem],
     ) -> Option<AutoCompactionOverlay> {
         if previous_items == new_items {
             return self.auto_compaction_overlay.clone();
@@ -7579,16 +7748,18 @@ impl ChatWidget<'_> {
         })
     }
 
-    fn rebuild_auto_history(&mut self) -> Vec<hanzo_protocol::models::ResponseItem> {
+    fn rebuild_auto_history(&mut self) -> Vec<code_protocol::models::ResponseItem> {
         let conversation = self.export_auto_drive_items();
-        let tail = self.auto_history.replace_converted(conversation.clone());
+        let tail = self
+            .auto_history
+            .replace_converted(conversation.clone());
         if !tail.is_empty() {
             self.auto_history.append_converted_tail(&tail);
         }
         self.auto_history.raw_snapshot()
     }
 
-    fn current_auto_history(&mut self) -> Vec<hanzo_protocol::models::ResponseItem> {
+    fn current_auto_history(&mut self) -> Vec<code_protocol::models::ResponseItem> {
         if self.auto_history.converted_is_empty() {
             return self.rebuild_auto_history();
         }
@@ -7596,9 +7767,9 @@ impl ChatWidget<'_> {
     }
 
     /// Export current user/assistant messages into ResponseItem list for forking.
-    pub(crate) fn export_response_items(&self) -> Vec<hanzo_protocol::models::ResponseItem> {
-        use hanzo_protocol::models::ContentItem;
-        use hanzo_protocol::models::ResponseItem;
+    pub(crate) fn export_response_items(&self) -> Vec<code_protocol::models::ResponseItem> {
+        use code_protocol::models::ContentItem;
+        use code_protocol::models::ResponseItem;
         let mut items = Vec::new();
         for (idx, cell) in self.history_cells.iter().enumerate() {
             match cell.kind() {
@@ -7620,6 +7791,8 @@ impl ChatWidget<'_> {
                         id: None,
                         role: "user".to_string(),
                         content: vec![content],
+                        end_turn: None,
+                        phase: None,
                     });
                 }
                 crate::history_cell::HistoryCellType::Assistant => {
@@ -7640,6 +7813,8 @@ impl ChatWidget<'_> {
                         id: None,
                         role: "assistant".to_string(),
                         content: vec![content],
+                        end_turn: None,
+                        phase: None,
                     });
                 }
                 crate::history_cell::HistoryCellType::PlanUpdate => {
@@ -7681,6 +7856,8 @@ impl ChatWidget<'_> {
                             id: None,
                             role: "assistant".to_string(),
                             content: vec![content],
+                            end_turn: None,
+                            phase: None,
                         });
                     }
                 }
@@ -7713,9 +7890,6 @@ impl ChatWidget<'_> {
         fn format_segment(segment: &str) -> String {
             if segment.eq_ignore_ascii_case("codex") {
                 return "Codex".to_string();
-            }
-            if segment.eq_ignore_ascii_case("hanzo") {
-                return "Hanzo".to_string();
             }
 
             let mut chars = segment.chars();
@@ -7791,7 +7965,11 @@ impl ChatWidget<'_> {
         if history_count < 2 {
             return false;
         }
-        if history_count != self.history_render.last_history_count().saturating_add(1) {
+        if history_count != self
+            .history_render
+            .last_history_count()
+            .saturating_add(1)
+        {
             return false;
         }
         if render_requests.len() != history_count {
@@ -7815,28 +7993,19 @@ impl ChatWidget<'_> {
         }
         let prev_is_reasoning = prev
             .cell
-            .and_then(|cell| {
-                cell.as_any()
-                    .downcast_ref::<crate::history_cell::CollapsibleReasoningCell>()
-            })
+            .and_then(|cell| cell.as_any().downcast_ref::<crate::history_cell::CollapsibleReasoningCell>())
             .is_some();
         let next_is_reasoning = next
             .cell
-            .and_then(|cell| {
-                cell.as_any()
-                    .downcast_ref::<crate::history_cell::CollapsibleReasoningCell>()
-            })
+            .and_then(|cell| cell.as_any().downcast_ref::<crate::history_cell::CollapsibleReasoningCell>())
             .is_some();
         if prev_is_reasoning || next_is_reasoning {
             return false;
         }
         let spacing = 1u16;
-        let spacing_range = self.history_render.extend_prefix_for_append(
-            prefix_width,
-            spacing,
-            next.height,
-            history_count,
-        );
+        let spacing_range = self
+            .history_render
+            .extend_prefix_for_append(prefix_width, spacing, next.height, history_count);
         if let Some(range) = spacing_range {
             self.history_render.append_spacing_range(range);
         }
@@ -7913,9 +8082,8 @@ impl ChatWidget<'_> {
             && matches!(key_event.kind, KeyEventKind::Press | KeyEventKind::Repeat)
         {
             match key_event.code {
-                crossterm::event::KeyCode::Enter | crossterm::event::KeyCode::Char(' ')
-                    if key_event.modifiers.is_empty() =>
-                {
+                crossterm::event::KeyCode::Enter
+                | crossterm::event::KeyCode::Char(' ') if key_event.modifiers.is_empty() => {
                     if !self.auto_state.should_bypass_coordinator_next_submit() {
                         self.auto_submit_prompt();
                     }
@@ -8136,6 +8304,21 @@ impl ChatWidget<'_> {
             }
         }
 
+        if let KeyEvent {
+            code: crossterm::event::KeyCode::Char('g'),
+            modifiers: crossterm::event::KeyModifiers::CONTROL,
+            kind: KeyEventKind::Press | KeyEventKind::Repeat,
+            ..
+        } = key_event
+        {
+            if !self.bottom_pane.has_active_modal_view() {
+                let initial = self.bottom_pane.composer_text();
+                self.app_event_tx
+                    .send(AppEvent::OpenExternalEditor { initial });
+            }
+            return;
+        }
+
         // Fast-path PageUp/PageDown to scroll the transcript by a viewport at a time.
         if let crossterm::event::KeyEvent {
             code: crossterm::event::KeyCode::PageUp,
@@ -8179,66 +8362,6 @@ impl ChatWidget<'_> {
             }
         }
 
-        // Alt+G / Option+G: toggle gutter (icons, borders, decorative chrome)
-        // On macOS, Option+G may arrive as the `©` character when "Option sends
-        // Esc+" is disabled; match both forms so the shortcut works everywhere.
-        let is_alt_g = matches!(
-            key_event,
-            KeyEvent {
-                code: KeyCode::Char('g'),
-                modifiers: KeyModifiers::ALT,
-                kind: KeyEventKind::Press,
-                ..
-            }
-        ) || matches!(
-            key_event,
-            KeyEvent {
-                code: KeyCode::Char('©'),
-                kind: KeyEventKind::Press,
-                ..
-            }
-        );
-        if is_alt_g {
-            let mode = crate::theme::cycle_gutter_mode();
-            self.invalidate_height_cache();
-            self.bottom_pane
-                .flash_footer_notice(mode.label().to_string());
-            self.request_redraw();
-            return;
-        }
-
-        if let KeyEvent {
-            code: KeyCode::Up,
-            modifiers: KeyModifiers::ALT,
-            kind: KeyEventKind::Press,
-            ..
-        } = key_event
-        {
-            if let Some(user_message) = self.queued_user_messages.pop_back() {
-                self.restore_user_message_to_composer(user_message);
-                self.refresh_queued_user_messages(false);
-                self.request_redraw();
-            }
-            return;
-        }
-
-        // `?` as first character in an empty composer opens the help popup
-        // instead of inserting text (like `/` opens the command menu).
-        if self.bottom_pane.composer_is_empty() {
-            if let KeyEvent {
-                code: KeyCode::Char('?'),
-                kind: KeyEventKind::Press,
-                modifiers,
-                ..
-            } = key_event
-            {
-                if modifiers.is_empty() || modifiers == KeyModifiers::SHIFT {
-                    self.toggle_help_popup();
-                    return;
-                }
-            }
-        }
-
         let composer_was_empty = self.bottom_pane.composer_is_empty();
         let input_result = self.bottom_pane.handle_key_event(key_event);
         let composer_is_empty = self.bottom_pane.composer_is_empty();
@@ -8252,6 +8375,10 @@ impl ChatWidget<'_> {
 
         match input_result {
             InputResult::Submitted(text) => {
+                if let Some(pending) = self.pending_request_user_input.take() {
+                    self.submit_request_user_input_answer(pending, text);
+                    return;
+                }
                 self.pending_turn_origin = Some(TurnOrigin::User);
                 let cleaned = Self::strip_context_sections(&text);
                 self.last_user_message = (!cleaned.trim().is_empty()).then_some(cleaned);
@@ -8285,12 +8412,12 @@ impl ChatWidget<'_> {
                 self.app_event_tx.send(AppEvent::RequestRedraw);
             }
             InputResult::ScrollUp => {
-                let before = self.layout.scroll_offset;
+                let before = self.layout.scroll_offset.get();
                 // Only allow Up to navigate command history when the top view
                 // cannot be scrolled at all (no scrollback available).
                 if self.layout.last_max_scroll.get() == 0 {
                     if self.bottom_pane.try_history_up() {
-                        self.perf_track_scroll_delta(before, self.layout.scroll_offset);
+                        self.perf_track_scroll_delta(before, self.layout.scroll_offset.get());
                         return;
                     }
                 }
@@ -8299,13 +8426,14 @@ impl ChatWidget<'_> {
                 let new_offset = self
                     .layout
                     .scroll_offset
+                    .get()
                     .saturating_add(3)
                     .min(self.layout.last_max_scroll.get());
-                self.layout.scroll_offset = new_offset;
+                self.layout.scroll_offset.set(new_offset);
                 self.flash_scrollbar();
                 self.sync_history_virtualization();
                 // Enable compact mode so history can use the spacer line
-                if self.layout.scroll_offset > 0 {
+                if self.layout.scroll_offset.get() > 0 {
                     self.bottom_pane.set_compact_compose(true);
                     self.height_manager
                         .borrow_mut()
@@ -8318,21 +8446,21 @@ impl ChatWidget<'_> {
                     .borrow_mut()
                     .record_event(HeightEvent::UserScroll);
                 self.maybe_show_history_nav_hint_on_first_scroll();
-                self.perf_track_scroll_delta(before, self.layout.scroll_offset);
+                self.perf_track_scroll_delta(before, self.layout.scroll_offset.get());
             }
             InputResult::ScrollDown => {
-                let before = self.layout.scroll_offset;
+                let before = self.layout.scroll_offset.get();
                 // Only allow Down to navigate command history when the top view
                 // cannot be scrolled at all (no scrollback available).
                 if self.layout.last_max_scroll.get() == 0 && self.bottom_pane.history_is_browsing()
                 {
                     if self.bottom_pane.try_history_down() {
-                        self.perf_track_scroll_delta(before, self.layout.scroll_offset);
+                        self.perf_track_scroll_delta(before, self.layout.scroll_offset.get());
                         return;
                     }
                 }
                 // Scroll down in chat history (decrease offset, towards bottom)
-                if self.layout.scroll_offset == 0 {
+                if self.layout.scroll_offset.get() == 0 {
                     // Already at bottom: ensure spacer above input is enabled.
                     self.bottom_pane.set_compact_compose(false);
                     self.sync_history_virtualization();
@@ -8344,30 +8472,32 @@ impl ChatWidget<'_> {
                     self.height_manager
                         .borrow_mut()
                         .record_event(HeightEvent::ComposerModeChange);
-                    self.perf_track_scroll_delta(before, self.layout.scroll_offset);
-                } else if self.layout.scroll_offset >= 3 {
+                    self.perf_track_scroll_delta(before, self.layout.scroll_offset.get());
+                } else if self.layout.scroll_offset.get() >= 3 {
                     // Move towards bottom but do NOT toggle spacer yet; wait until
                     // the user confirms by pressing Down again at bottom.
-                    self.layout.scroll_offset = self.layout.scroll_offset.saturating_sub(3);
+                    self.layout
+                        .scroll_offset
+                        .set(self.layout.scroll_offset.get().saturating_sub(3));
                     self.sync_history_virtualization();
                     self.app_event_tx.send(AppEvent::RequestRedraw);
                     self.height_manager
                         .borrow_mut()
                         .record_event(HeightEvent::UserScroll);
                     self.maybe_show_history_nav_hint_on_first_scroll();
-                    self.perf_track_scroll_delta(before, self.layout.scroll_offset);
-                } else if self.layout.scroll_offset > 0 {
+                    self.perf_track_scroll_delta(before, self.layout.scroll_offset.get());
+                } else if self.layout.scroll_offset.get() > 0 {
                     // Land exactly at bottom without toggling spacer yet; require
                     // a subsequent Down to re-enable the spacer so the input
                     // doesn't move when scrolling into the line above it.
-                    self.layout.scroll_offset = 0;
+                    self.layout.scroll_offset.set(0);
                     self.sync_history_virtualization();
                     self.app_event_tx.send(AppEvent::RequestRedraw);
                     self.height_manager
                         .borrow_mut()
                         .record_event(HeightEvent::UserScroll);
                     self.maybe_show_history_nav_hint_on_first_scroll();
-                    self.perf_track_scroll_delta(before, self.layout.scroll_offset);
+                    self.perf_track_scroll_delta(before, self.layout.scroll_offset.get());
                 }
                 self.flash_scrollbar();
             }
@@ -8391,13 +8521,13 @@ impl ChatWidget<'_> {
                 .browser_last_key
                 .clone()
                 .or_else(|| self.tools_state.browser_sessions.keys().next().cloned());
-            self.browser_overlay_state
-                .set_session_key(session_key.clone());
+            self.browser_overlay_state.set_session_key(session_key.clone());
             if let Some(key) = session_key {
                 if let Some(tracker) = self.tools_state.browser_sessions.get(&key) {
                     let history_len = tracker.cell.screenshot_history().len();
                     if history_len > 0 {
-                        self.browser_overlay_state
+                        self
+                            .browser_overlay_state
                             .set_screenshot_index(history_len.saturating_sub(1));
                     }
                 }
@@ -8588,7 +8718,8 @@ impl ChatWidget<'_> {
         } else if updated > max {
             updated = max;
         }
-        self.browser_overlay_state.set_action_scroll(updated as u16);
+        self.browser_overlay_state
+            .set_action_scroll(updated as u16);
     }
 
     fn toggle_agents_hud(&mut self) {
@@ -8649,8 +8780,7 @@ impl ChatWidget<'_> {
             .ok()
             .flatten();
 
-        let usage_records =
-            account_usage::list_rate_limit_snapshots(&code_home).unwrap_or_default();
+        let usage_records = account_usage::list_rate_limit_snapshots(&code_home).unwrap_or_default();
         let mut snapshot_map: HashMap<String, StoredRateLimitSnapshot> = usage_records
             .into_iter()
             .filter(|record| account_map.contains_key(&record.account_id))
@@ -8666,8 +8796,7 @@ impl ChatWidget<'_> {
 
         if let Some(active_id) = active_id.as_ref() {
             if !usage_summary_map.contains_key(active_id) {
-                if let Ok(Some(summary)) = account_usage::load_account_usage(&code_home, active_id)
-                {
+                if let Ok(Some(summary)) = account_usage::load_account_usage(&code_home, active_id) {
                     usage_summary_map.insert(active_id.clone(), summary);
                 }
             }
@@ -8677,9 +8806,15 @@ impl ChatWidget<'_> {
         let mut seen_ids: HashSet<String> = HashSet::new();
 
         if let Some(snapshot) = current_snapshot {
-            let account_ref = active_id.as_ref().and_then(|id| account_map.get(id));
-            let snapshot_ref = active_id.as_ref().and_then(|id| snapshot_map.get(id));
-            let summary_ref = active_id.as_ref().and_then(|id| usage_summary_map.get(id));
+            let account_ref = active_id
+                .as_ref()
+                .and_then(|id| account_map.get(id));
+            let snapshot_ref = active_id
+                .as_ref()
+                .and_then(|id| snapshot_map.get(id));
+            let summary_ref = active_id
+                .as_ref()
+                .and_then(|id| usage_summary_map.get(id));
 
             let title = account_ref
                 .map(account_display_label)
@@ -8687,10 +8822,15 @@ impl ChatWidget<'_> {
                 .unwrap_or_else(|| "Current session".to_string());
             let header = Self::account_header_lines(account_ref, snapshot_ref, summary_ref);
             let is_api_key_account =
-                matches!(account_ref.map(|acc| acc.mode), Some(McpAuthMode::ApiKey));
+                matches!(account_ref.map(|acc| acc.mode), Some(AuthMode::ApiKey));
             let extra = Self::usage_history_lines(summary_ref, is_api_key_account);
             let display = Self::rate_limit_display_config_for_account(account_ref);
-            let view = build_limits_view(&snapshot, current_reset, DEFAULT_GRID_CONFIG, display);
+            let view = build_limits_view(
+                &snapshot,
+                current_reset,
+                DEFAULT_GRID_CONFIG,
+                display,
+            );
             tabs.push(LimitsTab::view(title, header, view, extra));
 
             if let Some(active_id) = active_id.as_ref() {
@@ -8760,16 +8900,22 @@ impl ChatWidget<'_> {
                             usage_summary.as_ref(),
                         );
                         let is_api_key_account =
-                            matches!(account.map(|acc| acc.mode), Some(McpAuthMode::ApiKey));
-                        let extra =
-                            Self::usage_history_lines(usage_summary.as_ref(), is_api_key_account);
+                            matches!(account.map(|acc| acc.mode), Some(AuthMode::ApiKey));
+                        let extra = Self::usage_history_lines(
+                            usage_summary.as_ref(),
+                            is_api_key_account,
+                        );
                         tabs.push(LimitsTab::view(title, header, view, extra));
                     } else {
                         let is_api_key_account =
-                            matches!(account.map(|acc| acc.mode), Some(McpAuthMode::ApiKey));
-                        let mut lines =
-                            Self::usage_history_lines(usage_summary.as_ref(), is_api_key_account);
-                        lines.push(Self::dim_line(" Rate limit snapshot not yet available."));
+                            matches!(account.map(|acc| acc.mode), Some(AuthMode::ApiKey));
+                        let mut lines = Self::usage_history_lines(
+                            usage_summary.as_ref(),
+                            is_api_key_account,
+                        );
+                        lines.push(Self::dim_line(
+                            " Rate limit snapshot not yet available.",
+                        ));
                         let header = Self::account_header_lines(
                             account,
                             Some(&record),
@@ -8780,11 +8926,19 @@ impl ChatWidget<'_> {
                 }
                 None => {
                     let is_api_key_account =
-                        matches!(account.map(|acc| acc.mode), Some(McpAuthMode::ApiKey));
-                    let mut lines =
-                        Self::usage_history_lines(usage_summary.as_ref(), is_api_key_account);
-                    lines.push(Self::dim_line(" Rate limit snapshot not yet available."));
-                    let header = Self::account_header_lines(account, None, usage_summary.as_ref());
+                        matches!(account.map(|acc| acc.mode), Some(AuthMode::ApiKey));
+                    let mut lines = Self::usage_history_lines(
+                        usage_summary.as_ref(),
+                        is_api_key_account,
+                    );
+                    lines.push(Self::dim_line(
+                        " Rate limit snapshot not yet available.",
+                    ));
+                    let header = Self::account_header_lines(
+                        account,
+                        None,
+                        usage_summary.as_ref(),
+                    );
                     tabs.push(LimitsTab::message(title, header, lines));
                 }
             }
@@ -8792,7 +8946,9 @@ impl ChatWidget<'_> {
 
         if tabs.is_empty() {
             let mut lines = Self::usage_history_lines(None, false);
-            lines.push(Self::dim_line(" Rate limit snapshot not yet available."));
+            lines.push(Self::dim_line(
+                " Rate limit snapshot not yet available.",
+            ));
             tabs.push(LimitsTab::message("Usage", Vec::new(), lines));
         }
 
@@ -8803,12 +8959,12 @@ impl ChatWidget<'_> {
         let non_cached_input = totals
             .input_tokens
             .saturating_sub(totals.cached_input_tokens);
-        let input_cost =
-            (non_cached_input as f64 / TOKENS_PER_MILLION) * INPUT_COST_PER_MILLION_USD;
+        let input_cost = (non_cached_input as f64 / TOKENS_PER_MILLION)
+            * INPUT_COST_PER_MILLION_USD;
         let cached_cost = (totals.cached_input_tokens as f64 / TOKENS_PER_MILLION)
             * CACHED_INPUT_COST_PER_MILLION_USD;
-        let output_cost =
-            (totals.output_tokens as f64 / TOKENS_PER_MILLION) * OUTPUT_COST_PER_MILLION_USD;
+        let output_cost = (totals.output_tokens as f64 / TOKENS_PER_MILLION)
+            * OUTPUT_COST_PER_MILLION_USD;
         input_cost + cached_cost + output_cost
     }
 
@@ -8819,22 +8975,32 @@ impl ChatWidget<'_> {
         let cents_part = (cents_u128 % 100) as u8;
         let dollars = (dollars_u128.min(u128::from(u64::MAX))) as u64;
         if cents_part == 0 {
-            format!("${} USD", format_with_separators(dollars))
+            format!("${} USD", format_with_separators_u64(dollars))
         } else {
-            format!("${}.{:02} USD", format_with_separators(dollars), cents_part)
+            format!(
+                "${}.{:02} USD",
+                format_with_separators_u64(dollars),
+                cents_part
+            )
         }
     }
 
     fn accumulate_token_totals(target: &mut TokenTotals, delta: &TokenTotals) {
-        target.input_tokens = target.input_tokens.saturating_add(delta.input_tokens);
+        target.input_tokens = target
+            .input_tokens
+            .saturating_add(delta.input_tokens);
         target.cached_input_tokens = target
             .cached_input_tokens
             .saturating_add(delta.cached_input_tokens);
-        target.output_tokens = target.output_tokens.saturating_add(delta.output_tokens);
+        target.output_tokens = target
+            .output_tokens
+            .saturating_add(delta.output_tokens);
         target.reasoning_output_tokens = target
             .reasoning_output_tokens
             .saturating_add(delta.reasoning_output_tokens);
-        target.total_tokens = target.total_tokens.saturating_add(delta.total_tokens);
+        target.total_tokens = target
+            .total_tokens
+            .saturating_add(delta.total_tokens);
     }
 
     fn account_header_lines(
@@ -8846,9 +9012,8 @@ impl ChatWidget<'_> {
 
         let account_type = account
             .map(|acc| match acc.mode {
-                McpAuthMode::ChatGPT => "ChatGPT account",
-                McpAuthMode::Hanzo => "Hanzo account",
-                McpAuthMode::ApiKey => "API key",
+                AuthMode::ChatGPT | AuthMode::ChatgptAuthTokens => "ChatGPT account",
+                AuthMode::ApiKey => "API key",
             })
             .unwrap_or("Unknown account");
 
@@ -8858,8 +9023,10 @@ impl ChatWidget<'_> {
             .unwrap_or("Unknown");
 
         let value_style = Style::default().fg(crate::colors::text_dim());
-        let is_api_key = matches!(account.map(|acc| acc.mode), Some(McpAuthMode::ApiKey));
-        let totals = usage.map(|u| u.totals.clone()).unwrap_or_default();
+        let is_api_key = matches!(account.map(|acc| acc.mode), Some(AuthMode::ApiKey));
+        let totals = usage
+            .map(|u| u.totals.clone())
+            .unwrap_or_default();
         let non_cached_input = totals
             .input_tokens
             .saturating_sub(totals.cached_input_tokens);
@@ -8869,7 +9036,7 @@ impl ChatWidget<'_> {
         let total_tokens = totals.total_tokens;
 
         let cost_usd = Self::usage_cost_usd_from_totals(&totals);
-        let formatted_total = format_with_separators(total_tokens);
+        let formatted_total = format_with_separators_u64(total_tokens);
         let formatted_cost = Self::format_usd(cost_usd);
         let cost_suffix = if is_api_key {
             format!("({formatted_cost})")
@@ -8896,10 +9063,10 @@ impl ChatWidget<'_> {
 
         let indent = " ".repeat(tokens_prefix.len());
         let counts = [
-            (format_with_separators(cached_input), "cached"),
-            (format_with_separators(non_cached_input), "input"),
-            (format_with_separators(output_tokens), "output"),
-            (format_with_separators(reasoning_tokens), "reasoning"),
+            (format_with_separators_u64(cached_input), "cached"),
+            (format_with_separators_u64(non_cached_input), "input"),
+            (format_with_separators_u64(output_tokens), "output"),
+            (format_with_separators_u64(reasoning_tokens), "reasoning"),
         ];
         let max_width = counts
             .iter()
@@ -8933,7 +9100,10 @@ impl ChatWidget<'_> {
             .map(|offset| anchor - ChronoDuration::hours(offset as i64))
             .map(|dt| {
                 let utc_key = Self::truncate_utc_hour(dt.with_timezone(&Utc));
-                let totals = hourly_totals.get(&utc_key).cloned().unwrap_or_default();
+                let totals = hourly_totals
+                    .get(&utc_key)
+                    .cloned()
+                    .unwrap_or_default();
                 (dt, totals)
             })
             .collect();
@@ -8953,12 +9123,12 @@ impl ChatWidget<'_> {
         let prefix = status_content_prefix();
         let tokens_width = series
             .iter()
-            .map(|(_, totals)| format_with_separators(totals.total_tokens).len())
+            .map(|(_, totals)| format_with_separators_u64(totals.total_tokens).len())
             .max()
             .unwrap_or(0);
         let cached_width = series
             .iter()
-            .map(|(_, totals)| format_with_separators(totals.cached_input_tokens).len())
+            .map(|(_, totals)| format_with_separators_u64(totals.cached_input_tokens).len())
             .max()
             .unwrap_or(0);
         let cost_width = series
@@ -8966,18 +9136,17 @@ impl ChatWidget<'_> {
             .map(|(_, totals)| Self::format_usd(Self::usage_cost_usd_from_totals(totals)).len())
             .max()
             .unwrap_or(0);
-        let column_divider = RtSpan::styled(" │ ", Style::default().fg(crate::colors::text_dim()));
+        let column_divider = RtSpan::styled(
+            " │ ",
+            Style::default().fg(crate::colors::text_dim()),
+        );
         for (dt, totals) in series.iter() {
             let label = Self::format_hour_label(*dt);
             let bar = Self::bar_segment(totals.total_tokens, max_total, WIDTH);
-            let tokens = format_with_separators(totals.total_tokens);
+            let tokens = format_with_separators_u64(totals.total_tokens);
             let padding = tokens_width.saturating_sub(tokens.len());
-            let formatted_tokens = format!(
-                "{space}{tokens}",
-                space = " ".repeat(padding),
-                tokens = tokens
-            );
-            let cached_tokens = format_with_separators(totals.cached_input_tokens);
+            let formatted_tokens = format!("{space}{tokens}", space = " ".repeat(padding), tokens = tokens);
+            let cached_tokens = format_with_separators_u64(totals.cached_input_tokens);
             let cached_padding = cached_width.saturating_sub(cached_tokens.len());
             let cached_display = format!(
                 "{space}{cached_tokens}",
@@ -9055,12 +9224,12 @@ impl ChatWidget<'_> {
         let prefix = status_content_prefix();
         let tokens_width = daily
             .iter()
-            .map(|(_, totals)| format_with_separators(totals.total_tokens).len())
+            .map(|(_, totals)| format_with_separators_u64(totals.total_tokens).len())
             .max()
             .unwrap_or(0);
         let cached_width = daily
             .iter()
-            .map(|(_, totals)| format_with_separators(totals.cached_input_tokens).len())
+            .map(|(_, totals)| format_with_separators_u64(totals.cached_input_tokens).len())
             .max()
             .unwrap_or(0);
         let cost_width = daily
@@ -9068,18 +9237,17 @@ impl ChatWidget<'_> {
             .map(|(_, totals)| Self::format_usd(Self::usage_cost_usd_from_totals(totals)).len())
             .max()
             .unwrap_or(0);
-        let column_divider = RtSpan::styled(" │ ", Style::default().fg(crate::colors::text_dim()));
+        let column_divider = RtSpan::styled(
+            " │ ",
+            Style::default().fg(crate::colors::text_dim()),
+        );
         for (day, totals) in daily.iter() {
             let label = Self::format_daily_label(*day);
             let bar = Self::bar_segment(totals.total_tokens, max_total, WIDTH);
-            let tokens = format_with_separators(totals.total_tokens);
+            let tokens = format_with_separators_u64(totals.total_tokens);
             let padding = tokens_width.saturating_sub(tokens.len());
-            let formatted_tokens = format!(
-                "{space}{tokens}",
-                space = " ".repeat(padding),
-                tokens = tokens
-            );
-            let cached_tokens = format_with_separators(totals.cached_input_tokens);
+            let formatted_tokens = format!("{space}{tokens}", space = " ".repeat(padding), tokens = tokens);
+            let cached_tokens = format_with_separators_u64(totals.cached_input_tokens);
             let cached_padding = cached_width.saturating_sub(cached_tokens.len());
             let cached_display = format!(
                 "{space}{cached_tokens}",
@@ -9176,9 +9344,13 @@ impl ChatWidget<'_> {
         let month_totals = Self::aggregate_monthly_totals(summary);
         let mut months: Vec<(chrono::NaiveDate, TokenTotals)> = Vec::with_capacity(MONTHS);
         for _ in 0..MONTHS {
-            let start = chrono::NaiveDate::from_ymd_opt(year, month, 1).expect("valid month start");
+            let start = chrono::NaiveDate::from_ymd_opt(year, month, 1)
+                .expect("valid month start");
             let key = (start.year(), start.month());
-            let totals = month_totals.get(&key).cloned().unwrap_or_default();
+            let totals = month_totals
+                .get(&key)
+                .cloned()
+                .unwrap_or_default();
             months.push((start, totals));
             if month == 1 {
                 month = 12;
@@ -9204,12 +9376,12 @@ impl ChatWidget<'_> {
         let prefix = status_content_prefix();
         let tokens_width = months
             .iter()
-            .map(|(_, totals)| format_with_separators(totals.total_tokens).len())
+            .map(|(_, totals)| format_with_separators_u64(totals.total_tokens).len())
             .max()
             .unwrap_or(0);
         let cached_width = months
             .iter()
-            .map(|(_, totals)| format_with_separators(totals.cached_input_tokens).len())
+            .map(|(_, totals)| format_with_separators_u64(totals.cached_input_tokens).len())
             .max()
             .unwrap_or(0);
         let cost_width = months
@@ -9217,18 +9389,17 @@ impl ChatWidget<'_> {
             .map(|(_, totals)| Self::format_usd(Self::usage_cost_usd_from_totals(totals)).len())
             .max()
             .unwrap_or(0);
-        let column_divider = RtSpan::styled(" │ ", Style::default().fg(crate::colors::text_dim()));
+        let column_divider = RtSpan::styled(
+            " │ ",
+            Style::default().fg(crate::colors::text_dim()),
+        );
         for (start, totals) in months.iter() {
             let label = start.format("%b %Y").to_string();
             let bar = Self::bar_segment(totals.total_tokens, max_total, WIDTH);
-            let tokens = format_with_separators(totals.total_tokens);
+            let tokens = format_with_separators_u64(totals.total_tokens);
             let padding = tokens_width.saturating_sub(tokens.len());
-            let formatted_tokens = format!(
-                "{space}{tokens}",
-                space = " ".repeat(padding),
-                tokens = tokens
-            );
-            let cached_tokens = format_with_separators(totals.cached_input_tokens);
+            let formatted_tokens = format!("{space}{tokens}", space = " ".repeat(padding), tokens = tokens);
+            let cached_tokens = format_with_separators_u64(totals.cached_input_tokens);
             let cached_padding = cached_width.saturating_sub(cached_tokens.len());
             let cached_display = format!(
                 "{space}{cached_tokens}",
@@ -9660,17 +9831,19 @@ impl ChatWidget<'_> {
                 self.record_index_for_position(pos)
             };
             let event = match domain_record {
-                HistoryDomainRecord::Exec(ref exec_record) => HistoryDomainEvent::StartExec {
-                    index: record_index,
-                    call_id: exec_record.call_id.clone(),
-                    command: exec_record.command.clone(),
-                    parsed: exec_record.parsed.clone(),
-                    action: exec_record.action,
-                    started_at: exec_record.started_at,
-                    working_dir: exec_record.working_dir.clone(),
-                    env: exec_record.env.clone(),
-                    tags: exec_record.tags.clone(),
-                },
+                HistoryDomainRecord::Exec(ref exec_record) => {
+                    HistoryDomainEvent::StartExec {
+                        index: record_index,
+                        call_id: exec_record.call_id.clone(),
+                        command: exec_record.command.clone(),
+                        parsed: exec_record.parsed.clone(),
+                        action: exec_record.action,
+                        started_at: exec_record.started_at,
+                        working_dir: exec_record.working_dir.clone(),
+                        env: exec_record.env.clone(),
+                        tags: exec_record.tags.clone(),
+                    }
+                }
                 other => HistoryDomainEvent::Insert {
                     index: record_index,
                     record: other,
@@ -9806,6 +9979,10 @@ impl ChatWidget<'_> {
         self.refresh_explore_trailing_flags();
         self.refresh_reasoning_collapsed_visibility();
         self.mark_history_dirty();
+        let trimmed = self.enforce_history_cell_limit();
+        if trimmed > 0 {
+            pos = pos.saturating_sub(trimmed);
+        }
         pos
     }
 
@@ -9833,7 +10010,7 @@ impl ChatWidget<'_> {
             .downcast_ref::<crate::history_cell::CollapsibleReasoningCell>()
             .is_some();
         if !is_reasoning_cell {
-            self.clear_reasoning_in_progress();
+                self.clear_reasoning_in_progress();
         }
 
         let is_background_cell = matches!(cell.kind(), HistoryCellType::BackgroundEvent);
@@ -10006,6 +10183,10 @@ impl ChatWidget<'_> {
         self.refresh_explore_trailing_flags();
         self.refresh_reasoning_collapsed_visibility();
         self.mark_history_dirty();
+        let trimmed = self.enforce_history_cell_limit();
+        if trimmed > 0 {
+            pos = pos.saturating_sub(trimmed);
+        }
         pos
     }
 
@@ -10029,7 +10210,12 @@ impl ChatWidget<'_> {
     fn wait_pairs_from_exec_notes(notes: &[ExecWaitNote]) -> Vec<(String, bool)> {
         notes
             .iter()
-            .map(|note| (note.message.clone(), matches!(note.tone, TextTone::Error)))
+            .map(|note| {
+                (
+                    note.message.clone(),
+                    matches!(note.tone, TextTone::Error),
+                )
+            })
             .collect()
     }
 
@@ -10062,14 +10248,12 @@ impl ChatWidget<'_> {
                 }
             })
             .collect();
-        let mutation = self
-            .history_state
-            .apply_domain_event(HistoryDomainEvent::UpdateExecWait {
-                index: record_idx,
-                total_wait,
-                wait_active,
-                notes: note_records,
-            });
+        let mutation = self.history_state.apply_domain_event(HistoryDomainEvent::UpdateExecWait {
+            index: record_idx,
+            total_wait,
+            wait_active,
+            notes: note_records,
+        });
         match mutation {
             HistoryMutation::Replaced {
                 id,
@@ -10087,6 +10271,63 @@ impl ChatWidget<'_> {
             }
             _ => false,
         }
+    }
+
+    fn merge_tool_arguments(existing: &mut Vec<ToolArgument>, updates: Vec<ToolArgument>) {
+        for update in updates {
+            if let Some(existing_arg) = existing.iter_mut().find(|arg| arg.name == update.name) {
+                *existing_arg = update;
+            } else {
+                existing.push(update);
+            }
+        }
+    }
+
+    fn apply_custom_tool_update(
+        &mut self,
+        call_id: &str,
+        parameters: Option<serde_json::Value>,
+    ) {
+        let Some(params) = parameters else {
+            return;
+        };
+        let updates = history_cell::arguments_from_json(&params);
+        if updates.is_empty() {
+            return;
+        }
+
+        let running_entry = self
+            .tools_state
+            .running_custom_tools
+            .get(&ToolCallId(call_id.to_string()))
+            .copied();
+        let resolved_idx = running_entry
+            .as_ref()
+            .and_then(|entry| running_tools::resolve_entry_index(self, entry, call_id))
+            .or_else(|| running_tools::find_by_call_id(self, call_id));
+
+        let Some(idx) = resolved_idx else {
+            return;
+        };
+        if idx >= self.history_cells.len() {
+            return;
+        }
+        let Some(running_cell) = self.history_cells[idx]
+            .as_any()
+            .downcast_ref::<history_cell::RunningToolCallCell>()
+        else {
+            return;
+        };
+
+        let mut state = running_cell.state().clone();
+        Self::merge_tool_arguments(&mut state.arguments, updates);
+        let mut updated_cell = history_cell::RunningToolCallCell::from_state(state.clone());
+        updated_cell.state_mut().call_id = Some(call_id.to_string());
+        self.history_replace_with_record(
+            idx,
+            Box::new(updated_cell),
+            HistoryDomainRecord::from(state),
+        );
     }
 
     fn hydrate_cell_from_record(
@@ -10206,12 +10447,12 @@ impl ChatWidget<'_> {
             HistoryRecord::PlainMessage(state) => Some(Box::new(
                 history_cell::PlainHistoryCell::from_state(state.clone()),
             )),
-            HistoryRecord::WaitStatus(state) => Some(Box::new(
-                history_cell::WaitStatusCell::from_state(state.clone()),
-            )),
-            HistoryRecord::Loading(state) => Some(Box::new(history_cell::LoadingCell::from_state(
-                state.clone(),
-            ))),
+            HistoryRecord::WaitStatus(state) => {
+                Some(Box::new(history_cell::WaitStatusCell::from_state(state.clone())))
+            }
+            HistoryRecord::Loading(state) => {
+                Some(Box::new(history_cell::LoadingCell::from_state(state.clone())))
+            }
             HistoryRecord::RunningTool(state) => Some(Box::new(
                 history_cell::RunningToolCallCell::from_state(state.clone()),
             )),
@@ -10233,39 +10474,39 @@ impl ChatWidget<'_> {
             HistoryRecord::MergedExec(state) => Some(Box::new(
                 history_cell::MergedExecCell::from_state(state.clone()),
             )),
-            HistoryRecord::AssistantStream(state) => {
-                Some(Box::new(history_cell::StreamingContentCell::from_state(
+            HistoryRecord::AssistantStream(state) => Some(Box::new(
+                history_cell::StreamingContentCell::from_state(
                     state.clone(),
                     self.config.file_opener,
                     self.config.cwd.clone(),
-                )))
-            }
+                ),
+            )),
             HistoryRecord::AssistantMessage(state) => Some(Box::new(
                 history_cell::AssistantMarkdownCell::from_state(state.clone(), &self.config),
             )),
             HistoryRecord::Diff(state) => {
                 Some(Box::new(history_cell::DiffCell::from_record(state.clone())))
             }
-            HistoryRecord::Patch(state) => Some(Box::new(
-                history_cell::PatchSummaryCell::from_record(state.clone()),
-            )),
-            HistoryRecord::Explore(state) => Some(Box::new(
-                history_cell::ExploreAggregationCell::from_record(state.clone()),
-            )),
+            HistoryRecord::Patch(state) => {
+                Some(Box::new(history_cell::PatchSummaryCell::from_record(state.clone())))
+            }
+            HistoryRecord::Explore(state) => {
+                Some(Box::new(history_cell::ExploreAggregationCell::from_record(state.clone())))
+            }
             HistoryRecord::RateLimits(state) => Some(Box::new(
                 history_cell::RateLimitsCell::from_record(state.clone()),
             )),
-            HistoryRecord::BackgroundEvent(state) => Some(Box::new(
-                history_cell::BackgroundEventCell::new(state.clone()),
-            )),
+            HistoryRecord::BackgroundEvent(state) => {
+                Some(Box::new(history_cell::BackgroundEventCell::new(state.clone())))
+            }
             HistoryRecord::Image(state) => {
                 let cell = history_cell::ImageOutputCell::from_record(state.clone());
                 self.ensure_image_cell_picker(&cell);
                 Some(Box::new(cell))
             }
-            HistoryRecord::Context(state) => {
-                Some(Box::new(history_cell::ContextCell::new(state.clone())))
-            }
+            HistoryRecord::Context(state) => Some(Box::new(
+                history_cell::ContextCell::new(state.clone()),
+            )),
             HistoryRecord::Notice(state) => Some(Box::new(
                 history_cell::PlainHistoryCell::from_notice_record(state.clone()),
             )),
@@ -10319,15 +10560,12 @@ impl ChatWidget<'_> {
             return Some(idx);
         }
 
-        self.history_cells
-            .iter()
-            .enumerate()
-            .find_map(|(idx, cell)| {
-                history_cell::record_from_cell(cell.as_ref())
-                    .map(|record| record.id() == id)
-                    .filter(|matched| *matched)
-                    .map(|_| idx)
-            })
+        self.history_cells.iter().enumerate().find_map(|(idx, cell)| {
+        history_cell::record_from_cell(cell.as_ref())
+                .map(|record| record.id() == id)
+                .filter(|matched| *matched)
+                .map(|_| idx)
+        })
     }
 
     fn update_cell_from_record(&mut self, id: HistoryId, record: HistoryRecord) {
@@ -10386,9 +10624,9 @@ impl ChatWidget<'_> {
             .downcast_mut::<crate::history_cell::UpgradeNoticeCell>()
         {
             upgrade.state_mut().id = id;
-        } else if let Some(reasoning) =
-            cell.as_any_mut()
-                .downcast_mut::<crate::history_cell::CollapsibleReasoningCell>()
+        } else if let Some(reasoning) = cell
+            .as_any_mut()
+            .downcast_mut::<crate::history_cell::CollapsibleReasoningCell>()
         {
             reasoning.set_history_id(id);
         } else if let Some(exec) = cell
@@ -10492,8 +10730,11 @@ impl ChatWidget<'_> {
         let _ = self.history_insert_plain_state_with_key(state, key, "epilogue");
     }
 
-    fn history_push_plain_paragraphs<I, S>(&mut self, kind: PlainMessageKind, lines: I)
-    where
+    fn history_push_plain_paragraphs<I, S>(
+        &mut self,
+        kind: PlainMessageKind,
+        lines: I,
+    ) where
         I: IntoIterator<Item = S>,
         S: Into<String>,
     {
@@ -10503,7 +10744,10 @@ impl ChatWidget<'_> {
     }
 
     fn history_push_diff(&mut self, title: Option<String>, diff_output: String) {
-        let record = history_cell::diff_record_from_string(title.unwrap_or_default(), &diff_output);
+        let record = history_cell::diff_record_from_string(
+            title.unwrap_or_default(),
+            &diff_output,
+        );
         let key = self.next_internal_key();
         let _ = self.history_insert_with_key_global_tagged(
             Box::new(history_cell::DiffCell::from_record(record.clone())),
@@ -10527,7 +10771,7 @@ impl ChatWidget<'_> {
         &mut self,
         message: String,
         placement: BackgroundPlacement,
-        order: Option<hanzo_core::protocol::OrderMeta>,
+        order: Option<code_core::protocol::OrderMeta>,
     ) {
         let order = order;
         if order.is_none() {
@@ -10621,13 +10865,7 @@ impl ChatWidget<'_> {
     /// Push a cell using a synthetic key at the TOP of the NEXT request.
     fn history_push_top_next_req(&mut self, cell: impl HistoryCell + 'static) {
         let key = self.next_req_key_top();
-        // Use correct tag based on cell type to satisfy debug assertions
-        let tag = if cell.kind() == HistoryCellType::BackgroundEvent {
-            "background"
-        } else {
-            "prelude"
-        };
-        let _ = self.history_insert_with_key_global_tagged(Box::new(cell), key, tag, None);
+        let _ = self.history_insert_with_key_global_tagged(Box::new(cell), key, "prelude", None);
     }
     fn history_replace_with_record(
         &mut self,
@@ -10643,12 +10881,10 @@ impl ChatWidget<'_> {
             .record_index_for_cell(idx)
             .unwrap_or_else(|| self.record_index_for_position(idx));
 
-        let mutation = self
-            .history_state
-            .apply_domain_event(HistoryDomainEvent::Replace {
-                index: record_idx,
-                record,
-            });
+        let mutation = self.history_state.apply_domain_event(HistoryDomainEvent::Replace {
+            index: record_idx,
+            record,
+        });
 
         if let Some(id) = self.apply_mutation_to_cell(&mut cell, mutation) {
             if idx < self.history_cell_ids.len() {
@@ -10673,10 +10909,7 @@ impl ChatWidget<'_> {
         let record = history_cell::record_from_cell(cell.as_ref());
         let mut maybe_id = None;
 
-        match (
-            record.map(HistoryDomainRecord::from),
-            self.record_index_for_cell(idx),
-        ) {
+        match (record.map(HistoryDomainRecord::from), self.record_index_for_cell(idx)) {
             (Some(record), Some(record_idx)) => {
                 let mutation = self
                     .history_state
@@ -10765,6 +10998,50 @@ impl ChatWidget<'_> {
         self.mark_history_dirty();
     }
 
+    fn enforce_history_cell_limit(&mut self) -> usize {
+        if self.history_cells.len() <= MAX_HISTORY_CELLS_HARD_LIMIT {
+            return 0;
+        }
+
+        let remove_count = self
+            .history_cells
+            .len()
+            .saturating_sub(HISTORY_CELLS_TRIM_TARGET);
+        if remove_count == 0 {
+            return 0;
+        }
+
+        tracing::warn!(
+            "history cell backlog exceeded {}; trimming {} oldest cells",
+            MAX_HISTORY_CELLS_HARD_LIMIT,
+            remove_count
+        );
+
+        for _ in 0..remove_count {
+            if self.history_cells.is_empty() {
+                break;
+            }
+            self.history_remove_at(0);
+        }
+
+        self.history_cells_trimmed_total = self
+            .history_cells_trimmed_total
+            .saturating_add(remove_count as u64);
+        tracing::warn!(
+            removed = remove_count,
+            retained = self.history_cells.len(),
+            total_trimmed = self.history_cells_trimmed_total,
+            "history cell hard-limit compaction applied"
+        );
+
+        let current_offset = self.layout.scroll_offset.get();
+        let removed_offset = remove_count.min(u16::MAX as usize) as u16;
+        self.layout
+            .scroll_offset
+            .set(current_offset.saturating_sub(removed_offset));
+        remove_count
+    }
+
     fn history_replace_and_maybe_merge(&mut self, idx: usize, cell: Box<dyn HistoryCell>) {
         // Replace at index, then attempt standard exec merge with previous cell.
         self.history_replace_at(idx, cell);
@@ -10833,9 +11110,7 @@ impl ChatWidget<'_> {
         );
         self.history_replace_with_record(
             idx - 1,
-            Box::new(crate::history_cell::PlainHistoryCell::from_state(
-                state.clone(),
-            )),
+            Box::new(crate::history_cell::PlainHistoryCell::from_state(state.clone())),
             HistoryDomainRecord::Plain(state),
         );
         self.history_remove_at(idx);
@@ -10866,21 +11141,20 @@ impl ChatWidget<'_> {
         // Animation cleanup is now handled differently
     }
 
-    /// Replace the transient "Connecting MCP servers…" cell with either
-    /// a brief "Connected: X, Y" summary or remove it entirely.
+    /// Replace the initial Popular Commands notice that includes
+    /// the transient "Connecting MCP servers…" line with a version
+    /// that omits it.
     fn remove_connecting_mcp_notice(&mut self) {
         if self.test_mode {
             return;
         }
-        let needle_prefix = "Connecting MCP server";
+        let needle = "Connecting MCP servers…";
         if let Some((idx, cell)) = self.history_cells.iter().enumerate().find(|(idx, cell)| {
-            self.cell_lines_for_index(*idx, cell.as_ref())
-                .iter()
-                .any(|line| {
-                    line.spans
-                        .iter()
-                        .any(|span| span.content.as_ref().contains(needle_prefix))
-                })
+            self.cell_lines_for_index(*idx, cell.as_ref()).iter().any(|line| {
+                line.spans
+                    .iter()
+                    .any(|span| span.content.as_ref() == needle)
+            })
         }) {
             match cell.kind() {
                 crate::history_cell::HistoryCellType::Notice => {
@@ -10897,17 +11171,8 @@ impl ChatWidget<'_> {
                     );
                 }
                 _ => {
-                    // Replace with connected status showing server names
-                    let names: Vec<&str> =
-                        self.config.mcp_servers.keys().map(|s| s.as_str()).collect();
-                    if names.is_empty() {
-                        self.history_remove_at(idx);
-                    } else {
-                        let connected_cell = history_cell::new_connected_mcp_status(&names);
-                        let record =
-                            HistoryDomainRecord::BackgroundEvent(connected_cell.state().clone());
-                        self.history_replace_with_record(idx, Box::new(connected_cell), record);
-                    }
+                    // New layout: status is a separate BackgroundEvent cell — remove it
+                    self.history_remove_at(idx);
                 }
             }
         }
@@ -10991,7 +11256,10 @@ impl ChatWidget<'_> {
         true
     }
 
-    fn try_coordinator_route(&mut self, original_text: &str) -> Option<CoordinatorRouterResponse> {
+    fn try_coordinator_route(
+        &mut self,
+        original_text: &str,
+    ) -> Option<CoordinatorRouterResponse> {
         let trimmed = original_text.trim();
         if trimmed.is_empty() {
             return None;
@@ -11032,8 +11300,151 @@ impl ChatWidget<'_> {
         }
     }
 
+    fn submit_request_user_input_answer(&mut self, pending: PendingRequestUserInput, raw: String) {
+        use code_protocol::request_user_input::RequestUserInputAnswer;
+        use code_protocol::request_user_input::RequestUserInputResponse;
+
+        tracing::info!(
+            "[request_user_input] answer turn_id={} call_id={}",
+            pending.turn_id,
+            pending.call_id
+        );
+
+        let response = serde_json::from_str::<RequestUserInputResponse>(&raw).unwrap_or_else(|_| {
+            let question_count = pending.questions.len();
+            let mut lines: Vec<String> = raw
+                .lines()
+                .map(|line| line.trim_end().to_string())
+                .collect();
+
+            if question_count <= 1 {
+                lines = vec![raw.trim().to_string()];
+            } else if lines.len() > question_count {
+                let tail = lines.split_off(question_count - 1);
+                lines.push(tail.join("\n"));
+            }
+
+            while lines.len() < question_count {
+                lines.push(String::new());
+            }
+
+            let mut answers = std::collections::HashMap::new();
+            for (idx, question) in pending.questions.iter().enumerate() {
+                let value = lines.get(idx).cloned().unwrap_or_default();
+                answers.insert(
+                    question.id.clone(),
+                    RequestUserInputAnswer {
+                        answers: vec![value],
+                    },
+                );
+            }
+            RequestUserInputResponse { answers }
+        });
+
+        let display_text =
+            Self::format_request_user_input_display(&pending.questions, &response);
+        if !display_text.trim().is_empty() {
+            let key = Self::order_key_successor(pending.anchor_key);
+            let state = history_cell::new_user_prompt(display_text);
+            let _ =
+                self.history_insert_plain_state_with_key(state, key, "request_user_input_answer");
+            self.restore_reasoning_in_progress_if_streaming();
+        }
+
+        if let Err(e) = self.code_op_tx.send(Op::UserInputAnswer {
+            id: pending.turn_id,
+            response,
+        }) {
+            tracing::error!("failed to send Op::UserInputAnswer: {e}");
+        }
+
+        self.clear_composer();
+        self.bottom_pane
+            .update_status_text("waiting for model".to_string());
+        self.request_redraw();
+    }
+
+    fn format_request_user_input_display(
+        questions: &[code_protocol::request_user_input::RequestUserInputQuestion],
+        response: &code_protocol::request_user_input::RequestUserInputResponse,
+    ) -> String {
+        let mut lines = Vec::new();
+        for question in questions {
+            let answer: &[String] = response
+                .answers
+                .get(&question.id)
+                .map(|a| a.answers.as_slice())
+                .unwrap_or(&[]);
+            let value = answer.first().map(String::as_str).unwrap_or("");
+            let value = if value.trim().is_empty() {
+                "(skipped)"
+            } else if question.is_secret {
+                "[hidden]"
+            } else {
+                value
+            };
+
+            if questions.len() == 1 {
+                lines.push(value.to_string());
+            } else {
+                let header = question.header.trim();
+                if header.is_empty() {
+                    lines.push(value.to_string());
+                } else {
+                    lines.push(format!("{header}: {value}"));
+                }
+            }
+        }
+        lines.join("\n")
+    }
+
+    pub(crate) fn on_request_user_input_answer(
+        &mut self,
+        turn_id: String,
+        response: code_protocol::request_user_input::RequestUserInputResponse,
+    ) {
+        let Some(pending) = self.pending_request_user_input.take() else {
+            tracing::warn!(
+                "[request_user_input] received UI answer but no request is pending (turn_id={turn_id})"
+            );
+            return;
+        };
+
+        if pending.turn_id != turn_id {
+            tracing::warn!(
+                "[request_user_input] received UI answer for unexpected turn_id (expected={}, got={turn_id})",
+                pending.turn_id,
+            );
+        }
+
+        self.bottom_pane.close_request_user_input_view();
+
+        let display_text =
+            Self::format_request_user_input_display(&pending.questions, &response);
+
+        if !display_text.trim().is_empty() {
+            let key = Self::order_key_successor(pending.anchor_key);
+            let state = history_cell::new_user_prompt(display_text);
+            let _ =
+                self.history_insert_plain_state_with_key(state, key, "request_user_input_answer");
+            self.restore_reasoning_in_progress_if_streaming();
+        }
+
+        if let Err(e) = self.code_op_tx.send(Op::UserInputAnswer {
+            id: pending.turn_id,
+            response,
+        }) {
+            tracing::error!("failed to send Op::UserInputAnswer: {e}");
+        }
+
+        self.clear_composer();
+        self.bottom_pane
+            .update_status_text("waiting for model".to_string());
+        self.request_redraw();
+    }
+
     fn submit_user_message(&mut self, user_message: UserMessage) {
-        if self.layout.scroll_offset > 0 {
+        if self.layout.scroll_offset.get() > 0 {
             layout_scroll::to_bottom(self);
         }
         // Surface a local diagnostic note and anchor it to the NEXT turn,
@@ -11062,10 +11473,7 @@ impl ChatWidget<'_> {
                 }
             }
             let missing_s = missing.display().to_string();
-            if fallback.is_none()
-                && (missing_s.contains("/.hanzo/branches/")
-                    || missing_s.contains("/.code/branches/"))
-            {
+            if fallback.is_none() && missing_s.contains("/.code/branches/") {
                 let mut current = missing.as_path();
                 let mut first_existing: Option<PathBuf> = None;
                 while let Some(parent) = current.parent() {
@@ -11077,7 +11485,7 @@ impl ChatWidget<'_> {
                         first_existing = Some(current.to_path_buf());
                     }
                     if let Some(repo_root) =
-                        hanzo_core::git_info::resolve_root_git_project_for_trust(current)
+                        code_core::git_info::resolve_root_git_project_for_trust(current)
                     {
                         fallback = Some((repo_root, "repository root"));
                         break;
@@ -11117,8 +11525,8 @@ impl ChatWidget<'_> {
         let original_text = message.display_text.clone();
 
         let mut submitted_cli = false;
-        let manual_edit_pending =
-            self.auto_state.is_paused_manual() && self.auto_state.resume_after_submit();
+        let manual_edit_pending = self.auto_state.is_paused_manual()
+            && self.auto_state.resume_after_submit();
         let manual_override_active = self.auto_state.is_paused_manual();
         let bypass_active = self.auto_state.should_bypass_coordinator_next_submit();
         let coordinator_routing_allowed = if bypass_active {
@@ -11133,15 +11541,15 @@ impl ChatWidget<'_> {
             && self.config.auto_drive.coordinator_routing
             && coordinator_routing_allowed;
 
-        if should_route_through_coordinator {
+        if should_route_through_coordinator
+        {
             let mut conversation = self.current_auto_history();
             if let Some(user_item) = Self::auto_drive_make_user_message(original_text.clone()) {
                 conversation.push(user_item.clone());
                 if self.auto_send_user_prompt_to_coordinator(original_text.clone(), conversation) {
-                    self.finalize_sent_user_message(message);
+                    self.finalize_sent_user_message(message, None);
                     self.consume_pending_prompt_for_ui_only_turn();
-                    self.auto_history
-                        .append_raw(std::slice::from_ref(&user_item));
+                    self.auto_history.append_raw(std::slice::from_ref(&user_item));
                     return;
                 }
             }
@@ -11153,11 +11561,12 @@ impl ChatWidget<'_> {
             && coordinator_routing_allowed
         {
             if let Some(mut routed) = self.try_coordinator_route(&original_text) {
-                self.finalize_sent_user_message(message);
+                self.finalize_sent_user_message(message, None);
                 self.consume_pending_prompt_for_ui_only_turn();
 
                 if let Some(notice_text) = routed.user_response.take() {
-                    if let Some(item) = Self::auto_drive_make_assistant_message(notice_text.clone())
+                    if let Some(item) =
+                        Self::auto_drive_make_assistant_message(notice_text.clone())
                     {
                         self.auto_history.append_raw(std::slice::from_ref(&item));
                     }
@@ -11193,8 +11602,9 @@ impl ChatWidget<'_> {
                 Self::split_leading_slash_command(&original_text)
             {
                 if Self::multiline_slash_command_requires_split(&command_line) {
-                    let preview =
-                        crate::slash_command::process_slash_command_message(command_line.as_str());
+                    let preview = crate::slash_command::process_slash_command_message(
+                        command_line.as_str(),
+                    );
                     match preview {
                         ProcessedCommand::RegularCommand(SlashCommand::Auto, canonical_text) => {
                             let goal = rest_text.trim();
@@ -11235,7 +11645,9 @@ impl ChatWidget<'_> {
         match prompt_args::expand_custom_prompt(&text_only, self.bottom_pane.custom_prompts()) {
             Ok(Some(expanded)) => {
                 text_only = expanded.clone();
-                message.ordered_items.clear();
+                message
+                    .ordered_items
+                    .clear();
                 message
                     .ordered_items
                     .push(InputItem::Text { text: expanded });
@@ -11277,7 +11689,7 @@ impl ChatWidget<'_> {
                     "plan" | "solve" | "code"
                 );
                 if has_custom && !is_builtin {
-                    let res = hanzo_core::slash_commands::format_subagent_command(
+                    let res = code_core::slash_commands::format_subagent_command(
                         cmd_name,
                         &args,
                         Some(&self.config.agents),
@@ -11308,7 +11720,9 @@ impl ChatWidget<'_> {
                     ];
                     self.history_push_plain_paragraphs(PlainMessageKind::Notice, lines);
 
-                    message.ordered_items.clear();
+                    message
+                        .ordered_items
+                        .clear();
                     message
                         .ordered_items
                         .push(InputItem::Text { text: res.prompt });
@@ -11335,7 +11749,7 @@ impl ChatWidget<'_> {
                 };
 
                 if let Some(task) = args_opt {
-                    let res = hanzo_core::slash_commands::format_subagent_command(
+                    let res = code_core::slash_commands::format_subagent_command(
                         cmd_name,
                         &task,
                         Some(&self.config.agents),
@@ -11355,14 +11769,18 @@ impl ChatWidget<'_> {
                     // Replace the message with the resolved prompt and suppress the
                     // agent launch hint that would otherwise echo back immediately.
                     self.suppress_next_agent_hint = true;
-                    message.ordered_items.clear();
+                    message
+                        .ordered_items
+                        .clear();
                     message
                         .ordered_items
                         .push(InputItem::Text { text: res.prompt });
                 } else {
                     // Fallback to default expansion behavior
                     let expanded = _expanded;
-                    message.ordered_items.clear();
+                    message
+                        .ordered_items
+                        .clear();
                     message
                         .ordered_items
                         .push(InputItem::Text { text: expanded });
@@ -11395,10 +11813,10 @@ impl ChatWidget<'_> {
         // The global browser manager ensures both TUI and agent tools use the same instance
 
         // Start async screenshot capture in background (non-blocking)
-        {
+        if let Ok(handle) = tokio::runtime::Handle::try_current() {
             let latest_browser_screenshot_clone = Arc::clone(&self.latest_browser_screenshot);
 
-            tokio::spawn(async move {
+            handle.spawn(async move {
                 tracing::info!("Evaluating background screenshot capture...");
 
                 // Rate-limit: skip if a capture ran very recently (< 4000ms)
@@ -11429,8 +11847,7 @@ impl ChatWidget<'_> {
                 // Short settle to allow page to reach a stable state; keep it small
                 tokio::time::sleep(tokio::time::Duration::from_millis(800)).await;
 
-                let Some(browser_manager) = hanzo_browser::global::get_browser_manager().await
-                else {
+                let Some(browser_manager) = code_browser::global::get_browser_manager().await else {
                     tracing::info!("Skipping background screenshot: browser manager unavailable");
                     return;
                 };
@@ -11447,62 +11864,83 @@ impl ChatWidget<'_> {
 
                 BG_SHOT_LAST_START_MS.store(now_ms, Ordering::Relaxed);
 
-                // Single screenshot capture attempt with a modest timeout
-                tracing::info!("Screenshot capture attempt");
+                // Retry screenshot capture with exponential backoff
+                // Keep background capture lightweight: single attempt with a modest timeout
+                let mut attempts = 0;
+                let max_attempts = 1;
 
-                // Add timeout to screenshot capture
-                let capture_result = tokio::time::timeout(
-                    tokio::time::Duration::from_secs(5),
-                    browser_manager.capture_screenshot_with_url(),
-                )
-                .await;
+                loop {
+                    attempts += 1;
+                    tracing::info!(
+                        "Screenshot capture attempt {} of {}",
+                        attempts,
+                        max_attempts
+                    );
 
-                match capture_result {
-                    Ok(Ok((screenshot_paths, url))) => {
-                        tracing::info!(
-                            "Background screenshot capture succeeded with {} images",
-                            screenshot_paths.len()
-                        );
+                    // Add timeout to screenshot capture
+                    let capture_result = tokio::time::timeout(
+                        tokio::time::Duration::from_secs(5),
+                        browser_manager.capture_screenshot_with_url(),
+                    )
+                    .await;
 
-                        // Save the first screenshot path and URL for display in the TUI
-                        if let Some(first_path) = screenshot_paths.first() {
-                            if let Ok(mut latest) = latest_browser_screenshot_clone.lock() {
-                                let url_string =
-                                    url.clone().unwrap_or_else(|| "Browser".to_string());
-                                *latest = Some((first_path.clone(), url_string));
+                    match capture_result {
+                        Ok(Ok((screenshot_paths, url))) => {
+                            tracing::info!(
+                                "Background screenshot capture succeeded with {} images on attempt {}",
+                                screenshot_paths.len(),
+                                attempts
+                            );
+
+                            // Save the first screenshot path and URL for display in the TUI
+                            if let Some(first_path) = screenshot_paths.first() {
+                                if let Ok(mut latest) = latest_browser_screenshot_clone.lock() {
+                                    let url_string =
+                                        url.clone().unwrap_or_else(|| "Browser".to_string());
+                                    *latest = Some((first_path.clone(), url_string));
+                                }
                             }
-                        }
 
-                        // Create screenshot items
-                        let mut screenshot_items = Vec::new();
-                        for path in screenshot_paths {
-                            if path.exists() {
-                                tracing::info!("Adding browser screenshot: {}", path.display());
-                                let timestamp = std::time::SystemTime::now()
-                                    .duration_since(std::time::UNIX_EPOCH)
-                                    .unwrap_or_default()
-                                    .as_secs();
-                                let metadata = format!(
-                                    "screenshot:{}:{}",
-                                    timestamp,
-                                    url.as_deref().unwrap_or("unknown")
-                                );
-                                screenshot_items.push(InputItem::EphemeralImage {
-                                    path,
-                                    metadata: Some(metadata),
-                                });
+                            // Create screenshot items
+                            let mut screenshot_items = Vec::new();
+                            for path in screenshot_paths {
+                                if path.exists() {
+                                    tracing::info!("Adding browser screenshot: {}", path.display());
+                                    let timestamp = std::time::SystemTime::now()
+                                        .duration_since(std::time::UNIX_EPOCH)
+                                        .unwrap_or_default()
+                                        .as_secs();
+                                    let metadata = format!(
+                                        "screenshot:{}:{}",
+                                        timestamp,
+                                        url.as_deref().unwrap_or("unknown")
+                                    );
+                                    screenshot_items.push(InputItem::EphemeralImage {
+                                        path,
+                                        metadata: Some(metadata),
+                                    });
+                                }
                             }
-                        }
 
-                        // Do not enqueue screenshots as messages.
-                        // They are now injected per-turn by the core session.
-                        let _ = screenshot_items; // Consumed above
-                    }
-                    Ok(Err(e)) => {
-                        tracing::warn!("Background screenshot capture failed: {}", e);
-                    }
-                    Err(_timeout_err) => {
-                        tracing::warn!("Background screenshot capture timed out");
+                            // Do not enqueue screenshots as messages.
+                            // They are now injected per-turn by the core session.
+                            break; // Success - exit retry loop
+                        }
+                        Ok(Err(e)) => {
+                            tracing::warn!(
+                                "Background screenshot capture failed (attempt {}): {}",
+                                attempts,
+                                e
+                            );
+                            break;
+                        }
+                        Err(_timeout_err) => {
+                            tracing::warn!(
+                                "Background screenshot capture timed out (attempt {})",
+                                attempts
+                            );
+                            break;
+                        }
                     }
                 }
             });
@@ -11517,11 +11955,13 @@ impl ChatWidget<'_> {
         }
 
         let wait_only_active = self.wait_only_activity();
+        let auto_review_only_active = self.auto_review_only_activity();
         let turn_active = (self.is_task_running()
             || !self.active_task_ids.is_empty()
             || self.stream.is_write_cycle_active()
             || !self.queued_user_messages.is_empty())
-            && !wait_only_active;
+            && !wait_only_active
+            && !auto_review_only_active;
 
         if turn_active {
             tracing::info!(
@@ -11541,8 +11981,8 @@ impl ChatWidget<'_> {
                 Some(message.display_text.clone())
             };
 
-            let should_capture_snapshot =
-                self.active_ghost_snapshot.is_none() && self.ghost_snapshot_queue.is_empty();
+            let should_capture_snapshot = self.active_ghost_snapshot.is_none()
+                && self.ghost_snapshot_queue.is_empty();
             if should_capture_snapshot {
                 let _ = self.capture_ghost_snapshot(prompt_summary);
             }
@@ -11555,6 +11995,11 @@ impl ChatWidget<'_> {
             self.bottom_pane.set_task_running(false);
             self.bottom_pane
                 .update_status_text("Waiting in background".to_string());
+        } else if auto_review_only_active {
+            // Auto Review runs independently; keep input responsive while it continues.
+            self.bottom_pane.set_task_running(false);
+            self.bottom_pane
+                .update_status_text("Auto Review running in background".to_string());
         }
 
         tracing::info!(
@@ -11568,14 +12013,16 @@ impl ChatWidget<'_> {
         self.refresh_queued_user_messages(false);
 
         let batch: Vec<UserMessage> = self.queued_user_messages.iter().cloned().collect();
-        let summary = batch.last().and_then(|msg| {
-            let trimmed = msg.display_text.trim();
-            if trimmed.is_empty() {
-                None
-            } else {
-                Some(msg.display_text.clone())
-            }
-        });
+        let summary = batch
+            .last()
+            .and_then(|msg| {
+                let trimmed = msg.display_text.trim();
+                if trimmed.is_empty() {
+                    None
+                } else {
+                    Some(msg.display_text.clone())
+                }
+            });
 
         let _ = self.capture_ghost_snapshot(summary);
 
@@ -11643,10 +12090,7 @@ impl ChatWidget<'_> {
         self.enqueue_ghost_snapshot(request)
     }
 
-    fn capture_ghost_snapshot_blocking(
-        &mut self,
-        summary: Option<String>,
-    ) -> Option<GhostSnapshot> {
+    fn capture_ghost_snapshot_blocking(&mut self, summary: Option<String>) -> Option<GhostSnapshot> {
         if self.ghost_snapshots_disabled {
             return None;
         }
@@ -11711,31 +12155,43 @@ impl ChatWidget<'_> {
             );
         }
 
+        let single_message_dispatched_text =
+            (messages.len() == 1).then(|| Self::combined_input_text(&combined_items)).flatten();
+
         if !combined_items.is_empty() {
             self.flush_pending_agent_notes();
-            if let Err(e) = self.code_op_tx.send(Op::UserInput {
-                items: combined_items,
-                final_output_json_schema: None,
-            }) {
+            if let Err(e) = self
+                .code_op_tx
+                .send(Op::UserInput {
+                    items: combined_items,
+                    final_output_json_schema: None,
+                })
+            {
                 tracing::error!("failed to send Op::UserInput: {e}");
             }
         }
 
-        for message in messages {
-            self.finalize_sent_user_message(message);
+        for (idx, message) in messages.into_iter().enumerate() {
+            let dispatched_text = if idx == 0 {
+                single_message_dispatched_text.clone()
+            } else {
+                None
+            };
+            self.finalize_sent_user_message(message, dispatched_text);
         }
     }
 
     fn dispatch_queued_user_message_now(&mut self, message: UserMessage) {
         let message = self.take_queued_user_message(&message).unwrap_or(message);
         let items = message.ordered_items.clone();
+        let dispatched_text = Self::combined_input_text(&items);
         tracing::info!(
             "[queue] Dispatching single queued message via coordinator (queue_remaining={})",
             self.queued_user_messages.len()
         );
         match self.code_op_tx.send(Op::QueueUserInput { items }) {
             Ok(()) => {
-                self.finalize_sent_user_message(message);
+                self.finalize_sent_user_message(message, dispatched_text);
             }
             Err(err) => {
                 tracing::error!("failed to send QueueUserInput op: {err}");
@@ -11763,9 +12219,10 @@ impl ChatWidget<'_> {
             };
 
             let items = message.ordered_items.clone();
+            let dispatched_text = Self::combined_input_text(&items);
             match self.code_op_tx.send(Op::QueueUserInput { items }) {
                 Ok(()) => {
-                    self.finalize_sent_user_message(message);
+                    self.finalize_sent_user_message(message, dispatched_text);
                 }
                 Err(err) => {
                     tracing::error!("[queue] Failed to send QueueUserInput op: {err}");
@@ -11817,9 +12274,7 @@ impl ChatWidget<'_> {
             let handle = tokio::task::spawn_blocking(move || {
                 let hook_repo = repo_path.clone();
                 let options = CreateGhostCommitOptions::new(repo_path.as_path());
-                create_ghost_commit(
-                    &options.post_commit_hook(&move || bump_snapshot_epoch_for(&hook_repo)),
-                )
+                create_ghost_commit(&options.post_commit_hook(&move || bump_snapshot_epoch_for(&hook_repo)))
             });
             tokio::pin!(handle);
 
@@ -11941,15 +12396,13 @@ impl ChatWidget<'_> {
                 self.ghost_snapshots_disabled = true;
                 let (message, hint) = match &err {
                     GitToolingError::NotAGitRepository { .. } => (
-                        "Snapshots disabled: this workspace is not inside a Git repository."
-                            .to_string(),
+                        "Snapshots disabled: this workspace is not inside a Git repository.".to_string(),
                         None,
                     ),
                     _ => (
                         format!("Snapshots disabled after Git error: {err}"),
                         Some(
-                            "Restart Dev after resolving the issue to re-enable snapshots."
-                                .to_string(),
+                            "Restart Code after resolving the issue to re-enable snapshots.".to_string(),
                         ),
                     ),
                 };
@@ -11980,7 +12433,9 @@ impl ChatWidget<'_> {
         };
 
         if active_id != job_id {
-            tracing::warn!("ghost snapshot job id mismatch: expected {active_id}, got {job_id}");
+            tracing::warn!(
+                "ghost snapshot job id mismatch: expected {active_id}, got {job_id}"
+            );
             self.active_ghost_snapshot = Some((active_id, request));
             return;
         }
@@ -11997,7 +12452,9 @@ impl ChatWidget<'_> {
         for cell in &self.history_cells {
             match cell.kind() {
                 HistoryCellType::User => user_turns = user_turns.saturating_add(1),
-                HistoryCellType::Assistant => assistant_turns = assistant_turns.saturating_add(1),
+                HistoryCellType::Assistant => {
+                    assistant_turns = assistant_turns.saturating_add(1)
+                }
                 _ => {}
             }
         }
@@ -12008,9 +12465,14 @@ impl ChatWidget<'_> {
         snapshot
     }
 
-    fn conversation_delta_since(&self, snapshot: &ConversationSnapshot) -> (usize, usize) {
+    fn conversation_delta_since(
+        &self,
+        snapshot: &ConversationSnapshot,
+    ) -> (usize, usize) {
         let current = self.current_conversation_snapshot();
-        let user_delta = current.user_turns.saturating_sub(snapshot.user_turns);
+        let user_delta = current
+            .user_turns
+            .saturating_sub(snapshot.user_turns);
         let assistant_delta = current
             .assistant_turns
             .saturating_sub(snapshot.assistant_turns);
@@ -12024,7 +12486,9 @@ impl ChatWidget<'_> {
             .map(|key| (*key).into())
             .collect();
         let order_debug = self.cell_order_dbg.clone();
-        self.history_state.snapshot().with_order(order, order_debug)
+        self.history_state
+            .snapshot()
+            .with_order(order, order_debug)
     }
 
     fn mark_history_dirty(&mut self) {
@@ -12039,8 +12503,16 @@ impl ChatWidget<'_> {
             return;
         }
         if !force {
+            let snapshot_interval = if self.is_task_running()
+                || !self.active_task_ids.is_empty()
+                || self.stream.is_write_cycle_active()
+            {
+                Duration::from_millis(HISTORY_SNAPSHOT_FLUSH_INTERVAL_ACTIVE_MS)
+            } else {
+                Duration::from_millis(HISTORY_SNAPSHOT_FLUSH_INTERVAL_IDLE_MS)
+            };
             if let Some(last) = self.history_snapshot_last_flush {
-                if last.elapsed() < Duration::from_millis(400) {
+                if last.elapsed() < snapshot_interval {
                     return;
                 }
             }
@@ -12048,9 +12520,9 @@ impl ChatWidget<'_> {
         let snapshot = self.history_snapshot_for_persistence();
         match serde_json::to_value(&snapshot) {
             Ok(snapshot_value) => {
-                let send_result = self.code_op_tx.send(Op::PersistHistorySnapshot {
-                    snapshot: snapshot_value,
-                });
+                let send_result = self
+                    .code_op_tx
+                    .send(Op::PersistHistorySnapshot { snapshot: snapshot_value });
                 if send_result.is_err() {
                     tracing::warn!("failed to send history snapshot to core");
                 } else {
@@ -12079,7 +12551,8 @@ impl ChatWidget<'_> {
     pub(crate) fn adopt_ghost_state(&mut self, state: GhostState) {
         self.ghost_snapshots = state.snapshots;
         if self.ghost_snapshots.len() > MAX_TRACKED_GHOST_COMMITS {
-            self.ghost_snapshots.truncate(MAX_TRACKED_GHOST_COMMITS);
+            self.ghost_snapshots
+                .truncate(MAX_TRACKED_GHOST_COMMITS);
         }
         self.ghost_snapshots_disabled = state.disabled;
         self.ghost_snapshots_disabled_reason = state.disabled_reason;
@@ -12126,19 +12599,16 @@ impl ChatWidget<'_> {
             }
         } else {
             lines.push(
-                "Snapshots are currently disabled. Resolve the Git issue and restart Dev to re-enable them.".to_string(),
+                "Snapshots are currently disabled. Resolve the Git issue and restart Code to re-enable them.".to_string(),
             );
         }
 
         self.show_undo_status_popup(
             "Snapshots unavailable",
             Some(
-                "Restores workspace files only. Conversation history remains unchanged."
-                    .to_string(),
+                "Restores workspace files only. Conversation history remains unchanged.".to_string(),
             ),
-            Some(
-                "Automatic snapshotting failed, so /undo cannot restore the workspace.".to_string(),
-            ),
+            Some("Automatic snapshotting failed, so /undo cannot restore the workspace.".to_string()),
             lines,
         );
     }
@@ -12147,10 +12617,9 @@ impl ChatWidget<'_> {
         self.show_undo_status_popup(
             "No snapshots yet",
             Some(
-                "Restores workspace files only. Conversation history remains unchanged."
-                    .to_string(),
+                "Restores workspace files only. Conversation history remains unchanged.".to_string(),
             ),
-            Some("Snapshots appear once Dev captures a Git checkpoint.".to_string()),
+            Some("Snapshots appear once Code captures a Git checkpoint.".to_string()),
             vec![
                 "No snapshot is available to restore.".to_string(),
                 "Run a command that modifies files to create the first snapshot.".to_string(),
@@ -12229,8 +12698,7 @@ impl ChatWidget<'_> {
     }
 
     fn build_undo_timeline_entries(&self) -> Vec<UndoTimelineEntry> {
-        let mut entries: Vec<UndoTimelineEntry> =
-            Vec::with_capacity(self.ghost_snapshots.len().saturating_add(1));
+        let mut entries: Vec<UndoTimelineEntry> = Vec::with_capacity(self.ghost_snapshots.len().saturating_add(1));
         for snapshot in self.ghost_snapshots.iter() {
             entries.push(self.timeline_entry_for_snapshot(snapshot));
         }
@@ -12353,14 +12821,13 @@ impl ChatWidget<'_> {
     fn conversation_line(role: UndoPreviewRole, text: &str) -> Line<'static> {
         let (label, color) = match role {
             UndoPreviewRole::User => ("You", crate::colors::text_bright()),
-            UndoPreviewRole::Assistant => ("Dev", crate::colors::primary()),
+            UndoPreviewRole::Assistant => ("Code", crate::colors::primary()),
         };
         let label_span = Span::styled(
             format!("{label}: "),
             Style::default().fg(color).add_modifier(Modifier::BOLD),
         );
-        let content_span =
-            Span::styled(text.to_string(), Style::default().fg(crate::colors::text()));
+        let content_span = Span::styled(text.to_string(), Style::default().fg(crate::colors::text()));
         Line::from(vec![label_span, content_span])
     }
 
@@ -12449,7 +12916,10 @@ impl ChatWidget<'_> {
         }
     }
 
-    fn git_numstat<I, S>(&self, args: I) -> Result<Vec<(Option<u32>, Option<u32>, String)>, String>
+    fn git_numstat<I, S>(
+        &self,
+        args: I,
+    ) -> Result<Vec<(Option<u32>, Option<u32>, String)>, String>
     where
         I: IntoIterator<Item = S>,
         S: AsRef<str>,
@@ -12558,10 +13028,7 @@ impl ChatWidget<'_> {
         if entries.len() > max_entries {
             let remaining = entries.len() - max_entries;
             lines.push(Line::from(Span::styled(
-                format!(
-                    "… and {remaining} more file{}",
-                    if remaining == 1 { "" } else { "s" }
-                ),
+                format!("… and {remaining} more file{}", if remaining == 1 { "" } else { "s" }),
                 Style::default().fg(crate::colors::text_dim()),
             )));
         }
@@ -12624,10 +13091,7 @@ impl ChatWidget<'_> {
                 self.history_cells.push(cell);
                 self.history_cell_ids.push(Some(id));
             } else {
-                tracing::warn!(
-                    "unable to rebuild history cell for record id {:?}",
-                    record.id()
-                );
+                tracing::warn!("unable to rebuild history cell for record id {:?}", record.id());
                 let fallback = history_cell::new_background_event(format!(
                     "Restored snapshot missing renderer for record {:?}",
                     record.id()
@@ -12638,7 +13102,12 @@ impl ChatWidget<'_> {
         }
 
         if !snapshot.order.is_empty() {
-            self.cell_order_seq = snapshot.order.iter().copied().map(OrderKey::from).collect();
+            self.cell_order_seq = snapshot
+                .order
+                .iter()
+                .copied()
+                .map(OrderKey::from)
+                .collect();
         } else {
             self.cell_order_seq = self
                 .history_cells
@@ -12681,21 +13150,12 @@ impl ChatWidget<'_> {
             self.cell_order_dbg = snapshot.order_debug.clone();
         }
         if self.cell_order_dbg.len() < self.history_cells.len() {
-            self.cell_order_dbg.resize(self.history_cells.len(), None);
+            self.cell_order_dbg
+                .resize(self.history_cells.len(), None);
         }
 
-        let max_req = self
-            .cell_order_seq
-            .iter()
-            .map(|key| key.req)
-            .max()
-            .unwrap_or(0);
-        let max_seq = self
-            .cell_order_seq
-            .iter()
-            .map(|key| key.seq)
-            .max()
-            .unwrap_or(0);
+        let max_req = self.cell_order_seq.iter().map(|key| key.req).max().unwrap_or(0);
+        let max_seq = self.cell_order_seq.iter().map(|key| key.seq).max().unwrap_or(0);
 
         self.last_seen_request_index = max_req;
         self.current_request_index = max_req;
@@ -12751,7 +13211,9 @@ impl ChatWidget<'_> {
             .find(|(_, snap)| snap.commit().id() == commit_id)
             .map(|(idx, snap)| (idx, snap.clone()))
         else {
-            self.push_background_tail("Selected snapshot is no longer available.".to_string());
+            self.push_background_tail(
+                "Selected snapshot is no longer available.".to_string(),
+            );
             return;
         };
 
@@ -12799,8 +13261,7 @@ impl ChatWidget<'_> {
                 self.conversation_delta_since(&snapshot.conversation);
             if user_delta == 0 {
                 self.push_background_tail(
-                    "Conversation already matches selected snapshot; nothing to rewind."
-                        .to_string(),
+                    "Conversation already matches selected snapshot; nothing to rewind.".to_string(),
                 );
             } else {
                 self.app_event_tx.send(AppEvent::JumpBack {
@@ -12832,10 +13293,7 @@ impl ChatWidget<'_> {
         }
 
         if files_restored {
-            let mut message = format!(
-                "Restored workspace files to snapshot {}",
-                snapshot.short_id()
-            );
+            let mut message = format!("Restored workspace files to snapshot {}", snapshot.short_id());
             if let Some(snippet) = snapshot.summary_snippet(60) {
                 message.push_str(&format!(" • {}", snippet));
             }
@@ -12892,30 +13350,38 @@ impl ChatWidget<'_> {
         }
     }
 
-    fn finalize_sent_user_message(&mut self, message: UserMessage) {
+    fn combined_input_text(items: &[InputItem]) -> Option<String> {
+        let mut buffer = String::new();
+        for item in items {
+            if let InputItem::Text { text } = item {
+                if !buffer.is_empty() {
+                    buffer.push('\n');
+                }
+                buffer.push_str(text);
+            }
+        }
+
+        let trimmed = buffer.trim();
+        if trimmed.is_empty() {
+            None
+        } else {
+            Some(trimmed.to_string())
+        }
+    }
+
+    fn finalize_sent_user_message(
+        &mut self,
+        message: UserMessage,
+        dispatched_text: Option<String>,
+    ) {
         let UserMessage {
             display_text,
             ordered_items,
             suppress_persistence,
         } = message;
 
-        let combined_message_text = {
-            let mut buffer = String::new();
-            for item in &ordered_items {
-                if let InputItem::Text { text } = item {
-                    if !buffer.is_empty() {
-                        buffer.push('\n');
-                    }
-                    buffer.push_str(text);
-                }
-            }
-            let trimmed = buffer.trim();
-            if trimmed.is_empty() {
-                None
-            } else {
-                Some(trimmed.to_string())
-            }
-        };
+        let combined_message_text =
+            dispatched_text.or_else(|| Self::combined_input_text(ordered_items.as_slice()));
 
         if !display_text.is_empty() {
             let key = self.next_req_key_prompt();
@@ -12929,6 +13395,25 @@ impl ChatWidget<'_> {
 
         if let Some(model_echo) = combined_message_text {
             self.pending_dispatched_user_messages.push_back(model_echo);
+            let mut dropped = 0usize;
+            while self.pending_dispatched_user_messages.len()
+                > MAX_PENDING_DISPATCHED_USER_MESSAGES
+            {
+                if self.pending_dispatched_user_messages.pop_front().is_some() {
+                    dropped = dropped.saturating_add(1);
+                }
+            }
+            if dropped > 0 {
+                self.pending_dispatched_trimmed_total = self
+                    .pending_dispatched_trimmed_total
+                    .saturating_add(dropped as u64);
+                tracing::warn!(
+                    dropped,
+                    retained = self.pending_dispatched_user_messages.len(),
+                    total_trimmed = self.pending_dispatched_trimmed_total,
+                    "trimmed pending dispatched user message backlog"
+                );
+            }
         }
 
         let suppress_history = suppress_persistence;
@@ -12996,52 +13481,14 @@ impl ChatWidget<'_> {
                     {
                         // No way to schedule a delayed tick; force the timer to appear expired
                         // and emit a tick now to avoid indefinite blocking.
-                        self.queue_block_started_at =
-                            Some(Instant::now() - Duration::from_secs(10));
-                        let _ = self
-                            .app_event_tx
-                            .send(crate::app_event::AppEvent::CommitTick);
+                        self.queue_block_started_at = Some(Instant::now() - Duration::from_secs(10));
+                        let _ = self.app_event_tx.send(crate::app_event::AppEvent::CommitTick);
                     }
                 }
             }
         }
-        let messages: Vec<String> = self
-            .queued_user_messages
-            .iter()
-            .map(|message| message.display_text.clone())
-            .collect();
-        self.bottom_pane.set_queued_user_messages(messages);
+
         self.request_redraw();
-    }
-
-    fn restore_user_message_to_composer(&mut self, message: UserMessage) {
-        let UserMessage {
-            display_text,
-            ordered_items,
-            suppress_persistence: _,
-        } = message;
-
-        let placeholder_regex =
-            regex_lite::Regex::new(r"\[image: [^\]]+\]").expect("valid image placeholder regex");
-        let placeholders: Vec<String> = placeholder_regex
-            .find_iter(&display_text)
-            .map(|mat| mat.as_str().to_string())
-            .collect();
-
-        let image_paths: Vec<PathBuf> = ordered_items
-            .into_iter()
-            .filter_map(|item| match item {
-                InputItem::LocalImage { path } => Some(path),
-                _ => None,
-            })
-            .collect();
-
-        self.pending_images.clear();
-        for (placeholder, path) in placeholders.into_iter().zip(image_paths.into_iter()) {
-            self.pending_images.insert(placeholder, path);
-        }
-
-        self.bottom_pane.set_composer_text(display_text);
     }
 
     #[allow(dead_code)]
@@ -13130,7 +13577,8 @@ impl ChatWidget<'_> {
                         self.latest_upgrade_version.as_deref(),
                     );
                     let key = self.next_req_key_top();
-                    let _ = self.history_insert_plain_state_with_key(session_state, key, "prelude");
+                    let _ = self
+                        .history_insert_plain_state_with_key(session_state, key, "prelude");
                 }
 
                 if let Some(user_message) = self.initial_user_message.take() {
@@ -13142,6 +13590,11 @@ impl ChatWidget<'_> {
                 // Ask core for custom prompts so the slash menu can show them.
                 self.submit_op(Op::ListCustomPrompts);
                 self.submit_op(Op::ListSkills);
+                self.mcp_tools_by_server.clear();
+                self.mcp_server_failures.clear();
+                if !self.config.mcp_servers.is_empty() {
+                    self.submit_op(Op::ListMcpTools);
+                }
 
                 if self.resume_placeholder_visible && event.history_entry_count == 0 {
                     self.replace_resume_placeholder_with_notice(RESUME_NO_HISTORY_NOTICE);
@@ -13235,10 +13688,7 @@ impl ChatWidget<'_> {
             }
             EventMsg::ReplayHistory(ev) => {
                 self.clear_resume_placeholder();
-                let hanzo_core::protocol::ReplayHistoryEvent {
-                    items,
-                    history_snapshot,
-                } = ev;
+                let code_core::protocol::ReplayHistoryEvent { items, history_snapshot } = ev;
                 self.replay_history_depth = self.replay_history_depth.saturating_add(1);
                 let max_req = self.last_seen_request_index;
                 let mut processed_snapshot = false;
@@ -13277,9 +13727,7 @@ impl ChatWidget<'_> {
                 let ok = match event.order.as_ref() {
                     Some(om) => self.provider_order_key_from_order_meta(om),
                     None => {
-                        tracing::warn!(
-                            "missing OrderMeta on WebSearchComplete; using synthetic key"
-                        );
+                        tracing::warn!("missing OrderMeta on WebSearchComplete; using synthetic key");
                         self.next_internal_key()
                     }
                 };
@@ -13479,6 +13927,7 @@ impl ChatWidget<'_> {
                 // This begins the new turn; clear the pending prompt anchor count
                 // so subsequent background events use standard placement.
                 self.pending_user_prompts_for_next_turn = 0;
+                self.pending_request_user_input = None;
                 // Reset stream headers for new turn
                 self.stream.reset_headers_for_new_turn();
                 self.stream_state.current_kind = None;
@@ -13518,6 +13967,7 @@ impl ChatWidget<'_> {
             }
             EventMsg::TaskComplete(TaskCompleteEvent { last_agent_message }) => {
                 self.clear_reconnecting();
+                self.pending_request_user_input = None;
                 let had_running_execs = !self.exec.running_commands.is_empty();
                 // Finalize any active streams
                 let finalizing_streams = self.stream.is_write_cycle_active();
@@ -13554,12 +14004,12 @@ impl ChatWidget<'_> {
                     );
                 }
                 // Now that streaming is complete, flush any queued interrupts
-                self.flush_interrupt_queue();
+        self.flush_interrupt_queue();
 
-                // Only drop the working status if nothing is actually running.
-                let any_tools_running = !self.exec.running_commands.is_empty()
-                    || !self.tools_state.running_custom_tools.is_empty()
-                    || !self.tools_state.web_search_sessions.is_empty();
+        // Only drop the working status if nothing is actually running.
+        let any_tools_running = !self.exec.running_commands.is_empty()
+            || !self.tools_state.running_custom_tools.is_empty()
+            || !self.tools_state.web_search_sessions.is_empty();
                 let any_streaming = self.stream.is_write_cycle_active();
                 let any_agents_active = self.agents_are_actively_running();
                 let any_tasks_active = !self.active_task_ids.is_empty();
@@ -13577,6 +14027,7 @@ impl ChatWidget<'_> {
                 self.suppress_next_agent_hint = false;
                 self.mark_needs_redraw();
                 self.flush_history_snapshot_if_needed(true);
+
             }
             EventMsg::AgentReasoningRawContentDelta(AgentReasoningRawContentDeltaEvent {
                 delta,
@@ -13677,13 +14128,18 @@ impl ChatWidget<'_> {
                 if let Some(info) = &event.info {
                     self.total_token_usage = info.total_token_usage.clone();
                     self.last_token_usage = info.last_token_usage.clone();
+                    if let Some(requested_model) = &info.requested_model {
+                        self.session_requested_model = Some(requested_model.clone());
+                    }
+                    if let Some(response_model) = &info.latest_response_model {
+                        self.session_latest_response_model = Some(response_model.clone());
+                    }
                 }
                 if let Some(snapshot) = event.rate_limits {
                     self.update_rate_limit_resets(&snapshot);
-                    let warnings = self.rate_limit_warnings.take_warnings(
-                        snapshot.secondary_used_percent,
-                        snapshot.primary_used_percent,
-                    );
+                    let warnings = self
+                        .rate_limit_warnings
+                        .take_warnings(snapshot.secondary_used_percent, snapshot.primary_used_percent);
                     let mut legend_entries: Vec<RateLimitLegendEntry> = Vec::new();
                     for warning in warnings {
                         if self.log_and_should_display_warning(&warning) {
@@ -13740,8 +14196,16 @@ impl ChatWidget<'_> {
                     self.total_token_usage.clone(),
                     self.last_token_usage.clone(),
                     self.config.model_context_window,
+                    self.config.context_mode,
                 );
                 self.update_stream_token_usage_metadata();
+            }
+            EventMsg::AutoContextCheck(event) => {
+                self.bottom_pane.set_auto_context_phase(event.phase);
+            }
+            EventMsg::Warning(WarningEvent { message }) => {
+                self.history_push_plain_state(history_cell::new_warning_event(message));
+                self.request_redraw();
             }
             EventMsg::Error(ErrorEvent { message }) => {
                 self.on_error(message);
@@ -13795,6 +14259,195 @@ impl ChatWidget<'_> {
                         this.request_redraw();
                     },
                 );
+            }
+            EventMsg::RequestUserInput(ev) => {
+                let key = self.near_time_key_current_req(event.order.as_ref());
+                let mut lines: Vec<String> = Vec::new();
+                lines.push("Model requested user input".to_string());
+
+                for question in &ev.questions {
+                    let header = &question.header;
+                    let id = &question.id;
+                    let question_text = &question.question;
+                    lines.push(format!("\n{header} ({id})\n{question_text}"));
+                    if let Some(options) = &question.options {
+                        lines.push("Options:".to_string());
+                        for option in options {
+                            let label = &option.label;
+                            let description = &option.description;
+                            lines.push(format!("- {label}: {description}"));
+                        }
+                    }
+                }
+                let auto_answer = self.auto_state.is_active() && !self.auto_state.is_paused_manual();
+                if auto_answer {
+                    lines.push("\nAuto Drive is active; continuing automatically.".to_string());
+                } else {
+                    lines.push(
+                        "\nUse the picker below to continue (Esc to type in the composer).".to_string(),
+                    );
+                }
+
+                let role = history_cell::plain_role_for_kind(PlainMessageKind::Notice);
+                let state =
+                    history_cell::plain_message_state_from_paragraphs(PlainMessageKind::Notice, role, lines);
+                let _ = self.history_insert_plain_state_with_key(state, key, "request_user_input");
+                self.restore_reasoning_in_progress_if_streaming();
+
+                if auto_answer {
+                    use code_protocol::request_user_input::RequestUserInputAnswer;
+                    use code_protocol::request_user_input::RequestUserInputResponse;
+
+                    fn choose_option_label(
+                        question: &code_protocol::request_user_input::RequestUserInputQuestion,
+                    ) -> Option<String> {
+                        let options = question.options.as_ref()?;
+                        if options.is_empty() {
+                            return None;
+                        }
+
+                        let recommended = options.iter().position(|opt| {
+                            opt.label.contains("(Recommended)")
+                                || opt.label.contains("Recommended")
+                                || opt.label.contains("recommended")
+                        });
+                        let idx = recommended.unwrap_or(0);
+                        options.get(idx).map(|opt| opt.label.clone())
+                    }
+
+                    fn choose_freeform_value(
+                        question: &code_protocol::request_user_input::RequestUserInputQuestion,
+                    ) -> String {
+                        let key = format!("{} {}", question.id, question.header).to_ascii_lowercase();
+                        if key.contains("confirm") || key.contains("proceed") {
+                            "yes".to_string()
+                        } else if key.contains("name") {
+                            "Auto Drive".to_string()
+                        } else {
+                            "auto".to_string()
+                        }
+                    }
+
+                    let mut answers = std::collections::HashMap::new();
+                    for question in &ev.questions {
+                        let answer_value = if let Some(label) = choose_option_label(question) {
+                            vec![label]
+                        } else {
+                            vec![choose_freeform_value(question)]
+                        };
+                        answers.insert(
+                            question.id.clone(),
+                            RequestUserInputAnswer {
+                                answers: answer_value,
+                            },
+                        );
+                    }
+                    let response = RequestUserInputResponse { answers };
+
+                    let summary = {
+                        let mut parts = Vec::new();
+                        for question in &ev.questions {
+                            let label = response
+                                .answers
+                                .get(&question.id)
+                                .and_then(|a| a.answers.first())
+                                .map(String::as_str)
+                                .unwrap_or("(skipped)");
+                            if ev.questions.len() == 1 {
+                                parts.push(label.to_string());
+                            } else {
+                                let header = question.header.trim();
+                                if header.is_empty() {
+                                    parts.push(label.to_string());
+                                } else {
+                                    parts.push(format!("{header}: {label}"));
+                                }
+                            }
+                        }
+                        parts.join("\n")
+                    };
+
+                    if !summary.trim().is_empty() {
+                        let key = Self::order_key_successor(key);
+                        let role = history_cell::plain_role_for_kind(PlainMessageKind::Notice);
+                        let state = history_cell::plain_message_state_from_paragraphs(
+                            PlainMessageKind::Notice,
+                            role,
+                            vec![format!("Auto Drive answered user input:\n{summary}")],
+                        );
+                        let _ = self
+                            .history_insert_plain_state_with_key(state, key, "request_user_input_auto_answer");
+                        self.restore_reasoning_in_progress_if_streaming();
+                    }
+
+                    if let Err(e) = self.code_op_tx.send(Op::UserInputAnswer {
+                        id: ev.turn_id.clone(),
+                        response,
+                    }) {
+                        tracing::error!("failed to send Op::UserInputAnswer: {e}");
+                    }
+
+                    self.bottom_pane
+                        .update_status_text("waiting for model".to_string());
+                    self.bottom_pane.set_task_running(true);
+                } else {
+                    self.pending_request_user_input = Some(PendingRequestUserInput {
+                        turn_id: ev.turn_id.clone(),
+                        call_id: ev.call_id.clone(),
+                        anchor_key: key,
+                        questions: ev.questions.clone(),
+                    });
+                    self.bottom_pane
+                        .update_status_text("waiting for user input".to_string());
+                    self.bottom_pane.set_task_running(true);
+                    self.bottom_pane.ensure_input_focus();
+                    self.bottom_pane
+                        .show_request_user_input(crate::bottom_pane::RequestUserInputView::new(
+                            ev.turn_id.clone(),
+                            ev.questions.clone(),
+                            self.app_event_tx.clone(),
+                        ));
+                }
+                self.request_redraw();
+            }
+            EventMsg::DynamicToolCallRequest(ev) => {
+                let key = self.near_time_key_current_req(event.order.as_ref());
+                let tool = &ev.tool;
+                let call_id = &ev.call_id;
+                let lines = vec![
+                    format!("Dynamic tool call requested: {tool}"),
+                    format!("call_id: {call_id}"),
+                    "Dynamic tools are not supported in this UI; returning a failure response."
+                        .to_string(),
+                ];
+                let role = history_cell::plain_role_for_kind(PlainMessageKind::Notice);
+                let state = history_cell::plain_message_state_from_paragraphs(
+                    PlainMessageKind::Notice,
+                    role,
+                    lines,
+                );
+                let _ = self.history_insert_plain_state_with_key(state, key, "dynamic_tool_call");
+                self.restore_reasoning_in_progress_if_streaming();
+
+                let response = DynamicToolResponse {
+                    content_items: vec![
+                        code_protocol::dynamic_tools::DynamicToolCallOutputContentItem::InputText {
+                            text: "dynamic tools are not supported in this UI".to_string(),
+                        },
+                    ],
+                    success: false,
+                };
+                if let Err(e) = self.code_op_tx.send(Op::DynamicToolResponse {
+                    id: ev.call_id.clone(),
+                    response,
+                }) {
+                    tracing::error!("failed to send Op::DynamicToolResponse: {e}");
+                }
+
+                self.bottom_pane
+                    .update_status_text("waiting for model".to_string());
+                self.bottom_pane.set_task_running(true);
+                self.request_redraw();
             }
             EventMsg::ApplyPatchApprovalRequest(ev) => {
                 let id2 = id.clone();
@@ -13858,7 +14511,9 @@ impl ChatWidget<'_> {
                             .history_id_for_exec_call(call_id.as_ref())
                             .or_else(|| {
                                 running.history_index.and_then(|idx| {
-                                    self.history_cell_ids.get(idx).and_then(|slot| *slot)
+                                    self.history_cell_ids
+                                        .get(idx)
+                                        .and_then(|slot| *slot)
                                 })
                             });
                         running.history_id = mapped;
@@ -13895,45 +14550,7 @@ impl ChatWidget<'_> {
             }) => {
                 let exec_call_id = ExecCallId(call_id.clone());
                 self.exec.suppress_exec_end(exec_call_id);
-                // Store for session diff popup (clone before moving into history)
-                self.diffs.session_patch_sets.push(changes.clone());
-                // Capture/adjust baselines, including rename moves
-                if let Some(last) = self.diffs.session_patch_sets.last() {
-                    for (src_path, chg) in last.iter() {
-                        match chg {
-                            hanzo_core::protocol::FileChange::Update {
-                                move_path: Some(dest_path),
-                                ..
-                            } => {
-                                // Prefer to carry forward existing baseline from src to dest.
-                                if let Some(baseline) =
-                                    self.diffs.baseline_file_contents.remove(src_path)
-                                {
-                                    self.diffs
-                                        .baseline_file_contents
-                                        .insert(dest_path.clone(), baseline);
-                                } else if !self.diffs.baseline_file_contents.contains_key(dest_path)
-                                {
-                                    // Fallback: snapshot current contents of src (pre-apply) under dest key.
-                                    let baseline =
-                                        std::fs::read_to_string(src_path).unwrap_or_default();
-                                    self.diffs
-                                        .baseline_file_contents
-                                        .insert(dest_path.clone(), baseline);
-                                }
-                            }
-                            _ => {
-                                if !self.diffs.baseline_file_contents.contains_key(src_path) {
-                                    let baseline =
-                                        std::fs::read_to_string(src_path).unwrap_or_default();
-                                    self.diffs
-                                        .baseline_file_contents
-                                        .insert(src_path.clone(), baseline);
-                                }
-                            }
-                        }
-                    }
-                }
+                self.diffs.record_patch_set(&changes, true);
                 // Enable Ctrl+D footer hint now that we have diffs to show
                 self.bottom_pane.set_diffs_hint(true);
                 // Strict order
@@ -13944,9 +14561,10 @@ impl ChatWidget<'_> {
                         self.next_internal_key()
                     }
                 };
+                let history_changes = compact_patch_changes(&changes);
                 let cell = history_cell::new_patch_event(
                     PatchEventType::ApplyBegin { auto_approved },
-                    changes,
+                    history_changes,
                 );
                 let _ = self.history_insert_with_key_global(Box::new(cell), ok);
             }
@@ -14065,9 +14683,8 @@ impl ChatWidget<'_> {
                 }
 
                 if tool_name == "wait" {
-                    if let Some(exec_call_id) =
-                        wait_exec_call_id_from_params(params_string.as_ref())
-                    {
+
+                    if let Some(exec_call_id) = wait_exec_call_id_from_params(params_string.as_ref()) {
                         // Only treat this as an exec-scoped wait when the target exec is still running.
                         // Background waits (e.g., waiting on a shell call_id) also carry `call_id`.
                         if self.exec.running_commands.contains_key(&exec_call_id) {
@@ -14075,30 +14692,29 @@ impl ChatWidget<'_> {
                                 .running_wait_tools
                                 .insert(ToolCallId(call_id.clone()), exec_call_id.clone());
 
+
                             let mut wait_update: Option<(
                                 HistoryId,
                                 Option<Duration>,
                                 Vec<(String, bool)>,
                             )> = None;
-                            if let Some(running) = self.exec.running_commands.get_mut(&exec_call_id)
-                            {
+                            if let Some(running) = self.exec.running_commands.get_mut(&exec_call_id) {
                                 running.wait_active = true;
                                 running.wait_notes.clear();
                                 let history_id = running.history_id.or_else(|| {
                                     running.history_index.and_then(|idx| {
-                                        self.history_cell_ids.get(idx).and_then(|slot| *slot)
+                                        self.history_cell_ids
+                                            .get(idx)
+                                            .and_then(|slot| *slot)
                                     })
                                 });
                                 running.history_id = history_id;
                                 if let Some(id) = history_id {
-                                    wait_update =
-                                        Some((id, running.wait_total, running.wait_notes.clone()));
+                                    wait_update = Some((id, running.wait_total, running.wait_notes.clone()));
                                 }
                             }
                             if let Some((history_id, total, notes)) = wait_update {
-                                let _ = self.update_exec_wait_state_with_pairs(
-                                    history_id, total, true, &notes,
-                                );
+                                let _ = self.update_exec_wait_state_with_pairs(history_id, total, true, &notes);
                             }
                             self.bottom_pane
                                 .update_status_text("waiting for command".to_string());
@@ -14110,9 +14726,8 @@ impl ChatWidget<'_> {
                 }
 
                 if tool_name == "kill" {
-                    if let Some(exec_call_id) =
-                        wait_exec_call_id_from_params(params_string.as_ref())
-                    {
+
+                    if let Some(exec_call_id) = wait_exec_call_id_from_params(params_string.as_ref()) {
                         if self.exec.running_commands.contains_key(&exec_call_id) {
                             self.tools_state
                                 .running_kill_tools
@@ -14160,10 +14775,12 @@ impl ChatWidget<'_> {
                     .or_else(|| self.history_cell_ids.get(idx).and_then(|slot| *slot));
                 // Track index so we can replace it on completion
                 if idx < self.history_cells.len() {
-                    self.tools_state.running_custom_tools.insert(
-                        ToolCallId(call_id.clone()),
-                        RunningToolEntry::new(ok, idx).with_history_id(history_id),
-                    );
+                    self.tools_state
+                        .running_custom_tools
+                        .insert(
+                            ToolCallId(call_id.clone()),
+                            RunningToolEntry::new(ok, idx).with_history_id(history_id),
+                        );
                 }
 
                 // Update border status based on tool
@@ -14177,6 +14794,13 @@ impl ChatWidget<'_> {
                     self.bottom_pane
                         .update_status_text(format!("using tool: {}", tool_name));
                 }
+            }
+            EventMsg::CustomToolCallUpdate(CustomToolCallUpdateEvent {
+                call_id,
+                tool_name: _,
+                parameters,
+            }) => {
+                self.apply_custom_tool_update(&call_id, parameters);
             }
             EventMsg::CustomToolCallEnd(CustomToolCallEndEvent {
                 call_id,
@@ -14271,15 +14895,16 @@ impl ChatWidget<'_> {
                         let mut exec_running = false;
                         let mut exec_completed = false;
                         let mut note_lines: Vec<(String, bool)> = Vec::new();
-                        let suppress_json_notes =
-                            serde_json::from_str::<serde_json::Value>(trimmed)
-                                .ok()
-                                .and_then(|value| {
-                                    value.as_object().map(|obj| {
-                                        obj.contains_key("output") || obj.contains_key("metadata")
-                                    })
-                                })
-                                .unwrap_or(false);
+                        let suppress_json_notes = serde_json::from_str::<serde_json::Value>(
+                            trimmed,
+                        )
+                        .ok()
+                        .and_then(|value| {
+                            value.as_object().map(|obj| {
+                                obj.contains_key("output") || obj.contains_key("metadata")
+                            })
+                        })
+                        .unwrap_or(false);
                         if !suppress_json_notes {
                             for line in content.lines() {
                                 let note_text = line.trim();
@@ -14304,7 +14929,9 @@ impl ChatWidget<'_> {
                             wait_total = running.wait_total;
                             history_id = running.history_id.or_else(|| {
                                 running.history_index.and_then(|idx| {
-                                    self.history_cell_ids.get(idx).and_then(|slot| *slot)
+                                    self.history_cell_ids
+                                        .get(idx)
+                                        .and_then(|slot| *slot)
                                 })
                             });
                             running.history_id = history_id;
@@ -14313,20 +14940,12 @@ impl ChatWidget<'_> {
                         }
 
                         if history_id.is_none() {
-                            if let Some((idx, _)) = self
-                                .history_cells
-                                .iter()
-                                .enumerate()
-                                .rev()
-                                .find(|(_, cell)| {
-                                    cell.as_any()
-                                        .downcast_ref::<history_cell::ExecCell>()
-                                        .is_some()
-                                })
-                            {
-                                if let Some(id) =
-                                    self.history_cell_ids.get(idx).and_then(|slot| *slot)
-                                {
+                            if let Some((idx, _)) = self.history_cells.iter().enumerate().rev().find(|(_, cell)| {
+                                cell.as_any()
+                                    .downcast_ref::<history_cell::ExecCell>()
+                                    .is_some()
+                            }) {
+                                if let Some(id) = self.history_cell_ids.get(idx).and_then(|slot| *slot) {
                                     history_id = Some(id);
                                     if let Some(running) =
                                         self.exec.running_commands.get_mut(&exec_call_id)
@@ -14406,8 +15025,9 @@ impl ChatWidget<'_> {
                                     "command finished (output unavailable)".to_string(),
                                 );
                             } else {
-                                self.bottom_pane
-                                    .update_status_text("command status unavailable".to_string());
+                                self.bottom_pane.update_status_text(
+                                    "command status unavailable".to_string(),
+                                );
                             }
                         } else {
                             self.bottom_pane
@@ -14492,14 +15112,11 @@ impl ChatWidget<'_> {
                     if let Some(idx) = resolved_idx {
                         self.history_replace_with_record(
                             idx,
-                            Box::new(history_cell::PlainHistoryCell::from_state(
-                                wait_state.clone(),
-                            )),
+                            Box::new(history_cell::PlainHistoryCell::from_state(wait_state.clone())),
                             HistoryDomainRecord::Plain(wait_state.clone()),
                         );
                     } else {
-                        let _ =
-                            self.history_insert_plain_state_with_key(wait_state, ok, "untagged");
+                        let _ = self.history_insert_plain_state_with_key(wait_state, ok, "untagged");
                     }
 
                     self.bottom_pane
@@ -14562,13 +15179,20 @@ impl ChatWidget<'_> {
                 if let Some(idx) = resolved_idx {
                     self.history_debug(format!(
                         "custom_tool_end.in_place call_id={} idx={} order=({}, {}, {})",
-                        call_id, idx, ok.req, ok.out, ok.seq
+                        call_id,
+                        idx,
+                        ok.req,
+                        ok.out,
+                        ok.seq
                     ));
                     self.history_replace_at(idx, Box::new(completed));
                 } else {
                     self.history_debug(format!(
                         "custom_tool_end.fallback_insert call_id={} order=({}, {}, {})",
-                        call_id, ok.req, ok.out, ok.seq
+                        call_id,
+                        ok.req,
+                        ok.out,
+                        ok.seq
                     ));
                     running_tools::collapse_spinner(self, &call_id);
                     let _ = self.history_insert_with_key_global(Box::new(completed), ok);
@@ -14590,9 +15214,7 @@ impl ChatWidget<'_> {
                 let ok = match event.order.as_ref() {
                     Some(om) => self.provider_order_key_from_order_meta(om),
                     None => {
-                        tracing::warn!(
-                            "missing OrderMeta on ViewImageToolCall; using synthetic key"
-                        );
+                        tracing::warn!("missing OrderMeta on ViewImageToolCall; using synthetic key");
                         self.next_internal_key()
                     }
                 };
@@ -14605,7 +15227,7 @@ impl ChatWidget<'_> {
                 }
             }
             EventMsg::GetHistoryEntryResponse(event) => {
-                let hanzo_core::protocol::GetHistoryEntryResponseEvent {
+                let code_core::protocol::GetHistoryEntryResponseEvent {
                     offset,
                     log_id,
                     entry,
@@ -14620,10 +15242,40 @@ impl ChatWidget<'_> {
                 debug!("received {len} custom prompts");
                 self.bottom_pane.set_custom_prompts(ev.custom_prompts);
             }
+            EventMsg::McpListToolsResponse(ev) => {
+                self.mcp_tools_by_server = ev.server_tools.unwrap_or_default();
+                self.mcp_server_failures = ev.server_failures.unwrap_or_default();
+                self.refresh_mcp_settings_overlay();
+            }
             EventMsg::ListSkillsResponse(ev) => {
                 let len = ev.skills.len();
                 debug!("received {len} skills");
-                self.bottom_pane.set_skills(ev.skills);
+                let mut skills: Vec<code_core::protocol::Skill> = Vec::new();
+                for entry in ev.skills {
+                    for meta in entry.skills {
+                        let scope = match meta.scope {
+                            code_protocol::protocol::SkillScope::User => {
+                                code_protocol::skills::SkillScope::User
+                            }
+                            code_protocol::protocol::SkillScope::Repo => {
+                                code_protocol::skills::SkillScope::Repo
+                            }
+                            code_protocol::protocol::SkillScope::System
+                            | code_protocol::protocol::SkillScope::Admin => {
+                                code_protocol::skills::SkillScope::System
+                            }
+                        };
+                        let content = std::fs::read_to_string(&meta.path).unwrap_or_default();
+                        skills.push(code_core::protocol::Skill {
+                            name: meta.name,
+                            description: meta.description,
+                            path: meta.path,
+                            scope,
+                            content,
+                        });
+                    }
+                }
+                self.bottom_pane.set_skills(skills);
                 self.refresh_settings_overview_rows();
             }
             EventMsg::ShutdownComplete => {
@@ -14636,7 +15288,11 @@ impl ChatWidget<'_> {
             }
             EventMsg::BackgroundEvent(BackgroundEventEvent { message }) => {
                 info!("BackgroundEvent: {message}");
-                if browser_sessions::handle_background_event(self, event.order.as_ref(), &message) {
+                if browser_sessions::handle_background_event(
+                    self,
+                    event.order.as_ref(),
+                    &message,
+                ) {
                     return;
                 }
                 let is_agent_hint = message.starts_with("🤖 Agent");
@@ -14671,7 +15327,7 @@ impl ChatWidget<'_> {
                 self.restore_reasoning_in_progress_if_streaming();
 
                 // Also reflect CDP connect success in the status line.
-                if message.starts_with("✅ Connected to browser via CDP") {
+                if message.starts_with("✅ Connected to Chrome via CDP") {
                     self.bottom_pane
                         .update_status_text("using browser (CDP)".to_string());
                 }
@@ -14685,11 +15341,7 @@ impl ChatWidget<'_> {
             }
             EventMsg::AgentStatusUpdate(event) => {
                 agent_runs::handle_status_update(self, &event);
-                let AgentStatusUpdateEvent {
-                    agents,
-                    context,
-                    task,
-                } = event;
+                let AgentStatusUpdateEvent { agents, context, task } = event;
                 // Update the active agents list from the event and track timing
                 self.active_agents.clear();
                 let now = Instant::now();
@@ -14743,6 +15395,8 @@ impl ChatWidget<'_> {
                     }
                 }
 
+                self.prune_agent_runtime_cache(&agents);
+
                 self.update_agents_terminal_state(&agents, context.clone(), task.clone());
 
                 self.observe_auto_review_status(&agents);
@@ -14769,7 +15423,7 @@ impl ChatWidget<'_> {
                             .agent_runtime
                             .values()
                             .all(|rt| rt.completed_at.is_some());
-                    if all_agents_terminal {
+                    if all_agents_terminal && self.active_task_ids.is_empty() {
                         let any_tools_running = !self.exec.running_commands.is_empty()
                             || !self.tools_state.running_custom_tools.is_empty()
                             || !self.tools_state.web_search_sessions.is_empty();
@@ -14781,11 +15435,12 @@ impl ChatWidget<'_> {
                     }
                 }
 
-                if saw_running && has_running_non_auto_review && !self.bottom_pane.is_task_running()
+                if saw_running
+                    && has_running_non_auto_review
+                    && !self.bottom_pane.is_task_running()
                 {
                     self.bottom_pane.set_task_running(true);
-                    self.bottom_pane
-                        .update_status_text("Running...".to_string());
+                    self.bottom_pane.update_status_text("Running...".to_string());
                     self.refresh_auto_drive_visuals();
                     self.request_redraw();
                 }
@@ -14841,13 +15496,10 @@ impl ChatWidget<'_> {
                 self.request_redraw();
             }
             EventMsg::BrowserScreenshotUpdate(payload) => {
-                #[cfg(feature = "hanzo-fork")]
+                #[cfg(feature = "code-fork")]
                 handle_browser_screenshot(&payload, &self.app_event_tx);
 
-                let BrowserScreenshotUpdateEvent {
-                    screenshot_path,
-                    url,
-                } = payload;
+                let BrowserScreenshotUpdateEvent { screenshot_path, url } = payload;
                 let update = browser_sessions::handle_screenshot_update(
                     self,
                     event.order.as_ref(),
@@ -14885,7 +15537,8 @@ impl ChatWidget<'_> {
                             let last_index = len.saturating_sub(1);
                             let current_index = self.browser_overlay_state.screenshot_index();
                             if !self.browser_overlay_visible || current_index >= last_index {
-                                self.browser_overlay_state.set_screenshot_index(last_index);
+                                self.browser_overlay_state
+                                    .set_screenshot_index(last_index);
                             }
                         }
                     }
@@ -14901,19 +15554,25 @@ impl ChatWidget<'_> {
             }
             // Newer protocol variants we currently ignore in the TUI
             EventMsg::UserMessage(_) => {}
-            EventMsg::TurnAborted(_) => {}
+            EventMsg::TurnAborted(_) => {
+                self.pending_request_user_input = None;
+            }
             EventMsg::ConversationPath(_) => {}
             EventMsg::EnteredReviewMode(review_request) => {
                 if self.auto_resolve_enabled() {
                     self.auto_resolve_handle_review_enter();
                 }
-                let hint = review_request.user_facing_hint.trim();
+                let hint = review_request
+                    .user_facing_hint
+                    .as_deref()
+                    .unwrap_or("")
+                    .trim();
                 let banner = if hint.is_empty() {
                     ">> Code review started <<".to_string()
                 } else {
                     format!(">> Code review started: {hint} <<")
                 };
-                self.active_review_hint = Some(review_request.user_facing_hint.clone());
+                self.active_review_hint = review_request.user_facing_hint.clone();
                 self.active_review_prompt = Some(review_request.prompt.clone());
                 self.push_background_before_next_output(banner);
 
@@ -15075,10 +15734,7 @@ impl ChatWidget<'_> {
                 ],
                 "**Here's a demo walkthrough:**\n\n1. Run `./build-fast.sh perf` to compile quickly.\n2. Cache artifacts in `code-rs/target/perf`.\n3. Finish by sharing `./build-fast.sh run` output.\n\n```bash\n./build-fast.sh perf run\n```",
                 vec![
-                    (
-                        vec!["git", "status"],
-                        "On branch main\nnothing to commit, working tree clean\n",
-                    ),
+                    (vec!["git", "status"], "On branch main\nnothing to commit, working tree clean\n"),
                     (vec!["rg", "--files"], ""),
                 ],
                 Some(DemoPatch::Add {
@@ -15101,18 +15757,13 @@ impl ChatWidget<'_> {
                             status: StepStatus::Completed,
                         },
                     ],
+                    explanation: None,
                 },
-                (
-                    "browser_open",
-                    "https://example.com",
-                    "navigated to example.com",
-                ),
+                ("browser_open", "https://example.com", "navigated to example.com"),
                 ReasoningEffort::High,
                 "demo: lint warnings will appear here",
                 "demo: this slot shows error output",
-                Some(
-                    "diff --git a/src/lib.rs b/src/lib.rs\n@@ -1,3 +1,5 @@\n-pub fn hello() {}\n+pub fn hello() {\n+    println!(\"hello, demo!\");\n+}\n",
-                ),
+                Some("diff --git a/src/lib.rs b/src/lib.rs\n@@ -1,3 +1,5 @@\n-pub fn hello() {}\n+pub fn hello() {\n+    println!(\"hello, demo!\");\n+}\n"),
             ),
             (
                 "release rehearsal",
@@ -15129,10 +15780,7 @@ impl ChatWidget<'_> {
                 ],
                 "**Release rehearsal:**\n\n1. Run `./scripts/create_github_release.sh --dry-run`.\n2. Capture artifact hashes in the notes.\n3. Schedule follow-up validation in automation.\n\n```bash\n./scripts/create_github_release.sh 1.2.3 --dry-run\n```",
                 vec![
-                    (
-                        vec!["git", "--no-pager", "diff", "--stat"],
-                        " src/lib.rs | 10 ++++++----\n 1 file changed, 6 insertions(+), 4 deletions(-)\n",
-                    ),
+                    (vec!["git", "--no-pager", "diff", "--stat"], " src/lib.rs | 10 ++++++----\n 1 file changed, 6 insertions(+), 4 deletions(-)\n"),
                     (vec!["ls", "-1"], "Cargo.lock\nREADME.md\nsrc\ntarget\n"),
                 ],
                 Some(DemoPatch::Update {
@@ -15161,18 +15809,13 @@ impl ChatWidget<'_> {
                             status: StepStatus::Pending,
                         },
                     ],
+                    explanation: None,
                 },
-                (
-                    "browser_open",
-                    "https://example.com/releases",
-                    "reviewed release dashboard",
-                ),
+                ("browser_open", "https://example.com/releases", "reviewed release dashboard"),
                 ReasoningEffort::Medium,
                 "demo: release checklist warning",
                 "demo: release checklist error",
-                Some(
-                    "diff --git a/CHANGELOG.md b/CHANGELOG.md\n@@ -1,3 +1,6 @@\n+## 1.2.3\n+- polish release flow\n+- document automation hooks\n",
-                ),
+                Some("diff --git a/CHANGELOG.md b/CHANGELOG.md\n@@ -1,3 +1,6 @@\n+## 1.2.3\n+- polish release flow\n+- document automation hooks\n"),
             ),
         ];
 
@@ -15193,7 +15836,11 @@ impl ChatWidget<'_> {
                 diff_snippet,
             ) = scenario;
 
-            self.push_background_tail(format!("demo: scenario {} — {}", idx + 1, label));
+            self.push_background_tail(format!(
+                "demo: scenario {} — {}",
+                idx + 1,
+                label
+            ));
 
             self.history_push_plain_state(history_cell::new_user_prompt((*prompt).to_string()));
 
@@ -15245,7 +15892,7 @@ impl ChatWidget<'_> {
 
             for (command_tokens, stdout) in execs {
                 let cmd_vec: Vec<String> = command_tokens.iter().map(|s| s.to_string()).collect();
-                let parsed = hanzo_core::parse_command::parse_command(&cmd_vec);
+                let parsed = code_core::parse_command::parse_command(&cmd_vec);
                 self.history_push(history_cell::new_active_exec_command(
                     cmd_vec.clone(),
                     parsed.clone(),
@@ -15257,7 +15904,9 @@ impl ChatWidget<'_> {
                         stderr: String::new(),
                     };
                     self.history_push(history_cell::new_completed_exec_command(
-                        cmd_vec, parsed, output,
+                        cmd_vec,
+                        parsed,
+                        output,
                     ));
                 }
             }
@@ -15272,7 +15921,7 @@ impl ChatWidget<'_> {
                     DemoPatch::Add { path, content } => {
                         patch_changes.insert(
                             PathBuf::from(path),
-                            hanzo_core::protocol::FileChange::Add {
+                            code_core::protocol::FileChange::Add {
                                 content: (*content).to_string(),
                             },
                         );
@@ -15286,7 +15935,7 @@ impl ChatWidget<'_> {
                     } => {
                         patch_changes.insert(
                             PathBuf::from(path),
-                            hanzo_core::protocol::FileChange::Update {
+                            code_core::protocol::FileChange::Update {
                                 unified_diff: (*unified_diff).to_string(),
                                 move_path: None,
                                 original_content: (*original).to_string(),
@@ -15314,9 +15963,7 @@ impl ChatWidget<'_> {
                 (*result).to_string(),
             ));
 
-            self.history_push_plain_state(history_cell::new_warning_event(
-                (*warning_text).to_string(),
-            ));
+            self.history_push_plain_state(history_cell::new_warning_event((*warning_text).to_string()));
             self.history_push_plain_state(history_cell::new_error_event((*error_text).to_string()));
 
             self.history_push_plain_state(history_cell::new_model_output("gpt-5.1-codex", *effort));
@@ -15326,6 +15973,8 @@ impl ChatWidget<'_> {
                 &self.config,
                 &self.total_token_usage,
                 &self.last_token_usage,
+                self.session_requested_model.as_deref(),
+                self.session_latest_response_model.as_deref(),
             ));
 
             self.history_push_plain_state(history_cell::new_prompts_output());
@@ -15360,25 +16009,19 @@ impl ChatWidget<'_> {
             "Summarized API changes".to_string(),
         )];
         completed_preview.status_kind = history_cell::AgentStatusKind::Completed;
-        completed_preview.step_progress = Some(history_cell::StepProgress {
-            completed: 3,
-            total: 3,
-        });
+        completed_preview.step_progress = Some(history_cell::StepProgress { completed: 3, total: 3 });
         completed_preview.elapsed = Some(Duration::from_secs(32));
         completed_preview.last_update = Some("Wrapped up summary".to_string());
         let mut running_preview = history_cell::AgentStatusPreview::default();
         running_preview.id = "demo-running".to_string();
         running_preview.name = "Lint Fixer".to_string();
         running_preview.status = "Running".to_string();
-        running_preview.model = Some("code-gpt-5.2".to_string());
+        running_preview.model = Some("code-gpt-5.4".to_string());
         running_preview.details = vec![history_cell::AgentDetail::Progress(
             "Refining suggested fixes".to_string(),
         )];
         running_preview.status_kind = history_cell::AgentStatusKind::Running;
-        running_preview.step_progress = Some(history_cell::StepProgress {
-            completed: 1,
-            total: 3,
-        });
+        running_preview.step_progress = Some(history_cell::StepProgress { completed: 1, total: 3 });
         running_preview.elapsed = Some(Duration::from_secs(18));
         running_preview.last_update = Some("Step 2 of 3".to_string());
         agent_card.set_agent_overview(vec![completed_preview, running_preview]);
@@ -15417,10 +16060,7 @@ impl ChatWidget<'_> {
             "Scanning RFC summaries".to_string(),
         )];
         running_read.status_kind = history_cell::AgentStatusKind::Running;
-        running_read.step_progress = Some(history_cell::StepProgress {
-            completed: 2,
-            total: 5,
-        });
+        running_read.step_progress = Some(history_cell::StepProgress { completed: 2, total: 5 });
         running_read.elapsed = Some(Duration::from_secs(22));
         agent_read_card.set_agent_overview(vec![pending_preview, running_read]);
         agent_read_card.record_action("Fetching documentation excerpts");
@@ -15466,10 +16106,7 @@ impl ChatWidget<'_> {
         search_card.ensure_started_message();
         search_card.record_info(Duration::from_millis(120), "Searching documentation index");
         search_card.record_success(Duration::from_millis(620), "Found tokio.rs guides");
-        search_card.record_success(
-            Duration::from_millis(1040),
-            "Linked blog: cancellation patterns",
-        );
+        search_card.record_success(Duration::from_millis(1040), "Linked blog: cancellation patterns");
         search_card.set_status(history_cell::WebSearchStatus::Completed);
         search_card.set_duration(Some(Duration::from_millis(1400)));
         self.history_push(search_card);
@@ -15500,10 +16137,7 @@ impl ChatWidget<'_> {
         });
         let celebration_message = "Diagnostics report: all demo checks passed.".to_string();
         self.auto_state.last_completion_explanation = Some(celebration_message.clone());
-        self.schedule_auto_drive_card_celebration(
-            Duration::from_secs(2),
-            Some(celebration_message),
-        );
+        self.schedule_auto_drive_card_celebration(Duration::from_secs(2), Some(celebration_message));
 
         self.request_redraw();
     }
@@ -15560,8 +16194,10 @@ impl ChatWidget<'_> {
                 "Queued smoke tests across agents",
                 AutoDriveActionKind::Info,
             );
-            auto_drive_card
-                .push_action("Warning: macOS shard flaked", AutoDriveActionKind::Warning);
+            auto_drive_card.push_action(
+                "Warning: macOS shard flaked",
+                AutoDriveActionKind::Warning,
+            );
             auto_drive_card.push_action(
                 "Action required: retry or pause run",
                 AutoDriveActionKind::Error,
@@ -15618,6 +16254,8 @@ impl ChatWidget<'_> {
             &self.config,
             &self.total_token_usage,
             &self.last_token_usage,
+            self.session_requested_model.as_deref(),
+            self.session_latest_response_model.as_deref(),
         ));
     }
 
@@ -15658,8 +16296,7 @@ impl ChatWidget<'_> {
             return;
         }
 
-        let usage_records =
-            account_usage::list_rate_limit_snapshots(&code_home).unwrap_or_default();
+        let usage_records = account_usage::list_rate_limit_snapshots(&code_home).unwrap_or_default();
         let snapshot_map: HashMap<String, StoredRateLimitSnapshot> = usage_records
             .into_iter()
             .map(|record| (record.account_id.clone(), record))
@@ -15784,8 +16421,7 @@ impl ChatWidget<'_> {
             self.last_token_usage.tokens_in_context_window()
         });
         let context_window = self.config.model_context_window;
-        let context_tokens_used =
-            context_window.map(|_| self.last_token_usage.tokens_in_context_window());
+        let context_tokens_used = context_window.map(|_| self.last_token_usage.tokens_in_context_window());
 
         RateLimitResetInfo {
             primary_next_reset: self.rate_limit_primary_next_reset_at,
@@ -15801,7 +16437,7 @@ impl ChatWidget<'_> {
     fn rate_limit_display_config_for_account(
         account: Option<&StoredAccount>,
     ) -> RateLimitDisplayConfig {
-        if matches!(account.map(|acc| acc.mode), Some(McpAuthMode::ApiKey)) {
+        if matches!(account.map(|acc| acc.mode), Some(AuthMode::ApiKey)) {
             RateLimitDisplayConfig {
                 show_usage_sections: false,
                 show_chart: false,
@@ -15831,8 +16467,7 @@ impl ChatWidget<'_> {
     fn maybe_schedule_rate_limit_refresh(&mut self) {
         let Some(reset_at) = self.rate_limit_secondary_next_reset_at else {
             self.rate_limit_refresh_scheduled_for = None;
-            self.rate_limit_refresh_schedule_id
-                .fetch_add(1, Ordering::SeqCst);
+            self.rate_limit_refresh_schedule_id.fetch_add(1, Ordering::SeqCst);
             return;
         };
 
@@ -15956,31 +16591,29 @@ impl ChatWidget<'_> {
             return;
         }
 
-        let keyword = trimmed
-            .split_whitespace()
-            .next()
-            .unwrap_or("")
-            .to_ascii_lowercase();
+        let keyword = trimmed.split_whitespace().next().unwrap_or("").to_ascii_lowercase();
         match keyword.as_str() {
-            "status" => match &self.config.tui.notifications {
-                Notifications::Enabled(true) => {
-                    self.push_background_tail("🔔 TUI notifications are enabled.".to_string());
+            "status" => {
+                match &self.config.tui.notifications {
+                    Notifications::Enabled(true) => {
+                        self.push_background_tail("🔔 TUI notifications are enabled.".to_string());
+                    }
+                    Notifications::Enabled(false) => {
+                        self.push_background_tail("🔕 TUI notifications are disabled.".to_string());
+                    }
+                    Notifications::Custom(entries) => {
+                        let filters = if entries.is_empty() {
+                            "<none>".to_string()
+                        } else {
+                            entries.join(", ")
+                        };
+                        self.push_background_tail(format!(
+                            "🔔 TUI notifications use custom filters: [{}]",
+                            filters
+                        ));
+                    }
                 }
-                Notifications::Enabled(false) => {
-                    self.push_background_tail("🔕 TUI notifications are disabled.".to_string());
-                }
-                Notifications::Custom(entries) => {
-                    let filters = if entries.is_empty() {
-                        "<none>".to_string()
-                    } else {
-                        entries.join(", ")
-                    };
-                    self.push_background_tail(format!(
-                        "🔔 TUI notifications use custom filters: [{}]",
-                        filters
-                    ));
-                }
-            },
+            }
             "on" | "off" => {
                 let enable = keyword == "on";
                 match &self.config.tui.notifications {
@@ -16002,14 +16635,16 @@ impl ChatWidget<'_> {
                             entries.join(", ")
                         };
                         self.push_background_tail(format!(
-                            "TUI notifications use custom filters ([{}]); edit ~/.hanzo/config.toml to change them.",
+                            "TUI notifications use custom filters ([{}]); edit ~/.code/config.toml to change them.",
                             filters
                         ));
                     }
                 }
             }
             _ => {
-                self.push_background_tail("Usage: /notifications [status|on|off]".to_string());
+                self.push_background_tail(
+                    "Usage: /notifications [status|on|off]".to_string(),
+                );
             }
         }
     }
@@ -16083,7 +16718,7 @@ impl ChatWidget<'_> {
             "  • CWD: {}",
             self.config.cwd.display()
         )));
-        let in_git = hanzo_core::git_info::get_git_repo_root(&self.config.cwd).is_some();
+        let in_git = code_core::git_info::get_git_repo_root(&self.config.cwd).is_some();
         lines.push(Line::from(format!(
             "  • Git repo: {}",
             if in_git { "yes" } else { "no" }
@@ -16156,14 +16791,14 @@ impl ChatWidget<'_> {
                 } else {
                     a.command.clone()
                 };
-                let builtin = matches!(cmd.as_str(), "dev" | "code" | "codex" | "cloud");
+                let builtin = matches!(cmd.as_str(), "code" | "codex" | "cloud");
                 to_check.push((name, cmd, builtin));
             }
         } else {
             for spec in enabled_agent_model_specs() {
                 let name = spec.slug.to_string();
                 let cmd = spec.cli.to_string();
-                let builtin = matches!(spec.cli, "dev" | "code" | "codex" | "cloud");
+                let builtin = matches!(spec.cli, "code" | "codex" | "cloud");
                 to_check.push((name, cmd, builtin));
             }
         }
@@ -16303,14 +16938,8 @@ impl ChatWidget<'_> {
         let _ = self.with_login_add_view(|state| state.begin_device_code_flow());
     }
 
-    pub(crate) fn notify_login_device_code_ready(
-        &mut self,
-        authorize_url: String,
-        user_code: String,
-    ) {
-        let _ = self.with_login_add_view(|state| {
-            state.set_device_code_ready(authorize_url.clone(), user_code.clone())
-        });
+    pub(crate) fn notify_login_device_code_ready(&mut self, authorize_url: String, user_code: String) {
+        let _ = self.with_login_add_view(|state| state.set_device_code_ready(authorize_url.clone(), user_code.clone()));
     }
 
     pub(crate) fn notify_login_device_code_failed(&mut self, error: String) {
@@ -16339,10 +16968,7 @@ impl ChatWidget<'_> {
         self.bottom_pane.set_using_chatgpt_auth(using);
     }
 
-    fn spawn_update_refresh(
-        &self,
-        shared_state: std::sync::Arc<std::sync::Mutex<UpdateSharedState>>,
-    ) {
+    fn spawn_update_refresh(&self, shared_state: std::sync::Arc<std::sync::Mutex<UpdateSharedState>>) {
         let config = self.config.clone();
         let tx = self.app_event_tx.clone();
         tokio::spawn(async move {
@@ -16376,9 +17002,11 @@ impl ChatWidget<'_> {
 
         let resolution = crate::updates::resolve_upgrade_resolution();
         let (command, display, instructions) = match &resolution {
-            crate::updates::UpgradeResolution::Command { command, display } => {
-                (Some(command.clone()), Some(display.clone()), None)
-            }
+            crate::updates::UpgradeResolution::Command { command, display } => (
+                Some(command.clone()),
+                Some(display.clone()),
+                None,
+            ),
             crate::updates::UpgradeResolution::Manual { instructions } => {
                 (None, None, Some(instructions.clone()))
             }
@@ -16387,7 +17015,7 @@ impl ChatWidget<'_> {
         let view = UpdateSettingsView::new(
             self.app_event_tx.clone(),
             self.make_background_tail_ticket(),
-            hanzo_version::version().to_string(),
+            code_version::version().to_string(),
             self.config.auto_upgrade_enabled,
             command,
             display,
@@ -16413,6 +17041,14 @@ impl ChatWidget<'_> {
             self.config.api_key_fallback_on_all_accounts_limited,
         );
         AccountsSettingsContent::new(view)
+    }
+
+    fn build_memories_settings_content(&self) -> MemoriesSettingsContent {
+        let view = crate::bottom_pane::MemoriesSettingsView::new(
+            self.app_event_tx.clone(),
+            self.config.memories_enabled,
+        );
+        MemoriesSettingsContent::new(view)
     }
 
     fn build_validation_settings_content(&mut self) -> ValidationSettingsContent {
@@ -16442,15 +17078,15 @@ impl ChatWidget<'_> {
                 };
                 let requested = self.validation_tool_requested(status.name);
                 let group_enabled = self.validation_group_enabled(group);
-                ToolRow {
-                    status,
-                    enabled: requested,
-                    group_enabled,
-                }
+                ToolRow { status, enabled: requested, group_enabled }
             })
             .collect();
 
-        let view = ValidationSettingsView::new(groups, tool_rows, self.app_event_tx.clone());
+        let view = ValidationSettingsView::new(
+            groups,
+            tool_rows,
+            self.app_event_tx.clone(),
+        );
         ValidationSettingsContent::new(view)
     }
 
@@ -16498,6 +17134,14 @@ impl ChatWidget<'_> {
         let agents = self.auto_state.subagents_enabled;
         let cross = self.auto_state.cross_check_enabled;
         let qa = self.auto_state.qa_automation_enabled;
+        let model_routing = self.config.auto_drive.model_routing_enabled;
+        let model_routing_entries = self.config.auto_drive.model_routing_entries.clone();
+        let routing_model_options = self
+            .available_model_presets()
+            .into_iter()
+            .map(|preset| preset.model)
+            .filter(|model| model.to_ascii_lowercase().starts_with("gpt-"))
+            .collect::<Vec<_>>();
         let mode = self.auto_state.continue_mode;
         let view = AutoDriveSettingsView::new(
             self.app_event_tx.clone(),
@@ -16508,6 +17152,9 @@ impl ChatWidget<'_> {
             agents,
             cross,
             qa,
+            model_routing,
+            model_routing_entries,
+            routing_model_options,
             mode,
         );
         AutoDriveSettingsContent::new(view)
@@ -16562,15 +17209,19 @@ impl ChatWidget<'_> {
         let selected = if total_rows == 0 {
             0
         } else {
-            self.agents_overview_selected_index
+            self
+                .agents_overview_selected_index
                 .min(total_rows.saturating_sub(1))
         };
         self.agents_overview_selected_index = selected;
 
         self.ensure_settings_overlay_section(SettingsSection::Agents);
 
-        let updated =
-            self.try_update_agents_settings_overview(rows.clone(), commands.clone(), selected);
+        let updated = self.try_update_agents_settings_overview(
+            rows.clone(),
+            commands.clone(),
+            selected,
+        );
 
         if !updated {
             if let Some(overlay) = self.settings.overlay.as_mut() {
@@ -16636,8 +17287,7 @@ impl ChatWidget<'_> {
             let selected = if total == 0 {
                 0
             } else {
-                self.agents_overview_selected_index
-                    .min(total.saturating_sub(1))
+                self.agents_overview_selected_index.min(total.saturating_sub(1))
             };
             self.agents_overview_selected_index = selected;
 
@@ -16685,8 +17335,7 @@ impl ChatWidget<'_> {
             let selected = if total == 0 {
                 0
             } else {
-                self.agents_overview_selected_index
-                    .min(total.saturating_sub(1))
+                self.agents_overview_selected_index.min(total.saturating_sub(1))
             };
             self.agents_overview_selected_index = selected;
 
@@ -16763,7 +17412,10 @@ impl ChatWidget<'_> {
     }
 
     fn truncate_overlay_text(&self, text: &str, limit: usize) -> String {
-        let collapsed = text.split_whitespace().collect::<Vec<_>>().join(" ");
+        let collapsed = text
+            .split_whitespace()
+            .collect::<Vec<_>>()
+            .join(" ");
         let normalized = if collapsed.trim().is_empty() {
             text.trim().to_string()
         } else {
@@ -16795,23 +17447,17 @@ impl ChatWidget<'_> {
             );
 
             if is_terminal {
-                let (mut has_findings, findings_count, summary) =
+                let (has_findings, findings_count, summary) =
                     Self::parse_agent_review_result(entry.result.as_deref());
-
-                // Avoid showing a warning when we didn't get an explicit findings list.
-                // Some heuristic parses can claim "issues" but provide a zero count; treat those as clean
-                // to keep the UI consistent with successful, issue-free reviews.
-                if has_findings && findings_count == 0 {
-                    has_findings = false;
-                }
+                let effective_findings = if has_findings {
+                    findings_count.max(1)
+                } else {
+                    findings_count
+                };
 
                 let mut label = if has_findings {
-                    let plural = if findings_count == 1 {
-                        "issue"
-                    } else {
-                        "issues"
-                    };
-                    format!("Auto Review: {findings_count} {plural} found")
+                    let plural = if effective_findings == 1 { "issue" } else { "issues" };
+                    format!("Auto Review: {effective_findings} {plural} found")
                 } else if matches!(entry.status, AgentStatus::Completed) {
                     "Auto Review: no issues found".to_string()
                 } else {
@@ -16879,7 +17525,8 @@ impl ChatWidget<'_> {
                         if !text.is_empty() {
                             bullets.push((
                                 format!("Latest progress: {text}"),
-                                ratatui::style::Style::default().fg(crate::colors::text_dim()),
+                                ratatui::style::Style::default()
+                                    .fg(crate::colors::text_dim()),
                             ));
                         }
                     }
@@ -16891,24 +17538,8 @@ impl ChatWidget<'_> {
         let header_style = ratatui::style::Style::default()
             .fg(crate::colors::text())
             .add_modifier(ratatui::style::Modifier::BOLD);
-        let chevron = if collapsed {
-            if crate::theme::show_gutter() {
-                "▶"
-            } else {
-                ">"
-            }
-        } else {
-            if crate::theme::show_gutter() {
-                "▼"
-            } else {
-                "v"
-            }
-        };
-        let title = if crate::theme::show_borders() {
-            format!("╭ Highlights (h) {chevron} ")
-        } else {
-            format!("Highlights (h) {chevron} ")
-        };
+        let chevron = if collapsed { "▶" } else { "▼" };
+        let title = format!("╭ Highlights (h) {chevron} ");
         let title_width = unicode_width::UnicodeWidthStr::width(title.as_str()) as u16;
         let pad = available_width
             .saturating_sub(title_width)
@@ -16953,10 +17584,7 @@ impl ChatWidget<'_> {
         {
             if !error_text.is_empty() {
                 let msg = format!("Last error: {error_text}");
-                for (idx, wrapped) in textwrap::wrap(msg.as_str(), wrap_width)
-                    .into_iter()
-                    .enumerate()
-                {
+                for (idx, wrapped) in textwrap::wrap(msg.as_str(), wrap_width).into_iter().enumerate() {
                     let prefix = if idx == 0 { "│   " } else { "│     " };
                     lines.push(ratatui::text::Line::from(vec![
                         ratatui::text::Span::raw(prefix),
@@ -16984,10 +17612,8 @@ impl ChatWidget<'_> {
         available_width: u16,
         is_new_kind: bool,
     ) {
-        use ratatui::style::Modifier;
-        use ratatui::style::Style;
-        use ratatui::text::Line;
-        use ratatui::text::Span;
+        use ratatui::style::{Modifier, Style};
+        use ratatui::text::{Line, Span};
 
         let time_text = log.timestamp.format("%H:%M").to_string();
         let time_style = Style::default().fg(crate::colors::text_dim());
@@ -17020,10 +17646,7 @@ impl ChatWidget<'_> {
         for (line_idx, raw_line) in message_lines.into_iter().enumerate() {
             let sanitized = self.sanitize_agent_log_line(raw_line);
             let parsed = ansi_escape_line(&sanitized);
-            let wrapped = crate::insert_history::word_wrap_lines(
-                &[self.apply_log_fallback_style(parsed, message_base_style)],
-                wrap_width,
-            );
+            let wrapped = crate::insert_history::word_wrap_lines(&[self.apply_log_fallback_style(parsed, message_base_style)], wrap_width);
 
             for (wrap_idx, wrapped_line) in wrapped.into_iter().enumerate() {
                 let mut spans: Vec<Span> = Vec::new();
@@ -17044,6 +17667,7 @@ impl ChatWidget<'_> {
 
                 lines.push(Line::from(spans));
             }
+
         }
     }
 
@@ -17072,28 +17696,17 @@ impl ChatWidget<'_> {
     }
 
     fn strip_leading_timestamp<'a>(text: &'a str) -> &'a str {
-        fn is_digit(b: u8) -> bool {
-            b.is_ascii_digit()
-        }
+        fn is_digit(b: u8) -> bool { b.is_ascii_digit() }
 
         fn consume_hms(bytes: &[u8]) -> usize {
             if bytes.len() < 5 {
                 return 0;
             }
-            if !(is_digit(bytes[0])
-                && is_digit(bytes[1])
-                && bytes[2] == b':'
-                && is_digit(bytes[3])
-                && is_digit(bytes[4]))
-            {
+            if !(is_digit(bytes[0]) && is_digit(bytes[1]) && bytes[2] == b':' && is_digit(bytes[3]) && is_digit(bytes[4])) {
                 return 0;
             }
             let mut idx = 5;
-            if idx + 2 < bytes.len()
-                && bytes[idx] == b':'
-                && is_digit(bytes[idx + 1])
-                && is_digit(bytes[idx + 2])
-            {
+            if idx + 2 < bytes.len() && bytes[idx] == b':' && is_digit(bytes[idx + 1]) && is_digit(bytes[idx + 2]) {
                 idx += 3;
                 while idx < bytes.len() && (bytes[idx].is_ascii_digit() || bytes[idx] == b'.') {
                     idx += 1;
@@ -17147,11 +17760,15 @@ impl ChatWidget<'_> {
         candidate.trim_start()
     }
 
-    fn ensure_trailing_blank_line(&self, lines: &mut Vec<ratatui::text::Line<'static>>) {
+    fn ensure_trailing_blank_line(
+        &self,
+        lines: &mut Vec<ratatui::text::Line<'static>>,
+    ) {
         if lines
             .last()
             .map(|line| {
-                line.spans.is_empty() || (line.spans.len() == 1 && line.spans[0].content.is_empty())
+                line.spans.is_empty()
+                    || (line.spans.len() == 1 && line.spans[0].content.is_empty())
             })
             .unwrap_or(false)
         {
@@ -17162,12 +17779,13 @@ impl ChatWidget<'_> {
 
     fn update_agents_terminal_state(
         &mut self,
-        agents: &[hanzo_core::protocol::AgentInfo],
+        agents: &[code_core::protocol::AgentInfo],
         context: Option<String>,
         task: Option<String>,
     ) {
         self.agents_terminal.shared_context = context;
         self.agents_terminal.shared_task = task;
+        let now = Instant::now();
 
         let mut saw_new_agent = false;
         for info in agents {
@@ -17178,7 +17796,13 @@ impl ChatWidget<'_> {
                 .map(|id| self.agent_batch_metadata(id))
                 .unwrap_or_default();
             let is_new = !self.agents_terminal.entries.contains_key(&info.id);
-            if is_new && !self.agents_terminal.order.iter().any(|id| id == &info.id) {
+            if is_new
+                && !self
+                    .agents_terminal
+                    .order
+                    .iter()
+                    .any(|id| id == &info.id)
+            {
                 self.agents_terminal.order.push(info.id.clone());
                 saw_new_agent = true;
             }
@@ -17204,12 +17828,9 @@ impl ChatWidget<'_> {
             entry.batch_id = info.batch_id.clone();
             entry.model = info.model.clone();
             entry.source_kind = info.source_kind.clone();
+            entry.last_seen_at = now;
 
-            let AgentBatchMetadata {
-                label,
-                prompt: meta_prompt,
-                context: meta_context,
-            } = batch_metadata;
+            let AgentBatchMetadata { label, prompt: meta_prompt, context: meta_context } = batch_metadata;
             let auto_review_label = matches!(entry.source_kind, Some(AgentSourceKind::AutoReview))
                 .then(|| "Auto Review".to_string());
             let previous_label = entry.batch_label.clone();
@@ -17224,7 +17845,9 @@ impl ChatWidget<'_> {
                 .clone()
                 .or_else(|| self.agent_task.clone());
             let previous_prompt = entry.batch_prompt.clone();
-            entry.batch_prompt = meta_prompt.or(fallback_prompt).or(previous_prompt);
+            entry.batch_prompt = meta_prompt
+                .or(fallback_prompt)
+                .or(previous_prompt);
 
             let fallback_context = self
                 .agents_terminal
@@ -17232,7 +17855,9 @@ impl ChatWidget<'_> {
                 .clone()
                 .or_else(|| self.agent_context.clone());
             let previous_context = entry.batch_context.clone();
-            entry.batch_context = meta_context.or(fallback_context).or(previous_context);
+            entry.batch_context = meta_context
+                .or(fallback_context)
+                .or(previous_context);
 
             if entry.status != status {
                 entry.status = status.clone();
@@ -17277,9 +17902,10 @@ impl ChatWidget<'_> {
         }
 
         self.agents_terminal.clamp_selected_index();
+        self.prune_agents_terminal_entries();
 
         if saw_new_agent && self.agents_terminal.active {
-            self.layout.scroll_offset = 0;
+            self.layout.scroll_offset.set(0);
         }
     }
 
@@ -17292,10 +17918,14 @@ impl ChatWidget<'_> {
         self.agents_terminal.focus_sidebar();
         self.agents_terminal.clear_stop_prompt();
         self.bottom_pane.set_input_focus(false);
-        self.agents_terminal.saved_scroll_offset = self.layout.scroll_offset;
+        self.agents_terminal.saved_scroll_offset = self.layout.scroll_offset.get();
         if self.agents_terminal.order.is_empty() {
             for agent in &self.active_agents {
-                if !self.agents_terminal.entries.contains_key(&agent.id) {
+                if !self
+                    .agents_terminal
+                    .entries
+                    .contains_key(&agent.id)
+                {
                     self.agents_terminal.order.push(agent.id.clone());
                     let mut entry = AgentTerminalEntry::new(
                         agent.name.clone(),
@@ -17308,11 +17938,7 @@ impl ChatWidget<'_> {
                         .as_deref()
                         .map(|id| self.agent_batch_metadata(id))
                         .unwrap_or_default();
-                    let AgentBatchMetadata {
-                        label,
-                        prompt: meta_prompt,
-                        context: meta_context,
-                    } = batch_metadata;
+                    let AgentBatchMetadata { label, prompt: meta_prompt, context: meta_context } = batch_metadata;
                     entry.batch_label = label
                         .or_else(|| agent.batch_id.clone())
                         .or(entry.batch_label.clone());
@@ -17344,7 +17970,9 @@ impl ChatWidget<'_> {
                         entry.error = Some(error.clone());
                         entry.push_log(AgentLogKind::Error, error.clone());
                     }
-                    self.agents_terminal.entries.insert(agent.id.clone(), entry);
+                    self.agents_terminal
+                        .entries
+                        .insert(agent.id.clone(), entry);
                 }
             }
         }
@@ -17361,7 +17989,8 @@ impl ChatWidget<'_> {
         self.agents_terminal.active = false;
         self.agents_terminal.clear_stop_prompt();
         self.agents_terminal.focus_sidebar();
-        self.layout.scroll_offset = self.agents_terminal.saved_scroll_offset;
+        self.layout.scroll_offset
+            .set(self.agents_terminal.saved_scroll_offset);
         self.bottom_pane.set_input_focus(true);
         self.request_redraw();
     }
@@ -17371,8 +18000,10 @@ impl ChatWidget<'_> {
             let capped = self
                 .layout
                 .scroll_offset
+                .get()
                 .min(self.layout.last_max_scroll.get());
-            self.agents_terminal
+            self
+                .agents_terminal
                 .scroll_offsets
                 .insert(entry.scroll_key(), capped);
         }
@@ -17383,10 +18014,13 @@ impl ChatWidget<'_> {
             // Always reset to the top when switching agents; use a sentinel so the
             // next render clamps to the new agent's maximum scroll.
             let key = entry.scroll_key();
-            self.agents_terminal.scroll_offsets.insert(key, u16::MAX);
-            self.layout.scroll_offset = u16::MAX;
+            self
+                .agents_terminal
+                .scroll_offsets
+                .insert(key, u16::MAX);
+            self.layout.scroll_offset.set(u16::MAX);
         } else {
-            self.layout.scroll_offset = 0;
+            self.layout.scroll_offset.set(0);
         }
     }
 
@@ -17399,25 +18033,24 @@ impl ChatWidget<'_> {
             .last_render_scroll
             .get()
             .min(self.layout.last_max_scroll.get());
-        self.layout.scroll_offset = applied;
+        self.layout.scroll_offset.set(applied);
         if let Some(entry) = self.agents_terminal.current_sidebar_entry() {
-            self.agents_terminal
+            self
+                .agents_terminal
                 .scroll_offsets
                 .insert(entry.scroll_key(), applied);
         }
     }
 
     fn prompt_stop_selected_agent(&mut self) {
-        let Some(AgentsSidebarEntry::Agent(agent_id)) =
-            self.agents_terminal.current_sidebar_entry()
-        else {
+        let Some(AgentsSidebarEntry::Agent(agent_id)) = self.agents_terminal.current_sidebar_entry() else {
             return;
         };
 
-        let is_active = self.active_agents.iter().any(|agent| {
-            agent.id == agent_id
-                && matches!(agent.status, AgentStatus::Pending | AgentStatus::Running)
-        });
+        let is_active = self
+            .active_agents
+            .iter()
+            .any(|agent| agent.id == agent_id && matches!(agent.status, AgentStatus::Pending | AgentStatus::Running));
         let is_entry_active = self
             .agents_terminal
             .entries
@@ -17500,9 +18133,7 @@ impl ChatWidget<'_> {
                 && matches!(agent.status, AgentStatus::Pending | AgentStatus::Running)
             {
                 agent.status = AgentStatus::Cancelled;
-                agent
-                    .error
-                    .get_or_insert_with(|| "Cancelled by user".to_string());
+                agent.error.get_or_insert_with(|| "Cancelled by user".to_string());
             }
         }
 
@@ -17831,7 +18462,9 @@ fi\n\
             auto_close_on_success: false,
             start_running: true,
         };
-        self.push_background_before_next_output(format!("Terminal command: {command}"));
+        self.push_background_before_next_output(format!(
+            "Terminal command: {command}"
+        ));
         self.app_event_tx.send(AppEvent::OpenTerminal(launch));
         let cwd = self.config.cwd.to_string_lossy().to_string();
         start_direct_terminal_session(
@@ -17863,7 +18496,9 @@ fi\n\
             start_running: true,
         };
 
-        self.push_background_before_next_output(format!("Guided terminal request: {prompt}"));
+        self.push_background_before_next_output(format!(
+            "Guided terminal request: {prompt}"
+        ));
         self.app_event_tx.send(AppEvent::OpenTerminal(launch));
         start_prompt_terminal_session(
             self.app_event_tx.clone(),
@@ -17975,8 +18610,7 @@ fi\n\
         self.bottom_pane.show_auto_coordinator_view(model);
         self.bottom_pane.set_task_running(false);
         self.bottom_pane.clear_live_ring();
-        self.bottom_pane
-            .update_status_text("Auto Drive".to_string());
+        self.bottom_pane.update_status_text("Auto Drive".to_string());
         self.auto_update_terminal_hint();
         self.bottom_pane.ensure_input_focus();
         self.clear_composer();
@@ -17992,7 +18626,8 @@ fi\n\
         let last_decision_summary = self.auto_state.last_decision_summary.clone();
         let last_decision_status_sent_to_user =
             self.auto_state.last_decision_status_sent_to_user.clone();
-        let last_decision_status_title = self.auto_state.last_decision_status_title.clone();
+        let last_decision_status_title =
+            self.auto_state.last_decision_status_title.clone();
         let last_decision_display = self.auto_state.last_decision_display.clone();
         let last_decision_display_is_summary = self.auto_state.last_decision_display_is_summary;
 
@@ -18039,19 +18674,9 @@ fi\n\
         self.config.auto_drive.qa_automation_enabled = qa_automation_enabled;
         let coordinator_events = {
             let app_event_tx = self.app_event_tx.clone();
-            AutoCoordinatorEventSender::new(move |event| match event {
-                AutoCoordinatorEvent::Decision {
-                    seq,
-                    status,
-                    status_title,
-                    status_sent_to_user,
-                    goal,
-                    cli,
-                    agents_timing,
-                    agents,
-                    transcript,
-                } => {
-                    app_event_tx.send(AppEvent::AutoCoordinatorDecision {
+            AutoCoordinatorEventSender::new(move |event| {
+                match event {
+                    AutoCoordinatorEvent::Decision {
                         seq,
                         status,
                         status_title,
@@ -18061,55 +18686,58 @@ fi\n\
                         agents_timing,
                         agents,
                         transcript,
-                    });
-                }
-                AutoCoordinatorEvent::Thinking {
-                    delta,
-                    summary_index,
-                } => {
-                    app_event_tx.send(AppEvent::AutoCoordinatorThinking {
-                        delta,
-                        summary_index,
-                    });
-                }
-                AutoCoordinatorEvent::Action { message } => {
-                    app_event_tx.send(AppEvent::AutoCoordinatorAction { message });
-                }
-                AutoCoordinatorEvent::UserReply {
-                    user_response,
-                    cli_command,
-                } => {
-                    app_event_tx.send(AppEvent::AutoCoordinatorUserReply {
+                    } => {
+                        app_event_tx.send(AppEvent::AutoCoordinatorDecision {
+                            seq,
+                            status,
+                            status_title,
+                            status_sent_to_user,
+                            goal,
+                            cli,
+                            agents_timing,
+                            agents,
+                            transcript,
+                        });
+                    }
+                    AutoCoordinatorEvent::Thinking { delta, summary_index } => {
+                        app_event_tx.send(AppEvent::AutoCoordinatorThinking { delta, summary_index });
+                    }
+                    AutoCoordinatorEvent::Action { message } => {
+                        app_event_tx.send(AppEvent::AutoCoordinatorAction { message });
+                    }
+                    AutoCoordinatorEvent::UserReply {
                         user_response,
                         cli_command,
-                    });
-                }
-                AutoCoordinatorEvent::TokenMetrics {
-                    total_usage,
-                    last_turn_usage,
-                    turn_count,
-                    duplicate_items,
-                    replay_updates,
-                } => {
-                    app_event_tx.send(AppEvent::AutoCoordinatorTokenMetrics {
+                    } => {
+                        app_event_tx.send(AppEvent::AutoCoordinatorUserReply {
+                            user_response,
+                            cli_command,
+                        });
+                    }
+                    AutoCoordinatorEvent::TokenMetrics {
                         total_usage,
                         last_turn_usage,
                         turn_count,
                         duplicate_items,
                         replay_updates,
-                    });
-                }
-                AutoCoordinatorEvent::CompactedHistory {
-                    conversation,
-                    show_notice,
-                } => {
-                    app_event_tx.send(AppEvent::AutoCoordinatorCompactedHistory {
-                        conversation,
-                        show_notice,
-                    });
-                }
-                AutoCoordinatorEvent::StopAck => {
-                    app_event_tx.send(AppEvent::AutoCoordinatorStopAck);
+                    } => {
+                        app_event_tx.send(AppEvent::AutoCoordinatorTokenMetrics {
+                            total_usage,
+                            last_turn_usage,
+                            turn_count,
+                            duplicate_items,
+                            replay_updates,
+                        });
+                    }
+                    AutoCoordinatorEvent::CompactedHistory { conversation, show_notice } => {
+                        app_event_tx.send(AppEvent::AutoCoordinatorCompactedHistory {
+                            conversation,
+                            show_notice,
+                        });
+                    }
+                    AutoCoordinatorEvent::StopAck => {
+                        app_event_tx.send(AppEvent::AutoCoordinatorStopAck);
+                    }
                 }
             })
         };
@@ -18117,9 +18745,32 @@ fi\n\
         let mut auto_config = self.config.clone();
         auto_config.model = self.config.auto_drive.model.trim().to_string();
         if auto_config.model.is_empty() {
-            auto_config.model = hanzo_auto_drive_core::MODEL_SLUG.to_string();
+            auto_config.model = code_auto_drive_core::MODEL_SLUG.to_string();
         }
         auto_config.model_reasoning_effort = self.config.auto_drive.model_reasoning_effort;
+        let available_gpt_models = self
+            .available_model_presets()
+            .into_iter()
+            .map(|preset| preset.model)
+            .filter(|model| model.to_ascii_lowercase().starts_with("gpt-"))
+            .collect::<Vec<_>>();
+        auto_config.auto_drive.model_routing_entries = Self::sanitize_auto_drive_routing_entries(
+            auto_config.auto_drive.model_routing_entries.clone(),
+            &available_gpt_models,
+        );
+        if auto_config.auto_drive.model_routing_enabled
+            && !auto_config
+                .auto_drive
+                .model_routing_entries
+                .iter()
+                .any(|entry| entry.enabled)
+        {
+            auto_config.auto_drive.model_routing_enabled = false;
+            self.bottom_pane.flash_footer_notice(
+                "Auto Drive model routing disabled for this run because no enabled routing entries are available."
+                    .to_string(),
+            );
+        }
 
         let mut pid_guard = AutoDrivePidFile::write(
             &self.config.code_home,
@@ -18139,16 +18790,16 @@ fi\n\
                 self.auto_handle = Some(handle);
                 self.auto_drive_pid_guard = pid_guard.take();
                 let placeholder = auto_drive_strings::next_auto_drive_phrase().to_string();
-                let effects = self.auto_state.launch_succeeded(
-                    goal.clone(),
-                    Some(placeholder),
-                    Instant::now(),
-                );
+                let effects = self
+                    .auto_state
+                    .launch_succeeded(goal.clone(), Some(placeholder), Instant::now());
                 self.auto_apply_controller_effects(effects);
             }
             Err(err) => {
                 drop(pid_guard);
-                let effects = self.auto_state.launch_failed(goal.clone(), err.to_string());
+                let effects = self
+                    .auto_state
+                    .launch_failed(goal.clone(), err.to_string());
                 self.auto_apply_controller_effects(effects);
             }
         }
@@ -18170,7 +18821,8 @@ fi\n\
 
         if !full_auto_enabled && !(trimmed.is_empty() && self.auto_state.is_active()) {
             self.push_background_tail(
-                "Please use Shift+Tab to switch to Full Auto before using Auto Drive".to_string(),
+                "Please use Shift+Tab to switch to Full Auto before using Auto Drive"
+                    .to_string(),
             );
             self.request_redraw();
             return;
@@ -18248,8 +18900,29 @@ fi\n\
         agents_enabled: bool,
         cross_check_enabled: bool,
         qa_automation_enabled: bool,
+        model_routing_enabled: bool,
+        model_routing_entries: Vec<AutoDriveModelRoutingEntry>,
         continue_mode: AutoContinueMode,
     ) {
+        let available_gpt_models = self
+            .available_model_presets()
+            .into_iter()
+            .map(|preset| preset.model)
+            .filter(|model| model.to_ascii_lowercase().starts_with("gpt-"))
+            .collect::<Vec<_>>();
+        let sanitized_routing_entries =
+            Self::sanitize_auto_drive_routing_entries(model_routing_entries, &available_gpt_models);
+        if model_routing_enabled
+            && !sanitized_routing_entries.iter().any(|entry| entry.enabled)
+        {
+            self.bottom_pane.flash_footer_notice(
+                "Enable at least one Auto Drive routing entry before turning routing on."
+                    .to_string(),
+            );
+            self.request_redraw();
+            return;
+        }
+
         let mut changed = false;
         if self.auto_state.review_enabled != review_enabled {
             self.auto_state.review_enabled = review_enabled;
@@ -18267,6 +18940,14 @@ fi\n\
             self.auto_state.qa_automation_enabled = qa_automation_enabled;
             changed = true;
         }
+        if self.config.auto_drive.model_routing_enabled != model_routing_enabled {
+            self.config.auto_drive.model_routing_enabled = model_routing_enabled;
+            changed = true;
+        }
+        if self.config.auto_drive.model_routing_entries != sanitized_routing_entries {
+            self.config.auto_drive.model_routing_entries = sanitized_routing_entries.clone();
+            changed = true;
+        }
         if self.auto_state.continue_mode != continue_mode {
             let effects = self.auto_state.update_continue_mode(continue_mode);
             self.auto_apply_controller_effects(effects);
@@ -18281,15 +18962,18 @@ fi\n\
         self.config.auto_drive.agents_enabled = agents_enabled;
         self.config.auto_drive.cross_check_enabled = cross_check_enabled;
         self.config.auto_drive.qa_automation_enabled = qa_automation_enabled;
+        self.config.auto_drive.model_routing_enabled = model_routing_enabled;
+        self.config.auto_drive.model_routing_entries = sanitized_routing_entries;
         self.config.auto_drive.continue_mode = auto_continue_to_config(continue_mode);
         self.restore_auto_resolve_attempts_if_lost();
 
-        if let Ok(home) = hanzo_core::config::find_code_home() {
-            if let Err(err) = hanzo_core::config::set_auto_drive_settings(
+        if let Ok(home) = code_core::config::find_code_home() {
+            if let Err(err) = code_core::config::set_auto_drive_settings(
                 &home,
                 &self.config.auto_drive,
                 self.config.auto_drive_use_chat_model,
-            ) {
+            )
+            {
                 tracing::warn!("Failed to persist Auto Drive settings: {err}");
             }
         } else {
@@ -18314,9 +18998,7 @@ fi\n\
             return;
         };
         if handle
-            .send(AutoCoordinatorCommand::UpdateConversation(
-                conversation.into(),
-            ))
+            .send(AutoCoordinatorCommand::UpdateConversation(conversation.into()))
             .is_err()
         {
             self.auto_stop(Some("Coordinator stopped unexpectedly.".to_string()));
@@ -18329,6 +19011,8 @@ fi\n\
             self.auto_state.current_status_title = None;
             self.auto_state.current_cli_prompt = None;
             self.auto_state.current_cli_context = None;
+            self.auto_state.current_cli_model_override = None;
+            self.auto_state.current_cli_reasoning_effort_override = None;
             self.auto_state.hide_cli_context_in_ui = false;
             self.auto_state.last_broadcast_summary = None;
             self.auto_state.current_summary_index = None;
@@ -18355,9 +19039,7 @@ fi\n\
             return;
         };
         if handle
-            .send(AutoCoordinatorCommand::UpdateConversation(
-                conversation.into(),
-            ))
+            .send(AutoCoordinatorCommand::UpdateConversation(conversation.into()))
             .is_err()
         {
             self.auto_stop(Some("Coordinator stopped unexpectedly.".to_string()));
@@ -18370,6 +19052,8 @@ fi\n\
             self.auto_state.current_status_title = None;
             self.auto_state.current_cli_prompt = None;
             self.auto_state.current_cli_context = None;
+            self.auto_state.current_cli_model_override = None;
+            self.auto_state.current_cli_reasoning_effort_override = None;
             self.auto_state.hide_cli_context_in_ui = false;
             self.auto_state.last_broadcast_summary = None;
             self.auto_state.current_summary_index = None;
@@ -18430,9 +19114,7 @@ fi\n\
             "host unreachable",
             "send request",
         ];
-        TRANSIENT_MARKERS
-            .iter()
-            .any(|needle| lower.contains(needle))
+        TRANSIENT_MARKERS.iter().any(|needle| lower.contains(needle))
     }
 
     fn auto_schedule_restart_event(&self, token: u64, attempt: u32, delay: Duration) {
@@ -18480,12 +19162,11 @@ fi\n\
         cli: Option<AutoTurnCliAction>,
         agents_timing: Option<AutoTurnAgentsTiming>,
         agents: Vec<AutoTurnAgentsAction>,
-        transcript: Vec<hanzo_protocol::models::ResponseItem>,
+        transcript: Vec<code_protocol::models::ResponseItem>,
     ) {
         if !self.auto_state.is_active() {
             if let Some(handle) = self.auto_handle.as_ref() {
-                let _ =
-                    handle.send(hanzo_auto_drive_core::AutoCoordinatorCommand::AckDecision { seq });
+                let _ = handle.send(code_auto_drive_core::AutoCoordinatorCommand::AckDecision { seq });
             }
             return;
         }
@@ -18509,7 +19190,7 @@ fi\n\
         }
 
         if let Some(handle) = self.auto_handle.as_ref() {
-            let _ = handle.send(hanzo_auto_drive_core::AutoCoordinatorCommand::AckDecision { seq });
+            let _ = handle.send(code_auto_drive_core::AutoCoordinatorCommand::AckDecision { seq });
         }
 
         self.auto_state.current_status_sent_to_user = status_sent_to_user.clone();
@@ -18520,11 +19201,21 @@ fi\n\
             .as_ref()
             .map(|action| action.suppress_ui_context)
             .unwrap_or(false);
-        let cli_context_raw = cli.as_ref().and_then(|action| action.context.clone());
+        let cli_context_raw = cli
+            .as_ref()
+            .and_then(|action| action.context.clone());
         let cli_context = Self::normalize_status_field(cli_context_raw);
         let cli_prompt = cli.as_ref().map(|action| action.prompt.clone());
+        let cli_model_override = cli
+            .as_ref()
+            .and_then(|action| action.model_override.clone());
+        let cli_reasoning_effort_override = cli
+            .as_ref()
+            .and_then(|action| action.reasoning_effort_override);
 
         self.auto_state.current_cli_context = cli_context.clone();
+        self.auto_state.current_cli_model_override = cli_model_override.clone();
+        self.auto_state.current_cli_reasoning_effort_override = cli_reasoning_effort_override;
         self.auto_state.hide_cli_context_in_ui = planning_turn;
         self.auto_state.suppress_next_cli_display = planning_turn;
         if let Some(ref prompt_text) = cli_prompt {
@@ -18540,7 +19231,7 @@ fi\n\
         self.auto_state.last_decision_display = self.auto_state.current_display_line.clone();
         self.auto_state.last_decision_display_is_summary =
             self.auto_state.current_display_is_summary;
-        self.auto_state.on_resume_from_manual();
+            self.auto_state.on_resume_from_manual();
 
         self.pending_turn_descriptor = None;
         self.pending_auto_turn_config = None;
@@ -18550,7 +19241,10 @@ fi\n\
             .map(|value| value.trim())
             .filter(|value| !value.is_empty())
         {
-            self.auto_card_add_action(format!("Status: {current}"), AutoDriveActionKind::Info);
+            self.auto_card_add_action(
+                format!("Status: {current}"),
+                AutoDriveActionKind::Info,
+            );
         }
 
         let mut promoted_agents: Vec<String> = Vec::new();
@@ -18572,8 +19266,8 @@ fi\n\
 
         if continue_status {
             self.auto_state.pending_agent_actions = resolved_agents;
-            self.auto_state.pending_agent_timing =
-                agents_timing.filter(|_| !self.auto_state.pending_agent_actions.is_empty());
+            self.auto_state.pending_agent_timing = agents_timing
+                .filter(|_| !self.auto_state.pending_agent_actions.is_empty());
         } else {
             self.auto_state.pending_agent_actions.clear();
             self.auto_state.pending_agent_timing = None;
@@ -18600,7 +19294,7 @@ fi\n\
 
         if !matches!(status, AutoCoordinatorStatus::Failed) {
             self.auto_state.transient_restart_attempts = 0;
-            self.auto_state.on_recovery_attempt();
+           self.auto_state.on_recovery_attempt();
             self.auto_state.pending_restart = None;
         }
 
@@ -18620,7 +19314,13 @@ fi\n\
                         ));
                     }
                 } else {
-                    self.schedule_auto_cli_prompt(seq, prompt_text);
+                    self.schedule_auto_cli_prompt_with_override(
+                        seq,
+                        prompt_text,
+                        cli_model_override,
+                        cli_reasoning_effort_override,
+                        None,
+                    );
                 }
             }
             AutoCoordinatorStatus::Success => {
@@ -18653,9 +19353,7 @@ Have we met every part of this goal and is there no further work to do?"#
                     r#type: "json_schema".to_string(),
                     name: Some("auto_drive_diagnostics".to_string()),
                     strict: Some(true),
-                    schema: Some(
-                        hanzo_auto_drive_diagnostics::AutoDriveDiagnostics::completion_schema(),
-                    ),
+                    schema: Some(code_auto_drive_diagnostics::AutoDriveDiagnostics::completion_schema()),
                 };
                 self.submit_op(Op::SetNextTextFormat { format: tf.clone() });
                 self.next_cli_text_format = Some(tf);
@@ -18697,7 +19395,8 @@ Have we met every part of this goal and is there no further work to do?"#
     ) {
         if let Some(text) = user_response.clone() {
             if let Some(item) = Self::auto_drive_make_assistant_message(text.clone()) {
-                self.auto_history.append_raw(std::slice::from_ref(&item));
+                self.auto_history
+                    .append_raw(std::slice::from_ref(&item));
             }
             let mut lines = Vec::with_capacity(2);
             lines.push("AUTO DRIVE RESPONSE".to_string());
@@ -18731,13 +19430,14 @@ Have we met every part of this goal and is there no further work to do?"#
         duplicate_items: u32,
         replay_updates: u32,
     ) {
-        self.auto_history.apply_token_metrics(
-            total_usage,
-            last_turn_usage,
-            turn_count,
-            duplicate_items,
-            replay_updates,
-        );
+        self.auto_history
+            .apply_token_metrics(
+                total_usage,
+                last_turn_usage,
+                turn_count,
+                duplicate_items,
+                replay_updates,
+            );
         self.request_redraw();
     }
 
@@ -18753,8 +19453,8 @@ Have we met every part of this goal and is there no further work to do?"#
     ) {
         let (previous_items, previous_indices) = self.export_auto_drive_items_with_indices();
         let conversation = conversation.as_ref().to_vec();
-        self.auto_compaction_overlay =
-            self.derive_compaction_overlay(&previous_items, &previous_indices, &conversation);
+        self.auto_compaction_overlay = self
+            .derive_compaction_overlay(&previous_items, &previous_indices, &conversation);
         self.auto_history.replace_all(conversation);
         if show_notice {
             self.history_push_plain_paragraphs(
@@ -18767,19 +19467,33 @@ Have we met every part of this goal and is there no further work to do?"#
     }
 
     fn schedule_auto_cli_prompt(&mut self, decision_seq: u64, prompt_text: String) {
-        self.schedule_auto_cli_prompt_with_override(decision_seq, prompt_text, None);
+        self.schedule_auto_cli_prompt_with_override(
+            decision_seq,
+            prompt_text,
+            None,
+            None,
+            None,
+        );
     }
 
     fn schedule_auto_cli_prompt_with_override(
         &mut self,
         decision_seq: u64,
         prompt_text: String,
+        cli_model_override: Option<String>,
+        cli_reasoning_effort_override: Option<ReasoningEffort>,
         countdown_override: Option<u8>,
     ) {
         self.auto_state.suppress_next_cli_display = false;
-        let effects =
-            self.auto_state
-                .schedule_cli_prompt(decision_seq, prompt_text, countdown_override);
+        let effects = self
+            .auto_state
+            .schedule_cli_prompt(
+                decision_seq,
+                prompt_text,
+                cli_model_override,
+                cli_reasoning_effort_override,
+                countdown_override,
+            );
         self.auto_apply_controller_effects(effects);
     }
 
@@ -18793,8 +19507,8 @@ Have we met every part of this goal and is there no further work to do?"#
 
     fn auto_apply_controller_effects(&mut self, effects: Vec<AutoControllerEffect>) {
         for effect in effects {
-            match effect {
-                AutoControllerEffect::RefreshUi => {
+        match effect {
+            AutoControllerEffect::RefreshUi => {
                     self.auto_rebuild_live_ring();
                     self.request_redraw();
                 }
@@ -18825,8 +19539,7 @@ Have we met every part of this goal and is there no further work to do?"#
                 }
                 AutoControllerEffect::LaunchStarted { goal } => {
                     self.bottom_pane.set_task_running(false);
-                    self.bottom_pane
-                        .update_status_text("Auto Drive".to_string());
+                    self.bottom_pane.update_status_text("Auto Drive".to_string());
                     self.auto_card_start(Some(goal.clone()));
                     self.auto_card_add_action(
                         format!("Auto Drive started: {goal}"),
@@ -18835,7 +19548,9 @@ Have we met every part of this goal and is there no further work to do?"#
                     self.auto_card_set_status(AutoDriveStatus::Running);
                 }
                 AutoControllerEffect::LaunchFailed { goal, error } => {
-                    let message = format!("Coordinator failed to start for goal '{goal}': {error}");
+                    let message = format!(
+                        "Coordinator failed to start for goal '{goal}': {error}"
+                    );
                     self.auto_card_finalize(
                         Some(message),
                         AutoDriveStatus::Failed,
@@ -18857,18 +19572,10 @@ Have we met every part of this goal and is there no further work to do?"#
                                 AutoDriveActionKind::Info,
                             );
                         } else {
-                            self.auto_card_finalize(
-                                None,
-                                AutoDriveStatus::Stopped,
-                                AutoDriveActionKind::Info,
-                            );
+                            self.auto_card_finalize(None, AutoDriveStatus::Stopped, AutoDriveActionKind::Info);
                         }
                     } else {
-                        self.auto_card_finalize(
-                            None,
-                            AutoDriveStatus::Stopped,
-                            AutoDriveActionKind::Info,
-                        );
+                        self.auto_card_finalize(None, AutoDriveStatus::Stopped, AutoDriveActionKind::Info);
                     }
                     self.schedule_auto_drive_card_celebration(
                         Duration::from_secs(0),
@@ -18890,7 +19597,7 @@ Have we met every part of this goal and is there no further work to do?"#
                     self.bottom_pane
                         .update_status_text("Auto Drive paused".to_string());
                     self.bottom_pane.set_standard_terminal_hint(Some(
-                        "Press Esc again to exit Auto Drive".to_string(),
+                        AUTO_ESC_EXIT_HINT.to_string(),
                     ));
                     let message = format!(
                         "Auto Drive will retry automatically in {human_delay} (attempt {attempt}). Last error: {reason}"
@@ -18980,9 +19687,9 @@ Have we met every part of this goal and is there no further work to do?"#
 
     pub(crate) fn auto_handle_countdown(&mut self, countdown_id: u64, seconds_left: u8) {
         let decision_seq = self.auto_state.countdown_decision_seq;
-        let effects =
-            self.auto_state
-                .handle_countdown_tick(countdown_id, decision_seq, seconds_left);
+        let effects = self
+            .auto_state
+            .handle_countdown_tick(countdown_id, decision_seq, seconds_left);
         if effects.is_empty() {
             return;
         }
@@ -19119,17 +19826,15 @@ Have we met every part of this goal and is there no further work to do?"#
             return AutoReviewOutcome::Workspace;
         };
 
-        let final_commit =
-            match self.capture_auto_turn_commit("auto turn change snapshot", Some(&base_commit)) {
-                Ok(commit) => commit,
-                Err(err) => {
-                    tracing::warn!("failed to capture auto turn change snapshot: {err}");
-                    return AutoReviewOutcome::Workspace;
-                }
-            };
+        let final_commit = match self.capture_auto_turn_commit("auto turn change snapshot", Some(&base_commit)) {
+            Ok(commit) => commit,
+            Err(err) => {
+                tracing::warn!("failed to capture auto turn change snapshot: {err}");
+                return AutoReviewOutcome::Workspace;
+            }
+        };
 
-        let diff_paths = match self.git_diff_name_only_between(base_commit.id(), final_commit.id())
-        {
+        let diff_paths = match self.git_diff_name_only_between(base_commit.id(), final_commit.id()) {
             Ok(paths) => paths,
             Err(err) => {
                 tracing::warn!("failed to diff auto turn snapshots: {err}");
@@ -19138,9 +19843,7 @@ Have we met every part of this goal and is there no further work to do?"#
         };
 
         if diff_paths.is_empty() {
-            self.push_background_tail(
-                "Auto review skipped: no file changes detected this turn.".to_string(),
-            );
+            self.push_background_tail("Auto review skipped: no file changes detected this turn.".to_string());
             return AutoReviewOutcome::Skip;
         }
 
@@ -19172,6 +19875,24 @@ Have we met every part of this goal and is there no further work to do?"#
         }
 
         false
+    }
+
+    #[cfg(any(test, feature = "test-helpers"))]
+    #[allow(dead_code)]
+    fn worktree_has_uncommitted_changes(&self) -> Result<bool, String> {
+        self.run_git_command(["status", "--porcelain"], |stdout| {
+            Ok(stdout.lines().any(|line| !line.trim().is_empty()))
+        })
+    }
+
+    #[cfg(any(test, feature = "test-helpers"))]
+    #[allow(dead_code)]
+    fn current_head_commit_sha(&self) -> Option<String> {
+        self.run_git_command(["rev-parse", "HEAD"], |stdout| {
+            Ok(stdout.trim().to_string())
+        })
+        .ok()
+        .filter(|sha| !sha.is_empty())
     }
 
     fn prepare_auto_turn_review_state(&mut self) {
@@ -19251,8 +19972,8 @@ Have we met every part of this goal and is there no further work to do?"#
             return stub("auto review baseline snapshot", None);
         }
         let hook_repo = repo_path.clone();
-        let options = CreateGhostCommitOptions::new(repo_path.as_path())
-            .message("auto review baseline snapshot");
+        let options =
+            CreateGhostCommitOptions::new(repo_path.as_path()).message("auto review baseline snapshot");
         let hook = move || bump_snapshot_epoch_for(&hook_repo);
         let result = create_ghost_commit(&options.post_commit_hook(&hook));
         if result.is_ok() {
@@ -19300,7 +20021,9 @@ Have we met every part of this goal and is there no further work to do?"#
         result: Result<GhostCommit, GitToolingError>,
     ) {
         if turn_sequence != self.turn_sequence {
-            tracing::debug!("ignored auto review baseline for stale turn_sequence={turn_sequence}");
+            tracing::debug!(
+                "ignored auto review baseline for stale turn_sequence={turn_sequence}"
+            );
             return;
         }
         if self.auto_review_baseline.is_some() {
@@ -19354,9 +20077,7 @@ Have we met every part of this goal and is there no further work to do?"#
         }
 
         let Some(original_prompt) = self.auto_state.current_cli_prompt.clone() else {
-            self.auto_stop(Some(
-                "Coordinator prompt missing when attempting to submit.".to_string(),
-            ));
+            self.auto_stop(Some("Coordinator prompt missing when attempting to submit.".to_string()));
             return;
         };
 
@@ -19401,18 +20122,28 @@ Have we met every part of this goal and is there no further work to do?"#
         }
 
         self.auto_state.current_cli_context = None;
+        self.auto_state.current_cli_model_override = None;
+        self.auto_state.current_cli_reasoning_effort_override = None;
         self.auto_state.hide_cli_context_in_ui = false;
         self.auto_state.current_cli_prompt = Some(String::new());
         self.auto_pending_goal_request = true;
         self.auto_goal_bootstrap_done = false;
 
-        let override_seconds =
-            if matches!(self.auto_state.continue_mode, AutoContinueMode::Immediate) {
-                Some(10)
-            } else {
-                None
-            };
-        self.schedule_auto_cli_prompt_with_override(0, String::new(), override_seconds);
+        let override_seconds = if matches!(
+            self.auto_state.continue_mode,
+            AutoContinueMode::Immediate
+        ) {
+            Some(10)
+        } else {
+            None
+        };
+        self.schedule_auto_cli_prompt_with_override(
+            0,
+            String::new(),
+            None,
+            None,
+            override_seconds,
+        );
         true
     }
 
@@ -19433,14 +20164,14 @@ Have we met every part of this goal and is there no further work to do?"#
         self.auto_state.current_display_is_summary =
             self.auto_state.last_decision_display_is_summary && post_submit_display.is_some();
         self.auto_state.current_summary_index = None;
-        self.auto_state.placeholder_phrase = post_submit_display
-            .is_none()
-            .then(|| auto_drive_strings::next_auto_drive_phrase().to_string());
+        self.auto_state.placeholder_phrase = post_submit_display.is_none().then(|| {
+            auto_drive_strings::next_auto_drive_phrase().to_string()
+        });
         self.auto_state.current_reasoning_title = None;
         self.auto_state.thinking_prefix_stripped = false;
 
-        let should_prepare_agents =
-            self.auto_state.subagents_enabled && !self.auto_state.pending_agent_actions.is_empty();
+        let should_prepare_agents = self.auto_state.subagents_enabled
+            && !self.auto_state.pending_agent_actions.is_empty();
         if should_prepare_agents {
             self.prepare_agents();
         }
@@ -19450,6 +20181,9 @@ Have we met every part of this goal and is there no further work to do?"#
         } else {
             self.auto_turn_review_state = None;
         }
+
+        self.auto_apply_cli_turn_model_override();
+
         self.bottom_pane.update_status_text(String::new());
         self.bottom_pane.set_task_running(false);
         let mut message: UserMessage = full_prompt.into();
@@ -19462,9 +20196,28 @@ Have we met every part of this goal and is there no further work to do?"#
         self.submit_user_message(message);
         self.auto_state.pending_agent_actions.clear();
         self.auto_state.pending_agent_timing = None;
+        self.auto_state.current_cli_model_override = None;
+        self.auto_state.current_cli_reasoning_effort_override = None;
         self.auto_rebuild_live_ring();
         self.request_redraw();
         self.auto_state.suppress_next_cli_display = false;
+    }
+
+    fn auto_apply_cli_turn_model_override(&mut self) {
+        if !self.config.auto_drive.model_routing_enabled {
+            return;
+        }
+
+        let Some(model) = self.auto_state.current_cli_model_override.clone() else {
+            return;
+        };
+
+        let effort = self
+            .auto_state
+            .current_cli_reasoning_effort_override
+            .unwrap_or(ReasoningEffort::High);
+
+        self.apply_model_selection_inner(model, Some(effort), false, false);
     }
 
     fn auto_pause_for_manual_edit(&mut self, force: bool) {
@@ -19535,12 +20288,12 @@ Have we met every part of this goal and is there no further work to do?"#
             ));
 
             for action in agent_actions {
-                let prompt = action.prompt.trim().replace('\n', " ").replace('"', "\\\"");
-                let write_text = if action.write {
-                    "write: true"
-                } else {
-                    "write: false"
-                };
+                let prompt = action
+                    .prompt
+                    .trim()
+                    .replace('\n', " ")
+                    .replace('"', "\\\"");
+                let write_text = if action.write { "write: true" } else { "write: false" };
 
                 agent_lines.push(String::new());
                 agent_lines.push(format!(
@@ -19553,11 +20306,21 @@ Have we met every part of this goal and is there no further work to do?"#
                     .map(str::trim)
                     .filter(|s| !s.is_empty())
                 {
-                    agent_lines.push(format!("{LINE_PREFIX}Context: {}", ctx.replace('\n', " ")));
+                    agent_lines.push(format!(
+                        "{LINE_PREFIX}Context: {}",
+                        ctx.replace('\n', " ")
+                    ));
                 }
 
-                if let Some(models) = action.models.as_ref().filter(|list| !list.is_empty()) {
-                    agent_lines.push(format!("{LINE_PREFIX}Models: [{}]", models.join(", ")));
+                if let Some(models) = action
+                    .models
+                    .as_ref()
+                    .filter(|list| !list.is_empty())
+                {
+                    agent_lines.push(format!(
+                        "{LINE_PREFIX}Models: [{}]",
+                        models.join(", ")
+                    ));
                 }
             }
 
@@ -19601,7 +20364,7 @@ Have we met every part of this goal and is there no further work to do?"#
     }
 
     fn auto_agents_can_write(&self) -> bool {
-        if hanzo_core::git_info::get_git_repo_root(&self.config.cwd).is_none() {
+        if code_core::git_info::get_git_repo_root(&self.config.cwd).is_none() {
             return false;
         }
         matches!(
@@ -19625,7 +20388,9 @@ Have we met every part of this goal and is there no further work to do?"#
         self.auto_pending_goal_request = false;
         self.auto_goal_bootstrap_done = false;
         self.auto_drive_pid_guard = None;
-        let effects = self.auto_state.stop_run(Instant::now(), message);
+        let effects = self
+            .auto_state
+            .stop_run(Instant::now(), message);
         self.auto_goal_escape_state = AutoGoalEscState::Inactive;
         self.auto_apply_controller_effects(effects);
     }
@@ -19644,12 +20409,9 @@ Have we met every part of this goal and is there no further work to do?"#
         self.auto_state.thinking_prefix_stripped = false;
 
         let auto_resolve_blocking = self.auto_resolve_should_block_auto_resume();
-        let review_pending = self.is_review_flow_active()
-            || (self.auto_state.review_enabled
-                && self
-                    .pending_auto_turn_config
-                    .as_ref()
-                    .is_some_and(|cfg| !cfg.read_only));
+        // Background Auto Review is non-blocking for Auto Drive. We only wait
+        // when an explicit foreground review flow is active.
+        let review_pending = self.is_review_flow_active();
 
         if review_pending || auto_resolve_blocking {
             self.auto_state.on_begin_review(false);
@@ -19688,89 +20450,52 @@ Have we met every part of this goal and is there no further work to do?"#
             return;
         }
         let strategy = descriptor.and_then(|d| d.review_strategy.as_ref());
-        let (mut prompt, mut hint, mut auto_metadata, mut review_metadata, preparation) =
-            match scope {
-                Some(scope) => {
-                    let commit_id = scope.commit;
-                    let commit_for_prompt = commit_id.clone();
-                    let short_sha: String = commit_for_prompt.chars().take(8).collect();
-                    let file_label = if scope.file_count == 1 {
-                        "1 file".to_string()
-                    } else {
-                        format!("{} files", scope.file_count)
-                    };
-                    let prompt = format!(
-                        "Review commit {} generated during the latest Auto Drive turn. Highlight bugs, regressions, risky patterns, and missing tests before merge.",
-                        commit_for_prompt
-                    );
-                    let hint = format!("auto turn changes — {} ({})", short_sha, file_label);
-                    let preparation = format!("Preparing code review for commit {}", short_sha);
-                    let review_metadata = Some(ReviewContextMetadata {
-                        scope: Some("commit".to_string()),
-                        commit: Some(commit_id),
-                        ..Default::default()
-                    });
-                    let auto_metadata = Some(ReviewContextMetadata {
-                        scope: Some("workspace".to_string()),
-                        ..Default::default()
-                    });
-                    (prompt, hint, auto_metadata, review_metadata, preparation)
-                }
-                None => {
-                    let prompt = "Review the current workspace changes and highlight bugs, regressions, risky patterns, and missing tests before merge.".to_string();
-                    let hint = "current workspace changes".to_string();
-                    let review_metadata = Some(ReviewContextMetadata {
-                        scope: Some("workspace".to_string()),
-                        ..Default::default()
-                    });
-                    let preparation = "Preparing code review request...".to_string();
-                    (
-                        prompt,
-                        hint,
-                        review_metadata.clone(),
-                        review_metadata,
-                        preparation,
-                    )
-                }
-            };
+        let (mut prompt, mut hint, preparation) = match scope {
+            Some(scope) => {
+                let commit_for_prompt = scope.commit;
+                let short_sha: String = commit_for_prompt.chars().take(8).collect();
+                let file_label = if scope.file_count == 1 {
+                    "1 file".to_string()
+                } else {
+                    format!("{} files", scope.file_count)
+                };
+                let prompt = format!(
+                    "Review commit {} generated during the latest Auto Drive turn. Highlight bugs, regressions, risky patterns, and missing tests before merge.",
+                    commit_for_prompt
+                );
+                let hint = format!("auto turn changes — {} ({})", short_sha, file_label);
+                let preparation = format!("Preparing code review for commit {}", short_sha);
+                (prompt, hint, preparation)
+            }
+            None => {
+                let prompt = "Review the current workspace changes and highlight bugs, regressions, risky patterns, and missing tests before merge.".to_string();
+                let hint = "current workspace changes".to_string();
+                let preparation = "Preparing code review request...".to_string();
+                (prompt, hint, preparation)
+            }
+        };
 
         if let Some(strategy) = strategy {
-            if let Some(custom_prompt) = strategy.custom_prompt.as_ref().and_then(|text| {
-                let trimmed = text.trim();
-                (!trimmed.is_empty()).then_some(trimmed)
-            }) {
+            if let Some(custom_prompt) = strategy
+                .custom_prompt
+                .as_ref()
+                .and_then(|text| {
+                    let trimmed = text.trim();
+                    (!trimmed.is_empty()).then_some(trimmed)
+                })
+            {
                 prompt = custom_prompt.to_string();
             }
 
-            if let Some(scope_hint) = strategy.scope_hint.as_ref().and_then(|text| {
-                let trimmed = text.trim();
-                (!trimmed.is_empty()).then_some(trimmed)
-            }) {
+            if let Some(scope_hint) = strategy
+                .scope_hint
+                .as_ref()
+                .and_then(|text| {
+                    let trimmed = text.trim();
+                    (!trimmed.is_empty()).then_some(trimmed)
+                })
+            {
                 hint = scope_hint.to_string();
-
-                let apply_scope = |meta: &mut ReviewContextMetadata| {
-                    meta.scope = Some(scope_hint.to_string());
-                };
-
-                match review_metadata.as_mut() {
-                    Some(meta) => apply_scope(meta),
-                    None => {
-                        review_metadata = Some(ReviewContextMetadata {
-                            scope: Some(scope_hint.to_string()),
-                            ..Default::default()
-                        });
-                    }
-                }
-
-                match auto_metadata.as_mut() {
-                    Some(meta) => apply_scope(meta),
-                    None => {
-                        auto_metadata = Some(ReviewContextMetadata {
-                            scope: Some(scope_hint.to_string()),
-                            ..Default::default()
-                        });
-                    }
-                }
             }
         }
 
@@ -19779,13 +20504,13 @@ Have we met every part of this goal and is there no further work to do?"#
             self.auto_resolve_state = Some(AutoResolveState::new_with_limit(
                 prompt.clone(),
                 hint.clone(),
-                auto_metadata.clone(),
+                None,
                 max_re_reviews,
             ));
         } else {
             self.auto_resolve_state = None;
         }
-        self.begin_review(prompt, hint, Some(preparation), review_metadata);
+        self.begin_review(prompt, hint, Some(preparation));
     }
 
     fn auto_rebuild_live_ring(&mut self) {
@@ -19818,10 +20543,10 @@ Have we met every part of this goal and is there no further work to do?"#
                     cli_prompt: None,
                     cli_context: None,
                     show_composer: true,
-                    awaiting_submission: false,
-                    waiting_for_response: false,
-                    coordinator_waiting: false,
-                    waiting_for_review: false,
+            awaiting_submission: false,
+            waiting_for_response: false,
+            coordinator_waiting: false,
+            waiting_for_review: false,
                     countdown: None,
                     button: None,
                     manual_hint: None,
@@ -19837,31 +20562,33 @@ Have we met every part of this goal and is there no further work to do?"#
                     intro_started_at: self.auto_state.intro_started_at,
                     intro_reduced_motion: self.auto_state.intro_reduced_motion,
                 });
-                self.bottom_pane.show_auto_coordinator_view(model);
-                self.bottom_pane.release_auto_drive_style();
-                self.bottom_pane.set_standard_terminal_hint(None);
-                return;
-            }
-
-            self.bottom_pane.clear_auto_coordinator_view(true);
-            self.bottom_pane.clear_live_ring();
-            self.bottom_pane.set_standard_terminal_hint(None);
-            self.auto_reset_intro_timing();
-            return;
-        }
-
-        // AutoDrive is active: if intro animation was mid-flight, force reduced motion
-        // so a rebuild cannot leave the header half-rendered (issue #431).
-        if self.auto_state.intro_started_at.is_some() && !self.auto_state.intro_reduced_motion {
-            self.auto_state.intro_reduced_motion = true;
-        }
-
-        if self.auto_state.is_paused_manual() {
-            self.bottom_pane.clear_auto_coordinator_view(false);
-            self.bottom_pane.clear_live_ring();
+            self
+                .bottom_pane
+                .show_auto_coordinator_view(model);
+            self.bottom_pane.release_auto_drive_style();
             self.bottom_pane.set_standard_terminal_hint(None);
             return;
         }
+
+        self.bottom_pane.clear_auto_coordinator_view(true);
+        self.bottom_pane.clear_live_ring();
+        self.bottom_pane.set_standard_terminal_hint(None);
+        self.auto_reset_intro_timing();
+        return;
+    }
+
+    // AutoDrive is active: if intro animation was mid-flight, force reduced motion
+    // so a rebuild cannot leave the header half-rendered (issue #431).
+    if self.auto_state.intro_started_at.is_some() && !self.auto_state.intro_reduced_motion {
+        self.auto_state.intro_reduced_motion = true;
+    }
+
+    if self.auto_state.is_paused_manual() {
+        self.bottom_pane.clear_auto_coordinator_view(false);
+        self.bottom_pane.clear_live_ring();
+        self.bottom_pane.set_standard_terminal_hint(None);
+        return;
+    }
 
         self.bottom_pane.clear_live_ring();
 
@@ -19875,7 +20602,8 @@ Have we met every part of this goal and is there no further work to do?"#
         {
             line.clone()
         } else {
-            self.auto_state
+            self
+                .auto_state
                 .placeholder_phrase
                 .get_or_insert_with(|| auto_drive_strings::next_auto_drive_phrase().to_string())
                 .clone()
@@ -19889,9 +20617,7 @@ Have we met every part of this goal and is there no further work to do?"#
                 self.auto_state.current_status_title.as_ref(),
                 self.auto_state.current_status_sent_to_user.as_ref(),
             );
-            if self.auto_state.is_waiting_for_response()
-                && !self.auto_state.is_coordinator_waiting()
-            {
+            if self.auto_state.is_waiting_for_response() && !self.auto_state.is_coordinator_waiting() {
                 let appended = self.auto_append_status_lines(
                     &mut status_lines,
                     self.auto_state.last_decision_status_title.as_ref(),
@@ -19901,8 +20627,10 @@ Have we met every part of this goal and is there no further work to do?"#
                     if let Some(summary) = self.auto_state.last_decision_summary.as_ref() {
                         let trimmed = summary.trim();
                         if !trimmed.is_empty() {
-                            let collapsed =
-                                trimmed.split_whitespace().collect::<Vec<_>>().join(" ");
+                            let collapsed = trimmed
+                                .split_whitespace()
+                                .collect::<Vec<_>>()
+                                .join(" ");
                             if !collapsed.is_empty() {
                                 let current_line = status_lines
                                     .first()
@@ -19920,8 +20648,7 @@ Have we met every part of this goal and is there no further work to do?"#
         }
         let cli_running = self.is_cli_running();
         let progress_hint_active = self.auto_state.awaiting_coordinator_submit()
-            || (self.auto_state.is_waiting_for_response()
-                && !self.auto_state.is_coordinator_waiting())
+            || (self.auto_state.is_waiting_for_response() && !self.auto_state.is_coordinator_waiting())
             || cli_running;
 
         // Keep the most recent coordinator status visible across approval and
@@ -19958,6 +20685,7 @@ Have we met every part of this goal and is there no further work to do?"#
                 .clone()
                 .filter(|value| !value.trim().is_empty())
         };
+        let has_cli_prompt = cli_prompt.is_some();
 
         let bootstrap_pending = self.auto_pending_goal_request;
         let continue_cta_active = self.auto_should_show_continue_cta();
@@ -19976,7 +20704,6 @@ Have we met every part of this goal and is there no further work to do?"#
         };
 
         let button = if self.auto_state.awaiting_coordinator_submit() {
-            let has_cli_prompt = cli_prompt.is_some();
             let base_label = if bootstrap_pending {
                 "Complete Current Task"
             } else if has_cli_prompt {
@@ -20004,6 +20731,12 @@ Have we met every part of this goal and is there no further work to do?"#
                 Some("Edit the prompt, then press Enter to continue.".to_string())
             } else if bootstrap_pending {
                 None
+            } else if has_cli_prompt {
+                if countdown_active {
+                    Some("Enter to send now • Esc to edit".to_string())
+                } else {
+                    Some("Enter to send • Esc to edit".to_string())
+                }
             } else if continue_cta_active {
                 if countdown_active {
                     Some("Enter to continue now • Esc to stop".to_string())
@@ -20011,16 +20744,15 @@ Have we met every part of this goal and is there no further work to do?"#
                     Some("Enter to continue • Esc to stop".to_string())
                 }
             } else if countdown_active {
-                Some("Enter to send now • Esc to edit".to_string())
+                Some("Enter to send now • Esc to stop".to_string())
             } else {
-                Some("Enter to send • Esc to edit".to_string())
+                Some("Enter to send • Esc to stop".to_string())
             }
         } else {
             None
         };
 
         let ctrl_switch_hint = if self.auto_state.awaiting_coordinator_submit() {
-            let has_cli_prompt = cli_prompt.is_some();
             if self.auto_state.is_paused_manual() {
                 "Esc to cancel".to_string()
             } else if bootstrap_pending {
@@ -20030,7 +20762,7 @@ Have we met every part of this goal and is there no further work to do?"#
             } else if continue_cta_active {
                 "Esc to stop".to_string()
             } else {
-                "Esc to edit".to_string()
+                "Esc to stop".to_string()
             }
         } else if self.auto_state.is_waiting_for_response() {
             String::new()
@@ -20067,7 +20799,9 @@ Have we met every part of this goal and is there no further work to do?"#
             intro_reduced_motion: self.auto_state.intro_reduced_motion,
         });
 
-        self.bottom_pane.show_auto_coordinator_view(model);
+        self
+            .bottom_pane
+            .show_auto_coordinator_view(model);
 
         self.auto_update_terminal_hint();
 
@@ -20133,7 +20867,8 @@ Have we met every part of this goal and is there no further work to do?"#
         let left = format!("• {agents_label}  • {diagnostics_label}");
 
         let hint = left.to_string();
-        self.bottom_pane.set_standard_terminal_hint(Some(hint));
+        self.bottom_pane
+            .set_standard_terminal_hint(Some(hint));
     }
 
     fn auto_update_display_title(&mut self) {
@@ -20267,7 +21002,9 @@ Have we met every part of this goal and is there no further work to do?"#
                 self.auto_update_display_title();
                 let updated_line = self.auto_state.current_display_line.clone();
                 let updated_is_summary = self.auto_state.current_display_is_summary;
-                if updated_is_summary && (updated_line != previous_line || !previous_is_summary) {
+                if updated_is_summary
+                    && (updated_line != previous_line || !previous_is_summary)
+                {
                     display_updated = true;
                 }
             }
@@ -20349,10 +21086,7 @@ Have we met every part of this goal and is there no further work to do?"#
             .map(|value| value.trim())
             .filter(|value| !value.is_empty())
         {
-            if !parts
-                .iter()
-                .any(|existing| existing.eq_ignore_ascii_case(sent))
-            {
+            if !parts.iter().any(|existing| existing.eq_ignore_ascii_case(sent)) {
                 parts.push(sent.to_string());
             }
         }
@@ -20642,7 +21376,9 @@ Have we met every part of this goal and is there no further work to do?"#
                 self.config.debug,
             );
 
-            self.push_background_before_next_output(format!("Terminal prompt: {prompt_text}"));
+            self.push_background_before_next_output(format!(
+                "Terminal prompt: {prompt_text}"
+            ));
             return;
         }
 
@@ -20665,11 +21401,10 @@ Have we met every part of this goal and is there no further work to do?"#
         let command_string = command_body.to_string();
         let wrapped_command = wrap_command(&command_string);
         if wrapped_command.is_empty() {
-            self.app_event_tx
-                .send(AppEvent::TerminalSetAssistantMessage {
-                    id,
-                    message: "Command could not be constructed.".to_string(),
-                });
+            self.app_event_tx.send(AppEvent::TerminalSetAssistantMessage {
+                id,
+                message: "Command could not be constructed.".to_string(),
+            });
             if let Some(overlay) = self.terminal.overlay_mut() {
                 overlay.ensure_pending_command();
             }
@@ -20735,7 +21470,12 @@ Have we met every part of this goal and is there no further work to do?"#
         );
     }
 
-    fn start_direct_terminal_command(&mut self, id: u64, display: String, command: Vec<String>) {
+    fn start_direct_terminal_command(
+        &mut self,
+        id: u64,
+        display: String,
+        command: Vec<String>,
+    ) {
         if let Some(overlay) = self.terminal.overlay_mut() {
             overlay.cancel_pending_command();
         }
@@ -20872,8 +21612,7 @@ Have we met every part of this goal and is there no further work to do?"#
 
         if let Some(entry) = pending {
             if let Some(overlay) = self.terminal.overlay_mut() {
-                overlay
-                    .push_info_message("Command was not approved. You can edit it and try again.");
+                overlay.push_info_message("Command was not approved. You can edit it and try again.");
                 overlay.running = false;
                 overlay.exit_code = None;
                 overlay.duration = None;
@@ -20949,9 +21688,10 @@ Have we met every part of this goal and is there no further work to do?"#
             if let Some(pending) = overlay.pending_command.as_mut() {
                 match key_event.code {
                     KeyCode::Char(ch) => {
-                        if key_event.modifiers.intersects(
-                            KeyModifiers::CONTROL | KeyModifiers::ALT | KeyModifiers::SUPER,
-                        ) {
+                        if key_event
+                            .modifiers
+                            .intersects(KeyModifiers::CONTROL | KeyModifiers::ALT | KeyModifiers::SUPER)
+                        {
                             handled = true;
                         } else if pending.insert_char(ch) {
                             needs_redraw = true;
@@ -21180,7 +21920,7 @@ Have we met every part of this goal and is there no further work to do?"#
             } else if !cfg.args.is_empty() {
                 Some(cfg.args.clone())
             } else {
-                let d = hanzo_core::agent_defaults::default_params_for(
+                let d = code_core::agent_defaults::default_params_for(
                     &cfg.name, true, /*read_only*/
                 );
                 if d.is_empty() { None } else { Some(d) }
@@ -21190,7 +21930,7 @@ Have we met every part of this goal and is there no further work to do?"#
             } else if !cfg.args.is_empty() {
                 Some(cfg.args.clone())
             } else {
-                let d = hanzo_core::agent_defaults::default_params_for(
+                let d = code_core::agent_defaults::default_params_for(
                     &cfg.name, false, /*read_only*/
                 );
                 if d.is_empty() { None } else { Some(d) }
@@ -21235,9 +21975,9 @@ Have we met every part of this goal and is there no further work to do?"#
         } else {
             // Fallback: synthesize defaults
             let cmd = Self::resolve_agent_command(&name, None, None);
-            let ro = hanzo_core::agent_defaults::default_params_for(&name, true /*read_only*/);
+            let ro = code_core::agent_defaults::default_params_for(&name, true /*read_only*/);
             let wr =
-                hanzo_core::agent_defaults::default_params_for(&name, false /*read_only*/);
+                code_core::agent_defaults::default_params_for(&name, false /*read_only*/);
             let app_event_tx = self.app_event_tx.clone();
             let description = Self::agent_description_for(&name, Some(&cmd), None);
             let builtin = Self::is_builtin_agent(&name, &cmd);
@@ -21245,16 +21985,8 @@ Have we met every part of this goal and is there no further work to do?"#
                 AgentEditorView::new(
                     name.clone(),
                     builtin,
-                    if ro.is_empty() {
-                        None
-                    } else {
-                        Some(ro.clone())
-                    },
-                    if wr.is_empty() {
-                        None
-                    } else {
-                        Some(wr.clone())
-                    },
+                    if ro.is_empty() { None } else { Some(ro.clone()) },
+                    if wr.is_empty() { None } else { Some(wr.clone()) },
                     None,
                     description.clone(),
                     cmd.clone(),
@@ -21303,7 +22035,7 @@ Have we met every part of this goal and is there no further work to do?"#
 
     pub(crate) fn apply_subagent_update(
         &mut self,
-        cmd: hanzo_core::config_types::SubagentCommandConfig,
+        cmd: code_core::config_types::SubagentCommandConfig,
     ) {
         if let Some(slot) = self
             .config
@@ -21336,11 +22068,7 @@ Have we met every part of this goal and is there no further work to do?"#
         description: Option<String>,
         command: String,
     ) {
-        let provided_command = if command.trim().is_empty() {
-            None
-        } else {
-            Some(command.as_str())
-        };
+        let provided_command = if command.trim().is_empty() { None } else { Some(command.as_str()) };
         let existing_index = self
             .config
             .agents
@@ -21350,26 +22078,25 @@ Have we met every part of this goal and is there no further work to do?"#
         let existing_command = existing_index
             .and_then(|idx| self.config.agents.get(idx))
             .map(|cfg| cfg.command.clone());
-        let resolved =
-            Self::resolve_agent_command(name, provided_command, existing_command.as_deref());
+        let resolved = Self::resolve_agent_command(
+            name,
+            provided_command,
+            existing_command.as_deref(),
+        );
 
         let mut candidate_cfg = if let Some(idx) = existing_index {
-            self.config
-                .agents
-                .get(idx)
-                .cloned()
-                .unwrap_or_else(|| AgentConfig {
-                    name: name.to_string(),
-                    command: resolved.clone(),
-                    args: Vec::new(),
-                    read_only: false,
-                    enabled,
-                    description: description.clone(),
-                    env: None,
-                    args_read_only: args_ro.clone(),
-                    args_write: args_wr.clone(),
-                    instructions: instr.clone(),
-                })
+            self.config.agents.get(idx).cloned().unwrap_or_else(|| AgentConfig {
+                name: name.to_string(),
+                command: resolved.clone(),
+                args: Vec::new(),
+                read_only: false,
+                enabled,
+                description: description.clone(),
+                env: None,
+                args_read_only: args_ro.clone(),
+                args_write: args_wr.clone(),
+                instructions: instr.clone(),
+            })
         } else {
             AgentConfig {
                 name: name.to_string(),
@@ -21392,10 +22119,7 @@ Have we met every part of this goal and is there no further work to do?"#
         candidate_cfg.args_write = args_wr.clone();
         candidate_cfg.instructions = instr.clone();
 
-        let pending = PendingAgentUpdate {
-            id: Uuid::new_v4(),
-            cfg: candidate_cfg,
-        };
+        let pending = PendingAgentUpdate { id: Uuid::new_v4(), cfg: candidate_cfg };
         let requires_validation = !self.test_mode && existing_index.is_none();
         if requires_validation {
             self.start_agent_validation(pending);
@@ -21407,9 +22131,13 @@ Have we met every part of this goal and is there no further work to do?"#
 
     fn start_agent_validation(&mut self, pending: PendingAgentUpdate) {
         let name = pending.cfg.name.clone();
-        self.push_background_tail(format!("🧪 Testing agent `{}` (expecting \"ok\")…", name));
-        self.pending_agent_updates
-            .retain(|_, existing| !existing.cfg.name.eq_ignore_ascii_case(&name));
+        self.push_background_tail(format!(
+            "🧪 Testing agent `{}` (expecting \"ok\")…",
+            name
+        ));
+        self.pending_agent_updates.retain(|_, existing| {
+            !existing.cfg.name.eq_ignore_ascii_case(&name)
+        });
         let key = pending.key();
         let attempt = pending.clone();
         self.pending_agent_updates.insert(key, pending);
@@ -21423,20 +22151,11 @@ Have we met every part of this goal and is there no further work to do?"#
                 .await
                 .map_err(|e| format!("validation task failed: {e}"))
                 .and_then(|res| res);
-            tx.send(AppEvent::AgentValidationFinished {
-                name: agent_name,
-                result,
-                attempt_id,
-            });
+            tx.send(AppEvent::AgentValidationFinished { name: agent_name, result, attempt_id });
         });
     }
 
-    pub(crate) fn handle_agent_validation_finished(
-        &mut self,
-        name: &str,
-        attempt_id: Uuid,
-        result: Result<(), String>,
-    ) {
+    pub(crate) fn handle_agent_validation_finished(&mut self, name: &str, attempt_id: Uuid, result: Result<(), String>) {
         let key = format!("{}:{}", name.to_ascii_lowercase(), attempt_id);
         let Some(pending) = self.pending_agent_updates.remove(&key) else {
             return;
@@ -21444,7 +22163,10 @@ Have we met every part of this goal and is there no further work to do?"#
 
         match result {
             Ok(()) => {
-                self.push_background_tail(format!("✅ Agent `{}` responded with \"ok\".", name));
+                self.push_background_tail(format!(
+                    "✅ Agent `{}` responded with \"ok\".",
+                    name
+                ));
                 self.commit_agent_update(pending);
             }
             Err(err) => {
@@ -21477,7 +22199,7 @@ Have we met every part of this goal and is there no further work to do?"#
     }
 
     fn persist_agent_config(&self, cfg: &AgentConfig) {
-        if let Ok(home) = hanzo_core::config::find_code_home() {
+        if let Ok(home) = code_core::config::find_code_home() {
             let name = cfg.name.clone();
             let enabled = cfg.enabled;
             let ro = cfg.args_read_only.clone();
@@ -21486,7 +22208,7 @@ Have we met every part of this goal and is there no further work to do?"#
             let desc = cfg.description.clone();
             let command = cfg.command.clone();
             tokio::spawn(async move {
-                let _ = hanzo_core::config_edit::upsert_agent_config(
+                let _ = code_core::config_edit::upsert_agent_config(
                     &home,
                     &name,
                     Some(enabled),
@@ -21536,7 +22258,11 @@ Have we met every part of this goal and is there no further work to do?"#
         self.request_redraw();
     }
 
-    fn resolve_agent_command(name: &str, provided: Option<&str>, existing: Option<&str>) -> String {
+    fn resolve_agent_command(
+        name: &str,
+        provided: Option<&str>,
+        existing: Option<&str>,
+    ) -> String {
         let spec = agent_model_spec(name);
         if let Some(cmd) = provided {
             if let Some(resolved) = Self::normalize_agent_command(cmd, name, spec) {
@@ -21557,7 +22283,7 @@ Have we met every part of this goal and is there no further work to do?"#
     fn normalize_agent_command(
         candidate: &str,
         name: &str,
-        spec: Option<&hanzo_core::agent_defaults::AgentModelSpec>,
+        spec: Option<&code_core::agent_defaults::AgentModelSpec>,
     ) -> Option<String> {
         if candidate.trim().is_empty() {
             return None;
@@ -21566,9 +22292,7 @@ Have we met every part of this goal and is there no further work to do?"#
             if candidate.eq_ignore_ascii_case(name) && !spec.cli.eq_ignore_ascii_case(name) {
                 return Some(spec.cli.to_string());
             }
-            if candidate.eq_ignore_ascii_case(spec.slug)
-                && !spec.cli.eq_ignore_ascii_case(spec.slug)
-            {
+            if candidate.eq_ignore_ascii_case(spec.slug) && !spec.cli.eq_ignore_ascii_case(spec.slug) {
                 return Some(spec.cli.to_string());
             }
         }
@@ -21584,7 +22308,7 @@ Have we met every part of this goal and is there no further work to do?"#
             for (path, change) in changes.iter() {
                 // If this change represents a move/rename, show the destination path in the tabs
                 let display_path: PathBuf = match change {
-                    hanzo_core::protocol::FileChange::Update {
+                    code_core::protocol::FileChange::Update {
                         move_path: Some(dest),
                         ..
                     } => dest.clone(),
@@ -21612,7 +22336,7 @@ Have we met every part of this goal and is there no further work to do?"#
             let mut single = HashMap::new();
             single.insert(
                 path.clone(),
-                hanzo_core::protocol::FileChange::Update {
+                code_core::protocol::FileChange::Update {
                     unified_diff: unified.clone(),
                     move_path: None,
                     original_content: baseline.clone(),
@@ -21730,26 +22454,16 @@ Have we met every part of this goal and is there no further work to do?"#
         // Top quick action
         lines.push(kv(
             "Shift+Tab",
-            "Rotate access mode: Plan Mode / Auto Accept / Bypass permissions",
+            "Rotate agent between Read Only / Write with Approval / Full Access",
         ));
 
         // Global
-        lines.push(kv("Ctrl+G", "Guide overlay"));
-        lines.push(kv(
-            if cfg!(target_os = "macos") {
-                "Opt+G"
-            } else {
-                "Alt+G"
-            },
-            "Toggle gutter icons and borders",
-        ));
+        lines.push(kv("F1", "Help overlay"));
+        lines.push(kv("Ctrl+G", "Open external editor"));
         lines.push(kv("Ctrl+R", "Toggle reasoning"));
         lines.push(kv("Ctrl+T", "Toggle screen"));
         lines.push(kv("Ctrl+D", "Diff viewer"));
-        lines.push(kv(
-            "Esc",
-            &format!("{} / close popups", Self::double_esc_hint_label()),
-        ));
+        lines.push(kv("Esc", &format!("{} / close popups", Self::double_esc_hint_label())));
         // Task control shortcuts
         lines.push(kv("Esc", "End current task"));
         lines.push(kv("Ctrl+C", "End current task"));
@@ -21812,8 +22526,8 @@ Have we met every part of this goal and is there no further work to do?"#
             if cmd_str == "test-approval" {
                 continue;
             }
-            // Prefer "Hanzo Dev" branding in the Help panel
-            let desc = cmd.description().replace("Codex", "Hanzo Dev");
+            // Prefer "Code" branding in the Help panel
+            let desc = cmd.description().replace("Codex", "Code");
             // Render as "/command  —  description"
             lines.push(RtLine::from(vec![
                 RtSpan::styled(format!("/{cmd_str:<12}"), t_fg),
@@ -21835,16 +22549,44 @@ Have we met every part of this goal and is there no further work to do?"#
         self.request_redraw();
     }
 
-    fn available_model_presets(&self) -> Vec<ModelPreset> {
+    fn curated_model_presets(presets: Vec<ModelPreset>) -> Vec<ModelPreset> {
+        const MODEL_PICKER_ORDER: [&str; 3] = [
+            "gpt-5.4",
+            "gpt-5.3-codex",
+            "gpt-5.3-codex-spark",
+        ];
+
+        let curated: Vec<ModelPreset> = MODEL_PICKER_ORDER
+            .into_iter()
+            .filter_map(|model| {
+                presets.iter().find(|preset| {
+                    preset.model.eq_ignore_ascii_case(model)
+                        || preset.id.eq_ignore_ascii_case(model)
+                })
+            })
+            .cloned()
+            .collect();
+
+        if curated.is_empty() { presets } else { curated }
+    }
+
+    fn all_model_presets(&self) -> Vec<ModelPreset> {
         if let Some(presets) = self.remote_model_presets.as_ref() {
             return presets.clone();
         }
         let auth_mode = if self.config.using_chatgpt_auth {
-            Some(McpAuthMode::ChatGPT)
+            Some(AuthMode::ChatGPT)
         } else {
-            Some(McpAuthMode::ApiKey)
+            Some(AuthMode::ApiKey)
         };
-        builtin_model_presets(auth_mode)
+        builtin_model_presets(
+            auth_mode,
+            self.auth_manager.supports_pro_only_models(),
+        )
+    }
+
+    fn available_model_presets(&self) -> Vec<ModelPreset> {
+        Self::curated_model_presets(self.all_model_presets())
     }
 
     pub(crate) fn update_model_presets(
@@ -21856,8 +22598,13 @@ Have we met every part of this goal and is there no further work to do?"#
             return;
         }
 
-        self.remote_model_presets = Some(presets.clone());
-        self.bottom_pane.update_model_selection_presets(presets);
+        let curated_presets = Self::curated_model_presets(presets.clone());
+        if curated_presets.is_empty() {
+            return;
+        }
+
+        self.remote_model_presets = Some(presets);
+        self.bottom_pane.update_model_selection_presets(curated_presets);
 
         if let Some(default_model) = default_model {
             self.maybe_apply_remote_default_model(default_model);
@@ -21888,7 +22635,7 @@ Have we met every part of this goal and is there no further work to do?"#
     }
 
     fn clamp_reasoning_for_model(model: &str, requested: ReasoningEffort) -> ReasoningEffort {
-        let protocol_effort: hanzo_protocol::config_types::ReasoningEffort = requested.into();
+        let protocol_effort: code_protocol::config_types::ReasoningEffort = requested.into();
         let clamped = clamp_reasoning_effort_for_model(model, protocol_effort);
         ReasoningEffort::from(clamped)
     }
@@ -21965,8 +22712,8 @@ Have we met every part of this goal and is there no further work to do?"#
             return;
         }
 
-        let presets = self.available_model_presets();
-        if presets.is_empty() {
+        let all_presets = self.all_model_presets();
+        if all_presets.is_empty() {
             let message =
                 "No model presets are available. Update your configuration to define models."
                     .to_string();
@@ -21976,7 +22723,7 @@ Have we met every part of this goal and is there no further work to do?"#
 
         let trimmed = command_args.trim();
         if !trimmed.is_empty() {
-            if let Some(preset) = self.find_model_preset(trimmed, &presets) {
+            if let Some(preset) = self.find_model_preset(trimmed, &all_presets) {
                 let effort = Self::preset_effort_for_model(&preset);
                 self.apply_model_selection(preset.model.to_string(), Some(effort));
             } else {
@@ -21989,10 +22736,13 @@ Have we met every part of this goal and is there no further work to do?"#
             return;
         }
 
+        let presets = self.available_model_presets();
         self.bottom_pane.show_model_selection(
             presets,
             self.config.model.clone(),
             self.config.model_reasoning_effort,
+            self.config.service_tier,
+            self.config.context_mode,
             false,
             ModelSelectionTarget::Session,
         );
@@ -22015,6 +22765,8 @@ Have we met every part of this goal and is there no further work to do?"#
             presets,
             self.config.review_model.clone(),
             self.config.review_model_reasoning_effort,
+            self.config.service_tier,
+            self.config.context_mode,
             self.config.review_use_chat_model,
             ModelSelectionTarget::Review,
         );
@@ -22046,6 +22798,8 @@ Have we met every part of this goal and is there no further work to do?"#
             presets,
             current,
             effort,
+            self.config.service_tier,
+            self.config.context_mode,
             self.config.review_resolve_use_chat_model,
             ModelSelectionTarget::ReviewResolve,
         );
@@ -22077,6 +22831,8 @@ Have we met every part of this goal and is there no further work to do?"#
             presets,
             current,
             effort,
+            self.config.service_tier,
+            self.config.context_mode,
             self.config.auto_review_use_chat_model,
             ModelSelectionTarget::AutoReview,
         );
@@ -22108,6 +22864,8 @@ Have we met every part of this goal and is there no further work to do?"#
             presets,
             current,
             effort,
+            self.config.service_tier,
+            self.config.context_mode,
             self.config.auto_review_resolve_use_chat_model,
             ModelSelectionTarget::AutoReviewResolve,
         );
@@ -22132,13 +22890,16 @@ Have we met every part of this goal and is there no further work to do?"#
             self.config.planning_model.clone()
         };
         let effort = self.config.planning_model_reasoning_effort;
-        self.bottom_pane.show_model_selection(
-            presets,
-            current,
-            effort,
-            self.config.planning_use_chat_model,
-            ModelSelectionTarget::Planning,
-        );
+        self.bottom_pane
+            .show_model_selection(
+                presets,
+                current,
+                effort,
+                self.config.service_tier,
+                self.config.context_mode,
+                self.config.planning_use_chat_model,
+                ModelSelectionTarget::Planning,
+            );
     }
 
     pub(crate) fn show_auto_drive_model_selector(&mut self) {
@@ -22158,6 +22919,8 @@ Have we met every part of this goal and is there no further work to do?"#
             presets,
             self.config.auto_drive.model.clone(),
             self.config.auto_drive.model_reasoning_effort,
+            self.config.service_tier,
+            self.config.context_mode,
             self.config.auto_drive_use_chat_model,
             ModelSelectionTarget::AutoDrive,
         );
@@ -22165,6 +22928,148 @@ Have we met every part of this goal and is there no further work to do?"#
 
     pub(crate) fn apply_model_selection(&mut self, model: String, effort: Option<ReasoningEffort>) {
         self.apply_model_selection_inner(model, effort, true, true);
+    }
+
+    fn submit_configure_session_op(&mut self) {
+        let op = Op::ConfigureSession {
+            provider: self.config.model_provider.clone(),
+            model: self.config.model.clone(),
+            model_explicit: self.config.model_explicit,
+            model_reasoning_effort: self.config.model_reasoning_effort,
+            preferred_model_reasoning_effort: self.config.preferred_model_reasoning_effort,
+            model_reasoning_summary: self.config.model_reasoning_summary,
+            model_text_verbosity: self.config.model_text_verbosity,
+            service_tier: self.config.service_tier,
+            context_mode: self.config.context_mode,
+            model_context_window: self.config.model_context_window,
+            model_auto_compact_token_limit: self.config.model_auto_compact_token_limit,
+            user_instructions: self.config.user_instructions.clone(),
+            base_instructions: self.config.base_instructions.clone(),
+            approval_policy: self.config.approval_policy.clone(),
+            sandbox_policy: self.config.sandbox_policy.clone(),
+            disable_response_storage: self.config.disable_response_storage,
+            notify: self.config.notify.clone(),
+            cwd: self.config.cwd.clone(),
+            resume_path: None,
+            demo_developer_message: self.config.demo_developer_message.clone(),
+            dynamic_tools: Vec::new(),
+        };
+        self.submit_op(op);
+    }
+
+    fn refresh_bottom_pane_token_usage(&mut self) {
+        self.bottom_pane.set_token_usage(
+            self.total_token_usage.clone(),
+            self.last_token_usage.clone(),
+            self.config.model_context_window,
+            self.config.context_mode,
+        );
+    }
+
+    fn sync_session_context_selection_for_model(&mut self) -> bool {
+        let (next_context_window, next_auto_compact) = resolve_context_mode_limits(
+            &self.config.model,
+            self.config.context_mode,
+            &self.config.model_family,
+        );
+        let changed = self.config.model_context_window != next_context_window
+            || self.config.model_auto_compact_token_limit != next_auto_compact;
+        self.config.model_context_window = next_context_window;
+        self.config.model_auto_compact_token_limit = next_auto_compact;
+        changed
+    }
+
+    pub(crate) fn apply_service_tier_selection(&mut self, service_tier: Option<ServiceTier>) {
+        if self.config.service_tier == service_tier {
+            return;
+        }
+
+        self.config.service_tier = service_tier;
+        self.submit_configure_session_op();
+
+        let code_home = self.config.code_home.clone();
+        let profile = self.config.active_profile.clone();
+        let persisted_service_tier = match (profile.as_deref(), self.config.service_tier) {
+            (Some(_), None) => Some("standard"),
+            (_, Some(ServiceTier::Fast)) => Some("fast"),
+            (_, Some(ServiceTier::Standard)) => Some("standard"),
+            (_, None) => None,
+        };
+        tokio::spawn(async move {
+            if let Err(err) = code_core::config_edit::persist_overrides_and_clear_if_none(
+                &code_home,
+                profile.as_deref(),
+                &[(&["service_tier"] as &[&str], persisted_service_tier)],
+            )
+            .await
+            {
+                tracing::warn!("failed to persist fast mode setting: {err}");
+            }
+        });
+
+        self.refresh_settings_overview_rows();
+
+        let status = if matches!(self.config.service_tier, Some(ServiceTier::Fast)) {
+            "enabled"
+        } else {
+            "disabled"
+        };
+        self.bottom_pane
+            .flash_footer_notice(format!("Fast mode {status}."));
+        self.request_redraw();
+    }
+
+    pub(crate) fn apply_session_context_mode_selection(
+        &mut self,
+        context_mode: Option<ContextMode>,
+    ) {
+        let context_mode = context_mode.or(Some(ContextMode::Disabled));
+        if self.config.context_mode == context_mode && !self.sync_session_context_selection_for_model() {
+            return;
+        }
+
+        self.config.context_mode = context_mode;
+        let (next_context_window, next_auto_compact) = resolve_context_mode_limits(
+            &self.config.model,
+            self.config.context_mode,
+            &self.config.model_family,
+        );
+        self.config.model_context_window = next_context_window;
+        self.config.model_auto_compact_token_limit = next_auto_compact;
+        self.submit_configure_session_op();
+        self.refresh_bottom_pane_token_usage();
+
+        let code_home = self.config.code_home.clone();
+        let profile = self.config.active_profile.clone();
+        let persisted_context_mode = self.config.context_mode;
+        tokio::spawn(async move {
+            if let Err(err) = code_core::config_edit::persist_overrides_and_clear_if_none(
+                &code_home,
+                profile.as_deref(),
+                &[(
+                    &["context_mode"] as &[&str],
+                    persisted_context_mode.map(|mode| match mode {
+                        ContextMode::OneM => "1m",
+                        ContextMode::Auto => "auto",
+                        ContextMode::Disabled => "disabled",
+                    }),
+                )],
+            )
+            .await
+            {
+                tracing::warn!("failed to persist context mode setting: {err}");
+            }
+        });
+
+        self.refresh_settings_overview_rows();
+
+        let status = match self.config.context_mode {
+            Some(ContextMode::OneM) => "1M context enabled.".to_string(),
+            Some(ContextMode::Auto) => "Auto Context enabled.".to_string(),
+            Some(ContextMode::Disabled) | None => "Context mode disabled.".to_string(),
+        };
+        self.bottom_pane.flash_footer_notice(status);
+        self.request_redraw();
     }
 
     fn clamp_reasoning_for_model_from_presets(
@@ -22211,6 +23116,69 @@ Have we met every part of this goal and is there no further work to do?"#
             .unwrap_or(requested)
     }
 
+    fn sanitize_auto_drive_routing_entries(
+        entries: Vec<AutoDriveModelRoutingEntry>,
+        available_models: &[String],
+    ) -> Vec<AutoDriveModelRoutingEntry> {
+        fn normalize_reasoning(levels: &[ReasoningEffort]) -> Vec<ReasoningEffort> {
+            let mut normalized = Vec::new();
+            for level in [
+                ReasoningEffort::Minimal,
+                ReasoningEffort::Low,
+                ReasoningEffort::Medium,
+                ReasoningEffort::High,
+                ReasoningEffort::XHigh,
+            ] {
+                if levels.contains(&level) {
+                    normalized.push(level);
+                }
+            }
+            normalized
+        }
+
+        let mut normalized_entries = Vec::new();
+        for entry in entries {
+            let model = entry.model.trim().to_ascii_lowercase();
+            if !model.starts_with("gpt-") {
+                continue;
+            }
+
+            if !available_models
+                .iter()
+                .any(|available| available.eq_ignore_ascii_case(&model))
+            {
+                continue;
+            }
+
+            let reasoning_levels = normalize_reasoning(&entry.reasoning_levels);
+            if reasoning_levels.is_empty() {
+                continue;
+            }
+
+            normalized_entries.push(AutoDriveModelRoutingEntry {
+                model,
+                enabled: entry.enabled,
+                reasoning_levels,
+                description: entry.description.trim().to_string(),
+            });
+        }
+
+        if normalized_entries.is_empty() {
+            let mut defaults = code_core::config_types::default_auto_drive_model_routing_entries();
+            defaults.retain(|entry| {
+                available_models
+                    .iter()
+                    .any(|available| available.eq_ignore_ascii_case(&entry.model))
+            });
+            if defaults.is_empty() {
+                return Vec::new();
+            }
+            return defaults;
+        }
+
+        normalized_entries
+    }
+
     fn apply_model_selection_inner(
         &mut self,
         model: String,
@@ -22237,6 +23205,10 @@ Have we met every part of this goal and is there no further work to do?"#
             updated = true;
         }
 
+        if self.sync_session_context_selection_for_model() {
+            updated = true;
+        }
+
         if let Some(explicit) = effort {
             if self.config.preferred_model_reasoning_effort != Some(explicit) {
                 self.config.preferred_model_reasoning_effort = Some(explicit);
@@ -22247,9 +23219,8 @@ Have we met every part of this goal and is there no further work to do?"#
         let requested_effort = effort
             .or(self.config.preferred_model_reasoning_effort)
             .unwrap_or(self.config.model_reasoning_effort);
-        let presets = self.available_model_presets();
-        let clamped_effort =
-            Self::clamp_reasoning_for_model_from_presets(trimmed, requested_effort, &presets);
+        let presets = self.all_model_presets();
+        let clamped_effort = Self::clamp_reasoning_for_model_from_presets(trimmed, requested_effort, &presets);
 
         if self.config.model_reasoning_effort != clamped_effort {
             self.config.model_reasoning_effort = clamped_effort;
@@ -22257,25 +23228,8 @@ Have we met every part of this goal and is there no further work to do?"#
         }
 
         if updated {
-            let op = Op::ConfigureSession {
-                provider: self.config.model_provider.clone(),
-                model: self.config.model.clone(),
-                model_explicit: self.config.model_explicit,
-                model_reasoning_effort: self.config.model_reasoning_effort,
-                preferred_model_reasoning_effort: self.config.preferred_model_reasoning_effort,
-                model_reasoning_summary: self.config.model_reasoning_summary,
-                model_text_verbosity: self.config.model_text_verbosity,
-                user_instructions: self.config.user_instructions.clone(),
-                base_instructions: self.config.base_instructions.clone(),
-                approval_policy: self.config.approval_policy.clone(),
-                sandbox_policy: self.config.sandbox_policy.clone(),
-                disable_response_storage: self.config.disable_response_storage,
-                notify: self.config.notify.clone(),
-                cwd: self.config.cwd.clone(),
-                resume_path: None,
-                demo_developer_message: self.config.demo_developer_message.clone(),
-            };
-            self.submit_op(op);
+            self.submit_configure_session_op();
+            self.refresh_bottom_pane_token_usage();
 
             self.sync_follow_chat_models();
             self.refresh_settings_overview_rows();
@@ -22283,10 +23237,7 @@ Have we met every part of this goal and is there no further work to do?"#
 
         if announce {
             let placement = self.ui_placement_for_now();
-            let state = history_cell::new_model_output(
-                &self.config.model,
-                self.config.model_reasoning_effort,
-            );
+            let state = history_cell::new_model_output(&self.config.model, self.config.model_reasoning_effort);
             let cell = crate::history_cell::PlainHistoryCell::from_state(state.clone());
             self.push_system_cell(
                 Box::new(cell),
@@ -22334,13 +23285,16 @@ Have we met every part of this goal and is there no further work to do?"#
 
         if self.config.auto_review_resolve_use_chat_model {
             self.config.auto_review_resolve_model = self.config.model.clone();
-            self.config.auto_review_resolve_model_reasoning_effort =
-                self.config.model_reasoning_effort;
+            self.config.auto_review_resolve_model_reasoning_effort = self.config.model_reasoning_effort;
             self.update_review_settings_model_row();
         }
     }
 
-    pub(crate) fn apply_review_model_selection(&mut self, model: String, effort: ReasoningEffort) {
+    pub(crate) fn apply_review_model_selection(
+        &mut self,
+        model: String,
+        effort: ReasoningEffort,
+    ) {
         let trimmed = model.trim();
         if trimmed.is_empty() {
             return;
@@ -22367,8 +23321,8 @@ Have we met every part of this goal and is there no further work to do?"#
             return;
         }
 
-        let message = if let Ok(home) = hanzo_core::config::find_code_home() {
-            match hanzo_core::config::set_review_model(
+        let message = if let Ok(home) = code_core::config::find_code_home() {
+            match code_core::config::set_review_model(
                 &home,
                 &self.config.review_model,
                 self.config.review_model_reasoning_effort,
@@ -22436,8 +23390,8 @@ Have we met every part of this goal and is there no further work to do?"#
             return;
         }
 
-        let message = if let Ok(home) = hanzo_core::config::find_code_home() {
-            match hanzo_core::config::set_review_resolve_model(
+        let message = if let Ok(home) = code_core::config::find_code_home() {
+            match code_core::config::set_review_resolve_model(
                 &home,
                 &self.config.review_resolve_model,
                 self.config.review_resolve_model_reasoning_effort,
@@ -22446,9 +23400,7 @@ Have we met every part of this goal and is there no further work to do?"#
                 Ok(_) => format!(
                     "Resolve model set to {} ({} reasoning)",
                     self.config.review_resolve_model,
-                    Self::format_reasoning_effort(
-                        self.config.review_resolve_model_reasoning_effort
-                    )
+                    Self::format_reasoning_effort(self.config.review_resolve_model_reasoning_effort)
                 ),
                 Err(err) => {
                     tracing::warn!("Failed to persist resolve model: {err}");
@@ -22482,8 +23434,8 @@ Have we met every part of this goal and is there no further work to do?"#
             self.config.review_model_reasoning_effort = self.config.model_reasoning_effort;
         }
 
-        if let Ok(home) = hanzo_core::config::find_code_home() {
-            if let Err(err) = hanzo_core::config::set_review_model(
+        if let Ok(home) = code_core::config::find_code_home() {
+            if let Err(err) = code_core::config::set_review_model(
                 &home,
                 &self.config.review_model,
                 self.config.review_model_reasoning_effort,
@@ -22518,8 +23470,8 @@ Have we met every part of this goal and is there no further work to do?"#
             self.config.review_resolve_model_reasoning_effort = self.config.model_reasoning_effort;
         }
 
-        if let Ok(home) = hanzo_core::config::find_code_home() {
-            if let Err(err) = hanzo_core::config::set_review_resolve_model(
+        if let Ok(home) = code_core::config::find_code_home() {
+            if let Err(err) = code_core::config::set_review_resolve_model(
                 &home,
                 &self.config.review_resolve_model,
                 self.config.review_resolve_model_reasoning_effort,
@@ -22558,7 +23510,11 @@ Have we met every part of this goal and is there no further work to do?"#
         let clamped_effort = Self::clamp_reasoning_for_model(trimmed, effort);
 
         let mut updated = false;
-        if !self.config.auto_review_model.eq_ignore_ascii_case(trimmed) {
+        if !self
+            .config
+            .auto_review_model
+            .eq_ignore_ascii_case(trimmed)
+        {
             self.config.auto_review_model = trimmed.to_string();
             updated = true;
         }
@@ -22574,8 +23530,8 @@ Have we met every part of this goal and is there no further work to do?"#
             return;
         }
 
-        let notice = if let Ok(home) = hanzo_core::config::find_code_home() {
-            match hanzo_core::config::set_auto_review_model(
+        let notice = if let Ok(home) = code_core::config::find_code_home() {
+            match code_core::config::set_auto_review_model(
                 &home,
                 &self.config.auto_review_model,
                 self.config.auto_review_model_reasoning_effort,
@@ -22618,8 +23574,8 @@ Have we met every part of this goal and is there no further work to do?"#
             self.config.auto_review_model_reasoning_effort = self.config.model_reasoning_effort;
         }
 
-        if let Ok(home) = hanzo_core::config::find_code_home() {
-            if let Err(err) = hanzo_core::config::set_auto_review_model(
+        if let Ok(home) = code_core::config::find_code_home() {
+            if let Err(err) = code_core::config::set_auto_review_model(
                 &home,
                 &self.config.auto_review_model,
                 self.config.auto_review_model_reasoning_effort,
@@ -22678,8 +23634,8 @@ Have we met every part of this goal and is there no further work to do?"#
             return;
         }
 
-        let notice = if let Ok(home) = hanzo_core::config::find_code_home() {
-            match hanzo_core::config::set_auto_review_resolve_model(
+        let notice = if let Ok(home) = code_core::config::find_code_home() {
+            match code_core::config::set_auto_review_resolve_model(
                 &home,
                 &self.config.auto_review_resolve_model,
                 self.config.auto_review_resolve_model_reasoning_effort,
@@ -22688,9 +23644,7 @@ Have we met every part of this goal and is there no further work to do?"#
                 Ok(_) => format!(
                     "Auto Review resolve model set to {} ({} reasoning)",
                     self.config.auto_review_resolve_model,
-                    Self::format_reasoning_effort(
-                        self.config.auto_review_resolve_model_reasoning_effort
-                    )
+                    Self::format_reasoning_effort(self.config.auto_review_resolve_model_reasoning_effort)
                 ),
                 Err(err) => {
                     tracing::warn!("Failed to persist Auto Review resolve model: {err}");
@@ -22725,8 +23679,8 @@ Have we met every part of this goal and is there no further work to do?"#
                 self.config.model_reasoning_effort;
         }
 
-        if let Ok(home) = hanzo_core::config::find_code_home() {
-            if let Err(err) = hanzo_core::config::set_auto_review_resolve_model(
+        if let Ok(home) = code_core::config::find_code_home() {
+            if let Err(err) = code_core::config::set_auto_review_resolve_model(
                 &home,
                 &self.config.auto_review_resolve_model,
                 self.config.auto_review_resolve_model_reasoning_effort,
@@ -22742,9 +23696,7 @@ Have we met every part of this goal and is there no further work to do?"#
             format!(
                 "Auto Review resolve model set to {} ({} reasoning)",
                 self.config.auto_review_resolve_model,
-                Self::format_reasoning_effort(
-                    self.config.auto_review_resolve_model_reasoning_effort
-                )
+                Self::format_reasoning_effort(self.config.auto_review_resolve_model_reasoning_effort)
             )
         };
         self.bottom_pane.flash_footer_notice(notice);
@@ -22765,8 +23717,8 @@ Have we met every part of this goal and is there no further work to do?"#
 
         self.restore_auto_resolve_attempts_if_lost();
 
-        if let Ok(home) = hanzo_core::config::find_code_home() {
-            if let Err(err) = hanzo_core::config::set_auto_drive_settings(
+        if let Ok(home) = code_core::config::find_code_home() {
+            if let Err(err) = code_core::config::set_auto_drive_settings(
                 &home,
                 &self.config.auto_drive,
                 use_chat,
@@ -22791,11 +23743,7 @@ Have we met every part of this goal and is there no further work to do?"#
         self.request_redraw();
     }
 
-    pub(crate) fn handle_model_selection_closed(
-        &mut self,
-        target: ModelSelectionKind,
-        _accepted: bool,
-    ) {
+    pub(crate) fn handle_model_selection_closed(&mut self, target: ModelSelectionKind, _accepted: bool) {
         let expected_section = match target {
             ModelSelectionKind::Session => SettingsSection::Model,
             ModelSelectionKind::Review => SettingsSection::Review,
@@ -22846,8 +23794,8 @@ Have we met every part of this goal and is there no further work to do?"#
             return;
         }
 
-        if let Ok(home) = hanzo_core::config::find_code_home() {
-            if let Err(err) = hanzo_core::config::set_planning_model(
+        if let Ok(home) = code_core::config::find_code_home() {
+            if let Err(err) = code_core::config::set_planning_model(
                 &home,
                 &self.config.planning_model,
                 self.config.planning_model_reasoning_effort,
@@ -22865,10 +23813,7 @@ Have we met every part of this goal and is there no further work to do?"#
         self.refresh_settings_overview_rows();
         self.update_planning_settings_model_row();
         // If we're currently in plan mode, switch the session model immediately.
-        if matches!(
-            self.config.sandbox_policy,
-            hanzo_core::protocol::SandboxPolicy::ReadOnly
-        ) {
+        if matches!(self.config.sandbox_policy, code_core::protocol::SandboxPolicy::ReadOnly) {
             self.apply_planning_session_model();
         }
         self.request_redraw();
@@ -22881,10 +23826,7 @@ Have we met every part of this goal and is there no further work to do?"#
         }
 
         // If we're already on the planning model, do nothing.
-        if self
-            .config
-            .model
-            .eq_ignore_ascii_case(&self.config.planning_model)
+        if self.config.model.eq_ignore_ascii_case(&self.config.planning_model)
             && self.config.model_reasoning_effort == self.config.planning_model_reasoning_effort
         {
             return;
@@ -22899,25 +23841,7 @@ Have we met every part of this goal and is there no further work to do?"#
         self.config.model = self.config.planning_model.clone();
         self.config.model_reasoning_effort = self.config.planning_model_reasoning_effort;
 
-        let op = Op::ConfigureSession {
-            provider: self.config.model_provider.clone(),
-            model: self.config.model.clone(),
-            model_explicit: self.config.model_explicit,
-            model_reasoning_effort: self.config.model_reasoning_effort,
-            preferred_model_reasoning_effort: self.config.preferred_model_reasoning_effort,
-            model_reasoning_summary: self.config.model_reasoning_summary,
-            model_text_verbosity: self.config.model_text_verbosity,
-            user_instructions: self.config.user_instructions.clone(),
-            base_instructions: self.config.base_instructions.clone(),
-            approval_policy: self.config.approval_policy.clone(),
-            sandbox_policy: self.config.sandbox_policy.clone(),
-            disable_response_storage: self.config.disable_response_storage,
-            notify: self.config.notify.clone(),
-            cwd: self.config.cwd.clone(),
-            resume_path: None,
-            demo_developer_message: self.config.demo_developer_message.clone(),
-        };
-        self.submit_op(op);
+        self.submit_configure_session_op();
     }
 
     fn restore_planning_session_model(&mut self) {
@@ -22925,25 +23849,7 @@ Have we met every part of this goal and is there no further work to do?"#
             self.config.model = model;
             self.config.model_reasoning_effort = effort;
 
-            let op = Op::ConfigureSession {
-                provider: self.config.model_provider.clone(),
-                model: self.config.model.clone(),
-                model_explicit: self.config.model_explicit,
-                model_reasoning_effort: self.config.model_reasoning_effort,
-                preferred_model_reasoning_effort: self.config.preferred_model_reasoning_effort,
-                model_reasoning_summary: self.config.model_reasoning_summary,
-                model_text_verbosity: self.config.model_text_verbosity,
-                user_instructions: self.config.user_instructions.clone(),
-                base_instructions: self.config.base_instructions.clone(),
-                approval_policy: self.config.approval_policy.clone(),
-                sandbox_policy: self.config.sandbox_policy.clone(),
-                disable_response_storage: self.config.disable_response_storage,
-                notify: self.config.notify.clone(),
-                cwd: self.config.cwd.clone(),
-                resume_path: None,
-                demo_developer_message: self.config.demo_developer_message.clone(),
-            };
-            self.submit_op(op);
+            self.submit_configure_session_op();
         }
     }
 
@@ -22953,8 +23859,8 @@ Have we met every part of this goal and is there no further work to do?"#
         }
         self.config.planning_use_chat_model = use_chat;
 
-        if let Ok(home) = hanzo_core::config::find_code_home() {
-            if let Err(err) = hanzo_core::config::set_planning_model(
+        if let Ok(home) = code_core::config::find_code_home() {
+            if let Err(err) = code_core::config::set_planning_model(
                 &home,
                 &self.config.planning_model,
                 self.config.planning_model_reasoning_effort,
@@ -22978,10 +23884,7 @@ Have we met every part of this goal and is there no further work to do?"#
         self.update_planning_settings_model_row();
         self.refresh_settings_overview_rows();
 
-        if matches!(
-            self.config.sandbox_policy,
-            hanzo_core::protocol::SandboxPolicy::ReadOnly
-        ) {
+        if matches!(self.config.sandbox_policy, code_core::protocol::SandboxPolicy::ReadOnly) {
             self.apply_planning_session_model();
         }
         self.request_redraw();
@@ -23018,8 +23921,8 @@ Have we met every part of this goal and is there no further work to do?"#
             return;
         }
 
-        let message = if let Ok(home) = hanzo_core::config::find_code_home() {
-            match hanzo_core::config::set_auto_drive_settings(
+        let message = if let Ok(home) = code_core::config::find_code_home() {
+            match code_core::config::set_auto_drive_settings(
                 &home,
                 &self.config.auto_drive,
                 self.config.auto_drive_use_chat_model,
@@ -23090,6 +23993,8 @@ Have we met every part of this goal and is there no further work to do?"#
                 presets,
                 self.config.model.clone(),
                 self.config.model_reasoning_effort,
+                self.config.service_tier,
+                self.config.context_mode,
                 false,
                 ModelSelectionTarget::Session,
             );
@@ -23134,25 +24039,7 @@ Have we met every part of this goal and is there no further work to do?"#
             self.push_background_tail(message);
 
             // Send the update to the backend
-            let op = Op::ConfigureSession {
-                provider: self.config.model_provider.clone(),
-                model: self.config.model.clone(),
-                model_explicit: self.config.model_explicit,
-                model_reasoning_effort: self.config.model_reasoning_effort,
-                preferred_model_reasoning_effort: self.config.preferred_model_reasoning_effort,
-                model_reasoning_summary: self.config.model_reasoning_summary,
-                model_text_verbosity: self.config.model_text_verbosity,
-                user_instructions: self.config.user_instructions.clone(),
-                base_instructions: self.config.base_instructions.clone(),
-                approval_policy: self.config.approval_policy,
-                sandbox_policy: self.config.sandbox_policy.clone(),
-                disable_response_storage: self.config.disable_response_storage,
-                notify: self.config.notify.clone(),
-                cwd: self.config.cwd.clone(),
-                resume_path: None,
-                demo_developer_message: self.config.demo_developer_message.clone(),
-            };
-            let _ = self.code_op_tx.send(op);
+            self.submit_configure_session_op();
         } else {
             // No parameter specified, show interactive UI
             self.bottom_pane
@@ -23167,7 +24054,7 @@ Have we met every part of this goal and is there no further work to do?"#
         self.agents_terminal.reset();
         if self.agents_terminal.active {
             // Reset scroll offset when a new batch starts to avoid stale positions
-            self.layout.scroll_offset = 0;
+            self.layout.scroll_offset.set(0);
         }
 
         // Initialize sparkline with some data so it shows immediately
@@ -23278,26 +24165,7 @@ Have we met every part of this goal and is there no further work to do?"#
         self.config.model_reasoning_effort = clamped_effort;
 
         // Send ConfigureSession op to update the backend
-        let op = Op::ConfigureSession {
-            provider: self.config.model_provider.clone(),
-            model: self.config.model.clone(),
-            model_explicit: self.config.model_explicit,
-            model_reasoning_effort: clamped_effort,
-            preferred_model_reasoning_effort: self.config.preferred_model_reasoning_effort,
-            model_reasoning_summary: self.config.model_reasoning_summary,
-            model_text_verbosity: self.config.model_text_verbosity,
-            user_instructions: self.config.user_instructions.clone(),
-            base_instructions: self.config.base_instructions.clone(),
-            approval_policy: self.config.approval_policy.clone(),
-            sandbox_policy: self.config.sandbox_policy.clone(),
-            disable_response_storage: self.config.disable_response_storage,
-            notify: self.config.notify.clone(),
-            cwd: self.config.cwd.clone(),
-            resume_path: None,
-            demo_developer_message: self.config.demo_developer_message.clone(),
-        };
-
-        self.submit_op(op);
+        self.submit_configure_session_op();
 
         // Add status message to history (replaceable system notice)
         let placement = self.ui_placement_for_now();
@@ -23319,26 +24187,7 @@ Have we met every part of this goal and is there no further work to do?"#
         self.config.model_text_verbosity = new_verbosity;
 
         // Send ConfigureSession op to update the backend
-        let op = Op::ConfigureSession {
-            provider: self.config.model_provider.clone(),
-            model: self.config.model.clone(),
-            model_explicit: self.config.model_explicit,
-            model_reasoning_effort: self.config.model_reasoning_effort,
-            preferred_model_reasoning_effort: self.config.preferred_model_reasoning_effort,
-            model_reasoning_summary: self.config.model_reasoning_summary,
-            model_text_verbosity: new_verbosity,
-            user_instructions: self.config.user_instructions.clone(),
-            base_instructions: self.config.base_instructions.clone(),
-            approval_policy: self.config.approval_policy.clone(),
-            sandbox_policy: self.config.sandbox_policy.clone(),
-            disable_response_storage: self.config.disable_response_storage,
-            notify: self.config.notify.clone(),
-            cwd: self.config.cwd.clone(),
-            resume_path: None,
-            demo_developer_message: self.config.demo_developer_message.clone(),
-        };
-
-        self.submit_op(op);
+        self.submit_configure_session_op();
 
         // Add status message to history
         let message = format!("Text verbosity set to: {}", new_verbosity);
@@ -23354,13 +24203,10 @@ Have we met every part of this goal and is there no further work to do?"#
         let code_home = self.config.code_home.clone();
         let profile = self.config.active_profile.clone();
         tokio::spawn(async move {
-            if let Err(err) = hanzo_core::config_edit::persist_overrides(
+            if let Err(err) = code_core::config_edit::persist_overrides(
                 &code_home,
                 profile.as_deref(),
-                &[(
-                    &["auto_upgrade_enabled"],
-                    if enabled { "true" } else { "false" },
-                )],
+                &[(&["auto_upgrade_enabled"], if enabled { "true" } else { "false" })],
             )
             .await
             {
@@ -23403,13 +24249,10 @@ Have we met every part of this goal and is there no further work to do?"#
         let code_home = self.config.code_home.clone();
         let profile = self.config.active_profile.clone();
         tokio::spawn(async move {
-            if let Err(err) = hanzo_core::config_edit::persist_overrides(
+            if let Err(err) = code_core::config_edit::persist_overrides(
                 &code_home,
                 profile.as_deref(),
-                &[(
-                    &["auto_switch_accounts_on_rate_limit"],
-                    if enabled { "true" } else { "false" },
-                )],
+                &[(&["auto_switch_accounts_on_rate_limit"], if enabled { "true" } else { "false" })],
             )
             .await
             {
@@ -23442,6 +24285,51 @@ Have we met every part of this goal and is there no further work to do?"#
         self.request_redraw();
     }
 
+    pub(crate) fn set_memories_enabled(&mut self, enabled: bool) {
+        if self.config.memories_enabled == enabled {
+            return;
+        }
+        self.config.memories_enabled = enabled;
+
+        let code_home = self.config.code_home.clone();
+        let profile = self.config.active_profile.clone();
+        tokio::spawn(async move {
+            if let Err(err) = code_core::config_edit::persist_overrides(
+                &code_home,
+                profile.as_deref(),
+                &[(&["features", "memories"], if enabled { "true" } else { "false" })],
+            )
+            .await
+            {
+                tracing::warn!("failed to persist memories setting: {err}");
+            }
+        });
+
+        let notice = if enabled {
+            "Memories enabled (applies on next session)"
+        } else {
+            "Memories disabled (applies on next session)"
+        };
+        self.bottom_pane.flash_footer_notice(notice.to_string());
+
+        let should_refresh_memories = matches!(
+            self.settings
+                .overlay
+                .as_ref()
+                .map(|overlay| overlay.active_section()),
+            Some(SettingsSection::Memories)
+        );
+        if should_refresh_memories {
+            let content = self.build_memories_settings_content();
+            if let Some(overlay) = self.settings.overlay.as_mut() {
+                overlay.set_memories_content(content);
+            }
+        }
+
+        self.refresh_settings_overview_rows();
+        self.request_redraw();
+    }
+
     pub(crate) fn set_api_key_fallback_on_all_accounts_limited(&mut self, enabled: bool) {
         if self.config.api_key_fallback_on_all_accounts_limited == enabled {
             return;
@@ -23451,13 +24339,10 @@ Have we met every part of this goal and is there no further work to do?"#
         let code_home = self.config.code_home.clone();
         let profile = self.config.active_profile.clone();
         tokio::spawn(async move {
-            if let Err(err) = hanzo_core::config_edit::persist_overrides(
+            if let Err(err) = code_core::config_edit::persist_overrides(
                 &code_home,
                 profile.as_deref(),
-                &[(
-                    &["api_key_fallback_on_all_accounts_limited"],
-                    if enabled { "true" } else { "false" },
-                )],
+                &[(&["api_key_fallback_on_all_accounts_limited"], if enabled { "true" } else { "false" })],
             )
             .await
             {
@@ -23524,6 +24409,7 @@ Have we met every part of this goal and is there no further work to do?"#
             overlay.set_updates_content(update_content);
         }
         overlay.set_accounts_content(self.build_accounts_settings_content());
+        overlay.set_memories_content(self.build_memories_settings_content());
         overlay.set_notifications_content(self.build_notifications_settings_content());
         overlay.set_prompts_content(self.build_prompts_settings_content());
         overlay.set_skills_content(self.build_skills_settings_content());
@@ -23572,6 +24458,8 @@ Have we met every part of this goal and is there no further work to do?"#
             presets,
             current_model,
             current_effort,
+            self.config.service_tier,
+            self.config.context_mode,
             false,
             ModelSelectionTarget::Session,
             self.app_event_tx.clone(),
@@ -23594,9 +24482,7 @@ Have we met every part of this goal and is there no further work to do?"#
     fn build_notifications_settings_view(&mut self) -> NotificationsSettingsView {
         let mode = match &self.config.tui.notifications {
             Notifications::Enabled(enabled) => NotificationsMode::Toggle { enabled: *enabled },
-            Notifications::Custom(entries) => NotificationsMode::Custom {
-                entries: entries.clone(),
-            },
+            Notifications::Custom(entries) => NotificationsMode::Custom { entries: entries.clone() },
         };
         let ticket = self.make_background_tail_ticket();
         NotificationsSettingsView::new(mode, self.app_event_tx.clone(), ticket)
@@ -23623,16 +24509,16 @@ Have we met every part of this goal and is there no further work to do?"#
     }
 
     fn build_mcp_server_rows(&mut self) -> Option<McpServerRows> {
-        let home = match hanzo_core::config::find_code_home() {
+        let home = match code_core::config::find_code_home() {
             Ok(home) => home,
             Err(e) => {
-                let msg = format!("Failed to locate HANZO_HOME: {}", e);
+                let msg = format!("Failed to locate CODE_HOME: {}", e);
                 self.history_push_plain_state(history_cell::new_error_event(msg));
                 return None;
             }
         };
 
-        let (enabled, disabled) = match hanzo_core::config::list_mcp_servers(&home) {
+        let (enabled, disabled) = match code_core::config::list_mcp_servers(&home) {
             Ok(result) => result,
             Err(e) => {
                 let msg = format!("Failed to read MCP config: {}", e);
@@ -23643,17 +24529,19 @@ Have we met every part of this goal and is there no further work to do?"#
 
         let mut rows: McpServerRows = Vec::new();
         for (name, cfg) in enabled.into_iter() {
+            let summary = self.format_mcp_server_summary(&name, &cfg, true);
             rows.push(McpServerRow {
                 name,
                 enabled: true,
-                summary: Self::format_mcp_summary(&cfg),
+                summary,
             });
         }
         for (name, cfg) in disabled.into_iter() {
+            let summary = self.format_mcp_server_summary(&name, &cfg, false);
             rows.push(McpServerRow {
                 name,
                 enabled: false,
-                summary: Self::format_mcp_summary(&cfg),
+                summary,
             });
         }
         rows.sort_by(|a, b| a.name.cmp(&b.name));
@@ -23668,15 +24556,13 @@ Have we met every part of this goal and is there no further work to do?"#
 
     fn is_builtin_agent(name: &str, command: &str) -> bool {
         if let Some(spec) = agent_model_spec(name).or_else(|| agent_model_spec(command)) {
-            return matches!(spec.family, "dev" | "code" | "codex" | "cloud");
+            return matches!(spec.family, "code" | "codex" | "cloud");
         }
 
-        name.eq_ignore_ascii_case("dev")
-            || name.eq_ignore_ascii_case("code")
+        name.eq_ignore_ascii_case("code")
             || name.eq_ignore_ascii_case("codex")
             || name.eq_ignore_ascii_case("cloud")
             || name.eq_ignore_ascii_case("coder")
-            || command.eq_ignore_ascii_case("dev")
             || command.eq_ignore_ascii_case("code")
             || command.eq_ignore_ascii_case("codex")
             || command.eq_ignore_ascii_case("cloud")
@@ -23684,35 +24570,6 @@ Have we met every part of this goal and is there no further work to do?"#
     }
 
     fn collect_agents_overview_rows(&self) -> (Vec<AgentOverviewRow>, Vec<String>) {
-        fn command_exists(cmd: &str) -> bool {
-            if cmd.contains(std::path::MAIN_SEPARATOR) || cmd.contains('/') || cmd.contains('\\') {
-                return std::fs::metadata(cmd).map(|m| m.is_file()).unwrap_or(false);
-            }
-            #[cfg(target_os = "windows")]
-            {
-                which::which(cmd).map(|p| p.is_file()).unwrap_or(false)
-            }
-            #[cfg(not(target_os = "windows"))]
-            {
-                use std::os::unix::fs::PermissionsExt;
-                let Some(path_os) = std::env::var_os("PATH") else {
-                    return false;
-                };
-                for dir in std::env::split_paths(&path_os) {
-                    if dir.as_os_str().is_empty() {
-                        continue;
-                    }
-                    let candidate = dir.join(cmd);
-                    if let Ok(meta) = std::fs::metadata(&candidate) {
-                        if meta.is_file() && (meta.permissions().mode() & 0o111 != 0) {
-                            return true;
-                        }
-                    }
-                }
-                false
-            }
-        }
-
         fn command_for_check(command: &str) -> String {
             let (base, _) = split_command_and_args(command);
             if base.trim().is_empty() {
@@ -23729,10 +24586,7 @@ Have we met every part of this goal and is there no further work to do?"#
             .collect();
         let mut extras: Vec<String> = Vec::new();
         for agent in &self.config.agents {
-            if !ordered
-                .iter()
-                .any(|name| agent.name.eq_ignore_ascii_case(name))
-            {
+            if !ordered.iter().any(|name| agent.name.eq_ignore_ascii_case(name)) {
                 extras.push(agent.name.to_ascii_lowercase());
             }
         }
@@ -23760,16 +24614,16 @@ Have we met every part of this goal and is there no further work to do?"#
                 .find(|a| a.name.eq_ignore_ascii_case(name))
             {
                 let builtin = Self::is_builtin_agent(&cfg.name, &cfg.command);
-                let spec_cli = agent_model_spec(&cfg.name)
-                    .or_else(|| agent_model_spec(&cfg.command))
-                    .map(|spec| spec.cli);
+                    let spec_cli = agent_model_spec(&cfg.name)
+                        .or_else(|| agent_model_spec(&cfg.command))
+                        .map(|spec| spec.cli);
                 let command_to_check = command_for_check(&cfg.command);
                 let installed = if builtin {
                     true
-                } else if command_exists(&command_to_check) {
+                } else if external_agent_command_exists(&command_to_check) {
                     true
                 } else if let Some(cli) = spec_cli {
-                    command_exists(cli)
+                    external_agent_command_exists(cli)
                 } else {
                     false
                 };
@@ -23791,10 +24645,10 @@ Have we met every part of this goal and is there no further work to do?"#
                 let command_to_check = command_for_check(&cfg.command);
                 let installed = if builtin {
                     true
-                } else if command_exists(&command_to_check) {
+                } else if external_agent_command_exists(&command_to_check) {
                     true
                 } else if let Some(cli) = spec_cli {
-                    command_exists(cli)
+                    external_agent_command_exists(cli)
                 } else {
                     false
                 };
@@ -23815,9 +24669,9 @@ Have we met every part of this goal and is there no further work to do?"#
                 let installed = if builtin {
                     true
                 } else if let Some(cli) = spec_cli {
-                    command_exists(cli)
+                    external_agent_command_exists(cli)
                 } else {
-                    command_exists(&cmd)
+                    external_agent_command_exists(&cmd)
                 };
                 agent_rows.push(AgentOverviewRow {
                     name: name.clone(),
@@ -23834,11 +24688,7 @@ Have we met every part of this goal and is there no further work to do?"#
             .subagent_commands
             .iter()
             .map(|c| c.name.clone())
-            .filter(|name| {
-                !commands
-                    .iter()
-                    .any(|builtin| builtin.eq_ignore_ascii_case(name))
-            })
+            .filter(|name| !commands.iter().any(|builtin| builtin.eq_ignore_ascii_case(name)))
             .collect();
         commands.extend(custom);
 
@@ -23871,8 +24721,7 @@ Have we met every part of this goal and is there no further work to do?"#
         let selected = if total == 0 {
             0
         } else {
-            self.agents_overview_selected_index
-                .min(total.saturating_sub(1))
+            self.agents_overview_selected_index.min(total.saturating_sub(1))
         };
         self.agents_overview_selected_index = selected;
         AgentsSettingsContent::new_overview(rows, commands, selected, self.app_event_tx.clone())
@@ -23913,6 +24762,7 @@ Have we met every part of this goal and is there no further work to do?"#
                     SettingsSection::Updates => self.settings_summary_updates(),
                     SettingsSection::Accounts => self.settings_summary_accounts(),
                     SettingsSection::Agents => self.settings_summary_agents(),
+                    SettingsSection::Memories => self.settings_summary_memories(),
                     SettingsSection::Prompts => self.settings_summary_prompts(),
                     SettingsSection::Skills => self.settings_summary_skills(),
                     SettingsSection::AutoDrive => self.settings_summary_auto_drive(),
@@ -23971,10 +24821,7 @@ Have we met every part of this goal and is there no further work to do?"#
         let theme_label = Self::theme_display_name(self.config.tui.theme.name);
         let spinner_name = &self.config.tui.spinner.name;
         let spinner_label = spinner::spinner_label_for(spinner_name);
-        Some(format!(
-            "Theme: {} · Spinner: {}",
-            theme_label, spinner_label
-        ))
+        Some(format!("Theme: {} · Spinner: {}", theme_label, spinner_label))
     }
 
     fn settings_summary_updates(&self) -> Option<String> {
@@ -24035,8 +24882,7 @@ Have we met every part of this goal and is there no further work to do?"#
             } else {
                 Self::format_model_label(&self.config.auto_drive.model)
             };
-            let effort =
-                Self::format_reasoning_effort(self.config.auto_drive.model_reasoning_effort);
+            let effort = Self::format_reasoning_effort(self.config.auto_drive.model_reasoning_effort);
             (model_label, Some(effort))
         };
         let model_segment = if let Some(effort) = effort_text {
@@ -24044,11 +24890,22 @@ Have we met every part of this goal and is there no further work to do?"#
         } else {
             format!("Model: {}", model_text)
         };
+        let routing_enabled = self
+            .config
+            .auto_drive
+            .model_routing_entries
+            .iter()
+            .filter(|entry| entry.enabled)
+            .count();
+        let routing_total = self.config.auto_drive.model_routing_entries.len();
         Some(format!(
-            "{} · Agents: {} · Diagnostics: {} · Continue: {}",
+            "{} · Agents: {} · Diagnostics: {} · Model routing: {} ({}/{}) · Continue: {}",
             model_segment,
             Self::on_off_label(self.auto_state.subagents_enabled),
             Self::on_off_label(diagnostics_enabled),
+            Self::on_off_label(self.config.auto_drive.model_routing_enabled),
+            routing_enabled,
+            routing_total,
             self.auto_state.continue_mode.label()
         ))
     }
@@ -24102,9 +24959,7 @@ Have we met every part of this goal and is there no further work to do?"#
             format!(
                 "{} ({})",
                 Self::format_model_label(&self.config.auto_review_resolve_model),
-                Self::format_reasoning_effort(
-                    self.config.auto_review_resolve_model_reasoning_effort
-                )
+                Self::format_reasoning_effort(self.config.auto_review_resolve_model_reasoning_effort)
             )
         };
 
@@ -24164,6 +25019,25 @@ Have we met every part of this goal and is there no further work to do?"#
     fn settings_summary_skills(&self) -> Option<String> {
         let count = self.bottom_pane.skills().len();
         Some(format!("Skills loaded: {count}"))
+    }
+
+    fn settings_summary_memories(&self) -> Option<String> {
+        Some(format!(
+            "Memories: {}",
+            Self::on_off_label(self.config.memories_enabled)
+        ))
+    }
+
+    fn refresh_mcp_settings_overlay(&mut self) {
+        let content = self.build_mcp_settings_content();
+        let Some(content) = content else {
+            return;
+        };
+        let Some(overlay) = self.settings.overlay.as_mut() else {
+            return;
+        };
+        overlay.set_mcp_content(content);
+        self.request_redraw();
     }
 
     fn refresh_settings_overview_rows(&mut self) {
@@ -24227,48 +25101,45 @@ Have we met every part of this goal and is there no further work to do?"#
         if value { "On" } else { "Off" }
     }
 
-    fn theme_display_name(theme: hanzo_core::config_types::ThemeName) -> String {
+    fn theme_display_name(theme: code_core::config_types::ThemeName) -> String {
         match theme {
-            hanzo_core::config_types::ThemeName::LightPhoton => "Light - Photon".to_string(),
-            hanzo_core::config_types::ThemeName::LightPhotonAnsi16 => {
+            code_core::config_types::ThemeName::LightPhoton => "Light - Photon".to_string(),
+            code_core::config_types::ThemeName::LightPhotonAnsi16 => {
                 "Light - Photon (16-color)".to_string()
             }
-            hanzo_core::config_types::ThemeName::LightPrismRainbow => {
+            code_core::config_types::ThemeName::LightPrismRainbow => {
                 "Light - Prism Rainbow".to_string()
             }
-            hanzo_core::config_types::ThemeName::LightVividTriad => {
+            code_core::config_types::ThemeName::LightVividTriad => {
                 "Light - Vivid Triad".to_string()
             }
-            hanzo_core::config_types::ThemeName::LightPorcelain => "Light - Porcelain".to_string(),
-            hanzo_core::config_types::ThemeName::LightSandbar => "Light - Sandbar".to_string(),
-            hanzo_core::config_types::ThemeName::LightGlacier => "Light - Glacier".to_string(),
-            hanzo_core::config_types::ThemeName::DarkCarbonNight => {
+            code_core::config_types::ThemeName::LightPorcelain => "Light - Porcelain".to_string(),
+            code_core::config_types::ThemeName::LightSandbar => "Light - Sandbar".to_string(),
+            code_core::config_types::ThemeName::LightGlacier => "Light - Glacier".to_string(),
+            code_core::config_types::ThemeName::DarkCarbonNight => {
                 "Dark - Carbon Night".to_string()
             }
-            hanzo_core::config_types::ThemeName::DarkCarbonAnsi16 => {
+            code_core::config_types::ThemeName::DarkCarbonAnsi16 => {
                 "Dark - Carbon (16-color)".to_string()
             }
-            hanzo_core::config_types::ThemeName::DarkShinobiDusk => {
+            code_core::config_types::ThemeName::DarkShinobiDusk => {
                 "Dark - Shinobi Dusk".to_string()
             }
-            hanzo_core::config_types::ThemeName::DarkOledBlackPro => {
+            code_core::config_types::ThemeName::DarkOledBlackPro => {
                 "Dark - OLED Black Pro".to_string()
             }
-            hanzo_core::config_types::ThemeName::DarkAmberTerminal => {
+            code_core::config_types::ThemeName::DarkAmberTerminal => {
                 "Dark - Amber Terminal".to_string()
             }
-            hanzo_core::config_types::ThemeName::DarkAuroraFlux => "Dark - Aurora Flux".to_string(),
-            hanzo_core::config_types::ThemeName::DarkCharcoalRainbow => {
+            code_core::config_types::ThemeName::DarkAuroraFlux => "Dark - Aurora Flux".to_string(),
+            code_core::config_types::ThemeName::DarkCharcoalRainbow => {
                 "Dark - Charcoal Rainbow".to_string()
             }
-            hanzo_core::config_types::ThemeName::DarkZenGarden => "Dark - Zen Garden".to_string(),
-            hanzo_core::config_types::ThemeName::DarkPaperLightPro => {
+            code_core::config_types::ThemeName::DarkZenGarden => "Dark - Zen Garden".to_string(),
+            code_core::config_types::ThemeName::DarkPaperLightPro => {
                 "Dark - Paper Light Pro".to_string()
             }
-            hanzo_core::config_types::ThemeName::DarkCode => "Dark - Code".to_string(),
-            hanzo_core::config_types::ThemeName::DarkCodex => "Dark - Hanzo".to_string(),
-            hanzo_core::config_types::ThemeName::DarkMonochrome => "Dark - Monochrome".to_string(),
-            hanzo_core::config_types::ThemeName::Custom => {
+            code_core::config_types::ThemeName::Custom => {
                 let mut label =
                     crate::theme::custom_theme_label().unwrap_or_else(|| "Custom".to_string());
                 for pref in ["Light - ", "Dark - ", "Light ", "Dark "] {
@@ -24317,6 +25188,7 @@ Have we met every part of this goal and is there no further work to do?"#
             | SettingsSection::Notifications
             | SettingsSection::Prompts
             | SettingsSection::Accounts
+            | SettingsSection::Memories
             | SettingsSection::Skills => false,
             SettingsSection::Agents => {
                 self.show_agents_overview_ui();
@@ -24380,8 +25252,8 @@ Have we met every part of this goal and is there no further work to do?"#
         });
     }
 
-    pub(crate) fn set_theme(&mut self, new_theme: hanzo_core::config_types::ThemeName) {
-        let custom_hint = if matches!(new_theme, hanzo_core::config_types::ThemeName::Custom) {
+    pub(crate) fn set_theme(&mut self, new_theme: code_core::config_types::ThemeName) {
+        let custom_hint = if matches!(new_theme, code_core::config_types::ThemeName::Custom) {
             self.config
                 .tui
                 .theme
@@ -24394,7 +25266,7 @@ Have we met every part of this goal and is there no further work to do?"#
 
         // Update the config
         self.config.tui.theme.name = mapped_theme;
-        if matches!(new_theme, hanzo_core::config_types::ThemeName::Custom) {
+        if matches!(new_theme, code_core::config_types::ThemeName::Custom) {
             self.config.tui.theme.is_dark = custom_hint;
         } else {
             self.config.tui.theme.is_dark = None;
@@ -24427,14 +25299,14 @@ Have we met every part of this goal and is there no further work to do?"#
         // Update the config
         self.config.tui.spinner.name = spinner_name.clone();
         // Persist selection to config file
-        if let Ok(home) = hanzo_core::config::find_code_home() {
-            if let Err(e) = hanzo_core::config::set_tui_spinner_name(&home, &spinner_name) {
+        if let Ok(home) = code_core::config::find_code_home() {
+            if let Err(e) = code_core::config::set_tui_spinner_name(&home, &spinner_name) {
                 tracing::warn!("Failed to persist spinner to config.toml: {}", e);
             } else {
                 tracing::info!("Persisted TUI spinner selection to config.toml");
             }
         } else {
-            tracing::warn!("Could not locate config home to persist spinner selection");
+            tracing::warn!("Could not locate Codex home to persist spinner selection");
         }
 
         // Confirmation message (replaceable system notice)
@@ -24456,32 +25328,27 @@ Have we met every part of this goal and is there no further work to do?"#
     }
 
     fn apply_access_mode_indicator_from_config(&mut self) {
-        use hanzo_core::protocol::AskForApproval;
-        use hanzo_core::protocol::SandboxPolicy;
+        use code_core::protocol::AskForApproval;
+        use code_core::protocol::SandboxPolicy;
         let label = match (&self.config.sandbox_policy, self.config.approval_policy) {
-            (SandboxPolicy::ReadOnly, _) => Some("Plan Mode".to_string()),
+            (SandboxPolicy::ReadOnly, _) => Some("Read Only".to_string()),
             (
                 SandboxPolicy::WorkspaceWrite {
                     network_access: false,
                     ..
                 },
-                AskForApproval::OnFailure
-                | AskForApproval::OnRequest
-                | AskForApproval::UnlessTrusted,
-            ) => Some("Auto Accept".to_string()),
-            (SandboxPolicy::DangerFullAccess, AskForApproval::Never) => {
-                Some("Bypass permissions on".to_string())
-            }
+                AskForApproval::UnlessTrusted,
+            ) => Some("Write with Approval".to_string()),
             _ => None,
         };
         self.bottom_pane.set_access_mode_label(label);
     }
 
-    /// Rotate the access preset: Plan Mode → Auto Accept → Bypass permissions
+    /// Rotate the access preset: Read Only (Plan Mode) → Write with Approval → Full Access
     pub(crate) fn cycle_access_mode(&mut self) {
-        use hanzo_core::config::set_project_access_mode;
-        use hanzo_core::protocol::AskForApproval;
-        use hanzo_core::protocol::SandboxPolicy;
+        use code_core::config::set_project_access_mode;
+        use code_core::protocol::AskForApproval;
+        use code_core::protocol::SandboxPolicy;
 
         // Determine current index
         let idx = match (&self.config.sandbox_policy, self.config.approval_policy) {
@@ -24491,9 +25358,7 @@ Have we met every part of this goal and is there no further work to do?"#
                     network_access: false,
                     ..
                 },
-                AskForApproval::OnFailure
-                | AskForApproval::OnRequest
-                | AskForApproval::UnlessTrusted,
+                AskForApproval::UnlessTrusted,
             ) => 1,
             (SandboxPolicy::DangerFullAccess, AskForApproval::Never) => 2,
             _ => 0,
@@ -24503,17 +25368,17 @@ Have we met every part of this goal and is there no further work to do?"#
         // Apply mapping
         let (label, approval, sandbox) = match next {
             0 => (
-                "Plan Mode",
+                "Read Only (Plan Mode)",
                 AskForApproval::OnRequest,
                 SandboxPolicy::ReadOnly,
             ),
             1 => (
-                "Auto Accept",
-                AskForApproval::OnFailure,
+                "Write with Approval",
+                AskForApproval::UnlessTrusted,
                 SandboxPolicy::new_workspace_write_policy(),
             ),
             _ => (
-                "Bypass permissions on",
+                "Full Access",
                 AskForApproval::Never,
                 SandboxPolicy::DangerFullAccess,
             ),
@@ -24531,45 +25396,39 @@ Have we met every part of this goal and is there no further work to do?"#
         self.config.sandbox_policy = sandbox;
 
         // Send ConfigureSession op to backend
-        let op = Op::ConfigureSession {
-            provider: self.config.model_provider.clone(),
-            model: self.config.model.clone(),
-            model_explicit: self.config.model_explicit,
-            model_reasoning_effort: self.config.model_reasoning_effort,
-            preferred_model_reasoning_effort: self.config.preferred_model_reasoning_effort,
-            model_reasoning_summary: self.config.model_reasoning_summary,
-            model_text_verbosity: self.config.model_text_verbosity,
-            user_instructions: self.config.user_instructions.clone(),
-            base_instructions: self.config.base_instructions.clone(),
-            approval_policy: self.config.approval_policy.clone(),
-            sandbox_policy: self.config.sandbox_policy.clone(),
-            disable_response_storage: self.config.disable_response_storage,
-            notify: self.config.notify.clone(),
-            cwd: self.config.cwd.clone(),
-            resume_path: None,
-            demo_developer_message: self.config.demo_developer_message.clone(),
-        };
-        self.submit_op(op);
+        self.submit_configure_session_op();
 
-        // Persist selection into HANZO_HOME/config.toml for this project directory so it sticks.
+        // Persist selection into CODEX_HOME/config.toml for this project directory so it sticks.
         let _ = set_project_access_mode(
             &self.config.code_home,
             &self.config.cwd,
             self.config.approval_policy,
             match &self.config.sandbox_policy {
-                SandboxPolicy::ReadOnly => hanzo_protocol::config_types::SandboxMode::ReadOnly,
+                SandboxPolicy::ReadOnly => code_protocol::config_types::SandboxMode::ReadOnly,
                 SandboxPolicy::WorkspaceWrite { .. } => {
-                    hanzo_protocol::config_types::SandboxMode::WorkspaceWrite
+                    code_protocol::config_types::SandboxMode::WorkspaceWrite
                 }
                 SandboxPolicy::DangerFullAccess => {
-                    hanzo_protocol::config_types::SandboxMode::DangerFullAccess
+                    code_protocol::config_types::SandboxMode::DangerFullAccess
                 }
             },
         );
 
-        // Footer indicator: keep the active access label visible.
-        self.bottom_pane
-            .set_access_mode_label(Some(label.to_string()));
+        // Footer indicator: persistent for RO/Approval; ephemeral for Full Access
+        if next == 2 {
+            self.bottom_pane.set_access_mode_label_ephemeral(
+                "Full Access".to_string(),
+                std::time::Duration::from_secs(4),
+            );
+        } else {
+            let persistent = if next == 0 {
+                "Read Only"
+            } else {
+                "Write with Approval"
+            };
+            self.bottom_pane
+                .set_access_mode_label(Some(persistent.to_string()));
+        }
 
         // Announce in history: replace the last access-mode status, inserting early
         // in the current request so it appears above upcoming commands.
@@ -24581,23 +25440,25 @@ Have we met every part of this goal and is there no further work to do?"#
         // next turn begins. Subsequent cycles will overwrite this note.
         let agent_note = match next {
             0 => {
-                "System: access mode changed to Plan Mode. Do not attempt write operations or apply_patch."
+                "System: access mode changed to Read Only. Do not attempt write operations or apply_patch."
             }
             1 => {
-                "System: access mode changed to Auto Accept. Commands run in the workspace without prompts."
+                "System: access mode changed to Write with Approval. Request approval before writes."
             }
-            _ => {
-                "System: access mode changed to Bypass permissions. Writes and network are allowed."
-            }
+            _ => "System: access mode changed to Full Access. Writes and network are allowed.",
         };
         self.queue_agent_note(agent_note);
     }
 
     pub(crate) fn cycle_auto_drive_variant(&mut self) {
         self.auto_drive_variant = self.auto_drive_variant.next();
-        self.bottom_pane
+        self
+            .bottom_pane
             .set_auto_drive_variant(self.auto_drive_variant);
-        let notice = format!("Auto Drive style: {}", self.auto_drive_variant.name());
+        let notice = format!(
+            "Auto Drive style: {}",
+            self.auto_drive_variant.name()
+        );
         self.bottom_pane.flash_footer_notice(notice);
     }
 
@@ -24619,8 +25480,7 @@ Have we met every part of this goal and is there no further work to do?"#
         }
         // Insert new status near the top of this request window
         let key = self.near_time_key(None);
-        let pos =
-            self.history_insert_with_key_global_tagged(Box::new(cell), key, "background", None);
+        let pos = self.history_insert_with_key_global_tagged(Box::new(cell), key, "background", None);
         self.access_status_idx = Some(pos);
     }
 
@@ -24669,7 +25529,10 @@ Have we met every part of this goal and is there no further work to do?"#
                 .downcast_mut::<history_cell::MergedExecCell>()
             {
                 merged.rebuild_with_theme();
-            } else if let Some(diff) = cell.as_any_mut().downcast_mut::<history_cell::DiffCell>() {
+            } else if let Some(diff) = cell
+                .as_any_mut()
+                .downcast_mut::<history_cell::DiffCell>()
+            {
                 diff.rebuild_with_theme();
             }
         }
@@ -24689,18 +25552,18 @@ Have we met every part of this goal and is there no further work to do?"#
         self.restyle_history_after_theme_change();
     }
 
-    fn save_theme_to_config(&self, new_theme: hanzo_core::config_types::ThemeName) {
-        // Persist the theme selection to HANZO_HOME config.toml (legacy CODE_HOME/CODEX_HOME)
-        match hanzo_core::config::find_code_home() {
+    fn save_theme_to_config(&self, new_theme: code_core::config_types::ThemeName) {
+        // Persist the theme selection to CODE_HOME/CODEX_HOME config.toml
+        match code_core::config::find_code_home() {
             Ok(home) => {
-                if let Err(e) = hanzo_core::config::set_tui_theme_name(&home, new_theme) {
+                if let Err(e) = code_core::config::set_tui_theme_name(&home, new_theme) {
                     tracing::warn!("Failed to persist theme to config.toml: {}", e);
                 } else {
                     tracing::info!("Persisted TUI theme selection to config.toml");
                 }
             }
             Err(e) => {
-                tracing::warn!("Could not locate config home to persist theme: {}", e);
+                tracing::warn!("Could not locate Codex home to persist theme: {}", e);
             }
         }
     }
@@ -24730,12 +25593,7 @@ Have we met every part of this goal and is there no further work to do?"#
             CancellationEvent::Handled => return CancellationEvent::Handled,
             CancellationEvent::Ignored => {}
         }
-        let exec_related_running = !self.exec.running_commands.is_empty()
-            || !self.tools_state.running_custom_tools.is_empty()
-            || !self.tools_state.web_search_sessions.is_empty()
-            || !self.tools_state.running_wait_tools.is_empty()
-            || !self.tools_state.running_kill_tools.is_empty();
-        if self.bottom_pane.is_task_running() || exec_related_running {
+        if self.is_task_running() || self.wait_running() {
             self.interrupt_running_task();
             CancellationEvent::Ignored
         } else if self.bottom_pane.ctrl_c_quit_hint_visible() {
@@ -24753,7 +25611,11 @@ Have we met every part of this goal and is there no further work to do?"#
     }
 
     // --- Double‑Escape helpers ---
-    fn schedule_auto_drive_card_celebration(&self, delay: Duration, message: Option<String>) {
+    fn schedule_auto_drive_card_celebration(
+        &self,
+        delay: Duration,
+        message: Option<String>,
+    ) {
         let event = AppEvent::StartAutoDriveCelebration { message };
         self.spawn_app_event_after(delay, event);
     }
@@ -24833,11 +25695,13 @@ Have we met every part of this goal and is there no further work to do?"#
         }
     }
 
-    fn latest_auto_drive_card_mut(&mut self) -> Option<&mut history_cell::AutoDriveCardCell> {
-        self.history_cells.iter_mut().rev().find_map(|cell| {
-            cell.as_any_mut()
-                .downcast_mut::<history_cell::AutoDriveCardCell>()
-        })
+    fn latest_auto_drive_card_mut(
+        &mut self,
+    ) -> Option<&mut history_cell::AutoDriveCardCell> {
+        self.history_cells
+            .iter_mut()
+            .rev()
+            .find_map(|cell| cell.as_any_mut().downcast_mut::<history_cell::AutoDriveCardCell>())
     }
 
     pub(crate) fn auto_manual_entry_active(&self) -> bool {
@@ -24897,20 +25761,57 @@ Have we met every part of this goal and is there no further work to do?"#
         // Consider execs "wait-only" when every running command is being waited on and marked
         // as such. Any other exec activity keeps the composer blocked.
         let execs_wait_only = self.exec.running_commands.is_empty()
-            || self.exec.running_commands.iter().all(|(id, cmd)| {
-                cmd.wait_active
-                    && self
-                        .tools_state
-                        .running_wait_tools
-                        .values()
-                        .any(|wait_id| wait_id == id)
-            });
+            || self
+                .exec
+                .running_commands
+                .iter()
+                .all(|(id, cmd)| {
+                    cmd.wait_active
+                        && self
+                            .tools_state
+                            .running_wait_tools
+                            .values()
+                            .any(|wait_id| wait_id == id)
+                });
 
         execs_wait_only
             && self.tools_state.running_custom_tools.is_empty()
             && self.tools_state.web_search_sessions.is_empty()
             && !self.stream.is_write_cycle_active()
             && !self.agents_are_actively_running()
+            && self.active_task_ids.is_empty()
+    }
+
+    /// True when the only active work is background Auto Review agents.
+    ///
+    /// In this mode, user input should continue immediately instead of taking
+    /// the `QueueUserInput` path, because queueing behind review-only work can
+    /// silently defer messages until review completion.
+    fn auto_review_only_activity(&self) -> bool {
+        let has_running_auto_review = self.active_agents.iter().any(|agent| {
+            matches!(agent.status, AgentStatus::Pending | AgentStatus::Running)
+                && matches!(agent.source_kind, Some(AgentSourceKind::AutoReview))
+        });
+
+        let has_running_non_auto_review = self.active_agents.iter().any(|agent| {
+            matches!(agent.status, AgentStatus::Pending | AgentStatus::Running)
+                && !matches!(agent.source_kind, Some(AgentSourceKind::AutoReview))
+        });
+
+        if has_running_non_auto_review {
+            return false;
+        }
+
+        if !(has_running_auto_review || self.background_review.is_some()) {
+            return false;
+        }
+
+        !self.terminal_is_running()
+            && self.exec.running_commands.is_empty()
+            && self.tools_state.running_custom_tools.is_empty()
+            && self.tools_state.web_search_sessions.is_empty()
+            && !self.wait_running()
+            && !self.stream.is_write_cycle_active()
             && self.active_task_ids.is_empty()
     }
 
@@ -25218,11 +26119,7 @@ Have we met every part of this goal and is there no further work to do?"#
                 );
 
                 match mutation {
-                    HistoryMutation::Inserted {
-                        id: history_id,
-                        record,
-                        ..
-                    } => {
+                    HistoryMutation::Inserted { id: history_id, record, .. } => {
                         let insert_key = match explicit_id.as_deref() {
                             Some(rid) => self.try_stream_order_key(kind, rid).unwrap_or_else(|| {
                                 tracing::warn!(
@@ -25255,11 +26152,7 @@ Have we met every part of this goal and is there no further work to do?"#
                             explicit_id
                         );
                     }
-                    HistoryMutation::Replaced {
-                        id: history_id,
-                        record,
-                        ..
-                    } => {
+                    HistoryMutation::Replaced { id: history_id, record, .. } => {
                         self.update_cell_from_record(history_id, record);
                         self.mark_history_dirty();
                     }
@@ -25287,7 +26180,11 @@ Have we met every part of this goal and is there no further work to do?"#
     ) -> AssistantStreamState {
         let mut preview = String::new();
         for (idx, line) in lines.iter().enumerate() {
-            let flat: String = line.spans.iter().map(|s| s.content.as_ref()).collect();
+            let flat: String = line
+                .spans
+                .iter()
+                .map(|s| s.content.as_ref())
+                .collect();
             if idx == 0 && flat.trim().eq_ignore_ascii_case("codex") {
                 continue;
             }
@@ -25324,7 +26221,10 @@ Have we met every part of this goal and is there no further work to do?"#
         state: AssistantStreamState,
     ) {
         if state.id != HistoryId::ZERO {
-            self.update_cell_from_record(state.id, HistoryRecord::AssistantStream(state.clone()));
+            self.update_cell_from_record(
+                state.id,
+                HistoryRecord::AssistantStream(state.clone()),
+            );
             self.autoscroll_if_near_bottom();
             return;
         }
@@ -25335,7 +26235,10 @@ Have we met every part of this goal and is there no further work to do?"#
             .cloned()
         {
             if existing.id != HistoryId::ZERO {
-                self.update_cell_from_record(existing.id, HistoryRecord::AssistantStream(existing));
+                self.update_cell_from_record(
+                    existing.id,
+                    HistoryRecord::AssistantStream(existing),
+                );
                 self.autoscroll_if_near_bottom();
             }
         }
@@ -25345,19 +26248,19 @@ Have we met every part of this goal and is there no further work to do?"#
         let Some(stream_id) = self.stream.current_stream_id().cloned() else {
             return;
         };
-        let Some(preview) = self.stream.preview_source_for_kind(StreamKind::Answer) else {
+        let Some(preview) = self
+            .stream
+            .preview_source_for_kind(StreamKind::Answer)
+        else {
             return;
         };
         let metadata = MessageMetadata {
             citations: Vec::new(),
             token_usage: Some(self.last_token_usage.clone()),
         };
-        self.history_state.upsert_assistant_stream_state(
-            &stream_id,
-            preview,
-            None,
-            Some(&metadata),
-        );
+        self
+            .history_state
+            .upsert_assistant_stream_state(&stream_id, preview, None, Some(&metadata));
         if let Some(state) = self
             .history_state
             .assistant_stream_state(&stream_id)
@@ -25381,14 +26284,14 @@ Have we met every part of this goal and is there no further work to do?"#
                 received_at: SystemTime::now(),
             })
         };
-        let mutation =
-            self.history_state
-                .apply_domain_event(HistoryDomainEvent::UpsertAssistantStream {
-                    stream_id: stream_id.to_string(),
-                    preview_markdown: preview,
-                    delta,
-                    metadata: None,
-                });
+        let mutation = self.history_state.apply_domain_event(
+            HistoryDomainEvent::UpsertAssistantStream {
+                stream_id: stream_id.to_string(),
+                preview_markdown: preview,
+                delta,
+                metadata: None,
+            },
+        );
 
         match mutation {
             HistoryMutation::Inserted { record, .. } => {
@@ -25465,6 +26368,19 @@ Have we met every part of this goal and is there no further work to do?"#
         if let Some(sid) = stream_id {
             if self.mid_turn_answer_ids_in_turn.contains(sid) {
                 state.mid_turn = true;
+            }
+        }
+    }
+
+    fn apply_mid_turn_flag_and_sync(
+        &mut self,
+        stream_id: Option<&str>,
+        state: &mut AssistantMessageState,
+    ) {
+        self.apply_mid_turn_flag(stream_id, state);
+        if let Some(record) = self.history_state.record_mut(state.id) {
+            if let HistoryRecord::AssistantMessage(existing) = record {
+                *existing = state.clone();
             }
         }
     }
@@ -25565,9 +26481,8 @@ Have we met every part of this goal and is there no further work to do?"#
         let final_source = source.clone();
 
         if self.auto_state.pending_stop_message.is_some() {
-            match serde_json::from_str::<hanzo_auto_drive_diagnostics::CompletionCheck>(
-                &final_source,
-            ) {
+            match serde_json::from_str::<code_auto_drive_diagnostics::CompletionCheck>(&final_source)
+            {
                 Ok(check) => {
                     if check.complete {
                         let explanation = check.explanation.trim();
@@ -25608,37 +26523,37 @@ Have we met every part of this goal and is there no further work to do?"#
                             .goal
                             .as_deref()
                             .unwrap_or("(goal unavailable)");
-                        let follow_up = format!(
-                            "The primary goal has not been met. Please continue working on this.\nPrimary Goal: {goal}\nExplanation: {explanation}",
-                            explanation = check.explanation
-                        );
-                        let mut conversation = self.rebuild_auto_history();
-                        if let Some(user_item) =
-                            Self::auto_drive_make_user_message(follow_up.clone())
-                        {
-                            conversation.push(user_item.clone());
-                            self.auto_history
-                                .append_raw(std::slice::from_ref(&user_item));
-                        }
-                        self.auto_state.pending_stop_message = None;
-                        // Re-run the conversation through the normal decision pipeline so the
-                        // coordinator produces a full finish_status/progress/cli turn rather than
-                        // falling back to the user-response schema.
-                        self.auto_state.set_phase(AutoRunPhase::Active);
-                        self.auto_send_conversation_force();
-                        self.stop_spinner();
-                        return;
+                    let follow_up = format!(
+                        "The primary goal has not been met. Please continue working on this.\nPrimary Goal: {goal}\nExplanation: {explanation}",
+                        explanation = check.explanation
+                    );
+                    let mut conversation = self.rebuild_auto_history();
+                    if let Some(user_item) = Self::auto_drive_make_user_message(follow_up.clone()) {
+                        conversation.push(user_item.clone());
+                        self.auto_history.append_raw(std::slice::from_ref(&user_item));
                     }
+                    self.auto_state.pending_stop_message = None;
+                    // Re-run the conversation through the normal decision pipeline so the
+                    // coordinator produces a full finish_status/progress/cli turn rather than
+                    // falling back to the user-response schema.
+                    self.auto_state.set_phase(AutoRunPhase::Active);
+                    self.auto_send_conversation_force();
+                    self.stop_spinner();
+                    return;
+                }
                 }
                 Err(err) => {
-                    tracing::warn!("failed to parse diagnostics completion check: {}", err);
+                    tracing::warn!(
+                        "failed to parse diagnostics completion check: {}",
+                        err
+                    );
                     self.auto_state.last_completion_explanation = None;
                     let pending = self.auto_state.pending_stop_message.take();
                     self.auto_stop(pending);
                 }
             }
         }
-        if self.is_review_flow_active() {
+            if self.is_review_flow_active() {
             if let Some(ref want) = id {
                 if !self
                     .stream_state
@@ -25671,18 +26586,16 @@ Have we met every part of this goal and is there no further work to do?"#
             }
             self.last_assistant_message = Some(final_source.clone());
             let mut state = self.finalize_answer_stream_state(id.as_deref(), &final_source);
-            self.apply_mid_turn_flag(id.as_deref(), &mut state);
+            self.apply_mid_turn_flag_and_sync(id.as_deref(), &mut state);
             let history_id = state.id;
             let mut key = match id.as_deref() {
-                Some(rid) => self
-                    .try_stream_order_key(StreamKind::Answer, rid)
-                    .unwrap_or_else(|| {
-                        tracing::warn!(
-                            "missing stream order key for final Answer id={}; using synthetic key",
-                            rid
-                        );
-                        self.next_internal_key()
-                    }),
+                Some(rid) => self.try_stream_order_key(StreamKind::Answer, rid).unwrap_or_else(|| {
+                    tracing::warn!(
+                        "missing stream order key for final Answer id={}; using synthetic key",
+                        rid
+                    );
+                    self.next_internal_key()
+                }),
                 None => {
                     tracing::warn!("missing stream id for final Answer; using synthetic key");
                     self.next_internal_key()
@@ -25827,7 +26740,7 @@ Have we met every part of this goal and is there no further work to do?"#
                 idx
             );
             let mut state = self.finalize_answer_stream_state(id.as_deref(), &final_source);
-            self.apply_mid_turn_flag(id.as_deref(), &mut state);
+            self.apply_mid_turn_flag_and_sync(id.as_deref(), &mut state);
             let history_id = state.id;
             let cell = history_cell::AssistantMarkdownCell::from_state(state, &self.config);
             self.history_replace_at(idx, Box::new(cell));
@@ -25863,8 +26776,9 @@ Have we met every part of this goal and is there no further work to do?"#
                     "final-answer: replacing existing AssistantMarkdownCell at idx={} by id match",
                     idx
                 );
-                let mut state = self.finalize_answer_stream_state(id.as_deref(), &final_source);
-                self.apply_mid_turn_flag(id.as_deref(), &mut state);
+                let mut state =
+                    self.finalize_answer_stream_state(id.as_deref(), &final_source);
+                self.apply_mid_turn_flag_and_sync(id.as_deref(), &mut state);
                 let history_id = state.id;
                 let cell = history_cell::AssistantMarkdownCell::from_state(state, &self.config);
                 self.history_replace_at(idx, Box::new(cell));
@@ -25913,8 +26827,9 @@ Have we met every part of this goal and is there no further work to do?"#
                 tracing::debug!(
                     "final-answer: replacing tail AssistantMarkdownCell via heuristic identical/expansion"
                 );
-                let mut state = self.finalize_answer_stream_state(id.as_deref(), &final_source);
-                self.apply_mid_turn_flag(id.as_deref(), &mut state);
+                let mut state =
+                    self.finalize_answer_stream_state(id.as_deref(), &final_source);
+                self.apply_mid_turn_flag_and_sync(id.as_deref(), &mut state);
                 let history_id = state.id;
                 let cell = history_cell::AssistantMarkdownCell::from_state(state, &self.config);
                 self.history_replace_at(idx, Box::new(cell));
@@ -25966,10 +26881,15 @@ Have we met every part of this goal and is there no further work to do?"#
             Self::debug_fmt_order_key(key)
         );
         let mut state = self.finalize_answer_stream_state(id.as_deref(), &final_source);
-        self.apply_mid_turn_flag(id.as_deref(), &mut state);
+        self.apply_mid_turn_flag_and_sync(id.as_deref(), &mut state);
         let history_id = state.id;
         let cell = history_cell::AssistantMarkdownCell::from_state(state, &self.config);
-        self.history_insert_existing_record(Box::new(cell), key, "answer-final", history_id);
+        self.history_insert_existing_record(
+            Box::new(cell),
+            key,
+            "answer-final",
+            history_id,
+        );
         if let Some(ref want) = id {
             self.stream_state
                 .closed_answer_ids
@@ -26250,7 +27170,7 @@ Have we met every part of this goal and is there no further work to do?"#
         }
 
         // Add status message
-        self.push_background_tail("✅ Browser launched with user profile".to_string());
+        self.push_background_tail("✅ Chrome launched with user profile".to_string());
         // Show browsing state in input border after launch
         self.bottom_pane
             .update_status_text("using browser".to_string());
@@ -26260,8 +27180,8 @@ Have we met every part of this goal and is there no further work to do?"#
         if !self.config.debug {
             return None;
         }
-        let log_dir = hanzo_core::config::log_dir(&self.config).ok()?;
-        Some(log_dir.join("dev-chrome.log").display().to_string())
+        let log_dir = code_core::config::log_dir(&self.config).ok()?;
+        Some(log_dir.join("code-chrome.log").display().to_string())
     }
 
     fn apply_chrome_logging(&self, cmd: &mut std::process::Command, log_path: Option<&str>) {
@@ -26272,7 +27192,11 @@ Have we met every part of this goal and is there no further work to do?"#
         }
     }
 
-    fn connect_to_chrome_after_launch(&mut self, port: u16, ticket: BackgroundOrderTicket) {
+    fn connect_to_chrome_after_launch(
+        &mut self,
+        port: u16,
+        ticket: BackgroundOrderTicket,
+    ) {
         // Wait a moment for Chrome to start, then reuse the existing connection logic
         let app_event_tx = self.app_event_tx.clone();
         let latest_screenshot = self.latest_browser_screenshot.clone();
@@ -26327,7 +27251,7 @@ Have we met every part of this goal and is there no further work to do?"#
                 // Load persisted cache from disk (if any), then fall back to in-memory
                 let (cached_port, cached_ws) = match read_cached_connection().await {
                     Some(v) => v,
-                    None => hanzo_browser::global::get_last_connection().await,
+                    None => code_browser::global::get_last_connection().await,
                 };
                 cached_port_for_fallback = cached_port;
                 if let Some(ws) = cached_ws {
@@ -26363,7 +27287,7 @@ Have we met every part of this goal and is there no further work to do?"#
                 app_event_tx.send_background_event_with_ticket(
                     &ticket,
                     format!(
-                        "❌ CDP connect timed out after {}s. Ensure your browser is running with --remote-debugging-port={} and http://127.0.0.1:{}/json/version is reachable",
+                        "❌ CDP connect timed out after {}s. Ensure Chrome is running with --remote-debugging-port={} and http://127.0.0.1:{}/json/version is reachable",
                         connect_deadline.as_secs(),
                         port.unwrap_or(0),
                         port.unwrap_or(0)
@@ -26375,11 +27299,11 @@ Have we met every part of this goal and is there no further work to do?"#
             }
             Ok(result) => match result {
                 Ok(_) => {
-                    tracing::info!("[cdp] Connected to browser via CDP");
+                    tracing::info!("[cdp] Connected to Chrome via CDP");
 
                     // Build a detailed success message including CDP port and current URL when available
                     let (detected_port, detected_ws) =
-                        hanzo_browser::global::get_last_connection().await;
+                        code_browser::global::get_last_connection().await;
                     // Prefer explicit port; otherwise try to parse from ws URL
                     let mut port_num: Option<u16> = detected_port;
                     if port_num.is_none() {
@@ -26402,21 +27326,22 @@ Have we met every part of this goal and is there no further work to do?"#
 
                     let success_msg = match (port_num, current_url) {
                         (Some(p), Some(url)) if !url.is_empty() => {
-                            format!("✅ Connected to browser via CDP (port {}) to {}", p, url)
+                            format!("✅ Connected to Chrome via CDP (port {}) to {}", p, url)
                         }
-                        (Some(p), _) => format!("✅ Connected to browser via CDP (port {})", p),
+                        (Some(p), _) => format!("✅ Connected to Chrome via CDP (port {})", p),
                         (None, Some(url)) if !url.is_empty() => {
-                            format!("✅ Connected to browser via CDP to {}", url)
+                            format!("✅ Connected to Chrome via CDP to {}", url)
                         }
-                        _ => "✅ Connected to browser via CDP".to_string(),
+                        _ => "✅ Connected to Chrome via CDP".to_string(),
                     };
 
                     // Immediately notify success (do not block on screenshots)
-                    app_event_tx.send_background_event_with_ticket(&ticket, success_msg.clone());
+                    app_event_tx
+                        .send_background_event_with_ticket(&ticket, success_msg.clone());
 
                     // Persist last connection cache to disk (best-effort)
                     tokio::spawn(async move {
-                        let (p, ws) = hanzo_browser::global::get_last_connection().await;
+                        let (p, ws) = code_browser::global::get_last_connection().await;
                         let _ = write_cached_connection(p, ws).await;
                     });
 
@@ -26456,11 +27381,11 @@ Have we met every part of this goal and is there no further work to do?"#
                                                     ));
                                                 }
 
-                                                use hanzo_core::protocol::{
+                                                use code_core::protocol::{
                                                     BrowserScreenshotUpdateEvent, Event, EventMsg,
                                                 };
                                                 let _ = app_event_tx_inner.send(
-                                                    AppEvent::CodeEvent(Event {
+                                                    AppEvent::CodexEvent(Event {
                                                         id: uuid::Uuid::new_v4().to_string(),
                                                         event_seq: 0,
                                                         msg: EventMsg::BrowserScreenshotUpdate(
@@ -26499,7 +27424,7 @@ Have we met every part of this goal and is there no further work to do?"#
                         .await;
 
                     // Set as global manager
-                    hanzo_browser::global::set_global_browser_manager(browser_manager.clone())
+                    code_browser::global::set_global_browser_manager(browser_manager.clone())
                         .await;
 
                     // Capture initial screenshot in background (don't block connect feedback)
@@ -26527,11 +27452,11 @@ Have we met every part of this goal and is there no further work to do?"#
                                                         .unwrap_or_else(|| "Chrome".to_string()),
                                                 ));
                                             }
-                                            use hanzo_core::protocol::BrowserScreenshotUpdateEvent;
-                                            use hanzo_core::protocol::Event;
-                                            use hanzo_core::protocol::EventMsg;
+                                            use code_core::protocol::BrowserScreenshotUpdateEvent;
+                                            use code_core::protocol::Event;
+                                            use code_core::protocol::EventMsg;
                                             let _ =
-                                                app_event_tx_bg.send(AppEvent::CodeEvent(Event {
+                                                app_event_tx_bg.send(AppEvent::CodexEvent(Event {
                                                     id: uuid::Uuid::new_v4().to_string(),
                                                     event_seq: 0,
                                                     msg: EventMsg::BrowserScreenshotUpdate(
@@ -26574,7 +27499,7 @@ Have we met every part of this goal and is there no further work to do?"#
                         );
                         let port_to_keep = cached_port_for_fallback;
                         // Clear WS in-memory and on-disk
-                        hanzo_browser::global::set_last_connection(port_to_keep, None).await;
+                        code_browser::global::set_last_connection(port_to_keep, None).await;
                         let _ = write_cached_connection(port_to_keep, None).await;
 
                         // Reconfigure to use port (prefer cached port, else auto-detect)
@@ -26600,7 +27525,7 @@ Have we met every part of this goal and is there no further work to do?"#
                                 );
                                 // Emit success event and set up callbacks, mirroring the success path above
                                 let (detected_port, detected_ws) =
-                                    hanzo_browser::global::get_last_connection().await;
+                                    code_browser::global::get_last_connection().await;
                                 let mut port_num: Option<u16> = detected_port;
                                 if port_num.is_none() {
                                     if let Some(ws) = &detected_ws {
@@ -26619,17 +27544,17 @@ Have we met every part of this goal and is there no further work to do?"#
                                 let success_msg = match (port_num, current_url) {
                                     (Some(p), Some(url)) if !url.is_empty() => {
                                         format!(
-                                            "✅ Connected to browser via CDP (port {}) to {}",
+                                            "✅ Connected to Chrome via CDP (port {}) to {}",
                                             p, url
                                         )
                                     }
                                     (Some(p), _) => {
-                                        format!("✅ Connected to browser via CDP (port {})", p)
+                                        format!("✅ Connected to Chrome via CDP (port {})", p)
                                     }
                                     (None, Some(url)) if !url.is_empty() => {
-                                        format!("✅ Connected to browser via CDP to {}", url)
+                                        format!("✅ Connected to Chrome via CDP to {}", url)
                                     }
-                                    _ => "✅ Connected to browser via CDP".to_string(),
+                                    _ => "✅ Connected to Chrome via CDP".to_string(),
                                 };
                                 app_event_tx
                                     .send_background_event_with_ticket(&ticket, success_msg);
@@ -26637,7 +27562,7 @@ Have we met every part of this goal and is there no further work to do?"#
                                 // Persist last connection cache
                                 tokio::spawn(async move {
                                     let (p, ws) =
-                                        hanzo_browser::global::get_last_connection().await;
+                                        code_browser::global::get_last_connection().await;
                                     let _ = write_cached_connection(p, ws).await;
                                 });
 
@@ -26664,8 +27589,8 @@ Have we met every part of this goal and is there no further work to do?"#
                                                             if let Ok(mut latest) = latest_screenshot_inner.lock() {
                                                                 *latest = Some((first_path.clone(), url_inner.clone()));
                                                             }
-                                                            use hanzo_core::protocol::{BrowserScreenshotUpdateEvent, Event, EventMsg};
-                                                            let _ = app_event_tx_inner.send(AppEvent::CodeEvent(Event {
+                                                            use code_core::protocol::{BrowserScreenshotUpdateEvent, Event, EventMsg};
+                                                            let _ = app_event_tx_inner.send(AppEvent::CodexEvent(Event {
                                                                 id: uuid::Uuid::new_v4().to_string(),
                                                                 event_seq: 0,
                                                                 msg: EventMsg::BrowserScreenshotUpdate(BrowserScreenshotUpdateEvent {
@@ -26688,7 +27613,7 @@ Have we met every part of this goal and is there no further work to do?"#
                                     })
                                     .await;
                                 // Set as global manager like success path
-                                hanzo_browser::global::set_global_browser_manager(
+                                code_browser::global::set_global_browser_manager(
                                     browser_manager.clone(),
                                 )
                                 .await;
@@ -26726,22 +27651,16 @@ Have we met every part of this goal and is there no further work to do?"#
                                                                 }),
                                                             ));
                                                         }
-                                                        use hanzo_core::protocol::BrowserScreenshotUpdateEvent;
-                                                        use hanzo_core::protocol::Event;
-                                                        use hanzo_core::protocol::EventMsg;
-                                                        let _ = app_event_tx_bg
-                                                            .send(AppEvent::CodeEvent(Event {
+                                                        use code_core::protocol::BrowserScreenshotUpdateEvent;
+                                                        use code_core::protocol::Event;
+                                                        use code_core::protocol::EventMsg;
+                                                        let _ = app_event_tx_bg.send(AppEvent::CodexEvent(Event {
                                                             id: uuid::Uuid::new_v4().to_string(),
                                                             event_seq: 0,
-                                                            msg: EventMsg::BrowserScreenshotUpdate(
-                                                                BrowserScreenshotUpdateEvent {
-                                                                    screenshot_path: first_path
-                                                                        .clone(),
-                                                                    url: url.unwrap_or_else(|| {
-                                                                        "Chrome".to_string()
-                                                                    }),
-                                                                },
-                                                            ),
+                                                            msg: EventMsg::BrowserScreenshotUpdate(BrowserScreenshotUpdateEvent {
+                                                                screenshot_path: first_path.clone(),
+                                                                url: url.unwrap_or_else(|| "Chrome".to_string()),
+                                                            }),
                                                             order: None,
                                                         }));
                                                         break;
@@ -26788,7 +27707,7 @@ Have we met every part of this goal and is there no further work to do?"#
                                 app_event_tx.send_background_event_with_ticket(
                                     &ticket,
                                     format!(
-                                        "❌ CDP connect timed out after {}s during fallback. Ensure your browser is running with --remote-debugging-port and /json/version is reachable",
+                                        "❌ CDP connect timed out after {}s during fallback. Ensure Chrome is running with --remote-debugging-port and /json/version is reachable",
                                         retry_deadline.as_secs()
                                     ),
                                 );
@@ -26819,7 +27738,7 @@ Have we met every part of this goal and is there no further work to do?"#
         use std::process::Stdio;
 
         let temp_dir = std::env::temp_dir();
-        let profile_dir = temp_dir.join(format!("dev-chrome-temp-{}", port));
+        let profile_dir = temp_dir.join(format!("code-chrome-temp-{}", port));
         let log_path = self.chrome_log_path();
 
         #[cfg(target_os = "macos")]
@@ -26909,7 +27828,7 @@ Have we met every part of this goal and is there no further work to do?"#
 
         // Add status message
         self.push_background_tail(format!(
-            "✅ Browser launched with temporary profile at {}",
+            "✅ Chrome launched with temporary profile at {}",
             profile_dir.display()
         ));
     }
@@ -26949,7 +27868,8 @@ Have we met every part of this goal and is there no further work to do?"#
 
         let visible_message = format!(
             "🤖 Handing /browser failure ({}) to Code. Error: {}",
-            failure_context, truncated
+            failure_context,
+            truncated
         );
         app_event_tx.send_background_event_with_ticket(&ticket, visible_message);
 
@@ -26958,7 +27878,10 @@ Have we met every part of this goal and is there no further work to do?"#
             context = failure_context,
             error = truncated
         );
-        app_event_tx.send(AppEvent::DispatchCommand(SlashCommand::Code, command_text));
+        app_event_tx.send(AppEvent::DispatchCommand(
+            SlashCommand::Code,
+            command_text,
+        ));
     }
 
     pub(crate) fn handle_browser_command(&mut self, command_text: String) {
@@ -26995,10 +27918,8 @@ Have we met every part of this goal and is there no further work to do?"#
                     if let Err(e) = browser_manager.set_enabled(false).await {
                         tracing::warn!("[/browser] failed to disable internal browser: {}", e);
                     }
-                    app_event_tx.send_background_event_with_ticket(
-                        &ticket,
-                        "🔌 Browser disabled".to_string(),
-                    );
+                    app_event_tx
+                        .send_background_event_with_ticket(&ticket, "🔌 Browser disabled".to_string());
                 } else {
                     // Not in internal mode → enable internal and open about:blank
                     // Reuse existing helper (ensures config + start + global manager + screenshot)
@@ -27037,7 +27958,7 @@ Have we met every part of this goal and is there no further work to do?"#
                     browser_autofix_flag.store(false, Ordering::SeqCst);
 
                     // Set as global manager so core/session share the same instance
-                    hanzo_browser::global::set_global_browser_manager(browser_manager.clone())
+                    code_browser::global::set_global_browser_manager(browser_manager.clone())
                         .await;
 
                     // Navigate to about:blank explicitly
@@ -27046,10 +27967,11 @@ Have we met every part of this goal and is there no further work to do?"#
                     }
 
                     // Emit confirmation
-                    app_event_tx.send_background_event_with_ticket(
-                        &ticket,
-                        "✅ Browser enabled (about:blank)".to_string(),
-                    );
+                    app_event_tx
+                        .send_background_event_with_ticket(
+                            &ticket,
+                            "✅ Browser enabled (about:blank)".to_string(),
+                        );
                 }
             });
             return;
@@ -27107,7 +28029,10 @@ Have we met every part of this goal and is there no further work to do?"#
                     // IMPORTANT: Start the browser manager first before navigating
                     if let Err(e) = browser_manager.start().await {
                         let error_text = e.to_string();
-                        tracing::error!("Failed to start TUI browser manager: {}", error_text);
+                        tracing::error!(
+                            "Failed to start TUI browser manager: {}",
+                            error_text
+                        );
                         app_event_tx.send_background_event_with_ticket(
                             &ticket,
                             format!("❌ Failed to start internal browser: {}", error_text),
@@ -27161,11 +28086,11 @@ Have we met every part of this goal and is there no further work to do?"#
                                                 }
 
                                                 // Send update event
-                                                use hanzo_core::protocol::{
+                                                use code_core::protocol::{
                                                     BrowserScreenshotUpdateEvent, EventMsg,
                                                 };
                                                 let _ = app_event_tx_inner.send(
-                                                    AppEvent::CodeEvent(Event {
+                                                    AppEvent::CodexEvent(Event {
                                                         id: uuid::Uuid::new_v4().to_string(),
                                                         event_seq: 0,
                                                         msg: EventMsg::BrowserScreenshotUpdate(
@@ -27192,11 +28117,11 @@ Have we met every part of this goal and is there no further work to do?"#
                     }
 
                     // Set the browser manager as the global manager so both TUI and Session use the same instance
-                    hanzo_browser::global::set_global_browser_manager(browser_manager.clone())
+                    code_browser::global::set_global_browser_manager(browser_manager.clone())
                         .await;
 
                     // Ensure the navigation callback is also set on the global manager
-                    let global_manager = hanzo_browser::global::get_browser_manager().await;
+                    let global_manager = code_browser::global::get_browser_manager().await;
                     if let Some(global_manager) = global_manager {
                         let latest_screenshot_global = latest_screenshot.clone();
                         let app_event_tx_global = app_event_tx.clone();
@@ -27212,7 +28137,7 @@ Have we met every part of this goal and is there no further work to do?"#
                                 tokio::time::sleep(tokio::time::Duration::from_millis(1000)).await;
 
                                 // Capture screenshot after navigation
-                                let browser_manager = hanzo_browser::global::get_browser_manager().await;
+                                let browser_manager = code_browser::global::get_browser_manager().await;
                                 if let Some(browser_manager) = browser_manager {
                                     match browser_manager.capture_screenshot_with_url().await {
                                         Ok((paths, _url)) => {
@@ -27225,8 +28150,8 @@ Have we met every part of this goal and is there no further work to do?"#
                                                 }
 
                                                 // Send update event
-                                                use hanzo_core::protocol::{BrowserScreenshotUpdateEvent, EventMsg};
-                                                let _ = app_event_tx_inner.send(AppEvent::CodeEvent(Event { id: uuid::Uuid::new_v4().to_string(), event_seq: 0, msg: EventMsg::BrowserScreenshotUpdate(BrowserScreenshotUpdateEvent {
+                                                use code_core::protocol::{BrowserScreenshotUpdateEvent, EventMsg};
+                                                let _ = app_event_tx_inner.send(AppEvent::CodexEvent(Event { id: uuid::Uuid::new_v4().to_string(), event_seq: 0, msg: EventMsg::BrowserScreenshotUpdate(BrowserScreenshotUpdateEvent {
                                                         screenshot_path: first_path.clone(),
                                                         url: url_inner,
                                                     }), order: None }));
@@ -27275,9 +28200,9 @@ Have we met every part of this goal and is there no further work to do?"#
                                         }
 
                                         // Send update event
-                                        use hanzo_core::protocol::BrowserScreenshotUpdateEvent;
-                                        use hanzo_core::protocol::EventMsg;
-                                        let _ = app_event_tx.send(AppEvent::CodeEvent(Event {
+                                        use code_core::protocol::BrowserScreenshotUpdateEvent;
+                                        use code_core::protocol::EventMsg;
+                                        let _ = app_event_tx.send(AppEvent::CodexEvent(Event {
                                             id: uuid::Uuid::new_v4().to_string(),
                                             event_seq: 0,
                                             msg: EventMsg::BrowserScreenshotUpdate(
@@ -27430,7 +28355,10 @@ Have we met every part of this goal and is there no further work to do?"#
             .send_background_event_with_ticket(&browser_ticket, response);
     }
 
-    fn validation_tool_flag_mut(&mut self, name: &str) -> Option<&mut Option<bool>> {
+    fn validation_tool_flag_mut(
+        &mut self,
+        name: &str,
+    ) -> Option<&mut Option<bool>> {
         let tools = &mut self.config.validation.tools;
         match name {
             "shellcheck" => Some(&mut tools.shellcheck),
@@ -27543,16 +28471,15 @@ Have we met every part of this goal and is there no further work to do?"#
                 return;
             }
             self.config.github.actionlint_on_patch = enable;
-            if let Err(err) = self.code_op_tx.send(Op::UpdateValidationTool {
-                name: name.to_string(),
-                enable,
-            }) {
+            if let Err(err) = self
+                .code_op_tx
+                .send(Op::UpdateValidationTool { name: name.to_string(), enable })
+            {
                 tracing::warn!("failed to send validation tool update: {err}");
             }
             let persist_result = match find_code_home() {
-                Ok(home) => {
-                    set_github_actionlint_on_patch(&home, enable).map_err(|e| e.to_string())
-                }
+                Ok(home) => set_github_actionlint_on_patch(&home, enable)
+                    .map_err(|e| e.to_string()),
                 Err(err) => Err(err.to_string()),
             };
             if let Err(err) = persist_result {
@@ -27566,7 +28493,9 @@ Have we met every part of this goal and is there no further work to do?"#
         }
 
         let Some(flag) = self.validation_tool_flag_mut(name) else {
-            self.push_background_tail(format!("⚠️ Unknown validation tool '{name}'"));
+            self.push_background_tail(format!(
+                "⚠️ Unknown validation tool '{name}'"
+            ));
             return;
         };
 
@@ -27575,14 +28504,15 @@ Have we met every part of this goal and is there no further work to do?"#
         }
 
         *flag = Some(enable);
-        if let Err(err) = self.code_op_tx.send(Op::UpdateValidationTool {
-            name: name.to_string(),
-            enable,
-        }) {
+        if let Err(err) = self
+            .code_op_tx
+            .send(Op::UpdateValidationTool { name: name.to_string(), enable })
+        {
             tracing::warn!("failed to send validation tool update: {err}");
         }
         let persist_result = match find_code_home() {
-            Ok(home) => set_validation_tool_enabled(&home, name, enable).map_err(|e| e.to_string()),
+            Ok(home) => set_validation_tool_enabled(&home, name, enable)
+                .map_err(|e| e.to_string()),
             Err(err) => Err(err.to_string()),
         };
         if let Err(err) = persist_result {
@@ -27613,11 +28543,7 @@ Have we met every part of this goal and is there no further work to do?"#
             let requested = self.validation_tool_requested(status.name);
             let effective = self.validation_tool_enabled(status.name);
             let mut state = if requested {
-                if effective {
-                    "enabled".to_string()
-                } else {
-                    "disabled (group off)".to_string()
-                }
+                if effective { "enabled".to_string() } else { "disabled (group off)".to_string() }
             } else {
                 "disabled".to_string()
             };
@@ -27701,8 +28627,8 @@ Have we met every part of this goal and is there no further work to do?"#
         self.ensure_validation_settings_overlay();
     }
 
-    fn format_mcp_summary(cfg: &hanzo_core::config_types::McpServerConfig) -> String {
-        use hanzo_core::config_types::McpServerTransportConfig;
+    fn format_mcp_summary(cfg: &code_core::config_types::McpServerConfig) -> String {
+        use code_core::config_types::McpServerTransportConfig;
 
         match &cfg.transport {
             McpServerTransportConfig::Stdio { command, args, .. } => {
@@ -27712,8 +28638,71 @@ Have we met every part of this goal and is there no further work to do?"#
                     format!("{} {}", command, args.join(" "))
                 }
             }
-            McpServerTransportConfig::StreamableHttp { url, .. } => format!("HTTP {url}"),
-            McpServerTransportConfig::Zap { url } => format!("ZAP {url}"),
+            McpServerTransportConfig::StreamableHttp { url, .. } => format!("HTTP {}", url),
+        }
+    }
+
+    fn format_mcp_server_summary(
+        &self,
+        name: &str,
+        cfg: &code_core::config_types::McpServerConfig,
+        enabled: bool,
+    ) -> String {
+        let transport = Self::format_mcp_summary(cfg);
+        let status = self.format_mcp_tool_status(name, enabled);
+        if status.is_empty() {
+            transport
+        } else {
+            format!("{transport} · {status}")
+        }
+    }
+
+    fn format_mcp_tool_status(&self, name: &str, enabled: bool) -> String {
+        if !enabled {
+            return "Tools: disabled".to_string();
+        }
+
+        if let Some(failure) = self.mcp_server_failures.get(name) {
+            return self.format_mcp_failure(failure);
+        }
+
+        if let Some(tools) = self.mcp_tools_by_server.get(name) {
+            let list = Self::format_mcp_tool_list(tools);
+            return format!("Tools: {list}");
+        }
+
+        "Tools: pending".to_string()
+    }
+
+    fn format_mcp_tool_list(tools: &[String]) -> String {
+        const MAX_TOOLS: usize = 6;
+        const MAX_CHARS: usize = 120;
+
+        if tools.is_empty() {
+            return "none".to_string();
+        }
+
+        let mut display = tools
+            .iter()
+            .take(MAX_TOOLS)
+            .cloned()
+            .collect::<Vec<_>>()
+            .join(", ");
+        if tools.len() > MAX_TOOLS {
+            let remaining = tools.len().saturating_sub(MAX_TOOLS);
+            display.push_str(&format!(", +{remaining} more"));
+        }
+        Self::truncate_with_ellipsis(&display, MAX_CHARS)
+    }
+
+    fn format_mcp_failure(&self, failure: &McpServerFailure) -> String {
+        const MAX_CHARS: usize = 160;
+
+        let normalized = failure.message.replace('\n', " ");
+        let message = Self::truncate_with_ellipsis(&normalized, MAX_CHARS);
+        match failure.phase {
+            McpServerFailurePhase::Start => format!("Failed to start: {message}"),
+            McpServerFailurePhase::ListTools => format!("Failed to list tools: {message}"),
         }
     }
 
@@ -27721,6 +28710,9 @@ Have we met every part of this goal and is there no further work to do?"#
     pub(crate) fn handle_mcp_command(&mut self, command_text: String) {
         let trimmed = command_text.trim();
         if trimmed.is_empty() {
+            if !self.config.mcp_servers.is_empty() {
+                self.submit_op(Op::ListMcpTools);
+            }
             self.show_settings_overlay(Some(SettingsSection::Mcp));
             return;
         }
@@ -27729,60 +28721,49 @@ Have we met every part of this goal and is there no further work to do?"#
         let sub = parts.next().unwrap_or("");
 
         match sub {
-            "status" => match find_code_home() {
-                Ok(home) => match hanzo_core::config::list_mcp_servers(&home) {
-                    Ok((enabled, disabled)) => {
-                        let mut lines = String::new();
-                        if enabled.is_empty() && disabled.is_empty() {
-                            lines.push_str("No MCP servers configured. Use /mcp add … to add one.");
-                        } else {
-                            lines.push_str(&format!("Enabled ({}):\n", enabled.len()));
-                            for (name, cfg) in enabled {
-                                lines.push_str(&format!(
-                                    "• {} — {}\n",
-                                    name,
-                                    Self::format_mcp_summary(&cfg)
-                                ));
+            "status" => {
+                if !self.config.mcp_servers.is_empty() {
+                    self.submit_op(Op::ListMcpTools);
+                }
+                match find_code_home() {
+                    Ok(home) => match code_core::config::list_mcp_servers(&home) {
+                        Ok((enabled, disabled)) => {
+                            let mut lines = String::new();
+                            if enabled.is_empty() && disabled.is_empty() {
+                                lines.push_str(
+                                    "No MCP servers configured. Use /mcp add … to add one.",
+                                );
+                            } else {
+                                let enabled_count = enabled.len();
+                                lines.push_str(&format!("Enabled ({enabled_count}):\n"));
+                                for (name, cfg) in enabled {
+                                    lines.push_str(&format!(
+                                        "• {} — {}\n",
+                                        name,
+                                        self.format_mcp_server_summary(&name, &cfg, true)
+                                    ));
+                                }
+                                let disabled_count = disabled.len();
+                                lines.push_str(&format!("\nDisabled ({disabled_count}):\n"));
+                                for (name, cfg) in disabled {
+                                    lines.push_str(&format!(
+                                        "• {} — {}\n",
+                                        name,
+                                        self.format_mcp_server_summary(&name, &cfg, false)
+                                    ));
+                                }
                             }
-                            lines.push_str(&format!("\nDisabled ({}):\n", disabled.len()));
-                            for (name, cfg) in disabled {
-                                lines.push_str(&format!(
-                                    "• {} — {}\n",
-                                    name,
-                                    Self::format_mcp_summary(&cfg)
-                                ));
-                            }
+                            self.push_background_tail(lines);
                         }
-                        self.push_background_tail(lines);
-                    }
+                        Err(e) => {
+                            let msg = format!("Failed to read MCP config: {e}");
+                            self.history_push_plain_state(history_cell::new_error_event(msg));
+                        }
+                    },
                     Err(e) => {
-                        let msg = format!("Failed to read MCP config: {}", e);
+                        let msg = format!("Failed to locate CODEX_HOME: {e}");
                         self.history_push_plain_state(history_cell::new_error_event(msg));
                     }
-                },
-                Err(e) => {
-                    let msg = format!("Failed to locate HANZO_HOME: {}", e);
-                    self.history_push_plain_state(history_cell::new_error_event(msg));
-                }
-            },
-            "list" | "tools" => {
-                // List configured MCP servers and their tool prefixes
-                // Note: Runtime tool details are loaded when a session starts
-                if self.config.mcp_servers.is_empty() {
-                    self.push_background_tail(
-                        "No MCP servers configured. Use /mcp add … to add one.".to_string(),
-                    );
-                } else {
-                    let mut lines = format!("MCP Servers ({}):\n", self.config.mcp_servers.len());
-                    let mut sorted_servers: Vec<_> = self.config.mcp_servers.iter().collect();
-                    sorted_servers.sort_by_key(|(name, _)| name.as_str());
-                    for (name, cfg) in sorted_servers {
-                        let transport_info = Self::format_mcp_summary(cfg);
-                        lines.push_str(&format!("• {} — {}\n", name, transport_info));
-                        lines.push_str(&format!("  Tools prefix: mcp__{}_*\n", name));
-                    }
-                    lines.push_str("\nTools are loaded when a session starts. Use model to discover available tools.");
-                    self.push_background_tail(lines);
                 }
             }
             "on" | "off" => {
@@ -27794,7 +28775,7 @@ Have we met every part of this goal and is there no further work to do?"#
                 }
                 match find_code_home() {
                     Ok(home) => {
-                        match hanzo_core::config::set_mcp_server_enabled(&home, name, sub == "on") {
+                        match code_core::config::set_mcp_server_enabled(&home, name, sub == "on") {
                             Ok(changed) => {
                                 if changed {
                                     // Keep ChatWidget's in-memory config roughly in sync for new sessions.
@@ -27804,7 +28785,7 @@ Have we met every part of this goal and is there no further work to do?"#
                                     if sub == "on" {
                                         // If enabling, try to load its config from disk and add to in-memory map.
                                         if let Ok((enabled, _)) =
-                                            hanzo_core::config::list_mcp_servers(&home)
+                                            code_core::config::list_mcp_servers(&home)
                                         {
                                             if let Some((_, cfg)) =
                                                 enabled.into_iter().find(|(n, _)| n == name)
@@ -27837,7 +28818,7 @@ Have we met every part of this goal and is there no further work to do?"#
                         }
                     }
                     Err(e) => {
-                        let msg = format!("Failed to locate HANZO_HOME: {}", e);
+                        let msg = format!("Failed to locate CODEX_HOME: {}", e);
                         self.history_push_plain_state(history_cell::new_error_event(msg));
                     }
                 }
@@ -27947,21 +28928,17 @@ Have we met every part of this goal and is there no further work to do?"#
                 }
                 match find_code_home() {
                     Ok(home) => {
-                        let transport = hanzo_core::config_types::McpServerTransportConfig::Stdio {
+                        let transport = code_core::config_types::McpServerTransportConfig::Stdio {
                             command: command.to_string(),
                             args: args.clone(),
-                            env: if env.is_empty() {
-                                None
-                            } else {
-                                Some(env.clone())
-                            },
+                            env: if env.is_empty() { None } else { Some(env.clone()) },
                         };
-                        let cfg = hanzo_core::config_types::McpServerConfig {
+                        let cfg = code_core::config_types::McpServerConfig {
                             transport,
                             startup_timeout_sec: None,
                             tool_timeout_sec: None,
                         };
-                        match hanzo_core::config::add_mcp_server(&home, &name, cfg.clone()) {
+                        match code_core::config::add_mcp_server(&home, &name, cfg.clone()) {
                             Ok(()) => {
                                 let summary = Self::format_mcp_summary(&cfg);
                                 // Update in-memory config for future sessions
@@ -27976,491 +28953,19 @@ Have we met every part of this goal and is there no further work to do?"#
                         }
                     }
                     Err(e) => {
-                        let msg = format!("Failed to locate HANZO_HOME: {}", e);
+                        let msg = format!("Failed to locate CODEX_HOME: {}", e);
                         self.history_push_plain_state(history_cell::new_error_event(msg));
                     }
                 }
             }
             _ => {
                 let msg = format!(
-                    "Unknown MCP command: '{}'\nUsage:\n  /mcp status\n  /mcp list\n  /mcp on <name>\n  /mcp off <name>\n  /mcp add <name> <command> [args…] [ENV=VAL…]",
+                    "Unknown MCP command: '{}'\nUsage:\n  /mcp status\n  /mcp on <name>\n  /mcp off <name>\n  /mcp add <name> <command> [args…] [ENV=VAL…]",
                     sub
                 );
                 self.history_push_plain_state(history_cell::new_error_event(msg));
             }
         }
-    }
-
-    /// Handle `/provider` command: list or switch API providers.
-    pub(crate) fn handle_provider_command(&mut self, command_text: String) {
-        let trimmed = command_text.trim();
-        let parts: Vec<&str> = trimmed.split_whitespace().collect();
-        let subcommand = parts.first().map(|s| s.to_ascii_lowercase());
-
-        // Get account counts per provider
-        let account_counts =
-            auth_accounts::count_accounts_by_provider(&self.config.code_home).unwrap_or_default();
-
-        if trimmed.is_empty() || subcommand.as_deref() == Some("list") {
-            // List all available providers
-            let providers = &self.config.model_providers;
-            let current = &self.config.model_provider_id;
-
-            let mut lines = String::new();
-            lines.push_str("Available providers:\n\n");
-
-            let mut sorted_providers: Vec<_> = providers.iter().collect();
-            sorted_providers.sort_by(|a, b| a.0.cmp(b.0));
-
-            for (id, info) in sorted_providers {
-                let marker = if id == current {
-                    if crate::theme::show_gutter() {
-                        "▶ "
-                    } else {
-                        "> "
-                    }
-                } else {
-                    "  "
-                };
-                let base_url = info.base_url.as_deref().unwrap_or("(default)");
-                let env_key = info
-                    .env_key
-                    .as_ref()
-                    .map(|k| format!(" [{}]", k))
-                    .unwrap_or_default();
-
-                // Show account count for this provider
-                let provider_id_key = if id == "openai" {
-                    None
-                } else {
-                    Some(id.clone())
-                };
-                let acct_count = account_counts.get(&provider_id_key).copied().unwrap_or(0);
-                let acct_info = if acct_count > 0 {
-                    format!(
-                        " ({} account{})",
-                        acct_count,
-                        if acct_count == 1 { "" } else { "s" }
-                    )
-                } else {
-                    String::new()
-                };
-
-                lines.push_str(&format!(
-                    "{}{} — {}{}{}\n    {}\n",
-                    marker, id, info.name, env_key, acct_info, base_url
-                ));
-            }
-
-            lines.push_str("\nUsage:");
-            lines.push_str("\n  /provider <name>           — switch to provider");
-            lines.push_str("\n  /provider add <name> <key> — add API key for provider");
-            lines.push_str("\n  /provider rotate <name>    — show rotation status");
-            lines.push_str("\n  /provider list             — list providers");
-            self.push_background_tail(lines);
-            return;
-        }
-
-        // Handle subcommands
-        if subcommand.as_deref() == Some("add") {
-            if parts.len() < 3 {
-                self.history_push_plain_state(history_cell::new_error_event(
-                    "Usage: /provider add <provider-name> <api-key>".to_string(),
-                ));
-                return;
-            }
-            let provider_name = parts[1].to_ascii_lowercase();
-            let api_key = parts[2..].join(" ");
-
-            if !self.config.model_providers.contains_key(&provider_name) {
-                self.history_push_plain_state(history_cell::new_error_event(format!(
-                    "Unknown provider '{}'. Use /provider list to see available providers.",
-                    provider_name
-                )));
-                return;
-            }
-
-            // Add API key for the provider
-            let provider_id = if provider_name == "openai" {
-                None
-            } else {
-                Some(provider_name.clone())
-            };
-
-            match auth_accounts::upsert_api_key_account_for_provider(
-                &self.config.code_home,
-                api_key,
-                None,
-                provider_id,
-                false, // Don't make active - just store it
-            ) {
-                Ok(_account) => {
-                    let count = account_counts
-                        .get(&Some(provider_name.clone()))
-                        .copied()
-                        .unwrap_or(0)
-                        + 1;
-                    self.push_background_tail(format!(
-                        "Added API key for {} (now {} account{} for rotation)",
-                        provider_name,
-                        count,
-                        if count == 1 { "" } else { "s" }
-                    ));
-                }
-                Err(err) => {
-                    self.history_push_plain_state(history_cell::new_error_event(format!(
-                        "Failed to add API key: {}",
-                        err
-                    )));
-                }
-            }
-            return;
-        }
-
-        if subcommand.as_deref() == Some("rotate") {
-            let provider_name = parts.get(1).map(|s| s.to_ascii_lowercase());
-            let provider_id = match provider_name.as_deref() {
-                Some("openai") | None => None,
-                Some(name) => Some(name.to_string()),
-            };
-
-            match auth_accounts::list_accounts_for_provider(
-                &self.config.code_home,
-                provider_id.as_deref(),
-            ) {
-                Ok(accounts) => {
-                    if accounts.is_empty() {
-                        self.push_background_tail(format!(
-                            "No accounts configured for {}. Use /provider add to add API keys.",
-                            provider_name.as_deref().unwrap_or("openai")
-                        ));
-                    } else {
-                        let mut lines = format!(
-                            "Rotation status for {} ({} account{}):\n\n",
-                            provider_name.as_deref().unwrap_or("openai"),
-                            accounts.len(),
-                            if accounts.len() == 1 { "" } else { "s" }
-                        );
-                        for (i, acc) in accounts.iter().enumerate() {
-                            let key_preview = acc
-                                .openai_api_key
-                                .as_ref()
-                                .map(|k| {
-                                    if k.len() > 12 {
-                                        format!("{}...{}", &k[..4], &k[k.len() - 4..])
-                                    } else {
-                                        "****".to_string()
-                                    }
-                                })
-                                .unwrap_or_else(|| "N/A".to_string());
-                            lines.push_str(&format!(
-                                "  {}. {} — {} uses\n",
-                                i + 1,
-                                key_preview,
-                                acc.usage_count
-                            ));
-                        }
-                        lines.push_str("\nAccounts are rotated round-robin based on usage count.");
-                        self.push_background_tail(lines);
-                    }
-                }
-                Err(err) => {
-                    self.history_push_plain_state(history_cell::new_error_event(format!(
-                        "Failed to list accounts: {}",
-                        err
-                    )));
-                }
-            }
-            return;
-        }
-
-        // Try to switch to the named provider
-        let provider_id = trimmed.to_ascii_lowercase();
-
-        if !self.config.model_providers.contains_key(&provider_id) {
-            let available: Vec<_> = self.config.model_providers.keys().collect();
-            let msg = format!(
-                "Unknown provider '{}'. Available: {}",
-                provider_id,
-                available
-                    .iter()
-                    .map(|s| s.as_str())
-                    .collect::<Vec<_>>()
-                    .join(", ")
-            );
-            self.history_push_plain_state(history_cell::new_error_event(msg));
-            return;
-        }
-
-        // Check if provider's env key is set (if required)
-        if let Some(info) = self.config.model_providers.get(&provider_id) {
-            if let Some(env_key) = &info.env_key {
-                if std::env::var(env_key)
-                    .map(|v| v.trim().is_empty())
-                    .unwrap_or(true)
-                {
-                    // Check if we have stored accounts for this provider
-                    let provider_key = if provider_id == "openai" {
-                        None
-                    } else {
-                        Some(provider_id.clone())
-                    };
-                    let has_stored_accounts =
-                        account_counts.get(&provider_key).copied().unwrap_or(0) > 0;
-
-                    if !has_stored_accounts {
-                        let instructions = info
-                            .env_key_instructions
-                            .as_deref()
-                            .unwrap_or("Set the environment variable and restart.");
-                        let msg = format!(
-                            "Provider '{}' requires {} to be set.\n\n{}\n\nOr use: /provider add {} <api-key>",
-                            provider_id, env_key, instructions, provider_id
-                        );
-                        self.history_push_plain_state(history_cell::new_error_event(msg));
-                        return;
-                    }
-                }
-            }
-        }
-
-        // Switch provider
-        let provider = self.config.model_providers.get(&provider_id).cloned();
-        if let Some(info) = provider {
-            self.config.model_provider_id = provider_id.clone();
-            self.config.model_provider = info.clone();
-            let msg = format!(
-                "Switched to provider: {} ({})\nBase URL: {}",
-                info.name,
-                provider_id,
-                info.base_url.as_deref().unwrap_or("(default)")
-            );
-            self.push_background_tail(msg);
-        }
-    }
-
-    /// Handle `/share` command: share local LLM nodes via tunnel.
-    pub(crate) fn handle_share_command(&mut self, command_text: String) {
-        let trimmed = command_text.trim();
-        let parts: Vec<&str> = trimmed.split_whitespace().collect();
-        let subcommand = parts.first().map(|s| s.to_ascii_lowercase());
-
-        // Default ports for common local inference servers
-        const OLLAMA_PORT: u16 = 11434;
-        const LMSTUDIO_PORT: u16 = 1234;
-        const HANZO_NODE_PORT: u16 = 8080;
-
-        if trimmed.is_empty() || subcommand.as_deref() == Some("help") {
-            let help = r#"Share local LLM nodes via tunnel for remote access.
-
-Usage:
-  /share ollama       — share Ollama (port 11434)
-  /share lmstudio     — share LM Studio (port 1234)
-  /share hanzo        — share Hanzo Node (port 8080)
-  /share <port>       — share custom port
-  /share stop         — stop active tunnel
-  /share status       — show tunnel status
-
-Prerequisites:
-  Install ngrok: brew install ngrok (macOS) or https://ngrok.com
-  Or: Install localxpose: https://localxpose.io
-
-The tunnel URL can be used by others with:
-  /provider add hanzo <tunnel-url>/v1
-
-Note: Free ngrok accounts have connection limits."#;
-            self.push_background_tail(help.to_string());
-            return;
-        }
-
-        // Check for ngrok or localxpose
-        let ngrok_available = std::process::Command::new("ngrok")
-            .arg("version")
-            .output()
-            .map(|o| o.status.success())
-            .unwrap_or(false);
-
-        let localxpose_available = std::process::Command::new("loclx")
-            .arg("--version")
-            .output()
-            .map(|o| o.status.success())
-            .unwrap_or(false);
-
-        if !ngrok_available && !localxpose_available {
-            self.history_push_plain_state(history_cell::new_error_event(
-                "No tunnel tool found. Install ngrok or localxpose:\n\n\
-                 ngrok: brew install ngrok (macOS) or https://ngrok.com\n\
-                 localxpose: https://localxpose.io"
-                    .to_string(),
-            ));
-            return;
-        }
-
-        if subcommand.as_deref() == Some("stop") {
-            // Kill any existing ngrok/loclx processes
-            let _ = std::process::Command::new("pkill")
-                .args(["-f", "ngrok"])
-                .output();
-            let _ = std::process::Command::new("pkill")
-                .args(["-f", "loclx"])
-                .output();
-            self.push_background_tail("Stopped all active tunnels.".to_string());
-            return;
-        }
-
-        if subcommand.as_deref() == Some("status") {
-            // Check ngrok status via API
-            let status = std::process::Command::new("curl")
-                .args(["-s", "http://127.0.0.1:4040/api/tunnels"])
-                .output();
-
-            match status {
-                Ok(output) if output.status.success() => {
-                    let body = String::from_utf8_lossy(&output.stdout);
-                    if body.contains("public_url") {
-                        // Parse the JSON to extract tunnel URLs
-                        if let Ok(json) = serde_json::from_str::<serde_json::Value>(&body) {
-                            if let Some(tunnels) = json.get("tunnels").and_then(|t| t.as_array()) {
-                                let mut lines = "Active tunnels:\n\n".to_string();
-                                for tunnel in tunnels {
-                                    if let (Some(name), Some(url)) = (
-                                        tunnel.get("name").and_then(|n| n.as_str()),
-                                        tunnel.get("public_url").and_then(|u| u.as_str()),
-                                    ) {
-                                        lines.push_str(&format!("  {} → {}\n", name, url));
-                                    }
-                                }
-                                self.push_background_tail(lines);
-                                return;
-                            }
-                        }
-                    }
-                    self.push_background_tail("No active ngrok tunnels.".to_string());
-                }
-                _ => {
-                    self.push_background_tail("No active tunnels (ngrok not running).".to_string());
-                }
-            }
-            return;
-        }
-
-        // Determine the port to share
-        let port: u16 = match subcommand.as_deref() {
-            Some("ollama") => OLLAMA_PORT,
-            Some("lmstudio") | Some("lm-studio") => LMSTUDIO_PORT,
-            Some("hanzo") | Some("hanzo-node") => HANZO_NODE_PORT,
-            Some(port_str) => match port_str.parse::<u16>() {
-                Ok(p) => p,
-                Err(_) => {
-                    self.history_push_plain_state(history_cell::new_error_event(format!(
-                        "Invalid port or service: '{}'. Use /share help for usage.",
-                        port_str
-                    )));
-                    return;
-                }
-            },
-            None => {
-                self.history_push_plain_state(history_cell::new_error_event(
-                    "Please specify a service or port. Use /share help for usage.".to_string(),
-                ));
-                return;
-            }
-        };
-
-        // Check if the local service is running
-        let check_port = std::process::Command::new("lsof")
-            .args(["-i", &format!(":{}", port)])
-            .output();
-
-        let port_in_use = check_port
-            .map(|o| o.status.success() && !o.stdout.is_empty())
-            .unwrap_or(false);
-
-        if !port_in_use {
-            self.history_push_plain_state(history_cell::new_error_event(format!(
-                "No service detected on port {}. Start the service first:\n\n\
-                 Ollama: ollama serve\n\
-                 LM Studio: Start from the app\n\
-                 Hanzo Node: hanzo-node serve",
-                port
-            )));
-            return;
-        }
-
-        // Start the tunnel
-        let service_name = match port {
-            OLLAMA_PORT => "ollama",
-            LMSTUDIO_PORT => "lmstudio",
-            HANZO_NODE_PORT => "hanzo-node",
-            _ => "custom",
-        };
-
-        self.push_background_tail(format!(
-            "Starting tunnel for {} (port {})...\n\n\
-             The tunnel URL will appear shortly. Use Ctrl+C to stop.",
-            service_name, port
-        ));
-
-        // Start ngrok in background
-        let app_event_tx = self.app_event_tx.clone();
-        let ticket = self.make_background_tail_ticket();
-
-        std::thread::spawn(move || {
-            // Give ngrok a moment to start
-            std::thread::sleep(std::time::Duration::from_millis(500));
-
-            // Start ngrok
-            let child = std::process::Command::new("ngrok")
-                .args(["http", &port.to_string()])
-                .stdout(std::process::Stdio::null())
-                .stderr(std::process::Stdio::null())
-                .spawn();
-
-            if child.is_err() {
-                return;
-            }
-
-            // Wait for ngrok to be ready
-            std::thread::sleep(std::time::Duration::from_secs(2));
-
-            // Get the public URL from ngrok API
-            let status = std::process::Command::new("curl")
-                .args(["-s", "http://127.0.0.1:4040/api/tunnels"])
-                .output();
-
-            if let Ok(output) = status {
-                if output.status.success() {
-                    let body = String::from_utf8_lossy(&output.stdout);
-                    if let Ok(json) = serde_json::from_str::<serde_json::Value>(&body) {
-                        if let Some(tunnels) = json.get("tunnels").and_then(|t| t.as_array()) {
-                            for tunnel in tunnels {
-                                if let Some(url) = tunnel.get("public_url").and_then(|u| u.as_str())
-                                {
-                                    if url.starts_with("https://") {
-                                        let msg = format!(
-                                            "Tunnel active!\n\n\
-                                             Public URL: {}\n\n\
-                                             Others can use this endpoint with:\n\
-                                             /provider add {} {}/v1\n\n\
-                                             Use /share stop to close the tunnel.",
-                                            url, service_name, url
-                                        );
-                                        app_event_tx
-                                            .send_background_event_with_ticket(&ticket, msg);
-                                        return;
-                                    }
-                                }
-                            }
-                        }
-                    }
-                }
-            }
-
-            app_event_tx.send_background_event_with_ticket(
-                &ticket,
-                "Tunnel started but couldn't retrieve URL. Check /share status.".to_string(),
-            );
-        });
     }
 
     #[allow(dead_code)]
@@ -28496,15 +29001,16 @@ Note: Free ngrok accounts have connection limits."#;
             // Explicitly (re)start the internal browser session now
             if let Err(e) = browser_manager.start().await {
                 tracing::error!("Failed to start internal browser: {}", e);
-                app_event_tx.send_background_event_with_ticket(
-                    &ticket,
-                    format!("❌ Failed to start internal browser: {}", e),
-                );
+                app_event_tx
+                    .send_background_event_with_ticket(
+                        &ticket,
+                        format!("❌ Failed to start internal browser: {}", e),
+                    );
                 return;
             }
 
             // Set as global manager so core/session share the same instance
-            hanzo_browser::global::set_global_browser_manager(browser_manager.clone()).await;
+            code_browser::global::set_global_browser_manager(browser_manager.clone()).await;
 
             // Notify about successful switch/reconnect
             app_event_tx.send_background_event_with_ticket(
@@ -28530,9 +29036,9 @@ Note: Free ngrok accounts have connection limits."#;
                                 url.clone().unwrap_or_else(|| "Browser".to_string()),
                             ));
                         }
-                        use hanzo_core::protocol::BrowserScreenshotUpdateEvent;
-                        use hanzo_core::protocol::EventMsg;
-                        let _ = app_event_tx.send(AppEvent::CodeEvent(Event {
+                        use code_core::protocol::BrowserScreenshotUpdateEvent;
+                        use code_core::protocol::EventMsg;
+                        let _ = app_event_tx.send(AppEvent::CodexEvent(Event {
                             id: uuid::Uuid::new_v4().to_string(),
                             event_seq: 0,
                             msg: EventMsg::BrowserScreenshotUpdate(BrowserScreenshotUpdateEvent {
@@ -28719,9 +29225,9 @@ Note: Free ngrok accounts have connection limits."#;
                                     url.clone().unwrap_or_else(|| "Browser".to_string()),
                                 ));
                             }
-                            use hanzo_core::protocol::BrowserScreenshotUpdateEvent;
-                            use hanzo_core::protocol::EventMsg;
-                            let _ = app_event_tx.send(AppEvent::CodeEvent(Event {
+                            use code_core::protocol::BrowserScreenshotUpdateEvent;
+                            use code_core::protocol::EventMsg;
+                            let _ = app_event_tx.send(AppEvent::CodexEvent(Event {
                                 id: uuid::Uuid::new_v4().to_string(),
                                 event_seq: 0,
                                 msg: EventMsg::BrowserScreenshotUpdate(
@@ -28784,7 +29290,7 @@ Note: Free ngrok accounts have connection limits."#;
             return;
         }
         use crate::chatwidget::message::UserMessage;
-        use hanzo_core::protocol::InputItem;
+        use code_core::protocol::InputItem;
         let mut ordered = Vec::new();
         if !prompt.trim().is_empty() {
             ordered.push(InputItem::Text { text: prompt });
@@ -28805,7 +29311,7 @@ Note: Free ngrok accounts have connection limits."#;
             return;
         }
         use crate::chatwidget::message::UserMessage;
-        use hanzo_core::protocol::InputItem;
+        use code_core::protocol::InputItem;
         let mut ordered = Vec::new();
         if !preface.trim().is_empty() {
             ordered.push(InputItem::Text { text: preface });
@@ -28842,7 +29348,7 @@ Note: Free ngrok accounts have connection limits."#;
             return;
         }
         use crate::chatwidget::message::UserMessage;
-        use hanzo_core::protocol::InputItem;
+        use code_core::protocol::InputItem;
 
         let mut ordered = Vec::new();
         let preface_cache = preface.clone();
@@ -28902,6 +29408,7 @@ Note: Free ngrok accounts have connection limits."#;
         }
 
         let items = message.ordered_items.clone();
+        let dispatched_text = Self::combined_input_text(&items);
         if let Err(e) = self.code_op_tx.send(Op::UserInput {
             items,
             final_output_json_schema: None,
@@ -28909,7 +29416,7 @@ Note: Free ngrok accounts have connection limits."#;
             tracing::error!("failed to send immediate UserInput: {e}");
         }
 
-        self.finalize_sent_user_message(message);
+        self.finalize_sent_user_message(message, dispatched_text);
     }
 
     /// Queue a note that will be delivered to the agent as a hidden system
@@ -28973,6 +29480,7 @@ Note: Free ngrok accounts have connection limits."#;
             self.total_token_usage.clone(),
             self.last_token_usage.clone(),
             self.config.model_context_window,
+            self.config.context_mode,
         );
     }
 
@@ -28996,10 +29504,7 @@ Note: Free ngrok accounts have connection limits."#;
                     .find(|record| record.account_id == account_id)
                     .and_then(|record| record.plan.clone()),
                 Err(err) => {
-                    tracing::warn!(
-                        ?err,
-                        "failed to load rate limit snapshots while logging warning"
-                    );
+                    tracing::warn!(?err, "failed to load rate limit snapshots while logging warning");
                     None
                 }
             }
@@ -29038,14 +29543,12 @@ Note: Free ngrok accounts have connection limits."#;
             .map(|r| ratatui::text::Line::from(r.text))
             .collect::<Vec<_>>();
         if !streaming_lines.is_empty() {
-            // Apply gutter to streaming preview (first line gets " ⏺ ", continuations get 3 spaces)
-            if crate::theme::show_borders() {
-                if let Some(first) = streaming_lines.first_mut() {
-                    first.spans.insert(0, ratatui::text::Span::raw(" ⏺ "));
-                }
-                for line in streaming_lines.iter_mut().skip(1) {
-                    line.spans.insert(0, ratatui::text::Span::raw("   "));
-                }
+            // Apply gutter to streaming preview (first line gets " • ", continuations get 3 spaces)
+            if let Some(first) = streaming_lines.first_mut() {
+                first.spans.insert(0, ratatui::text::Span::raw(" • "));
+            }
+            for line in streaming_lines.iter_mut().skip(1) {
+                line.spans.insert(0, ratatui::text::Span::raw("   "));
             }
             out.extend(streaming_lines);
             out.push(ratatui::text::Line::from(""));
@@ -29158,8 +29661,7 @@ Note: Free ngrok accounts have connection limits."#;
                 .and_then(|meta| meta.modified())
                 .ok();
 
-            let metadata_changed =
-                cache.last_head_mtime != modified || cache.last_refresh.is_none();
+            let metadata_changed = cache.last_head_mtime != modified || cache.last_refresh.is_none();
 
             if metadata_changed {
                 cache.value = fs::read_to_string(&head_path)
@@ -29194,32 +29696,25 @@ Note: Free ngrok accounts have connection limits."#;
 
     fn render_status_bar(&self, area: Rect, buf: &mut Buffer) {
         use crate::exec_command::relativize_to_home;
+        use ratatui::layout::Margin;
         use ratatui::style::Modifier;
         use ratatui::style::Style;
         use ratatui::text::Line;
         use ratatui::text::Span;
+        use ratatui::widgets::Block;
+        use ratatui::widgets::Borders;
         use ratatui::widgets::Paragraph;
-        use ratatui::widgets::Widget;
 
-        if area.width == 0 || area.height == 0 {
-            return;
-        }
-
-        let base_style = Style::default()
-            .bg(crate::colors::background())
-            .fg(crate::colors::text());
-        fill_rect(buf, area, Some(' '), base_style);
-
+        // Add same horizontal padding as the Message input (2 chars on each side)
+        let horizontal_padding = 1u16;
         let padded_area = Rect {
-            x: area.x.saturating_add(1),
+            x: area.x + horizontal_padding,
             y: area.y,
-            width: area.width.saturating_sub(2),
+            width: area.width.saturating_sub(horizontal_padding * 2),
             height: area.height,
         };
-        if padded_area.width == 0 || padded_area.height == 0 {
-            return;
-        }
 
+        // Get current working directory string
         let cwd_str = match relativize_to_home(&self.config.cwd) {
             Some(rel) if !rel.as_os_str().is_empty() => format!("~/{}", rel.display()),
             Some(_) => "~".to_string(),
@@ -29232,74 +29727,98 @@ Note: Free ngrok accounts have connection limits."#;
             .unwrap_or(cwd_str.as_str())
             .to_string();
 
+        // Build status line spans with dynamic elision based on width.
+        // Removal priority when space is tight:
+        //   1) Reasoning level
+        //   2) Model
+        //   3) Branch
+        //   4) Directory
         let branch_opt = self.get_git_branch();
+
+        // Helper to assemble spans based on include flags
         let build_spans = |include_reasoning: bool,
                            include_model: bool,
                            include_branch: bool,
                            include_dir: bool,
                            dir_display: &str| {
-            let separator = Span::styled(" | ", Style::default().fg(crate::colors::text_dim()));
-            let mut spans: Vec<Span> = vec![Span::styled(
-                "Hanzo Dev",
+            let mut spans: Vec<Span> = Vec::new();
+            let model_display = self.format_model_name(&self.config.model);
+            let mut model_suffix_parts: Vec<String> = Vec::new();
+            if include_reasoning {
+                model_suffix_parts
+                    .push(Self::format_reasoning_effort(self.config.model_reasoning_effort).to_string());
+            }
+            if matches!(self.config.service_tier, Some(ServiceTier::Fast)) {
+                model_suffix_parts.push("Fast".to_string());
+            }
+            let model_label = if model_suffix_parts.is_empty() {
+                model_display
+            } else {
+                format!("{} ({})", model_display, model_suffix_parts.join(", "))
+            };
+
+            // Title follows theme text color
+            spans.push(Span::styled(
+                "Every Code",
                 Style::default()
-                    .fg(crate::colors::text_bright())
+                    .fg(crate::colors::text())
                     .add_modifier(Modifier::BOLD),
-            )];
+            ));
 
             if include_model {
-                spans.push(separator.clone());
                 spans.push(Span::styled(
-                    "Model ",
+                    "  •  ",
                     Style::default().fg(crate::colors::text_dim()),
                 ));
                 spans.push(Span::styled(
-                    self.format_model_name(&self.config.model),
-                    Style::default().fg(crate::colors::text()),
-                ));
-            }
-
-            if include_reasoning {
-                spans.push(separator.clone());
-                spans.push(Span::styled(
-                    "Reasoning ",
+                    "Model: ",
                     Style::default().fg(crate::colors::text_dim()),
                 ));
                 spans.push(Span::styled(
-                    Self::format_reasoning_effort(self.config.model_reasoning_effort),
-                    Style::default().fg(crate::colors::text()),
+                    model_label,
+                    Style::default().fg(crate::colors::info()),
                 ));
             }
 
             if include_dir {
-                spans.push(separator.clone());
                 spans.push(Span::styled(
-                    "Dir ",
+                    "  •  ",
+                    Style::default().fg(crate::colors::text_dim()),
+                ));
+                spans.push(Span::styled(
+                    "Directory: ",
                     Style::default().fg(crate::colors::text_dim()),
                 ));
                 spans.push(Span::styled(
                     dir_display.to_string(),
-                    Style::default().fg(crate::colors::text()),
+                    Style::default().fg(crate::colors::info()),
                 ));
             }
 
             if include_branch {
                 if let Some(branch) = &branch_opt {
-                    spans.push(separator);
                     spans.push(Span::styled(
-                        "Branch ",
+                        "  •  ",
+                        Style::default().fg(crate::colors::text_dim()),
+                    ));
+                    spans.push(Span::styled(
+                        "Branch: ",
                         Style::default().fg(crate::colors::text_dim()),
                     ));
                     spans.push(Span::styled(
                         branch.clone(),
-                        Style::default().fg(crate::colors::text()),
+                        Style::default().fg(crate::colors::success_green()),
                     ));
                 }
             }
 
+            // Footer already shows the Ctrl+R hint; avoid duplicating it here.
+
             spans
         };
 
-        let minimal_header = std::env::var_os("HANZO_TUI_FORCE_MINIMAL_HEADER").is_some();
+        // Start with all items in production; tests can opt-in to a minimal header via env flag.
+        let minimal_header = std::env::var_os("CODEX_TUI_FORCE_MINIMAL_HEADER").is_some();
         let demo_mode = self.config.demo_developer_message.is_some();
         let mut include_reasoning = !minimal_header;
         let mut include_model = !minimal_header;
@@ -29314,9 +29833,22 @@ Note: Free ngrok accounts have connection limits."#;
             &cwd_str,
         );
 
-        let inner_width = padded_area.width as usize;
+        // Now recompute exact available width inside the border + padding before measuring
+        // Render a bordered status block and explicitly fill its background.
+        // Without a background fill, some terminals blend with prior frame
+        // contents, which is especially noticeable on dark themes as dark
+        // "caps" at the edges. Match the app background for consistency.
+        let status_block = Block::default()
+            .borders(Borders::ALL)
+            .border_style(Style::default().fg(crate::colors::border()))
+            .style(Style::default().bg(crate::colors::background()));
+        let inner_area = status_block.inner(padded_area);
+        let padded_inner = inner_area.inner(Margin::new(1, 0));
+        let inner_width = padded_inner.width as usize;
+
+        // Helper to measure current spans width
         let measure =
-            |spans: &[Span]| -> usize { spans.iter().map(|s| s.content.chars().count()).sum() };
+            |spans: &Vec<Span>| -> usize { spans.iter().map(|s| s.content.chars().count()).sum() };
 
         if include_dir && !use_short_dir && measure(&status_spans) > inner_width {
             use_short_dir = true;
@@ -29329,6 +29861,7 @@ Note: Free ngrok accounts have connection limits."#;
             );
         }
 
+        // Elide items in priority order until content fits
         while measure(&status_spans) > inner_width {
             if include_reasoning {
                 include_reasoning = false;
@@ -29341,45 +29874,61 @@ Note: Free ngrok accounts have connection limits."#;
             } else {
                 break;
             }
-
             status_spans = build_spans(
                 include_reasoning,
                 include_model,
                 include_branch,
                 include_dir,
-                if use_short_dir {
-                    &cwd_short_str
-                } else {
-                    &cwd_str
-                },
+                if use_short_dir { &cwd_short_str } else { &cwd_str },
             );
         }
 
+        // Note: The reasoning visibility hint is appended inside `build_spans`
+        // so it participates in width measurement and elision. Do not append
+        // it again here to avoid overflow that caused corrupted glyph boxes on
+        // some terminals.
+
+        let status_line = Line::from(status_spans);
+
         let now = Instant::now();
+        let mut frame_needed = false;
         if ENABLE_WARP_STRIPES && self.header_wave.schedule_if_needed(now) {
+            frame_needed = true;
+        }
+        if frame_needed {
             self.app_event_tx
                 .send(AppEvent::ScheduleFrameIn(HeaderWaveEffect::FRAME_INTERVAL));
         }
-        if self.header_wave.is_enabled() {
+
+        // Render the block first
+        status_block.render(padded_area, buf);
+        let wave_enabled = self.header_wave.is_enabled();
+        if wave_enabled {
             self.header_wave.render(padded_area, buf, now);
         }
 
-        Paragraph::new(Line::from(status_spans))
-            .style(base_style)
-            .alignment(ratatui::layout::Alignment::Left)
-            .render(padded_area, buf);
+        // Then render the text inside with padding, centered
+        let effect_enabled = wave_enabled;
+        let status_style = if effect_enabled {
+            Style::default().fg(crate::colors::text())
+        } else {
+            Style::default()
+                .bg(crate::colors::background())
+                .fg(crate::colors::text())
+        };
+
+        let status_widget = Paragraph::new(vec![status_line])
+            .alignment(ratatui::layout::Alignment::Center)
+            .style(status_style);
+        ratatui::widgets::Widget::render(status_widget, padded_inner, buf);
     }
 
     fn render_screenshot_highlevel(&self, path: &PathBuf, area: Rect, buf: &mut Buffer) {
-        use ratatui::style::Color;
-        use ratatui::style::Style;
         use ratatui::widgets::Widget;
         use ratatui_image::Image;
         use ratatui_image::Resize;
         use ratatui_image::picker::Picker;
         use ratatui_image::picker::ProtocolType;
-
-        fill_rect(buf, area, Some(' '), Style::default().bg(Color::Black));
 
         // First, cheaply read image dimensions without decoding the full image
         let (img_w, img_h) = match image::image_dimensions(path) {
@@ -29394,7 +29943,8 @@ Note: Free ngrok accounts have connection limits."#;
         let mut cached_picker = self.cached_picker.borrow_mut();
         if cached_picker.is_none() {
             // If we didn't get a picker from terminal query at startup, create one from font size
-            let p = Picker::from_query_stdio().unwrap_or_else(|_| Picker::halfblocks());
+            let (fw, fh) = self.measured_font_size();
+            let p = Picker::from_fontsize((fw, fh));
 
             *cached_picker = Some(p);
         }
@@ -29510,10 +30060,10 @@ Note: Free ngrok accounts have connection limits."#;
     }
 
     fn render_screenshot_placeholder(&self, path: &PathBuf, area: Rect, buf: &mut Buffer) {
-        use ratatui::style::Color;
         use ratatui::style::Modifier;
         use ratatui::style::Style;
         use ratatui::widgets::Block;
+        use ratatui::widgets::Borders;
         use ratatui::widgets::Paragraph;
 
         // Show a placeholder box with screenshot info
@@ -29526,14 +30076,9 @@ Note: Free ngrok accounts have connection limits."#;
         let placeholder_widget = Paragraph::new(placeholder_text)
             .block(
                 Block::default()
-                    .borders(crate::theme::zen_borders())
+                    .borders(Borders::ALL)
                     .border_style(Style::default().fg(crate::colors::info()))
-                    .title(if crate::theme::show_borders() {
-                        "Browser"
-                    } else {
-                        ""
-                    })
-                    .style(Style::default().bg(Color::Black)),
+                    .title("Browser"),
             )
             .style(
                 Style::default()
@@ -29554,12 +30099,12 @@ async fn run_background_review(
     prefer_fallback: bool,
 ) {
     // Best-effort: clean up any stale lock left by a cancelled review process.
-    let _ = hanzo_core::review_coord::clear_stale_lock_if_dead(Some(&config.cwd));
+    let _ = code_core::review_coord::clear_stale_lock_if_dead(Some(&config.cwd));
 
     // Prevent duplicate auto-reviews within this process: if any AutoReview agent
     // is already pending/running, bail early with a benign notice.
     {
-        let mgr = hanzo_core::AGENT_MANAGER.read().await;
+        let mgr = code_core::AGENT_MANAGER.read().await;
         let busy = mgr
             .list_agents(None, Some("auto-review".to_string()), false)
             .into_iter()
@@ -29573,9 +30118,7 @@ async fn run_background_review(
                 branch: String::new(),
                 has_findings: false,
                 findings: 0,
-                summary: Some(
-                    "Auto review skipped: another auto review is already running.".to_string(),
-                ),
+                summary: Some("Auto review skipped: another auto review is already running.".to_string()),
                 error: None,
                 agent_id: None,
                 snapshot: None,
@@ -29586,7 +30129,7 @@ async fn run_background_review(
 
     let app_event_tx_clone = app_event_tx.clone();
     let outcome = async move {
-        let git_root = hanzo_core::git_worktree::get_git_root_from(&config.cwd)
+        let git_root = code_core::git_worktree::get_git_root_from(&config.cwd)
             .await
             .map_err(|e| format!("failed to detect git root: {e}"))?;
 
@@ -29611,6 +30154,82 @@ async fn run_background_review(
         let snapshot_id = snapshot.id().to_string();
         bump_snapshot_epoch_for(&config.cwd);
 
+        let review_scope = task::spawn_blocking({
+            let cwd = config.cwd.clone();
+            let snapshot_id = snapshot_id.clone();
+            let parent_id = base_snapshot
+                .as_ref()
+                .map(|base| base.id().to_string())
+                .unwrap_or_default();
+            move || {
+                let name_only_output = if parent_id.is_empty() {
+                    std::process::Command::new("git")
+                        .current_dir(&cwd)
+                        .args(["show", "--pretty=format:", "--name-only", &snapshot_id])
+                        .output()
+                        .map_err(|err| format!("failed to collect review scope paths: {err}"))?
+                } else {
+                    std::process::Command::new("git")
+                        .current_dir(&cwd)
+                        .args(["diff", "--name-only", &parent_id, &snapshot_id])
+                        .output()
+                        .map_err(|err| format!("failed to collect review scope paths: {err}"))?
+                };
+                if !name_only_output.status.success() {
+                    return Ok::<(Option<String>, Option<String>), String>((None, None));
+                }
+                let stdout = String::from_utf8_lossy(&name_only_output.stdout);
+                let paths = stdout.lines().map(str::to_string).collect::<Vec<_>>();
+                let scope_note = format_background_review_scope_from_paths(&snapshot_id, &paths);
+
+                if paths.len() > AUTO_REVIEW_MAX_CHANGED_PATHS {
+                    return Err(format!(
+                        "auto review scope exceeds configured background review size limits: {} changed paths (limit {}).",
+                        paths.len(),
+                        AUTO_REVIEW_MAX_CHANGED_PATHS,
+                    ));
+                }
+
+                let diff_output = if parent_id.is_empty() {
+                    std::process::Command::new("git")
+                        .current_dir(&cwd)
+                        .args(["show", "--format=", "--unified=3", &snapshot_id])
+                        .output()
+                        .map_err(|err| format!("failed to collect review diff excerpt: {err}"))?
+                } else {
+                    std::process::Command::new("git")
+                        .current_dir(&cwd)
+                        .args(["diff", "--unified=3", &parent_id, &snapshot_id])
+                        .output()
+                        .map_err(|err| format!("failed to collect review diff excerpt: {err}"))?
+                };
+                if !diff_output.status.success() {
+                    return Ok((scope_note, None));
+                }
+
+                let diff_text = String::from_utf8_lossy(&diff_output.stdout);
+                if diff_text.chars().count() > AUTO_REVIEW_MAX_RAW_DIFF_CHARS {
+                    return Err(format!(
+                        "auto review scope exceeds configured background review size limits: diff is {} chars (limit {}).",
+                        diff_text.chars().count(),
+                        AUTO_REVIEW_MAX_RAW_DIFF_CHARS,
+                    ));
+                }
+
+                let diff_excerpt = if diff_text.trim().is_empty() {
+                    None
+                } else {
+                    Some(ChatWidget::truncate_with_ellipsis(
+                        diff_text.trim(),
+                        AUTO_REVIEW_DIFF_EXCERPT_CHARS,
+                    ))
+                };
+                Ok((scope_note, diff_excerpt))
+            }
+        })
+        .await
+        .map_err(|e| format!("failed to spawn review scope task: {e}"))??;
+
         // Attempt to hold the shared review lock; if busy or a previous review
         // with findings is still surfaced, fall back to a per-request
         // auto-review worktree to avoid clobbering pending fixes.
@@ -29621,7 +30240,7 @@ async fn run_background_review(
         } else {
             match try_acquire_lock("review", &config.cwd) {
                 Ok(Some(g)) => {
-                    let path = hanzo_core::git_worktree::prepare_reusable_worktree(
+                    let path = code_core::git_worktree::prepare_reusable_worktree(
                         &git_root,
                         AUTO_REVIEW_SHARED_WORKTREE,
                         snapshot_id.as_str(),
@@ -29642,13 +30261,13 @@ async fn run_background_review(
             }
         };
 
-        // Ensure Codex models are invoked via the `dev-` CLI shim so they exist on PATH.
+        // Ensure Codex models are invoked via the `code-` CLI shim so they exist on PATH.
         fn ensure_code_prefix(model: &str) -> String {
             let lower = model.to_ascii_lowercase();
-            if lower.starts_with("dev-") || lower.starts_with("code-") {
+            if lower.starts_with("code-") {
                 model.to_string()
             } else {
-                format!("dev-{}", model)
+                format!("code-{}", model)
             }
         }
 
@@ -29656,8 +30275,8 @@ async fn run_background_review(
 
         // Allow the spawned agent to reuse the parent's review lock without blocking.
         let mut env: std::collections::HashMap<String, String> = std::collections::HashMap::new();
-        env.insert("HANZO_REVIEW_LOCK_LEASE".to_string(), "1".to_string());
-        let agent_config = hanzo_core::config_types::AgentConfig {
+        env.insert("CODE_REVIEW_LOCK_LEASE".to_string(), "1".to_string());
+        let agent_config = code_core::config_types::AgentConfig {
             name: review_model.clone(),
             command: String::new(),
             args: Vec::new(),
@@ -29671,16 +30290,14 @@ async fn run_background_review(
         };
 
         // Use the /review entrypoint so upstream wiring (model defaults, review formatting) stays intact.
-        let mut review_prompt = format!(
-            "/review Analyze only changes made in commit {snapshot_id}. Identify critical bugs, regressions, security/performance/concurrency risks or incorrect assumptions. Provide actionable feedback and references to the changed code; ignore minor style or formatting nits."
+        let review_prompt = build_background_review_prompt(
+            &snapshot_id,
+            review_scope.0.as_deref(),
+            review_scope.1.as_deref(),
+            turn_context.as_deref(),
         );
 
-        if let Some(context) = turn_context {
-            review_prompt.push_str("\n\n");
-            review_prompt.push_str(&context);
-        }
-
-        let mut manager = hanzo_core::AGENT_MANAGER.write().await;
+        let mut manager = code_core::AGENT_MANAGER.write().await;
         let agent_id = manager
             .create_agent_with_options(
                 review_model,
@@ -29694,7 +30311,7 @@ async fn run_background_review(
                 Some(agent_config.clone()),
                 Some(branch.clone()),
                 Some(snapshot_id.clone()),
-                Some(hanzo_core::protocol::AgentSourceKind::AutoReview),
+                Some(code_core::protocol::AgentSourceKind::AutoReview),
                 config.auto_review_model_reasoning_effort.into(),
             )
             .await;
@@ -29726,7 +30343,7 @@ async fn run_background_review(
 }
 
 #[allow(dead_code)]
-fn insert_background_lock(agent_id: &str, guard: hanzo_core::review_coord::ReviewGuard) {
+fn insert_background_lock(agent_id: &str, guard: code_core::review_coord::ReviewGuard) {
     if let Ok(mut map) = BACKGROUND_REVIEW_LOCKS.lock() {
         map.insert(agent_id.to_string(), guard);
     }
@@ -29766,60 +30383,116 @@ impl Drop for AutoReviewStubGuard {
 }
 
 #[cfg(test)]
-mod tests {
-    use super::CAPTURE_AUTO_TURN_COMMIT_STUB;
-    use super::GIT_DIFF_NAME_ONLY_BETWEEN_STUB;
-    use super::*;
+    mod tests {
+        use super::*;
+        use super::{
+            CAPTURE_AUTO_TURN_COMMIT_STUB,
+            GIT_DIFF_NAME_ONLY_BETWEEN_STUB,
+        };
+    use crate::app_event::AppEvent;
     use crate::bottom_pane::AutoCoordinatorViewModel;
     use crate::chatwidget::message::UserMessage;
-    use crate::chatwidget::smoke_helpers::ChatWidgetHarness;
-    use crate::chatwidget::smoke_helpers::enter_test_runtime_guard;
-    use crate::history_cell::ExploreAggregationCell;
-    use crate::history_cell::HistoryCellType;
-    use crate::history_cell::{self};
-    use crossterm::event::KeyCode;
-    use crossterm::event::KeyEvent;
-    use crossterm::event::KeyModifiers;
-    use hanzo_auto_drive_core::AUTO_RESOLVE_MAX_REVIEW_ATTEMPTS;
-    use hanzo_auto_drive_core::AutoContinueMode;
-    use hanzo_auto_drive_core::AutoRunPhase;
-    use hanzo_auto_drive_core::AutoRunSummary;
-    use hanzo_auto_drive_core::TurnComplexity;
-    use hanzo_auto_drive_core::TurnMode;
-    use hanzo_core::config_types::AutoResolveAttemptLimit;
-    use hanzo_core::history::state::AssistantStreamDelta;
-    use hanzo_core::history::state::AssistantStreamState;
-    use hanzo_core::history::state::HistoryId;
-    use hanzo_core::history::state::HistoryRecord;
-    use hanzo_core::history::state::HistorySnapshot;
-    use hanzo_core::history::state::HistoryState;
-    use hanzo_core::history::state::InlineSpan;
-    use hanzo_core::history::state::MessageLine;
-    use hanzo_core::history::state::MessageLineKind;
-    use hanzo_core::history::state::OrderKeySnapshot;
-    use hanzo_core::history::state::PlainMessageKind;
-    use hanzo_core::history::state::PlainMessageRole;
-    use hanzo_core::history::state::PlainMessageState;
-    use hanzo_core::history::state::TextEmphasis;
-    use hanzo_core::history::state::TextTone;
-    use hanzo_core::parse_command::ParsedCommand;
-    use hanzo_core::protocol::AgentInfo as CoreAgentInfo;
-    use hanzo_core::protocol::AgentMessageEvent;
-    use hanzo_core::protocol::AgentStatusUpdateEvent;
-    use hanzo_core::protocol::AskForApproval;
-    use hanzo_core::protocol::ErrorEvent;
-    use hanzo_core::protocol::Event;
-    use hanzo_core::protocol::EventMsg;
-    use hanzo_core::protocol::ExecCommandBeginEvent;
-    use hanzo_core::protocol::OrderMeta;
-    use hanzo_core::protocol::TaskCompleteEvent;
-    use ratatui::widgets::FrameExt;
-    use std::path::PathBuf;
+    use crate::chatwidget::smoke_helpers::{enter_test_runtime_guard, ChatWidgetHarness};
+    use crate::history_cell::{self, ExploreAggregationCell, HistoryCellType};
+    use code_common::model_presets::ReasoningEffortPreset;
+    use code_auto_drive_core::{
+        AutoContinueMode,
+        AutoRunPhase,
+        AutoRunSummary,
+        TurnComplexity,
+        TurnMode,
+        AUTO_RESOLVE_MAX_REVIEW_ATTEMPTS,
+    };
+    use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
+    use code_core::config_types::AutoResolveAttemptLimit;
+    use code_core::history::state::{
+        AssistantStreamDelta,
+        AssistantStreamState,
+        HistoryId,
+        HistoryRecord,
+        HistorySnapshot,
+        HistoryState,
+        InlineSpan,
+        MessageLine,
+        MessageLineKind,
+        OrderKeySnapshot,
+        PlainMessageKind,
+        PlainMessageRole,
+        PlainMessageState,
+        TextEmphasis,
+        TextTone,
+    };
+use code_core::parse_command::ParsedCommand;
+use code_core::protocol::OrderMeta;
+    use code_core::config::{Config, ConfigOverrides, ConfigToml};
+    use code_core::config_types::{ContextMode, McpServerConfig, McpServerTransportConfig, ServiceTier};
+    use code_core::protocol::{
+        AskForApproval,
+        AgentMessageEvent,
+        AgentStatusUpdateEvent,
+        ErrorEvent,
+        Event,
+        EventMsg,
+        ExecCommandBeginEvent,
+        McpServerFailure,
+        McpServerFailurePhase,
+        Op,
+        TaskCompleteEvent,
+    };
+    use code_core::protocol::AgentInfo as CoreAgentInfo;
+    use std::sync::atomic::{AtomicUsize, Ordering};
     use std::process::Command;
-    use std::sync::Arc;
-    use std::sync::atomic::AtomicUsize;
-    use std::sync::atomic::Ordering;
     use tempfile::tempdir;
+    use std::sync::Arc;
+    use std::path::PathBuf;
+    use tokio::sync::mpsc::{UnboundedReceiver, unbounded_channel};
+
+    fn replace_code_op_channel(chat: &mut ChatWidget<'static>) -> UnboundedReceiver<Op> {
+        let (code_op_tx, code_op_rx) = unbounded_channel::<Op>();
+        chat.code_op_tx = code_op_tx;
+        code_op_rx
+    }
+
+    fn expect_post_turn_developer_input(code_op_rx: &mut UnboundedReceiver<Op>) -> String {
+        loop {
+            match code_op_rx.try_recv().expect("post-turn developer op") {
+                Op::AddPostTurnDeveloperInput { text } => return text,
+                Op::UserInput {
+                    final_output_json_schema: None,
+                    ..
+                }
+                | Op::QueueUserInput { .. }
+                | Op::AddToHistory { .. } => continue,
+                other => panic!("expected AddPostTurnDeveloperInput, got {other:?}"),
+            }
+        }
+    }
+
+    fn expect_immediate_user_input(code_op_rx: &mut UnboundedReceiver<Op>) -> String {
+        loop {
+            match code_op_rx.try_recv().expect("user input op") {
+                Op::UserInput {
+                    items,
+                    final_output_json_schema: None,
+                }
+                | Op::QueueUserInput {
+                    items,
+                } => return ChatWidget::combined_input_text(&items).unwrap_or_default(),
+                Op::AddPostTurnDeveloperInput { .. } | Op::AddToHistory { .. } => continue,
+                other => panic!("expected UserInput, got {other:?}"),
+            }
+        }
+    }
+
+    fn assert_no_code_ops_pending(code_op_rx: &mut UnboundedReceiver<Op>) {
+        assert!(
+            matches!(
+                code_op_rx.try_recv(),
+                Err(tokio::sync::mpsc::error::TryRecvError::Empty)
+            ),
+            "expected no pending code ops"
+        );
+    }
 
     #[test]
     fn parse_agent_review_result_json_clean() {
@@ -29834,6 +30507,63 @@ mod tests {
         assert!(!has_findings);
         assert_eq!(findings, 0);
         assert_eq!(summary.as_deref(), Some("looks clean"));
+    }
+
+    #[test]
+    fn background_review_scope_note_filters_and_truncates_paths() {
+        let paths = vec![
+            "src/lib.rs".to_string(),
+            "target/debug/app".to_string(),
+            "src/main.rs".to_string(),
+            "src/lib.rs".to_string(),
+        ];
+
+        let scope = format_background_review_scope_from_paths("abc123", &paths)
+            .expect("scope note should be present");
+
+        assert!(scope.contains("commit abc123"));
+        assert!(scope.contains("- src/lib.rs"));
+        assert!(scope.contains("- src/main.rs"));
+        assert!(!scope.contains("target/debug/app"));
+        assert!(scope.contains("excluded by path policy"));
+    }
+
+    #[test]
+    fn background_review_prompt_prefers_diff_excerpt_over_commit_scope() {
+        let prompt = build_background_review_prompt(
+            "abc123",
+            Some("Changed files to prioritize:\n- src/lib.rs"),
+            Some("diff --git a/src/lib.rs b/src/lib.rs\n+new line"),
+            Some("<context>\n<user>Fix it</user>\n</context>"),
+        );
+
+        assert!(prompt.contains("Review only the provided code change scope"));
+        assert!(prompt.contains("Snapshot: abc123."));
+        assert!(prompt.contains("Changed files to prioritize"));
+        assert!(prompt.contains("```diff"));
+        assert!(prompt.contains("+new line"));
+        assert!(prompt.contains("<context>"));
+        assert!(!prompt.contains("Analyze only changes made in commit"));
+    }
+
+    #[test]
+    fn turn_context_block_omits_prior_auto_review_developer_note() {
+        let mut harness = ChatWidgetHarness::new();
+        let chat = harness.chat();
+
+        chat.last_user_message = Some("Fix the tests".to_string());
+        chat.last_developer_message = Some(
+            "[developer] Background auto-review failed. Merge the worktree 'auto-review'."
+                .to_string(),
+        );
+        chat.last_assistant_message = Some("I updated the failing assertions".to_string());
+
+        let context = chat.turn_context_block().expect("context block");
+
+        assert!(context.contains("<user>Fix the tests</user>"));
+        assert!(context.contains("<assistant>I updated the failing assertions</assistant>"));
+        assert!(!context.contains("Background auto-review failed"));
+        assert!(!context.contains("Merge the worktree"));
     }
 
     #[test]
@@ -29853,6 +30583,55 @@ mod tests {
         let summary_text = summary.unwrap();
         assert!(summary_text.contains("needs work"));
         assert!(summary_text.contains("bug"));
+    }
+
+    #[test]
+    fn mcp_summary_includes_tools_and_failures() {
+        let mut harness = ChatWidgetHarness::new();
+        harness.with_chat(|chat| {
+            chat.mcp_tools_by_server.insert(
+                "alpha".to_string(),
+                vec!["fetch".to_string(), "search".to_string()],
+            );
+            chat.mcp_server_failures.insert(
+                "beta".to_string(),
+                McpServerFailure {
+                    phase: McpServerFailurePhase::ListTools,
+                    message: "timeout".to_string(),
+                },
+            );
+
+            let ok_cfg = McpServerConfig {
+                transport: McpServerTransportConfig::Stdio {
+                    command: "alpha-bin".to_string(),
+                    args: Vec::new(),
+                    env: None,
+                },
+                startup_timeout_sec: None,
+                tool_timeout_sec: None,
+            };
+            let fail_cfg = McpServerConfig {
+                transport: McpServerTransportConfig::Stdio {
+                    command: "beta-bin".to_string(),
+                    args: Vec::new(),
+                    env: None,
+                },
+                startup_timeout_sec: None,
+                tool_timeout_sec: None,
+            };
+
+            let ok_summary = chat.format_mcp_server_summary("alpha", &ok_cfg, true);
+            let fail_summary = chat.format_mcp_server_summary("beta", &fail_cfg, true);
+
+            assert!(
+                ok_summary.contains("Tools: fetch, search"),
+                "expected tool list in summary, got: {ok_summary}"
+            );
+            assert!(
+                fail_summary.contains("Failed to list tools: timeout"),
+                "expected failure message in summary, got: {fail_summary}"
+            );
+        });
     }
 
     #[test]
@@ -29899,6 +30678,44 @@ mod tests {
     }
 
     #[test]
+    fn parse_agent_review_result_prefers_embedded_json_over_log_dump() {
+        let text = r#"
+            [auto-review] launching worker...
+            [auto-review] streaming tool output...
+            {
+                "findings": [
+                    {"title": "bug", "body": "fix", "confidence_score": 0.5, "priority": 1, "code_location": {"absolute_file_path": "foo", "line_range": {"start":1,"end":1}}}
+                ],
+                "overall_correctness": "incorrect",
+                "overall_explanation": "needs work",
+                "overall_confidence_score": 0.6
+            }
+            [auto-review] done
+        "#;
+
+        let (has_findings, findings, summary) = ChatWidget::parse_agent_review_result(Some(text));
+        assert!(has_findings);
+        assert_eq!(findings, 1);
+        let summary_text = summary.expect("summary should be present");
+        assert!(summary_text.contains("needs work"));
+        assert!(summary_text.contains("Findings: bug"));
+        assert!(!summary_text.contains("streaming tool output"));
+    }
+
+    #[test]
+    fn parse_agent_review_result_truncates_plain_text_log_fallback() {
+        let text = format!("review found issues: {}", "x".repeat(1000));
+        let (has_findings, findings, summary) = ChatWidget::parse_agent_review_result(Some(&text));
+
+        assert!(has_findings);
+        assert_eq!(findings, 0);
+        let summary_text = summary.expect("summary should be present");
+        assert!(summary_text.starts_with("review found issues:"));
+        assert!(summary_text.ends_with('…'));
+        assert!(summary_text.chars().count() <= 280);
+    }
+
+    #[test]
     fn format_model_name_capitalizes_codex_mini() {
         let mut harness = ChatWidgetHarness::new();
         let formatted = harness.chat().format_model_name("gpt-5.1-codex-mini");
@@ -29906,9 +30723,197 @@ mod tests {
     }
 
     #[test]
-    #[ignore = "requires tokio runtime - needs conversion to async test"]
+    fn curated_model_presets_falls_back_when_shortlist_missing() {
+        let presets = vec![ModelPreset {
+            id: "custom-model".to_string(),
+            model: "custom-model".to_string(),
+            display_name: "custom-model".to_string(),
+            description: "custom".to_string(),
+            default_reasoning_effort: ReasoningEffort::Medium.into(),
+            supported_reasoning_efforts: vec![ReasoningEffortPreset {
+                effort: ReasoningEffort::Medium.into(),
+                description: "balanced".to_string(),
+            }],
+            supported_text_verbosity: &[TextVerbosity::Medium],
+            is_default: false,
+            upgrade: None,
+            pro_only: false,
+            show_in_picker: true,
+        }];
+
+        let curated = ChatWidget::curated_model_presets(presets.clone());
+        assert_eq!(curated.len(), 1);
+        assert_eq!(curated[0].id, presets[0].id);
+    }
+
+    #[test]
+    fn model_command_accepts_supported_non_curated_builtin_model() {
+        let _runtime_guard = enter_test_runtime_guard();
+        let mut harness = ChatWidgetHarness::new();
+        let chat = harness.chat();
+
+        chat.handle_model_command("gpt-5.2".to_string());
+
+        assert_eq!(chat.config.model, "gpt-5.2");
+        assert_eq!(chat.config.model_reasoning_effort, ReasoningEffort::Medium);
+    }
+
+    #[test]
+    fn model_command_accepts_supported_non_curated_remote_model() {
+        let _runtime_guard = enter_test_runtime_guard();
+        let mut harness = ChatWidgetHarness::new();
+        let chat = harness.chat();
+
+        let remote_presets: Vec<ModelPreset> = builtin_model_presets(Some(AuthMode::ChatGPT), true)
+            .into_iter()
+            .filter(|preset| preset.id == "gpt-5.4" || preset.id == "gpt-5.2")
+            .collect();
+        assert_eq!(remote_presets.len(), 2, "expected remote test presets");
+
+        chat.update_model_presets(remote_presets, None);
+        chat.handle_model_command("gpt-5.2".to_string());
+
+        assert_eq!(chat.config.model, "gpt-5.2");
+        assert_eq!(chat.config.model_reasoning_effort, ReasoningEffort::Medium);
+    }
+
+    #[test]
+    fn apply_service_tier_selection_persists_fast_mode_toggle() {
+        let _runtime_guard = enter_test_runtime_guard();
+        let code_home = tempdir().expect("temp code home");
+        let config_path = code_home.path().join("config.toml");
+        let mut harness = ChatWidgetHarness::new();
+        harness.chat().config.code_home = code_home.path().to_path_buf();
+
+        harness
+            .chat()
+            .apply_service_tier_selection(Some(ServiceTier::Fast));
+
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(2);
+        loop {
+            let contents = std::fs::read_to_string(&config_path).unwrap_or_default();
+            if contents.contains("service_tier = \"fast\"") {
+                break;
+            }
+            assert!(
+                std::time::Instant::now() < deadline,
+                "expected persisted fast mode enablement in {config_path:?}, got: {contents:?}"
+            );
+            std::thread::sleep(std::time::Duration::from_millis(20));
+        }
+
+        harness.chat().apply_service_tier_selection(None);
+
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(2);
+        loop {
+            let contents = std::fs::read_to_string(&config_path).unwrap_or_default();
+            if !contents.contains("service_tier") {
+                break;
+            }
+            assert!(
+                std::time::Instant::now() < deadline,
+                "expected persisted fast mode disablement in {config_path:?}, got: {contents:?}"
+            );
+            std::thread::sleep(std::time::Duration::from_millis(20));
+        }
+    }
+
+    #[test]
+    fn apply_service_tier_selection_persists_profile_disable_as_standard() {
+        let _runtime_guard = enter_test_runtime_guard();
+        let code_home = tempdir().expect("temp code home");
+        let config_path = code_home.path().join("config.toml");
+        std::fs::write(
+            &config_path,
+            "profile = \"work\"\nservice_tier = \"fast\"\n[profiles.work]\n",
+        )
+        .expect("seed config");
+
+        let mut harness = ChatWidgetHarness::new();
+        harness.chat().config.code_home = code_home.path().to_path_buf();
+        harness.chat().config.active_profile = Some("work".to_string());
+        harness.chat().config.service_tier = Some(ServiceTier::Fast);
+
+        harness.chat().apply_service_tier_selection(None);
+
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(2);
+        loop {
+            let contents = std::fs::read_to_string(&config_path).unwrap_or_default();
+            if contents.contains("[profiles.work]")
+                && contents.contains("service_tier = \"standard\"")
+            {
+                break;
+            }
+            assert!(
+                std::time::Instant::now() < deadline,
+                "expected persisted profile fast mode disablement in {config_path:?}, got: {contents:?}"
+            );
+            std::thread::sleep(std::time::Duration::from_millis(20));
+        }
+
+        let cfg_text = std::fs::read_to_string(&config_path).expect("read config");
+        let cfg = toml::from_str::<ConfigToml>(&cfg_text).expect("parse config");
+        let reloaded = Config::load_from_base_config_with_overrides(
+            cfg,
+            ConfigOverrides {
+                cwd: Some(code_home.path().to_path_buf()),
+                ..Default::default()
+            },
+            code_home.path().to_path_buf(),
+        )
+        .expect("reload config");
+
+        assert_eq!(reloaded.active_profile.as_deref(), Some("work"));
+        assert_eq!(reloaded.service_tier, None);
+    }
+
+    #[test]
+    fn apply_context_mode_selection_persists_disabled_override() {
+        let _runtime_guard = enter_test_runtime_guard();
+        let code_home = tempdir().expect("temp code home");
+        let config_path = code_home.path().join("config.toml");
+        let mut harness = ChatWidgetHarness::new();
+        harness.chat().config.code_home = code_home.path().to_path_buf();
+        harness.chat().config.context_mode = Some(ContextMode::Auto);
+
+        harness.chat().apply_session_context_mode_selection(None);
+
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(2);
+        loop {
+            let contents = std::fs::read_to_string(&config_path).unwrap_or_default();
+            if contents.contains("context_mode = \"disabled\"") {
+                break;
+            }
+            assert!(
+                std::time::Instant::now() < deadline,
+                "expected persisted disabled context mode in {config_path:?}, got: {contents:?}"
+            );
+            std::thread::sleep(std::time::Duration::from_millis(20));
+        }
+
+        let cfg_text = std::fs::read_to_string(&config_path).expect("read config");
+        let cfg = toml::from_str::<ConfigToml>(&cfg_text).expect("parse config");
+        let reloaded = Config::load_from_base_config_with_overrides(
+            cfg,
+            ConfigOverrides {
+                cwd: Some(code_home.path().to_path_buf()),
+                ..Default::default()
+            },
+            code_home.path().to_path_buf(),
+        )
+        .expect("reload config");
+
+        assert_eq!(reloaded.context_mode, Some(ContextMode::Disabled));
+        assert_eq!(reloaded.model_context_window, Some(272_000));
+    }
+
+    #[test]
     fn auto_review_triggers_when_enabled_and_diff_seen() {
+        let _stub_lock = AUTO_STUB_LOCK.lock().unwrap();
         let _guard = AutoReviewStubGuard::install(|| {});
+        let _capture_guard = CaptureCommitStubGuard::install(|_, _| {
+            Ok(GhostCommit::new("baseline".to_string(), None))
+        });
         let mut harness = ChatWidgetHarness::new();
         let chat = harness.chat();
         chat.config.tui.auto_review_enabled = true;
@@ -29917,19 +30922,19 @@ mod tests {
 
         chat.maybe_trigger_auto_review();
 
-        assert!(
-            chat.background_review.is_some(),
-            "background review should start"
-        );
+        assert!(chat.background_review.is_some(), "background review should start");
     }
 
     #[test]
-    #[ignore = "requires tokio runtime - needs conversion to async test"]
     fn auto_review_does_not_duplicate_while_running() {
+        let _stub_lock = AUTO_STUB_LOCK.lock().unwrap();
         let calls = Arc::new(AtomicUsize::new(0));
         let calls_clone = calls.clone();
         let _guard = AutoReviewStubGuard::install(move || {
             calls_clone.fetch_add(1, Ordering::SeqCst);
+        });
+        let _capture_guard = CaptureCommitStubGuard::install(|_, _| {
+            Ok(GhostCommit::new("baseline".to_string(), None))
         });
 
         let mut harness = ChatWidgetHarness::new();
@@ -29947,8 +30952,8 @@ mod tests {
     }
 
     #[test]
-    #[ignore = "requires tokio runtime - needs conversion to async test"]
     fn auto_review_skips_when_no_changes_since_reviewed_snapshot() {
+        let _stub_lock = AUTO_STUB_LOCK.lock().unwrap();
         let _rt = enter_test_runtime_guard();
         let calls = Arc::new(AtomicUsize::new(0));
         let calls_clone = calls.clone();
@@ -29970,7 +30975,8 @@ mod tests {
         git(&["init"]);
         git(&["config", "user.email", "auto@review.test"]);
         git(&["config", "user.name", "Auto Review"]);
-        std::fs::write(repo_path.join("README.md"), "hello").expect("write README");
+        std::fs::write(repo_path.join("README.md"), "hello")
+            .expect("write README");
         git(&["add", "."]);
         git(&["commit", "-m", "init"]);
 
@@ -29993,7 +30999,6 @@ mod tests {
     }
 
     #[test]
-    #[ignore = "requires tokio runtime - needs conversion to async test"]
     fn task_started_defers_auto_review_baseline_capture() {
         let _stub_lock = AUTO_STUB_LOCK.lock().unwrap();
         let _rt = enter_test_runtime_guard();
@@ -30070,28 +31075,621 @@ mod tests {
                     .any(|span| span.content.contains("issue(s) found"))
             })
         });
+        assert!(notice_present, "actionable auto review notice should be visible");
+        assert!(chat.pending_agent_notes.is_empty());
+        assert!(chat.pending_dispatched_user_messages.is_empty());
+        let developer_seen = chat.history_cells.iter().any(|cell| {
+            cell.display_lines_trimmed().iter().any(|line| {
+                line.spans
+                    .iter()
+                    .any(|span| span.content.contains("[developer] Background auto-review"))
+            })
+        });
         assert!(
-            notice_present,
-            "actionable auto review notice should be visible"
+            !developer_seen,
+            "auto review should rely on the Auto Review notice instead of a [developer] history message"
+        );
+    }
+
+    #[test]
+    fn background_review_findings_are_forwarded_to_coordinator_resume() {
+        let _rt = enter_test_runtime_guard();
+        let mut harness = ChatWidgetHarness::new();
+        let chat = harness.chat();
+
+        chat.auto_state.set_phase(AutoRunPhase::AwaitingReview {
+            diagnostics_pending: false,
+        });
+
+        chat.auto_history.replace_all(vec![code_protocol::models::ResponseItem::Message {
+            id: Some("seed-item".to_string()),
+            role: "user".to_string(),
+            content: vec![code_protocol::models::ContentItem::InputText {
+                text: "seed transcript".to_string(),
+            }],
+            end_turn: None,
+            phase: None,
+        }]);
+
+        chat.background_review = Some(BackgroundReviewState {
+            worktree_path: PathBuf::from("/tmp/wt"),
+            branch: "auto-review-branch".to_string(),
+            agent_id: Some("agent-123".to_string()),
+            snapshot: Some("ghost123".to_string()),
+            base: None,
+            last_seen: std::time::Instant::now(),
+        });
+
+        chat.on_background_review_finished(
+            PathBuf::from("/tmp/wt"),
+            "auto-review-branch".to_string(),
+            true,
+            1,
+            Some("needs work".to_string()),
+            None,
+            Some("agent-123".to_string()),
+            Some("ghost123".to_string()),
+        );
+
+        let mut transcript = String::new();
+        for item in chat.auto_history.raw_snapshot().iter() {
+            if let code_protocol::models::ResponseItem::Message { content, .. } = item {
+                for content_item in content {
+                    match content_item {
+                        code_protocol::models::ContentItem::InputText { text }
+                        | code_protocol::models::ContentItem::OutputText { text } => {
+                            transcript.push_str(text);
+                            transcript.push('\n');
+                        }
+                        _ => {}
+                    }
+                }
+            }
+        }
+
+        assert!(
+            transcript.contains("Auto Review: 1 issue(s) found"),
+            "auto review notice should be present when auto drive resumes"
         );
         assert!(
-            chat.pending_agent_notes.is_empty(),
-            "idle path should inject via hidden message, not queue notes"
+            transcript.contains("needs work"),
+            "auto review summary should be forwarded to the coordinator"
         );
-        let developer_seen = chat
-            .pending_dispatched_user_messages
-            .iter()
-            .any(|msg| msg.contains("[developer]"));
+    }
+
+    #[test]
+    fn auto_drive_does_not_wait_for_background_auto_review() {
+        let mut harness = ChatWidgetHarness::new();
+        let chat = harness.chat();
+
+        chat.auto_state.set_phase(AutoRunPhase::Active);
+        chat.auto_state.goal = Some("keep going".to_string());
+        chat.auto_state.started_at = Some(Instant::now());
+        chat.auto_state.on_prompt_submitted();
+        chat.auto_state.set_waiting_for_response(true);
+        chat.auto_state.review_enabled = true;
+
+        chat.pending_auto_turn_config = Some(TurnConfig {
+            read_only: false,
+            complexity: Some(TurnComplexity::Low),
+            text_format_override: None,
+        });
+
+        chat.auto_on_assistant_final();
+
         assert!(
-            developer_seen,
-            "developer note should be sent in hidden message"
+            !chat.auto_state.awaiting_review(),
+            "background auto review should never block Auto Drive"
         );
+        assert!(
+            !chat.auto_state.is_waiting_for_response(),
+            "Auto Drive should keep progressing after assistant final"
+        );
+    }
+
+    #[test]
+    fn background_review_idle_dispatches_developer_followup_turn() {
+        let _rt = enter_test_runtime_guard();
+        let mut harness = ChatWidgetHarness::new();
+        let chat = harness.chat();
+        let mut code_op_rx = replace_code_op_channel(chat);
+
+        chat.background_review = Some(BackgroundReviewState {
+            worktree_path: PathBuf::from("/tmp/wt"),
+            branch: "auto-review-branch".to_string(),
+            agent_id: Some("agent-123".to_string()),
+            snapshot: Some("ghost123".to_string()),
+            base: None,
+            last_seen: Instant::now(),
+        });
+
+        chat.on_background_review_finished(
+            PathBuf::from("/tmp/wt"),
+            "auto-review-branch".to_string(),
+            true,
+            1,
+            Some("needs work".to_string()),
+            None,
+            Some("agent-123".to_string()),
+            Some("ghost123".to_string()),
+        );
+
+        let note = expect_post_turn_developer_input(&mut code_op_rx);
+        assert!(
+            chat.pending_dispatched_user_messages.is_empty(),
+            "auto review notes should not start a synthetic background turn"
+        );
+        assert!(
+            note.contains("Background auto-review completed and reported 1 issue(s)"),
+            "idle auto-review findings should be sent to core immediately"
+        );
+        assert!(
+            note.contains("Auto Review: 1 issue(s) found. needs work Merge /tmp/wt to apply fixes."),
+            "developer follow-up should include the same concise notice shown in the UI"
+        );
+    }
+
+    #[test]
+    fn background_review_clean_dispatches_post_turn_developer_input() {
+        let _rt = enter_test_runtime_guard();
+        let mut harness = ChatWidgetHarness::new();
+        let chat = harness.chat();
+        let mut code_op_rx = replace_code_op_channel(chat);
+
+        chat.background_review = Some(BackgroundReviewState {
+            worktree_path: PathBuf::from("/tmp/wt"),
+            branch: "auto-review-branch".to_string(),
+            agent_id: Some("agent-clean".to_string()),
+            snapshot: Some("ghost-clean".to_string()),
+            base: None,
+            last_seen: Instant::now(),
+        });
+
+        chat.on_background_review_finished(
+            PathBuf::from("/tmp/wt"),
+            "auto-review-branch".to_string(),
+            false,
+            0,
+            Some("looks clean".to_string()),
+            None,
+            Some("agent-clean".to_string()),
+            Some("ghost-clean".to_string()),
+        );
+
+        let note = expect_post_turn_developer_input(&mut code_op_rx);
+        assert!(note.contains("Background auto-review completed with no findings."));
+        assert!(note.contains("ghost-clean"));
+    }
+
+    #[test]
+    fn background_review_failure_note_is_sanitized_and_bounded() {
+        let mut harness = ChatWidgetHarness::new();
+        let chat = harness.chat();
+        let mut code_op_rx = replace_code_op_channel(chat);
+
+        chat.background_review = Some(BackgroundReviewState {
+            worktree_path: PathBuf::from("/tmp/wt"),
+            branch: "auto-review-branch".to_string(),
+            agent_id: Some("agent-123".to_string()),
+            snapshot: Some("ghost123".to_string()),
+            base: None,
+            last_seen: Instant::now(),
+        });
+
+        let noisy_error = [
+            "[2026-02-28T11:27:12] ERROR: Model hit context-window limit; running /compact and retrying…",
+            "[2026-02-28T11:27:13] codex",
+            "Compact task completed",
+            "[2026-02-28T11:27:50] ERROR: remote compact failed: unexpected status 429 Too Many Requests",
+            "[2026-02-28T11:28:02] Command guard: Leading cd ...",
+            "original_script: cd /tmp && git show",
+            "resend_exact_argv: [\"bash\",\"-lc\",\"git show\"]",
+            "[2026-02-28T11:38:27] ERROR: stream disconnected before completion: Your input exceeds the context window of this model.",
+        ]
+        .join("\n");
+
+        chat.on_background_review_finished(
+            PathBuf::from("/tmp/wt"),
+            "auto-review-branch".to_string(),
+            false,
+            0,
+            None,
+            Some(noisy_error),
+            Some("agent-123".to_string()),
+            Some("ghost123".to_string()),
+        );
+
+        let note = expect_post_turn_developer_input(&mut code_op_rx);
+
+        assert!(note.contains("Background auto-review failed."));
+        assert!(note.contains("Failure class: context_budget_exhausted"));
+        assert!(note.contains("Phase: compact"));
+        assert!(
+            note.contains("Model hit the context window repeatedly and then exhausted usage while compacting."),
+            "error should be summarized instead of dumping raw logs"
+        );
+        assert!(!note.contains("tokens used:"));
+        assert!(!note.contains("original_script:"));
+        assert!(!note.contains("resend_exact_argv:"));
+        assert!(
+            note.chars().count() <= MAX_PENDING_AUTO_REVIEW_NOTE_CHARS,
+            "queued note should stay bounded"
+        );
+        assert!(
+            chat
+                .last_developer_message
+                .as_ref()
+                .is_some_and(|msg| msg.chars().count() <= MAX_AUTO_REVIEW_NOTE_CONTEXT_CHARS),
+            "cached context should stay bounded"
+        );
+    }
+
+    #[test]
+    fn auto_review_failure_note_classifies_os_error_2_with_path_context_as_missing_path() {
+        let mut harness = ChatWidgetHarness::new();
+        let chat = harness.chat();
+        let mut code_op_rx = replace_code_op_channel(chat);
+
+        chat.background_review = Some(BackgroundReviewState {
+            worktree_path: PathBuf::from("/tmp/wt"),
+            branch: "auto-review-branch".to_string(),
+            agent_id: Some("agent-123".to_string()),
+            snapshot: Some("ghost123".to_string()),
+            base: None,
+            last_seen: Instant::now(),
+        });
+
+        let error = "Command failed: 2026-03-01T08:40:52.668950Z ERROR code_core::exec: exec error for worktree /tmp/wt: No such file or directory (os error 2)";
+        chat.on_background_review_finished(
+            PathBuf::from("/tmp/wt"),
+            "auto-review-branch".to_string(),
+            false,
+            0,
+            None,
+            Some(error.to_string()),
+            Some("agent-123".to_string()),
+            Some("ghost123".to_string()),
+        );
+
+        let note = expect_post_turn_developer_input(&mut code_op_rx);
+        assert!(note.contains("Failure class: exec_missing_path"));
+        assert!(note.contains("Phase: exec_run"));
+        assert!(note.contains("Retryable: false"));
+        assert!(note.contains("Hint: Verify the auto-review worktree path exists"));
+    }
+
+    #[test]
+    fn auto_review_failure_note_keeps_generic_os_error_2_as_unknown() {
+        let mut harness = ChatWidgetHarness::new();
+        let chat = harness.chat();
+        let mut code_op_rx = replace_code_op_channel(chat);
+
+        chat.background_review = Some(BackgroundReviewState {
+            worktree_path: PathBuf::from("/tmp/wt"),
+            branch: "auto-review-branch".to_string(),
+            agent_id: Some("agent-123".to_string()),
+            snapshot: Some("ghost123".to_string()),
+            base: None,
+            last_seen: Instant::now(),
+        });
+
+        let error = "Command failed: 2026-03-01T08:40:52.668950Z ERROR code_core::exec: exec error: No such file or directory (os error 2)";
+        chat.on_background_review_finished(
+            PathBuf::from("/tmp/wt"),
+            "auto-review-branch".to_string(),
+            false,
+            0,
+            None,
+            Some(error.to_string()),
+            Some("agent-123".to_string()),
+            Some("ghost123".to_string()),
+        );
+
+        let note = expect_post_turn_developer_input(&mut code_op_rx);
+        assert!(note.contains("Failure class: unknown"));
+        assert!(note.contains("Retryable: true"));
+    }
+
+    #[test]
+    fn auto_review_failure_note_prefers_missing_path_over_context_window_noise() {
+        let mut harness = ChatWidgetHarness::new();
+        let chat = harness.chat();
+        let mut code_op_rx = replace_code_op_channel(chat);
+
+        chat.background_review = Some(BackgroundReviewState {
+            worktree_path: PathBuf::from("/tmp/wt"),
+            branch: "auto-review-branch".to_string(),
+            agent_id: Some("agent-123".to_string()),
+            snapshot: Some("ghost123".to_string()),
+            base: None,
+            last_seen: Instant::now(),
+        });
+
+        let error = "Model hit the context window while running auto review. Detail: Command failed: 2026-03-08T12:06:27.985551Z ERROR code_core::exec: exec error: exec preflight failed: working directory does not exist: /home/azureuser/.analysis";
+        chat.on_background_review_finished(
+            PathBuf::from("/tmp/wt"),
+            "auto-review-branch".to_string(),
+            false,
+            0,
+            None,
+            Some(error.to_string()),
+            Some("agent-123".to_string()),
+            Some("ghost123".to_string()),
+        );
+
+        let note = expect_post_turn_developer_input(&mut code_op_rx);
+        assert!(note.contains("Failure class: exec_missing_path"));
+        assert!(note.contains("Phase: exec_preflight"));
+        assert!(note.contains("Retryable: false"));
+    }
+
+    #[test]
+    fn auto_review_failure_note_classifies_disk_full_snapshot_errors() {
+        let mut harness = ChatWidgetHarness::new();
+        let chat = harness.chat();
+        let mut code_op_rx = replace_code_op_channel(chat);
+
+        chat.background_review = Some(BackgroundReviewState {
+            worktree_path: PathBuf::from("/tmp/wt"),
+            branch: "auto-review-branch".to_string(),
+            agent_id: Some("agent-123".to_string()),
+            snapshot: Some("ghost123".to_string()),
+            base: None,
+            last_seen: Instant::now(),
+        });
+
+        let error = "failed to capture snapshot: git command `git add --all` failed with status exit status: 128: fatal: sha1 file '/tmp/code-git-index-123/index.lock' write error. No space left on device (os error 28)";
+        chat.on_background_review_finished(
+            PathBuf::from("/tmp/wt"),
+            "auto-review-branch".to_string(),
+            false,
+            0,
+            None,
+            Some(error.to_string()),
+            Some("agent-123".to_string()),
+            Some("ghost123".to_string()),
+        );
+
+        let note = expect_post_turn_developer_input(&mut code_op_rx);
+        assert!(note.contains("Failure class: disk_full"));
+        assert!(note.contains("Phase: snapshot_capture"));
+        assert!(note.contains("Retryable: false"));
+        assert!(note.contains("Free space in /tmp"));
+    }
+
+    #[test]
+    fn duplicate_auto_review_failure_note_is_suppressed() {
+        let mut harness = ChatWidgetHarness::new();
+        let chat = harness.chat();
+        let mut code_op_rx = replace_code_op_channel(chat);
+
+        let error = "failed to capture snapshot: No space left on device (os error 28) at path '/tmp/code-git-index-123'";
+
+        chat.background_review = Some(BackgroundReviewState {
+            worktree_path: PathBuf::from("/tmp/wt"),
+            branch: "auto-review-branch".to_string(),
+            agent_id: Some("agent-123".to_string()),
+            snapshot: Some("ghost123".to_string()),
+            base: None,
+            last_seen: Instant::now(),
+        });
+        chat.on_background_review_finished(
+            PathBuf::from("/tmp/wt"),
+            "auto-review-branch".to_string(),
+            false,
+            0,
+            None,
+            Some(error.to_string()),
+            Some("agent-123".to_string()),
+            Some("ghost123".to_string()),
+        );
+        let first = expect_post_turn_developer_input(&mut code_op_rx);
+        assert!(first.contains("Failure class: disk_full"));
+
+        chat.background_review = Some(BackgroundReviewState {
+            worktree_path: PathBuf::from("/tmp/wt"),
+            branch: "auto-review-branch".to_string(),
+            agent_id: Some("agent-123".to_string()),
+            snapshot: Some("ghost123".to_string()),
+            base: None,
+            last_seen: Instant::now(),
+        });
+        chat.on_background_review_finished(
+            PathBuf::from("/tmp/wt"),
+            "auto-review-branch".to_string(),
+            false,
+            0,
+            None,
+            Some(error.to_string()),
+            Some("agent-123".to_string()),
+            Some("ghost123".to_string()),
+        );
+
+        assert_no_code_ops_pending(&mut code_op_rx);
+    }
+
+    #[test]
+    fn non_retryable_auto_review_failures_do_not_queue_followup_review() {
+        let mut harness = ChatWidgetHarness::new();
+        let chat = harness.chat();
+        let mut code_op_rx = replace_code_op_channel(chat);
+        let base = GhostCommit::new("base-disk-full".to_string(), None);
+
+        chat.background_review = Some(BackgroundReviewState {
+            worktree_path: PathBuf::from("/tmp/wt"),
+            branch: "auto-review-branch".to_string(),
+            agent_id: Some("agent-123".to_string()),
+            snapshot: Some("ghost123".to_string()),
+            base: Some(base),
+            last_seen: Instant::now(),
+        });
+
+        let error = "failed to capture snapshot: No space left on device (os error 28) at path '/tmp/code-git-index-123'";
+        chat.on_background_review_finished(
+            PathBuf::from("/tmp/wt"),
+            "auto-review-branch".to_string(),
+            false,
+            0,
+            None,
+            Some(error.to_string()),
+            Some("agent-123".to_string()),
+            Some("ghost123".to_string()),
+        );
+
+        let note = expect_post_turn_developer_input(&mut code_op_rx);
+        assert!(note.contains("Failure class: disk_full"));
+        assert!(
+            chat.pending_auto_review_range.is_none(),
+            "non-retryable failures should not queue another background review"
+        );
+    }
+
+    #[test]
+    fn auto_review_failure_note_uses_placeholders_for_missing_worktree_context() {
+        let mut harness = ChatWidgetHarness::new();
+        let chat = harness.chat();
+        let mut code_op_rx = replace_code_op_channel(chat);
+
+        chat.background_review = Some(BackgroundReviewState {
+            worktree_path: PathBuf::new(),
+            branch: String::new(),
+            agent_id: None,
+            snapshot: None,
+            base: None,
+            last_seen: Instant::now(),
+        });
+
+        let error = "failed to prepare worktree: Failed to reset reusable worktree: fatal: not a git repository";
+        chat.on_background_review_finished(
+            PathBuf::new(),
+            String::new(),
+            false,
+            0,
+            None,
+            Some(error.to_string()),
+            None,
+            None,
+        );
+
+        let note = expect_post_turn_developer_input(&mut code_op_rx);
+        assert!(note.contains("Failure class: worktree_prepare_failed"));
+        assert!(note.contains("Phase: worktree_prepare"));
+        assert!(note.contains("Worktree: '(unknown)'"));
+        assert!(note.contains("Worktree path: (unavailable)"));
+    }
+
+    #[test]
+    fn auto_review_failure_note_classifies_fallback_worktree_prepare_errors() {
+        let mut harness = ChatWidgetHarness::new();
+        let chat = harness.chat();
+        let mut code_op_rx = replace_code_op_channel(chat);
+
+        chat.background_review = Some(BackgroundReviewState {
+            worktree_path: PathBuf::new(),
+            branch: String::new(),
+            agent_id: None,
+            snapshot: None,
+            base: None,
+            last_seen: Instant::now(),
+        });
+
+        let error = "failed to prepare fallback worktree: Failed to create reusable worktree: Preparing worktree (detached HEAD e54553f43)";
+        chat.on_background_review_finished(
+            PathBuf::new(),
+            String::new(),
+            false,
+            0,
+            None,
+            Some(error.to_string()),
+            None,
+            None,
+        );
+
+        let note = expect_post_turn_developer_input(&mut code_op_rx);
+        assert!(note.contains("Failure class: worktree_prepare_failed"));
+        assert!(note.contains("Phase: worktree_prepare"));
+        assert!(note.contains("Retryable: false"));
+    }
+
+    #[test]
+    fn auto_review_failure_note_classifies_scope_too_large_errors() {
+        let mut harness = ChatWidgetHarness::new();
+        let chat = harness.chat();
+        let mut code_op_rx = replace_code_op_channel(chat);
+
+        chat.background_review = Some(BackgroundReviewState {
+            worktree_path: PathBuf::new(),
+            branch: String::new(),
+            agent_id: None,
+            snapshot: None,
+            base: None,
+            last_seen: Instant::now(),
+        });
+
+        let error = "auto review scope exceeds configured background review size limits: 400 changed paths (limit 120).";
+        chat.on_background_review_finished(
+            PathBuf::new(),
+            String::new(),
+            false,
+            0,
+            None,
+            Some(error.to_string()),
+            None,
+            None,
+        );
+
+        let note = expect_post_turn_developer_input(&mut code_op_rx);
+        assert!(note.contains("Failure class: review_scope_too_large"));
+        assert!(note.contains("Phase: prompt_build"));
+        assert!(note.contains("Retryable: false"));
+    }
+
+    #[test]
+    fn auto_review_with_zero_count_findings_still_surfaces_notice() {
+        let mut harness = ChatWidgetHarness::new();
+        let chat = harness.chat();
+
+        chat.background_review = Some(BackgroundReviewState {
+            worktree_path: PathBuf::from("/tmp/wt"),
+            branch: "auto-review-branch".to_string(),
+            agent_id: Some("agent-123".to_string()),
+            snapshot: Some("ghost123".to_string()),
+            base: None,
+            last_seen: Instant::now(),
+        });
+
+        chat.on_background_review_finished(
+            PathBuf::from("/tmp/wt"),
+            "auto-review-branch".to_string(),
+            true,
+            0,
+            Some("Findings: missing validation on write path".to_string()),
+            None,
+            Some("agent-123".to_string()),
+            Some("ghost123".to_string()),
+        );
+
+        assert!(
+            chat
+                .auto_review_status
+                .is_some_and(|state| state.status == AutoReviewIndicatorStatus::Fixed),
+            "zero-count findings should still surface as actionable"
+        );
+        let notice_present = chat.history_cells.iter().any(|cell| {
+            cell.display_lines_trimmed().iter().any(|line| {
+                line.spans
+                    .iter()
+                    .any(|span| span.content.contains("Auto Review: 1 issue(s) found"))
+            })
+        });
+        assert!(notice_present, "fallback findings notice should be visible");
     }
 
     #[test]
     fn background_review_busy_path_enqueues_developer_note_with_merge_hint() {
         let mut harness = ChatWidgetHarness::new();
         let chat = harness.chat();
+        let mut code_op_rx = replace_code_op_channel(chat);
 
         chat.config.tui.auto_review_enabled = true;
         chat.bottom_pane.set_task_running(true); // simulate busy state so note is queued
@@ -30127,23 +31725,31 @@ mod tests {
             Some("ghost123".to_string()),
         );
 
-        // Busy path still injects a developer note immediately so the user sees it in the transcript.
         assert!(chat.pending_agent_notes.is_empty());
-        let developer_sent = chat.pending_dispatched_user_messages.iter().any(|msg| {
-            msg.contains("[developer]")
-                && msg.contains("Merge the worktree")
-                && msg.contains("auto-review-branch")
+        assert!(chat.pending_dispatched_user_messages.is_empty());
+        let note = expect_post_turn_developer_input(&mut code_op_rx);
+        assert!(note.contains("Merge the worktree 'auto-review-branch'"));
+        let developer_seen = chat.history_cells.iter().any(|cell| {
+            cell.display_lines_trimmed().iter().any(|line| {
+                line.spans.iter().any(|span| {
+                    span.content.contains("[developer]")
+                        && span.content.contains("Merge the worktree")
+                        && span.content.contains("auto-review-branch")
+                })
+            })
         });
         assert!(
-            developer_sent,
-            "developer merge-hint note should be injected even while busy"
+            !developer_seen,
+            "busy path should not render a [developer] merge-hint message"
         );
     }
 
     #[test]
     fn background_review_observe_idle_injects_note_from_agent_result() {
+        let _rt = enter_test_runtime_guard();
         let mut harness = ChatWidgetHarness::new();
         let chat = harness.chat();
+        let mut code_op_rx = replace_code_op_channel(chat);
 
         chat.config.tui.auto_review_enabled = true;
         chat.background_review = Some(BackgroundReviewState {
@@ -30155,7 +31761,7 @@ mod tests {
             last_seen: std::time::Instant::now(),
         });
 
-        let agent = hanzo_core::protocol::AgentInfo {
+        let agent = code_core::protocol::AgentInfo {
             id: "agent-1".to_string(),
             name: "Auto Review".to_string(),
             status: "completed".to_string(),
@@ -30181,17 +31787,35 @@ mod tests {
 
         chat.observe_auto_review_status(&[agent]);
 
-        // Idle path: should send hidden developer note immediately (not queued)
-        assert!(chat.pending_agent_notes.is_empty());
-        let developer_sent = chat.pending_dispatched_user_messages.iter().any(|msg| {
-            msg.contains("[developer]")
-                && msg.contains("Merge the worktree")
-                && msg.contains("auto-review-branch")
+        let note = expect_post_turn_developer_input(&mut code_op_rx);
+        assert!(
+            chat.pending_dispatched_user_messages.is_empty(),
+            "idle observe path should not auto-start a hidden follow-up turn"
+        );
+        assert!(note.contains("Background auto-review completed and reported 1 issue(s)"));
+        let developer_seen = chat.history_cells.iter().any(|cell| {
+            cell.display_lines_trimmed().iter().any(|line| {
+                line.spans.iter().any(|span| {
+                    span.content.contains("[developer]")
+                        && span.content.contains("Merge the worktree")
+                        && span.content.contains("auto-review-branch")
+                })
+            })
         });
         assert!(
-            developer_sent,
-            "developer merge-hint note should be injected when idle"
+            !developer_seen,
+            "idle path should not render a [developer] merge-hint message"
         );
+
+        chat.submit_text_message("continue".to_string());
+        let submitted = expect_immediate_user_input(&mut code_op_rx);
+        assert!(
+            chat.pending_dispatched_user_messages
+                .iter()
+                .any(|msg| msg == "continue"),
+            "next user message should be tracked independently of background review notes"
+        );
+        assert_eq!(submitted, "continue");
     }
 
     #[test]
@@ -30210,7 +31834,7 @@ mod tests {
             last_seen: std::time::Instant::now(),
         });
 
-        let agent = hanzo_core::protocol::AgentInfo {
+        let agent = code_core::protocol::AgentInfo {
             id: "agent-1".to_string(),
             name: "Auto Review".to_string(),
             status: "completed".to_string(),
@@ -30237,14 +31861,199 @@ mod tests {
         chat.observe_auto_review_status(&[agent]);
 
         assert!(chat.pending_agent_notes.is_empty());
-        let developer_sent = chat.pending_dispatched_user_messages.iter().any(|msg| {
-            msg.contains("[developer]")
-                && msg.contains("Merge the worktree")
-                && msg.contains("auto-review-branch")
+        assert!(chat.pending_dispatched_user_messages.is_empty());
+        let developer_seen = chat.history_cells.iter().any(|cell| {
+            cell.display_lines_trimmed().iter().any(|line| {
+                line.spans.iter().any(|span| {
+                    span.content.contains("[developer]")
+                        && span.content.contains("Merge the worktree")
+                        && span.content.contains("auto-review-branch")
+                })
+            })
         });
         assert!(
-            developer_sent,
-            "developer merge-hint note should be injected when busy"
+            !developer_seen,
+            "busy observe path should not render a [developer] merge-hint message"
+        );
+    }
+
+    #[test]
+    fn esc_stop_auto_drive_keeps_background_review_non_blocking() {
+        let _rt = enter_test_runtime_guard();
+        let mut harness = ChatWidgetHarness::new();
+        let chat = harness.chat();
+        let mut code_op_rx = replace_code_op_channel(chat);
+
+        chat.auto_state.set_phase(AutoRunPhase::Active);
+        chat.auto_state.goal = Some("keep running".to_string());
+        chat.auto_state.started_at = Some(Instant::now());
+        chat.background_review = Some(BackgroundReviewState {
+            worktree_path: PathBuf::from("/tmp/wt"),
+            branch: "auto-review-branch".to_string(),
+            agent_id: Some("agent-esc".to_string()),
+            snapshot: Some("ghost999".to_string()),
+            base: None,
+            last_seen: Instant::now(),
+        });
+
+        let esc = KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE);
+        let mut last_esc_time = None;
+        assert!(chat.handle_app_esc(esc, &mut last_esc_time));
+        assert!(!chat.auto_state.is_active(), "Esc should stop Auto Drive immediately");
+        let summary_prompt = expect_immediate_user_input(&mut code_op_rx);
+        assert!(
+            summary_prompt.contains("Please write a Session Summary for the most recent Auto Drive session in this chat."),
+            "Esc should request an Auto Drive session summary"
+        );
+        let pending_before_review = chat.pending_dispatched_user_messages.len();
+
+        chat.on_background_review_finished(
+            PathBuf::from("/tmp/wt"),
+            "auto-review-branch".to_string(),
+            true,
+            1,
+            Some("summary".to_string()),
+            None,
+            Some("agent-esc".to_string()),
+            Some("ghost999".to_string()),
+        );
+
+        let pending_after_review = chat.pending_dispatched_user_messages.len();
+        assert_eq!(
+            pending_after_review,
+            pending_before_review,
+            "background review completion should not start a hidden turn"
+        );
+        let note = expect_post_turn_developer_input(&mut code_op_rx);
+        assert!(
+            note.contains("Background auto-review completed and reported 1 issue(s)"),
+            "auto-review findings should be submitted to core immediately after completion"
+        );
+        assert!(!chat.is_task_running(), "background review should not hold task-running state");
+
+        chat.submit_text_message("after esc".to_string());
+        assert!(
+            chat.pending_dispatched_user_messages
+                .iter()
+                .any(|msg| msg.contains("after esc")),
+            "typing should resume immediately after Esc even while auto review events complete"
+        );
+        assert!(chat.queued_user_messages.is_empty());
+    }
+
+    #[test]
+    fn heavy_agent_churn_with_auto_review_keeps_bounds_and_typing() {
+        let _rt = enter_test_runtime_guard();
+        let mut harness = ChatWidgetHarness::new();
+        let chat = harness.chat();
+        let _code_op_rx = replace_code_op_channel(chat);
+
+        chat.config.tui.auto_review_enabled = true;
+        chat.auto_state.set_phase(AutoRunPhase::Active);
+        chat.auto_state.goal = Some("long churn".to_string());
+        chat.auto_state.started_at = Some(Instant::now());
+        chat.background_review = Some(BackgroundReviewState {
+            worktree_path: PathBuf::from("/tmp/wt"),
+            branch: "auto-review-branch".to_string(),
+            agent_id: Some("agent-auto-review".to_string()),
+            snapshot: Some("ghost-long".to_string()),
+            base: None,
+            last_seen: Instant::now(),
+        });
+
+        let total_agents = 2200usize;
+        let chunk_size = 55usize;
+        let chunks = total_agents / chunk_size;
+
+        for chunk in 0..chunks {
+            let mut agents = Vec::with_capacity(chunk_size + 1);
+            for offset in 0..chunk_size {
+                let idx = chunk * chunk_size + offset;
+                agents.push(code_core::protocol::AgentInfo {
+                    id: format!("agent-churn-{idx}"),
+                    name: format!("Agent {idx}"),
+                    status: "completed".to_string(),
+                    batch_id: Some(format!("batch-{}", idx / 5)),
+                    model: Some("code-gpt-5.3-codex".to_string()),
+                    last_progress: Some("done".to_string()),
+                    result: Some("ok".to_string()),
+                    error: None,
+                    elapsed_ms: None,
+                    token_count: None,
+                    last_activity_at: None,
+                    seconds_since_last_activity: None,
+                    source_kind: None,
+                });
+            }
+
+            agents.push(code_core::protocol::AgentInfo {
+                id: "agent-auto-review".to_string(),
+                name: "Auto Review".to_string(),
+                status: "running".to_string(),
+                batch_id: Some("auto-review-branch".to_string()),
+                model: Some("code-review".to_string()),
+                last_progress: Some("[auto-review] phase: reviewing".to_string()),
+                result: Some(
+                    r#"{
+                        "findings":[{"title":"bug","body":"details","confidence_score":0.5,"priority":1,"code_location":{"absolute_file_path":"src/lib.rs","line_range":{"start":1,"end":1}}}],
+                        "overall_correctness":"incorrect",
+                        "overall_explanation":"needs work",
+                        "overall_confidence_score":0.6
+                    }"#
+                    .to_string(),
+                ),
+                error: None,
+                elapsed_ms: None,
+                token_count: None,
+                last_activity_at: None,
+                seconds_since_last_activity: None,
+                source_kind: Some(AgentSourceKind::AutoReview),
+            });
+
+            chat.handle_code_event(Event {
+                id: format!("status-{chunk}"),
+                event_seq: chunk as u64,
+                msg: EventMsg::AgentStatusUpdate(AgentStatusUpdateEvent {
+                    agents,
+                    context: None,
+                    task: None,
+                }),
+                order: None,
+            });
+        }
+
+        assert!(chat.agents_terminal.entries.len() <= MAX_AGENTS_TERMINAL_ENTRIES);
+        assert!(chat.agent_runtime.len() <= MAX_AGENT_RUNTIME_ENTRIES);
+        assert!(chat.processed_auto_review_agents.len() <= MAX_PROCESSED_AUTO_REVIEW_AGENTS);
+
+        let esc = KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE);
+        assert!(chat.execute_esc_intent(EscIntent::AutoStopActive, esc));
+        assert!(
+            !chat.auto_state.is_active(),
+            "stopping Auto Drive during churn should always exit the run"
+        );
+        let pending_before_review = chat.pending_dispatched_user_messages.len();
+        chat.on_background_review_finished(
+            PathBuf::from("/tmp/wt"),
+            "auto-review-branch".to_string(),
+            true,
+            1,
+            Some("summary".to_string()),
+            None,
+            Some("agent-auto-review".to_string()),
+            Some("ghost-long".to_string()),
+        );
+        assert!(
+            chat.pending_dispatched_user_messages.len() == pending_before_review,
+            "idle review completion should not create a synthetic turn"
+        );
+
+        chat.submit_text_message("typing after churn".to_string());
+        assert!(
+            chat.pending_dispatched_user_messages
+                .iter()
+                .any(|msg| msg.contains("typing after churn")),
+            "typing should remain responsive after heavy churn"
         );
     }
 
@@ -30256,7 +32065,7 @@ mod tests {
         chat.config.tui.auto_review_enabled = true;
         chat.background_review = None;
 
-        let agent = hanzo_core::protocol::AgentInfo {
+        let agent = code_core::protocol::AgentInfo {
             id: "agent-blank".to_string(),
             name: "Auto Review".to_string(),
             status: "failed".to_string(),
@@ -30278,10 +32087,7 @@ mod tests {
             .pending_dispatched_user_messages
             .iter()
             .any(|msg| msg.contains("Worktree path: \n") || msg.contains("Worktree path: \r\n"));
-        assert!(
-            !blank_path_message,
-            "should not emit auto-review message with blank worktree path"
-        );
+        assert!(!blank_path_message, "should not emit auto-review message with blank worktree path");
         assert!(chat.processed_auto_review_agents.contains("agent-blank"));
     }
 
@@ -30300,12 +32106,11 @@ mod tests {
             .iter()
             .find(|row| row.name == "qwen-3-coder")
             .expect("qwen row present");
-        assert!(!qwen.installed);
-        assert!(!qwen.enabled);
+        assert_eq!(qwen.enabled, qwen.installed);
 
         let code = rows
             .iter()
-            .find(|row| row.name == "code-gpt-5.2")
+            .find(|row| row.name == "code-gpt-5.4")
             .expect("code row present");
         assert!(code.installed);
         assert!(code.enabled);
@@ -30322,7 +32127,6 @@ mod tests {
     }
 
     #[test]
-    #[ignore = "requires tokio runtime - needs conversion to async test"]
     fn skipped_auto_review_with_findings_defers_to_next_turn() {
         let _rt = enter_test_runtime_guard();
         let mut harness = ChatWidgetHarness::new();
@@ -30350,11 +32154,7 @@ mod tests {
         });
 
         chat.maybe_trigger_auto_review();
-        assert_eq!(
-            launches.load(Ordering::SeqCst),
-            0,
-            "should skip while review runs"
-        );
+        assert_eq!(launches.load(Ordering::SeqCst), 0, "should skip while review runs");
         let pending = chat
             .pending_auto_review_range
             .as_ref()
@@ -30377,26 +32177,15 @@ mod tests {
             .pending_auto_review_range
             .as_ref()
             .expect("pending kept after findings");
-        assert_eq!(
-            pending_after_finish.defer_until_turn,
-            Some(chat.turn_sequence)
-        );
-        assert_eq!(
-            launches.load(Ordering::SeqCst),
-            0,
-            "follow-up deferred to next turn"
-        );
+        assert_eq!(pending_after_finish.defer_until_turn, Some(chat.turn_sequence));
+        assert_eq!(launches.load(Ordering::SeqCst), 0, "follow-up deferred to next turn");
 
         chat.turn_sequence = 2;
         chat.turn_had_code_edits = true;
         chat.auto_review_baseline = Some(GhostCommit::new("next-base".to_string(), None));
 
         chat.maybe_trigger_auto_review();
-        assert_eq!(
-            launches.load(Ordering::SeqCst),
-            1,
-            "follow-up launched next turn"
-        );
+        assert_eq!(launches.load(Ordering::SeqCst), 1, "follow-up launched next turn");
         let running = chat
             .background_review
             .as_ref()
@@ -30450,15 +32239,8 @@ mod tests {
             Some("ghost-running".to_string()),
         );
 
-        assert_eq!(
-            launches.load(Ordering::SeqCst),
-            1,
-            "follow-up should start immediately"
-        );
-        assert!(
-            chat.pending_auto_review_range.is_none(),
-            "pending should be consumed"
-        );
+        assert_eq!(launches.load(Ordering::SeqCst), 1, "follow-up should start immediately");
+        assert!(chat.pending_auto_review_range.is_none(), "pending should be consumed");
         let running = chat.background_review.as_ref().expect("follow-up running");
         assert_eq!(
             running.base.as_ref().map(|c| c.id()),
@@ -30524,11 +32306,7 @@ mod tests {
             Some("ghost-running".to_string()),
         );
 
-        assert_eq!(
-            launches.load(Ordering::SeqCst),
-            1,
-            "collapsed follow-up should run once"
-        );
+        assert_eq!(launches.load(Ordering::SeqCst), 1, "collapsed follow-up should run once");
         let running = chat.background_review.as_ref().expect("follow-up running");
         assert_eq!(running.base.as_ref().map(|c| c.id()), Some(first_base.id()));
         assert!(chat.pending_auto_review_range.is_none());
@@ -30564,15 +32342,8 @@ mod tests {
 
         chat.maybe_trigger_auto_review();
 
-        assert_eq!(
-            launches.load(Ordering::SeqCst),
-            1,
-            "stale review should be relaunched"
-        );
-        let running = chat
-            .background_review
-            .as_ref()
-            .expect("reclaimed review running");
+        assert_eq!(launches.load(Ordering::SeqCst), 1, "stale review should be relaunched");
+        let running = chat.background_review.as_ref().expect("reclaimed review running");
         assert_eq!(running.base.as_ref().map(|c| c.id()), Some(base.id()));
         assert!(chat.pending_auto_review_range.is_none());
     }
@@ -30590,14 +32361,12 @@ mod tests {
         );
 
         harness.open_auto_drive_settings();
-        let frame_with_settings =
-            crate::test_helpers::render_chat_widget_to_vt100(&mut harness, 90, 24);
+        let frame_with_settings = crate::test_helpers::render_chat_widget_to_vt100(&mut harness, 90, 24);
         assert!(frame_with_settings.contains("Auto Drive Settings"));
         assert!(!frame_with_settings.contains('\u{fffd}'));
 
         harness.close_auto_drive_settings();
-        let frame_after_close =
-            crate::test_helpers::render_chat_widget_to_vt100(&mut harness, 90, 24);
+        let frame_after_close = crate::test_helpers::render_chat_widget_to_vt100(&mut harness, 90, 24);
         assert!(!frame_after_close.contains("Auto Drive Settings"));
         assert!(!frame_after_close.contains('\u{fffd}'));
     }
@@ -30619,9 +32388,7 @@ mod tests {
     fn plan_multiline_commands_are_not_split() {
         assert!(ChatWidget::multiline_slash_command_requires_split("/auto"));
         assert!(!ChatWidget::multiline_slash_command_requires_split("/plan"));
-        assert!(!ChatWidget::multiline_slash_command_requires_split(
-            "/solve add context"
-        ));
+        assert!(!ChatWidget::multiline_slash_command_requires_split("/solve add context"));
     }
 
     #[test]
@@ -30637,17 +32404,13 @@ mod tests {
         harness.chat().clear_reconnecting();
         assert!(!harness.chat().reconnect_notice_active);
     }
-    use ratatui::Terminal;
     use ratatui::backend::TestBackend;
     use ratatui::text::Line;
+    use ratatui::Terminal;
     use std::collections::HashMap;
-    use std::time::Duration;
-    use std::time::Instant;
-    use std::time::SystemTime;
+    use std::time::{Duration, Instant, SystemTime};
 
-    use hanzo_core::protocol::ReviewCodeLocation;
-    use hanzo_core::protocol::ReviewFinding;
-    use hanzo_core::protocol::ReviewLineRange;
+    use code_core::protocol::{ReviewFinding, ReviewCodeLocation, ReviewLineRange};
 
     struct CaptureCommitStubGuard;
 
@@ -30736,7 +32499,7 @@ mod tests {
         chat.resume_expected_next_request = None;
         chat.resume_provider_baseline = None;
         chat.synthetic_system_req = None;
-        chat.layout.scroll_offset = 0;
+        chat.layout.scroll_offset.set(0);
         chat.layout.last_max_scroll.set(0);
         chat.layout.last_history_viewport_height.set(0);
         #[cfg(any(test, feature = "test-helpers"))]
@@ -30744,14 +32507,16 @@ mod tests {
     }
 
     fn insert_plain_cell(chat: &mut ChatWidget<'_>, lines: &[&str]) {
-        use hanzo_core::history::state::InlineSpan;
-        use hanzo_core::history::state::MessageLine;
-        use hanzo_core::history::state::MessageLineKind;
-        use hanzo_core::history::state::PlainMessageKind;
-        use hanzo_core::history::state::PlainMessageRole;
-        use hanzo_core::history::state::PlainMessageState;
-        use hanzo_core::history::state::TextEmphasis;
-        use hanzo_core::history::state::TextTone;
+        use code_core::history::state::{
+            InlineSpan,
+            MessageLine,
+            MessageLineKind,
+            PlainMessageKind,
+            PlainMessageRole,
+            PlainMessageState,
+            TextEmphasis,
+            TextTone,
+        };
 
         let state = PlainMessageState {
             id: HistoryId::ZERO,
@@ -30812,6 +32577,37 @@ mod tests {
     }
 
     #[test]
+    fn history_insert_enforces_hard_limit_and_keeps_recent_tail() {
+        let mut harness = ChatWidgetHarness::new();
+        let chat = harness.chat();
+        reset_history(chat);
+
+        for idx in 0..(MAX_HISTORY_CELLS_HARD_LIMIT + 75) {
+            insert_plain_cell(chat, &[&format!("history-line-{idx}")]);
+        }
+
+        assert!(chat.history_cells.len() <= MAX_HISTORY_CELLS_HARD_LIMIT);
+        assert!(chat.history_cells.len() >= HISTORY_CELLS_TRIM_TARGET);
+
+        let oldest_present = chat.history_cells.iter().any(|cell| {
+            cell.display_lines_trimmed().iter().any(|line| {
+                line.spans
+                    .iter()
+                    .any(|span| span.content.contains("history-line-0"))
+            })
+        });
+        assert!(!oldest_present, "oldest history entries should be compacted away");
+
+        let newest = format!("history-line-{}", MAX_HISTORY_CELLS_HARD_LIMIT + 74);
+        let newest_present = chat.history_cells.iter().any(|cell| {
+            cell.display_lines_trimmed().iter().any(|line| {
+                line.spans.iter().any(|span| span.content.contains(&newest))
+            })
+        });
+        assert!(newest_present, "most recent history entries should remain visible");
+    }
+
+    #[test]
     fn review_dialog_uncommitted_option_runs_workspace_scope() {
         let mut harness = ChatWidgetHarness::new();
         let chat = harness.chat();
@@ -30844,15 +32640,9 @@ mod tests {
             preparation_label.as_deref(),
             Some("Preparing code review for current changes")
         );
-        assert!(
-            auto_resolve,
-            "auto resolve now defaults to on for workspace reviews"
-        );
+        assert!(auto_resolve, "auto resolve now defaults to on for workspace reviews");
 
-        let metadata = metadata.expect("workspace scope metadata");
-        assert_eq!(metadata.scope.as_deref(), Some("workspace"));
-        assert!(metadata.base_branch.is_none());
-        assert!(metadata.current_branch.is_none());
+        assert!(metadata.is_none(), "workspace review should not attach metadata");
     }
 
     #[test]
@@ -30861,6 +32651,19 @@ mod tests {
         let chat = harness.chat();
 
         chat.auto_state.on_begin_review(false);
+
+        let route = chat.describe_esc_context();
+        assert_eq!(route.intent, EscIntent::AutoStopActive);
+        assert!(!route.allows_double_esc);
+    }
+
+    #[test]
+    fn esc_router_stops_auto_drive_while_waiting_for_response() {
+        let mut harness = ChatWidgetHarness::new();
+        let chat = harness.chat();
+
+        chat.auto_state.set_phase(AutoRunPhase::Active);
+        chat.auto_state.set_coordinator_waiting(true);
 
         let route = chat.describe_esc_context();
         assert_eq!(route.intent, EscIntent::AutoStopActive);
@@ -30964,10 +32767,7 @@ mod tests {
 
         let (batches, agents) = chat.collect_cancelable_agents();
         assert_eq!(batches, vec!["work".to_string()]);
-        assert!(
-            agents.is_empty(),
-            "batch cancel should cover the non-auto agent"
-        );
+        assert!(agents.is_empty(), "batch cancel should cover the non-auto agent");
     }
 
     #[test]
@@ -31014,10 +32814,7 @@ mod tests {
         let route = chat.describe_esc_context();
         assert_eq!(route.intent, EscIntent::AutoStopActive);
         assert!(chat.execute_esc_intent(route.intent, esc_event));
-        assert!(
-            !chat.auto_state.is_active(),
-            "Auto Drive stops before canceling agents"
-        );
+        assert!(!chat.auto_state.is_active(), "Auto Drive stops before canceling agents");
         let esc_event = KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE);
         let route = chat.describe_esc_context();
         assert_eq!(route.intent, EscIntent::CancelAgents);
@@ -31126,10 +32923,7 @@ mod tests {
         let route = chat.describe_esc_context();
         assert_eq!(route.intent, EscIntent::CancelAgents);
         assert!(chat.execute_esc_intent(route.intent, esc_event));
-        assert!(
-            !chat.auto_state.is_active(),
-            "Auto Drive should stop after cancelling the command"
-        );
+        assert!(!chat.auto_state.is_active(), "Auto Drive should stop after cancelling the command");
         assert!(chat.auto_state.last_run_summary.is_none());
 
         let route = chat.describe_esc_context();
@@ -31199,8 +32993,8 @@ mod tests {
             chat.schedule_auto_cli_prompt(0, "echo ready".to_string());
         });
 
-        let (button_label, countdown_override, ctrl_switch_hint, manual_hint_present) = harness
-            .with_chat(|chat| {
+        let (button_label, countdown_override, ctrl_switch_hint, manual_hint_present) =
+            harness.with_chat(|chat| {
                 let model = chat
                     .bottom_pane
                     .auto_view_model()
@@ -31231,6 +33025,58 @@ mod tests {
 
         let auto_pending = harness.with_chat(|chat| chat.auto_pending_goal_request);
         assert!(!auto_pending);
+    }
+
+    #[test]
+    fn auto_drive_countdown_tick_decrements_then_auto_submits() {
+        let mut harness = ChatWidgetHarness::new();
+
+        harness.with_chat(|chat| {
+            chat.auto_state.continue_mode = AutoContinueMode::TenSeconds;
+            chat.auto_state.goal = Some("Ship feature".to_string());
+            chat.auto_state.set_phase(AutoRunPhase::Active);
+            chat.schedule_auto_cli_prompt(7, "echo ready".to_string());
+        });
+
+        let countdown_id = harness.with_chat(|chat| {
+            assert!(chat.auto_state.awaiting_coordinator_submit());
+            assert_eq!(chat.auto_state.seconds_remaining, 10);
+            chat.auto_state.countdown_id
+        });
+
+        harness.with_chat(|chat| {
+            chat.auto_handle_countdown(countdown_id, 9);
+            assert!(chat.auto_state.awaiting_coordinator_submit());
+            assert_eq!(chat.auto_state.seconds_remaining, 9);
+        });
+
+        harness.with_chat(|chat| {
+            chat.auto_handle_countdown(countdown_id, 0);
+            assert!(!chat.auto_state.awaiting_coordinator_submit());
+            assert!(chat.auto_state.is_waiting_for_response());
+            assert_eq!(chat.auto_state.seconds_remaining, 0);
+        });
+    }
+
+    #[test]
+    fn auto_drive_enter_override_submits_with_active_countdown() {
+        let mut harness = ChatWidgetHarness::new();
+
+        harness.with_chat(|chat| {
+            chat.auto_state.continue_mode = AutoContinueMode::TenSeconds;
+            chat.auto_state.goal = Some("Ship feature".to_string());
+            chat.auto_state.set_phase(AutoRunPhase::Active);
+            chat.schedule_auto_cli_prompt(8, "echo ready".to_string());
+
+            assert!(chat.auto_state.awaiting_coordinator_submit());
+            assert_eq!(chat.auto_state.seconds_remaining, 10);
+
+            chat.handle_key_event(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
+
+            assert!(!chat.auto_state.awaiting_coordinator_submit());
+            assert!(chat.auto_state.is_waiting_for_response());
+            assert_eq!(chat.auto_state.seconds_remaining, 0);
+        });
     }
 
     #[test]
@@ -31268,7 +33114,8 @@ mod tests {
         });
 
         let cli_running = harness.with_chat(|chat| {
-            chat.bottom_pane
+            chat
+                .bottom_pane
                 .auto_view_model()
                 .and_then(|model| match model {
                     AutoCoordinatorViewModel::Active(active) => Some(active.cli_running),
@@ -31302,10 +33149,7 @@ mod tests {
         });
 
         let (still_active, in_recovery) = harness.with_chat(|chat| {
-            (
-                chat.auto_state.is_active(),
-                chat.auto_state.in_transient_recovery(),
-            )
+            (chat.auto_state.is_active(), chat.auto_state.in_transient_recovery())
         });
         assert!(
             still_active && in_recovery,
@@ -31368,6 +33212,8 @@ mod tests {
                     prompt: "echo ready".to_string(),
                     context: None,
                     suppress_ui_context: false,
+                    model_override: None,
+                    reasoning_effort_override: None,
                 }),
                 None,
                 Vec::new(),
@@ -31379,10 +33225,7 @@ mod tests {
         assert_eq!(chat.auto_state.goal.as_deref(), Some("Finish migrations"));
         assert!(chat.auto_goal_bootstrap_done);
         assert!(!chat.auto_pending_goal_request);
-        assert_eq!(
-            chat.auto_state.current_cli_prompt.as_deref(),
-            Some("echo ready")
-        );
+        assert_eq!(chat.auto_state.current_cli_prompt.as_deref(), Some("echo ready"));
     }
 
     #[test]
@@ -31407,6 +33250,8 @@ mod tests {
                     prompt: "echo start".to_string(),
                     context: None,
                     suppress_ui_context: false,
+                    model_override: None,
+                    reasoning_effort_override: None,
                 }),
                 None,
                 Vec::new(),
@@ -31494,6 +33339,8 @@ mod tests {
                     prompt: "echo work".to_string(),
                     context: None,
                     suppress_ui_context: false,
+                    model_override: None,
+                    reasoning_effort_override: None,
                 }),
                 None,
                 Vec::new(),
@@ -31571,16 +33418,27 @@ mod tests {
     }
 
     #[test]
+    fn ctrl_g_dispatches_external_editor_event() {
+        let mut harness = ChatWidgetHarness::new();
+        let key_event = KeyEvent::new(KeyCode::Char('g'), KeyModifiers::CONTROL);
+        harness.chat().handle_key_event(key_event);
+        let events = harness.drain_events();
+        assert!(
+            events
+                .iter()
+                .any(|event| matches!(event, AppEvent::OpenExternalEditor { .. })),
+            "expected external editor request on Ctrl+G",
+        );
+    }
+
+    #[test]
     fn goal_entry_esc_exits_immediately_without_suggestion() {
         let mut harness = ChatWidgetHarness::new();
         let chat = harness.chat();
 
         chat.auto_show_goal_entry_panel();
         assert!(chat.auto_state.should_show_goal_entry());
-        assert!(matches!(
-            chat.auto_goal_escape_state,
-            AutoGoalEscState::Inactive
-        ));
+        assert!(matches!(chat.auto_goal_escape_state, AutoGoalEscState::Inactive));
 
         let esc_event = KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE);
         let route = chat.describe_esc_context();
@@ -31697,10 +33555,7 @@ mod tests {
 
         let esc_event = KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE);
         assert!(chat.execute_esc_intent(route.intent, esc_event));
-        assert!(
-            chat.diffs.confirm.is_none(),
-            "diff confirm should clear after Esc"
-        );
+        assert!(chat.diffs.confirm.is_none(), "diff confirm should clear after Esc");
     }
 
     #[test]
@@ -31771,11 +33626,7 @@ mod tests {
             })
             .collect();
 
-        assert_eq!(
-            reasoning_cells.len(),
-            2,
-            "expected exactly two reasoning cells"
-        );
+        assert_eq!(reasoning_cells.len(), 2, "expected exactly two reasoning cells");
 
         assert!(
             reasoning_cells[0].display_lines().is_empty(),
@@ -31817,11 +33668,7 @@ mod tests {
             })
             .collect();
 
-        assert_eq!(
-            reasoning_cells.len(),
-            2,
-            "expected exactly two reasoning cells"
-        );
+        assert_eq!(reasoning_cells.len(), 2, "expected exactly two reasoning cells");
 
         assert!(
             reasoning_cells[0].display_lines().is_empty(),
@@ -31860,7 +33707,6 @@ mod tests {
     }
 
     #[test]
-    #[ignore = "requires tokio runtime - needs conversion to async test"]
     fn auto_review_skip_resumes_auto_drive() {
         let mut harness = ChatWidgetHarness::new();
         let chat = harness.chat();
@@ -31914,8 +33760,8 @@ mod tests {
 
         chat.auto_on_assistant_final();
         assert!(
-            chat.auto_state.awaiting_review(),
-            "post-turn review should be pending"
+            !chat.auto_state.awaiting_review(),
+            "background auto review should not block post-turn progress"
         );
 
         let descriptor_snapshot = chat.pending_turn_descriptor.clone();
@@ -31943,7 +33789,6 @@ mod tests {
     }
 
     #[test]
-    #[ignore = "requires tokio runtime - needs conversion to async test"]
     fn auto_review_skip_stays_blocked_when_auto_resolve_pending() {
         let mut harness = ChatWidgetHarness::new();
         let chat = harness.chat();
@@ -31997,10 +33842,7 @@ mod tests {
         });
 
         chat.auto_on_assistant_final();
-        assert!(
-            chat.auto_state.awaiting_review(),
-            "auto-resolve should block resume before skip"
-        );
+        assert!(chat.auto_state.awaiting_review(), "auto-resolve should block resume before skip");
 
         let descriptor_snapshot = chat.pending_turn_descriptor.clone();
         chat.auto_handle_post_turn_review(turn_config.clone(), descriptor_snapshot.as_ref());
@@ -32060,7 +33902,9 @@ mod tests {
         chat.auto_resolve_handle_review_exit(Some(review.clone()));
         assert!(
             matches!(
-                chat.auto_resolve_state.as_ref().map(|state| &state.phase),
+                chat.auto_resolve_state
+                    .as_ref()
+                    .map(|state| &state.phase),
                 Some(AutoResolvePhase::PendingFix { .. })
             ),
             "limit 0 should still request an automated fix"
@@ -32069,7 +33913,9 @@ mod tests {
         chat.auto_resolve_on_task_complete(Some("fix applied".to_string()));
         assert!(
             matches!(
-                chat.auto_resolve_state.as_ref().map(|state| &state.phase),
+                chat.auto_resolve_state
+                    .as_ref()
+                    .map(|state| &state.phase),
                 Some(AutoResolvePhase::AwaitingFix { .. })
             ),
             "auto-resolve should wait for judge after fix"
@@ -32078,7 +33924,9 @@ mod tests {
         chat.auto_resolve_on_task_complete(Some("ready for judge".to_string()));
         assert!(
             matches!(
-                chat.auto_resolve_state.as_ref().map(|state| &state.phase),
+                chat.auto_resolve_state
+                    .as_ref()
+                    .map(|state| &state.phase),
                 Some(AutoResolvePhase::AwaitingJudge { .. })
             ),
             "auto-resolve should request a status check"
@@ -32126,9 +33974,7 @@ mod tests {
         );
 
         assert_eq!(
-            chat.auto_resolve_state
-                .as_ref()
-                .map(|state| state.max_attempts),
+            chat.auto_resolve_state.as_ref().map(|state| state.max_attempts),
             Some(1),
             "auto-resolve state should honor configured limit"
         );
@@ -32224,6 +34070,8 @@ mod tests {
                 prompt: "Run cargo test".to_string(),
                 context: Some("use --all-features".to_string()),
                 suppress_ui_context: false,
+                model_override: None,
+                reasoning_effort_override: None,
             }),
             Some(AutoTurnAgentsTiming::Parallel),
             vec![AutoTurnAgentsAction {
@@ -32251,12 +34099,87 @@ mod tests {
         assert!(action.write);
 
         let notice = "Auto Drive enabled write mode";
-        let write_notice_present = chat.history_cells.iter().any(|cell| {
-            cell.display_lines_trimmed()
-                .iter()
-                .any(|line| line.spans.iter().any(|span| span.content.contains(notice)))
+        let write_notice_present = chat
+            .history_cells
+            .iter()
+            .any(|cell| {
+                cell.display_lines_trimmed().iter().any(|line| {
+                    line.spans
+                        .iter()
+                        .any(|span| span.content.contains(notice))
+                })
         });
         assert!(write_notice_present);
+    }
+
+    #[test]
+    fn auto_submit_prompt_applies_routed_cli_model_override() {
+        let _runtime_guard = enter_test_runtime_guard();
+        let mut harness = ChatWidgetHarness::new();
+        let chat = harness.chat();
+
+        chat.auto_state.set_phase(AutoRunPhase::Active);
+        chat.config.auto_drive.model_routing_enabled = true;
+        chat.config.model = "gpt-5.3-codex".to_string();
+        chat.config.model_reasoning_effort = ReasoningEffort::Medium;
+
+        chat.auto_handle_decision(
+            5,
+            AutoCoordinatorStatus::Continue,
+            Some("Fixing tests".to_string()),
+            Some("Running targeted loop.".to_string()),
+            None,
+            Some(AutoTurnCliAction {
+                prompt: "Run the failing test and keep iterating until it passes.".to_string(),
+                context: None,
+                suppress_ui_context: false,
+                model_override: Some("gpt-5.3-codex-spark".to_string()),
+                reasoning_effort_override: Some(ReasoningEffort::High),
+            }),
+            None,
+            Vec::new(),
+            Vec::new(),
+        );
+
+        chat.auto_submit_prompt();
+
+        assert_eq!(chat.config.model, "gpt-5.3-codex-spark");
+        assert_eq!(chat.config.model_reasoning_effort, ReasoningEffort::High);
+    }
+
+    #[test]
+    fn auto_submit_prompt_preserves_model_when_routing_disabled() {
+        let _runtime_guard = enter_test_runtime_guard();
+        let mut harness = ChatWidgetHarness::new();
+        let chat = harness.chat();
+
+        chat.auto_state.set_phase(AutoRunPhase::Active);
+        chat.config.auto_drive.model_routing_enabled = false;
+        chat.config.model = "gpt-5.3-codex".to_string();
+        chat.config.model_reasoning_effort = ReasoningEffort::Medium;
+
+        chat.auto_handle_decision(
+            6,
+            AutoCoordinatorStatus::Continue,
+            Some("Fixing tests".to_string()),
+            Some("Running targeted loop.".to_string()),
+            None,
+            Some(AutoTurnCliAction {
+                prompt: "Run the failing test and keep iterating until it passes.".to_string(),
+                context: None,
+                suppress_ui_context: false,
+                model_override: Some("gpt-5.3-codex-spark".to_string()),
+                reasoning_effort_override: Some(ReasoningEffort::High),
+            }),
+            None,
+            Vec::new(),
+            Vec::new(),
+        );
+
+        chat.auto_submit_prompt();
+
+        assert_eq!(chat.config.model, "gpt-5.3-codex");
+        assert_eq!(chat.config.model_reasoning_effort, ReasoningEffort::Medium);
     }
 
     #[test]
@@ -32264,7 +34187,7 @@ mod tests {
         let mut harness = ChatWidgetHarness::new();
         {
             let chat = harness.chat();
-            chat.auto_state.set_phase(AutoRunPhase::Active);
+        chat.auto_state.set_phase(AutoRunPhase::Active);
             chat.config.auto_drive.coordinator_routing = true;
             chat.config.sandbox_policy = SandboxPolicy::DangerFullAccess;
         }
@@ -32318,7 +34241,7 @@ mod tests {
         let mut harness = ChatWidgetHarness::new();
         {
             let chat = harness.chat();
-            chat.auto_state.set_phase(AutoRunPhase::Active);
+        chat.auto_state.set_phase(AutoRunPhase::Active);
             chat.config.auto_drive.coordinator_routing = true;
             chat.config.sandbox_policy = SandboxPolicy::DangerFullAccess;
         }
@@ -32347,7 +34270,7 @@ mod tests {
         let mut harness = ChatWidgetHarness::new();
         {
             let chat = harness.chat();
-            chat.auto_state.set_phase(AutoRunPhase::Active);
+        chat.auto_state.set_phase(AutoRunPhase::Active);
             chat.config.auto_drive.coordinator_routing = true;
         }
 
@@ -32359,10 +34282,8 @@ mod tests {
 
         let events = harness.drain_events();
         assert!(
-            events
-                .iter()
-                .any(|event| matches!(event, AppEvent::DispatchCommand(_, _))
-                    || matches!(event, AppEvent::CodeOp(_))),
+            events.iter().any(|event| matches!(event, AppEvent::DispatchCommand(_, _))
+                || matches!(event, AppEvent::CodexOp(_))),
             "slash command should follow existing dispatch path"
         );
     }
@@ -32400,14 +34321,10 @@ mod tests {
         assert!(message.contains("agent.wait"));
         assert!(message.contains("Timing (blocking)"));
         assert!(message.contains("Launch these agents first"));
-        assert!(
-            !message.contains("agent {\"action\""),
-            "message should not include raw agent JSON"
-        );
+        assert!(!message.contains("agent {\"action\""), "message should not include raw agent JSON");
     }
 
     #[test]
-    #[ignore = "requires tokio runtime - needs conversion to async test"]
     fn task_complete_triggers_review_when_waiting_flag_set() {
         let mut harness = ChatWidgetHarness::new();
         let chat = harness.chat();
@@ -32457,7 +34374,10 @@ mod tests {
         });
 
         chat.auto_on_assistant_final();
-        assert!(chat.auto_state.awaiting_review());
+        assert!(
+            !chat.auto_state.awaiting_review(),
+            "background auto review should not set an awaiting-review gate"
+        );
 
         let descriptor_snapshot = chat.pending_turn_descriptor.clone();
         chat.auto_handle_post_turn_review(turn_config.clone(), descriptor_snapshot.as_ref());
@@ -32580,14 +34500,13 @@ mod tests {
             response_text.to_string(),
         );
 
-        assert_eq!(
-            chat.history_cells.len(),
-            3,
-            "expected assistant cell to be added"
-        );
+        assert_eq!(chat.history_cells.len(), 3, "expected assistant cell to be added");
 
-        let tail_kinds: Vec<HistoryCellType> =
-            chat.history_cells.iter().map(|cell| cell.kind()).collect();
+        let tail_kinds: Vec<HistoryCellType> = chat
+            .history_cells
+            .iter()
+            .map(|cell| cell.kind())
+            .collect();
 
         let len = tail_kinds.len();
         assert_eq!(
@@ -32677,14 +34596,16 @@ mod tests {
         assert_eq!(chat.overall_task_status, "complete".to_string());
 
         assert!(
-            chat.agent_runtime
+            chat
+                .agent_runtime
                 .values()
                 .all(|rt| rt.completed_at.is_none()),
             "runtime should remain incomplete until backend reports a terminal status"
         );
 
         assert!(
-            chat.active_agents
+            chat
+                .active_agents
                 .iter()
                 .all(|agent| !matches!(agent.status, AgentStatus::Pending | AgentStatus::Running)),
             "agents should be forced into a terminal status after the answer completes"
@@ -32731,10 +34652,7 @@ mod tests {
             order: None,
         });
 
-        assert!(
-            chat.bottom_pane.is_task_running(),
-            "spinner should be running initially"
-        );
+        assert!(chat.bottom_pane.is_task_running(), "spinner should be running initially");
 
         chat.handle_code_event(Event {
             id: turn_id.clone(),
@@ -32745,10 +34663,7 @@ mod tests {
             order: None,
         });
 
-        assert!(
-            chat.bottom_pane.is_task_running(),
-            "spinner stays running after assistant message"
-        );
+        assert!(chat.bottom_pane.is_task_running(), "spinner stays running after assistant message");
 
         chat.handle_code_event(Event {
             id: turn_id.clone(),
@@ -32796,6 +34711,102 @@ mod tests {
     }
 
     #[test]
+    fn final_answer_does_not_clear_spinner_while_task_is_still_active() {
+        let _rt = enter_test_runtime_guard();
+        let mut harness = ChatWidgetHarness::new();
+        {
+            let chat = harness.chat();
+            reset_history(chat);
+        }
+
+        let turn_id = "turn-1".to_string();
+
+        harness.handle_event(Event {
+            id: turn_id.clone(),
+            event_seq: 0,
+            msg: EventMsg::TaskStarted,
+            order: None,
+        });
+
+        harness.handle_event(Event {
+            id: turn_id.clone(),
+            event_seq: 1,
+            msg: EventMsg::AgentStatusUpdate(AgentStatusUpdateEvent {
+                agents: vec![CoreAgentInfo {
+                    id: "agent-1".to_string(),
+                    name: "Todo Agent".to_string(),
+                    status: "running".to_string(),
+                    batch_id: Some("batch-single".to_string()),
+                    model: None,
+                    last_progress: None,
+                    result: None,
+                    error: None,
+                    elapsed_ms: None,
+                    token_count: None,
+                    last_activity_at: None,
+                    seconds_since_last_activity: None,
+                    source_kind: None,
+                }],
+                context: None,
+                task: None,
+            }),
+            order: None,
+        });
+
+        harness.handle_event(Event {
+            id: turn_id.clone(),
+            event_seq: 2,
+            msg: EventMsg::AgentMessage(AgentMessageEvent {
+                message: "Working through the task now.".to_string(),
+            }),
+            order: Some(OrderMeta {
+                request_ordinal: 1,
+                output_index: Some(0),
+                sequence_number: Some(0),
+            }),
+        });
+
+        harness.flush_into_widget();
+
+        assert!(
+            harness.chat().bottom_pane.is_task_running(),
+            "final assistant output should not clear the spinner before TaskComplete"
+        );
+
+        harness.handle_event(Event {
+            id: turn_id,
+            event_seq: 3,
+            msg: EventMsg::AgentStatusUpdate(AgentStatusUpdateEvent {
+                agents: vec![CoreAgentInfo {
+                    id: "agent-1".to_string(),
+                    name: "Todo Agent".to_string(),
+                    status: "completed".to_string(),
+                    batch_id: Some("batch-single".to_string()),
+                    model: None,
+                    last_progress: None,
+                    result: Some("Still working".to_string()),
+                    error: None,
+                    elapsed_ms: None,
+                    token_count: None,
+                    last_activity_at: None,
+                    seconds_since_last_activity: None,
+                    source_kind: None,
+                }],
+                context: None,
+                task: None,
+            }),
+            order: None,
+        });
+
+        harness.flush_into_widget();
+
+        assert!(
+            harness.chat().bottom_pane.is_task_running(),
+            "terminal agent status should not clear the spinner while the turn is still active"
+        );
+    }
+
+    #[test]
     fn scrollback_spacer_preserves_top_cell_bottom_line() {
         let mut harness = ChatWidgetHarness::new();
         let chat = harness.chat();
@@ -32806,7 +34817,7 @@ mod tests {
         insert_plain_cell(chat, &["new-1", "new-2"]);
 
         let viewport_height = 6;
-        chat.layout.scroll_offset = 2;
+        chat.layout.scroll_offset.set(2);
 
         let mut terminal = Terminal::new(TestBackend::new(40, viewport_height)).expect("terminal");
         terminal
@@ -32814,10 +34825,7 @@ mod tests {
             .expect("draw history");
 
         let adjusted = chat.history_render.adjust_scroll_to_content(2);
-        assert_eq!(
-            adjusted, 1,
-            "scroll origin should step back from spacer row"
-        );
+        assert_eq!(adjusted, 1, "scroll origin should step back from spacer row");
 
         let prefix = chat.history_render.prefix_sums.borrow();
         assert!(!prefix.is_empty(), "prefix sums populated after draw");
@@ -32825,29 +34833,19 @@ mod tests {
             Ok(i) => i,
             Err(i) => i.saturating_sub(1),
         };
-        assert_eq!(
-            start_idx, 0,
-            "expected first cell to be visible after adjustment"
-        );
+        assert_eq!(start_idx, 0, "expected first cell to be visible after adjustment");
 
         let content_y = prefix[start_idx];
         drop(prefix);
         let skip_top = adjusted.saturating_sub(content_y);
-        assert_eq!(
-            skip_top, 1,
-            "should display the second line of the oldest cell"
-        );
+        assert_eq!(skip_top, 1, "should display the second line of the oldest cell");
 
         let cell = &chat.history_cells[start_idx];
         let lines = cell.display_lines_trimmed();
         let line = lines
             .get(skip_top as usize)
             .expect("line available after scroll adjustment");
-        let text: String = line
-            .spans
-            .iter()
-            .map(|span| span.content.as_ref())
-            .collect();
+        let text: String = line.spans.iter().map(|span| span.content.as_ref()).collect();
         assert_eq!(text.trim(), "old-2");
     }
 
@@ -32899,8 +34897,104 @@ mod tests {
         harness.flush_into_widget();
 
         assert!(
+            harness.chat().bottom_pane.is_task_running(),
+            "spinner should stay active briefly while waiting for a missing TaskComplete"
+        );
+
+        {
+            let chat = harness.chat();
+            chat.idle_spinner_clear_started_at = Some(
+                Instant::now()
+                    .checked_sub(MID_TURN_IDLE_SPINNER_CLEAR_GRACE + Duration::from_millis(50))
+                    .expect("timestamp should subtract"),
+            );
+            chat.maybe_hide_spinner();
+        }
+
+        assert!(
             !harness.chat().bottom_pane.is_task_running(),
             "spinner should clear after the final answer even when TaskComplete never arrives"
+        );
+    }
+
+    #[test]
+    fn mid_turn_answer_stays_unfinalized_while_turn_is_active() {
+        let _rt = enter_test_runtime_guard();
+        let mut harness = ChatWidgetHarness::new();
+        {
+            let chat = harness.chat();
+            reset_history(chat);
+        }
+
+        let turn_id = "turn-1".to_string();
+
+        harness.handle_event(Event {
+            id: turn_id.clone(),
+            event_seq: 0,
+            msg: EventMsg::TaskStarted,
+            order: None,
+        });
+
+        harness.handle_event(Event {
+            id: turn_id,
+            event_seq: 1,
+            msg: EventMsg::AgentMessage(AgentMessageEvent {
+                message: "Working through the first part.".to_string(),
+            }),
+            order: Some(OrderMeta {
+                request_ordinal: 1,
+                output_index: Some(0),
+                sequence_number: Some(0),
+            }),
+        });
+
+        harness.flush_into_widget();
+
+        let frame = crate::test_helpers::render_chat_widget_to_vt100(&mut harness, 90, 24);
+        assert!(frame.contains("Working through the first part."));
+        assert!(
+            !frame.contains(" • Working through the first part."),
+            "mid-turn assistant output should not render as a finalized assistant cell:\n{frame}"
+        );
+
+        {
+            let chat = harness.chat();
+            assert_eq!(
+                chat.active_task_ids.len(),
+                1,
+                "turn should still be active after a mid-turn assistant message"
+            );
+            assert!(
+                chat.last_answer_is_mid_turn(),
+                "assistant cell should still be tagged as mid-turn before TaskComplete"
+            );
+            assert!(
+                chat.bottom_pane.is_task_running(),
+                "spinner should still be active before idle cleanup runs"
+            );
+            chat.idle_spinner_clear_started_at = Some(
+                Instant::now()
+                    .checked_sub(IDLE_SPINNER_CLEAR_GRACE + Duration::from_millis(50))
+                    .expect("timestamp should subtract"),
+            );
+            chat.maybe_hide_spinner();
+            assert!(
+                chat.bottom_pane.is_task_running(),
+                "spinner flipped off inside maybe_hide_spinner (tasks={}, mid_turn={})",
+                chat.active_task_ids.len(),
+                chat.last_answer_is_mid_turn()
+            );
+        }
+
+        assert!(
+            harness.chat().bottom_pane.is_task_running(),
+            "mid-turn assistant output should keep the spinner active until the turn completes"
+        );
+
+        let frame = crate::test_helpers::render_chat_widget_to_vt100(&mut harness, 90, 24);
+        assert!(
+            frame.contains("Thinking..."),
+            "mid-turn idle waiting should continue to show Thinking...:\n{frame}"
         );
     }
 
@@ -32915,7 +35009,7 @@ mod tests {
         insert_plain_cell(chat, &["new-1", "new-2"]);
 
         let viewport_height = 6;
-        chat.layout.scroll_offset = 2;
+        chat.layout.scroll_offset.set(2);
 
         {
             let mut terminal =
@@ -32955,11 +35049,8 @@ mod tests {
         }
 
         let max_scroll = chat.layout.last_max_scroll.get();
-        assert!(
-            max_scroll > 0,
-            "expected overflow to produce a positive max scroll"
-        );
-        chat.layout.scroll_offset = max_scroll;
+        assert!(max_scroll > 0, "expected overflow to produce a positive max scroll");
+        chat.layout.scroll_offset.set(max_scroll);
 
         let mut terminal = Terminal::new(TestBackend::new(40, 6)).expect("terminal");
         terminal
@@ -32967,10 +35058,8 @@ mod tests {
             .expect("draw history at top boundary");
 
         let max_scroll = chat.layout.last_max_scroll.get();
-        let scroll_from_top = max_scroll.saturating_sub(chat.layout.scroll_offset);
-        let effective = chat
-            .history_render
-            .adjust_scroll_to_content(scroll_from_top);
+        let scroll_from_top = max_scroll.saturating_sub(chat.layout.scroll_offset.get());
+        let effective = chat.history_render.adjust_scroll_to_content(scroll_from_top);
         let prefix = chat.history_render.prefix_sums.borrow();
         let mut start_idx = match prefix.binary_search(&effective) {
             Ok(i) => i,
@@ -33038,8 +35127,11 @@ mod tests {
             None,
         );
 
-        let kinds: Vec<HistoryCellType> =
-            chat.history_cells.iter().map(|cell| cell.kind()).collect();
+        let kinds: Vec<HistoryCellType> = chat
+            .history_cells
+            .iter()
+            .map(|cell| cell.kind())
+            .collect();
 
         assert_eq!(
             kinds,
@@ -33079,11 +35171,7 @@ mod tests {
             output_index: Some(2),
             sequence_number: Some(0),
         });
-        chat.history_insert_plain_state_with_key(
-            make_plain("reasoning"),
-            reasoning_key,
-            "reasoning",
-        );
+        chat.history_insert_plain_state_with_key(make_plain("reasoning"), reasoning_key, "reasoning");
 
         // Explore summary follows immediately afterwards.
         let explore_key = ChatWidget::raw_order_key_from_order_meta(&OrderMeta {
@@ -33107,23 +35195,14 @@ mod tests {
             .map(|cell| {
                 cell.display_lines_trimmed()
                     .first()
-                    .map(|line| {
-                        line.spans
-                            .iter()
-                            .map(|span| span.content.as_ref())
-                            .collect()
-                    })
+                    .map(|line| line.spans.iter().map(|span| span.content.as_ref()).collect())
                     .unwrap_or_default()
             })
             .collect();
 
         assert_eq!(
             labels,
-            vec![
-                "reasoning".to_string(),
-                "explore".to_string(),
-                "tool".to_string()
-            ],
+            vec!["reasoning".to_string(), "explore".to_string(), "tool".to_string()],
             "later inserts with smaller output_index should not leapfrog visible reasoning/explore summaries",
         );
     }
@@ -33173,12 +35252,7 @@ mod tests {
             .map(|cell| {
                 cell.display_lines_trimmed()
                     .first()
-                    .map(|line| {
-                        line.spans
-                            .iter()
-                            .map(|span| span.content.as_ref())
-                            .collect()
-                    })
+                    .map(|line| line.spans.iter().map(|span| span.content.as_ref()).collect())
                     .unwrap_or_default()
             })
             .collect();
@@ -33197,10 +35271,9 @@ mod tests {
         reset_history(chat);
 
         let make_plain = |id: u64,
-                          text: &str,
-                          role: PlainMessageRole,
-                          kind: PlainMessageKind|
-         -> PlainMessageState {
+                           text: &str,
+                           role: PlainMessageRole,
+                           kind: PlainMessageKind| -> PlainMessageState {
             PlainMessageState {
                 id: HistoryId(id),
                 role,
@@ -33304,6 +35377,9 @@ mod tests {
             "resume insertion should surface the new assistant answer at the tail"
         );
     }
+
+
+
 }
 
 fn append_thought_ellipsis(text: &str) -> String {
@@ -33443,7 +35519,10 @@ impl ChatWidget<'_> {
     }
 
     fn configured_auto_resolve_re_reviews(&self) -> u32 {
-        self.config.auto_drive.auto_resolve_review_attempts.get()
+        self.config
+            .auto_drive
+            .auto_resolve_review_attempts
+            .get()
     }
 
     fn auto_resolve_clear(&mut self) {
@@ -33459,62 +35538,11 @@ impl ChatWidget<'_> {
     fn auto_resolve_commit_sha(&self) -> Option<String> {
         self.auto_resolve_state
             .as_ref()
-            .and_then(|state| state.metadata.as_ref())
-            .and_then(|metadata| metadata.commit.clone())
+            .and_then(|state| state.last_reviewed_commit.clone())
     }
 
     fn auto_resolve_scope(&self) -> Option<String> {
-        self.auto_resolve_state
-            .as_ref()
-            .and_then(|state| state.metadata.as_ref())
-            .and_then(|metadata| metadata.scope.clone())
-    }
-
-    fn worktree_has_uncommitted_changes(&self) -> Option<bool> {
-        let output = Command::new("git")
-            .current_dir(&self.config.cwd)
-            .args(["status", "--short"])
-            .output()
-            .ok()?;
-        if !output.status.success() {
-            return None;
-        }
-        let stdout = String::from_utf8_lossy(&output.stdout);
-        Some(!stdout.trim().is_empty())
-    }
-
-    fn current_head_commit_sha(&self) -> Option<String> {
-        let output = Command::new("git")
-            .current_dir(&self.config.cwd)
-            .args(["rev-parse", "HEAD"])
-            .output()
-            .ok()?;
-        if !output.status.success() {
-            return None;
-        }
-        let stdout = String::from_utf8_lossy(&output.stdout).trim().to_string();
-        if stdout.is_empty() {
-            None
-        } else {
-            Some(stdout)
-        }
-    }
-
-    fn commit_subject_for(&self, commit: &str) -> Option<String> {
-        let output = Command::new("git")
-            .current_dir(&self.config.cwd)
-            .args(["show", "-s", "--format=%s", commit])
-            .output()
-            .ok()?;
-        if !output.status.success() {
-            return None;
-        }
-        let stdout = String::from_utf8_lossy(&output.stdout).trim().to_string();
-        if stdout.is_empty() {
-            None
-        } else {
-            Some(stdout)
-        }
+        None
     }
 
     fn strip_context_sections(text: &str) -> String {
@@ -33559,6 +35587,14 @@ impl ChatWidget<'_> {
         cleaned
     }
 
+    fn should_include_auto_review_context_message(text: &str) -> bool {
+        let lowered = text.to_ascii_lowercase();
+        !(lowered.contains("background auto-review failed")
+            || lowered.contains("background auto-review completed")
+            || lowered.contains("auto review:")
+            || lowered.contains("merge the worktree"))
+    }
+
     fn turn_context_block(&self) -> Option<String> {
         let mut lines: Vec<String> = Vec::new();
         let mut any = false;
@@ -33569,6 +35605,7 @@ impl ChatWidget<'_> {
             .as_ref()
             .map(|msg| Self::strip_context_sections(msg))
             .map(|msg| msg.trim().to_string())
+            .map(|msg| Self::truncate_with_ellipsis(&msg, AUTO_REVIEW_CONTEXT_BLOCK_CHARS))
             .filter(|msg| !msg.is_empty())
         {
             any = true;
@@ -33579,6 +35616,8 @@ impl ChatWidget<'_> {
             .as_ref()
             .map(|msg| Self::strip_context_sections(msg))
             .map(|msg| msg.trim().to_string())
+            .filter(|msg| Self::should_include_auto_review_context_message(msg))
+            .map(|msg| Self::truncate_with_ellipsis(&msg, AUTO_REVIEW_CONTEXT_BLOCK_CHARS))
             .filter(|msg| !msg.is_empty())
         {
             any = true;
@@ -33589,6 +35628,7 @@ impl ChatWidget<'_> {
             .as_ref()
             .map(|msg| Self::strip_context_sections(msg))
             .map(|msg| msg.trim().to_string())
+            .map(|msg| Self::truncate_with_ellipsis(&msg, AUTO_REVIEW_CONTEXT_BLOCK_CHARS))
             .filter(|msg| !msg.is_empty())
         {
             any = true;
@@ -33596,7 +35636,11 @@ impl ChatWidget<'_> {
         }
         lines.push("</context>".to_string());
 
-        if any { Some(lines.join("\n")) } else { None }
+        if any {
+            Some(lines.join("\n"))
+        } else {
+            None
+        }
     }
 
     fn auto_resolve_should_block_auto_resume(&self) -> bool {
@@ -33664,10 +35708,7 @@ impl ChatWidget<'_> {
                     state.last_fix_message = None;
 
                     if output.findings.is_empty() {
-                        notice = Some(
-                            "Auto-resolve: review reported no actionable findings. Exiting."
-                                .to_string(),
-                        );
+                        notice = Some("Auto-resolve: review reported no actionable findings. Exiting.".to_string());
                         should_clear = true;
                     } else if state.max_attempts > 0 && state.attempt > state.max_attempts {
                         let limit = state.max_attempts;
@@ -33683,16 +35724,12 @@ impl ChatWidget<'_> {
                         state.phase = AutoResolvePhase::PendingFix {
                             review: output.clone(),
                         };
-                        notice = Some(
-                            "Auto-resolve: review found issues. Preparing follow-up fix request."
-                                .to_string(),
-                        );
+                        notice = Some("Auto-resolve: review found issues. Preparing follow-up fix request.".to_string());
                     }
                 }
                 None => {
                     notice = Some(
-                        "Auto-resolve: review ended without findings. Please inspect manually."
-                            .to_string(),
+                        "Auto-resolve: review ended without findings. Please inspect manually.".to_string(),
                     );
                     should_clear = true;
                 }
@@ -33741,7 +35778,7 @@ impl ChatWidget<'_> {
     fn dispatch_auto_fix(&mut self, review: &ReviewOutputEvent) {
         let summary = Self::auto_resolve_format_findings(review);
         let mut preface = String::from(
-            "You are continuing an automated /review resolution loop. Review the listed findings and determine whether they represent real issues introduced by our changes. If they are, apply the necessary fixes and resolve any similar issues you can identify before responding.",
+            "You are continuing an automated /review resolution loop. Review the listed findings and determine whether they represent real issues introduced by our changes. If they are, apply the necessary fixes and resolve any similar issues you can identify before responding."
         );
         if !summary.is_empty() {
             preface.push_str("\n\nFindings:\n");
@@ -33775,9 +35812,7 @@ impl ChatWidget<'_> {
             preface.push_str(&context);
         }
 
-        self.auto_resolve_notice(
-            "Auto-resolve: asking the agent to verify and address the review findings.",
-        );
+        self.auto_resolve_notice("Auto-resolve: asking the agent to verify and address the review findings.");
         self.submit_hidden_text_message_with_preface(
             "Is this a real issue introduced by our changes? If so, please fix and resolve all similar issues.".to_string(),
             preface,
@@ -33787,23 +35822,17 @@ impl ChatWidget<'_> {
     fn dispatch_auto_judge(&mut self, review: &ReviewOutputEvent, fix_message: Option<String>) {
         let summary = Self::auto_resolve_format_findings(review);
         let mut preface = String::from(
-            "You are evaluating whether the latest fixes resolved the findings from `/review`. Respond with a strict JSON object containing `status` and optional `rationale`. Valid `status` values: `review_again`, `no_issue`, `continue_fix`. Do not include any additional text before or after the JSON.",
+            "You are evaluating whether the latest fixes resolved the findings from `/review`. Respond with a strict JSON object containing `status` and optional `rationale`. Valid `status` values: `review_again`, `no_issue`, `continue_fix`. Do not include any additional text before or after the JSON."
         );
         if !summary.is_empty() {
             preface.push_str("\n\nOriginal findings:\n");
             preface.push_str(&summary);
         }
-        if let Some(fix) = fix_message
-            .as_ref()
-            .map(|s| s.trim())
-            .filter(|s| !s.is_empty())
-        {
+        if let Some(fix) = fix_message.as_ref().map(|s| s.trim()).filter(|s| !s.is_empty()) {
             preface.push_str("\n\nLatest agent response:\n");
             preface.push_str(fix);
         }
-        preface.push_str(
-            "\n\nReturn JSON: {\"status\": \"...\", \"rationale\": \"optional explanation\"}.",
-        );
+        preface.push_str("\n\nReturn JSON: {\"status\": \"...\", \"rationale\": \"optional explanation\"}.");
         if self
             .auto_resolve_scope()
             .as_deref()
@@ -33827,16 +35856,13 @@ impl ChatWidget<'_> {
         }
 
         self.auto_resolve_notice("Auto-resolve: requesting status JSON from the agent.");
-        self.submit_hidden_text_message_with_preface(
-            "Auto-resolve status check".to_string(),
-            preface,
-        );
+        self.submit_hidden_text_message_with_preface("Auto-resolve status check".to_string(), preface);
     }
 
     fn dispatch_auto_continue(&mut self, review: &ReviewOutputEvent) {
         let summary = Self::auto_resolve_format_findings(review);
         let mut preface = String::from(
-            "The previous status check indicated more work is required on the review findings. Continue addressing the remaining issues before responding.",
+            "The previous status check indicated more work is required on the review findings. Continue addressing the remaining issues before responding."
         );
         if !summary.is_empty() {
             preface.push_str("\n\nOutstanding findings:\n");
@@ -33846,9 +35872,7 @@ impl ChatWidget<'_> {
             preface.push_str("\n\n");
             preface.push_str(&context);
         }
-        self.auto_resolve_notice(
-            "Auto-resolve: asking the agent to continue working on the findings.",
-        );
+        self.auto_resolve_notice("Auto-resolve: asking the agent to continue working on the findings.");
         self.submit_hidden_text_message_with_preface("Please continue".to_string(), preface);
     }
 
@@ -33870,32 +35894,8 @@ impl ChatWidget<'_> {
             base_prompt = base_prompt[..idx].trim_end().to_string();
         }
 
-        let mut next_hint = state_snapshot.hint.clone();
-        let mut next_metadata = state_snapshot.metadata.clone();
-
-        if next_metadata
-            .as_ref()
-            .and_then(|meta| meta.scope.as_ref())
-            .is_some_and(|scope| scope.eq_ignore_ascii_case("commit"))
-        {
-            if let Some(new_commit) = self.current_head_commit_sha() {
-                let short_sha: String = new_commit.chars().take(7).collect();
-                let subject = self.commit_subject_for(&new_commit);
-                base_prompt = if let Some(subject) = subject {
-                    format!(
-                        "Review the code changes introduced by commit {new_commit} (\"{subject}\"). Provide prioritized, actionable findings."
-                    )
-                } else {
-                    format!(
-                        "Review the code changes introduced by commit {new_commit}. Provide prioritized, actionable findings."
-                    )
-                };
-                next_hint = format!("commit {short_sha}");
-                if let Some(meta) = next_metadata.as_mut() {
-                    meta.commit = Some(new_commit.clone());
-                }
-            }
-        }
+        let next_hint = state_snapshot.hint.clone();
+        let next_metadata = state_snapshot.metadata.clone();
 
         let mut continued_prompt = base_prompt.clone();
         if let Some(last_review) = state_snapshot.last_review.as_ref() {
@@ -33905,36 +35905,9 @@ impl ChatWidget<'_> {
                 continued_prompt.push_str(&recap);
             }
         }
-        if state_snapshot
-            .metadata
-            .as_ref()
-            .and_then(|meta| meta.scope.as_ref())
-            .is_some_and(|scope| scope.eq_ignore_ascii_case("commit"))
-        {
-            if let Some(commit) = state_snapshot
-                .metadata
-                .as_ref()
-                .and_then(|meta| meta.commit.clone())
-            {
-                if let Some(true) = self.worktree_has_uncommitted_changes() {
-                    continued_prompt.push_str(
-                        "\n\nNote: there are uncommitted changes in the working tree since commit ",
-                    );
-                    continued_prompt.push_str(&commit);
-                    continued_prompt.push_str(
-                        ". Ensure the review covers the updated workspace rather than only the original commit snapshot.",
-                    );
-                }
-            }
-        }
         continued_prompt.push_str("\n\n");
         continued_prompt.push_str(AUTO_RESOLVE_REVIEW_FOLLOWUP);
-        self.begin_review(
-            continued_prompt,
-            next_hint.clone(),
-            Some(prep_label),
-            next_metadata.clone(),
-        );
+        self.begin_review(continued_prompt, next_hint.clone(), Some(prep_label));
         if let Some(state) = self.auto_resolve_state.as_mut() {
             state.phase = AutoResolvePhase::WaitingForReview;
             state.prompt = base_prompt;
@@ -33959,10 +35932,13 @@ impl ChatWidget<'_> {
         match status.as_str() {
             "no_issue" => {
                 let rationale_text = rationale.trim();
-                let attempt_limit_reached = self.auto_resolve_state.as_ref().is_some_and(|state| {
-                    let allowed = state.max_attempts.saturating_add(1);
-                    state.attempt >= allowed
-                });
+                let attempt_limit_reached = self
+                    .auto_resolve_state
+                    .as_ref()
+                    .is_some_and(|state| {
+                        let allowed = state.max_attempts.saturating_add(1);
+                        state.attempt >= allowed
+                    });
 
                 if attempt_limit_reached {
                     let limit = self
@@ -34018,10 +35994,13 @@ impl ChatWidget<'_> {
                 self.dispatch_auto_continue(&review);
             }
             "review_again" => {
-                let stop = self.auto_resolve_state.as_ref().is_some_and(|state| {
-                    let allowed = state.max_attempts.saturating_add(1);
-                    state.attempt >= allowed
-                });
+                let stop = self
+                    .auto_resolve_state
+                    .as_ref()
+                    .is_some_and(|state| {
+                        let allowed = state.max_attempts.saturating_add(1);
+                        state.attempt >= allowed
+                    });
                 if stop {
                     let limit = self
                         .auto_resolve_state
@@ -34041,9 +36020,7 @@ impl ChatWidget<'_> {
                     self.auto_resolve_clear();
                 } else {
                     if rationale.trim().is_empty() {
-                        self.auto_resolve_notice(
-                            "Auto-resolve: running another /review pass.".to_string(),
-                        );
+                        self.auto_resolve_notice("Auto-resolve: running another /review pass.".to_string());
                     } else {
                         let rationale_text = rationale.trim();
                         self.auto_resolve_notice(format!(
@@ -34067,7 +36044,7 @@ impl ChatWidget<'_> {
             return Some(decision);
         }
 
-        if let Some(start) = raw.find("{") {
+        if let Some(start) = raw.find("{" ) {
             if let Some(end) = raw.rfind("}") {
                 let slice = &raw[start..=end];
                 if let Ok(decision) = serde_json::from_str::<AutoResolveDecision>(slice) {
@@ -34092,8 +36069,7 @@ impl ChatWidget<'_> {
     pub(crate) fn open_review_dialog(&mut self) {
         if self.is_task_running() {
             self.history_push_plain_state(crate::history_cell::new_error_event(
-                "`/review` — complete or cancel the current task before starting a new review."
-                    .to_string(),
+                "`/review` — complete or cancel the current task before starting a new review.".to_string(),
             ));
             self.request_redraw();
             return;
@@ -34131,10 +36107,7 @@ impl ChatWidget<'_> {
         let workspace_prompt = "Review the current workspace changes (staged, unstaged, and untracked files) and highlight bugs, regressions, risky patterns, and missing tests before merge.".to_string();
         let workspace_hint = "current workspace changes".to_string();
         let workspace_preparation = "Preparing code review for current changes".to_string();
-        let workspace_metadata = Some(ReviewContextMetadata {
-            scope: Some("workspace".to_string()),
-            ..Default::default()
-        });
+        let workspace_metadata = None;
         let workspace_auto_resolve = self.config.tui.review_auto_resolve;
         items.push(SelectionItem {
             name: "Review uncommitted changes".to_string(),
@@ -34202,8 +36175,12 @@ impl ChatWidget<'_> {
             6,
         );
 
-        self.bottom_pane
-            .show_list_selection("Review options".to_string(), None, None, view);
+        self.bottom_pane.show_list_selection(
+            "Review options".to_string(),
+            None,
+            None,
+            view,
+        );
     }
 
     pub(crate) fn show_review_custom_prompt(&mut self) {
@@ -34232,8 +36209,8 @@ impl ChatWidget<'_> {
             self.auto_resolve_clear();
         }
 
-        let message = if let Ok(home) = hanzo_core::config::find_code_home() {
-            match hanzo_core::config::set_tui_review_auto_resolve(&home, enabled) {
+        let message = if let Ok(home) = code_core::config::find_code_home() {
+            match code_core::config::set_tui_review_auto_resolve(&home, enabled) {
                 Ok(_) => {
                     tracing::info!("Persisted review auto resolve toggle: {}", enabled);
                     if enabled {
@@ -34252,7 +36229,7 @@ impl ChatWidget<'_> {
                 }
             }
         } else {
-            tracing::warn!("Could not locate config home to persist review auto resolve toggle");
+            tracing::warn!("Could not locate Codex home to persist review auto resolve toggle");
             if enabled {
                 "Auto Resolve enabled for this session."
             } else {
@@ -34273,8 +36250,8 @@ impl ChatWidget<'_> {
 
         self.config.tui.auto_review_enabled = enabled;
 
-        let message = if let Ok(home) = hanzo_core::config::find_code_home() {
-            match hanzo_core::config::set_tui_auto_review_enabled(&home, enabled) {
+        let message = if let Ok(home) = code_core::config::find_code_home() {
+            match code_core::config::set_tui_auto_review_enabled(&home, enabled) {
                 Ok(_) => {
                     tracing::info!("Persisted auto review toggle: {}", enabled);
                     if enabled {
@@ -34293,7 +36270,7 @@ impl ChatWidget<'_> {
                 }
             }
         } else {
-            tracing::warn!("Could not locate config home to persist auto review toggle");
+            tracing::warn!("Could not locate Codex home to persist auto review toggle");
             if enabled {
                 "Auto Review enabled for this session."
             } else {
@@ -34305,6 +36282,66 @@ impl ChatWidget<'_> {
         self.refresh_settings_overview_rows();
         self.update_review_settings_model_row();
         self.request_redraw();
+    }
+
+    fn auto_review_git_root(&self) -> Option<PathBuf> {
+        self.run_git_command(["rev-parse", "--show-toplevel"], |stdout| {
+            let root = stdout.lines().next().unwrap_or("").trim();
+            if root.is_empty() {
+                Err("auto review git root unavailable".to_string())
+            } else {
+                Ok(root.to_string())
+            }
+        })
+        .ok()
+        .map(PathBuf::from)
+    }
+
+    fn auto_review_baseline_path(&self) -> Option<PathBuf> {
+        let git_root = self.auto_review_git_root()?;
+        match auto_review_baseline_path_for_repo(&git_root) {
+            Ok(path) => Some(path),
+            Err(err) => {
+                tracing::warn!("failed to resolve auto review baseline path: {err}");
+                None
+            }
+        }
+    }
+
+    fn load_auto_review_baseline_marker(&mut self) {
+        if self.auto_review_reviewed_marker.is_some() {
+            return;
+        }
+        let Some(path) = self.auto_review_baseline_path() else {
+            return;
+        };
+        let Ok(contents) = std::fs::read_to_string(&path) else {
+            return;
+        };
+        let commit_id = contents.lines().next().unwrap_or("").trim();
+        if commit_id.is_empty() {
+            return;
+        }
+        self.auto_review_reviewed_marker = Some(GhostCommit::new(commit_id.to_string(), None));
+    }
+
+    fn persist_auto_review_baseline_marker(&self, commit_id: &str) {
+        let commit_id = commit_id.trim();
+        if commit_id.is_empty() {
+            return;
+        }
+        let Some(path) = self.auto_review_baseline_path() else {
+            return;
+        };
+        if let Some(parent) = path.parent() {
+            if let Err(err) = std::fs::create_dir_all(parent) {
+                tracing::warn!("failed to create auto review baseline dir: {err}");
+                return;
+            }
+        }
+        if let Err(err) = std::fs::write(&path, format!("{commit_id}\n")) {
+            tracing::warn!("failed to persist auto review baseline: {err}");
+        }
     }
 
     fn maybe_trigger_auto_review(&mut self) {
@@ -34350,10 +36387,12 @@ impl ChatWidget<'_> {
 
     fn auto_review_has_changes_since(&self, reviewed: &GhostCommit) -> bool {
         let reviewed_id = reviewed.id();
-        let tracked_changes = match self
-            .run_git_command(["diff", "--name-only", reviewed_id], |stdout| {
+        let tracked_changes = match self.run_git_command(
+            ["diff", "--name-only", reviewed_id],
+            |stdout| {
                 Ok(stdout.lines().any(|line| !line.trim().is_empty()))
-            }) {
+            },
+        ) {
             Ok(changed) => changed,
             Err(err) => {
                 tracing::warn!("auto review diff failed for {reviewed_id}: {err}");
@@ -34365,8 +36404,9 @@ impl ChatWidget<'_> {
             return true;
         }
 
-        let snapshot_paths =
-            match self.run_git_command(["ls-tree", "-r", "--name-only", reviewed_id], |stdout| {
+        let snapshot_paths = match self.run_git_command(
+            ["ls-tree", "-r", "--name-only", reviewed_id],
+            |stdout| {
                 let mut paths = HashSet::new();
                 for line in stdout.lines().map(str::trim) {
                     if !line.is_empty() {
@@ -34374,28 +36414,31 @@ impl ChatWidget<'_> {
                     }
                 }
                 Ok(paths)
-            }) {
-                Ok(paths) => paths,
-                Err(err) => {
-                    tracing::warn!("auto review snapshot listing failed for {reviewed_id}: {err}");
-                    return true;
-                }
-            };
+            },
+        ) {
+            Ok(paths) => paths,
+            Err(err) => {
+                tracing::warn!("auto review snapshot listing failed for {reviewed_id}: {err}");
+                return true;
+            }
+        };
 
-        let untracked_changes =
-            match self.run_git_command(["ls-files", "--others", "--exclude-standard"], |stdout| {
+        let untracked_changes = match self.run_git_command(
+            ["ls-files", "--others", "--exclude-standard"],
+            |stdout| {
                 Ok(stdout
                     .lines()
                     .map(str::trim)
                     .filter(|line| !line.is_empty())
                     .any(|path| !snapshot_paths.contains(path)))
-            }) {
-                Ok(changed) => changed,
-                Err(err) => {
-                    tracing::warn!("auto review untracked check failed: {err}");
-                    return true;
-                }
-            };
+            },
+        ) {
+            Ok(changed) => changed,
+            Err(err) => {
+                tracing::warn!("auto review untracked check failed: {err}");
+                return true;
+            }
+        };
 
         untracked_changes
     }
@@ -34416,9 +36459,7 @@ impl ChatWidget<'_> {
                 }
             }
         }
-        self.pending_auto_review_range
-            .take()
-            .map(|range| range.base)
+        self.pending_auto_review_range.take().map(|range| range.base)
     }
 
     fn take_or_capture_auto_review_baseline(&mut self) -> Option<GhostCommit> {
@@ -34478,10 +36519,7 @@ impl ChatWidget<'_> {
         let had_notice = self.auto_review_notice.is_some();
         let had_fixed_indicator = matches!(
             self.auto_review_status,
-            Some(AutoReviewStatus {
-                status: AutoReviewIndicatorStatus::Fixed,
-                ..
-            })
+            Some(AutoReviewStatus { status: AutoReviewIndicatorStatus::Fixed, .. })
         );
         self.background_review = Some(BackgroundReviewState {
             worktree_path: std::path::PathBuf::new(),
@@ -34523,7 +36561,7 @@ impl ChatWidget<'_> {
         });
     }
 
-    fn observe_auto_review_status(&mut self, agents: &[hanzo_core::protocol::AgentInfo]) {
+    fn observe_auto_review_status(&mut self, agents: &[code_core::protocol::AgentInfo]) {
         let now = Instant::now();
         for agent in agents {
             if !Self::is_auto_review_agent(agent) {
@@ -34536,7 +36574,7 @@ impl ChatWidget<'_> {
                     self.clear_auto_review_indicator();
                     self.background_review = None;
                     self.background_review_guard = None;
-                    self.processed_auto_review_agents.insert(agent.id.clone());
+                    self.remember_processed_auto_review_agent(&agent.id);
                     continue;
                 }
             }
@@ -34562,19 +36600,22 @@ impl ChatWidget<'_> {
 
             if matches!(status, AgentStatus::Running | AgentStatus::Pending) {
                 let findings = self.auto_review_status.and_then(|s| s.findings);
-                self.set_auto_review_indicator(AutoReviewIndicatorStatus::Running, findings, phase);
+                self.set_auto_review_indicator(
+                    AutoReviewIndicatorStatus::Running,
+                    findings,
+                    phase,
+                );
                 continue;
             }
 
             if let Some(mut state) = self.auto_review_status {
                 state.phase = phase;
                 self.auto_review_status = Some(state);
-                self.bottom_pane
-                    .set_auto_review_status(Some(AutoReviewFooterStatus {
-                        status: state.status,
-                        findings: state.findings,
-                        phase,
-                    }));
+                self.bottom_pane.set_auto_review_status(Some(AutoReviewFooterStatus {
+                    status: state.status,
+                    findings: state.findings,
+                    phase,
+                }));
             }
 
             if is_terminal && self.processed_auto_review_agents.contains(&agent.id) {
@@ -34584,39 +36625,37 @@ impl ChatWidget<'_> {
                 continue;
             }
 
-            let (worktree_path, branch, snapshot) =
-                if let Some(state) = self.background_review.as_ref() {
-                    (
-                        state.worktree_path.clone(),
-                        state.branch.clone(),
-                        state.snapshot.clone(),
-                    )
-                } else {
-                    let Some(branch) = agent
-                        .batch_id
-                        .clone()
-                        .filter(|value| !value.trim().is_empty())
-                    else {
-                        // We sometimes observe the same terminal auto-review agent multiple
-                        // times (especially after cancellation/resend). If the background
-                        // review state is already cleared and we cannot resolve the worktree,
-                        // do not surface a misleading blank-path error.
-                        self.processed_auto_review_agents.insert(agent.id.clone());
-                        continue;
-                    };
-                    let Some(worktree_path) =
-                        resolve_auto_review_worktree_path(&self.config.cwd, &branch)
-                    else {
-                        self.processed_auto_review_agents.insert(agent.id.clone());
-                        continue;
-                    };
-                    (worktree_path, branch, None)
+            let (worktree_path, branch, snapshot) = if let Some(state) = self.background_review.as_ref() {
+                (
+                    state.worktree_path.clone(),
+                    state.branch.clone(),
+                    state.snapshot.clone(),
+                )
+            } else {
+                let Some(branch) = agent
+                    .batch_id
+                    .clone()
+                    .filter(|value| !value.trim().is_empty())
+                else {
+                    // We sometimes observe the same terminal auto-review agent multiple
+                    // times (especially after cancellation/resend). If the background
+                    // review state is already cleared and we cannot resolve the worktree,
+                    // do not surface a misleading blank-path error.
+                    self.remember_processed_auto_review_agent(&agent.id);
+                    continue;
                 };
+                let Some(worktree_path) =
+                    resolve_auto_review_worktree_path(&self.config.cwd, &branch)
+                else {
+                    self.remember_processed_auto_review_agent(&agent.id);
+                    continue;
+                };
+                (worktree_path, branch, None)
+            };
 
-            let (has_findings, findings, summary) =
-                Self::parse_agent_review_result(agent.result.as_deref());
+            let (has_findings, findings, summary) = Self::parse_agent_review_result(agent.result.as_deref());
 
-            self.processed_auto_review_agents.insert(agent.id.clone());
+            self.remember_processed_auto_review_agent(&agent.id);
             self.on_background_review_finished(
                 worktree_path,
                 branch,
@@ -34633,9 +36672,9 @@ impl ChatWidget<'_> {
     /// Parse the auto-review agent result to derive findings count and a concise summary.
     /// Tries to deserialize `ReviewOutputEvent` JSON (direct or fenced). Falls back to heuristics.
     fn parse_agent_review_result(raw: Option<&str>) -> (bool, usize, Option<String>) {
-        let Some(text) = raw else {
-            return (false, 0, None);
-        };
+        const MAX_AUTO_REVIEW_FALLBACK_SUMMARY_CHARS: usize = 280;
+
+        let Some(text) = raw else { return (false, 0, None); };
         let trimmed = text.trim();
         if trimmed.is_empty() {
             return (false, 0, None);
@@ -34663,6 +36702,14 @@ impl ChatWidget<'_> {
             return Self::review_result_from_output(&output);
         }
 
+        // Some runners prepend logs before printing JSON. Scan for embedded JSON
+        // objects and prefer the latest parseable review payload.
+        if let Some((has_findings, findings, summary)) =
+            Self::extract_review_from_mixed_text(trimmed)
+        {
+            return (has_findings, findings, summary);
+        }
+
         // Try to extract JSON from fenced code blocks.
         if let Some(start) = trimmed.find("```") {
             if let Some((body, _)) = trimmed[start + 3..].split_once("```") {
@@ -34676,34 +36723,301 @@ impl ChatWidget<'_> {
         // Heuristic: treat plain text as summary; infer findings only when the text
         // explicitly mentions issues. Avoid false positives for skip/lock messages.
         let lowered = trimmed.to_ascii_lowercase();
-        let clean_phrases = [
-            "no issues",
-            "no findings",
-            "clean",
-            "looks good",
-            "nothing to fix",
-        ];
-        let skip_phrases = [
-            "already running",
-            "another review",
-            "skipping this",
-            "skip this",
-        ];
-        let issue_markers = [
-            "issue", "issues", "finding", "findings", "bug", "bugs", "problem", "problems",
-            "error", "errors",
-        ]; // keep broad but guarded
+        let clean_phrases = ["no issues", "no findings", "clean", "looks good", "nothing to fix"];
+        let skip_phrases = ["already running", "another review", "skipping this", "skip this"];
+        let issue_markers = ["issue", "issues", "finding", "findings", "bug", "bugs", "problem", "problems", "error", "errors"]; // keep broad but guarded
 
         if skip_phrases.iter().any(|p| lowered.contains(p)) {
-            return (false, 0, Some(trimmed.to_string()));
+            return (
+                false,
+                0,
+                Some(Self::summarize_plain_review_text(
+                    trimmed,
+                    MAX_AUTO_REVIEW_FALLBACK_SUMMARY_CHARS,
+                )),
+            );
         }
 
         if clean_phrases.iter().any(|p| lowered.contains(p)) {
-            return (false, 0, Some(trimmed.to_string()));
+            return (
+                false,
+                0,
+                Some(Self::summarize_plain_review_text(
+                    trimmed,
+                    MAX_AUTO_REVIEW_FALLBACK_SUMMARY_CHARS,
+                )),
+            );
         }
 
         let has_findings = issue_markers.iter().any(|p| lowered.contains(p));
-        (has_findings, 0, Some(trimmed.to_string()))
+        (
+            has_findings,
+            0,
+            Some(Self::summarize_plain_review_text(
+                trimmed,
+                MAX_AUTO_REVIEW_FALLBACK_SUMMARY_CHARS,
+            )),
+        )
+    }
+
+    fn extract_review_from_mixed_text(text: &str) -> Option<(bool, usize, Option<String>)> {
+        #[derive(serde::Deserialize)]
+        struct MultiRunReview {
+            #[serde(flatten)]
+            latest: ReviewOutputEvent,
+            #[serde(default)]
+            runs: Vec<ReviewOutputEvent>,
+        }
+
+        let mut brace_depth = 0usize;
+        let mut in_string = false;
+        let mut escaped = false;
+        let mut object_start = None;
+        let mut best_match: Option<(bool, usize, Option<String>)> = None;
+
+        for (idx, ch) in text.char_indices() {
+            if in_string {
+                if escaped {
+                    escaped = false;
+                    continue;
+                }
+                if ch == '\\' {
+                    escaped = true;
+                    continue;
+                }
+                if ch == '"' {
+                    in_string = false;
+                }
+                continue;
+            }
+
+            match ch {
+                '"' => in_string = true,
+                '{' => {
+                    if brace_depth == 0 {
+                        object_start = Some(idx);
+                    }
+                    brace_depth = brace_depth.saturating_add(1);
+                }
+                '}' => {
+                    if brace_depth == 0 {
+                        continue;
+                    }
+                    brace_depth -= 1;
+                    if brace_depth == 0
+                        && let Some(start) = object_start.take()
+                    {
+                        let candidate = &text[start..=idx];
+                        if let Ok(wrapper) = serde_json::from_str::<MultiRunReview>(candidate) {
+                            let mut runs = wrapper.runs;
+                            if runs.is_empty() {
+                                runs.push(wrapper.latest);
+                            }
+                            best_match = Some(Self::review_result_from_runs(&runs));
+                            continue;
+                        }
+                        if let Ok(output) = serde_json::from_str::<ReviewOutputEvent>(candidate) {
+                            best_match = Some(Self::review_result_from_output(&output));
+                        }
+                    }
+                }
+                _ => {}
+            }
+        }
+
+        best_match
+    }
+
+    fn summarize_plain_review_text(text: &str, max_chars: usize) -> String {
+        let mut line = text
+            .lines()
+            .map(str::trim)
+            .find(|line| !line.is_empty())
+            .unwrap_or(text)
+            .replace('\n', " ")
+            .replace('\r', " ");
+
+        line = line.split_whitespace().collect::<Vec<_>>().join(" ");
+        if line.chars().count() <= max_chars {
+            return line;
+        }
+
+        let truncated: String = line.chars().take(max_chars.saturating_sub(1)).collect();
+        format!("{truncated}…")
+    }
+
+    fn summarize_auto_review_error(error: &str) -> String {
+        let trimmed = error.trim();
+        if trimmed.is_empty() {
+            return "Auto review failed before producing findings.".to_string();
+        }
+
+        let lowered = trimmed.to_ascii_lowercase();
+        let hit_context_window = lowered.contains("context-window limit")
+            || lowered.contains("context window")
+            || lowered.contains("input exceeds the context window");
+        let hit_usage_limit = lowered.contains("usage_limit_reached")
+            || lowered.contains("429 too many requests")
+            || lowered.contains("usage limit has been reached");
+        let disk_full = lowered.contains("no space left on device")
+            || lowered.contains("os error 28");
+
+        let mut summary = if disk_full {
+            "Auto review could not create temporary git data because the disk is full."
+                .to_string()
+        } else if hit_context_window && hit_usage_limit {
+            "Model hit the context window repeatedly and then exhausted usage while compacting."
+                .to_string()
+        } else if hit_context_window {
+            "Model hit the context window while running auto review.".to_string()
+        } else if hit_usage_limit {
+            "Auto review hit account usage limits before finishing.".to_string()
+        } else {
+            "Auto review failed before producing findings.".to_string()
+        };
+
+        let detail = trimmed
+            .lines()
+            .map(str::trim)
+            .filter(|line| !line.is_empty())
+            .find(|line| {
+                let lower = line.to_ascii_lowercase();
+                !(lower.starts_with('[')
+                    || lower.starts_with("exec ")
+                    || lower.starts_with("bash -lc")
+                    || lower.starts_with("git ")
+                    || lower.starts_with("tokens used:")
+                    || lower.starts_with("compact task completed")
+                    || lower.starts_with("command guard:")
+                    || lower.starts_with("original_script:")
+                    || lower.starts_with("resend_exact_argv:")
+                    || lower.starts_with("review finished")
+                    || lower.starts_with("worktree:"))
+            });
+
+        if let Some(detail) = detail {
+            let compact_detail = Self::truncate_with_ellipsis(detail, MAX_AUTO_REVIEW_ERROR_SUMMARY_CHARS);
+            if !compact_detail.eq_ignore_ascii_case(&summary) {
+                summary.push(' ');
+                summary.push_str("Detail: ");
+                summary.push_str(&compact_detail);
+            }
+        }
+
+        summary
+    }
+
+    fn classify_auto_review_error(error: &str) -> AutoReviewFailureClassification {
+        let lowered = error.to_ascii_lowercase();
+        let worktree_prepare_failed = lowered.contains("failed to prepare worktree")
+            || lowered.contains("failed to prepare fallback worktree")
+            || lowered.contains("failed to create reusable worktree")
+            || lowered.contains("failed to reset reusable worktree")
+            || lowered.contains("not a git repository")
+            || lowered.contains("preparing worktree (detached head");
+        let scope_too_large = lowered.contains("auto review scope exceeds configured background review size limits");
+        let hit_context_window = lowered.contains("context-window limit")
+            || lowered.contains("context window")
+            || lowered.contains("input exceeds the context window");
+        let hit_usage_limit = lowered.contains("usage_limit_reached")
+            || lowered.contains("429 too many requests")
+            || lowered.contains("usage limit has been reached");
+        let disk_full = lowered.contains("no space left on device")
+            || lowered.contains("os error 28");
+
+        let missing_binary = lowered.contains("executable not found")
+            || lowered.contains("command not found")
+            || (lowered.contains("no such file or directory") && lowered.contains("exec preflight"));
+        let os_error_2_with_path_context = lowered.contains("no such file or directory (os error 2)")
+            && (lowered.contains("worktree")
+                || lowered.contains("working directory")
+                || lowered.contains("cwd")
+                || lowered.contains("current_dir")
+                || lowered.contains("exec preflight"));
+        let missing_path = lowered.contains("working directory does not exist")
+            || lowered.contains("working directory is not a directory")
+            || os_error_2_with_path_context;
+
+        if worktree_prepare_failed {
+            return AutoReviewFailureClassification {
+                failure_class: "worktree_prepare_failed",
+                phase: "worktree_prepare",
+                retryable: false,
+                remediation_hint: "Verify the current workspace is inside a valid git repository and retry auto review.",
+            };
+        }
+
+        if scope_too_large {
+            return AutoReviewFailureClassification {
+                failure_class: "review_scope_too_large",
+                phase: "prompt_build",
+                retryable: false,
+                remediation_hint: "The change set is too large for one background auto-review; run /review manually on a smaller scope or split the change set.",
+            };
+        }
+
+        if disk_full {
+            return AutoReviewFailureClassification {
+                failure_class: "disk_full",
+                phase: if lowered.contains("snapshot")
+                    || lowered.contains("write-tree")
+                    || lowered.contains("git add --all")
+                    || lowered.contains("git write-tree")
+                {
+                    "snapshot_capture"
+                } else {
+                    "exec_run"
+                },
+                retryable: false,
+                remediation_hint: "Free space in /tmp (or point temporary files elsewhere) before retrying auto review.",
+            };
+        }
+
+        if missing_binary {
+            return AutoReviewFailureClassification {
+                failure_class: "exec_missing_binary",
+                phase: if lowered.contains("preflight") {
+                    "exec_preflight"
+                } else {
+                    "exec_run"
+                },
+                retryable: false,
+                remediation_hint: "Ensure required binaries (for example git/bash/rg/code) are installed and available on PATH in the auto-review runtime.",
+            };
+        }
+
+        if missing_path {
+            return AutoReviewFailureClassification {
+                failure_class: "exec_missing_path",
+                phase: if lowered.contains("preflight") {
+                    "exec_preflight"
+                } else {
+                    "exec_run"
+                },
+                retryable: false,
+                remediation_hint: "Verify the auto-review worktree path exists and command/file paths are valid before retrying.",
+            };
+        }
+
+        if hit_context_window {
+            return AutoReviewFailureClassification {
+                failure_class: "context_budget_exhausted",
+                phase: if lowered.contains("compact") {
+                    "compact"
+                } else {
+                    "prompt_build"
+                },
+                retryable: hit_usage_limit,
+                remediation_hint: "Reduce review scope or chunk large diffs so compaction can finish within model limits.",
+            };
+        }
+
+        AutoReviewFailureClassification {
+            failure_class: "unknown",
+            phase: "exec_run",
+            retryable: true,
+            remediation_hint: "Re-run auto review once and capture logs if the failure repeats.",
+        }
     }
 
     fn review_result_from_runs(outputs: &[ReviewOutputEvent]) -> (bool, usize, Option<String>) {
@@ -34712,10 +37026,11 @@ impl ChatWidget<'_> {
         }
 
         let last = outputs.last().unwrap();
-        let last_with_findings_idx = outputs.iter().rposition(|o| !o.findings.is_empty());
+        let last_with_findings_idx = outputs
+            .iter()
+            .rposition(|o| !o.findings.is_empty());
 
-        let (mut has_findings, mut findings_len, mut summary) =
-            Self::review_result_from_output(last);
+        let (mut has_findings, mut findings_len, mut summary) = Self::review_result_from_output(last);
 
         if let Some(idx) = last_with_findings_idx {
             let with_findings = &outputs[idx];
@@ -34795,25 +37110,150 @@ impl ChatWidget<'_> {
         self.bottom_pane.set_auto_review_status(None);
     }
 
-    fn last_assistant_cell_index(&self) -> Option<usize> {
-        self.history_cells
-            .iter()
-            .enumerate()
-            .rev()
-            .find_map(|(idx, cell)| {
-                cell.as_any()
-                    .downcast_ref::<history_cell::AssistantMarkdownCell>()
-                    .map(|_| idx)
-            })
+    fn remember_processed_auto_review_agent(&mut self, agent_id: &str) {
+        if agent_id.trim().is_empty() {
+            return;
+        }
+
+        if !self
+            .processed_auto_review_agents
+            .insert(agent_id.to_string())
+        {
+            return;
+        }
+
+        self
+            .processed_auto_review_agent_order
+            .push_back(agent_id.to_string());
+
+        let mut evicted = 0usize;
+        while self.processed_auto_review_agents.len() > MAX_PROCESSED_AUTO_REVIEW_AGENTS {
+            let Some(oldest) = self.processed_auto_review_agent_order.pop_front() else {
+                break;
+            };
+            if self.processed_auto_review_agents.remove(&oldest) {
+                evicted = evicted.saturating_add(1);
+            }
+        }
+
+        if evicted > 0 {
+            self.auto_review_processed_evicted_total = self
+                .auto_review_processed_evicted_total
+                .saturating_add(evicted as u64);
+            tracing::debug!(
+                evicted,
+                retained = self.processed_auto_review_agents.len(),
+                total_evicted = self.auto_review_processed_evicted_total,
+                "trimmed processed auto-review agent cache"
+            );
+        }
     }
 
-    fn insert_auto_review_notice(
-        &mut self,
+    fn prune_agent_runtime_cache(&mut self, current_agents: &[code_core::protocol::AgentInfo]) {
+        if self.agent_runtime.len() <= MAX_AGENT_RUNTIME_ENTRIES {
+            return;
+        }
+
+        let active_ids: HashSet<&str> = current_agents.iter().map(|agent| agent.id.as_str()).collect();
+        let mut terminal_candidates: Vec<(Instant, String)> = self
+            .agent_runtime
+            .iter()
+            .filter(|(id, runtime)| {
+                !active_ids.contains(id.as_str()) && runtime.completed_at.is_some()
+            })
+            .filter_map(|(id, runtime)| runtime.completed_at.map(|ts| (ts, id.clone())))
+            .collect();
+
+        if terminal_candidates.is_empty() {
+            return;
+        }
+
+        terminal_candidates.sort_by_key(|(completed_at, _)| *completed_at);
+        let mut pruned = 0usize;
+        for (_, id) in terminal_candidates {
+            if self.agent_runtime.len() <= MAX_AGENT_RUNTIME_ENTRIES {
+                break;
+            }
+            if self.agent_runtime.remove(&id).is_some() {
+                pruned = pruned.saturating_add(1);
+            }
+        }
+
+        if pruned > 0 {
+            self.agent_runtime_pruned_total = self
+                .agent_runtime_pruned_total
+                .saturating_add(pruned as u64);
+            tracing::debug!(
+                pruned,
+                retained = self.agent_runtime.len(),
+                total_pruned = self.agent_runtime_pruned_total,
+                "trimmed agent runtime cache"
+            );
+        }
+    }
+
+    fn prune_agents_terminal_entries(&mut self) {
+        if self.agents_terminal.entries.len() <= MAX_AGENTS_TERMINAL_ENTRIES {
+            return;
+        }
+
+        let mut removable: Vec<(Instant, String)> = self
+            .agents_terminal
+            .entries
+            .iter()
+            .filter(|(_, entry)| {
+                matches!(
+                    entry.status,
+                    AgentStatus::Completed | AgentStatus::Failed | AgentStatus::Cancelled
+                )
+            })
+            .map(|(id, entry)| (entry.last_seen_at, id.clone()))
+            .collect();
+
+        removable.sort_by_key(|(seen_at, _)| *seen_at);
+
+        let mut pruned = 0usize;
+        for (_, id) in removable {
+            if self.agents_terminal.entries.len() <= MAX_AGENTS_TERMINAL_ENTRIES {
+                break;
+            }
+
+            if self.agents_terminal.entries.remove(&id).is_some() {
+                pruned = pruned.saturating_add(1);
+            }
+            self.agents_terminal.order.retain(|agent_id| agent_id != &id);
+            self.agents_terminal.scroll_offsets.remove(&format!("agent:{id}"));
+        }
+
+        self.agents_terminal.clamp_selected_index();
+
+        if pruned > 0 {
+            self.agents_terminal_pruned_total = self
+                .agents_terminal_pruned_total
+                .saturating_add(pruned as u64);
+            tracing::debug!(
+                pruned,
+                retained = self.agents_terminal.entries.len(),
+                total_pruned = self.agents_terminal_pruned_total,
+                "trimmed agents terminal entries"
+            );
+        }
+    }
+
+    fn last_assistant_cell_index(&self) -> Option<usize> {
+        self.history_cells.iter().enumerate().rev().find_map(|(idx, cell)| {
+            cell.as_any()
+                .downcast_ref::<history_cell::AssistantMarkdownCell>()
+                .map(|_| idx)
+        })
+    }
+
+    fn auto_review_notice_line(
         branch: &str,
         worktree_path: &std::path::Path,
         summary: Option<&str>,
         findings: usize,
-    ) {
+    ) -> String {
         let path_text = format!("{}", worktree_path.display());
         let has_path = !path_text.is_empty();
 
@@ -34833,9 +37273,49 @@ impl ChatWidget<'_> {
             line.push(' ');
             line.push_str(&format!("Merge {path_text} to apply fixes."));
         }
-        if crate::theme::show_borders() {
-            line.push_str(" [Ctrl+A] Show");
-        }
+        line.push_str(" [Ctrl+A] Show");
+        line
+    }
+
+    fn should_record_auto_review_failure_note(
+        &mut self,
+        classification: AutoReviewFailureClassification,
+        worktree_label: &str,
+        worktree_path_label: &str,
+        summarized_error: &str,
+    ) -> bool {
+        let now = Instant::now();
+        let candidate = AutoReviewFailureRecord {
+            failure_class: classification.failure_class,
+            phase: classification.phase,
+            worktree_label: worktree_label.to_string(),
+            worktree_path_label: worktree_path_label.to_string(),
+            summarized_error: summarized_error.to_string(),
+            observed_at: now,
+        };
+
+        let duplicate = self.last_auto_review_failure.as_ref().is_some_and(|last| {
+            last.failure_class == candidate.failure_class
+                && last.phase == candidate.phase
+                && last.worktree_label == candidate.worktree_label
+                && last.worktree_path_label == candidate.worktree_path_label
+                && last.summarized_error == candidate.summarized_error
+                && now.duration_since(last.observed_at).as_secs()
+                    <= AUTO_REVIEW_FAILURE_DEDUPE_WINDOW_SECS
+        });
+
+        self.last_auto_review_failure = Some(candidate);
+        !duplicate
+    }
+
+    fn insert_auto_review_notice(
+        &mut self,
+        branch: &str,
+        worktree_path: &std::path::Path,
+        summary: Option<&str>,
+        findings: usize,
+    ) {
+        let line = Self::auto_review_notice_line(branch, worktree_path, summary, findings);
 
         let message_lines = vec![MessageLine {
             kind: MessageLineKind::Paragraph,
@@ -34851,10 +37331,7 @@ impl ChatWidget<'_> {
             id: HistoryId::ZERO,
             role: PlainMessageRole::System,
             kind: PlainMessageKind::Notice,
-            header: Some(MessageHeader {
-                label: "Auto Review".to_string(),
-                badge: None,
-            }),
+            header: Some(MessageHeader { label: "Auto Review".to_string(), badge: None }),
             lines: message_lines,
             metadata: None,
         };
@@ -34910,6 +37387,7 @@ impl ChatWidget<'_> {
                 AutoReviewPhase::Reviewing,
             );
         }
+
         // Ensure the main status spinner is cleared once the foreground turn ends;
         // background auto review should not keep the composer in a "running" state.
         self.bottom_pane.set_task_running(false);
@@ -34929,13 +37407,22 @@ impl ChatWidget<'_> {
         agent_id: Option<String>,
         snapshot: Option<String>,
     ) {
-        // Normalize zero-count "issues" so the indicator and developer notes stay
-        // aligned with the overlay: if the parser could not produce a findings list,
-        // treat the run as clean instead of "fixed".
-        let mut has_findings = has_findings;
-        if has_findings && findings == 0 {
-            has_findings = false;
-        }
+        let effective_findings = if has_findings {
+            findings.max(1)
+        } else {
+            findings
+        };
+
+        let inflight_worktree_path = self
+            .background_review
+            .as_ref()
+            .map(|state| state.worktree_path.clone())
+            .unwrap_or_default();
+        let inflight_branch = self
+            .background_review
+            .as_ref()
+            .map(|state| state.branch.clone())
+            .unwrap_or_default();
 
         let inflight_base = self
             .background_review
@@ -34950,7 +37437,6 @@ impl ChatWidget<'_> {
         self.background_review = None;
         self.background_review_guard = None;
         release_background_lock(&agent_id);
-        let mut developer_note: Option<String> = None;
         let snapshot_note = inflight_snapshot
             .as_deref()
             .map(str::trim)
@@ -34972,30 +37458,81 @@ impl ChatWidget<'_> {
             .filter(|s| !s.is_empty())
             .map(|s| s.replace('\n', " "))
             .map(|s| format!("Summary: {s}"));
+        let resolved_worktree_path = if worktree_path.as_os_str().is_empty() {
+            inflight_worktree_path
+        } else {
+            worktree_path
+        };
+        let resolved_branch = if branch.trim().is_empty() {
+            inflight_branch
+        } else {
+            branch
+        };
+        let worktree_label = if resolved_branch.trim().is_empty() {
+            "(unknown)".to_string()
+        } else {
+            resolved_branch.clone()
+        };
+        let worktree_path_label = if resolved_worktree_path.as_os_str().is_empty() {
+            "(unavailable)".to_string()
+        } else {
+            resolved_worktree_path.display().to_string()
+        };
         let errored = error.is_some();
-        let indicator_status = if let Some(err) = error {
-            developer_note = Some(format!(
-                "[developer] Background auto-review failed.\n\nThis auto-review ran in an isolated git worktree and did not modify your current workspace.\n\nWorktree: '{branch}'\nWorktree path: {}\n{snapshot_note}\n{agent_note}\nError: {err}",
-                worktree_path.display(),
-            ));
-            AutoReviewIndicatorStatus::Failed
+        let notice_line = has_findings.then(|| {
+            Self::auto_review_notice_line(
+                &worktree_label,
+                &resolved_worktree_path,
+                summary.as_deref(),
+                effective_findings,
+            )
+        });
+        let mut error_retryable = false;
+        let (indicator_status, developer_note) = if let Some(err) = error {
+            let summarized_error = Self::summarize_auto_review_error(&err);
+            let classification = Self::classify_auto_review_error(&err);
+            error_retryable = classification.retryable;
+            let note = self
+                .should_record_auto_review_failure_note(
+                    classification,
+                    &worktree_label,
+                    &worktree_path_label,
+                    &summarized_error,
+                )
+                .then(|| {
+                    format!(
+                        "[developer] Background auto-review failed.\n\nThis auto-review ran in an isolated git worktree and did not modify your current workspace.\n\nWorktree: '{worktree_label}'\nWorktree path: {worktree_path_label}\n{snapshot_note}\n{agent_note}\nFailure class: {}\nPhase: {}\nRetryable: {}\nHint: {}\nError: {err}",
+                        classification.failure_class,
+                        classification.phase,
+                        classification.retryable,
+                        classification.remediation_hint,
+                        err = summarized_error,
+                    )
+                });
+            (AutoReviewIndicatorStatus::Failed, note)
         } else if has_findings {
+            self.last_auto_review_failure = None;
             let mut note = format!(
-                "[developer] Background auto-review completed and reported {findings} issue(s).\n\nA separate LLM ran /review (and may have run auto-resolve) in an isolated git worktree. Any proposed fixes live only in that worktree until you merge them.\n\nNext: Decide if the findings are genuine. If yes, Merge the worktree '{branch}' to apply the changes (or cherry-pick selectively). If not, do not merge.\n\nWorktree path: {}\n{snapshot_note}\n{agent_note}",
-                worktree_path.display(),
+                "[developer] {}\n\nBackground auto-review completed and reported {effective_findings} issue(s).\n\nA separate LLM ran /review (and may have run auto-resolve) in an isolated git worktree. Any proposed fixes live only in that worktree until you merge them.\n\nNext: Decide if the findings are genuine. If yes, Merge the worktree '{worktree_label}' to apply the changes (or cherry-pick selectively). If not, do not merge.\n\nWorktree path: {worktree_path_label}\n{snapshot_note}\n{agent_note}",
+                notice_line.as_deref().unwrap_or("Background auto-review found issues."),
             );
             if let Some(summary_note) = summary_note {
                 note.push('\n');
                 note.push_str(&summary_note);
             }
-            developer_note = Some(note);
-            AutoReviewIndicatorStatus::Fixed
+            (AutoReviewIndicatorStatus::Fixed, Some(note))
         } else {
-            AutoReviewIndicatorStatus::Clean
+            self.last_auto_review_failure = None;
+            (
+                AutoReviewIndicatorStatus::Clean,
+                Some(format!(
+                    "[developer] Background auto-review completed with no findings.\n\nA separate LLM ran /review in an isolated git worktree and did not report actionable issues.\n\nWorktree path: {worktree_path_label}\n{snapshot_note}\n{agent_note}"
+                )),
+            )
         };
 
         let findings_for_indicator =
-            matches!(indicator_status, AutoReviewIndicatorStatus::Fixed).then_some(findings.max(1));
+            matches!(indicator_status, AutoReviewIndicatorStatus::Fixed).then_some(effective_findings);
         let phase = self
             .auto_review_status
             .map(|s| s.phase)
@@ -35003,18 +37540,15 @@ impl ChatWidget<'_> {
         self.set_auto_review_indicator(indicator_status, findings_for_indicator, phase);
         if matches!(indicator_status, AutoReviewIndicatorStatus::Fixed) {
             self.insert_auto_review_notice(
-                &branch,
-                &worktree_path,
+                &worktree_label,
+                &resolved_worktree_path,
                 summary.as_deref(),
-                findings.max(1),
+                effective_findings,
             );
         }
 
         if let Some(note) = developer_note {
-            // Immediately inject as a developer message so the user sees it in the
-            // transcript, even if tasks/streams are still running. Do not defer to
-            // pending_agent_notes; that path can be lost if the session ends.
-            self.submit_hidden_text_message_with_preface(String::new(), note);
+            self.record_background_review_note(note);
         }
 
         // Auto review completion should never leave the composer spinner active.
@@ -35024,17 +37558,48 @@ impl ChatWidget<'_> {
         self.handle_auto_review_completion_state(
             has_findings,
             errored,
+            error_retryable,
             inflight_base,
             inflight_snapshot,
         );
+
+        // Auto review findings are inserted as history notices, but Auto Drive
+        // resumes from cached conversation state. Rebuild before resuming so
+        // the coordinator receives the latest background review context.
+        if self.auto_state.is_active() {
+            self.rebuild_auto_history();
+        }
+
         self.maybe_resume_auto_after_review();
         self.request_redraw();
+    }
+
+    fn record_background_review_note(&mut self, note: String) {
+        let trimmed = note.trim();
+        if trimmed.is_empty() {
+            return;
+        }
+
+        let bounded_note = Self::truncate_with_ellipsis(trimmed, MAX_PENDING_AUTO_REVIEW_NOTE_CHARS);
+        let cleaned = Self::strip_context_sections(&bounded_note);
+        if !cleaned.trim().is_empty() {
+            self.last_developer_message =
+                Some(Self::truncate_with_ellipsis(&cleaned, MAX_AUTO_REVIEW_NOTE_CONTEXT_CHARS));
+        }
+
+        if let Err(err) = self
+            .code_op_tx
+            .send(Op::AddPostTurnDeveloperInput { text: bounded_note })
+        {
+            tracing::error!("failed to send AddPostTurnDeveloperInput op: {err}");
+        }
     }
 
     fn handle_auto_review_completion_state(
         &mut self,
         has_findings: bool,
         errored: bool,
+        error_retryable: bool,
         inflight_base: Option<GhostCommit>,
         snapshot: Option<String>,
     ) {
@@ -35043,11 +37608,14 @@ impl ChatWidget<'_> {
         if !errored {
             if let Some(id) = snapshot.as_ref() {
                 self.auto_review_reviewed_marker = Some(GhostCommit::new(id.clone(), None));
+                self.persist_auto_review_baseline_marker(id);
             }
         }
 
         if was_skipped || errored {
-            if let Some(base) = inflight_base {
+            if (was_skipped || error_retryable)
+                && let Some(base) = inflight_base
+            {
                 self.queue_skipped_auto_review(base);
             }
             return;
@@ -35073,7 +37641,7 @@ impl ChatWidget<'_> {
     }
 
     pub(crate) fn set_review_auto_resolve_attempts(&mut self, attempts: u32) {
-        use hanzo_core::config_types::AutoResolveAttemptLimit;
+        use code_core::config_types::AutoResolveAttemptLimit;
 
         let Ok(limit) = AutoResolveAttemptLimit::try_new(attempts) else {
             tracing::warn!("Ignoring invalid auto-resolve attempt value: {}", attempts);
@@ -35082,7 +37650,13 @@ impl ChatWidget<'_> {
 
         self.auto_resolve_attempts_baseline = limit.get();
 
-        if self.config.auto_drive.auto_resolve_review_attempts.get() == limit.get() {
+        if self
+            .config
+            .auto_drive
+            .auto_resolve_review_attempts
+            .get()
+            == limit.get()
+        {
             return;
         }
 
@@ -35095,14 +37669,17 @@ impl ChatWidget<'_> {
             }
         }
 
-        let message = if let Ok(home) = hanzo_core::config::find_code_home() {
-            match hanzo_core::config::set_auto_drive_settings(
+        let message = if let Ok(home) = code_core::config::find_code_home() {
+            match code_core::config::set_auto_drive_settings(
                 &home,
                 &self.config.auto_drive,
                 self.config.auto_drive_use_chat_model,
             ) {
                 Ok(_) => {
-                    tracing::info!("Persisted auto resolve attempt limit: {}", limit.get());
+                    tracing::info!(
+                        "Persisted auto resolve attempt limit: {}",
+                        limit.get()
+                    );
                     format!("Max re-reviews set to {}.", limit.get())
                 }
                 Err(err) => {
@@ -35114,7 +37691,7 @@ impl ChatWidget<'_> {
                 }
             }
         } else {
-            tracing::warn!("Could not locate config home to persist auto resolve attempts");
+            tracing::warn!("Could not locate Codex home to persist auto resolve attempts");
             format!("Max re-reviews set to {} for this session.", limit.get())
         };
 
@@ -35125,27 +37702,36 @@ impl ChatWidget<'_> {
     }
 
     pub(crate) fn set_auto_review_followup_attempts(&mut self, attempts: u32) {
-        use hanzo_core::config_types::AutoResolveAttemptLimit;
+        use code_core::config_types::AutoResolveAttemptLimit;
 
         let Ok(limit) = AutoResolveAttemptLimit::try_new(attempts) else {
             tracing::warn!("Ignoring invalid auto-review follow-up value: {}", attempts);
             return;
         };
 
-        if self.config.auto_drive.auto_review_followup_attempts.get() == limit.get() {
+        if self
+            .config
+            .auto_drive
+            .auto_review_followup_attempts
+            .get()
+            == limit.get()
+        {
             return;
         }
 
         self.config.auto_drive.auto_review_followup_attempts = limit;
 
-        if let Ok(home) = hanzo_core::config::find_code_home() {
-            match hanzo_core::config::set_auto_drive_settings(
+        if let Ok(home) = code_core::config::find_code_home() {
+            match code_core::config::set_auto_drive_settings(
                 &home,
                 &self.config.auto_drive,
                 self.config.auto_drive_use_chat_model,
             ) {
                 Ok(_) => {
-                    tracing::info!("Persisted auto-review follow-up limit: {}", limit.get());
+                    tracing::info!(
+                        "Persisted auto-review follow-up limit: {}",
+                        limit.get()
+                    );
                     self.bottom_pane.flash_footer_notice(format!(
                         "Auto Review follow-ups set to {}.",
                         limit.get()
@@ -35170,9 +37756,13 @@ impl ChatWidget<'_> {
         if self.auto_resolve_attempts_baseline == 0 {
             return;
         }
-        let current = self.config.auto_drive.auto_resolve_review_attempts.get();
+        let current = self
+            .config
+            .auto_drive
+            .auto_resolve_review_attempts
+            .get();
         if current == 0 {
-            if let Ok(limit) = hanzo_core::config_types::AutoResolveAttemptLimit::try_new(
+            if let Ok(limit) = code_core::config_types::AutoResolveAttemptLimit::try_new(
                 self.auto_resolve_attempts_baseline,
             ) {
                 self.config.auto_drive.auto_resolve_review_attempts = limit;
@@ -35194,8 +37784,7 @@ impl ChatWidget<'_> {
                     self.config.review_resolve_model.clone(),
                     self.config.review_resolve_model_reasoning_effort,
                 );
-                content
-                    .set_review_resolve_use_chat_model(self.config.review_resolve_use_chat_model);
+                content.set_review_resolve_use_chat_model(self.config.review_resolve_use_chat_model);
                 content.update_auto_review_model(
                     self.config.auto_review_model.clone(),
                     self.config.auto_review_model_reasoning_effort,
@@ -35208,9 +37797,7 @@ impl ChatWidget<'_> {
                 content.set_auto_review_resolve_use_chat_model(
                     self.config.auto_review_resolve_use_chat_model,
                 );
-                content.set_review_followups(
-                    self.config.auto_drive.auto_resolve_review_attempts.get(),
-                );
+                content.set_review_followups(self.config.auto_drive.auto_resolve_review_attempts.get());
                 content.set_auto_review_followups(
                     self.config.auto_drive.auto_review_followup_attempts.get(),
                 );
@@ -35261,8 +37848,12 @@ impl ChatWidget<'_> {
             self.app_event_tx.clone(),
             6,
         );
-        self.bottom_pane
-            .show_list_selection("Select a commit".to_string(), None, None, view);
+        self.bottom_pane.show_list_selection(
+            "Select a commit".to_string(),
+            None,
+            None,
+            view,
+        );
     }
 
     pub(crate) fn present_review_commit_picker(&mut self, commits: Vec<CommitLogEntry>) {
@@ -35301,27 +37892,21 @@ impl ChatWidget<'_> {
             let prompt_closure = prompt.clone();
             let hint_closure = hint.clone();
             let prep_closure = preparation.clone();
-            let metadata_option = Some(ReviewContextMetadata {
-                scope: Some("commit".to_string()),
-                commit: Some(sha.clone()),
-                ..Default::default()
-            });
+            let metadata_option = None;
             let auto_flag = auto_resolve;
             items.push(SelectionItem {
                 name: title,
                 description: None,
                 is_current: false,
-                actions: vec![Box::new(
-                    move |tx: &crate::app_event_sender::AppEventSender| {
-                        tx.send(crate::app_event::AppEvent::RunReviewWithScope {
-                            prompt: prompt_closure.clone(),
-                            hint: hint_closure.clone(),
-                            preparation_label: Some(prep_closure.clone()),
-                            metadata: metadata_option.clone(),
-                            auto_resolve: auto_flag,
-                        });
-                    },
-                )],
+                actions: vec![Box::new(move |tx: &crate::app_event_sender::AppEventSender| {
+                    tx.send(crate::app_event::AppEvent::RunReviewWithScope {
+                        prompt: prompt_closure.clone(),
+                        hint: hint_closure.clone(),
+                        preparation_label: Some(prep_closure.clone()),
+                        metadata: metadata_option.clone(),
+                        auto_resolve: auto_flag,
+                    });
+                })],
             });
         }
 
@@ -35364,8 +37949,12 @@ impl ChatWidget<'_> {
             self.app_event_tx.clone(),
             6,
         );
-        self.bottom_pane
-            .show_list_selection("Select a base branch".to_string(), None, None, view);
+        self.bottom_pane.show_list_selection(
+            "Select a base branch".to_string(),
+            None,
+            None,
+            view,
+        );
     }
 
     pub(crate) fn present_review_branch_picker(
@@ -35396,7 +37985,7 @@ impl ChatWidget<'_> {
 
             let prompt = if let Some(current) = current_trimmed.as_ref() {
                 format!(
-                    "Review the code changes between the current branch '{current}' and '{branch_trimmed}'. Identify the intent of the changes in '{current}' and ensure no obvious gaps remain. Find all genuine bugs or regressions which need to be addressed before merging. Return ALL issues which need to be addressed, not just the first one you find."
+                    "Review the code changes between the current branch '{current}' and '{branch_trimmed}'. Identify the intent of the changes in '{current}' and ensure no obvious gaps remain. Find all geniune bugs or regressions which need to be addressed before merging. Return ALL issues which need to be addressed, not just the first one you find."
                 )
             } else {
                 format!(
@@ -35408,28 +37997,21 @@ impl ChatWidget<'_> {
             let prompt_closure = prompt.clone();
             let hint_closure = hint.clone();
             let prep_closure = preparation.clone();
-            let metadata_option = Some(ReviewContextMetadata {
-                scope: Some("branch_diff".to_string()),
-                base_branch: Some(branch_trimmed.to_string()),
-                current_branch: current_trimmed.clone(),
-                ..Default::default()
-            });
+            let metadata_option = None;
             let auto_flag = auto_resolve;
             items.push(SelectionItem {
                 name: title,
                 description: None,
                 is_current: false,
-                actions: vec![Box::new(
-                    move |tx: &crate::app_event_sender::AppEventSender| {
-                        tx.send(crate::app_event::AppEvent::RunReviewWithScope {
-                            prompt: prompt_closure.clone(),
-                            hint: hint_closure.clone(),
-                            preparation_label: Some(prep_closure.clone()),
-                            metadata: metadata_option.clone(),
-                            auto_resolve: auto_flag,
-                        });
-                    },
-                )],
+                actions: vec![Box::new(move |tx: &crate::app_event_sender::AppEventSender| {
+                    tx.send(crate::app_event::AppEvent::RunReviewWithScope {
+                        prompt: prompt_closure.clone(),
+                        hint: hint_closure.clone(),
+                        preparation_label: Some(prep_closure.clone()),
+                        metadata: metadata_option.clone(),
+                        auto_resolve: auto_flag,
+                    });
+                })],
             });
         }
 
@@ -35465,8 +38047,7 @@ impl ChatWidget<'_> {
     pub(crate) fn handle_review_command(&mut self, args: String) {
         if self.is_task_running() {
             self.history_push_plain_state(crate::history_cell::new_error_event(
-                "`/review` — complete or cancel the current task before starting a new review."
-                    .to_string(),
+                "`/review` — complete or cancel the current task before starting a new review.".to_string(),
             ));
             self.request_redraw();
             return;
@@ -35477,57 +38058,49 @@ impl ChatWidget<'_> {
         if trimmed.is_empty() {
             if Self::is_branch_worktree_path(&self.config.cwd) {
                 if let Some(git_root) =
-                    hanzo_core::git_info::resolve_root_git_project_for_trust(&self.config.cwd)
+                    code_core::git_info::resolve_root_git_project_for_trust(&self.config.cwd)
                 {
                     let worktree_cwd = self.config.cwd.clone();
                     let tx = self.app_event_tx.clone();
                     let auto_flag = auto_resolve;
                     tokio::spawn(async move {
-                        let branch_metadata =
-                            hanzo_core::git_worktree::load_branch_metadata(&worktree_cwd);
-                        let metadata_base = branch_metadata.as_ref().and_then(|meta| {
-                            meta.remote_ref
-                                .clone()
-                                .or_else(|| {
-                                    if let (Some(remote_name), Some(base_branch)) =
-                                        (meta.remote_name.clone(), meta.base_branch.clone())
-                                    {
-                                        Some(format!("{}/{}", remote_name, base_branch))
-                                    } else {
-                                        None
-                                    }
-                                })
-                                .or_else(|| meta.base_branch.clone())
-                        });
-                        let default_branch = match metadata_base {
-                            Some(value) => Some(value),
-                            None => hanzo_core::git_worktree::detect_default_branch(&git_root)
-                                .await
-                                .map(|name| name.trim().to_string())
-                                .filter(|name| !name.is_empty()),
-                        };
-                        let current_branch =
-                            hanzo_core::git_info::current_branch_name(&worktree_cwd)
-                                .await
-                                .map(|name| name.trim().to_string())
-                                .filter(|name| !name.is_empty());
+                    let branch_metadata =
+                        code_core::git_worktree::load_branch_metadata(&worktree_cwd);
+                    let metadata_base = branch_metadata.as_ref().and_then(|meta| {
+                        meta.remote_ref.clone().or_else(|| {
+                            if let (Some(remote_name), Some(base_branch)) =
+                                (meta.remote_name.clone(), meta.base_branch.clone())
+                            {
+                                Some(format!("{}/{}", remote_name, base_branch))
+                            } else {
+                                None
+                            }
+                        })
+                        .or_else(|| meta.base_branch.clone())
+                    });
+                    let default_branch = match metadata_base {
+                        Some(value) => Some(value),
+                        None => code_core::git_worktree::detect_default_branch(&git_root)
+                            .await
+                            .map(|name| name.trim().to_string())
+                            .filter(|name| !name.is_empty()),
+                    };
+                    let current_branch = code_core::git_info::current_branch_name(&worktree_cwd)
+                        .await
+                        .map(|name| name.trim().to_string())
+                        .filter(|name| !name.is_empty());
 
                         if let (Some(base_branch), Some(current_branch)) =
                             (default_branch, current_branch)
                         {
                             if base_branch != current_branch {
                                 let prompt = format!(
-                                    "Review the code changes between the current branch '{current_branch}' and '{base_branch}'. Identify the intent of the changes in '{current_branch}' and ensure no obvious gaps remain. Find all genuine bugs or regressions which need to be addressed before merging. Return ALL issues which need to be addressed, not just the first one you find."
+                                    "Review the code changes between the current branch '{current_branch}' and '{base_branch}'. Identify the intent of the changes in '{current_branch}' and ensure no obvious gaps remain. Find all geniune bugs or regressions which need to be addressed before merging. Return ALL issues which need to be addressed, not just the first one you find."
                                 );
                                 let hint = format!("against {base_branch}");
                                 let preparation_label =
                                     Some(format!("Preparing code review against {base_branch}"));
-                                let metadata = Some(ReviewContextMetadata {
-                                    scope: Some("branch_diff".to_string()),
-                                    base_branch: Some(base_branch.clone()),
-                                    current_branch: Some(current_branch.clone()),
-                                    ..Default::default()
-                                });
+                                let metadata = None;
                                 tx.send(crate::app_event::AppEvent::RunReviewWithScope {
                                     prompt,
                                     hint,
@@ -35543,10 +38116,7 @@ impl ChatWidget<'_> {
                             prompt: "Review the current workspace changes and highlight bugs, regressions, risky patterns, and missing tests before merge.".to_string(),
                             hint: "current workspace changes".to_string(),
                             preparation_label: Some("Preparing code review request...".to_string()),
-                            metadata: Some(ReviewContextMetadata {
-                                scope: Some("workspace".to_string()),
-                                ..Default::default()
-                            }),
+                            metadata: None,
                             auto_resolve: auto_flag,
                         });
                     });
@@ -35554,31 +38124,17 @@ impl ChatWidget<'_> {
                 }
             }
 
-            let metadata = ReviewContextMetadata {
-                scope: Some("workspace".to_string()),
-                ..Default::default()
-            };
             self.start_review_with_scope(
                 "Review the current workspace changes and highlight bugs, regressions, risky patterns, and missing tests before merge.".to_string(),
                 "current workspace changes".to_string(),
                 Some("Preparing code review request...".to_string()),
-                Some(metadata),
+                None,
                 auto_resolve,
             );
         } else {
             let value = trimmed.to_string();
             let preparation = format!("Preparing code review for {value}");
-            let metadata = ReviewContextMetadata {
-                scope: Some("custom".to_string()),
-                ..Default::default()
-            };
-            self.start_review_with_scope(
-                value.clone(),
-                value,
-                Some(preparation),
-                Some(metadata),
-                auto_resolve,
-            );
+            self.start_review_with_scope(value.clone(), value, Some(preparation), None, auto_resolve);
         }
     }
 
@@ -35602,7 +38158,7 @@ impl ChatWidget<'_> {
             self.auto_resolve_state = None;
         }
 
-        self.begin_review(prompt, hint, preparation_label, metadata);
+        self.begin_review(prompt, hint, preparation_label);
     }
 
     fn begin_review(
@@ -35610,7 +38166,6 @@ impl ChatWidget<'_> {
         prompt: String,
         hint: String,
         preparation_label: Option<String>,
-        metadata: Option<ReviewContextMetadata>,
     ) {
         self.active_review_hint = None;
         self.active_review_prompt = None;
@@ -35627,10 +38182,18 @@ impl ChatWidget<'_> {
         self.insert_background_event_early(preparation_notice);
         self.request_redraw();
 
+        let user_facing_hint = if hint.trim().is_empty() {
+            None
+        } else {
+            Some(hint)
+        };
+        let target = code_protocol::protocol::ReviewTarget::Custom {
+            instructions: prompt.clone(),
+        };
         let review_request = ReviewRequest {
+            target,
             prompt,
-            user_facing_hint: hint,
-            metadata,
+            user_facing_hint,
         };
         match try_acquire_lock("review", &self.config.cwd) {
             Ok(Some(guard)) => {
@@ -35638,14 +38201,10 @@ impl ChatWidget<'_> {
                 self.submit_op(Op::Review { review_request });
             }
             Ok(None) => {
-                self.push_background_tail(
-                    "Review skipped: another review is already running.".to_string(),
-                );
+                self.push_background_tail("Review skipped: another review is already running.".to_string());
             }
             Err(err) => {
-                self.push_background_tail(format!(
-                    "Review skipped: could not acquire review lock ({err})"
-                ));
+                self.push_background_tail(format!("Review skipped: could not acquire review lock ({err})"));
             }
         }
     }
@@ -35682,11 +38241,7 @@ impl ChatWidget<'_> {
             sections.push(explanation.to_string());
         }
         if !output.findings.is_empty() {
-            sections.push(
-                format_review_findings_block(&output.findings, None)
-                    .trim()
-                    .to_string(),
-            );
+            sections.push(format_review_findings_block(&output.findings, None).trim().to_string());
         }
         let correctness = output.overall_correctness.trim();
         if !correctness.is_empty() {
@@ -35720,7 +38275,7 @@ impl ChatWidget<'_> {
         history_cell::AssistantMarkdownCell::from_state(state, &self.config)
     }
 
-    /// Handle `/branch [task]` command. Creates a worktree under `.hanzo/branches`,
+    /// Handle `/branch [task]` command. Creates a worktree under `.code/branches`,
     /// optionally copies current uncommitted changes, then switches the session cwd
     /// into the worktree. If `task` is non-empty, submits it immediately.
     pub(crate) fn handle_cloud_command(&mut self, args: String) {
@@ -35824,8 +38379,12 @@ impl ChatWidget<'_> {
             6,
         );
 
-        self.bottom_pane
-            .show_list_selection("Cloud tasks".to_string(), None, None, view);
+        self.bottom_pane.show_list_selection(
+            "Cloud tasks".to_string(),
+            None,
+            None,
+            view,
+        );
     }
 
     pub(crate) fn show_cloud_tasks_loading(&mut self) {
@@ -35843,8 +38402,12 @@ impl ChatWidget<'_> {
             self.app_event_tx.clone(),
             6,
         );
-        self.bottom_pane
-            .show_list_selection("Loading cloud tasks".to_string(), None, None, view);
+        self.bottom_pane.show_list_selection(
+            "Loading cloud tasks".to_string(),
+            None,
+            None,
+            view,
+        );
     }
 
     pub(crate) fn present_cloud_tasks(
@@ -35895,11 +38458,18 @@ impl ChatWidget<'_> {
             self.app_event_tx.clone(),
             8,
         );
-        self.bottom_pane
-            .show_list_selection("Select environment".to_string(), None, None, view);
+        self.bottom_pane.show_list_selection(
+            "Select environment".to_string(),
+            None,
+            None,
+            view,
+        );
     }
 
-    pub(crate) fn present_cloud_environment_picker(&mut self, environments: Vec<CloudEnvironment>) {
+    pub(crate) fn present_cloud_environment_picker(
+        &mut self,
+        environments: Vec<CloudEnvironment>,
+    ) {
         if environments.is_empty() {
             self.show_cloud_tasks_error("No environments available".to_string());
             return;
@@ -35948,8 +38518,12 @@ impl ChatWidget<'_> {
             10,
         );
 
-        self.bottom_pane
-            .show_list_selection("Select environment".to_string(), None, None, view);
+        self.bottom_pane.show_list_selection(
+            "Select environment".to_string(),
+            None,
+            None,
+            view,
+        );
     }
 
     pub(crate) fn set_cloud_environment(&mut self, environment: Option<CloudEnvironment>) {
@@ -35972,9 +38546,8 @@ impl ChatWidget<'_> {
 
     fn request_cloud_task_refresh(&mut self, env_override: Option<String>) {
         let selected = env_override.or_else(|| self.current_cloud_env_id());
-        self.app_event_tx.send(AppEvent::FetchCloudTasks {
-            environment: selected,
-        });
+        self.app_event_tx
+            .send(AppEvent::FetchCloudTasks { environment: selected });
     }
 
     fn cloud_env_label(&self) -> String {
@@ -36212,7 +38785,7 @@ impl ChatWidget<'_> {
     }
 
     fn ensure_git_repo_for_action(&mut self, resume: GitInitResume, reason: &str) -> bool {
-        if hanzo_core::git_info::get_git_repo_root(&self.config.cwd).is_some() {
+        if code_core::git_info::get_git_repo_root(&self.config.cwd).is_some() {
             if self.git_init_declined {
                 self.git_init_declined = false;
             }
@@ -36261,9 +38834,7 @@ impl ChatWidget<'_> {
             },
             SelectionItem {
                 name: "Continue without git".to_string(),
-                description: Some(
-                    "Write-enabled agents and worktrees will be unavailable.".to_string(),
-                ),
+                description: Some("Write-enabled agents and worktrees will be unavailable.".to_string()),
                 is_current: false,
                 actions: vec![Box::new(|tx: &AppEventSender| {
                     tx.send(AppEvent::DeclineGitInit);
@@ -36364,10 +38935,7 @@ impl ChatWidget<'_> {
         if ok {
             self.git_init_declined = false;
             let notice = if message.trim().is_empty() {
-                format!(
-                    "Initialized git repository in {}.",
-                    self.config.cwd.display()
-                )
+                format!("Initialized git repository in {}.", self.config.cwd.display())
             } else {
                 message
             };
@@ -36449,7 +39017,7 @@ impl ChatWidget<'_> {
             use tokio::process::Command;
             let ticket = branch_tail_ticket;
             // Resolve git root
-            let git_root = match hanzo_core::git_worktree::get_git_root_from(&cwd).await {
+            let git_root = match code_core::git_worktree::get_git_root_from(&cwd).await {
                 Ok(p) => p,
                 Err(e) => {
                     tx.send_background_event_with_ticket(
@@ -36476,11 +39044,10 @@ impl ChatWidget<'_> {
             } else {
                 Some(args.trim())
             };
-            let branch_name = hanzo_core::git_worktree::generate_branch_name_from_task(task_opt);
+            let branch_name = code_core::git_worktree::generate_branch_name_from_task(task_opt);
             // Create worktree
             let (worktree, used_branch) =
-                match hanzo_core::git_worktree::setup_worktree(&git_root, &branch_name, None).await
-                {
+                match code_core::git_worktree::setup_worktree(&git_root, &branch_name, None).await {
                     Ok((p, b)) => (p, b),
                     Err(e) => {
                         tx.send_background_event_with_ticket(
@@ -36493,7 +39060,7 @@ impl ChatWidget<'_> {
             remember_worktree_root_hint(&worktree, &git_root);
             // Copy uncommitted changes from the source root into the new worktree
             let copied =
-                match hanzo_core::git_worktree::copy_uncommitted_to_worktree(&git_root, &worktree)
+                match code_core::git_worktree::copy_uncommitted_to_worktree(&git_root, &worktree)
                     .await
                 {
                     Ok(n) => n,
@@ -36507,8 +39074,8 @@ impl ChatWidget<'_> {
                     }
                 };
 
-            let mut branch_metadata: Option<hanzo_core::git_worktree::BranchMetadata> = None;
-            match hanzo_core::git_worktree::ensure_local_default_remote(
+            let mut branch_metadata: Option<code_core::git_worktree::BranchMetadata> = None;
+            match code_core::git_worktree::ensure_local_default_remote(
                 &git_root,
                 current_base_branch.as_deref(),
             )
@@ -36516,8 +39083,7 @@ impl ChatWidget<'_> {
             {
                 Ok(meta_option) => {
                     if let Some(meta) = meta_option.clone() {
-                        if let Err(e) =
-                            hanzo_core::git_worktree::write_branch_metadata(&worktree, &meta).await
+                        if let Err(e) = code_core::git_worktree::write_branch_metadata(&worktree, &meta).await
                         {
                             tx.send_background_event_with_ticket(
                                 &ticket,
@@ -36560,7 +39126,7 @@ impl ChatWidget<'_> {
                 .output()
                 .await;
             // Compute fallback remote default
-            let fallback_remote = hanzo_core::git_worktree::detect_default_branch(&git_root)
+            let fallback_remote = code_core::git_worktree::detect_default_branch(&git_root)
                 .await
                 .map(|d| format!("origin/{}", d));
             let target_upstream = src_upstream.clone().or(fallback_remote);
@@ -36644,11 +39210,9 @@ impl ChatWidget<'_> {
             return;
         }
         let Some(git_root) =
-            hanzo_core::git_info::resolve_root_git_project_for_trust(&self.config.cwd)
+            code_core::git_info::resolve_root_git_project_for_trust(&self.config.cwd)
         else {
-            self.push_background_tail(
-                "`/push` — run this command inside a git repository.".to_string(),
-            );
+            self.push_background_tail("`/push` — run this command inside a git repository.".to_string());
             self.request_redraw();
             return;
         };
@@ -36662,8 +39226,7 @@ impl ChatWidget<'_> {
 
         tokio::spawn(async move {
             use std::fmt::Write as _;
-            use tokio::fs;
-            use tokio::process::Command;
+            use tokio::{fs, process::Command};
 
             let short_status = match ChatWidget::git_short_status(&worktree).await {
                 Ok(output) => output,
@@ -36772,7 +39335,7 @@ impl ChatWidget<'_> {
             let mut steps = Vec::new();
             if has_dirty_changes {
                 steps.push(
-                    "Briefly clean this repo (add working files/secrets to .gitignore, delete any temporary files) if necessary, then commit all remaining dirty files."
+                    "Briefly clean this repo (add working files/secrets to .gitignore, delete any temporary files) if neccessary, then commit all remaining dirty files."
                         .to_string(),
                 );
             }
@@ -36782,7 +39345,10 @@ impl ChatWidget<'_> {
             );
             steps.push("Perform a git push.".to_string());
             if gh_available && workflows_exist {
-                steps.push("Use gh_run_wait to monitor any triggered workflows.".to_string());
+                steps.push(
+                    "Use gh_run_wait to monitor any triggered workflows."
+                        .to_string(),
+                );
                 steps.push(
                     "If the workflow fails, then view errors, commit, push, monitor and repeat until the workflow succeeds."
                         .to_string(),
@@ -36800,7 +39366,7 @@ impl ChatWidget<'_> {
                 let _ = writeln!(message, "{}. {}", idx + 1, step);
             }
             message.push_str(
-                "You must ensure all workflows complete successfully. Do not yield or respond until this has been completed.",
+                "You must ensure all workflows complete successfully. Do not yeild or respond until this has been completed.",
             );
 
             tx.send(AppEvent::SubmitHiddenTextWithPreface {
@@ -36862,7 +39428,8 @@ impl ChatWidget<'_> {
             };
             self.history_push_plain_state(crate::history_cell::new_error_event(format!(
                 "Unknown project command `{}`.{}",
-                name, suggestion
+                name,
+                suggestion
             )));
             self.request_redraw();
         }
@@ -36899,7 +39466,7 @@ impl ChatWidget<'_> {
             new_cwd.display()
         );
         let branch_note = if Self::is_branch_worktree_path(&new_cwd) {
-            if let Some(meta) = hanzo_core::git_worktree::load_branch_metadata(&new_cwd) {
+            if let Some(meta) = code_core::git_worktree::load_branch_metadata(&new_cwd) {
                 let branch_name = new_cwd
                     .file_name()
                     .and_then(|n| n.to_str())
@@ -36918,7 +39485,7 @@ impl ChatWidget<'_> {
                         }
                     })
                     .or(meta.base_branch.clone())
-                    .unwrap_or_else(|| hanzo_core::git_worktree::LOCAL_DEFAULT_REMOTE.to_string());
+                    .unwrap_or_else(|| code_core::git_worktree::LOCAL_DEFAULT_REMOTE.to_string());
                 let mut note = format!(
                     "System: Working directory changed from {} to {}{}. You are now working on branch '{}' checked out at {}. Compare against '{}' for the parent branch and run all commands from this directory.",
                     previous_cwd.display(),
@@ -36933,7 +39500,8 @@ impl ChatWidget<'_> {
                 {
                     note.push_str(&format!(
                         " The remote '{}' points to {}.",
-                        remote_name, remote_url
+                        remote_name,
+                        remote_url
                     ));
                 }
                 note
@@ -36945,25 +39513,7 @@ impl ChatWidget<'_> {
         };
         self.queue_agent_note(branch_note);
 
-        let op = Op::ConfigureSession {
-            provider: self.config.model_provider.clone(),
-            model: self.config.model.clone(),
-            model_explicit: self.config.model_explicit,
-            model_reasoning_effort: self.config.model_reasoning_effort,
-            preferred_model_reasoning_effort: self.config.preferred_model_reasoning_effort,
-            model_reasoning_summary: self.config.model_reasoning_summary,
-            model_text_verbosity: self.config.model_text_verbosity,
-            user_instructions: self.config.user_instructions.clone(),
-            base_instructions: self.config.base_instructions.clone(),
-            approval_policy: self.config.approval_policy.clone(),
-            sandbox_policy: self.config.sandbox_policy.clone(),
-            disable_response_storage: self.config.disable_response_storage,
-            notify: self.config.notify.clone(),
-            cwd: self.config.cwd.clone(),
-            resume_path: None,
-            demo_developer_message: self.config.demo_developer_message.clone(),
-        };
-        self.submit_op(op);
+        self.submit_configure_session_op();
 
         if let Some(prompt) = initial_prompt {
             if !prompt.is_empty() {
@@ -36991,8 +39541,7 @@ impl ChatWidget<'_> {
         }
         if !Self::is_branch_worktree_path(&self.config.cwd) {
             self.history_push_plain_state(crate::history_cell::new_error_event(
-                "`/merge` — run this command from inside a branch worktree created with '/branch'."
-                    .to_string(),
+                "`/merge` — run this command from inside a branch worktree created with '/branch'.".to_string(),
             ));
             self.request_redraw();
             return;
@@ -37008,6 +39557,7 @@ impl ChatWidget<'_> {
         self.request_redraw();
 
         tokio::spawn(async move {
+
             fn send_background(
                 tx: &AppEventSender,
                 ticket: &BackgroundOrderTicket,
@@ -37034,21 +39584,22 @@ impl ChatWidget<'_> {
                     reasons.push("manual follow-up requested".to_string());
                 }
                 let reason_text = reasons.join(", ");
+                if state.git_root != state.worktree_path {
+                    let _ = tx.send(AppEvent::SwitchCwd(state.git_root.clone(), None));
+                }
                 send_background(
                     tx,
                     ticket,
-                    format!("`/merge` — handing off to agent ({})", reason_text),
+                    format!("`/merge` — handing off to agent ({reason_text})"),
                 );
-                let visible = format!(
-                    "Finalize branch '{}' via /merge (agent merge required)",
-                    state.worktree_branch
-                );
+                let worktree_branch = state.worktree_branch.as_str();
+                let visible =
+                    format!("Finalize branch '{worktree_branch}' via /merge (agent merge required)");
                 let preface = state.agent_preface(&reason_text);
                 let _ = tx.send(AppEvent::SubmitTextWithPreface { visible, preface });
             }
 
-            let git_root = match hanzo_core::git_info::resolve_root_git_project_for_trust(&work_cwd)
-            {
+            let git_root = match code_core::git_info::resolve_root_git_project_for_trust(&work_cwd) {
                 Some(p) => p,
                 None => {
                     send_background(&tx, &ticket, "`/merge` — not a git repo".to_string());
@@ -37112,6 +39663,7 @@ impl ChatWidget<'_> {
             handoff_to_agent(&tx, &ticket, state, blockers);
         });
     }
+
 }
 
 impl ChatWidget<'_> {
@@ -37122,21 +39674,11 @@ impl ChatWidget<'_> {
         bottom_pane_area: Rect,
         buf: &mut Buffer,
     ) {
-        use ratatui::layout::Alignment;
-        use ratatui::layout::Constraint;
-        use ratatui::layout::Direction;
-        use ratatui::layout::Layout;
-        use ratatui::layout::Margin;
-        use ratatui::layout::Rect as RtRect;
-        use ratatui::style::Modifier;
-        use ratatui::style::Style;
-        use ratatui::text::Line as RLine;
-        use ratatui::text::Span;
-        use ratatui::widgets::Block;
-        use ratatui::widgets::Clear;
-        use ratatui::widgets::Paragraph;
+        use ratatui::layout::{Alignment, Constraint, Direction, Layout, Margin, Rect as RtRect};
+        use ratatui::style::{Modifier, Style};
+        use ratatui::text::{Line as RLine, Span};
+        use ratatui::widgets::{Block, Borders, Clear, Paragraph, Wrap};
         use ratatui::widgets::Widget;
-        use ratatui::widgets::Wrap;
 
         let scrim_style = Style::default()
             .bg(crate::colors::overlay_scrim())
@@ -37145,8 +39687,7 @@ impl ChatWidget<'_> {
 
         let padding = 1u16;
         let footer_reserved = bottom_pane_area.height.min(1);
-        let overlay_bottom =
-            (bottom_pane_area.y + bottom_pane_area.height).saturating_sub(footer_reserved);
+        let overlay_bottom = (bottom_pane_area.y + bottom_pane_area.height).saturating_sub(footer_reserved);
         let overlay_height = overlay_bottom
             .saturating_sub(history_area.y)
             .max(1)
@@ -37161,11 +39702,17 @@ impl ChatWidget<'_> {
         Clear.render(window_area, buf);
 
         let block = Block::default()
-            .borders(crate::theme::zen_borders())
-            .title(RLine::from(vec![Span::styled(
-                format!(" {} ", self.browser_title()),
-                Style::default().fg(crate::colors::text()),
-            )]))
+            .borders(Borders::ALL)
+            .title(RLine::from(vec![
+                Span::styled(
+                    format!(" {} ", self.browser_title()),
+                    Style::default().fg(crate::colors::text()),
+                ),
+                Span::styled(
+                    "— Ctrl+B to close",
+                    Style::default().fg(crate::colors::text_dim()),
+                ),
+            ]))
             .style(Style::default().bg(crate::colors::background()))
             .border_style(
                 Style::default()
@@ -37324,11 +39871,7 @@ impl ChatWidget<'_> {
             .split(body_area);
 
         let screenshot_column = columns[0];
-        let info_column = if columns.len() > 1 {
-            columns[1]
-        } else {
-            columns[0]
-        };
+        let info_column = if columns.len() > 1 { columns[1] } else { columns[0] };
 
         let progress_height = if screenshot_column.height > 3 { 1 } else { 0 };
         let screenshot_display_height = screenshot_column.height.saturating_sub(progress_height);
@@ -37383,8 +39926,7 @@ impl ChatWidget<'_> {
 
         if let Some(area) = progress_area {
             if area.height > 0 && area.width > 0 {
-                let progress_line =
-                    self.browser_overlay_progress_line(area.width, current_time, total_time);
+                let progress_line = self.browser_overlay_progress_line(area.width, current_time, total_time);
                 Paragraph::new(progress_line)
                     .alignment(Alignment::Center)
                     .style(Style::default().fg(crate::colors::text()))
@@ -37546,23 +40088,12 @@ impl ChatWidget<'_> {
         bottom_pane_area: Rect,
         buf: &mut Buffer,
     ) {
-        use ratatui::layout::Alignment;
-        use ratatui::layout::Constraint;
-        use ratatui::layout::Direction;
-        use ratatui::layout::Layout;
-        use ratatui::layout::Margin;
-        use ratatui::layout::Rect as RtRect;
-        use ratatui::style::Modifier;
-        use ratatui::style::Style;
-        use ratatui::text::Line;
-        use ratatui::text::Span;
-        use ratatui::widgets::Block;
-        use ratatui::widgets::Clear;
-        use ratatui::widgets::HighlightSpacing;
-        use ratatui::widgets::List;
-        use ratatui::widgets::ListItem;
-        use ratatui::widgets::ListState;
-        use ratatui::widgets::Paragraph;
+        use ratatui::layout::{Alignment, Constraint, Direction, Layout, Margin, Rect as RtRect};
+        use ratatui::style::{Modifier, Style};
+        use ratatui::text::{Line, Span};
+        use ratatui::widgets::{
+            Block, Borders, Clear, HighlightSpacing, List, ListItem, ListState, Paragraph,
+        };
 
         let scrim_style = Style::default()
             .bg(crate::colors::overlay_scrim())
@@ -37571,8 +40102,7 @@ impl ChatWidget<'_> {
 
         let padding = 1u16;
         let footer_reserved = bottom_pane_area.height.min(1);
-        let overlay_bottom =
-            (bottom_pane_area.y + bottom_pane_area.height).saturating_sub(footer_reserved);
+        let overlay_bottom = (bottom_pane_area.y + bottom_pane_area.height).saturating_sub(footer_reserved);
         let overlay_height = overlay_bottom
             .saturating_sub(history_area.y)
             .max(1)
@@ -37586,13 +40116,13 @@ impl ChatWidget<'_> {
         };
         Clear.render(window_area, buf);
 
-        let title_spans = vec![Span::styled(
-            " Agents ",
-            Style::default().fg(crate::colors::text()),
-        )];
+        let title_spans = vec![
+            Span::styled(" Agents ", Style::default().fg(crate::colors::text())),
+            Span::styled("— Ctrl+A to close", Style::default().fg(crate::colors::text_dim())),
+        ];
 
         let block = Block::default()
-            .borders(crate::theme::zen_borders())
+            .borders(Borders::ALL)
             .title(Line::from(title_spans))
             .style(Style::default().bg(crate::colors::background()))
             .border_style(
@@ -37621,7 +40151,9 @@ impl ChatWidget<'_> {
 
         let tab_height = if content.height >= 3 { 1 } else { 0 };
         let hint_height = if content.height >= 2 { 1 } else { 0 };
-        let body_height = content.height.saturating_sub(hint_height + tab_height);
+        let body_height = content
+            .height
+            .saturating_sub(hint_height + tab_height);
         let tabs_area = RtRect {
             x: content.x,
             y: content.y,
@@ -37723,8 +40255,7 @@ impl ChatWidget<'_> {
             })
             .max()
             .unwrap_or(10);
-        let status_icon_width =
-            UnicodeWidthStr::width(agent_status_icon(AgentStatus::Running)) as u16;
+        let status_icon_width = UnicodeWidthStr::width(agent_status_icon(AgentStatus::Running)) as u16;
         let desired_sidebar = longest_name_width
             .saturating_add(status_icon_width)
             .saturating_add(8);
@@ -37754,12 +40285,14 @@ impl ChatWidget<'_> {
         let last_group_idx = groups.len().saturating_sub(1);
 
         for (group_idx, group) in groups.into_iter().enumerate() {
-            items.push(ListItem::new(Line::from(vec![Span::styled(
-                group.label.clone(),
-                Style::default()
-                    .fg(crate::colors::text())
-                    .add_modifier(Modifier::BOLD),
-            )])));
+            items.push(ListItem::new(Line::from(vec![
+                Span::styled(
+                    group.label.clone(),
+                    Style::default()
+                        .fg(crate::colors::text())
+                        .add_modifier(Modifier::BOLD),
+                ),
+            ])));
             row_entries.push(None);
 
             let selected_entry = self.agents_terminal.current_sidebar_entry();
@@ -37774,9 +40307,7 @@ impl ChatWidget<'_> {
                     let status = entry.status.clone();
                     let status_icon = agent_status_icon(status.clone());
                     let name_room = sidebar_width
-                        .saturating_sub(
-                            (UnicodeWidthStr::width(status_icon) as u16).saturating_add(5),
-                        )
+                        .saturating_sub((UnicodeWidthStr::width(status_icon) as u16).saturating_add(5))
                         .max(4) as usize;
                     let mut display_name = model_label.clone();
                     if display_name.chars().count() > name_room {
@@ -37792,14 +40323,20 @@ impl ChatWidget<'_> {
                         .map(|entry| entry == &AgentsSidebarEntry::Agent(agent_id.clone()))
                         .unwrap_or(false);
                     let prefix_span = if is_selected {
-                        Span::styled("› ", Style::default().fg(crate::colors::primary()))
+                        Span::styled(
+                            "› ",
+                            Style::default().fg(crate::colors::primary()),
+                        )
                     } else {
                         Span::raw("  ")
                     };
 
                     let line = Line::from(vec![
                         prefix_span,
-                        Span::styled(display_name, Style::default().fg(crate::colors::text())),
+                        Span::styled(
+                            display_name,
+                            Style::default().fg(crate::colors::text()),
+                        ),
                         Span::raw(" "),
                         Span::styled(status_icon, Style::default().fg(color)),
                     ]);
@@ -37847,7 +40384,7 @@ impl ChatWidget<'_> {
             .highlight_spacing(HighlightSpacing::Never);
 
         let sidebar_block = Block::default()
-            .borders(crate::theme::zen_borders())
+            .borders(Borders::ALL)
             .style(Style::default().bg(crate::colors::background()))
             .border_style(Style::default().fg(sidebar_border_color));
 
@@ -37864,11 +40401,7 @@ impl ChatWidget<'_> {
 
         ratatui::widgets::StatefulWidget::render(sidebar, sidebar_inner, buf, &mut list_state);
 
-        let right_area = if chunks.len() > 1 {
-            chunks[1]
-        } else {
-            chunks[0]
-        };
+        let right_area = if chunks.len() > 1 { chunks[1] } else { chunks[0] };
         let detail_width = right_area.width.saturating_sub(2).max(1);
         let mut lines: Vec<Line> = Vec::new();
 
@@ -37903,11 +40436,7 @@ impl ChatWidget<'_> {
                     ]));
 
                     let id_short = format!("#{}", agent_id.chars().take(7).collect::<String>());
-                    let status_chip = format!(
-                        "{} {}",
-                        agent_status_icon(status.clone()),
-                        agent_status_label(status)
-                    );
+                    let status_chip = format!("{} {}", agent_status_icon(status.clone()), agent_status_label(status));
                     let model_meta = entry
                         .model
                         .as_ref()
@@ -37917,16 +40446,14 @@ impl ChatWidget<'_> {
                         Span::raw(" "),
                         Span::styled("Status:", Style::default().fg(crate::colors::text_dim())),
                         Span::raw(" "),
-                        Span::styled(
-                            status_chip,
-                            Style::default()
-                                .fg(status_color)
-                                .add_modifier(Modifier::BOLD),
-                        ),
+                        Span::styled(status_chip, Style::default().fg(status_color).add_modifier(Modifier::BOLD)),
                         Span::raw("   "),
                         Span::styled("Model:", Style::default().fg(crate::colors::text_dim())),
                         Span::raw(" "),
-                        Span::styled(model_meta, Style::default().fg(crate::colors::text())),
+                        Span::styled(
+                            model_meta,
+                            Style::default().fg(crate::colors::text()),
+                        ),
                         Span::raw("   "),
                         Span::styled("ID:", Style::default().fg(crate::colors::text_dim())),
                         Span::raw(" "),
@@ -37965,26 +40492,15 @@ impl ChatWidget<'_> {
                     let action_header_style = Style::default()
                         .fg(crate::colors::text())
                         .add_modifier(Modifier::BOLD);
-                    let chevron = if self.agents_terminal.actions_collapsed {
-                        if crate::theme::show_gutter() {
-                            "▶"
-                        } else {
-                            ">"
-                        }
-                    } else {
-                        if crate::theme::show_gutter() {
-                            "▼"
-                        } else {
-                            "v"
-                        }
-                    };
-                    let header_text = if crate::theme::show_borders() {
-                        format!("╭ Action Log (a) {chevron} — {} entries ", entry.logs.len())
-                    } else {
-                        format!("Action Log (a) {chevron} — {} entries ", entry.logs.len())
-                    };
+                    let chevron = if self.agents_terminal.actions_collapsed { "▶" } else { "▼" };
+                    let header_text = format!(
+                        "╭ Action Log (a) {chevron} — {} entries ",
+                        entry.logs.len()
+                    );
                     let header_width = UnicodeWidthStr::width(header_text.as_str()) as u16;
-                    let pad = detail_width.saturating_sub(header_width).saturating_sub(1);
+                    let pad = detail_width
+                        .saturating_sub(header_width)
+                        .saturating_sub(1);
                     let mut action_header = header_text;
                     action_header.push_str(&"─".repeat(pad as usize));
                     action_header.push('╮');
@@ -38056,9 +40572,7 @@ impl ChatWidget<'_> {
         let viewport_height = right_area.height.saturating_sub(2).max(1);
         let total_lines = wrapped_lines.len() as u16;
         let max_scroll = total_lines.saturating_sub(viewport_height);
-        self.layout
-            .last_history_viewport_height
-            .set(viewport_height);
+        self.layout.last_history_viewport_height.set(viewport_height);
         self.layout.last_max_scroll.set(max_scroll);
 
         // scroll_offset is bottom‑anchored; Paragraph expects top‑anchored scroll.
@@ -38073,7 +40587,10 @@ impl ChatWidget<'_> {
             })
             .unwrap_or(max_scroll);
         let clamped_offset = preferred_offset.min(max_scroll);
-        self.agents_terminal.last_render_scroll.set(clamped_offset);
+        self
+            .agents_terminal
+            .last_render_scroll
+            .set(clamped_offset);
         let scroll_from_top = max_scroll.saturating_sub(clamped_offset);
 
         let detail_has_focus = self.agents_terminal.focus() == AgentsTerminalFocus::Detail;
@@ -38083,7 +40600,7 @@ impl ChatWidget<'_> {
             crate::colors::border()
         };
         let history_block = Block::default()
-            .borders(crate::theme::zen_borders())
+            .borders(Borders::ALL)
             .border_style(Style::default().fg(detail_border_color));
 
         Paragraph::new(wrapped_lines)
@@ -38116,37 +40633,17 @@ impl ChatWidget<'_> {
             } else {
                 Line::from(vec![
                     Span::styled("[↑/↓/←/→]", Style::default().fg(crate::colors::function())),
-                    Span::styled(
-                        " Navigate   ",
-                        Style::default().fg(crate::colors::text_dim()),
-                    ),
+                    Span::styled(" Navigate   ", Style::default().fg(crate::colors::text_dim())),
                     Span::styled("[1-5]", Style::default().fg(crate::colors::function())),
                     Span::styled(" Filter   ", Style::default().fg(crate::colors::text_dim())),
                     Span::styled("[S]", Style::default().fg(crate::colors::function())),
                     Span::styled(" Sort   ", Style::default().fg(crate::colors::text_dim())),
                     Span::styled("[H/A]", Style::default().fg(crate::colors::function())),
-                    Span::styled(
-                        " Toggle Details   ",
-                        Style::default().fg(crate::colors::text_dim()),
-                    ),
+                    Span::styled(" Toggle Details   ", Style::default().fg(crate::colors::text_dim())),
                     Span::styled("[X]", Style::default().fg(crate::colors::function())),
                     Span::styled(" Stop   ", Style::default().fg(crate::colors::text_dim())),
-                    Span::styled(
-                        if crate::theme::show_gutter() {
-                            "[Ctrl+A]"
-                        } else {
-                            ""
-                        },
-                        Style::default().fg(crate::colors::function()),
-                    ),
-                    Span::styled(
-                        if crate::theme::show_gutter() {
-                            " Exit"
-                        } else {
-                            ""
-                        },
-                        Style::default().fg(crate::colors::text_dim()),
-                    ),
+                    Span::styled("[Ctrl+A]", Style::default().fg(crate::colors::function())),
+                    Span::styled(" Exit", Style::default().fg(crate::colors::text_dim())),
                 ])
             };
             Paragraph::new(hint_line)
@@ -38163,6 +40660,7 @@ impl ChatWidget<'_> {
         use ratatui::text::Span;
         use ratatui::text::Text;
         use ratatui::widgets::Block;
+        use ratatui::widgets::Borders;
         use ratatui::widgets::Paragraph;
         use ratatui::widgets::Sparkline;
         use ratatui::widgets::SparklineBar;
@@ -38179,12 +40677,8 @@ impl ChatWidget<'_> {
 
         // Agent status block
         let agent_block = Block::default()
-            .borders(crate::theme::zen_borders())
-            .title(if crate::theme::show_borders() {
-                " Agents "
-            } else {
-                ""
-            })
+            .borders(Borders::ALL)
+            .title(" Agents ")
             .border_style(Style::default().fg(crate::colors::border()));
 
         let inner_agent = agent_block.inner(area);
@@ -38237,14 +40731,10 @@ impl ChatWidget<'_> {
         // single space between dot and summary; no label/separator
         left_spans.push(Span::raw(" "));
         left_spans.push(Span::raw(summary));
-        let right_spans: Vec<Span> = if !crate::theme::show_gutter() {
-            vec![]
-        } else {
-            vec![
-                Span::from("Ctrl+A").style(key_hint_style),
-                Span::styled(" open terminal", label_style),
-            ]
-        };
+        let right_spans: Vec<Span> = vec![
+            Span::from("Ctrl+A").style(key_hint_style),
+            Span::styled(" open terminal", label_style),
+        ];
         let measure =
             |spans: &Vec<Span>| -> usize { spans.iter().map(|s| s.content.chars().count()).sum() };
         let left_len = measure(&left_spans);
@@ -38428,12 +40918,14 @@ impl ChatWidget<'_> {
 
                 let mut line_spans: Vec<Span> = Vec::new();
                 line_spans.push(Span::from(" "));
-                line_spans.push(Span::styled(
-                    format!("{}", agent.name),
-                    Style::default()
-                        .fg(crate::colors::text())
-                        .add_modifier(Modifier::BOLD),
-                ));
+                line_spans.push(
+                    Span::styled(
+                        format!("{}", agent.name),
+                        Style::default()
+                            .fg(crate::colors::text())
+                            .add_modifier(Modifier::BOLD),
+                    ),
+                );
                 line_spans.push(Span::styled(
                     format!(" [{}]", short_id(&agent.id)),
                     Style::default().fg(crate::colors::text_dim()),
@@ -38460,7 +40952,10 @@ impl ChatWidget<'_> {
                         }
                         text_content.push(RLine::from(vec![
                             Span::from("   "),
-                            Span::styled(lp_trim, Style::default().fg(crate::colors::text_dim())),
+                            Span::styled(
+                                lp_trim,
+                                Style::default().fg(crate::colors::text_dim()),
+                            ),
                         ]));
                     }
                 }
@@ -38689,9 +41184,8 @@ impl WidgetRef for &ChatWidget<'_> {
             .last_bottom_reserved_rows
             .set(bottom_pane_area.height);
 
-        // Render status bar if enabled in config.
-        // When disabled, status_bar_area will have 0 height from layout_areas.
-        if self.config.tui.show_status_bar && status_bar_area.height > 0 {
+        // Render status bar and HUD only in full TUI mode
+        if !self.standard_terminal_mode {
             self.render_status_bar(status_bar_area, buf);
         }
 
@@ -38708,9 +41202,8 @@ impl WidgetRef for &ChatWidget<'_> {
         }
 
         // Create a unified scrollable container for all chat content
-        // Use consistent padding throughout; flush-left in zen mode
-        let theme = crate::theme::current_theme();
-        let padding = theme.content_padding;
+        // Use consistent padding throughout
+        let padding = 1u16;
         let content_area = Rect {
             x: history_area.x + padding,
             y: history_area.y,
@@ -38737,7 +41230,8 @@ impl WidgetRef for &ChatWidget<'_> {
             .collect::<Vec<_>>();
 
         let streaming_cell = if !streaming_lines.is_empty() {
-            let state = self.synthesize_stream_state_from_lines(None, &streaming_lines, true);
+            let state =
+                self.synthesize_stream_state_from_lines(None, &streaming_lines, true);
             Some(history_cell::new_streaming_content(state, &self.config))
         } else {
             None
@@ -38764,9 +41258,9 @@ impl WidgetRef for &ChatWidget<'_> {
 
         // Calculate total content height using prefix sums; build if needed
         let spacing = 1u16; // Standard spacing between cells
-        let gutter_w: u16 = if theme.show_gutter { 2 } else { 0 };
+        const GUTTER_WIDTH: u16 = 2; // Same as in render loop
         let reasoning_visible = self.is_reasoning_shown();
-        let cache_width = content_area.width.saturating_sub(gutter_w);
+        let cache_width = content_area.width.saturating_sub(GUTTER_WIDTH);
 
         // Opportunistically clear height cache if width changed
         self.history_render.handle_width_change(cache_width);
@@ -38777,8 +41271,7 @@ impl WidgetRef for &ChatWidget<'_> {
             p.frames = p.frames.saturating_add(1);
         }
 
-        let render_settings =
-            RenderSettings::new(cache_width, self.render_theme_epoch, reasoning_visible);
+        let render_settings = RenderSettings::new(cache_width, self.render_theme_epoch, reasoning_visible);
         self.last_render_settings.set(render_settings);
         if self.history_frozen_count > 0
             && self.history_frozen_width != render_settings.width
@@ -38788,15 +41281,19 @@ impl WidgetRef for &ChatWidget<'_> {
             self.app_event_tx.send(AppEvent::SyncHistoryVirtualization);
         }
         let perf_enabled = self.perf_state.enabled;
-        let needs_prefix_rebuild = self
-            .history_render
-            .should_rebuild_prefix(content_area.width, request_count);
+        let needs_prefix_rebuild =
+            self.history_render
+                .should_rebuild_prefix(content_area.width, request_count);
         let mut rendered_cells_full: Option<Vec<VisibleCell>> = None;
         if needs_prefix_rebuild {
             if render_requests_full.is_none() {
                 let render_request_cache = self.render_request_cache.borrow();
                 let mut render_requests = Vec::with_capacity(request_count);
-                for (cell, seed) in self.history_cells.iter().zip(render_request_cache.iter()) {
+                for (cell, seed) in self
+                    .history_cells
+                    .iter()
+                    .zip(render_request_cache.iter())
+                {
                     let assistant = cell
                         .as_any()
                         .downcast_ref::<crate::history_cell::AssistantMarkdownCell>();
@@ -38849,9 +41346,8 @@ impl WidgetRef for &ChatWidget<'_> {
 
                 if perf_enabled {
                     let mut p = self.perf_state.stats.borrow_mut();
-                    p.render_requests_full = p
-                        .render_requests_full
-                        .saturating_add(render_requests.len() as u64);
+                    p.render_requests_full =
+                        p.render_requests_full.saturating_add(render_requests.len() as u64);
                 }
 
                 render_requests_full = Some(render_requests);
@@ -38869,70 +41365,65 @@ impl WidgetRef for &ChatWidget<'_> {
                 // Prefix sums already updated; skip the full rebuild path.
                 rendered_cells_full = None;
             } else {
-                if perf_enabled {
+            if perf_enabled {
+                let mut p = self.perf_state.stats.borrow_mut();
+                p.prefix_rebuilds = p.prefix_rebuilds.saturating_add(1);
+            }
+
+            let prefix_start = perf_enabled.then(std::time::Instant::now);
+            let cells = self.history_render.visible_cells(
+                &self.history_state,
+                &render_requests,
+                render_settings,
+            );
+
+            let mut prefix: Vec<u16> = Vec::with_capacity(cells.len().saturating_add(1));
+            prefix.push(0);
+            let mut acc = 0u16;
+            let content_width = content_area.width.saturating_sub(GUTTER_WIDTH);
+            let mut spacing_ranges: Vec<(u16, u16)> = Vec::new();
+
+            for (idx, vis) in cells.iter().enumerate() {
+                let cell = vis.cell.expect("rendered cell missing source");
+                let line_count = vis.height;
+                if self.perf_state.enabled
+                    && matches!(vis.height_source, history_render::HeightSource::DesiredHeight)
+                {
                     let mut p = self.perf_state.stats.borrow_mut();
-                    p.prefix_rebuilds = p.prefix_rebuilds.saturating_add(1);
+                    p.height_misses_render = p.height_misses_render.saturating_add(1);
+                    if let Some(ns) = vis.height_measure_ns {
+                        let label = self.perf_label_for_item(cell);
+                        p.record_render((idx, content_width), label.as_str(), ns);
+                    }
+                }
+                let cell_start = acc;
+                acc = acc.saturating_add(line_count);
+                let cell_end = acc;
+
+                if cell
+                    .as_any()
+                    .is::<crate::history_cell::AssistantMarkdownCell>()
+                    && line_count >= 2
+                {
+                    spacing_ranges.push((cell_start, cell_start.saturating_add(1)));
+                    spacing_ranges.push((cell_end.saturating_sub(1), cell_end));
                 }
 
-                let prefix_start = perf_enabled.then(std::time::Instant::now);
-                let cells = self.history_render.visible_cells(
-                    &self.history_state,
-                    &render_requests,
-                    render_settings,
-                );
+                let mut should_add_spacing = idx < cells.len().saturating_sub(1) && line_count > 0;
+                if should_add_spacing {
+                    let prev_visible_idx = (0..idx).rev().find(|j| cells[*j].height > 0);
+                    let next_visible_idx = ((idx + 1)..cells.len()).find(|j| cells[*j].height > 0);
 
-                let mut prefix: Vec<u16> = Vec::with_capacity(cells.len().saturating_add(1));
-                prefix.push(0);
-                let mut acc = 0u16;
-                let content_width = content_area.width.saturating_sub(gutter_w);
-                let mut spacing_ranges: Vec<(u16, u16)> = Vec::new();
-
-                for (idx, vis) in cells.iter().enumerate() {
-                    let cell = vis.cell.expect("rendered cell missing source");
-                    let line_count = vis.height;
-                    if self.perf_state.enabled
-                        && matches!(
-                            vis.height_source,
-                            history_render::HeightSource::DesiredHeight
-                        )
-                    {
-                        let mut p = self.perf_state.stats.borrow_mut();
-                        p.height_misses_render = p.height_misses_render.saturating_add(1);
-                        if let Some(ns) = vis.height_measure_ns {
-                            let label = self.perf_label_for_item(cell);
-                            p.record_render((idx, content_width), label.as_str(), ns);
-                        }
-                    }
-                    let cell_start = acc;
-                    acc = acc.saturating_add(line_count);
-                    let cell_end = acc;
-
-                    if cell
-                        .as_any()
-                        .is::<crate::history_cell::AssistantMarkdownCell>()
-                        && line_count >= 2
-                    {
-                        spacing_ranges.push((cell_start, cell_start.saturating_add(1)));
-                        spacing_ranges.push((cell_end.saturating_sub(1), cell_end));
-                    }
-
-                    let mut should_add_spacing =
-                        idx < cells.len().saturating_sub(1) && line_count > 0;
-                    if should_add_spacing {
-                        let prev_visible_idx = (0..idx).rev().find(|j| cells[*j].height > 0);
-                        let next_visible_idx =
-                            ((idx + 1)..cells.len()).find(|j| cells[*j].height > 0);
-
-                        if next_visible_idx.is_none() {
-                            should_add_spacing = false;
-                        } else {
-                            let this_collapsed = cell
-                                .as_any()
-                                .downcast_ref::<crate::history_cell::CollapsibleReasoningCell>()
-                                .map(|rc| rc.is_collapsed())
-                                .unwrap_or(false);
-                            if this_collapsed {
-                                let prev_collapsed = prev_visible_idx
+                    if next_visible_idx.is_none() {
+                        should_add_spacing = false;
+                    } else {
+                        let this_collapsed = cell
+                            .as_any()
+                            .downcast_ref::<crate::history_cell::CollapsibleReasoningCell>()
+                            .map(|rc| rc.is_collapsed())
+                            .unwrap_or(false);
+                        if this_collapsed {
+                            let prev_collapsed = prev_visible_idx
                                 .and_then(|j| cells[j]
                                     .cell
                                     .and_then(|c| {
@@ -38941,7 +41432,7 @@ impl WidgetRef for &ChatWidget<'_> {
                                             .map(|rc| rc.is_collapsed())
                                     }))
                                 .unwrap_or(false);
-                                let next_collapsed = next_visible_idx
+                            let next_collapsed = next_visible_idx
                                 .and_then(|j| cells[j]
                                     .cell
                                     .and_then(|c| {
@@ -38950,37 +41441,37 @@ impl WidgetRef for &ChatWidget<'_> {
                                             .map(|rc| rc.is_collapsed())
                                     }))
                                 .unwrap_or(false);
-                                if prev_collapsed && next_collapsed {
-                                    should_add_spacing = false;
-                                }
+                            if prev_collapsed && next_collapsed {
+                                should_add_spacing = false;
                             }
                         }
                     }
-                    if should_add_spacing {
-                        let spacing_start = acc;
-                        acc = acc.saturating_add(spacing);
-                        // Track the spacer interval so scroll adjustments can skip over it later.
-                        spacing_ranges.push((spacing_start, acc));
-                    }
-                    prefix.push(acc);
                 }
+                if should_add_spacing {
+                    let spacing_start = acc;
+                    acc = acc.saturating_add(spacing);
+                    // Track the spacer interval so scroll adjustments can skip over it later.
+                    spacing_ranges.push((spacing_start, acc));
+                }
+                prefix.push(acc);
+            }
 
-                let total_height = *prefix.last().unwrap_or(&0);
-                if let (true, Some(t0)) = (perf_enabled, prefix_start) {
-                    let elapsed = t0.elapsed().as_nanos();
-                    let mut p = self.perf_state.stats.borrow_mut();
-                    p.ns_total_height = p.ns_total_height.saturating_add(elapsed);
-                }
-                self.history_render.update_prefix_cache(
-                    content_area.width,
-                    prefix,
-                    total_height,
-                    cells.len(),
-                    self.history_cells.len(),
-                );
-                self.history_render.update_spacing_ranges(spacing_ranges);
-                rendered_cells_full = Some(cells);
-                self.history_prefix_append_only.set(true);
+            let total_height = *prefix.last().unwrap_or(&0);
+            if let (true, Some(t0)) = (perf_enabled, prefix_start) {
+                let elapsed = t0.elapsed().as_nanos();
+                let mut p = self.perf_state.stats.borrow_mut();
+                p.ns_total_height = p.ns_total_height.saturating_add(elapsed);
+            }
+            self.history_render.update_prefix_cache(
+                content_area.width,
+                prefix,
+                total_height,
+                cells.len(),
+                self.history_cells.len(),
+            );
+            self.history_render.update_spacing_ranges(spacing_ranges);
+            rendered_cells_full = Some(cells);
+            self.history_prefix_append_only.set(true);
             }
         }
 
@@ -38989,8 +41480,8 @@ impl WidgetRef for &ChatWidget<'_> {
             && render_settings.width > 0
             && content_area.height > 0
         {
-            let prefix_ready =
-                self.history_render.prefix_sums.borrow().len() > self.history_cells.len();
+            let prefix_ready = self.history_render.prefix_sums.borrow().len()
+                > self.history_cells.len();
             if prefix_ready {
                 self.history_virtualization_sync_pending.set(false);
                 let _ = self.app_event_tx.send(AppEvent::SyncHistoryVirtualization);
@@ -39008,11 +41499,7 @@ impl WidgetRef for &ChatWidget<'_> {
                 let remainder = base_total_height % viewport_rows;
                 remainder_for_log = Some(remainder);
                 if remainder == 0 {
-                    requested_spacer_lines = if base_total_height == viewport_rows {
-                        1
-                    } else {
-                        2
-                    };
+                    requested_spacer_lines = if base_total_height == viewport_rows { 1 } else { 2 };
                 } else if remainder <= 2 || remainder >= viewport_rows.saturating_sub(2) {
                     requested_spacer_lines = 1;
                 }
@@ -39020,7 +41507,7 @@ impl WidgetRef for &ChatWidget<'_> {
         }
 
         let composer_rows = self.layout.last_bottom_reserved_rows.get();
-        let ensure_footer_space = self.layout.scroll_offset == 0
+        let ensure_footer_space = self.layout.scroll_offset.get() == 0
             && composer_rows > 0
             && base_total_height >= viewport_rows
             && request_count > 0;
@@ -39037,9 +41524,9 @@ impl WidgetRef for &ChatWidget<'_> {
             // requested height even if no additional history events arrive. Without
             // this, we'd keep the stale overscan row on-screen until the user types
             // or resizes the window again.
-            let _ = self
-                .app_event_tx
-                .send(AppEvent::ScheduleFrameIn(HISTORY_ANIMATION_FRAME_INTERVAL));
+            let _ = self.app_event_tx.send(AppEvent::ScheduleFrameIn(
+                HISTORY_ANIMATION_FRAME_INTERVAL,
+            ));
         }
 
         if spacer_lines > 0 {
@@ -39047,7 +41534,7 @@ impl WidgetRef for &ChatWidget<'_> {
             self.history_render
                 .set_bottom_spacer_range(Some((base_total_height, total_height)));
             tracing::debug!(
-                target: "hanzo_tui::history_render",
+                target: "code_tui::history_render",
                 lines = spacer_lines,
                 base_height = base_total_height,
                 padded_height = total_height,
@@ -39061,8 +41548,11 @@ impl WidgetRef for &ChatWidget<'_> {
         }
         let overscan_extra = total_height.saturating_sub(base_total_height);
         // Calculate scroll position and vertical alignment
-        // Stabilize viewport when input area height changes while scrolled up.
+        // Preserve a stable viewport anchor when history grows while the user is scrolled up.
         let prev_viewport_h = self.layout.last_history_viewport_height.get();
+        let prev_max_scroll = self.layout.last_max_scroll.get();
+        let prev_scroll_offset = self.layout.scroll_offset.get().min(prev_max_scroll);
+        let prev_scroll_from_top = prev_max_scroll.saturating_sub(prev_scroll_offset);
         if prev_viewport_h == 0 {
             // Initialize on first render
             self.layout
@@ -39081,9 +41571,18 @@ impl WidgetRef for &ChatWidget<'_> {
             // scroll_offset is measured from the bottom (0 = bottom/newest)
             // Convert to distance from the top for rendering math.
             let max_scroll = total_height.saturating_sub(content_area.height);
-            // Update cache and clamp for display only
+            if self.layout.scroll_offset.get() > 0 && max_scroll != prev_max_scroll {
+                // If the user has scrolled up and the history height changes (e.g. new output
+                // arrives while streaming), keep the same content anchored at the top of the
+                // viewport by adjusting our bottom-anchored scroll offset.
+                self.layout
+                    .scroll_offset
+                    .set(max_scroll.saturating_sub(prev_scroll_from_top));
+            }
+
+            // Update cache and clamp for display only.
             self.layout.last_max_scroll.set(max_scroll);
-            let clamped_scroll_offset = self.layout.scroll_offset.min(max_scroll);
+            let clamped_scroll_offset = self.layout.scroll_offset.get().min(max_scroll);
             let mut scroll_from_top = max_scroll.saturating_sub(clamped_scroll_offset);
 
             if overscan_extra > 0 && clamped_scroll_offset == 0 {
@@ -39100,7 +41599,7 @@ impl WidgetRef for &ChatWidget<'_> {
             // Only skip known spacer intervals recorded by the history render cache.
 
             tracing::debug!(
-                target: "hanzo_tui::scrollback",
+                target: "code_tui::scrollback",
                 total_height,
                 base_total_height,
                 viewport = content_area.height,
@@ -39111,21 +41610,6 @@ impl WidgetRef for &ChatWidget<'_> {
                 "scrollback pre-adjust scroll position",
             );
 
-            // Viewport stabilization: when user is scrolled up (offset > 0) and the
-            // history viewport height changes due to the input area growing/shrinking,
-            // adjust the scroll_from_top to keep the top line steady on screen.
-            if clamped_scroll_offset > 0 {
-                let prev_h = prev_viewport_h as i32;
-                let curr_h = content_area.height as i32;
-                let delta_h = prev_h - curr_h; // positive if viewport shrank
-                if delta_h != 0 {
-                    // Adjust in the opposite direction to keep the same top anchor
-                    let sft = scroll_from_top as i32 - delta_h;
-                    let sft = sft.clamp(0, max_scroll as i32) as u16;
-                    scroll_from_top = sft;
-                }
-            }
-
             // If our scroll origin landed on a spacer row between cells, nudge it up so
             // the viewport starts with real content instead of an empty separator.
             let scroll_pos = if clamped_scroll_offset > 0 {
@@ -39133,7 +41617,7 @@ impl WidgetRef for &ChatWidget<'_> {
                     .history_render
                     .adjust_scroll_to_content(scroll_from_top);
                 tracing::debug!(
-                    target: "hanzo_tui::scrollback",
+                    target: "code_tui::scrollback",
                     adjusted_scroll_from_top = adjusted,
                     scroll_from_top,
                     "scrollback adjusted scroll position",
@@ -39275,10 +41759,7 @@ impl WidgetRef for &ChatWidget<'_> {
                 visible_requests_slice,
                 render_settings,
             ));
-            _subset_rendered
-                .as_ref()
-                .map(|v| v.as_slice())
-                .unwrap_or(&[])
+            _subset_rendered.as_ref().map(|v| v.as_slice()).unwrap_or(&[])
         };
 
         // Only schedule animation frames if an animating cell is actually visible.
@@ -39329,8 +41810,8 @@ impl WidgetRef for &ChatWidget<'_> {
                 .cell
                 .expect("visible cell missing backing cell for render");
             // Calculate height with reduced width due to gutter
-            let gw: u16 = crate::theme::gutter_width();
-            let content_width = content_area.width.saturating_sub(gw);
+            const GUTTER_WIDTH: u16 = 2;
+            let content_width = content_area.width.saturating_sub(GUTTER_WIDTH);
             let maybe_assistant = item
                 .as_any()
                 .downcast_ref::<crate::history_cell::AssistantMarkdownCell>();
@@ -39339,8 +41820,10 @@ impl WidgetRef for &ChatWidget<'_> {
                 .downcast_ref::<crate::history_cell::StreamingContentCell>()
                 .is_some();
 
-            let mut layout_for_render: Option<Rc<CachedLayout>> =
-                visible.layout.as_ref().map(|lr| lr.layout());
+            let mut layout_for_render: Option<Rc<CachedLayout>> = visible
+                .layout
+                .as_ref()
+                .map(|lr| lr.layout());
 
             let item_height = visible.height;
             if content_area.width > 0 {
@@ -39379,10 +41862,7 @@ impl WidgetRef for &ChatWidget<'_> {
             }
             if self.perf_state.enabled
                 && rendered_cells_full.is_none()
-                && matches!(
-                    visible.height_source,
-                    history_render::HeightSource::DesiredHeight
-                )
+                && matches!(visible.height_source, history_render::HeightSource::DesiredHeight)
             {
                 let mut p = self.perf_state.stats.borrow_mut();
                 p.height_misses_render = p.height_misses_render.saturating_add(1);
@@ -39412,34 +41892,35 @@ impl WidgetRef for &ChatWidget<'_> {
             let available_height = (content_area.y + content_area.height).saturating_sub(screen_y);
             let visible_height = item_height.saturating_sub(skip_top).min(available_height);
 
+
             if visible_height > 0 {
-                // Reserve gutter space based on gutter mode:
-                // - None: 0 (flush-left)
-                // - Spacing: 2 (whitespace indent, no icons)
-                // - Full: 2 (icons + spacing)
-                let gutter_width = crate::theme::gutter_width().min(content_area.width);
+                // Define gutter width (2 chars: symbol + space)
+                const GUTTER_WIDTH: u16 = 2;
 
                 // Split area into gutter and content
                 let gutter_area = Rect {
                     x: content_area.x,
                     y: screen_y,
-                    width: gutter_width,
+                    width: GUTTER_WIDTH.min(content_area.width),
                     height: visible_height,
                 };
 
                 let item_area = Rect {
-                    x: content_area.x + gutter_width,
+                    x: content_area.x + GUTTER_WIDTH.min(content_area.width),
                     y: screen_y,
-                    width: content_area.width.saturating_sub(gutter_width),
+                    width: content_area.width.saturating_sub(GUTTER_WIDTH),
                     height: visible_height,
                 };
 
                 if history_cell_logging_enabled() {
                     let row_start = item_area.y;
-                    let row_end = item_area.y.saturating_add(visible_height).saturating_sub(1);
+                    let row_end = item_area
+                        .y
+                        .saturating_add(visible_height)
+                        .saturating_sub(1);
                     let cache_hit = layout_for_render.is_some();
                     tracing::info!(
-                        target: "hanzo_tui::history_cells",
+                        target: "code_tui::history_cells",
                         idx,
                         kind = ?item.kind(),
                         row_start,
@@ -39478,10 +41959,7 @@ impl WidgetRef for &ChatWidget<'_> {
                 // the light "hole" seen after we reduced redraws. For other
                 // cell types keep the default background (already painted by
                 // the frame bg fill above).
-                if (is_assistant || is_auto_review)
-                    && gutter_area.width > 0
-                    && gutter_area.height > 0
-                {
+                if (is_assistant || is_auto_review) && gutter_area.width > 0 && gutter_area.height > 0 {
                     let _perf_gutter_start = if self.perf_state.enabled {
                         Some(std::time::Instant::now())
                     } else {
@@ -39494,8 +41972,7 @@ impl WidgetRef for &ChatWidget<'_> {
                         tint_x = content_area.x.saturating_sub(1);
                         tint_width = tint_width.saturating_add(1);
                     }
-                    let tint_rect =
-                        Rect::new(tint_x, gutter_area.y, tint_width, gutter_area.height);
+                    let tint_rect = Rect::new(tint_x, gutter_area.y, tint_width, gutter_area.height);
                     fill_rect(buf, tint_rect, Some(' '), style);
                     // Also tint one column immediately to the right of the content area
                     // so the assistant block is visually bookended. This column lives in the
@@ -39591,13 +42068,14 @@ impl WidgetRef for &ChatWidget<'_> {
                         }
                     } else {
                         match symbol {
-                            "›" | "▶" => crate::colors::text(),        // user
-                            "⋮" => crate::colors::primary(),           // thinking
-                            "•" | "⏺" => crate::colors::text_bright(), // codex/agent
-                            "⚙" => crate::colors::info(),              // tool working
-                            "✔" => crate::colors::success(),           // tool complete
-                            "✖" => crate::colors::error(),             // error
-                            "★" => crate::colors::text_bright(),       // notice/popular
+                            "›" => crate::colors::text(),        // user
+                            "⋮" => crate::colors::primary(),     // thinking
+                            "•" => crate::colors::text_bright(), // codex/agent
+                            "⚙" => crate::colors::info(),        // tool working
+                            "✔" => crate::colors::success(),     // tool complete
+                            "✖" => crate::colors::error(),       // error
+                            "⚠" => crate::colors::warning(),     // warning notice
+                            "★" => crate::colors::text_bright(), // notice/popular
                             _ => crate::colors::text_dim(),
                         }
                     };
@@ -39650,10 +42128,10 @@ impl WidgetRef for &ChatWidget<'_> {
                 // Render the cell content first
                 let mut handled_assistant = false;
                 if let Some(plan) = visible.assistant_plan.as_ref() {
-                    if let Some(assistant) = visible.cell.and_then(|c| {
-                        c.as_any()
-                            .downcast_ref::<crate::history_cell::AssistantMarkdownCell>()
-                    }) {
+                    if let Some(assistant) = visible
+                        .cell
+                        .and_then(|c| c.as_any().downcast_ref::<crate::history_cell::AssistantMarkdownCell>())
+                    {
                         if skip_rows < plan.total_rows() && item_area.height > 0 {
                             assistant.render_with_layout(plan.as_ref(), item_area, buf, skip_rows);
                         }
@@ -39726,7 +42204,7 @@ impl WidgetRef for &ChatWidget<'_> {
                 let viewport_top = content_area.y;
                 let viewport_bottom = content_area.y.saturating_add(content_area.height);
                 tracing::debug!(
-                    target: "hanzo_tui::scrollback",
+                    target: "code_tui::scrollback",
                     idx,
                     request_count,
                     content_y,
@@ -39743,8 +42221,7 @@ impl WidgetRef for &ChatWidget<'_> {
                 );
             }
 
-            let mut should_add_spacing =
-                idx < request_count.saturating_sub(1) && visible_height > 0;
+            let mut should_add_spacing = idx < request_count.saturating_sub(1) && visible_height > 0;
             if should_add_spacing {
                 // Special-case: two adjacent collapsed reasoning cells → no spacer.
                 let this_is_collapsed_reasoning = item
@@ -39781,7 +42258,7 @@ impl WidgetRef for &ChatWidget<'_> {
         if let Some(first) = height_mismatches.first() {
             for mismatch in &height_mismatches {
                 tracing::error!(
-                    target: "hanzo_tui::history_cells",
+                    target: "code_tui::history_cells",
                     history_id = ?mismatch.history_id,
                     idx = mismatch.idx,
                     cached = mismatch.cached,
@@ -39896,7 +42373,7 @@ impl WidgetRef for &ChatWidget<'_> {
         } else {
             // Render the bottom pane directly without a border for now
             // The composer has its own layout with hints at the bottom
-            (&self.bottom_pane).render_ref(bottom_pane_area, buf);
+            (&self.bottom_pane).render(bottom_pane_area, buf);
         }
 
         if let Some(overlay) = self.terminal.overlay() {
@@ -39907,8 +42384,8 @@ impl WidgetRef for &ChatWidget<'_> {
 
             let padding = 1u16;
             let footer_reserved = 1.min(bottom_pane_area.height);
-            let overlay_bottom =
-                (bottom_pane_area.y + bottom_pane_area.height).saturating_sub(footer_reserved);
+            let overlay_bottom = (bottom_pane_area.y + bottom_pane_area.height)
+                .saturating_sub(footer_reserved);
             let overlay_height = overlay_bottom
                 .saturating_sub(history_area.y)
                 .max(1)
@@ -39922,17 +42399,13 @@ impl WidgetRef for &ChatWidget<'_> {
             Clear.render(window_area, buf);
 
             let block = Block::default()
-                .borders(crate::theme::zen_borders())
-                .title(ratatui::text::Line::from(
-                    if !crate::theme::show_borders() {
-                        vec![]
-                    } else {
-                        vec![ratatui::text::Span::styled(
-                            format!(" Terminal - {} ", overlay.title),
-                            Style::default().fg(crate::colors::text()),
-                        )]
-                    },
-                ))
+                .borders(Borders::ALL)
+                .title(ratatui::text::Line::from(vec![
+                    ratatui::text::Span::styled(
+                        format!(" Terminal - {} ", overlay.title),
+                        Style::default().fg(crate::colors::text()),
+                    ),
+                ]))
                 .style(Style::default().bg(crate::colors::background()))
                 .border_style(
                     Style::default()
@@ -39983,24 +42456,22 @@ impl WidgetRef for &ChatWidget<'_> {
                     let mut consumed_width: usize = 0;
 
                     if overlay.running {
-                        if crate::theme::show_borders() {
-                            let now_ms = std::time::SystemTime::now()
-                                .duration_since(std::time::UNIX_EPOCH)
-                                .unwrap_or_default()
-                                .as_millis();
-                            let frame = crate::spinner::frame_at_time(
-                                crate::spinner::current_spinner(),
-                                now_ms,
-                            );
-                            if !frame.is_empty() {
-                                consumed_width += frame.chars().count();
-                                header_spans.push(ratatui::text::Span::styled(
-                                    frame,
-                                    Style::default().fg(crate::colors::spinner()),
-                                ));
-                                header_spans.push(ratatui::text::Span::raw(" "));
-                                consumed_width = consumed_width.saturating_add(1);
-                            }
+                        let now_ms = std::time::SystemTime::now()
+                            .duration_since(std::time::UNIX_EPOCH)
+                            .unwrap_or_default()
+                            .as_millis();
+                        let frame = crate::spinner::frame_at_time(
+                            crate::spinner::current_spinner(),
+                            now_ms,
+                        );
+                        if !frame.is_empty() {
+                            consumed_width += frame.chars().count();
+                            header_spans.push(ratatui::text::Span::styled(
+                                frame,
+                                Style::default().fg(crate::colors::spinner()),
+                            ));
+                            header_spans.push(ratatui::text::Span::raw(" "));
+                            consumed_width = consumed_width.saturating_add(1);
                         }
 
                         let status_text = overlay
@@ -40018,10 +42489,9 @@ impl WidgetRef for &ChatWidget<'_> {
                         self.app_event_tx
                             .send(AppEvent::ScheduleFrameIn(Duration::from_millis(interval)));
                     } else {
-                        let show_icons = crate::theme::show_gutter();
                         let (icon, color, status_text) = match overlay.exit_code {
                             Some(0) => (
-                                if show_icons { "✔" } else { "" },
+                                "✔",
                                 crate::colors::success(),
                                 overlay
                                     .duration
@@ -40029,7 +42499,7 @@ impl WidgetRef for &ChatWidget<'_> {
                                     .unwrap_or_else(|| "Completed".to_string()),
                             ),
                             Some(code) => (
-                                if show_icons { "✖" } else { "" },
+                                "✖",
                                 crate::colors::error(),
                                 overlay
                                     .duration
@@ -40056,7 +42526,7 @@ impl WidgetRef for &ChatWidget<'_> {
                             .saturating_add(UnicodeWidthStr::width(status_text.as_str()));
                         header_spans.push(ratatui::text::Span::styled(
                             status_text,
-                            Style::default().fg(color),
+                            Style::default().fg(crate::colors::text_dim()),
                         ));
                     }
 
@@ -40177,13 +42647,12 @@ impl WidgetRef for &ChatWidget<'_> {
                         " Scroll  ",
                         Style::default().fg(crate::colors::text_dim()),
                     ),
-                    ratatui::text::Span::styled("Esc", Style::default().fg(crate::colors::error())),
                     ratatui::text::Span::styled(
-                        if overlay.running {
-                            " Cancel  "
-                        } else {
-                            " Close  "
-                        },
+                        "Esc",
+                        Style::default().fg(crate::colors::error()),
+                    ),
+                    ratatui::text::Span::styled(
+                        if overlay.running { " Cancel  " } else { " Close  " },
                         Style::default().fg(crate::colors::text_dim()),
                     ),
                 ];
@@ -40218,9 +42687,7 @@ impl WidgetRef for &ChatWidget<'_> {
 
                 let instructions_area = Rect {
                     x: footer_area.x,
-                    y: footer_area
-                        .y
-                        .saturating_add(footer_area.height.saturating_sub(1)),
+                    y: footer_area.y.saturating_add(footer_area.height.saturating_sub(1)),
                     width: footer_area.width,
                     height: 1,
                 };
@@ -40325,12 +42792,8 @@ impl WidgetRef for &ChatWidget<'_> {
                     ratatui::text::Span::styled(" close ", t_dim),
                 ]);
                 let block = Block::default()
-                    .borders(crate::theme::zen_borders())
-                    .title(if crate::theme::show_borders() {
-                        ratatui::text::Line::from(title_spans)
-                    } else {
-                        ratatui::text::Line::from("")
-                    })
+                    .borders(Borders::ALL)
+                    .title(ratatui::text::Line::from(title_spans))
                     // Use normal background for the window itself so it contrasts against the
                     // dimmed scrim behind
                     .style(Style::default().bg(crate::colors::background()))
@@ -40396,12 +42859,10 @@ impl WidgetRef for &ChatWidget<'_> {
                     constraints.push(Constraint::Fill(1));
                     let chunks = Layout::horizontal(constraints).split(tabs_area);
                     // Draw a light bottom border across the entire tabs strip
-                    if crate::theme::show_borders() {
-                        let tabs_bottom_rule = Block::default()
-                            .borders(Borders::BOTTOM)
-                            .border_style(Style::default().fg(crate::colors::border()));
-                        tabs_bottom_rule.render(tabs_area, buf);
-                    }
+                    let tabs_bottom_rule = Block::default()
+                        .borders(Borders::BOTTOM)
+                        .border_style(Style::default().fg(crate::colors::border()));
+                    tabs_bottom_rule.render(tabs_area, buf);
                     for i in 0..labels.len() {
                         // last chunk is filler; guard below
                         if i >= chunks.len().saturating_sub(1) {
@@ -40453,13 +42914,10 @@ impl WidgetRef for &ChatWidget<'_> {
                                 width: accent_w,
                                 height: 1,
                             };
-                            if crate::theme::show_borders() {
-                                let underline =
-                                    Block::default().borders(Borders::BOTTOM).border_style(
-                                        Style::default().fg(crate::colors::text_bright()),
-                                    );
-                                underline.render(accent_rect, buf);
-                            }
+                            let underline = Block::default()
+                                .borders(Borders::BOTTOM)
+                                .border_style(Style::default().fg(crate::colors::text_bright()));
+                            underline.render(accent_rect, buf);
                         }
                     }
                 } else {
@@ -40559,12 +43017,8 @@ impl WidgetRef for &ChatWidget<'_> {
                         };
                         Clear.render(dialog, buf);
                         let dlg_block = Block::default()
-                            .borders(crate::theme::zen_borders())
-                            .title(if crate::theme::show_borders() {
-                                "Confirm Undo"
-                            } else {
-                                ""
-                            })
+                            .borders(Borders::ALL)
+                            .title("Confirm Undo")
                             .style(
                                 Style::default()
                                     .bg(crate::colors::background())
@@ -40619,35 +43073,29 @@ impl WidgetRef for &ChatWidget<'_> {
                     };
                     Clear.render(window_area, buf);
                     let block = Block::default()
-                        .borders(crate::theme::zen_borders())
-                        .title(ratatui::text::Line::from(
-                            if !crate::theme::show_borders() {
-                                vec![]
-                            } else {
-                                vec![
-                                    ratatui::text::Span::styled(
-                                        " ",
-                                        Style::default().fg(crate::colors::text_dim()),
-                                    ),
-                                    ratatui::text::Span::styled(
-                                        "Guide",
-                                        Style::default().fg(crate::colors::text()),
-                                    ),
-                                    ratatui::text::Span::styled(
-                                        " ——— ",
-                                        Style::default().fg(crate::colors::text_dim()),
-                                    ),
-                                    ratatui::text::Span::styled(
-                                        "Esc",
-                                        Style::default().fg(crate::colors::text()),
-                                    ),
-                                    ratatui::text::Span::styled(
-                                        " close ",
-                                        Style::default().fg(crate::colors::text_dim()),
-                                    ),
-                                ]
-                            },
-                        ))
+                        .borders(Borders::ALL)
+                        .title(ratatui::text::Line::from(vec![
+                            ratatui::text::Span::styled(
+                                " ",
+                                Style::default().fg(crate::colors::text_dim()),
+                            ),
+                            ratatui::text::Span::styled(
+                                "Guide",
+                                Style::default().fg(crate::colors::text()),
+                            ),
+                            ratatui::text::Span::styled(
+                                " ——— ",
+                                Style::default().fg(crate::colors::text_dim()),
+                            ),
+                            ratatui::text::Span::styled(
+                                "Esc",
+                                Style::default().fg(crate::colors::text()),
+                            ),
+                            ratatui::text::Span::styled(
+                                " close ",
+                                Style::default().fg(crate::colors::text_dim()),
+                            ),
+                        ]))
                         .style(Style::default().bg(crate::colors::background()))
                         .border_style(
                             Style::default()
@@ -40790,7 +43238,7 @@ struct ExecState {
         ExecCallId,
         (
             ExecCommandEndEvent,
-            hanzo_core::protocol::OrderMeta,
+            code_core::protocol::OrderMeta,
             std::time::Instant,
         ),
     >,
@@ -40877,7 +43325,7 @@ struct StreamState {
 #[derive(Default)]
 struct LayoutState {
     // Scroll offset from bottom (0 = bottom)
-    scroll_offset: u16,
+    scroll_offset: Cell<u16>,
     // Cached max scroll from last render
     last_max_scroll: std::cell::Cell<u16>,
     // Track last viewport height of the history content area
@@ -40894,11 +43342,57 @@ struct LayoutState {
 
 #[derive(Default)]
 struct DiffsState {
-    session_patch_sets: Vec<HashMap<PathBuf, hanzo_core::protocol::FileChange>>,
+    session_patch_sets: Vec<HashMap<PathBuf, code_core::protocol::FileChange>>,
     baseline_file_contents: HashMap<PathBuf, String>,
     overlay: Option<DiffOverlay>,
     confirm: Option<DiffConfirm>,
     body_visible_rows: std::cell::Cell<u16>,
+}
+
+impl DiffsState {
+    fn record_patch_set(
+        &mut self,
+        changes: &HashMap<PathBuf, code_core::protocol::FileChange>,
+        move_existing_baselines: bool,
+    ) {
+        let compact_changes = compact_patch_changes(changes);
+        self.session_patch_sets.push(compact_changes);
+        if self.session_patch_sets.len() > MAX_SESSION_PATCH_SETS {
+            let overflow = self.session_patch_sets.len() - MAX_SESSION_PATCH_SETS;
+            self.session_patch_sets.drain(0..overflow);
+        }
+
+        for (src_path, change) in changes {
+            match change {
+                code_core::protocol::FileChange::Update {
+                    move_path: Some(dest_path),
+                    ..
+                } => {
+                    if move_existing_baselines {
+                        if let Some(baseline) = self.baseline_file_contents.remove(src_path) {
+                            self.baseline_file_contents.insert(dest_path.clone(), baseline);
+                        } else if !self.baseline_file_contents.contains_key(dest_path) {
+                            let baseline = std::fs::read_to_string(src_path).unwrap_or_default();
+                            self.baseline_file_contents.insert(dest_path.clone(), baseline);
+                        }
+                    } else if let Some(baseline) = self.baseline_file_contents.get(src_path).cloned() {
+                        self.baseline_file_contents
+                            .entry(dest_path.clone())
+                            .or_insert(baseline);
+                    } else if !self.baseline_file_contents.contains_key(dest_path) {
+                        let baseline = std::fs::read_to_string(src_path).unwrap_or_default();
+                        self.baseline_file_contents.insert(dest_path.clone(), baseline);
+                    }
+                }
+                _ => {
+                    if !self.baseline_file_contents.contains_key(src_path) {
+                        let baseline = std::fs::read_to_string(src_path).unwrap_or_default();
+                        self.baseline_file_contents.insert(src_path.clone(), baseline);
+                    }
+                }
+            }
+        }
+    }
 }
 
 #[derive(Default)]
@@ -41066,7 +43560,8 @@ fn pending_command_box_lines(
     let padded_width = inner_width.saturating_sub(2).max(1) as usize;
     let command_width = inner_width.saturating_sub(4).max(1) as usize;
 
-    const INSTRUCTION_TEXT: &str = "Press Enter to run this command. Press Esc to cancel.";
+    const INSTRUCTION_TEXT: &str =
+        "Press Enter to run this command. Press Esc to cancel.";
     let instruction_segments = wrap(INSTRUCTION_TEXT, padded_width);
     let instruction_style = Style::default().fg(crate::colors::text_dim());
     let mut lines: Vec<RtLine<'static>> = instruction_segments
@@ -41089,9 +43584,7 @@ fn pending_command_box_lines(
         .fg(crate::colors::background());
 
     if !lines.is_empty() {
-        lines.push(ratatui::text::Line::from(vec![ratatui::text::Span::raw(
-            String::new(),
-        )]));
+        lines.push(ratatui::text::Line::from(vec![ratatui::text::Span::raw(String::new())]));
     }
 
     for (idx, line) in command_lines.iter().enumerate() {
@@ -41146,10 +43639,7 @@ fn command_line_index_for_cursor(lines: &[CommandDisplayLine], cursor: usize) ->
     lines.len().saturating_sub(1)
 }
 
-fn split_line_for_cursor(
-    text: &str,
-    cursor_offset: usize,
-) -> (String, Option<String>, Option<String>) {
+fn split_line_for_cursor(text: &str, cursor_offset: usize) -> (String, Option<String>, Option<String>) {
     if cursor_offset >= text.len() {
         return (text.to_string(), None, None);
     }
@@ -41176,14 +43666,13 @@ fn render_text_box(
     buf: &mut Buffer,
 ) {
     let block = Block::default()
-        .borders(crate::theme::zen_borders())
+        .borders(Borders::ALL)
         .style(Style::default().bg(crate::colors::background()))
         .border_style(Style::default().fg(border_color))
-        .title(if crate::theme::show_borders() {
-            ratatui::text::Span::styled(title.to_string(), Style::default().fg(border_color))
-        } else {
-            ratatui::text::Span::styled("", Style::default())
-        });
+        .title(ratatui::text::Span::styled(
+            title.to_string(),
+            Style::default().fg(border_color),
+        ));
     block.render(area, buf);
 
     let inner = area.inner(ratatui::layout::Margin::new(1, 1));
@@ -41220,6 +43709,7 @@ impl ChatWidget<'_> {
             }
         }
     }
+    
 
     pub(crate) fn set_tui_notifications(&mut self, enabled: bool) {
         let new_state = Notifications::Enabled(enabled);
@@ -41227,22 +43717,27 @@ impl ChatWidget<'_> {
         self.config.tui_notifications = new_state.clone();
 
         match find_code_home() {
-            Ok(home) => match hanzo_core::config::set_tui_notifications(&home, new_state) {
-                Ok(()) => {
-                    let msg = format!(
-                        "✅ {} TUI notifications",
-                        if enabled { "Enabled" } else { "Disabled" }
-                    );
-                    self.push_background_tail(msg);
+            Ok(home) => {
+                match code_core::config::set_tui_notifications(&home, new_state) {
+                    Ok(()) => {
+                        let msg = format!(
+                            "✅ {} TUI notifications",
+                            if enabled { "Enabled" } else { "Disabled" }
+                        );
+                        self.push_background_tail(msg);
+                    }
+                    Err(err) => {
+                        let msg = format!(
+                            "⚠️ Failed to persist TUI notifications setting: {}",
+                            err
+                        );
+                        self.history_push_plain_state(history_cell::new_error_event(msg));
+                    }
                 }
-                Err(err) => {
-                    let msg = format!("⚠️ Failed to persist TUI notifications setting: {}", err);
-                    self.history_push_plain_state(history_cell::new_error_event(msg));
-                }
-            },
+            }
             Err(_) => {
                 let msg = format!(
-                    "✅ {} TUI notifications (not persisted: HANZO_HOME not found)",
+                    "✅ {} TUI notifications (not persisted: CODE_HOME/CODEX_HOME not found)",
                     if enabled { "Enabled" } else { "Disabled" }
                 );
                 self.push_background_tail(msg);
@@ -41263,7 +43758,7 @@ impl ChatWidget<'_> {
             .filter(|text| !text.is_empty());
 
         self.app_event_tx.send(AppEvent::EmitTuiNotification {
-            title: "Hanzo Dev".to_string(),
+            title: "Code".to_string(),
             body: snippet,
         });
     }
@@ -41285,7 +43780,10 @@ impl ChatWidget<'_> {
     }
 
     fn notification_snippet(input: &str) -> String {
-        let collapsed = input.split_whitespace().collect::<Vec<_>>().join(" ");
+        let collapsed = input
+            .split_whitespace()
+            .collect::<Vec<_>>()
+            .join(" ");
 
         const LIMIT: usize = 120;
         if collapsed.chars().count() <= LIMIT {
@@ -41306,12 +43804,12 @@ impl ChatWidget<'_> {
     }
 
     pub(crate) fn toggle_mcp_server(&mut self, name: &str, enable: bool) {
-        match hanzo_core::config::find_code_home() {
-            Ok(home) => match hanzo_core::config::set_mcp_server_enabled(&home, name, enable) {
+        match code_core::config::find_code_home() {
+            Ok(home) => match code_core::config::set_mcp_server_enabled(&home, name, enable) {
                 Ok(changed) => {
                     if changed {
                         if enable {
-                            if let Ok((enabled, _)) = hanzo_core::config::list_mcp_servers(&home) {
+                            if let Ok((enabled, _)) = code_core::config::list_mcp_servers(&home) {
                                 if let Some((_, cfg)) = enabled.into_iter().find(|(n, _)| n == name)
                                 {
                                     self.config.mcp_servers.insert(name.to_string(), cfg);
@@ -41334,7 +43832,7 @@ impl ChatWidget<'_> {
                 }
             },
             Err(e) => {
-                let msg = format!("Failed to locate HANZO_HOME: {}", e);
+                let msg = format!("Failed to locate CODEX_HOME: {}", e);
                 self.history_push_plain_state(history_cell::new_error_event(msg));
             }
         }

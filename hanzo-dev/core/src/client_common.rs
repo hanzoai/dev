@@ -8,12 +8,13 @@ use crate::model_family::ModelFamily;
 use crate::openai_tools::OpenAiTool;
 use crate::protocol::RateLimitSnapshotEvent;
 use crate::protocol::TokenUsage;
+use crate::user_instructions::UserInstructions;
+use code_protocol::models::ContentItem;
+use code_protocol::models::FunctionCallOutputContentItem;
+use code_protocol::models::ResponseItem;
 use futures::Stream;
-use hanzo_protocol::models::ContentItem;
-use hanzo_protocol::models::ResponseItem;
 use once_cell::sync::Lazy;
-use serde::Deserialize;
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::borrow::Cow;
 use std::ops::Deref;
@@ -25,17 +26,15 @@ use uuid::Uuid;
 
 /// Additional prompt for Code. Can not edit Codex instructions.
 const PROMPT_CODER_TEMPLATE: &str = include_str!("../prompt_coder.md");
-static BASE_MODEL_DESCRIPTIONS: Lazy<String> = Lazy::new(model_guide_markdown);
-static DEFAULT_DEVELOPER_PROMPT: Lazy<String> =
-    Lazy::new(|| PROMPT_CODER_TEMPLATE.replace("{MODEL_DESCRIPTIONS}", &BASE_MODEL_DESCRIPTIONS));
+static BASE_MODEL_DESCRIPTIONS: Lazy<String> = Lazy::new(|| model_guide_markdown());
+static DEFAULT_DEVELOPER_PROMPT: Lazy<String> = Lazy::new(|| {
+    PROMPT_CODER_TEMPLATE.replace("{MODEL_DESCRIPTIONS}", &BASE_MODEL_DESCRIPTIONS)
+});
 
 /// wraps environment context message in a tag for the model to parse more easily.
 const ENVIRONMENT_CONTEXT_START: &str = "<environment_context>\n\n";
 const ENVIRONMENT_CONTEXT_END: &str = "\n\n</environment_context>";
 
-/// wraps user instructions message in a tag for the model to parse more easily.
-const USER_INSTRUCTIONS_START: &str = "<user_instructions>\n\n";
-const USER_INSTRUCTIONS_END: &str = "\n\n</user_instructions>";
 /// Review thread system prompt. Edit `core/src/review_prompt.md` to customize.
 #[allow(dead_code)]
 pub const REVIEW_PROMPT: &str = include_str!("../review_prompt.md");
@@ -138,15 +137,26 @@ impl Prompt {
         }
     }
 
-    fn get_formatted_user_instructions(&self) -> Option<String> {
-        self.user_instructions
+    fn get_formatted_user_instructions(&self) -> Option<ResponseItem> {
+        let instructions = self.user_instructions.as_ref()?;
+        let directory = self
+            .environment_context
             .as_ref()
-            .map(|ui| format!("{USER_INSTRUCTIONS_START}{ui}{USER_INSTRUCTIONS_END}"))
+            .and_then(|ctx| ctx.cwd.as_ref())
+            .map(|cwd| cwd.to_string_lossy().into_owned())
+            .unwrap_or_default();
+        Some(
+            UserInstructions {
+                directory,
+                text: instructions.clone(),
+            }
+            .into(),
+        )
     }
 
     fn get_formatted_environment_context(&self) -> Option<String> {
         self.environment_context.as_ref().map(|ec| {
-            let ec_str = serde_json::to_string_pretty(ec).unwrap_or_else(|_| format!("{ec:?}"));
+            let ec_str = serde_json::to_string_pretty(ec).unwrap_or_else(|_| format!("{:?}", ec));
             format!("{ENVIRONMENT_CONTEXT_START}{ec_str}{ENVIRONMENT_CONTEXT_END}")
         })
     }
@@ -159,10 +169,7 @@ impl Prompt {
             input_with_instructions.push(ResponseItem::Message {
                 id: None,
                 role: "developer".to_string(),
-                content: vec![ContentItem::InputText {
-                    text: developer_text,
-                }],
-            });
+                content: vec![ContentItem::InputText { text: developer_text }], end_turn: None, phase: None});
             for message in &self.prepend_developer_messages {
                 let trimmed = message.trim();
                 if trimmed.is_empty() {
@@ -173,8 +180,7 @@ impl Prompt {
                     role: "developer".to_string(),
                     content: vec![ContentItem::InputText {
                         text: trimmed.to_string(),
-                    }],
-                });
+                    }], end_turn: None, phase: None});
             }
             if let Some(ec) = self.get_formatted_environment_context() {
                 let has_environment_context = self.input.iter().any(|item| {
@@ -188,39 +194,34 @@ impl Prompt {
                     input_with_instructions.push(ResponseItem::Message {
                         id: None,
                         role: "user".to_string(),
-                        content: vec![ContentItem::InputText { text: ec }],
-                    });
+                        content: vec![ContentItem::InputText { text: ec }], end_turn: None, phase: None});
                 }
             }
             if let Some(ui) = self.get_formatted_user_instructions() {
                 let has_user_instructions = self.input.iter().any(|item| {
                     matches!(item, ResponseItem::Message { role, content, .. }
-                        if role == "user"
-                            && content.iter().any(|c| matches!(c,
-                                ContentItem::InputText { text } if text.contains(USER_INSTRUCTIONS_START)
-                            )))
+                        if role == "user" && UserInstructions::is_user_instructions(content))
                 });
                 if !has_user_instructions {
-                    input_with_instructions.push(ResponseItem::Message {
-                        id: None,
-                        role: "user".to_string(),
-                        content: vec![ContentItem::InputText { text: ui }],
-                    });
+                    input_with_instructions.push(ui);
                 }
             }
         }
         // Deduplicate function call outputs before adding to input
         let mut seen_call_ids = std::collections::HashSet::new();
         for item in &self.input {
-            if let ResponseItem::FunctionCallOutput { call_id, .. } = item
-                && !seen_call_ids.insert(call_id.clone())
-            {
-                // Skip duplicate function call output
-                tracing::debug!(
-                    "Filtering duplicate FunctionCallOutput with call_id: {} from input",
-                    call_id
-                );
-                continue;
+            match item {
+                ResponseItem::FunctionCallOutput { call_id, .. } => {
+                    if !seen_call_ids.insert(call_id.clone()) {
+                        // Skip duplicate function call output
+                        tracing::debug!(
+                            "Filtering duplicate FunctionCallOutput with call_id: {} from input",
+                            call_id
+                        );
+                        continue;
+                    }
+                }
+                _ => {}
             }
             input_with_instructions.push(item.clone());
         }
@@ -241,24 +242,25 @@ impl Prompt {
     /// Creates a formatted user instructions message from a string
     #[allow(dead_code)]
     pub(crate) fn format_user_instructions_message(ui: &str) -> ResponseItem {
-        ResponseItem::Message {
-            id: None,
-            role: "user".to_string(),
-            content: vec![ContentItem::InputText {
-                text: format!("{USER_INSTRUCTIONS_START}{ui}{USER_INSTRUCTIONS_END}"),
-            }],
+        UserInstructions {
+            directory: String::new(),
+            text: ui.to_string(),
         }
+        .into()
     }
 }
 
 #[derive(Debug)]
 pub enum ResponseEvent {
-    Created,
-    OutputItemDone {
-        item: ResponseItem,
-        sequence_number: Option<u64>,
-        output_index: Option<u32>,
+    Created {
+        response_id: Option<String>,
+        response_model: Option<String>,
     },
+    OutputItemDone { item: ResponseItem, sequence_number: Option<u64>, output_index: Option<u32> },
+    /// Indicates that the server will include reasoning content on this stream.
+    ///
+    /// Some providers expose this as a handshake header on websocket streams.
+    ServerReasoningIncluded(bool),
     Completed {
         response_id: String,
         token_usage: Option<TokenUsage>,
@@ -364,7 +366,7 @@ pub struct TextFormat {
 fn limit_screenshots_in_input(input: &mut Vec<ResponseItem>) {
     // Find all screenshot positions
     let mut screenshot_positions = Vec::new();
-
+    
     for (idx, item) in input.iter().enumerate() {
         if let ResponseItem::Message { content, .. } = item {
             let has_screenshot = content
@@ -375,52 +377,116 @@ fn limit_screenshots_in_input(input: &mut Vec<ResponseItem>) {
             }
         }
     }
-
+    
     // If we have 5 or fewer screenshots, no action needed
     if screenshot_positions.len() <= 5 {
         return;
     }
-
+    
     // Determine which screenshots to keep
     let mut positions_to_keep = std::collections::HashSet::new();
-
+    
     // Keep the first screenshot
     if let Some(&first) = screenshot_positions.first() {
         positions_to_keep.insert(first);
     }
-
+    
     // Keep the last 4 screenshots
     let last_four_start = screenshot_positions.len().saturating_sub(4);
     for &pos in &screenshot_positions[last_four_start..] {
         positions_to_keep.insert(pos);
     }
-
+    
     // Replace screenshots that should be removed
     for &pos in &screenshot_positions {
-        if !positions_to_keep.contains(&pos)
-            && let Some(ResponseItem::Message { content, .. }) = input.get_mut(pos)
-        {
-            // Replace image content with placeholder message
-            let mut new_content = Vec::new();
-            for item in content.iter() {
-                match item {
-                    ContentItem::InputImage { .. } => {
-                        new_content.push(ContentItem::InputText {
-                            text: "[screenshot no longer available]".to_string(),
-                        });
+        if !positions_to_keep.contains(&pos) {
+            if let Some(ResponseItem::Message { content, .. }) = input.get_mut(pos) {
+                // Replace image content with placeholder message
+                let mut new_content = Vec::new();
+                for item in content.iter() {
+                    match item {
+                        ContentItem::InputImage { .. } => {
+                            new_content.push(ContentItem::InputText {
+                                text: "[screenshot no longer available]".to_string(),
+                            });
+                        }
+                        other => new_content.push(other.clone()),
                     }
-                    other => new_content.push(other.clone()),
                 }
+                *content = new_content;
             }
-            *content = new_content;
         }
     }
-
+    
     tracing::debug!(
         "Limited screenshots from {} to {} (kept first and last 4)",
         screenshot_positions.len(),
         positions_to_keep.len()
     );
+}
+
+const SPARK_IMAGE_PLACEHOLDER: &str =
+    "[image omitted: selected -spark model does not support image inputs]";
+
+/// Replace `input_image` payloads with text placeholders for models that are
+/// known not to accept image inputs.
+pub(crate) fn replace_image_payloads_for_model(input: &mut Vec<ResponseItem>, model_slug: &str) {
+    if !model_slug.to_ascii_lowercase().contains("-spark") {
+        return;
+    }
+
+    for item in input.iter_mut() {
+        match item {
+            ResponseItem::Message { content, .. } => {
+                for content_item in content.iter_mut() {
+                    if matches!(content_item, ContentItem::InputImage { .. }) {
+                        *content_item = ContentItem::InputText {
+                            text: SPARK_IMAGE_PLACEHOLDER.to_string(),
+                        };
+                    }
+                }
+            }
+            ResponseItem::FunctionCallOutput { output, .. } => {
+                if let Some(content_items) = output.content_items_mut() {
+                    for output_item in content_items.iter_mut() {
+                        if matches!(output_item, FunctionCallOutputContentItem::InputImage { .. }) {
+                            *output_item = FunctionCallOutputContentItem::InputText {
+                                text: SPARK_IMAGE_PLACEHOLDER.to_string(),
+                            };
+                        }
+                    }
+                }
+            }
+            _ => {}
+        }
+    }
+}
+
+/// Convert upstream `image_generation_call` output items into standard user
+/// `input_image` messages when we replay stateless history.
+pub(crate) fn rewrite_image_generation_calls_for_input(input: &mut Vec<ResponseItem>) {
+    let original_items = std::mem::take(input);
+    *input = original_items
+        .into_iter()
+        .map(|item| match item {
+            ResponseItem::ImageGenerationCall { result, .. } => {
+                let image_url = if result.starts_with("data:") {
+                    result
+                } else {
+                    format!("data:image/png;base64,{result}")
+                };
+
+                ResponseItem::Message {
+                    id: None,
+                    role: "user".to_string(),
+                    content: vec![ContentItem::InputImage { image_url }],
+                    end_turn: None,
+                    phase: None,
+                }
+            }
+            _ => item,
+        })
+        .collect();
 }
 
 /// Request object that is serialized as JSON and POST'ed when using the
@@ -444,6 +510,8 @@ pub(crate) struct ResponsesApiRequest<'a> {
     pub(crate) stream: bool,
     pub(crate) include: Vec<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
+    pub(crate) service_tier: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub(crate) prompt_cache_key: Option<String>,
 }
 
@@ -455,6 +523,11 @@ pub(crate) fn create_reasoning_param_for_request(
     if !model_family.supports_reasoning_summaries {
         return None;
     }
+
+    let summary = match summary {
+        ReasoningSummaryConfig::Auto => model_family.default_reasoning_summary,
+        other => other,
+    };
 
     let summary = if summary == ReasoningSummaryConfig::None {
         None
@@ -482,10 +555,105 @@ impl Stream for ResponseStream {
 #[cfg(test)]
 mod tests {
     use crate::model_family::find_family_for_model;
-    use hanzo_apply_patch::APPLY_PATCH_TOOL_INSTRUCTIONS;
+    use code_apply_patch::APPLY_PATCH_TOOL_INSTRUCTIONS;
     use pretty_assertions::assert_eq;
 
     use super::*;
+
+    #[test]
+    fn replace_image_payloads_for_spark_model_rewrites_images() {
+        let mut input = vec![
+            ResponseItem::Message {
+                id: None,
+                role: "user".to_string(),
+                content: vec![
+                    ContentItem::InputText {
+                        text: "Please inspect this".to_string(),
+                    },
+                    ContentItem::InputImage {
+                        image_url: "data:image/png;base64,AAA".to_string(),
+                    },
+                ],
+                end_turn: None,
+                phase: None,
+            },
+            ResponseItem::FunctionCallOutput {
+                call_id: "call_1".to_string(),
+                output: code_protocol::models::FunctionCallOutputPayload::from_content_items(vec![
+                    FunctionCallOutputContentItem::InputImage {
+                        image_url: "data:image/png;base64,BBB".to_string(),
+                        detail: None,
+                    },
+                ]),
+            },
+        ];
+
+        replace_image_payloads_for_model(&mut input, "gpt-5.3-codex-spark");
+
+        assert!(matches!(
+            &input[0],
+            ResponseItem::Message { content, .. }
+                if matches!(
+                    content.get(1),
+                    Some(ContentItem::InputText { text }) if text == SPARK_IMAGE_PLACEHOLDER
+                )
+        ));
+
+        assert!(matches!(
+            &input[1],
+            ResponseItem::FunctionCallOutput { output, .. }
+                if matches!(
+                    output.content_items().and_then(|items| items.first()),
+                    Some(FunctionCallOutputContentItem::InputText { text })
+                        if text == SPARK_IMAGE_PLACEHOLDER
+                )
+        ));
+    }
+
+    #[test]
+    fn replace_image_payloads_for_non_spark_model_keeps_images() {
+        let mut input = vec![ResponseItem::Message {
+            id: None,
+            role: "user".to_string(),
+            content: vec![ContentItem::InputImage {
+                image_url: "data:image/png;base64,AAA".to_string(),
+            }],
+            end_turn: None,
+            phase: None,
+        }];
+
+        replace_image_payloads_for_model(&mut input, "gpt-5.3-codex");
+
+        assert!(matches!(
+            &input[0],
+            ResponseItem::Message { content, .. }
+                if matches!(content.first(), Some(ContentItem::InputImage { .. }))
+        ));
+    }
+
+    #[test]
+    fn rewrite_image_generation_calls_for_input_converts_to_user_image_message() {
+        let mut input = vec![ResponseItem::ImageGenerationCall {
+            id: "ig_1".to_string(),
+            status: "completed".to_string(),
+            revised_prompt: None,
+            result: "Zm9v".to_string(),
+        }];
+
+        rewrite_image_generation_calls_for_input(&mut input);
+
+        assert_eq!(input.len(), 1);
+        assert!(matches!(
+            &input[0],
+            ResponseItem::Message { role, content, .. }
+                if role == "user"
+                    && matches!(
+                        content.first(),
+                        Some(ContentItem::InputImage { image_url })
+                            if image_url == "data:image/png;base64,Zm9v"
+                    )
+        ));
+    }
 
     struct InstructionsTestCase {
         pub slug: &'static str,
@@ -608,11 +776,9 @@ mod tests {
             store: false,
             stream: true,
             include: vec![],
+            service_tier: None,
             prompt_cache_key: None,
-            text: Some(Text {
-                verbosity: OpenAiTextVerbosity::Low,
-                format: None,
-            }),
+            text: Some(Text { verbosity: OpenAiTextVerbosity::Low, format: None }),
         };
 
         let v = serde_json::to_value(&req).expect("json");
@@ -646,6 +812,7 @@ mod tests {
             store: false,
             stream: true,
             include: vec![],
+            service_tier: None,
             prompt_cache_key: None,
             text: Some(Text {
                 verbosity: OpenAiTextVerbosity::Medium,
@@ -693,6 +860,7 @@ mod tests {
             store: false,
             stream: true,
             include: vec![],
+            service_tier: None,
             prompt_cache_key: None,
             text: None,
         };
