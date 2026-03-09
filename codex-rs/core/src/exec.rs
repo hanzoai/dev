@@ -15,7 +15,6 @@ use tokio::io::AsyncReadExt;
 use tokio::io::BufReader;
 use tokio::process::Child;
 use tokio_util::sync::CancellationToken;
-use uuid::Uuid;
 
 use crate::error::CodexErr;
 use crate::error::Result;
@@ -67,7 +66,6 @@ pub struct ExecParams {
     pub expiration: ExecExpiration,
     pub env: HashMap<String, String>,
     pub network: Option<NetworkProxy>,
-    pub network_attempt_id: Option<Uuid>,
     pub sandbox_permissions: SandboxPermissions,
     pub windows_sandbox_level: codex_protocol::config_types::WindowsSandboxLevel,
     pub justification: Option<String>,
@@ -186,15 +184,13 @@ pub async fn process_exec_tool_call(
         mut env,
         expiration,
         network,
-        network_attempt_id,
         sandbox_permissions,
         windows_sandbox_level,
         justification,
         arg0: _,
     } = params;
-    let network_attempt_id = network_attempt_id.map(|attempt_id| attempt_id.to_string());
     if let Some(network) = network.as_ref() {
-        network.apply_to_env_for_attempt(&mut env, network_attempt_id.as_deref());
+        network.apply_to_env(&mut env);
     }
     let (program, args) = command.split_first().ok_or_else(|| {
         CodexErr::Io(io::Error::new(
@@ -210,6 +206,7 @@ pub async fn process_exec_tool_call(
         env,
         expiration,
         sandbox_permissions,
+        additional_permissions: None,
         justification,
     };
 
@@ -222,6 +219,8 @@ pub async fn process_exec_tool_call(
             enforce_managed_network,
             network: network.as_ref(),
             sandbox_policy_cwd: sandbox_cwd,
+            #[cfg(target_os = "macos")]
+            macos_seatbelt_profile_extensions: None,
             codex_linux_sandbox_exe: codex_linux_sandbox_exe.as_ref(),
             use_linux_sandbox_bwrap,
             windows_sandbox_level,
@@ -229,32 +228,28 @@ pub async fn process_exec_tool_call(
         .map_err(CodexErr::from)?;
 
     // Route through the sandboxing module for a single, unified execution path.
-    crate::sandboxing::execute_env(exec_req, sandbox_policy, stdout_stream).await
+    crate::sandboxing::execute_env(exec_req, stdout_stream).await
 }
 
-pub(crate) async fn execute_exec_env(
-    env: ExecRequest,
+pub(crate) async fn execute_exec_request(
+    exec_request: ExecRequest,
     sandbox_policy: &SandboxPolicy,
     stdout_stream: Option<StdoutStream>,
+    after_spawn: Option<Box<dyn FnOnce() + Send>>,
 ) -> Result<ExecToolCallOutput> {
     let ExecRequest {
         command,
         cwd,
         env,
         network,
-        network_attempt_id,
         expiration,
         sandbox,
         windows_sandbox_level,
         sandbox_permissions,
+        sandbox_policy: _sandbox_policy_from_env,
         justification,
         arg0,
-    } = env;
-
-    let network_attempt_id = match network_attempt_id.as_deref() {
-        Some(attempt_id) => Uuid::parse_str(attempt_id).ok(),
-        None => network.as_ref().map(|_| Uuid::new_v4()),
-    };
+    } = exec_request;
 
     let params = ExecParams {
         command,
@@ -262,7 +257,6 @@ pub(crate) async fn execute_exec_env(
         expiration,
         env,
         network: network.clone(),
-        network_attempt_id,
         sandbox_permissions,
         windows_sandbox_level,
         justification,
@@ -270,7 +264,7 @@ pub(crate) async fn execute_exec_env(
     };
 
     let start = Instant::now();
-    let raw_output_result = exec(params, sandbox, sandbox_policy, stdout_stream).await;
+    let raw_output_result = exec(params, sandbox, sandbox_policy, stdout_stream, after_spawn).await;
     let duration = start.elapsed();
     finalize_exec_result(raw_output_result, sandbox, duration)
 }
@@ -356,14 +350,12 @@ async fn exec_windows_sandbox(
         cwd,
         mut env,
         network,
-        network_attempt_id,
         expiration,
         windows_sandbox_level,
         ..
     } = params;
-    let network_attempt_id = network_attempt_id.map(|attempt_id| attempt_id.to_string());
     if let Some(network) = network.as_ref() {
-        network.apply_to_env_for_attempt(&mut env, network_attempt_id.as_deref());
+        network.apply_to_env(&mut env);
     }
 
     // TODO(iceweasel-oai): run_windows_sandbox_capture should support all
@@ -702,6 +694,7 @@ async fn exec(
     sandbox: SandboxType,
     sandbox_policy: &SandboxPolicy,
     stdout_stream: Option<StdoutStream>,
+    after_spawn: Option<Box<dyn FnOnce() + Send>>,
 ) -> Result<RawExecToolCallOutput> {
     #[cfg(target_os = "windows")]
     if sandbox == SandboxType::WindowsRestrictedToken
@@ -717,16 +710,13 @@ async fn exec(
         cwd,
         mut env,
         network,
-        network_attempt_id,
         arg0,
         expiration,
         windows_sandbox_level: _,
         ..
     } = params;
-    let network_attempt_id = network_attempt_id.map(|attempt_id| attempt_id.to_string());
-
     if let Some(network) = network.as_ref() {
-        network.apply_to_env_for_attempt(&mut env, network_attempt_id.as_deref());
+        network.apply_to_env(&mut env);
     }
 
     let (program, args) = command.split_first().ok_or_else(|| {
@@ -750,6 +740,9 @@ async fn exec(
         env,
     })
     .await?;
+    if let Some(after_spawn) = after_spawn {
+        after_spawn();
+    }
     consume_truncated_output(child, expiration, stdout_stream).await
 }
 
@@ -1137,7 +1130,6 @@ mod tests {
             expiration: 500.into(),
             env,
             network: None,
-            network_attempt_id: None,
             sandbox_permissions: SandboxPermissions::UseDefault,
             windows_sandbox_level: codex_protocol::config_types::WindowsSandboxLevel::Disabled,
             justification: None,
@@ -1148,6 +1140,7 @@ mod tests {
             params,
             SandboxType::None,
             &SandboxPolicy::new_read_only_policy(),
+            None,
             None,
         )
         .await?;
@@ -1191,7 +1184,6 @@ mod tests {
             expiration: ExecExpiration::Cancellation(cancel_token),
             env,
             network: None,
-            network_attempt_id: None,
             sandbox_permissions: SandboxPermissions::UseDefault,
             windows_sandbox_level: codex_protocol::config_types::WindowsSandboxLevel::Disabled,
             justification: None,
