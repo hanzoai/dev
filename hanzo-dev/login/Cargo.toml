@@ -1,7 +1,10 @@
 [package]
 edition = "2024"
 name = "hanzo-login"
+description = "OAuth login flow for Hanzo Dev"
 version = { workspace = true }
+license = { workspace = true }
+repository = { workspace = true }
 
 [lints]
 workspace = true

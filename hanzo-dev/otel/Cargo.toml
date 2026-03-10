@@ -1,7 +1,10 @@
 [package]
 edition = "2024"
 name = "hanzo-otel"
+description = "OpenTelemetry instrumentation for Hanzo"
 version = { workspace = true }
+license = { workspace = true }
+repository = { workspace = true }
 
 [lib]
 doctest = false
