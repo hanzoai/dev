@@ -175,7 +175,7 @@ impl BrowserSessionCell {
         if let Some(p) = picker {
             *slot = Some(p);
         } else {
-            *slot = Some(Picker::from_query_stdio().unwrap_or_else(|_| Picker::halfblocks()));
+            *slot = Some(Picker::from_query_stdio().unwrap_or_else(|_| Picker::from_fontsize((1, 2))));
         }
     }
 
@@ -1045,7 +1045,7 @@ impl BrowserSessionCell {
     fn ensure_picker(&self) -> Picker {
         let mut picker_ref = self.cached_picker.borrow_mut();
         if picker_ref.is_none() {
-            *picker_ref = Some(Picker::from_query_stdio().unwrap_or_else(|_| Picker::halfblocks()));
+            *picker_ref = Some(Picker::from_query_stdio().unwrap_or_else(|_| Picker::from_fontsize((1, 2))));
         }
         picker_ref.as_ref().unwrap().clone()
     }

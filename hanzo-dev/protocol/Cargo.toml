@@ -21,6 +21,10 @@ workspace = true
 
 [dependencies]
 base64 = { workspace = true }
+hanzo-execpolicy = { workspace = true }
+hanzo-git-tooling = { workspace = true }
+hanzo-utils-absolute-path = { workspace = true }
+hanzo-utils-image = { workspace = true }
 icu_decimal = { workspace = true }
 icu_locale_core = { workspace = true }
 mcp-types = { workspace = true }

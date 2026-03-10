@@ -1,8 +1,11 @@
+use crate::spawn::CODEX_SANDBOX_ENV_VAR;
 use reqwest::header::HeaderValue;
 use std::sync::LazyLock;
 use std::sync::Mutex;
+use std::sync::RwLock;
 
 pub const DEFAULT_ORIGINATOR: &str = "code_cli_rs";
+pub const CODEX_INTERNAL_ORIGINATOR_OVERRIDE_ENV_VAR: &str = "CODEX_INTERNAL_ORIGINATOR_OVERRIDE";
 
 /// Optional suffix for the Codex User-Agent string.
 ///
@@ -12,22 +15,102 @@ pub const DEFAULT_ORIGINATOR: &str = "code_cli_rs";
 /// passing an explicit originator.
 pub static USER_AGENT_SUFFIX: LazyLock<Mutex<Option<String>>> = LazyLock::new(|| Mutex::new(None));
 
-pub fn get_code_user_agent(originator: Option<&str>) -> String {
-    let build_version = hanzo_version::version();
+#[derive(Debug, Clone)]
+pub struct Originator {
+    pub value: String,
+    pub header_value: HeaderValue,
+}
+
+static ORIGINATOR: LazyLock<RwLock<Option<Originator>>> = LazyLock::new(|| RwLock::new(None));
+
+#[derive(Debug)]
+pub enum SetOriginatorError {
+    InvalidHeaderValue,
+    AlreadyInitialized,
+}
+
+fn get_originator_value(provided: Option<String>) -> Originator {
+    let value = std::env::var(CODEX_INTERNAL_ORIGINATOR_OVERRIDE_ENV_VAR)
+        .ok()
+        .or(provided)
+        .unwrap_or(DEFAULT_ORIGINATOR.to_string());
+
+    match HeaderValue::from_str(&value) {
+        Ok(header_value) => Originator {
+            value,
+            header_value,
+        },
+        Err(e) => {
+            tracing::error!("Unable to turn originator override {value} into header value: {e}");
+            Originator {
+                value: DEFAULT_ORIGINATOR.to_string(),
+                header_value: HeaderValue::from_static(DEFAULT_ORIGINATOR),
+            }
+        }
+    }
+}
+
+pub fn set_default_originator(value: String) -> Result<(), SetOriginatorError> {
+    if HeaderValue::from_str(&value).is_err() {
+        return Err(SetOriginatorError::InvalidHeaderValue);
+    }
+    let originator = get_originator_value(Some(value));
+    let Ok(mut guard) = ORIGINATOR.write() else {
+        return Err(SetOriginatorError::AlreadyInitialized);
+    };
+    if guard.is_some() {
+        return Err(SetOriginatorError::AlreadyInitialized);
+    }
+    *guard = Some(originator);
+    Ok(())
+}
+
+pub fn originator() -> Originator {
+    if let Ok(guard) = ORIGINATOR.read()
+        && let Some(originator) = guard.as_ref()
+    {
+        return originator.clone();
+    }
+
+    if std::env::var(CODEX_INTERNAL_ORIGINATOR_OVERRIDE_ENV_VAR).is_ok() {
+        let originator = get_originator_value(None);
+        if let Ok(mut guard) = ORIGINATOR.write() {
+            match guard.as_ref() {
+                Some(originator) => return originator.clone(),
+                None => *guard = Some(originator.clone()),
+            }
+        }
+        return originator;
+    }
+
+    get_originator_value(None)
+}
+
+pub fn get_code_user_agent(originator_override: Option<&str>) -> String {
+    let suffix = USER_AGENT_SUFFIX
+        .lock()
+        .ok()
+        .and_then(|guard| guard.clone());
+    get_code_user_agent_with_suffix(originator_override, suffix.as_deref())
+}
+
+pub fn get_code_user_agent_with_suffix(
+    originator_override: Option<&str>,
+    user_agent_suffix: Option<&str>,
+) -> String {
+    let build_version = hanzo_version::wire_compatible_version();
     let os_info = os_info::get();
+    let originator_value = originator_override
+        .map(str::to_string)
+        .unwrap_or_else(|| originator().value);
     let prefix = format!(
-        "{}/{build_version} ({} {}; {}) {}",
-        originator.unwrap_or(DEFAULT_ORIGINATOR),
+        "{originator_value}/{build_version} ({} {}; {}) {}",
         os_info.os_type(),
         os_info.version(),
         os_info.architecture().unwrap_or("unknown"),
         crate::terminal::user_agent()
     );
-    let suffix = USER_AGENT_SUFFIX
-        .lock()
-        .ok()
-        .and_then(|guard| guard.clone())
-        .as_deref()
+    let suffix = user_agent_suffix
         .map(str::trim)
         .filter(|s| !s.is_empty())
         .map_or_else(String::new, |v| format!(" ({v})"));
@@ -51,19 +134,13 @@ fn sanitize_user_agent(candidate: String, fallback: &str) -> String {
         .map(|ch| if matches!(ch, ' '..='~') { ch } else { '_' })
         .collect();
     if !sanitized.is_empty() && HeaderValue::from_str(sanitized.as_str()).is_ok() {
-        tracing::warn!(
-            "Sanitized Codex user agent because provided suffix contained invalid header characters"
-        );
+        tracing::warn!("Sanitized Codex user agent because provided suffix contained invalid header characters");
         sanitized
     } else if HeaderValue::from_str(fallback).is_ok() {
-        tracing::warn!(
-            "Falling back to base Codex user agent because provided suffix could not be sanitized"
-        );
+        tracing::warn!("Falling back to base Codex user agent because provided suffix could not be sanitized");
         fallback.to_string()
     } else {
-        tracing::warn!(
-            "Falling back to default Codex originator because base user agent string is invalid"
-        );
+        tracing::warn!("Falling back to default Codex originator because base user agent string is invalid");
         DEFAULT_ORIGINATOR.to_string()
     }
 }
@@ -72,87 +149,102 @@ fn sanitize_user_agent(candidate: String, fallback: &str) -> String {
 pub fn create_client(originator: &str) -> reqwest::Client {
     use reqwest::header::HeaderMap;
     use reqwest::header::HeaderValue;
-    use std::panic::AssertUnwindSafe;
 
     let mut headers = HeaderMap::new();
-    let originator_value = HeaderValue::from_str(originator)
+    let originator = get_originator_value(Some(originator.to_string()));
+    let originator_value = HeaderValue::from_str(&originator.value)
         .unwrap_or_else(|_| HeaderValue::from_static(DEFAULT_ORIGINATOR));
     headers.insert("originator", originator_value);
-    let ua = get_code_user_agent(Some(originator));
+    let ua = get_code_user_agent(Some(originator.value.as_str()));
 
-    let primary = std::panic::catch_unwind(AssertUnwindSafe(|| {
-        build_client_with_headers(&ua, headers.clone(), false)
-    }));
-    match primary {
-        Ok(Ok(client)) => client,
-        Ok(Err(err)) => {
-            tracing::warn!(
-                "failed to create reqwest client with system proxy settings ({err}); retrying without proxy autodetection"
-            );
-            build_client_with_headers(&ua, headers, true).unwrap_or_else(|fallback_err| {
-                tracing::warn!(
-                    "failed to create reqwest client without system proxy settings ({fallback_err}); falling back to default reqwest client"
-                );
-                build_fallback_client()
-            })
-        }
-        Err(_) => {
-            tracing::warn!(
-                "reqwest client creation panicked while resolving system proxy settings; retrying without proxy autodetection"
-            );
-            build_client_with_headers(&ua, headers, true).unwrap_or_else(|fallback_err| {
-                tracing::warn!(
-                    "failed to create reqwest client without system proxy settings ({fallback_err}); falling back to default reqwest client"
-                );
-                build_fallback_client()
-            })
-        }
-    }
-}
-
-fn build_client_with_headers(
-    user_agent: &str,
-    headers: reqwest::header::HeaderMap,
-    disable_system_proxy: bool,
-) -> Result<reqwest::Client, reqwest::Error> {
     let mut builder = reqwest::Client::builder()
-        // Set UA via dedicated helper to avoid header validation pitfalls.
-        .user_agent(user_agent.to_string())
+        // Set UA via dedicated helper to avoid header validation pitfalls
+        .user_agent(ua)
         .default_headers(headers);
-
-    #[cfg(target_os = "macos")]
-    {
-        // Avoid reqwest's system proxy autodetection on macOS. In headless or
-        // restricted runtime contexts this can panic inside system-configuration.
-        builder = builder.no_proxy();
-    }
-
-    if disable_system_proxy {
-        builder = builder.no_proxy();
-    }
-
-    builder.build()
-}
-
-fn build_fallback_client() -> reqwest::Client {
-    let mut builder = reqwest::Client::builder();
-
-    #[cfg(target_os = "macos")]
-    {
+    if is_sandboxed() {
         builder = builder.no_proxy();
     }
 
     builder.build().unwrap_or_else(|_| reqwest::Client::new())
 }
 
+fn is_sandboxed() -> bool {
+    std::env::var(CODEX_SANDBOX_ENV_VAR).as_deref() == Ok("seatbelt")
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::future::Future;
+    use std::sync::LazyLock;
+    use std::sync::Mutex;
+
+    static ORIGINATOR_ENV_LOCK: LazyLock<Mutex<()>> = LazyLock::new(|| Mutex::new(()));
+
+    fn set_originator_env(value: &str) {
+        unsafe {
+            std::env::set_var(CODEX_INTERNAL_ORIGINATOR_OVERRIDE_ENV_VAR, value);
+        }
+    }
+
+    fn remove_originator_env() {
+        unsafe {
+            std::env::remove_var(CODEX_INTERNAL_ORIGINATOR_OVERRIDE_ENV_VAR);
+        }
+    }
+
+    fn with_originator_env_cleared<F: FnOnce()>(f: F) {
+        let _lock = ORIGINATOR_ENV_LOCK.lock().expect("originator env lock");
+        let previous = std::env::var(CODEX_INTERNAL_ORIGINATOR_OVERRIDE_ENV_VAR).ok();
+        remove_originator_env();
+        f();
+        match previous {
+            Some(value) => {
+                set_originator_env(&value);
+            }
+            None => {
+                remove_originator_env();
+            }
+        }
+    }
+
+    async fn with_originator_env_cleared_async<F, Fut>(f: F)
+    where
+        F: FnOnce() -> Fut,
+        Fut: Future<Output = ()>,
+    {
+        let _lock = ORIGINATOR_ENV_LOCK.lock().expect("originator env lock");
+        let previous = std::env::var(CODEX_INTERNAL_ORIGINATOR_OVERRIDE_ENV_VAR).ok();
+        remove_originator_env();
+        f().await;
+        match previous {
+            Some(value) => {
+                set_originator_env(&value);
+            }
+            None => {
+                remove_originator_env();
+            }
+        }
+    }
 
     #[test]
     fn test_get_code_user_agent() {
-        let user_agent = get_code_user_agent(None);
-        assert!(user_agent.starts_with("code_cli_rs/"));
+        with_originator_env_cleared(|| {
+            let user_agent = get_code_user_agent(None);
+            assert!(user_agent.starts_with(&format!("{DEFAULT_ORIGINATOR}/")));
+        });
+    }
+
+    #[test]
+    fn test_get_code_user_agent_uses_wire_compatible_version() {
+        with_originator_env_cleared(|| {
+            let user_agent = get_code_user_agent(None);
+            let expected = format!("{DEFAULT_ORIGINATOR}/{}", hanzo_version::wire_compatible_version());
+            assert!(
+                user_agent.starts_with(&expected),
+                "expected user-agent to start with {expected}, got {user_agent}"
+            );
+        });
     }
 
     #[tokio::test]
@@ -163,66 +255,59 @@ mod tests {
         use wiremock::matchers::method;
         use wiremock::matchers::path;
 
-        let originator = "test_originator";
-        let client = create_client(originator);
+        with_originator_env_cleared_async(|| async {
+            let originator = "test_originator";
+            let client = create_client(originator);
 
-        // Spin up a local mock server and capture a request.
-        let server = MockServer::start().await;
-        Mock::given(method("GET"))
-            .and(path("/"))
-            .respond_with(ResponseTemplate::new(200))
-            .mount(&server)
-            .await;
+            // Spin up a local mock server and capture a request.
+            let server = MockServer::start().await;
+            Mock::given(method("GET"))
+                .and(path("/"))
+                .respond_with(ResponseTemplate::new(200))
+                .mount(&server)
+                .await;
 
-        let resp = client
-            .get(server.uri())
-            .send()
-            .await
-            .expect("failed to send request");
-        assert!(resp.status().is_success());
+            let resp = client
+                .get(server.uri())
+                .send()
+                .await
+                .expect("failed to send request");
+            assert!(resp.status().is_success());
 
-        let requests = server
-            .received_requests()
-            .await
-            .expect("failed to fetch received requests");
-        assert!(!requests.is_empty());
-        let headers = &requests[0].headers;
+            let requests = server
+                .received_requests()
+                .await
+                .expect("failed to fetch received requests");
+            assert!(!requests.is_empty());
+            let headers = &requests[0].headers;
 
-        // originator header is set to the provided value
-        let originator_header = headers
-            .get("originator")
-            .expect("originator header missing");
-        assert_eq!(originator_header.to_str().unwrap(), originator);
+            // originator header is set to the provided value
+            let originator_header = headers
+                .get("originator")
+                .expect("originator header missing");
+            assert_eq!(originator_header.to_str().unwrap(), originator);
 
-        // User-Agent matches the computed Codex UA for that originator
-        let expected_ua = get_code_user_agent(Some(originator));
-        let ua_header = headers
-            .get("user-agent")
-            .expect("user-agent header missing");
-        assert_eq!(ua_header.to_str().unwrap(), expected_ua);
-    }
-
-    #[test]
-    fn test_build_client_with_headers_no_proxy() {
-        let mut headers = reqwest::header::HeaderMap::new();
-        headers.insert(
-            "originator",
-            reqwest::header::HeaderValue::from_static("test_originator"),
-        );
-
-        let client = build_client_with_headers("test_agent/0.0.0", headers, true);
-        assert!(client.is_ok());
+            // User-Agent matches the computed Codex UA for that originator
+            let expected_ua = get_code_user_agent(Some(originator));
+            let ua_header = headers
+                .get("user-agent")
+                .expect("user-agent header missing");
+            assert_eq!(ua_header.to_str().unwrap(), expected_ua);
+        })
+        .await;
     }
 
     #[test]
     #[cfg(target_os = "macos")]
     fn test_macos() {
         use regex_lite::Regex;
-        let user_agent = get_code_user_agent(None);
-        let re = Regex::new(
-            r"^code_cli_rs/\d+\.\d+\.\d+ \(Mac OS \d+\.\d+\.\d+; (x86_64|arm64)\) (\S+)$",
-        )
-        .unwrap();
-        assert!(re.is_match(&user_agent));
+        with_originator_env_cleared(|| {
+            let user_agent = get_code_user_agent(None);
+            let re = Regex::new(
+                r"^code_cli_rs/\d+\.\d+\.\d+ \(Mac OS \d+\.\d+\.\d+; (x86_64|arm64)\) (\S+)$",
+            )
+            .unwrap();
+            assert!(re.is_match(&user_agent));
+        });
     }
 }

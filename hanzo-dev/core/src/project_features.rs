@@ -1,10 +1,7 @@
 use std::collections::HashMap;
-use std::path::Path;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
-use crate::config_types::ProjectCommandConfig;
-use crate::config_types::ProjectHookConfig;
-use crate::config_types::ProjectHookEvent;
+use crate::config_types::{ProjectCommandConfig, ProjectHookConfig, ProjectHookEvent};
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct ProjectHook {
@@ -54,7 +51,7 @@ impl ProjectHooks {
     }
 
     pub fn is_empty(&self) -> bool {
-        self.hooks.values().all(std::vec::Vec::is_empty)
+        self.hooks.values().all(|hooks| hooks.is_empty())
     }
 
     pub fn hooks_for(&self, event: ProjectHookEvent) -> impl Iterator<Item = &ProjectHook> {
@@ -89,10 +86,7 @@ impl ProjectCommand {
     }
 }
 
-pub fn load_project_commands(
-    configs: &[ProjectCommandConfig],
-    project_root: &Path,
-) -> Vec<ProjectCommand> {
+pub fn load_project_commands(configs: &[ProjectCommandConfig], project_root: &Path) -> Vec<ProjectCommand> {
     let mut commands: Vec<ProjectCommand> = Vec::new();
     for cfg in configs {
         let name = cfg.name.trim();

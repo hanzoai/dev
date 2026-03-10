@@ -7,12 +7,12 @@ use std::path::Path;
 use std::path::PathBuf;
 
 use hanzo_protocol::ConversationId;
-use hanzo_protocol::models::ContentItem;
-use hanzo_protocol::models::ResponseItem;
+use hanzo_protocol::ThreadId;
+use hanzo_protocol::models::BaseInstructions;
+use hanzo_protocol::models::{ContentItem, ResponseItem};
 use hanzo_protocol::protocol::EventMsg as ProtoEventMsg;
 use hanzo_protocol::protocol::SessionSource;
-use serde::Deserialize;
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use time::OffsetDateTime;
 use time::format_description::FormatItem;
@@ -25,11 +25,10 @@ use tracing::info;
 use tracing::warn;
 
 use super::SESSIONS_SUBDIR;
+use super::list::get_conversations;
 use super::list::ConversationsPage;
 use super::list::Cursor;
-use super::list::get_conversations;
-use super::policy::should_persist_response_item;
-use super::policy::should_persist_rollout_item;
+use super::policy::{should_persist_response_item, should_persist_rollout_item};
 use crate::config::Config;
 use crate::default_client::DEFAULT_ORIGINATOR;
 use crate::git_info::collect_git_info;
@@ -62,8 +61,8 @@ pub struct SavedSession {
 /// Rollouts are recorded as JSONL and can be inspected with tools such as:
 ///
 /// ```ignore
-/// $ jq -C . ~/.hanzo/sessions/rollout-2025-05-07T17-24-21-5973b6c0-94b8-487b-a530-2aeb6098ae0e.jsonl
-/// $ fx ~/.hanzo/sessions/rollout-2025-05-07T17-24-21-5973b6c0-94b8-487b-a530-2aeb6098ae0e.jsonl
+/// $ jq -C . ~/.code/sessions/rollout-2025-05-07T17-24-21-5973b6c0-94b8-487b-a530-2aeb6098ae0e.jsonl
+/// $ fx ~/.code/sessions/rollout-2025-05-07T17-24-21-5973b6c0-94b8-487b-a530-2aeb6098ae0e.jsonl
 /// ```
 #[derive(Clone)]
 pub struct RolloutRecorder {
@@ -93,7 +92,7 @@ enum RolloutCmd {
 /// Tracks context needed to update the session catalog after writes.
 struct CatalogUpdateState {
     code_home: PathBuf,
-    session_id: ConversationId,
+    session_id: ThreadId,
     rollout_path: PathBuf,
     last_timestamp: String,
 }
@@ -154,13 +153,18 @@ impl RolloutRecorder {
                     tokio::fs::File::from_std(file),
                     path,
                     Some(SessionMeta {
-                        id: session_id,
+                        id: ThreadId::from_string(&session_id.to_string()).map_err(|e| {
+                            IoError::other(format!("failed to convert session ID: {e}"))
+                        })?,
+                        forked_from_id: None,
                         timestamp,
                         cwd: config.cwd.clone(),
                         originator: DEFAULT_ORIGINATOR.to_string(),
                         cli_version: env!("CARGO_PKG_VERSION").to_string(),
-                        instructions,
                         source,
+                        model_provider: None,
+                        base_instructions: instructions.map(|text| BaseInstructions { text }),
+                        dynamic_tools: None,
                     }),
                 )
             }
@@ -281,13 +285,7 @@ impl RolloutRecorder {
 
     /// Compatibility wrapper for older resume API used by codex.rs
     pub async fn resume(config: &Config, path: &Path) -> std::io::Result<(Self, SavedSession)> {
-        let recorder = Self::new(
-            config,
-            RolloutRecorderParams::Resume {
-                path: path.to_path_buf(),
-            },
-        )
-        .await?;
+        let recorder = Self::new(config, RolloutRecorderParams::Resume { path: path.to_path_buf() }).await?;
         let history = Self::get_rollout_history(path).await?;
         let (session_id, items) = match history {
             InitialHistory::Resumed(resumed) => {
@@ -300,19 +298,13 @@ impl RolloutRecorder {
             Ok(json) => match serde_json::from_str::<crate::history::HistorySnapshot>(&json) {
                 Ok(snapshot) => Some(snapshot),
                 Err(e) => {
-                    warn!(
-                        "failed to parse history snapshot from {:?}: {}",
-                        snapshot_path, e
-                    );
+                    warn!("failed to parse history snapshot from {:?}: {}", snapshot_path, e);
                     None
                 }
             },
             Err(err) => {
                 if err.kind() != std::io::ErrorKind::NotFound {
-                    warn!(
-                        "failed to read history snapshot from {:?}: {}",
-                        snapshot_path, err
-                    );
+                    warn!("failed to read history snapshot from {:?}: {}", snapshot_path, err);
                 }
                 None
             }
@@ -335,7 +327,7 @@ impl RolloutRecorder {
         }
 
         let mut items: Vec<RolloutItem> = Vec::new();
-        let mut conversation_id: Option<ConversationId> = None;
+        let mut conversation_id: Option<ThreadId> = None;
         for line in text.lines() {
             if line.trim().is_empty() {
                 continue;
@@ -362,28 +354,32 @@ impl RolloutRecorder {
                     RolloutItem::ResponseItem(item) => {
                         items.push(RolloutItem::ResponseItem(item));
                     }
-                    RolloutItem::Event(ev) => match &ev.msg {
-                        ProtoEventMsg::UserMessage(user_msg) => {
-                            let mut content = Vec::new();
-                            content.push(ContentItem::InputText {
-                                text: user_msg.message.clone(),
-                            });
-                            if let Some(images) = &user_msg.images {
-                                for image_url in images {
-                                    content.push(ContentItem::InputImage {
-                                        image_url: image_url.clone(),
-                                    });
+                    RolloutItem::Event(ev) => {
+                        match &ev.msg {
+                            ProtoEventMsg::UserMessage(user_msg) => {
+                                let mut content = Vec::new();
+                                content.push(ContentItem::InputText {
+                                    text: user_msg.message.clone(),
+                                });
+                                if let Some(images) = &user_msg.images {
+                                    for image_url in images {
+                                        content.push(ContentItem::InputImage {
+                                            image_url: image_url.clone(),
+                                        });
+                                    }
                                 }
+                                items.push(RolloutItem::ResponseItem(ResponseItem::Message {
+                                    id: Some(ev.id.clone()),
+                                    role: "user".to_string(),
+                                    content, end_turn: None, phase: None}));
                             }
-                            items.push(RolloutItem::ResponseItem(ResponseItem::Message {
-                                id: Some(ev.id.clone()),
-                                role: "user".to_string(),
-                                content,
-                            }));
+                            ProtoEventMsg::AgentMessage(_) => items.push(RolloutItem::Event(ev)),
+                            _ => items.push(RolloutItem::Event(ev)),
                         }
-                        ProtoEventMsg::AgentMessage(_) => items.push(RolloutItem::Event(ev)),
-                        _ => items.push(RolloutItem::Event(ev)),
-                    },
+                    }
+                    RolloutItem::EventMsg(ev_msg) => {
+                        items.push(RolloutItem::EventMsg(ev_msg));
+                    }
                     RolloutItem::Compacted(compacted) => {
                         items.push(RolloutItem::Compacted(compacted));
                     }
@@ -452,8 +448,8 @@ fn create_log_file(
     config: &Config,
     conversation_id: ConversationId,
 ) -> std::io::Result<LogFileInfo> {
-    // Resolve ~/.hanzo/sessions/YYYY/MM/DD and create it if missing (Hanzo Dev still
-    // reads legacy ~/.code/sessions/ and ~/.codex/sessions/ paths).
+    // Resolve ~/.code/sessions/YYYY/MM/DD and create it if missing (Code still
+    // reads legacy ~/.codex/sessions/ paths).
     let timestamp = OffsetDateTime::now_local()
         .map_err(|e| IoError::other(format!("failed to get local time: {e}")))?;
     let mut dir = config.code_home.clone();
@@ -538,16 +534,17 @@ async fn rollout_writer(
                     }
                 }
 
-                if let Some(ref state) = catalog_state
-                    && let Err(err) = super::catalog::update_catalog_entry(
+                if let Some(ref state) = catalog_state {
+                    if let Err(err) = super::catalog::update_catalog_entry(
                         &state.code_home,
                         &state.rollout_path,
                         state.session_id.into(),
                         &state.last_timestamp,
                     )
                     .await
-                {
-                    warn!("failed to update session catalog after AddItems: {err}");
+                    {
+                        warn!("failed to update session catalog after AddItems: {err}");
+                    }
                 }
             }
             RolloutCmd::SetSnapshot(snapshot) => {

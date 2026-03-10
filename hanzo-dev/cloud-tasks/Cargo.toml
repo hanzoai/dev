@@ -18,18 +18,18 @@ tokio = { version = "1", features = ["macros", "rt-multi-thread"] }
 tracing = { version = "0.1.41", features = ["log"] }
 tracing-subscriber = { version = "0.3.19", features = ["env-filter"] }
 hanzo-cloud-tasks-client = { path = "../cloud-tasks-client", features = ["mock", "online"] }
-ratatui = { version = "0.30.0" }
-crossterm = { version = "0.29.0", features = ["event-stream"] }
+ratatui = { workspace = true }
+crossterm = { workspace = true, features = ["event-stream"] }
 tokio-stream = "0.1.17"
 chrono = { version = "0.4", features = ["serde"] }
 hanzo-login = { path = "../login" }
 hanzo-core = { path = "../core" }
-throbber-widgets-tui = "0.10.0"
+throbber-widgets-tui = "0.8.0"
 base64 = "0.22"
 serde_json = "1"
 reqwest = { version = "0.12", features = ["json"] }
 serde = { version = "1", features = ["derive"] }
-unicode-width = "0.1"
+unicode-width = { workspace = true }
 unicode-segmentation = "1.12"
 hanzo-tui = { path = "../tui" }
 

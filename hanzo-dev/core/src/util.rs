@@ -27,12 +27,7 @@ pub(crate) fn backoff(attempt: u64) -> Duration {
 pub(crate) async fn wait_for_connectivity(probe_url: &str) {
     // Cap individual waits to avoid very long sleeps while still backing off.
     const MAX_DELAY: Duration = Duration::from_secs(30);
-    let mut builder = reqwest::Client::builder();
-    #[cfg(target_os = "macos")]
-    {
-        builder = builder.no_proxy();
-    }
-    let client = builder.build().unwrap_or_else(|_| reqwest::Client::new());
+    let client = reqwest::Client::new();
     let mut attempt: u64 = 1;
     loop {
         // Treat any HTTP response as proof that DNS + TLS + routing are back.
@@ -49,13 +44,14 @@ pub(crate) async fn wait_for_connectivity(probe_url: &str) {
 }
 
 pub fn escape_command(command: &[String]) -> String {
-    try_join(command.iter().map(std::string::String::as_str)).unwrap_or_else(|_| command.join(" "))
+    try_join(command.iter().map(|s| s.as_str())).unwrap_or_else(|_| command.join(" "))
 }
 
 pub fn strip_bash_lc_and_escape(command: &[String]) -> String {
     match command {
         [first, second, third]
-            if is_shell_like_executable(first) && (second == "-lc" || second == "-c") =>
+            if is_shell_like_executable(first)
+                && (second == "-lc" || second == "-c") =>
         {
             third.clone()
         }

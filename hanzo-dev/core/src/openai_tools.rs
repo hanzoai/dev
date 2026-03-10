@@ -11,8 +11,8 @@ use crate::model_family::ModelFamily;
 use crate::plan_tool::PLAN_TOOL;
 use crate::protocol::AskForApproval;
 use crate::protocol::SandboxPolicy;
-use code_protocol::dynamic_tools::DynamicToolSpec;
-use code_protocol::openai_models::WebSearchToolType;
+use hanzo_protocol::dynamic_tools::DynamicToolSpec;
+use hanzo_protocol::openai_models::WebSearchToolType;
 use crate::tool_apply_patch::{
     create_apply_patch_freeform_tool, create_apply_patch_json_tool, ApplyPatchToolType,
 };

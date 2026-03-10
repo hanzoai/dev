@@ -358,6 +358,10 @@ pub struct AutoDriveController {
     pub pending_stop_message: Option<String>,
     pub last_completion_explanation: Option<String>,
     pub phase: AutoRunPhase,
+    /// CLI model override for this auto-drive session.
+    pub current_cli_model_override: Option<String>,
+    /// CLI reasoning effort override for this auto-drive session.
+    pub current_cli_reasoning_effort_override: Option<String>,
     // Non-cloneable guard is kept separately; controller stays Clone.
     pub review_lock: Option<std::sync::Arc<hanzo_core::review_coord::ReviewGuard>>,
 }

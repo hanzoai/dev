@@ -544,7 +544,7 @@ impl PromptsSettingsView {
 
         // Trigger reload so composer autocomplete picks it up.
         self.app_event_tx
-            .send(AppEvent::CodeOp(Op::ListCustomPrompts));
+            .send(AppEvent::CodexOp(Op::ListCustomPrompts));
     }
 
     fn delete_current(&mut self) {
@@ -579,6 +579,6 @@ impl PromptsSettingsView {
             Style::default().fg(colors::success()),
         ));
         self.app_event_tx
-            .send(AppEvent::CodeOp(Op::ListCustomPrompts));
+            .send(AppEvent::CodexOp(Op::ListCustomPrompts));
     }
 }

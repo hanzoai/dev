@@ -226,7 +226,7 @@ impl EventProcessor for EventProcessorWithHumanOutput {
                     ts_println!(
                         self,
                         "tokens used: {}",
-                        format_with_separators(usage_info.total_token_usage.blended_total())
+                        format_with_separators(usage_info.total_token_usage.blended_total() as i64)
                     );
                 }
             }
@@ -597,7 +597,7 @@ impl EventProcessor for EventProcessorWithHumanOutput {
                 println!();
             }
             EventMsg::PlanUpdate(plan_update_event) => {
-                let UpdatePlanArgs { name, plan } = plan_update_event;
+                let UpdatePlanArgs { name, plan, explanation: _ } = plan_update_event;
                 ts_println!(self, "name: {name:?}");
                 ts_println!(self, "plan: {plan:?}");
             }
@@ -679,15 +679,10 @@ impl EventProcessor for EventProcessorWithHumanOutput {
                     "review".style(self.magenta),
                     "started".style(self.bold),
                 );
-                if let Some(scope) = request.metadata.as_ref().and_then(|m| m.scope.as_ref()) {
-                    println!(
-                        "{} {}",
-                        "scope:".style(self.dimmed),
-                        scope.style(self.dimmed)
-                    );
-                }
-                if !request.user_facing_hint.trim().is_empty() {
-                    println!("{}", request.user_facing_hint.trim().style(self.dimmed));
+                if let Some(hint) = request.user_facing_hint.as_deref() {
+                    if !hint.trim().is_empty() {
+                        println!("{}", hint.trim().style(self.dimmed));
+                    }
                 }
             }
             EventMsg::ExitedReviewMode(event) => {
@@ -740,6 +735,8 @@ impl EventProcessor for EventProcessorWithHumanOutput {
                 }
             }
             EventMsg::CompactionCheckpointWarning(_) => {}
+            // New upstream variants - silently ignore in headless output
+            _ => {}
         }
         CodexStatus::Running
     }

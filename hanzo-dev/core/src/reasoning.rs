@@ -13,8 +13,10 @@ const GPT5_1_CODEX_EFFORTS: &[ReasoningEffort] = &[
     ReasoningEffort::High,
 ];
 
-const GPT5_1_CODEX_MINI_EFFORTS: &[ReasoningEffort] =
-    &[ReasoningEffort::Medium, ReasoningEffort::High];
+const GPT5_1_CODEX_MINI_EFFORTS: &[ReasoningEffort] = &[
+    ReasoningEffort::Medium,
+    ReasoningEffort::High,
+];
 
 const GPT5_1_EFFORTS: &[ReasoningEffort] = &[
     ReasoningEffort::Low,
@@ -35,8 +37,10 @@ const GPT5_CODEX_EFFORTS: &[ReasoningEffort] = &[
     ReasoningEffort::High,
 ];
 
-const GPT5_CODEX_MINI_EFFORTS: &[ReasoningEffort] =
-    &[ReasoningEffort::Medium, ReasoningEffort::High];
+const GPT5_CODEX_MINI_EFFORTS: &[ReasoningEffort] = &[
+    ReasoningEffort::Medium,
+    ReasoningEffort::High,
+];
 
 const GPT5_EFFORTS: &[ReasoningEffort] = &[
     ReasoningEffort::Minimal,
@@ -88,11 +92,11 @@ pub fn supported_reasoning_efforts_for_model(model: &str) -> &'static [Reasoning
         return GPT5_1_EFFORTS;
     }
 
-    if lower.starts_with("gpt-5.3") || lower.starts_with("test-gpt-5.3") {
-        return GPT5_2_EFFORTS;
-    }
-
-    if lower.starts_with("gpt-5.2") || lower.starts_with("test-gpt-5.2") {
+    if lower.starts_with("gpt-5.2")
+        || lower.starts_with("test-gpt-5.2")
+        || lower.starts_with("gpt-5.3")
+        || lower.starts_with("test-gpt-5.3")
+    {
         return GPT5_2_EFFORTS;
     }
 
@@ -120,7 +124,7 @@ pub fn clamp_reasoning_effort_for_model(
     requested: ReasoningEffort,
 ) -> ReasoningEffort {
     let allowed = supported_reasoning_efforts_for_model(model);
-    if allowed.contains(&requested) {
+    if allowed.iter().any(|effort| *effort == requested) {
         return requested;
     }
 
