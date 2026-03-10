@@ -1,6 +1,9 @@
 [package]
 name = "hanzo-git-apply"
+description = "Git patch application for Hanzo Dev"
 version = { workspace = true }
+license = { workspace = true }
+repository = { workspace = true }
 edition = "2024"
 
 [lib]

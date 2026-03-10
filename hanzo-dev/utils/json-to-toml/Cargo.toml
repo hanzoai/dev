@@ -1,7 +1,10 @@
 [package]
 edition.workspace = true
 name = "hanzo-utils-json-to-toml"
+description = "JSON to TOML converter for Hanzo"
 version.workspace = true
+license = { workspace = true }
+repository = { workspace = true }
 
 [dependencies]
 serde_json = { workspace = true }

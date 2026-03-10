@@ -1,7 +1,10 @@
 [package]
 name = "hanzo-auto-drive-diagnostics"
+description = "Auto-drive diagnostics for Hanzo Dev"
 edition = "2024"
 version = { workspace = true }
+license = { workspace = true }
+repository = { workspace = true }
 
 [lib]
 name = "hanzo_auto_drive_diagnostics"

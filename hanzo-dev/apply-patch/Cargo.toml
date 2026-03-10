@@ -1,7 +1,10 @@
 [package]
 edition = "2024"
 name = "hanzo-apply-patch"
+description = "Patch application utilities for Hanzo"
 version = { workspace = true }
+license = { workspace = true }
+repository = { workspace = true }
 
 [lib]
 name = "hanzo_apply_patch"

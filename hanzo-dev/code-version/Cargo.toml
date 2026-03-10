@@ -1,6 +1,9 @@
 [package]
 name = "hanzo-version"
+description = "Version management for Hanzo Dev"
 version = { workspace = true }
+license = { workspace = true }
+repository = { workspace = true }
 edition = { workspace = true }
 build = "build.rs"
 

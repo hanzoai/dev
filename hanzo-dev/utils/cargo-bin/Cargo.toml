@@ -1,8 +1,10 @@
 [package]
 name = "codex-utils-cargo-bin"
+description = "Cargo binary utilities"
 version.workspace = true
+repository = { workspace = true }
 edition.workspace = true
-license.workspace = true
+license = { workspace = true }
 
 [lints]
 workspace = true

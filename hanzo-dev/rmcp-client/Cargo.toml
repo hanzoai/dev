@@ -1,7 +1,10 @@
 [package]
 edition = "2024"
 name = "hanzo-rmcp-client"
+description = "RMCP client for Hanzo Dev"
 version = { workspace = true }
+license = { workspace = true }
+repository = { workspace = true }
 
 [lints]
 workspace = true

@@ -1,6 +1,9 @@
 [package]
 name = "hanzo-mcp-smoke"
+description = "MCP smoke tests for Hanzo"
 version = { workspace = true }
+license = { workspace = true }
+repository = { workspace = true }
 edition = "2024"
 
 [dependencies]
