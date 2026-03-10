@@ -236,7 +236,7 @@ impl CodexToolCallParam {
     /// effective Config object generated from the supplied parameters.
     pub fn into_config(
         self,
-        code_linux_sandbox_exe: Option<PathBuf>,
+        hanzo_linux_sandbox_exe: Option<PathBuf>,
     ) -> std::io::Result<(String, hanzo_core::config::Config)> {
         let Self {
             prompt,
@@ -259,7 +259,7 @@ impl CodexToolCallParam {
             approval_policy: approval_policy.map(Into::into),
             sandbox_mode: sandbox.map(Into::into),
             model_provider: None,
-            code_linux_sandbox_exe,
+            hanzo_linux_sandbox_exe,
             base_instructions,
             include_plan_tool,
             include_apply_patch_tool: None,
@@ -272,7 +272,7 @@ impl CodexToolCallParam {
             experimental_client_tools: None,
             compact_prompt_override: None,
             compact_prompt_override_file: None,
-            wire_api: None,
+            dynamic_tools: None,
         };
 
         let cli_overrides = cli_overrides

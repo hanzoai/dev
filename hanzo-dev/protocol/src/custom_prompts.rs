@@ -1,3 +1,4 @@
+use schemars::JsonSchema;
 use serde::Deserialize;
 use serde::Serialize;
 use std::path::PathBuf;
@@ -9,7 +10,7 @@ use ts_rs::TS;
 /// - Full slash prefix: `"/{PROMPTS_CMD_PREFIX}:"`
 pub const PROMPTS_CMD_PREFIX: &str = "prompts";
 
-#[derive(Serialize, Deserialize, Debug, Clone, TS)]
+#[derive(Serialize, Deserialize, Debug, Clone, JsonSchema, TS)]
 pub struct CustomPrompt {
     pub name: String,
     pub path: PathBuf,
@@ -17,3 +18,4 @@ pub struct CustomPrompt {
     pub description: Option<String>,
     pub argument_hint: Option<String>,
 }
+

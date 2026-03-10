@@ -12,8 +12,7 @@ use std::path::PathBuf;
 use std::time::Duration;
 use uuid::Uuid;
 
-use crate::config_types::ClientTools;
-use crate::config_types::McpToolId;
+use crate::config_types::{ClientTools, McpToolId};
 use crate::mcp_connection_manager::McpConnectionManager;
 use crate::protocol::FileChange;
 use crate::protocol::ReviewDecision;
@@ -38,7 +37,11 @@ impl<'a> AcpFileSystem<'a> {
         }
     }
 
-    async fn read_text_file_impl(&self, tool: &McpToolId, path: &Path) -> Result<String> {
+    async fn read_text_file_impl(
+        &self,
+        tool: &McpToolId,
+        path: &Path,
+    ) -> Result<String> {
         let arguments = acp::ReadTextFileRequest {
             session_id: acp::SessionId(self.session_id.to_string().into()),
             path: path.to_path_buf(),
@@ -62,7 +65,7 @@ impl<'a> AcpFileSystem<'a> {
             .await?;
 
         if is_error.unwrap_or_default() {
-            anyhow::bail!("Error reading text file: {structured_content:?}");
+            anyhow::bail!("Error reading text file: {:?}", structured_content);
         }
 
         let output = serde_json::from_value::<acp::ReadTextFileResponse>(
@@ -100,7 +103,7 @@ impl<'a> AcpFileSystem<'a> {
             .await?;
 
         if is_error.unwrap_or_default() {
-            anyhow::bail!("Error writing text file: {structured_content:?}");
+            anyhow::bail!("Error writing text file: {:?}", structured_content);
         }
 
         Ok(())
@@ -112,7 +115,7 @@ impl<'a> FileSystem for AcpFileSystem<'a> {
         if let Some(tool) = self.tools.read_text_file.as_ref() {
             self.read_text_file_impl(tool, path)
                 .await
-                .map_err(std::io::Error::other)
+                .map_err(|err| std::io::Error::new(std::io::ErrorKind::Other, err))
         } else {
             StdFileSystem.read_text_file(path).await
         }
@@ -122,7 +125,7 @@ impl<'a> FileSystem for AcpFileSystem<'a> {
         if let Some(tool) = self.tools.write_text_file.as_ref() {
             self.write_text_file_impl(tool, path, contents)
                 .await
-                .map_err(std::io::Error::other)
+                .map_err(|err| std::io::Error::new(std::io::ErrorKind::Other, err))
         } else {
             StdFileSystem.write_text_file(path, contents).await
         }
@@ -189,7 +192,7 @@ pub(crate) async fn request_permission(
             } else if option_id == deny_id {
                 ReviewDecision::Denied
             } else {
-                anyhow::bail!("Unexpected permission option: {option_id}");
+                anyhow::bail!("Unexpected permission option: {}", option_id);
             }
         }
         Cancelled => ReviewDecision::Abort,
@@ -271,9 +274,7 @@ pub fn new_patch_tool_call(
 
     for (path, change) in changes.iter() {
         match change {
-            FileChange::Add {
-                content: new_content,
-            } => {
+            FileChange::Add { content: new_content } => {
                 content.push(acp::ToolCallContent::Diff {
                     diff: acp::Diff {
                         path: path.clone(),

@@ -153,7 +153,7 @@ fn spawn_apply(
 // (no standalone patch summarizer needed – UI displays raw diffs)
 
 /// Entry point for the `codex cloud` subcommand.
-pub async fn run_main(cli: Cli, _code_linux_sandbox_exe: Option<PathBuf>) -> anyhow::Result<()> {
+pub async fn run_main(cli: Cli, _hanzo_linux_sandbox_exe: Option<PathBuf>) -> anyhow::Result<()> {
     // Non-interactive submit mode: used by the core agent runner to create a
     // cloud task and return its id on stdout.
     if let Some(crate::cli::Command::Submit(args)) = cli.cmd {
@@ -172,7 +172,7 @@ pub async fn run_main(cli: Cli, _code_linux_sandbox_exe: Option<PathBuf>) -> any
         .try_init();
 
     info!("Launching Cloud Tasks list UI");
-    set_user_agent_suffix("code_cloud_tasks_tui");
+    set_user_agent_suffix("hanzo_cloud_tasks_tui");
 
     // Default to online unless explicitly configured to use mock.
     let use_mock = matches!(
@@ -1518,7 +1518,7 @@ pub async fn run_main(cli: Cli, _code_linux_sandbox_exe: Option<PathBuf>) -> any
 // Lightweight non-interactive submit implementation. Accepts a prompt and
 // optional env/best-of/qa/git-ref and prints only the created task id.
 async fn run_submit(args: crate::cli::SubmitArgs) -> anyhow::Result<()> {
-    set_user_agent_suffix("code_cloud_tasks_submit");
+    set_user_agent_suffix("hanzo_cloud_tasks_submit");
 
     let use_mock = matches!(
         std::env::var("HANZO_CLOUD_TASKS_MODE").ok().as_deref(),

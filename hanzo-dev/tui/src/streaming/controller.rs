@@ -1,7 +1,7 @@
 #![allow(dead_code)]
 
 use crate::memory_citation::strip_memory_citations;
-use code_core::config::Config;
+use hanzo_core::config::Config;
 use ratatui::text::Line;
 use ratatui::style::Modifier;
 
@@ -867,9 +867,9 @@ mod tests {
     use super::HistorySink;
     use super::StreamController;
     use super::StreamKind;
-    use code_core::config::Config;
-    use code_core::config::ConfigOverrides;
-    use code_core::config::ConfigToml;
+    use hanzo_core::config::Config;
+    use hanzo_core::config::ConfigOverrides;
+    use hanzo_core::config::ConfigToml;
     use ratatui::text::Line;
 
     #[derive(Default)]

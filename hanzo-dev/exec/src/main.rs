@@ -25,7 +25,7 @@ struct TopCli {
 }
 
 fn main() -> anyhow::Result<()> {
-    arg0_dispatch_or_else(|code_linux_sandbox_exe| async move {
+    arg0_dispatch_or_else(|hanzo_linux_sandbox_exe| async move {
         let top_cli = TopCli::parse();
         // Merge root-level overrides into inner CLI struct so downstream logic remains unchanged.
         let mut inner = top_cli.inner;
@@ -34,7 +34,7 @@ fn main() -> anyhow::Result<()> {
             .raw_overrides
             .splice(0..0, top_cli.config_overrides.raw_overrides);
 
-        run_main(inner, code_linux_sandbox_exe).await?;
+        run_main(inner, hanzo_linux_sandbox_exe).await?;
         Ok(())
     })
 }

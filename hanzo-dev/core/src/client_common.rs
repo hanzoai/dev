@@ -9,9 +9,9 @@ use crate::openai_tools::OpenAiTool;
 use crate::protocol::RateLimitSnapshotEvent;
 use crate::protocol::TokenUsage;
 use crate::user_instructions::UserInstructions;
-use code_protocol::models::ContentItem;
-use code_protocol::models::FunctionCallOutputContentItem;
-use code_protocol::models::ResponseItem;
+use hanzo_protocol::models::ContentItem;
+use hanzo_protocol::models::FunctionCallOutputContentItem;
+use hanzo_protocol::models::ResponseItem;
 use futures::Stream;
 use once_cell::sync::Lazy;
 use serde::{Deserialize, Serialize};
@@ -555,7 +555,7 @@ impl Stream for ResponseStream {
 #[cfg(test)]
 mod tests {
     use crate::model_family::find_family_for_model;
-    use code_apply_patch::APPLY_PATCH_TOOL_INSTRUCTIONS;
+    use hanzo_apply_patch::APPLY_PATCH_TOOL_INSTRUCTIONS;
     use pretty_assertions::assert_eq;
 
     use super::*;
@@ -579,7 +579,7 @@ mod tests {
             },
             ResponseItem::FunctionCallOutput {
                 call_id: "call_1".to_string(),
-                output: code_protocol::models::FunctionCallOutputPayload::from_content_items(vec![
+                output: hanzo_protocol::models::FunctionCallOutputPayload::from_content_items(vec![
                     FunctionCallOutputContentItem::InputImage {
                         image_url: "data:image/png;base64,BBB".to_string(),
                         detail: None,

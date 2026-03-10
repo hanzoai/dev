@@ -353,7 +353,7 @@ impl LoginAccountsState {
             Ok(()) => {
                 self.feedback = Some(Feedback {
                     message: match mode {
-                        AuthMode::ChatGPT => "ChatGPT account selected".to_string(),
+                        AuthMode::ChatGPT | AuthMode::ChatgptAuthTokens => "ChatGPT account selected".to_string(),
                         AuthMode::Hanzo => "Hanzo account selected".to_string(),
                         AuthMode::ApiKey => "API key selected".to_string(),
                     },

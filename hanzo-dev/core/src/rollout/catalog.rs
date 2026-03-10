@@ -1,25 +1,18 @@
 //! Session catalog: unified index of all sessions for efficient querying and resume.
 
 use std::cmp::Reverse;
-use std::collections::HashMap;
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::fs;
-use std::io::BufRead;
-use std::io::BufReader;
-use std::io::{self};
-use std::path::Path;
-use std::path::PathBuf;
+use std::io::{self, BufRead, BufReader};
+use std::path::{Path, PathBuf};
 
-use hanzo_protocol::models::ContentItem;
-use hanzo_protocol::models::ResponseItem;
-use hanzo_protocol::protocol::RolloutItem;
-use hanzo_protocol::protocol::RolloutLine;
-use hanzo_protocol::protocol::SessionSource;
-use serde::Deserialize;
-use serde::Serialize;
+use hanzo_protocol::models::{ContentItem, ResponseItem};
+use hanzo_protocol::protocol::{RolloutItem, RolloutLine, SessionSource};
+use serde::{Deserialize, Serialize};
 use tracing::warn;
 use uuid::Uuid;
 
+use super::ARCHIVED_SESSIONS_SUBDIR;
 use super::SESSIONS_SUBDIR;
 
 const INDEX_SUBDIR: &str = "sessions/index";
@@ -76,6 +69,10 @@ pub struct SessionIndexEntry {
     /// Snippet from the last user message
     #[serde(skip_serializing_if = "Option::is_none")]
     pub last_user_snippet: Option<String>,
+
+    /// Optional user-assigned nickname for the session
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub nickname: Option<String>,
 
     /// Device/machine where this session originated (for synced sessions)
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -264,6 +261,16 @@ impl SessionCatalog {
         self.save()
     }
 
+    /// Update the nickname for a session entry.
+    pub fn set_nickname(&mut self, session_id: Uuid, nickname: Option<String>) -> io::Result<bool> {
+        let Some(entry) = self.entries.get_mut(&session_id) else {
+            return Ok(false);
+        };
+        entry.nickname = nickname;
+        self.save()?;
+        Ok(true)
+    }
+
     /// Remove an entry's session_id from secondary indexes.
     fn remove_from_indexes(&mut self, session_id: &Uuid, entry: &SessionIndexEntry) {
         // Remove from cwd index
@@ -272,10 +279,10 @@ impl SessionCatalog {
         }
 
         // Remove from git root index
-        if let Some(ref git_root) = entry.git_project_root
-            && let Some(ids) = self.by_git_root.get_mut(git_root)
-        {
-            ids.retain(|id| id != session_id);
+        if let Some(ref git_root) = entry.git_project_root {
+            if let Some(ids) = self.by_git_root.get_mut(git_root) {
+                ids.retain(|id| id != session_id);
+            }
         }
     }
 
@@ -295,32 +302,42 @@ impl SessionCatalog {
     #[allow(dead_code)]
     pub async fn reconcile(&mut self, code_home: &Path) -> io::Result<ReconcileResult> {
         let sessions_root = code_home.join(SESSIONS_SUBDIR);
+        let archived_root = code_home.join(ARCHIVED_SESSIONS_SUBDIR);
 
         if !sessions_root.exists() {
             return Ok(ReconcileResult::default());
         }
 
         let mut result = ReconcileResult::default();
-        let discovered_entries = scan_rollout_files(&sessions_root).await?;
+        let discovered_entries = scan_rollout_files(&sessions_root, false).await?;
+        let mut discovered_entries = if archived_root.exists() {
+            let archived_entries = scan_rollout_files(&archived_root, true).await?;
+            merge_discovered_entries(discovered_entries, archived_entries)
+        } else {
+            discovered_entries
+        };
         let discovered_ids: HashSet<Uuid> = discovered_entries.keys().copied().collect();
         let mut changed = false;
 
         // Remove entries that no longer exist on disk.
         let existing_ids: Vec<Uuid> = self.entries.keys().copied().collect();
         for session_id in existing_ids {
-            if !discovered_ids.contains(&session_id)
-                && let Some(entry) = self.entries.remove(&session_id)
-            {
-                self.remove_from_indexes(&session_id, &entry);
-                result.removed += 1;
-                changed = true;
+            if !discovered_ids.contains(&session_id) {
+                if let Some(entry) = self.entries.remove(&session_id) {
+                    self.remove_from_indexes(&session_id, &entry);
+                    result.removed += 1;
+                    changed = true;
+                }
             }
         }
 
         // Upsert discovered entries.
-        for (session_id, entry) in discovered_entries {
+        for (session_id, mut entry) in discovered_entries.drain() {
             if let Some(existing) = self.entries.get(&session_id).cloned() {
                 if should_replace(&existing, &entry) {
+                    if entry.nickname.is_none() {
+                        entry.nickname = existing.nickname.clone();
+                    }
                     self.remove_from_indexes(&session_id, &existing);
                     self.index_entry(entry);
                     result.updated += 1;
@@ -351,9 +368,12 @@ impl SessionCatalog {
     /// Get the full absolute path to a session's snapshot file.
     #[allow(dead_code)]
     pub fn resolve_snapshot_path(&self, code_home: &Path, session_id: &Uuid) -> Option<PathBuf> {
-        self.entries
-            .get(session_id)
-            .and_then(|entry| entry.snapshot_path.as_ref().map(|p| code_home.join(p)))
+        self.entries.get(session_id).and_then(|entry| {
+            entry
+                .snapshot_path
+                .as_ref()
+                .map(|p| code_home.join(p))
+        })
     }
 }
 
@@ -368,7 +388,10 @@ pub struct ReconcileResult {
 
 /// Scan all rollout files under the sessions directory and build index entries.
 #[allow(dead_code)]
-async fn scan_rollout_files(sessions_root: &Path) -> io::Result<HashMap<Uuid, SessionIndexEntry>> {
+async fn scan_rollout_files(
+    sessions_root: &Path,
+    archived: bool,
+) -> io::Result<HashMap<Uuid, SessionIndexEntry>> {
     use tokio::fs;
 
     let mut queue = vec![sessions_root.to_path_buf()];
@@ -383,20 +406,23 @@ async fn scan_rollout_files(sessions_root: &Path) -> io::Result<HashMap<Uuid, Se
 
             if metadata.is_dir() {
                 queue.push(path);
-            } else if metadata.is_file()
-                && let Some(name) = path.file_name().and_then(|n| n.to_str())
-                && name.ends_with(".jsonl")
-                && name.starts_with("rollout-")
-                && let Some(index_entry) = parse_rollout_file(&path, sessions_root).await
-            {
-                match discovered.get(&index_entry.session_id) {
-                    Some(existing) => {
-                        if should_replace(existing, &index_entry) {
-                            discovered.insert(index_entry.session_id, index_entry);
+            } else if metadata.is_file() {
+                if let Some(name) = path.file_name().and_then(|n| n.to_str()) {
+                    if name.ends_with(".jsonl") && name.starts_with("rollout-") {
+                        if let Some(index_entry) =
+                            parse_rollout_file(&path, sessions_root, archived).await
+                        {
+                            match discovered.get(&index_entry.session_id) {
+                                Some(existing) => {
+                                    if should_replace(existing, &index_entry) {
+                                        discovered.insert(index_entry.session_id, index_entry);
+                                    }
+                                }
+                                None => {
+                                    discovered.insert(index_entry.session_id, index_entry);
+                                }
+                            }
                         }
-                    }
-                    None => {
-                        discovered.insert(index_entry.session_id, index_entry);
                     }
                 }
             }
@@ -407,9 +433,12 @@ async fn scan_rollout_files(sessions_root: &Path) -> io::Result<HashMap<Uuid, Se
 }
 
 /// Parse a rollout file and extract catalog entry information.
-async fn parse_rollout_file(path: &Path, sessions_root: &Path) -> Option<SessionIndexEntry> {
-    use tokio::io::AsyncBufReadExt;
-    use tokio::io::BufReader;
+async fn parse_rollout_file(
+    path: &Path,
+    sessions_root: &Path,
+    archived: bool,
+) -> Option<SessionIndexEntry> {
+    use tokio::io::{AsyncBufReadExt, BufReader};
 
     // Read the file
     let file = match tokio::fs::File::open(path).await {
@@ -464,17 +493,20 @@ async fn parse_rollout_file(path: &Path, sessions_root: &Path) -> Option<Session
             RolloutItem::ResponseItem(response_item) => {
                 message_count += 1;
 
-                if let ResponseItem::Message { role, content, .. } = response_item
-                    && role.eq_ignore_ascii_case("user")
-                {
-                    let snippet = snippet_from_content(&content);
-                    if snippet.as_deref().is_some_and(is_system_status_snippet) {
-                        continue;
-                    }
+                if let ResponseItem::Message { role, content, .. } = response_item {
+                    if role.eq_ignore_ascii_case("user") {
+                        let snippet = snippet_from_content(&content);
+                        if snippet
+                            .as_deref()
+                            .map_or(false, is_system_status_snippet)
+                        {
+                            continue;
+                        }
 
-                    user_message_count += 1;
-                    if let Some(snippet) = snippet {
-                        last_user_snippet = Some(snippet);
+                        user_message_count += 1;
+                        if let Some(snippet) = snippet {
+                            last_user_snippet = Some(snippet);
+                        }
                     }
                 }
             }
@@ -482,6 +514,10 @@ async fn parse_rollout_file(path: &Path, sessions_root: &Path) -> Option<Session
                 // Event lines record internal state changes (tool output, approvals, etc.).
                 // They are not a reliable indicator of user-submitted turns, so avoid
                 // counting them toward `user_message_count` to keep resume filters strict.
+                message_count += 1;
+            }
+            RolloutItem::EventMsg(_event) => {
+                // Same accounting as RolloutItem::Event.
                 message_count += 1;
             }
             RolloutItem::Compacted(_) | RolloutItem::TurnContext(_) => {
@@ -508,7 +544,7 @@ async fn parse_rollout_file(path: &Path, sessions_root: &Path) -> Option<Session
             snapshot_file
                 .strip_prefix(code_home)
                 .ok()
-                .map(std::path::Path::to_path_buf)
+                .map(|p| p.to_path_buf())
         } else {
             None
         }
@@ -532,11 +568,31 @@ async fn parse_rollout_file(path: &Path, sessions_root: &Path) -> Option<Session
         message_count,
         user_message_count,
         last_user_snippet,
+        nickname: None,
         sync_origin_device: None,
         sync_version: 0,
-        archived: false,
+        archived,
         deleted: false,
     })
+}
+
+fn merge_discovered_entries(
+    mut primary: HashMap<Uuid, SessionIndexEntry>,
+    secondary: HashMap<Uuid, SessionIndexEntry>,
+) -> HashMap<Uuid, SessionIndexEntry> {
+    for (session_id, entry) in secondary {
+        match primary.get(&session_id) {
+            Some(existing) => {
+                if should_replace(existing, &entry) {
+                    primary.insert(session_id, entry);
+                }
+            }
+            None => {
+                primary.insert(session_id, entry);
+            }
+        }
+    }
+    primary
 }
 
 fn should_replace(existing: &SessionIndexEntry, candidate: &SessionIndexEntry) -> bool {
@@ -565,27 +621,34 @@ pub async fn update_catalog_entry(
 ) -> io::Result<()> {
     let mut catalog = SessionCatalog::load(code_home)?;
 
-    // If entry exists, update last_event_at
-    if let Some(mut entry) = catalog.entries.remove(&session_id) {
-        entry.last_event_at = last_timestamp.to_string();
-
-        // Re-parse file to update message count and snippet
-        if let Some(updated) =
-            parse_rollout_file(rollout_path, &code_home.join(SESSIONS_SUBDIR)).await
-        {
-            entry.message_count = updated.message_count;
-            entry.user_message_count = updated.user_message_count;
-            entry.last_user_snippet = updated.last_user_snippet;
-        }
-
-        catalog.upsert(entry)?;
+    let sessions_root = code_home.join(SESSIONS_SUBDIR);
+    let archived_root = code_home.join(ARCHIVED_SESSIONS_SUBDIR);
+    let (parse_root, archived) = if rollout_path.starts_with(&archived_root) {
+        (&archived_root, true)
     } else {
-        // Entry doesn't exist, parse and add it
-        if let Some(entry) =
-            parse_rollout_file(rollout_path, &code_home.join(SESSIONS_SUBDIR)).await
-        {
+        (&sessions_root, false)
+    };
+
+    // If entry exists, update last_event_at
+        if let Some(mut entry) = catalog.entries.remove(&session_id) {
+            entry.last_event_at = last_timestamp.to_string();
+
+            // Re-parse file to update message count and snippet
+            if let Some(updated) = parse_rollout_file(rollout_path, parse_root, archived).await {
+                entry.message_count = updated.message_count;
+                entry.user_message_count = updated.user_message_count;
+                entry.last_user_snippet = updated.last_user_snippet;
+                entry.archived = updated.archived;
+                entry.rollout_path = updated.rollout_path;
+                entry.snapshot_path = updated.snapshot_path;
+            }
+
             catalog.upsert(entry)?;
-        }
+        } else {
+            // Entry doesn't exist, parse and add it
+            if let Some(entry) = parse_rollout_file(rollout_path, parse_root, archived).await {
+                catalog.upsert(entry)?;
+            }
     }
 
     Ok(())
@@ -593,9 +656,8 @@ pub async fn update_catalog_entry(
 
 fn snippet_from_content(content: &[ContentItem]) -> Option<String> {
     content.iter().find_map(|item| match item {
-        ContentItem::InputText { text } | ContentItem::OutputText { text } => {
-            Some(truncate_snippet(text))
-        }
+        ContentItem::InputText { text }
+        | ContentItem::OutputText { text } => Some(truncate_snippet(text)),
         _ => None,
     })
 }
@@ -630,6 +692,7 @@ mod tests {
             message_count: 5,
             user_message_count: 2,
             last_user_snippet: None,
+            nickname: None,
             sync_origin_device: None,
             sync_version: 0,
             archived: false,
@@ -665,6 +728,7 @@ mod tests {
             message_count: 5,
             user_message_count: 1,
             last_user_snippet: Some("test message".to_string()),
+            nickname: None,
             sync_origin_device: None,
             sync_version: 0,
             archived: false,
@@ -678,6 +742,45 @@ mod tests {
         // Load catalog and verify
         let loaded = SessionCatalog::load(code_home)?;
         assert_eq!(loaded.get(&entry.session_id), Some(&entry));
+
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn test_catalog_set_nickname() -> io::Result<()> {
+        let temp = TempDir::new()?;
+        let code_home = temp.path();
+
+        let session_id = Uuid::new_v4();
+        let entry = SessionIndexEntry {
+            session_id,
+            rollout_path: PathBuf::from("sessions/test-nickname.jsonl"),
+            snapshot_path: None,
+            created_at: "2025-01-01T10:00:00.000Z".to_string(),
+            last_event_at: "2025-01-01T10:05:00.000Z".to_string(),
+            cwd_real: PathBuf::from("/test"),
+            cwd_display: "/test".to_string(),
+            git_project_root: None,
+            git_branch: None,
+            model_provider: None,
+            session_source: SessionSource::Cli,
+            message_count: 5,
+            user_message_count: 1,
+            last_user_snippet: None,
+            nickname: None,
+            sync_origin_device: None,
+            sync_version: 0,
+            archived: false,
+            deleted: false,
+        };
+
+        let mut catalog = SessionCatalog::load(code_home)?;
+        catalog.upsert(entry.clone())?;
+        assert!(catalog.set_nickname(session_id, Some("Launch checklist".to_string()))?);
+
+        let loaded = SessionCatalog::load(code_home)?;
+        let retrieved = loaded.get(&session_id).expect("session entry");
+        assert_eq!(retrieved.nickname.as_deref(), Some("Launch checklist"));
 
         Ok(())
     }
@@ -705,6 +808,7 @@ mod tests {
             message_count: 5,
             user_message_count: 1,
             last_user_snippet: None,
+            nickname: None,
             sync_origin_device: None,
             sync_version: 0,
             archived: false,
@@ -755,6 +859,7 @@ mod tests {
             message_count: 5,
             user_message_count: 2,
             last_user_snippet: Some("first message".to_string()),
+            nickname: None,
             sync_origin_device: None,
             sync_version: 0,
             archived: false,
@@ -779,10 +884,7 @@ mod tests {
         let retrieved = loaded.get(&session_id).unwrap();
         assert_eq!(retrieved.last_event_at, "2025-01-01T10:15:00.000Z");
         assert_eq!(retrieved.message_count, 10);
-        assert_eq!(
-            retrieved.last_user_snippet,
-            Some("updated message".to_string())
-        );
+        assert_eq!(retrieved.last_user_snippet, Some("updated message".to_string()));
 
         Ok(())
     }
@@ -807,6 +909,7 @@ mod tests {
             message_count: 5,
             user_message_count: 1,
             last_user_snippet: None,
+            nickname: None,
             sync_origin_device: None,
             sync_version: 0,
             archived: false,
@@ -850,6 +953,7 @@ mod tests {
             message_count: 5,
             user_message_count: 2,
             last_user_snippet: None,
+            nickname: None,
             sync_origin_device: None,
             sync_version: 0,
             archived: false,
@@ -867,7 +971,7 @@ mod tests {
             session_id: Uuid::parse_str("00000000-0000-0000-0000-000000000003").unwrap(),
             rollout_path: PathBuf::from("sessions/test3.jsonl"),
             last_event_at: "2025-01-01T10:10:00.000Z".to_string(), // Same as entry2
-            created_at: "2025-01-01T10:01:00.000Z".to_string(),    // Later created_at
+            created_at: "2025-01-01T10:01:00.000Z".to_string(), // Later created_at
             ..entry1.clone()
         };
 
@@ -898,9 +1002,7 @@ mod tests {
         let entry = SessionIndexEntry {
             session_id: Uuid::new_v4(),
             rollout_path: PathBuf::from("sessions/2025/01/01/rollout-test.jsonl"),
-            snapshot_path: Some(PathBuf::from(
-                "sessions/2025/01/01/rollout-test.snapshot.json",
-            )),
+            snapshot_path: Some(PathBuf::from("sessions/2025/01/01/rollout-test.snapshot.json")),
             created_at: "2025-01-01T10:00:00.000Z".to_string(),
             last_event_at: "2025-01-01T10:05:00.000Z".to_string(),
             cwd_real: PathBuf::from("/test"),
@@ -912,6 +1014,7 @@ mod tests {
             message_count: 5,
             user_message_count: 2,
             last_user_snippet: None,
+            nickname: None,
             sync_origin_device: None,
             sync_version: 0,
             archived: false,
@@ -989,6 +1092,7 @@ mod tests {
             message_count: 5,
             user_message_count: 2,
             last_user_snippet: None,
+            nickname: None,
             sync_origin_device: None,
             sync_version: 0,
             archived: false,

@@ -10,14 +10,14 @@ use std::sync::atomic::AtomicBool;
 use time::OffsetDateTime;
 use time::PrimitiveDateTime;
 use time::format_description::FormatItem;
-use time::format_description::well_known::Rfc3339;
 use time::macros::format_description;
+use time::format_description::well_known::Rfc3339;
 use uuid::Uuid;
 
 use super::SESSIONS_SUBDIR;
 use crate::config::resolve_code_path_for_read;
-use crate::protocol::EventMsg;
 use crate::protocol::event_msg_from_protocol;
+use crate::protocol::EventMsg;
 use hanzo_protocol::protocol::RolloutItem;
 use hanzo_protocol::protocol::RolloutLine;
 use hanzo_protocol::protocol::SessionSource;
@@ -142,7 +142,7 @@ pub(crate) async fn get_conversation(path: &Path) -> io::Result<String> {
 
 /// Load conversation file paths from disk using directory traversal.
 ///
-/// Directory layout: `~/.hanzo/sessions/YYYY/MM/DD/rollout-YYYY-MM-DDThh-mm-ss-<uuid>.jsonl`
+/// Directory layout: `~/.codex/sessions/YYYY/MM/DD/rollout-YYYY-MM-DDThh-mm-ss-<uuid>.jsonl`
 /// Returned newest (latest) first.
 async fn traverse_directories_for_paths(
     root: PathBuf,
@@ -251,8 +251,9 @@ async fn traverse_directories_for_paths(
         }
     }
 
-    candidates
-        .sort_by_key(|(modified, ts, sid, _)| (Reverse(*modified), Reverse(*ts), Reverse(*sid)));
+    candidates.sort_by_key(|(modified, ts, sid, _)| {
+        (Reverse(*modified), Reverse(*ts), Reverse(*sid))
+    });
 
     let mut items: Vec<ConversationItem> = Vec::with_capacity(page_size.min(candidates.len()));
     for (_, _, _, item) in candidates.into_iter().take(page_size) {
@@ -373,7 +374,7 @@ async fn read_head_and_tail(
 
         match &rollout_line.item {
             RolloutItem::SessionMeta(session_meta_line) => {
-                summary.source = Some(session_meta_line.meta.source);
+                summary.source = Some(session_meta_line.meta.source.clone());
                 summary.created_at = summary
                     .created_at
                     .clone()
@@ -382,16 +383,22 @@ async fn read_head_and_tail(
                 summary.saw_session_meta = true;
             }
             RolloutItem::Event(event) => {
-                if let Some(msg) = event_msg_from_protocol(&event.msg)
-                    && matches!(msg, EventMsg::UserMessage(_) | EventMsg::AgentMessage(_))
-                {
-                    summary.saw_user_event = true;
-                    summary.updated_at = Some(rollout_line.timestamp.clone());
+                if let Some(msg) = event_msg_from_protocol(&event.msg) {
+                    if matches!(msg, EventMsg::UserMessage(_) | EventMsg::AgentMessage(_)) {
+                        summary.saw_user_event = true;
+                        summary.updated_at = Some(rollout_line.timestamp.clone());
+                    }
                 }
             }
-            RolloutItem::ResponseItem(_)
-            | RolloutItem::Compacted(_)
-            | RolloutItem::TurnContext(_) => {}
+            RolloutItem::EventMsg(event_msg) => {
+                if let Some(msg) = event_msg_from_protocol(event_msg) {
+                    if matches!(msg, EventMsg::UserMessage(_) | EventMsg::AgentMessage(_)) {
+                        summary.saw_user_event = true;
+                        summary.updated_at = Some(rollout_line.timestamp.clone());
+                    }
+                }
+            }
+            RolloutItem::ResponseItem(_) | RolloutItem::Compacted(_) | RolloutItem::TurnContext(_) => {}
         }
 
         summary
@@ -498,9 +505,9 @@ fn snapshot_to_rollout_path(path: &Path) -> Option<PathBuf> {
 
 #[cfg(test)]
 mod tests {
-    use super::SESSIONS_SUBDIR;
     use super::find_conversation_path_by_id_str;
     use super::snapshot_to_rollout_path;
+    use super::SESSIONS_SUBDIR;
     use std::fs;
     use std::path::PathBuf;
     use tempfile::tempdir;

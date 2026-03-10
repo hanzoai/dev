@@ -1,24 +1,24 @@
 [package]
 edition = "2024"
-name = "code-tui"
+name = "hanzo-tui"
 version = { workspace = true }
 
 [[bin]]
-name = "code-tui"
+name = "hanzo-tui"
 path = "src/main.rs"
 
 [lib]
-name = "code_tui"
+name = "hanzo_tui"
 path = "src/lib.rs"
 
 [features]
-default = ["code-fork"]
+default = ["hanzo-fork"]
 # Gate verbose debug logging inside the TUI implementation.
 debug-logs = []
-dev-faults = ["code-auto-drive-core/dev-faults"]
+dev-faults = ["hanzo-auto-drive-core/dev-faults"]
 # Fork-specific extensions layered on top of upstream history rendering.
-code-fork = []
-test-helpers = ["code-auto-drive-core/test-helpers"]
+hanzo-fork = []
+test-helpers = ["hanzo-auto-drive-core/test-helpers"]
 
 [lints]
 workspace = true
@@ -28,24 +28,24 @@ anyhow = "1"
 base64 = "0.22.1"
 chrono = { version = "0.4", features = ["serde"] }
 clap = { version = "4", features = ["derive"] }
-code-ansi-escape = { path = "../ansi-escape" }
-code-arg0 = { path = "../arg0" }
-code-browser = { path = "../browser" }
-code-common = { path = "../common", features = [
+hanzo-ansi-escape = { path = "../ansi-escape" }
+hanzo-arg0 = { path = "../arg0" }
+hanzo-browser = { path = "../browser" }
+hanzo-common = { path = "../common", features = [
     "cli",
     "elapsed",
     "sandbox_summary",
 ] }
-code-core = { path = "../core" }
-code-file-search = { path = "../file-search" }
-code-git-tooling = { path = "../git-tooling" }
-code-login = { path = "../login" }
-code-ollama = { path = "../ollama" }
-code-protocol = { path = "../protocol" }
-code-version = { path = "../code-version" }
-code-cloud-tasks-client = { path = "../cloud-tasks-client", features = ["mock"] }
-code-auto-drive-diagnostics = { path = "../code-auto-drive-diagnostics" }
-code-auto-drive-core = { workspace = true }
+hanzo-core = { path = "../core" }
+hanzo-file-search = { path = "../file-search" }
+hanzo-git-tooling = { path = "../git-tooling" }
+hanzo-login = { path = "../login" }
+hanzo-ollama = { path = "../ollama" }
+hanzo-protocol = { path = "../protocol" }
+hanzo-version = { path = "../code-version" }
+hanzo-cloud-tasks-client = { path = "../cloud-tasks-client", features = ["mock"] }
+hanzo-auto-drive-diagnostics = { path = "../code-auto-drive-diagnostics" }
+hanzo-auto-drive-core = { workspace = true }
 color-eyre = "0.6.3"
 crossterm = { version = "0.28.1", features = ["bracketed-paste"] }
 diffy = "0.4.2"
@@ -121,7 +121,7 @@ rand = "0.9"
 strip-ansi-escapes = "0.1"
 serde_bytes = "0.11"
 toml = { workspace = true }
-code-tui = { path = ".", features = ["test-helpers"] }
+hanzo-tui = { path = ".", features = ["test-helpers"] }
 [build-dependencies]
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"

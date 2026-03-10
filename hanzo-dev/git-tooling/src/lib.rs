@@ -1,5 +1,10 @@
 use std::fmt;
 
+use schemars::JsonSchema;
+use serde::Deserialize;
+use serde::Serialize;
+use ts_rs::TS;
+
 mod errors;
 mod ghost_commits;
 mod operations;
@@ -13,7 +18,7 @@ pub use ghost_commits::restore_to_commit;
 pub use platform::create_symlink;
 
 /// Details of a ghost commit created from a repository state.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize, JsonSchema, TS)]
 pub struct GhostCommit {
     id: String,
     parent: Option<String>,

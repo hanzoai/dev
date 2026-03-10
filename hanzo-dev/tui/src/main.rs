@@ -16,7 +16,7 @@ struct TopCli {
 }
 
 fn main() -> anyhow::Result<()> {
-    arg0_dispatch_or_else(|code_linux_sandbox_exe| async move {
+    arg0_dispatch_or_else(|hanzo_linux_sandbox_exe| async move {
         let top_cli = TopCli::parse();
         let mut inner = top_cli.inner;
         inner.finalize_defaults();
@@ -27,7 +27,7 @@ fn main() -> anyhow::Result<()> {
         let ExitSummary {
             token_usage,
             session_id,
-        } = run_main(inner, code_linux_sandbox_exe).await?;
+        } = run_main(inner, hanzo_linux_sandbox_exe).await?;
         if !token_usage.is_zero() {
             println!("{}", hanzo_core::protocol::FinalOutput::from(token_usage));
         }

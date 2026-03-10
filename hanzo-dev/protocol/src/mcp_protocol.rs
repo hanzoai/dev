@@ -105,11 +105,17 @@ pub enum AuthMode {
     #[ts(rename = "chatgptAuthTokens")]
     #[strum(serialize = "chatgptAuthTokens")]
     ChatgptAuthTokens,
+    /// Hanzo-native OAuth authentication.
+    Hanzo,
 }
 
 impl AuthMode {
     pub fn is_chatgpt(self) -> bool {
         matches!(self, AuthMode::ChatGPT | AuthMode::ChatgptAuthTokens)
+    }
+
+    pub fn is_hanzo(self) -> bool {
+        matches!(self, AuthMode::Hanzo)
     }
 }
 
@@ -587,7 +593,7 @@ pub struct UserSavedConfig {
     pub profiles: HashMap<String, Profile>,
 }
 
-/// MCP representation of a [`code_core::config_profile::ConfigProfile`].
+/// MCP representation of a [`hanzo_core::config_profile::ConfigProfile`].
 #[derive(Deserialize, Debug, Clone, PartialEq, Serialize, TS)]
 #[serde(rename_all = "camelCase")]
 pub struct Profile {
@@ -601,7 +607,7 @@ pub struct Profile {
     pub model_verbosity: Option<Verbosity>,
     pub chatgpt_base_url: Option<String>,
 }
-/// MCP representation of a [`code_core::config::ToolsToml`].
+/// MCP representation of a [`hanzo_core::config::ToolsToml`].
 #[derive(Deserialize, Debug, Clone, PartialEq, Serialize, TS)]
 #[serde(rename_all = "camelCase")]
 pub struct Tools {
@@ -611,7 +617,7 @@ pub struct Tools {
     pub view_image: Option<bool>,
 }
 
-/// MCP representation of a [`code_core::config_types::SandboxWorkspaceWrite`].
+/// MCP representation of a [`hanzo_core::config_types::SandboxWorkspaceWrite`].
 #[derive(Deserialize, Debug, Clone, PartialEq, Serialize, TS)]
 #[serde(rename_all = "camelCase")]
 pub struct SandboxSettings {
@@ -730,8 +736,8 @@ pub enum ServerRequest {
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq, TS)]
 pub struct ApplyPatchApprovalParams {
     pub conversation_id: ConversationId,
-    /// Use to correlate this with [code_core::protocol::PatchApplyBeginEvent]
-    /// and [code_core::protocol::PatchApplyEndEvent].
+    /// Use to correlate this with [hanzo_core::protocol::PatchApplyBeginEvent]
+    /// and [hanzo_core::protocol::PatchApplyEndEvent].
     pub call_id: String,
     pub file_changes: HashMap<PathBuf, FileChange>,
     /// Optional explanatory reason (e.g. request for extra write access).
@@ -746,8 +752,8 @@ pub struct ApplyPatchApprovalParams {
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq, TS)]
 pub struct ExecCommandApprovalParams {
     pub conversation_id: ConversationId,
-    /// Use to correlate this with [code_core::protocol::ExecCommandBeginEvent]
-    /// and [code_core::protocol::ExecCommandEndEvent].
+    /// Use to correlate this with [hanzo_core::protocol::ExecCommandBeginEvent]
+    /// and [hanzo_core::protocol::ExecCommandEndEvent].
     pub call_id: String,
     /// Identifier for this specific approval callback.
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -796,7 +802,7 @@ pub struct FuzzyFileSearchParams {
     pub cancellation_token: Option<String>,
 }
 
-/// Superset of [`code_file_search::FileMatch`]
+/// Superset of [`hanzo_file_search::FileMatch`]
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq, TS)]
 pub struct FuzzyFileSearchResult {
     pub root: String,

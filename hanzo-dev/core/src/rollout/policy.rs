@@ -1,7 +1,7 @@
 use crate::protocol::event_msg_from_protocol;
 use crate::protocol::EventMsg;
-use code_protocol::models::ResponseItem;
-use code_protocol::protocol::RolloutItem;
+use hanzo_protocol::models::ResponseItem;
+use hanzo_protocol::protocol::RolloutItem;
 
 /// Whether a rollout `item` should be persisted in rollout files.
 #[inline]

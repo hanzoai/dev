@@ -1,33 +1,22 @@
 use std::collections::hash_map::DefaultHasher;
 use std::fs;
-use std::hash::Hash;
-use std::hash::Hasher;
-use std::path::Path;
-use std::path::PathBuf;
-use std::sync::Arc;
-use std::sync::Mutex;
-use std::sync::atomic::AtomicBool;
-use std::sync::atomic::Ordering;
+use std::hash::{Hash, Hasher};
+use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use anyhow::Result;
 use anyhow::bail;
-use chrono::DateTime;
-use chrono::Duration as ChronoDuration;
-use chrono::Utc;
-use futures_util::SinkExt;
-use futures_util::StreamExt;
+use chrono::{DateTime, Duration as ChronoDuration, Utc};
+use futures_util::{SinkExt, StreamExt};
 use once_cell::sync::Lazy;
-use serde::Deserialize;
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use serde_json::Value;
-use tokio::time::Instant;
-use tokio::time::sleep;
-use tokio::time::sleep_until;
+use tokio::time::{sleep, sleep_until, Instant};
 use tokio_tungstenite::connect_async;
 use tokio_tungstenite::tungstenite::Message;
-use tracing::info;
-use tracing::warn;
+use tracing::{info, warn};
 
 use crate::codex::Session;
 
@@ -47,8 +36,7 @@ struct BridgeMeta {
 }
 
 const HEARTBEAT_STALE_MS: i64 = 20_000;
-const SUBSCRIPTION_OVERRIDE_FILE: &str = "dev-bridge.subscription.json";
-const LEGACY_SUBSCRIPTION_OVERRIDE_FILE: &str = "code-bridge.subscription.json";
+const SUBSCRIPTION_OVERRIDE_FILE: &str = "code-bridge.subscription.json";
 const BATCH_WINDOW: Duration = Duration::from_secs(3);
 const MAX_EVENTS_PER_BATCH: usize = 50;
 const MAX_EVENT_SUMMARY_CHARS: usize = 1200;
@@ -71,8 +59,7 @@ pub(crate) struct SubscriptionState {
     last_sent: Option<Subscription>,
 }
 
-static SUBSCRIPTIONS: Lazy<Mutex<SubscriptionState>> =
-    Lazy::new(|| Mutex::new(SubscriptionState::default()));
+static SUBSCRIPTIONS: Lazy<Mutex<SubscriptionState>> = Lazy::new(|| Mutex::new(SubscriptionState::default()));
 
 static CONTROL_SENDER: Lazy<Mutex<Option<tokio::sync::mpsc::UnboundedSender<String>>>> =
     Lazy::new(|| Mutex::new(None));
@@ -156,23 +143,22 @@ fn normalise_vec(values: Vec<String>) -> Vec<String> {
 }
 
 fn parse_level(raw: &str) -> Option<String> {
-    serde_json::from_str::<Value>(raw).ok().and_then(|val| {
-        val.get("level")
-            .and_then(|v| v.as_str())
-            .map(str::to_lowercase)
-            .or_else(|| {
-                val.get("type")
-                    .and_then(|v| v.as_str())
-                    .map(str::to_lowercase)
-            })
-    })
+    serde_json::from_str::<Value>(raw)
+        .ok()
+        .and_then(|val| {
+            val.get("level")
+                .and_then(|v| v.as_str())
+                .map(|s| s.to_lowercase())
+                .or_else(|| {
+                    val.get("type")
+                        .and_then(|v| v.as_str())
+                        .map(|s| s.to_lowercase())
+                })
+        })
 }
 
 fn is_error_level(level: &str) -> bool {
-    matches!(
-        level,
-        "error" | "errors" | "err" | "fatal" | "critical" | "panic"
-    )
+    matches!(level, "error" | "errors" | "err" | "fatal" | "critical" | "panic")
 }
 
 fn truncate_summary(text: &str) -> (String, bool) {
@@ -180,10 +166,7 @@ fn truncate_summary(text: &str) -> (String, bool) {
     let truncated: String = chars.by_ref().take(MAX_EVENT_SUMMARY_CHARS).collect();
     if text.chars().count() > MAX_EVENT_SUMMARY_CHARS {
         let remaining = text.chars().count().saturating_sub(MAX_EVENT_SUMMARY_CHARS);
-        (
-            format!("{truncated}... [truncated {remaining} chars]"),
-            true,
-        )
+        (format!("{}... [truncated {remaining} chars]", truncated), true)
     } else {
         (truncated, false)
     }
@@ -227,10 +210,10 @@ fn coalesce_events(events: Vec<BridgeBatchEvent>) -> CoalescedBatch {
             truncated_events += 1;
         }
 
-        if let Some(level) = level.as_deref()
-            && is_error_level(level)
-        {
-            saw_error = true;
+        if let Some(level) = level.as_deref() {
+            if is_error_level(level) {
+                saw_error = true;
+            }
         }
 
         if let Some((_, count)) = entries.iter_mut().find(|(msg, _)| msg == &summary) {
@@ -263,10 +246,10 @@ fn format_batch_message(batch: &CoalescedBatch) -> String {
 
     let mut lines = Vec::new();
     let header = if batch.total_events == 1 {
-        "Dev Bridge event".to_string()
+        "Code Bridge event".to_string()
     } else {
         format!(
-            "Dev Bridge events ({} in last {}s)",
+            "Code Bridge events ({} in last {}s)",
             batch.total_events,
             BATCH_WINDOW.as_secs()
         )
@@ -280,7 +263,7 @@ fn format_batch_message(batch: &CoalescedBatch) -> String {
             String::new()
         };
         let indented = msg.replace('\n', "\n  ");
-        lines.push(format!("- {prefix}{indented}"));
+        lines.push(format!("- {}{}", prefix, indented));
     }
 
     if batch.dropped_events > 0 {
@@ -345,11 +328,7 @@ pub(crate) fn set_bridge_levels(levels: Vec<String>) {
         .session
         .clone()
         .unwrap_or_else(|| merge_effective_subscription(&state));
-    sub.levels = if levels.is_empty() {
-        default_levels()
-    } else {
-        normalise_vec(levels)
-    };
+    sub.levels = if levels.is_empty() { default_levels() } else { normalise_vec(levels) };
     state.session = Some(sub);
     maybe_resubscribe(&mut state);
 }
@@ -361,11 +340,7 @@ pub(crate) fn set_bridge_subscription(levels: Vec<String>, capabilities: Vec<Str
         .session
         .clone()
         .unwrap_or_else(|| merge_effective_subscription(&state));
-    sub.levels = if levels.is_empty() {
-        default_levels()
-    } else {
-        normalise_vec(levels)
-    };
+    sub.levels = if levels.is_empty() { default_levels() } else { normalise_vec(levels) };
     sub.capabilities = normalise_vec(capabilities);
     state.session = Some(sub);
     maybe_resubscribe(&mut state);
@@ -397,7 +372,7 @@ pub(crate) fn send_bridge_control(action: &str, args: serde_json::Value) {
     }
 }
 
-/// Spawn a background task that watches `.hanzo/dev-bridge.json` and
+/// Spawn a background task that watches `.code/code-bridge.json` and
 /// connects as a consumer to the external bridge host when available.
 pub(crate) fn spawn_bridge_listener(session: std::sync::Arc<Session>) {
     let cwd = session.get_cwd().to_path_buf();
@@ -418,7 +393,7 @@ pub(crate) fn spawn_bridge_listener(session: std::sync::Arc<Session>) {
                             }));
                             session
                                 .record_bridge_event(format!(
-                                    "Dev Bridge subscription updated from {} (levels: [{}], capabilities: [{}], filter: {})",
+                                    "Code Bridge subscription updated from {} (levels: [{}], capabilities: [{}], filter: {})",
                                     path.display(),
                                     sub.levels.join(", "),
                                     sub.capabilities.join(", "),
@@ -433,7 +408,7 @@ pub(crate) fn spawn_bridge_listener(session: std::sync::Arc<Session>) {
                         if last_override_seen.is_some() {
                             set_workspace_subscription(None);
                             session
-                                .record_bridge_event("Dev Bridge subscription override removed or invalid; reverted to defaults (errors only).".to_string())
+                                .record_bridge_event("Code Bridge subscription override removed or invalid; reverted to defaults (errors only).".to_string())
                                 .await;
                             *LAST_OVERRIDE_FINGERPRINT.lock().unwrap() = None;
                             last_override_seen = None;
@@ -444,7 +419,7 @@ pub(crate) fn spawn_bridge_listener(session: std::sync::Arc<Session>) {
                 set_workspace_subscription(None);
                 session
                     .record_bridge_event(
-                        "Dev Bridge subscription override removed; reverted to defaults (errors only)."
+                        "Code Bridge subscription override removed; reverted to defaults (errors only)."
                             .to_string(),
                     )
                     .await;
@@ -460,8 +435,7 @@ pub(crate) fn spawn_bridge_listener(session: std::sync::Arc<Session>) {
                     Ok(meta) => {
                         last_notice = None;
                         info!("[bridge] host metadata found, connecting");
-                        if let Err(err) = connect_and_listen(meta, Arc::clone(&session), &cwd).await
-                        {
+                        if let Err(err) = connect_and_listen(meta, Arc::clone(&session), &cwd).await {
                             warn!("[bridge] connect failed: {err:?}");
                         }
                     }
@@ -469,7 +443,7 @@ pub(crate) fn spawn_bridge_listener(session: std::sync::Arc<Session>) {
                         if last_notice != Some("stale") {
                             session
                                 .record_bridge_event(format!(
-                                    "Dev Bridge metadata is stale at {} ({err}); waiting for a fresh host...",
+                                    "Code Bridge metadata is stale at {} ({err}); waiting for a fresh host...",
                                     meta_path.display()
                                 ))
                                 .await;
@@ -528,10 +502,7 @@ pub(crate) fn get_workspace_subscription() -> Option<Subscription> {
     SUBSCRIPTIONS.lock().unwrap().workspace.clone()
 }
 
-pub(crate) fn persist_workspace_subscription(
-    cwd: &Path,
-    sub: Option<Subscription>,
-) -> anyhow::Result<()> {
+pub(crate) fn persist_workspace_subscription(cwd: &Path, sub: Option<Subscription>) -> anyhow::Result<()> {
     let path = resolve_subscription_override_path(cwd);
 
     if let Some(parent) = path.parent() {
@@ -543,12 +514,14 @@ pub(crate) fn persist_workspace_subscription(
         let payload = serde_json::to_string_pretty(&SubscriptionOverride {
             levels: sub.levels.clone(),
             capabilities: sub.capabilities.clone(),
-            llm_filter: sub.llm_filter,
+            llm_filter: sub.llm_filter.clone(),
         })?;
         fs::write(&tmp, payload)?;
         fs::rename(tmp, &path)?;
-    } else if path.exists() {
-        fs::remove_file(&path)?;
+    } else {
+        if path.exists() {
+            fs::remove_file(&path)?;
+        }
     }
 
     Ok(())
@@ -578,11 +551,9 @@ fn maybe_resubscribe(state: &mut SubscriptionState) {
 fn find_meta_path(start: &Path) -> Option<PathBuf> {
     let mut current = Some(start);
     while let Some(dir) = current {
-        for name in ["dev-bridge.json", "code-bridge.json"] {
-            let candidate = dir.join(".hanzo").join(name);
-            if candidate.exists() {
-                return Some(candidate);
-            }
+        let candidate = dir.join(".code/code-bridge.json");
+        if candidate.exists() {
+            return Some(candidate);
         }
         current = dir.parent();
     }
@@ -590,25 +561,20 @@ fn find_meta_path(start: &Path) -> Option<PathBuf> {
 }
 
 fn subscription_override_path(start: &Path) -> Option<PathBuf> {
-    if let Some(meta) = find_meta_path(start)
-        && let Some(dir) = meta.parent()
-    {
-        let candidate = dir.join(SUBSCRIPTION_OVERRIDE_FILE);
-        if candidate.exists() {
-            return Some(candidate);
+    if let Some(meta) = find_meta_path(start) {
+        if let Some(dir) = meta.parent() {
+            let candidate = dir.join(SUBSCRIPTION_OVERRIDE_FILE);
+            if candidate.exists() {
+                return Some(candidate);
+            }
         }
     }
 
     let mut current = Some(start);
     while let Some(dir) = current {
-        for name in [
-            SUBSCRIPTION_OVERRIDE_FILE,
-            LEGACY_SUBSCRIPTION_OVERRIDE_FILE,
-        ] {
-            let candidate = dir.join(".hanzo").join(name);
-            if candidate.exists() {
-                return Some(candidate);
-            }
+        let candidate = dir.join(".code").join(SUBSCRIPTION_OVERRIDE_FILE);
+        if candidate.exists() {
+            return Some(candidate);
         }
         current = dir.parent();
     }
@@ -628,7 +594,7 @@ fn resolve_subscription_override_path(start: &Path) -> PathBuf {
         return dir.join(SUBSCRIPTION_OVERRIDE_FILE);
     }
 
-    start.join(".hanzo").join(SUBSCRIPTION_OVERRIDE_FILE)
+    start.join(".code").join(SUBSCRIPTION_OVERRIDE_FILE)
 }
 
 fn find_meta_dir(start: &Path) -> Option<PathBuf> {
@@ -638,7 +604,7 @@ fn find_meta_dir(start: &Path) -> Option<PathBuf> {
 fn find_code_dir(start: &Path) -> Option<PathBuf> {
     let mut current = Some(start);
     while let Some(dir) = current {
-        let candidate = dir.join(".hanzo");
+        let candidate = dir.join(".code");
         if candidate.is_dir() {
             return Some(candidate);
         }
@@ -675,32 +641,28 @@ fn workspace_has_code_bridge(start: &Path) -> bool {
     let contains_dep = |section: &str| -> bool {
         json.get(section)
             .and_then(|v| v.as_object())
-            .map(|map| {
-                map.contains_key("@hanzo/dev-bridge") || map.contains_key("@just-every/code-bridge")
-            })
+            .map(|map| map.contains_key("@just-every/code-bridge"))
             .unwrap_or(false)
     };
 
-    contains_dep("dependencies")
-        || contains_dep("devDependencies")
-        || contains_dep("peerDependencies")
+    contains_dep("dependencies") || contains_dep("devDependencies") || contains_dep("peerDependencies")
 }
 
 fn is_meta_stale(meta: &BridgeMeta, path: &Path) -> bool {
-    if let Some(hb) = &meta.heartbeat_at
-        && let Ok(ts) = DateTime::parse_from_rfc3339(hb)
-    {
-        let age = Utc::now().signed_duration_since(ts.with_timezone(&Utc));
-        return age.num_milliseconds() > HEARTBEAT_STALE_MS;
+    if let Some(hb) = &meta.heartbeat_at {
+        if let Ok(ts) = DateTime::parse_from_rfc3339(hb) {
+            let age = Utc::now().signed_duration_since(ts.with_timezone(&Utc));
+            return age.num_milliseconds() > HEARTBEAT_STALE_MS;
+        }
     }
 
     // Fallback for hosts that don't emit heartbeat: use file mtime as staleness signal
-    if let Ok(stat) = std::fs::metadata(path)
-        && let Ok(modified) = stat.modified()
-    {
-        let modified: DateTime<Utc> = modified.into();
-        let age = Utc::now().signed_duration_since(modified);
-        return age > ChronoDuration::milliseconds(HEARTBEAT_STALE_MS);
+    if let Ok(stat) = std::fs::metadata(path) {
+        if let Ok(modified) = stat.modified() {
+            let modified: DateTime<Utc> = modified.into();
+            let age = Utc::now().signed_duration_since(modified);
+            return age > ChronoDuration::milliseconds(HEARTBEAT_STALE_MS);
+        }
     }
     false
 }
@@ -714,7 +676,7 @@ async fn connect_and_listen(meta: BridgeMeta, session: Arc<Session>, cwd: &Path)
         "type": "auth",
         "role": "consumer",
         "secret": meta.secret,
-        "clientId": format!("dev-consumer-{}", session.session_uuid()),
+        "clientId": format!("code-consumer-{}", session.session_uuid()),
     })
     .to_string();
     tx.send(Message::Text(auth)).await?;
@@ -758,7 +720,7 @@ async fn connect_and_listen(meta: BridgeMeta, session: Arc<Session>, cwd: &Path)
 
     // announce developer message
     let announce = format!(
-        "Dev Bridge host available.\n- url: {url}\n- secret: {secret}\n",
+        "Code Bridge host available.\n- url: {url}\n- secret: {secret}\n",
         url = meta.url,
         secret = meta.secret
     );
@@ -767,7 +729,7 @@ async fn connect_and_listen(meta: BridgeMeta, session: Arc<Session>, cwd: &Path)
     if !BRIDGE_HINT_EMITTED.swap(true, Ordering::SeqCst) && workspace_has_code_bridge(cwd) {
         session
             .record_bridge_event(
-                "Dev Bridge is a local, real-time debug stream (errors/console like Sentry, plus pageviews/screenshots and a control channel). Use the `code_bridge` tool: `action=subscribe` with level (errors|warn|info|trace) to persist full-capability logging, `action=screenshot` to request a capture, or `action=javascript` with `code` to run JS on the bridge client."
+                "Code Bridge is a local, real-time debug stream (errors/console like Sentry, plus pageviews/screenshots and a control channel). Use the `code_bridge` tool: `action=subscribe` with level (errors|warn|info|trace) to persist full-capability logging, `action=screenshot` to request a capture, or `action=javascript` with `code` to run JS on the bridge client."
                     .to_string(),
             )
             .await;
@@ -859,10 +821,7 @@ fn summarize(raw: &str) -> String {
         if let Some(msg) = val.get("message").and_then(|v| v.as_str()) {
             parts.push(format!("message: {msg}"));
         }
-        return format!(
-            "<code_bridge_event>\n{}\n</code_bridge_event>",
-            parts.join("\n")
-        );
+        return format!("<code_bridge_event>\n{}\n</code_bridge_event>", parts.join("\n"));
     }
     raw.to_string()
 }
@@ -922,7 +881,6 @@ mod tests {
     }
 
     #[test]
-    #[ignore = "flaky due to global state - needs test isolation"]
     fn resubscribe_sends_message_on_change() {
         reset_state();
         let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
@@ -990,7 +948,10 @@ mod tests {
     #[test]
     fn format_batch_includes_multipliers() {
         let batch = CoalescedBatch {
-            entries: vec![("one".to_string(), 1), ("two".to_string(), 3)],
+            entries: vec![
+                ("one".to_string(), 1),
+                ("two".to_string(), 3),
+            ],
             total_events: 4,
             truncated_events: 0,
             dropped_events: 0,
@@ -998,7 +959,7 @@ mod tests {
         };
 
         let text = format_batch_message(&batch);
-        assert!(text.contains("Dev Bridge events (4 in last"));
+        assert!(text.contains("Code Bridge events (4 in last"));
         assert!(text.contains("- one"));
         assert!(text.contains("- [3x] two"));
     }

@@ -27,12 +27,12 @@ use crate::account_switching::RateLimitSwitchState;
 use crate::agent_tool::current_agent_spawn_depth;
 use crate::agent_tool::external_agent_command_exists;
 use crate::protocol::McpListToolsResponseEvent;
-use code_app_server_protocol::AuthMode as AppAuthMode;
-use code_protocol::models::ContentItem;
-use code_protocol::models::ResponseItem;
-use code_protocol::models::FunctionCallOutputContentItem;
-use code_protocol::models::ImageDetail;
-use code_protocol::models::FunctionCallOutputPayload;
+use hanzo_app_server_protocol::AuthMode as AppAuthMode;
+use hanzo_protocol::models::ContentItem;
+use hanzo_protocol::models::ResponseItem;
+use hanzo_protocol::models::FunctionCallOutputContentItem;
+use hanzo_protocol::models::ImageDetail;
+use hanzo_protocol::models::FunctionCallOutputPayload;
 use std::collections::HashMap;
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -474,7 +474,7 @@ pub(super) async fn submission_loop(
                         match RolloutRecorder::new(
                             &config,
                             crate::rollout::recorder::RolloutRecorderParams::new(
-                                code_protocol::mcp_protocol::ConversationId::from(session_id),
+                                hanzo_protocol::mcp_protocol::ConversationId::from(session_id),
                                 effective_user_instructions.clone(),
                                 SessionSource::Cli,
                             ),
@@ -531,7 +531,7 @@ pub(super) async fn submission_loop(
                     manager.set_debug_log_root(None);
                 }
 
-                let conversation_id = code_protocol::mcp_protocol::ConversationId::from(session_id);
+                let conversation_id = hanzo_protocol::mcp_protocol::ConversationId::from(session_id);
                 let auth_snapshot = auth_manager.as_ref().and_then(|mgr| mgr.auth());
                 let otel_event_manager = {
                     let manager = OtelEventManager::new(
@@ -667,7 +667,7 @@ pub(super) async fn submission_loop(
                     .as_ref()
                     .and_then(|manager| manager.auth().map(|auth| auth.mode))
                     .or(Some(if config.using_chatgpt_auth {
-                        AppAuthMode::Chatgpt
+                        AppAuthMode::ChatGPT
                     } else {
                         AppAuthMode::ApiKey
                     }));
@@ -739,7 +739,7 @@ pub(super) async fn submission_loop(
                     notify,
                     state: Mutex::new(state),
                     rollout: Mutex::new(rollout_recorder),
-                    code_linux_sandbox_exe: config.code_linux_sandbox_exe.clone(),
+                    hanzo_linux_sandbox_exe: config.hanzo_linux_sandbox_exe.clone(),
                     disable_response_storage,
                     user_shell: default_shell,
                     show_raw_agent_reasoning: config.show_raw_agent_reasoning,
@@ -1145,7 +1145,7 @@ pub(super) async fn submission_loop(
                     .into_iter()
                     .filter_map(|(name, tool)| {
                         let value = serde_json::to_value(tool).ok()?;
-                        let converted = code_protocol::mcp::Tool::from_mcp_value(value).ok()?;
+                        let converted = hanzo_protocol::mcp::Tool::from_mcp_value(value).ok()?;
                         Some((name, converted))
                     })
                     .collect();
@@ -1179,7 +1179,7 @@ pub(super) async fn submission_loop(
                     }
                 };
 
-                let custom_prompts: Vec<code_protocol::custom_prompts::CustomPrompt> =
+                let custom_prompts: Vec<hanzo_protocol::custom_prompts::CustomPrompt> =
                     if let Some(dir) = crate::custom_prompts::default_prompts_dir() {
                         crate::custom_prompts::discover_prompts_in(&dir).await
                     } else {
@@ -1213,10 +1213,10 @@ pub(super) async fn submission_loop(
                 .await
                 .unwrap_or_default();
 
-                let skills: Vec<code_protocol::protocol::SkillMetadata> = skill_load_outcome
+                let skills: Vec<hanzo_protocol::protocol::SkillMetadata> = skill_load_outcome
                     .skills
                     .into_iter()
-                    .map(|skill| code_protocol::protocol::SkillMetadata {
+                    .map(|skill| hanzo_protocol::protocol::SkillMetadata {
                         name: skill.name,
                         description: skill.description,
                         short_description: None,
@@ -1225,32 +1225,32 @@ pub(super) async fn submission_loop(
                         path: skill.path,
                         scope: match skill.scope {
                             crate::skills::model::SkillScope::Repo => {
-                                code_protocol::protocol::SkillScope::Repo
+                                hanzo_protocol::protocol::SkillScope::Repo
                             }
                             crate::skills::model::SkillScope::User => {
-                                code_protocol::protocol::SkillScope::User
+                                hanzo_protocol::protocol::SkillScope::User
                             }
                             crate::skills::model::SkillScope::System => {
-                                code_protocol::protocol::SkillScope::System
+                                hanzo_protocol::protocol::SkillScope::System
                             }
                             crate::skills::model::SkillScope::Admin => {
-                                code_protocol::protocol::SkillScope::Admin
+                                hanzo_protocol::protocol::SkillScope::Admin
                             }
                         },
                         enabled: true,
                     })
                     .collect();
 
-                let errors: Vec<code_protocol::protocol::SkillErrorInfo> = skill_load_outcome
+                let errors: Vec<hanzo_protocol::protocol::SkillErrorInfo> = skill_load_outcome
                     .errors
                     .into_iter()
-                    .map(|error| code_protocol::protocol::SkillErrorInfo {
+                    .map(|error| hanzo_protocol::protocol::SkillErrorInfo {
                         path: error.path,
                         message: error.message,
                     })
                     .collect();
 
-                let skills = vec![code_protocol::protocol::SkillsListEntry {
+                let skills = vec![hanzo_protocol::protocol::SkillsListEntry {
                     cwd: sess.get_cwd().to_path_buf(),
                     skills,
                     errors,
@@ -2805,7 +2805,7 @@ async fn run_turn(
     mut input: Vec<ResponseItem>,
 ) -> CodexResult<Vec<ProcessedResponseItem>> {
     // Check if browser is enabled
-    let browser_enabled = code_browser::global::get_browser_manager().await.is_some();
+    let browser_enabled = hanzo_browser::global::get_browser_manager().await.is_some();
 
     let tc = &**turn_context;
     let agents_active = {
@@ -3283,7 +3283,7 @@ async fn run_turn(
 
                         // If we have partial deltas, include a short ephemeral hint so the model can resume.
                         if !sp.partial_assistant_text.is_empty() || !sp.partial_reasoning_summary.is_empty() {
-                            use code_protocol::models::ContentItem;
+                            use hanzo_protocol::models::ContentItem;
                             let mut hint = String::from(
                                 "[EPHEMERAL:RETRY_HINT]\nPrevious attempt aborted mid-stream. Continue without repeating.\n",
                             );
@@ -3455,8 +3455,8 @@ fn extract_mcp_tool_selection_from_history(history: &[ResponseItem]) -> Option<V
 mod mcp_tool_selection_tests {
     use super::extract_mcp_tool_selection_from_history;
     use super::select_mcp_tools_for_turn;
-    use code_protocol::models::FunctionCallOutputPayload;
-    use code_protocol::models::ResponseItem;
+    use hanzo_protocol::models::FunctionCallOutputPayload;
+    use hanzo_protocol::models::ResponseItem;
     use mcp_types::Tool;
     use mcp_types::ToolInputSchema;
     use std::collections::HashMap;
@@ -4252,7 +4252,7 @@ async fn handle_response_item(
                     return Ok(Some(ResponseInputItem::FunctionCallOutput {
                         call_id: "".to_string(),
                         output: FunctionCallOutputPayload {
-                            body: code_protocol::models::FunctionCallOutputBody::Text("LocalShellCall without call_id or id".to_string()),
+                            body: hanzo_protocol::models::FunctionCallOutputBody::Text("LocalShellCall without call_id or id".to_string()),
                             success: None},
                     }));
                 }
@@ -4278,7 +4278,7 @@ async fn handle_response_item(
             Some(ResponseInputItem::FunctionCallOutput {
                 call_id,
                 output: FunctionCallOutputPayload {
-                    body: code_protocol::models::FunctionCallOutputBody::Text(format!("Custom tool '{name}' is not supported in this build")),
+                    body: hanzo_protocol::models::FunctionCallOutputBody::Text(format!("Custom tool '{name}' is not supported in this build")),
                     success: Some(false)},
             })
         }
@@ -4474,7 +4474,7 @@ async fn handle_function_call(
                     ResponseInputItem::FunctionCallOutput {
                         call_id,
                         output: FunctionCallOutputPayload {
-                            body: code_protocol::models::FunctionCallOutputBody::Text(format!("unsupported call: {name}")),
+                            body: hanzo_protocol::models::FunctionCallOutputBody::Text(format!("unsupported call: {name}")),
                             success: None},
                     }
                 }
@@ -4488,8 +4488,8 @@ async fn handle_request_user_input(
     ctx: &ToolCallCtx,
     arguments: String,
 ) -> ResponseInputItem {
-    use code_protocol::request_user_input::RequestUserInputArgs;
-    use code_protocol::request_user_input::RequestUserInputEvent;
+    use hanzo_protocol::request_user_input::RequestUserInputArgs;
+    use hanzo_protocol::request_user_input::RequestUserInputEvent;
 
     let mut args: RequestUserInputArgs = match serde_json::from_str(&arguments) {
         Ok(args) => args,
@@ -4497,7 +4497,7 @@ async fn handle_request_user_input(
             return ResponseInputItem::FunctionCallOutput {
                 call_id: ctx.call_id.clone(),
                 output: FunctionCallOutputPayload {
-                    body: code_protocol::models::FunctionCallOutputBody::Text(format!("invalid request_user_input arguments: {err}")),
+                    body: hanzo_protocol::models::FunctionCallOutputBody::Text(format!("invalid request_user_input arguments: {err}")),
                     success: Some(false)},
             };
         }
@@ -4507,7 +4507,7 @@ async fn handle_request_user_input(
         return ResponseInputItem::FunctionCallOutput {
             call_id: ctx.call_id.clone(),
             output: FunctionCallOutputPayload {
-                body: code_protocol::models::FunctionCallOutputBody::Text("request_user_input requires at least one question".to_string()),
+                body: hanzo_protocol::models::FunctionCallOutputBody::Text("request_user_input requires at least one question".to_string()),
                 success: Some(false)},
         };
     }
@@ -4520,7 +4520,7 @@ async fn handle_request_user_input(
         return ResponseInputItem::FunctionCallOutput {
             call_id: ctx.call_id.clone(),
             output: FunctionCallOutputPayload {
-                body: code_protocol::models::FunctionCallOutputBody::Text("request_user_input requires non-empty options for every question"
+                body: hanzo_protocol::models::FunctionCallOutputBody::Text("request_user_input requires non-empty options for every question"
                     .to_string()),
                 success: Some(false)},
         };
@@ -4535,7 +4535,7 @@ async fn handle_request_user_input(
             return ResponseInputItem::FunctionCallOutput {
                 call_id: ctx.call_id.clone(),
                 output: FunctionCallOutputPayload {
-                    body: code_protocol::models::FunctionCallOutputBody::Text(err),
+                    body: hanzo_protocol::models::FunctionCallOutputBody::Text(err),
                     success: Some(false)},
             };
         }
@@ -4557,7 +4557,7 @@ async fn handle_request_user_input(
             return ResponseInputItem::FunctionCallOutput {
                 call_id: ctx.call_id.clone(),
                 output: FunctionCallOutputPayload {
-                    body: code_protocol::models::FunctionCallOutputBody::Text("request_user_input was cancelled before receiving a response".to_string()),
+                    body: hanzo_protocol::models::FunctionCallOutputBody::Text("request_user_input was cancelled before receiving a response".to_string()),
                     success: Some(false)},
             };
         }
@@ -4569,7 +4569,7 @@ async fn handle_request_user_input(
             return ResponseInputItem::FunctionCallOutput {
                 call_id: ctx.call_id.clone(),
                 output: FunctionCallOutputPayload {
-                    body: code_protocol::models::FunctionCallOutputBody::Text(format!("failed to serialize request_user_input response: {err}")),
+                    body: hanzo_protocol::models::FunctionCallOutputBody::Text(format!("failed to serialize request_user_input response: {err}")),
                     success: Some(false)},
             };
         }
@@ -4578,7 +4578,7 @@ async fn handle_request_user_input(
     ResponseInputItem::FunctionCallOutput {
         call_id: ctx.call_id.clone(),
         output: FunctionCallOutputPayload {
-            body: code_protocol::models::FunctionCallOutputBody::Text(content),
+            body: hanzo_protocol::models::FunctionCallOutputBody::Text(content),
             success: Some(true),
         },
     }
@@ -4599,7 +4599,7 @@ async fn handle_dynamic_tool_call(
                 return ResponseInputItem::FunctionCallOutput {
                     call_id: ctx.call_id.clone(),
                     output: FunctionCallOutputPayload {
-                        body: code_protocol::models::FunctionCallOutputBody::Text(format!("invalid dynamic tool arguments: {err}")),
+                        body: hanzo_protocol::models::FunctionCallOutputBody::Text(format!("invalid dynamic tool arguments: {err}")),
                         success: Some(false)},
                 };
             }
@@ -4612,7 +4612,7 @@ async fn handle_dynamic_tool_call(
             return ResponseInputItem::FunctionCallOutput {
                 call_id: ctx.call_id.clone(),
                 output: FunctionCallOutputPayload {
-                    body: code_protocol::models::FunctionCallOutputBody::Text(err),
+                    body: hanzo_protocol::models::FunctionCallOutputBody::Text(err),
                     success: Some(false)},
             };
         }
@@ -4620,7 +4620,7 @@ async fn handle_dynamic_tool_call(
 
     sess.send_ordered_from_ctx(
         ctx,
-        EventMsg::DynamicToolCallRequest(code_protocol::dynamic_tools::DynamicToolCallRequest {
+        EventMsg::DynamicToolCallRequest(hanzo_protocol::dynamic_tools::DynamicToolCallRequest {
             call_id: ctx.call_id.clone(),
             turn_id: ctx.sub_id.clone(),
             tool: tool_name,
@@ -4635,7 +4635,7 @@ async fn handle_dynamic_tool_call(
             return ResponseInputItem::FunctionCallOutput {
                 call_id: ctx.call_id.clone(),
                 output: FunctionCallOutputPayload {
-                    body: code_protocol::models::FunctionCallOutputBody::Text("dynamic tool call was cancelled before receiving a response"
+                    body: hanzo_protocol::models::FunctionCallOutputBody::Text("dynamic tool call was cancelled before receiving a response"
                         .to_string()),
                     success: Some(false)},
             };
@@ -4780,7 +4780,7 @@ async fn handle_search_tool_bm25(
             return ResponseInputItem::FunctionCallOutput {
                 call_id: ctx.call_id.clone(),
                 output: FunctionCallOutputPayload {
-                    body: code_protocol::models::FunctionCallOutputBody::Text(format!(
+                    body: hanzo_protocol::models::FunctionCallOutputBody::Text(format!(
                         "invalid {SEARCH_TOOL_BM25_TOOL_NAME} arguments: {err}"
                     )),
                     success: Some(false),
@@ -4794,7 +4794,7 @@ async fn handle_search_tool_bm25(
         return ResponseInputItem::FunctionCallOutput {
             call_id: ctx.call_id.clone(),
             output: FunctionCallOutputPayload {
-                body: code_protocol::models::FunctionCallOutputBody::Text(
+                body: hanzo_protocol::models::FunctionCallOutputBody::Text(
                     "query must not be empty".to_string(),
                 ),
                 success: Some(false),
@@ -4806,7 +4806,7 @@ async fn handle_search_tool_bm25(
         return ResponseInputItem::FunctionCallOutput {
             call_id: ctx.call_id.clone(),
             output: FunctionCallOutputPayload {
-                body: code_protocol::models::FunctionCallOutputBody::Text(
+                body: hanzo_protocol::models::FunctionCallOutputBody::Text(
                     "limit must be greater than zero".to_string(),
                 ),
                 success: Some(false),
@@ -4884,7 +4884,7 @@ async fn handle_search_tool_bm25(
     ResponseInputItem::FunctionCallOutput {
         call_id: ctx.call_id.clone(),
         output: FunctionCallOutputPayload {
-            body: code_protocol::models::FunctionCallOutputBody::Text(content),
+            body: hanzo_protocol::models::FunctionCallOutputBody::Text(content),
             success: Some(true),
         },
     }
@@ -4903,17 +4903,17 @@ async fn handle_browser_cleanup(sess: &Session, ctx: &ToolCallCtx) -> ResponseIn
                 match browser_manager.cleanup().await {
                     Ok(_) => ResponseInputItem::FunctionCallOutput {
                         call_id: call_id_clone,
-                        output: FunctionCallOutputPayload {body: code_protocol::models::FunctionCallOutputBody::Text("Browser cleanup completed".to_string()), success: Some(true)},
+                        output: FunctionCallOutputPayload {body: hanzo_protocol::models::FunctionCallOutputBody::Text("Browser cleanup completed".to_string()), success: Some(true)},
                     },
                     Err(e) => ResponseInputItem::FunctionCallOutput {
                         call_id: call_id_clone,
-                        output: FunctionCallOutputPayload {body: code_protocol::models::FunctionCallOutputBody::Text(format!("Cleanup failed: {}", e)), success: Some(false)},
+                        output: FunctionCallOutputPayload {body: hanzo_protocol::models::FunctionCallOutputBody::Text(format!("Cleanup failed: {}", e)), success: Some(false)},
                     },
                 }
             } else {
                 ResponseInputItem::FunctionCallOutput {
                     call_id: call_id_clone,
-                    output: FunctionCallOutputPayload {body: code_protocol::models::FunctionCallOutputBody::Text("Browser is not initialized. Use browser_open to start the browser.".to_string()), success: Some(false)},
+                    output: FunctionCallOutputPayload {body: hanzo_protocol::models::FunctionCallOutputBody::Text("Browser is not initialized. Use browser_open to start the browser.".to_string()), success: Some(false)},
                 }
             }
         }
@@ -4970,7 +4970,7 @@ async fn handle_code_bridge_with_cwd(
             return ResponseInputItem::FunctionCallOutput {
                 call_id: ctx.call_id.clone(),
                 output: FunctionCallOutputPayload {
-                    body: code_protocol::models::FunctionCallOutputBody::Text(format!("invalid arguments: {e}")),
+                    body: hanzo_protocol::models::FunctionCallOutputBody::Text(format!("invalid arguments: {e}")),
                     success: Some(false)},
             };
         }
@@ -4986,7 +4986,7 @@ async fn handle_code_bridge_with_cwd(
                     return ResponseInputItem::FunctionCallOutput {
                         call_id: ctx.call_id.clone(),
                         output: FunctionCallOutputPayload {
-                            body: code_protocol::models::FunctionCallOutputBody::Text("invalid or missing level (use errors|warn|info|trace)".to_string()),
+                            body: hanzo_protocol::models::FunctionCallOutputBody::Text("invalid or missing level (use errors|warn|info|trace)".to_string()),
                             success: Some(false)},
                     }
                 }
@@ -5002,7 +5002,7 @@ async fn handle_code_bridge_with_cwd(
                 return ResponseInputItem::FunctionCallOutput {
                     call_id: ctx.call_id.clone(),
                     output: FunctionCallOutputPayload {
-                        body: code_protocol::models::FunctionCallOutputBody::Text(format!("persist failed: {e}")),
+                        body: hanzo_protocol::models::FunctionCallOutputBody::Text(format!("persist failed: {e}")),
                         success: Some(false)},
                 };
             }
@@ -5010,14 +5010,14 @@ async fn handle_code_bridge_with_cwd(
 
             ResponseInputItem::FunctionCallOutput {
                 call_id: ctx.call_id.clone(),
-                output: FunctionCallOutputPayload {body: code_protocol::models::FunctionCallOutputBody::Text("ok".to_string()), success: Some(true)},
+                output: FunctionCallOutputPayload {body: hanzo_protocol::models::FunctionCallOutputBody::Text("ok".to_string()), success: Some(true)},
             }
         }
         "screenshot" => {
             send_bridge_control("screenshot", serde_json::json!({}));
             ResponseInputItem::FunctionCallOutput {
                 call_id: ctx.call_id.clone(),
-                output: FunctionCallOutputPayload {body: code_protocol::models::FunctionCallOutputBody::Text("requested screenshot".to_string()), success: Some(true)},
+                output: FunctionCallOutputPayload {body: hanzo_protocol::models::FunctionCallOutputBody::Text("requested screenshot".to_string()), success: Some(true)},
             }
         }
         "javascript" => {
@@ -5027,7 +5027,7 @@ async fn handle_code_bridge_with_cwd(
                     return ResponseInputItem::FunctionCallOutput {
                         call_id: ctx.call_id.clone(),
                         output: FunctionCallOutputPayload {
-                            body: code_protocol::models::FunctionCallOutputBody::Text("missing code for javascript action".to_string()),
+                            body: hanzo_protocol::models::FunctionCallOutputBody::Text("missing code for javascript action".to_string()),
                             success: Some(false)},
                     }
                 }
@@ -5035,20 +5035,20 @@ async fn handle_code_bridge_with_cwd(
             send_bridge_control("javascript", serde_json::json!({ "code": code }));
             ResponseInputItem::FunctionCallOutput {
                 call_id: ctx.call_id.clone(),
-                output: FunctionCallOutputPayload {body: code_protocol::models::FunctionCallOutputBody::Text("sent javascript".to_string()), success: Some(true)},
+                output: FunctionCallOutputPayload {body: hanzo_protocol::models::FunctionCallOutputBody::Text("sent javascript".to_string()), success: Some(true)},
             }
         }
         // Keep legacy actions for backward compatibility with older prompts/tools
         "show" | "set" | "clear" => ResponseInputItem::FunctionCallOutput {
             call_id: ctx.call_id.clone(),
             output: FunctionCallOutputPayload {
-                body: code_protocol::models::FunctionCallOutputBody::Text("deprecated action; use subscribe, screenshot, or javascript".to_string()),
+                body: hanzo_protocol::models::FunctionCallOutputBody::Text("deprecated action; use subscribe, screenshot, or javascript".to_string()),
                 success: Some(false)},
         },
         _ => ResponseInputItem::FunctionCallOutput {
             call_id: ctx.call_id.clone(),
             output: FunctionCallOutputPayload {
-                body: code_protocol::models::FunctionCallOutputBody::Text(format!("unsupported action: {}", action)),
+                body: hanzo_protocol::models::FunctionCallOutputBody::Text(format!("unsupported action: {}", action)),
                 success: Some(false)},
         },
     }
@@ -5145,7 +5145,7 @@ async fn handle_web_fetch(sess: &Session, ctx: &ToolCallCtx, arguments: String) 
                     return ResponseInputItem::FunctionCallOutput {
                         call_id: call_id_clone,
                         output: FunctionCallOutputPayload {
-                            body: code_protocol::models::FunctionCallOutputBody::Text(format!("Invalid web_fetch arguments: {e}")),
+                            body: hanzo_protocol::models::FunctionCallOutputBody::Text(format!("Invalid web_fetch arguments: {e}")),
                             success: None},
                     };
                 }
@@ -5265,7 +5265,7 @@ async fn handle_web_fetch(sess: &Session, ctx: &ToolCallCtx, arguments: String) 
 })()"#;
 
                 if prefer_global {
-                    if let Some(manager) = code_browser::global::get_browser_manager().await {
+                    if let Some(manager) = hanzo_browser::global::get_browser_manager().await {
                         if manager.is_enabled_sync() {
                             match tokio::time::timeout(timeout, manager.goto(url)).await {
                                 Ok(Ok(res)) => {
@@ -5794,7 +5794,7 @@ async fn handle_web_fetch(sess: &Session, ctx: &ToolCallCtx, arguments: String) 
                         Err(e) => {
                             return ResponseInputItem::FunctionCallOutput {
                                 call_id: call_id_clone,
-                                output: FunctionCallOutputPayload {body: code_protocol::models::FunctionCallOutputBody::Text(format!("Markdown conversion failed: {e}")), success: Some(false)},
+                                output: FunctionCallOutputPayload {body: hanzo_protocol::models::FunctionCallOutputBody::Text(format!("Markdown conversion failed: {e}")), success: Some(false)},
                             };
                         }
                     };
@@ -5812,7 +5812,7 @@ async fn handle_web_fetch(sess: &Session, ctx: &ToolCallCtx, arguments: String) 
                     });
                     return ResponseInputItem::FunctionCallOutput {
                         call_id: call_id_clone,
-                        output: FunctionCallOutputPayload {body: code_protocol::models::FunctionCallOutputBody::Text(body.to_string()), success: Some(true)},
+                        output: FunctionCallOutputPayload {body: hanzo_protocol::models::FunctionCallOutputBody::Text(body.to_string()), success: Some(true)},
                     };
                 }
             }
@@ -5822,7 +5822,7 @@ async fn handle_web_fetch(sess: &Session, ctx: &ToolCallCtx, arguments: String) 
                 Err(e) => {
                     return ResponseInputItem::FunctionCallOutput {
                         call_id: call_id_clone,
-                        output: FunctionCallOutputPayload {body: code_protocol::models::FunctionCallOutputBody::Text(format!("Request failed: {e}")), success: Some(false)},
+                        output: FunctionCallOutputPayload {body: hanzo_protocol::models::FunctionCallOutputBody::Text(format!("Request failed: {e}")), success: Some(false)},
                     };
                 }
             };
@@ -5837,7 +5837,7 @@ async fn handle_web_fetch(sess: &Session, ctx: &ToolCallCtx, arguments: String) 
                 Err(e) => {
                     return ResponseInputItem::FunctionCallOutput {
                         call_id: call_id_clone,
-                        output: FunctionCallOutputPayload {body: code_protocol::models::FunctionCallOutputBody::Text(format!("Failed to read response body: {e}")), success: Some(false)},
+                        output: FunctionCallOutputPayload {body: hanzo_protocol::models::FunctionCallOutputBody::Text(format!("Failed to read response body: {e}")), success: Some(false)},
                     };
                 }
             };
@@ -5897,7 +5897,7 @@ async fn handle_web_fetch(sess: &Session, ctx: &ToolCallCtx, arguments: String) 
                         Err(e) => {
                             return ResponseInputItem::FunctionCallOutput {
                                 call_id: call_id_clone,
-                                output: FunctionCallOutputPayload {body: code_protocol::models::FunctionCallOutputBody::Text(format!("Markdown conversion failed: {e}")), success: Some(false)},
+                                output: FunctionCallOutputPayload {body: hanzo_protocol::models::FunctionCallOutputBody::Text(format!("Markdown conversion failed: {e}")), success: Some(false)},
                             };
                         }
                     };
@@ -5920,7 +5920,7 @@ async fn handle_web_fetch(sess: &Session, ctx: &ToolCallCtx, arguments: String) 
                     });
                     return ResponseInputItem::FunctionCallOutput {
                         call_id: call_id_clone,
-                        output: FunctionCallOutputPayload {body: code_protocol::models::FunctionCallOutputBody::Text(body.to_string()), success: Some(true)},
+                        output: FunctionCallOutputPayload {body: hanzo_protocol::models::FunctionCallOutputBody::Text(body.to_string()), success: Some(true)},
                     };
                 }
 
@@ -5939,7 +5939,7 @@ async fn handle_web_fetch(sess: &Session, ctx: &ToolCallCtx, arguments: String) 
 
                 return ResponseInputItem::FunctionCallOutput {
                     call_id: call_id_clone,
-                    output: FunctionCallOutputPayload {body: code_protocol::models::FunctionCallOutputBody::Text(body.to_string()), success: Some(false)},
+                    output: FunctionCallOutputPayload {body: hanzo_protocol::models::FunctionCallOutputBody::Text(body.to_string()), success: Some(false)},
                 };
             }
 
@@ -5981,7 +5981,7 @@ async fn handle_web_fetch(sess: &Session, ctx: &ToolCallCtx, arguments: String) 
 
                 return ResponseInputItem::FunctionCallOutput {
                     call_id: call_id_clone,
-                    output: FunctionCallOutputPayload {body: code_protocol::models::FunctionCallOutputBody::Text(body.to_string()), success: Some(false)},
+                    output: FunctionCallOutputPayload {body: hanzo_protocol::models::FunctionCallOutputBody::Text(body.to_string()), success: Some(false)},
                 };
             }
 
@@ -5997,7 +5997,7 @@ async fn handle_web_fetch(sess: &Session, ctx: &ToolCallCtx, arguments: String) 
                         "truncated": false,
                         "markdown": md,
                     });
-                    return ResponseInputItem::FunctionCallOutput { call_id: call_id_clone, output: FunctionCallOutputPayload {body: code_protocol::models::FunctionCallOutputBody::Text(body.to_string()), success: Some(true)} };
+                    return ResponseInputItem::FunctionCallOutput { call_id: call_id_clone, output: FunctionCallOutputPayload {body: hanzo_protocol::models::FunctionCallOutputBody::Text(body.to_string()), success: Some(true)} };
                 }
             }
 
@@ -6007,7 +6007,7 @@ async fn handle_web_fetch(sess: &Session, ctx: &ToolCallCtx, arguments: String) 
                 Err(e) => {
                     return ResponseInputItem::FunctionCallOutput {
                         call_id: call_id_clone,
-                        output: FunctionCallOutputPayload {body: code_protocol::models::FunctionCallOutputBody::Text(format!("Markdown conversion failed: {e}")), success: Some(false)},
+                        output: FunctionCallOutputPayload {body: hanzo_protocol::models::FunctionCallOutputBody::Text(format!("Markdown conversion failed: {e}")), success: Some(false)},
                     };
                 }
             };
@@ -6020,7 +6020,7 @@ async fn handle_web_fetch(sess: &Session, ctx: &ToolCallCtx, arguments: String) 
                         Err(e) => {
                             return ResponseInputItem::FunctionCallOutput {
                                 call_id: call_id_clone,
-                                output: FunctionCallOutputPayload {body: code_protocol::models::FunctionCallOutputBody::Text(format!("Markdown conversion failed: {e}")), success: Some(false)},
+                                output: FunctionCallOutputPayload {body: hanzo_protocol::models::FunctionCallOutputBody::Text(format!("Markdown conversion failed: {e}")), success: Some(false)},
                             };
                         }
                     };
@@ -6038,7 +6038,7 @@ async fn handle_web_fetch(sess: &Session, ctx: &ToolCallCtx, arguments: String) 
                     });
                     return ResponseInputItem::FunctionCallOutput {
                         call_id: call_id_clone,
-                        output: FunctionCallOutputPayload {body: code_protocol::models::FunctionCallOutputBody::Text(body.to_string()), success: Some(true)},
+                        output: FunctionCallOutputPayload {body: hanzo_protocol::models::FunctionCallOutputBody::Text(body.to_string()), success: Some(true)},
                     };
                 }
 
@@ -6050,7 +6050,7 @@ async fn handle_web_fetch(sess: &Session, ctx: &ToolCallCtx, arguments: String) 
                     "diagnostics": { "final_url": final_url, "content_type": content_type, "used_browser_ua": used_browser_ua, "blocked_by_waf": true, "vendor": "cloudflare", "detected_via": "markdown" },
                     "markdown": markdown.chars().take(2000).collect::<String>(),
                 });
-                return ResponseInputItem::FunctionCallOutput { call_id: call_id_clone, output: FunctionCallOutputPayload {body: code_protocol::models::FunctionCallOutputBody::Text(body.to_string()), success: Some(false)} };
+                return ResponseInputItem::FunctionCallOutput { call_id: call_id_clone, output: FunctionCallOutputPayload {body: hanzo_protocol::models::FunctionCallOutputBody::Text(body.to_string()), success: Some(false)} };
             }
 
             let body = serde_json::json!({
@@ -6063,7 +6063,7 @@ async fn handle_web_fetch(sess: &Session, ctx: &ToolCallCtx, arguments: String) 
                 "markdown": markdown,
             });
 
-            ResponseInputItem::FunctionCallOutput { call_id: call_id_clone, output: FunctionCallOutputPayload {body: code_protocol::models::FunctionCallOutputBody::Text(body.to_string()), success: Some(true)} }
+            ResponseInputItem::FunctionCallOutput { call_id: call_id_clone, output: FunctionCallOutputPayload {body: hanzo_protocol::models::FunctionCallOutputBody::Text(body.to_string()), success: Some(true)} }
         },
     ).await
 }
@@ -6088,7 +6088,7 @@ async fn handle_image_view(sess: &Session, ctx: &ToolCallCtx, arguments: String)
             return ResponseInputItem::FunctionCallOutput {
                 call_id: ctx.call_id.clone(),
                 output: FunctionCallOutputPayload {
-                    body: code_protocol::models::FunctionCallOutputBody::Text(format!("Invalid image_view arguments: {e}")),
+                    body: hanzo_protocol::models::FunctionCallOutputBody::Text(format!("Invalid image_view arguments: {e}")),
                     success: Some(false)},
             };
         }
@@ -6106,7 +6106,7 @@ async fn handle_image_view(sess: &Session, ctx: &ToolCallCtx, arguments: String)
                 return ResponseInputItem::FunctionCallOutput {
                     call_id,
                     output: FunctionCallOutputPayload {
-                    body: code_protocol::models::FunctionCallOutputBody::Text("image_view requires a non-empty path".to_string()),
+                    body: hanzo_protocol::models::FunctionCallOutputBody::Text("image_view requires a non-empty path".to_string()),
                         success: Some(false)},
                 };
             }
@@ -6124,7 +6124,7 @@ async fn handle_image_view(sess: &Session, ctx: &ToolCallCtx, arguments: String)
                     return ResponseInputItem::FunctionCallOutput {
                         call_id,
                         output: FunctionCallOutputPayload {
-                            body: code_protocol::models::FunctionCallOutputBody::Text(format!(
+                            body: hanzo_protocol::models::FunctionCallOutputBody::Text(format!(
                                 "image_view could not read {}: {err}",
                                 resolved.display()
                             )),
@@ -6136,7 +6136,7 @@ async fn handle_image_view(sess: &Session, ctx: &ToolCallCtx, arguments: String)
                 return ResponseInputItem::FunctionCallOutput {
                     call_id,
                     output: FunctionCallOutputPayload {
-                        body: code_protocol::models::FunctionCallOutputBody::Text(format!(
+                        body: hanzo_protocol::models::FunctionCallOutputBody::Text(format!(
                             "image_view requires a file path, got {}",
                             resolved.display()
                         )),
@@ -6150,7 +6150,7 @@ async fn handle_image_view(sess: &Session, ctx: &ToolCallCtx, arguments: String)
                     return ResponseInputItem::FunctionCallOutput {
                         call_id,
                         output: FunctionCallOutputPayload {
-                            body: code_protocol::models::FunctionCallOutputBody::Text(format!(
+                            body: hanzo_protocol::models::FunctionCallOutputBody::Text(format!(
                                 "image_view could not read {}: {err}",
                                 resolved.display()
                             )),
@@ -6166,7 +6166,7 @@ async fn handle_image_view(sess: &Session, ctx: &ToolCallCtx, arguments: String)
                 return ResponseInputItem::FunctionCallOutput {
                     call_id,
                     output: FunctionCallOutputPayload {
-                        body: code_protocol::models::FunctionCallOutputBody::Text(format!(
+                        body: hanzo_protocol::models::FunctionCallOutputBody::Text(format!(
                             "image_view only supports image files (got {mime})"
                         )),
                         success: Some(false)},
@@ -6206,7 +6206,7 @@ async fn handle_image_view(sess: &Session, ctx: &ToolCallCtx, arguments: String)
             ResponseInputItem::FunctionCallOutput {
                 call_id,
                 output: FunctionCallOutputPayload {
-                    body: code_protocol::models::FunctionCallOutputBody::ContentItems(vec![
+                    body: hanzo_protocol::models::FunctionCallOutputBody::ContentItems(vec![
                         FunctionCallOutputContentItem::InputText { text: marker },
                         FunctionCallOutputContentItem::InputImage {
                             image_url,
@@ -6253,7 +6253,7 @@ async fn handle_wait(
                 let parsed: Params = match serde_json::from_str(&arguments_clone) {
                     Ok(p) => p,
                     Err(e) => {
-                    return ResponseInputItem::FunctionCallOutput { call_id: ctx_inner.call_id.clone(), output: FunctionCallOutputPayload {body: code_protocol::models::FunctionCallOutputBody::Text(format!("Invalid wait arguments: {}", e)), success: Some(false)} };
+                    return ResponseInputItem::FunctionCallOutput { call_id: ctx_inner.call_id.clone(), output: FunctionCallOutputPayload {body: hanzo_protocol::models::FunctionCallOutputBody::Text(format!("Invalid wait arguments: {}", e)), success: Some(false)} };
                     }
                 };
                 let call_id = match parsed.call_id {
@@ -6262,7 +6262,7 @@ async fn handle_wait(
                         return ResponseInputItem::FunctionCallOutput {
                             call_id: ctx_inner.call_id.clone(),
                             output: FunctionCallOutputPayload {
-                                body: code_protocol::models::FunctionCallOutputBody::Text("wait requires a call_id".to_string()),
+                                body: hanzo_protocol::models::FunctionCallOutputBody::Text("wait requires a call_id".to_string()),
                                 success: Some(false)},
                         };
                     }
@@ -6328,7 +6328,7 @@ async fn handle_wait(
                     return ResponseInputItem::FunctionCallOutput {
                         call_id: ctx_inner.call_id.clone(),
                         output: FunctionCallOutputPayload {
-                            body: code_protocol::models::FunctionCallOutputBody::Text(content),
+                            body: hanzo_protocol::models::FunctionCallOutputBody::Text(content),
                             success: Some(done.exit_code == 0),
                         },
                     };
@@ -6337,7 +6337,7 @@ async fn handle_wait(
                     return ResponseInputItem::FunctionCallOutput {
                         call_id: ctx_inner.call_id.clone(),
                         output: FunctionCallOutputPayload {
-                            body: code_protocol::models::FunctionCallOutputBody::Text(format!("No background job found for call_id={call_id}")),
+                            body: hanzo_protocol::models::FunctionCallOutputBody::Text(format!("No background job found for call_id={call_id}")),
                             success: Some(false)},
                     };
                 };
@@ -6365,7 +6365,7 @@ async fn handle_wait(
                         return ResponseInputItem::FunctionCallOutput {
                             call_id: ctx_inner.call_id.clone(),
                             output: FunctionCallOutputPayload {
-                                body: code_protocol::models::FunctionCallOutputBody::Text(format!("No background job found for call_id={call_id}")),
+                                body: hanzo_protocol::models::FunctionCallOutputBody::Text(format!("No background job found for call_id={call_id}")),
                                 success: Some(false)},
                         };
                     }
@@ -6376,7 +6376,7 @@ async fn handle_wait(
                         return ResponseInputItem::FunctionCallOutput {
                             call_id: ctx_inner.call_id.clone(),
                             output: FunctionCallOutputPayload {
-                                body: code_protocol::models::FunctionCallOutputBody::Text(format!(
+                                body: hanzo_protocol::models::FunctionCallOutputBody::Text(format!(
                                     "Background job {call_id} ended without a result; it may have been cancelled or crashed."
                                 )),
                                 success: Some(false)},
@@ -6401,7 +6401,7 @@ async fn handle_wait(
                         return ResponseInputItem::FunctionCallOutput {
                             call_id: ctx_inner.call_id.clone(),
                             output: FunctionCallOutputPayload {
-                                body: code_protocol::models::FunctionCallOutputBody::Text(msg),
+                                body: hanzo_protocol::models::FunctionCallOutputBody::Text(msg),
                                 success: Some(false)},
                         };
                     }
@@ -6421,7 +6421,7 @@ async fn handle_wait(
                         return ResponseInputItem::FunctionCallOutput {
                             call_id: ctx_inner.call_id.clone(),
                             output: FunctionCallOutputPayload {
-                                body: code_protocol::models::FunctionCallOutputBody::Text(message),
+                                body: hanzo_protocol::models::FunctionCallOutputBody::Text(message),
                                 success: Some(false)},
                         };
                     }
@@ -6442,7 +6442,7 @@ async fn handle_wait(
                         return ResponseInputItem::FunctionCallOutput {
                             call_id: ctx_inner.call_id.clone(),
                             output: FunctionCallOutputPayload {
-                                body: code_protocol::models::FunctionCallOutputBody::Text(msg),
+                                body: hanzo_protocol::models::FunctionCallOutputBody::Text(msg),
                                 success: Some(false)},
                         };
                     }
@@ -6484,7 +6484,7 @@ async fn handle_wait(
                     ResponseInputItem::FunctionCallOutput {
                         call_id: ctx_inner.call_id.clone(),
                         output: FunctionCallOutputPayload {
-                            body: code_protocol::models::FunctionCallOutputBody::Text(content),
+                            body: hanzo_protocol::models::FunctionCallOutputBody::Text(content),
                             success: Some(done.exit_code == 0),
                         },
                     }
@@ -6492,7 +6492,7 @@ async fn handle_wait(
                     ResponseInputItem::FunctionCallOutput {
                         call_id: ctx_inner.call_id.clone(),
                         output: FunctionCallOutputPayload {
-                            body: code_protocol::models::FunctionCallOutputBody::Text("No completed background job found".to_string()),
+                            body: hanzo_protocol::models::FunctionCallOutputBody::Text("No completed background job found".to_string()),
                             success: Some(false)},
                     }
                 }
@@ -6616,7 +6616,7 @@ async fn handle_gh_run_wait(
             return ResponseInputItem::FunctionCallOutput {
                 call_id: ctx.call_id.clone(),
                 output: FunctionCallOutputPayload {
-                    body: code_protocol::models::FunctionCallOutputBody::Text(format!("Invalid gh_run_wait arguments: {e}")),
+                    body: hanzo_protocol::models::FunctionCallOutputBody::Text(format!("Invalid gh_run_wait arguments: {e}")),
                     success: Some(false)},
             };
         }
@@ -7098,7 +7098,7 @@ async fn handle_gh_run_wait(
                 return ResponseInputItem::FunctionCallOutput {
                     call_id,
                     output: FunctionCallOutputPayload {
-                        body: code_protocol::models::FunctionCallOutputBody::Text(error),
+                        body: hanzo_protocol::models::FunctionCallOutputBody::Text(error),
                         success: Some(false)},
                 };
             }
@@ -7108,7 +7108,7 @@ async fn handle_gh_run_wait(
                 return ResponseInputItem::FunctionCallOutput {
                     call_id,
                     output: FunctionCallOutputPayload {
-                        body: code_protocol::models::FunctionCallOutputBody::Text("gh_run_wait requires a valid run_id".to_string()),
+                        body: hanzo_protocol::models::FunctionCallOutputBody::Text("gh_run_wait requires a valid run_id".to_string()),
                         success: Some(false)},
                 };
             }
@@ -7139,7 +7139,7 @@ async fn handle_gh_run_wait(
                             return ResponseInputItem::FunctionCallOutput {
                                 call_id,
                                 output: FunctionCallOutputPayload {
-                                    body: code_protocol::models::FunctionCallOutputBody::Text(err),
+                                    body: hanzo_protocol::models::FunctionCallOutputBody::Text(err),
                                     success: Some(false)},
                             };
                         }
@@ -7198,7 +7198,7 @@ async fn handle_gh_run_wait(
                     return ResponseInputItem::FunctionCallOutput {
                         call_id,
                         output: FunctionCallOutputPayload {
-                            body: code_protocol::models::FunctionCallOutputBody::Text(summary),
+                            body: hanzo_protocol::models::FunctionCallOutputBody::Text(summary),
                             success},
                     };
                 }
@@ -7238,7 +7238,7 @@ async fn handle_gh_run_wait(
                     return ResponseInputItem::FunctionCallOutput {
                         call_id,
                         output: FunctionCallOutputPayload {
-                            body: code_protocol::models::FunctionCallOutputBody::Text(format!(
+                            body: hanzo_protocol::models::FunctionCallOutputBody::Text(format!(
                                 "{budget_text}\n\nRun {run_id} still in progress. Call gh_run_wait again to continue."
                             )),
                             success: Some(false)},
@@ -7256,7 +7256,7 @@ async fn handle_gh_run_wait(
                     return ResponseInputItem::FunctionCallOutput {
                         call_id,
                         output: FunctionCallOutputPayload {
-                            body: code_protocol::models::FunctionCallOutputBody::Text(message),
+                            body: hanzo_protocol::models::FunctionCallOutputBody::Text(message),
                             success: Some(false)},
                     };
                 }
@@ -7299,7 +7299,7 @@ async fn handle_kill(
                     return ResponseInputItem::FunctionCallOutput {
                         call_id: ctx_inner.call_id.clone(),
                         output: FunctionCallOutputPayload {
-                            body: code_protocol::models::FunctionCallOutputBody::Text(format!("Invalid kill arguments: {e}")),
+                            body: hanzo_protocol::models::FunctionCallOutputBody::Text(format!("Invalid kill arguments: {e}")),
                             success: Some(false)},
                     };
                 }
@@ -7337,7 +7337,7 @@ async fn handle_kill(
                         return ResponseInputItem::FunctionCallOutput {
                             call_id: ctx_inner.call_id.clone(),
                             output: FunctionCallOutputPayload {
-                                body: code_protocol::models::FunctionCallOutputBody::Text(format!("No background job found for call_id={}", parsed.call_id)),
+                                body: hanzo_protocol::models::FunctionCallOutputBody::Text(format!("No background job found for call_id={}", parsed.call_id)),
                                 success: Some(false)},
                         };
                     }
@@ -7348,7 +7348,7 @@ async fn handle_kill(
                 return ResponseInputItem::FunctionCallOutput {
                     call_id: ctx_inner.call_id.clone(),
                     output: FunctionCallOutputPayload {
-                        body: code_protocol::models::FunctionCallOutputBody::Text(format!("Background job {} has already completed.", parsed.call_id)),
+                        body: hanzo_protocol::models::FunctionCallOutputBody::Text(format!("Background job {} has already completed.", parsed.call_id)),
                         success: Some(false)},
                 };
             }
@@ -7403,7 +7403,7 @@ async fn handle_kill(
             ResponseInputItem::FunctionCallOutput {
                 call_id: ctx_inner.call_id.clone(),
                 output: FunctionCallOutputPayload {
-                    body: code_protocol::models::FunctionCallOutputBody::Text(status),
+                    body: hanzo_protocol::models::FunctionCallOutputBody::Text(status),
                     success: Some(true)},
             }
         },
@@ -7539,7 +7539,7 @@ fn parse_container_exec_arguments(
             let output = ResponseInputItem::FunctionCallOutput {
                 call_id: call_id.to_string(),
                 output: FunctionCallOutputPayload {
-                    body: code_protocol::models::FunctionCallOutputBody::Text(format!("failed to parse function arguments: {e}")),
+                    body: hanzo_protocol::models::FunctionCallOutputBody::Text(format!("failed to parse function arguments: {e}")),
                     success: None},
             };
             Err(Box::new(output))
@@ -7551,7 +7551,7 @@ fn agent_tool_failure(ctx: &ToolCallCtx, message: impl Into<String>) -> Response
     ResponseInputItem::FunctionCallOutput {
         call_id: ctx.call_id.clone(),
         output: FunctionCallOutputPayload {
-            body: code_protocol::models::FunctionCallOutputBody::Text(message.into()),
+            body: hanzo_protocol::models::FunctionCallOutputBody::Text(message.into()),
             success: Some(false)},
     }
 }
@@ -7997,7 +7997,7 @@ pub(crate) async fn handle_run_agent(
                 return ResponseInputItem::FunctionCallOutput {
                     call_id: call_id_clone,
                     output: FunctionCallOutputPayload {
-                        body: code_protocol::models::FunctionCallOutputBody::Text(response.to_string()),
+                        body: hanzo_protocol::models::FunctionCallOutputBody::Text(response.to_string()),
                         success: Some(false)},
                 };
             }
@@ -8024,7 +8024,7 @@ pub(crate) async fn handle_run_agent(
                 return ResponseInputItem::FunctionCallOutput {
                     call_id: call_id_clone,
                     output: FunctionCallOutputPayload {
-                        body: code_protocol::models::FunctionCallOutputBody::Text(
+                        body: hanzo_protocol::models::FunctionCallOutputBody::Text(
                             response.to_string(),
                         ),
                         success: Some(false),
@@ -8211,7 +8211,7 @@ pub(crate) async fn handle_run_agent(
                     return ResponseInputItem::FunctionCallOutput {
                         call_id: call_id_clone,
                         output: FunctionCallOutputPayload {
-                            body: code_protocol::models::FunctionCallOutputBody::Text(response.to_string()),
+                            body: hanzo_protocol::models::FunctionCallOutputBody::Text(response.to_string()),
                             success: Some(false)},
                     };
                 }
@@ -8328,14 +8328,14 @@ pub(crate) async fn handle_run_agent(
             ResponseInputItem::FunctionCallOutput {
                 call_id: call_id_clone,
                 output: FunctionCallOutputPayload {
-                    body: code_protocol::models::FunctionCallOutputBody::Text(response.to_string()),
+                    body: hanzo_protocol::models::FunctionCallOutputBody::Text(response.to_string()),
                     success: Some(true)},
             }
         }
         Err(e) => ResponseInputItem::FunctionCallOutput {
             call_id: call_id_clone,
             output: FunctionCallOutputPayload {
-                body: code_protocol::models::FunctionCallOutputBody::Text(format!("Invalid agent arguments: {}", e)),
+                body: hanzo_protocol::models::FunctionCallOutputBody::Text(format!("Invalid agent arguments: {}", e)),
                 success: None},
         },
     }
@@ -8392,7 +8392,7 @@ async fn handle_check_agent_status(
                         return ResponseInputItem::FunctionCallOutput {
                             call_id: call_id_clone,
                             output: FunctionCallOutputPayload {
-                                body: code_protocol::models::FunctionCallOutputBody::Text(format!(
+                                body: hanzo_protocol::models::FunctionCallOutputBody::Text(format!(
                                     "Agent {} does not belong to batch {}",
                                     params.agent_id, params.batch_id
                                 )),
@@ -8425,7 +8425,7 @@ async fn handle_check_agent_status(
                             return ResponseInputItem::FunctionCallOutput {
                                 call_id: call_id_clone,
                                 output: FunctionCallOutputPayload {
-                                    body: code_protocol::models::FunctionCallOutputBody::Text(format!("Failed to prepare agent progress file: {}", e)),
+                                    body: hanzo_protocol::models::FunctionCallOutputBody::Text(format!("Failed to prepare agent progress file: {}", e)),
                                     success: Some(false)},
                             };
                         }
@@ -8440,7 +8440,7 @@ async fn handle_check_agent_status(
                                 return ResponseInputItem::FunctionCallOutput {
                                     call_id: call_id_clone,
                                     output: FunctionCallOutputPayload {
-                                        body: code_protocol::models::FunctionCallOutputBody::Text(format!("Failed to write progress file: {}", e)),
+                                        body: hanzo_protocol::models::FunctionCallOutputBody::Text(format!("Failed to write progress file: {}", e)),
                                         success: Some(false)},
                                 };
                             }
@@ -8470,14 +8470,14 @@ async fn handle_check_agent_status(
                 ResponseInputItem::FunctionCallOutput {
                     call_id: call_id_clone,
                     output: FunctionCallOutputPayload {
-                        body: code_protocol::models::FunctionCallOutputBody::Text(response.to_string()),
+                        body: hanzo_protocol::models::FunctionCallOutputBody::Text(response.to_string()),
                         success: Some(true)},
                 }
             } else {
                 ResponseInputItem::FunctionCallOutput {
                     call_id: call_id_clone,
                     output: FunctionCallOutputPayload {
-                        body: code_protocol::models::FunctionCallOutputBody::Text(format!("Agent not found: {}", params.agent_id)),
+                        body: hanzo_protocol::models::FunctionCallOutputBody::Text(format!("Agent not found: {}", params.agent_id)),
                         success: Some(false)},
                 }
             }
@@ -8485,7 +8485,7 @@ async fn handle_check_agent_status(
         Err(e) => ResponseInputItem::FunctionCallOutput {
             call_id: call_id_clone,
             output: FunctionCallOutputPayload {
-                body: code_protocol::models::FunctionCallOutputBody::Text(format!("Invalid agent arguments for action=status: {}", e)),
+                body: hanzo_protocol::models::FunctionCallOutputBody::Text(format!("Invalid agent arguments for action=status: {}", e)),
                 success: None},
         },
     }
@@ -8518,7 +8518,7 @@ async fn handle_get_agent_result(
                         return ResponseInputItem::FunctionCallOutput {
                             call_id: call_id_clone,
                             output: FunctionCallOutputPayload {
-                                body: code_protocol::models::FunctionCallOutputBody::Text(format!(
+                                body: hanzo_protocol::models::FunctionCallOutputBody::Text(format!(
                                     "Agent {} does not belong to batch {}",
                                     params.agent_id, params.batch_id
                                 )),
@@ -8533,7 +8533,7 @@ async fn handle_get_agent_result(
                         return ResponseInputItem::FunctionCallOutput {
                             call_id: call_id_clone,
                             output: FunctionCallOutputPayload {
-                                body: code_protocol::models::FunctionCallOutputBody::Text(format!("Failed to prepare agent output dir: {}", e)),
+                                body: hanzo_protocol::models::FunctionCallOutputBody::Text(format!("Failed to prepare agent output dir: {}", e)),
                                 success: Some(false)},
                         };
                     }
@@ -8558,7 +8558,7 @@ async fn handle_get_agent_result(
                         ResponseInputItem::FunctionCallOutput {
                             call_id: call_id_clone,
                             output: FunctionCallOutputPayload {
-                                body: code_protocol::models::FunctionCallOutputBody::Text(response.to_string()),
+                                body: hanzo_protocol::models::FunctionCallOutputBody::Text(response.to_string()),
                                 success: Some(true)},
                         }
                     }
@@ -8580,14 +8580,14 @@ async fn handle_get_agent_result(
                         ResponseInputItem::FunctionCallOutput {
                             call_id: call_id_clone,
                             output: FunctionCallOutputPayload {
-                                body: code_protocol::models::FunctionCallOutputBody::Text(response.to_string()),
+                                body: hanzo_protocol::models::FunctionCallOutputBody::Text(response.to_string()),
                                 success: Some(false)},
                         }
                     }
                     _ => ResponseInputItem::FunctionCallOutput {
                         call_id: call_id_clone,
                         output: FunctionCallOutputPayload {
-                            body: code_protocol::models::FunctionCallOutputBody::Text(format!(
+                            body: hanzo_protocol::models::FunctionCallOutputBody::Text(format!(
                                 "Agent is still {}: cannot get result yet",
                                 serde_json::to_string(&agent.status)
                                     .unwrap_or_else(|_| "running".to_string())
@@ -8599,7 +8599,7 @@ async fn handle_get_agent_result(
                 ResponseInputItem::FunctionCallOutput {
                     call_id: call_id_clone,
                     output: FunctionCallOutputPayload {
-                        body: code_protocol::models::FunctionCallOutputBody::Text(format!("Agent not found: {}", params.agent_id)),
+                        body: hanzo_protocol::models::FunctionCallOutputBody::Text(format!("Agent not found: {}", params.agent_id)),
                         success: Some(false)},
                 }
             }
@@ -8607,7 +8607,7 @@ async fn handle_get_agent_result(
         Err(e) => ResponseInputItem::FunctionCallOutput {
             call_id: call_id_clone,
             output: FunctionCallOutputPayload {
-                body: code_protocol::models::FunctionCallOutputBody::Text(format!("Invalid agent arguments for action=result: {}", e)),
+                body: hanzo_protocol::models::FunctionCallOutputBody::Text(format!("Invalid agent arguments for action=result: {}", e)),
                 success: None},
         },
     }
@@ -8640,7 +8640,7 @@ async fn handle_cancel_agent(
                         return ResponseInputItem::FunctionCallOutput {
                             call_id: call_id_clone,
                             output: FunctionCallOutputPayload {
-                                body: code_protocol::models::FunctionCallOutputBody::Text("action=cancel requires 'cancel.batch_id'".to_string()),
+                                body: hanzo_protocol::models::FunctionCallOutputBody::Text("action=cancel requires 'cancel.batch_id'".to_string()),
                                 success: Some(false)},
                         };
                     }
@@ -8650,7 +8650,7 @@ async fn handle_cancel_agent(
                         return ResponseInputItem::FunctionCallOutput {
                             call_id: call_id_clone,
                             output: FunctionCallOutputPayload {
-                                body: code_protocol::models::FunctionCallOutputBody::Text(format!(
+                                body: hanzo_protocol::models::FunctionCallOutputBody::Text(format!(
                                     "Agent {} does not belong to batch {}",
                                     agent_id, batch_id
                                 )),
@@ -8662,14 +8662,14 @@ async fn handle_cancel_agent(
                     ResponseInputItem::FunctionCallOutput {
                         call_id: call_id_clone,
                         output: FunctionCallOutputPayload {
-                            body: code_protocol::models::FunctionCallOutputBody::Text(format!("Agent {} cancelled", agent_id)),
+                            body: hanzo_protocol::models::FunctionCallOutputBody::Text(format!("Agent {} cancelled", agent_id)),
                             success: Some(true)},
                     }
                 } else {
                     ResponseInputItem::FunctionCallOutput {
                         call_id: call_id_clone,
                         output: FunctionCallOutputPayload {
-                            body: code_protocol::models::FunctionCallOutputBody::Text(format!("Failed to cancel agent {}", agent_id)),
+                            body: hanzo_protocol::models::FunctionCallOutputBody::Text(format!("Failed to cancel agent {}", agent_id)),
                             success: Some(false)},
                     }
                 }
@@ -8678,14 +8678,14 @@ async fn handle_cancel_agent(
                 ResponseInputItem::FunctionCallOutput {
                     call_id: call_id_clone,
                     output: FunctionCallOutputPayload {
-                        body: code_protocol::models::FunctionCallOutputBody::Text(format!("Cancelled {} agents in batch {}", count, batch_id)),
+                        body: hanzo_protocol::models::FunctionCallOutputBody::Text(format!("Cancelled {} agents in batch {}", count, batch_id)),
                         success: Some(true)},
                 }
             } else {
                 ResponseInputItem::FunctionCallOutput {
                     call_id: call_id_clone,
                     output: FunctionCallOutputPayload {
-                        body: code_protocol::models::FunctionCallOutputBody::Text("Either agent_id or batch_id must be provided".to_string()),
+                        body: hanzo_protocol::models::FunctionCallOutputBody::Text("Either agent_id or batch_id must be provided".to_string()),
                         success: Some(false)},
                 }
             }
@@ -8693,7 +8693,7 @@ async fn handle_cancel_agent(
         Err(e) => ResponseInputItem::FunctionCallOutput {
             call_id: call_id_clone,
             output: FunctionCallOutputPayload {
-                body: code_protocol::models::FunctionCallOutputBody::Text(format!("Invalid agent arguments for action=cancel: {}", e)),
+                body: hanzo_protocol::models::FunctionCallOutputBody::Text(format!("Invalid agent arguments for action=cancel: {}", e)),
                 success: None},
         },
     }
@@ -8724,7 +8724,7 @@ async fn handle_wait_for_agent(
                             return ResponseInputItem::FunctionCallOutput {
                                 call_id: call_id_clone,
                                 output: FunctionCallOutputPayload {
-                                    body: code_protocol::models::FunctionCallOutputBody::Text("action=wait requires 'wait.batch_id'".to_string()),
+                                    body: hanzo_protocol::models::FunctionCallOutputBody::Text("action=wait requires 'wait.batch_id'".to_string()),
                                     success: Some(false)},
                             };
                         }
@@ -8739,7 +8739,7 @@ async fn handle_wait_for_agent(
                             return ResponseInputItem::FunctionCallOutput {
                                 call_id: call_id_clone,
                                 output: FunctionCallOutputPayload {
-                                    body: code_protocol::models::FunctionCallOutputBody::Text("Timeout waiting for agent completion".to_string()),
+                                    body: hanzo_protocol::models::FunctionCallOutputBody::Text("Timeout waiting for agent completion".to_string()),
                                     success: Some(false)},
                             };
                         }
@@ -8754,7 +8754,7 @@ async fn handle_wait_for_agent(
                                         return ResponseInputItem::FunctionCallOutput {
                                             call_id: call_id_clone,
                                             output: FunctionCallOutputPayload {
-                                                body: code_protocol::models::FunctionCallOutputBody::Text(format!(
+                                                body: hanzo_protocol::models::FunctionCallOutputBody::Text(format!(
                                                     "Agent {} does not belong to batch {}",
                                                     agent_id, batch_id
                                                 )),
@@ -8776,7 +8776,7 @@ async fn handle_wait_for_agent(
                                     return ResponseInputItem::FunctionCallOutput {
                                         call_id: call_id_clone,
                                         output: FunctionCallOutputPayload {
-                                            body: code_protocol::models::FunctionCallOutputBody::Text(format!("Failed to prepare agent output dir: {}", e)),
+                                            body: hanzo_protocol::models::FunctionCallOutputBody::Text(format!("Failed to prepare agent output dir: {}", e)),
                                             success: Some(false)},
                                     };
                                 }
@@ -8830,7 +8830,7 @@ async fn handle_wait_for_agent(
                             return ResponseInputItem::FunctionCallOutput {
                                 call_id: call_id_clone,
                                 output: FunctionCallOutputPayload {
-                                    body: code_protocol::models::FunctionCallOutputBody::Text(response.to_string()),
+                                    body: hanzo_protocol::models::FunctionCallOutputBody::Text(response.to_string()),
                                     success: Some(true)},
                             };
                         }
@@ -8870,7 +8870,7 @@ async fn handle_wait_for_agent(
                                         return ResponseInputItem::FunctionCallOutput {
                                             call_id: call_id_clone,
                                             output: FunctionCallOutputPayload {
-                                                body: code_protocol::models::FunctionCallOutputBody::Text(format!("Failed to prepare agent output dir: {}", e)),
+                                                body: hanzo_protocol::models::FunctionCallOutputBody::Text(format!("Failed to prepare agent output dir: {}", e)),
                                                 success: Some(false)},
                                         };
                                     }
@@ -8931,7 +8931,7 @@ async fn handle_wait_for_agent(
                             return ResponseInputItem::FunctionCallOutput {
                                 call_id: call_id_clone,
                                 output: FunctionCallOutputPayload {
-                                    body: code_protocol::models::FunctionCallOutputBody::Text(response.to_string()),
+                                    body: hanzo_protocol::models::FunctionCallOutputBody::Text(response.to_string()),
                                     success: Some(true)},
                             };
                         }
@@ -8971,7 +8971,7 @@ async fn handle_wait_for_agent(
                                     return ResponseInputItem::FunctionCallOutput {
                                         call_id: call_id_clone,
                                         output: FunctionCallOutputPayload {
-                                            body: code_protocol::models::FunctionCallOutputBody::Text(format!("Failed to prepare agent output dir: {}", e)),
+                                            body: hanzo_protocol::models::FunctionCallOutputBody::Text(format!("Failed to prepare agent output dir: {}", e)),
                                             success: Some(false)},
                                     };
                                 }
@@ -9024,7 +9024,7 @@ async fn handle_wait_for_agent(
                             return ResponseInputItem::FunctionCallOutput {
                                 call_id: call_id_clone,
                                 output: FunctionCallOutputPayload {
-                                    body: code_protocol::models::FunctionCallOutputBody::Text(response.to_string()),
+                                    body: hanzo_protocol::models::FunctionCallOutputBody::Text(response.to_string()),
                                     success: Some(true)},
                             };
                         }
@@ -9049,7 +9049,7 @@ async fn handle_wait_for_agent(
                             return ResponseInputItem::FunctionCallOutput {
                                 call_id: call_id_clone,
                                 output: FunctionCallOutputPayload {
-                                    body: code_protocol::models::FunctionCallOutputBody::Text(response.to_string()),
+                                    body: hanzo_protocol::models::FunctionCallOutputBody::Text(response.to_string()),
                                     success: Some(true)},
                             };
                         }
@@ -9076,7 +9076,7 @@ async fn handle_wait_for_agent(
                     return ResponseInputItem::FunctionCallOutput {
                         call_id: call_id_clone,
                         output: FunctionCallOutputPayload {
-                            body: code_protocol::models::FunctionCallOutputBody::Text(response.to_string()),
+                            body: hanzo_protocol::models::FunctionCallOutputBody::Text(response.to_string()),
                             success: Some(false)},
                     };
                 }
@@ -9092,7 +9092,7 @@ async fn handle_wait_for_agent(
                     return ResponseInputItem::FunctionCallOutput {
                         call_id: call_id_clone,
                         output: FunctionCallOutputPayload {
-                            body: code_protocol::models::FunctionCallOutputBody::Text(message),
+                            body: hanzo_protocol::models::FunctionCallOutputBody::Text(message),
                             success: Some(false)},
                     };
                 }
@@ -9102,7 +9102,7 @@ async fn handle_wait_for_agent(
                 Err(e) => ResponseInputItem::FunctionCallOutput {
                     call_id: call_id_clone,
                     output: FunctionCallOutputPayload {
-                        body: code_protocol::models::FunctionCallOutputBody::Text(format!("Invalid agent arguments for action=wait: {}", e)),
+                        body: hanzo_protocol::models::FunctionCallOutputBody::Text(format!("Invalid agent arguments for action=wait: {}", e)),
                         success: None},
                 },
             }
@@ -9134,7 +9134,7 @@ async fn handle_list_agents(
                     return ResponseInputItem::FunctionCallOutput {
                         call_id: call_id_clone,
                         output: FunctionCallOutputPayload {
-                            body: code_protocol::models::FunctionCallOutputBody::Text("action=list requires 'list.batch_id'".to_string()),
+                            body: hanzo_protocol::models::FunctionCallOutputBody::Text("action=list requires 'list.batch_id'".to_string()),
                             success: Some(false)},
                     };
                 }
@@ -9225,14 +9225,14 @@ async fn handle_list_agents(
             ResponseInputItem::FunctionCallOutput {
                 call_id: call_id_clone,
                 output: FunctionCallOutputPayload {
-                    body: code_protocol::models::FunctionCallOutputBody::Text(summary.to_string()),
+                    body: hanzo_protocol::models::FunctionCallOutputBody::Text(summary.to_string()),
                     success: Some(true)},
             }
         }
         Err(e) => ResponseInputItem::FunctionCallOutput {
             call_id: call_id_clone,
             output: FunctionCallOutputPayload {
-                body: code_protocol::models::FunctionCallOutputBody::Text(format!("Invalid agent arguments for action=list: {}", e)),
+                body: hanzo_protocol::models::FunctionCallOutputBody::Text(format!("Invalid agent arguments for action=list: {}", e)),
                 success: None},
         },
     }
@@ -9538,7 +9538,7 @@ async fn handle_container_exec_with_params(
 
                 return ResponseInputItem::FunctionCallOutput {
                     call_id,
-                    output: FunctionCallOutputPayload {body: code_protocol::models::FunctionCallOutputBody::Text(guidance), success: None},
+                    output: FunctionCallOutputPayload {body: hanzo_protocol::models::FunctionCallOutputBody::Text(guidance), success: None},
                 };
             }
 
@@ -9562,7 +9562,7 @@ async fn handle_container_exec_with_params(
 
                 return ResponseInputItem::FunctionCallOutput {
                     call_id,
-                    output: FunctionCallOutputPayload {body: code_protocol::models::FunctionCallOutputBody::Text(guidance), success: None},
+                    output: FunctionCallOutputPayload {body: hanzo_protocol::models::FunctionCallOutputBody::Text(guidance), success: None},
                 };
             }
         }
@@ -9608,7 +9608,7 @@ async fn handle_container_exec_with_params(
 
                         return ResponseInputItem::FunctionCallOutput {
                             call_id,
-                            output: FunctionCallOutputPayload {body: code_protocol::models::FunctionCallOutputBody::Text(guidance), success: None},
+                            output: FunctionCallOutputPayload {body: hanzo_protocol::models::FunctionCallOutputBody::Text(guidance), success: None},
                         };
                     }
                 }
@@ -9632,7 +9632,7 @@ async fn handle_container_exec_with_params(
         return ResponseInputItem::FunctionCallOutput {
             call_id,
             output: FunctionCallOutputPayload {
-                body: code_protocol::models::FunctionCallOutputBody::Text(guidance),
+                body: hanzo_protocol::models::FunctionCallOutputBody::Text(guidance),
                 success: None},
         };
     }
@@ -9651,7 +9651,7 @@ async fn handle_container_exec_with_params(
         return ResponseInputItem::FunctionCallOutput {
             call_id,
             output: FunctionCallOutputPayload {
-                body: code_protocol::models::FunctionCallOutputBody::Text(guidance),
+                body: hanzo_protocol::models::FunctionCallOutputBody::Text(guidance),
                 success: None},
         };
     }
@@ -9670,7 +9670,7 @@ async fn handle_container_exec_with_params(
         return ResponseInputItem::FunctionCallOutput {
             call_id,
             output: FunctionCallOutputPayload {
-                body: code_protocol::models::FunctionCallOutputBody::Text(guidance),
+                body: hanzo_protocol::models::FunctionCallOutputBody::Text(guidance),
                 success: None},
         };
     }
@@ -9703,7 +9703,7 @@ async fn handle_container_exec_with_params(
 
                 return ResponseInputItem::FunctionCallOutput {
                     call_id,
-                    output: FunctionCallOutputPayload {body: code_protocol::models::FunctionCallOutputBody::Text(guidance), success: None},
+                    output: FunctionCallOutputPayload {body: hanzo_protocol::models::FunctionCallOutputBody::Text(guidance), success: None},
                 };
             }
         }
@@ -9738,7 +9738,7 @@ async fn handle_container_exec_with_params(
 
                     return ResponseInputItem::FunctionCallOutput {
                         call_id,
-                        output: FunctionCallOutputPayload {body: code_protocol::models::FunctionCallOutputBody::Text(guidance), success: None},
+                        output: FunctionCallOutputPayload {body: hanzo_protocol::models::FunctionCallOutputBody::Text(guidance), success: None},
                     };
                 }
             }
@@ -9818,7 +9818,7 @@ async fn handle_container_exec_with_params(
                             )
                             .await;
 
-                        return ResponseInputItem::FunctionCallOutput { call_id, output: FunctionCallOutputPayload {body: code_protocol::models::FunctionCallOutputBody::Text(guidance), success: None} };
+                        return ResponseInputItem::FunctionCallOutput { call_id, output: FunctionCallOutputPayload {body: hanzo_protocol::models::FunctionCallOutputBody::Text(guidance), success: None} };
                     }
                 }
             }
@@ -9844,7 +9844,7 @@ async fn handle_container_exec_with_params(
 
                     return ResponseInputItem::FunctionCallOutput {
                         call_id,
-                        output: FunctionCallOutputPayload {body: code_protocol::models::FunctionCallOutputBody::Text(guidance), success: None},
+                        output: FunctionCallOutputPayload {body: hanzo_protocol::models::FunctionCallOutputBody::Text(guidance), success: None},
                     };
                 }
             }
@@ -9980,7 +9980,7 @@ async fn handle_container_exec_with_params(
                     return ResponseInputItem::FunctionCallOutput {
                         call_id,
                         output: FunctionCallOutputPayload {
-                            body: code_protocol::models::FunctionCallOutputBody::Text(content),
+                            body: hanzo_protocol::models::FunctionCallOutputBody::Text(content),
                             success: Some(run.success),
                         },
                     };
@@ -9991,7 +9991,7 @@ async fn handle_container_exec_with_params(
             return ResponseInputItem::FunctionCallOutput {
                 call_id,
                 output: FunctionCallOutputPayload {
-                    body: code_protocol::models::FunctionCallOutputBody::Text(format!("error: {parse_error:#}")),
+                    body: hanzo_protocol::models::FunctionCallOutputBody::Text(format!("error: {parse_error:#}")),
                     success: None},
             };
         }
@@ -10074,7 +10074,7 @@ async fn handle_container_exec_with_params(
                     return ResponseInputItem::FunctionCallOutput {
                         call_id,
                         output: FunctionCallOutputPayload {
-                            body: code_protocol::models::FunctionCallOutputBody::Text("exec command rejected by user".to_string()),
+                            body: hanzo_protocol::models::FunctionCallOutputBody::Text("exec command rejected by user".to_string()),
                             success: None},
                     };
                 }
@@ -10089,7 +10089,7 @@ async fn handle_container_exec_with_params(
             return ResponseInputItem::FunctionCallOutput {
                 call_id,
                 output: FunctionCallOutputPayload {
-                    body: code_protocol::models::FunctionCallOutputBody::Text(format!("exec command rejected: {reason}")),
+                    body: hanzo_protocol::models::FunctionCallOutputBody::Text(format!("exec command rejected: {reason}")),
                     success: None},
             };
         }
@@ -10175,7 +10175,7 @@ async fn handle_container_exec_with_params(
     let call_id_for_events = call_id.clone();
     let sandbox_policy = sess.sandbox_policy.clone();
     let sandbox_cwd = sess.get_cwd().to_path_buf();
-    let code_linux_sandbox_exe = sess.code_linux_sandbox_exe.clone();
+    let hanzo_linux_sandbox_exe = sess.hanzo_linux_sandbox_exe.clone();
     let exec_spool_dir_for_task = if sess.client.debug_enabled() {
         Some(
             sess.client
@@ -10216,7 +10216,7 @@ async fn handle_container_exec_with_params(
             sandbox_type,
             &sandbox_policy,
             &sandbox_cwd,
-            &code_linux_sandbox_exe,
+            &hanzo_linux_sandbox_exe,
             stdout_stream,
         )
         .await;
@@ -10372,14 +10372,14 @@ async fn handle_container_exec_with_params(
             return ResponseInputItem::FunctionCallOutput {
                 call_id: call_id.clone(),
                 output: FunctionCallOutputPayload {
-                    body: code_protocol::models::FunctionCallOutputBody::Text(content),
+                    body: hanzo_protocol::models::FunctionCallOutputBody::Text(content),
                     success: Some(is_success),
                 },
             };
         } else {
             // Fallback (should not happen): indicate completion without detail
             let msg = format!("Command completed.");
-            return ResponseInputItem::FunctionCallOutput { call_id: call_id.clone(), output: FunctionCallOutputPayload {body: code_protocol::models::FunctionCallOutputBody::Text(msg), success: Some(true)} };
+            return ResponseInputItem::FunctionCallOutput { call_id: call_id.clone(), output: FunctionCallOutputPayload {body: hanzo_protocol::models::FunctionCallOutputBody::Text(msg), success: Some(true)} };
         }
     }
 
@@ -10396,7 +10396,7 @@ async fn handle_container_exec_with_params(
     } else {
         format!("{}\n\nOutput so far (tail):\n{}", header, tail)
     };
-    ResponseInputItem::FunctionCallOutput { call_id: call_id.clone(), output: FunctionCallOutputPayload {body: code_protocol::models::FunctionCallOutputBody::Text(msg), success: Some(true)} }
+    ResponseInputItem::FunctionCallOutput { call_id: call_id.clone(), output: FunctionCallOutputPayload {body: hanzo_protocol::models::FunctionCallOutputBody::Text(msg), success: Some(true)} }
 }
 
 #[allow(dead_code)]
@@ -10437,7 +10437,7 @@ async fn handle_sandbox_error(
         return ResponseInputItem::FunctionCallOutput {
             call_id,
             output: FunctionCallOutputPayload {
-                body: code_protocol::models::FunctionCallOutputBody::Text(content),
+                body: hanzo_protocol::models::FunctionCallOutputBody::Text(content),
                 success: Some(false),
             },
         };
@@ -10456,7 +10456,7 @@ async fn handle_sandbox_error(
             return ResponseInputItem::FunctionCallOutput {
                 call_id,
                 output: FunctionCallOutputPayload {
-                    body: code_protocol::models::FunctionCallOutputBody::Text(content),
+                    body: hanzo_protocol::models::FunctionCallOutputBody::Text(content),
                     success: Some(false),
                 },
             };
@@ -10469,7 +10469,7 @@ async fn handle_sandbox_error(
         return ResponseInputItem::FunctionCallOutput {
             call_id,
             output: FunctionCallOutputPayload {
-                body: code_protocol::models::FunctionCallOutputBody::Text("command timed out".to_string()),
+                body: hanzo_protocol::models::FunctionCallOutputBody::Text("command timed out".to_string()),
                 success: Some(false)},
         };
     }
@@ -10531,7 +10531,7 @@ async fn handle_sandbox_error(
             return ResponseInputItem::FunctionCallOutput {
                 call_id,
                 output: FunctionCallOutputPayload {
-                    body: code_protocol::models::FunctionCallOutputBody::Text("exec command rejected by user".to_string()),
+                    body: hanzo_protocol::models::FunctionCallOutputBody::Text("exec command rejected by user".to_string()),
                     success: None},
             };
         }
@@ -10557,7 +10557,7 @@ async fn handle_sandbox_error(
                 sandbox_type: SandboxType::None,
                 sandbox_policy: &sess.sandbox_policy,
                 sandbox_cwd: sess.get_cwd(),
-                code_linux_sandbox_exe: &sess.code_linux_sandbox_exe,
+                hanzo_linux_sandbox_exe: &sess.hanzo_linux_sandbox_exe,
                 stdout_stream: if exec_command_context.apply_patch.is_some() {
                     None
                 } else {
@@ -10598,7 +10598,7 @@ async fn handle_sandbox_error(
             ResponseInputItem::FunctionCallOutput {
                 call_id: call_id.clone(),
                 output: FunctionCallOutputPayload {
-                    body: code_protocol::models::FunctionCallOutputBody::Text(content),
+                    body: hanzo_protocol::models::FunctionCallOutputBody::Text(content),
                     success: Some(is_success),
                 },
             }
@@ -10606,7 +10606,7 @@ async fn handle_sandbox_error(
         Err(e) => ResponseInputItem::FunctionCallOutput {
             call_id: call_id.clone(),
             output: FunctionCallOutputPayload {
-                body: code_protocol::models::FunctionCallOutputBody::Text(format!("retry failed: {e}")),
+                body: hanzo_protocol::models::FunctionCallOutputBody::Text(format!("retry failed: {e}")),
                 success: None},
         },
     }
@@ -10798,7 +10798,7 @@ pub(super) fn get_last_assistant_message_from_turn(responses: &[ResponseItem]) -
 pub(super) async fn capture_browser_screenshot(
     _sess: &Session,
 ) -> Result<(PathBuf, String), String> {
-    let browser_manager = code_browser::global::get_browser_manager()
+    let browser_manager = hanzo_browser::global::get_browser_manager()
         .await
         .ok_or_else(|| "No browser manager available".to_string())?;
 
@@ -11344,7 +11344,7 @@ async fn handle_browser_tool(sess: &Session, ctx: &ToolCallCtx, arguments: Strin
             return ResponseInputItem::FunctionCallOutput {
                 call_id: ctx.call_id.clone(),
                 output: FunctionCallOutputPayload {
-                    body: code_protocol::models::FunctionCallOutputBody::Text(format!("Invalid browser arguments: {e}")),
+                    body: hanzo_protocol::models::FunctionCallOutputBody::Text(format!("Invalid browser arguments: {e}")),
                     success: Some(false)},
             };
         }
@@ -11356,7 +11356,7 @@ async fn handle_browser_tool(sess: &Session, ctx: &ToolCallCtx, arguments: Strin
             return ResponseInputItem::FunctionCallOutput {
                 call_id: ctx.call_id.clone(),
                 output: FunctionCallOutputPayload {
-                    body: code_protocol::models::FunctionCallOutputBody::Text("Invalid browser arguments: expected an object".to_string()),
+                    body: hanzo_protocol::models::FunctionCallOutputBody::Text("Invalid browser arguments: expected an object".to_string()),
                     success: Some(false)},
             };
         }
@@ -11369,7 +11369,7 @@ async fn handle_browser_tool(sess: &Session, ctx: &ToolCallCtx, arguments: Strin
             return ResponseInputItem::FunctionCallOutput {
                 call_id: ctx.call_id.clone(),
                 output: FunctionCallOutputPayload {
-                    body: code_protocol::models::FunctionCallOutputBody::Text("Invalid browser arguments: missing 'action'".to_string()),
+                    body: hanzo_protocol::models::FunctionCallOutputBody::Text("Invalid browser arguments: missing 'action'".to_string()),
                     success: Some(false)},
             };
         }
@@ -11403,7 +11403,7 @@ async fn handle_browser_tool(sess: &Session, ctx: &ToolCallCtx, arguments: Strin
         _ => ResponseInputItem::FunctionCallOutput {
             call_id: ctx.call_id.clone(),
             output: FunctionCallOutputPayload {
-                body: code_protocol::models::FunctionCallOutputBody::Text(format!("Unknown browser action: {}", action)),
+                body: hanzo_protocol::models::FunctionCallOutputBody::Text(format!("Unknown browser action: {}", action)),
                 success: Some(false)},
         },
     }
@@ -11436,21 +11436,21 @@ async fn handle_browser_open(sess: &Session, ctx: &ToolCallCtx, arguments: Strin
                         return ResponseInputItem::FunctionCallOutput {
                             call_id: call_id_clone.clone(),
                             output: FunctionCallOutputPayload {
-                                body: code_protocol::models::FunctionCallOutputBody::Text("Developer tools are disabled for this browser session. Use the browser.console tool to inspect logs instead.".to_string()),
+                                body: hanzo_protocol::models::FunctionCallOutputBody::Text("Developer tools are disabled for this browser session. Use the browser.console tool to inspect logs instead.".to_string()),
                                 success: Some(false)},
                         };
                     }
 
                     // Use the global browser manager (create if needed)
                     let browser_manager = {
-                        let existing_global = code_browser::global::get_browser_manager().await;
+                        let existing_global = hanzo_browser::global::get_browser_manager().await;
                         if let Some(existing) = existing_global {
                             tracing::info!("Using existing global browser manager");
                             Some(existing)
                         } else {
                             tracing::info!("Creating new browser manager");
                             let new_manager =
-                                code_browser::global::get_or_create_browser_manager().await;
+                                hanzo_browser::global::get_or_create_browser_manager().await;
                             Some(new_manager)
                         }
                     };
@@ -11475,7 +11475,7 @@ async fn handle_browser_open(sess: &Session, ctx: &ToolCallCtx, arguments: Strin
                                 ResponseInputItem::FunctionCallOutput {
                                     call_id: call_id_clone.clone(),
                                     output: FunctionCallOutputPayload {
-                                        body: code_protocol::models::FunctionCallOutputBody::Text(format!("Browser opened to: {}", url)),
+                                        body: hanzo_protocol::models::FunctionCallOutputBody::Text(format!("Browser opened to: {}", url)),
                                         success: Some(true)},
                                 }
                             }
@@ -11513,7 +11513,7 @@ async fn handle_browser_open(sess: &Session, ctx: &ToolCallCtx, arguments: Strin
                                 ResponseInputItem::FunctionCallOutput {
                                     call_id: call_id_clone.clone(),
                                     output: FunctionCallOutputPayload {
-                                        body: code_protocol::models::FunctionCallOutputBody::Text(content),
+                                        body: hanzo_protocol::models::FunctionCallOutputBody::Text(content),
                                         success: Some(false),
                                     },
                                 }
@@ -11523,7 +11523,7 @@ async fn handle_browser_open(sess: &Session, ctx: &ToolCallCtx, arguments: Strin
                         ResponseInputItem::FunctionCallOutput {
                             call_id: call_id_clone.clone(),
                             output: FunctionCallOutputPayload {
-                                body: code_protocol::models::FunctionCallOutputBody::Text("Failed to initialize browser manager.".to_string()),
+                                body: hanzo_protocol::models::FunctionCallOutputBody::Text("Failed to initialize browser manager.".to_string()),
                                 success: Some(false)},
                         }
                     }
@@ -11531,7 +11531,7 @@ async fn handle_browser_open(sess: &Session, ctx: &ToolCallCtx, arguments: Strin
                 Err(e) => ResponseInputItem::FunctionCallOutput {
                     call_id: call_id_clone,
                     output: FunctionCallOutputPayload {
-                        body: code_protocol::models::FunctionCallOutputBody::Text(format!("Failed to parse browser_open arguments: {}", e)),
+                        body: hanzo_protocol::models::FunctionCallOutputBody::Text(format!("Failed to parse browser_open arguments: {}", e)),
                         success: Some(false)},
                 },
             }
@@ -11543,9 +11543,9 @@ async fn handle_browser_open(sess: &Session, ctx: &ToolCallCtx, arguments: Strin
 /// Get the browser manager for the session (always uses global)
 async fn get_browser_manager_for_session(
     _sess: &Session,
-) -> Option<Arc<code_browser::BrowserManager>> {
+) -> Option<Arc<hanzo_browser::BrowserManager>> {
     // Always use the global browser manager
-    code_browser::global::get_browser_manager().await
+    hanzo_browser::global::get_browser_manager().await
 }
 
 async fn handle_browser_close(sess: &Session, ctx: &ToolCallCtx) -> ResponseInputItem {
@@ -11567,18 +11567,18 @@ async fn handle_browser_close(sess: &Session, ctx: &ToolCallCtx) -> ResponseInpu
                 match browser_manager.stop().await {
                     Ok(_) => {
                         // Clear the browser manager from global
-                        code_browser::global::clear_browser_manager().await;
+                        hanzo_browser::global::clear_browser_manager().await;
                         ResponseInputItem::FunctionCallOutput {
                             call_id: call_id_clone.clone(),
                             output: FunctionCallOutputPayload {
-                                body: code_protocol::models::FunctionCallOutputBody::Text("Browser closed. Screenshot capture disabled.".to_string()),
+                                body: hanzo_protocol::models::FunctionCallOutputBody::Text("Browser closed. Screenshot capture disabled.".to_string()),
                                 success: Some(true)},
                         }
                     }
                     Err(e) => ResponseInputItem::FunctionCallOutput {
                         call_id: call_id_clone.clone(),
                         output: FunctionCallOutputPayload {
-                            body: code_protocol::models::FunctionCallOutputBody::Text(format!("Failed to close browser: {}", e)),
+                            body: hanzo_protocol::models::FunctionCallOutputBody::Text(format!("Failed to close browser: {}", e)),
                             success: Some(false)},
                     },
                 }
@@ -11586,7 +11586,7 @@ async fn handle_browser_close(sess: &Session, ctx: &ToolCallCtx) -> ResponseInpu
                 ResponseInputItem::FunctionCallOutput {
                     call_id: call_id_clone,
                     output: FunctionCallOutputPayload {
-                        body: code_protocol::models::FunctionCallOutputBody::Text("Browser is not currently open.".to_string()),
+                        body: hanzo_protocol::models::FunctionCallOutputBody::Text("Browser is not currently open.".to_string()),
                         success: Some(false)},
                 }
             }
@@ -11624,14 +11624,14 @@ async fn handle_browser_status(sess: &Session, ctx: &ToolCallCtx) -> ResponseInp
                 ResponseInputItem::FunctionCallOutput {
                     call_id: call_id_clone.clone(),
                     output: FunctionCallOutputPayload {
-                        body: code_protocol::models::FunctionCallOutputBody::Text(status_msg),
+                        body: hanzo_protocol::models::FunctionCallOutputBody::Text(status_msg),
                         success: Some(true)},
                 }
             } else {
                 ResponseInputItem::FunctionCallOutput {
                     call_id: call_id_clone,
                     output: FunctionCallOutputPayload {
-                        body: code_protocol::models::FunctionCallOutputBody::Text("Browser is not initialized. Use browser_open to start the browser."
+                        body: hanzo_protocol::models::FunctionCallOutputBody::Text("Browser is not initialized. Use browser_open to start the browser."
                                 .to_string()),
                         success: Some(false)},
                 }
@@ -11688,7 +11688,7 @@ async fn handle_browser_click(sess: &Session, ctx: &ToolCallCtx, arguments: Stri
                                 return ResponseInputItem::FunctionCallOutput {
                                     call_id: call_id_clone.clone(),
                                     output: FunctionCallOutputPayload {
-                                        body: code_protocol::models::FunctionCallOutputBody::Text(format!("Failed to move before click: {}", e)),
+                                        body: hanzo_protocol::models::FunctionCallOutputBody::Text(format!("Failed to move before click: {}", e)),
                                         success: Some(false)},
                                 };
                             }
@@ -11697,7 +11697,7 @@ async fn handle_browser_click(sess: &Session, ctx: &ToolCallCtx, arguments: Stri
                             return ResponseInputItem::FunctionCallOutput {
                                 call_id: call_id_clone.clone(),
                                 output: FunctionCallOutputPayload {
-                                    body: code_protocol::models::FunctionCallOutputBody::Text(format!("Failed to get current cursor position: {}", e)),
+                                    body: hanzo_protocol::models::FunctionCallOutputBody::Text(format!("Failed to get current cursor position: {}", e)),
                                     success: Some(false)},
                             };
                         }
@@ -11725,14 +11725,14 @@ async fn handle_browser_click(sess: &Session, ctx: &ToolCallCtx, arguments: Stri
                         ResponseInputItem::FunctionCallOutput {
                             call_id: call_id_clone.clone(),
                             output: FunctionCallOutputPayload {
-                                body: code_protocol::models::FunctionCallOutputBody::Text(format!("{} at ({}, {})", label, x, y)),
+                                body: hanzo_protocol::models::FunctionCallOutputBody::Text(format!("{} at ({}, {})", label, x, y)),
                                 success: Some(true)},
                         }
                     }
                     Err(e) => ResponseInputItem::FunctionCallOutput {
                         call_id: call_id_clone.clone(),
                         output: FunctionCallOutputPayload {
-                            body: code_protocol::models::FunctionCallOutputBody::Text(format!("Failed to perform mouse action: {}", e)),
+                            body: hanzo_protocol::models::FunctionCallOutputBody::Text(format!("Failed to perform mouse action: {}", e)),
                             success: Some(false)},
                     },
                 }
@@ -11740,7 +11740,7 @@ async fn handle_browser_click(sess: &Session, ctx: &ToolCallCtx, arguments: Stri
         ResponseInputItem::FunctionCallOutput {
             call_id: call_id_clone,
             output: FunctionCallOutputPayload {
-                body: code_protocol::models::FunctionCallOutputBody::Text("Browser is not initialized. Use browser_open to start the browser."
+                body: hanzo_protocol::models::FunctionCallOutputBody::Text("Browser is not initialized. Use browser_open to start the browser."
                     .to_string()),
                 success: Some(false)},
         }
@@ -11797,14 +11797,14 @@ async fn handle_browser_move(sess: &Session, ctx: &ToolCallCtx, arguments: Strin
                                 ResponseInputItem::FunctionCallOutput {
                                     call_id: call_id_clone.clone(),
                                     output: FunctionCallOutputPayload {
-                                        body: code_protocol::models::FunctionCallOutputBody::Text(format!("Moved mouse position to ({}, {})", x, y)),
+                                        body: hanzo_protocol::models::FunctionCallOutputBody::Text(format!("Moved mouse position to ({}, {})", x, y)),
                                         success: Some(true)},
                                 }
                             }
                             Err(e) => ResponseInputItem::FunctionCallOutput {
                                 call_id: call_id_clone.clone(),
                                 output: FunctionCallOutputPayload {
-                                    body: code_protocol::models::FunctionCallOutputBody::Text(format!("Failed to move mouse: {}", e)),
+                                    body: hanzo_protocol::models::FunctionCallOutputBody::Text(format!("Failed to move mouse: {}", e)),
                                     success: Some(false)},
                             },
                         }
@@ -11812,7 +11812,7 @@ async fn handle_browser_move(sess: &Session, ctx: &ToolCallCtx, arguments: Strin
                     Err(e) => ResponseInputItem::FunctionCallOutput {
                         call_id: call_id_clone.clone(),
                         output: FunctionCallOutputPayload {
-                            body: code_protocol::models::FunctionCallOutputBody::Text(format!("Failed to parse browser_move arguments: {}", e)),
+                            body: hanzo_protocol::models::FunctionCallOutputBody::Text(format!("Failed to parse browser_move arguments: {}", e)),
                             success: Some(false)},
                     },
                 }
@@ -11820,7 +11820,7 @@ async fn handle_browser_move(sess: &Session, ctx: &ToolCallCtx, arguments: Strin
                 ResponseInputItem::FunctionCallOutput {
                     call_id: call_id_clone,
                     output: FunctionCallOutputPayload {
-                        body: code_protocol::models::FunctionCallOutputBody::Text("Browser is not initialized. Use browser_open to start the browser."
+                        body: hanzo_protocol::models::FunctionCallOutputBody::Text("Browser is not initialized. Use browser_open to start the browser."
                             .to_string()),
                         success: Some(false)},
                 }
@@ -11857,14 +11857,14 @@ async fn handle_browser_type(sess: &Session, ctx: &ToolCallCtx, arguments: Strin
                                 ResponseInputItem::FunctionCallOutput {
                                     call_id: call_id_clone.clone(),
                                     output: FunctionCallOutputPayload {
-                                        body: code_protocol::models::FunctionCallOutputBody::Text(format!("Typed: {}", text)),
+                                        body: hanzo_protocol::models::FunctionCallOutputBody::Text(format!("Typed: {}", text)),
                                         success: Some(true)},
                                 }
                             }
                             Err(e) => ResponseInputItem::FunctionCallOutput {
                                 call_id: call_id_clone.clone(),
                                 output: FunctionCallOutputPayload {
-                                    body: code_protocol::models::FunctionCallOutputBody::Text(format!("Failed to type text: {}", e)),
+                                    body: hanzo_protocol::models::FunctionCallOutputBody::Text(format!("Failed to type text: {}", e)),
                                     success: Some(false)},
                             },
                         }
@@ -11872,7 +11872,7 @@ async fn handle_browser_type(sess: &Session, ctx: &ToolCallCtx, arguments: Strin
                     Err(e) => ResponseInputItem::FunctionCallOutput {
                         call_id: call_id_clone.clone(),
                         output: FunctionCallOutputPayload {
-                            body: code_protocol::models::FunctionCallOutputBody::Text(format!("Failed to parse browser_type arguments: {}", e)),
+                            body: hanzo_protocol::models::FunctionCallOutputBody::Text(format!("Failed to parse browser_type arguments: {}", e)),
                             success: Some(false)},
                     },
                 }
@@ -11880,7 +11880,7 @@ async fn handle_browser_type(sess: &Session, ctx: &ToolCallCtx, arguments: Strin
                 ResponseInputItem::FunctionCallOutput {
                     call_id: call_id_clone,
                     output: FunctionCallOutputPayload {
-                        body: code_protocol::models::FunctionCallOutputBody::Text("Browser is not initialized. Use browser_open to start the browser."
+                        body: hanzo_protocol::models::FunctionCallOutputBody::Text("Browser is not initialized. Use browser_open to start the browser."
                                 .to_string()),
                         success: Some(false)},
                 }
@@ -11920,7 +11920,7 @@ async fn handle_browser_key(sess: &Session, ctx: &ToolCallCtx, arguments: String
                             return ResponseInputItem::FunctionCallOutput {
                                 call_id: call_id_clone.clone(),
                                 output: FunctionCallOutputPayload {
-                                    body: code_protocol::models::FunctionCallOutputBody::Text("Developer tools are disabled for this browser session. Use the browser.console tool to inspect logs instead.".to_string()),
+                                    body: hanzo_protocol::models::FunctionCallOutputBody::Text("Developer tools are disabled for this browser session. Use the browser.console tool to inspect logs instead.".to_string()),
                                     success: Some(false)},
                             };
                         }
@@ -11930,14 +11930,14 @@ async fn handle_browser_key(sess: &Session, ctx: &ToolCallCtx, arguments: String
                                 ResponseInputItem::FunctionCallOutput {
                                     call_id: call_id_clone.clone(),
                                     output: FunctionCallOutputPayload {
-                                        body: code_protocol::models::FunctionCallOutputBody::Text(format!("Pressed key: {}", key)),
+                                        body: hanzo_protocol::models::FunctionCallOutputBody::Text(format!("Pressed key: {}", key)),
                                         success: Some(true)},
                                 }
                             }
                             Err(e) => ResponseInputItem::FunctionCallOutput {
                                 call_id: call_id_clone.clone(),
                                 output: FunctionCallOutputPayload {
-                                    body: code_protocol::models::FunctionCallOutputBody::Text(format!("Failed to press key: {}", e)),
+                                    body: hanzo_protocol::models::FunctionCallOutputBody::Text(format!("Failed to press key: {}", e)),
                                     success: Some(false)},
                             },
                         }
@@ -11945,7 +11945,7 @@ async fn handle_browser_key(sess: &Session, ctx: &ToolCallCtx, arguments: String
                     Err(e) => ResponseInputItem::FunctionCallOutput {
                         call_id: call_id_clone,
                         output: FunctionCallOutputPayload {
-                            body: code_protocol::models::FunctionCallOutputBody::Text(format!("Failed to parse browser_key arguments: {}", e)),
+                            body: hanzo_protocol::models::FunctionCallOutputBody::Text(format!("Failed to parse browser_key arguments: {}", e)),
                             success: Some(false)},
                     },
                 }
@@ -11953,7 +11953,7 @@ async fn handle_browser_key(sess: &Session, ctx: &ToolCallCtx, arguments: String
                 ResponseInputItem::FunctionCallOutput {
                     call_id: call_id_clone,
                     output: FunctionCallOutputPayload {
-                        body: code_protocol::models::FunctionCallOutputBody::Text("Browser is not initialized. Use browser_open to start the browser."
+                        body: hanzo_protocol::models::FunctionCallOutputBody::Text("Browser is not initialized. Use browser_open to start the browser."
                                 .to_string()),
                         success: Some(false)},
                 }
@@ -12040,7 +12040,7 @@ async fn handle_browser_javascript(sess: &Session, ctx: &ToolCallCtx, arguments:
                                 ResponseInputItem::FunctionCallOutput {
                                     call_id: call_id_clone.clone(),
                                     output: FunctionCallOutputPayload {
-                                        body: code_protocol::models::FunctionCallOutputBody::Text(formatted_result),
+                                        body: hanzo_protocol::models::FunctionCallOutputBody::Text(formatted_result),
                                         success: Some(true)},
                                 }
                             }
@@ -12054,7 +12054,7 @@ async fn handle_browser_javascript(sess: &Session, ctx: &ToolCallCtx, arguments:
                                 ResponseInputItem::FunctionCallOutput {
                                     call_id: call_id_clone.clone(),
                                     output: FunctionCallOutputPayload {
-                                        body: code_protocol::models::FunctionCallOutputBody::Text(content),
+                                        body: hanzo_protocol::models::FunctionCallOutputBody::Text(content),
                                         success: Some(false),
                                     },
                                 }
@@ -12064,7 +12064,7 @@ async fn handle_browser_javascript(sess: &Session, ctx: &ToolCallCtx, arguments:
                     Err(e) => ResponseInputItem::FunctionCallOutput {
                         call_id: call_id_clone,
                         output: FunctionCallOutputPayload {
-                            body: code_protocol::models::FunctionCallOutputBody::Text(format!("Failed to parse browser_javascript arguments: {}", e)),
+                            body: hanzo_protocol::models::FunctionCallOutputBody::Text(format!("Failed to parse browser_javascript arguments: {}", e)),
                             success: Some(false)},
                     },
                 }
@@ -12072,7 +12072,7 @@ async fn handle_browser_javascript(sess: &Session, ctx: &ToolCallCtx, arguments:
                 ResponseInputItem::FunctionCallOutput {
                     call_id: call_id_clone,
                     output: FunctionCallOutputPayload {
-                        body: code_protocol::models::FunctionCallOutputBody::Text("Browser is not initialized. Use browser_open to start the browser."
+                        body: hanzo_protocol::models::FunctionCallOutputBody::Text("Browser is not initialized. Use browser_open to start the browser."
                                 .to_string()),
                         success: Some(false)},
                 }
@@ -12110,14 +12110,14 @@ async fn handle_browser_scroll(sess: &Session, ctx: &ToolCallCtx, arguments: Str
                         ResponseInputItem::FunctionCallOutput {
                             call_id: call_id_clone.clone(),
                             output: FunctionCallOutputPayload {
-                                body: code_protocol::models::FunctionCallOutputBody::Text(format!("Scrolled by ({}, {})", dx, dy)),
+                                body: hanzo_protocol::models::FunctionCallOutputBody::Text(format!("Scrolled by ({}, {})", dx, dy)),
                                 success: Some(true)},
                         }
                     }
                     Err(e) => ResponseInputItem::FunctionCallOutput {
                         call_id: call_id_clone.clone(),
                         output: FunctionCallOutputPayload {
-                            body: code_protocol::models::FunctionCallOutputBody::Text(format!("Failed to scroll: {}", e)),
+                            body: hanzo_protocol::models::FunctionCallOutputBody::Text(format!("Failed to scroll: {}", e)),
                             success: Some(false)},
                     },
                 }
@@ -12125,7 +12125,7 @@ async fn handle_browser_scroll(sess: &Session, ctx: &ToolCallCtx, arguments: Str
             Err(e) => ResponseInputItem::FunctionCallOutput {
                 call_id: call_id_clone,
                 output: FunctionCallOutputPayload {
-                    body: code_protocol::models::FunctionCallOutputBody::Text(format!("Failed to parse browser_scroll arguments: {}", e)),
+                    body: hanzo_protocol::models::FunctionCallOutputBody::Text(format!("Failed to parse browser_scroll arguments: {}", e)),
                     success: Some(false)},
             },
         }
@@ -12133,7 +12133,7 @@ async fn handle_browser_scroll(sess: &Session, ctx: &ToolCallCtx, arguments: Str
         ResponseInputItem::FunctionCallOutput {
             call_id: call_id_clone,
             output: FunctionCallOutputPayload {
-                body: code_protocol::models::FunctionCallOutputBody::Text("Browser is not initialized. Use browser_open to start the browser.".to_string()),
+                body: hanzo_protocol::models::FunctionCallOutputBody::Text("Browser is not initialized. Use browser_open to start the browser.".to_string()),
                 success: Some(false)},
         }
     }
@@ -12195,14 +12195,14 @@ async fn handle_browser_console(sess: &Session, ctx: &ToolCallCtx, arguments: St
                         ResponseInputItem::FunctionCallOutput {
                             call_id: call_id_clone,
                             output: FunctionCallOutputPayload {
-                                body: code_protocol::models::FunctionCallOutputBody::Text(formatted),
+                                body: hanzo_protocol::models::FunctionCallOutputBody::Text(formatted),
                                 success: Some(true)},
                         }
                     }
                     Err(e) => ResponseInputItem::FunctionCallOutput {
                         call_id: call_id_clone,
                         output: FunctionCallOutputPayload {
-                            body: code_protocol::models::FunctionCallOutputBody::Text(format!("Failed to get console logs: {}", e)),
+                            body: hanzo_protocol::models::FunctionCallOutputBody::Text(format!("Failed to get console logs: {}", e)),
                             success: Some(false)},
                     },
                 }
@@ -12210,7 +12210,7 @@ async fn handle_browser_console(sess: &Session, ctx: &ToolCallCtx, arguments: St
                 ResponseInputItem::FunctionCallOutput {
                     call_id: call_id_clone,
                     output: FunctionCallOutputPayload {
-                        body: code_protocol::models::FunctionCallOutputBody::Text("Browser is not enabled. Use browser_open to enable it first.".to_string()),
+                        body: hanzo_protocol::models::FunctionCallOutputBody::Text("Browser is not enabled. Use browser_open to enable it first.".to_string()),
                         success: Some(false)},
                 }
             }
@@ -12254,7 +12254,7 @@ async fn handle_browser_cdp(sess: &Session, ctx: &ToolCallCtx, arguments: String
                             return ResponseInputItem::FunctionCallOutput {
                                 call_id: call_id_clone,
                                 output: FunctionCallOutputPayload {
-                                    body: code_protocol::models::FunctionCallOutputBody::Text("Missing required field: method".to_string()),
+                                    body: hanzo_protocol::models::FunctionCallOutputBody::Text("Missing required field: method".to_string()),
                                     success: Some(false)},
                             };
                         }
@@ -12272,14 +12272,14 @@ async fn handle_browser_cdp(sess: &Session, ctx: &ToolCallCtx, arguments: String
                                 ResponseInputItem::FunctionCallOutput {
                                     call_id: call_id_clone,
                                     output: FunctionCallOutputPayload {
-                                        body: code_protocol::models::FunctionCallOutputBody::Text(pretty),
+                                        body: hanzo_protocol::models::FunctionCallOutputBody::Text(pretty),
                                         success: Some(true)},
                                 }
                             }
                             Err(e) => ResponseInputItem::FunctionCallOutput {
                                 call_id: call_id_clone,
                                 output: FunctionCallOutputPayload {
-                                    body: code_protocol::models::FunctionCallOutputBody::Text(format!("Failed to execute CDP command: {}", e)),
+                                    body: hanzo_protocol::models::FunctionCallOutputBody::Text(format!("Failed to execute CDP command: {}", e)),
                                     success: Some(false)},
                             },
                         }
@@ -12287,7 +12287,7 @@ async fn handle_browser_cdp(sess: &Session, ctx: &ToolCallCtx, arguments: String
                     Err(e) => ResponseInputItem::FunctionCallOutput {
                         call_id: call_id_clone,
                         output: FunctionCallOutputPayload {
-                            body: code_protocol::models::FunctionCallOutputBody::Text(format!("Failed to parse browser_cdp arguments: {}", e)),
+                            body: hanzo_protocol::models::FunctionCallOutputBody::Text(format!("Failed to parse browser_cdp arguments: {}", e)),
                             success: Some(false)},
                     },
                 }
@@ -12295,7 +12295,7 @@ async fn handle_browser_cdp(sess: &Session, ctx: &ToolCallCtx, arguments: String
                 ResponseInputItem::FunctionCallOutput {
                     call_id: call_id_clone,
                     output: FunctionCallOutputPayload {
-                        body: code_protocol::models::FunctionCallOutputBody::Text("Browser is not initialized. Use browser_open to start the browser.".to_string()),
+                        body: hanzo_protocol::models::FunctionCallOutputBody::Text("Browser is not initialized. Use browser_open to start the browser.".to_string()),
                         success: Some(false)},
                 }
             }
@@ -12405,7 +12405,7 @@ async fn handle_browser_inspect(sess: &Session, ctx: &ToolCallCtx, arguments: St
                                 return ResponseInputItem::FunctionCallOutput {
                                     call_id: call_id_clone,
                                     output: FunctionCallOutputPayload {
-                                        body: code_protocol::models::FunctionCallOutputBody::Text("Failed to resolve target node for inspection".to_string()),
+                                        body: hanzo_protocol::models::FunctionCallOutputBody::Text("Failed to resolve target node for inspection".to_string()),
                                         success: Some(false)},
                                 };
                             }
@@ -12492,13 +12492,13 @@ async fn handle_browser_inspect(sess: &Session, ctx: &ToolCallCtx, arguments: St
 
                         ResponseInputItem::FunctionCallOutput {
                             call_id: call_id_clone,
-                            output: FunctionCallOutputPayload {body: code_protocol::models::FunctionCallOutputBody::Text(out), success: Some(true)},
+                            output: FunctionCallOutputPayload {body: hanzo_protocol::models::FunctionCallOutputBody::Text(out), success: Some(true)},
                         }
                     }
                     Err(e) => ResponseInputItem::FunctionCallOutput {
                         call_id: call_id_clone,
                         output: FunctionCallOutputPayload {
-                            body: code_protocol::models::FunctionCallOutputBody::Text(format!("Failed to parse browser_inspect arguments: {}", e)),
+                            body: hanzo_protocol::models::FunctionCallOutputBody::Text(format!("Failed to parse browser_inspect arguments: {}", e)),
                             success: Some(false)},
                     },
                 }
@@ -12506,7 +12506,7 @@ async fn handle_browser_inspect(sess: &Session, ctx: &ToolCallCtx, arguments: St
                 ResponseInputItem::FunctionCallOutput {
                     call_id: call_id_clone,
                     output: FunctionCallOutputPayload {
-                        body: code_protocol::models::FunctionCallOutputBody::Text("Browser is not initialized. Use browser_open to start the browser.".to_string()),
+                        body: hanzo_protocol::models::FunctionCallOutputBody::Text("Browser is not initialized. Use browser_open to start the browser.".to_string()),
                         success: Some(false)},
                 }
             }
@@ -12539,7 +12539,7 @@ async fn handle_browser_history(sess: &Session, ctx: &ToolCallCtx, arguments: St
                             return ResponseInputItem::FunctionCallOutput {
                                 call_id: call_id_clone,
                                 output: FunctionCallOutputPayload {
-                                    body: code_protocol::models::FunctionCallOutputBody::Text(format!(
+                                    body: hanzo_protocol::models::FunctionCallOutputBody::Text(format!(
                                         "Unsupported direction: {} (expected 'back' or 'forward')",
                                         direction
                                     )),
@@ -12558,14 +12558,14 @@ async fn handle_browser_history(sess: &Session, ctx: &ToolCallCtx, arguments: St
                                 ResponseInputItem::FunctionCallOutput {
                                     call_id: call_id_clone.clone(),
                                     output: FunctionCallOutputPayload {
-                                        body: code_protocol::models::FunctionCallOutputBody::Text(format!("History {} triggered", direction)),
+                                        body: hanzo_protocol::models::FunctionCallOutputBody::Text(format!("History {} triggered", direction)),
                                         success: Some(true)},
                                 }
                             }
                             Err(e) => ResponseInputItem::FunctionCallOutput {
                                 call_id: call_id_clone.clone(),
                                 output: FunctionCallOutputPayload {
-                                    body: code_protocol::models::FunctionCallOutputBody::Text(format!("Failed to navigate history: {}", e)),
+                                    body: hanzo_protocol::models::FunctionCallOutputBody::Text(format!("Failed to navigate history: {}", e)),
                                     success: Some(false)},
                             },
                         }
@@ -12573,7 +12573,7 @@ async fn handle_browser_history(sess: &Session, ctx: &ToolCallCtx, arguments: St
                     Err(e) => ResponseInputItem::FunctionCallOutput {
                         call_id: call_id_clone,
                         output: FunctionCallOutputPayload {
-                            body: code_protocol::models::FunctionCallOutputBody::Text(format!("Failed to parse browser_history arguments: {}", e)),
+                            body: hanzo_protocol::models::FunctionCallOutputBody::Text(format!("Failed to parse browser_history arguments: {}", e)),
                             success: Some(false)},
                     },
                 }
@@ -12581,7 +12581,7 @@ async fn handle_browser_history(sess: &Session, ctx: &ToolCallCtx, arguments: St
                 ResponseInputItem::FunctionCallOutput {
                     call_id: call_id_clone,
                     output: FunctionCallOutputPayload {
-                        body: code_protocol::models::FunctionCallOutputBody::Text("Browser is not initialized. Use browser_open to start the browser."
+                        body: hanzo_protocol::models::FunctionCallOutputBody::Text("Browser is not initialized. Use browser_open to start the browser."
                                 .to_string()),
                         success: Some(false)},
                 }
@@ -13162,7 +13162,7 @@ mod command_guard_detection_tests {
 mod cleanup_tests {
     use super::*;
     use super::super::session::prune_history_items;
-    use code_protocol::protocol::{
+    use hanzo_protocol::protocol::{
         BROWSER_SNAPSHOT_CLOSE_TAG,
         BROWSER_SNAPSHOT_OPEN_TAG,
         ENVIRONMENT_CONTEXT_CLOSE_TAG,
@@ -13420,7 +13420,7 @@ pub(super) fn debug_history(label: &str, items: &[ResponseItem]) {
     if std::env::var_os("CODEX_COMPACT_TRACE").is_some() {
         eprintln!("[compact_history] {} => [{}]", label, rendered);
     }
-    info!(target = "code_core::compact_history", "{} => [{}]", label, rendered);
+    info!(target = "hanzo_core::compact_history", "{} => [{}]", label, rendered);
 }
 
 #[derive(Debug)]

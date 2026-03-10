@@ -341,6 +341,7 @@ impl App<'_> {
             commit_anim_running: Arc::new(AtomicBool::new(false)),
             terminal_info,
             clear_on_first_frame: true,
+            input_suspended: Arc::new(AtomicBool::new(false)),
             pending_jump_back_ghost_state: None,
             pending_jump_back_history_snapshot: None,
             last_frame_size: None,

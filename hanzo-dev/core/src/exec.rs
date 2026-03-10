@@ -7,9 +7,9 @@ use std::path::Path;
 use std::path::PathBuf;
 use std::pin::Pin;
 use std::process::ExitStatus;
-use std::sync::Arc;
 use std::time::Duration;
 use std::time::Instant;
+use std::sync::Arc;
 
 use async_channel::Sender;
 use tokio::io::AsyncRead;
@@ -20,20 +20,20 @@ use tokio::process::Child;
 use tokio::time::Sleep;
 
 use crate::codex::Session;
-use crate::error::CodeErr;
+use crate::error::CodexErr;
 use crate::error::Result;
 use crate::error::SandboxErr;
 use crate::landlock::spawn_command_under_linux_sandbox;
+use crate::text_encoding::bytes_to_string_smart;
 use crate::protocol::Event;
 use crate::protocol::EventMsg;
+use crate::protocol::OrderMeta;
 use crate::protocol::ExecCommandOutputDeltaEvent;
 use crate::protocol::ExecOutputStream;
-use crate::protocol::OrderMeta;
 use crate::protocol::SandboxPolicy;
 use crate::seatbelt::spawn_command_under_seatbelt;
 use crate::spawn::StdioPolicy;
 use crate::spawn::spawn_child_async;
-use crate::text_encoding::bytes_to_string_smart;
 use serde_bytes::ByteBuf;
 
 // Note: legacy stream caps were removed in favor of streaming all bytes and
@@ -140,14 +140,14 @@ pub async fn process_exec_tool_call(
     sandbox_type: SandboxType,
     sandbox_policy: &SandboxPolicy,
     sandbox_cwd: &Path,
-    code_linux_sandbox_exe: &Option<PathBuf>,
+    hanzo_linux_sandbox_exe: &Option<PathBuf>,
     stdout_stream: Option<StdoutStream>,
 ) -> Result<ExecToolCallOutput> {
     let start = Instant::now();
 
     let timeout_duration = params.maybe_timeout_duration();
 
-    let raw_output_result: std::result::Result<RawExecToolCallOutput, CodeErr> = match sandbox_type
+    let raw_output_result: std::result::Result<RawExecToolCallOutput, CodexErr> = match sandbox_type
     {
         SandboxType::None => exec(params, sandbox_policy, stdout_stream.clone()).await,
         SandboxType::MacosSeatbelt => {
@@ -176,11 +176,11 @@ pub async fn process_exec_tool_call(
                 ..
             } = params;
 
-            let code_linux_sandbox_exe = code_linux_sandbox_exe
+            let hanzo_linux_sandbox_exe = hanzo_linux_sandbox_exe
                 .as_ref()
-                .ok_or(CodeErr::LandlockSandboxExecutableNotProvided)?;
+                .ok_or(CodexErr::LandlockSandboxExecutableNotProvided)?;
             let child = spawn_command_under_linux_sandbox(
-                code_linux_sandbox_exe,
+                hanzo_linux_sandbox_exe,
                 command,
                 command_cwd,
                 sandbox_policy,
@@ -231,23 +231,23 @@ pub async fn process_exec_tool_call(
             };
 
             if timed_out {
-                return Err(CodeErr::Sandbox(SandboxErr::Timeout {
+                return Err(CodexErr::Sandbox(SandboxErr::Timeout {
                     output: Box::new(exec_output),
                 }));
             }
 
             if let Some(signal) = exit_signal {
                 if raw_output.oom_killed {
-                    return Err(CodeErr::Sandbox(SandboxErr::OutOfMemory {
+                    return Err(CodexErr::Sandbox(SandboxErr::OutOfMemory {
                         output: Box::new(exec_output),
                         memory_max_bytes: raw_output.cgroup_memory_max_bytes,
                     }));
                 }
-                return Err(CodeErr::Sandbox(SandboxErr::Signal(signal)));
+                return Err(CodexErr::Sandbox(SandboxErr::Signal(signal)));
             }
 
             if exit_code != 0 && is_likely_sandbox_denied(sandbox_type, exit_code) {
-                return Err(CodeErr::Sandbox(SandboxErr::Denied {
+                return Err(CodexErr::Sandbox(SandboxErr::Denied {
                     output: Box::new(exec_output),
                 }));
             }
@@ -338,7 +338,7 @@ async fn exec(
     preflight_exec(&command, &cwd, &env)?;
 
     let (program, args) = command.split_first().ok_or_else(|| {
-        CodeErr::Io(io::Error::new(
+        CodexErr::Io(io::Error::new(
             io::ErrorKind::InvalidInput,
             "command args are empty",
         ))
@@ -457,12 +457,12 @@ async fn consume_truncated_output(
     let mut killer = KillOnDrop::new(child);
 
     let stdout_reader = killer.as_mut().stdout.take().ok_or_else(|| {
-        CodeErr::Io(io::Error::other(
+        CodexErr::Io(io::Error::other(
             "stdout pipe was unexpectedly not available",
         ))
     })?;
     let stderr_reader = killer.as_mut().stderr.take().ok_or_else(|| {
-        CodeErr::Io(io::Error::other(
+        CodexErr::Io(io::Error::other(
             "stderr pipe was unexpectedly not available",
         ))
     })?;
@@ -529,7 +529,8 @@ async fn consume_truncated_output(
         }
         StreamOutput {
             text: combined_buf,
-            truncated_after_lines: combined_truncated.then_some(combined_truncated_lines.max(1)),
+            truncated_after_lines: combined_truncated
+                .then_some(combined_truncated_lines.max(1)),
             truncated_before_bytes: (combined_truncated_bytes > 0)
                 .then_some(combined_truncated_bytes),
         }
@@ -648,7 +649,7 @@ async fn consume_truncated_output(
             truncated_before_bytes: None,
         }
     } else {
-        combined_handle.await.map_err(CodeErr::from)?
+        combined_handle.await.map_err(CodexErr::from)?
     };
 
     let (oom_killed, cgroup_memory_max_bytes) = {
@@ -714,12 +715,7 @@ async fn emit_pending_delta(
     let event = if let Some(sess) = &stream.session {
         sess.make_event(&stream.sub_id, msg)
     } else {
-        Event {
-            id: stream.sub_id.clone(),
-            event_seq: 0,
-            msg,
-            order: stream.order.clone(),
-        }
+        Event { id: stream.sub_id.clone(), event_seq: 0, msg, order: stream.order.clone() }
     };
     #[allow(clippy::let_unit_value)]
     let _ = stream.tx_event.send(event).await;
@@ -836,15 +832,9 @@ struct KillOnDrop {
 }
 
 impl KillOnDrop {
-    fn new(child: Child) -> Self {
-        Self { child: Some(child) }
-    }
-    fn as_mut(&mut self) -> &mut Child {
-        self.child.as_mut().expect("child present")
-    }
-    fn disarm(&mut self) {
-        self.child = None;
-    }
+    fn new(child: Child) -> Self { Self { child: Some(child) } }
+    fn as_mut(&mut self) -> &mut Child { self.child.as_mut().expect("child present") }
+    fn disarm(&mut self) { self.child = None; }
 }
 
 impl Drop for KillOnDrop {

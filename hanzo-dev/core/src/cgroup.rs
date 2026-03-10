@@ -1,27 +1,25 @@
 #[cfg(target_os = "linux")]
-use std::path::Path;
-#[cfg(target_os = "linux")]
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 #[cfg(target_os = "linux")]
 const CGROUP_MOUNT: &str = "/sys/fs/cgroup";
 
 #[cfg(target_os = "linux")]
-const EXEC_CGROUP_SUBDIR: &str = "dev-exec";
+const EXEC_CGROUP_SUBDIR: &str = "code-exec";
 
 #[cfg(target_os = "linux")]
 const EXEC_CGROUP_OOM_SCORE_ADJ: &str = "500";
 
 #[cfg(target_os = "linux")]
 pub(crate) fn default_exec_memory_max_bytes() -> Option<u64> {
-    if let Ok(raw) = std::env::var("HANZO_EXEC_MEMORY_MAX_BYTES") {
+    if let Ok(raw) = std::env::var("CODEX_EXEC_MEMORY_MAX_BYTES") {
         if let Ok(value) = raw.trim().parse::<u64>() {
             if value > 0 {
                 return Some(value);
             }
         }
     }
-    if let Ok(raw) = std::env::var("HANZO_EXEC_MEMORY_MAX_MB") {
+    if let Ok(raw) = std::env::var("CODEX_EXEC_MEMORY_MAX_MB") {
         if let Ok(value) = raw.trim().parse::<u64>() {
             if value > 0 {
                 return Some(value.saturating_mul(1024 * 1024));
@@ -92,12 +90,7 @@ pub(crate) fn exec_cgroup_abs_for_pid(pid: u32) -> Option<PathBuf> {
 #[cfg(target_os = "linux")]
 fn best_effort_enable_memory_controller(parent: &Path) {
     let controllers = std::fs::read_to_string(parent.join("cgroup.controllers")).ok();
-    if controllers
-        .as_deref()
-        .unwrap_or_default()
-        .split_whitespace()
-        .all(|c| c != "memory")
-    {
+    if controllers.as_deref().unwrap_or_default().split_whitespace().all(|c| c != "memory") {
         return;
     }
     let subtree = parent.join("cgroup.subtree_control");
@@ -180,28 +173,3 @@ pub(crate) fn best_effort_cleanup_exec_cgroup(pid: u32) {
     // Only remove the per-pid directory. The parent container stays.
     let _ = std::fs::remove_dir(&dir);
 }
-#[cfg(not(target_os = "linux"))]
-#[allow(dead_code)]
-pub(crate) fn default_exec_memory_max_bytes() -> Option<u64> {
-    None
-}
-
-#[cfg(not(target_os = "linux"))]
-#[allow(dead_code)]
-pub(crate) fn best_effort_attach_self_to_exec_cgroup(_pid: u32, _memory_max_bytes: u64) {}
-
-#[cfg(not(target_os = "linux"))]
-#[allow(dead_code)]
-pub(crate) fn exec_cgroup_oom_killed(_pid: u32) -> Option<bool> {
-    None
-}
-
-#[cfg(not(target_os = "linux"))]
-#[allow(dead_code)]
-pub(crate) fn exec_cgroup_memory_max_bytes(_pid: u32) -> Option<u64> {
-    None
-}
-
-#[cfg(not(target_os = "linux"))]
-#[allow(dead_code)]
-pub(crate) fn best_effort_cleanup_exec_cgroup(_pid: u32) {}

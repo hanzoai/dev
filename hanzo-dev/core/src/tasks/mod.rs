@@ -18,7 +18,6 @@ use crate::protocol::TurnAbortedEvent;
 use crate::state::ActiveTurn;
 use crate::state::RunningTask;
 use crate::state::TaskKind;
-use crate::task_feed;
 
 pub(crate) use compact::CompactTask;
 pub(crate) use regular::RegularTask;
@@ -81,34 +80,17 @@ impl Session {
                     .await;
                 // Emit completion uniformly from spawn site so all tasks share the same lifecycle.
                 let sess = session_ctx.clone_session();
-                sess.on_task_finished(sub_clone, last_agent_message, task_kind)
-                    .await;
+                sess.on_task_finished(sub_clone, last_agent_message).await;
             })
             .abort_handle()
         };
 
-        let sub_id_for_feed = sub_id.clone();
         let running_task = RunningTask {
             handle,
             kind: task_kind,
             task,
         };
         self.register_new_active_task(sub_id, running_task).await;
-
-        task_feed::spawn_task_feed_entry(
-            self.client.code_home().to_path_buf(),
-            task_feed::TaskFeedSeed {
-                event: task_feed::TaskFeedEvent::TaskStarted,
-                status: task_feed::TaskFeedStatus::Running,
-                session_id: self.id.to_string(),
-                task_id: sub_id_for_feed,
-                task_kind: task_kind.header_value().to_string(),
-                model: self.client.get_model(),
-                cwd: self.cwd.clone(),
-                last_agent_message: None,
-                abort_reason: None,
-            },
-        );
     }
 
     pub async fn abort_all_tasks(self: &Arc<Self>, reason: TurnAbortReason) {
@@ -121,7 +103,6 @@ impl Session {
         self: &Arc<Self>,
         sub_id: String,
         last_agent_message: Option<String>,
-        task_kind: TaskKind,
     ) {
         let mut active = self.active_turn.lock().await;
         if let Some(at) = active.as_mut()
@@ -130,28 +111,12 @@ impl Session {
             *active = None;
         }
         drop(active);
-        let last_agent_message_for_feed = last_agent_message.clone();
         let event = Event {
             id: sub_id.clone(),
             msg: EventMsg::TaskComplete(TaskCompleteEvent { last_agent_message }),
         };
         self.send_event(event).await;
         self.reconcile_running_execs(&sub_id).await;
-
-        task_feed::spawn_task_feed_entry(
-            self.client.code_home().to_path_buf(),
-            task_feed::TaskFeedSeed {
-                event: task_feed::TaskFeedEvent::TaskCompleted,
-                status: task_feed::TaskFeedStatus::Succeeded,
-                session_id: self.id.to_string(),
-                task_id: sub_id,
-                task_kind: task_kind.header_value().to_string(),
-                model: self.client.get_model(),
-                cwd: self.cwd.clone(),
-                last_agent_message: last_agent_message_for_feed,
-                abort_reason: None,
-            },
-        );
     }
 
     async fn register_new_active_task(&self, sub_id: String, task: RunningTask) {
@@ -192,7 +157,6 @@ impl Session {
         let session_ctx = Arc::new(SessionTaskContext::new(Arc::clone(self)));
         session_task.abort(session_ctx, &sub_id).await;
 
-        let abort_reason = abort_reason_label(&reason).to_string();
         let event = Event {
             id: sub_id.clone(),
             msg: EventMsg::TurnAborted(TurnAbortedEvent { reason }),
@@ -200,29 +164,6 @@ impl Session {
         self.send_event(event).await;
 
         self.finalize_cancelled_execs(&sub_id).await;
-
-        task_feed::spawn_task_feed_entry(
-            self.client.code_home().to_path_buf(),
-            task_feed::TaskFeedSeed {
-                event: task_feed::TaskFeedEvent::TaskAborted,
-                status: task_feed::TaskFeedStatus::Cancelled,
-                session_id: self.id.to_string(),
-                task_id: sub_id,
-                task_kind: task.kind.header_value().to_string(),
-                model: self.client.get_model(),
-                cwd: self.cwd.clone(),
-                last_agent_message: None,
-                abort_reason,
-            },
-        );
-    }
-}
-
-fn abort_reason_label(reason: &TurnAbortReason) -> &'static str {
-    match reason {
-        TurnAbortReason::Interrupted => "interrupted",
-        TurnAbortReason::Replaced => "replaced",
-        TurnAbortReason::ReviewEnded => "review_ended",
     }
 }
 

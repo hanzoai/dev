@@ -154,6 +154,8 @@ fn run_refresh(
             content: vec![ContentItem::InputText {
                 text: "Yield immediately with only the message \"ok\"".to_string(),
             }],
+            end_turn: None,
+            phase: None,
         });
         prompt.set_log_tag("tui/rate_limit_refresh");
 
@@ -229,7 +231,7 @@ fn run_refresh(
                 order: None,
             };
 
-            app_event_tx.send(AppEvent::CodeEvent(event));
+            app_event_tx.send(AppEvent::CodexEvent(event));
         } else if let Some(account_id) = record_account_id {
             app_event_tx.send(AppEvent::RateLimitSnapshotStored { account_id });
         }

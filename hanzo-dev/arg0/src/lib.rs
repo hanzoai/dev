@@ -2,7 +2,7 @@ use std::future::Future;
 use std::path::Path;
 use std::path::PathBuf;
 
-use hanzo_core::HANZO_APPLY_PATCH_ARG1;
+use hanzo_core::CODEX_APPLY_PATCH_ARG1;
 use hanzo_core::config::resolve_code_path_for_read;
 #[cfg(unix)]
 use std::os::unix::fs::symlink;
@@ -28,7 +28,7 @@ const MISSPELLED_APPLY_PATCH_ARG0: &str = "applypatch";
 /// 3.  Derive the path to the current executable (so children can re-invoke the
 ///     sandbox) when running on Linux.
 /// 4.  Execute the provided async `main_fn` inside that runtime, forwarding any
-///     error. Note that `main_fn` receives `code_linux_sandbox_exe:
+///     error. Note that `main_fn` receives `hanzo_linux_sandbox_exe:
 ///     Option<PathBuf>`, as an argument, which is generally needed as part of
 ///     constructing [`hanzo_core::config::Config`].
 ///
@@ -55,7 +55,7 @@ where
     }
 
     let argv1 = args.next().unwrap_or_default();
-    if argv1 == HANZO_APPLY_PATCH_ARG1 {
+    if argv1 == CODEX_APPLY_PATCH_ARG1 {
         let patch_arg = args.next().and_then(|s| s.to_str().map(str::to_owned));
         let exit_code = match patch_arg {
             Some(patch_arg) => {
@@ -67,7 +67,7 @@ where
                 }
             }
             None => {
-                eprintln!("Error: {HANZO_APPLY_PATCH_ARG1} requires a UTF-8 PATCH argument.");
+                eprintln!("Error: {CODEX_APPLY_PATCH_ARG1} requires a UTF-8 PATCH argument.");
                 1
             }
         };
@@ -95,13 +95,13 @@ where
     // async entry-point.
     let runtime = tokio::runtime::Runtime::new()?;
     runtime.block_on(async move {
-        let code_linux_sandbox_exe: Option<PathBuf> = if cfg!(target_os = "linux") {
+        let hanzo_linux_sandbox_exe: Option<PathBuf> = if cfg!(target_os = "linux") {
             std::env::current_exe().ok()
         } else {
             None
         };
 
-        main_fn(code_linux_sandbox_exe).await
+        main_fn(hanzo_linux_sandbox_exe).await
     })
 }
 
@@ -198,7 +198,7 @@ fn prepend_path_entry_for_apply_patch() -> std::io::Result<TempDir> {
                 &batch_script,
                 format!(
                     r#"@echo off
-"{}" {HANZO_APPLY_PATCH_ARG1} %*
+"{}" {CODEX_APPLY_PATCH_ARG1} %*
 "#,
                     exe.display()
                 ),

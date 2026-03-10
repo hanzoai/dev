@@ -66,7 +66,7 @@ pub struct CodexMessageProcessor {
     _auth_manager: Arc<AuthManager>,
     conversation_manager: Arc<ConversationManager>,
     outgoing: Arc<OutgoingMessageSender>,
-    code_linux_sandbox_exe: Option<PathBuf>,
+    hanzo_linux_sandbox_exe: Option<PathBuf>,
     _config: Arc<Config>,
     conversation_listeners: HashMap<Uuid, oneshot::Sender<()>>,
     // Queue of pending interrupt requests per conversation. We reply when TurnAborted arrives.
@@ -80,14 +80,14 @@ impl CodexMessageProcessor {
         auth_manager: Arc<AuthManager>,
         conversation_manager: Arc<ConversationManager>,
         outgoing: Arc<OutgoingMessageSender>,
-        code_linux_sandbox_exe: Option<PathBuf>,
+        hanzo_linux_sandbox_exe: Option<PathBuf>,
         config: Arc<Config>,
     ) -> Self {
         Self {
             _auth_manager: auth_manager,
             conversation_manager,
             outgoing,
-            code_linux_sandbox_exe,
+            hanzo_linux_sandbox_exe,
             _config: config,
             conversation_listeners: HashMap::new(),
             pending_interrupts: Arc::new(Mutex::new(HashMap::new())),
@@ -165,7 +165,7 @@ impl CodexMessageProcessor {
     // Upstream added utility endpoints (user info, set default model, one-off exec).
     // Our fork does not expose them via this server; omit to preserve behavior.
     async fn process_new_conversation(&self, request_id: RequestId, params: NewConversationParams) {
-        let config = match derive_config_from_params(params, self.code_linux_sandbox_exe.clone()) {
+        let config = match derive_config_from_params(params, self.hanzo_linux_sandbox_exe.clone()) {
             Ok(config) => config,
             Err(err) => {
                 let error = JSONRPCErrorError {
@@ -572,13 +572,10 @@ async fn apply_bespoke_event_handling(
                         hanzo_core::protocol::FileChange::Update {
                             unified_diff,
                             move_path,
-                            original_content,
-                            new_content,
+                            ..
                         } => hanzo_protocol::protocol::FileChange::Update {
                             unified_diff,
                             move_path,
-                            original_content,
-                            new_content,
                         },
                     };
                     (p, mapped)
@@ -607,6 +604,8 @@ async fn apply_bespoke_event_handling(
             command,
             cwd,
             reason,
+            approval_id: req_approval_id,
+            ..
         }) => {
             let params = ExecCommandApprovalParams {
                 conversation_id,
@@ -614,6 +613,8 @@ async fn apply_bespoke_event_handling(
                 command,
                 cwd,
                 reason,
+                approval_id: req_approval_id,
+                additional_permissions: None,
             };
             let value = serde_json::to_value(&params).unwrap_or_default();
             let rx = outgoing
@@ -633,7 +634,7 @@ async fn apply_bespoke_event_handling(
 
 fn derive_config_from_params(
     params: NewConversationParams,
-    code_linux_sandbox_exe: Option<PathBuf>,
+    hanzo_linux_sandbox_exe: Option<PathBuf>,
 ) -> std::io::Result<Config> {
     let NewConversationParams {
         model,
@@ -654,7 +655,7 @@ fn derive_config_from_params(
         approval_policy: approval_policy.map(map_ask_for_approval_from_wire),
         sandbox_mode,
         model_provider: None,
-        code_linux_sandbox_exe,
+        hanzo_linux_sandbox_exe,
         base_instructions,
         include_plan_tool,
         include_apply_patch_tool: None,
@@ -665,9 +666,9 @@ fn derive_config_from_params(
         tools_web_search_request: None,
         mcp_servers: None,
         experimental_client_tools: None,
+        dynamic_tools: None,
         compact_prompt_override: None,
         compact_prompt_override_file: None,
-        wire_api: None,
     };
 
     let cli_overrides = cli_overrides
@@ -749,6 +750,7 @@ async fn on_exec_approval_response(
     if let Err(err) = conversation
         .submit(Op::ExecApproval {
             id: approval_id,
+            turn_id: Some(String::new()),
             decision: map_review_decision_from_wire(response.decision),
         })
         .await
@@ -769,6 +771,9 @@ fn map_review_decision_from_wire(
         }
         hanzo_protocol::protocol::ReviewDecision::Denied => core_protocol::ReviewDecision::Denied,
         hanzo_protocol::protocol::ReviewDecision::Abort => core_protocol::ReviewDecision::Abort,
+        hanzo_protocol::protocol::ReviewDecision::ApprovedExecpolicyAmendment { .. } => {
+            core_protocol::ReviewDecision::Approved
+        }
     }
 }
 
@@ -786,6 +791,13 @@ fn map_ask_for_approval_from_wire(
             core_protocol::AskForApproval::OnRequest
         }
         hanzo_protocol::protocol::AskForApproval::Never => core_protocol::AskForApproval::Never,
+        hanzo_protocol::protocol::AskForApproval::Reject(config) => {
+            core_protocol::AskForApproval::Reject(core_protocol::RejectConfig {
+                sandbox_approval: config.sandbox_approval,
+                rules: config.rules,
+                mcp_elicitations: config.mcp_elicitations,
+            })
+        }
     }
 }
 

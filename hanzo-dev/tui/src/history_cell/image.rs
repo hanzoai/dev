@@ -98,7 +98,7 @@ impl ImageOutputCell {
         };
         if needs_init {
             *slot = Some(picker.unwrap_or_else(|| {
-                Picker::from_query_stdio().unwrap_or_else(|_| Picker::halfblocks())
+                Picker::from_query_stdio().unwrap_or_else(|_| Picker::from_fontsize((1, 2)))
             }));
             self.cached_image_protocol.borrow_mut().take();
         }
@@ -119,7 +119,7 @@ impl ImageOutputCell {
     fn ensure_picker(&self) -> Picker {
         let mut picker_ref = self.cached_picker.borrow_mut();
         if picker_ref.is_none() {
-            *picker_ref = Some(Picker::from_query_stdio().unwrap_or_else(|_| Picker::halfblocks()));
+            *picker_ref = Some(Picker::from_query_stdio().unwrap_or_else(|_| Picker::from_fontsize((1, 2))));
         }
         picker_ref.as_ref().unwrap().clone()
     }
@@ -180,7 +180,7 @@ impl ImageOutputCell {
             lines.push(format!("Type: {mime}"));
         }
         if let Some(byte_len) = record.byte_len {
-            let size = format_with_separators(u64::from(byte_len));
+            let size = format_with_separators(i64::from(byte_len));
             lines.push(format!("Size: {size} bytes"));
         }
         if let Some(alt) = record

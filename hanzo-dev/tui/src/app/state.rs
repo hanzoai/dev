@@ -264,6 +264,10 @@ pub(crate) struct App<'a> {
     /// profile defaults until all cells are explicitly painted.
     pub(super) clear_on_first_frame: bool,
 
+    /// When true, keyboard input from the terminal is suspended (e.g. while an
+    /// external editor is open).
+    pub(super) input_suspended: Arc<AtomicBool>,
+
     /// Pending ghost snapshot state to apply after a conversation fork completes.
     pub(super) pending_jump_back_ghost_state: Option<GhostState>,
     /// Pending history snapshot to seed the next widget after a jump-back fork.

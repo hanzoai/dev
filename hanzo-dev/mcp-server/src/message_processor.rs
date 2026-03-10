@@ -64,7 +64,7 @@ use uuid::Uuid;
 pub(crate) struct MessageProcessor {
     outgoing: Arc<OutgoingMessageSender>,
     initialized: bool,
-    code_linux_sandbox_exe: Option<PathBuf>,
+    hanzo_linux_sandbox_exe: Option<PathBuf>,
     conversation_manager: Arc<ConversationManager>,
     session_map: SessionMap,
     running_requests_id_to_code_uuid: Arc<Mutex<HashMap<RequestId, Uuid>>>,
@@ -77,7 +77,7 @@ impl MessageProcessor {
     /// `Sender` so handlers can enqueue messages to be written to stdout.
     pub(crate) fn new(
         outgoing: OutgoingMessageSender,
-        code_linux_sandbox_exe: Option<PathBuf>,
+        hanzo_linux_sandbox_exe: Option<PathBuf>,
         config: Arc<Config>,
     ) -> Self {
         let outgoing = Arc::new(outgoing);
@@ -95,14 +95,14 @@ impl MessageProcessor {
             auth_manager,
             conversation_manager.clone(),
             outgoing.clone(),
-            code_linux_sandbox_exe.clone(),
+            hanzo_linux_sandbox_exe.clone(),
             config_for_processor,
         );
         let session_map: SessionMap = Arc::new(Mutex::new(HashMap::new()));
         Self {
             outgoing,
             initialized: false,
-            code_linux_sandbox_exe,
+            hanzo_linux_sandbox_exe,
             conversation_manager,
             session_map,
             running_requests_id_to_code_uuid: Arc::new(Mutex::new(HashMap::new())),
@@ -572,7 +572,7 @@ impl MessageProcessor {
     async fn handle_tool_call_codex(&self, id: RequestId, arguments: Option<serde_json::Value>) {
         let (initial_prompt, config): (String, Config) = match arguments {
             Some(json_val) => match serde_json::from_value::<CodexToolCallParam>(json_val) {
-                Ok(tool_cfg) => match tool_cfg.into_config(self.code_linux_sandbox_exe.clone()) {
+                Ok(tool_cfg) => match tool_cfg.into_config(self.hanzo_linux_sandbox_exe.clone()) {
                     Ok(cfg) => cfg,
                     Err(e) => {
                         let result = CallToolResult {
@@ -978,7 +978,7 @@ impl MessageProcessor {
             experimental_client_tools: client_tools,
             compact_prompt_override: None,
             compact_prompt_override_file: None,
-            wire_api: None,
+            dynamic_tools: None,
             ..Default::default()
         };
 
@@ -1635,6 +1635,7 @@ fn configure_session_op_from_config(config: &Config) -> Op {
         cwd: config.cwd.clone(),
         resume_path: None,
         demo_developer_message: config.demo_developer_message.clone(),
+        dynamic_tools: config.dynamic_tools.clone(),
     }
 }
 

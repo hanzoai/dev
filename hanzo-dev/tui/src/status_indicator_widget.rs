@@ -77,7 +77,7 @@ impl StatusIndicatorWidget {
     }
 
     pub(crate) fn interrupt(&self) {
-        self.app_event_tx.send(AppEvent::CodeOp(Op::Interrupt));
+        self.app_event_tx.send(AppEvent::CodexOp(Op::Interrupt));
     }
 
     pub(crate) fn update_header(&mut self, header: String) {
@@ -249,7 +249,7 @@ impl WidgetRef for StatusIndicatorWidget {
                         Style::default()
                             .fg(text_dim)
                             .add_modifier(Modifier::DIM)
-                            .italic(),
+                            .add_modifier(Modifier::ITALIC),
                     ),
                 );
             }
@@ -259,7 +259,7 @@ impl WidgetRef for StatusIndicatorWidget {
                         Style::default()
                             .fg(text_dim)
                             .add_modifier(Modifier::DIM)
-                            .italic(),
+                            .add_modifier(Modifier::ITALIC),
                     ),
                 );
             }

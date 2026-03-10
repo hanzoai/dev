@@ -19,9 +19,7 @@ pub enum SafetyCheck {
         user_explicitly_approved: bool,
     },
     AskUser,
-    Reject {
-        reason: String,
-    },
+    Reject { reason: String },
 }
 
 pub fn assess_patch_safety(
@@ -40,8 +38,7 @@ pub fn assess_patch_safety(
     if matches!(sandbox_policy, SandboxPolicy::ReadOnly) {
         return match policy {
             AskForApproval::Never => SafetyCheck::Reject {
-                reason: "write operations require approval but approval policy is set to never"
-                    .to_string(),
+                reason: "write operations require approval but approval policy is set to never".to_string(),
             },
             AskForApproval::Reject(config)
                 if config.rejects_sandbox_approval() || config.rejects_rules_approval() =>
@@ -130,8 +127,12 @@ pub fn assess_command_safety(
     // would probably be fine to run the command in a sandbox, but when
     // `approved.contains(command)` is `true`, the user may have approved it for
     // the session _because_ they know it needs to run outside a sandbox.
-    if is_known_safe_command(command) || approved.iter().any(|pattern| pattern.matches(command)) {
-        let user_explicitly_approved = approved.iter().any(|pattern| pattern.matches(command));
+    if is_known_safe_command(command)
+        || approved.iter().any(|pattern| pattern.matches(command))
+    {
+        let user_explicitly_approved = approved
+            .iter()
+            .any(|pattern| pattern.matches(command));
         return SafetyCheck::AutoApprove {
             sandbox_type: SandboxType::None,
             user_explicitly_approved,
@@ -297,10 +298,10 @@ fn is_write_patch_constrained_to_writable_paths(
                 if !is_path_writable(path) {
                     return false;
                 }
-                if let Some(dest) = move_path
-                    && !is_path_writable(dest)
-                {
-                    return false;
+                if let Some(dest) = move_path {
+                    if !is_path_writable(dest) {
+                        return false;
+                    }
                 }
             }
         }

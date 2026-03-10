@@ -19,8 +19,8 @@ use hanzo_rmcp_client::RmcpClient;
 use mcp_types::ClientCapabilities;
 use mcp_types::Implementation;
 use mcp_types::Tool;
-use serde_json::json;
 
+use serde_json::json;
 use sha1::Digest;
 use sha1::Sha1;
 use tokio::sync::RwLock;
@@ -30,6 +30,7 @@ use tracing::warn;
 
 use crate::config_types::McpServerConfig;
 use crate::config_types::McpServerTransportConfig;
+use crate::protocol::{McpServerFailure, McpServerFailurePhase};
 
 /// Delimiter used to separate the server name from the tool name in a fully
 /// qualified tool name.
@@ -81,9 +82,8 @@ fn append_sha1_suffix(base: &str, raw: &str) -> String {
 /// Default timeout for initializing MCP server & initially listing tools.
 const DEFAULT_STARTUP_TIMEOUT: Duration = Duration::from_secs(10);
 
-/// Map that holds a startup error for every MCP server that could **not** be
-/// spawned successfully.
-pub type ClientStartErrors = HashMap<String, anyhow::Error>;
+/// Map that holds startup or tool-list errors for MCP servers.
+pub type ClientStartErrors = HashMap<String, McpServerFailure>;
 
 fn qualify_tools(tools: Vec<ToolInfo>) -> HashMap<String, ToolInfo> {
     let mut used_names = HashSet::new();
@@ -141,7 +141,6 @@ struct ManagedClient {
 #[derive(Clone)]
 enum McpClientAdapter {
     Rmcp(Arc<RmcpClient>),
-    Zap(Arc<tokio::sync::Mutex<hanzo_zap::Client>>),
 }
 
 impl McpClientAdapter {
@@ -180,17 +179,6 @@ impl McpClientAdapter {
         Ok(McpClientAdapter::Rmcp(client))
     }
 
-    async fn new_zap_client(url: String, startup_timeout: Duration) -> Result<Self> {
-        let client = tokio::time::timeout(startup_timeout, hanzo_zap::Client::connect(&url))
-            .await
-            .map_err(|_| {
-                anyhow!("ZAP connection to {url} timed out after {startup_timeout:?}")
-            })??;
-        Ok(McpClientAdapter::Zap(Arc::new(tokio::sync::Mutex::new(
-            client,
-        ))))
-    }
-
     async fn list_tools(
         &self,
         params: Option<mcp_types::ListToolsRequestParams>,
@@ -198,24 +186,6 @@ impl McpClientAdapter {
     ) -> Result<mcp_types::ListToolsResult> {
         match self {
             McpClientAdapter::Rmcp(client) => client.list_tools(params, timeout).await,
-            McpClientAdapter::Zap(client) => {
-                let _ = params;
-                let fut = async {
-                    let mut guard = client.lock().await;
-                    guard.list_tools().await
-                };
-                let zap_tools = match timeout {
-                    Some(t) => tokio::time::timeout(t, fut)
-                        .await
-                        .map_err(|_| anyhow!("ZAP list_tools timed out"))??,
-                    None => fut.await?,
-                };
-                let tools = zap_tools.into_iter().map(zap_tool_to_mcp).collect();
-                Ok(mcp_types::ListToolsResult {
-                    tools,
-                    next_cursor: None,
-                })
-            }
         }
     }
 
@@ -227,20 +197,6 @@ impl McpClientAdapter {
     ) -> Result<mcp_types::CallToolResult> {
         match self {
             McpClientAdapter::Rmcp(client) => client.call_tool(name, arguments, timeout).await,
-            McpClientAdapter::Zap(client) => {
-                let args = arguments.unwrap_or(serde_json::Value::Object(Default::default()));
-                let fut = async {
-                    let mut guard = client.lock().await;
-                    guard.call_tool(&name, args).await
-                };
-                let result = match timeout {
-                    Some(t) => tokio::time::timeout(t, fut)
-                        .await
-                        .map_err(|_| anyhow!("ZAP call_tool timed out"))?,
-                    None => fut.await,
-                }?;
-                Ok(zap_result_to_mcp(result))
-            }
         }
     }
 
@@ -248,14 +204,6 @@ impl McpClientAdapter {
         match self {
             McpClientAdapter::Rmcp(client) => {
                 client.shutdown().await;
-            }
-            McpClientAdapter::Zap(client) => {
-                if let Ok(guard) = Arc::try_unwrap(client) {
-                    let client = guard.into_inner();
-                    if let Err(e) = client.close().await {
-                        warn!("ZAP client close error: {e:#}");
-                    }
-                }
             }
         }
     }
@@ -272,6 +220,8 @@ pub struct McpConnectionManager {
 
     /// Fully qualified tool name -> tool instance.
     tools: HashMap<String, ToolInfo>,
+    server_names: Vec<String>,
+    failures: HashMap<String, McpServerFailure>,
 }
 
 impl McpConnectionManager {
@@ -281,8 +231,8 @@ impl McpConnectionManager {
     ///   are human-readable server identifiers and *values* are the spawn
     ///   instructions.
     ///
-    /// Servers that fail to start are reported in `ClientStartErrors`: the
-    /// user should be informed about these errors.
+    /// Servers that fail to start or list tools are reported in `ClientStartErrors`:
+    /// the user should be informed about these errors.
     pub async fn new(
         mcp_servers: HashMap<String, McpServerConfig>,
         excluded_tools: HashSet<(String, String)>,
@@ -299,10 +249,13 @@ impl McpConnectionManager {
         for (server_name, cfg) in mcp_servers {
             // Validate server name before spawning
             if !is_valid_mcp_server_name(&server_name) {
-                let error = anyhow::anyhow!(
+                let message = format!(
                     "invalid server name '{server_name}': must match pattern ^[a-zA-Z0-9_-]+$"
                 );
-                errors.insert(server_name, error);
+                errors.insert(
+                    server_name,
+                    McpServerFailure { phase: McpServerFailurePhase::Start, message },
+                );
                 continue;
             }
 
@@ -322,11 +275,11 @@ impl McpConnectionManager {
                         elicitation: Some(json!({})),
                     },
                     client_info: Implementation {
-                        name: "hanzo-dev-mcp-client".to_owned(),
+                        name: "codex-mcp-client".to_owned(),
                         version: env!("CARGO_PKG_VERSION").to_owned(),
-                        title: Some("Hanzo Dev".into()),
-                        // This field is used by Hanzo Dev when it is an MCP
-                        // server: it should not be used when Hanzo Dev is
+                        title: Some("Codex".into()),
+                        // This field is used by Codex when it is an MCP
+                        // server: it should not be used when Codex is
                         // an MCP client.
                         user_agent: None,
                     },
@@ -350,11 +303,13 @@ impl McpConnectionManager {
                         .with_context(|| {
                             if args_for_error.is_empty() {
                                 format!(
-                                    "failed to spawn MCP server `{server_name_for_error}` using command `{command_for_error}`"
+                                    "failed to spawn MCP server `{}` using command `{}`",
+                                    server_name_for_error, command_for_error
                                 )
                             } else {
                                 format!(
-                                    "failed to spawn MCP server `{server_name_for_error}` using command `{command_for_error}` with args {args_for_error:?}"
+                                    "failed to spawn MCP server `{}` using command `{}` with args {:?}",
+                                    server_name_for_error, command_for_error, args_for_error
                                 )
                             }
                         })
@@ -377,15 +332,6 @@ impl McpConnectionManager {
                             startup_timeout,
                         )
                         .await
-                    }
-                    McpServerTransportConfig::Zap { url } => {
-                        McpClientAdapter::new_zap_client(url, startup_timeout)
-                            .await
-                            .with_context(|| {
-                                format!(
-                                    "failed to connect to ZAP server `{server_name_for_error}`"
-                                )
-                            })
                     }
                 }
                 .map(|c| (c, startup_timeout));
@@ -417,7 +363,14 @@ impl McpConnectionManager {
                     );
                 }
                 Err(e) => {
-                    errors.insert(server_name, e);
+                    let message = format!("server '{server_name}': {e:#}");
+                    errors.insert(
+                        server_name,
+                        McpServerFailure {
+                            phase: McpServerFailurePhase::Start,
+                            message,
+                        },
+                    );
                 }
             }
         }
@@ -426,13 +379,16 @@ impl McpConnectionManager {
 
         let tools = qualify_tools(all_tools);
 
-        Ok((
-            Self {
-                clients: RwLock::new(clients),
-                tools,
-            },
-            errors,
-        ))
+        let mut server_names: Vec<String> = clients.keys().cloned().collect();
+        server_names.sort();
+        let failures = errors.clone();
+
+        Ok((Self {
+            clients: RwLock::new(clients),
+            tools,
+            server_names,
+            failures,
+        }, errors))
     }
 
     /// Returns a single map that contains **all** tools. Each key is the
@@ -442,6 +398,44 @@ impl McpConnectionManager {
             .iter()
             .map(|(name, tool)| (name.clone(), tool.tool.clone()))
             .collect()
+    }
+
+    pub fn list_all_tools_with_server_names(&self) -> Vec<(String, String, Tool)> {
+        self.tools
+            .iter()
+            .map(|(qualified_name, tool_info)| {
+                (
+                    qualified_name.clone(),
+                    tool_info.server_name.clone(),
+                    tool_info.tool.clone(),
+                )
+            })
+            .collect()
+    }
+
+    pub fn list_tools_by_server(&self) -> HashMap<String, Vec<String>> {
+        let mut tools_by_server: HashMap<String, Vec<String>> = HashMap::new();
+        for tool in self.tools.values() {
+            tools_by_server
+                .entry(tool.server_name.clone())
+                .or_default()
+                .push(tool.tool_name.clone());
+        }
+
+        for server_name in &self.server_names {
+            tools_by_server.entry(server_name.clone()).or_default();
+        }
+
+        for tools in tools_by_server.values_mut() {
+            tools.sort();
+            tools.dedup();
+        }
+
+        tools_by_server
+    }
+
+    pub fn list_server_failures(&self) -> HashMap<String, McpServerFailure> {
+        self.failures.clone()
     }
 
     /// Invoke the tool indicated by the (server, tool) pair.
@@ -482,6 +476,7 @@ impl McpConnectionManager {
             managed.shutdown().await;
         }
     }
+
 }
 
 impl ManagedClient {
@@ -537,8 +532,16 @@ async fn list_all_tools(
                 }
             }
             Err(err) => {
-                warn!("Failed to list tools for MCP server '{server_name}': {err:#?}");
-                errors.insert(server_name, err);
+                warn!(
+                    "Failed to list tools for MCP server '{server_name}': {err:#?}"
+                );
+                errors.insert(
+                    server_name,
+                    McpServerFailure {
+                        phase: McpServerFailurePhase::ListTools,
+                        message: format!("{err:#}"),
+                    },
+                );
             }
         }
     }
@@ -550,67 +553,6 @@ async fn list_all_tools(
     );
 
     aggregated
-}
-
-/// Convert a ZAP tool definition into an MCP tool definition.
-fn zap_tool_to_mcp(tool: hanzo_zap::Tool) -> mcp_types::Tool {
-    // The ZAP `input_schema` is a serde_json::Value; MCP expects a
-    // `ToolInputSchema` with explicit `type`, `properties`, and `required` fields.
-    let (r#type, properties, required) = match tool.input_schema {
-        serde_json::Value::Object(ref map) => {
-            let t = map
-                .get("type")
-                .and_then(|v| v.as_str())
-                .unwrap_or("object")
-                .to_string();
-            let props = map.get("properties").cloned();
-            let req = map.get("required").and_then(|v| {
-                v.as_array().map(|arr| {
-                    arr.iter()
-                        .filter_map(|s| s.as_str().map(String::from))
-                        .collect::<Vec<_>>()
-                })
-            });
-            (t, props, req)
-        }
-        _ => ("object".to_string(), None, None),
-    };
-
-    mcp_types::Tool {
-        name: tool.name,
-        description: Some(tool.description),
-        input_schema: mcp_types::ToolInputSchema {
-            r#type,
-            properties,
-            required,
-        },
-        annotations: None,
-        output_schema: None,
-        title: None,
-    }
-}
-
-/// Convert a ZAP tool result into an MCP call-tool result.
-fn zap_result_to_mcp(result: hanzo_zap::ToolResult) -> mcp_types::CallToolResult {
-    let text = match &result.content {
-        serde_json::Value::String(s) => s.clone(),
-        other => other.to_string(),
-    };
-    mcp_types::CallToolResult {
-        content: vec![mcp_types::ContentBlock::TextContent(
-            mcp_types::TextContent {
-                text,
-                annotations: None,
-                r#type: "text".to_string(),
-            },
-        )],
-        is_error: if result.error.is_some() {
-            Some(true)
-        } else {
-            None
-        },
-        structured_content: None,
-    }
 }
 
 fn is_valid_mcp_server_name(server_name: &str) -> bool {
@@ -752,12 +694,9 @@ mod tests {
         let err = errors
             .get("context7-mcp")
             .expect("missing executable should be reported under server name");
-        let msg = format!("{err:#}");
+        let msg = err.message.as_str();
 
-        assert!(
-            msg.contains("context7-mcp"),
-            "error should mention the server name"
-        );
+        assert!(msg.contains("context7-mcp"), "error should mention the server name");
         assert!(
             msg.contains("nonexistent-cmd"),
             "error should include the missing command, got: {msg}"

@@ -10,7 +10,7 @@ pub(crate) fn account_display_label(account: &StoredAccount) -> String {
         let trimmed = label.trim();
         if !trimmed.is_empty() {
             match account.mode {
-                AuthMode::ChatGPT | AuthMode::Hanzo => {
+                AuthMode::ChatGPT | AuthMode::ChatgptAuthTokens | AuthMode::Hanzo => {
                     let default_email = account
                         .tokens
                         .as_ref()
@@ -30,12 +30,12 @@ pub(crate) fn account_display_label(account: &StoredAccount) -> String {
     }
 
     let mode_label = match account.mode {
-        AuthMode::ChatGPT => "ChatGPT",
+        AuthMode::ChatGPT | AuthMode::ChatgptAuthTokens => "ChatGPT",
         AuthMode::Hanzo => "Hanzo",
         AuthMode::ApiKey => "API key",
     };
     match account.mode {
-        AuthMode::ChatGPT | AuthMode::Hanzo => account
+        AuthMode::ChatGPT | AuthMode::ChatgptAuthTokens | AuthMode::Hanzo => account
             .tokens
             .as_ref()
             .and_then(|tokens| tokens.id_token.email.clone())
@@ -59,7 +59,7 @@ pub(crate) fn key_suffix(text: &str) -> String {
 pub(crate) fn account_mode_priority(mode: AuthMode) -> u8 {
     match mode {
         AuthMode::Hanzo => 0,
-        AuthMode::ChatGPT => 1,
+        AuthMode::ChatGPT | AuthMode::ChatgptAuthTokens => 1,
         AuthMode::ApiKey => 2,
     }
 }

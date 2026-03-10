@@ -84,7 +84,7 @@ async fn run_llm_request(
             model: Some(model.clone()),
             compact_prompt_override: None,
             compact_prompt_override_file: None,
-            wire_api: None,
+            dynamic_tools: None,
             ..ConfigOverrides::default()
         }
     } else {
@@ -101,6 +101,8 @@ async fn run_llm_request(
         content: vec![ContentItem::InputText {
             text: args.developer.clone(),
         }],
+        end_turn: None,
+        phase: None,
     });
     input.push(ResponseItem::Message {
         id: None,
@@ -108,6 +110,8 @@ async fn run_llm_request(
         content: vec![ContentItem::InputText {
             text: args.message.clone(),
         }],
+        end_turn: None,
+        phase: None,
     });
 
     // Resolve schema

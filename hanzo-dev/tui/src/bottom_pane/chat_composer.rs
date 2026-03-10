@@ -3,9 +3,9 @@ use ratatui::layout::{Constraint, Layout, Margin, Rect};
 use ratatui::style::{Color, Modifier, Style, Stylize};
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, BorderType, Borders, StatefulWidgetRef, WidgetRef};
-use code_core::config_types::ContextMode;
-use code_core::protocol::AutoContextPhase;
-use code_core::protocol::TokenUsage;
+use hanzo_core::config_types::ContextMode;
+use hanzo_core::protocol::AutoContextPhase;
+use hanzo_core::protocol::TokenUsage;
 use crossterm::event::KeyCode;
 use crossterm::event::KeyEvent;
 use crossterm::event::KeyEventKind;
@@ -17,9 +17,9 @@ use super::command_popup::CommandPopup;
 use super::file_search_popup::FileSearchPopup;
 use super::paste_burst::PasteBurst;
 use crate::slash_command::{built_in_slash_commands, SlashCommand};
-use code_protocol::custom_prompts::CustomPrompt;
-use code_protocol::custom_prompts::PROMPTS_CMD_PREFIX;
-use code_core::model_family::EXTENDED_CONTEXT_WINDOW_1M;
+use hanzo_protocol::custom_prompts::CustomPrompt;
+use hanzo_protocol::custom_prompts::PROMPTS_CMD_PREFIX;
+use hanzo_core::model_family::EXTENDED_CONTEXT_WINDOW_1M;
 
 use crate::app_event_sender::AppEventSender;
 use crate::auto_drive_style::{BorderGradient, ComposerStyle};
@@ -30,7 +30,7 @@ use crate::bottom_pane::textarea::TextAreaState;
 use crate::clipboard_paste::normalize_pasted_path;
 use crate::clipboard_paste::paste_image_to_temp_png;
 use crate::clipboard_paste::try_decode_base64_image_to_temp_png;
-use code_file_search::FileMatch;
+use hanzo_file_search::FileMatch;
 use std::cell::RefCell;
 use std::sync::Arc;
 use std::sync::atomic::AtomicBool;
@@ -1940,7 +1940,7 @@ impl ChatComposer {
                         command_popup.set_prompts(self.custom_prompts.clone());
                     }
                     // Load saved subagent commands to include in autocomplete (exclude built-ins)
-                    if let Ok(cfg) = code_core::config::Config::load_with_cli_overrides(vec![], code_core::config::ConfigOverrides::default()) {
+                    if let Ok(cfg) = hanzo_core::config::Config::load_with_cli_overrides(vec![], hanzo_core::config::ConfigOverrides::default()) {
                         let mut names: Vec<String> = cfg
                             .subagent_commands
                             .iter()

@@ -8,9 +8,9 @@ use std::sync::{Arc, Mutex, OnceLock};
 use std::time::{Duration, Instant};
 
 use chrono::{DateTime, Utc};
-use code_protocol::models::{ContentItem, ResponseItem};
-use code_protocol::protocol::RolloutItem;
-use code_protocol::protocol::SessionSource;
+use hanzo_protocol::models::{ContentItem, ResponseItem};
+use hanzo_protocol::protocol::RolloutItem;
+use hanzo_protocol::protocol::SessionSource;
 use futures::StreamExt;
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
@@ -720,7 +720,7 @@ fn phase2_output_schema() -> Value {
     })
 }
 
-fn serialize_memory_relevant_rollout(items: &[code_protocol::protocol::RolloutItem]) -> anyhow::Result<String> {
+fn serialize_memory_relevant_rollout(items: &[hanzo_protocol::protocol::RolloutItem]) -> anyhow::Result<String> {
     let mut out = Vec::new();
     for item in items {
         if crate::rollout::policy::should_persist_response_item_for_memories(item) {
