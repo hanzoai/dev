@@ -76,7 +76,6 @@ static PRESETS: Lazy<Vec<ModelPreset>> = Lazy::new(|| {
             supported_text_verbosity: ALL_TEXT_VERBOSITY,
             is_default: false,
             upgrade: None,
-            pro_only: false,
             show_in_picker: true,
         },
         ModelPreset {
@@ -541,6 +540,7 @@ fn find_preset_for_model(model: &str) -> Option<&'static ModelPreset> {
 
 fn reasoning_effort_rank(effort: ReasoningEffort) -> u8 {
     match effort {
+        ReasoningEffort::None => 0,
         ReasoningEffort::Minimal => 0,
         ReasoningEffort::Low => 1,
         ReasoningEffort::Medium => 2,

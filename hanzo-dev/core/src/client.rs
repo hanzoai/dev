@@ -11,8 +11,8 @@ use crate::account_usage;
 use crate::auth;
 use crate::auth_accounts;
 use bytes::Bytes;
-use code_app_server_protocol::AuthMode;
-use code_protocol::models::ResponseItem;
+use hanzo_app_server_protocol::AuthMode;
+use hanzo_protocol::models::ResponseItem;
 use eventsource_stream::Eventsource;
 use futures::prelude::*;
 use httpdate::parse_http_date;
@@ -79,7 +79,7 @@ use crate::protocol::TokenUsage;
 use crate::reasoning::clamp_reasoning_effort_for_model;
 use crate::slash_commands::get_enabled_agents;
 use crate::util::backoff;
-use code_otel::otel_event_manager::{OtelEventManager, TurnLatencyPayload};
+use hanzo_otel::otel_event_manager::{OtelEventManager, TurnLatencyPayload};
 use std::sync::Arc;
 use std::sync::Mutex;
 use std::sync::RwLock;
@@ -346,7 +346,7 @@ impl ModelClient {
 
                 prefer_websockets.then_some(preferred_ws_version_from_env())
             }
-            WireApi::Chat => None,
+            WireApi::Chat | WireApi::Zap => None,
         }
     }
 
@@ -465,7 +465,7 @@ impl ModelClient {
             .as_ref()
             .and_then(|manager| manager.auth().map(|auth| auth.mode))
             .or(Some(if self.config.using_chatgpt_auth {
-                AuthMode::Chatgpt
+                AuthMode::ChatGPT
             } else {
                 AuthMode::ApiKey
             }));
@@ -648,6 +648,30 @@ impl ModelClient {
                 });
 
                 Ok(ResponseStream { rx_event: rx })
+            }
+            WireApi::Zap => {
+                // Delegate to the ZAP cloud client
+                let model_slug = prompt
+                    .model_override
+                    .as_deref()
+                    .unwrap_or(self.config.model.as_str());
+                let messages_json = serde_json::to_value(&prompt.input).unwrap_or_default();
+                let auth_token = match &self.auth_manager {
+                    Some(am) => {
+                        match am.auth() {
+                            Some(auth) => auth.get_token().await.unwrap_or_default(),
+                            None => String::new(),
+                        }
+                    }
+                    None => String::new(),
+                };
+                crate::zap_client::stream_zap(
+                    model_slug,
+                    messages_json,
+                    &auth_token,
+                    self.provider.base_url.as_deref(),
+                    None,
+                ).await
             }
         }
     }

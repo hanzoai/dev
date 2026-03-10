@@ -2,8 +2,7 @@ use std::time::Instant;
 
 use tracing::error;
 
-use crate::codex::Session;
-use crate::codex::ToolCallCtx;
+use crate::codex::{Session, ToolCallCtx};
 use crate::protocol::EventMsg;
 use crate::protocol::McpInvocation;
 use crate::protocol::McpToolCallBeginEvent;
@@ -32,9 +31,8 @@ pub(crate) async fn handle_mcp_tool_call(
                 return ResponseInputItem::FunctionCallOutput {
                     call_id: ctx.call_id.clone(),
                     output: FunctionCallOutputPayload {
-                        content: format!("err: {e}"),
-                        success: Some(false),
-                    },
+                        body: hanzo_protocol::models::FunctionCallOutputBody::Text(format!("err: {e}")),
+                        success: Some(false)},
                 };
             }
         }
@@ -46,10 +44,7 @@ pub(crate) async fn handle_mcp_tool_call(
         arguments: arguments_value.clone(),
     };
 
-    let tool_call_begin_event = EventMsg::McpToolCallBegin(McpToolCallBeginEvent {
-        call_id: ctx.call_id.clone(),
-        invocation: invocation.clone(),
-    });
+    let tool_call_begin_event = EventMsg::McpToolCallBegin(McpToolCallBeginEvent { call_id: ctx.call_id.clone(), invocation: invocation.clone() });
     notify_mcp_tool_call_event(sess, ctx, tool_call_begin_event).await;
 
     let start = Instant::now();
@@ -58,18 +53,21 @@ pub(crate) async fn handle_mcp_tool_call(
         .call_tool(&server, &tool_name, arguments_value.clone(), None)
         .await
         .map_err(|e| format!("tool call error: {e}"));
-    let tool_call_end_event = EventMsg::McpToolCallEnd(McpToolCallEndEvent {
-        call_id: ctx.call_id.clone(),
-        invocation,
-        duration: start.elapsed(),
-        result: result.clone(),
+    let protocol_result = result.clone().and_then(|value| {
+        serde_json::to_value(value)
+            .map_err(|e| format!("failed to encode MCP tool result: {e}"))
+            .and_then(|json| {
+                serde_json::from_value::<hanzo_protocol::mcp::CallToolResult>(json)
+                    .map_err(|e| format!("failed to decode MCP tool result: {e}"))
+            })
     });
+    let tool_call_end_event = EventMsg::McpToolCallEnd(McpToolCallEndEvent { call_id: ctx.call_id.clone(), invocation, duration: start.elapsed(), result: result.clone() });
 
     notify_mcp_tool_call_event(sess, ctx, tool_call_end_event.clone()).await;
 
     ResponseInputItem::McpToolCallOutput {
         call_id: ctx.call_id.clone(),
-        result,
+        result: protocol_result,
     }
 }
 

@@ -80,7 +80,7 @@ fn browser_anchor_line(tracker: &BrowserSessionTracker) -> Line<'static> {
             .cloned()
             .unwrap_or_else(|| "browser session".to_string());
     }
-    spans.push(Span::styled(title.clone(), Style::new().bold()));
+    spans.push(Span::styled(title.clone(), Style::new().add_modifier(ratatui::style::Modifier::BOLD)));
 
     if let Some(url) = url.as_ref() {
         if url != &title {

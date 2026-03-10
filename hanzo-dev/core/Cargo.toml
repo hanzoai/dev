@@ -31,7 +31,9 @@ chrono = { workspace = true, features = ["serde"] }
 chardetng = { workspace = true }
 hanzo-apply-patch = { workspace = true }
 hanzo-file-search = { workspace = true }
+hanzo-git-tooling = { workspace = true }
 hanzo-protocol = { workspace = true }
+hanzo-utils-absolute-path = { workspace = true }
 hanzo-rmcp-client = { workspace = true }
 hanzo-zap = { workspace = true }
 hanzo-app-server-protocol = { workspace = true }

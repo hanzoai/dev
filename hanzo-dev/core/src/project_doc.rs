@@ -198,7 +198,7 @@ fn discover_project_doc_paths_with_candidates(
     // Build chain from cwd upwards and detect git root.
     let mut chain: Vec<PathBuf> = vec![dir.clone()];
     let mut git_root: Option<PathBuf> = None;
-    let mut cursor = dir;
+    let mut cursor = dir.clone();
     while let Some(parent) = cursor.parent() {
         let git_marker = cursor.join(".git");
         let git_exists = match std::fs::metadata(&git_marker) {
@@ -363,9 +363,7 @@ mod tests {
         let mut cfg = make_config(&repo, 4096, None);
         cfg.cwd = nested;
 
-        let res = get_user_instructions(&cfg, None)
-            .await
-            .expect("doc expected");
+        let res = get_user_instructions(&cfg, None).await.expect("doc expected");
         assert_eq!(res, "root level doc");
     }
 
@@ -454,9 +452,7 @@ mod tests {
         let mut cfg = make_config(&repo, 4096, None);
         cfg.cwd = nested;
 
-        let res = get_user_instructions(&cfg, None)
-            .await
-            .expect("doc expected");
+        let res = get_user_instructions(&cfg, None).await.expect("doc expected");
         assert_eq!(res, "root doc");
     }
 
@@ -497,9 +493,7 @@ mod tests {
         let mut cfg = make_config(&repo, 4096, None);
         cfg.cwd = nested;
 
-        let res = get_user_instructions(&cfg, None)
-            .await
-            .expect("doc expected");
+        let res = get_user_instructions(&cfg, None).await.expect("doc expected");
         assert_eq!(res, "root doc\n\ncrate doc");
     }
 

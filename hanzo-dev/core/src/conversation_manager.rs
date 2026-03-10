@@ -1,21 +1,21 @@
 use crate::AuthManager;
 use crate::CodexAuth;
-use crate::code_conversation::CodexConversation;
 use crate::codex::Codex;
 use crate::codex::CodexSpawnOk;
 use crate::codex::INITIAL_SUBMIT_ID;
+use crate::code_conversation::CodexConversation;
 use crate::config::Config;
-use crate::error::CodeErr;
+use crate::error::CodexErr;
 use crate::error::Result as CodexResult;
 use crate::protocol::Event;
 use crate::protocol::EventMsg;
 use crate::protocol::SessionConfiguredEvent;
 use crate::rollout::RolloutRecorder;
 use hanzo_protocol::ConversationId;
+use hanzo_protocol::protocol::SessionSource;
 use hanzo_protocol::models::ResponseItem;
 use hanzo_protocol::protocol::InitialHistory;
 use hanzo_protocol::protocol::RolloutItem;
-use hanzo_protocol::protocol::SessionSource;
 use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -97,7 +97,7 @@ impl ConversationManager {
                 ..
             } if id == INITIAL_SUBMIT_ID => session_configured,
             _ => {
-                return Err(CodeErr::SessionConfiguredNotFirstEvent);
+                return Err(CodexErr::SessionConfiguredNotFirstEvent);
             }
         };
 
@@ -122,7 +122,7 @@ impl ConversationManager {
         conversations
             .get(&conversation_id)
             .cloned()
-            .ok_or_else(|| CodeErr::ConversationNotFound(conversation_id.into()))
+            .ok_or_else(|| CodexErr::ConversationNotFound(conversation_id.into()))
     }
 
     pub async fn resume_conversation_from_rollout(
@@ -169,9 +169,7 @@ impl ConversationManager {
 
         // If there is no prior history to seed, just start a fresh conversation.
         if matches!(history, InitialHistory::New) {
-            return self
-                .spawn_conversation(config, self.auth_manager.clone())
-                .await;
+            return self.spawn_conversation(config, self.auth_manager.clone()).await;
         }
 
         // Otherwise, create a temporary rollout with the truncated items and resume from it.
@@ -182,11 +180,11 @@ impl ConversationManager {
             crate::rollout::recorder::RolloutRecorderParams::new(
                 convo_id,
                 instructions,
-                self.session_source,
+                self.session_source.clone(),
             ),
         )
         .await
-        .map_err(CodeErr::Io)?;
+        .map_err(|e| CodexErr::Io(e))?;
 
         // Persist rollout items to seed the resumed conversation.
         let rollout_items = history.get_rollout_items();
@@ -194,10 +192,10 @@ impl ConversationManager {
             recorder
                 .record_items(&rollout_items)
                 .await
-                .map_err(CodeErr::Io)?;
+                .map_err(CodexErr::Io)?;
         }
         // Ensure data is flushed to disk before resuming.
-        recorder.shutdown().await.map_err(CodeErr::Io)?;
+        recorder.shutdown().await.map_err(|e| CodexErr::Io(e))?;
 
         // Now spawn a conversation resuming from the newly created rollout.
         config.experimental_resume = Some(recorder.rollout_path.clone());
@@ -260,8 +258,7 @@ mod tests {
             role: "user".to_string(),
             content: vec![ContentItem::OutputText {
                 text: text.to_string(),
-            }],
-        }
+            }], end_turn: None, phase: None}
     }
     fn assistant_msg(text: &str) -> ResponseItem {
         ResponseItem::Message {
@@ -269,8 +266,7 @@ mod tests {
             role: "assistant".to_string(),
             content: vec![ContentItem::OutputText {
                 text: text.to_string(),
-            }],
-        }
+            }], end_turn: None, phase: None}
     }
 
     #[test]

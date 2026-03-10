@@ -3,12 +3,12 @@ use crate::config_types::ContextMode;
 use crate::config_types::ReasoningEffort;
 use crate::config_types::ReasoningSummary;
 use crate::tool_apply_patch::ApplyPatchToolType;
-use code_protocol::openai_models::ConfigShellToolType;
-use code_protocol::openai_models::ModelInfo;
-use code_protocol::openai_models::ModelsResponse;
-use code_protocol::openai_models::TruncationMode;
-use code_protocol::openai_models::WebSearchToolType;
-use code_protocol::protocol::TruncationPolicy;
+use hanzo_protocol::openai_models::ConfigShellToolType;
+use hanzo_protocol::openai_models::ModelInfo;
+use hanzo_protocol::openai_models::ModelsResponse;
+use hanzo_protocol::openai_models::TruncationMode;
+use hanzo_protocol::openai_models::WebSearchToolType;
+use hanzo_protocol::protocol::TruncationPolicy;
 use once_cell::sync::Lazy;
 
 /// The `instructions` field in the payload sent to a model should always start
@@ -181,12 +181,12 @@ fn apply_upstream_model_overrides(mut family: ModelFamily) -> ModelFamily {
     family.base_instructions = model_info.base_instructions.clone();
     family.context_window = model_info.context_window.and_then(|limit| u64::try_from(limit).ok());
     family.default_reasoning_effort = model_info.default_reasoning_level.map(|effort| match effort {
-        code_protocol::openai_models::ReasoningEffort::None
-        | code_protocol::openai_models::ReasoningEffort::Minimal => ReasoningEffort::Minimal,
-        code_protocol::openai_models::ReasoningEffort::Low => ReasoningEffort::Low,
-        code_protocol::openai_models::ReasoningEffort::Medium => ReasoningEffort::Medium,
-        code_protocol::openai_models::ReasoningEffort::High => ReasoningEffort::High,
-        code_protocol::openai_models::ReasoningEffort::XHigh => ReasoningEffort::XHigh,
+        hanzo_protocol::openai_models::ReasoningEffort::None
+        | hanzo_protocol::openai_models::ReasoningEffort::Minimal => ReasoningEffort::Minimal,
+        hanzo_protocol::openai_models::ReasoningEffort::Low => ReasoningEffort::Low,
+        hanzo_protocol::openai_models::ReasoningEffort::Medium => ReasoningEffort::Medium,
+        hanzo_protocol::openai_models::ReasoningEffort::High => ReasoningEffort::High,
+        hanzo_protocol::openai_models::ReasoningEffort::XHigh => ReasoningEffort::XHigh,
     });
     family.default_reasoning_summary = model_info.default_reasoning_summary.into();
     family.supports_reasoning_summaries = model_info.supports_reasoning_summaries;
