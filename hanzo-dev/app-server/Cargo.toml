@@ -1,7 +1,10 @@
 [package]
 edition = "2024"
 name = "hanzo-app-server"
+description = "Application server for Hanzo Dev"
 version = { workspace = true }
+license = { workspace = true }
+repository = { workspace = true }
 
 [[bin]]
 name = "hanzo-app-server"

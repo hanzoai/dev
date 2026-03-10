@@ -1,6 +1,9 @@
 [package]
 name = "hanzo-backend-openapi-models"
+description = "OpenAPI model types for Hanzo backend"
 version = { workspace = true }
+license = { workspace = true }
+repository = { workspace = true }
 edition = "2024"
 
 [lib]
