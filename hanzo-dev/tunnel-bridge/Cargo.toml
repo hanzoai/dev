@@ -8,7 +8,7 @@ edition.workspace = true
 
 [dependencies]
 hanzo-tunnel = { path = "../../../tunnel" }
-hanzo-app-server-protocol = { path = "../app-server-protocol" }
+hanzo-app-server-protocol = { path = "../app-server-protocol", version = "0.6.74" }
 mcp-types = { workspace = true }
 serde = { workspace = true, features = ["derive"] }
 serde_json = { workspace = true }
