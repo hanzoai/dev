@@ -1,6 +1,9 @@
 [package]
 name = "hanzo-cloud-tasks"
+description = "Cloud task runner TUI for Hanzo Dev"
 version = { workspace = true }
+license = { workspace = true }
+repository = { workspace = true }
 edition = "2024"
 
 [lib]

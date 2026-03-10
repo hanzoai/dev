@@ -1,6 +1,9 @@
 [package]
 name = "hanzo-cloud-tasks-client"
+description = "Cloud tasks API client for Hanzo"
 version = { workspace = true }
+license = { workspace = true }
+repository = { workspace = true }
 edition = "2024"
 
 [lib]
