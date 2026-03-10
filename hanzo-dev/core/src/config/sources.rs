@@ -10,7 +10,7 @@ use crate::config_types::{
     ThemeName,
 };
 use crate::protocol::{ApprovedCommandMatchKind, AskForApproval};
-use code_protocol::config_types::SandboxMode;
+use hanzo_protocol::config_types::SandboxMode;
 use dirs::home_dir;
 use std::collections::{BTreeMap, HashMap};
 use std::io::ErrorKind;
@@ -394,6 +394,9 @@ pub fn set_tui_theme_name(code_home: &Path, theme: ThemeName) -> anyhow::Result<
         ThemeName::DarkCharcoalRainbow => "dark-charcoal-rainbow",
         ThemeName::DarkZenGarden => "dark-zen-garden",
         ThemeName::DarkPaperLightPro => "dark-paper-light-pro",
+        ThemeName::DarkMonochrome => "dark-monochrome",
+        ThemeName::DarkCodex => "dark-codex",
+        ThemeName::DarkCode => "dark-code",
         ThemeName::Custom => "custom",
     };
 

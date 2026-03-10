@@ -3,15 +3,15 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use chrono::Utc;
-use code_app_server_protocol::AuthMode;
-use code_protocol::config_types::ReasoningSummary as ProtocolReasoningSummary;
-use code_protocol::config_types::Personality as ProtocolPersonality;
-use code_protocol::openai_models::ApplyPatchToolType as ProtocolApplyPatchToolType;
-use code_protocol::openai_models::ModelInfo;
-use code_protocol::openai_models::ModelsResponse;
-use code_protocol::openai_models::ReasoningEffort as ProtocolReasoningEffort;
-use code_protocol::openai_models::TruncationMode as ProtocolTruncationMode;
-use code_protocol::openai_models::WebSearchToolType;
+use hanzo_app_server_protocol::AuthMode;
+use hanzo_protocol::config_types::ReasoningSummary as ProtocolReasoningSummary;
+use hanzo_protocol::config_types::Personality as ProtocolPersonality;
+use hanzo_protocol::openai_models::ApplyPatchToolType as ProtocolApplyPatchToolType;
+use hanzo_protocol::openai_models::ModelInfo;
+use hanzo_protocol::openai_models::ModelsResponse;
+use hanzo_protocol::openai_models::ReasoningEffort as ProtocolReasoningEffort;
+use hanzo_protocol::openai_models::TruncationMode as ProtocolTruncationMode;
+use hanzo_protocol::openai_models::WebSearchToolType;
 use reqwest::header;
 use reqwest::Method;
 use reqwest::Url;
@@ -457,16 +457,16 @@ fn map_reasoning_summary(summary: ProtocolReasoningSummary) -> ConfigReasoningSu
 }
 
 fn map_truncation_policy(
-    policy: &code_protocol::openai_models::TruncationPolicyConfig,
-) -> code_protocol::protocol::TruncationPolicy {
+    policy: &hanzo_protocol::openai_models::TruncationPolicyConfig,
+) -> hanzo_protocol::protocol::TruncationPolicy {
     let limit = usize::try_from(policy.limit).unwrap_or(usize::MAX);
     match policy.mode {
-        ProtocolTruncationMode::Bytes => code_protocol::protocol::TruncationPolicy::Bytes(limit),
-        ProtocolTruncationMode::Tokens => code_protocol::protocol::TruncationPolicy::Tokens(limit),
+        ProtocolTruncationMode::Bytes => hanzo_protocol::protocol::TruncationPolicy::Bytes(limit),
+        ProtocolTruncationMode::Tokens => hanzo_protocol::protocol::TruncationPolicy::Tokens(limit),
     }
 }
 
 /// Build a client version string that remains wire-compatible with hosted models.
 fn format_client_version_to_whole() -> String {
-    code_version::wire_compatible_version().to_string()
+    hanzo_version::wire_compatible_version().to_string()
 }

@@ -29,10 +29,35 @@ use ratatui::backend::CrosstermBackend;
 use ratatui::crossterm::execute;
 use ratatui::crossterm::terminal::disable_raw_mode;
 use ratatui::crossterm::terminal::enable_raw_mode;
-use ratatui::prelude::IntoCrossterm;
 use ratatui_image::picker::Picker;
 #[cfg(unix)]
 use std::os::fd::AsRawFd;
+
+/// Convert a ratatui Color to a crossterm Color for direct terminal writes.
+fn to_ct(c: ratatui::style::Color) -> crossterm::style::Color {
+    match c {
+        ratatui::style::Color::Reset => crossterm::style::Color::Reset,
+        ratatui::style::Color::Black => crossterm::style::Color::Black,
+        ratatui::style::Color::Red => crossterm::style::Color::DarkRed,
+        ratatui::style::Color::Green => crossterm::style::Color::DarkGreen,
+        ratatui::style::Color::Yellow => crossterm::style::Color::DarkYellow,
+        ratatui::style::Color::Blue => crossterm::style::Color::DarkBlue,
+        ratatui::style::Color::Magenta => crossterm::style::Color::DarkMagenta,
+        ratatui::style::Color::Cyan => crossterm::style::Color::DarkCyan,
+        ratatui::style::Color::Gray => crossterm::style::Color::Grey,
+        ratatui::style::Color::DarkGray => crossterm::style::Color::DarkGrey,
+        ratatui::style::Color::LightRed => crossterm::style::Color::Red,
+        ratatui::style::Color::LightGreen => crossterm::style::Color::Green,
+        ratatui::style::Color::LightYellow => crossterm::style::Color::Yellow,
+        ratatui::style::Color::LightBlue => crossterm::style::Color::Blue,
+        ratatui::style::Color::LightMagenta => crossterm::style::Color::Magenta,
+        ratatui::style::Color::LightCyan => crossterm::style::Color::Cyan,
+        ratatui::style::Color::White => crossterm::style::Color::White,
+        ratatui::style::Color::Rgb(r, g, b) => crossterm::style::Color::Rgb { r, g, b },
+        ratatui::style::Color::Indexed(i) => crossterm::style::Color::AnsiValue(i),
+        _ => crossterm::style::Color::Reset,
+    }
+}
 
 /// A type alias for the terminal type used in this application
 pub type Tui = Terminal<CrosstermBackend<BufWriter<Stdout>>>;
@@ -125,13 +150,13 @@ pub fn init(config: &Config) -> Result<(Tui, TerminalInfo)> {
     set_panic_hook();
 
     // Clear screen with theme background color
-    let theme_bg = crate::colors::background();
-    let theme_fg = crate::colors::text();
+    let theme_bg = to_ct(crate::colors::background());
+    let theme_fg = to_ct(crate::colors::text());
     execute!(
         stdout(),
         SetColors(crossterm::style::Colors::new(
-            theme_fg.into_crossterm(),
-            theme_bg.into_crossterm()
+            theme_fg,
+            theme_bg
         )),
         Clear(ClearType::All),
         MoveTo(0, 0),
@@ -169,8 +194,8 @@ pub fn init(config: &Config) -> Result<(Tui, TerminalInfo)> {
             // Set explicit fg/bg to the theme's colors while painting.
             execute!(
                 stdout(),
-                SetForegroundColor(theme_fg.into_crossterm()),
-                SetBackgroundColor(theme_bg.into_crossterm())
+                SetForegroundColor(theme_fg),
+                SetBackgroundColor(theme_bg)
             )?;
             for y in 0..rows {
                 execute!(stdout(), MoveTo(0, y), Print(&blank))?;
@@ -182,8 +207,8 @@ pub fn init(config: &Config) -> Result<(Tui, TerminalInfo)> {
                 stdout(),
                 MoveTo(0, 0),
                 SetColors(crossterm::style::Colors::new(
-                    theme_fg.into_crossterm(),
-                    theme_bg.into_crossterm()
+                    theme_fg,
+                    theme_bg
                 ))
             )?;
         }
@@ -314,8 +339,8 @@ pub fn enter_alt_screen_only(
         stdout(),
         crossterm::terminal::EnterAlternateScreen,
         SetColors(crossterm::style::Colors::new(
-            theme_fg.into_crossterm(),
-            theme_bg.into_crossterm()
+            to_ct(theme_fg),
+            to_ct(theme_bg),
         )),
         Clear(ClearType::All),
         MoveTo(0, 0),

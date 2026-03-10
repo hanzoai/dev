@@ -259,7 +259,7 @@ pub async fn build_chatgpt_headers() -> HeaderMap {
     use reqwest::header::HeaderValue;
     use reqwest::header::USER_AGENT;
 
-    set_user_agent_suffix("code_cloud_tasks_tui");
+    set_user_agent_suffix("hanzo_cloud_tasks_tui");
     let ua = hanzo_core::default_client::get_code_user_agent(None);
     let mut headers = HeaderMap::new();
     headers.insert(

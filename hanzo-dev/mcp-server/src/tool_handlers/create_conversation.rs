@@ -49,7 +49,7 @@ pub(crate) async fn handle_create_conversation(
         sandbox_mode: sandbox,
         model_provider: None,
         config_profile: profile,
-        code_linux_sandbox_exe: None,
+        hanzo_linux_sandbox_exe: None,
         base_instructions,
         include_plan_tool: None,
         include_apply_patch_tool: None,

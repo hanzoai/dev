@@ -3,7 +3,7 @@ mod pkce;
 mod server;
 
 pub use device_code_auth::DeviceCodeSession;
-pub use device_code_auth::run_device_code_login;
+pub use device_code_auth::run_device_hanzo_login;
 pub use server::LoginServer;
 pub use server::ServerOptions;
 pub use server::ShutdownHandle;
@@ -15,7 +15,7 @@ pub use hanzo_core::AuthManager;
 pub use hanzo_core::CodexAuth;
 pub use hanzo_core::auth::AuthDotJson;
 pub use hanzo_core::auth::CLIENT_ID;
-pub use hanzo_core::auth::HANZO_API_KEY_ENV_VAR;
+pub use hanzo_core::auth::CODEX_API_KEY_ENV_VAR;
 pub use hanzo_core::auth::OPENAI_API_KEY_ENV_VAR;
 pub use hanzo_core::auth::get_auth_file;
 pub use hanzo_core::auth::login_with_api_key;

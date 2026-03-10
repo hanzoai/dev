@@ -79,6 +79,8 @@ impl AutoDriveSettingsView {
             agents_enabled: self.agents_enabled,
             cross_check_enabled: self.cross_check_enabled,
             qa_automation_enabled: self.qa_automation_enabled,
+            model_routing_enabled: false,
+            model_routing_entries: vec![],
             continue_mode: self.continue_mode,
         });
     }

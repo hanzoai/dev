@@ -846,6 +846,10 @@ pub struct Tui {
     /// Run a background `/review` after turns that modify code.
     #[serde(default = "default_true")]
     pub auto_review_enabled: bool,
+
+    /// Show the status bar at the bottom of the TUI.
+    #[serde(default = "default_true")]
+    pub show_status_bar: bool,
 }
 
 // Important: Provide a manual Default so that when no config file exists and we
@@ -867,6 +871,7 @@ impl Default for Tui {
             alternate_screen: true,
             review_auto_resolve: true,
             auto_review_enabled: true,
+            show_status_bar: true,
         }
     }
 }
@@ -1145,6 +1150,37 @@ pub struct ThemeConfig {
     /// or "Light - <label>" in lists.
     #[serde(default)]
     pub is_dark: Option<bool>,
+
+    /// Optional zen-mode display config.
+    #[serde(default)]
+    pub zen: Option<ZenThemeConfig>,
+}
+
+/// Zen-mode display configuration.
+#[derive(Deserialize, Debug, Clone, PartialEq, Default)]
+pub struct ZenThemeConfig {
+    /// Whether zen mode is enabled.
+    #[serde(default)]
+    pub enabled: bool,
+}
+
+/// Gutter display mode for history cells.
+#[derive(Deserialize, Debug, Clone, Copy, PartialEq, Eq, Default)]
+#[serde(rename_all = "lowercase")]
+pub enum GutterMode {
+    #[default]
+    None,
+    Full,
+}
+
+impl GutterMode {
+    /// Cycle to the next mode: None → Full → None.
+    pub fn next(self) -> Self {
+        match self {
+            Self::None => Self::Full,
+            Self::Full => Self::None,
+        }
+    }
 }
 
 impl Default for ThemeConfig {
@@ -1154,6 +1190,7 @@ impl Default for ThemeConfig {
             colors: ThemeColors::default(),
             label: None,
             is_dark: None,
+            zen: None,
         }
     }
 }
@@ -1225,6 +1262,9 @@ pub enum ThemeName {
     DarkCharcoalRainbow,
     DarkZenGarden,
     DarkPaperLightPro,
+    DarkMonochrome,
+    DarkCodex,
+    DarkCode,
     Custom,
 }
 
@@ -1658,40 +1698,40 @@ impl Default for RetentionConfig {
     }
 }
 
-impl From<code_protocol::config_types::ReasoningEffort> for ReasoningEffort {
-    fn from(v: code_protocol::config_types::ReasoningEffort) -> Self {
+impl From<hanzo_protocol::config_types::ReasoningEffort> for ReasoningEffort {
+    fn from(v: hanzo_protocol::config_types::ReasoningEffort) -> Self {
         match v {
-            code_protocol::config_types::ReasoningEffort::None => ReasoningEffort::None,
-            code_protocol::config_types::ReasoningEffort::Minimal => ReasoningEffort::Minimal,
-            code_protocol::config_types::ReasoningEffort::Low => ReasoningEffort::Low,
-            code_protocol::config_types::ReasoningEffort::Medium => ReasoningEffort::Medium,
-            code_protocol::config_types::ReasoningEffort::High => ReasoningEffort::High,
-            code_protocol::config_types::ReasoningEffort::XHigh => ReasoningEffort::XHigh,
+            hanzo_protocol::config_types::ReasoningEffort::None => ReasoningEffort::None,
+            hanzo_protocol::config_types::ReasoningEffort::Minimal => ReasoningEffort::Minimal,
+            hanzo_protocol::config_types::ReasoningEffort::Low => ReasoningEffort::Low,
+            hanzo_protocol::config_types::ReasoningEffort::Medium => ReasoningEffort::Medium,
+            hanzo_protocol::config_types::ReasoningEffort::High => ReasoningEffort::High,
+            hanzo_protocol::config_types::ReasoningEffort::XHigh => ReasoningEffort::XHigh,
         }
     }
 }
 
-impl From<ReasoningEffort> for code_protocol::config_types::ReasoningEffort {
+impl From<ReasoningEffort> for hanzo_protocol::config_types::ReasoningEffort {
     fn from(v: ReasoningEffort) -> Self {
         match v {
             ReasoningEffort::Minimal | ReasoningEffort::None => {
-                code_protocol::config_types::ReasoningEffort::Minimal
+                hanzo_protocol::config_types::ReasoningEffort::Minimal
             }
-            ReasoningEffort::Low => code_protocol::config_types::ReasoningEffort::Low,
-            ReasoningEffort::Medium => code_protocol::config_types::ReasoningEffort::Medium,
-            ReasoningEffort::High => code_protocol::config_types::ReasoningEffort::High,
-            ReasoningEffort::XHigh => code_protocol::config_types::ReasoningEffort::XHigh,
+            ReasoningEffort::Low => hanzo_protocol::config_types::ReasoningEffort::Low,
+            ReasoningEffort::Medium => hanzo_protocol::config_types::ReasoningEffort::Medium,
+            ReasoningEffort::High => hanzo_protocol::config_types::ReasoningEffort::High,
+            ReasoningEffort::XHigh => hanzo_protocol::config_types::ReasoningEffort::XHigh,
         }
     }
 }
 
-impl From<code_protocol::config_types::ReasoningSummary> for ReasoningSummary {
-    fn from(v: code_protocol::config_types::ReasoningSummary) -> Self {
+impl From<hanzo_protocol::config_types::ReasoningSummary> for ReasoningSummary {
+    fn from(v: hanzo_protocol::config_types::ReasoningSummary) -> Self {
         match v {
-            code_protocol::config_types::ReasoningSummary::Auto => ReasoningSummary::Auto,
-            code_protocol::config_types::ReasoningSummary::Concise => ReasoningSummary::Concise,
-            code_protocol::config_types::ReasoningSummary::Detailed => ReasoningSummary::Detailed,
-            code_protocol::config_types::ReasoningSummary::None => ReasoningSummary::None,
+            hanzo_protocol::config_types::ReasoningSummary::Auto => ReasoningSummary::Auto,
+            hanzo_protocol::config_types::ReasoningSummary::Concise => ReasoningSummary::Concise,
+            hanzo_protocol::config_types::ReasoningSummary::Detailed => ReasoningSummary::Detailed,
+            hanzo_protocol::config_types::ReasoningSummary::None => ReasoningSummary::None,
         }
     }
 }

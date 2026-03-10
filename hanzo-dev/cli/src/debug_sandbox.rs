@@ -15,7 +15,7 @@ use crate::exit_status::handle_exit_status;
 
 pub async fn run_command_under_seatbelt(
     command: SeatbeltCommand,
-    code_linux_sandbox_exe: Option<PathBuf>,
+    hanzo_linux_sandbox_exe: Option<PathBuf>,
 ) -> anyhow::Result<()> {
     let SeatbeltCommand {
         full_auto,
@@ -26,7 +26,7 @@ pub async fn run_command_under_seatbelt(
         full_auto,
         command,
         config_overrides,
-        code_linux_sandbox_exe,
+        hanzo_linux_sandbox_exe,
         SandboxType::Seatbelt,
     )
     .await
@@ -34,7 +34,7 @@ pub async fn run_command_under_seatbelt(
 
 pub async fn run_command_under_landlock(
     command: LandlockCommand,
-    code_linux_sandbox_exe: Option<PathBuf>,
+    hanzo_linux_sandbox_exe: Option<PathBuf>,
 ) -> anyhow::Result<()> {
     let LandlockCommand {
         full_auto,
@@ -45,7 +45,7 @@ pub async fn run_command_under_landlock(
         full_auto,
         command,
         config_overrides,
-        code_linux_sandbox_exe,
+        hanzo_linux_sandbox_exe,
         SandboxType::Landlock,
     )
     .await
@@ -60,7 +60,7 @@ async fn run_command_under_sandbox(
     full_auto: bool,
     command: Vec<String>,
     config_overrides: CliConfigOverrides,
-    code_linux_sandbox_exe: Option<PathBuf>,
+    hanzo_linux_sandbox_exe: Option<PathBuf>,
     sandbox_type: SandboxType,
 ) -> anyhow::Result<()> {
     let sandbox_mode = create_sandbox_mode(full_auto);
@@ -70,10 +70,10 @@ async fn run_command_under_sandbox(
             .map_err(anyhow::Error::msg)?,
         ConfigOverrides {
             sandbox_mode: Some(sandbox_mode),
-            code_linux_sandbox_exe,
+            hanzo_linux_sandbox_exe,
             compact_prompt_override: None,
             compact_prompt_override_file: None,
-            wire_api: None,
+            dynamic_tools: None,
             ..Default::default()
         },
     )?;
@@ -103,11 +103,11 @@ async fn run_command_under_sandbox(
         }
         SandboxType::Landlock => {
             #[expect(clippy::expect_used)]
-            let code_linux_sandbox_exe = config
-                .code_linux_sandbox_exe
+            let hanzo_linux_sandbox_exe = config
+                .hanzo_linux_sandbox_exe
                 .expect("dev-linux-sandbox executable not found");
             spawn_command_under_linux_sandbox(
-                code_linux_sandbox_exe,
+                hanzo_linux_sandbox_exe,
                 command,
                 cwd,
                 &config.sandbox_policy,

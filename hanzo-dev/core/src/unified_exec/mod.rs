@@ -442,7 +442,7 @@ mod tests {
                 session_id: Some(session_id),
                 input_chunks: &[
                     "export".to_string(),
-                    "HANZO_INTERACTIVE_SHELL_VAR=dev\n".to_string(),
+                    "CODEX_INTERACTIVE_SHELL_VAR=codex\n".to_string(),
                 ],
                 timeout_ms: Some(2_500),
             })
@@ -451,11 +451,11 @@ mod tests {
         let out_2 = manager
             .handle_request(UnifiedExecRequest {
                 session_id: Some(session_id),
-                input_chunks: &["echo $HANZO_INTERACTIVE_SHELL_VAR\n".to_string()],
+                input_chunks: &["echo $CODEX_INTERACTIVE_SHELL_VAR\n".to_string()],
                 timeout_ms: Some(2_500),
             })
             .await?;
-        assert!(out_2.output.contains("dev"));
+        assert!(out_2.output.contains("codex"));
 
         Ok(())
     }
@@ -477,7 +477,7 @@ mod tests {
         manager
             .handle_request(UnifiedExecRequest {
                 session_id: Some(session_a),
-                input_chunks: &["export HANZO_INTERACTIVE_SHELL_VAR=dev\n".to_string()],
+                input_chunks: &["export CODEX_INTERACTIVE_SHELL_VAR=codex\n".to_string()],
                 timeout_ms: Some(2_500),
             })
             .await?;
@@ -487,7 +487,7 @@ mod tests {
                 session_id: None,
                 input_chunks: &[
                     "echo".to_string(),
-                    "$HANZO_INTERACTIVE_SHELL_VAR\n".to_string(),
+                    "$CODEX_INTERACTIVE_SHELL_VAR\n".to_string(),
                 ],
                 timeout_ms: Some(2_500),
             })
@@ -497,18 +497,17 @@ mod tests {
         let out_3 = manager
             .handle_request(UnifiedExecRequest {
                 session_id: Some(session_a),
-                input_chunks: &["echo $HANZO_INTERACTIVE_SHELL_VAR\n".to_string()],
+                input_chunks: &["echo $CODEX_INTERACTIVE_SHELL_VAR\n".to_string()],
                 timeout_ms: Some(2_500),
             })
             .await?;
-        assert!(out_3.output.contains("dev"));
+        assert!(out_3.output.contains("codex"));
 
         Ok(())
     }
 
     #[cfg(unix)]
     #[tokio::test]
-    #[ignore = "flaky timing-sensitive test"]
     async fn unified_exec_timeouts() -> Result<(), UnifiedExecError> {
         let manager = UnifiedExecSessionManager::default();
 
@@ -526,7 +525,7 @@ mod tests {
                 session_id: Some(session_id),
                 input_chunks: &[
                     "export".to_string(),
-                    "HANZO_INTERACTIVE_SHELL_VAR=dev\n".to_string(),
+                    "CODEX_INTERACTIVE_SHELL_VAR=codex\n".to_string(),
                 ],
                 timeout_ms: Some(2_500),
             })
@@ -535,11 +534,11 @@ mod tests {
         let out_2 = manager
             .handle_request(UnifiedExecRequest {
                 session_id: Some(session_id),
-                input_chunks: &["sleep 5 && echo $HANZO_INTERACTIVE_SHELL_VAR\n".to_string()],
+                input_chunks: &["sleep 5 && echo $CODEX_INTERACTIVE_SHELL_VAR\n".to_string()],
                 timeout_ms: Some(10),
             })
             .await?;
-        assert!(!out_2.output.contains("dev"));
+        assert!(!out_2.output.contains("codex"));
 
         tokio::time::sleep(Duration::from_secs(7)).await;
 
@@ -552,7 +551,7 @@ mod tests {
             })
             .await?;
 
-        assert!(out_3.output.contains("dev"));
+        assert!(out_3.output.contains("codex"));
 
         Ok(())
     }

@@ -125,7 +125,7 @@ fn argument_value_from_json(value: &serde_json::Value) -> ArgumentValue {
     }
 }
 
-fn arguments_from_json(value: &serde_json::Value) -> Vec<ToolArgument> {
+pub(crate) fn arguments_from_json(value: &serde_json::Value) -> Vec<ToolArgument> {
     arguments_from_json_excluding(value, &[])
 }
 

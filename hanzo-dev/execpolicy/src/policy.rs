@@ -100,4 +100,16 @@ impl Policy {
         }
         violations
     }
+
+    pub fn get_allowed_prefixes(&self) -> Vec<Vec<String>> {
+        let mut prefixes = Vec::new();
+        for (program_name, program_specs) in self.programs.iter_all() {
+            for _spec in program_specs {
+                prefixes.push(vec![program_name.clone()]);
+            }
+        }
+        prefixes.sort();
+        prefixes.dedup();
+        prefixes
+    }
 }

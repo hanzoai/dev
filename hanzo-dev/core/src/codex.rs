@@ -20,38 +20,38 @@ use time::OffsetDateTime;
 use async_channel::Receiver;
 use async_channel::Sender;
 use base64::Engine;
-use code_apply_patch::ApplyPatchAction;
-use code_apply_patch::MaybeApplyPatchVerified;
+use hanzo_apply_patch::ApplyPatchAction;
+use hanzo_apply_patch::MaybeApplyPatchVerified;
 use crate::bridge_client::spawn_bridge_listener;
-use code_browser::BrowserConfig as CodexBrowserConfig;
-use code_browser::BrowserManager;
-use code_otel::otel_event_manager::{
+use hanzo_browser::BrowserConfig as CodexBrowserConfig;
+use hanzo_browser::BrowserManager;
+use hanzo_otel::otel_event_manager::{
     OtelEventManager,
     ToolDecisionSource,
     TurnLatencyPayload,
     TurnLatencyPhase,
 };
-use code_protocol::config_types::ReasoningEffort as ProtoReasoningEffort;
-use code_protocol::config_types::ReasoningSummary as ProtoReasoningSummary;
-use code_utils_absolute_path::AbsolutePathBuf as ProtoAbsolutePathBuf;
-use code_protocol::protocol::AskForApproval as ProtoAskForApproval;
-use code_protocol::protocol::RejectConfig as ProtoRejectConfig;
-use code_protocol::protocol::ReviewDecision as ProtoReviewDecision;
-use code_protocol::protocol::SandboxPolicy as ProtoSandboxPolicy;
-use code_protocol::protocol::BROWSER_SNAPSHOT_OPEN_TAG;
-use code_protocol::protocol::ENVIRONMENT_CONTEXT_CLOSE_TAG;
-use code_protocol::protocol::ENVIRONMENT_CONTEXT_DELTA_CLOSE_TAG;
-use code_protocol::protocol::ENVIRONMENT_CONTEXT_DELTA_OPEN_TAG;
-use code_protocol::protocol::ENVIRONMENT_CONTEXT_OPEN_TAG;
+use hanzo_protocol::config_types::ReasoningEffort as ProtoReasoningEffort;
+use hanzo_protocol::config_types::ReasoningSummary as ProtoReasoningSummary;
+use hanzo_utils_absolute_path::AbsolutePathBuf as ProtoAbsolutePathBuf;
+use hanzo_protocol::protocol::AskForApproval as ProtoAskForApproval;
+use hanzo_protocol::protocol::RejectConfig as ProtoRejectConfig;
+use hanzo_protocol::protocol::ReviewDecision as ProtoReviewDecision;
+use hanzo_protocol::protocol::SandboxPolicy as ProtoSandboxPolicy;
+use hanzo_protocol::protocol::BROWSER_SNAPSHOT_OPEN_TAG;
+use hanzo_protocol::protocol::ENVIRONMENT_CONTEXT_CLOSE_TAG;
+use hanzo_protocol::protocol::ENVIRONMENT_CONTEXT_DELTA_CLOSE_TAG;
+use hanzo_protocol::protocol::ENVIRONMENT_CONTEXT_DELTA_OPEN_TAG;
+use hanzo_protocol::protocol::ENVIRONMENT_CONTEXT_OPEN_TAG;
 use crate::config_types::ReasoningEffort as ReasoningEffortConfig;
 use crate::config_types::ReasoningSummary as ReasoningSummaryConfig;
 use crate::config_types::ClientTools;
 // unused: AuthManager
 // unused: ConversationHistoryResponseEvent
-use code_protocol::protocol::TurnAbortReason;
-use code_protocol::protocol::TurnAbortedEvent;
+use hanzo_protocol::protocol::TurnAbortReason;
+use hanzo_protocol::protocol::TurnAbortedEvent;
 use futures::prelude::*;
-use code_protocol::mcp::CallToolResult;
+use hanzo_protocol::mcp::CallToolResult;
 use serde::{Deserialize, Serialize};
 use serde_json::json;
 use tokio::sync::oneshot;
@@ -80,8 +80,8 @@ use crate::agent_defaults::{
     enabled_agent_model_specs_for_auth,
     filter_agent_model_names_for_auth,
 };
-use code_protocol::models::WebSearchAction;
-use code_protocol::protocol::RolloutItem;
+use hanzo_protocol::models::WebSearchAction;
+use hanzo_protocol::protocol::RolloutItem;
 use shlex::split as shlex_split;
 use shlex::try_join as shlex_try_join;
 use chrono::Local;
@@ -366,14 +366,14 @@ fn convert_call_tool_result_to_function_call_output_payload(
 ) -> FunctionCallOutputPayload {
     match result {
         Ok(ok) => FunctionCallOutputPayload {
-            body: code_protocol::models::FunctionCallOutputBody::Text(
+            body: hanzo_protocol::models::FunctionCallOutputBody::Text(
                 serde_json::to_string(ok)
                     .unwrap_or_else(|e| format!("JSON serialization error: {e}")),
             ),
             success: Some(true),
         },
         Err(e) => FunctionCallOutputPayload {
-            body: code_protocol::models::FunctionCallOutputBody::Text(format!("err: {e:?}")),
+            body: hanzo_protocol::models::FunctionCallOutputBody::Text(format!("err: {e:?}")),
             success: Some(false),
         },
     }
@@ -522,7 +522,7 @@ async fn build_turn_status_items_legacy(sess: &Session) -> Vec<ResponseItem> {
     let mut screenshot_content: Option<ContentItem> = None;
     let mut include_screenshot = false;
 
-    if let Some(browser_manager) = code_browser::global::get_browser_manager().await {
+    if let Some(browser_manager) = hanzo_browser::global::get_browser_manager().await {
         if browser_manager.is_enabled().await {
             if let Some((_, idle_timeout)) = browser_manager.idle_elapsed_past_timeout().await {
                 let idle_text = format!(
@@ -706,7 +706,7 @@ async fn build_turn_status_items_v2(sess: &Session) -> Vec<ResponseItem> {
         items.push(item);
     }
 
-    if let Some(browser_manager) = code_browser::global::get_browser_manager().await {
+    if let Some(browser_manager) = hanzo_browser::global::get_browser_manager().await {
         if browser_manager.is_enabled().await {
             let browser_stream_id = {
                 let mut state = sess.state.lock().unwrap();
@@ -853,7 +853,7 @@ fn should_include_browser_screenshot(
 mod tests {
     use super::*;
     use crate::codex::streaming::{process_rollout_env_item, TimelineReplayContext};
-    use code_protocol::models::ContentItem;
+    use hanzo_protocol::models::ContentItem;
     use pretty_assertions::assert_eq;
 
     #[test]
@@ -1000,15 +1000,15 @@ use crate::exec_env::create_env;
 use crate::mcp_connection_manager::McpConnectionManager;
 use crate::mcp_tool_call::handle_mcp_tool_call;
 use crate::model_family::{derive_default_model_family, find_family_for_model};
-use code_protocol::models::ContentItem;
-use code_protocol::models::FunctionCallOutputPayload;
-use code_protocol::models::LocalShellAction;
-use code_protocol::models::ReasoningItemContent;
-use code_protocol::models::ReasoningItemReasoningSummary;
-use code_protocol::models::ResponseInputItem;
-use code_protocol::models::ResponseItem;
-use code_protocol::models::ShellToolCallParams;
-use code_protocol::models::SandboxPermissions;
+use hanzo_protocol::models::ContentItem;
+use hanzo_protocol::models::FunctionCallOutputPayload;
+use hanzo_protocol::models::LocalShellAction;
+use hanzo_protocol::models::ReasoningItemContent;
+use hanzo_protocol::models::ReasoningItemReasoningSummary;
+use hanzo_protocol::models::ResponseInputItem;
+use hanzo_protocol::models::ResponseItem;
+use hanzo_protocol::models::ShellToolCallParams;
+use hanzo_protocol::models::SandboxPermissions;
 use crate::openai_tools::ToolsConfig;
 use crate::openai_tools::get_openai_tools;
 use crate::slash_commands::get_enabled_agents;
@@ -1070,7 +1070,7 @@ use crate::shell;
 use crate::turn_diff_tracker::TurnDiffTracker;
 use crate::user_notification::UserNotification;
 use crate::util::{backoff, wait_for_connectivity};
-use code_protocol::protocol::SessionSource;
+use hanzo_protocol::protocol::SessionSource;
 use crate::rollout::recorder::SessionStateSnapshot;
 use serde_json::Value;
 use crate::exec_command::ExecSessionManager;

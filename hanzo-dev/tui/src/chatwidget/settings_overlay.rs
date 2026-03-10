@@ -33,7 +33,7 @@ use crate::chrome_launch::{ChromeLaunchOption, CHROME_LAUNCH_CHOICES};
 use super::limits_overlay::{LimitsOverlay, LimitsOverlayContent};
 use crate::live_wrap::take_prefix_by_width;
 use crate::util::buffer::fill_rect;
-use code_core::config_types::ReasoningEffort;
+use hanzo_core::config_types::ReasoningEffort;
 
 const LABEL_COLUMN_WIDTH: usize = 18;
 
@@ -524,8 +524,8 @@ impl SettingsContent for AutoDriveSettingsContent {
         self.view.is_view_complete()
     }
 
-    fn handle_paste(&mut self, text: String) -> bool {
-        self.view.handle_paste(text)
+    fn handle_paste(&mut self, _text: String) -> bool {
+        false
     }
 }
 

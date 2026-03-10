@@ -12,7 +12,7 @@ pub(crate) struct SessionServices {
     pub(crate) unified_exec_manager: UnifiedExecSessionManager,
     pub(crate) notifier: UserNotifier,
     pub(crate) rollout: Mutex<Option<RolloutRecorder>>,
-    pub(crate) code_linux_sandbox_exe: Option<PathBuf>,
+    pub(crate) hanzo_linux_sandbox_exe: Option<PathBuf>,
     pub(crate) user_shell: crate::shell::Shell,
     pub(crate) show_raw_agent_reasoning: bool,
 }

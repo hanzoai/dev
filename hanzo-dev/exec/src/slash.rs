@@ -1,7 +1,7 @@
 use hanzo_core::config_types::AgentConfig;
 use hanzo_core::config_types::SubagentCommandConfig;
-use hanzo_core::protocol::ReviewContextMetadata;
 use hanzo_core::protocol::ReviewRequest;
+use hanzo_protocol::protocol::ReviewTarget;
 
 use hanzo_core::slash_commands::format_subagent_command;
 
@@ -93,25 +93,14 @@ fn handle_subagent(name: &str, args: &str, ctx: SlashContext<'_>) -> Result<Slas
 }
 
 fn handle_review(args_raw: &str) -> Result<SlashDispatch, String> {
-    let (prompt, hint, metadata) = if args_raw.is_empty() {
+    let (prompt, hint) = if args_raw.is_empty() {
         (
             "Review the current workspace changes and highlight bugs, regressions, risky patterns, and missing tests before merge.".to_string(),
             "current workspace changes".to_string(),
-            ReviewContextMetadata {
-                scope: Some("workspace".to_string()),
-                ..Default::default()
-            },
         )
     } else {
         let text = args_raw.trim().to_string();
-        (
-            text.clone(),
-            text,
-            ReviewContextMetadata {
-                scope: Some("custom".to_string()),
-                ..Default::default()
-            },
-        )
+        (text.clone(), text)
     };
 
     let summary = if args_raw.is_empty() {
@@ -127,9 +116,9 @@ fn handle_review(args_raw: &str) -> Result<SlashDispatch, String> {
 
     Ok(SlashDispatch::Review {
         request: ReviewRequest {
+            target: ReviewTarget::UncommittedChanges,
             prompt,
-            user_facing_hint: hint,
-            metadata: Some(metadata),
+            user_facing_hint: Some(hint),
         },
         summary,
     })
@@ -186,8 +175,7 @@ mod tests {
         match result {
             SlashDispatch::Review { request, summary } => {
                 assert_eq!(summary, "/review");
-                assert_eq!(request.user_facing_hint, "current workspace changes");
-                assert_eq!(request.metadata.unwrap().scope.unwrap(), "workspace");
+                assert_eq!(request.user_facing_hint.as_deref(), Some("current workspace changes"));
             }
             _ => panic!("expected review"),
         }

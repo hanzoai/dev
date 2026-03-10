@@ -55,3 +55,4 @@ impl TryFrom<ConfigRequirementsToml> for ConfigRequirements {
 pub(crate) struct LegacyManagedConfigToml {
     pub(crate) approval_policy: Option<AskForApproval>,
 }
+

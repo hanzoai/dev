@@ -1,15 +1,10 @@
-use chrono::DateTime;
-use chrono::Utc;
+use chrono::{DateTime, Utc};
 use hanzo_app_server_protocol::AuthMode;
-use serde::Deserialize;
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use std::fs::File;
 use std::fs::OpenOptions;
-use std::io::Read;
-use std::io::Write;
-use std::io::{self};
-use std::path::Path;
-use std::path::PathBuf;
+use std::io::{self, Read, Write};
+use std::path::{Path, PathBuf};
 use uuid::Uuid;
 
 use crate::token_data::TokenData;
@@ -23,11 +18,6 @@ pub struct StoredAccount {
 
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub label: Option<String>,
-
-    /// Provider ID this account is associated with (e.g., "openai", "openrouter", "groq").
-    /// None means the account is for the default OpenAI provider.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub provider_id: Option<String>,
 
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub openai_api_key: Option<String>,
@@ -43,10 +33,6 @@ pub struct StoredAccount {
 
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub last_used_at: Option<DateTime<Utc>>,
-
-    /// Number of times this account has been used (for rotation tracking).
-    #[serde(default)]
-    pub usage_count: u64,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -93,10 +79,10 @@ fn read_accounts_file(path: &Path) -> io::Result<AccountsFile> {
 }
 
 fn write_accounts_file(path: &Path, data: &AccountsFile) -> io::Result<()> {
-    if let Some(parent) = path.parent()
-        && !parent.exists()
-    {
-        std::fs::create_dir_all(parent)?;
+    if let Some(parent) = path.parent() {
+        if !parent.exists() {
+            std::fs::create_dir_all(parent)?;
+        }
     }
 
     let json = serde_json::to_string_pretty(data)?;
@@ -126,7 +112,7 @@ fn next_id() -> String {
 }
 
 fn match_chatgpt_account(existing: &StoredAccount, tokens: &TokenData) -> bool {
-    if existing.mode != AuthMode::ChatGPT {
+    if !existing.mode.is_chatgpt() {
         return false;
     }
 
@@ -151,17 +137,12 @@ fn match_chatgpt_account(existing: &StoredAccount, tokens: &TokenData) -> bool {
     account_id_matches && email_matches
 }
 
-fn match_api_key_account(
-    existing: &StoredAccount,
-    api_key: &str,
-    provider_id: Option<&str>,
-) -> bool {
+fn match_api_key_account(existing: &StoredAccount, api_key: &str) -> bool {
     existing.mode == AuthMode::ApiKey
         && existing
             .openai_api_key
             .as_ref()
             .is_some_and(|stored| stored == api_key)
-        && existing.provider_id.as_deref() == provider_id
 }
 
 fn touch_account(account: &mut StoredAccount, used: bool) {
@@ -173,21 +154,16 @@ fn touch_account(account: &mut StoredAccount, used: bool) {
     }
 }
 
-fn upsert_account(
-    mut data: AccountsFile,
-    mut new_account: StoredAccount,
-) -> (AccountsFile, StoredAccount) {
+fn upsert_account(mut data: AccountsFile, mut new_account: StoredAccount) -> (AccountsFile, StoredAccount) {
     let existing_idx = match new_account.mode {
-        AuthMode::ChatGPT | AuthMode::Hanzo => new_account.tokens.as_ref().and_then(|tokens| {
-            data.accounts
-                .iter()
-                .position(|acc| match_chatgpt_account(acc, tokens))
-        }),
-        AuthMode::ApiKey => new_account.openai_api_key.as_ref().and_then(|api_key| {
-            data.accounts.iter().position(|acc| {
-                match_api_key_account(acc, api_key, new_account.provider_id.as_deref())
-            })
-        }),
+        AuthMode::ChatGPT | AuthMode::ChatgptAuthTokens => new_account
+            .tokens
+            .as_ref()
+            .and_then(|tokens| data.accounts.iter().position(|acc| match_chatgpt_account(acc, tokens))),
+        AuthMode::ApiKey | AuthMode::Hanzo => new_account
+            .openai_api_key
+            .as_ref()
+            .and_then(|api_key| data.accounts.iter().position(|acc| match_api_key_account(acc, api_key))),
     };
 
     if let Some(idx) = existing_idx {
@@ -234,7 +210,10 @@ pub fn get_active_account_id(code_home: &Path) -> io::Result<Option<String>> {
 pub fn find_account(code_home: &Path, account_id: &str) -> io::Result<Option<StoredAccount>> {
     let path = accounts_file_path(code_home);
     let data = read_accounts_file(&path)?;
-    Ok(data.accounts.into_iter().find(|acc| acc.id == account_id))
+    Ok(data
+        .accounts
+        .into_iter()
+        .find(|acc| acc.id == account_id))
 }
 
 pub fn set_active_account_id(
@@ -289,17 +268,6 @@ pub fn upsert_api_key_account(
     label: Option<String>,
     make_active: bool,
 ) -> io::Result<StoredAccount> {
-    upsert_api_key_account_for_provider(code_home, api_key, label, None, make_active)
-}
-
-/// Upsert an API key account for a specific provider.
-pub fn upsert_api_key_account_for_provider(
-    code_home: &Path,
-    api_key: String,
-    label: Option<String>,
-    provider_id: Option<String>,
-    make_active: bool,
-) -> io::Result<StoredAccount> {
     let path = accounts_file_path(code_home);
     let data = read_accounts_file(&path)?;
 
@@ -307,20 +275,22 @@ pub fn upsert_api_key_account_for_provider(
         id: next_id(),
         mode: AuthMode::ApiKey,
         label,
-        provider_id,
         openai_api_key: Some(api_key),
         tokens: None,
         last_refresh: None,
         created_at: None,
         last_used_at: None,
-        usage_count: 0,
     };
 
     let (mut data, mut stored) = upsert_account(data, new_account);
 
     if make_active {
         data.active_account_id = Some(stored.id.clone());
-        if let Some(account) = data.accounts.iter_mut().find(|acc| acc.id == stored.id) {
+        if let Some(account) = data
+            .accounts
+            .iter_mut()
+            .find(|acc| acc.id == stored.id)
+        {
             touch_account(account, true);
             stored = account.clone();
         }
@@ -344,20 +314,22 @@ pub fn upsert_chatgpt_account(
         id: next_id(),
         mode: AuthMode::ChatGPT,
         label,
-        provider_id: None, // ChatGPT accounts are always for OpenAI
         openai_api_key: None,
         tokens: Some(tokens),
         last_refresh: Some(last_refresh),
         created_at: None,
         last_used_at: None,
-        usage_count: 0,
     };
 
     let (mut data, mut stored) = upsert_account(data, new_account);
 
     if make_active {
         data.active_account_id = Some(stored.id.clone());
-        if let Some(account) = data.accounts.iter_mut().find(|acc| acc.id == stored.id) {
+        if let Some(account) = data
+            .accounts
+            .iter_mut()
+            .find(|acc| acc.id == stored.id)
+        {
             touch_account(account, true);
             stored = account.clone();
         }
@@ -365,141 +337,13 @@ pub fn upsert_chatgpt_account(
 
     write_accounts_file(&path, &data)?;
     Ok(stored)
-}
-
-/// Store a Hanzo OAuth account (hanzo.id / Casdoor JWT).
-pub fn upsert_hanzo_account(
-    code_home: &Path,
-    tokens: TokenData,
-    last_refresh: DateTime<Utc>,
-    label: Option<String>,
-    make_active: bool,
-) -> io::Result<StoredAccount> {
-    let path = accounts_file_path(code_home);
-    let data = read_accounts_file(&path)?;
-
-    let new_account = StoredAccount {
-        id: next_id(),
-        mode: AuthMode::Hanzo,
-        label,
-        provider_id: Some("hanzo".to_string()),
-        openai_api_key: None,
-        tokens: Some(tokens),
-        last_refresh: Some(last_refresh),
-        created_at: None,
-        last_used_at: None,
-        usage_count: 0,
-    };
-
-    let (mut data, mut stored) = upsert_account(data, new_account);
-
-    if make_active {
-        data.active_account_id = Some(stored.id.clone());
-        if let Some(account) = data.accounts.iter_mut().find(|acc| acc.id == stored.id) {
-            touch_account(account, true);
-            stored = account.clone();
-        }
-    }
-
-    write_accounts_file(&path, &data)?;
-    Ok(stored)
-}
-
-/// List accounts for a specific provider (None = default OpenAI provider).
-pub fn list_accounts_for_provider(
-    code_home: &Path,
-    provider_id: Option<&str>,
-) -> io::Result<Vec<StoredAccount>> {
-    let path = accounts_file_path(code_home);
-    let data = read_accounts_file(&path)?;
-    Ok(data
-        .accounts
-        .into_iter()
-        .filter(|acc| acc.provider_id.as_deref() == provider_id)
-        .collect())
-}
-
-/// Get the next account to use for a provider using round-robin rotation.
-/// Returns the account with the lowest usage_count among accounts for this provider.
-pub fn get_next_rotated_account(
-    code_home: &Path,
-    provider_id: Option<&str>,
-) -> io::Result<Option<StoredAccount>> {
-    let path = accounts_file_path(code_home);
-    let data = read_accounts_file(&path)?;
-
-    let matching: Vec<_> = data
-        .accounts
-        .iter()
-        .filter(|acc| acc.provider_id.as_deref() == provider_id && acc.mode == AuthMode::ApiKey)
-        .collect();
-
-    if matching.is_empty() {
-        return Ok(None);
-    }
-
-    // Find the account with the lowest usage count
-    let next = matching
-        .iter()
-        .min_by_key(|acc| acc.usage_count)
-        .map(|acc| (*acc).clone());
-
-    Ok(next)
-}
-
-/// Increment the usage count for an account (for rotation tracking).
-pub fn increment_usage_count(code_home: &Path, account_id: &str) -> io::Result<()> {
-    let path = accounts_file_path(code_home);
-    let mut data = read_accounts_file(&path)?;
-
-    if let Some(account) = data.accounts.iter_mut().find(|acc| acc.id == account_id) {
-        account.usage_count = account.usage_count.saturating_add(1);
-        account.last_used_at = Some(now());
-    }
-
-    write_accounts_file(&path, &data)?;
-    Ok(())
-}
-
-/// Get all unique provider IDs from stored accounts.
-pub fn list_provider_ids(code_home: &Path) -> io::Result<Vec<Option<String>>> {
-    let path = accounts_file_path(code_home);
-    let data = read_accounts_file(&path)?;
-
-    let mut provider_ids: Vec<Option<String>> = data
-        .accounts
-        .iter()
-        .map(|acc| acc.provider_id.clone())
-        .collect();
-
-    // Deduplicate while preserving order
-    let mut seen = std::collections::HashSet::new();
-    provider_ids.retain(|id| seen.insert(id.clone()));
-
-    Ok(provider_ids)
-}
-
-/// Count accounts per provider.
-pub fn count_accounts_by_provider(
-    code_home: &Path,
-) -> io::Result<std::collections::HashMap<Option<String>, usize>> {
-    let path = accounts_file_path(code_home);
-    let data = read_accounts_file(&path)?;
-
-    let mut counts = std::collections::HashMap::new();
-    for acc in data.accounts {
-        *counts.entry(acc.provider_id).or_insert(0) += 1;
-    }
-
-    Ok(counts)
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::token_data::IdTokenInfo;
-    use crate::token_data::TokenData;
     use base64::Engine;
+    use crate::token_data::{IdTokenInfo, TokenData};
     use tempfile::tempdir;
 
     fn make_chatgpt_tokens(account_id: Option<&str>, email: Option<&str>) -> TokenData {
@@ -535,7 +379,6 @@ mod tests {
         TokenData {
             id_token: IdTokenInfo {
                 email: email.map(|s| s.to_string()),
-                issuer: None,
                 chatgpt_plan_type: None,
                 raw_jwt: fake_jwt(account_id, email, "pro"),
             },
@@ -555,8 +398,8 @@ mod tests {
         assert_eq!(stored.mode, AuthMode::ApiKey);
         assert_eq!(stored.openai_api_key.as_deref(), Some("sk-test"));
 
-        let again =
-            upsert_api_key_account(home.path(), api_key, None, false).expect("upsert same key");
+        let again = upsert_api_key_account(home.path(), api_key, None, false)
+            .expect("upsert same key");
         assert_eq!(stored.id, again.id);
 
         let accounts = list_accounts(home.path()).expect("list accounts");
@@ -568,12 +411,24 @@ mod tests {
     fn upsert_chatgpt_dedupes_by_account_id() {
         let home = tempdir().expect("tempdir");
         let tokens = make_chatgpt_tokens(Some("acct-1"), Some("user@example.com"));
-        let stored = upsert_chatgpt_account(home.path(), tokens.clone(), Utc::now(), None, true)
-            .expect("insert chatgpt");
+        let stored = upsert_chatgpt_account(
+            home.path(),
+            tokens.clone(),
+            Utc::now(),
+            None,
+            true,
+        )
+        .expect("insert chatgpt");
 
         let tokens_updated = make_chatgpt_tokens(Some("acct-1"), Some("user@example.com"));
-        let again = upsert_chatgpt_account(home.path(), tokens_updated, Utc::now(), None, false)
-            .expect("update chatgpt");
+        let again = upsert_chatgpt_account(
+            home.path(),
+            tokens_updated,
+            Utc::now(),
+            None,
+            false,
+        )
+        .expect("update chatgpt");
 
         assert_eq!(stored.id, again.id);
         let accounts = list_accounts(home.path()).expect("list accounts");
@@ -586,19 +441,28 @@ mod tests {
         let home = tempdir().expect("tempdir");
 
         let personal = make_chatgpt_tokens(Some("acct-personal"), Some("user@example.com"));
-        let personal_id = upsert_chatgpt_account(home.path(), personal, Utc::now(), None, true)
-            .expect("insert personal account")
-            .id;
+        let personal_id = upsert_chatgpt_account(
+            home.path(),
+            personal,
+            Utc::now(),
+            None,
+            true,
+        )
+        .expect("insert personal account")
+        .id;
 
         let team = make_chatgpt_tokens(Some("acct-team"), Some("user@example.com"));
-        let team_id = upsert_chatgpt_account(home.path(), team, Utc::now(), None, false)
-            .expect("insert team account")
-            .id;
+        let team_id = upsert_chatgpt_account(
+            home.path(),
+            team,
+            Utc::now(),
+            None,
+            false,
+        )
+        .expect("insert team account")
+        .id;
 
-        assert_ne!(
-            personal_id, team_id,
-            "accounts with different IDs should not be merged"
-        );
+        assert_ne!(personal_id, team_id, "accounts with different IDs should not be merged");
 
         let accounts = list_accounts(home.path()).expect("list accounts");
         assert_eq!(accounts.len(), 2, "both accounts should remain listed");
@@ -608,8 +472,14 @@ mod tests {
     fn remove_account_clears_active() {
         let home = tempdir().expect("tempdir");
         let tokens = make_chatgpt_tokens(Some("acct-remove"), Some("user@example.com"));
-        let stored = upsert_chatgpt_account(home.path(), tokens, Utc::now(), None, true)
-            .expect("insert chatgpt");
+        let stored = upsert_chatgpt_account(
+            home.path(),
+            tokens,
+            Utc::now(),
+            None,
+            true,
+        )
+        .expect("insert chatgpt");
 
         let active_before = get_active_account_id(home.path()).expect("active id");
         assert_eq!(active_before.as_deref(), Some(stored.id.as_str()));

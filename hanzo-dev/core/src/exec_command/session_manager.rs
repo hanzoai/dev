@@ -1,6 +1,5 @@
 #![allow(dead_code)]
-use std::collections::HashMap;
-use std::collections::VecDeque;
+use std::collections::{HashMap, VecDeque};
 use std::io::ErrorKind;
 use std::io::Read;
 use std::path::PathBuf;
@@ -23,6 +22,8 @@ use crate::exec_command::exec_command_params::WriteStdinParams;
 use crate::exec_command::exec_command_session::ExecCommandSession;
 use crate::exec_command::session_id::SessionId;
 use hanzo_protocol::models::FunctionCallOutputPayload;
+
+const EXEC_COMMAND_OUTPUT_MAX_BYTES: u64 = 1024 * 1024;
 
 #[derive(Debug, Default)]
 pub struct SessionManager {
@@ -60,7 +61,9 @@ impl TruncatingCollector {
             return;
         }
 
-        self.total_bytes = self.total_bytes.saturating_add(chunk.len() as u64);
+        self.total_bytes = self
+            .total_bytes
+            .saturating_add(chunk.len() as u64);
 
         if self.prefix.len() < self.cap_bytes {
             let remaining = self.cap_bytes - self.prefix.len();
@@ -88,7 +91,10 @@ impl TruncatingCollector {
         }
 
         if (self.total_bytes as usize) <= self.cap_bytes {
-            return (String::from_utf8_lossy(&self.prefix).into_owned(), None);
+            return (
+                String::from_utf8_lossy(&self.prefix).into_owned(),
+                None,
+            );
         }
 
         let prefix_str = String::from_utf8_lossy(&self.prefix).into_owned();
@@ -107,9 +113,10 @@ impl TruncatingCollector {
             let right_budget = keep_budget - left_budget;
             let prefix_slice = pick_prefix_slice(&prefix_str, left_budget);
             let suffix_slice = pick_suffix_slice(&suffix_str, right_budget);
-            let kept_content_bytes = prefix_slice.len() + suffix_slice.len();
-            let truncated_content_bytes =
-                self.total_bytes.saturating_sub(kept_content_bytes as u64);
+            let kept_content_bytes = prefix_slice.as_bytes().len() + suffix_slice.as_bytes().len();
+            let truncated_content_bytes = self
+                .total_bytes
+                .saturating_sub(kept_content_bytes as u64);
             let new_tokens = truncated_content_bytes.div_ceil(4);
             if new_tokens == guess_tokens {
                 let mut out = String::with_capacity(marker_len + kept_content_bytes + 1);
@@ -132,8 +139,9 @@ impl TruncatingCollector {
         let right_budget = keep_budget - left_budget;
         let prefix_slice = pick_prefix_slice(&prefix_str, left_budget);
         let suffix_slice = pick_suffix_slice(&suffix_str, right_budget);
-        let mut out =
-            String::with_capacity(marker_len + prefix_slice.len() + suffix_slice.len() + 1);
+        let mut out = String::with_capacity(
+            marker_len + prefix_slice.as_bytes().len() + suffix_slice.as_bytes().len() + 1,
+        );
         out.push_str(prefix_slice);
         out.push_str(&marker);
         out.push('\n');
@@ -142,27 +150,27 @@ impl TruncatingCollector {
     }
 }
 
-fn pick_prefix_slice(input: &str, left_budget: usize) -> &str {
+fn pick_prefix_slice<'a>(input: &'a str, left_budget: usize) -> &'a str {
     if left_budget >= input.len() {
         return input;
     }
-    if let Some(head) = input.get(..left_budget)
-        && let Some(idx) = head.rfind('\n')
-    {
-        return &input[..idx + 1];
+    if let Some(head) = input.get(..left_budget) {
+        if let Some(idx) = head.rfind('\n') {
+            return &input[..idx + 1];
+        }
     }
     truncate_on_boundary(input, left_budget)
 }
 
-fn pick_suffix_slice(input: &str, right_budget: usize) -> &str {
+fn pick_suffix_slice<'a>(input: &'a str, right_budget: usize) -> &'a str {
     if right_budget >= input.len() {
         return input;
     }
     let tail_start = input.len().saturating_sub(right_budget);
-    if let Some(tail) = input.get(tail_start..)
-        && let Some(idx) = tail.find('\n')
-    {
-        return &input[tail_start + idx + 1..];
+    if let Some(tail) = input.get(tail_start..) {
+        if let Some(idx) = tail.find('\n') {
+            return &input[tail_start + idx + 1..];
+        }
     }
     let mut idx = tail_start;
     while idx < input.len() && !input.is_char_boundary(idx) {
@@ -171,7 +179,7 @@ fn pick_suffix_slice(input: &str, right_budget: usize) -> &str {
     &input[idx..]
 }
 
-fn truncate_on_boundary(input: &str, max_len: usize) -> &str {
+fn truncate_on_boundary<'a>(input: &'a str, max_len: usize) -> &'a str {
     if input.len() <= max_len {
         return input;
     }
@@ -216,11 +224,11 @@ pub enum ExitStatus {
 pub fn result_into_payload(result: Result<ExecCommandOutput, String>) -> FunctionCallOutputPayload {
     match result {
         Ok(output) => FunctionCallOutputPayload {
-            content: output.to_text_output(),
+            body: hanzo_protocol::models::FunctionCallOutputBody::Text(output.to_text_output()),
             success: Some(true),
         },
         Err(err) => FunctionCallOutputPayload {
-            content: err,
+            body: hanzo_protocol::models::FunctionCallOutputBody::Text(err),
             success: Some(false),
         },
     }
@@ -265,7 +273,10 @@ impl SessionManager {
 
         // Collect output until either timeout expires or process exits.
         // Enforce the byte cap incrementally so runaway commands cannot exhaust memory.
-        let cap_bytes_u64 = params.max_output_tokens.saturating_mul(4);
+        let cap_bytes_u64 = params
+            .max_output_tokens
+            .saturating_mul(4)
+            .min(EXEC_COMMAND_OUTPUT_MAX_BYTES);
         let cap_bytes: usize = cap_bytes_u64.min(usize::MAX as u64) as usize;
         let mut collector = TruncatingCollector::new(cap_bytes);
 
@@ -361,7 +372,9 @@ impl SessionManager {
             return Err("failed to write to stdin".to_string());
         }
 
-        let cap_bytes_u64 = max_output_tokens.saturating_mul(4);
+        let cap_bytes_u64 = max_output_tokens
+            .saturating_mul(4)
+            .min(EXEC_COMMAND_OUTPUT_MAX_BYTES);
         let cap_bytes: usize = cap_bytes_u64.min(usize::MAX as u64) as usize;
 
         // Collect output up to yield_time_ms, truncating to max_output_tokens bytes.

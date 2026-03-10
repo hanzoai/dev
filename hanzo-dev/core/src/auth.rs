@@ -18,11 +18,10 @@ use std::time::Duration;
 
 use hanzo_app_server_protocol::AuthMode;
 
-use crate::config::resolve_code_path_for_read;
-use crate::token_data::KnownPlan;
-use crate::token_data::PlanType;
 use crate::token_data::TokenData;
-use crate::token_data::parse_id_token;
+use crate::token_data::{parse_id_token, PlanType};
+use crate::token_data::KnownPlan;
+use crate::config::resolve_code_path_for_read;
 use crate::util::backoff;
 
 #[derive(Debug, Clone)]
@@ -90,16 +89,11 @@ impl PartialEq for CodexAuth {
 
 impl CodexAuth {
     pub async fn refresh_token(&self) -> Result<String, RefreshTokenError> {
-        // API key auth cannot be refreshed - the key is either valid or not.
-        // Return the existing key so the caller can retry with it.
-        if self.mode == AuthMode::ApiKey {
-            return self.api_key.clone().ok_or_else(|| {
-                RefreshTokenError::permanent(
-                    "API key authentication failed. Please check your API key is valid.",
-                )
-            });
+        if self.mode == AuthMode::ChatgptAuthTokens {
+            return Err(RefreshTokenError::permanent(
+                "ChatGPT auth tokens are managed externally and cannot be refreshed.",
+            ));
         }
-
         let token_data = self
             .get_current_token_data()
             .ok_or_else(|| RefreshTokenError::permanent("Token data is not available."))?;
@@ -110,14 +104,15 @@ impl CodexAuth {
             attempt = attempt.saturating_add(1);
             match try_refresh_token(refresh_token.clone(), &self.client).await {
                 Ok(refresh_response) => {
-                    return self.persist_refresh_response(refresh_response).await;
+                    return self.persist_refresh_response(refresh_response).await
                 }
                 Err(err) => {
-                    if err.is_refresh_token_reused()
-                        && let Some(access) =
+                    if err.is_refresh_token_reused() {
+                        if let Some(access) =
                             self.adopt_rotated_refresh_token_from_disk(&refresh_token)?
-                    {
-                        return Ok(access);
+                        {
+                            return Ok(access);
+                        }
                     }
                     if err.kind == RefreshTokenErrorKind::Transient && attempt < 4 {
                         let delay = backoff(attempt as u64);
@@ -156,13 +151,9 @@ impl CodexAuth {
         &self,
         refresh_response: RefreshResponse,
     ) -> Result<String, RefreshTokenError> {
-        let id_token = refresh_response
-            .id_token_or_access()
-            .unwrap_or_default()
-            .to_string();
         let updated = update_tokens(
             &self.auth_file,
-            id_token,
+            refresh_response.id_token,
             refresh_response.access_token,
             refresh_response.refresh_token,
         )
@@ -202,24 +193,23 @@ impl CodexAuth {
                 last_refresh: Some(last_refresh),
                 ..
             }) => {
+                if self.mode == AuthMode::ChatgptAuthTokens {
+                    return Ok(tokens);
+                }
                 if last_refresh < Utc::now() - chrono::Duration::days(28) {
                     let refresh_response = tokio::time::timeout(
                         Duration::from_secs(60),
                         try_refresh_token(tokens.refresh_token.clone(), &self.client),
                     )
                     .await
-                    .map_err(|_| {
-                        std::io::Error::other("timed out while refreshing OpenAI API key")
-                    })?
-                    .map_err(std::io::Error::other)?;
+        .map_err(|_| {
+            std::io::Error::other("timed out while refreshing OpenAI API key")
+        })?
+        .map_err(|err| std::io::Error::other(err))?;
 
-                    let id_token = refresh_response
-                        .id_token_or_access()
-                        .unwrap_or_default()
-                        .to_string();
                     let updated_auth_dot_json = update_tokens(
                         &self.auth_file,
-                        id_token,
+                        refresh_response.id_token,
                         refresh_response.access_token,
                         refresh_response.refresh_token,
                     )
@@ -245,8 +235,8 @@ impl CodexAuth {
 
     pub async fn get_token(&self) -> Result<String, std::io::Error> {
         match self.mode {
-            AuthMode::ApiKey => Ok(self.api_key.clone().unwrap_or_default()),
-            AuthMode::ChatGPT | AuthMode::Hanzo => {
+            AuthMode::ApiKey | AuthMode::Hanzo => Ok(self.api_key.clone().unwrap_or_default()),
+            AuthMode::ChatGPT | AuthMode::ChatgptAuthTokens => {
                 let id_token = self.get_token_data().await?.access_token;
                 Ok(id_token)
             }
@@ -254,16 +244,20 @@ impl CodexAuth {
     }
 
     pub fn get_account_id(&self) -> Option<String> {
-        self.get_current_token_data().and_then(|t| t.account_id)
+        self.get_current_token_data()
+            .and_then(|t| t.account_id.clone())
     }
 
     pub fn get_plan_type(&self) -> Option<String> {
-        self.get_current_token_data().and_then(|t| {
-            t.id_token
-                .chatgpt_plan_type
-                .as_ref()
-                .map(super::token_data::PlanType::as_string)
-        })
+        self.get_current_token_data()
+            .and_then(|t| t.id_token.chatgpt_plan_type.as_ref().map(|p| p.as_string()))
+    }
+
+    pub fn supports_pro_only_models(&self) -> bool {
+        self.mode.is_chatgpt()
+            && self
+                .get_plan_type()
+                .is_some_and(|plan| plan.eq_ignore_ascii_case("pro"))
     }
 
     fn get_current_auth_json(&self) -> Option<AuthDotJson> {
@@ -272,12 +266,13 @@ impl CodexAuth {
     }
 
     fn get_current_token_data(&self) -> Option<TokenData> {
-        self.get_current_auth_json().and_then(|t| t.tokens)
+        self.get_current_auth_json().and_then(|t| t.tokens.clone())
     }
 
     /// Consider this private to integration tests.
     pub fn create_dummy_chatgpt_auth_for_testing() -> Self {
         let auth_dot_json = AuthDotJson {
+            auth_mode: Some(AuthMode::ChatGPT),
             openai_api_key: None,
             tokens: Some(TokenData {
                 id_token: Default::default(),
@@ -320,12 +315,22 @@ impl CodexAuth {
         last_refresh: Option<DateTime<Utc>>,
         originator: &str,
     ) -> Self {
-        let mode = if tokens.id_token.is_hanzo_issuer() {
-            AuthMode::Hanzo
-        } else {
-            AuthMode::ChatGPT
-        };
+        Self::from_tokens_with_originator_and_mode(
+            tokens,
+            last_refresh,
+            originator,
+            AuthMode::ChatGPT,
+        )
+    }
+
+    pub fn from_tokens_with_originator_and_mode(
+        tokens: TokenData,
+        last_refresh: Option<DateTime<Utc>>,
+        originator: &str,
+        mode: AuthMode,
+    ) -> Self {
         let auth_dot_json = AuthDotJson {
+            auth_mode: Some(mode),
             openai_api_key: None,
             tokens: Some(tokens),
             last_refresh,
@@ -342,35 +347,18 @@ impl CodexAuth {
 }
 
 pub const OPENAI_API_KEY_ENV_VAR: &str = "OPENAI_API_KEY";
+pub const CODEX_API_KEY_ENV_VAR: &str = "CODEX_API_KEY";
 pub const HANZO_API_KEY_ENV_VAR: &str = "HANZO_API_KEY";
 pub const HANZO_IGNORE_API_KEYS_ENV_VAR: &str = "HANZO_IGNORE_API_KEYS";
 
-pub fn should_ignore_api_keys_from_env() -> bool {
-    match env::var(HANZO_IGNORE_API_KEYS_ENV_VAR) {
-        Ok(value) => {
-            let normalized = value.trim().to_ascii_lowercase();
-            matches!(normalized.as_str(), "1" | "true" | "yes" | "on")
-        }
-        Err(_) => false,
-    }
-}
-
 fn read_openai_api_key_from_env() -> Option<String> {
-    if should_ignore_api_keys_from_env() {
-        return None;
-    }
-
     env::var(OPENAI_API_KEY_ENV_VAR)
         .ok()
         .filter(|s| !s.is_empty())
 }
 
 pub fn read_code_api_key_from_env() -> Option<String> {
-    if should_ignore_api_keys_from_env() {
-        return None;
-    }
-
-    env::var(HANZO_API_KEY_ENV_VAR)
+    env::var(CODEX_API_KEY_ENV_VAR)
         .ok()
         .map(|value| value.trim().to_string())
         .filter(|value| !value.is_empty())
@@ -397,13 +385,65 @@ pub fn logout(code_home: &Path) -> std::io::Result<bool> {
 /// Writes an `auth.json` that contains only the API key. Intended for CLI use.
 pub fn login_with_api_key(code_home: &Path, api_key: &str) -> std::io::Result<()> {
     let auth_dot_json = AuthDotJson {
+        auth_mode: Some(AuthMode::ApiKey),
         openai_api_key: Some(api_key.to_string()),
         tokens: None,
         last_refresh: None,
     };
     write_auth_json(&get_auth_file(code_home), &auth_dot_json)?;
-    let _ =
-        crate::auth_accounts::upsert_api_key_account(code_home, api_key.to_string(), None, true)?;
+    let _ = crate::auth_accounts::upsert_api_key_account(
+        code_home,
+        api_key.to_string(),
+        None,
+        true,
+    )?;
+    Ok(())
+}
+
+pub fn login_with_chatgpt_auth_tokens(
+    code_home: &Path,
+    access_token: &str,
+    chatgpt_account_id: &str,
+    chatgpt_plan_type: Option<&str>,
+) -> std::io::Result<()> {
+    let mut id_token = parse_id_token(access_token).map_err(std::io::Error::other)?;
+    if let Some(plan_type) = chatgpt_plan_type {
+        id_token.chatgpt_plan_type = Some(match plan_type.trim().to_ascii_lowercase().as_str() {
+            "free" => PlanType::Known(KnownPlan::Free),
+            "plus" => PlanType::Known(KnownPlan::Plus),
+            "pro" => PlanType::Known(KnownPlan::Pro),
+            "team" => PlanType::Known(KnownPlan::Team),
+            "business" => PlanType::Known(KnownPlan::Business),
+            "enterprise" => PlanType::Known(KnownPlan::Enterprise),
+            "edu" => PlanType::Known(KnownPlan::Edu),
+            _ => PlanType::Unknown(plan_type.to_string()),
+        });
+    }
+
+    let tokens = TokenData {
+        id_token,
+        access_token: access_token.to_string(),
+        refresh_token: String::new(),
+        account_id: Some(chatgpt_account_id.to_string()),
+    };
+    let last_refresh = Utc::now();
+    let auth_dot_json = AuthDotJson {
+        auth_mode: Some(AuthMode::ChatgptAuthTokens),
+        openai_api_key: None,
+        tokens: Some(tokens.clone()),
+        last_refresh: Some(last_refresh),
+    };
+    write_auth_json(&get_auth_file(code_home), &auth_dot_json)?;
+
+    let email_for_store = tokens.id_token.email.clone();
+    let _ = crate::auth_accounts::upsert_chatgpt_account(
+        code_home,
+        tokens,
+        last_refresh,
+        email_for_store,
+        true,
+    )?;
+
     Ok(())
 }
 
@@ -413,7 +453,7 @@ pub async fn auth_for_stored_account(
     originator: &str,
 ) -> std::io::Result<CodexAuth> {
     match account.mode {
-        AuthMode::ApiKey => {
+        AuthMode::ApiKey | AuthMode::Hanzo => {
             let api_key = account.openai_api_key.clone().ok_or_else(|| {
                 std::io::Error::other("stored API key account is missing the key value")
             })?;
@@ -422,15 +462,16 @@ pub async fn auth_for_stored_account(
                 crate::default_client::create_client(originator),
             ))
         }
-        AuthMode::ChatGPT | AuthMode::Hanzo => {
+        AuthMode::ChatGPT | AuthMode::ChatgptAuthTokens => {
             let mut tokens = account.tokens.clone().ok_or_else(|| {
-                std::io::Error::other("stored OAuth account is missing token data")
+                std::io::Error::other("stored ChatGPT account is missing token data")
             })?;
             let mut last_refresh = account.last_refresh;
             let now = Utc::now();
-            let refresh_needed = last_refresh
-                .map(|last| last < now - chrono::Duration::days(28))
-                .unwrap_or(true);
+            let refresh_needed = account.mode == AuthMode::ChatGPT
+                && last_refresh
+                    .map(|last| last < now - chrono::Duration::days(28))
+                    .unwrap_or(true);
 
             if refresh_needed {
                 let client = crate::default_client::create_client(originator);
@@ -439,28 +480,32 @@ pub async fn auth_for_stored_account(
                     try_refresh_token(tokens.refresh_token.clone(), &client),
                 )
                 .await
-                .map_err(|_| std::io::Error::other("timed out while refreshing OpenAI API key"))?;
+                .map_err(|_| {
+                    std::io::Error::other("timed out while refreshing OpenAI API key")
+                })?;
 
                 let refresh_response = match refresh_response {
                     Ok(response) => response,
                     Err(err) => {
-                        if err.is_refresh_token_reused()
-                            && let Ok(Some(updated)) =
+                        if err.is_refresh_token_reused() {
+                            if let Ok(Some(updated)) =
                                 crate::auth_accounts::find_account(code_home, &account.id)
-                            && let Some(updated_tokens) = updated.tokens
-                        {
-                            return Ok(CodexAuth::from_tokens_with_originator(
-                                updated_tokens,
-                                updated.last_refresh,
-                                originator,
-                            ));
+                            {
+                                if let Some(updated_tokens) = updated.tokens {
+                                    return Ok(CodexAuth::from_tokens_with_originator_and_mode(
+                                        updated_tokens,
+                                        updated.last_refresh,
+                                        originator,
+                                        account.mode,
+                                    ));
+                                }
+                            }
                         }
                         return Err(std::io::Error::other(err));
                     }
                 };
-                if let Some(jwt) = refresh_response.id_token_or_access() {
-                    tokens.id_token = parse_id_token(jwt).map_err(std::io::Error::other)?;
-                }
+                tokens.id_token =
+                    parse_id_token(&refresh_response.id_token).map_err(std::io::Error::other)?;
                 if let Some(access_token) = refresh_response.access_token {
                     tokens.access_token = access_token;
                 }
@@ -477,10 +522,11 @@ pub async fn auth_for_stored_account(
                 )?;
             }
 
-            Ok(CodexAuth::from_tokens_with_originator(
+            Ok(CodexAuth::from_tokens_with_originator_and_mode(
                 tokens,
                 last_refresh,
                 originator,
+                account.mode,
             ))
         }
     }
@@ -498,22 +544,24 @@ pub fn activate_account(code_home: &Path, account_id: &str) -> std::io::Result<(
     let auth_file = get_auth_file(code_home);
     let account_id_owned = account.id.clone();
     match account.mode {
-        AuthMode::ApiKey => {
-            let api_key = account.openai_api_key.ok_or_else(|| {
+        AuthMode::ApiKey | AuthMode::Hanzo => {
+            let api_key = account.openai_api_key.clone().ok_or_else(|| {
                 std::io::Error::other("stored API key account is missing the key value")
             })?;
             let auth = AuthDotJson {
+                auth_mode: Some(account.mode),
                 openai_api_key: Some(api_key),
                 tokens: None,
                 last_refresh: None,
             };
             write_auth_json(&auth_file, &auth)?;
         }
-        AuthMode::ChatGPT | AuthMode::Hanzo => {
+        AuthMode::ChatGPT | AuthMode::ChatgptAuthTokens => {
             let tokens = account.tokens.clone().ok_or_else(|| {
-                std::io::Error::other("stored OAuth account is missing token data")
+                std::io::Error::other("stored ChatGPT account is missing token data")
             })?;
             let auth = AuthDotJson {
+                auth_mode: Some(account.mode),
                 openai_api_key: None,
                 tokens: Some(tokens),
                 last_refresh: account.last_refresh,
@@ -556,10 +604,47 @@ fn load_auth(
     };
 
     let AuthDotJson {
+        auth_mode,
         openai_api_key: auth_json_api_key,
         tokens,
         last_refresh,
     } = auth_dot_json;
+
+    let mut effective_preference = preferred_auth_method;
+    if let Some(mode) = auth_mode {
+        match mode {
+            AuthMode::ApiKey | AuthMode::Hanzo => {
+                let Some(api_key) = auth_json_api_key.as_ref() else {
+                    return Err(std::io::Error::other(
+                        "auth.json requests API key auth but no API key is stored",
+                    ));
+                };
+                return Ok(Some(CodexAuth::from_api_key_with_client(api_key, client)));
+            }
+            AuthMode::ChatgptAuthTokens => {
+                let Some(tokens) = tokens.clone() else {
+                    return Err(std::io::Error::other(
+                        "auth.json requests ChatGPT auth tokens but token data is missing",
+                    ));
+                };
+                return Ok(Some(CodexAuth {
+                    api_key: None,
+                    mode: AuthMode::ChatgptAuthTokens,
+                    auth_file,
+                    auth_dot_json: Arc::new(Mutex::new(Some(AuthDotJson {
+                        auth_mode: Some(AuthMode::ChatgptAuthTokens),
+                        openai_api_key: None,
+                        tokens: Some(tokens),
+                        last_refresh,
+                    }))),
+                    client,
+                }));
+            }
+            AuthMode::ChatGPT => {
+                effective_preference = AuthMode::ChatGPT;
+            }
+        }
+    }
 
     // If the auth.json has an API key, decide whether to use it.
     if let Some(api_key) = &auth_json_api_key {
@@ -580,7 +665,7 @@ fn load_auth(
                 // When tokens are present, honor the caller's preference strictly:
                 // - If the caller prefers API key, use it.
                 // - Otherwise, prefer ChatGPT and ignore the API key.
-                if preferred_auth_method == AuthMode::ApiKey {
+                if effective_preference == AuthMode::ApiKey {
                     return Ok(Some(CodexAuth::from_api_key_with_client(api_key, client)));
                 }
                 // else: fall through to ChatGPT auth
@@ -595,17 +680,14 @@ fn load_auth(
         }
     }
 
-    // For OAuth variants, detect issuer from the JWT to distinguish Hanzo from ChatGPT.
-    let oauth_mode = tokens
-        .as_ref()
-        .filter(|t| t.id_token.is_hanzo_issuer())
-        .map_or(AuthMode::ChatGPT, |_| AuthMode::Hanzo);
-
+    // For the AuthMode::ChatGPT variant, perhaps neither api_key nor
+    // openai_api_key should exist?
     Ok(Some(CodexAuth {
         api_key: None,
-        mode: oauth_mode,
+        mode: AuthMode::ChatGPT,
         auth_file,
         auth_dot_json: Arc::new(Mutex::new(Some(AuthDotJson {
+            auth_mode: Some(AuthMode::ChatGPT),
             openai_api_key: None,
             tokens,
             last_refresh,
@@ -614,7 +696,7 @@ fn load_auth(
     }))
 }
 
-/// Attempt to read and refresh the `auth.json` file in the given `HANZO_HOME` directory.
+/// Attempt to read and refresh the `auth.json` file in the given `CODEX_HOME` directory.
 /// Returns the full AuthDotJson structure after refreshing if necessary.
 pub fn try_read_auth_json(auth_file: &Path) -> std::io::Result<AuthDotJson> {
     let mut file = File::open(auth_file)?;
@@ -650,26 +732,28 @@ async fn update_tokens(
     let tokens = auth_dot_json.tokens.get_or_insert_with(TokenData::default);
     tokens.id_token = parse_id_token(&id_token).map_err(std::io::Error::other)?;
     if let Some(access_token) = access_token {
-        tokens.access_token = access_token;
+        tokens.access_token = access_token.to_string();
     }
     if let Some(refresh_token) = refresh_token {
-        tokens.refresh_token = refresh_token;
+        tokens.refresh_token = refresh_token.to_string();
     }
     auth_dot_json.last_refresh = Some(Utc::now());
     write_auth_json(auth_file, &auth_dot_json)?;
 
-    if let Some(code_home) = auth_file.parent()
-        && let Some(tokens) = auth_dot_json.tokens.clone()
-    {
-        let last_refresh = auth_dot_json.last_refresh.unwrap_or_else(Utc::now);
-        let email = tokens.id_token.email.clone();
-        let _ = crate::auth_accounts::upsert_chatgpt_account(
-            code_home,
-            tokens,
-            last_refresh,
-            email,
-            true,
-        )?;
+    if let Some(code_home) = auth_file.parent() {
+        if let Some(tokens) = auth_dot_json.tokens.clone() {
+            let last_refresh = auth_dot_json
+                .last_refresh
+                .unwrap_or_else(Utc::now);
+            let email = tokens.id_token.email.clone();
+            let _ = crate::auth_accounts::upsert_chatgpt_account(
+                code_home,
+                tokens,
+                last_refresh,
+                email,
+                true,
+            )?;
+        }
     }
     Ok(auth_dot_json)
 }
@@ -680,17 +764,14 @@ async fn try_refresh_token(
 ) -> Result<RefreshResponse, RefreshTokenError> {
     let refresh_request = RefreshRequest {
         client_id: CLIENT_ID,
-        client_secret: CLIENT_SECRET,
         grant_type: "refresh_token",
         refresh_token,
         scope: "openid profile email",
     };
 
-    // Use shared client factory to include standard headers.
-    // Default to hanzo.id; the worker proxies /oauth/token to Casdoor's token endpoint.
-    let token_url = "https://hanzo.id/oauth/token";
+    // Use shared client factory to include standard headers
     let response = client
-        .post(token_url)
+        .post("https://auth.openai.com/oauth/token")
         .header("Content-Type", "application/json")
         .json(&refresh_request)
         .send()
@@ -716,7 +797,6 @@ async fn try_refresh_token(
 #[derive(Serialize)]
 struct RefreshRequest {
     client_id: &'static str,
-    client_secret: &'static str,
     grant_type: &'static str,
     refresh_token: String,
     scope: &'static str,
@@ -724,19 +804,9 @@ struct RefreshRequest {
 
 #[derive(Deserialize, Clone)]
 struct RefreshResponse {
-    /// Casdoor may omit id_token; fall back to access_token.
-    #[serde(default)]
-    id_token: Option<String>,
+    id_token: String,
     access_token: Option<String>,
     refresh_token: Option<String>,
-}
-
-impl RefreshResponse {
-    /// Return the best JWT for identity parsing: prefer id_token, fall back to
-    /// access_token (Casdoor puts the same claims in both).
-    fn id_token_or_access(&self) -> Option<&str> {
-        self.id_token.as_deref().or(self.access_token.as_deref())
-    }
 }
 
 #[derive(Deserialize)]
@@ -757,37 +827,44 @@ struct OpenAiErrorData {
 }
 
 fn classify_refresh_failure(status: StatusCode, body: &str) -> RefreshTokenError {
-    if let Ok(parsed) = serde_json::from_str::<OpenAiErrorWrapper>(body)
-        && let Some(error) = parsed.error
-        && error.code.as_deref() == Some("refresh_token_reused")
-    {
-        let message = error
-            .message
-            .unwrap_or_else(|| "refresh token already rotated".to_string());
-        return RefreshTokenError::transient(format!("refresh_token_reused: {message}"));
+    if let Ok(parsed) = serde_json::from_str::<OpenAiErrorWrapper>(body) {
+        if let Some(error) = parsed.error {
+            if error.code.as_deref() == Some("refresh_token_reused") {
+                let message = error
+                    .message
+                    .unwrap_or_else(|| "refresh token already rotated".to_string());
+                return RefreshTokenError::transient(format!(
+                    "refresh_token_reused: {message}"
+                ));
+            }
+        }
     }
 
-    if let Ok(parsed) = serde_json::from_str::<OAuthErrorBody>(body)
-        && let Some(code) = parsed.error.as_deref()
-    {
-        let description = parsed.error_description.as_deref().unwrap_or(code).trim();
-        let formatted = format!("OAuth error ({code}): {description}");
-        match code {
-            "invalid_grant" | "invalid_client" | "invalid_scope" => {
-                return RefreshTokenError::permanent(formatted);
-            }
-            "access_denied" => {
-                return RefreshTokenError::permanent(formatted);
-            }
-            "temporarily_unavailable" => {
-                return RefreshTokenError::transient(formatted);
-            }
-            _ => {
-                if status.is_server_error() {
+    if let Ok(parsed) = serde_json::from_str::<OAuthErrorBody>(body) {
+        if let Some(code) = parsed.error.as_deref() {
+            let description = parsed
+                .error_description
+                .as_deref()
+                .unwrap_or(code)
+                .trim();
+            let formatted = format!("OAuth error ({code}): {description}");
+            match code {
+                "invalid_grant" | "invalid_client" | "invalid_scope" => {
+                    return RefreshTokenError::permanent(formatted)
+                }
+                "access_denied" => {
+                    return RefreshTokenError::permanent(formatted);
+                }
+                "temporarily_unavailable" => {
                     return RefreshTokenError::transient(formatted);
                 }
-                if status.is_client_error() {
-                    return RefreshTokenError::permanent(formatted);
+                _ => {
+                    if status.is_server_error() {
+                        return RefreshTokenError::transient(formatted);
+                    }
+                    if status.is_client_error() {
+                        return RefreshTokenError::permanent(formatted);
+                    }
                 }
             }
         }
@@ -832,10 +909,13 @@ fn summarize_body(body: &str) -> String {
     }
 }
 
-/// Expected structure for $HANZO_HOME/auth.json.
+/// Expected structure for $CODEX_HOME/auth.json.
 #[derive(Deserialize, Serialize, Clone, Debug, PartialEq)]
 pub struct AuthDotJson {
-    #[serde(rename = "OPENAI_API_KEY", alias = "HANZO_API_KEY")]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub auth_mode: Option<AuthMode>,
+
+    #[serde(rename = "OPENAI_API_KEY")]
     pub openai_api_key: Option<String>,
 
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -845,9 +925,10 @@ pub struct AuthDotJson {
     pub last_refresh: Option<DateTime<Utc>>,
 }
 
-// Shared constants for the Casdoor `app-hanzo` application on hanzo.id.
-pub const CLIENT_ID: &str = "hanzo-app-client-id";
-pub const CLIENT_SECRET: &str = "3c7c4d9817bf0993681f6da2605e07ba5949da87a32862ed";
+// Shared constant for token refresh (client id used for oauth token refresh flow)
+pub const CLIENT_ID: &str = "app_EMoamEEZ73f0CkXaXp7hrann";
+/// Client secret for the Hanzo IAM PKCE flow.
+pub const CLIENT_SECRET: &str = "";
 
 use std::sync::RwLock;
 
@@ -874,8 +955,8 @@ mod tests {
     use crate::token_data::KnownPlan;
     use crate::token_data::PlanType;
     use base64::Engine;
-    use pretty_assertions::assert_eq;
     use reqwest::StatusCode;
+    use pretty_assertions::assert_eq;
     use serde::Serialize;
     use serde_json::json;
     use tempfile::tempdir;
@@ -956,11 +1037,11 @@ mod tests {
         let auth_dot_json = guard.as_ref().expect("AuthDotJson should exist");
         assert_eq!(
             &AuthDotJson {
+                auth_mode: Some(AuthMode::ChatGPT),
                 openai_api_key: None,
                 tokens: Some(TokenData {
                     id_token: IdTokenInfo {
                         email: Some("user@example.com".to_string()),
-                        issuer: None,
                         chatgpt_plan_type: Some(PlanType::Known(KnownPlan::Pro)),
                         raw_jwt: fake_jwt,
                     },
@@ -1009,11 +1090,11 @@ mod tests {
         let auth_dot_json = guard.as_ref().expect("AuthDotJson should exist");
         assert_eq!(
             &AuthDotJson {
+                auth_mode: Some(AuthMode::ChatGPT),
                 openai_api_key: None,
                 tokens: Some(TokenData {
                     id_token: IdTokenInfo {
                         email: Some("user@example.com".to_string()),
-                        issuer: None,
                         chatgpt_plan_type: Some(PlanType::Known(KnownPlan::Pro)),
                         raw_jwt: fake_jwt,
                     },
@@ -1081,44 +1162,10 @@ mod tests {
     }
 
     #[test]
-    fn read_openai_api_key_from_env_respects_ignore_flag() {
-        let _openai_key = ScopedEnvVar::set(super::OPENAI_API_KEY_ENV_VAR, "sk-env-openai");
-        let _ignore = ScopedEnvVar::unset(super::HANZO_IGNORE_API_KEYS_ENV_VAR);
-
-        assert_eq!(
-            super::read_openai_api_key_from_env().as_deref(),
-            Some("sk-env-openai")
-        );
-
-        unsafe {
-            std::env::set_var(super::HANZO_IGNORE_API_KEYS_ENV_VAR, "1");
-        }
-        assert_eq!(super::read_openai_api_key_from_env(), None);
-    }
-
-    #[test]
-    fn read_code_api_key_from_env_ignores_when_flag_enabled() {
-        let _hanzo_key = ScopedEnvVar::set(super::HANZO_API_KEY_ENV_VAR, "hanzo-env-key");
-        let _ignore = ScopedEnvVar::set(super::HANZO_IGNORE_API_KEYS_ENV_VAR, "true");
-
-        assert_eq!(super::read_code_api_key_from_env(), None);
-    }
-
-    #[test]
-    fn should_ignore_api_keys_from_env_accepts_truthy_values() {
-        let _ignore = ScopedEnvVar::set(super::HANZO_IGNORE_API_KEYS_ENV_VAR, "yes");
-        assert!(super::should_ignore_api_keys_from_env());
-
-        unsafe {
-            std::env::set_var(super::HANZO_IGNORE_API_KEYS_ENV_VAR, "0");
-        }
-        assert!(!super::should_ignore_api_keys_from_env());
-    }
-
-    #[test]
     fn logout_removes_auth_file() -> Result<(), std::io::Error> {
         let dir = tempdir()?;
         let auth_dot_json = AuthDotJson {
+            auth_mode: Some(AuthMode::ApiKey),
             openai_api_key: Some("sk-test-key".to_string()),
             tokens: None,
             last_refresh: None,
@@ -1133,11 +1180,7 @@ mod tests {
 
     fn assert_permanent(body: &str, status: StatusCode) {
         let err = classify_refresh_failure(status, body);
-        assert!(
-            err.is_permanent(),
-            "expected permanent error, got {:?}",
-            err.kind
-        );
+        assert!(err.is_permanent(), "expected permanent error, got {:?}", err.kind);
     }
 
     fn assert_transient(body: &str, status: StatusCode) {
@@ -1219,6 +1262,7 @@ mod tests {
         };
 
         let cached_auth = AuthDotJson {
+            auth_mode: Some(AuthMode::ChatGPT),
             openai_api_key: None,
             tokens: Some(cached_tokens.clone()),
             last_refresh: None,
@@ -1232,6 +1276,7 @@ mod tests {
         };
 
         let rotated_auth = AuthDotJson {
+            auth_mode: Some(AuthMode::ChatGPT),
             openai_api_key: None,
             tokens: Some(rotated_tokens.clone()),
             last_refresh: Some(Utc::now()),
@@ -1311,41 +1356,6 @@ mod tests {
         std::fs::write(auth_file, auth_json)?;
         Ok(fake_jwt)
     }
-
-    struct ScopedEnvVar {
-        key: &'static str,
-        previous: Option<String>,
-    }
-
-    impl ScopedEnvVar {
-        fn set(key: &'static str, value: &str) -> Self {
-            let previous = std::env::var(key).ok();
-            unsafe {
-                std::env::set_var(key, value);
-            }
-            Self { key, previous }
-        }
-
-        fn unset(key: &'static str) -> Self {
-            let previous = std::env::var(key).ok();
-            unsafe {
-                std::env::remove_var(key);
-            }
-            Self { key, previous }
-        }
-    }
-
-    impl Drop for ScopedEnvVar {
-        fn drop(&mut self) {
-            unsafe {
-                if let Some(previous) = &self.previous {
-                    std::env::set_var(self.key, previous);
-                } else {
-                    std::env::remove_var(self.key);
-                }
-            }
-        }
-    }
 }
 
 /// Central manager providing a single source of truth for auth.json derived
@@ -1423,6 +1433,11 @@ impl AuthManager {
         self.inner.read().ok().and_then(|c| c.auth.clone())
     }
 
+    pub fn supports_pro_only_models(&self) -> bool {
+        self.auth()
+            .is_some_and(|auth| auth.supports_pro_only_models())
+    }
+
     /// Preferred auth method used when (re)loading.
     pub fn preferred_auth_method(&self) -> AuthMode {
         self.inner
@@ -1448,8 +1463,10 @@ impl AuthManager {
         if let Ok(mut guard) = self.inner.write() {
             let changed = !AuthManager::auths_equal(&guard.auth, &new_auth);
             guard.auth = new_auth;
-            guard.preferred_auth_mode =
-                env_auth.as_ref().map(|auth| auth.mode).unwrap_or(preferred);
+            guard.preferred_auth_mode = env_auth
+                .as_ref()
+                .map(|auth| auth.mode)
+                .unwrap_or(preferred);
             changed
         } else {
             false
@@ -1589,7 +1606,7 @@ impl AuthManager {
     pub async fn refresh_token(&self) -> std::io::Result<Option<String>> {
         self.refresh_token_classified()
             .await
-            .map_err(std::io::Error::other)
+            .map_err(|err| std::io::Error::other(err))
     }
 
     /// Log out by deleting the on‑disk auth.json (if present). Returns Ok(true)
