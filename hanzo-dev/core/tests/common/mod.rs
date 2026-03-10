@@ -55,7 +55,7 @@ fn default_test_overrides() -> ConfigOverrides {
 
     match sandbox_path {
         Some(sandbox_path) => ConfigOverrides {
-            code_linux_sandbox_exe: Some(sandbox_path),
+            hanzo_linux_sandbox_exe: Some(sandbox_path),
             ..ConfigOverrides::default()
         },
         None => {

@@ -4,11 +4,9 @@ use std::fs::File;
 use std::fs::{self};
 use std::io::BufWriter;
 use std::io::Write;
-use std::path::Path;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
-use filetime::FileTime;
-use filetime::set_file_mtime;
+use filetime::{set_file_mtime, FileTime};
 use tempfile::TempDir;
 use time::OffsetDateTime;
 use time::PrimitiveDateTime;
@@ -17,27 +15,25 @@ use time::format_description::well_known::Rfc3339;
 use time::macros::format_description;
 use uuid::Uuid;
 
-use crate::config::Config;
-use crate::config::ConfigOverrides;
-use crate::config::ConfigToml;
+use crate::config::{Config, ConfigOverrides, ConfigToml};
 use crate::rollout::INTERACTIVE_SESSION_SOURCES;
 use crate::rollout::list::ConversationsPage;
 use crate::rollout::list::Cursor;
 use crate::rollout::list::get_conversation;
 use crate::rollout::list::get_conversations;
-use hanzo_protocol::ConversationId;
-use hanzo_protocol::models::ContentItem;
-use hanzo_protocol::models::ResponseItem;
-use hanzo_protocol::protocol::EventMsg as ProtoEventMsg;
-use hanzo_protocol::protocol::RecordedEvent;
-use hanzo_protocol::protocol::RolloutItem;
-use hanzo_protocol::protocol::RolloutLine;
-use hanzo_protocol::protocol::SessionMeta;
-use hanzo_protocol::protocol::SessionMetaLine;
-use hanzo_protocol::protocol::SessionSource;
-use hanzo_protocol::protocol::UserMessageEvent;
-use std::time::Duration;
-use std::time::SystemTime;
+use std::time::{Duration, SystemTime};
+use hanzo_protocol::models::{ContentItem, ResponseItem};
+use hanzo_protocol::ThreadId;
+use hanzo_protocol::protocol::{
+    EventMsg as ProtoEventMsg,
+    RecordedEvent,
+    RolloutItem,
+    RolloutLine,
+    SessionMeta,
+    SessionMetaLine,
+    SessionSource,
+    UserMessageEvent,
+};
 
 const NO_SOURCE_FILTER: &[SessionSource] = &[];
 
@@ -62,8 +58,11 @@ fn assert_page_summary(
     expected_scanned_files: usize,
 ) {
     assert_eq!(page.items.len(), expected_items.len());
-    for (idx, (item, (expected_path, expected_ts))) in
-        page.items.iter().zip(expected_items.iter()).enumerate()
+    for (idx, (item, (expected_path, expected_ts))) in page
+        .items
+        .iter()
+        .zip(expected_items.iter())
+        .enumerate()
     {
         assert_eq!(item.path, *expected_path, "path mismatch for item {idx}");
         assert_eq!(
@@ -121,15 +120,18 @@ fn write_session_file(
     let file = File::create(file_path)?;
     let mut writer = BufWriter::new(file);
 
-    let conversation_id = ConversationId::from(uuid);
+    let conversation_id = ThreadId::from_string(&uuid.to_string()).unwrap();
     let session_meta = SessionMeta {
         id: conversation_id,
         timestamp: ts_str.to_string(),
         cwd: Path::new(".").to_path_buf(),
         originator: "test_originator".to_string(),
         cli_version: "test_version".to_string(),
-        instructions: None,
         source: source.unwrap_or_default(),
+        model_provider: None,
+        base_instructions: None,
+        dynamic_tools: None,
+        forked_from_id: None,
     };
     let session_meta_line = RolloutLine {
         timestamp: ts_str.to_string(),
@@ -148,8 +150,9 @@ fn write_session_file(
             order: None,
             msg: ProtoEventMsg::UserMessage(UserMessageEvent {
                 message: format!("Message {i}"),
-                kind: None,
                 images: None,
+                local_images: vec![],
+                text_elements: vec![],
             }),
         };
         let line = RolloutLine {
@@ -178,29 +181,31 @@ async fn test_resume_reconstruct_history_drops_user_events() {
 
     let rollout_ts = "2025-10-06T09-00-00";
     let session_uuid = Uuid::from_u128(0xfeed_babe_u128);
-    let rollout_path = sessions_dir.join(format!("rollout-{rollout_ts}-{session_uuid}.jsonl"));
+    let rollout_path = sessions_dir.join(format!(
+        "rollout-{rollout_ts}-{session_uuid}.jsonl"
+    ));
 
     let mut writer = BufWriter::new(File::create(&rollout_path).unwrap());
 
     let session_meta = SessionMeta {
-        id: ConversationId::from(session_uuid),
+        id: ThreadId::from_string(&session_uuid.to_string()).unwrap(),
         timestamp: "2025-10-06T09:00:00.000Z".to_string(),
         cwd: workspace.clone(),
         originator: "regression-test".to_string(),
         cli_version: "0.0.0-test".to_string(),
-        instructions: Some("explain async/await".to_string()),
         source: SessionSource::Cli,
+        model_provider: None,
+        base_instructions: None,
+        dynamic_tools: None,
+        forked_from_id: None,
     };
-    serde_json::to_writer(
-        &mut writer,
-        &RolloutLine {
-            timestamp: session_meta.timestamp.clone(),
-            item: RolloutItem::SessionMeta(SessionMetaLine {
-                meta: session_meta,
-                git: None,
-            }),
-        },
-    )
+    serde_json::to_writer(&mut writer, &RolloutLine {
+        timestamp: session_meta.timestamp.clone(),
+        item: RolloutItem::SessionMeta(SessionMetaLine {
+            meta: session_meta,
+            git: None,
+        }),
+    })
     .unwrap();
     writer.write_all(b"\n").unwrap();
 
@@ -210,17 +215,15 @@ async fn test_resume_reconstruct_history_drops_user_events() {
         order: None,
         msg: ProtoEventMsg::UserMessage(UserMessageEvent {
             message: "hi there".to_string(),
-            kind: None,
             images: None,
+            local_images: vec![],
+            text_elements: vec![],
         }),
     };
-    serde_json::to_writer(
-        &mut writer,
-        &RolloutLine {
-            timestamp: "2025-10-06T09:00:01.000Z".to_string(),
-            item: RolloutItem::Event(user_event),
-        },
-    )
+    serde_json::to_writer(&mut writer, &RolloutLine {
+        timestamp: "2025-10-06T09:00:01.000Z".to_string(),
+        item: RolloutItem::Event(user_event),
+    })
     .unwrap();
     writer.write_all(b"\n").unwrap();
 
@@ -229,15 +232,11 @@ async fn test_resume_reconstruct_history_drops_user_events() {
         role: "assistant".to_string(),
         content: vec![ContentItem::OutputText {
             text: "Sure, let's talk about async/await.".to_string(),
-        }],
-    };
-    serde_json::to_writer(
-        &mut writer,
-        &RolloutLine {
-            timestamp: "2025-10-06T09:00:02.000Z".to_string(),
-            item: RolloutItem::ResponseItem(assistant_response),
-        },
-    )
+        }], end_turn: None, phase: None};
+    serde_json::to_writer(&mut writer, &RolloutLine {
+        timestamp: "2025-10-06T09:00:02.000Z".to_string(),
+        item: RolloutItem::ResponseItem(assistant_response),
+    })
     .unwrap();
     writer.write_all(b"\n").unwrap();
     writer.flush().unwrap();
@@ -276,7 +275,8 @@ async fn test_resume_reconstruct_history_drops_user_events() {
         .count();
 
     assert_eq!(
-        user_messages, 1,
+        user_messages,
+        1,
         "expected one user message to survive resume replay"
     );
 }
@@ -323,7 +323,8 @@ async fn test_list_conversations_latest_first() {
 
     let expected_items = vec![
         (
-            home.join("sessions")
+            home
+                .join("sessions")
                 .join("2025")
                 .join("01")
                 .join("03")
@@ -331,7 +332,8 @@ async fn test_list_conversations_latest_first() {
             "2025-01-03T12-00-00",
         ),
         (
-            home.join("sessions")
+            home
+                .join("sessions")
                 .join("2025")
                 .join("01")
                 .join("02")
@@ -339,7 +341,8 @@ async fn test_list_conversations_latest_first() {
             "2025-01-02T12-00-00",
         ),
         (
-            home.join("sessions")
+            home
+                .join("sessions")
                 .join("2025")
                 .join("01")
                 .join("01")
@@ -413,7 +416,8 @@ async fn test_pagination_cursor() {
         .unwrap();
     let expected_page1_items = vec![
         (
-            home.join("sessions")
+            home
+                .join("sessions")
                 .join("2025")
                 .join("03")
                 .join("05")
@@ -421,7 +425,8 @@ async fn test_pagination_cursor() {
             "2025-03-05T09-00-00",
         ),
         (
-            home.join("sessions")
+            home
+                .join("sessions")
                 .join("2025")
                 .join("03")
                 .join("04")
@@ -431,12 +436,7 @@ async fn test_pagination_cursor() {
     ];
     let expected_cursor1: Cursor =
         serde_json::from_str(&format!("\"2025-03-04T09-00-00|{u4}\"")).unwrap();
-    assert_page_summary(
-        &page1,
-        &expected_page1_items,
-        Some(expected_cursor1.clone()),
-        5,
-    );
+    assert_page_summary(&page1, &expected_page1_items, Some(expected_cursor1.clone()), 5);
 
     let page2 = get_conversations(
         home,
@@ -448,7 +448,8 @@ async fn test_pagination_cursor() {
     .unwrap();
     let expected_page2_items = vec![
         (
-            home.join("sessions")
+            home
+                .join("sessions")
                 .join("2025")
                 .join("03")
                 .join("03")
@@ -456,7 +457,8 @@ async fn test_pagination_cursor() {
             "2025-03-03T09-00-00",
         ),
         (
-            home.join("sessions")
+            home
+                .join("sessions")
                 .join("2025")
                 .join("03")
                 .join("02")
@@ -466,12 +468,7 @@ async fn test_pagination_cursor() {
     ];
     let expected_cursor2: Cursor =
         serde_json::from_str(&format!("\"2025-03-02T09-00-00|{u2}\"")).unwrap();
-    assert_page_summary(
-        &page2,
-        &expected_page2_items,
-        Some(expected_cursor2.clone()),
-        5,
-    );
+    assert_page_summary(&page2, &expected_page2_items, Some(expected_cursor2.clone()), 5);
 
     let page3 = get_conversations(
         home,
@@ -483,20 +480,18 @@ async fn test_pagination_cursor() {
     .unwrap();
     let expected_cursor3: Cursor =
         serde_json::from_str(&format!("\"2025-03-01T09-00-00|{u1}\"")).unwrap();
-    let expected_page3_items = vec![(
-        home.join("sessions")
-            .join("2025")
-            .join("03")
-            .join("01")
-            .join(format!("rollout-2025-03-01T09-00-00-{u1}.jsonl")),
-        "2025-03-01T09-00-00",
-    )];
-    assert_page_summary(
-        &page3,
-        &expected_page3_items,
-        Some(expected_cursor3.clone()),
-        5,
-    );
+    let expected_page3_items = vec![
+        (
+            home
+                .join("sessions")
+                .join("2025")
+                .join("03")
+                .join("01")
+                .join(format!("rollout-2025-03-01T09-00-00-{u1}.jsonl")),
+            "2025-03-01T09-00-00",
+        ),
+    ];
+    assert_page_summary(&page3, &expected_page3_items, Some(expected_cursor3.clone()), 5);
 }
 
 #[tokio::test]
@@ -581,8 +576,14 @@ async fn test_list_conversations_prefers_recent_mtime() {
     let first = page.items.first().expect("expected at least one session");
     assert_eq!(first.path, older_path);
 
-    let modified_at = first.modified_at.as_deref().expect("expected modified_at");
-    let updated_at = first.updated_at.as_deref().expect("expected updated_at");
+    let modified_at = first
+        .modified_at
+        .as_deref()
+        .expect("expected modified_at");
+    let updated_at = first
+        .updated_at
+        .as_deref()
+        .expect("expected updated_at");
 
     let modified_dt = OffsetDateTime::parse(modified_at, &Rfc3339).expect("parse modified_at");
     let format: &[FormatItem] =
@@ -617,7 +618,8 @@ async fn test_stable_ordering_same_second_pagination() {
     let expected_cursor1: Cursor = serde_json::from_str(&format!("\"{ts}|{u2}\"")).unwrap();
     let expected_page1_items = vec![
         (
-            home.join("sessions")
+            home
+                .join("sessions")
                 .join("2025")
                 .join("07")
                 .join("01")
@@ -625,7 +627,8 @@ async fn test_stable_ordering_same_second_pagination() {
             ts,
         ),
         (
-            home.join("sessions")
+            home
+                .join("sessions")
                 .join("2025")
                 .join("07")
                 .join("01")
@@ -633,12 +636,7 @@ async fn test_stable_ordering_same_second_pagination() {
             ts,
         ),
     ];
-    assert_page_summary(
-        &page1,
-        &expected_page1_items,
-        Some(expected_cursor1.clone()),
-        3,
-    );
+    assert_page_summary(&page1, &expected_page1_items, Some(expected_cursor1.clone()), 3);
 
     let page2 = get_conversations(
         home,
@@ -649,20 +647,18 @@ async fn test_stable_ordering_same_second_pagination() {
     .await
     .unwrap();
     let expected_cursor2: Cursor = serde_json::from_str(&format!("\"{ts}|{u1}\"")).unwrap();
-    let expected_page2_items = vec![(
-        home.join("sessions")
-            .join("2025")
-            .join("07")
-            .join("01")
-            .join(format!("rollout-2025-07-01T00-00-00-{u1}.jsonl")),
-        ts,
-    )];
-    assert_page_summary(
-        &page2,
-        &expected_page2_items,
-        Some(expected_cursor2.clone()),
-        3,
-    );
+    let expected_page2_items = vec![
+        (
+            home
+                .join("sessions")
+                .join("2025")
+                .join("07")
+                .join("01")
+                .join(format!("rollout-2025-07-01T00-00-00-{u1}.jsonl")),
+            ts,
+        ),
+    ];
+    assert_page_summary(&page2, &expected_page2_items, Some(expected_cursor2.clone()), 3);
 }
 
 #[tokio::test]

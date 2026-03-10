@@ -215,6 +215,10 @@ pub struct AutoTurnCliAction {
     pub prompt: String,
     pub context: Option<String>,
     pub suppress_ui_context: bool,
+    /// Optional model override for this turn.
+    pub model_override: Option<String>,
+    /// Optional reasoning effort override for this turn.
+    pub reasoning_effort_override: Option<String>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -1219,6 +1223,8 @@ fn run_auto_loop(
             prompt: seed.cli_prompt.clone(),
             context: Some(seed.goal_message.clone()),
             suppress_ui_context: true,
+            model_override: None,
+            reasoning_effort_override: None,
         };
         let event = AutoCoordinatorEvent::Decision {
             seq: decision_seq,
@@ -3166,6 +3172,8 @@ fn cli_action_to_event(action: &CliAction) -> AutoTurnCliAction {
         prompt: action.prompt.clone(),
         context: action.context.clone(),
         suppress_ui_context: action.suppress_ui_context,
+        model_override: None,
+        reasoning_effort_override: None,
     }
 }
 
@@ -3245,6 +3253,8 @@ pub(crate) fn make_message(role: &str, text: String) -> ResponseItem {
         id: None,
         role: role.to_string(),
         content: vec![content],
+        end_turn: None,
+        phase: None,
     }
 }
 

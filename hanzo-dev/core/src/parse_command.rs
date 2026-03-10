@@ -5,6 +5,7 @@ use serde::Deserialize;
 use serde::Serialize;
 use shlex::split as shlex_split;
 use shlex::try_join as shlex_try_join;
+use std::path::PathBuf;
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize)]
 pub enum ParsedCommand {
     Read {
@@ -34,7 +35,11 @@ impl From<ParsedCommand> for hanzo_protocol::parse_command::ParsedCommand {
     fn from(v: ParsedCommand) -> Self {
         use hanzo_protocol::parse_command::ParsedCommand as P;
         match v {
-            ParsedCommand::Read { cmd, name } => P::Read { cmd, name },
+            ParsedCommand::Read { cmd, name } => P::Read {
+                cmd,
+                name: name.clone(),
+                path: PathBuf::from(name),
+            },
             ParsedCommand::ListFiles { cmd, path } => P::ListFiles { cmd, path },
             ParsedCommand::Search { cmd, query, path } => P::Search { cmd, query, path },
             ParsedCommand::ReadCommand { cmd } => P::ReadCommand { cmd },
@@ -44,7 +49,7 @@ impl From<ParsedCommand> for hanzo_protocol::parse_command::ParsedCommand {
 }
 
 fn shlex_join(tokens: &[String]) -> String {
-    shlex_try_join(tokens.iter().map(std::string::String::as_str))
+    shlex_try_join(tokens.iter().map(|s| s.as_str()))
         .unwrap_or_else(|_| "<command included NUL byte>".to_string())
 }
 
@@ -516,10 +521,10 @@ mod tests {
     #[test]
     fn supports_grep_recursive_current_dir() {
         assert_parsed(
-            &vec_str(&["grep", "-R", "HANZO_SANDBOX_ENV_VAR", "-n", "."]),
+            &vec_str(&["grep", "-R", "CODEX_SANDBOX_ENV_VAR", "-n", "."]),
             vec![ParsedCommand::Search {
-                cmd: "grep -R HANZO_SANDBOX_ENV_VAR -n .".to_string(),
-                query: Some("HANZO_SANDBOX_ENV_VAR".to_string()),
+                cmd: "grep -R CODEX_SANDBOX_ENV_VAR -n .".to_string(),
+                query: Some("CODEX_SANDBOX_ENV_VAR".to_string()),
                 path: Some(".".to_string()),
             }],
         );
@@ -531,13 +536,13 @@ mod tests {
             &vec_str(&[
                 "grep",
                 "-R",
-                "HANZO_SANDBOX_ENV_VAR",
+                "CODEX_SANDBOX_ENV_VAR",
                 "-n",
                 "core/src/spawn.rs",
             ]),
             vec![ParsedCommand::Search {
-                cmd: "grep -R HANZO_SANDBOX_ENV_VAR -n core/src/spawn.rs".to_string(),
-                query: Some("HANZO_SANDBOX_ENV_VAR".to_string()),
+                cmd: "grep -R CODEX_SANDBOX_ENV_VAR -n core/src/spawn.rs".to_string(),
+                query: Some("CODEX_SANDBOX_ENV_VAR".to_string()),
                 path: Some("spawn.rs".to_string()),
             }],
         );
@@ -1053,7 +1058,7 @@ pub fn parse_command_impl(command: &[String]) -> Vec<ParsedCommand> {
     let parts = if contains_connectors(&normalized) {
         split_on_connectors(&normalized)
     } else {
-        vec![normalized]
+        vec![normalized.clone()]
     };
 
     // Preserve left-to-right execution order for all commands, including bash -c/-lc
@@ -1078,17 +1083,17 @@ fn simplify_once(commands: &[ParsedCommand]) -> Option<Vec<ParsedCommand>> {
     }
 
     // echo ... && ...rest => ...rest
-    if let ParsedCommand::Unknown { cmd } = &commands[0]
-        && shlex_split(cmd)
-            .is_some_and(|t| t.first().map(std::string::String::as_str) == Some("echo"))
-    {
-        return Some(commands[1..].to_vec());
+    if let ParsedCommand::Unknown { cmd } = &commands[0] {
+        if shlex_split(cmd).is_some_and(|t| t.first().map(|s| s.as_str()) == Some("echo")) {
+            return Some(commands[1..].to_vec());
+        }
     }
 
     // cd foo && [any command] => [any command] (keep non-cd when a cd is followed by something)
     if let Some(idx) = commands.iter().position(|pc| match pc {
-        ParsedCommand::Unknown { cmd } => shlex_split(cmd)
-            .is_some_and(|t| t.first().map(std::string::String::as_str) == Some("cd")),
+        ParsedCommand::Unknown { cmd } => {
+            shlex_split(cmd).is_some_and(|t| t.first().map(|s| s.as_str()) == Some("cd"))
+        }
         _ => false,
     }) {
         // If a `cd` is followed by any command, keep the following commands and
@@ -1223,7 +1228,7 @@ fn short_display_path(path: &str) -> String {
     });
     parts
         .next()
-        .map(std::string::ToString::to_string)
+        .map(|s| s.to_string())
         .unwrap_or_else(|| trimmed.to_string())
 }
 
@@ -1376,7 +1381,8 @@ fn parse_jq_filter_and_path(args: &[String]) -> (Option<String>, Option<String>)
 fn git_grep_flag_consumes_value(flag: &str) -> bool {
     matches!(
         flag,
-        "-e" | "-f"
+        "-e"
+            | "-f"
             | "-g"
             | "-O"
             | "-A"
@@ -1452,97 +1458,108 @@ fn parse_bash_lc_commands(original: &[String]) -> Option<Vec<ParsedCommand>> {
     if !is_shell_executable(bash) || flag != "-lc" {
         return None;
     }
-    if let Some(tree) = try_parse_bash(script)
-        && let Some(all_commands) = try_parse_word_only_commands_sequence(&tree, script)
-    {
-        if all_commands.is_empty() {
-            return None;
-        }
-        let script_tokens = shlex_split(script)
-            .unwrap_or_else(|| vec!["bash".to_string(), flag.clone(), script.clone()]);
-        // Strip small formatting helpers (e.g., head/tail/awk/wc/etc) so we
-        // bias toward the primary command when pipelines are present.
-        let had_multiple_commands = all_commands.len() > 1;
-        // The bash AST walker yields commands in right-to-left order for
-        // connector/pipeline sequences. Reverse to reflect actual execution order.
-        let mut filtered_commands = drop_small_formatting_commands(all_commands);
-        filtered_commands.reverse();
-        if filtered_commands.is_empty() {
-            return None;
-        }
-        let mut commands: Vec<ParsedCommand> = filtered_commands
-            .into_iter()
-            .map(|tokens| summarize_main_tokens(&tokens))
-            .collect();
-        if commands.len() > 1 {
-            commands.retain(|pc| !matches!(pc, ParsedCommand::Unknown { cmd } if cmd == "true"));
-            // Apply the same simplifications used for non-bash parsing, e.g., drop leading `cd`.
-            while let Some(next) = simplify_once(&commands) {
-                commands = next;
+    if let Some(tree) = try_parse_bash(script) {
+        if let Some(all_commands) = try_parse_word_only_commands_sequence(&tree, script) {
+            if all_commands.is_empty() {
+                return None;
             }
-        }
-        if commands.len() == 1 {
-            // If we reduced to a single command, attribute the full original script
-            // for clearer UX in file-reading and listing scenarios, or when there were
-            // no connectors in the original script. For search commands that came from
-            // a pipeline (e.g. `rg --files | sed -n`), keep only the primary command.
-            let had_connectors = had_multiple_commands
-                || script_tokens
-                    .iter()
-                    .any(|t| t == "|" || t == "&&" || t == "||" || t == ";");
-            commands = commands
+            let script_tokens = shlex_split(script)
+                .unwrap_or_else(|| vec!["bash".to_string(), flag.clone(), script.clone()]);
+            // Strip small formatting helpers (e.g., head/tail/awk/wc/etc) so we
+            // bias toward the primary command when pipelines are present.
+            let had_multiple_commands = all_commands.len() > 1;
+            // The bash AST walker yields commands in right-to-left order for
+            // connector/pipeline sequences. Reverse to reflect actual execution order.
+            let mut filtered_commands = drop_small_formatting_commands(all_commands);
+            filtered_commands.reverse();
+            if filtered_commands.is_empty() {
+                return None;
+            }
+            let mut commands: Vec<ParsedCommand> = filtered_commands
                 .into_iter()
-                .map(|pc| match pc {
-                    ParsedCommand::Read { name, cmd, .. } => {
-                        if had_connectors {
-                            let has_pipe = script_tokens.iter().any(|t| t == "|");
-                            let has_sed_n = script_tokens.windows(2).any(|w| {
-                                w.first().map(std::string::String::as_str) == Some("sed")
-                                    && w.get(1).map(std::string::String::as_str) == Some("-n")
-                            });
-                            if has_pipe && has_sed_n {
-                                ParsedCommand::Read {
-                                    cmd: script.clone(),
-                                    name,
+                .map(|tokens| summarize_main_tokens(&tokens))
+                .collect();
+            if commands.len() > 1 {
+                commands
+                    .retain(|pc| !matches!(pc, ParsedCommand::Unknown { cmd } if cmd == "true"));
+                // Apply the same simplifications used for non-bash parsing, e.g., drop leading `cd`.
+                while let Some(next) = simplify_once(&commands) {
+                    commands = next;
+                }
+            }
+            if commands.len() == 1 {
+                // If we reduced to a single command, attribute the full original script
+                // for clearer UX in file-reading and listing scenarios, or when there were
+                // no connectors in the original script. For search commands that came from
+                // a pipeline (e.g. `rg --files | sed -n`), keep only the primary command.
+                let had_connectors = had_multiple_commands
+                    || script_tokens
+                        .iter()
+                        .any(|t| t == "|" || t == "&&" || t == "||" || t == ";");
+                commands = commands
+                    .into_iter()
+                    .map(|pc| match pc {
+                        ParsedCommand::Read { name, cmd, .. } => {
+                            if had_connectors {
+                                let has_pipe = script_tokens.iter().any(|t| t == "|");
+                                let has_sed_n = script_tokens.windows(2).any(|w| {
+                                    w.first().map(|s| s.as_str()) == Some("sed")
+                                        && w.get(1).map(|s| s.as_str()) == Some("-n")
+                                });
+                                if has_pipe && has_sed_n {
+                                    ParsedCommand::Read {
+                                        cmd: script.clone(),
+                                        name,
+                                    }
+                                } else {
+                                    ParsedCommand::Read {
+                                        cmd: cmd.clone(),
+                                        name,
+                                    }
                                 }
                             } else {
-                                ParsedCommand::Read { cmd, name }
-                            }
-                        } else {
-                            ParsedCommand::Read {
-                                cmd: shlex_join(&script_tokens),
-                                name,
+                                ParsedCommand::Read {
+                                    cmd: shlex_join(&script_tokens),
+                                    name,
+                                }
                             }
                         }
-                    }
-                    ParsedCommand::ListFiles { path, cmd, .. } => {
-                        if had_connectors {
-                            ParsedCommand::ListFiles { cmd, path }
-                        } else {
-                            ParsedCommand::ListFiles {
-                                cmd: shlex_join(&script_tokens),
-                                path,
+                        ParsedCommand::ListFiles { path, cmd, .. } => {
+                            if had_connectors {
+                                ParsedCommand::ListFiles {
+                                    cmd: cmd.clone(),
+                                    path,
+                                }
+                            } else {
+                                ParsedCommand::ListFiles {
+                                    cmd: shlex_join(&script_tokens),
+                                    path,
+                                }
                             }
                         }
-                    }
-                    ParsedCommand::Search {
-                        query, path, cmd, ..
-                    } => {
-                        if had_connectors {
-                            ParsedCommand::Search { cmd, query, path }
-                        } else {
-                            ParsedCommand::Search {
-                                cmd: shlex_join(&script_tokens),
-                                query,
-                                path,
+                        ParsedCommand::Search {
+                            query, path, cmd, ..
+                        } => {
+                            if had_connectors {
+                                ParsedCommand::Search {
+                                    cmd: cmd.clone(),
+                                    query,
+                                    path,
+                                }
+                            } else {
+                                ParsedCommand::Search {
+                                    cmd: shlex_join(&script_tokens),
+                                    query,
+                                    path,
+                                }
                             }
                         }
-                    }
-                    other => other,
-                })
-                .collect();
+                        other => other,
+                    })
+                    .collect();
+            }
+            return Some(commands);
         }
-        return Some(commands);
     }
     None
 }
@@ -1576,8 +1593,7 @@ fn is_small_formatting_command(tokens: &[String]) -> bool {
             // Keep `sed -n <range> file` (treated as a file read elsewhere);
             // otherwise consider it a formatting helper in a pipeline.
             tokens.len() < 4
-                || !(tokens[1] == "-n"
-                    && is_valid_sed_n_arg(tokens.get(2).map(std::string::String::as_str)))
+                || !(tokens[1] == "-n" && is_valid_sed_n_arg(tokens.get(2).map(|s| s.as_str())))
         }
         _ => false,
     }
@@ -1670,8 +1686,7 @@ fn git_branch_is_read_only(args: &[String]) -> bool {
         "--column",
     ];
     const SAFE_SHORT_FLAGS: &[char] = &['a', 'r', 'v', 'q', 'l'];
-    const MUTATING_SHORT_FLAGS: &[char] =
-        &['d', 'D', 'm', 'M', 'c', 'C', 'f', 'F', 'b', 'B', 't', 'u'];
+    const MUTATING_SHORT_FLAGS: &[char] = &['d', 'D', 'm', 'M', 'c', 'C', 'f', 'F', 'b', 'B', 't', 'u'];
 
     let mut expect_value = false;
     let mut allow_patterns = false;
@@ -1764,7 +1779,7 @@ fn summarize_main_tokens(main_cmd: &[String]) -> ParsedCommand {
             }
         }
         Some((head, tail)) if head == "git" => {
-            let cmd = if main_cmd.get(1).map(std::string::String::as_str) == Some("branch") {
+            let cmd = if main_cmd.get(1).map(|s| s.as_str()) == Some("branch") {
                 simple_space_join(main_cmd).unwrap_or_else(|| shlex_join(main_cmd))
             } else {
                 shlex_join(main_cmd)
@@ -1793,10 +1808,7 @@ fn summarize_main_tokens(main_cmd: &[String]) -> ParsedCommand {
                 (None, non_flags.first().map(|s| short_display_path(s)))
             } else {
                 (
-                    non_flags
-                        .first()
-                        .cloned()
-                        .map(std::string::ToString::to_string),
+                    non_flags.first().cloned().map(|s| s.to_string()),
                     non_flags.get(1).map(|s| short_display_path(s)),
                 )
             };
@@ -1831,10 +1843,7 @@ fn summarize_main_tokens(main_cmd: &[String]) -> ParsedCommand {
                 .collect();
             // Do not shorten the query: grep patterns may legitimately contain slashes
             // and should be preserved verbatim. Only paths should be shortened.
-            let query = non_flags
-                .first()
-                .cloned()
-                .map(std::string::ToString::to_string);
+            let query = non_flags.first().cloned().map(|s| s.to_string());
             let path = non_flags.get(1).map(|s| short_display_path(s));
             ParsedCommand::Search {
                 cmd: shlex_join(main_cmd),
@@ -1853,12 +1862,11 @@ fn summarize_main_tokens(main_cmd: &[String]) -> ParsedCommand {
         }
         Some((head, tail)) if head == "cat" => {
             // Support both `cat <file>` and `cat -- <file>` forms.
-            let effective_tail: &[String] =
-                if tail.first().map(std::string::String::as_str) == Some("--") {
-                    &tail[1..]
-                } else {
-                    tail
-                };
+            let effective_tail: &[String] = if tail.first().map(|s| s.as_str()) == Some("--") {
+                &tail[1..]
+            } else {
+                tail
+            };
             if effective_tail.len() == 1 {
                 let name = short_display_path(&effective_tail[0]);
                 ParsedCommand::Read {
@@ -1970,7 +1978,7 @@ fn summarize_main_tokens(main_cmd: &[String]) -> ParsedCommand {
             if head == "sed"
                 && tail.len() >= 3
                 && tail[0] == "-n"
-                && is_valid_sed_n_arg(tail.get(1).map(std::string::String::as_str)) =>
+                && is_valid_sed_n_arg(tail.get(1).map(|s| s.as_str())) =>
         {
             if let Some(path) = tail.get(2) {
                 let name = short_display_path(path);

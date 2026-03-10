@@ -1,24 +1,15 @@
 use crate::git_worktree;
 use crate::rollout::SESSIONS_SUBDIR;
 use fs2::FileExt;
-use serde::Deserialize;
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use std::collections::HashSet;
 use std::ffi::OsStr;
-use std::fs::File;
-use std::fs::OpenOptions;
-use std::fs::{self};
-use std::io::Write;
-use std::io::{self};
-use std::path::Path;
-use std::path::PathBuf;
-use std::time::Duration;
-use std::time::SystemTime;
-use time::Date;
-use time::OffsetDateTime;
-use tracing::debug;
-use tracing::info;
-use tracing::warn;
+use std::fs::{self, File, OpenOptions};
+use std::io::{self, Write};
+use std::path::{Path, PathBuf};
+use std::time::{Duration, SystemTime};
+use time::{Date, OffsetDateTime};
+use tracing::{debug, info, warn};
 
 const DEFAULT_SESSION_RETENTION_DAYS: i64 = 7;
 const DEFAULT_WORKTREE_RETENTION_DAYS: i64 = 3;
@@ -48,20 +39,20 @@ struct HousekeepingConfig {
 
 impl HousekeepingConfig {
     fn from_env() -> Self {
-        let disabled = std::env::var("HANZO_CLEANUP_DISABLE")
+        let disabled = std::env::var("CODE_CLEANUP_DISABLE")
             .map(|value| matches_ignore_case(&value, &["1", "true", "on", "yes"]))
             .unwrap_or(false);
 
         let session_retention_days = parse_days_env(
-            "HANZO_CLEANUP_SESSION_RETENTION_DAYS",
+            "CODE_CLEANUP_SESSION_RETENTION_DAYS",
             DEFAULT_SESSION_RETENTION_DAYS,
         );
         let worktree_retention_days = parse_days_env(
-            "HANZO_CLEANUP_WORKTREE_RETENTION_DAYS",
+            "CODE_CLEANUP_WORKTREE_RETENTION_DAYS",
             DEFAULT_WORKTREE_RETENTION_DAYS,
         );
         let min_interval_hours = parse_positive_i64_env(
-            "HANZO_CLEANUP_MIN_INTERVAL_HOURS",
+            "CODE_CLEANUP_MIN_INTERVAL_HOURS",
             DEFAULT_MIN_INTERVAL_HOURS,
         );
 
@@ -97,14 +88,14 @@ pub fn run_housekeeping_if_due(code_home: &Path) -> io::Result<Option<CleanupOut
     let config = HousekeepingConfig::from_env();
 
     if config.disabled {
-        debug!("hanzo home housekeeping disabled via HANZO_CLEANUP_DISABLE");
+        debug!("code home housekeeping disabled via CODE_CLEANUP_DISABLE");
         return Ok(None);
     }
 
     let lock_path = code_home.join(LOCK_FILE_NAME);
     let maybe_lock = acquire_lock(&lock_path)?;
     let Some(lock_file) = maybe_lock else {
-        debug!("hanzo home housekeeping skipped; another process holds the lock");
+        debug!("code home housekeeping skipped; another process holds the lock");
         return Ok(None);
     };
     let _lock_guard = HeldLock::new(lock_file);
@@ -120,7 +111,7 @@ pub fn run_housekeeping_if_due(code_home: &Path) -> io::Result<Option<CleanupOut
     {
         let min_interval = time::Duration::hours(config.min_interval_hours.max(0));
         if !min_interval.is_zero() && now - last_run < min_interval {
-            debug!("hanzo home housekeeping skipped; ran recently");
+            debug!("code home housekeeping skipped; ran recently");
             return Ok(None);
         }
     }
@@ -133,7 +124,7 @@ pub fn run_housekeeping_if_due(code_home: &Path) -> io::Result<Option<CleanupOut
 
     if outcome.errors > 0 {
         warn!(
-            "hanzo home housekeeping completed with {} error(s)",
+            "code home housekeeping completed with {} error(s)",
             outcome.errors
         );
     }
@@ -145,10 +136,10 @@ pub fn run_housekeeping_if_due(code_home: &Path) -> io::Result<Option<CleanupOut
             worktrees_pruned = outcome.worktrees_removed,
             worktree_bytes_reclaimed = outcome.worktree_bytes_reclaimed,
             skipped_active_worktrees = outcome.worktrees_skipped_active,
-            "hanzo home housekeeping pruned stale artifacts"
+            "code home housekeeping pruned stale artifacts"
         );
     } else {
-        debug!("hanzo home housekeeping completed; nothing to prune");
+        debug!("code home housekeeping completed; nothing to prune");
     }
 
     Ok(Some(outcome))
@@ -161,23 +152,23 @@ fn perform_housekeeping(
 ) -> io::Result<CleanupOutcome> {
     let mut outcome = CleanupOutcome::default();
 
-    if let Some(days) = config.session_retention_days
-        && let Some(stats) = cleanup_sessions(code_home, now.date(), days)?
-    {
-        outcome.session_days_removed = stats.removed_days;
-        outcome.session_files_removed = stats.removed_files;
-        outcome.session_bytes_reclaimed = stats.reclaimed_bytes;
-        outcome.errors += stats.errors;
+    if let Some(days) = config.session_retention_days {
+        if let Some(stats) = cleanup_sessions(code_home, now.date(), days)? {
+            outcome.session_days_removed = stats.removed_days;
+            outcome.session_files_removed = stats.removed_files;
+            outcome.session_bytes_reclaimed = stats.reclaimed_bytes;
+            outcome.errors += stats.errors;
+        }
     }
 
-    if let Some(days) = config.worktree_retention_days
-        && let Some(stats) = cleanup_worktrees(code_home, now, days)?
-    {
-        outcome.worktrees_removed = stats.removed_worktrees;
-        outcome.worktree_files_removed = stats.removed_files;
-        outcome.worktree_bytes_reclaimed = stats.reclaimed_bytes;
-        outcome.worktrees_skipped_active = stats.skipped_active;
-        outcome.errors += stats.errors;
+    if let Some(days) = config.worktree_retention_days {
+        if let Some(stats) = cleanup_worktrees(code_home, now, days)? {
+            outcome.worktrees_removed = stats.removed_worktrees;
+            outcome.worktree_files_removed = stats.removed_files;
+            outcome.worktree_bytes_reclaimed = stats.reclaimed_bytes;
+            outcome.worktrees_skipped_active = stats.skipped_active;
+            outcome.errors += stats.errors;
+        }
     }
 
     Ok(outcome)
@@ -299,11 +290,7 @@ fn cleanup_worktrees(
         }
 
         let repo_path = repo_entry.path();
-        if !repo_entry
-            .file_type()
-            .map(|ft| ft.is_dir())
-            .unwrap_or(false)
-        {
+        if !repo_entry.file_type().map(|ft| ft.is_dir()).unwrap_or(false) {
             continue;
         }
 
@@ -315,11 +302,7 @@ fn cleanup_worktrees(
         let branch_entries = list_dir_sorted(&branches_dir);
         for branch_entry in branch_entries {
             let branch_path = branch_entry.path();
-            if !branch_entry
-                .file_type()
-                .map(|ft| ft.is_dir())
-                .unwrap_or(false)
-            {
+            if !branch_entry.file_type().map(|ft| ft.is_dir()).unwrap_or(false) {
                 continue;
             }
 
@@ -345,10 +328,7 @@ fn cleanup_worktrees(
                 Ok(ts) => ts,
                 Err(err) => {
                     stats.errors += 1;
-                    warn!(
-                        "failed to read modified timestamp for {:?}: {err}",
-                        branch_path
-                    );
+                    warn!("failed to read modified timestamp for {:?}: {err}", branch_path);
                     continue;
                 }
             };
@@ -376,10 +356,10 @@ fn cleanup_worktrees(
                     git_worktree::remove_branch_metadata(&branch_path);
                     purge_session_registry(&working_root.join("_session"), &branch_path);
 
-                    if let Some(repo_root) = repo_root.as_deref()
-                        && should_prune_worktree_branch(&branch_name)
-                    {
-                        run_git_branch_delete_if_merged(repo_root, &branch_name);
+                    if let Some(repo_root) = repo_root.as_deref() {
+                        if should_prune_worktree_branch(&branch_name) {
+                            run_git_branch_delete_if_merged(repo_root, &branch_name);
+                        }
                     }
 
                     stats.removed_worktrees += 1;
@@ -435,10 +415,7 @@ fn run_git_branch_delete_if_merged(repo_root: &Path, branch_name: &str) {
             }
         }
         Err(err) => {
-            debug!(
-                "git branch -d failed for {:?} in {:?}: {err}",
-                branch_name, repo_root
-            );
+            debug!("git branch -d failed for {:?} in {:?}: {err}", branch_name, repo_root);
         }
     }
 }
@@ -573,10 +550,7 @@ fn purge_session_registry(session_dir: &Path, worktree_path: &Path) {
         let mut changed = false;
         let mut kept: Vec<&str> = Vec::new();
         for line in data.lines() {
-            if line
-                .split_once('\t')
-                .is_some_and(|(_, path)| path == worktree_str)
-            {
+            if line.split_once('\t').map_or(false, |(_, path)| path == worktree_str) {
                 changed = true;
             } else if !line.trim().is_empty() {
                 kept.push(line);
@@ -587,15 +561,12 @@ fn purge_session_registry(session_dir: &Path, worktree_path: &Path) {
             continue;
         }
 
-        if let Ok(mut file) = OpenOptions::new()
-            .write(true)
-            .truncate(true)
-            .open(&file_path)
-            && !kept.is_empty()
-        {
-            let content = kept.join("\n");
-            let _ = file.write_all(content.as_bytes());
-            let _ = file.write_all(b"\n");
+        if let Ok(mut file) = OpenOptions::new().write(true).truncate(true).open(&file_path) {
+            if !kept.is_empty() {
+                let content = kept.join("\n");
+                let _ = file.write_all(content.as_bytes());
+                let _ = file.write_all(b"\n");
+            }
         }
     }
 }
@@ -617,8 +588,7 @@ fn check_pid_alive(pid: i32) -> Option<bool> {
 
 #[cfg(any(target_os = "macos", target_os = "ios"))]
 fn check_pid_alive(pid: i32) -> Option<bool> {
-    use libc::c_int;
-    use libc::kill;
+    use libc::{kill, c_int};
     const SIGZERO: c_int = 0;
     let result = unsafe { kill(pid, SIGZERO) };
     if result == 0 {
@@ -630,12 +600,8 @@ fn check_pid_alive(pid: i32) -> Option<bool> {
 
 #[cfg(target_os = "windows")]
 fn check_pid_alive(pid: i32) -> Option<bool> {
-    use windows_sys::Win32::Foundation::CloseHandle;
-    use windows_sys::Win32::Foundation::HANDLE;
-    use windows_sys::Win32::Foundation::STILL_ACTIVE;
-    use windows_sys::Win32::System::Threading::GetExitCodeProcess;
-    use windows_sys::Win32::System::Threading::OpenProcess;
-    use windows_sys::Win32::System::Threading::PROCESS_QUERY_LIMITED_INFORMATION;
+    use windows_sys::Win32::Foundation::{CloseHandle, HANDLE, STILL_ACTIVE};
+    use windows_sys::Win32::System::Threading::{GetExitCodeProcess, OpenProcess, PROCESS_QUERY_LIMITED_INFORMATION};
 
     unsafe {
         let handle: HANDLE = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, 0, pid as u32);
@@ -653,12 +619,7 @@ fn check_pid_alive(pid: i32) -> Option<bool> {
     }
 }
 
-#[cfg(not(any(
-    target_os = "linux",
-    target_os = "macos",
-    target_os = "ios",
-    target_os = "windows"
-)))]
+#[cfg(not(any(target_os = "linux", target_os = "macos", target_os = "ios", target_os = "windows")))]
 fn check_pid_alive(_pid: i32) -> Option<bool> {
     None
 }
@@ -720,7 +681,7 @@ fn list_dir_sorted(path: &Path) -> Vec<fs::DirEntry> {
         Ok(it) => it.flatten().collect(),
         Err(_) => Vec::new(),
     };
-    entries.sort_by_key(std::fs::DirEntry::file_name);
+    entries.sort_by(|a, b| a.file_name().cmp(&b.file_name()));
     entries
 }
 
@@ -733,9 +694,7 @@ fn parse_u16(name: &std::ffi::OsStr) -> Option<u16> {
 }
 
 fn dir_is_empty(path: &Path) -> bool {
-    fs::read_dir(path)
-        .map(|mut it| it.next().is_none())
-        .unwrap_or(false)
+    fs::read_dir(path).map(|mut it| it.next().is_none()).unwrap_or(false)
 }
 
 fn canonicalize_or_original(path: &Path) -> PathBuf {
@@ -760,8 +719,7 @@ fn acquire_lock(path: &Path) -> io::Result<Option<File>> {
 
 fn read_state(path: &Path) -> io::Result<CleanupState> {
     match fs::read(path) {
-        Ok(bytes) => serde_json::from_slice(&bytes)
-            .map_err(|err| io::Error::new(io::ErrorKind::InvalidData, err)),
+        Ok(bytes) => serde_json::from_slice(&bytes).map_err(|err| io::Error::new(io::ErrorKind::InvalidData, err)),
         Err(err) if err.kind() == io::ErrorKind::NotFound => Ok(CleanupState::default()),
         Err(err) => Err(err),
     }
@@ -776,7 +734,7 @@ fn write_state(path: &Path, state: &CleanupState) -> io::Result<()> {
         opts.mode(0o600);
     }
     let mut file = opts.open(path)?;
-    let data = serde_json::to_vec(state).map_err(io::Error::other)?;
+    let data = serde_json::to_vec(state).map_err(|err| io::Error::new(io::ErrorKind::Other, err))?;
     file.write_all(&data)?;
     file.write_all(b"\n")?;
     file.sync_all()
@@ -794,7 +752,9 @@ fn parse_days_env(var: &str, default: i64) -> Option<i64> {
                 Err(_) => {
                     warn!(
                         "invalid value for {} ({}); falling back to default {}",
-                        var, value, default
+                        var,
+                        value,
+                        default
                     );
                     Some(default)
                 }
@@ -816,7 +776,9 @@ fn parse_positive_i64_env(var: &str, default: i64) -> i64 {
             Err(_) => {
                 warn!(
                     "invalid value for {} ({}); falling back to default {}",
-                    var, value, default
+                    var,
+                    value,
+                    default
                 );
                 default
             }
@@ -876,11 +838,7 @@ mod tests {
         let code_home = temp.path();
         let worktree_path = code_home.join("working/demo/branches/test-branch");
         fs::create_dir_all(&worktree_path).unwrap();
-        fs::write(
-            worktree_path.join(".git"),
-            "gitdir: /tmp/nonexistent/.git/worktrees/test-branch\n",
-        )
-        .unwrap();
+        fs::write(worktree_path.join(".git"), "gitdir: /tmp/nonexistent/.git/worktrees/test-branch\n").unwrap();
         fs::write(worktree_path.join("README.md"), b"placeholder").unwrap();
 
         let config = HousekeepingConfig {
@@ -903,11 +861,7 @@ mod tests {
         let code_home = temp.path();
         let worktree_path = code_home.join("working/demo/branches/active-branch");
         fs::create_dir_all(&worktree_path).unwrap();
-        fs::write(
-            worktree_path.join(".git"),
-            "gitdir: /tmp/nonexistent/.git/worktrees/active-branch\n",
-        )
-        .unwrap();
+        fs::write(worktree_path.join(".git"), "gitdir: /tmp/nonexistent/.git/worktrees/active-branch\n").unwrap();
         let session_dir = code_home.join("working/_session");
         fs::create_dir_all(&session_dir).unwrap();
         let pid = std::process::id();
@@ -957,17 +911,8 @@ mod tests {
 
         let worktree_path = code_home.join("working/repo/branches/code-branch-test");
         fs::create_dir_all(worktree_path.parent().unwrap()).unwrap();
-        run_git(
-            &repo_dir,
-            [
-                "worktree",
-                "add",
-                "-b",
-                "code-branch-test",
-                worktree_path.to_str().unwrap(),
-            ],
-        )
-        .unwrap();
+        run_git(&repo_dir, ["worktree", "add", "-b", "code-branch-test", worktree_path.to_str().unwrap()])
+            .unwrap();
 
         assert!(branch_exists(&repo_dir, "code-branch-test"));
 
@@ -986,10 +931,7 @@ mod tests {
         assert!(!branch_exists(&repo_dir, "code-branch-test"));
     }
 
-    fn run_git(
-        repo_root: &Path,
-        args: impl IntoIterator<Item = impl AsRef<std::ffi::OsStr>>,
-    ) -> io::Result<()> {
+    fn run_git(repo_root: &Path, args: impl IntoIterator<Item = impl AsRef<std::ffi::OsStr>>) -> io::Result<()> {
         let output = std::process::Command::new("git")
             .current_dir(repo_root)
             .args(args)
@@ -997,21 +939,14 @@ mod tests {
         if output.status.success() {
             Ok(())
         } else {
-            Err(io::Error::other(
-                String::from_utf8_lossy(&output.stderr).trim().to_string(),
-            ))
+            Err(io::Error::other(String::from_utf8_lossy(&output.stderr).trim().to_string()))
         }
     }
 
     fn branch_exists(repo_root: &Path, branch_name: &str) -> bool {
         let output = std::process::Command::new("git")
             .current_dir(repo_root)
-            .args([
-                "show-ref",
-                "--verify",
-                "--quiet",
-                &format!("refs/heads/{branch_name}"),
-            ])
+            .args(["show-ref", "--verify", "--quiet", &format!("refs/heads/{branch_name}")])
             .status();
         output.map(|status| status.success()).unwrap_or(false)
     }
@@ -1034,8 +969,7 @@ mod tests {
     #[cfg(target_os = "windows")]
     #[test]
     fn process_still_running_reports_status() {
-        use std::process::Command;
-        use std::process::Stdio;
+        use std::process::{Command, Stdio};
         use std::thread;
         use std::time::Duration;
 

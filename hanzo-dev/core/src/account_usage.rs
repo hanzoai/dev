@@ -1,25 +1,12 @@
 use std::collections::BTreeMap;
-use std::fs::OpenOptions;
-use std::fs::{self};
-use std::io::ErrorKind;
-use std::io::Read;
-use std::io::Seek;
-use std::io::SeekFrom;
-use std::io::Write;
-use std::path::Path;
-use std::path::PathBuf;
+use std::fs::{self, OpenOptions};
+use std::io::{ErrorKind, Read, Seek, SeekFrom, Write};
+use std::path::{Path, PathBuf};
 
+use chrono::{DateTime, Datelike, Duration, NaiveDate, TimeZone, Timelike, Utc};
 use crate::protocol::RateLimitSnapshotEvent;
-use chrono::DateTime;
-use chrono::Datelike;
-use chrono::Duration;
-use chrono::NaiveDate;
-use chrono::TimeZone;
-use chrono::Timelike;
-use chrono::Utc;
 use fs2::FileExt;
-use serde::Deserialize;
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use serde_json;
 
 use crate::protocol::TokenUsage;
@@ -166,10 +153,10 @@ impl AccountUsageData {
     }
 
     fn apply_plan(&mut self, plan: Option<&str>) {
-        if let Some(plan) = plan
-            && self.plan.as_deref() != Some(plan)
-        {
-            self.plan = Some(plan.to_string());
+        if let Some(plan) = plan {
+            if self.plan.as_deref() != Some(plan) {
+                self.plan = Some(plan.to_string());
+            }
         }
     }
 
@@ -202,7 +189,7 @@ impl AccountUsageData {
                 let bucket = truncate_to_hour(entry.timestamp);
                 rollover
                     .entry(bucket)
-                    .or_default()
+                    .or_insert_with(TokenTotals::default)
                     .add_totals(&entry.tokens);
             }
         }
@@ -253,7 +240,7 @@ impl AccountUsageData {
                 let month_key = truncate_to_month(entry.period_start);
                 monthly_rollover
                     .entry(month_key)
-                    .or_default()
+                    .or_insert_with(TokenTotals::default)
                     .add_totals(&entry.tokens);
             } else {
                 remaining.push(entry);
@@ -501,11 +488,12 @@ pub fn list_rate_limit_snapshots(
             let data: AccountUsageData = match serde_json::from_str(&contents) {
                 Ok(data) => data,
                 Err(_) => continue,
-            };
+                };
             let rate = data.rate_limit.unwrap_or_default();
             let primary_next_reset_at = rate.primary_next_reset_at;
-            let secondary_next_reset_at =
-                rate.secondary_next_reset_at.or(rate.primary_next_reset_at);
+            let secondary_next_reset_at = rate
+                .secondary_next_reset_at
+                .or(rate.primary_next_reset_at);
             results.push(StoredRateLimitSnapshot {
                 account_id: data.account_id,
                 plan: data.plan,
@@ -578,7 +566,8 @@ pub fn mark_rate_limit_refresh_attempt_if_due(
                 // We've already stored a successful snapshot at/after this reset.
                 false
             } else {
-                let attempted_after_reset = last_attempt.is_some_and(|attempt| attempt >= reset_at);
+                let attempted_after_reset = last_attempt
+                    .is_some_and(|attempt| attempt >= reset_at);
 
                 if !attempted_after_reset {
                     true
@@ -614,10 +603,9 @@ fn record_threshold_log(
     reset_at: Option<DateTime<Utc>>,
     observed_at: DateTime<Utc>,
 ) -> bool {
-    if let Some(existing) = logs
-        .iter_mut()
-        .find(|entry| (entry.threshold - threshold).abs() < f64::EPSILON)
-    {
+    if let Some(existing) = logs.iter_mut().find(|entry| {
+        (entry.threshold - threshold).abs() < f64::EPSILON
+    }) {
         let previous_reset = existing.reset_at;
         let previous_logged = existing.logged_at;
         let new_reset = reset_at;
@@ -637,9 +625,8 @@ fn record_threshold_log(
             .unwrap_or(false);
 
         let unknown_reset_elapsed = (previous_reset.is_none() || new_reset.is_none())
-            && previous_logged.is_some_and(|logged| {
-                observed_at.signed_duration_since(logged) >= UNKNOWN_RESET_RELOG_INTERVAL
-            });
+            && previous_logged
+                .is_some_and(|logged| observed_at.signed_duration_since(logged) >= UNKNOWN_RESET_RELOG_INTERVAL);
 
         let mut should_clear = false;
 
@@ -839,8 +826,8 @@ mod tests {
     //! The helper tests below construct scenarios targeting each rule so the state
     //! machine in `record_threshold_log` can be refactored confidently.
     use super::*;
-    use crate::protocol::TokenUsage;
     use std::fs::File;
+    use crate::protocol::TokenUsage;
     use tempfile::TempDir;
 
     fn sample_usage() -> TokenUsage {
@@ -862,11 +849,7 @@ mod tests {
             .expect("hint recorded");
 
         let snapshots = list_rate_limit_snapshots(home.path()).expect("snapshot listing");
-        assert_eq!(
-            snapshots.len(),
-            1,
-            "usage hint should create one snapshot entry"
-        );
+        assert_eq!(snapshots.len(), 1, "usage hint should create one snapshot entry");
         let snapshot = &snapshots[0];
         assert_eq!(snapshot.account_id, "acct-1");
         assert_eq!(snapshot.plan.as_deref(), Some("Team"));
@@ -884,8 +867,14 @@ mod tests {
         let now = Utc::now();
 
         // Two records that should roll into hourly buckets once a fresh entry is written.
-        record_token_usage(home.path(), account, None, &usage, now - Duration::hours(2))
-            .expect("first record");
+        record_token_usage(
+            home.path(),
+            account,
+            None,
+            &usage,
+            now - Duration::hours(2),
+        )
+        .expect("first record");
         record_token_usage(
             home.path(),
             account,
@@ -896,7 +885,8 @@ mod tests {
         .expect("second record");
 
         // Recent usage that should remain in the in-memory hourly entries window.
-        record_token_usage(home.path(), account, None, &usage, now).expect("recent record");
+        record_token_usage(home.path(), account, None, &usage, now)
+            .expect("recent record");
 
         let summary = load_account_usage(home.path(), account)
             .expect("load summary")
@@ -904,14 +894,8 @@ mod tests {
 
         // Only the most recent entry should remain in the sliding hourly window.
         assert_eq!(summary.hourly_entries.len(), 1);
-        assert!(
-            summary.hourly_buckets.len() >= 1,
-            "older usage should compact into buckets"
-        );
-        assert!(
-            summary.daily_buckets.len() >= 1,
-            "hourly buckets roll into daily aggregates"
-        );
+        assert!(summary.hourly_buckets.len() >= 1, "older usage should compact into buckets");
+        assert!(summary.daily_buckets.len() >= 1, "hourly buckets roll into daily aggregates");
     }
 
     #[test]
@@ -946,10 +930,7 @@ mod tests {
         )
         .expect("second record succeeds");
 
-        assert!(
-            !second,
-            "duplicate logging before reset should be suppressed"
-        );
+        assert!(!second, "duplicate logging before reset should be suppressed");
 
         let third = record_rate_limit_warning(
             home.path(),
@@ -998,10 +979,7 @@ mod tests {
             msg,
         )
         .expect("second record succeeds");
-        assert!(
-            second,
-            "after reset we should log again even if next window is later"
-        );
+        assert!(second, "after reset we should log again even if next window is later");
 
         // Subsequent updates inside the new window should remain suppressed until that reset passes.
         let third = record_rate_limit_warning(
@@ -1015,10 +993,7 @@ mod tests {
             msg,
         )
         .expect("third record succeeds");
-        assert!(
-            !third,
-            "duplicate logging inside the same window should stay muted"
-        );
+        assert!(!third, "duplicate logging inside the same window should stay muted");
     }
 
     #[test]
@@ -1053,10 +1028,7 @@ mod tests {
             msg,
         )
         .expect("second record succeeds");
-        assert!(
-            second,
-            "post-reset poll should emit again even if prior log was moments before reset"
-        );
+        assert!(second, "post-reset poll should emit again even if prior log was moments before reset");
     }
 
     #[test]
@@ -1090,10 +1062,7 @@ mod tests {
             msg,
         )
         .expect("second record succeeds");
-        assert!(
-            !second,
-            "dropping reset info should keep warning muted initially"
-        );
+        assert!(!second, "dropping reset info should keep warning muted initially");
 
         // After the unknown interval we should allow another log.
         let third = record_rate_limit_warning(
@@ -1153,10 +1122,7 @@ mod tests {
             msg,
         )
         .expect("third record succeeds");
-        assert!(
-            third,
-            "restored reset metadata after fallback window should re-log"
-        );
+        assert!(third, "restored reset metadata after fallback window should re-log");
     }
 
     #[test]
@@ -1164,8 +1130,14 @@ mod tests {
         let home = TempDir::new().expect("tempdir");
         let now = Utc::now();
 
-        record_token_usage(home.path(), "acct-1", Some("Team"), &sample_usage(), now)
-            .expect("record usage");
+        record_token_usage(
+            home.path(),
+            "acct-1",
+            Some("Team"),
+            &sample_usage(),
+            now,
+        )
+        .expect("record usage");
 
         let path = usage_file_path(home.path(), "acct-1");
         let mut contents = String::new();

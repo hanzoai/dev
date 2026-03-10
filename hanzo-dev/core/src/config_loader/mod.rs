@@ -10,8 +10,7 @@ use std::io;
 use std::path::Path;
 use std::path::PathBuf;
 use tokio::fs;
-use tokio::runtime::Builder as RuntimeBuilder;
-use tokio::runtime::Handle;
+use tokio::runtime::{Builder as RuntimeBuilder, Handle};
 use toml::Value as TomlValue;
 
 #[cfg(unix)]
@@ -151,18 +150,16 @@ async fn load_config_requirements_internal(
 
     let managed_config_path =
         managed_config_path.unwrap_or_else(|| managed_config_default_path(code_home));
-    let requirements_path =
-        requirements_path.unwrap_or_else(|| requirements_default_path(code_home));
+    let requirements_path = requirements_path.unwrap_or_else(|| requirements_default_path(code_home));
 
-    let mut requirements = if let Some(value) =
-        read_config_from_path(&requirements_path, false).await?
-    {
-        let parsed: ConfigRequirementsToml = value.try_into().map_err(|err: toml::de::Error| {
-            io::Error::new(
-                io::ErrorKind::InvalidData,
-                format!("Failed to parse config requirements TOML: {err}"),
-            )
-        })?;
+    let mut requirements = if let Some(value) = read_config_from_path(&requirements_path, false).await? {
+        let parsed: ConfigRequirementsToml =
+            value.try_into().map_err(|err: toml::de::Error| {
+                io::Error::new(
+                    io::ErrorKind::InvalidData,
+                    format!("Failed to parse config requirements TOML: {err}"),
+                )
+            })?;
         ConfigRequirements::try_from(parsed)
             .map_err(|err| io::Error::new(io::ErrorKind::InvalidInput, err))?
     } else {
@@ -184,13 +181,12 @@ async fn load_config_requirements_internal(
     let mut legacy_approval_policy = None;
 
     for legacy in [managed_config, managed_preferences].into_iter().flatten() {
-        let legacy: LegacyManagedConfigToml =
-            legacy.try_into().map_err(|err: toml::de::Error| {
-                io::Error::new(
-                    io::ErrorKind::InvalidData,
-                    format!("Failed to parse legacy managed_config TOML: {err}"),
-                )
-            })?;
+        let legacy: LegacyManagedConfigToml = legacy.try_into().map_err(|err: toml::de::Error| {
+            io::Error::new(
+                io::ErrorKind::InvalidData,
+                format!("Failed to parse legacy managed_config TOML: {err}"),
+            )
+        })?;
 
         if let Some(approval_policy) = legacy.approval_policy {
             legacy_approval_policy = Some(approval_policy);
@@ -300,7 +296,7 @@ where
             .spawn(move || run_future(future))
             .map_err(|err| io::Error::other(format!("config loader thread spawn failed: {err}")))?
             .join()
-            .map_err(|_| io::Error::other("config loader thread panicked"))?
+            .map_err(|_| io::Error::new(io::ErrorKind::Other, "config loader thread panicked"))?
     } else {
         run_future(future)
     }
@@ -314,7 +310,7 @@ where
     let runtime = RuntimeBuilder::new_current_thread()
         .enable_all()
         .build()
-        .map_err(io::Error::other)?;
+        .map_err(|err| io::Error::new(io::ErrorKind::Other, err))?;
     runtime.block_on(future)
 }
 

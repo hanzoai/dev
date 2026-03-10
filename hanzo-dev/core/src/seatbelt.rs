@@ -4,7 +4,7 @@ use std::path::PathBuf;
 use tokio::process::Child;
 
 use crate::protocol::SandboxPolicy;
-use crate::spawn::HANZO_SANDBOX_ENV_VAR;
+use crate::spawn::CODEX_SANDBOX_ENV_VAR;
 use crate::spawn::StdioPolicy;
 use crate::spawn::spawn_child_async;
 
@@ -26,7 +26,7 @@ pub async fn spawn_command_under_seatbelt(
 ) -> std::io::Result<Child> {
     let args = create_seatbelt_command_args(command, sandbox_policy, sandbox_policy_cwd);
     let arg0 = None;
-    env.insert(HANZO_SANDBOX_ENV_VAR.to_string(), "seatbelt".to_string());
+    env.insert(CODEX_SANDBOX_ENV_VAR.to_string(), "seatbelt".to_string());
     spawn_child_async(
         PathBuf::from(MACOS_PATH_TO_SEATBELT_EXECUTABLE),
         args,
@@ -69,22 +69,24 @@ fn create_seatbelt_command_args(
                 // If the writable root is a file, allow writes to that exact file via literal.
                 if canonical_root.is_file() {
                     writable_folder_policies.push(format!("(literal (param \"{root_param}\"))"));
-                } else if wr.read_only_subpaths.is_empty() {
-                    writable_folder_policies.push(format!("(subpath (param \"{root_param}\"))"));
                 } else {
-                    // Add parameters for each read-only subpath and generate
-                    // the `(require-not ...)` clauses.
-                    let mut require_parts: Vec<String> = Vec::new();
-                    require_parts.push(format!("(subpath (param \"{root_param}\"))"));
-                    for (subpath_index, ro) in wr.read_only_subpaths.iter().enumerate() {
-                        let canonical_ro = ro.canonicalize().unwrap_or_else(|_| ro.clone());
-                        let ro_param = format!("WRITABLE_ROOT_{index}_RO_{subpath_index}");
-                        cli_args.push(format!("-D{ro_param}={}", canonical_ro.to_string_lossy()));
-                        require_parts
-                            .push(format!("(require-not (subpath (param \"{ro_param}\")))"));
+                    if wr.read_only_subpaths.is_empty() {
+                        writable_folder_policies.push(format!("(subpath (param \"{root_param}\"))"));
+                    } else {
+                        // Add parameters for each read-only subpath and generate
+                        // the `(require-not ...)` clauses.
+                        let mut require_parts: Vec<String> = Vec::new();
+                        require_parts.push(format!("(subpath (param \"{root_param}\"))"));
+                        for (subpath_index, ro) in wr.read_only_subpaths.iter().enumerate() {
+                            let canonical_ro = ro.canonicalize().unwrap_or_else(|_| ro.clone());
+                            let ro_param = format!("WRITABLE_ROOT_{index}_RO_{subpath_index}");
+                            cli_args.push(format!("-D{ro_param}={}", canonical_ro.to_string_lossy()));
+                            require_parts
+                                .push(format!("(require-not (subpath (param \"{ro_param}\")))"));
+                        }
+                        let policy_component = format!("(require-all {} )", require_parts.join(" "));
+                        writable_folder_policies.push(policy_component);
                     }
-                    let policy_component = format!("(require-all {} )", require_parts.join(" "));
-                    writable_folder_policies.push(policy_component);
                 }
             }
 
@@ -117,11 +119,8 @@ fn create_seatbelt_command_args(
         "{MACOS_SEATBELT_BASE_POLICY}\n{file_read_policy}\n{file_write_policy}\n{network_policy}"
     );
 
-    #[allow(clippy::print_stderr)]
-    if std::env::var("HANZO_DEBUG_PRINT_SEATBELT").is_ok() {
-        eprintln!(
-            "--- Hanzo Dev Seatbelt Policy ---\n{full_policy}\n------------------------------"
-        );
+    if std::env::var("CODEX_DEBUG_PRINT_SEATBELT").is_ok() {
+        eprintln!("--- Codex Seatbelt Policy ---\n{}\n------------------------------", full_policy);
     }
 
     let mut seatbelt_args: Vec<String> = vec!["-p".to_string(), full_policy];

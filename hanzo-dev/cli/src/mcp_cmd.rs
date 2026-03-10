@@ -126,12 +126,6 @@ fn build_mcp_transport_for_add(
         if !command.is_empty() {
             bail!("--url cannot be combined with a command");
         }
-        if url.starts_with("zap://") || url.starts_with("zaps://") {
-            if bearer_token.is_some() {
-                bail!("--bearer-token is not supported for ZAP transport");
-            }
-            return Ok(McpServerTransportConfig::Zap { url });
-        }
         if let Some(bearer_token) = bearer_token {
             return Ok(McpServerTransportConfig::StreamableHttp {
                 url,
@@ -238,35 +232,6 @@ mod tests {
     }
 
     #[test]
-    fn add_with_zap_url_uses_zap_transport() {
-        let transport = build_mcp_transport_for_add(
-            Some("zap://localhost:9999".to_string()),
-            None,
-            None,
-            Vec::new(),
-        )
-        .expect("transport");
-
-        match transport {
-            McpServerTransportConfig::Zap { url } => {
-                assert_eq!(url, "zap://localhost:9999");
-            }
-            _ => panic!("expected zap transport"),
-        }
-    }
-
-    #[test]
-    fn add_with_zap_url_and_bearer_token_is_rejected() {
-        let result = build_mcp_transport_for_add(
-            Some("zap://localhost:9999".to_string()),
-            Some("token".to_string()),
-            None,
-            Vec::new(),
-        );
-        assert!(result.is_err());
-    }
-
-    #[test]
     fn add_with_url_and_bearer_token_uses_streamable_http() {
         let transport = build_mcp_transport_for_add(
             Some("https://mcp.example.com/mcp".to_string()),
@@ -358,10 +323,6 @@ fn run_list(config_overrides: &CliConfigOverrides, list_args: ListArgs) -> Resul
                             "oauth_resource": oauth_resource,
                         })
                     }
-                    McpServerTransportConfig::Zap { url } => serde_json::json!({
-                        "type": "zap",
-                        "url": url,
-                    }),
                 };
 
                 serde_json::json!({
@@ -384,7 +345,6 @@ fn run_list(config_overrides: &CliConfigOverrides, list_args: ListArgs) -> Resul
 
     let mut stdio_rows: Vec<[String; 4]> = Vec::new();
     let mut http_rows: Vec<[String; 3]> = Vec::new();
-    let mut zap_rows: Vec<[String; 2]> = Vec::new();
 
     for (name, cfg) in entries {
         match &cfg.transport {
@@ -424,9 +384,6 @@ fn run_list(config_overrides: &CliConfigOverrides, list_args: ListArgs) -> Resul
                 };
                 let _ = (http_headers, env_http_headers);
                 http_rows.push([name.clone(), url.clone(), has_bearer.into()]);
-            }
-            McpServerTransportConfig::Zap { url } => {
-                zap_rows.push([name.clone(), url.clone()]);
             }
         }
     }
@@ -501,37 +458,6 @@ fn run_list(config_overrides: &CliConfigOverrides, list_args: ListArgs) -> Resul
         }
     }
 
-    if (!stdio_rows.is_empty() || !http_rows.is_empty()) && !zap_rows.is_empty() {
-        println!();
-    }
-
-    if !zap_rows.is_empty() {
-        let mut widths = ["Name".len(), "Url".len()];
-        for row in &zap_rows {
-            for (i, cell) in row.iter().enumerate() {
-                widths[i] = widths[i].max(cell.len());
-            }
-        }
-
-        println!(
-            "{:<name_w$}  {:<url_w$}",
-            "Name",
-            "Url (ZAP)",
-            name_w = widths[0],
-            url_w = widths[1],
-        );
-
-        for row in &zap_rows {
-            println!(
-                "{:<name_w$}  {:<url_w$}",
-                row[0],
-                row[1],
-                name_w = widths[0],
-                url_w = widths[1],
-            );
-        }
-    }
-
     Ok(())
 }
 
@@ -567,10 +493,6 @@ fn run_get(config_overrides: &CliConfigOverrides, get_args: GetArgs) -> Result<(
                 "http_headers": http_headers,
                 "env_http_headers": env_http_headers,
                 "oauth_resource": oauth_resource,
-            }),
-            McpServerTransportConfig::Zap { url } => serde_json::json!({
-                "type": "zap",
-                "url": url,
             }),
         };
         let output = serde_json::to_string_pretty(&serde_json::json!({
@@ -635,10 +557,6 @@ fn run_get(config_overrides: &CliConfigOverrides, get_args: GetArgs) -> Result<(
                 .clone()
                 .unwrap_or_else(|| "-".to_string());
             println!("  oauth_resource: {resource_display}");
-        }
-        McpServerTransportConfig::Zap { url } => {
-            println!("  transport: zap");
-            println!("  url: {url}");
         }
     }
     if let Some(timeout) = server.startup_timeout_sec {

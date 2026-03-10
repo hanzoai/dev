@@ -317,6 +317,7 @@ impl UserApprovalWidget<'_> {
             ApprovalRequest::Exec { id, .. } => Op::ExecApproval {
                 id: id.clone(),
                 decision,
+                turn_id: None,
             },
             ApprovalRequest::ApplyPatch { id, .. } => Op::PatchApproval {
                 id: id.clone(),
@@ -327,7 +328,7 @@ impl UserApprovalWidget<'_> {
             }
         };
 
-        self.app_event_tx.send(AppEvent::CodeOp(op));
+        self.app_event_tx.send(AppEvent::CodexOp(op));
         self.done = true;
     }
 

@@ -253,7 +253,10 @@ pub(crate) async fn stream_zap(
 
     tokio::spawn(async move {
         // Created event
-        if tx.send(Ok(ResponseEvent::Created)).await.is_err() {
+        if tx.send(Ok(ResponseEvent::Created {
+            response_id: Some(completion.id.clone()),
+            response_model: completion.model.clone(),
+        })).await.is_err() {
             return;
         }
 
@@ -266,6 +269,8 @@ pub(crate) async fn stream_zap(
                     content: vec![ContentItem::OutputText {
                         text: content.clone(),
                     }],
+                    end_turn: None,
+                    phase: None,
                 };
                 if tx
                     .send(Ok(ResponseEvent::OutputItemDone {

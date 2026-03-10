@@ -1,16 +1,14 @@
 use base64::Engine;
 use chrono::Utc;
-use serde::Deserialize;
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use std::fs as stdfs;
-use std::path::Path;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use tokio::fs::OpenOptions;
 use tokio::process::Command;
 
 use crate::review_coord::bump_snapshot_epoch_for;
 
-/// Returns the `/.../.hanzo/branches/<worktree>` root when `path` resides inside a branch worktree.
+/// Returns the `/.../.code/branches/<worktree>` root when `path` resides inside a branch worktree.
 pub fn branch_worktree_root(path: &Path) -> Option<PathBuf> {
     use std::ffi::OsStr;
 
@@ -26,7 +24,7 @@ pub fn branch_worktree_root(path: &Path) -> Option<PathBuf> {
             while let Some(dir) = higher {
                 if dir
                     .file_name()
-                    .map(|name| name == OsStr::new(".hanzo") || name == OsStr::new(".code"))
+                    .map(|name| name == OsStr::new(".code"))
                     .unwrap_or(false)
                 {
                     candidate = Some(ancestor.to_path_buf());
@@ -40,7 +38,7 @@ pub fn branch_worktree_root(path: &Path) -> Option<PathBuf> {
     candidate
 }
 
-/// Returns true when `path` resides inside a `/.../.hanzo/branches/<worktree>` directory.
+/// Returns true when `path` resides inside a `/.../.code/branches/<worktree>` directory.
 pub fn is_branch_worktree_path(path: &Path) -> bool {
     branch_worktree_root(path).is_some()
 }
@@ -63,11 +61,7 @@ pub fn sanitize_ref_component(s: &str) -> String {
         }
     }
     let out = out.trim_matches('-').to_string();
-    if out.is_empty() {
-        "branch".to_string()
-    } else {
-        out
-    }
+    if out.is_empty() { "branch".to_string() } else { out }
 }
 
 /// Generate a branch name for a generic task. If `task` is None or cannot
@@ -85,16 +79,14 @@ pub fn generate_branch_name_from_task(task: Option<&str>) -> String {
             if slug.len() > 48 {
                 slug.truncate(48);
                 slug = slug.trim_matches('-').to_string();
-                if slug.is_empty() {
-                    slug = "branch".to_string();
-                }
+                if slug.is_empty() { slug = "branch".to_string(); }
             }
-            return format!("dev-branch-{slug}");
+            return format!("code-branch-{}", slug);
         }
     }
     // Fallback: timestamped id
     let ts = Utc::now().format("%Y%m%d-%H%M%S");
-    format!("dev-branch-{ts}")
+    format!("code-branch-{}", ts)
 }
 
 pub const LOCAL_DEFAULT_REMOTE: &str = "local-default";
@@ -120,7 +112,7 @@ pub async fn get_git_root_from(cwd: &Path) -> Result<PathBuf, String> {
         .current_dir(cwd)
         .output()
         .await
-        .map_err(|e| format!("Git not installed or not in a git repository: {e}"))?;
+        .map_err(|e| format!("Git not installed or not in a git repository: {}", e))?;
 
     if output.status.success() {
         let path = String::from_utf8_lossy(&output.stdout).trim().to_string();
@@ -130,7 +122,7 @@ pub async fn get_git_root_from(cwd: &Path) -> Result<PathBuf, String> {
     }
 }
 
-/// Create a new worktree for `branch_id` under `<git_root>/.hanzo/branches/<branch_id>`.
+/// Create a new worktree for `branch_id` under `<git_root>/.code/branches/<branch_id>`.
 /// When `base_ref` is provided, the worktree is created from that commit/ref so
 /// subsequent mutations in the primary working tree cannot affect the agent's
 /// view. If `base_ref` is `None`, the worktree is created from the current
@@ -141,20 +133,20 @@ pub async fn setup_worktree(
     branch_id: &str,
     base_ref: Option<&str>,
 ) -> Result<(PathBuf, String), String> {
-    // Global location: ~/.hanzo/working/<repo_name>/branches
+    // Global location: ~/.code/working/<repo_name>/branches
     let repo_name = git_root
         .file_name()
         .and_then(|s| s.to_str())
         .unwrap_or("repo");
     let mut code_dir = dirs::home_dir().unwrap_or_else(|| PathBuf::from("."));
     code_dir = code_dir
-        .join(".hanzo")
+        .join(".code")
         .join("working")
         .join(repo_name)
         .join("branches");
     tokio::fs::create_dir_all(&code_dir)
         .await
-        .map_err(|e| format!("Failed to create .hanzo/branches directory: {e}"))?;
+        .map_err(|e| format!("Failed to create .code/branches directory: {}", e))?;
 
     let mut effective_branch = branch_id.to_string();
     let mut worktree_path = code_dir.join(&effective_branch);
@@ -168,7 +160,7 @@ pub async fn setup_worktree(
                 .args(["reset", "--hard", base])
                 .output()
                 .await
-                .map_err(|e| format!("Failed to reset existing worktree: {e}"))?;
+                .map_err(|e| format!("Failed to reset existing worktree: {}", e))?;
             if !reset.status.success() {
                 let stderr = String::from_utf8_lossy(&reset.stderr);
                 return Err(format!("Failed to reset existing worktree: {stderr}"));
@@ -178,7 +170,7 @@ pub async fn setup_worktree(
                 .args(["clean", "-fd"])
                 .output()
                 .await
-                .map_err(|e| format!("Failed to clean existing worktree: {e}"))?;
+                .map_err(|e| format!("Failed to clean existing worktree: {}", e))?;
             if !clean.status.success() {
                 let stderr = String::from_utf8_lossy(&clean.stderr);
                 return Err(format!("Failed to clean existing worktree: {stderr}"));
@@ -189,7 +181,7 @@ pub async fn setup_worktree(
         }
 
         if reuse_allowed {
-            // Reuse existing worktree for speed when it does not need to be
+            // Re-use existing worktree for speed when it does not need to be
             // pinned to a specific snapshot.
             record_worktree_in_session(git_root, &worktree_path).await;
             return Ok((worktree_path, effective_branch));
@@ -204,9 +196,10 @@ pub async fn setup_worktree(
             .current_dir(git_root)
             .output()
             .await
-            && out.status.success()
         {
-            bump_snapshot_epoch_for(&worktree_path);
+            if out.status.success() {
+                bump_snapshot_epoch_for(&worktree_path);
+            }
         }
     }
 
@@ -236,8 +229,8 @@ pub async fn setup_worktree(
 
     if !output.status.success() {
         let stderr = String::from_utf8_lossy(&output.stderr);
-        let missing_but_registered = !worktree_path.exists()
-            && (stderr.contains("already registered") || stderr.contains("already used by"));
+        let missing_but_registered =
+            !worktree_path.exists() && (stderr.contains("already registered") || stderr.contains("already used by"));
 
         if missing_but_registered {
             prune_stale_worktrees(git_root).await?;
@@ -262,18 +255,12 @@ pub async fn setup_worktree(
                 .map_err(|e| format!("Failed to create git worktree after prune: {e}"))?;
             if !retry.status.success() {
                 let retry_err = String::from_utf8_lossy(&retry.stderr);
-                return Err(format!(
-                    "Failed to create worktree after prune: {retry_err}"
-                ));
+                return Err(format!("Failed to create worktree after prune: {retry_err}"));
             }
             bump_snapshot_epoch_for(&worktree_path);
             record_worktree_in_session(git_root, &worktree_path).await;
         } else if stderr.contains("already exists") {
-            effective_branch = format!(
-                "{}-{}",
-                effective_branch,
-                Utc::now().format("%Y%m%d-%H%M%S")
-            );
+            effective_branch = format!("{}-{}", effective_branch, Utc::now().format("%Y%m%d-%H%M%S"));
             worktree_path = code_dir.join(&effective_branch);
             // Ensure target path is clean
             if worktree_path.exists() {
@@ -332,20 +319,20 @@ pub async fn prepare_reusable_worktree(
     base_ref: &str,
     keep_gitignored: bool,
 ) -> Result<PathBuf, String> {
-    // Global location: ~/.hanzo/working/<repo_name>/branches
+    // Global location: ~/.code/working/<repo_name>/branches
     let repo_name = git_root
         .file_name()
         .and_then(|s| s.to_str())
         .unwrap_or("repo");
     let mut code_dir = dirs::home_dir().unwrap_or_else(|| PathBuf::from("."));
     code_dir = code_dir
-        .join(".hanzo")
+        .join(".code")
         .join("working")
         .join(repo_name)
         .join("branches");
     tokio::fs::create_dir_all(&code_dir)
         .await
-        .map_err(|e| format!("Failed to create .hanzo/branches directory: {e}"))?;
+        .map_err(|e| format!("Failed to create .code/branches directory: {}", e))?;
 
     let worktree_path = code_dir.join(worktree_name);
 
@@ -357,7 +344,7 @@ pub async fn prepare_reusable_worktree(
             .args(["reset", "--hard", base_ref])
             .output()
             .await
-            .map_err(|e| format!("Failed to reset reusable worktree: {e}"))?;
+            .map_err(|e| format!("Failed to reset reusable worktree: {}", e))?;
         if !reset.status.success() {
             let stderr = String::from_utf8_lossy(&reset.stderr);
             return Err(format!("Failed to reset reusable worktree: {stderr}"));
@@ -373,7 +360,7 @@ pub async fn prepare_reusable_worktree(
             .args(&clean_args)
             .output()
             .await
-            .map_err(|e| format!("Failed to clean reusable worktree: {e}"))?;
+            .map_err(|e| format!("Failed to clean reusable worktree: {}", e))?;
         if !clean.status.success() {
             let stderr = String::from_utf8_lossy(&clean.stderr);
             return Err(format!("Failed to clean reusable worktree: {stderr}"));
@@ -402,8 +389,8 @@ pub async fn prepare_reusable_worktree(
 
     if !output.status.success() {
         let stderr = String::from_utf8_lossy(&output.stderr);
-        let missing_but_registered = !worktree_path.exists()
-            && (stderr.contains("already registered") || stderr.contains("already used by"));
+        let missing_but_registered =
+            !worktree_path.exists() && (stderr.contains("already registered") || stderr.contains("already used by"));
 
         if missing_but_registered {
             prune_stale_worktrees(git_root).await?;
@@ -425,9 +412,7 @@ pub async fn prepare_reusable_worktree(
 
             if !retry.status.success() {
                 let retry_err = String::from_utf8_lossy(&retry.stderr);
-                return Err(format!(
-                    "Failed to create reusable worktree after prune: {retry_err}"
-                ));
+                return Err(format!("Failed to create reusable worktree after prune: {retry_err}"));
             }
 
             bump_snapshot_epoch_for(&worktree_path);
@@ -464,19 +449,12 @@ async fn prune_stale_worktrees(git_root: &Path) -> Result<(), String> {
 async fn record_worktree_in_session(git_root: &Path, worktree_path: &Path) {
     let pid = std::process::id();
     let mut base = dirs::home_dir().unwrap_or_else(|| PathBuf::from("."));
-    // Global session registry: ~/.hanzo/working/_session
-    base = base.join(".hanzo").join("working").join("_session");
-    if let Err(_e) = tokio::fs::create_dir_all(&base).await {
-        return;
-    }
-    let file = base.join(format!("pid-{pid}.txt"));
+    // Global session registry: ~/.code/working/_session
+    base = base.join(".code").join("working").join("_session");
+    if let Err(_e) = tokio::fs::create_dir_all(&base).await { return; }
+    let file = base.join(format!("pid-{}.txt", pid));
     // Store git_root and worktree_path separated by a tab; one entry per line.
-    if let Ok(mut f) = OpenOptions::new()
-        .create(true)
-        .append(true)
-        .open(&file)
-        .await
-    {
+    if let Ok(mut f) = OpenOptions::new().create(true).append(true).open(&file).await {
         let line = format!("{}\t{}\n", git_root.display(), worktree_path.display());
         let _ = tokio::io::AsyncWriteExt::write_all(&mut f, line.as_bytes()).await;
     }
@@ -531,9 +509,9 @@ pub async fn ensure_local_default_remote(
     }
 
     let base_branch_clean = base_branch
-        .map(str::trim)
+        .map(|s| s.trim())
         .filter(|s| !s.is_empty() && *s != "HEAD")
-        .map(std::string::ToString::to_string);
+        .map(|s| s.to_string());
     let base_branch_clean = match base_branch_clean {
         Some(value) => Some(value),
         None => detect_default_branch(git_root).await,
@@ -584,7 +562,7 @@ fn metadata_file_path(worktree_path: &Path) -> Option<PathBuf> {
     let canonical = canonical_worktree_path(worktree_path)?;
     let mut base = dirs::home_dir()?;
     base = base
-        .join(".hanzo")
+        .join(".code")
         .join("working")
         .join(BRANCH_METADATA_DIR);
     let key = canonical.to_string_lossy();
@@ -596,9 +574,7 @@ pub async fn write_branch_metadata(
     worktree_path: &Path,
     metadata: &BranchMetadata,
 ) -> Result<(), String> {
-    let Some(path) = metadata_file_path(worktree_path) else {
-        return Ok(());
-    };
+    let Some(path) = metadata_file_path(worktree_path) else { return Ok(()); };
     if let Some(parent) = path.parent() {
         tokio::fs::create_dir_all(parent)
             .await
@@ -614,11 +590,12 @@ pub async fn write_branch_metadata(
 }
 
 pub fn load_branch_metadata(worktree_path: &Path) -> Option<BranchMetadata> {
-    if let Some(path) = metadata_file_path(worktree_path)
-        && let Ok(bytes) = stdfs::read(&path)
-        && let Ok(parsed) = serde_json::from_slice(&bytes)
-    {
-        return Some(parsed);
+    if let Some(path) = metadata_file_path(worktree_path) {
+        if let Ok(bytes) = stdfs::read(&path) {
+            if let Ok(parsed) = serde_json::from_slice(&bytes) {
+                return Some(parsed);
+            }
+        }
     }
     let legacy_path = worktree_path.join(".codex-branch.json");
     let bytes = stdfs::read(legacy_path).ok()?;
@@ -644,7 +621,7 @@ async fn _ensure_origin_remote(git_root: &Path) -> Result<(), String> {
         .args(["remote"])
         .output()
         .await
-        .map_err(|e| format!("git remote failed: {e}"))?;
+        .map_err(|e| format!("git remote failed: {}", e))?;
     if !remotes_out.status.success() {
         return Err("git remote returned error".to_string());
     }
@@ -667,9 +644,7 @@ async fn _ensure_origin_remote(git_root: &Path) -> Result<(), String> {
     let mut candidates = vec!["fork", "upstream-push", "upstream"]; // typical setups
     // Append any other remotes as fallbacks
     for r in &remotes {
-        if !candidates.contains(&r.as_str()) {
-            candidates.push(r);
-        }
+        if !candidates.contains(&r.as_str()) { candidates.push(r); }
     }
 
     // Find a candidate with a URL
@@ -679,28 +654,28 @@ async fn _ensure_origin_remote(git_root: &Path) -> Result<(), String> {
             .args(["remote", "get-url", cand])
             .output()
             .await;
-        if let Ok(out) = url_out
-            && out.status.success()
-        {
-            let url = String::from_utf8_lossy(&out.stdout).trim().to_string();
-            if !url.is_empty() {
-                // Add origin pointing to this URL
-                let add = Command::new("git")
-                    .current_dir(git_root)
-                    .args(["remote", "add", "origin", &url])
-                    .output()
-                    .await
-                    .map_err(|e| format!("git remote add origin failed: {e}"))?;
-                if !add.status.success() {
-                    return Err("failed to add origin".to_string());
+        if let Ok(out) = url_out {
+            if out.status.success() {
+                let url = String::from_utf8_lossy(&out.stdout).trim().to_string();
+                if !url.is_empty() {
+                    // Add origin pointing to this URL
+                    let add = Command::new("git")
+                        .current_dir(git_root)
+                        .args(["remote", "add", "origin", &url])
+                        .output()
+                        .await
+                        .map_err(|e| format!("git remote add origin failed: {}", e))?;
+                    if !add.status.success() {
+                        return Err("failed to add origin".to_string());
+                    }
+                    bump_snapshot_epoch_for(git_root);
+                    let _ = Command::new("git")
+                        .current_dir(git_root)
+                        .args(["remote", "set-head", "origin", "-a"])
+                        .output()
+                        .await;
+                    return Ok(());
                 }
-                bump_snapshot_epoch_for(git_root);
-                let _ = Command::new("git")
-                    .current_dir(git_root)
-                    .args(["remote", "set-head", "origin", "-a"])
-                    .output()
-                    .await;
-                return Ok(());
             }
         }
     }
@@ -710,60 +685,34 @@ async fn _ensure_origin_remote(git_root: &Path) -> Result<(), String> {
 
 /// Copy uncommitted (modified + untracked) files from `src_root` into the `worktree_path`
 /// and mirror deletions. Returns the number of touched paths (copies + deletions).
-pub async fn copy_uncommitted_to_worktree(
-    src_root: &Path,
-    worktree_path: &Path,
-) -> Result<usize, String> {
+pub async fn copy_uncommitted_to_worktree(src_root: &Path, worktree_path: &Path) -> Result<usize, String> {
     // List modified and other (untracked) files relative to repo root
     let output = Command::new("git")
         .current_dir(src_root)
         .args(["ls-files", "-om", "--exclude-standard", "-z"])
         .output()
         .await
-        .map_err(|e| format!("Failed to list changes: {e}"))?;
+        .map_err(|e| format!("Failed to list changes: {}", e))?;
     if !output.status.success() {
         let stderr = String::from_utf8_lossy(&output.stderr);
-        return Err(format!("git ls-files failed: {stderr}"));
+        return Err(format!("git ls-files failed: {}", stderr));
     }
     let bytes = output.stdout;
     let mut count = 0usize;
     for path_bytes in bytes.split(|b| *b == 0) {
-        if path_bytes.is_empty() {
-            continue;
-        }
-        let rel = match String::from_utf8(path_bytes.to_vec()) {
-            Ok(s) => s,
-            Err(_) => continue,
-        };
+        if path_bytes.is_empty() { continue; }
+        let rel = match String::from_utf8(path_bytes.to_vec()) { Ok(s) => s, Err(_) => continue };
         // Avoid copying .git files explicitly
-        if rel.starts_with(".git/") {
-            continue;
-        }
+        if rel.starts_with(".git/") { continue; }
         let from = src_root.join(&rel);
         let to = worktree_path.join(&rel);
-        let meta = match tokio::fs::metadata(&from).await {
-            Ok(m) => m,
-            Err(_) => continue,
-        };
-        if !meta.is_file() {
-            continue;
-        }
-        if let Some(parent) = to.parent() {
-            tokio::fs::create_dir_all(parent)
-                .await
-                .map_err(|e| format!("Failed to create dir {}: {}", parent.display(), e))?;
-        }
+        let meta = match tokio::fs::metadata(&from).await { Ok(m) => m, Err(_) => continue };
+        if !meta.is_file() { continue; }
+        if let Some(parent) = to.parent() { tokio::fs::create_dir_all(parent).await.map_err(|e| format!("Failed to create dir {}: {}", parent.display(), e))?; }
         // Use copy for files; skip if it's a directory (shouldn't appear from ls-files)
         match tokio::fs::copy(&from, &to).await {
             Ok(_) => count += 1,
-            Err(e) => {
-                return Err(format!(
-                    "Failed to copy {} -> {}: {}",
-                    from.display(),
-                    to.display(),
-                    e
-                ));
-            }
+            Err(e) => return Err(format!("Failed to copy {} -> {}: {}", from.display(), to.display(), e)),
         }
     }
 
@@ -773,73 +722,54 @@ pub async fn copy_uncommitted_to_worktree(
         .args(["ls-files", "-d", "-z"])
         .output()
         .await
-        .map_err(|e| format!("Failed to list deletions: {e}"))?;
+        .map_err(|e| format!("Failed to list deletions: {}", e))?;
     if !deleted.status.success() {
         let stderr = String::from_utf8_lossy(&deleted.stderr);
-        return Err(format!("git ls-files -d failed: {stderr}"));
+        return Err(format!("git ls-files -d failed: {}", stderr));
     }
     for path_bytes in deleted.stdout.split(|b| *b == 0) {
-        if path_bytes.is_empty() {
-            continue;
-        }
-        let rel = match String::from_utf8(path_bytes.to_vec()) {
-            Ok(s) => s,
-            Err(_) => continue,
-        };
-        if rel.starts_with(".git/") {
-            continue;
-        }
+        if path_bytes.is_empty() { continue; }
+        let rel = match String::from_utf8(path_bytes.to_vec()) { Ok(s) => s, Err(_) => continue };
+        if rel.starts_with(".git/") { continue; }
         let target = worktree_path.join(&rel);
         match tokio::fs::remove_file(&target).await {
             Ok(_) => count += 1,
-            Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
-            Err(e) => {
-                return Err(format!(
-                    "Failed to remove deleted path {}: {}",
-                    target.display(),
-                    e
-                ));
-            }
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => {},
+            Err(e) => return Err(format!("Failed to remove deleted path {}: {}", target.display(), e)),
         }
     }
 
     // Opt-in: mirror modified submodule pointers into the worktree index (no checkout/network).
-    // Enable via HANZO_BRANCH_INCLUDE_SUBMODULES=1|true|yes.
-    let include_submods = std::env::var("HANZO_BRANCH_INCLUDE_SUBMODULES")
+    // Enable via CODEX_BRANCH_INCLUDE_SUBMODULES=1|true|yes.
+    let include_submods = std::env::var("CODEX_BRANCH_INCLUDE_SUBMODULES")
         .ok()
         .map(|v| v.to_ascii_lowercase())
         .map(|v| v == "1" || v == "true" || v == "yes")
         .unwrap_or(false);
-    if include_submods
-        && let Ok(out) = Command::new("git")
+    if include_submods {
+        if let Ok(out) = Command::new("git")
             .current_dir(src_root)
             .args(["submodule", "status", "--recursive"])
             .output()
             .await
-        && out.status.success()
-    {
-        let text = String::from_utf8_lossy(&out.stdout);
-        for line in text.lines() {
-            let line = line.trim();
-            if !line.starts_with('+') {
-                continue;
+        {
+            if out.status.success() {
+                let text = String::from_utf8_lossy(&out.stdout);
+                for line in text.lines() {
+                    let line = line.trim();
+                    if !line.starts_with('+') { continue; }
+                    let rest = &line[1..];
+                    let mut parts = rest.split_whitespace();
+                    let sha = match parts.next() { Some(s) => s, None => continue };
+                    let path = match parts.next() { Some(p) => p, None => continue };
+                    let spec = format!("160000,{},{}", sha, path);
+                    let _ = Command::new("git")
+                        .current_dir(worktree_path)
+                        .args(["update-index", "--add", "--cacheinfo", &spec])
+                        .output()
+                        .await;
+                }
             }
-            let rest = &line[1..];
-            let mut parts = rest.split_whitespace();
-            let sha = match parts.next() {
-                Some(s) => s,
-                None => continue,
-            };
-            let path = match parts.next() {
-                Some(p) => p,
-                None => continue,
-            };
-            let spec = format!("160000,{sha},{path}");
-            let _ = Command::new("git")
-                .current_dir(worktree_path)
-                .args(["update-index", "--add", "--cacheinfo", &spec])
-                .output()
-                .await;
         }
     }
     Ok(count)
@@ -854,28 +784,20 @@ pub async fn detect_default_branch(cwd: &Path) -> Option<String> {
         .output()
         .await
         .ok()?;
-    if sym.status.success()
-        && let Ok(s) = String::from_utf8(sym.stdout)
-        && let Some((_, name)) = s.trim().rsplit_once('/')
-    {
-        return Some(name.to_string());
+    if sym.status.success() {
+        if let Ok(s) = String::from_utf8(sym.stdout) {
+            if let Some((_, name)) = s.trim().rsplit_once('/') { return Some(name.to_string()); }
+        }
     }
     // Fallback to local main/master
     for candidate in ["main", "master"] {
         let out = Command::new("git")
             .current_dir(cwd)
-            .args([
-                "rev-parse",
-                "--verify",
-                "--quiet",
-                &format!("refs/heads/{candidate}"),
-            ])
+            .args(["rev-parse", "--verify", "--quiet", &format!("refs/heads/{candidate}")])
             .output()
             .await
             .ok()?;
-        if out.status.success() {
-            return Some(candidate.to_string());
-        }
+        if out.status.success() { return Some(candidate.to_string()); }
     }
     None
 }
@@ -890,24 +812,18 @@ mod tests {
 
     fn set_home(path: &Path) {
         // SAFETY: tests isolate HOME inside a fresh temp directory.
-        unsafe {
-            std::env::set_var("HOME", path);
-        }
+        unsafe { std::env::set_var("HOME", path); }
     }
 
     fn restore_home(prev: Option<String>) {
         match prev {
             Some(prev) => {
                 // SAFETY: restoring the previous HOME value at test end.
-                unsafe {
-                    std::env::set_var("HOME", prev);
-                }
+                unsafe { std::env::set_var("HOME", prev); }
             }
             None => {
                 // SAFETY: clearing HOME after the test to match original state.
-                unsafe {
-                    std::env::remove_var("HOME");
-                }
+                unsafe { std::env::remove_var("HOME"); }
             }
         }
     }
@@ -926,15 +842,11 @@ mod tests {
     }
 
     async fn init_repo(repo: &Path) {
-        tokio::fs::create_dir_all(repo)
-            .await
-            .expect("create repo dir");
+        tokio::fs::create_dir_all(repo).await.expect("create repo dir");
         git(repo, &["init", "-q"]).await;
         git(repo, &["config", "user.email", "test@example.com"]).await;
         git(repo, &["config", "user.name", "Test User"]).await;
-        tokio::fs::write(repo.join("README.md"), b"hello")
-            .await
-            .expect("write README");
+        tokio::fs::write(repo.join("README.md"), b"hello").await.expect("write README");
         git(repo, &["add", "."]).await;
         git(repo, &["commit", "-m", "init"]).await;
     }

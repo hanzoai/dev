@@ -1,10 +1,8 @@
-use crate::agent_defaults::agent_model_spec;
-use crate::agent_defaults::default_agent_configs;
+use crate::agent_defaults::{agent_model_spec, default_agent_configs};
 use crate::config_types::AgentConfig;
-use std::collections::HashMap;
-use std::collections::HashSet;
-use std::sync::LazyLock;
-use std::sync::Mutex;
+use std::collections::{HashMap, HashSet};
+use std::io::ErrorKind;
+use std::sync::{LazyLock, Mutex};
 
 static RESPONSES_ORIGINATOR_OVERRIDE: LazyLock<Mutex<Option<String>>> =
     LazyLock::new(|| Mutex::new(None));
@@ -16,7 +14,7 @@ pub(crate) const fn default_true_local() -> bool {
 pub fn set_default_originator(originator: &str) -> std::io::Result<()> {
     let mut guard = RESPONSES_ORIGINATOR_OVERRIDE
         .lock()
-        .map_err(|_| std::io::Error::other("originator override lock poisoned"))?;
+        .map_err(|_| std::io::Error::new(ErrorKind::Other, "originator override lock poisoned"))?;
     *guard = Some(originator.to_string());
     Ok(())
 }

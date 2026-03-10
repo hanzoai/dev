@@ -7,14 +7,14 @@ use std::path::PathBuf;
 use tokio::process::Child;
 
 /// Spawn a shell tool command under the Linux Landlock+seccomp sandbox helper
-/// (dev-linux-sandbox).
+/// (codex-linux-sandbox).
 ///
 /// Unlike macOS Seatbelt where we directly embed the policy text, the Linux
 /// helper accepts a list of `--sandbox-permission`/`-s` flags mirroring the
 /// public CLI. We convert the internal [`SandboxPolicy`] representation into
 /// the equivalent CLI options.
 pub async fn spawn_command_under_linux_sandbox<P>(
-    code_linux_sandbox_exe: P,
+    hanzo_linux_sandbox_exe: P,
     command: Vec<String>,
     command_cwd: PathBuf,
     sandbox_policy: &SandboxPolicy,
@@ -26,9 +26,9 @@ where
     P: AsRef<Path>,
 {
     let args = create_linux_sandbox_command_args(command, sandbox_policy, sandbox_policy_cwd);
-    let arg0 = Some("dev-linux-sandbox");
+    let arg0 = Some("codex-linux-sandbox");
     spawn_child_async(
-        code_linux_sandbox_exe.as_ref().to_path_buf(),
+        hanzo_linux_sandbox_exe.as_ref().to_path_buf(),
         args,
         arg0,
         command_cwd,
@@ -39,7 +39,7 @@ where
     .await
 }
 
-/// Converts the sandbox policy into the CLI invocation for `dev-linux-sandbox`.
+/// Converts the sandbox policy into the CLI invocation for `codex-linux-sandbox`.
 fn create_linux_sandbox_command_args(
     command: Vec<String>,
     sandbox_policy: &SandboxPolicy,

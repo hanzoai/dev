@@ -1,7 +1,7 @@
 use super::*;
 use serde_json::Value;
-use code_protocol::dynamic_tools::DynamicToolResponse;
-use code_protocol::dynamic_tools::DynamicToolSpec;
+use hanzo_protocol::dynamic_tools::DynamicToolResponse;
+use hanzo_protocol::dynamic_tools::DynamicToolSpec;
 use super::streaming::{
     AgentTask,
     TRUNCATION_MARKER,
@@ -351,7 +351,7 @@ mod tests {
     use super::is_connectivity_error;
     use super::{FollowUpTurnAction, QueuedUserInput, State, take_follow_up_turn_action};
     use crate::error::CodexErr;
-    use code_protocol::models::{ContentItem, ResponseInputItem};
+    use hanzo_protocol::models::{ContentItem, ResponseInputItem};
 
     fn developer_input(text: &str) -> ResponseInputItem {
         ResponseInputItem::Message {
@@ -486,7 +486,7 @@ pub(crate) struct Session {
     /// sessions can be replayed or inspected later.
     pub(super) rollout: Mutex<Option<RolloutRecorder>>,
     pub(super) state: Mutex<State>,
-    pub(super) code_linux_sandbox_exe: Option<PathBuf>,
+    pub(super) hanzo_linux_sandbox_exe: Option<PathBuf>,
     pub(super) user_shell: shell::Shell,
     pub(super) show_raw_agent_reasoning: bool,
     /// Pending browser screenshots to include in the next model request
@@ -629,7 +629,7 @@ impl Session {
                     .and_then(|mgr| mgr.auth())
                     .map(|auth| auth.mode);
 
-                let default_model_slug = if auth_mode.is_some_and(code_app_server_protocol::AuthMode::is_chatgpt) {
+                let default_model_slug = if auth_mode.is_some_and(hanzo_app_server_protocol::AuthMode::is_chatgpt) {
                     crate::config::GPT_5_CODEX_MEDIUM_MODEL
                 } else {
                     crate::config::OPENAI_DEFAULT_MODEL
@@ -771,7 +771,7 @@ impl Session {
     ) -> MaybeApplyPatchVerified {
         // Upstream parser no longer needs a filesystem; it is pure and sync.
         let _ = self.client_tools.as_ref();
-        code_apply_patch::maybe_parse_apply_patch_verified(argv, cwd)
+        hanzo_apply_patch::maybe_parse_apply_patch_verified(argv, cwd)
     }
 
     // ────────────────────────────
@@ -1317,7 +1317,7 @@ impl Session {
         cwd: PathBuf,
         reason: Option<String>,
         network_approval_context: Option<crate::protocol::NetworkApprovalContext>,
-        additional_permissions: Option<code_protocol::models::PermissionProfile>,
+        additional_permissions: Option<hanzo_protocol::models::PermissionProfile>,
     ) -> oneshot::Receiver<ReviewDecision> {
         let (tx_approve, rx_approve) = oneshot::channel();
         let effective_approval_id = approval_id.clone().unwrap_or_else(|| call_id.clone());
@@ -2017,7 +2017,7 @@ impl Session {
                     );
                 }
                 RolloutItem::Event(recorded_event) => {
-                    if let code_protocol::protocol::EventMsg::UserMessage(user_msg_event) = &recorded_event.msg {
+                    if let hanzo_protocol::protocol::EventMsg::UserMessage(user_msg_event) = &recorded_event.msg {
                         let response_item = ResponseItem::Message {
                             id: Some(recorded_event.id.clone()),
                             role: "user".to_string(),

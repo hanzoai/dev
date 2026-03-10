@@ -186,6 +186,7 @@ async fn run_code_tool_session_inner(
                         call_id,
                         approval_id,
                         reason: _,
+                        ..
                     }) => {
                         handle_exec_approval_request(
                             command,
@@ -309,6 +310,8 @@ async fn run_code_tool_session_inner(
                         // though we may want to do give different treatment to
                         // individual events in the future.
                     }
+                    // New upstream variants - ignore
+                    _ => {}
                 }
             }
             Err(e) => {

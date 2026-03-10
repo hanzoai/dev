@@ -1,8 +1,7 @@
 use std::collections::BTreeMap;
 use std::sync::LazyLock;
 
-use crate::codex::Session;
-use crate::codex::ToolCallCtx;
+use crate::codex::{Session, ToolCallCtx};
 use crate::openai_tools::JsonSchema;
 use crate::openai_tools::OpenAiTool;
 use crate::openai_tools::ResponsesApiTool;
@@ -48,9 +47,7 @@ pub(crate) static PLAN_TOOL: LazyLock<OpenAiTool> = LazyLock::new(|| {
     properties.insert(
         "name".to_string(),
         JsonSchema::String {
-            description: Some(
-                "2-5 word title describing the plan e.g. 'Fix Box Rendering'".to_string(),
-            ),
+            description: Some("2-5 word title describing the plan e.g. 'Fix Box Rendering'".to_string()),
             allowed_values: None,
         },
     );
@@ -86,9 +83,8 @@ pub(crate) async fn handle_update_plan(
             let output = ResponseInputItem::FunctionCallOutput {
                 call_id: ctx.call_id.clone(),
                 output: FunctionCallOutputPayload {
-                    content: "Plan updated".to_string(),
-                    success: Some(true),
-                },
+                    body: hanzo_protocol::models::FunctionCallOutputBody::Text("Plan updated".to_string()),
+                    success: Some(true)},
             };
             session
                 .send_ordered_from_ctx(ctx, EventMsg::PlanUpdate(args))
@@ -109,9 +105,8 @@ fn parse_update_plan_arguments(
             let output = ResponseInputItem::FunctionCallOutput {
                 call_id: call_id.to_string(),
                 output: FunctionCallOutputPayload {
-                    content: format!("failed to parse function arguments: {e}"),
-                    success: None,
-                },
+                    body: hanzo_protocol::models::FunctionCallOutputBody::Text(format!("failed to parse function arguments: {e}")),
+                    success: None},
             };
             Err(Box::new(output))
         }
@@ -162,17 +157,17 @@ fn canonicalize_word_boundaries(input: &str) -> String {
         let next_char = chars.peek().copied();
         let mut split = false;
 
-        if !current.is_empty()
-            && let Some(prev) = prev_char
-        {
-            if prev.is_ascii_lowercase() && ch.is_ascii_uppercase() {
-                split = true;
-            } else if prev.is_ascii_uppercase()
-                && ch.is_ascii_uppercase()
-                && uppercase_run > 0
-                && next_char.is_some_and(|c| c.is_ascii_lowercase())
-            {
-                split = true;
+        if !current.is_empty() {
+            if let Some(prev) = prev_char {
+                if prev.is_ascii_lowercase() && ch.is_ascii_uppercase() {
+                    split = true;
+                } else if prev.is_ascii_uppercase()
+                    && ch.is_ascii_uppercase()
+                    && uppercase_run > 0
+                    && next_char.map_or(false, |c| c.is_ascii_lowercase())
+                {
+                    split = true;
+                }
             }
         }
 
@@ -200,8 +195,7 @@ fn canonicalize_word_boundaries(input: &str) -> String {
 }
 
 const KNOWN_ACRONYMS: &[&str] = &[
-    "AI", "API", "CLI", "CPU", "DB", "GPU", "HTTP", "HTTPS", "ID", "LLM", "SDK", "SQL", "TUI",
-    "UI", "UX",
+    "AI", "API", "CLI", "CPU", "DB", "GPU", "HTTP", "HTTPS", "ID", "LLM", "SDK", "SQL", "TUI", "UI", "UX",
 ];
 
 fn format_plan_word(word: &str) -> String {

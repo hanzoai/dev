@@ -424,13 +424,13 @@ struct PreviewArgs {
 }
 
 fn main() -> anyhow::Result<()> {
-    arg0_dispatch_or_else(|code_linux_sandbox_exe| async move {
-        cli_main(code_linux_sandbox_exe).await?;
+    arg0_dispatch_or_else(|hanzo_linux_sandbox_exe| async move {
+        cli_main(hanzo_linux_sandbox_exe).await?;
         Ok(())
     })
 }
 
-async fn cli_main(code_linux_sandbox_exe: Option<PathBuf>) -> anyhow::Result<()> {
+async fn cli_main(hanzo_linux_sandbox_exe: Option<PathBuf>) -> anyhow::Result<()> {
     let MultitoolCli {
         config_overrides: root_config_overrides,
         mut interactive,
@@ -479,7 +479,7 @@ async fn cli_main(code_linux_sandbox_exe: Option<PathBuf>) -> anyhow::Result<()>
             let ExitSummary {
                 token_usage,
                 session_id,
-            } = hanzo_tui::run_main(interactive, code_linux_sandbox_exe).await?;
+            } = hanzo_tui::run_main(interactive, hanzo_linux_sandbox_exe).await?;
             if !token_usage.is_zero() {
                 println!("{}", hanzo_core::protocol::FinalOutput::from(token_usage));
             }
@@ -500,7 +500,7 @@ async fn cli_main(code_linux_sandbox_exe: Option<PathBuf>) -> anyhow::Result<()>
                 &mut exec_cli.config_overrides,
                 root_config_overrides.clone(),
             );
-            hanzo_exec::run_main(exec_cli, code_linux_sandbox_exe).await?;
+            hanzo_exec::run_main(exec_cli, hanzo_linux_sandbox_exe).await?;
         }
         Some(Subcommand::Auto(mut exec_cli)) => {
             exec_cli.auto_drive = true;
@@ -512,10 +512,10 @@ async fn cli_main(code_linux_sandbox_exe: Option<PathBuf>) -> anyhow::Result<()>
                 &mut exec_cli.config_overrides,
                 root_config_overrides.clone(),
             );
-            hanzo_exec::run_main(exec_cli, code_linux_sandbox_exe).await?;
+            hanzo_exec::run_main(exec_cli, hanzo_linux_sandbox_exe).await?;
         }
         Some(Subcommand::McpServer) => {
-            hanzo_mcp_server::run_main(code_linux_sandbox_exe, root_config_overrides).await?;
+            hanzo_mcp_server::run_main(hanzo_linux_sandbox_exe, root_config_overrides).await?;
         }
         Some(Subcommand::Mcp(mut mcp_cli)) => {
             // Propagate any root-level config overrides (e.g. `-c key=value`).
@@ -523,7 +523,7 @@ async fn cli_main(code_linux_sandbox_exe: Option<PathBuf>) -> anyhow::Result<()>
             mcp_cli.run().await?;
         }
         Some(Subcommand::AppServer) => {
-            hanzo_app_server::run_main(code_linux_sandbox_exe, root_config_overrides).await?;
+            hanzo_app_server::run_main(hanzo_linux_sandbox_exe, root_config_overrides).await?;
         }
         Some(Subcommand::Resume(ResumeCommand {
             session_id,
@@ -541,7 +541,7 @@ async fn cli_main(code_linux_sandbox_exe: Option<PathBuf>) -> anyhow::Result<()>
             let ExitSummary {
                 token_usage,
                 session_id,
-            } = hanzo_tui::run_main(interactive, code_linux_sandbox_exe).await?;
+            } = hanzo_tui::run_main(interactive, hanzo_linux_sandbox_exe).await?;
             if !token_usage.is_zero() {
                 println!("{}", hanzo_core::protocol::FinalOutput::from(token_usage));
             }
@@ -623,7 +623,7 @@ async fn cli_main(code_linux_sandbox_exe: Option<PathBuf>) -> anyhow::Result<()>
                 &mut cloud_cli.config_overrides,
                 root_config_overrides.clone(),
             );
-            hanzo_cloud_tasks::run_main(cloud_cli, code_linux_sandbox_exe).await?;
+            hanzo_cloud_tasks::run_main(cloud_cli, hanzo_linux_sandbox_exe).await?;
         }
         Some(Subcommand::Debug(debug_args)) => match debug_args.cmd {
             DebugCommand::Seatbelt(mut seatbelt_cli) => {
@@ -633,7 +633,7 @@ async fn cli_main(code_linux_sandbox_exe: Option<PathBuf>) -> anyhow::Result<()>
                 );
                 hanzo_dev::debug_sandbox::run_command_under_seatbelt(
                     seatbelt_cli,
-                    code_linux_sandbox_exe,
+                    hanzo_linux_sandbox_exe,
                 )
                 .await?;
             }
@@ -644,7 +644,7 @@ async fn cli_main(code_linux_sandbox_exe: Option<PathBuf>) -> anyhow::Result<()>
                 );
                 hanzo_dev::debug_sandbox::run_command_under_landlock(
                     landlock_cli,
-                    code_linux_sandbox_exe,
+                    hanzo_linux_sandbox_exe,
                 )
                 .await?;
             }

@@ -7,12 +7,9 @@
 
 #[cfg(test)]
 mod tests {
-    use crate::environment_context::EnvironmentContext;
-    use crate::environment_context::EnvironmentContextTracker;
-    use crate::shell::BashShell;
-    use crate::shell::Shell;
-    use hanzo_protocol::models::ContentItem;
-    use hanzo_protocol::models::ResponseItem;
+    use hanzo_protocol::models::{ContentItem, ResponseItem};
+    use crate::environment_context::{EnvironmentContext, EnvironmentContextTracker};
+    use crate::shell::{Shell, BashShell};
     use hanzo_protocol::protocol::ENVIRONMENT_CONTEXT_OPEN_TAG;
 
     /// Helper to create a legacy XML environment context item
@@ -21,7 +18,12 @@ mod tests {
             shell_path: "/bin/bash".to_string(),
             bashrc_path: "~/.bashrc".to_string(),
         });
-        let env_ctx = EnvironmentContext::new(Some("/test/cwd".into()), None, None, Some(shell));
+        let env_ctx = EnvironmentContext::new(
+            Some("/test/cwd".into()),
+            None,
+            None,
+            Some(shell),
+        );
         ResponseItem::from(env_ctx)
     }
 
@@ -32,8 +34,7 @@ mod tests {
             role: "user".to_string(),
             content: vec![ContentItem::InputText {
                 text: text.to_string(),
-            }],
-        }
+            }], end_turn: None, phase: None}
     }
 
     /// Helper to create an assistant message
@@ -43,8 +44,7 @@ mod tests {
             role: "assistant".to_string(),
             content: vec![ContentItem::OutputText {
                 text: text.to_string(),
-            }],
-        }
+            }], end_turn: None, phase: None}
     }
 
     #[test]
@@ -75,8 +75,12 @@ mod tests {
             shell_path: "/bin/bash".to_string(),
             bashrc_path: "~/.bashrc".to_string(),
         });
-        let env_ctx =
-            EnvironmentContext::new(Some("/test/cwd".into()), None, None, Some(shell.clone()));
+        let env_ctx = EnvironmentContext::new(
+            Some("/test/cwd".into()),
+            None,
+            None,
+            Some(shell.clone()),
+        );
 
         // First emission should be Full (baseline)
         let result1 = tracker.emit_response_items(&env_ctx, None, None, Some("stream"));
@@ -110,8 +114,12 @@ mod tests {
         );
 
         // Third emission with different context should be Delta
-        let env_ctx_changed =
-            EnvironmentContext::new(Some("/test/cwd2".into()), None, None, Some(shell));
+        let env_ctx_changed = EnvironmentContext::new(
+            Some("/test/cwd2".into()),
+            None,
+            None,
+            Some(shell),
+        );
         let result3 = tracker.emit_response_items(&env_ctx_changed, None, None, Some("stream"));
         assert!(result3.is_ok());
         let (emission3, items3) = result3.unwrap().expect("Changed context should emit Delta");
@@ -229,7 +237,10 @@ mod tests {
     #[test]
     fn test_env_context_v2_disabled_preserves_legacy() {
         // When env_ctx_v2 is disabled, legacy XML should be preserved
-        let mut history = vec![legacy_env_context_item(), user_message("User message")];
+        let mut history = vec![
+            legacy_env_context_item(),
+            user_message("User message"),
+        ];
 
         let env_ctx_v2_enabled = false;
 
@@ -254,11 +265,7 @@ mod tests {
         }
 
         // Legacy XML should still be present when disabled
-        assert_eq!(
-            history.len(),
-            2,
-            "All items should be preserved when env_ctx_v2 is disabled"
-        );
+        assert_eq!(history.len(), 2, "All items should be preserved when env_ctx_v2 is disabled");
         assert!(
             is_legacy_env_context(&history[0]),
             "Legacy XML should be preserved when env_ctx_v2 is disabled"

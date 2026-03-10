@@ -168,7 +168,7 @@ impl WidgetRef for &FileSearchPopup {
             for xi in x..x + w {
                 buf[(xi, y)].set_char(' ');
             }
-            buf.set_string(start, y, msg, ratatui::style::Style::default().dim());
+            buf.set_string(start, y, msg, ratatui::style::Style::default().add_modifier(ratatui::style::Modifier::DIM));
         } else {
             render_rows(
                 indented_area,

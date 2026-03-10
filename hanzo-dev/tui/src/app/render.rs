@@ -4,7 +4,6 @@ use std::time::Duration;
 
 use color_eyre::eyre::Result;
 use crossterm::SynchronizedUpdate;
-use ratatui::widgets::FrameExt;
 
 use crate::app_event::AppEvent;
 use crate::thread_spawner;

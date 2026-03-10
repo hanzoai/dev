@@ -175,6 +175,7 @@ pub(crate) use tool_factory::new_completed_web_fetch_tool_call;
 pub(crate) use tool_factory::new_running_browser_tool_call;
 pub(crate) use tool_factory::new_running_custom_tool_call;
 pub(crate) use tool_factory::new_running_mcp_tool_call;
+pub(crate) use tool_factory::arguments_from_json;
 pub(crate) use upgrade::UpgradeNoticeCell;
 pub(crate) use upgrade::new_upgrade_prelude;
 pub(crate) use wait_status::WaitStatusCell;

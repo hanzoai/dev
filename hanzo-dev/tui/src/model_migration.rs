@@ -18,10 +18,36 @@ use crossterm::style::ResetColor;
 use crossterm::style::SetAttribute;
 use crossterm::style::SetForegroundColor;
 use crossterm::terminal::Clear;
+use ratatui::style::Color as RColor;
 use crossterm::terminal::ClearType;
 use crossterm::terminal::disable_raw_mode;
 use crossterm::terminal::enable_raw_mode;
-use ratatui::prelude::IntoCrossterm;
+
+/// Convert a ratatui Color to a crossterm Color for direct terminal output.
+fn to_ct(c: RColor) -> CtColor {
+    match c {
+        RColor::Reset => CtColor::Reset,
+        RColor::Black => CtColor::Black,
+        RColor::Red => CtColor::DarkRed,
+        RColor::Green => CtColor::DarkGreen,
+        RColor::Yellow => CtColor::DarkYellow,
+        RColor::Blue => CtColor::DarkBlue,
+        RColor::Magenta => CtColor::DarkMagenta,
+        RColor::Cyan => CtColor::DarkCyan,
+        RColor::Gray => CtColor::Grey,
+        RColor::DarkGray => CtColor::DarkGrey,
+        RColor::LightRed => CtColor::Red,
+        RColor::LightGreen => CtColor::Green,
+        RColor::LightYellow => CtColor::Yellow,
+        RColor::LightBlue => CtColor::Blue,
+        RColor::LightMagenta => CtColor::Magenta,
+        RColor::LightCyan => CtColor::Cyan,
+        RColor::White => CtColor::White,
+        RColor::Rgb(r, g, b) => CtColor::Rgb { r, g, b },
+        RColor::Indexed(i) => CtColor::AnsiValue(i),
+        _ => CtColor::Reset,
+    }
+}
 
 pub(crate) enum ModelMigrationOutcome {
     Accepted,
@@ -177,7 +203,7 @@ fn render_prompt(
     stdout.execute(MoveTo(0, 0))?;
 
     // Monochromatic: use bright text for heading, no colored accents.
-    let bright_fg = colors::text_bright().into_crossterm();
+    let bright_fg = to_ct(colors::text_bright());
     write_line_fg_bold(stdout, copy.heading, bright_fg)?;
     write_blank(stdout)?;
     for line in copy.content {
@@ -230,7 +256,7 @@ fn write_line_fg_bold(stdout: &mut io::Stdout, line: &str, fg: CtColor) -> io::R
 
 fn write_key_tip_line(stdout: &mut io::Stdout) -> io::Result<()> {
     // Monochromatic: bright text for key names, no colored accents.
-    let bright_fg = colors::text_bright().into_crossterm();
+    let bright_fg = to_ct(colors::text_bright());
     queue!(
         stdout,
         Print("Use "),

@@ -9,12 +9,12 @@ use crossterm::event::{KeyCode, KeyEvent, KeyEventKind};
 use crossterm::execute;
 use crossterm::SynchronizedUpdate;
 
-use code_cloud_tasks_client::{CloudTaskError, TaskId};
-use code_core::config::add_project_allowed_command;
-use code_core::config_types::Notifications;
-use code_core::protocol::{Event, Op, SandboxPolicy};
-use code_core::SessionCatalog;
-use code_login::{AuthManager, AuthMode, ServerOptions};
+use hanzo_cloud_tasks_client::{CloudTaskError, TaskId};
+use hanzo_core::config::add_project_allowed_command;
+use hanzo_core::config_types::Notifications;
+use hanzo_core::protocol::{Event, Op, SandboxPolicy};
+use hanzo_core::SessionCatalog;
+use hanzo_login::{AuthManager, AuthMode, ServerOptions};
 use portable_pty::PtySize;
 
 use crate::app_event::AppEvent;
@@ -60,7 +60,7 @@ impl App<'_> {
         let remote_code_home = self.config.code_home.clone();
         let remote_using_chatgpt_hint = self.config.using_chatgpt_auth;
         tokio::spawn(async move {
-            let remote_manager = code_core::remote_models::RemoteModelsManager::new(
+            let remote_manager = hanzo_core::remote_models::RemoteModelsManager::new(
                 remote_auth_manager.clone(),
                 remote_provider,
                 remote_code_home,
@@ -82,15 +82,12 @@ impl App<'_> {
                     }
                 });
             let supports_pro_only_models = remote_auth_manager.supports_pro_only_models();
-            let presets = code_common::model_presets::builtin_model_presets(
+            let presets = hanzo_common::model_presets::builtin_model_presets(
                 auth_mode,
-                supports_pro_only_models,
             );
             let presets = crate::remote_model_presets::merge_remote_models(
                 remote_models,
                 presets,
-                auth_mode,
-                supports_pro_only_models,
             );
             let default_model = remote_manager.default_model_slug(auth_mode).await;
             remote_tx.send(AppEvent::ModelPresetsUpdated {
@@ -1085,65 +1082,6 @@ impl App<'_> {
                                 widget.show_resume_picker();
                             }
                         }
-                        SlashCommand::Rename => {
-                            if let AppState::Chat { widget } = &mut self.app_state {
-                                let trimmed = command_args.trim();
-                                if trimmed.is_empty() {
-                                    widget.debug_notice(
-                                        "Usage: /rename <name> (or /rename - to clear)".to_string(),
-                                    );
-                                } else if let Some(session_id) = widget.session_id() {
-                                    let nickname =
-                                        if trimmed == "-" || trimmed.eq_ignore_ascii_case("clear") {
-                                            None
-                                        } else {
-                                            Some(trimmed.to_string())
-                                        };
-                                    let code_home = self.config.code_home.clone();
-                                    let tx = self.app_event_tx.clone();
-                                    let nickname_label = nickname.clone();
-                                    if let Err(err) = std::thread::Builder::new()
-                                        .name("session-rename".to_string())
-                                        .spawn(move || {
-                                            let message = match tokio::runtime::Builder::new_current_thread()
-                                                .enable_all()
-                                                .build()
-                                            {
-                                                Ok(rt) => {
-                                                    let catalog = SessionCatalog::new(code_home);
-                                                    match rt.block_on(
-                                                        catalog.set_nickname(session_id, nickname),
-                                                    ) {
-                                                        Ok(true) => match nickname_label {
-                                                            Some(name) => {
-                                                                format!("Session renamed to \"{name}\".")
-                                                            }
-                                                            None => "Session nickname cleared.".to_string(),
-                                                        },
-                                                        Ok(false) => {
-                                                            "Session not found in catalog.".to_string()
-                                                        }
-                                                        Err(err) => {
-                                                            format!("Failed to rename session: {err}")
-                                                        }
-                                                    }
-                                                }
-                                                Err(err) => {
-                                                    format!("Failed to start rename task: {err}")
-                                                }
-                                            };
-                                            tx.send(AppEvent::SessionRenameCompleted { message });
-                                        })
-                                    {
-                                        widget.debug_notice(format!(
-                                            "Failed to spawn rename task: {err}",
-                                        ));
-                                    }
-                                } else {
-                                    widget.debug_notice("Session not ready yet.".to_string());
-                                }
-                            }
-                        }
                         SlashCommand::New => {
                             if let AppState::Chat { widget } = &mut self.app_state {
                                 widget.abort_active_turn_for_new_chat();
@@ -1186,7 +1124,7 @@ impl App<'_> {
                             }
                         }
                         SlashCommand::Logout => {
-                            if let Err(e) = code_login::logout(&self.config.code_home) { tracing::error!("failed to logout: {e}"); }
+                            if let Err(e) = hanzo_login::logout(&self.config.code_home) { tracing::error!("failed to logout: {e}"); }
                             break 'main;
                         }
                         SlashCommand::Diff => {
@@ -1352,11 +1290,11 @@ impl App<'_> {
                         }
                         #[cfg(debug_assertions)]
                         SlashCommand::TestApproval => {
-                            use code_core::protocol::EventMsg;
+                            use hanzo_core::protocol::EventMsg;
                             use std::collections::HashMap;
 
-                            use code_core::protocol::ApplyPatchApprovalRequestEvent;
-                            use code_core::protocol::FileChange;
+                            use hanzo_core::protocol::ApplyPatchApprovalRequestEvent;
+                            use hanzo_core::protocol::FileChange;
 
                             self.app_event_tx.send(AppEvent::CodexEvent(Event {
                                 id: "1".to_string(),
@@ -1393,6 +1331,12 @@ impl App<'_> {
                                 ),
                                 order: None,
                             }));
+                        }
+                        SlashCommand::Provider | SlashCommand::Share => {
+                            // Not yet implemented in this UI.
+                            if let AppState::Chat { widget } = &mut self.app_state {
+                                widget.debug_notice(format!("/{command:?} is not yet supported in this UI."));
+                            }
                         }
                     }
                 }
@@ -1881,7 +1825,7 @@ impl App<'_> {
                     let cwd = self.config.cwd.clone();
                     let tx = self.app_event_tx.clone();
                     tokio::spawn(async move {
-                        let commits = code_core::git_info::recent_commits(&cwd, 60).await;
+                        let commits = hanzo_core::git_info::recent_commits(&cwd, 60).await;
                         tx.send(AppEvent::PresentReviewCommitPicker { commits });
                     });
                 }
@@ -1898,8 +1842,8 @@ impl App<'_> {
                     let tx = self.app_event_tx.clone();
                     tokio::spawn(async move {
                         let (branches, current_branch) = tokio::join!(
-                            code_core::git_info::local_git_branches(&cwd),
-                            code_core::git_info::current_branch_name(&cwd),
+                            hanzo_core::git_info::local_git_branches(&cwd),
+                            hanzo_core::git_info::current_branch_name(&cwd),
                         );
                         tx.send(AppEvent::PresentReviewBranchPicker {
                             current_branch,
@@ -1922,11 +1866,11 @@ impl App<'_> {
                 }
                 AppEvent::UpdateTheme(new_theme) => {
                     // Switch the theme immediately
-                    if matches!(new_theme, code_core::config_types::ThemeName::Custom) {
+                    if matches!(new_theme, hanzo_core::config_types::ThemeName::Custom) {
                         // Prefer runtime custom colors; fall back to config on disk
                         if let Some(colors) = crate::theme::custom_theme_colors() {
-                            crate::theme::init_theme(&code_core::config_types::ThemeConfig { name: new_theme, colors, label: crate::theme::custom_theme_label(), is_dark: crate::theme::custom_theme_is_dark() });
-                        } else if let Ok(cfg) = code_core::config::Config::load_with_cli_overrides(vec![], code_core::config::ConfigOverrides::default()) {
+                            crate::theme::init_theme(&hanzo_core::config_types::ThemeConfig { name: new_theme, colors, label: crate::theme::custom_theme_label(), is_dark: crate::theme::custom_theme_is_dark(), zen: None });
+                        } else if let Ok(cfg) = hanzo_core::config::Config::load_with_cli_overrides(vec![], hanzo_core::config::ConfigOverrides::default()) {
                             crate::theme::init_theme(&cfg.tui.theme);
                         } else {
                             crate::theme::switch_theme(new_theme);
@@ -1964,10 +1908,10 @@ impl App<'_> {
                 }
                 AppEvent::PreviewTheme(new_theme) => {
                     // Switch the theme immediately for preview (no history event)
-                    if matches!(new_theme, code_core::config_types::ThemeName::Custom) {
+                    if matches!(new_theme, hanzo_core::config_types::ThemeName::Custom) {
                         if let Some(colors) = crate::theme::custom_theme_colors() {
-                            crate::theme::init_theme(&code_core::config_types::ThemeConfig { name: new_theme, colors, label: crate::theme::custom_theme_label(), is_dark: crate::theme::custom_theme_is_dark() });
-                        } else if let Ok(cfg) = code_core::config::Config::load_with_cli_overrides(vec![], code_core::config::ConfigOverrides::default()) {
+                            crate::theme::init_theme(&hanzo_core::config_types::ThemeConfig { name: new_theme, colors, label: crate::theme::custom_theme_label(), is_dark: crate::theme::custom_theme_is_dark(), zen: None });
+                        } else if let Ok(cfg) = hanzo_core::config::Config::load_with_cli_overrides(vec![], hanzo_core::config::ConfigOverrides::default()) {
                             crate::theme::init_theme(&cfg.tui.theme);
                         } else {
                             crate::theme::switch_theme(new_theme);
@@ -2059,11 +2003,11 @@ impl App<'_> {
 
                         let opts = ServerOptions::new(
                             self.config.code_home.clone(),
-                            code_login::CLIENT_ID.to_string(),
+                            hanzo_login::CLIENT_ID.to_string(),
                             self.config.responses_originator_header.clone(),
                         );
 
-                        match code_login::run_login_server(opts) {
+                        match hanzo_login::run_login_server(opts) {
                             Ok(server) => {
                                 widget.notify_login_chatgpt_started(server.auth_url.clone());
                                 let shutdown = server.cancel_handle();
@@ -2104,12 +2048,12 @@ impl App<'_> {
 
                         let opts = ServerOptions::new(
                             self.config.code_home.clone(),
-                            code_login::CLIENT_ID.to_string(),
+                            hanzo_login::CLIENT_ID.to_string(),
                             self.config.responses_originator_header.clone(),
                         );
                         let tx = self.app_event_tx.clone();
                         let join_handle = tokio::spawn(async move {
-                            match code_login::DeviceCodeSession::start(opts).await {
+                            match hanzo_login::DeviceCodeSession::start(opts).await {
                                 Ok(session) => {
                                     let authorize_url = session.authorize_url();
                                     let user_code = session.user_code().to_string();
@@ -2255,7 +2199,7 @@ impl App<'_> {
                             let mut user_seen = 0usize;
                             let mut cut = items.len();
                             for (idx, it) in items.iter().enumerate().rev() {
-                                if let code_protocol::models::ResponseItem::Message { role, .. } = it {
+                                if let hanzo_protocol::models::ResponseItem::Message { role, .. } = it {
                                     if role == "user" {
                                         user_seen += 1;
                                         if user_seen == nth { cut = idx; break; }
@@ -2367,11 +2311,11 @@ impl App<'_> {
 
                     // Replay prefix to the UI
                     if emit_prefix {
-                        let ev = code_core::protocol::Event {
+                        let ev = hanzo_core::protocol::Event {
                             id: "fork".to_string(),
                             event_seq: 0,
-                            msg: code_core::protocol::EventMsg::ReplayHistory(
-                                code_core::protocol::ReplayHistoryEvent {
+                            msg: hanzo_core::protocol::EventMsg::ReplayHistory(
+                                hanzo_core::protocol::ReplayHistoryEvent {
                                     items: prefix_items,
                                     history_snapshot: None,
                                 }

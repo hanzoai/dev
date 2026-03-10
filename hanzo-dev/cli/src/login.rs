@@ -9,7 +9,7 @@ use hanzo_core::auth::logout;
 use hanzo_core::config::Config;
 use hanzo_core::config::ConfigOverrides;
 use hanzo_login::ServerOptions;
-use hanzo_login::run_device_code_login;
+use hanzo_login::run_device_hanzo_login;
 use hanzo_login::run_login_server;
 use std::env;
 use std::io::IsTerminal;
@@ -139,7 +139,7 @@ pub async fn run_login_with_device_code(
     if let Some(iss) = issuer_base_url {
         opts.issuer = iss;
     }
-    match run_device_code_login(opts).await {
+    match run_device_hanzo_login(opts).await {
         Ok(()) => {
             let email = get_logged_in_email(&config.code_home, &config.responses_originator_header);
             if let Some(email) = email {
@@ -185,7 +185,7 @@ pub async fn run_login_status(cli_config_overrides: CliConfigOverrides) -> ! {
                     std::process::exit(1);
                 }
             },
-            AuthMode::ChatGPT => {
+            AuthMode::ChatGPT | AuthMode::ChatgptAuthTokens => {
                 let email =
                     get_logged_in_email(&config.code_home, &config.responses_originator_header);
                 if let Some(email) = email {

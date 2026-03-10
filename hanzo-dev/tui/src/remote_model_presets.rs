@@ -80,12 +80,12 @@ fn model_info_to_preset(info: ModelInfo) -> ModelPreset {
         model: info.slug.clone(),
         display_name: info.display_name,
         description: info.description.unwrap_or_default(),
-        default_reasoning_effort: map_reasoning_effort(info.default_reasoning_level),
+        default_reasoning_effort: info.default_reasoning_level.map(map_reasoning_effort).unwrap_or(ProtocolReasoningEffort::Medium),
         supported_reasoning_efforts,
         supported_text_verbosity,
         is_default: false,
-        upgrade: info.upgrade.map(|upgrade_slug| ModelUpgrade {
-            id: upgrade_slug,
+        upgrade: info.upgrade.map(|u| ModelUpgrade {
+            id: u.model,
             reasoning_effort_mapping: None,
             migration_config_key: info.slug,
         }),

@@ -59,6 +59,7 @@ impl ConversationHistory {
             self.items.push(item);
         }
     }
+
 }
 
 /// Anything that is not a system message or "reasoning" message is considered
@@ -72,6 +73,7 @@ fn is_api_message(message: &ResponseItem) -> bool {
         | ResponseItem::CustomToolCallOutput { .. }
         | ResponseItem::LocalShellCall { .. }
         | ResponseItem::CompactionSummary { .. }
+        | ResponseItem::GhostSnapshot { .. }
         | ResponseItem::Reasoning { .. }
         | ResponseItem::WebSearchCall { .. }
         | ResponseItem::ImageGenerationCall { .. } => true,
@@ -90,8 +92,7 @@ mod tests {
             role: "assistant".to_string(),
             content: vec![ContentItem::OutputText {
                 text: text.to_string(),
-            }],
-        }
+            }], end_turn: None, phase: None}
     }
 
     fn user_msg(text: &str) -> ResponseItem {
@@ -100,8 +101,7 @@ mod tests {
             role: "user".to_string(),
             content: vec![ContentItem::OutputText {
                 text: text.to_string(),
-            }],
-        }
+            }], end_turn: None, phase: None}
     }
 
     #[test]
@@ -113,8 +113,7 @@ mod tests {
             role: "system".to_string(),
             content: vec![ContentItem::OutputText {
                 text: "ignored".to_string(),
-            }],
-        };
+            }], end_turn: None, phase: None};
         h.record_items([&system, &ResponseItem::Other]);
 
         // User and assistant should be retained.
@@ -132,14 +131,14 @@ mod tests {
                     content: vec![ContentItem::OutputText {
                         text: "hi".to_string()
                     }]
-                },
+                , end_turn: None, phase: None},
                 ResponseItem::Message {
                     id: None,
                     role: "assistant".to_string(),
                     content: vec![ContentItem::OutputText {
                         text: "hello".to_string()
                     }]
-                }
+                , end_turn: None, phase: None}
             ]
         );
     }
