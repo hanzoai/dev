@@ -1,7 +1,10 @@
 [package]
 edition = "2024"
 name = "hanzo-execpolicy"
+description = "Execution policy management for Hanzo"
 version = { workspace = true }
+license = { workspace = true }
+repository = { workspace = true }
 
 [[bin]]
 name = "hanzo-execpolicy"

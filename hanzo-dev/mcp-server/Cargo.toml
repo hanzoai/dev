@@ -1,7 +1,10 @@
 [package]
 edition = "2024"
 name = "hanzo-mcp-server"
+description = "MCP server implementation for Hanzo"
 version = { workspace = true }
+license = { workspace = true }
+repository = { workspace = true }
 
 [[bin]]
 name = "hanzo-mcp-server"

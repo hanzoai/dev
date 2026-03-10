@@ -1,7 +1,10 @@
 [package]
 edition = "2024"
 name = "hanzo-file-search"
+description = "File search utilities for Hanzo Dev"
 version = { workspace = true }
+license = { workspace = true }
+repository = { workspace = true }
 
 [[bin]]
 name = "hanzo-file-search"

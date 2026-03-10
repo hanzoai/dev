@@ -1,7 +1,10 @@
 [package]
 name = "hanzo-auto-drive-core"
+description = "Auto-drive core logic for Hanzo Dev"
 edition = "2024"
 version = { workspace = true }
+license = { workspace = true }
+repository = { workspace = true }
 
 [lib]
 name = "hanzo_auto_drive_core"

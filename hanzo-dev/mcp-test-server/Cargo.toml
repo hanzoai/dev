@@ -1,6 +1,9 @@
 [package]
 name = "hanzo-mcp-test-server"
+description = "MCP test server for Hanzo"
 version = { workspace = true }
+license = { workspace = true }
+repository = { workspace = true }
 edition = "2024"
 
 [dependencies]
