@@ -38,8 +38,8 @@ hanzo-rmcp-client = { workspace = true }
 hanzo-zap = { workspace = true }
 hanzo-app-server-protocol = { workspace = true }
 hanzo-otel = { workspace = true, features = ["otel"] }
-hanzo-browser = { path = "../browser" }
-hanzo-version = { path = "../code-version" }
+hanzo-browser = { path = "../browser", version = "0.6.74" }
+hanzo-version = { path = "../code-version", version = "0.6.74" }
 agent-client-protocol = "0.4.3"
 dirs = { workspace = true }
 dunce = { workspace = true }
@@ -137,7 +137,7 @@ serial_test = "3.2.0"
 pretty_assertions = { workspace = true }
 tokio-test = { workspace = true }
 wiremock = { workspace = true }
-hanzo-git-tooling = { path = "../git-tooling" }
+hanzo-git-tooling = { path = "../git-tooling", version = "0.6.74" }
 walkdir = { workspace = true }
 
 [package.metadata.cargo-shear]

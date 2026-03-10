@@ -42,7 +42,7 @@ hanzo-app-server-protocol = { workspace = true }
 hanzo-protocol-ts = { workspace = true }
 hanzo-responses-api-proxy = { workspace = true }
 hanzo-tui = { workspace = true }
-hanzo-version = { path = "../code-version" }
+hanzo-version = { path = "../code-version", version = "0.6.74" }
 hanzo-cloud-tasks = { workspace = true }
 hanzo-tunnel = { path = "../../../tunnel" }
 hanzo-tunnel-bridge = { workspace = true }

@@ -21,10 +21,10 @@ workspace = true
 [dependencies]
 anyhow = { workspace = true }
 chrono = { workspace = true, features = ["serde"] }
-hanzo-common = { path = "../common", features = ["elapsed"] }
-hanzo-core = { path = "../core" }
-hanzo-git-tooling = { path = "../git-tooling" }
-hanzo-protocol = { path = "../protocol" }
+hanzo-common = { path = "../common", features = ["elapsed"], version = "0.6.74" }
+hanzo-core = { path = "../core", version = "0.6.74" }
+hanzo-git-tooling = { path = "../git-tooling", version = "0.6.74" }
+hanzo-protocol = { path = "../protocol", version = "0.6.74" }
 futures = { workspace = true }
 once_cell = { workspace = true, optional = true }
 rand = { workspace = true }
