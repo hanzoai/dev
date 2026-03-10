@@ -3,11 +3,11 @@ use super::settings_panel::{render_panel, PanelFrameStyle};
 use super::BottomPane;
 use crate::app_event::{AppEvent, ModelSelectionKind};
 use crate::app_event_sender::AppEventSender;
-use code_common::model_presets::ModelPreset;
-use code_core::config_types::ContextMode;
-use code_core::config_types::ReasoningEffort;
-use code_core::config_types::ServiceTier;
-use code_core::model_family::supports_extended_context;
+use hanzo_common::model_presets::ModelPreset;
+use hanzo_core::config_types::ContextMode;
+use hanzo_core::config_types::ReasoningEffort;
+use hanzo_core::config_types::ServiceTier;
+use hanzo_core::model_family::supports_extended_context;
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 use std::cell::Cell;
 use ratatui::buffer::Buffer;
@@ -1116,8 +1116,8 @@ mod tests {
     use super::*;
     use crate::app_event::AppEvent;
     use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
-    use code_common::model_presets::{ModelPreset, ReasoningEffortPreset};
-    use code_core::config_types::TextVerbosity;
+    use hanzo_common::model_presets::{ModelPreset, ReasoningEffortPreset};
+    use hanzo_core::config_types::TextVerbosity;
     use std::sync::mpsc;
 
     const TEST_VERBOSITY: [TextVerbosity; 1] = [TextVerbosity::Low];

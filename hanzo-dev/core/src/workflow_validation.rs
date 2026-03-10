@@ -1,18 +1,12 @@
+use hanzo_apply_patch::{ApplyPatchAction, ApplyPatchFileChange};
 use crate::config_types::GithubConfig;
-use hanzo_apply_patch::ApplyPatchAction;
-use hanzo_apply_patch::ApplyPatchFileChange;
 use std::fs;
 use std::io::Write;
-use std::path::Path;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use tempfile::TempDir;
 
 fn is_workflow_path(path: &Path, cwd: &Path) -> bool {
-    let absolute = if path.is_absolute() {
-        path.to_path_buf()
-    } else {
-        cwd.join(path)
-    };
+    let absolute = if path.is_absolute() { path.to_path_buf() } else { cwd.join(path) };
     let mut saw_dot_github = false;
     let mut saw_workflows = false;
     for component in absolute.components() {
@@ -36,11 +30,7 @@ fn is_workflow_path(path: &Path, cwd: &Path) -> bool {
 }
 
 fn is_in_github_dir(path: &Path, cwd: &Path) -> bool {
-    let absolute = if path.is_absolute() {
-        path.to_path_buf()
-    } else {
-        cwd.join(path)
-    };
+    let absolute = if path.is_absolute() { path.to_path_buf() } else { cwd.join(path) };
     if let Ok(relative) = absolute.strip_prefix(cwd) {
         return relative.starts_with(".github");
     }
@@ -99,11 +89,7 @@ pub fn maybe_run_actionlint(
                     let _ = stage_file_with_contents(temp_root, cwd, path, content);
                 }
             }
-            ApplyPatchFileChange::Update {
-                new_content,
-                move_path,
-                ..
-            } => {
+            ApplyPatchFileChange::Update { new_content, move_path, .. } => {
                 let dest_path = move_path.as_ref().unwrap_or(path);
                 let dest_in_github = is_in_github_dir(dest_path, cwd);
                 if !dest_in_github && !path_in_github {
@@ -139,20 +125,16 @@ pub fn maybe_run_actionlint(
 
     let mut lines: Vec<String> = Vec::new();
     if !output.stdout.is_empty() {
-        lines.extend(
-            String::from_utf8_lossy(&output.stdout)
-                .lines()
-                .map(std::string::ToString::to_string),
-        );
+        lines.extend(String::from_utf8_lossy(&output.stdout).lines().map(|s| s.to_string()));
     }
     if !output.stderr.is_empty() {
-        lines.extend(
-            String::from_utf8_lossy(&output.stderr)
-                .lines()
-                .map(std::string::ToString::to_string),
-        );
+        lines.extend(String::from_utf8_lossy(&output.stderr).lines().map(|s| s.to_string()));
     }
-    if lines.is_empty() { None } else { Some(lines) }
+    if lines.is_empty() {
+        None
+    } else {
+        Some(lines)
+    }
 }
 
 fn copy_dir_recursive(src: &Path, dst: &Path) -> std::io::Result<()> {
@@ -181,7 +163,7 @@ fn which(exe: &Path) -> Option<PathBuf> {
     let name = exe.as_os_str();
     let paths: Vec<PathBuf> = std::env::var_os("PATH")
         .map(|paths| std::env::split_paths(&paths).collect())
-        .unwrap_or_default();
+        .unwrap_or_else(Vec::new);
     for dir in paths {
         let candidate = dir.join(name);
         if candidate.is_file() && is_executable(&candidate) {
@@ -210,10 +192,10 @@ fn stage_file_with_contents(temp_root: &Path, cwd: &Path, target: &Path, content
         Err(_) => return false,
     };
     let destination = temp_root.join(relative);
-    if let Some(parent) = destination.parent()
-        && fs::create_dir_all(parent).is_err()
-    {
-        return false;
+    if let Some(parent) = destination.parent() {
+        if fs::create_dir_all(parent).is_err() {
+            return false;
+        }
     }
     match fs::File::create(&destination) {
         Ok(mut file) => file.write_all(contents.as_bytes()).is_ok(),

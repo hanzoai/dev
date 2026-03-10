@@ -396,8 +396,8 @@ impl ThemeSelectionView {
                 // Build developer guidance and input
                 let developer = "You are performing a custom task to create a terminal spinner.\n\nRequirements:\n- Output JSON ONLY, no prose.\n- `interval` is the delay in milliseconds between frames; MUST be between 50 and 300 inclusive.\n- `frames` is an array of strings; each element is a frame displayed sequentially at the given interval.\n- The spinner SHOULD have between 2 and 60 frames.\n- Each frame SHOULD be between 1 and 30 characters wide. ALL frames MUST be the SAME width (same number of characters). If you propose frames with varying widths, PAD THEM ON THE LEFT with spaces so they are uniform.\n- You MAY use both ASCII and Unicode characters (e.g., box drawing, braille, arrows). Use EMOJIS ONLY if the user explicitly requests emojis in their prompt.\n- Be creative! You have the full range of Unicode to play with!\n".to_string();
                 let mut input: Vec<hanzo_protocol::models::ResponseItem> = Vec::new();
-                input.push(hanzo_protocol::models::ResponseItem::Message { id: None, role: "developer".to_string(), content: vec![hanzo_protocol::models::ContentItem::InputText { text: developer }] });
-                input.push(hanzo_protocol::models::ResponseItem::Message { id: None, role: "user".to_string(), content: vec![hanzo_protocol::models::ContentItem::InputText { text: user_prompt }] });
+                input.push(hanzo_protocol::models::ResponseItem::Message { id: None, role: "developer".to_string(), content: vec![hanzo_protocol::models::ContentItem::InputText { text: developer }], end_turn: None, phase: None });
+                input.push(hanzo_protocol::models::ResponseItem::Message { id: None, role: "user".to_string(), content: vec![hanzo_protocol::models::ContentItem::InputText { text: user_prompt }], end_turn: None, phase: None });
 
                 // JSON schema for structured output
                 let schema = serde_json::json!({
@@ -444,7 +444,7 @@ impl ThemeSelectionView {
                 let mut last_err: Option<String> = None;
                 while let Some(ev) = stream.next().await {
                     match ev {
-                        Ok(hanzo_core::ResponseEvent::Created) => { tracing::info!("LLM: created"); let _ = progress_tx.send(ProgressMsg::SetStatus("(starting generation)".to_string())); }
+                        Ok(hanzo_core::ResponseEvent::Created { .. }) => { tracing::info!("LLM: created"); let _ = progress_tx.send(ProgressMsg::SetStatus("(starting generation)".to_string())); }
                         Ok(hanzo_core::ResponseEvent::ReasoningSummaryDelta { delta, .. }) => { tracing::info!(target: "spinner", "LLM[thinking]: {}", delta); let _ = progress_tx.send(ProgressMsg::ThinkingDelta(delta.clone())); think_sum.push_str(&delta); }
                         Ok(hanzo_core::ResponseEvent::ReasoningContentDelta { delta, .. }) => { tracing::info!(target: "spinner", "LLM[reasoning]: {}", delta); }
                         Ok(hanzo_core::ResponseEvent::OutputTextDelta { delta, .. }) => { tracing::info!(target: "spinner", "LLM[delta]: {}", delta); let _ = progress_tx.send(ProgressMsg::OutputDelta(delta.clone())); out.push_str(&delta); }
@@ -724,8 +724,8 @@ impl ThemeSelectionView {
                     example.to_string()
                 );
                 let mut input: Vec<hanzo_protocol::models::ResponseItem> = Vec::new();
-                input.push(hanzo_protocol::models::ResponseItem::Message { id: None, role: "developer".to_string(), content: vec![hanzo_protocol::models::ContentItem::InputText { text: developer }] });
-                input.push(hanzo_protocol::models::ResponseItem::Message { id: None, role: "user".to_string(), content: vec![hanzo_protocol::models::ContentItem::InputText { text: user_prompt }] });
+                input.push(hanzo_protocol::models::ResponseItem::Message { id: None, role: "developer".to_string(), content: vec![hanzo_protocol::models::ContentItem::InputText { text: developer }], end_turn: None, phase: None });
+                input.push(hanzo_protocol::models::ResponseItem::Message { id: None, role: "user".to_string(), content: vec![hanzo_protocol::models::ContentItem::InputText { text: user_prompt }], end_turn: None, phase: None });
 
                 let schema = serde_json::json!({
                     "type": "object",
@@ -794,7 +794,7 @@ impl ThemeSelectionView {
                 let mut last_err: Option<String> = None;
                 while let Some(ev) = stream.next().await {
                     match ev {
-                        Ok(hanzo_core::ResponseEvent::Created) => {
+                        Ok(hanzo_core::ResponseEvent::Created { .. }) => {
                             let _ = progress_tx.send(ProgressMsg::SetStatus("(starting generation)".to_string()));
                         }
                         Ok(hanzo_core::ResponseEvent::ReasoningSummaryDelta { delta, .. }) => {
@@ -1390,7 +1390,7 @@ impl ThemeSelectionView {
                                                     colors,
                                                     label: Some(name),
                                                     is_dark: s.proposed_is_dark.get(),
-                                                    zen: crate::theme::is_zen_mode(),
+                                                    zen: if crate::theme::is_zen_mode() { Some(hanzo_core::config_types::ZenThemeConfig { enabled: true }) } else { None },
                                                 },
                                             );
                                         }
@@ -1430,7 +1430,7 @@ impl ThemeSelectionView {
                                                     colors: colors.clone(),
                                                     label: Some(name.clone()),
                                                     is_dark: s.proposed_is_dark.get(),
-                                                    zen: crate::theme::is_zen_mode(),
+                                                    zen: if crate::theme::is_zen_mode() { Some(hanzo_core::config_types::ZenThemeConfig { enabled: true }) } else { None },
                                                 },
                                             );
                                             self.revert_theme_on_back = ThemeName::Custom;
@@ -2050,7 +2050,7 @@ impl<'a> BottomPaneView<'a> for ThemeSelectionView {
                                                     colors,
                                                     label: Some(name),
                                                     is_dark: s.proposed_is_dark.get(),
-                                                    zen: crate::theme::is_zen_mode(),
+                                                    zen: if crate::theme::is_zen_mode() { Some(hanzo_core::config_types::ZenThemeConfig { enabled: true }) } else { None },
                                                 },
                                             );
                                         }
@@ -2093,7 +2093,7 @@ impl<'a> BottomPaneView<'a> for ThemeSelectionView {
                                                     colors: colors.clone(),
                                                     label: Some(name.clone()),
                                                     is_dark: s.proposed_is_dark.get(),
-                                                    zen: crate::theme::is_zen_mode(),
+                                                    zen: if crate::theme::is_zen_mode() { Some(hanzo_core::config_types::ZenThemeConfig { enabled: true }) } else { None },
                                                 },
                                             );
                                             self.revert_theme_on_back = ThemeName::Custom;
@@ -2923,7 +2923,7 @@ impl<'a> BottomPaneView<'a> for ThemeSelectionView {
                                             colors: colors.clone(),
                                             label: Some(name),
                                             is_dark,
-                                            zen: crate::theme::is_zen_mode(),
+                                            zen: if crate::theme::is_zen_mode() { Some(hanzo_core::config_types::ZenThemeConfig { enabled: true }) } else { None },
                                         },
                                     );
                                 }

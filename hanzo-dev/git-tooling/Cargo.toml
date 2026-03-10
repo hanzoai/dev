@@ -9,8 +9,11 @@ name = "hanzo_git_tooling"
 path = "src/lib.rs"
 
 [dependencies]
+schemars = { workspace = true }
+serde = { workspace = true, features = ["derive"] }
 tempfile = "3"
 thiserror = "2"
+ts-rs = { workspace = true }
 walkdir = "2"
 
 [lints]

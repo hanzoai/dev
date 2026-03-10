@@ -3,8 +3,7 @@ use std::path::Path;
 
 use shlex::split as shlex_split;
 
-use crate::parse_command::ParsedCommand;
-use crate::parse_command::parse_command_impl;
+use crate::parse_command::{parse_command_impl, ParsedCommand};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum DryRunGuardKey {
@@ -100,12 +99,8 @@ impl DryRunAnalysis {
             DryRunGuardKey::CargoFix => self.suggest_cargo_fix_dry_run(),
             DryRunGuardKey::CargoClippyFix => self.suggest_cargo_clippy_dry_run(),
             DryRunGuardKey::Rustfmt => self.suggest_rustfmt_dry_run(),
-            DryRunGuardKey::PackageLint(manager) => {
-                self.suggest_package_script_dry_run(manager, "--dry-run", Some("--check"))
-            }
-            DryRunGuardKey::PackageFormat(manager) => {
-                self.suggest_package_script_dry_run(manager, "--check", Some("--dry-run"))
-            }
+            DryRunGuardKey::PackageLint(manager) => self.suggest_package_script_dry_run(manager, "--dry-run", Some("--check")),
+            DryRunGuardKey::PackageFormat(manager) => self.suggest_package_script_dry_run(manager, "--check", Some("--dry-run")),
             DryRunGuardKey::EslintFix => self.suggest_eslint_fix_dry_run(),
             DryRunGuardKey::PrettierWrite => self.suggest_prettier_write_dry_run(),
             DryRunGuardKey::Black => self.suggest_append_flag("--check"),
@@ -125,11 +120,7 @@ impl DryRunAnalysis {
     fn suggest_cargo_fmt_dry_run(&self) -> Option<String> {
         let mut out = self.tokens.clone();
         if let Some(pos) = out.iter().position(|t| t == "--") {
-            if !out
-                .iter()
-                .skip(pos + 1)
-                .any(|t| equal_ignore_case(t, "--check"))
-            {
+            if !out.iter().skip(pos + 1).any(|t| equal_ignore_case(t, "--check")) {
                 out.insert(pos + 1, "--check".to_string());
             }
         } else {
@@ -276,11 +267,7 @@ fn first_command_tokens(argv: &[String]) -> Option<Vec<String>> {
     };
     match shlex_split(&cmd) {
         Some(tokens) => Some(tokens),
-        None => Some(
-            cmd.split_whitespace()
-                .map(std::string::ToString::to_string)
-                .collect(),
-        ),
+        None => Some(cmd.split_whitespace().map(|s| s.to_string()).collect()),
     }
 }
 
@@ -309,10 +296,7 @@ fn is_env_assignment(token: &str) -> bool {
 }
 
 fn is_wrapper(token: &str) -> bool {
-    matches!(
-        token,
-        "env" | "sudo" | "command" | "time" | "nohup" | "nice"
-    )
+    matches!(token, "env" | "sudo" | "command" | "time" | "nohup" | "nice")
 }
 
 fn command_basename(token: &str) -> String {
@@ -383,10 +367,7 @@ mod tests {
     #[test]
     fn detects_npm_lint_without_dry_run() {
         let analysis = analyze("npm run lint");
-        assert_eq!(
-            analysis.key,
-            DryRunGuardKey::PackageLint(PackageManager::Npm)
-        );
+        assert_eq!(analysis.key, DryRunGuardKey::PackageLint(PackageManager::Npm));
         assert_eq!(analysis.disposition, DryRunDisposition::Mutating);
     }
 
@@ -399,10 +380,7 @@ mod tests {
     #[test]
     fn detects_package_format_script() {
         let analysis = analyze("yarn format");
-        assert_eq!(
-            analysis.key,
-            DryRunGuardKey::PackageFormat(PackageManager::Yarn)
-        );
+        assert_eq!(analysis.key, DryRunGuardKey::PackageFormat(PackageManager::Yarn));
         assert_eq!(analysis.disposition, DryRunDisposition::Mutating);
     }
 
@@ -524,22 +502,14 @@ fn analyze_cargo(tokens: &[String]) -> Option<InternalAnalysis> {
     }
 
     let sub = command_basename(&tokens[idx]);
-    let args = if idx + 1 < tokens.len() {
-        &tokens[idx + 1..]
-    } else {
-        &[]
-    };
+    let args = if idx + 1 < tokens.len() { &tokens[idx + 1..] } else { &[] };
 
     match sub.as_str() {
         "fmt" => {
             let is_dry = slice_contains_flag(args, "--check");
             Some(InternalAnalysis {
                 key: DryRunGuardKey::CargoFmt,
-                disposition: if is_dry {
-                    DryRunDisposition::DryRun
-                } else {
-                    DryRunDisposition::Mutating
-                },
+                disposition: if is_dry { DryRunDisposition::DryRun } else { DryRunDisposition::Mutating },
                 display_name: "cargo fmt".to_string(),
                 suggested_dry_run: None,
             })
@@ -548,11 +518,7 @@ fn analyze_cargo(tokens: &[String]) -> Option<InternalAnalysis> {
             let is_dry = slice_contains_flag(args, "--dry-run");
             Some(InternalAnalysis {
                 key: DryRunGuardKey::CargoFix,
-                disposition: if is_dry {
-                    DryRunDisposition::DryRun
-                } else {
-                    DryRunDisposition::Mutating
-                },
+                disposition: if is_dry { DryRunDisposition::DryRun } else { DryRunDisposition::Mutating },
                 display_name: "cargo fix".to_string(),
                 suggested_dry_run: None,
             })
@@ -565,11 +531,7 @@ fn analyze_cargo(tokens: &[String]) -> Option<InternalAnalysis> {
             let is_dry = slice_contains_flag(args, "--dry-run");
             Some(InternalAnalysis {
                 key: DryRunGuardKey::CargoClippyFix,
-                disposition: if is_dry {
-                    DryRunDisposition::DryRun
-                } else {
-                    DryRunDisposition::Mutating
-                },
+                disposition: if is_dry { DryRunDisposition::DryRun } else { DryRunDisposition::Mutating },
                 display_name: "cargo clippy --fix".to_string(),
                 suggested_dry_run: None,
             })
@@ -587,11 +549,7 @@ fn analyze_rustfmt(tokens: &[String]) -> Option<InternalAnalysis> {
     let is_dry = slice_contains_flag(args, "--check");
     Some(InternalAnalysis {
         key: DryRunGuardKey::Rustfmt,
-        disposition: if is_dry {
-            DryRunDisposition::DryRun
-        } else {
-            DryRunDisposition::Mutating
-        },
+        disposition: if is_dry { DryRunDisposition::DryRun } else { DryRunDisposition::Mutating },
         display_name: "rustfmt".to_string(),
         suggested_dry_run: None,
     })
@@ -612,21 +570,14 @@ fn analyze_package_manager(tokens: &[String], manager: PackageManager) -> Option
     }
 
     let script_lower = script.to_ascii_lowercase();
-    let args = if script_idx + 1 < tokens.len() {
-        &tokens[script_idx + 1..]
-    } else {
-        &[]
-    };
+    let args = if script_idx + 1 < tokens.len() { &tokens[script_idx + 1..] } else { &[] };
 
     let (key, display_name) = if script_lower.contains("lint") {
         (
             DryRunGuardKey::PackageLint(manager),
             format!("{} {}", manager.label(), script),
         )
-    } else if script_lower.contains("format")
-        || script_lower.contains("fmt")
-        || script_lower.contains("prettier")
-    {
+    } else if script_lower.contains("format") || script_lower.contains("fmt") || script_lower.contains("prettier") {
         (
             DryRunGuardKey::PackageFormat(manager),
             format!("{} {}", manager.label(), script),
@@ -647,11 +598,7 @@ fn analyze_package_manager(tokens: &[String], manager: PackageManager) -> Option
 
     Some(InternalAnalysis {
         key,
-        disposition: if is_dry {
-            DryRunDisposition::DryRun
-        } else {
-            DryRunDisposition::Mutating
-        },
+        disposition: if is_dry { DryRunDisposition::DryRun } else { DryRunDisposition::Mutating },
         display_name,
         suggested_dry_run: None,
     })
@@ -703,24 +650,16 @@ fn analyze_direct_formatter(tokens: &[String]) -> Option<InternalAnalysis> {
             if !has_fix {
                 return None;
             }
-            let is_dry = actual.iter().any(|t| {
-                equal_ignore_case(t, "--fix-dry-run") || equal_ignore_case(t, "--dry-run")
-            });
+            let is_dry = actual.iter().any(|t| equal_ignore_case(t, "--fix-dry-run") || equal_ignore_case(t, "--dry-run"));
             Some(InternalAnalysis {
                 key: DryRunGuardKey::EslintFix,
-                disposition: if is_dry {
-                    DryRunDisposition::DryRun
-                } else {
-                    DryRunDisposition::Mutating
-                },
+                disposition: if is_dry { DryRunDisposition::DryRun } else { DryRunDisposition::Mutating },
                 display_name: "eslint --fix".to_string(),
                 suggested_dry_run: None,
             })
         }
         "prettier" => {
-            let has_write = actual
-                .iter()
-                .any(|t| equal_ignore_case(t, "--write") || t == "-w");
+            let has_write = actual.iter().any(|t| equal_ignore_case(t, "--write") || t == "-w");
             if !has_write {
                 return None;
             }
@@ -731,11 +670,7 @@ fn analyze_direct_formatter(tokens: &[String]) -> Option<InternalAnalysis> {
             });
             Some(InternalAnalysis {
                 key: DryRunGuardKey::PrettierWrite,
-                disposition: if is_dry {
-                    DryRunDisposition::DryRun
-                } else {
-                    DryRunDisposition::Mutating
-                },
+                disposition: if is_dry { DryRunDisposition::DryRun } else { DryRunDisposition::Mutating },
                 display_name: "prettier --write".to_string(),
                 suggested_dry_run: None,
             })
@@ -744,11 +679,7 @@ fn analyze_direct_formatter(tokens: &[String]) -> Option<InternalAnalysis> {
             let is_dry = actual.iter().any(|t| equal_ignore_case(t, "--check"));
             Some(InternalAnalysis {
                 key: DryRunGuardKey::Black,
-                disposition: if is_dry {
-                    DryRunDisposition::DryRun
-                } else {
-                    DryRunDisposition::Mutating
-                },
+                disposition: if is_dry { DryRunDisposition::DryRun } else { DryRunDisposition::Mutating },
                 display_name: "black".to_string(),
                 suggested_dry_run: None,
             })
@@ -760,11 +691,7 @@ fn analyze_direct_formatter(tokens: &[String]) -> Option<InternalAnalysis> {
             let is_dry = args.iter().any(|t| equal_ignore_case(t, "--check"));
             Some(InternalAnalysis {
                 key: DryRunGuardKey::RuffFormat,
-                disposition: if is_dry {
-                    DryRunDisposition::DryRun
-                } else {
-                    DryRunDisposition::Mutating
-                },
+                disposition: if is_dry { DryRunDisposition::DryRun } else { DryRunDisposition::Mutating },
                 display_name: "ruff format".to_string(),
                 suggested_dry_run: None,
             })
@@ -773,11 +700,7 @@ fn analyze_direct_formatter(tokens: &[String]) -> Option<InternalAnalysis> {
             let is_dry = actual.iter().any(|t| equal_ignore_case(t, "--check-only"));
             Some(InternalAnalysis {
                 key: DryRunGuardKey::Isort,
-                disposition: if is_dry {
-                    DryRunDisposition::DryRun
-                } else {
-                    DryRunDisposition::Mutating
-                },
+                disposition: if is_dry { DryRunDisposition::DryRun } else { DryRunDisposition::Mutating },
                 display_name: "isort".to_string(),
                 suggested_dry_run: None,
             })
@@ -790,11 +713,7 @@ fn analyze_direct_formatter(tokens: &[String]) -> Option<InternalAnalysis> {
             let is_dry = actual.iter().any(|t| t == "-d" || t == "-l" || t == "-n");
             Some(InternalAnalysis {
                 key: DryRunGuardKey::Gofmt,
-                disposition: if is_dry {
-                    DryRunDisposition::DryRun
-                } else {
-                    DryRunDisposition::Mutating
-                },
+                disposition: if is_dry { DryRunDisposition::DryRun } else { DryRunDisposition::Mutating },
                 display_name: "gofmt -w".to_string(),
                 suggested_dry_run: None,
             })
@@ -803,11 +722,7 @@ fn analyze_direct_formatter(tokens: &[String]) -> Option<InternalAnalysis> {
             let is_dry = actual.iter().any(|t| equal_ignore_case(t, "--check"));
             Some(InternalAnalysis {
                 key: DryRunGuardKey::Rustywind,
-                disposition: if is_dry {
-                    DryRunDisposition::DryRun
-                } else {
-                    DryRunDisposition::Mutating
-                },
+                disposition: if is_dry { DryRunDisposition::DryRun } else { DryRunDisposition::Mutating },
                 display_name: "rustywind".to_string(),
                 suggested_dry_run: None,
             })
@@ -819,26 +734,16 @@ fn analyze_direct_formatter(tokens: &[String]) -> Option<InternalAnalysis> {
             let is_dry = actual.iter().any(|t| equal_ignore_case(t, "--dry-run"));
             Some(InternalAnalysis {
                 key: DryRunGuardKey::DartFormat,
-                disposition: if is_dry {
-                    DryRunDisposition::DryRun
-                } else {
-                    DryRunDisposition::Mutating
-                },
+                disposition: if is_dry { DryRunDisposition::DryRun } else { DryRunDisposition::Mutating },
                 display_name: "dart format".to_string(),
                 suggested_dry_run: None,
             })
         }
         "swiftformat" => {
-            let is_dry = actual
-                .iter()
-                .any(|t| equal_ignore_case(t, "--lint") || equal_ignore_case(t, "--dryrun"));
+            let is_dry = actual.iter().any(|t| equal_ignore_case(t, "--lint") || equal_ignore_case(t, "--dryrun"));
             Some(InternalAnalysis {
                 key: DryRunGuardKey::SwiftFormat,
-                disposition: if is_dry {
-                    DryRunDisposition::DryRun
-                } else {
-                    DryRunDisposition::Mutating
-                },
+                disposition: if is_dry { DryRunDisposition::DryRun } else { DryRunDisposition::Mutating },
                 display_name: "swiftformat".to_string(),
                 suggested_dry_run: None,
             })
@@ -847,7 +752,7 @@ fn analyze_direct_formatter(tokens: &[String]) -> Option<InternalAnalysis> {
     }
 }
 
-fn peel_exec_wrappers(mut tokens: &[String]) -> &[String] {
+fn peel_exec_wrappers<'a>(mut tokens: &'a [String]) -> &'a [String] {
     loop {
         if tokens.is_empty() {
             return tokens;
@@ -880,7 +785,7 @@ fn peel_exec_wrappers(mut tokens: &[String]) -> &[String] {
     tokens
 }
 
-fn skip_leading_flags(tokens: &[String]) -> &[String] {
+fn skip_leading_flags<'a>(tokens: &'a [String]) -> &'a [String] {
     let mut idx = 0usize;
     while idx < tokens.len() {
         let token = tokens[idx].as_str();

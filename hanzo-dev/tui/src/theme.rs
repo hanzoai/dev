@@ -95,7 +95,8 @@ pub fn init_theme(config: &ThemeConfig) {
         quantize_theme_to_ansi256(&mut theme);
     }
 
-    theme.apply_zen(config.zen);
+    let zen_enabled = config.zen.as_ref().is_some_and(|z| z.enabled);
+    theme.apply_zen(zen_enabled);
 
     let mut current = CURRENT_THEME.write().unwrap();
     *current = theme.clone();
@@ -106,8 +107,8 @@ pub fn init_theme(config: &ThemeConfig) {
         *CUSTOM_THEME_COLORS.write().unwrap() = Some(config.colors.clone());
         *CUSTOM_THEME_IS_DARK.write().unwrap() = config.is_dark;
     }
-    *ZEN_MODE.write().unwrap() = config.zen;
-    *GUTTER_MODE.write().unwrap() = if config.zen {
+    *ZEN_MODE.write().unwrap() = zen_enabled;
+    *GUTTER_MODE.write().unwrap() = if zen_enabled {
         GutterMode::None
     } else {
         GutterMode::Full

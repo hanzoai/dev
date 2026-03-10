@@ -1,12 +1,12 @@
+use anyhow::Context as _;
+use anyhow::Result;
 use crate::acp::AcpFileSystem;
 use crate::codex::Session;
 use crate::patch_harness::run_patch_harness;
 use crate::protocol::FileChange;
 use crate::protocol::ReviewDecision;
-use crate::safety::SafetyCheck;
 use crate::safety::assess_patch_safety;
-use anyhow::Context as _;
-use anyhow::Result;
+use crate::safety::SafetyCheck;
 use hanzo_apply_patch::AffectedPaths;
 use hanzo_apply_patch::ApplyPatchAction;
 use hanzo_apply_patch::ApplyPatchFileChange;
@@ -20,7 +20,7 @@ use std::collections::HashMap;
 use std::path::Path;
 use std::path::PathBuf;
 
-pub const HANZO_APPLY_PATCH_ARG1: &str = "--hanzo-run-as-apply-patch";
+pub const CODEX_APPLY_PATCH_ARG1: &str = "--codex-run-as-apply-patch";
 
 pub(crate) struct ApplyPatchRun {
     pub auto_approved: bool,
@@ -48,88 +48,93 @@ pub(crate) async fn apply_patch(
         let mut status_message: Option<String> = None;
         let validation_cfg = sess.validation_config();
         let github_cfg = sess.get_github_config();
-        if let (Ok(validation_cfg), Ok(github_cfg)) = (validation_cfg.read(), github_cfg.read())
-            && let Some((mut findings, mut ran_checks)) =
-                run_patch_harness(&action, sess.get_cwd(), &validation_cfg, &github_cfg)
-        {
-            const MAX_ISSUES: usize = 12;
-            let total_issues = findings.len();
-            let truncated = total_issues > MAX_ISSUES;
-            if truncated {
-                findings.truncate(MAX_ISSUES);
-            }
-            findings.retain(|finding| {
-                finding.tool.trim().len() <= 120 && finding.message.trim().len() <= 800
-            });
-            let issues_json: Vec<serde_json::Value> = findings
-                .iter()
-                .map(|finding| {
-                    let relative_file = finding
-                        .file
-                        .as_ref()
-                        .and_then(|path| path.strip_prefix(sess.get_cwd()).ok())
-                        .map(|path| path.display().to_string());
-                    json!({
-                        "tool": finding.tool,
-                        "file": relative_file,
-                        "msg": finding.message,
-                    })
-                })
-                .collect();
-            summary_json = Some(
-                json!({
-                    "validation": {
-                        "issues": issues_json,
-                        "checks": ran_checks,
-                        "issue_count": total_issues,
-                        "truncated": truncated,
-                    }
-                })
-                .to_string(),
-            );
-
-            let mut lines: Vec<String> = Vec::new();
-            if total_issues == 0 {
-                lines.push("✅ Validate New Code: no issues".to_string());
-            } else {
-                lines.push(format!("❌ Validate New Code: {total_issues} issue(s)"));
-                for finding in findings.iter() {
-                    let mut parts = vec![finding.tool.clone()];
-                    if let Some(rel) = finding
-                        .file
-                        .as_ref()
-                        .and_then(|p| p.strip_prefix(sess.get_cwd()).ok())
-                        .map(|p| p.display().to_string())
-                    {
-                        parts.push(rel);
-                    }
-                    let mut msg = finding.message.clone();
-                    if msg.len() > 160 {
-                        msg.truncate(157);
-                        msg.push('…');
-                    }
-                    parts.push(msg);
-                    lines.push(format!("• {}", parts.join(" — ")));
-                }
+        if let (Ok(validation_cfg), Ok(github_cfg)) = (validation_cfg.read(), github_cfg.read()) {
+            if let Some((mut findings, mut ran_checks)) = run_patch_harness(
+                &action,
+                sess.get_cwd(),
+                &*validation_cfg,
+                &*github_cfg,
+            ) {
+                const MAX_ISSUES: usize = 12;
+                let total_issues = findings.len();
+                let truncated = total_issues > MAX_ISSUES;
                 if truncated {
-                    let remaining = total_issues - findings.len();
-                    lines.push(format!("… plus {remaining} more issue(s)"));
+                    findings.truncate(MAX_ISSUES);
                 }
+                findings.retain(|finding| {
+                    finding.tool.trim().len() <= 120 && finding.message.trim().len() <= 800
+                });
+                let issues_json: Vec<serde_json::Value> = findings
+                    .iter()
+                    .map(|finding| {
+                        let relative_file = finding
+                            .file
+                            .as_ref()
+                            .and_then(|path| path.strip_prefix(sess.get_cwd()).ok())
+                            .map(|path| path.display().to_string());
+                        json!({
+                            "tool": finding.tool,
+                            "file": relative_file,
+                            "msg": finding.message,
+                        })
+                    })
+                    .collect();
+                summary_json = Some(
+                    json!({
+                        "validation": {
+                            "issues": issues_json,
+                            "checks": ran_checks,
+                            "issue_count": total_issues,
+                            "truncated": truncated,
+                        }
+                    })
+                    .to_string(),
+                );
+
+                let mut lines: Vec<String> = Vec::new();
+                if total_issues == 0 {
+                    lines.push("✅ Validate New Code: no issues".to_string());
+                } else {
+                    lines.push(format!("❌ Validate New Code: {total_issues} issue(s)"));
+                    for finding in findings.iter() {
+                        let mut parts = vec![finding.tool.clone()];
+                        if let Some(rel) = finding
+                            .file
+                            .as_ref()
+                            .and_then(|p| p.strip_prefix(sess.get_cwd()).ok())
+                            .map(|p| p.display().to_string())
+                        {
+                            parts.push(rel);
+                        }
+                        let mut msg = finding.message.clone();
+                        if msg.len() > 160 {
+                            msg.truncate(157);
+                            msg.push_str("…");
+                        }
+                        parts.push(msg);
+                        lines.push(format!("• {}", parts.join(" — ")));
+                    }
+                    if truncated {
+                        let remaining = total_issues - findings.len();
+                        lines.push(format!("… plus {remaining} more issue(s)"));
+                    }
+                }
+                if ran_checks.is_empty() {
+                    lines.push("Checks run: none".to_string());
+                } else {
+                    ran_checks.sort();
+                    lines.push(format!("Checks run: {}", ran_checks.join(", ")));
+                }
+                status_message = Some(lines.join("\n"));
             }
-            if ran_checks.is_empty() {
-                lines.push("Checks run: none".to_string());
-            } else {
-                ran_checks.sort();
-                lines.push(format!("Checks run: {}", ran_checks.join(", ")));
-            }
-            status_message = Some(lines.join("\n"));
         }
         (summary_json, status_message)
     };
 
     if let Some(message) = harness_status_message.as_ref() {
         let order = sess.next_background_order(sub_id, attempt_req, output_index);
-        sess.notify_background_event_with_order(sub_id, order, message.clone())
+        sess
+            .notify_background_event_with_order(sub_id, order, message.clone())
             .await;
     }
 
@@ -150,9 +155,8 @@ pub(crate) async fn apply_patch(
                     return ApplyPatchResult::Reply(ResponseInputItem::FunctionCallOutput {
                         call_id: call_id.to_owned(),
                         output: FunctionCallOutputPayload {
-                            content: "patch rejected by user".to_string(),
-                            success: Some(false),
-                        },
+                            body: hanzo_protocol::models::FunctionCallOutputBody::Text("patch rejected by user".to_string()),
+                            success: Some(false)},
                     });
                 }
             }
@@ -161,24 +165,18 @@ pub(crate) async fn apply_patch(
             return ApplyPatchResult::Reply(ResponseInputItem::FunctionCallOutput {
                 call_id: call_id.to_owned(),
                 output: FunctionCallOutputPayload {
-                    content: format!("patch rejected: {reason}"),
-                    success: Some(false),
-                },
+                    body: hanzo_protocol::models::FunctionCallOutputBody::Text(format!("patch rejected: {reason}")),
+                    success: Some(false)},
             });
         }
     };
     let mut stdout = Vec::new();
     let mut stderr = Vec::new();
     let result = if let Some(client_tools) = sess.client_tools() {
-        let fs = AcpFileSystem::new(
-            sess.session_uuid(),
-            client_tools,
-            sess.mcp_connection_manager(),
-        );
+        let fs = AcpFileSystem::new(sess.session_uuid(), client_tools, sess.mcp_connection_manager());
         apply_changes_from_apply_patch_and_report(&action, &mut stdout, &mut stderr, &fs).await
     } else {
-        apply_changes_from_apply_patch_and_report(&action, &mut stdout, &mut stderr, &StdFileSystem)
-            .await
+        apply_changes_from_apply_patch_and_report(&action, &mut stdout, &mut stderr, &StdFileSystem).await
     };
 
     let stdout = String::from_utf8_lossy(&stdout).to_string();
@@ -269,12 +267,12 @@ async fn apply_changes_from_apply_patch(
     for (path, change) in action.changes() {
         match change {
             ApplyPatchFileChange::Add { content } => {
-                if let Some(parent) = path.parent()
-                    && !parent.as_os_str().is_empty()
-                {
-                    std::fs::create_dir_all(parent).with_context(|| {
-                        format!("Failed to create parent directories for {}", path.display())
-                    })?;
+                if let Some(parent) = path.parent() {
+                    if !parent.as_os_str().is_empty() {
+                        std::fs::create_dir_all(parent).with_context(|| {
+                            format!("Failed to create parent directories for {}", path.display())
+                        })?;
+                    }
                 }
                 fs.write_text_file(path, content.clone())
                     .await
@@ -292,15 +290,12 @@ async fn apply_changes_from_apply_patch(
                 ..
             } => {
                 if let Some(move_path) = move_path {
-                    if let Some(parent) = move_path.parent()
-                        && !parent.as_os_str().is_empty()
-                    {
-                        std::fs::create_dir_all(parent).with_context(|| {
-                            format!(
-                                "Failed to create parent directories for {}",
-                                move_path.display()
-                            )
-                        })?;
+                    if let Some(parent) = move_path.parent() {
+                        if !parent.as_os_str().is_empty() {
+                            std::fs::create_dir_all(parent).with_context(|| {
+                                format!("Failed to create parent directories for {}", move_path.display())
+                            })?;
+                        }
                     }
 
                     std::fs::rename(path, move_path)

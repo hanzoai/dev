@@ -484,7 +484,7 @@ fn agent_start_line(tracker: &AgentRunTracker) -> Line<'static> {
 
     let mut spans: Vec<Span<'static>> = Vec::new();
     spans.push(Span::raw("Started "));
-    spans.push(Span::styled(title, Style::new().bold()));
+    spans.push(Span::styled(title, Style::new().add_modifier(ratatui::style::Modifier::BOLD)));
     if let Some(segment) = agent_segment {
         spans.push(Span::raw(segment));
     }

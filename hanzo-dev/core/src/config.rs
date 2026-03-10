@@ -47,9 +47,9 @@ use crate::config_types::ReasoningSummary;
 use crate::config_types::ContextMode;
 use crate::config_types::ServiceTier;
 use crate::project_features::{load_project_commands, ProjectCommand, ProjectHooks};
-use code_app_server_protocol::AuthMode;
-use code_protocol::config_types::SandboxMode;
-use code_protocol::dynamic_tools::DynamicToolSpec;
+use hanzo_app_server_protocol::AuthMode;
+use hanzo_protocol::config_types::SandboxMode;
+use hanzo_protocol::dynamic_tools::DynamicToolSpec;
 use std::time::Instant;
 use serde::Deserialize;
 use serde::de::{self, Unexpected};
@@ -401,7 +401,7 @@ pub struct Config {
     /// [`ConfigOverrides`].
     ///
     /// When this program is invoked, arg0 will be set to `codex-linux-sandbox`.
-    pub code_linux_sandbox_exe: Option<PathBuf>,
+    pub hanzo_linux_sandbox_exe: Option<PathBuf>,
 
     /// The value to use for `reasoning.effort` when making a
     /// request using the Responses API. Allowed values: `minimal`, `low`, `medium`, `high`, `xhigh`.
@@ -990,7 +990,7 @@ pub struct ConfigOverrides {
     pub sandbox_mode: Option<SandboxMode>,
     pub model_provider: Option<String>,
     pub config_profile: Option<String>,
-    pub code_linux_sandbox_exe: Option<PathBuf>,
+    pub hanzo_linux_sandbox_exe: Option<PathBuf>,
     pub base_instructions: Option<String>,
     pub include_plan_tool: Option<bool>,
     pub include_apply_patch_tool: Option<bool>,
@@ -1028,7 +1028,7 @@ impl Config {
             sandbox_mode,
             model_provider,
             config_profile: config_profile_key,
-            code_linux_sandbox_exe,
+            hanzo_linux_sandbox_exe,
             base_instructions,
             include_plan_tool,
             include_apply_patch_tool,
@@ -1623,7 +1623,7 @@ impl Config {
             tui: cfg.tui.clone().unwrap_or_default(),
             auto_drive,
             auto_drive_use_chat_model,
-            code_linux_sandbox_exe,
+            hanzo_linux_sandbox_exe,
             active_profile: active_profile_name,
 
             hide_agent_reasoning: cfg.hide_agent_reasoning.unwrap_or(false),
@@ -1706,7 +1706,7 @@ impl Config {
 
     /// Check if we're using ChatGPT authentication
     fn is_using_chatgpt_auth(code_home: &Path) -> bool {
-        use code_app_server_protocol::AuthMode;
+        use hanzo_app_server_protocol::AuthMode;
         use crate::CodexAuth;
         
         // Prefer ChatGPT when both ChatGPT tokens and an API key are present.

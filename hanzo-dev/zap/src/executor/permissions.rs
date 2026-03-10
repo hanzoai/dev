@@ -70,6 +70,12 @@ pub fn check_approval(
                 )),
             }
         }
+        AskForApproval::Reject(_) => {
+            PermissionResult::RequiresApproval(format!(
+                "Operation '{}' rejected by policy",
+                operation
+            ))
+        }
     }
 }
 
@@ -85,6 +91,10 @@ pub fn is_path_writable(path: &Path, sandbox: &SandboxPolicy, cwd: &Path) -> boo
             }
             // Check additional writable roots
             writable_roots.iter().any(|root| path.starts_with(root))
+        }
+        SandboxPolicy::ExternalSandbox { .. } => {
+            // External sandbox manages its own permissions
+            true
         }
     }
 }

@@ -1,9 +1,6 @@
 // Use img_hash's re-exported image module for compatibility
-use img_hash::HashAlg;
-use img_hash::HasherConfig;
-use img_hash::ImageHash;
-use img_hash::image::DynamicImage;
-use img_hash::image::io::Reader as ImageReader;
+use img_hash::image::{DynamicImage, io::Reader as ImageReader};
+use img_hash::{HashAlg, HasherConfig, ImageHash};
 use std::path::Path;
 
 fn phash_256(img: &DynamicImage) -> ImageHash<[u8; 32]> {
@@ -44,13 +41,13 @@ pub fn are_hashes_similar(phash1: &[u8], dhash1: &[u8], phash2: &[u8], dhash2: &
     let phash_dist = phash1
         .iter()
         .zip(phash2.iter())
-        .map(|(a, b)| (a ^ b).count_ones())
+        .map(|(a, b)| (a ^ b).count_ones() as u32)
         .sum::<u32>();
 
     let dhash_dist = dhash1
         .iter()
         .zip(dhash2.iter())
-        .map(|(a, b)| (a ^ b).count_ones())
+        .map(|(a, b)| (a ^ b).count_ones() as u32)
         .sum::<u32>();
 
     // 256 bits → ~5% tolerance (≈13 bits)

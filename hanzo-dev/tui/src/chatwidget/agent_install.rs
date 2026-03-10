@@ -851,6 +851,8 @@ fn make_message(role: &str, text: String) -> ResponseItem {
         id: None,
         role: role.to_string(),
         content: vec![content],
+        end_turn: None,
+        phase: None,
     }
 }
 

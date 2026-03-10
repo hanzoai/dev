@@ -33,7 +33,7 @@ impl MessageProcessor {
     /// `Sender` so handlers can enqueue messages to be written to stdout.
     pub(crate) fn new(
         outgoing: OutgoingMessageSender,
-        code_linux_sandbox_exe: Option<PathBuf>,
+        hanzo_linux_sandbox_exe: Option<PathBuf>,
         config: Arc<Config>,
     ) -> Self {
         let outgoing = Arc::new(outgoing);
@@ -51,7 +51,7 @@ impl MessageProcessor {
             auth_manager,
             conversation_manager,
             outgoing.clone(),
-            code_linux_sandbox_exe,
+            hanzo_linux_sandbox_exe,
             config_for_processor.clone(),
         );
 

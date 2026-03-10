@@ -15,13 +15,38 @@ use crossterm::style::SetColors;
 use crossterm::style::SetForegroundColor;
 // No terminal clears in terminal-mode insertion; preserve user's theme.
 use ratatui::layout::Size;
-use ratatui::prelude::IntoCrossterm;
 use ratatui::style::Color;
 use ratatui::style::Modifier;
 use ratatui::text::Line;
 use ratatui::text::Span;
 use textwrap::Options as TwOptions;
 use textwrap::WordSplitter;
+
+/// Convert a ratatui Color to a crossterm Color.
+fn ratatui_color_to_crossterm(c: Color) -> CColor {
+    match c {
+        Color::Reset => CColor::Reset,
+        Color::Black => CColor::Black,
+        Color::Red => CColor::DarkRed,
+        Color::Green => CColor::DarkGreen,
+        Color::Yellow => CColor::DarkYellow,
+        Color::Blue => CColor::DarkBlue,
+        Color::Magenta => CColor::DarkMagenta,
+        Color::Cyan => CColor::DarkCyan,
+        Color::Gray => CColor::Grey,
+        Color::DarkGray => CColor::DarkGrey,
+        Color::LightRed => CColor::Red,
+        Color::LightGreen => CColor::Green,
+        Color::LightYellow => CColor::Yellow,
+        Color::LightBlue => CColor::Blue,
+        Color::LightMagenta => CColor::Magenta,
+        Color::LightCyan => CColor::Cyan,
+        Color::White => CColor::White,
+        Color::Rgb(r, g, b) => CColor::Rgb { r, g, b },
+        Color::Indexed(i) => CColor::AnsiValue(i),
+        _ => CColor::Reset,
+    }
+}
 
 /// Insert `lines` above the viewport.
 #[allow(dead_code)]
@@ -384,8 +409,8 @@ where
             queue!(
                 writer,
                 SetColors(Colors::new(
-                    next_fg.into_crossterm(),
-                    next_bg.into_crossterm()
+                    ratatui_color_to_crossterm(next_fg),
+                    ratatui_color_to_crossterm(next_bg),
                 ))
             )?;
             fg = next_fg;
