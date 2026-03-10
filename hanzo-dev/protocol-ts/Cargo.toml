@@ -1,7 +1,10 @@
 [package]
 edition = "2024"
 name = "hanzo-protocol-ts"
+description = "TypeScript protocol bindings for Hanzo"
 version = { workspace = true }
+license = { workspace = true }
+repository = { workspace = true }
 
 [lints]
 workspace = true

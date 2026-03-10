@@ -1,7 +1,10 @@
 [package]
 edition = "2024"
 name = "hanzo-exec"
+description = "Command execution engine for Hanzo Dev"
 version = { workspace = true }
+license = { workspace = true }
+repository = { workspace = true }
 
 [[bin]]
 name = "dev-exec"

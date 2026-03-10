@@ -1,7 +1,10 @@
 [package]
 edition = "2024"
 name = "hanzo-arg0"
+description = "Argument parsing utilities for Hanzo"
 version = { workspace = true }
+license = { workspace = true }
+repository = { workspace = true }
 
 [lib]
 name = "hanzo_arg0"
