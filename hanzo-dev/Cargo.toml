@@ -57,46 +57,46 @@ edition = "2024"
 
 [workspace.dependencies]
 # Internal
-hanzo-ansi-escape = { path = "ansi-escape" }
-hanzo-app-server = { path = "app-server" }
-hanzo-app-server-protocol = { path = "app-server-protocol" }
-hanzo-apply-patch = { path = "apply-patch" }
-hanzo-arg0 = { path = "arg0" }
-hanzo-browser = { path = "browser" }
-hanzo-chatgpt = { path = "chatgpt" }
-hanzo-common = { path = "common" }
-hanzo-core = { path = "core" }
+hanzo-ansi-escape = { path = "ansi-escape", version = "0.6.74" }
+hanzo-app-server = { path = "app-server", version = "0.6.74" }
+hanzo-app-server-protocol = { path = "app-server-protocol", version = "0.6.74" }
+hanzo-apply-patch = { path = "apply-patch", version = "0.6.74" }
+hanzo-arg0 = { path = "arg0", version = "0.6.74" }
+hanzo-browser = { path = "browser", version = "0.6.74" }
+hanzo-chatgpt = { path = "chatgpt", version = "0.6.74" }
+hanzo-common = { path = "common", version = "0.6.74" }
+hanzo-core = { path = "core", version = "0.6.74" }
 hanzo-backend-client = { path = "backend-client" }
-hanzo-backend-openapi-models = { path = "code-backend-openapi-models" }
-hanzo-cloud-tasks = { path = "cloud-tasks" }
-hanzo-cloud-tasks-client = { path = "cloud-tasks-client" }
-hanzo-exec = { path = "exec" }
-hanzo-execpolicy = { path = "execpolicy" }
-hanzo-file-search = { path = "file-search" }
-hanzo-git-tooling = { path = "git-tooling" }
-hanzo-git-apply = { path = "git-apply" }
-hanzo-linux-sandbox = { path = "linux-sandbox" }
-hanzo-login = { path = "login" }
-hanzo-mcp-client = { path = "mcp-client", version = "0.6.61" }
-hanzo-mcp-server = { path = "mcp-server" }
-hanzo-ollama = { path = "ollama" }
-hanzo-process-hardening = { path = "process-hardening" }
-hanzo-protocol = { path = "protocol", version = "0.6.61" }
-hanzo-protocol-ts = { path = "protocol-ts" }
-hanzo-responses-api-proxy = { path = "responses-api-proxy" }
-hanzo-rmcp-client = { path = "rmcp-client" }
-hanzo-otel = { path = "otel" }
-hanzo-tui = { path = "tui" }
-hanzo-utils-absolute-path = { path = "utils/absolute-path" }
-hanzo-utils-cache = { path = "utils/cache" }
-hanzo-utils-image = { path = "utils/image" }
-hanzo-utils-json-to-toml = { path = "utils/json-to-toml" }
-hanzo-utils-readiness = { path = "utils/readiness" }
-hanzo-auto-drive-core = { path = "code-auto-drive-core" }
-hanzo-tunnel-bridge = { path = "tunnel-bridge" }
-hanzo-zap = { path = "zap", version = "0.6.61" }
-hanzo-zt = { path = "zt" }
-mcp-types = { path = "mcp-types", package = "hanzo-mcp-types", version = "0.6.61" }
+hanzo-backend-openapi-models = { path = "code-backend-openapi-models", version = "0.6.74" }
+hanzo-cloud-tasks = { path = "cloud-tasks", version = "0.6.74" }
+hanzo-cloud-tasks-client = { path = "cloud-tasks-client", version = "0.6.74" }
+hanzo-exec = { path = "exec", version = "0.6.74" }
+hanzo-execpolicy = { path = "execpolicy", version = "0.6.74" }
+hanzo-file-search = { path = "file-search", version = "0.6.74" }
+hanzo-git-tooling = { path = "git-tooling", version = "0.6.74" }
+hanzo-git-apply = { path = "git-apply", version = "0.6.74" }
+hanzo-linux-sandbox = { path = "linux-sandbox", version = "0.6.74" }
+hanzo-login = { path = "login", version = "0.6.74" }
+hanzo-mcp-client = { path = "mcp-client", version = "0.6.74" }
+hanzo-mcp-server = { path = "mcp-server", version = "0.6.74" }
+hanzo-ollama = { path = "ollama", version = "0.6.74" }
+hanzo-process-hardening = { path = "process-hardening", version = "0.6.74" }
+hanzo-protocol = { path = "protocol", version = "0.6.74" }
+hanzo-protocol-ts = { path = "protocol-ts", version = "0.6.74" }
+hanzo-responses-api-proxy = { path = "responses-api-proxy", version = "0.6.74" }
+hanzo-rmcp-client = { path = "rmcp-client", version = "0.6.74" }
+hanzo-otel = { path = "otel", version = "0.6.74" }
+hanzo-tui = { path = "tui", version = "0.6.74" }
+hanzo-utils-absolute-path = { path = "utils/absolute-path", version = "0.6.74" }
+hanzo-utils-cache = { path = "utils/cache", version = "0.6.74" }
+hanzo-utils-image = { path = "utils/image", version = "0.6.74" }
+hanzo-utils-json-to-toml = { path = "utils/json-to-toml", version = "0.6.74" }
+hanzo-utils-readiness = { path = "utils/readiness", version = "0.6.74" }
+hanzo-auto-drive-core = { path = "code-auto-drive-core", version = "0.6.74" }
+hanzo-tunnel-bridge = { path = "tunnel-bridge", version = "0.6.74" }
+hanzo-zap = { path = "zap", version = "0.6.74" }
+hanzo-zt = { path = "zt", version = "0.6.74" }
+mcp-types = { path = "mcp-types", package = "hanzo-mcp-types", version = "0.6.74" }
 upstream-mcp-types = { package = "codex-mcp-types", version = "0.63.0" }
 
 # External - Guard for I/O sanitization
