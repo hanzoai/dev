@@ -15,9 +15,9 @@ workspace = true
 
 [dependencies]
 anyhow = { workspace = true }
-hanzo-auto-drive-core = { path = "../code-auto-drive-core" }
-hanzo-core = { path = "../core" }
-hanzo-protocol = { path = "../protocol" }
+hanzo-auto-drive-core = { path = "../code-auto-drive-core", version = "0.6.74" }
+hanzo-core = { path = "../core", version = "0.6.74" }
+hanzo-protocol = { path = "../protocol", version = "0.6.74" }
 serde = { workspace = true, features = ["derive"] }
 serde_json = { workspace = true }
 thiserror = { workspace = true }
