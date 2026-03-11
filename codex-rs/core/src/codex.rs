@@ -60,7 +60,6 @@ use codex_app_server_protocol::McpServerElicitationRequestParams;
 use codex_hooks::HookEvent;
 use codex_hooks::HookEventAfterAgent;
 use codex_hooks::HookPayload;
-use codex_hooks::HookResult;
 use codex_hooks::Hooks;
 use codex_hooks::HooksConfig;
 use codex_network_proxy::NetworkProxy;
@@ -1881,7 +1880,8 @@ impl Session {
 
     pub(crate) async fn set_mcp_tool_selection(&self, tool_names: Vec<String>) {
         let mut state = self.state.lock().await;
-        state.set_mcp_tool_selection(tool_names);
+        state.clear_mcp_tool_selection();
+        state.merge_mcp_tool_selection(tool_names);
     }
 
     pub(crate) async fn get_mcp_tool_selection(&self) -> Option<Vec<String>> {
@@ -2328,19 +2328,8 @@ impl Session {
         turn_context
     }
 
-    pub(crate) async fn maybe_emit_unknown_model_warning_for_turn(&self, tc: &TurnContext) {
-        if tc.model_info.used_fallback_model_metadata {
-            self.send_event(
-                tc,
-                EventMsg::Warning(WarningEvent {
-                    message: format!(
-                        "Model metadata for `{}` not found. Defaulting to fallback metadata; this can degrade performance and cause issues.",
-                        tc.model_info.slug
-                    ),
-                }),
-            )
-            .await;
-        }
+    pub(crate) async fn maybe_emit_unknown_model_warning_for_turn(&self, _tc: &TurnContext) {
+        // Model fallback metadata tracking was removed upstream.
     }
 
     pub(crate) async fn new_default_turn(&self) -> Arc<TurnContext> {
@@ -5741,8 +5730,7 @@ pub(crate) async fn run_turn(
                     if stop_outcome.should_stop {
                         break;
                     }
-                    let hook_outcomes = sess
-                        .hooks()
+                    sess.hooks()
                         .dispatch(HookPayload {
                             session_id: sess.conversation_id,
                             cwd: turn_context.cwd.clone(),
@@ -5758,47 +5746,6 @@ pub(crate) async fn run_turn(
                             },
                         })
                         .await;
-
-                    let mut abort_message = None;
-                    for hook_outcome in hook_outcomes {
-                        let hook_name = hook_outcome.hook_name;
-                        match hook_outcome.result {
-                            HookResult::Success => {}
-                            HookResult::FailedContinue(error) => {
-                                warn!(
-                                    turn_id = %turn_context.sub_id,
-                                    hook_name = %hook_name,
-                                    error = %error,
-                                    "after_agent hook failed; continuing"
-                                );
-                            }
-                            HookResult::FailedAbort(error) => {
-                                let message = format!(
-                                    "after_agent hook '{hook_name}' failed and aborted turn completion: {error}"
-                                );
-                                warn!(
-                                    turn_id = %turn_context.sub_id,
-                                    hook_name = %hook_name,
-                                    error = %error,
-                                    "after_agent hook failed; aborting operation"
-                                );
-                                if abort_message.is_none() {
-                                    abort_message = Some(message);
-                                }
-                            }
-                        }
-                    }
-                    if let Some(message) = abort_message {
-                        sess.send_event(
-                            &turn_context,
-                            EventMsg::Error(ErrorEvent {
-                                message,
-                                codex_error_info: None,
-                            }),
-                        )
-                        .await;
-                        return None;
-                    }
                     break;
                 }
                 continue;
