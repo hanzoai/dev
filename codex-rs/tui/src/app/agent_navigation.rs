@@ -18,10 +18,10 @@
 //! order. Once a thread id is observed it keeps its place in the cycle even if the entry is later
 //! updated or marked closed.
 
-use crate::multi_agents::AgentPickerThreadEntry;
-use crate::multi_agents::format_agent_picker_item_name;
-use crate::multi_agents::next_agent_shortcut;
-use crate::multi_agents::previous_agent_shortcut;
+use crate::collab::AgentPickerThreadEntry;
+use crate::collab::format_agent_picker_item_name;
+use crate::collab::next_agent_shortcut;
+use crate::collab::previous_agent_shortcut;
 use codex_protocol::ThreadId;
 use ratatui::text::Span;
 use std::collections::HashMap;
