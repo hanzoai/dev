@@ -20,6 +20,7 @@ use codex_core::features::Features;
 use codex_protocol::ThreadId;
 use codex_protocol::mcp::RequestId;
 use codex_protocol::models::MacOsAutomationPermission;
+use codex_protocol::models::MacOsContactsPermission;
 use codex_protocol::models::MacOsPreferencesPermission;
 use codex_protocol::models::PermissionProfile;
 use codex_protocol::protocol::ElicitationAction;
@@ -28,6 +29,7 @@ use codex_protocol::protocol::NetworkApprovalContext;
 use codex_protocol::protocol::NetworkPolicyRuleAction;
 use codex_protocol::protocol::Op;
 use codex_protocol::protocol::ReviewDecision;
+use codex_protocol::request_permissions::PermissionGrantScope;
 use crossterm::event::KeyCode;
 use crossterm::event::KeyEvent;
 use crossterm::event::KeyEventKind;
@@ -282,9 +284,16 @@ impl ApprovalOverlay {
             ReviewDecision::ApprovedExecpolicyAmendment { .. }
             | ReviewDecision::NetworkPolicyAmendment { .. } => Default::default(),
         };
+        let scope = if matches!(decision, ReviewDecision::ApprovedForSession) {
+            PermissionGrantScope::Session
+        } else {
+            PermissionGrantScope::Turn
+        };
         if request.thread_label().is_none() {
             let message = if granted_permissions.is_empty() {
                 "You did not grant additional permissions"
+            } else if matches!(scope, PermissionGrantScope::Session) {
+                "You granted additional permissions for this session"
             } else {
                 "You granted additional permissions"
             };
@@ -299,6 +308,7 @@ impl ApprovalOverlay {
                 id: call_id.to_string(),
                 response: codex_protocol::request_permissions::RequestPermissionsResponse {
                     permissions: granted_permissions,
+                    scope,
                 },
             },
         });
@@ -791,6 +801,17 @@ pub(crate) fn format_additional_permissions_rule(
         if macos.macos_calendar {
             parts.push("macOS calendar".to_string());
         }
+        if macos.macos_reminders {
+            parts.push("macOS reminders".to_string());
+        }
+        if !matches!(macos.macos_contacts, MacOsContactsPermission::None) {
+            let value = match macos.macos_contacts {
+                MacOsContactsPermission::None => "none",
+                MacOsContactsPermission::ReadOnly => "readonly",
+                MacOsContactsPermission::ReadWrite => "readwrite",
+            };
+            parts.push(format!("macOS contacts {value}"));
+        }
     }
 
     if parts.is_empty() {
@@ -830,6 +851,12 @@ fn permissions_options() -> Vec<ApprovalOption> {
             decision: ApprovalDecision::Review(ReviewDecision::Approved),
             display_shortcut: None,
             additional_shortcuts: vec![key_hint::plain(KeyCode::Char('y'))],
+        },
+        ApprovalOption {
+            label: "Yes, grant these permissions for this session".to_string(),
+            decision: ApprovalDecision::Review(ReviewDecision::ApprovedForSession),
+            display_shortcut: None,
+            additional_shortcuts: vec![key_hint::plain(KeyCode::Char('a'))],
         },
         ApprovalOption {
             label: "No, continue without permissions".to_string(),
@@ -1244,8 +1271,36 @@ mod tests {
             labels,
             vec![
                 "Yes, grant these permissions".to_string(),
+                "Yes, grant these permissions for this session".to_string(),
                 "No, continue without permissions".to_string(),
             ]
+        );
+    }
+
+    #[test]
+    fn permissions_session_shortcut_submits_session_scope() {
+        let (tx, mut rx) = unbounded_channel::<AppEvent>();
+        let tx = AppEventSender::new(tx);
+        let mut view =
+            ApprovalOverlay::new(make_permissions_request(), tx, Features::with_defaults());
+
+        view.handle_key_event(KeyEvent::new(KeyCode::Char('a'), KeyModifiers::NONE));
+
+        let mut saw_op = false;
+        while let Ok(ev) = rx.try_recv() {
+            if let AppEvent::SubmitThreadOp {
+                op: Op::RequestPermissionsResponse { response, .. },
+                ..
+            } = ev
+            {
+                assert_eq!(response.scope, PermissionGrantScope::Session);
+                saw_op = true;
+                break;
+            }
+        }
+        assert!(
+            saw_op,
+            "expected permission approval decision to emit a session-scoped response"
         );
     }
 
@@ -1358,8 +1413,11 @@ mod tests {
                         "com.apple.Calendar".to_string(),
                         "com.apple.Notes".to_string(),
                     ]),
+                    macos_launch_services: false,
                     macos_accessibility: true,
                     macos_calendar: true,
+                    macos_reminders: true,
+                    macos_contacts: MacOsContactsPermission::None,
                 }),
                 ..Default::default()
             }),

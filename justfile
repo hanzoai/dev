@@ -68,3 +68,19 @@ build-for-release:
 # Run the MCP server
 mcp-server-run *args:
     cargo run -p hanzo-mcp-server -- "$@"
+
+# Regenerate the json schema for config.toml from the current config types.
+write-config-schema:
+    cargo run -p codex-core --bin codex-write-config-schema
+
+# Regenerate vendored app-server protocol schema artifacts.
+write-app-server-schema *args:
+    cargo run -p codex-app-server-protocol --bin write_schema_fixtures -- "$@"
+
+[no-cd]
+write-hooks-schema:
+    cargo run --manifest-path ./codex-rs/Cargo.toml -p codex-hooks --bin write_hooks_schema_fixtures
+
+# Tail logs from the state SQLite database
+log *args:
+    if [ "${1:-}" = "--" ]; then shift; fi; cargo run -p codex-state --bin logs_client -- "$@"
