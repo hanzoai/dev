@@ -1044,4 +1044,13 @@ Project commands appear in the TUI via `/cmd <name>` and run through the standar
 | `tools.web_search` | boolean | Enable web search tool (alias: `web_search_request`) (default: false). |
 | `tools.web_search_allowed_domains` | array<string> | Optional allow-list for web search (filters.allowed_domains). |
 
+## Realtime start instructions
+
+`experimental_realtime_start_instructions` lets you replace the built-in
+developer message that is inserted when realtime becomes active. It only affects
+the realtime start message in prompt history and does not change websocket
+backend prompt settings or the realtime end/inactive message.
+
+Ctrl+C/Ctrl+D quitting uses a ~1 second double-press hint (`ctrl + c again to quit`).
+
 <!-- markdownlint-enable MD012 MD013 MD028 MD033 -->
