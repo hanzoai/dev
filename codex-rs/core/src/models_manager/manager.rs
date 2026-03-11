@@ -213,7 +213,6 @@ impl ModelsManager {
         let model_info = if let Some(remote) = remote {
             ModelInfo {
                 slug: model.to_string(),
-                used_fallback_model_metadata: false,
                 ..remote
             }
         } else {

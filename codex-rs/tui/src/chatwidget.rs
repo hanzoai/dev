@@ -253,7 +253,7 @@ use crate::history_cell::WebSearchCell;
 use crate::key_hint;
 use crate::key_hint::KeyBinding;
 use crate::markdown::append_markdown;
-use crate::multi_agents;
+use crate::collab;
 use crate::render::Insets;
 use crate::render::renderable::ColumnRenderable;
 use crate::render::renderable::FlexRenderable;
@@ -580,7 +580,7 @@ pub(crate) struct ChatWidget {
     // Latest completed user-visible Codex output that `/copy` should place on the clipboard.
     last_copyable_output: Option<String>,
     running_commands: HashMap<String, RunningCommand>,
-    pending_collab_spawn_requests: HashMap<String, multi_agents::SpawnRequestSummary>,
+    pending_collab_spawn_requests: HashMap<String, collab::SpawnRequestSummary>,
     suppressed_exec_calls: HashSet<String>,
     skills_all: Vec<ProtocolSkillMetadata>,
     skills_initial_state: Option<HashMap<PathBuf, bool>>,
@@ -5028,7 +5028,7 @@ impl ChatWidget {
             }) => {
                 self.pending_collab_spawn_requests.insert(
                     call_id,
-                    multi_agents::SpawnRequestSummary {
+                    collab::SpawnRequestSummary {
                         model,
                         reasoning_effort,
                     },
@@ -5036,20 +5036,20 @@ impl ChatWidget {
             }
             EventMsg::CollabAgentSpawnEnd(ev) => {
                 let spawn_request = self.pending_collab_spawn_requests.remove(&ev.call_id);
-                self.on_collab_event(multi_agents::spawn_end(ev, spawn_request.as_ref()));
+                self.on_collab_event(collab::spawn_end(ev, spawn_request.as_ref()));
             }
             EventMsg::CollabAgentInteractionBegin(_) => {}
             EventMsg::CollabAgentInteractionEnd(ev) => {
-                self.on_collab_event(multi_agents::interaction_end(ev))
+                self.on_collab_event(collab::interaction_end(ev))
             }
             EventMsg::CollabWaitingBegin(ev) => {
-                self.on_collab_event(multi_agents::waiting_begin(ev))
+                self.on_collab_event(collab::waiting_begin(ev))
             }
-            EventMsg::CollabWaitingEnd(ev) => self.on_collab_event(multi_agents::waiting_end(ev)),
+            EventMsg::CollabWaitingEnd(ev) => self.on_collab_event(collab::waiting_end(ev)),
             EventMsg::CollabCloseBegin(_) => {}
-            EventMsg::CollabCloseEnd(ev) => self.on_collab_event(multi_agents::close_end(ev)),
-            EventMsg::CollabResumeBegin(ev) => self.on_collab_event(multi_agents::resume_begin(ev)),
-            EventMsg::CollabResumeEnd(ev) => self.on_collab_event(multi_agents::resume_end(ev)),
+            EventMsg::CollabCloseEnd(ev) => self.on_collab_event(collab::close_end(ev)),
+            EventMsg::CollabResumeBegin(ev) => self.on_collab_event(collab::resume_begin(ev)),
+            EventMsg::CollabResumeEnd(ev) => self.on_collab_event(collab::resume_end(ev)),
             EventMsg::ThreadRolledBack(rollback) => {
                 // Conservatively clear `/copy` state on rollback. The app layer trims visible
                 // transcript cells, but we do not maintain rollback-aware raw-markdown history yet,
