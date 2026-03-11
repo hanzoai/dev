@@ -51,6 +51,10 @@ Fork of OpenAI Codex CLI. Rust-based AI development assistant in the terminal.
 | `protocol` | Wire protocol definitions |
 | `mcp-server` | MCP server implementation |
 | `login` | OAuth flow for hanzo.id and OpenAI |
+| `hooks` | Hook engine (session-start, stop, after-agent, after-tool-use) |
+| `skills` | Skill discovery, loading, and marketplace |
+| `app-server` | WebSocket/stdio app server for IDE integration |
+| `otel` | OpenTelemetry tracing and metrics |
 
 ## Auth Modes
 
@@ -65,14 +69,19 @@ Default provider: `hanzo` at `https://api.hanzo.ai/v1`
 ## Commands
 
 ```bash
-# Build
-./build-fast.sh                    # Fast dev build
-cargo build --release -p cli       # Release CLI binary
-cargo check -p dev-protocol        # Check single crate
+# Build (codex-rs workspace)
+cargo build --manifest-path codex-rs/Cargo.toml --release -p codex-cli
+cargo check --manifest-path codex-rs/Cargo.toml
+
+# Build (hanzo-dev workspace)
+cargo build --manifest-path hanzo-dev/Cargo.toml --release -p hanzo-dev
+
+# Fast dev build
+./build-fast.sh
 
 # Test
-cargo test --all
-cargo test -p core
+cargo test --manifest-path codex-rs/Cargo.toml --all
+just test  # uses cargo-nextest
 
 # npm package
 npm install -g hanzo-node
@@ -82,6 +91,14 @@ hanzo "explain this code"
 # Format / Lint
 cargo fmt
 cargo clippy
+
+# Justfile recipes
+just codex [args]          # Run codex from source
+just mcp-server-run [args] # Run MCP server
+just write-config-schema   # Regenerate config.toml schema
+just write-app-server-schema # Regenerate app-server protocol schema
+just write-hooks-schema    # Regenerate hooks schema
+just log [args]            # Tail state SQLite logs
 ```
 
 ## Build Profiles
@@ -92,11 +109,17 @@ cargo clippy
 
 ## Merge Strategy (from upstream)
 
-1. Fetch from `https://github.com/openai/codex`
-2. Cherry-pick or manually apply changes
-3. Upstream uses `codex-rs/` -- same path in this repo
-4. Preserve Hanzo branding in user-facing strings
-5. Test with `./build-fast.sh`
+1. `git fetch openai` (remote points to local clone at `/Users/z/work/openai/codex`)
+2. `git merge openai/main` — resolve conflicts preserving Hanzo branding
+3. Common conflict areas: `justfile`, `package.json`, hooks, TUI module names
+4. Upstream renames to watch: `multi_agents` → `collab`, `HookResult` → `HookOutcome`
+5. After merge: `cargo check --manifest-path codex-rs/Cargo.toml` to verify
+6. Then fix any compile errors in hanzo-dev workspace that depend on codex-rs types
+
+**Remotes:**
+- `origin` — `git@github.com:hanzoai/dev.git`
+- `openai` — `/Users/z/work/openai/codex` (local mirror)
+- `openai-upstream` — `https://github.com/openai/codex.git`
 
 ## npm Distribution
 
