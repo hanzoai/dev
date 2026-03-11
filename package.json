@@ -3,13 +3,14 @@
   "private": true,
   "description": "Tools for repo-wide maintenance.",
   "scripts": {
-    "format": "prettier --check *.json *.md .github/workflows/*.yml **/*.js",
-    "format:fix": "prettier --write *.json *.md .github/workflows/*.yml **/*.js",
+    "format": "prettier --check *.json *.md docs/*.md .github/workflows/*.yml **/*.js",
+    "format:fix": "prettier --write *.json *.md docs/*.md .github/workflows/*.yml **/*.js",
     "build": "cd hanzo-dev && cargo build --release --bin dev --bin dev-tui --bin dev-exec",
     "build:dev": "cd hanzo-dev && cargo build --bin dev --bin dev-tui --bin dev-exec",
     "build:quick": "cd hanzo-dev && cargo build --release --bin dev",
     "test:local": "if [ -d hanzo-dev ]; then (cd hanzo-dev && cargo run -p hanzo-dev -- --version); elif [ -d codex-cli ]; then (cd codex-cli && npm link && codex --version); else echo 'no CLI workspace found' >&2; exit 1; fi",
-    "fix": "cargo fmt && cargo fix --allow-dirty && cargo clippy --fix --allow-dirty"
+    "fix": "cargo fmt && cargo fix --allow-dirty && cargo clippy --fix --allow-dirty",
+    "write-hooks-schema": "cargo run --manifest-path ./codex-rs/Cargo.toml -p codex-hooks --bin write_hooks_schema_fixtures"
   },
   "devDependencies": {
     "prettier": "^3.6.2",
