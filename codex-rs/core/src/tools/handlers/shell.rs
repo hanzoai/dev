@@ -2,6 +2,7 @@ use async_trait::async_trait;
 use codex_protocol::ThreadId;
 use codex_protocol::models::ShellCommandToolCallParams;
 use codex_protocol::models::ShellToolCallParams;
+use std::collections::HashMap;
 use std::sync::Arc;
 
 use crate::codex::TurnContext;
@@ -410,6 +411,7 @@ impl ShellHandler {
             cwd: exec_params.cwd.clone(),
             timeout_ms: exec_params.expiration.timeout_ms(),
             env: exec_params.env.clone(),
+            explicit_env_overrides: HashMap::new(),
             network: exec_params.network.clone(),
             sandbox_permissions: effective_additional_permissions.sandbox_permissions,
             additional_permissions: normalized_additional_permissions,
