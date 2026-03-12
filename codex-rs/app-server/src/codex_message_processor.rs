@@ -4685,6 +4685,7 @@ impl CodexMessageProcessor {
             }
             MarketplaceError::InvalidMarketplaceFile { .. }
             | MarketplaceError::PluginNotFound { .. }
+            | MarketplaceError::PluginNotAvailable { .. }
             | MarketplaceError::InvalidPlugin(_) => {
                 self.send_invalid_request_error(request_id, err.to_string())
                     .await;
@@ -5399,6 +5400,8 @@ impl CodexMessageProcessor {
                                         PluginSource::Local { path }
                                     }
                                 },
+                                install_policy: plugin.install_policy.map(Into::into),
+                                auth_policy: plugin.auth_policy.map(Into::into),
                                 interface: plugin.interface.map(|interface| PluginInterface {
                                     display_name: interface.display_name,
                                     short_description: interface.short_description,
@@ -5648,7 +5651,13 @@ impl CodexMessageProcessor {
 
                 self.clear_plugin_related_caches();
                 self.outgoing
-                    .send_response(request_id, PluginInstallResponse { apps_needing_auth })
+                    .send_response(
+                        request_id,
+                        PluginInstallResponse {
+                            auth_policy: result.auth_policy.map(Into::into),
+                            apps_needing_auth,
+                        },
+                    )
                     .await;
             }
             Err(err) => {
@@ -6497,9 +6506,17 @@ impl CodexMessageProcessor {
                         };
 
                         // For now, we send a notification for every event,
-                        // JSON-serializing the `Event` as-is, but these should
-                        // be migrated to be variants of `ServerNotification`
-                        // instead.
+                        // Legacy `codex/event/*` notifications are still
+                        // produced here because the in-process app-server lane
+                        // (`codex exec` and other in-process consumers) still
+                        // depends on them. External transports now drop
+                        // `OutgoingMessage::Notification` in `transport.rs`,
+                        // so stdio/websocket clients only observe the typed
+                        // `ServerNotification` translations emitted below.
+                        //
+                        // TODO: remove this raw legacy-notification emission
+                        // entirely once the remaining in-process consumers are
+                        // migrated off `codex/event/*`.
                         let event_formatted = match &event.msg {
                             EventMsg::TurnStarted(_) => "task_started",
                             EventMsg::TurnComplete(_) => "task_complete",
