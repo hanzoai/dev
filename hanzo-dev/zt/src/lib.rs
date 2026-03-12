@@ -54,4 +54,4 @@ pub use models::*;
 pub use transport::ZtTransport;
 
 #[cfg(feature = "tunnel")]
-pub use tunnel::{ZtTunnelConfig, create_tunnel_context};
+pub use tunnel::{ZtTunnelConfig, create_tunnel_context, run_zt_transport};
