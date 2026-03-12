@@ -6,18 +6,34 @@
 //!
 //! This crate is the thin adapter that makes dev remotely controllable from
 //! `app.hanzo.bot` via the shared tunnel.
+//!
+//! Requires the `hanzo-tunnel` optional dependency to be enabled for full
+//! functionality. Without it, only the translation helpers are available.
 
+#[cfg(feature = "tunnel")]
 use hanzo_tunnel::protocol::{CommandPayload, EventPayload, Frame};
 use serde_json::Value;
+#[cfg(feature = "tunnel")]
 use std::sync::Arc;
+#[cfg(feature = "tunnel")]
 use tokio::sync::{Mutex, mpsc};
-use tracing::{debug, warn};
+use tracing::debug;
+#[cfg(feature = "tunnel")]
+use tracing::warn;
+
+/// A JSON-RPC request to send to the app-server.
+#[derive(Debug, Clone)]
+pub struct JsonRpcRequest {
+    pub method: String,
+    pub params: Value,
+}
 
 /// Maps cloud command methods to app-server JSON-RPC methods.
 ///
 /// Cloud commands are high-level ("chat.send", "exec.approve"), while
 /// app-server uses specific JSON-RPC methods ("sendUserMessage",
 /// "execCommandApproval", etc.).
+#[cfg(feature = "tunnel")]
 pub fn cloud_command_to_jsonrpc(
     cmd: &CommandPayload,
     conversation_id: &str,
@@ -87,8 +103,11 @@ pub fn cloud_command_to_jsonrpc(
 ///
 /// App-server notifications use `codex/event/<EventType>` naming.
 /// Cloud events use shorter `<category>.<action>` naming.
-pub fn notification_to_cloud_event(method: &str, params: &Value) -> Option<Frame> {
-    let event_name = match method {
+///
+/// Returns the event name and the params as a tuple (without wrapping in a Frame)
+/// so this helper is usable regardless of tunnel availability.
+pub fn notification_event_name(method: &str) -> &str {
+    match method {
         "codex/event/agentMessage" => "chat.message",
         "codex/event/agentMessageDelta" => "chat.delta",
         "codex/event/agentReasoning" => "chat.reasoning",
@@ -109,22 +128,21 @@ pub fn notification_to_cloud_event(method: &str, params: &Value) -> Option<Frame
             debug!(method, "unmapped notification, forwarding raw");
             method
         }
-    };
+    }
+}
 
+/// Maps app-server notification methods to cloud event frames.
+#[cfg(feature = "tunnel")]
+pub fn notification_to_cloud_event(method: &str, params: &Value) -> Option<Frame> {
+    let event_name = notification_event_name(method);
     Some(Frame::Event(EventPayload {
         event: event_name.into(),
         data: params.clone(),
     }))
 }
 
-/// A JSON-RPC request to send to the app-server.
-#[derive(Debug, Clone)]
-pub struct JsonRpcRequest {
-    pub method: String,
-    pub params: Value,
-}
-
 /// Bridge state — tracks the active conversation and pending requests.
+#[cfg(feature = "tunnel")]
 pub struct TunnelBridge {
     /// The active conversation ID (set after newConversation).
     conversation_id: Arc<Mutex<Option<String>>>,
@@ -134,6 +152,7 @@ pub struct TunnelBridge {
     next_id: Arc<std::sync::atomic::AtomicU64>,
 }
 
+#[cfg(feature = "tunnel")]
 impl TunnelBridge {
     /// Create a new bridge.
     ///
@@ -226,7 +245,7 @@ impl TunnelBridge {
     }
 }
 
-#[cfg(test)]
+#[cfg(all(test, feature = "tunnel"))]
 mod tests {
     use super::*;
 
@@ -377,5 +396,17 @@ mod tests {
         assert_eq!(bridge.next_request_id(), 1);
         assert_eq!(bridge.next_request_id(), 2);
         assert_eq!(bridge.next_request_id(), 3);
+    }
+}
+
+#[cfg(test)]
+mod basic_tests {
+    use super::*;
+
+    #[test]
+    fn event_name_mapping() {
+        assert_eq!(notification_event_name("codex/event/agentMessage"), "chat.message");
+        assert_eq!(notification_event_name("codex/event/taskStarted"), "turn.started");
+        assert_eq!(notification_event_name("unknown/event"), "unknown/event");
     }
 }
