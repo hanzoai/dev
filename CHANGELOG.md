@@ -942,7 +942,7 @@
 
 ## [0.2.131] - 2025-09-12
 
-- Core/HTTP: set explicit `Host` header from target URL to fix TLS SNI failures when using HTTP(S)_PROXY with Responses streaming. (6ad9cb283)
+- Core/HTTP: set explicit `Host` header from target URL to fix TLS SNI failures when using HTTP(S)\_PROXY with Responses streaming. (6ad9cb283)
 - Exec/Workflows: exit non‑zero on agent Error events so CI fails fast on real stream failures. (fec6aa0f0)
 - Proxy: harden TLS forwarding (servername, Host reset, hop‑by‑hop header cleanup). (fec6aa0f0)
 

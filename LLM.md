@@ -42,27 +42,27 @@ Fork of OpenAI Codex CLI. Rust-based AI development assistant in the terminal.
 
 ## Key Crates
 
-| Crate | Purpose |
-|-------|---------|
-| `cli` | CLI binary, arg parsing |
-| `core` | Auth, config, model providers, inference |
-| `tui` | Ratatui terminal interface |
-| `exec` | Sandboxed command execution |
-| `protocol` | Wire protocol definitions |
-| `mcp-server` | MCP server implementation |
-| `login` | OAuth flow for hanzo.id and OpenAI |
-| `hooks` | Hook engine (session-start, stop, after-agent, after-tool-use) |
-| `skills` | Skill discovery, loading, and marketplace |
-| `app-server` | WebSocket/stdio app server for IDE integration |
-| `otel` | OpenTelemetry tracing and metrics |
+| Crate        | Purpose                                                        |
+| ------------ | -------------------------------------------------------------- |
+| `cli`        | CLI binary, arg parsing                                        |
+| `core`       | Auth, config, model providers, inference                       |
+| `tui`        | Ratatui terminal interface                                     |
+| `exec`       | Sandboxed command execution                                    |
+| `protocol`   | Wire protocol definitions                                      |
+| `mcp-server` | MCP server implementation                                      |
+| `login`      | OAuth flow for hanzo.id and OpenAI                             |
+| `hooks`      | Hook engine (session-start, stop, after-agent, after-tool-use) |
+| `skills`     | Skill discovery, loading, and marketplace                      |
+| `app-server` | WebSocket/stdio app server for IDE integration                 |
+| `otel`       | OpenTelemetry tracing and metrics                              |
 
 ## Auth Modes
 
-| Mode | Token Source | Display |
-|------|-------------|---------|
-| `ApiKey` | `HANZO_API_KEY` / `OPENAI_API_KEY` env | "API key (...xxxxx)" |
-| `ChatGPT` | OpenAI OAuth JWT | "Logged in as [email]" |
-| `Hanzo` | hanzo.id Casdoor JWT | "Logged in to Hanzo as [email]" |
+| Mode      | Token Source                           | Display                         |
+| --------- | -------------------------------------- | ------------------------------- |
+| `ApiKey`  | `HANZO_API_KEY` / `OPENAI_API_KEY` env | "API key (...xxxxx)"            |
+| `ChatGPT` | OpenAI OAuth JWT                       | "Logged in as [email]"          |
+| `Hanzo`   | hanzo.id Casdoor JWT                   | "Logged in to Hanzo as [email]" |
 
 Default provider: `hanzo` at `https://api.hanzo.ai/v1`
 
@@ -117,6 +117,7 @@ just log [args]            # Tail state SQLite logs
 6. Then fix any compile errors in hanzo-dev workspace that depend on codex-rs types
 
 **Remotes:**
+
 - `origin` — `git@github.com:hanzoai/dev.git`
 - `openai` — `/Users/z/work/openai/codex` (local mirror)
 - `openai-upstream` — `https://github.com/openai/codex.git`
@@ -124,6 +125,7 @@ just log [args]            # Tail state SQLite logs
 ## npm Distribution
 
 `hanzo-node/` provides platform-specific binaries:
+
 - `hanzo-node-darwin-arm64`, `hanzo-node-darwin-x64`
 - `hanzo-node-linux-x64-musl`, `hanzo-node-linux-arm64-musl`
 - `hanzo-node-win32-x64`
@@ -157,15 +159,15 @@ App → ZAP Client → ZT Transport → ZT Fabric → ZT Service
 
 ### Key Types
 
-| Type | Module | Purpose |
-|------|--------|---------|
-| `ZtContext` | `context.rs` | Main entry: authenticate, dial, listen, services |
-| `Config` / `ConfigBuilder` | `config.rs` | Controller URL, credentials, billing, timeouts |
-| `HanzoJwtCredentials` | `auth.rs` | Resolves JWT from env/file, implements Credentials |
-| `BillingGuard` | `billing.rs` | Balance check + usage recording (no free tier) |
-| `ZtTransport` | `transport.rs` | ZAP Transport trait impl (feature-gated `zap`) |
-| `ControllerClient` | `controller.rs` | REST client for `/edge/client/v1` |
-| `ZtConnection` | `connection.rs` | AsyncRead + AsyncWrite over channels |
+| Type                       | Module          | Purpose                                            |
+| -------------------------- | --------------- | -------------------------------------------------- |
+| `ZtContext`                | `context.rs`    | Main entry: authenticate, dial, listen, services   |
+| `Config` / `ConfigBuilder` | `config.rs`     | Controller URL, credentials, billing, timeouts     |
+| `HanzoJwtCredentials`      | `auth.rs`       | Resolves JWT from env/file, implements Credentials |
+| `BillingGuard`             | `billing.rs`    | Balance check + usage recording (no free tier)     |
+| `ZtTransport`              | `transport.rs`  | ZAP Transport trait impl (feature-gated `zap`)     |
+| `ControllerClient`         | `controller.rs` | REST client for `/edge/client/v1`                  |
+| `ZtConnection`             | `connection.rs` | AsyncRead + AsyncWrite over channels               |
 
 ### Features
 
@@ -175,6 +177,7 @@ App → ZAP Client → ZT Transport → ZT Fabric → ZT Service
 ### CLI Integration
 
 `hanzo-dev/cli/src/cloud.rs` has `#[cfg(feature = "zt")]` branch:
+
 - URLs starting with `zt://` use ZtContext.dial() instead of WebSocket
 - Feature `zt = ["dep:hanzo-zt"]` in cli's Cargo.toml
 
@@ -189,14 +192,14 @@ cargo test -p hanzo-zt        # 9 tests (auth, config, controller, doctest)
 
 All SDKs follow the same pattern (ZT REST API + ZAP framing + Hanzo IAM + billing):
 
-| Language | Location | Status |
-|----------|----------|--------|
-| **Rust** | `hanzo-dev/zt/` | 9 tests pass, 0 warnings |
-| **Go** | `~/work/hanzozt/sdk-golang/{zap,auth/hanzo,billing}/` | 5 tests pass (fork deps need module path fix) |
-| **TypeScript** | `~/work/hanzozt/zt-sdk-nodejs/src/{zap,auth,billing}/` | Complete |
-| **Python** | `~/work/hanzozt/zt-sdk-py/hanzozt/{zap,auth,billing}/` | 11 tests pass |
-| **C++** | `~/work/hanzozt/zt-sdk-cpp/` | Builds clean (CMake + libzt) |
-| **C** | `~/work/hanzozt/zt-sdk-c/{includes/zt/zt_zap.h,library/zt_zap.c}` | Syntax checks pass |
+| Language       | Location                                                          | Status                                        |
+| -------------- | ----------------------------------------------------------------- | --------------------------------------------- |
+| **Rust**       | `hanzo-dev/zt/`                                                   | 9 tests pass, 0 warnings                      |
+| **Go**         | `~/work/hanzozt/sdk-golang/{zap,auth/hanzo,billing}/`             | 5 tests pass (fork deps need module path fix) |
+| **TypeScript** | `~/work/hanzozt/zt-sdk-nodejs/src/{zap,auth,billing}/`            | Complete                                      |
+| **Python**     | `~/work/hanzozt/zt-sdk-py/hanzozt/{zap,auth,billing}/`            | 11 tests pass                                 |
+| **C++**        | `~/work/hanzozt/zt-sdk-cpp/`                                      | Builds clean (CMake + libzt)                  |
+| **C**          | `~/work/hanzozt/zt-sdk-c/{includes/zt/zt_zap.h,library/zt_zap.c}` | Syntax checks pass                            |
 
 ZAP `zt://` scheme registered at `~/work/zap/zap/src/transport.rs` (7 tests pass, feature-gated).
 
