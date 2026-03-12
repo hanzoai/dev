@@ -24,7 +24,7 @@ pin-project-lite = "0.2"
 hanzo-zap = { package = "zap-schema", version = "1.0", optional = true }
 
 # Optional tunnel integration
-hanzo-tunnel = { version = "0.1", optional = true }
+hanzo-tunnel = { version = "0.1.1", optional = true }
 
 [dev-dependencies]
 tokio = { version = "1", features = ["full"] }
