@@ -13,7 +13,7 @@ export class Codex {
   private options: CodexOptions;
 
   constructor(options: CodexOptions = {}) {
-    this.exec = new CodexExec(options.codexPathOverride, options.configOverrides);
+    this.exec = new CodexExec(options.codexPathOverride, undefined, options.configOverrides);
     this.options = options;
   }
 
