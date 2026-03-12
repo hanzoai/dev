@@ -24,6 +24,9 @@ use tracing::{debug, info, warn};
 #[cfg(feature = "zt")]
 use hanzo_zt::{ZtContext, ConfigBuilder, HanzoJwtCredentials};
 
+#[cfg(all(feature = "zt", feature = "tunnel"))]
+use hanzo_zt::run_zt_transport;
+
 const DEFAULT_RELAY_URL: &str = "wss://api.hanzo.ai/v1/relay";
 const DEFAULT_GATEWAY_URL: &str = "ws://127.0.0.1:18789/v1/tunnel";
 
@@ -119,7 +122,7 @@ pub async fn maybe_connect(args: &CloudArgs) -> Option<CloudHandle> {
         return None;
     }
 
-    #[cfg(feature = "zt")]
+    #[cfg(all(feature = "zt", feature = "tunnel"))]
     if relay_url.starts_with("zt://") {
         let service_name = relay_url.strip_prefix("zt://").unwrap_or("hanzo-relay");
         tracing::info!(%service_name, "connecting via ZT fabric");
@@ -143,12 +146,74 @@ pub async fn maybe_connect(args: &CloudArgs) -> Option<CloudHandle> {
             .map_err(|e| format!("ZT auth failed: {e}"))
             .ok()?;
 
-        let conn = ctx.dial(service_name).await
+        let zt_conn = ctx.dial(service_name).await
             .map_err(|e| format!("ZT dial failed: {e}"))
             .ok()?;
 
         tracing::info!("connected to ZT service: {service_name}");
-        // TODO: Wire ZT connection into tunnel transport
+
+        // Build the tunnel connection over ZT transport
+        let instance_id = uuid::Uuid::new_v4().to_string();
+        let (outgoing_tx, outgoing_rx) = mpsc::channel::<hanzo_tunnel::Frame>(256);
+        let (incoming_tx, incoming_rx) = mpsc::channel::<hanzo_tunnel::Frame>(256);
+        let (shutdown_tx, shutdown_rx) = tokio::sync::watch::channel(false);
+
+        // Send registration frame
+        let platform = format!("{}-{}", std::env::consts::OS, std::env::consts::ARCH);
+        let register_frame = hanzo_tunnel::Frame::Register(hanzo_tunnel::protocol::RegisterPayload {
+            instance_id: instance_id.clone(),
+            app_kind: AppKind::Dev,
+            display_name: hostname(),
+            capabilities: dev_capabilities(),
+            version: hanzo_version::version().to_string(),
+            platform,
+            cwd: std::env::current_dir().ok().map(|p| p.display().to_string()),
+            commands: dev_commands(),
+            metadata: serde_json::Value::Null,
+        });
+
+        outgoing_tx.send(register_frame).await.ok()?;
+
+        // Spawn the ZT transport loop
+        tokio::spawn(run_zt_transport(zt_conn, outgoing_rx, incoming_tx, shutdown_rx));
+
+        // Create TunnelConnection from channels
+        let connection = TunnelConnection::from_channels(
+            outgoing_tx,
+            incoming_rx,
+            shutdown_tx,
+            instance_id,
+        );
+        let conn = Arc::new(connection);
+
+        // Wait for registration confirmation
+        let session_url = tokio::time::timeout(std::time::Duration::from_secs(10), async {
+            if let Some(hanzo_tunnel::Frame::Registered(r)) = conn.recv_command().await {
+                r.session_url
+            } else {
+                None
+            }
+        })
+        .await
+        .unwrap_or(None);
+
+        if let Some(ref url) = session_url {
+            eprintln!("\x1b[2m  cloud (zt): {url}\x1b[0m");
+            info!(instance_id = %conn.instance_id, session_url = %url, "registered via ZT");
+        } else {
+            debug!(instance_id = %conn.instance_id, "connected via ZT (no session URL)");
+        }
+
+        // Spawn dispatch loop
+        let (terminal_tx, terminal_rx) = mpsc::channel(256);
+        let terminal = Arc::new(TerminalManager::new(terminal_tx));
+        let dispatcher = Arc::new(CommandDispatcher::new(terminal));
+        let dispatch_conn = conn.clone();
+        tokio::spawn(async move {
+            run_tunnel_dispatch_loop(dispatch_conn, dispatcher, terminal_rx).await;
+        });
+
+        return Some(CloudHandle { conn });
     }
 
     info!(relay_url = %relay_url, "connecting to cloud");
