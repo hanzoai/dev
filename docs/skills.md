@@ -63,6 +63,7 @@ Behavior:
    ---
 
    # Optional body
+
    Add instructions, references, examples, or scripts (kept on disk).
    ```
 

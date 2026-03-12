@@ -292,7 +292,6 @@ jobs:
           echo '### openai-proxy.log (tail)' >> "$GITHUB_STEP_SUMMARY"
           { echo '```'; tail -n 80 .github/auto/openai-proxy.log || true; echo '```'; } >> "$GITHUB_STEP_SUMMARY"
 
-
       - name: Generate comment with Code (read-only)
         id: gen
         if: steps.meta.outputs.pr_number && env.OPENAI_API_KEY != ''
