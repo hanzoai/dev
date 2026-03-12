@@ -21,10 +21,10 @@ async-trait = "0.1"
 pin-project-lite = "0.2"
 
 # Optional ZAP integration
-hanzo-zap = { package = "zap-schema", path = "../../../../zap/zap", optional = true }
+hanzo-zap = { package = "zap-schema", version = "1.0", optional = true }
 
-# Optional tunnel integration — uncomment when hanzo-tunnel crate exists
-# hanzo-tunnel = { path = "../../../../tunnel", optional = true }
+# Optional tunnel integration
+hanzo-tunnel = { version = "0.1", optional = true }
 
 [dev-dependencies]
 tokio = { version = "1", features = ["full"] }
@@ -33,5 +33,5 @@ wiremock = "0.6"
 [features]
 default = ["zap"]
 zap = ["dep:hanzo-zap"]
-tunnel = []
-# full = ["zap", "tunnel"]
+tunnel = ["dep:hanzo-tunnel"]
+full = ["zap", "tunnel"]
