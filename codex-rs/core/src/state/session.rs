@@ -13,6 +13,7 @@ use crate::error::Result as CodexResult;
 use crate::protocol::RateLimitSnapshot;
 use crate::protocol::TokenUsage;
 use crate::protocol::TokenUsageInfo;
+use crate::sandboxing::merge_permission_profiles;
 use crate::tasks::RegularTask;
 use crate::truncate::TruncationPolicy;
 use codex_protocol::protocol::TurnContextItem;
@@ -31,7 +32,6 @@ pub(crate) struct SessionState {
     previous_turn_settings: Option<PreviousTurnSettings>,
     /// Startup regular task pre-created during session initialization.
     pub(crate) startup_regular_task: Option<JoinHandle<CodexResult<RegularTask>>>,
-    pub(crate) active_mcp_tool_selection: Option<Vec<String>>,
     pub(crate) active_connector_selection: HashSet<String>,
     pub(crate) pending_session_start_source: Option<codex_hooks::SessionStartSource>,
     granted_permissions: Option<PermissionProfile>,
@@ -50,7 +50,6 @@ impl SessionState {
             mcp_dependency_prompted: HashSet::new(),
             previous_turn_settings: None,
             startup_regular_task: None,
-            active_mcp_tool_selection: None,
             active_connector_selection: HashSet::new(),
             pending_session_start_source: None,
             granted_permissions: None,
@@ -176,43 +175,6 @@ impl SessionState {
         self.startup_regular_task.take()
     }
 
-    pub(crate) fn merge_mcp_tool_selection(&mut self, tool_names: Vec<String>) -> Vec<String> {
-        if tool_names.is_empty() {
-            return self.active_mcp_tool_selection.clone().unwrap_or_default();
-        }
-
-        let mut merged = self.active_mcp_tool_selection.take().unwrap_or_default();
-        let mut seen: HashSet<String> = merged.iter().cloned().collect();
-
-        for tool_name in tool_names {
-            if seen.insert(tool_name.clone()) {
-                merged.push(tool_name);
-            }
-        }
-
-        self.active_mcp_tool_selection = Some(merged.clone());
-        merged
-    }
-
-    pub(crate) fn get_mcp_tool_selection(&self) -> Option<Vec<String>> {
-        self.active_mcp_tool_selection.clone()
-    }
-
-    pub(crate) fn clear_mcp_tool_selection(&mut self) {
-        self.active_mcp_tool_selection = None;
-    }
-
-    pub(crate) fn record_granted_permissions(&mut self, permissions: PermissionProfile) {
-        self.granted_permissions = crate::sandboxing::merge_permission_profiles(
-            self.granted_permissions.as_ref(),
-            Some(&permissions),
-        );
-    }
-
-    pub(crate) fn granted_permissions(&self) -> Option<PermissionProfile> {
-        self.granted_permissions.clone()
-    }
-
     // Adds connector IDs to the active set and returns the merged selection.
     pub(crate) fn merge_connector_selection<I>(&mut self, connector_ids: I) -> HashSet<String>
     where
@@ -244,6 +206,15 @@ impl SessionState {
     ) -> Option<codex_hooks::SessionStartSource> {
         self.pending_session_start_source.take()
     }
+
+    pub(crate) fn record_granted_permissions(&mut self, permissions: PermissionProfile) {
+        self.granted_permissions =
+            merge_permission_profiles(self.granted_permissions.as_ref(), Some(&permissions));
+    }
+
+    pub(crate) fn granted_permissions(&self) -> Option<PermissionProfile> {
+        self.granted_permissions.clone()
+    }
 }
 
 // Sometimes new snapshots don't include credits or plan information.
@@ -271,75 +242,6 @@ mod tests {
     use crate::codex::make_session_configuration_for_tests;
     use crate::protocol::RateLimitWindow;
     use pretty_assertions::assert_eq;
-
-    #[tokio::test]
-    async fn merge_mcp_tool_selection_deduplicates_and_preserves_order() {
-        let session_configuration = make_session_configuration_for_tests().await;
-        let mut state = SessionState::new(session_configuration);
-
-        let merged = state.merge_mcp_tool_selection(vec![
-            "mcp__rmcp__echo".to_string(),
-            "mcp__rmcp__image".to_string(),
-            "mcp__rmcp__echo".to_string(),
-        ]);
-        assert_eq!(
-            merged,
-            vec![
-                "mcp__rmcp__echo".to_string(),
-                "mcp__rmcp__image".to_string(),
-            ]
-        );
-
-        let merged = state.merge_mcp_tool_selection(vec![
-            "mcp__rmcp__image".to_string(),
-            "mcp__rmcp__search".to_string(),
-        ]);
-        assert_eq!(
-            merged,
-            vec![
-                "mcp__rmcp__echo".to_string(),
-                "mcp__rmcp__image".to_string(),
-                "mcp__rmcp__search".to_string(),
-            ]
-        );
-    }
-
-    #[tokio::test]
-    async fn merge_mcp_tool_selection_empty_input_is_noop() {
-        let session_configuration = make_session_configuration_for_tests().await;
-        let mut state = SessionState::new(session_configuration);
-        state.merge_mcp_tool_selection(vec![
-            "mcp__rmcp__echo".to_string(),
-            "mcp__rmcp__image".to_string(),
-        ]);
-
-        let merged = state.merge_mcp_tool_selection(Vec::new());
-        assert_eq!(
-            merged,
-            vec![
-                "mcp__rmcp__echo".to_string(),
-                "mcp__rmcp__image".to_string(),
-            ]
-        );
-        assert_eq!(
-            state.get_mcp_tool_selection(),
-            Some(vec![
-                "mcp__rmcp__echo".to_string(),
-                "mcp__rmcp__image".to_string(),
-            ])
-        );
-    }
-
-    #[tokio::test]
-    async fn clear_mcp_tool_selection_removes_selection() {
-        let session_configuration = make_session_configuration_for_tests().await;
-        let mut state = SessionState::new(session_configuration);
-        state.merge_mcp_tool_selection(vec!["mcp__rmcp__echo".to_string()]);
-
-        state.clear_mcp_tool_selection();
-
-        assert_eq!(state.get_mcp_tool_selection(), None);
-    }
 
     #[tokio::test]
     // Verifies connector merging deduplicates repeated IDs.
