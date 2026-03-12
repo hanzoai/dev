@@ -31,17 +31,11 @@ jobs:
       - name: Prettier (run `pnpm run format:fix` to fix)
         run: pnpm run format
 
-      - name: Ensure root README.md contains only ASCII and certain Unicode code points
-        run: ./scripts/asciicheck.py README.md
+      - name: Ensure README.md contains only ASCII and safe Unicode
+        run: python3 scripts/asciicheck.py README.md
 
-      - name: Check root README ToC
+      - name: Check README ToC
         run: python3 scripts/readme_toc.py README.md
-
-      - name: Ensure codex-cli/README.md contains only ASCII and certain Unicode code points
-        run: ./scripts/asciicheck.py codex-cli/README.md
-
-      - name: Check codex-cli/README ToC
-        run: python3 scripts/readme_toc.py codex-cli/README.md
 
   # ── Rust: build + test ──
   rust-build:
