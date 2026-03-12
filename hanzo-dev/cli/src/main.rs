@@ -24,7 +24,9 @@ use copilot_cmd::CopilotArgs;
 use copilot_cmd::execute_copilot_command;
 use hanzo_cloud_tasks::Cli as CloudTasksCli;
 use hanzo_common::CliConfigOverrides;
+#[cfg(feature = "tunnel")]
 mod cloud;
+#[cfg(feature = "tunnel")]
 use cloud::CloudArgs;
 use hanzo_core::SessionCatalog;
 use hanzo_core::SessionQuery;
@@ -108,6 +110,7 @@ struct MultitoolCli {
 
     /// Connect to the Hanzo cloud relay for remote management from app.hanzo.bot.
     /// Also enabled by HANZO_CLOUD=1. Optionally pass a URL: --cloud wss://...
+    #[cfg(feature = "tunnel")]
     #[clap(flatten)]
     cloud: CloudArgs,
 
@@ -437,6 +440,7 @@ async fn cli_main(hanzo_linux_sandbox_exe: Option<PathBuf>) -> anyhow::Result<()
         auto_drive,
         demo_developer_message,
         ignore_api_keys,
+        #[cfg(feature = "tunnel")]
         cloud: cloud_args,
         subcommand,
     } = MultitoolCli::parse();
@@ -468,6 +472,7 @@ async fn cli_main(hanzo_linux_sandbox_exe: Option<PathBuf>) -> anyhow::Result<()
     };
 
     // Spawn cloud tunnel connection if --cloud or HANZO_CLOUD=1.
+    #[cfg(feature = "tunnel")]
     let _cloud_handle = cloud::maybe_connect(&cloud_args).await;
 
     match subcommand {
