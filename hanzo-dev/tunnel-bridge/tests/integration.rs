@@ -2,6 +2,10 @@
 //!
 //! These tests connect to a local bot gateway at ws://127.0.0.1:18789/v1/tunnel.
 //! They will be skipped if the gateway is not running.
+//!
+//! Requires the `tunnel` feature to be enabled.
+
+#![cfg(feature = "tunnel")]
 
 use hanzo_tunnel::{AppKind, TunnelConfig};
 use std::time::Duration;

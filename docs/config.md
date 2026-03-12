@@ -570,13 +570,13 @@ set = { CI = "1" }
 include_only = ["PATH", "HOME"]
 ```
 
-| Field                     | Type                 | Default | Description                                                                                                                                     |
-| ------------------------- | -------------------- | ------- | ----------------------------------------------------------------------------------------------------------------------------------------------- |
-| `inherit`                 | string               | `all`   | Starting template for the environment:<br>`all` (clone full parent env), `core` (`HOME`, `PATH`, `USER`, …), or `none` (start empty).           |
-| `ignore_default_excludes` | boolean              | `true`  | When `false`, Code removes any var whose **name** contains `KEY`, `SECRET`, or `TOKEN` (case-insensitive) before other rules run; defaults to `true` so this filter is disabled by default.              |
-| `exclude`                 | array<string>        | `[]`    | Case-insensitive glob patterns to drop after the default filter.<br>Examples: `"AWS_*"`, `"AZURE_*"`.                                           |
-| `set`                     | table<string,string> | `{}`    | Explicit key/value overrides or additions – always win over inherited values.                                                                   |
-| `include_only`            | array<string>        | `[]`    | If non-empty, a whitelist of patterns; only variables that match _one_ pattern survive the final step. (Generally used with `inherit = "all"`.) |
+| Field                     | Type                 | Default | Description                                                                                                                                                                                 |
+| ------------------------- | -------------------- | ------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `inherit`                 | string               | `all`   | Starting template for the environment:<br>`all` (clone full parent env), `core` (`HOME`, `PATH`, `USER`, …), or `none` (start empty).                                                       |
+| `ignore_default_excludes` | boolean              | `true`  | When `false`, Code removes any var whose **name** contains `KEY`, `SECRET`, or `TOKEN` (case-insensitive) before other rules run; defaults to `true` so this filter is disabled by default. |
+| `exclude`                 | array<string>        | `[]`    | Case-insensitive glob patterns to drop after the default filter.<br>Examples: `"AWS_*"`, `"AZURE_*"`.                                                                                       |
+| `set`                     | table<string,string> | `{}`    | Explicit key/value overrides or additions – always win over inherited values.                                                                                                               |
+| `include_only`            | array<string>        | `[]`    | If non-empty, a whitelist of patterns; only variables that match _one_ pattern survive the final step. (Generally used with `inherit = "all"`.)                                             |
 
 The patterns are **glob style**, not full regular expressions: `*` matches any
 number of characters, `?` matches exactly one, and character classes like
@@ -914,7 +914,7 @@ notifications = [ "approval-requested" ]
 
 ### Auto Drive Observer
 
-Code keeps long-running Auto Drive sessions in check with a lightweight observer thread. Configure its cadence with the top-level `auto_drive_observer_cadence` key (default `5`). After every *n* completed requests the observer reviews the coordinator/CLI transcript, emits telemetry, and—if necessary—suggests a corrected prompt or follow-up guidance. Setting the value to `0` disables the observer entirely.
+Code keeps long-running Auto Drive sessions in check with a lightweight observer thread. Configure its cadence with the top-level `auto_drive_observer_cadence` key (default `5`). After every _n_ completed requests the observer reviews the coordinator/CLI transcript, emits telemetry, and—if necessary—suggests a corrected prompt or follow-up guidance. Setting the value to `0` disables the observer entirely.
 
 ```toml
 # Run the observer after every third Auto Drive request
@@ -988,61 +988,61 @@ Project commands appear in the TUI via `/cmd <name>` and run through the standar
 
 ## Config reference
 
-| Key | Type / Values | Notes |
-| --- | --- | --- |
-| `model` | string | Model to use (e.g., `gpt-5.1-codex`). |
-| `model_provider` | string | Provider id from `model_providers` (default: `openai`). |
-| `model_context_window` | number | Context window tokens. |
-| `model_max_output_tokens` | number | Max output tokens. |
-| `approval_policy` | `untrusted` \| `on-failure` \| `on-request` \| `never` | When to prompt for approval. |
-| `sandbox_mode` | `read-only` \| `workspace-write` \| `danger-full-access` | OS sandbox policy. |
-| `sandbox_workspace_write.writable_roots` | array<string> | Extra writable roots in workspace‑write. |
-| `sandbox_workspace_write.network_access` | boolean | Allow network in workspace‑write (default: false). |
-| `sandbox_workspace_write.exclude_tmpdir_env_var` | boolean | Exclude `$TMPDIR` from writable roots (default: false). |
-| `sandbox_workspace_write.exclude_slash_tmp` | boolean | Exclude `/tmp` from writable roots (default: false). |
-| `disable_response_storage` | boolean | Required for ZDR orgs. |
-| `notify` | array<string> | External program for notifications. |
-| `instructions` | string | Currently ignored; use `experimental_instructions_file` or `AGENTS.md`. |
-| `mcp_servers.<id>.command` | string | MCP server launcher command. |
-| `mcp_servers.<id>.args` | array<string> | MCP server args. |
-| `mcp_servers.<id>.env` | map<string,string> | MCP server env vars. |
-| `mcp_servers.<id>.startup_timeout_sec` | number | Startup timeout in seconds (default: 10). Timeout is applied both for initializing MCP server and initially listing tools. |
-| `mcp_servers.<id>.tool_timeout_sec` | number | Per-tool timeout in seconds (default: 60). Accepts fractional values; omit to use the default. |
-| `model_providers.<id>.name` | string | Display name. |
-| `model_providers.<id>.base_url` | string | API base URL. |
-| `model_providers.<id>.env_key` | string | Env var for API key. |
-| `model_providers.<id>.wire_api` | `chat` \| `responses` | Protocol used (default: `chat`). |
-| `model_providers.<id>.query_params` | map<string,string> | Extra query params (e.g., Azure `api-version`). |
-| `model_providers.<id>.http_headers` | map<string,string> | Additional static headers. |
-| `model_providers.<id>.env_http_headers` | map<string,string> | Headers sourced from env vars. |
-| `model_providers.<id>.request_max_retries` | number | Per‑provider HTTP retry count (default: 4). |
-| `model_providers.<id>.stream_max_retries` | number | SSE stream retry count (default: 5). |
-| `model_providers.<id>.stream_idle_timeout_ms` | number | SSE idle timeout (ms) (default: 300000). |
-| `project_doc_max_bytes` | number | Max bytes to read from `AGENTS.md`. |
-| `projects.<path>.trust_level` | string | Mark project/worktree as trusted (only `"trusted"` is recognized). |
-| `projects.<path>.hooks` | array<table> | Lifecycle hooks for that workspace (see "Project Hooks"). |
-| `projects.<path>.commands` | array<table> | Project commands exposed via `/cmd`. |
-| `profile` | string | Active profile name. |
-| `profiles.<name>.*` | various | Profile‑scoped overrides of the same keys. |
-| `history.persistence` | `save-all` \| `none` | History file persistence (default: `save-all`). |
-| `history.max_bytes` | number | Currently ignored (not enforced). |
-| `file_opener` | `vscode` \| `vscode-insiders` \| `windsurf` \| `cursor` \| `none` | URI scheme for clickable citations (default: `vscode`). |
-| `tui` | table | TUI‑specific options. |
-| `tui.notifications` | boolean \| array<string> | Enable desktop notifications in the tui (default: false). |
-| `hide_agent_reasoning` | boolean | Hide model reasoning events. |
-| `show_raw_agent_reasoning` | boolean | Show raw reasoning (when available). |
-| `model_reasoning_effort` | `minimal` \| `low` \| `medium` \| `high` | Responses API reasoning effort. |
-| `model_reasoning_summary` | `auto` \| `concise` \| `detailed` \| `none` | Reasoning summaries. |
-| `model_verbosity` | `low` \| `medium` \| `high` | GPT‑5 text verbosity (Responses API). |
-| `model_supports_reasoning_summaries` | boolean | Force‑enable reasoning summaries. |
-| `chatgpt_base_url` | string | Base URL for ChatGPT auth flow. |
-| `experimental_resume` | string (path) | Resume JSONL path (internal/experimental). |
-| `experimental_instructions_file` | string (path) | Replace built‑in instructions (experimental). |
-| `experimental_use_exec_command_tool` | boolean | Use experimental exec command tool. |
-| `use_experimental_reasoning_summary` | boolean | Use experimental summary for reasoning chain. |
-| `responses_originator_header_internal_override` | string | Override `originator` header value. |
-| `tools.web_search` | boolean | Enable web search tool (alias: `web_search_request`) (default: false). |
-| `tools.web_search_allowed_domains` | array<string> | Optional allow-list for web search (filters.allowed_domains). |
+| Key                                              | Type / Values                                                     | Notes                                                                                                                      |
+| ------------------------------------------------ | ----------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------- |
+| `model`                                          | string                                                            | Model to use (e.g., `gpt-5.1-codex`).                                                                                      |
+| `model_provider`                                 | string                                                            | Provider id from `model_providers` (default: `openai`).                                                                    |
+| `model_context_window`                           | number                                                            | Context window tokens.                                                                                                     |
+| `model_max_output_tokens`                        | number                                                            | Max output tokens.                                                                                                         |
+| `approval_policy`                                | `untrusted` \| `on-failure` \| `on-request` \| `never`            | When to prompt for approval.                                                                                               |
+| `sandbox_mode`                                   | `read-only` \| `workspace-write` \| `danger-full-access`          | OS sandbox policy.                                                                                                         |
+| `sandbox_workspace_write.writable_roots`         | array<string>                                                     | Extra writable roots in workspace‑write.                                                                                   |
+| `sandbox_workspace_write.network_access`         | boolean                                                           | Allow network in workspace‑write (default: false).                                                                         |
+| `sandbox_workspace_write.exclude_tmpdir_env_var` | boolean                                                           | Exclude `$TMPDIR` from writable roots (default: false).                                                                    |
+| `sandbox_workspace_write.exclude_slash_tmp`      | boolean                                                           | Exclude `/tmp` from writable roots (default: false).                                                                       |
+| `disable_response_storage`                       | boolean                                                           | Required for ZDR orgs.                                                                                                     |
+| `notify`                                         | array<string>                                                     | External program for notifications.                                                                                        |
+| `instructions`                                   | string                                                            | Currently ignored; use `experimental_instructions_file` or `AGENTS.md`.                                                    |
+| `mcp_servers.<id>.command`                       | string                                                            | MCP server launcher command.                                                                                               |
+| `mcp_servers.<id>.args`                          | array<string>                                                     | MCP server args.                                                                                                           |
+| `mcp_servers.<id>.env`                           | map<string,string>                                                | MCP server env vars.                                                                                                       |
+| `mcp_servers.<id>.startup_timeout_sec`           | number                                                            | Startup timeout in seconds (default: 10). Timeout is applied both for initializing MCP server and initially listing tools. |
+| `mcp_servers.<id>.tool_timeout_sec`              | number                                                            | Per-tool timeout in seconds (default: 60). Accepts fractional values; omit to use the default.                             |
+| `model_providers.<id>.name`                      | string                                                            | Display name.                                                                                                              |
+| `model_providers.<id>.base_url`                  | string                                                            | API base URL.                                                                                                              |
+| `model_providers.<id>.env_key`                   | string                                                            | Env var for API key.                                                                                                       |
+| `model_providers.<id>.wire_api`                  | `chat` \| `responses`                                             | Protocol used (default: `chat`).                                                                                           |
+| `model_providers.<id>.query_params`              | map<string,string>                                                | Extra query params (e.g., Azure `api-version`).                                                                            |
+| `model_providers.<id>.http_headers`              | map<string,string>                                                | Additional static headers.                                                                                                 |
+| `model_providers.<id>.env_http_headers`          | map<string,string>                                                | Headers sourced from env vars.                                                                                             |
+| `model_providers.<id>.request_max_retries`       | number                                                            | Per‑provider HTTP retry count (default: 4).                                                                                |
+| `model_providers.<id>.stream_max_retries`        | number                                                            | SSE stream retry count (default: 5).                                                                                       |
+| `model_providers.<id>.stream_idle_timeout_ms`    | number                                                            | SSE idle timeout (ms) (default: 300000).                                                                                   |
+| `project_doc_max_bytes`                          | number                                                            | Max bytes to read from `AGENTS.md`.                                                                                        |
+| `projects.<path>.trust_level`                    | string                                                            | Mark project/worktree as trusted (only `"trusted"` is recognized).                                                         |
+| `projects.<path>.hooks`                          | array<table>                                                      | Lifecycle hooks for that workspace (see "Project Hooks").                                                                  |
+| `projects.<path>.commands`                       | array<table>                                                      | Project commands exposed via `/cmd`.                                                                                       |
+| `profile`                                        | string                                                            | Active profile name.                                                                                                       |
+| `profiles.<name>.*`                              | various                                                           | Profile‑scoped overrides of the same keys.                                                                                 |
+| `history.persistence`                            | `save-all` \| `none`                                              | History file persistence (default: `save-all`).                                                                            |
+| `history.max_bytes`                              | number                                                            | Currently ignored (not enforced).                                                                                          |
+| `file_opener`                                    | `vscode` \| `vscode-insiders` \| `windsurf` \| `cursor` \| `none` | URI scheme for clickable citations (default: `vscode`).                                                                    |
+| `tui`                                            | table                                                             | TUI‑specific options.                                                                                                      |
+| `tui.notifications`                              | boolean \| array<string>                                          | Enable desktop notifications in the tui (default: false).                                                                  |
+| `hide_agent_reasoning`                           | boolean                                                           | Hide model reasoning events.                                                                                               |
+| `show_raw_agent_reasoning`                       | boolean                                                           | Show raw reasoning (when available).                                                                                       |
+| `model_reasoning_effort`                         | `minimal` \| `low` \| `medium` \| `high`                          | Responses API reasoning effort.                                                                                            |
+| `model_reasoning_summary`                        | `auto` \| `concise` \| `detailed` \| `none`                       | Reasoning summaries.                                                                                                       |
+| `model_verbosity`                                | `low` \| `medium` \| `high`                                       | GPT‑5 text verbosity (Responses API).                                                                                      |
+| `model_supports_reasoning_summaries`             | boolean                                                           | Force‑enable reasoning summaries.                                                                                          |
+| `chatgpt_base_url`                               | string                                                            | Base URL for ChatGPT auth flow.                                                                                            |
+| `experimental_resume`                            | string (path)                                                     | Resume JSONL path (internal/experimental).                                                                                 |
+| `experimental_instructions_file`                 | string (path)                                                     | Replace built‑in instructions (experimental).                                                                              |
+| `experimental_use_exec_command_tool`             | boolean                                                           | Use experimental exec command tool.                                                                                        |
+| `use_experimental_reasoning_summary`             | boolean                                                           | Use experimental summary for reasoning chain.                                                                              |
+| `responses_originator_header_internal_override`  | string                                                            | Override `originator` header value.                                                                                        |
+| `tools.web_search`                               | boolean                                                           | Enable web search tool (alias: `web_search_request`) (default: false).                                                     |
+| `tools.web_search_allowed_domains`               | array<string>                                                     | Optional allow-list for web search (filters.allowed_domains).                                                              |
 
 ## Realtime start instructions
 

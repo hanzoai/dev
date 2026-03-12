@@ -2,18 +2,18 @@ name: Release
 
 on:
   push:
-    branches: [ main ]
+    branches: [main]
     # Ignore common non-release paths, but DO NOT ignore release.yml so that
     # edits to this workflow can intentionally trigger a new release run.
     paths-ignore:
-      - '.github/workflows/issue-triage.yml'
-      - '.github/workflows/preview-build.yml'
-      - '.github/workflows/upstream-merge.yml'
-      - 'examples/**'
-      - '**/*.test.ts'
-      - 'test/**'
-      - 'CHANGELOG.md'
-      - 'docs/release-notes/**'
+      - ".github/workflows/issue-triage.yml"
+      - ".github/workflows/preview-build.yml"
+      - ".github/workflows/upstream-merge.yml"
+      - "examples/**"
+      - "**/*.test.ts"
+      - "test/**"
+      - "CHANGELOG.md"
+      - "docs/release-notes/**"
 
 concurrency:
   group: release-${{ github.ref }}
@@ -40,8 +40,8 @@ jobs:
       - name: Setup Node.js for auth check
         uses: actions/setup-node@v4
         with:
-          node-version: '20'
-          registry-url: 'https://registry.npmjs.org'
+          node-version: "20"
+          registry-url: "https://registry.npmjs.org"
       - name: Validate npm authentication (must fail fast if missing/invalid)
         env:
           NODE_AUTH_TOKEN: ${{ env.NPM_TOKEN }}
@@ -83,7 +83,7 @@ jobs:
       - name: Setup Python 3.12
         uses: actions/setup-python@v5
         with:
-          python-version: '3.12'
+          python-version: "3.12"
 
       - name: Read Rust toolchain channel
         id: rust_toolchain
@@ -172,8 +172,8 @@ jobs:
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: '20'
-          registry-url: 'https://registry.npmjs.org'
+          node-version: "20"
+          registry-url: "https://registry.npmjs.org"
 
       - name: Determine next version (package.json is authoritative)
         id: version
@@ -240,7 +240,7 @@ jobs:
       - name: Setup Python 3.12
         uses: actions/setup-python@v5
         with:
-          python-version: '3.12'
+          python-version: "3.12"
 
       - name: Read Rust toolchain channel
         id: rust_toolchain
@@ -368,7 +368,7 @@ jobs:
       - name: Build binaries (with timings)
         shell: bash
         env:
-          CARGO_INCREMENTAL: "0"   # keep off in CI; release builds + sccache
+          CARGO_INCREMENTAL: "0" # keep off in CI; release builds + sccache
           RUST_BACKTRACE: "1"
         run: |
           cd hanzo-dev
@@ -491,8 +491,8 @@ jobs:
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: '20'
-          registry-url: 'https://registry.npmjs.org'
+          node-version: "20"
+          registry-url: "https://registry.npmjs.org"
 
       - name: Start local OpenAI proxy for release (hardened)
         if: env.OPENAI_API_KEY != ''

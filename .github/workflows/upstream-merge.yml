@@ -3,17 +3,17 @@ name: Upstream Merge
 on:
   # Poll upstream regularly; also allow manual and external triggers
   schedule:
-    - cron: '*/30 * * * *'
+    - cron: "*/30 * * * *"
   workflow_dispatch:
     inputs:
       upstream_repo:
-        description: 'Upstream repo (owner/name)'
+        description: "Upstream repo (owner/name)"
         required: false
-        default: 'openai/codex'
+        default: "openai/codex"
       upstream_branch:
-        description: 'Upstream branch'
+        description: "Upstream branch"
         required: false
-        default: 'main'
+        default: "main"
   repository_dispatch:
     types: [upstream-push]
 
@@ -35,9 +35,9 @@ env:
   # skips due to no upstream changes and the branch is zero‑diff vs base.
   # This used to be true when we reset the branch each run; now we carry
   # forward the branch for incremental merges, so default this to false.
-  CLOSE_ZERO_DIFF_ON_SKIP: 'false'
-  RG_VERSION: '14.1.0'
-  JQ_VERSION: '1.7.1'
+  CLOSE_ZERO_DIFF_ON_SKIP: "false"
+  RG_VERSION: "14.1.0"
+  JQ_VERSION: "1.7.1"
 
 jobs:
   precheck:
@@ -354,7 +354,7 @@ jobs:
         if: steps.check_upstream.outputs.skip != 'true'
         uses: actions/setup-node@v4
         with:
-          node-version: '20'
+          node-version: "20"
 
       - name: Cache npm (npx) downloads
         if: steps.check_upstream.outputs.skip != 'true'
@@ -382,7 +382,6 @@ jobs:
           echo "pid=$!" >> "$GITHUB_OUTPUT"
           # Wait briefly for readiness
           for i in {1..30}; do if nc -z 127.0.0.1 5055; then break; else sleep 0.2; fi; done || true
-
 
       - name: Print proxy startup log tail
         if: steps.check_upstream.outputs.skip != 'true'
@@ -603,7 +602,7 @@ jobs:
           - If Git reports no merge-base between origin/DEFAULT_BRANCH and upstream/UPSTREAM_BRANCH, you may use `--allow-unrelated-histories` to graft histories and proceed with all policies/guards.
           - If the initial `git merge --no-ff --no-commit upstream/UPSTREAM_BRANCH` fails with unrelated histories, re-run the merge in a separate command with `--allow-unrelated-histories` (do not chain with `||`).
           - Use only the provided GH_TOKEN for push; do not echo it.
-          
+
           <tools>
           - To search for API usages before removing exports:
               rg -n "^(use\\s+codex_core::|codex_core::)(ModelClient|Prompt|Response(Event|Stream))\\b" codex-rs
@@ -835,7 +834,7 @@ jobs:
           fi
           popd >/dev/null
           git worktree remove -f "$wt"
-      
+
       - name: Branding report (guide-only) and perma-deleted guard
         if: steps.check_upstream.outputs.skip != 'true'
         env:
