@@ -5423,7 +5423,7 @@
           "type": "boolean"
         },
         "optOutNotificationMethods": {
-          "description": "Exact notification method names that should be suppressed for this connection (for example `codex/event/session_configured`).",
+          "description": "Exact notification method names that should be suppressed for this connection (for example `thread/started`).",
           "items": {
             "type": "string"
           },
@@ -12749,6 +12749,13 @@
         ],
         "type": "string"
       },
+      "PluginAuthPolicy": {
+        "enum": [
+          "ON_INSTALL",
+          "ON_USE"
+        ],
+        "type": "string"
+      },
       "PluginInstallParams": {
         "$schema": "http://json-schema.org/draft-07/schema#",
         "properties": {
@@ -12766,6 +12773,14 @@
         "title": "PluginInstallParams",
         "type": "object"
       },
+      "PluginInstallPolicy": {
+        "enum": [
+          "NOT_AVAILABLE",
+          "AVAILABLE",
+          "INSTALLED_BY_DEFAULT"
+        ],
+        "type": "string"
+      },
       "PluginInstallResponse": {
         "$schema": "http://json-schema.org/draft-07/schema#",
         "properties": {
@@ -12774,6 +12789,16 @@
               "$ref": "#/definitions/v2/AppSummary"
             },
             "type": "array"
+          },
+          "authPolicy": {
+            "anyOf": [
+              {
+                "$ref": "#/definitions/v2/PluginAuthPolicy"
+              },
+              {
+                "type": "null"
+              }
+            ]
           }
         },
         "required": [
@@ -12974,11 +12999,31 @@
       },
       "PluginSummary": {
         "properties": {
+          "authPolicy": {
+            "anyOf": [
+              {
+                "$ref": "#/definitions/v2/PluginAuthPolicy"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
           "enabled": {
             "type": "boolean"
           },
           "id": {
             "type": "string"
+          },
+          "installPolicy": {
+            "anyOf": [
+              {
+                "$ref": "#/definitions/v2/PluginInstallPolicy"
+              },
+              {
+                "type": "null"
+              }
+            ]
           },
           "installed": {
             "type": "boolean"
@@ -13756,6 +13801,12 @@
               "name": {
                 "type": "string"
               },
+              "namespace": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
               "type": {
                 "enum": [
                   "function_call"
@@ -13771,6 +13822,47 @@
               "type"
             ],
             "title": "FunctionCallResponseItem",
+            "type": "object"
+          },
+          {
+            "properties": {
+              "arguments": true,
+              "call_id": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "execution": {
+                "type": "string"
+              },
+              "id": {
+                "type": [
+                  "string",
+                  "null"
+                ],
+                "writeOnly": true
+              },
+              "status": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "type": {
+                "enum": [
+                  "tool_search_call"
+                ],
+                "title": "ToolSearchCallResponseItemType",
+                "type": "string"
+              }
+            },
+            "required": [
+              "arguments",
+              "execution",
+              "type"
+            ],
+            "title": "ToolSearchCallResponseItem",
             "type": "object"
           },
           {
@@ -13860,6 +13952,41 @@
               "type"
             ],
             "title": "CustomToolCallOutputResponseItem",
+            "type": "object"
+          },
+          {
+            "properties": {
+              "call_id": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "execution": {
+                "type": "string"
+              },
+              "status": {
+                "type": "string"
+              },
+              "tools": {
+                "items": true,
+                "type": "array"
+              },
+              "type": {
+                "enum": [
+                  "tool_search_output"
+                ],
+                "title": "ToolSearchOutputResponseItemType",
+                "type": "string"
+              }
+            },
+            "required": [
+              "execution",
+              "status",
+              "tools",
+              "type"
+            ],
+            "title": "ToolSearchOutputResponseItem",
             "type": "object"
           },
           {
