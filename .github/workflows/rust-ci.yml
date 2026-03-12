@@ -3,22 +3,80 @@ name: rust-ci
 on:
   push:
     branches: [main]
+    paths:
+      - 'hanzo-dev/**'
+      - 'codex-rs/**'
+      - '**/Cargo.toml'
+      - '**/Cargo.lock'
   pull_request:
+    paths:
+      - 'hanzo-dev/**'
+      - 'codex-rs/**'
+      - '**/Cargo.toml'
+      - '**/Cargo.lock'
   workflow_dispatch:
 
 jobs:
-  noop:
-    name: No-op CI (placeholder)
-    runs-on: ubuntu-latest
+  check:
+    name: Rust check (${{ matrix.target }})
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: ubuntu-latest
+            target: x86_64-unknown-linux-gnu
+          - runner: macos-15-xlarge
+            target: aarch64-apple-darwin
+
     steps:
-      - name: Success
-        run: echo "rust-ci placeholder job succeeded"
+      - uses: actions/checkout@v6
+
+      - name: Install Linux dependencies
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update -y
+          sudo DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends pkg-config libcap-dev
+
+      - uses: dtolnay/rust-toolchain@1.93.0
+        with:
+          components: clippy, rustfmt
+          targets: ${{ matrix.target }}
+
+      - name: Cache Cargo
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            hanzo-dev/target
+          key: cargo-rust-ci-${{ matrix.target }}-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: cargo-rust-ci-${{ matrix.target }}-
+
+      - name: Cargo check
+        working-directory: hanzo-dev
+        run: cargo check --target ${{ matrix.target }}
+
+      - name: Cargo test
+        working-directory: hanzo-dev
+        run: cargo test --target ${{ matrix.target }}
+        continue-on-error: true
+
+      - name: Cargo clippy
+        working-directory: hanzo-dev
+        run: cargo clippy --target ${{ matrix.target }} -- -D warnings
+        continue-on-error: true
+
+      - name: Cargo fmt
+        working-directory: hanzo-dev
+        run: cargo fmt --check
 
   results:
     name: CI results (required)
-    needs: [noop]
+    needs: [check]
     runs-on: ubuntu-latest
     if: always()
     steps:
       - run: |
-          [[ "${{ needs.noop.result }}" == "success" ]] || exit 1
+          [[ "${{ needs.check.result }}" == "success" ]] || exit 1

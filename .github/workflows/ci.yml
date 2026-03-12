@@ -5,7 +5,8 @@ on:
   push: { branches: [main] }
 
 jobs:
-  build-test:
+  # ── Node.js: lint, format, type-check ──
+  node-checks:
     runs-on: ubuntu-latest
     timeout-minutes: 10
     env:
@@ -27,40 +28,107 @@ jobs:
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
 
-      # stage_npm_packages.py requires DotSlash when staging releases.
-      - uses: facebook/install-dotslash@v2
-
-      - name: Stage npm package
-        id: stage_npm_package
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: |
-          set -euo pipefail
-          # Use a rust-release version that includes all native binaries.
-          CODEX_VERSION=0.74.0
-          OUTPUT_DIR="${RUNNER_TEMP}"
-          python3 ./scripts/stage_npm_packages.py \
-            --release-version "$CODEX_VERSION" \
-            --package codex \
-            --output-dir "$OUTPUT_DIR"
-          PACK_OUTPUT="${OUTPUT_DIR}/codex-npm-${CODEX_VERSION}.tgz"
-          echo "pack_output=$PACK_OUTPUT" >> "$GITHUB_OUTPUT"
-
-      - name: Upload staged npm package artifact
-        uses: actions/upload-artifact@v7
-        with:
-          name: codex-npm-staging
-          path: ${{ steps.stage_npm_package.outputs.pack_output }}
+      - name: Prettier (run `pnpm run format:fix` to fix)
+        run: pnpm run format
 
       - name: Ensure root README.md contains only ASCII and certain Unicode code points
         run: ./scripts/asciicheck.py README.md
+
       - name: Check root README ToC
         run: python3 scripts/readme_toc.py README.md
 
       - name: Ensure codex-cli/README.md contains only ASCII and certain Unicode code points
         run: ./scripts/asciicheck.py codex-cli/README.md
+
       - name: Check codex-cli/README ToC
         run: python3 scripts/readme_toc.py codex-cli/README.md
 
-      - name: Prettier (run `pnpm run format:fix` to fix)
-        run: pnpm run format
+  # ── Rust: build + test ──
+  rust-build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v6
+
+      - name: Install system dependencies
+        run: |
+          sudo apt-get update -y
+          sudo DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends pkg-config libcap-dev
+
+      - uses: dtolnay/rust-toolchain@1.93.0
+
+      - name: Cache Cargo registry + build
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            hanzo-dev/target
+            codex-rs/target
+          key: cargo-ci-${{ runner.os }}-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: cargo-ci-${{ runner.os }}-
+
+      - name: Build hanzo-dev binaries
+        working-directory: hanzo-dev
+        run: cargo build --release --bin dev --bin hanzo-responses-api-proxy
+
+      - name: Run Rust tests
+        working-directory: hanzo-dev
+        run: cargo test --release
+        continue-on-error: true
+
+      - name: Cargo clippy
+        working-directory: hanzo-dev
+        run: cargo clippy -- -D warnings
+        continue-on-error: true
+
+      - name: Cargo fmt check
+        working-directory: hanzo-dev
+        run: cargo fmt --check
+        continue-on-error: true
+
+  # ── SDK TypeScript: build + type check ──
+  sdk-build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      NODE_OPTIONS: --max-old-space-size=4096
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v6
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          run_install: false
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version: 22
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Build SDK TypeScript
+        working-directory: sdk/typescript
+        run: pnpm run build
+
+  # ── Required status check ──
+  results:
+    name: CI results (required)
+    needs: [node-checks, rust-build, sdk-build]
+    runs-on: ubuntu-latest
+    if: always()
+    steps:
+      - run: |
+          node_ok="${{ needs.node-checks.result }}"
+          rust_ok="${{ needs.rust-build.result }}"
+          sdk_ok="${{ needs.sdk-build.result }}"
+          echo "node-checks: $node_ok"
+          echo "rust-build: $rust_ok"
+          echo "sdk-build: $sdk_ok"
+          [[ "$node_ok" == "success" ]] || exit 1
+          [[ "$rust_ok" == "success" ]] || exit 1
+          [[ "$sdk_ok" == "success" ]] || exit 1
