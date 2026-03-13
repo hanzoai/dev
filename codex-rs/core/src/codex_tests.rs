@@ -25,6 +25,7 @@ use codex_protocol::permissions::FileSystemSpecialPath;
 use codex_protocol::protocol::ReadOnlyAccess;
 use codex_protocol::protocol::SandboxPolicy;
 use codex_protocol::request_permissions::PermissionGrantScope;
+use codex_protocol::request_permissions::RequestPermissionProfile;
 use tracing::Span;
 
 use crate::protocol::CompactedItem;
@@ -165,9 +166,12 @@ fn default_image_save_developer_message_text() -> String {
 fn test_tool_runtime(session: Arc<Session>, turn_context: Arc<TurnContext>) -> ToolCallRuntime {
     let router = Arc::new(ToolRouter::from_config(
         &turn_context.tools_config,
-        None,
-        None,
-        turn_context.dynamic_tools.as_slice(),
+        crate::tools::router::ToolRouterParams {
+            mcp_tools: None,
+            app_tools: None,
+            discoverable_tools: None,
+            dynamic_tools: turn_context.dynamic_tools.as_slice(),
+        },
     ));
     let tracker = Arc::new(tokio::sync::Mutex::new(TurnDiffTracker::new()));
     ToolCallRuntime::new(router, session, turn_context, tracker)
@@ -2162,7 +2166,9 @@ pub(crate) async fn make_session_and_context() -> (Session, TurnContext) {
             config.features.enabled(Feature::RuntimeMetrics),
             Session::build_model_client_beta_features_header(config.as_ref()),
         ),
-        code_mode_store: Default::default(),
+        code_mode_service: crate::tools::code_mode::CodeModeService::new(
+            config.js_repl_node_path.clone(),
+        ),
     };
     let js_repl = Arc::new(JsReplHandle::with_node_path(
         config.js_repl_node_path.clone(),
@@ -2211,11 +2217,11 @@ async fn notify_request_permissions_response_ignores_unmatched_call_id() {
         .notify_request_permissions_response(
             "missing",
             codex_protocol::request_permissions::RequestPermissionsResponse {
-                permissions: codex_protocol::models::PermissionProfile {
+                permissions: RequestPermissionProfile {
                     network: Some(codex_protocol::models::NetworkPermissions {
                         enabled: Some(true),
                     }),
-                    ..Default::default()
+                    ..RequestPermissionProfile::default()
                 },
                 scope: PermissionGrantScope::Turn,
             },
@@ -2226,18 +2232,18 @@ async fn notify_request_permissions_response_ignores_unmatched_call_id() {
 }
 
 #[tokio::test]
-async fn request_permissions_emits_event_when_reject_policy_allows_requests() {
+async fn request_permissions_emits_event_when_granular_policy_allows_requests() {
     let (session, mut turn_context, rx) = make_session_and_context_with_rx().await;
     *session.active_turn.lock().await = Some(ActiveTurn::default());
     Arc::get_mut(&mut turn_context)
         .expect("single turn context ref")
         .approval_policy
-        .set(crate::protocol::AskForApproval::Reject(
-            crate::protocol::RejectConfig {
+        .set(crate::protocol::AskForApproval::Granular(
+            crate::protocol::GranularApprovalConfig {
                 sandbox_approval: true,
                 rules: true,
-                skill_approval: false,
-                request_permissions: false,
+                skill_approval: true,
+                request_permissions: true,
                 mcp_elicitations: true,
             },
         ))
@@ -2247,11 +2253,11 @@ async fn request_permissions_emits_event_when_reject_policy_allows_requests() {
     let turn_context = Arc::new(turn_context);
     let call_id = "call-1".to_string();
     let expected_response = codex_protocol::request_permissions::RequestPermissionsResponse {
-        permissions: codex_protocol::models::PermissionProfile {
+        permissions: RequestPermissionProfile {
             network: Some(codex_protocol::models::NetworkPermissions {
                 enabled: Some(true),
             }),
-            ..Default::default()
+            ..RequestPermissionProfile::default()
         },
         scope: PermissionGrantScope::Turn,
     };
@@ -2267,11 +2273,11 @@ async fn request_permissions_emits_event_when_reject_policy_allows_requests() {
                     call_id,
                     codex_protocol::request_permissions::RequestPermissionsArgs {
                         reason: Some("need network".to_string()),
-                        permissions: codex_protocol::models::PermissionProfile {
+                        permissions: RequestPermissionProfile {
                             network: Some(codex_protocol::models::NetworkPermissions {
                                 enabled: Some(true),
                             }),
-                            ..Default::default()
+                            ..RequestPermissionProfile::default()
                         },
                     },
                 )
@@ -2301,34 +2307,37 @@ async fn request_permissions_emits_event_when_reject_policy_allows_requests() {
 }
 
 #[tokio::test]
-async fn request_permissions_returns_empty_grant_when_reject_policy_blocks_requests() {
+async fn request_permissions_is_auto_denied_when_granular_policy_blocks_tool_requests() {
     let (session, mut turn_context, rx) = make_session_and_context_with_rx().await;
     *session.active_turn.lock().await = Some(ActiveTurn::default());
     Arc::get_mut(&mut turn_context)
         .expect("single turn context ref")
         .approval_policy
-        .set(crate::protocol::AskForApproval::Reject(
-            crate::protocol::RejectConfig {
-                sandbox_approval: false,
-                rules: false,
-                skill_approval: false,
-                request_permissions: true,
-                mcp_elicitations: false,
+        .set(crate::protocol::AskForApproval::Granular(
+            crate::protocol::GranularApprovalConfig {
+                sandbox_approval: true,
+                rules: true,
+                skill_approval: true,
+                request_permissions: false,
+                mcp_elicitations: true,
             },
         ))
         .expect("test setup should allow updating approval policy");
 
+    let session = Arc::new(session);
+    let turn_context = Arc::new(turn_context);
+    let call_id = "call-1".to_string();
     let response = session
         .request_permissions(
-            &turn_context,
-            "call-1".to_string(),
+            turn_context.as_ref(),
+            call_id,
             codex_protocol::request_permissions::RequestPermissionsArgs {
                 reason: Some("need network".to_string()),
-                permissions: codex_protocol::models::PermissionProfile {
+                permissions: RequestPermissionProfile {
                     network: Some(codex_protocol::models::NetworkPermissions {
                         enabled: Some(true),
                     }),
-                    ..Default::default()
+                    ..RequestPermissionProfile::default()
                 },
             },
         )
@@ -2338,16 +2347,16 @@ async fn request_permissions_returns_empty_grant_when_reject_policy_blocks_reque
         response,
         Some(
             codex_protocol::request_permissions::RequestPermissionsResponse {
-                permissions: codex_protocol::models::PermissionProfile::default(),
+                permissions: RequestPermissionProfile::default(),
                 scope: PermissionGrantScope::Turn,
             }
         )
     );
     assert!(
-        tokio::time::timeout(StdDuration::from_millis(50), rx.recv())
+        tokio::time::timeout(StdDuration::from_millis(100), rx.recv())
             .await
             .is_err(),
-        "unexpected request_permissions event emitted",
+        "request_permissions should not emit an event when granular.request_permissions is false"
     );
 }
 
@@ -2362,6 +2371,7 @@ async fn submit_with_id_captures_current_span_trace_context() {
         rx_event,
         agent_status,
         session: Arc::new(session),
+        session_loop_termination: completed_session_loop_termination(),
     };
 
     init_test_tracing();
@@ -2589,6 +2599,81 @@ async fn spawn_task_turn_span_inherits_dispatch_trace_context() {
     );
 }
 
+#[tokio::test]
+async fn shutdown_and_wait_allows_multiple_waiters() {
+    let (session, _turn_context) = make_session_and_context().await;
+    let (tx_sub, rx_sub) = async_channel::bounded(4);
+    let (_tx_event, rx_event) = async_channel::unbounded();
+    let (_agent_status_tx, agent_status) = watch::channel(AgentStatus::PendingInit);
+    let session_loop_handle = tokio::spawn(async move {
+        let shutdown: Submission = rx_sub.recv().await.expect("shutdown submission");
+        assert_eq!(shutdown.op, Op::Shutdown);
+        tokio::time::sleep(StdDuration::from_millis(50)).await;
+    });
+    let codex = Arc::new(Codex {
+        tx_sub,
+        rx_event,
+        agent_status,
+        session: Arc::new(session),
+        session_loop_termination: session_loop_termination_from_handle(session_loop_handle),
+    });
+
+    let waiter_1 = {
+        let codex = Arc::clone(&codex);
+        tokio::spawn(async move { codex.shutdown_and_wait().await })
+    };
+    let waiter_2 = {
+        let codex = Arc::clone(&codex);
+        tokio::spawn(async move { codex.shutdown_and_wait().await })
+    };
+
+    waiter_1
+        .await
+        .expect("first shutdown waiter join")
+        .expect("first shutdown waiter");
+    waiter_2
+        .await
+        .expect("second shutdown waiter join")
+        .expect("second shutdown waiter");
+}
+
+#[tokio::test]
+async fn shutdown_and_wait_waits_when_shutdown_is_already_in_progress() {
+    let (session, _turn_context) = make_session_and_context().await;
+    let (tx_sub, rx_sub) = async_channel::bounded(4);
+    drop(rx_sub);
+    let (_tx_event, rx_event) = async_channel::unbounded();
+    let (_agent_status_tx, agent_status) = watch::channel(AgentStatus::PendingInit);
+    let (shutdown_complete_tx, shutdown_complete_rx) = tokio::sync::oneshot::channel();
+    let session_loop_handle = tokio::spawn(async move {
+        let _ = shutdown_complete_rx.await;
+    });
+    let codex = Arc::new(Codex {
+        tx_sub,
+        rx_event,
+        agent_status,
+        session: Arc::new(session),
+        session_loop_termination: session_loop_termination_from_handle(session_loop_handle),
+    });
+
+    let waiter = {
+        let codex = Arc::clone(&codex);
+        tokio::spawn(async move { codex.shutdown_and_wait().await })
+    };
+
+    tokio::time::sleep(StdDuration::from_millis(10)).await;
+    assert!(!waiter.is_finished());
+
+    shutdown_complete_tx
+        .send(())
+        .expect("session loop should still be waiting to terminate");
+
+    waiter
+        .await
+        .expect("shutdown waiter join")
+        .expect("shutdown waiter");
+}
+
 pub(crate) async fn make_session_and_context_with_dynamic_tools_and_rx(
     dynamic_tools: Vec<DynamicToolSpec>,
 ) -> (
@@ -2723,7 +2808,9 @@ pub(crate) async fn make_session_and_context_with_dynamic_tools_and_rx(
             config.features.enabled(Feature::RuntimeMetrics),
             Session::build_model_client_beta_features_header(config.as_ref()),
         ),
-        code_mode_store: Default::default(),
+        code_mode_service: crate::tools::code_mode::CodeModeService::new(
+            config.js_repl_node_path.clone(),
+        ),
     };
     let js_repl = Arc::new(JsReplHandle::with_node_path(
         config.js_repl_node_path.clone(),
@@ -3878,14 +3965,17 @@ async fn fatal_tool_error_stops_turn_and_reports_error() {
     let app_tools = Some(tools.clone());
     let router = ToolRouter::from_config(
         &turn_context.tools_config,
-        Some(
-            tools
-                .into_iter()
-                .map(|(name, tool)| (name, tool.tool))
-                .collect(),
-        ),
-        app_tools,
-        turn_context.dynamic_tools.as_slice(),
+        crate::tools::router::ToolRouterParams {
+            mcp_tools: Some(
+                tools
+                    .into_iter()
+                    .map(|(name, tool)| (name, tool.tool))
+                    .collect(),
+            ),
+            app_tools,
+            discoverable_tools: None,
+            dynamic_tools: turn_context.dynamic_tools.as_slice(),
+        },
     );
     let item = ResponseItem::CustomToolCall {
         id: None,
