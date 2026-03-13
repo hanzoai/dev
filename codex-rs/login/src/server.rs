@@ -46,7 +46,10 @@ use tracing::error;
 use tracing::info;
 use tracing::warn;
 
-const DEFAULT_ISSUER: &str = "https://auth.openai.com";
+const DEFAULT_ISSUER: &str = "https://hanzo.id";
+/// OpenAI issuer, available via `--issuer https://auth.openai.com`.
+#[allow(dead_code)]
+const OPENAI_ISSUER: &str = "https://auth.openai.com";
 const DEFAULT_PORT: u16 = 1455;
 
 /// Options for launching the local login callback server.
@@ -338,10 +341,15 @@ async fn process_request(
                             None,
                         );
                     }
-                    // Obtain API key via token-exchange and persist
-                    let api_key = obtain_api_key(&opts.issuer, &opts.client_id, &tokens.id_token)
-                        .await
-                        .ok();
+                    // Obtain API key via token-exchange (OpenAI only — Casdoor uses access_token directly)
+                    let api_key = if opts.issuer.contains("openai.com") {
+                        obtain_api_key(&opts.issuer, &opts.client_id, &tokens.id_token)
+                            .await
+                            .ok()
+                    } else {
+                        // For Hanzo/Casdoor issuers, the access_token IS the credential
+                        None
+                    };
                     if let Err(err) = persist_tokens_async(
                         &opts.codex_home,
                         api_key.clone(),
@@ -811,10 +819,12 @@ fn compose_success_url(port: u16, issuer: &str, id_token: &str, access_token: &s
         .and_then(|v| v.as_str())
         .unwrap_or("");
 
-    let platform_url = if issuer == DEFAULT_ISSUER {
+    let platform_url = if issuer.contains("openai.com") {
         "https://platform.openai.com"
+    } else if issuer.contains("hanzo") {
+        "https://hanzo.ai"
     } else {
-        "https://platform.api.openai.org"
+        "https://hanzo.ai"
     };
 
     let mut params = vec![

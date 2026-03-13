@@ -293,7 +293,7 @@ from_date = "2000-01-01"
 # target_app specify which app should display the announcement (cli, vsce, ...).
 
 [[announcements]]
-content = "Welcome to Codex! Check out the new onboarding flow."
+content = "Welcome to Hanzo Dev! Check out the new onboarding flow."
 from_date = "2024-10-01"
 to_date = "2024-10-15"
 target_app = "cli"
