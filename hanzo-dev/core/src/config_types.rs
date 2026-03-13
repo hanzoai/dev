@@ -1152,7 +1152,8 @@ pub struct ThemeConfig {
     pub is_dark: Option<bool>,
 
     /// Optional zen-mode display config.
-    #[serde(default)]
+    /// Accepts both `zen = true` (shorthand) and `zen = { enabled = true }` (full form).
+    #[serde(default, deserialize_with = "deserialize_zen_theme_config")]
     pub zen: Option<ZenThemeConfig>,
 }
 
@@ -1162,6 +1163,47 @@ pub struct ZenThemeConfig {
     /// Whether zen mode is enabled.
     #[serde(default)]
     pub enabled: bool,
+}
+
+/// Accept both `zen = true` and `zen = { enabled = true }` for better DX.
+fn deserialize_zen_theme_config<'de, D>(deserializer: D) -> Result<Option<ZenThemeConfig>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    use serde::de;
+
+    struct ZenVisitor;
+
+    impl<'de> de::Visitor<'de> for ZenVisitor {
+        type Value = Option<ZenThemeConfig>;
+
+        fn expecting(&self, formatter: &mut std::fmt::Formatter) -> std::fmt::Result {
+            formatter.write_str("a boolean or a ZenThemeConfig object")
+        }
+
+        fn visit_bool<E: de::Error>(self, v: bool) -> Result<Self::Value, E> {
+            Ok(Some(ZenThemeConfig { enabled: v }))
+        }
+
+        fn visit_none<E: de::Error>(self) -> Result<Self::Value, E> {
+            Ok(None)
+        }
+
+        fn visit_some<D: serde::Deserializer<'de>>(
+            self,
+            deserializer: D,
+        ) -> Result<Self::Value, D::Error> {
+            deserializer.deserialize_any(ZenVisitor)
+        }
+
+        fn visit_map<A: de::MapAccess<'de>>(self, map: A) -> Result<Self::Value, A::Error> {
+            let config =
+                ZenThemeConfig::deserialize(de::value::MapAccessDeserializer::new(map))?;
+            Ok(Some(config))
+        }
+    }
+
+    deserializer.deserialize_any(ZenVisitor)
 }
 
 /// Gutter display mode for history cells.

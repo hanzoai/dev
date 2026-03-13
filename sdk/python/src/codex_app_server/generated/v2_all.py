@@ -229,6 +229,7 @@ class Reject(BaseModel):
     request_permissions: bool | None = False
     rules: bool
     sandbox_approval: bool
+    skill_approval: bool | None = False
 
 
 class RejectAskForApproval(BaseModel):
@@ -1587,7 +1588,7 @@ class InitializeCapabilities(BaseModel):
         list[str] | None,
         Field(
             alias="optOutNotificationMethods",
-            description="Exact notification method names that should be suppressed for this connection (for example `codex/event/session_configured`).",
+            description="Exact notification method names that should be suppressed for this connection (for example `thread/started`).",
         ),
     ] = None
 
@@ -1795,6 +1796,12 @@ class MacOsAutomationPermission(
     root: MacOsAutomationPermissionValue | BundleIdsMacOsAutomationPermission
 
 
+class MacOsContactsPermission(Enum):
+    none = "none"
+    read_only = "read_only"
+    read_write = "read_write"
+
+
 class MacOsPreferencesPermission(Enum):
     none = "none"
     read_only = "read_only"
@@ -1808,7 +1815,10 @@ class MacOsSeatbeltProfileExtensions(BaseModel):
     macos_accessibility: bool | None = False
     macos_automation: Annotated[MacOsAutomationPermission | None, Field()] = "none"
     macos_calendar: bool | None = False
+    macos_contacts: MacOsContactsPermission | None = "none"
+    macos_launch_services: bool | None = False
     macos_preferences: MacOsPreferencesPermission | None = "read_only"
+    macos_reminders: bool | None = False
 
 
 class McpAuthStatus(Enum):
@@ -2212,6 +2222,11 @@ class PlanType(Enum):
     unknown = "unknown"
 
 
+class PluginAuthPolicy(Enum):
+    on_install = "ON_INSTALL"
+    on_use = "ON_USE"
+
+
 class PluginInstallParams(BaseModel):
     model_config = ConfigDict(
         populate_by_name=True,
@@ -2220,11 +2235,18 @@ class PluginInstallParams(BaseModel):
     plugin_name: Annotated[str, Field(alias="pluginName")]
 
 
+class PluginInstallPolicy(Enum):
+    not_available = "NOT_AVAILABLE"
+    available = "AVAILABLE"
+    installed_by_default = "INSTALLED_BY_DEFAULT"
+
+
 class PluginInstallResponse(BaseModel):
     model_config = ConfigDict(
         populate_by_name=True,
     )
     apps_needing_auth: Annotated[list[AppSummary], Field(alias="appsNeedingAuth")]
+    auth_policy: Annotated[PluginAuthPolicy, Field(alias="authPolicy")]
 
 
 class PluginInterface(BaseModel):
@@ -2257,6 +2279,13 @@ class PluginListParams(BaseModel):
             description="Optional working directories used to discover repo marketplaces. When omitted, only home-scoped marketplaces and the official curated marketplace are considered."
         ),
     ] = None
+    force_remote_sync: Annotated[
+        bool | None,
+        Field(
+            alias="forceRemoteSync",
+            description="When true, reconcile the official curated marketplace against the remote plugin state before listing marketplaces.",
+        ),
+    ] = None
 
 
 class LocalPluginSource(BaseModel):
@@ -2278,8 +2307,10 @@ class PluginSummary(BaseModel):
     model_config = ConfigDict(
         populate_by_name=True,
     )
+    auth_policy: Annotated[PluginAuthPolicy, Field(alias="authPolicy")]
     enabled: bool
     id: str
+    install_policy: Annotated[PluginInstallPolicy, Field(alias="installPolicy")]
     installed: bool
     interface: PluginInterface | None = None
     name: str
@@ -2650,8 +2681,23 @@ class FunctionCallResponseItem(BaseModel):
     call_id: str
     id: str | None = None
     name: str
+    namespace: str | None = None
     type: Annotated[
         Literal["function_call"], Field(title="FunctionCallResponseItemType")
+    ]
+
+
+class ToolSearchCallResponseItem(BaseModel):
+    model_config = ConfigDict(
+        populate_by_name=True,
+    )
+    arguments: Any
+    call_id: str | None = None
+    execution: str
+    id: str | None = None
+    status: str | None = None
+    type: Annotated[
+        Literal["tool_search_call"], Field(title="ToolSearchCallResponseItemType")
     ]
 
 
@@ -2666,6 +2712,19 @@ class CustomToolCallResponseItem(BaseModel):
     status: str | None = None
     type: Annotated[
         Literal["custom_tool_call"], Field(title="CustomToolCallResponseItemType")
+    ]
+
+
+class ToolSearchOutputResponseItem(BaseModel):
+    model_config = ConfigDict(
+        populate_by_name=True,
+    )
+    call_id: str | None = None
+    execution: str
+    status: str
+    tools: list
+    type: Annotated[
+        Literal["tool_search_output"], Field(title="ToolSearchOutputResponseItemType")
     ]
 
 
@@ -3421,6 +3480,7 @@ class ThreadForkParams(BaseModel):
     developer_instructions: Annotated[
         str | None, Field(alias="developerInstructions")
     ] = None
+    ephemeral: bool | None = None
     model: Annotated[
         str | None,
         Field(description="Configuration overrides for the forked thread, if any."),
@@ -5588,12 +5648,14 @@ class CollabAgentSpawnBeginEventMsg(BaseModel):
         populate_by_name=True,
     )
     call_id: Annotated[str, Field(description="Identifier for the collab tool call.")]
+    model: str
     prompt: Annotated[
         str,
         Field(
             description="Initial prompt sent to the agent. Can be empty to prevent CoT leaking at the beginning."
         ),
     ]
+    reasoning_effort: ReasoningEffort
     sender_thread_id: Annotated[ThreadId, Field(description="Thread ID of the sender.")]
     type: Annotated[
         Literal["collab_agent_spawn_begin"],
@@ -5606,6 +5668,7 @@ class CollabAgentSpawnEndEventMsg(BaseModel):
         populate_by_name=True,
     )
     call_id: Annotated[str, Field(description="Identifier for the collab tool call.")]
+    model: Annotated[str, Field(description="Model requested for the spawned agent.")]
     new_agent_nickname: Annotated[
         str | None, Field(description="Optional nickname assigned to the new agent.")
     ] = None
@@ -5621,6 +5684,10 @@ class CollabAgentSpawnEndEventMsg(BaseModel):
         Field(
             description="Initial prompt sent to the agent. Can be empty to prevent CoT leaking at the beginning."
         ),
+    ]
+    reasoning_effort: Annotated[
+        ReasoningEffort,
+        Field(description="Reasoning effort requested for the spawned agent."),
     ]
     sender_thread_id: Annotated[ThreadId, Field(description="Thread ID of the sender.")]
     status: Annotated[
@@ -6532,10 +6599,21 @@ class CollabAgentToolCallThreadItem(BaseModel):
     id: Annotated[
         str, Field(description="Unique identifier for this collab tool call.")
     ]
+    model: Annotated[
+        str | None,
+        Field(description="Model requested for the spawned agent, when applicable."),
+    ] = None
     prompt: Annotated[
         str | None,
         Field(
             description="Prompt text sent as part of the collab tool call, when available."
+        ),
+    ] = None
+    reasoning_effort: Annotated[
+        ReasoningEffort | None,
+        Field(
+            alias="reasoningEffort",
+            description="Reasoning effort requested for the spawned agent, when applicable.",
         ),
     ] = None
     receiver_thread_ids: Annotated[
@@ -7320,6 +7398,7 @@ class PluginListResponse(BaseModel):
         populate_by_name=True,
     )
     marketplaces: list[PluginMarketplaceEntry]
+    remote_sync_error: Annotated[str | None, Field(alias="remoteSyncError")] = None
 
 
 class ProfileV2(BaseModel):
@@ -7406,9 +7485,11 @@ class ResponseItem(
         | ReasoningResponseItem
         | LocalShellCallResponseItem
         | FunctionCallResponseItem
+        | ToolSearchCallResponseItem
         | FunctionCallOutputResponseItem
         | CustomToolCallResponseItem
         | CustomToolCallOutputResponseItem
+        | ToolSearchOutputResponseItem
         | WebSearchCallResponseItem
         | ImageGenerationCallResponseItem
         | GhostSnapshotResponseItem
@@ -7424,9 +7505,11 @@ class ResponseItem(
         | ReasoningResponseItem
         | LocalShellCallResponseItem
         | FunctionCallResponseItem
+        | ToolSearchCallResponseItem
         | FunctionCallOutputResponseItem
         | CustomToolCallResponseItem
         | CustomToolCallOutputResponseItem
+        | ToolSearchOutputResponseItem
         | WebSearchCallResponseItem
         | ImageGenerationCallResponseItem
         | GhostSnapshotResponseItem
