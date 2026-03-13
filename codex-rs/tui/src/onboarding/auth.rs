@@ -4,6 +4,8 @@ use codex_core::AuthManager;
 use codex_core::auth::AuthCredentialsStoreMode;
 use codex_core::auth::CLIENT_ID;
 use codex_core::auth::login_with_api_key;
+use codex_core::auth::read_anthropic_api_key_from_env;
+use codex_core::auth::read_hanzo_api_key_from_env;
 use codex_core::auth::read_openai_api_key_from_env;
 use codex_login::DeviceCode;
 use codex_login::ServerOptions;
@@ -294,7 +296,7 @@ impl AuthModeWidget {
         let mut lines: Vec<Line> = vec![
             Line::from(vec![
                 "  ".into(),
-                "Sign in with ChatGPT to use Codex as part of your paid plan".into(),
+                "Sign in to use Hanzo Dev with your account".into(),
             ]),
             Line::from(vec![
                 "  ".into(),
@@ -444,14 +446,14 @@ impl AuthModeWidget {
             "".into(),
             "  Before you start:".into(),
             "".into(),
-            "  Decide how much autonomy you want to grant Codex".into(),
+            "  Decide how much autonomy you want to grant Hanzo Dev".into(),
             Line::from(vec![
                 "  For more details see the ".into(),
-                "\u{1b}]8;;https://developers.openai.com/codex/security\u{7}Codex docs\u{1b}]8;;\u{7}".underlined(),
+                "\u{1b}]8;;https://hanzo.ai/dev\u{7}Hanzo Dev docs\u{1b}]8;;\u{7}".underlined(),
             ])
             .dim(),
             "".into(),
-            "  Codex can make mistakes".into(),
+            "  Hanzo Dev can make mistakes".into(),
             "  Review the code it writes and commands it runs".dim().into(),
             "".into(),
             "  Powered by your ChatGPT account".into(),
@@ -485,7 +487,7 @@ impl AuthModeWidget {
         let lines = vec![
             "✓ API key configured".fg(Color::Green).into(),
             "".into(),
-            "  Codex will use usage-based billing with your API key.".into(),
+            "  Hanzo Dev will use usage-based billing with your API key.".into(),
         ];
 
         Paragraph::new(lines)
@@ -644,7 +646,9 @@ impl AuthModeWidget {
             return;
         }
         self.error = None;
-        let prefill_from_env = read_openai_api_key_from_env();
+        let prefill_from_env = read_hanzo_api_key_from_env()
+            .or_else(read_anthropic_api_key_from_env)
+            .or_else(read_openai_api_key_from_env);
         let mut guard = self.sign_in_state.write().unwrap();
         match &mut *guard {
             SignInState::ApiKeyEntry(state) => {

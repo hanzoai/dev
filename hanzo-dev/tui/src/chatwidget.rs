@@ -29746,7 +29746,7 @@ Have we met every part of this goal and is there no further work to do?"#
 
             // Title follows theme text color
             spans.push(Span::styled(
-                "Every Code",
+                "Hanzo Dev",
                 Style::default()
                     .fg(crate::colors::text())
                     .add_modifier(Modifier::BOLD),
@@ -29826,7 +29826,7 @@ Have we met every part of this goal and is there no further work to do?"#
         // contents, which is especially noticeable on dark themes as dark
         // "caps" at the edges. Match the app background for consistency.
         let status_block = Block::default()
-            .borders(Borders::ALL)
+            .borders(crate::theme::zen_borders())
             .border_style(Style::default().fg(crate::colors::border()))
             .style(Style::default().bg(crate::colors::background()));
         let inner_area = status_block.inner(padded_area);

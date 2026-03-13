@@ -112,7 +112,7 @@ pub async fn fetch_environments() -> Result<Vec<CloudEnvironment>> {
     let ua = hanzo_core::default_client::get_code_user_agent(None);
     headers.insert(
         USER_AGENT,
-        HeaderValue::from_str(&ua).unwrap_or(HeaderValue::from_static("codex-cli")),
+        HeaderValue::from_str(&ua).unwrap_or(HeaderValue::from_static("hanzo-dev")),
     );
     if let Some(token) = &config.token {
         if let Ok(value) = HeaderValue::from_str(&format!("Bearer {token}")) {
@@ -236,7 +236,7 @@ async fn load_config() -> Result<CloudTasksConfig> {
     );
     let auth = auth_manager
         .auth()
-        .ok_or_else(|| anyhow!("Not signed in. Run `codex login` to authenticate with ChatGPT."))?;
+        .ok_or_else(|| anyhow!("Not signed in. Run `dev login` to authenticate."))?;
     let token = auth
         .get_token()
         .await

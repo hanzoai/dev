@@ -192,7 +192,7 @@ pub fn read_api_key_from_stdin() -> String {
 
     if stdin.is_terminal() {
         eprintln!(
-            "--with-api-key expects the API key on stdin. Try piping it, e.g. `printenv OPENAI_API_KEY | codex login --with-api-key`."
+            "--with-api-key expects the API key on stdin. Try piping it, e.g. `printenv HANZO_API_KEY | hanzo login --with-api-key`."
         );
         std::process::exit(1);
     }
@@ -320,7 +320,17 @@ pub async fn run_login_status(cli_config_overrides: CliConfigOverrides) -> ! {
         Ok(Some(auth)) => match auth.auth_mode() {
             AuthMode::ApiKey => match auth.get_token() {
                 Ok(api_key) => {
-                    eprintln!("Logged in using an API key - {}", safe_format_key(&api_key));
+                    let provider = if api_key.starts_with("sk-hanzo-") {
+                        "Hanzo"
+                    } else if api_key.starts_with("sk-ant-") {
+                        "Claude (Anthropic)"
+                    } else {
+                        "OpenAI"
+                    };
+                    eprintln!(
+                        "Logged in via {provider} API key - {}",
+                        safe_format_key(&api_key)
+                    );
                     std::process::exit(0);
                 }
                 Err(e) => {
