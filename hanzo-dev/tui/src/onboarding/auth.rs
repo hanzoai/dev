@@ -319,7 +319,7 @@ impl AuthModeWidget {
             Line::from(""),
             Line::from("    ANTHROPIC_API_KEY   - Claude (or run: claude login)")
                 .style(Style::default().fg(crate::colors::text_dim())),
-            Line::from("    OPENAI_API_KEY      - OpenAI/Codex")
+            Line::from("    OPENAI_API_KEY      - OpenAI")
                 .style(Style::default().fg(crate::colors::text_dim())),
             Line::from("    GOOGLE_API_KEY      - Gemini")
                 .style(Style::default().fg(crate::colors::text_dim())),

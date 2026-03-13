@@ -316,7 +316,7 @@ pub(crate) fn assistant_markdown_lines_with_context(
     cwd: &Path,
 ) -> Vec<Line<'static>> {
     let mut out: Vec<Line<'static>> = Vec::new();
-    out.push(Line::from("codex"));
+    out.push(Line::from("hanzo"));
     crate::markdown::append_markdown_with_opener_and_cwd_and_bold(
         &state.markdown,
         &mut out,

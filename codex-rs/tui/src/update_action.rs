@@ -13,9 +13,9 @@ impl UpdateAction {
     /// Returns the list of command-line arguments for invoking the update.
     pub fn command_args(self) -> (&'static str, &'static [&'static str]) {
         match self {
-            UpdateAction::NpmGlobalLatest => ("npm", &["install", "-g", "@openai/codex"]),
-            UpdateAction::BunGlobalLatest => ("bun", &["install", "-g", "@openai/codex"]),
-            UpdateAction::BrewUpgrade => ("brew", &["upgrade", "--cask", "codex"]),
+            UpdateAction::NpmGlobalLatest => ("npm", &["install", "-g", "@hanzo/dev"]),
+            UpdateAction::BunGlobalLatest => ("bun", &["install", "-g", "@hanzo/dev"]),
+            UpdateAction::BrewUpgrade => ("brew", &["upgrade", "--cask", "hanzo-dev"]),
         }
     }
 
