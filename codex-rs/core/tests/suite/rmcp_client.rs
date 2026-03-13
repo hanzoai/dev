@@ -420,6 +420,8 @@ async fn stdio_image_responses_are_sanitized_for_text_only_model() -> anyhow::Re
                 experimental_supported_tools: Vec::new(),
                 input_modalities: vec![InputModality::Text],
                 prefer_websockets: false,
+                used_fallback_model_metadata: false,
+                supports_search_tool: false,
             }],
         },
     )
