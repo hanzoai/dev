@@ -1,32 +1,50 @@
 {
   "name": "@hanzo/zap",
-  "version": "0.6.61",
-  "description": "Zero-copy Agent Protocol (ZAP) SDK for TypeScript - 1000x faster than MCP",
+  "version": "1.0.0",
+  "description": "ZAP — Zero-copy Agent Protocol. Hanzo-branded wrapper over @zap-proto/zap.",
   "type": "module",
   "main": "./dist/index.js",
+  "module": "./dist/index.js",
   "types": "./dist/index.d.ts",
   "exports": {
     ".": {
       "types": "./dist/index.d.ts",
       "import": "./dist/index.js",
       "require": "./dist/index.cjs"
+    },
+    "./protocol": {
+      "types": "./dist/protocol.d.ts",
+      "import": "./dist/protocol.js"
+    },
+    "./transport": {
+      "types": "./dist/transport.d.ts",
+      "import": "./dist/transport.js"
+    },
+    "./rpc": {
+      "types": "./dist/rpc.d.ts",
+      "import": "./dist/rpc.js"
     }
   },
+  "files": [
+    "dist",
+    "src"
+  ],
+  "sideEffects": false,
   "scripts": {
-    "build": "tsup src/index.ts --format esm,cjs --dts",
-    "dev": "tsup src/index.ts --format esm,cjs --dts --watch",
-    "test": "vitest",
+    "build": "tsup src/index.ts src/protocol.ts src/transport.ts src/rpc.ts --format esm,cjs --dts --clean",
+    "dev": "tsup src/index.ts src/protocol.ts src/transport.ts src/rpc.ts --format esm,cjs --dts --watch",
+    "test": "vitest run",
+    "test:watch": "vitest",
     "lint": "eslint src/",
     "typecheck": "tsc --noEmit"
   },
   "keywords": [
     "zap",
-    "mcp",
-    "ai",
-    "agent",
-    "protocol",
+    "rpc",
+    "binary-protocol",
+    "object-capabilities",
     "hanzo",
-    "zero-copy"
+    "websocket"
   ],
   "author": "Hanzo AI <dev@hanzo.ai>",
   "license": "MIT",
@@ -35,17 +53,32 @@
     "url": "git+https://github.com/hanzoai/dev.git",
     "directory": "zap/sdk/typescript"
   },
-  "homepage": "https://github.com/hanzoai/dev/tree/main/zap",
+  "homepage": "https://hanzo.ai/zap",
   "bugs": {
     "url": "https://github.com/hanzoai/dev/issues"
+  },
+  "dependencies": {
+    "@zap-proto/zap": "^1.0.0"
+  },
+  "devDependencies": {
+    "@types/node": "^22.0.0",
+    "@types/ws": "^8.0.0",
+    "tsup": "^8.0.0",
+    "typescript": "^5.3.0",
+    "vitest": "^2.0.0"
+  },
+  "peerDependencies": {
+    "ws": ">=8.0.0"
+  },
+  "peerDependenciesMeta": {
+    "ws": {
+      "optional": true
+    }
   },
   "engines": {
     "node": ">=18.0.0"
   },
-  "devDependencies": {
-    "@types/node": "^20.0.0",
-    "tsup": "^8.0.0",
-    "typescript": "^5.3.0",
-    "vitest": "^1.0.0"
+  "publishConfig": {
+    "access": "public"
   }
 }
