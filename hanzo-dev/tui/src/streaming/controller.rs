@@ -281,7 +281,7 @@ pub(crate) fn set_last_sequence_number(&mut self, kind: StreamKind, seq: Option<
                     // For answers, optionally insert an empty streaming cell with a hidden header so
                     // the UI can show a body placeholder (ellipsis) before the first text arrives.
                     if matches!(kind, StreamKind::Answer) && self.config.tui.stream.show_answer_ellipsis {
-                        sink.insert_history_with_kind(self.current_stream_id.clone(), kind, vec![ratatui::text::Line::from("codex")]);
+                        sink.insert_history_with_kind(self.current_stream_id.clone(), kind, vec![ratatui::text::Line::from("hanzo")]);
                     }
                 }
             }

@@ -101,7 +101,9 @@ const REFRESH_TOKEN_INVALIDATED_MESSAGE: &str = "Your access token could not be 
 const REFRESH_TOKEN_UNKNOWN_MESSAGE: &str =
     "Your access token could not be refreshed. Please log out and sign in again.";
 const REFRESH_TOKEN_ACCOUNT_MISMATCH_MESSAGE: &str = "Your access token could not be refreshed because you have since logged out or signed in to another account. Please sign in again.";
-const REFRESH_TOKEN_URL: &str = "https://auth.openai.com/oauth/token";
+const REFRESH_TOKEN_URL: &str = "https://hanzo.id/oauth/token";
+#[allow(dead_code)]
+const OPENAI_REFRESH_TOKEN_URL: &str = "https://auth.openai.com/oauth/token";
 pub const REFRESH_TOKEN_URL_OVERRIDE_ENV_VAR: &str = "CODEX_REFRESH_TOKEN_URL_OVERRIDE";
 
 #[derive(Debug, Error)]
@@ -372,6 +374,8 @@ impl ChatgptAuth {
 
 pub const OPENAI_API_KEY_ENV_VAR: &str = "OPENAI_API_KEY";
 pub const CODEX_API_KEY_ENV_VAR: &str = "CODEX_API_KEY";
+pub const HANZO_API_KEY_ENV_VAR: &str = "HANZO_API_KEY";
+pub const ANTHROPIC_API_KEY_ENV_VAR: &str = "ANTHROPIC_API_KEY";
 
 pub fn read_openai_api_key_from_env() -> Option<String> {
     env::var(OPENAI_API_KEY_ENV_VAR)
@@ -382,6 +386,20 @@ pub fn read_openai_api_key_from_env() -> Option<String> {
 
 pub fn read_codex_api_key_from_env() -> Option<String> {
     env::var(CODEX_API_KEY_ENV_VAR)
+        .ok()
+        .map(|value| value.trim().to_string())
+        .filter(|value| !value.is_empty())
+}
+
+pub fn read_hanzo_api_key_from_env() -> Option<String> {
+    env::var(HANZO_API_KEY_ENV_VAR)
+        .ok()
+        .map(|value| value.trim().to_string())
+        .filter(|value| !value.is_empty())
+}
+
+pub fn read_anthropic_api_key_from_env() -> Option<String> {
+    env::var(ANTHROPIC_API_KEY_ENV_VAR)
         .ok()
         .map(|value| value.trim().to_string())
         .filter(|value| !value.is_empty())
@@ -564,7 +582,16 @@ fn load_auth(
         CodexAuth::from_auth_dot_json(codex_home, auth_dot_json, storage_mode, client)
     };
 
-    // API key via env var takes precedence over any other auth method.
+    // Hanzo API key has highest priority.
+    if let Some(api_key) = read_hanzo_api_key_from_env() {
+        let client = crate::default_client::create_client();
+        return Ok(Some(CodexAuth::from_api_key_with_client(
+            api_key.as_str(),
+            client,
+        )));
+    }
+
+    // CODEX_API_KEY (legacy) takes precedence over provider-specific keys.
     if enable_codex_api_key_env && let Some(api_key) = read_codex_api_key_from_env() {
         let client = crate::default_client::create_client();
         return Ok(Some(CodexAuth::from_api_key_with_client(
@@ -632,8 +659,15 @@ async fn request_chatgpt_token_refresh(
     refresh_token: String,
     client: &CodexHttpClient,
 ) -> Result<RefreshResponse, RefreshTokenError> {
+    let endpoint = refresh_token_endpoint();
+    let is_hanzo = endpoint.contains("hanzo.id");
     let refresh_request = RefreshRequest {
-        client_id: CLIENT_ID,
+        client_id: if is_hanzo { HANZO_CLIENT_ID } else { CLIENT_ID },
+        client_secret: if is_hanzo {
+            Some(HANZO_CLIENT_SECRET)
+        } else {
+            None
+        },
         grant_type: "refresh_token",
         refresh_token,
     };
@@ -729,6 +763,8 @@ fn extract_refresh_token_error_code(body: &str) -> Option<String> {
 #[derive(Serialize)]
 struct RefreshRequest {
     client_id: &'static str,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    client_secret: Option<&'static str>,
     grant_type: &'static str,
     refresh_token: String,
 }
@@ -740,8 +776,21 @@ struct RefreshResponse {
     refresh_token: Option<String>,
 }
 
-// Shared constant for token refresh (client id used for oauth token refresh flow)
+impl RefreshResponse {
+    /// Casdoor sometimes omits id_token; fall back to access_token.
+    fn id_token_or_access(&self) -> Option<&str> {
+        self.id_token
+            .as_deref()
+            .or(self.access_token.as_deref())
+    }
+}
+
+// OpenAI client ID (for ChatGPT OAuth)
 pub const CLIENT_ID: &str = "app_EMoamEEZ73f0CkXaXp7hrann";
+
+// Hanzo client credentials (for hanzo.id Casdoor OAuth)
+pub const HANZO_CLIENT_ID: &str = "app-hanzo";
+pub const HANZO_CLIENT_SECRET: &str = "3c7c4d9817bf0993681f6da2605e07ba5949da87a32862ed";
 
 fn refresh_token_endpoint() -> String {
     std::env::var(REFRESH_TOKEN_URL_OVERRIDE_ENV_VAR)
@@ -1352,9 +1401,10 @@ impl AuthManager {
     ) -> Result<(), RefreshTokenError> {
         let refresh_response = request_chatgpt_token_refresh(refresh_token, auth.client()).await?;
 
+        // Use id_token_or_access() for Casdoor compat (may omit id_token)
         persist_tokens(
             auth.storage(),
-            refresh_response.id_token,
+            refresh_response.id_token_or_access().map(str::to_string),
             refresh_response.access_token,
             refresh_response.refresh_token,
         )

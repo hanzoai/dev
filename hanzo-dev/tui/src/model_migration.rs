@@ -105,12 +105,10 @@ pub(crate) fn migration_copy_for_key(key: &str) -> ModelMigrationCopy {
             }
         }
         _ => ModelMigrationCopy {
-            heading: "Codex just got an upgrade: meet gpt-5.1-codex-max",
+            heading: "New models available",
             content: &[
-                "Our flagship agentic coding model is smarter, faster, and tuned for long sessions.",
-                "Everyone signed in with ChatGPT gets it automatically.",
-                "Learn more: www.openai.com/index/gpt-5-1-codex-max",
-                "Choose how you'd like Codex to proceed.",
+                "Hanzo Dev supports 100+ models via the Hanzo Gateway.",
+                "Use /model to browse and switch models, or set model in config.toml.",
             ],
             can_opt_out: true,
         },
