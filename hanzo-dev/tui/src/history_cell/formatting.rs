@@ -500,7 +500,7 @@ pub(crate) fn select_preview_from_plain_text(
     out
 }
 
-/// Check if a line appears to be a title/header (like "codex", "user", "thinking", etc.)
+/// Check if a line appears to be a title/header (like "hanzo", "user", "thinking", etc.)
 fn is_title_line(line: &Line) -> bool {
     // Check if the line has special formatting that indicates it's a title
     if line.spans.is_empty() {
@@ -519,7 +519,8 @@ fn is_title_line(line: &Line) -> bool {
     // Check for common title patterns (fallback heuristic only; primary logic uses explicit cell types)
     matches!(
         text.as_str(),
-        "codex"
+        "hanzo"
+            | "codex"
             | "user"
             | "thinking"
             | "event"

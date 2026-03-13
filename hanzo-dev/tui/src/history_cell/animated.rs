@@ -5,7 +5,7 @@ use std::cell::RefCell;
 use std::time::Duration;
 use std::time::Instant;
 
-/// Simplified welcome cell that renders a Codex-style bordered card
+/// Simplified welcome cell that renders a bordered card
 /// with version and model info instead of complex glitch animations.
 pub(crate) struct AnimatedWelcomeCell {
     start_time: Instant,
