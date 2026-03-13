@@ -9,8 +9,8 @@ use crate::events::stop::StopOutcome;
 use crate::events::stop::StopRequest;
 use crate::types::Hook;
 use crate::types::HookEvent;
-use crate::types::HookOutcome;
 use crate::types::HookPayload;
+use crate::types::HookResponse;
 
 #[derive(Default, Clone)]
 pub struct HooksConfig {
@@ -68,14 +68,19 @@ impl Hooks {
         }
     }
 
-    pub async fn dispatch(&self, hook_payload: HookPayload) {
-        // TODO(gt): support interrupting program execution by returning a result here.
-        for hook in self.hooks_for_event(&hook_payload.hook_event) {
+    pub async fn dispatch(&self, hook_payload: HookPayload) -> Vec<HookResponse> {
+        let hooks = self.hooks_for_event(&hook_payload.hook_event);
+        let mut outcomes = Vec::with_capacity(hooks.len());
+        for hook in hooks {
             let outcome = hook.execute(&hook_payload).await;
-            if matches!(outcome, HookOutcome::Stop) {
+            let should_abort_operation = outcome.result.should_abort_operation();
+            outcomes.push(outcome);
+            if should_abort_operation {
                 break;
             }
         }
+
+        outcomes
     }
 
     pub fn preview_session_start(

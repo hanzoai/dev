@@ -277,6 +277,13 @@ pub struct ModelInfo {
     /// When true, this model should use websocket transport even when websocket features are off.
     #[serde(default)]
     pub prefer_websockets: bool,
+    /// Internal-only marker set by core when a model slug resolved to fallback metadata.
+    #[serde(default, skip_serializing, skip_deserializing)]
+    #[schemars(skip)]
+    #[ts(skip)]
+    pub used_fallback_model_metadata: bool,
+    #[serde(default)]
+    pub supports_search_tool: bool,
 }
 
 impl ModelInfo {
@@ -532,6 +539,8 @@ mod tests {
             experimental_supported_tools: vec![],
             input_modalities: default_input_modalities(),
             prefer_websockets: false,
+            used_fallback_model_metadata: false,
+            supports_search_tool: false,
         }
     }
 
@@ -726,6 +735,7 @@ mod tests {
         assert_eq!(model.availability_nux, None);
         assert!(!model.supports_image_detail_original);
         assert_eq!(model.web_search_tool_type, WebSearchToolType::Text);
+        assert!(!model.supports_search_tool);
     }
 
     #[test]
