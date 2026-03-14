@@ -323,7 +323,7 @@ where
                 None => Some(vec![Span::from(" ".repeat(width - 1) + "- ")]),
                 Some(index) => {
                     *index += 1;
-                    Some(vec![format!("{:width$}. ", *index - 1).light_blue()])
+                    Some(vec![Span::styled(format!("{:width$}. ", *index - 1), Style::new().fg(crate::colors::text_dim()))])
                 }
             }
         } else {
@@ -382,7 +382,7 @@ where
     fn pop_link(&mut self) {
         if let Some(link) = self.link.take() {
             self.push_span(" (".into());
-            self.push_span(link.cyan().underlined());
+            self.push_span(link.underlined().fg(crate::colors::text_dim()));
             self.push_span(")".into());
         }
     }
@@ -397,7 +397,7 @@ where
             .iter()
             .any(|ctx| ctx.prefix.iter().any(|s| s.content.contains('>')));
         let style = if blockquote_active {
-            Style::new().green()
+            Style::new().fg(crate::colors::text_dim())
         } else {
             line.style
         };
