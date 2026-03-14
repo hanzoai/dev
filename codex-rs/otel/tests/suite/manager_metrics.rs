@@ -23,7 +23,7 @@ fn manager_attaches_metadata_tags_to_metrics() -> Result<()> {
         Some("account-id".to_string()),
         None,
         Some(TelemetryAuthMode::ApiKey),
-        "test".to_string(),
+        "test_originator".to_string(),
         true,
         "tty".to_string(),
         SessionSource::Cli,
