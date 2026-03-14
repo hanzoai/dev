@@ -200,7 +200,7 @@ fn build_summary_lines(
     display: RateLimitDisplayConfig,
 ) -> Vec<Line<'static>> {
     let mut lines: Vec<Line<'static>> = Vec::new();
-    lines.push("/limits".magenta().into());
+    lines.push(Line::from(Span::styled("/limits", Style::default().fg(crate::colors::text_bright()))));
     lines.push("".into());
 
     if display.show_usage_sections {
