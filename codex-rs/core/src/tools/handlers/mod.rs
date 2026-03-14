@@ -7,7 +7,7 @@ mod js_repl;
 mod list_dir;
 mod mcp;
 mod mcp_resource;
-pub(crate) mod collab;
+pub(crate) mod multi_agents;
 mod plan;
 mod read_file;
 mod request_permissions;
