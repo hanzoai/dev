@@ -161,7 +161,8 @@ pub async fn run_login_with_chatgpt(cli_config_overrides: CliConfigOverrides) ->
     }
 }
 
-/// Login using an existing Claude Code session from macOS Keychain.
+/// Login using an existing Claude Code session from macOS Keychain,
+/// falling back to browser OAuth if no keychain token is found.
 pub async fn run_login_with_claude_keychain(cli_config_overrides: CliConfigOverrides) -> ! {
     let config = load_config_or_exit(cli_config_overrides).await;
     let _login_log_guard = init_login_file_logging(&config);
@@ -185,11 +186,22 @@ pub async fn run_login_with_claude_keychain(cli_config_overrides: CliConfigOverr
             }
         }
         None => {
-            eprintln!(
-                "No active Claude Code session found in keychain.\n\
-                 Log in to Claude Code first (`claude` CLI), or use `hanzo login --provider claude --browser` for OAuth."
-            );
-            std::process::exit(1);
+            eprintln!("No Claude Code keychain session found, starting browser OAuth...");
+            match login_with_claude_browser(
+                config.codex_home,
+                config.cli_auth_credentials_store_mode,
+            )
+            .await
+            {
+                Ok(_) => {
+                    eprintln!("{LOGIN_SUCCESS_MESSAGE} (Claude account)");
+                    std::process::exit(0);
+                }
+                Err(e) => {
+                    eprintln!("Error logging in with Claude: {e}");
+                    std::process::exit(1);
+                }
+            }
         }
     }
 }
