@@ -168,6 +168,14 @@
       "description": "Tool settings for a single app.",
       "type": "object"
     },
+    "ApprovalsReviewer": {
+      "description": "Configures who approval requests are routed to for review. Examples include sandbox escapes, blocked network access, MCP approval prompts, and ARC escalations. Defaults to `user`. `guardian_subagent` uses a carefully prompted subagent to gather relevant context and apply a risk-based decision framework before approving or denying the request.",
+      "enum": [
+        "user",
+        "guardian_subagent"
+      ],
+      "type": "string"
+    },
     "AppsConfigToml": {
       "additionalProperties": {
         "$ref": "#/definitions/AppConfig"
@@ -304,6 +312,9 @@
         "approval_policy": {
           "$ref": "#/definitions/AskForApproval"
         },
+        "approvals_reviewer": {
+          "$ref": "#/definitions/ApprovalsReviewer"
+        },
         "chatgpt_base_url": {
           "type": "string"
         },
@@ -337,6 +348,9 @@
               "type": "boolean"
             },
             "code_mode": {
+              "type": "boolean"
+            },
+            "code_mode_only": {
               "type": "boolean"
             },
             "codex_git_commit": {
@@ -384,9 +398,6 @@
             "fast_mode": {
               "type": "boolean"
             },
-            "guardian_approval": {
-              "type": "boolean"
-            },
             "image_detail_original": {
               "type": "boolean"
             },
@@ -421,9 +432,6 @@
               "type": "boolean"
             },
             "realtime_conversation": {
-              "type": "boolean"
-            },
-            "realtime_conversation_v2": {
               "type": "boolean"
             },
             "remote_models": {
@@ -463,6 +471,9 @@
               "type": "boolean"
             },
             "skill_mcp_dependency_install": {
+              "type": "boolean"
+            },
+            "smart_approvals": {
               "type": "boolean"
             },
             "sqlite": {
@@ -1339,10 +1350,29 @@
       },
       "type": "object"
     },
+    "RealtimeToml": {
+      "additionalProperties": false,
+      "properties": {
+        "type": {
+          "$ref": "#/definitions/RealtimeWsMode"
+        },
+        "version": {
+          "$ref": "#/definitions/RealtimeWsVersion"
+        }
+      },
+      "type": "object"
+    },
     "RealtimeWsMode": {
       "enum": [
         "conversational",
         "transcription"
+      ],
+      "type": "string"
+    },
+    "RealtimeWsVersion": {
+      "enum": [
+        "v1",
+        "v2"
       ],
       "type": "string"
     },
@@ -1696,6 +1726,10 @@
       "properties": {
         "sandbox": {
           "$ref": "#/definitions/WindowsSandboxModeToml"
+        },
+        "sandbox_private_desktop": {
+          "description": "Defaults to `true`. Set to `false` to launch the final sandboxed child process on `Winsta0\\\\Default` instead of a private desktop.",
+          "type": "boolean"
         }
       },
       "type": "object"
@@ -1742,6 +1776,14 @@
         }
       ],
       "description": "Default approval policy for executing commands."
+    },
+    "approvals_reviewer": {
+      "allOf": [
+        {
+          "$ref": "#/definitions/ApprovalsReviewer"
+        }
+      ],
+      "description": "Configures who approval requests are routed to for review once they have been escalated. This does not disable separate safety checks such as ARC."
     },
     "apps": {
       "allOf": [
@@ -1820,14 +1862,6 @@
       "description": "Experimental / do not use. Overrides only the realtime conversation websocket transport base URL (the `Op::RealtimeConversation` `/v1/realtime` connection) without changing normal provider HTTP requests.",
       "type": "string"
     },
-    "experimental_realtime_ws_mode": {
-      "allOf": [
-        {
-          "$ref": "#/definitions/RealtimeWsMode"
-        }
-      ],
-      "description": "Experimental / do not use. Selects the realtime websocket intent mode. `conversational` is speech-to-speech while `transcription` is transcript-only."
-    },
     "experimental_realtime_ws_model": {
       "description": "Experimental / do not use. Selects the realtime websocket model/snapshot used for the `Op::RealtimeConversation` connection.",
       "type": "string"
@@ -1863,6 +1897,9 @@
           "type": "boolean"
         },
         "code_mode": {
+          "type": "boolean"
+        },
+        "code_mode_only": {
           "type": "boolean"
         },
         "codex_git_commit": {
@@ -1910,9 +1947,6 @@
         "fast_mode": {
           "type": "boolean"
         },
-        "guardian_approval": {
-          "type": "boolean"
-        },
         "image_detail_original": {
           "type": "boolean"
         },
@@ -1947,9 +1981,6 @@
           "type": "boolean"
         },
         "realtime_conversation": {
-          "type": "boolean"
-        },
-        "realtime_conversation_v2": {
           "type": "boolean"
         },
         "remote_models": {
@@ -1989,6 +2020,9 @@
           "type": "boolean"
         },
         "skill_mcp_dependency_install": {
+          "type": "boolean"
+        },
+        "smart_approvals": {
           "type": "boolean"
         },
         "sqlite": {
@@ -2298,6 +2332,15 @@
         "$ref": "#/definitions/ProjectConfig"
       },
       "type": "object"
+    },
+    "realtime": {
+      "allOf": [
+        {
+          "$ref": "#/definitions/RealtimeToml"
+        }
+      ],
+      "default": null,
+      "description": "Experimental / do not use. Realtime websocket session selection. `version` controls v1/v2 and `type` controls conversational/transcription."
     },
     "review_model": {
       "description": "Review model override used by the `/review` feature.",
