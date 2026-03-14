@@ -22,12 +22,6 @@ importers:
 
   codex-rs/responses-api-proxy/npm: {}
 
-  dev-cli:
-    devDependencies:
-      prettier:
-        specifier: ^3.3.3
-        version: 3.6.2
-
   sdk/typescript:
     devDependencies:
       '@types/jest':
