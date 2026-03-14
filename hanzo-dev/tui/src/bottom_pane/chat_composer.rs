@@ -620,7 +620,8 @@ impl ChatComposer {
             (ActivePopup::None, false) => 1,
         };
         // Calculate dynamic height based on content
-        let content_width = area.width.saturating_sub(4); // Account for border and padding
+        let bp = if crate::theme::is_zen_mode() { 0 } else { 4 };
+        let content_width = area.width.saturating_sub(bp); // Account for border and padding
         let content_lines = self.textarea.desired_height(content_width).max(1);
         let desired_input_height = (content_lines + 2).max(3); // Parent layout enforces max
 
@@ -2306,6 +2307,14 @@ impl ChatComposer {
     }
 
     pub(crate) fn footer_height(&self) -> u16 {
+        // Hide footer entirely in zen mode for minimal look
+        if crate::theme::is_zen_mode() {
+            return match &self.active_popup {
+                ActivePopup::Command(popup) => popup.calculate_required_height(),
+                ActivePopup::File(popup) => popup.calculate_required_height(),
+                ActivePopup::None => 0,
+            };
+        }
         if self.render_mode == ComposerRenderMode::FooterOnly {
             return if self.standard_terminal_hint.is_some() { 1 } else { 0 };
         }
@@ -2855,7 +2864,8 @@ impl WidgetRef for ChatComposer {
 
         let footer_height = self.footer_height();
 
-        let content_width = area.width.saturating_sub(4);
+        let border_pad = if crate::theme::is_zen_mode() { 0 } else { 4 };
+        let content_width = area.width.saturating_sub(border_pad);
         let content_lines = self.textarea.desired_height(content_width).max(1);
         let desired_input_height = (content_lines + 2).max(3);
 
@@ -2951,8 +2961,10 @@ impl WidgetRef for ChatComposer {
             apply_auto_drive_border_gradient(buf, input_area, gradient);
         }
 
-        // Add padding inside the text area (1 char horizontal only, no vertical padding)
-        let padded_textarea_rect = textarea_rect.inner(Margin::new(1, 0));
+        // In zen mode: no horizontal padding, but add 1 row vertical inset so text
+        // sits inside the background area (borders normally provide this inset).
+        let (h_pad, v_pad) = if crate::theme::is_zen_mode() { (0, 1) } else { (1, 0) };
+        let padded_textarea_rect = textarea_rect.inner(Margin::new(h_pad, v_pad));
 
         let mut state = self.textarea_state.borrow_mut();
         StatefulWidgetRef::render_ref(&(&self.textarea), padded_textarea_rect, buf, &mut state);

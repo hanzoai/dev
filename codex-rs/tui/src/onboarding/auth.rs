@@ -3,8 +3,12 @@
 use codex_core::AuthManager;
 use codex_core::auth::AuthCredentialsStoreMode;
 use codex_core::auth::CLIENT_ID;
+use codex_core::auth::CLAUDE_CLIENT_ID;
+use codex_core::auth::CLAUDE_ISSUER;
+use codex_core::auth::HANZO_CLIENT_ID;
 use codex_core::auth::login_with_api_key;
 use codex_core::auth::read_anthropic_api_key_from_env;
+use codex_core::auth::read_claude_code_keychain_token;
 use codex_core::auth::read_hanzo_api_key_from_env;
 use codex_core::auth::read_openai_api_key_from_env;
 use codex_login::DeviceCode;
@@ -91,13 +95,19 @@ pub(crate) enum SignInState {
     ChatGptDeviceCode(ContinueWithDeviceCodeState),
     ChatGptSuccessMessage,
     ChatGptSuccess,
+    HanzoIdContinueInBrowser(ContinueInBrowserState),
+    HanzoIdSuccess,
+    ClaudeContinueInBrowser(ContinueInBrowserState),
+    ClaudeSuccess,
     ApiKeyEntry(ApiKeyInputState),
     ApiKeyConfigured,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum SignInOption {
+    HanzoId,
     ChatGpt,
+    Claude,
     DeviceCode,
     ApiKey,
 }
@@ -153,6 +163,12 @@ impl KeyboardHandler for AuthModeWidget {
             KeyCode::Char('3') => {
                 self.select_option_by_index(2);
             }
+            KeyCode::Char('4') => {
+                self.select_option_by_index(3);
+            }
+            KeyCode::Char('5') => {
+                self.select_option_by_index(4);
+            }
             KeyCode::Enter => {
                 let sign_in_state = { (*self.sign_in_state.read().unwrap()).clone() };
                 match sign_in_state {
@@ -169,7 +185,9 @@ impl KeyboardHandler for AuthModeWidget {
                 tracing::info!("Esc pressed");
                 let mut sign_in_state = self.sign_in_state.write().unwrap();
                 match &*sign_in_state {
-                    SignInState::ChatGptContinueInBrowser(_) => {
+                    SignInState::ChatGptContinueInBrowser(_)
+                    | SignInState::HanzoIdContinueInBrowser(_)
+                    | SignInState::ClaudeContinueInBrowser(_) => {
                         *sign_in_state = SignInState::PickMode;
                         drop(sign_in_state);
                         self.request_frame.schedule_frame();
@@ -219,24 +237,31 @@ impl AuthModeWidget {
     }
 
     fn displayed_sign_in_options(&self) -> Vec<SignInOption> {
-        let mut options = vec![SignInOption::ChatGpt];
+        let mut options = vec![SignInOption::HanzoId];
         if self.is_chatgpt_login_allowed() {
-            options.push(SignInOption::DeviceCode);
+            options.push(SignInOption::ChatGpt);
         }
+        options.push(SignInOption::Claude);
         if self.is_api_login_allowed() {
             options.push(SignInOption::ApiKey);
+        }
+        if self.is_chatgpt_login_allowed() {
+            options.push(SignInOption::DeviceCode);
         }
         options
     }
 
     fn selectable_sign_in_options(&self) -> Vec<SignInOption> {
-        let mut options = Vec::new();
+        let mut options = vec![SignInOption::HanzoId];
         if self.is_chatgpt_login_allowed() {
             options.push(SignInOption::ChatGpt);
-            options.push(SignInOption::DeviceCode);
         }
+        options.push(SignInOption::Claude);
         if self.is_api_login_allowed() {
             options.push(SignInOption::ApiKey);
+        }
+        if self.is_chatgpt_login_allowed() {
+            options.push(SignInOption::DeviceCode);
         }
         options
     }
@@ -265,10 +290,16 @@ impl AuthModeWidget {
 
     fn handle_sign_in_option(&mut self, option: SignInOption) {
         match option {
+            SignInOption::HanzoId => {
+                self.start_hanzo_id_login();
+            }
             SignInOption::ChatGpt => {
                 if self.is_chatgpt_login_allowed() {
                     self.start_chatgpt_login();
                 }
+            }
+            SignInOption::Claude => {
+                self.start_claude_login();
             }
             SignInOption::DeviceCode => {
                 if self.is_chatgpt_login_allowed() {
@@ -286,7 +317,7 @@ impl AuthModeWidget {
     }
 
     fn disallow_api_login(&mut self) {
-        self.highlighted_mode = SignInOption::ChatGpt;
+        self.highlighted_mode = SignInOption::HanzoId;
         self.error = Some(API_KEY_DISABLED_MESSAGE.to_string());
         *self.sign_in_state.write().unwrap() = SignInState::PickMode;
         self.request_frame.schedule_frame();
@@ -339,10 +370,17 @@ impl AuthModeWidget {
         } else {
             "Usage included with Plus, Pro, Business, and Enterprise plans"
         };
-        let device_code_description = "Sign in from another device with a one-time code";
 
         for (idx, option) in self.displayed_sign_in_options().into_iter().enumerate() {
             match option {
+                SignInOption::HanzoId => {
+                    lines.extend(create_mode_item(
+                        idx,
+                        option,
+                        "Sign in with Hanzo ID",
+                        "Hanzo AI account via hanzo.id",
+                    ));
+                }
                 SignInOption::ChatGpt => {
                     lines.extend(create_mode_item(
                         idx,
@@ -351,12 +389,20 @@ impl AuthModeWidget {
                         chatgpt_description,
                     ));
                 }
+                SignInOption::Claude => {
+                    lines.extend(create_mode_item(
+                        idx,
+                        option,
+                        "Sign in with Claude",
+                        "Use your Anthropic Claude account",
+                    ));
+                }
                 SignInOption::DeviceCode => {
                     lines.extend(create_mode_item(
                         idx,
                         option,
                         "Sign in with Device Code",
-                        device_code_description,
+                        "Sign in from another device with a one-time code",
                     ));
                 }
                 SignInOption::ApiKey => {
@@ -407,7 +453,13 @@ impl AuthModeWidget {
         let mut lines = vec![spans.into(), "".into()];
 
         let sign_in_state = self.sign_in_state.read().unwrap();
-        let auth_url = if let SignInState::ChatGptContinueInBrowser(state) = &*sign_in_state
+        let browser_state = match &*sign_in_state {
+            SignInState::ChatGptContinueInBrowser(s)
+            | SignInState::HanzoIdContinueInBrowser(s)
+            | SignInState::ClaudeContinueInBrowser(s) => Some(s),
+            _ => None,
+        };
+        let auth_url = if let Some(state) = browser_state
             && !state.auth_url.is_empty()
         {
             lines.push("  If the link doesn't open automatically, open the following link to authenticate:".into());
@@ -488,6 +540,18 @@ impl AuthModeWidget {
             "✓ API key configured".fg(Color::Green).into(),
             "".into(),
             "  Hanzo Dev will use usage-based billing with your API key.".into(),
+        ];
+
+        Paragraph::new(lines)
+            .wrap(Wrap { trim: false })
+            .render(area, buf);
+    }
+
+    fn render_provider_success(&self, provider_name: &str, area: Rect, buf: &mut Buffer) {
+        let lines = vec![
+            format!("✓ Signed in with {provider_name}")
+                .fg(Color::Green)
+                .into(),
         ];
 
         Paragraph::new(lines)
@@ -718,6 +782,123 @@ impl AuthModeWidget {
         }
     }
 
+    /// Kicks off the Hanzo ID auth flow via browser OAuth (default issuer hanzo.id).
+    fn start_hanzo_id_login(&mut self) {
+        self.error = None;
+        let opts = ServerOptions::new(
+            self.codex_home.clone(),
+            HANZO_CLIENT_ID.to_string(),
+            None,
+            self.cli_auth_credentials_store_mode,
+        );
+
+        match run_login_server(opts) {
+            Ok(child) => {
+                let sign_in_state = self.sign_in_state.clone();
+                let request_frame = self.request_frame.clone();
+                let auth_manager = self.auth_manager.clone();
+                tokio::spawn(async move {
+                    let auth_url = child.auth_url.clone();
+                    {
+                        *sign_in_state.write().unwrap() =
+                            SignInState::HanzoIdContinueInBrowser(ContinueInBrowserState {
+                                auth_url,
+                                shutdown_flag: Some(child.cancel_handle()),
+                            });
+                    }
+                    request_frame.schedule_frame();
+                    let r = child.block_until_done().await;
+                    match r {
+                        Ok(()) => {
+                            auth_manager.reload();
+                            *sign_in_state.write().unwrap() = SignInState::HanzoIdSuccess;
+                            request_frame.schedule_frame();
+                        }
+                        _ => {
+                            *sign_in_state.write().unwrap() = SignInState::PickMode;
+                            request_frame.schedule_frame();
+                        }
+                    }
+                });
+            }
+            Err(e) => {
+                *self.sign_in_state.write().unwrap() = SignInState::PickMode;
+                self.error = Some(e.to_string());
+                self.request_frame.schedule_frame();
+            }
+        }
+    }
+
+    /// Kicks off the Claude auth flow. Tries macOS Keychain first, falls back to browser OAuth.
+    fn start_claude_login(&mut self) {
+        self.error = None;
+
+        // Try keychain first (zero interaction if Claude Code is already logged in).
+        if let Some(token) = read_claude_code_keychain_token() {
+            match login_with_api_key(
+                &self.codex_home,
+                &token,
+                self.cli_auth_credentials_store_mode,
+            ) {
+                Ok(()) => {
+                    self.login_status = LoginStatus::AuthMode(AuthMode::ApiKey);
+                    self.auth_manager.reload();
+                    *self.sign_in_state.write().unwrap() = SignInState::ClaudeSuccess;
+                    self.request_frame.schedule_frame();
+                    return;
+                }
+                Err(_) => {
+                    // Keychain token failed to save; fall through to browser flow.
+                }
+            }
+        }
+
+        // Browser OAuth flow via claude.ai.
+        let opts = ServerOptions::new(
+            self.codex_home.clone(),
+            CLAUDE_CLIENT_ID.to_string(),
+            None,
+            self.cli_auth_credentials_store_mode,
+        )
+        .with_issuer(CLAUDE_ISSUER.to_string());
+
+        match run_login_server(opts) {
+            Ok(child) => {
+                let sign_in_state = self.sign_in_state.clone();
+                let request_frame = self.request_frame.clone();
+                let auth_manager = self.auth_manager.clone();
+                tokio::spawn(async move {
+                    let auth_url = child.auth_url.clone();
+                    {
+                        *sign_in_state.write().unwrap() =
+                            SignInState::ClaudeContinueInBrowser(ContinueInBrowserState {
+                                auth_url,
+                                shutdown_flag: Some(child.cancel_handle()),
+                            });
+                    }
+                    request_frame.schedule_frame();
+                    let r = child.block_until_done().await;
+                    match r {
+                        Ok(()) => {
+                            auth_manager.reload();
+                            *sign_in_state.write().unwrap() = SignInState::ClaudeSuccess;
+                            request_frame.schedule_frame();
+                        }
+                        _ => {
+                            *sign_in_state.write().unwrap() = SignInState::PickMode;
+                            request_frame.schedule_frame();
+                        }
+                    }
+                });
+            }
+            Err(e) => {
+                *self.sign_in_state.write().unwrap() = SignInState::PickMode;
+                self.error = Some(e.to_string());
+                self.request_frame.schedule_frame();
+            }
+        }
+    }
+
     /// Kicks off the ChatGPT auth flow and keeps the UI state consistent with the attempt.
     fn start_chatgpt_login(&mut self) {
         // If we're already authenticated with ChatGPT, don't start a new login –
@@ -797,9 +978,14 @@ impl StepStateProvider for AuthModeWidget {
             SignInState::PickMode
             | SignInState::ApiKeyEntry(_)
             | SignInState::ChatGptContinueInBrowser(_)
+            | SignInState::HanzoIdContinueInBrowser(_)
+            | SignInState::ClaudeContinueInBrowser(_)
             | SignInState::ChatGptDeviceCode(_)
             | SignInState::ChatGptSuccessMessage => StepState::InProgress,
-            SignInState::ChatGptSuccess | SignInState::ApiKeyConfigured => StepState::Complete,
+            SignInState::ChatGptSuccess
+            | SignInState::HanzoIdSuccess
+            | SignInState::ClaudeSuccess
+            | SignInState::ApiKeyConfigured => StepState::Complete,
         }
     }
 }
@@ -811,7 +997,9 @@ impl WidgetRef for AuthModeWidget {
             SignInState::PickMode => {
                 self.render_pick_mode(area, buf);
             }
-            SignInState::ChatGptContinueInBrowser(_) => {
+            SignInState::ChatGptContinueInBrowser(_)
+            | SignInState::HanzoIdContinueInBrowser(_)
+            | SignInState::ClaudeContinueInBrowser(_) => {
                 self.render_continue_in_browser(area, buf);
             }
             SignInState::ChatGptDeviceCode(state) => {
@@ -822,6 +1010,12 @@ impl WidgetRef for AuthModeWidget {
             }
             SignInState::ChatGptSuccess => {
                 self.render_chatgpt_success(area, buf);
+            }
+            SignInState::HanzoIdSuccess => {
+                self.render_provider_success("Hanzo ID", area, buf);
+            }
+            SignInState::ClaudeSuccess => {
+                self.render_provider_success("Claude", area, buf);
             }
             SignInState::ApiKeyEntry(state) => {
                 self.render_api_key_entry(area, buf, state);

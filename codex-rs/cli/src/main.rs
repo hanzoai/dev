@@ -14,7 +14,9 @@ use codex_cli::login::read_api_key_from_stdin;
 use codex_cli::login::run_login_status;
 use codex_cli::login::run_login_with_api_key;
 use codex_cli::login::run_login_with_chatgpt;
+use codex_cli::login::run_login_with_claude_keychain;
 use codex_cli::login::run_login_with_device_code;
+use codex_cli::login::run_login_with_device_code_fallback_to_browser;
 use codex_cli::login::run_logout;
 use codex_cloud_tasks::Cli as CloudTasksCli;
 use codex_exec::Cli as ExecCli;
@@ -282,6 +284,10 @@ struct LoginCommand {
     #[arg(long = "device-auth")]
     use_device_code: bool,
 
+    /// Login provider: hanzo (default), openai, or claude
+    #[arg(long = "provider", value_name = "PROVIDER")]
+    provider: Option<LoginProvider>,
+
     /// EXPERIMENTAL: Use custom OAuth issuer base URL (advanced)
     /// Override the OAuth issuer base URL (advanced)
     #[arg(long = "experimental_issuer", value_name = "URL", hide = true)]
@@ -299,6 +305,16 @@ struct LoginCommand {
 enum LoginSubcommand {
     /// Show login status.
     Status,
+}
+
+#[derive(Debug, Clone, clap::ValueEnum)]
+enum LoginProvider {
+    /// Hanzo IAM (default)
+    Hanzo,
+    /// OpenAI / ChatGPT
+    Openai,
+    /// Claude Code (Anthropic)
+    Claude,
 }
 
 #[derive(Debug, Parser)]
@@ -680,14 +696,7 @@ async fn cli_main(arg0_paths: Arg0DispatchPaths) -> anyhow::Result<()> {
                     run_login_status(login_cli.config_overrides).await;
                 }
                 None => {
-                    if login_cli.use_device_code {
-                        run_login_with_device_code(
-                            login_cli.config_overrides,
-                            login_cli.issuer_base_url,
-                            login_cli.client_id,
-                        )
-                        .await;
-                    } else if login_cli.api_key.is_some() {
+                    if login_cli.api_key.is_some() {
                         eprintln!(
                             "The --api-key flag is no longer supported. Pipe the key instead, e.g. `printenv OPENAI_API_KEY | codex login --with-api-key`."
                         );
@@ -696,7 +705,41 @@ async fn cli_main(arg0_paths: Arg0DispatchPaths) -> anyhow::Result<()> {
                         let api_key = read_api_key_from_stdin();
                         run_login_with_api_key(login_cli.config_overrides, api_key).await;
                     } else {
-                        run_login_with_chatgpt(login_cli.config_overrides).await;
+                        match login_cli.provider {
+                            Some(LoginProvider::Claude) => {
+                                // Try keychain first, fall back to browser OAuth
+                                run_login_with_claude_keychain(login_cli.config_overrides).await;
+                            }
+                            Some(LoginProvider::Openai) => {
+                                if login_cli.use_device_code {
+                                    run_login_with_device_code(
+                                        login_cli.config_overrides,
+                                        login_cli.issuer_base_url,
+                                        login_cli.client_id,
+                                    )
+                                    .await;
+                                } else {
+                                    run_login_with_chatgpt(login_cli.config_overrides).await;
+                                }
+                            }
+                            Some(LoginProvider::Hanzo) | None => {
+                                if login_cli.use_device_code {
+                                    run_login_with_device_code(
+                                        login_cli.config_overrides,
+                                        login_cli.issuer_base_url,
+                                        login_cli.client_id,
+                                    )
+                                    .await;
+                                } else {
+                                    run_login_with_device_code_fallback_to_browser(
+                                        login_cli.config_overrides,
+                                        login_cli.issuer_base_url,
+                                        login_cli.client_id,
+                                    )
+                                    .await;
+                                }
+                            }
+                        }
                     }
                 }
             }
