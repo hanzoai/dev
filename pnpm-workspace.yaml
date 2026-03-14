@@ -1,5 +1,7 @@
 packages:
-  - dev-cli
+  # dev-cli is excluded: it's a publish-only package whose optionalDeps
+  # (@hanzo/dev-*) don't exist until the release workflow builds them.
+  # Its postinstall also tries to download binaries, slowing CI.
   - codex-rs/responses-api-proxy/npm
   - sdk/typescript
   - shell-tool-mcp
