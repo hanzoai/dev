@@ -360,7 +360,7 @@ impl BottomPane<'_> {
             let y_offset = if self.top_spacer_enabled { 1u16 } else { 0u16 };
 
             // Adjust composer area to account for empty line and padding
-            let horizontal_padding = 1u16; // Message input uses 1 char padding
+            let horizontal_padding = crate::theme::content_padding();
             let composer_rect = Rect {
                 x: area.x + horizontal_padding,
                 y: area.y + y_offset,
@@ -1176,7 +1176,7 @@ impl WidgetRef for &BottomPane<'_> {
 
         let mut composer_rect = compute_composer_rect(area, self.top_spacer_enabled);
         let mut composer_needs_render = true;
-        let horizontal_padding = 1u16;
+        let horizontal_padding = crate::theme::content_padding();
 
         if let Some(view) = &self.active_view {
             if !view.is_complete() {
@@ -1265,7 +1265,7 @@ impl WidgetRef for &BottomPane<'_> {
 }
 
 fn compute_composer_rect(area: Rect, top_spacer_enabled: bool) -> Rect {
-    let horizontal_padding = 1u16;
+    let horizontal_padding = crate::theme::content_padding();
     let mut y_offset = 0u16;
     if top_spacer_enabled {
         y_offset = y_offset.saturating_add(1);

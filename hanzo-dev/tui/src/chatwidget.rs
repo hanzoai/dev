@@ -41245,9 +41245,9 @@ impl WidgetRef for &ChatWidget<'_> {
 
         // Calculate total content height using prefix sums; build if needed
         let spacing = 1u16; // Standard spacing between cells
-        const GUTTER_WIDTH: u16 = 2; // Same as in render loop
+        let gutter_width = crate::theme::gutter_width();
         let reasoning_visible = self.is_reasoning_shown();
-        let cache_width = content_area.width.saturating_sub(GUTTER_WIDTH);
+        let cache_width = content_area.width.saturating_sub(gutter_width);
 
         // Opportunistically clear height cache if width changed
         self.history_render.handle_width_change(cache_width);
@@ -41367,7 +41367,7 @@ impl WidgetRef for &ChatWidget<'_> {
             let mut prefix: Vec<u16> = Vec::with_capacity(cells.len().saturating_add(1));
             prefix.push(0);
             let mut acc = 0u16;
-            let content_width = content_area.width.saturating_sub(GUTTER_WIDTH);
+            let content_width = content_area.width.saturating_sub(gutter_width);
             let mut spacing_ranges: Vec<(u16, u16)> = Vec::new();
 
             for (idx, vis) in cells.iter().enumerate() {
@@ -41797,8 +41797,8 @@ impl WidgetRef for &ChatWidget<'_> {
                 .cell
                 .expect("visible cell missing backing cell for render");
             // Calculate height with reduced width due to gutter
-            const GUTTER_WIDTH: u16 = 2;
-            let content_width = content_area.width.saturating_sub(GUTTER_WIDTH);
+            let gutter_width = crate::theme::gutter_width();
+            let content_width = content_area.width.saturating_sub(gutter_width);
             let maybe_assistant = item
                 .as_any()
                 .downcast_ref::<crate::history_cell::AssistantMarkdownCell>();
@@ -41881,21 +41881,21 @@ impl WidgetRef for &ChatWidget<'_> {
 
 
             if visible_height > 0 {
-                // Define gutter width (2 chars: symbol + space)
-                const GUTTER_WIDTH: u16 = 2;
+                // Gutter width from theme (0 in zen mode)
+                let gw = crate::theme::gutter_width();
 
                 // Split area into gutter and content
                 let gutter_area = Rect {
                     x: content_area.x,
                     y: screen_y,
-                    width: GUTTER_WIDTH.min(content_area.width),
+                    width: gw.min(content_area.width),
                     height: visible_height,
                 };
 
                 let item_area = Rect {
-                    x: content_area.x + GUTTER_WIDTH.min(content_area.width),
+                    x: content_area.x + gw.min(content_area.width),
                     y: screen_y,
-                    width: content_area.width.saturating_sub(GUTTER_WIDTH),
+                    width: content_area.width.saturating_sub(gw),
                     height: visible_height,
                 };
 

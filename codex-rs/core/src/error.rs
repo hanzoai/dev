@@ -214,6 +214,13 @@ impl CodexErr {
             | CodexErr::SessionConfiguredNotFirstEvent
             | CodexErr::UsageLimitReached(_)
             | CodexErr::ServerOverloaded => false,
+            // 401/403 are auth failures — retrying won't help, the user needs to (re-)login.
+            CodexErr::UnexpectedStatus(err)
+                if err.status == StatusCode::UNAUTHORIZED
+                    || err.status == StatusCode::FORBIDDEN =>
+            {
+                false
+            }
             CodexErr::Stream(..)
             | CodexErr::Timeout
             | CodexErr::UnexpectedStatus(_)
@@ -327,27 +334,35 @@ impl UnexpectedResponseError {
     }
 
     fn friendly_message(&self) -> Option<String> {
-        if self.status != StatusCode::FORBIDDEN {
-            return None;
+        if self.status == StatusCode::UNAUTHORIZED {
+            return Some(
+                "Authentication failed (401). Run `hanzo login` to sign in.".to_string(),
+            );
         }
 
-        if !self.body.contains("Cloudflare") || !self.body.contains("blocked") {
-            return None;
+        if self.status == StatusCode::FORBIDDEN {
+            if self.body.contains("Cloudflare") && self.body.contains("blocked") {
+                let status = self.status;
+                let mut message =
+                    format!("{CLOUDFLARE_BLOCKED_MESSAGE} (status {status})");
+                if let Some(url) = &self.url {
+                    message.push_str(&format!(", url: {url}"));
+                }
+                if let Some(cf_ray) = &self.cf_ray {
+                    message.push_str(&format!(", cf-ray: {cf_ray}"));
+                }
+                if let Some(id) = &self.request_id {
+                    message.push_str(&format!(", request id: {id}"));
+                }
+                return Some(message);
+            }
+
+            return Some(
+                "Access denied (403). Your API key may lack permissions, or run `hanzo login` to re-authenticate.".to_string(),
+            );
         }
 
-        let status = self.status;
-        let mut message = format!("{CLOUDFLARE_BLOCKED_MESSAGE} (status {status})");
-        if let Some(url) = &self.url {
-            message.push_str(&format!(", url: {url}"));
-        }
-        if let Some(cf_ray) = &self.cf_ray {
-            message.push_str(&format!(", cf-ray: {cf_ray}"));
-        }
-        if let Some(id) = &self.request_id {
-            message.push_str(&format!(", request id: {id}"));
-        }
-
-        Some(message)
+        None
     }
 }
 
@@ -583,6 +598,12 @@ impl CodexErr {
                 http_status_code: self.http_status_code_value(),
             },
             CodexErr::RefreshTokenFailed(_) => CodexErrorInfo::Unauthorized,
+            CodexErr::UnexpectedStatus(err)
+                if err.status == StatusCode::UNAUTHORIZED
+                    || err.status == StatusCode::FORBIDDEN =>
+            {
+                CodexErrorInfo::Unauthorized
+            }
             CodexErr::SessionConfiguredNotFirstEvent
             | CodexErr::InternalServerError
             | CodexErr::InternalAgentDied => CodexErrorInfo::InternalServerError,
