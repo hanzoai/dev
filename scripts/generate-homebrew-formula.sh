@@ -2,7 +2,7 @@
 set -euo pipefail
 
 # Generate a minimal Homebrew formula from the latest GitHub release.
-# Writes Formula/Code.rb into the repo root (not a tap); you can copy it
+# Writes Formula/Dev.rb into the repo root (not a tap); you can copy it
 # into a tap repo to publish.
 
 owner_repo="hanzoai/dev"
@@ -22,8 +22,8 @@ if [ -z "$version" ] && [ -f "hanzo-dev/Cargo.toml" ]; then
   raw="$(awk -F '"' '/^\[workspace.package\]/{f=1; next} f && $1 ~ /version/ {print $2; exit}' hanzo-dev/Cargo.toml)"
   version="$(sanitize_version "$raw")"
 fi
-if [ -z "$version" ] && [ -f "codex-cli/package.json" ]; then
-  raw="$(jq -r .version codex-cli/package.json)"
+if [ -z "$version" ] && [ -f "dev-cli/package.json" ]; then
+  raw="$(jq -r .version dev-cli/package.json)"
   version="$(sanitize_version "$raw")"
 fi
 if [ -z "$version" ] && git rev-parse --git-dir >/dev/null 2>&1; then
@@ -47,8 +47,8 @@ fi
 RELEASE_ASSETS_DIR=${RELEASE_ASSETS_DIR:-"release-assets"}
 
 assets=(
-  "code-aarch64-apple-darwin.tar.gz"
-  "code-x86_64-apple-darwin.tar.gz"
+  "dev-aarch64-apple-darwin.tar.gz"
+  "dev-x86_64-apple-darwin.tar.gz"
 )
 
 sha256_file() {
@@ -76,15 +76,15 @@ retry() {
 }
 
 mkdir -p Formula
-cat > Formula/Code.rb <<'RUBY'
-class Code < Formula
-  desc "Terminal coding agent"
+cat > Formula/Dev.rb <<'RUBY'
+class Dev < Formula
+  desc "Hanzo Dev - AI coding assistant"
   homepage "https://github.com/hanzoai/dev"
 RUBY
 
-echo "  version \"v${version}\"" >> Formula/Code.rb
+echo "  version \"v${version}\"" >> Formula/Dev.rb
 
-cat >> Formula/Code.rb <<'RUBY'
+cat >> Formula/Dev.rb <<'RUBY'
   on_macos do
     if Hardware::CPU.arm?
       url "__URL_ARM64__"
@@ -96,16 +96,16 @@ cat >> Formula/Code.rb <<'RUBY'
   end
 
   def install
-    bin.install Dir["code-*"].first => "code"
+    bin.install Dir["dev-*"].first => "dev"
     # Provide a compatibility shim
-    (bin/"coder").write <<~EOS
+    (bin/"hanzo").write <<~EOS
       #!/bin/bash
-      exec "#{bin}/code" "$@"
+      exec "#{bin}/dev" "$@"
     EOS
   end
 
   test do
-    system "#{bin}/code", "--help"
+    system "#{bin}/dev", "--help"
   end
 end
 RUBY
@@ -135,16 +135,16 @@ for a in "${assets[@]}"; do
 
   # Apply URL (always), and sha when available
   if [[ "${a}" == *"aarch64-apple-darwin"* ]]; then
-    sed -i.bak "s#__URL_ARM64__#${url}#" Formula/Code.rb
-    if [ -n "$sha" ]; then sed -i.bak "s#__SHA_ARM64__#${sha}#" Formula/Code.rb; fi
+    sed -i.bak "s#__URL_ARM64__#${url}#" Formula/Dev.rb
+    if [ -n "$sha" ]; then sed -i.bak "s#__SHA_ARM64__#${sha}#" Formula/Dev.rb; fi
   else
-    sed -i.bak "s#__URL_X64__#${url}#" Formula/Code.rb
-    if [ -n "$sha" ]; then sed -i.bak "s#__SHA_X64__#${sha}#" Formula/Code.rb; fi
+    sed -i.bak "s#__URL_X64__#${url}#" Formula/Dev.rb
+    if [ -n "$sha" ]; then sed -i.bak "s#__SHA_X64__#${sha}#" Formula/Dev.rb; fi
   fi
 done
 
-rm -f Formula/Code.rb.bak
-echo "Wrote Formula/Code.rb for v${version}" >&2
+rm -f Formula/Dev.rb.bak
+echo "Wrote Formula/Dev.rb for v${version}"
 
 # Optional: best-effort HEAD check to surface propagation status without failing CI
 for a in "${assets[@]}"; do
