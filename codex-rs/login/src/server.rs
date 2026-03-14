@@ -84,6 +84,12 @@ impl ServerOptions {
             cli_auth_credentials_store_mode,
         }
     }
+
+    /// Override the issuer URL.
+    pub fn with_issuer(mut self, issuer: String) -> Self {
+        self.issuer = issuer;
+        self
+    }
 }
 
 /// Handle for a running login callback server.
@@ -341,13 +347,16 @@ async fn process_request(
                             None,
                         );
                     }
-                    // Obtain API key via token-exchange (OpenAI only — Casdoor uses access_token directly)
-                    let api_key = if opts.issuer.contains("openai.com") {
+                    // Obtain API key via token-exchange (OpenAI only).
+                    // For Claude, the access_token (sk-ant-oat*) is the API key.
+                    // For Hanzo/Casdoor, the access_token IS the credential.
+                    let api_key = if is_claude_issuer(&opts.issuer) {
+                        Some(tokens.access_token.clone())
+                    } else if opts.issuer.contains("openai.com") {
                         obtain_api_key(&opts.issuer, &opts.client_id, &tokens.id_token)
                             .await
                             .ok()
                     } else {
-                        // For Hanzo/Casdoor issuers, the access_token IS the credential
                         None
                     };
                     if let Err(err) = persist_tokens_async(
@@ -467,6 +476,11 @@ fn send_response_with_disconnect(
     writer.flush()
 }
 
+/// Returns `true` when `issuer` is Claude/Anthropic.
+fn is_claude_issuer(issuer: &str) -> bool {
+    issuer.contains("claude.ai") || issuer.contains("anthropic.com")
+}
+
 fn build_authorize_url(
     issuer: &str,
     client_id: &str,
@@ -475,28 +489,37 @@ fn build_authorize_url(
     state: &str,
     forced_chatgpt_workspace_id: Option<&str>,
 ) -> String {
+    let scope = if is_claude_issuer(issuer) {
+        "user:inference user:profile user:sessions:claude_code user:mcp_servers user:file_upload"
+    } else {
+        "openid profile email offline_access api.connectors.read api.connectors.invoke"
+    };
+
     let mut query = vec![
         ("response_type".to_string(), "code".to_string()),
         ("client_id".to_string(), client_id.to_string()),
         ("redirect_uri".to_string(), redirect_uri.to_string()),
-        (
-            "scope".to_string(),
-            "openid profile email offline_access api.connectors.read api.connectors.invoke"
-                .to_string(),
-        ),
+        ("scope".to_string(), scope.to_string()),
         (
             "code_challenge".to_string(),
             pkce.code_challenge.to_string(),
         ),
         ("code_challenge_method".to_string(), "S256".to_string()),
-        ("id_token_add_organizations".to_string(), "true".to_string()),
-        ("codex_cli_simplified_flow".to_string(), "true".to_string()),
         ("state".to_string(), state.to_string()),
-        (
+    ];
+
+    // OpenAI / Hanzo-specific parameters
+    if !is_claude_issuer(issuer) {
+        query.push(("id_token_add_organizations".to_string(), "true".to_string()));
+        query.push((
+            "codex_cli_simplified_flow".to_string(),
+            "true".to_string(),
+        ));
+        query.push((
             "originator".to_string(),
             originator().value.as_str().to_string(),
-        ),
-    ];
+        ));
+    }
     if let Some(workspace_id) = forced_chatgpt_workspace_id {
         query.push(("allowed_workspace_id".to_string(), workspace_id.to_string()));
     }
@@ -695,7 +718,8 @@ pub(crate) async fn exchange_code_for_tokens(
 ) -> io::Result<ExchangedTokens> {
     #[derive(serde::Deserialize)]
     struct TokenResponse {
-        id_token: String,
+        // Claude returns only access_token + refresh_token (no id_token).
+        id_token: Option<String>,
         access_token: String,
         refresh_token: String,
     }
@@ -706,8 +730,16 @@ pub(crate) async fn exchange_code_for_tokens(
         redirect_uri = %redirect_uri,
         "starting oauth token exchange"
     );
+
+    // Claude uses a separate token endpoint.
+    let token_url = if is_claude_issuer(issuer) {
+        codex_core::auth::CLAUDE_TOKEN_URL.to_string()
+    } else {
+        format!("{issuer}/oauth/token")
+    };
+
     let resp = client
-        .post(format!("{issuer}/oauth/token"))
+        .post(&token_url)
         .header("Content-Type", "application/x-www-form-urlencoded")
         .body(format!(
             "grant_type=authorization_code&code={}&redirect_uri={}&client_id={}&code_verifier={}",
@@ -750,8 +782,12 @@ pub(crate) async fn exchange_code_for_tokens(
 
     let tokens: TokenResponse = resp.json().await.map_err(io::Error::other)?;
     info!(%status, "oauth token exchange succeeded");
+    // For Claude, use access_token as the id_token stand-in when id_token is absent.
+    let id_token = tokens
+        .id_token
+        .unwrap_or_else(|| tokens.access_token.clone());
     Ok(ExchangedTokens {
-        id_token: tokens.id_token,
+        id_token,
         access_token: tokens.access_token,
         refresh_token: tokens.refresh_token,
     })
@@ -819,10 +855,10 @@ fn compose_success_url(port: u16, issuer: &str, id_token: &str, access_token: &s
         .and_then(|v| v.as_str())
         .unwrap_or("");
 
-    let platform_url = if issuer.contains("openai.com") {
+    let platform_url = if is_claude_issuer(issuer) {
+        "https://platform.claude.com"
+    } else if issuer.contains("openai.com") {
         "https://platform.openai.com"
-    } else if issuer.contains("hanzo") {
-        "https://hanzo.ai"
     } else {
         "https://hanzo.ai"
     };
