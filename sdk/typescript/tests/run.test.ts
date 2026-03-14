@@ -195,6 +195,497 @@ describe("Codex", () => {
       await close();
     }
   });
+
+  it("passes modelReasoningEffort to exec", async () => {
+    const { url, close } = await startResponsesTestProxy({
+      statusCode: 200,
+      responseBodies: [
+        sse(
+          responseStarted("response_1"),
+          assistantMessage("Reasoning effort applied", "item_1"),
+          responseCompleted("response_1"),
+        ),
+      ],
+    });
+
+    const { args: spawnArgs, restore } = codexExecSpy();
+
+    try {
+      const client = new Codex({ codexPathOverride: codexExecPath, baseUrl: url, apiKey: "test" });
+
+      const thread = client.startThread({
+        modelReasoningEffort: "high",
+      });
+      await thread.run("apply reasoning effort");
+
+      const commandArgs = spawnArgs[0];
+      expect(commandArgs).toBeDefined();
+      expectPair(commandArgs, ["--config", 'model_reasoning_effort="high"']);
+    } finally {
+      restore();
+      await close();
+    }
+  });
+
+  it("passes networkAccessEnabled to exec", async () => {
+    const { url, close } = await startResponsesTestProxy({
+      statusCode: 200,
+      responseBodies: [
+        sse(
+          responseStarted("response_1"),
+          assistantMessage("Network access enabled", "item_1"),
+          responseCompleted("response_1"),
+        ),
+      ],
+    });
+
+    const { args: spawnArgs, restore } = codexExecSpy();
+
+    try {
+      const client = new Codex({ codexPathOverride: codexExecPath, baseUrl: url, apiKey: "test" });
+
+      const thread = client.startThread({
+        networkAccessEnabled: true,
+      });
+      await thread.run("test network access");
+
+      const commandArgs = spawnArgs[0];
+      expect(commandArgs).toBeDefined();
+      expectPair(commandArgs, ["--config", "sandbox_workspace_write.network_access=true"]);
+    } finally {
+      restore();
+      await close();
+    }
+  });
+
+  it("passes webSearchEnabled to exec", async () => {
+    const { url, close } = await startResponsesTestProxy({
+      statusCode: 200,
+      responseBodies: [
+        sse(
+          responseStarted("response_1"),
+          assistantMessage("Web search enabled", "item_1"),
+          responseCompleted("response_1"),
+        ),
+      ],
+    });
+
+    const { args: spawnArgs, restore } = codexExecSpy();
+
+    try {
+      const client = new Codex({ codexPathOverride: codexExecPath, baseUrl: url, apiKey: "test" });
+
+      const thread = client.startThread({
+        webSearchEnabled: true,
+      });
+      await thread.run("test web search");
+
+      const commandArgs = spawnArgs[0];
+      expect(commandArgs).toBeDefined();
+      expectPair(commandArgs, ["--config", 'web_search="live"']);
+    } finally {
+      restore();
+      await close();
+    }
+  });
+
+  it("passes webSearchMode to exec", async () => {
+    const { url, close } = await startResponsesTestProxy({
+      statusCode: 200,
+      responseBodies: [
+        sse(
+          responseStarted("response_1"),
+          assistantMessage("Web search cached", "item_1"),
+          responseCompleted("response_1"),
+        ),
+      ],
+    });
+
+    const { args: spawnArgs, restore } = codexExecSpy();
+
+    try {
+      const client = new Codex({ codexPathOverride: codexExecPath, baseUrl: url, apiKey: "test" });
+
+      const thread = client.startThread({
+        webSearchMode: "cached",
+      });
+      await thread.run("test web search mode");
+
+      const commandArgs = spawnArgs[0];
+      expect(commandArgs).toBeDefined();
+      expectPair(commandArgs, ["--config", 'web_search="cached"']);
+    } finally {
+      restore();
+      await close();
+    }
+  });
+
+  it("passes webSearchEnabled false to exec", async () => {
+    const { url, close } = await startResponsesTestProxy({
+      statusCode: 200,
+      responseBodies: [
+        sse(
+          responseStarted("response_1"),
+          assistantMessage("Web search disabled", "item_1"),
+          responseCompleted("response_1"),
+        ),
+      ],
+    });
+
+    const { args: spawnArgs, restore } = codexExecSpy();
+
+    try {
+      const client = new Codex({ codexPathOverride: codexExecPath, baseUrl: url, apiKey: "test" });
+
+      const thread = client.startThread({
+        webSearchEnabled: false,
+      });
+      await thread.run("test web search disabled");
+
+      const commandArgs = spawnArgs[0];
+      expect(commandArgs).toBeDefined();
+      expectPair(commandArgs, ["--config", 'web_search="disabled"']);
+    } finally {
+      restore();
+      await close();
+    }
+  });
+
+  it("passes approvalPolicy to exec", async () => {
+    const { url, close } = await startResponsesTestProxy({
+      statusCode: 200,
+      responseBodies: [
+        sse(
+          responseStarted("response_1"),
+          assistantMessage("Approval policy set", "item_1"),
+          responseCompleted("response_1"),
+        ),
+      ],
+    });
+
+    const { args: spawnArgs, restore } = codexExecSpy();
+
+    try {
+      const client = new Codex({ codexPathOverride: codexExecPath, baseUrl: url, apiKey: "test" });
+
+      const thread = client.startThread({
+        approvalPolicy: "on-request",
+      });
+      await thread.run("test approval policy");
+
+      const commandArgs = spawnArgs[0];
+      expect(commandArgs).toBeDefined();
+      expectPair(commandArgs, ["--config", 'approval_policy="on-request"']);
+    } finally {
+      restore();
+      await close();
+    }
+  });
+
+  it("passes CodexOptions config overrides as TOML --config flags", async () => {
+    const { url, close } = await startResponsesTestProxy({
+      statusCode: 200,
+      responseBodies: [
+        sse(
+          responseStarted("response_1"),
+          assistantMessage("Config overrides applied", "item_1"),
+          responseCompleted("response_1"),
+        ),
+      ],
+    });
+
+    const { args: spawnArgs, restore } = codexExecSpy();
+
+    try {
+      const client = new Codex({
+        codexPathOverride: codexExecPath,
+        baseUrl: url,
+        apiKey: "test",
+        config: {
+          approval_policy: "never",
+          sandbox_workspace_write: { network_access: true },
+          retry_budget: 3,
+          tool_rules: { allow: ["git status", "git diff"] },
+        },
+      });
+
+      const thread = client.startThread();
+      await thread.run("apply config overrides");
+
+      const commandArgs = spawnArgs[0];
+      expect(commandArgs).toBeDefined();
+      expectPair(commandArgs, ["--config", 'approval_policy="never"']);
+      expectPair(commandArgs, ["--config", "sandbox_workspace_write.network_access=true"]);
+      expectPair(commandArgs, ["--config", "retry_budget=3"]);
+      expectPair(commandArgs, ["--config", 'tool_rules.allow=["git status", "git diff"]']);
+    } finally {
+      restore();
+      await close();
+    }
+  });
+
+  it("lets thread options override CodexOptions config overrides", async () => {
+    const { url, close } = await startResponsesTestProxy({
+      statusCode: 200,
+      responseBodies: [
+        sse(
+          responseStarted("response_1"),
+          assistantMessage("Thread overrides applied", "item_1"),
+          responseCompleted("response_1"),
+        ),
+      ],
+    });
+
+    const { args: spawnArgs, restore } = codexExecSpy();
+
+    try {
+      const client = new Codex({
+        codexPathOverride: codexExecPath,
+        baseUrl: url,
+        apiKey: "test",
+        config: { approval_policy: "never" },
+      });
+
+      const thread = client.startThread({ approvalPolicy: "on-request" });
+      await thread.run("override approval policy");
+
+      const commandArgs = spawnArgs[0];
+      const approvalPolicyOverrides = collectConfigValues(commandArgs, "approval_policy");
+      expect(approvalPolicyOverrides).toEqual([
+        'approval_policy="never"',
+        'approval_policy="on-request"',
+      ]);
+      expect(approvalPolicyOverrides.at(-1)).toBe('approval_policy="on-request"');
+    } finally {
+      restore();
+      await close();
+    }
+  });
+
+  it("allows overriding the env passed to the Codex CLI", async () => {
+    const { url, close } = await startResponsesTestProxy({
+      statusCode: 200,
+      responseBodies: [
+        sse(
+          responseStarted("response_1"),
+          assistantMessage("Custom env", "item_1"),
+          responseCompleted("response_1"),
+        ),
+      ],
+    });
+
+    const { args: spawnArgs, envs: spawnEnvs, restore } = codexExecSpy();
+    process.env.CODEX_ENV_SHOULD_NOT_LEAK = "leak";
+
+    try {
+      const client = new Codex({
+        codexPathOverride: codexExecPath,
+        baseUrl: url,
+        apiKey: "test",
+        env: { CUSTOM_ENV: "custom" },
+      });
+
+      const thread = client.startThread();
+      await thread.run("custom env");
+
+      const spawnEnv = spawnEnvs[0];
+      expect(spawnEnv).toBeDefined();
+      if (!spawnEnv) {
+        throw new Error("Spawn env missing");
+      }
+      const commandArgs = spawnArgs[0];
+      expect(commandArgs).toBeDefined();
+      if (!commandArgs) {
+        throw new Error("Command args missing");
+      }
+      expect(spawnEnv.CUSTOM_ENV).toBe("custom");
+      expect(spawnEnv.CODEX_ENV_SHOULD_NOT_LEAK).toBeUndefined();
+      expect(spawnEnv.OPENAI_BASE_URL).toBeUndefined();
+      expect(spawnEnv.CODEX_API_KEY).toBe("test");
+      expect(spawnEnv.CODEX_INTERNAL_ORIGINATOR_OVERRIDE).toBeDefined();
+      expect(commandArgs).toContain("--config");
+      expect(commandArgs).toContain(`openai_base_url=${JSON.stringify(url)}`);
+    } finally {
+      delete process.env.CODEX_ENV_SHOULD_NOT_LEAK;
+      restore();
+      await close();
+    }
+  });
+
+  it("passes additionalDirectories as repeated flags", async () => {
+    const { url, close } = await startResponsesTestProxy({
+      statusCode: 200,
+      responseBodies: [
+        sse(
+          responseStarted("response_1"),
+          assistantMessage("Additional directories applied", "item_1"),
+          responseCompleted("response_1"),
+        ),
+      ],
+    });
+
+    const { args: spawnArgs, restore } = codexExecSpy();
+
+    try {
+      const client = new Codex({ codexPathOverride: codexExecPath, baseUrl: url, apiKey: "test" });
+
+      const thread = client.startThread({
+        additionalDirectories: ["../backend", "/tmp/shared"],
+      });
+      await thread.run("test additional dirs");
+
+      const commandArgs = spawnArgs[0];
+      expect(commandArgs).toBeDefined();
+      if (!commandArgs) {
+        throw new Error("Command args missing");
+      }
+
+      // Find the --add-dir flags
+      const addDirArgs: string[] = [];
+      for (let i = 0; i < commandArgs.length; i += 1) {
+        if (commandArgs[i] === "--add-dir") {
+          addDirArgs.push(commandArgs[i + 1] ?? "");
+        }
+      }
+      expect(addDirArgs).toEqual(["../backend", "/tmp/shared"]);
+    } finally {
+      restore();
+      await close();
+    }
+  });
+
+  it("writes output schema to a temporary file and forwards it", async () => {
+    const { url, close, requests } = await startResponsesTestProxy({
+      statusCode: 200,
+      responseBodies: [
+        sse(
+          responseStarted("response_1"),
+          assistantMessage("Structured response", "item_1"),
+          responseCompleted("response_1"),
+        ),
+      ],
+    });
+
+    const { args: spawnArgs, restore } = codexExecSpy();
+
+    const schema = {
+      type: "object",
+      properties: {
+        answer: { type: "string" },
+      },
+      required: ["answer"],
+      additionalProperties: false,
+    } as const;
+
+    try {
+      const client = new Codex({ codexPathOverride: codexExecPath, baseUrl: url, apiKey: "test" });
+
+      const thread = client.startThread();
+      await thread.run("structured", { outputSchema: schema });
+
+      expect(requests.length).toBeGreaterThanOrEqual(1);
+      const payload = requests[0];
+      expect(payload).toBeDefined();
+      const text = payload!.json.text;
+      expect(text).toBeDefined();
+      expect(text?.format).toEqual({
+        name: "codex_output_schema",
+        type: "json_schema",
+        strict: true,
+        schema,
+      });
+
+      const commandArgs = spawnArgs[0];
+      expect(commandArgs).toBeDefined();
+      const schemaFlagIndex = commandArgs!.indexOf("--output-schema");
+      expect(schemaFlagIndex).toBeGreaterThan(-1);
+      const schemaPath = commandArgs![schemaFlagIndex + 1];
+      expect(typeof schemaPath).toBe("string");
+      if (typeof schemaPath !== "string") {
+        throw new Error("--output-schema flag missing path argument");
+      }
+      expect(fs.existsSync(schemaPath)).toBe(false);
+    } finally {
+      restore();
+      await close();
+    }
+  });
+  it("combines structured text input segments", async () => {
+    const { url, close, requests } = await startResponsesTestProxy({
+      statusCode: 200,
+      responseBodies: [
+        sse(
+          responseStarted("response_1"),
+          assistantMessage("Combined input applied", "item_1"),
+          responseCompleted("response_1"),
+        ),
+      ],
+    });
+
+    try {
+      const client = new Codex({ codexPathOverride: codexExecPath, baseUrl: url, apiKey: "test" });
+
+      const thread = client.startThread();
+      await thread.run([
+        { type: "text", text: "Describe file changes" },
+        { type: "text", text: "Focus on impacted tests" },
+      ]);
+
+      const payload = requests[0];
+      expect(payload).toBeDefined();
+      const lastUser = payload!.json.input.at(-1);
+      expect(lastUser?.content?.[0]?.text).toBe("Describe file changes\n\nFocus on impacted tests");
+    } finally {
+      await close();
+    }
+  });
+  it("forwards images to exec", async () => {
+    const { url, close } = await startResponsesTestProxy({
+      statusCode: 200,
+      responseBodies: [
+        sse(
+          responseStarted("response_1"),
+          assistantMessage("Images applied", "item_1"),
+          responseCompleted("response_1"),
+        ),
+      ],
+    });
+
+    const { args: spawnArgs, restore } = codexExecSpy();
+    const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "codex-images-"));
+    const imagesDirectoryEntries: [string, string] = [
+      path.join(tempDir, "first.png"),
+      path.join(tempDir, "second.jpg"),
+    ];
+    imagesDirectoryEntries.forEach((image, index) => {
+      fs.writeFileSync(image, `image-${index}`);
+    });
+
+    try {
+      const client = new Codex({ codexPathOverride: codexExecPath, baseUrl: url, apiKey: "test" });
+
+      const thread = client.startThread();
+      await thread.run([
+        { type: "text", text: "describe the images" },
+        { type: "local_image", path: imagesDirectoryEntries[0] },
+        { type: "local_image", path: imagesDirectoryEntries[1] },
+      ]);
+
+      const commandArgs = spawnArgs[0];
+      expect(commandArgs).toBeDefined();
+      const forwardedImages: string[] = [];
+      for (let i = 0; i < commandArgs!.length; i += 1) {
+        if (commandArgs![i] === "--image") {
+          forwardedImages.push(commandArgs![i + 1] ?? "");
+        }
+      }
+      expect(forwardedImages).toEqual(imagesDirectoryEntries);
+    } finally {
+      fs.rmSync(tempDir, { recursive: true, force: true });
+      restore();
+      await close();
+    }
+  });
   it("runs in provided working directory", async () => {
     const { url, close } = await startResponsesTestProxy({
       statusCode: 200,
