@@ -14,6 +14,7 @@ expression: sanitized
 │  Directory: [[workspace]]                                                  │
 │  Permissions:      Custom (read-only, on-request)                          │
 │  Agents.md:        <none>                                                  │
+│  Account:          API key configured (run codex login to use ChatGPT)     │
 │                                                                            │
 │  Token usage:      1.2K total  (800 input + 400 output)                    │
 │  Context window:   100% left (1.2K used / 272K)                            │
