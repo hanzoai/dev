@@ -20,29 +20,13 @@ importers:
         specifier: ^5.9.2
         version: 5.9.2
 
-  codex-cli:
+  codex-rs/responses-api-proxy/npm: {}
+
+  dev-cli:
     devDependencies:
       prettier:
         specifier: ^3.3.3
         version: 3.6.2
-    optionalDependencies:
-      '@just-every/code-darwin-arm64':
-        specifier: 0.6.79
-        version: 0.6.79
-      '@just-every/code-darwin-x64':
-        specifier: 0.6.79
-        version: 0.6.79
-      '@just-every/code-linux-arm64-musl':
-        specifier: 0.6.79
-        version: 0.6.79
-      '@just-every/code-linux-x64-musl':
-        specifier: 0.6.79
-        version: 0.6.79
-      '@just-every/code-win32-x64':
-        specifier: 0.6.79
-        version: 0.6.79
-
-  codex-rs/responses-api-proxy/npm: {}
 
   sdk/typescript:
     devDependencies:
@@ -590,31 +574,6 @@ packages:
 
   '@jridgewell/trace-mapping@0.3.9':
     resolution: {integrity: sha512-3Belt6tdc8bPgAtbcmdtNJlirVoTmEb5e2gC94PnkwEW9jI6CAHUeoG85tjWP5WquqfavoMtMwiG4P926ZKKuQ==}
-
-  '@just-every/code-darwin-arm64@0.6.79':
-    resolution: {integrity: sha512-hnBVfrVLKytDxMG6XjPBME1kTGrbZk3PJHoTRT6rxA7A69bvuSpIdVYxUpmSa2MSjoFqcwXT5IPe2iPjYQIN5Q==}
-    cpu: [arm64]
-    os: [darwin]
-
-  '@just-every/code-darwin-x64@0.6.79':
-    resolution: {integrity: sha512-VGY0DaCEu40QkUIts0UgXOITfJMWzvSguooU/oQoMTltY/1IHx0pTN9GXYZlXbloW8agJoy5xSX5Ome+HVRmqQ==}
-    cpu: [x64]
-    os: [darwin]
-
-  '@just-every/code-linux-arm64-musl@0.6.79':
-    resolution: {integrity: sha512-kg4CAgW8Sg/duoUzQZzu+owNYRfcQbvetORUjP9ADQiu7iYedmewBbti52ghY7n4ItwZMb3W3p2YvK9jHQn8Jw==}
-    cpu: [arm64]
-    os: [linux]
-
-  '@just-every/code-linux-x64-musl@0.6.79':
-    resolution: {integrity: sha512-7tJyjgedl+YDB10s5QwMLKJjGW2+0L3UXq+/OfvGHFecTdxrkq9MejeCXXbAPUKPObZwQX+k5vZq8ZOCLFR2BA==}
-    cpu: [x64]
-    os: [linux]
-
-  '@just-every/code-win32-x64@0.6.79':
-    resolution: {integrity: sha512-qqRkhoFHH5LAeKdfNCrGjaYDC71RcGlNpz8j2kgarBV+tz8WluIHseexbNk3Heg42/tL3TGLbqMrVgOVQ4a32g==}
-    cpu: [x64]
-    os: [win32]
 
   '@nodelib/fs.scandir@2.1.5':
     resolution: {integrity: sha512-vq24Bq3ym5HEQm2NKCr3yXDwjc7vTsEThRDnkp2DK9p1uqLR+DHurm/NOTo0KG7HYHU7eppKZj3MyqYuMBf62g==}
@@ -2771,21 +2730,6 @@ snapshots:
     dependencies:
       '@jridgewell/resolve-uri': 3.1.2
       '@jridgewell/sourcemap-codec': 1.5.5
-
-  '@just-every/code-darwin-arm64@0.6.79':
-    optional: true
-
-  '@just-every/code-darwin-x64@0.6.79':
-    optional: true
-
-  '@just-every/code-linux-arm64-musl@0.6.79':
-    optional: true
-
-  '@just-every/code-linux-x64-musl@0.6.79':
-    optional: true
-
-  '@just-every/code-win32-x64@0.6.79':
-    optional: true
 
   '@nodelib/fs.scandir@2.1.5':
     dependencies:

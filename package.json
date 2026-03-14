@@ -3,8 +3,8 @@
   "private": true,
   "description": "Tools for repo-wide maintenance.",
   "scripts": {
-    "format": "prettier --check '*.json' '!(CLAUDE|LLM|AGENTS).md' 'docs/*.md' '.github/workflows/*.yml' 'scripts/*.js' 'cli-proxy/*.js' 'codex-cli/*.js' 'codex-cli/scripts/*.js' 'console/*.js' 'dev-cli/*.js' 'hanzo-cli/*.js' 'hanzo-node/*.js'",
-    "format:fix": "prettier --write '*.json' '!(CLAUDE|LLM|AGENTS).md' 'docs/*.md' '.github/workflows/*.yml' 'scripts/*.js' 'cli-proxy/*.js' 'codex-cli/*.js' 'codex-cli/scripts/*.js' 'console/*.js' 'dev-cli/*.js' 'hanzo-cli/*.js' 'hanzo-node/*.js'",
+    "format": "prettier --check '*.json' '!(CLAUDE|LLM|AGENTS).md' 'docs/*.md' '.github/workflows/*.yml' 'scripts/*.js' 'cli-proxy/*.js' 'dev-cli/*.js' 'dev-cli/scripts/*.js' 'console/*.js' 'dev-cli/*.js' 'hanzo-cli/*.js' 'hanzo-node/*.js'",
+    "format:fix": "prettier --write '*.json' '!(CLAUDE|LLM|AGENTS).md' 'docs/*.md' '.github/workflows/*.yml' 'scripts/*.js' 'cli-proxy/*.js' 'dev-cli/*.js' 'dev-cli/scripts/*.js' 'console/*.js' 'dev-cli/*.js' 'hanzo-cli/*.js' 'hanzo-node/*.js'",
     "build": "cd hanzo-dev && cargo build --release --bin dev --bin dev-tui --bin dev-exec",
     "build:dev": "cd hanzo-dev && cargo build --bin dev --bin dev-tui --bin dev-exec",
     "build:quick": "cd hanzo-dev && cargo build --release --bin dev",
