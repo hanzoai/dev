@@ -84,14 +84,14 @@
 ### Run
 
 ```bash
-npx -y @just-every/code
+npx -y @hanzo/dev
 ```
 
 ### Install & Run
 
 ```bash
-npm install -g @just-every/code
-code // or `coder` if you're using VS Code
+npm install -g @hanzo/dev
+dev
 ```
 
 Note: If another tool already provides a `code` command (e.g. VS Code), our CLI is also installed as `coder`. Use `coder` to avoid conflicts.

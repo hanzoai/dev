@@ -59,7 +59,7 @@ provider = "anthropic"
 ## Related Packages
 
 - `@hanzo/dev` - Same CLI with different package name
-- `@just-every/code` - Legacy upstream fork compatibility
+- `@hanzo/dev` - Primary CLI package
 
 ## License
 
