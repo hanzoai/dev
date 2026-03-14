@@ -512,7 +512,7 @@ pub(crate) fn map_theme_for_palette(
 ) -> ThemeName {
     match palette_mode() {
         PaletteMode::Ansi16 => match name {
-            ThemeName::LightPhotonAnsi16 | ThemeName::DarkCarbonAnsi16 => name,
+            ThemeName::LightPhotonAnsi16 | ThemeName::DarkCarbonAnsi16 | ThemeName::DarkMonochrome => name,
             ThemeName::Custom => {
                 let is_dark = custom_is_dark_hint
                     .or_else(|| custom_theme_is_dark())
@@ -1614,28 +1614,28 @@ fn get_predefined_theme(name: ThemeName) -> Theme {
         },
 
         ThemeName::DarkMonochrome => Theme {
-            // Deep blue-black monochrome for a simpler low-contrast dark UI.
-            primary: Color::Rgb(226, 229, 234),
-            secondary: Color::Rgb(184, 188, 196),
-            background: Color::Rgb(3, 7, 14),
-            foreground: Color::Rgb(214, 218, 225),
-            border: Color::Rgb(28, 36, 50),
-            border_focused: Color::Rgb(54, 62, 78),
-            selection: Color::Rgb(10, 14, 24),
-            cursor: Color::Rgb(230, 233, 238),
-            success: Color::Rgb(214, 218, 225),
-            warning: Color::Rgb(214, 218, 225),
-            error: Color::Rgb(236, 238, 242),
-            info: Color::Rgb(214, 218, 225),
-            text: Color::Rgb(214, 218, 225),
-            text_dim: Color::Rgb(118, 126, 140),
-            text_bright: Color::Rgb(236, 238, 242),
-            keyword: Color::Rgb(228, 231, 236),
-            string: Color::Rgb(214, 218, 225),
-            comment: Color::Rgb(102, 110, 124),
-            function: Color::Rgb(222, 225, 231),
-            spinner: Color::Rgb(118, 126, 140),
-            progress: Color::Rgb(214, 218, 225),
+            // Pure black & white monochrome — no color accents.
+            primary: Color::Rgb(220, 220, 220),
+            secondary: Color::Rgb(160, 160, 160),
+            background: Color::Rgb(0, 0, 0),
+            foreground: Color::Rgb(210, 210, 210),
+            border: Color::Rgb(40, 40, 40),
+            border_focused: Color::Rgb(80, 80, 80),
+            selection: Color::Rgb(20, 20, 20),
+            cursor: Color::Rgb(230, 230, 230),
+            success: Color::Rgb(210, 210, 210),
+            warning: Color::Rgb(210, 210, 210),
+            error: Color::Rgb(240, 240, 240),
+            info: Color::Rgb(210, 210, 210),
+            text: Color::Rgb(210, 210, 210),
+            text_dim: Color::Rgb(120, 120, 120),
+            text_bright: Color::Rgb(240, 240, 240),
+            keyword: Color::Rgb(220, 220, 220),
+            string: Color::Rgb(210, 210, 210),
+            comment: Color::Rgb(100, 100, 100),
+            function: Color::Rgb(220, 220, 220),
+            spinner: Color::Rgb(120, 120, 120),
+            progress: Color::Rgb(210, 210, 210),
             show_borders: true,
             show_gutter: true,
             content_padding: 1,

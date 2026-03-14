@@ -633,7 +633,7 @@ impl ChatComposer {
         .areas(area);
 
         // Get inner area of the bordered input box
-        let input_block = Block::default().borders(Borders::ALL);
+        let input_block = Block::default().borders(crate::theme::zen_borders());
         let textarea_rect = input_block.inner(input_area);
 
         // Apply the same inner padding as in render (horizontal only).
@@ -2888,7 +2888,7 @@ impl WidgetRef for ChatComposer {
             self.render_footer(area, buf);
         }
         // Draw border around input area with optional variant title when task is running
-        let mut input_block = Block::default().borders(Borders::ALL);
+        let mut input_block = Block::default().borders(crate::theme::zen_borders());
         let mut auto_drive_border_gradient = None;
         if let Some(style) = self
             .auto_drive_style
@@ -2904,7 +2904,7 @@ impl WidgetRef for ChatComposer {
             input_block = input_block
                 .border_style(Style::default().fg(crate::colors::border()))
                 .border_type(BorderType::Plain)
-                .style(Style::default().bg(crate::colors::background()));
+                .style(Style::default().bg(crate::colors::input_background()));
         }
 
         if self.is_task_running && !self.embedded_mode {

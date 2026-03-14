@@ -618,13 +618,21 @@ fn load_auth(
 
     // Fall back to the configured persistent store (file/keyring/auto) for managed auth.
     let storage = create_auth_storage(codex_home.to_path_buf(), auth_credentials_store_mode);
-    let auth_dot_json = match storage.load()? {
-        Some(auth) => auth,
-        None => return Ok(None),
-    };
+    if let Some(auth_dot_json) = storage.load()? {
+        let auth = build_auth(auth_dot_json, auth_credentials_store_mode)?;
+        return Ok(Some(auth));
+    }
 
-    let auth = build_auth(auth_dot_json, auth_credentials_store_mode)?;
-    Ok(Some(auth))
+    // Try reading an existing Claude Code access token from the macOS Keychain.
+    if let Some(claude_token) = read_claude_code_keychain_token() {
+        let client = crate::default_client::create_client();
+        return Ok(Some(CodexAuth::from_api_key_with_client(
+            claude_token.as_str(),
+            client,
+        )));
+    }
+
+    Ok(None)
 }
 
 // Persist refreshed tokens into auth storage and update last_refresh.
@@ -791,6 +799,44 @@ pub const CLIENT_ID: &str = "app_EMoamEEZ73f0CkXaXp7hrann";
 // Hanzo client credentials (for hanzo.id Casdoor OAuth)
 pub const HANZO_CLIENT_ID: &str = "app-hanzo";
 pub const HANZO_CLIENT_SECRET: &str = "3c7c4d9817bf0993681f6da2605e07ba5949da87a32862ed";
+
+// Claude Code OAuth credentials (for Anthropic OAuth)
+pub const CLAUDE_CLIENT_ID: &str = "9d1c250a-e61b-44d9-88ed-5944d1962f5e";
+pub const CLAUDE_ISSUER: &str = "https://claude.ai";
+pub const CLAUDE_TOKEN_URL: &str = "https://platform.claude.com/v1/oauth/token";
+pub const CLAUDE_API_KEY_URL: &str =
+    "https://api.anthropic.com/api/oauth/claude_cli/create_api_key";
+
+/// Attempts to read an existing Claude Code access token from the macOS Keychain.
+/// Returns `Some(access_token)` if a valid, non-expired token is found.
+#[cfg(target_os = "macos")]
+pub fn read_claude_code_keychain_token() -> Option<String> {
+    use std::process::Command;
+    let output = Command::new("security")
+        .args(["find-generic-password", "-s", "Claude Code-credentials", "-w"])
+        .output()
+        .ok()?;
+    if !output.status.success() {
+        return None;
+    }
+    let json_str = String::from_utf8(output.stdout).ok()?;
+    let parsed: serde_json::Value = serde_json::from_str(json_str.trim()).ok()?;
+    let oauth = parsed.get("claudeAiOauth")?;
+    let access_token = oauth.get("accessToken")?.as_str()?;
+    // Check expiry
+    if let Some(expires_at) = oauth.get("expiresAt").and_then(|v| v.as_i64()) {
+        let now_ms = chrono::Utc::now().timestamp_millis();
+        if now_ms >= expires_at {
+            return None;
+        }
+    }
+    Some(access_token.to_string())
+}
+
+#[cfg(not(target_os = "macos"))]
+pub fn read_claude_code_keychain_token() -> Option<String> {
+    None
+}
 
 fn refresh_token_endpoint() -> String {
     std::env::var(REFRESH_TOKEN_URL_OVERRIDE_ENV_VAR)

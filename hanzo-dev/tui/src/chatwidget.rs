@@ -41171,8 +41171,8 @@ impl WidgetRef for &ChatWidget<'_> {
             .last_bottom_reserved_rows
             .set(bottom_pane_area.height);
 
-        // Render status bar and HUD only in full TUI mode
-        if !self.standard_terminal_mode {
+        // Render status bar and HUD only in full TUI mode, hidden in zen mode
+        if !self.standard_terminal_mode && !crate::theme::is_zen_mode() {
             self.render_status_bar(status_bar_area, buf);
         }
 
