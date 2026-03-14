@@ -1,4 +1,4 @@
-## @just-every/code v0.6.77
+## @hanzo/dev v0.6.77
 
 This release improves automatic context selection defaults and strengthens context-mode reliability.
 
@@ -11,8 +11,8 @@ This release improves automatic context selection defaults and strengthens conte
 ### Install
 
 ```bash
-npm install -g @just-every/code@latest
-code
+npm install -g @hanzo/dev@latest
+dev
 ```
 
-Compare: https://github.com/just-every/code/compare/v0.6.76...v0.6.77
+Compare: https://github.com/hanzoai/dev/compare/v0.6.76...v0.6.77
