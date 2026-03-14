@@ -198,7 +198,7 @@ pub(super) fn layout_areas(chat: &ChatWidget<'_>, area: Rect) -> Vec<Rect> {
         bottom_desired,
         font_cell,
         None,
-        // Use config setting for status bar visibility (defaults to false)
-        chat.config.tui.show_status_bar,
+        // In zen mode, hide status bar for minimal look; otherwise use config setting
+        chat.config.tui.show_status_bar && !crate::theme::is_zen_mode(),
     )
 }
