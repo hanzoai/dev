@@ -130,7 +130,8 @@ pub(crate) fn background() -> Color {
 pub(crate) fn input_background() -> Color {
     let bg = current_theme().background;
     if matches!(current_theme_name(), ThemeName::DarkMonochrome) {
-        return bg;
+        // Subtle dark gray input bar (codex-style)
+        return Color::Rgb(18, 18, 18);
     }
     if color_to_rgb(bg) == (0, 0, 0) {
         return bg;
