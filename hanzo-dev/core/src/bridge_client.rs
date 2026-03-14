@@ -641,7 +641,7 @@ fn workspace_has_code_bridge(start: &Path) -> bool {
     let contains_dep = |section: &str| -> bool {
         json.get(section)
             .and_then(|v| v.as_object())
-            .map(|map| map.contains_key("@just-every/code-bridge"))
+            .map(|map| map.contains_key("@hanzo/dev-bridge") || map.contains_key("@just-every/code-bridge"))
             .unwrap_or(false)
     };
 
