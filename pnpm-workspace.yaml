@@ -1,5 +1,5 @@
 packages:
-  - codex-cli
+  - dev-cli
   - codex-rs/responses-api-proxy/npm
   - sdk/typescript
   - shell-tool-mcp
