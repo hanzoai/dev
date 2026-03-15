@@ -2876,12 +2876,15 @@ impl WidgetRef for ChatComposer {
         let input_height = desired_input_height.min(available_height);
 
         let (input_area, footer_area) = if footer_height == 0 {
+            // Anchor the input box to the bottom of the available area
+            // instead of stretching it to fill everything.
+            let h = input_height.min(available_height);
             (
                 Rect {
                     x: area.x,
-                    y: area.y,
+                    y: area.y + available_height.saturating_sub(h),
                     width: area.width,
-                    height: available_height,
+                    height: h,
                 },
                 None,
             )
