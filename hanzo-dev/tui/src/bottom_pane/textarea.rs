@@ -1051,7 +1051,7 @@ impl TextArea {
         lines: &[Range<usize>],
         range: std::ops::Range<usize>,
     ) {
-        let bg = crate::colors::background();
+        let bg = crate::colors::input_background();
         let fg = crate::colors::text();
         let line_style = Style::default().bg(bg).fg(fg);
         for (row, idx) in range.enumerate() {
