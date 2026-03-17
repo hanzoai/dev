@@ -612,33 +612,54 @@ impl ChatComposer {
     }
 
     pub fn cursor_pos(&self, area: Rect) -> Option<(u16, u16)> {
-        // Split area: textarea with border at top, hints/popup at bottom
-        let hint_height = match (&self.active_popup, self.embedded_mode) {
-            (ActivePopup::Command(popup), _) => popup.calculate_required_height(),
-            (ActivePopup::File(popup), _) => popup.calculate_required_height(),
-            (ActivePopup::None, true) => 0,
-            (ActivePopup::None, false) => 1,
-        };
-        // Calculate dynamic height based on content
-        let bp = if crate::theme::is_zen_mode() { 0 } else { 4 };
-        let content_width = area.width.saturating_sub(bp); // Account for border and padding
-        let content_lines = self.textarea.desired_height(content_width).max(1);
-        let desired_input_height = (content_lines + 2).max(3); // Parent layout enforces max
+        // Hide the cursor when the composer does not have focus or when
+        // only the footer is rendered (no textarea on screen).
+        if !self.has_focus || self.render_mode == ComposerRenderMode::FooterOnly {
+            return None;
+        }
 
-        // Use desired height but don't exceed available space
-        let input_height = desired_input_height.min(area.height.saturating_sub(hint_height));
-        let [input_area, _] = Layout::vertical([
-            Constraint::Length(input_height),
-            Constraint::Length(hint_height),
-        ])
-        .areas(area);
+        // Mirror the same layout logic used in render() so the cursor
+        // position matches the actually-rendered input box.
+        let footer_height = self.footer_height();
+
+        let border_pad = if crate::theme::is_zen_mode() { 0 } else { 4 };
+        let content_width = area.width.saturating_sub(border_pad);
+        let content_lines = self.textarea.desired_height(content_width).max(1);
+        let desired_input_height = (content_lines + 2).max(3);
+
+        let available_height = area.height.saturating_sub(footer_height);
+        if available_height == 0 {
+            return None;
+        }
+        let input_height = desired_input_height.min(available_height);
+
+        let input_area = if footer_height == 0 {
+            // Anchor to bottom — must match render().
+            let h = input_height.min(available_height);
+            Rect {
+                x: area.x,
+                y: area.y + available_height.saturating_sub(h),
+                width: area.width,
+                height: h,
+            }
+        } else {
+            let [input_area, _] = Layout::vertical([
+                Constraint::Length(input_height),
+                Constraint::Length(footer_height),
+            ])
+            .areas(area);
+            input_area
+        };
 
         // Get inner area of the bordered input box
         let input_block = Block::default().borders(crate::theme::zen_borders());
         let textarea_rect = input_block.inner(input_area);
 
-        // Apply the same inner padding as in render (horizontal only).
-        let padded_textarea_rect = textarea_rect.inner(Margin::new(crate::layout_consts::COMPOSER_INNER_HPAD.into(), 0));
+        // Apply the same inner padding as in render.
+        // In zen mode: no horizontal padding, but 1 row vertical inset (borders normally
+        // provide this inset, but zen mode has no borders).
+        let (h_pad, v_pad): (u16, u16) = if crate::theme::is_zen_mode() { (0, 1) } else { (crate::layout_consts::COMPOSER_INNER_HPAD.into(), 0) };
+        let padded_textarea_rect = textarea_rect.inner(Margin::new(h_pad, v_pad));
 
         let state = self.textarea_state.borrow();
         self.textarea
@@ -2937,21 +2958,24 @@ impl WidgetRef for ChatComposer {
                     }
                 }
             } else {
+                // Pulsing ⏺ with short status text.
                 use std::time::{SystemTime, UNIX_EPOCH};
                 let now_ms = SystemTime::now()
                     .duration_since(UNIX_EPOCH)
                     .unwrap_or_default()
                     .as_millis();
-                let def = crate::spinner::current_spinner();
-                let spinner_str = crate::spinner::frame_at_time(def, now_ms);
+                let pulse_on = (now_ms / 500) % 2 == 0;
+                let dot_style = if pulse_on {
+                    Style::default().fg(crate::colors::info())
+                } else {
+                    Style::default().fg(crate::colors::info()).add_modifier(Modifier::DIM)
+                };
+                let text_style = Style::default().fg(crate::colors::text_dim());
 
                 let title_line = Line::from(vec![
                     Span::raw(" "),
-                    Span::styled(spinner_str, Style::default().fg(crate::colors::info())),
-                    Span::styled(
-                        format!(" {}... ", self.status_message),
-                        Style::default().fg(crate::colors::info()),
-                    ),
+                    Span::styled("⏺", dot_style),
+                    Span::styled(format!(" {} ", self.status_message), text_style),
                 ])
                 .centered();
                 input_block = input_block.title(title_line);
@@ -2991,9 +3015,10 @@ impl WidgetRef for ChatComposer {
         // - The hardware cursor is still positioned via `frame.set_cursor_position` at the
         //   app layer; this overlay ensures visibility independent of terminal settings.
         drop(state); // release the borrow before computing position again
-        if let Some((cx, cy)) = self
-            .textarea
-            .cursor_pos_with_state(padded_textarea_rect, *self.textarea_state.borrow())
+        if self.has_focus
+            && let Some((cx, cy)) = self
+                .textarea
+                .cursor_pos_with_state(padded_textarea_rect, *self.textarea_state.borrow())
         {
             let theme = crate::theme::current_theme();
             let cursor_bg = theme.cursor;

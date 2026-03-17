@@ -1652,12 +1652,14 @@ fn compute_legacy_code_home_dir() -> Option<PathBuf> {
     let Some(home) = home_dir() else {
         return None;
     };
-    let candidate = home.join(".codex");
-    if path_exists(&candidate) {
-        Some(candidate)
-    } else {
-        None
+    // Check legacy paths in order of preference
+    for dir in [".codex", ".code"] {
+        let candidate = home.join(dir);
+        if path_exists(&candidate) {
+            return Some(candidate);
+        }
     }
+    None
 }
 
 fn legacy_code_home_dir() -> Option<PathBuf> {
@@ -1716,6 +1718,10 @@ pub fn resolve_code_path_for_read(code_home: &Path, relative: &Path) -> PathBuf 
 ///   function will Err if the path does not exist.
 /// - If neither is set, this function does not verify that the directory exists.
 pub fn find_code_home() -> std::io::Result<PathBuf> {
+    if let Some(path) = env_path("HANZO_DEV_HOME")? {
+        return Ok(path);
+    }
+
     if let Some(path) = env_path("CODE_HOME")? {
         return Ok(path);
     }
@@ -1731,8 +1737,15 @@ pub fn find_code_home() -> std::io::Result<PathBuf> {
         )
     })?;
 
+    let hanzo_path = home.join(".hanzo").join("dev");
+    if path_exists(&hanzo_path) {
+        return Ok(hanzo_path);
+    }
+
+    // Legacy fallback
     let mut write_path = home;
-    write_path.push(".code");
+    write_path.push(".hanzo");
+    write_path.push("dev");
     Ok(write_path)
 }
 

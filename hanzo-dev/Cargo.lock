@@ -895,9 +895,9 @@ dependencies = [
 
 [[package]]
 name = "cc"
-version = "1.2.56"
+version = "1.2.57"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "aebf35691d1bfb0ac386a69bac2fde4dd276fb618cf8bf4f5318fe285e821bb2"
+checksum = "7a0dd1ca384932ff3641c8718a02769f1698e7563dc6974ffd03346116310423"
 dependencies = [
  "find-msvc-tools",
  "jobserver",
@@ -2378,7 +2378,7 @@ dependencies = [
 
 [[package]]
 name = "hanzo-ansi-escape"
-version = "0.6.74"
+version = "0.6.79"
 dependencies = [
  "ansi-to-tui",
  "ratatui",
@@ -2387,7 +2387,7 @@ dependencies = [
 
 [[package]]
 name = "hanzo-app-server"
-version = "0.6.74"
+version = "0.6.79"
 dependencies = [
  "anyhow",
  "hanzo-arg0",
@@ -2408,7 +2408,7 @@ dependencies = [
 
 [[package]]
 name = "hanzo-app-server-protocol"
-version = "0.6.74"
+version = "0.6.79"
 dependencies = [
  "hanzo-mcp-types",
  "hanzo-protocol",
@@ -2416,7 +2416,7 @@ dependencies = [
 
 [[package]]
 name = "hanzo-apply-patch"
-version = "0.6.74"
+version = "0.6.79"
 dependencies = [
  "anyhow",
  "assert_cmd",
@@ -2430,7 +2430,7 @@ dependencies = [
 
 [[package]]
 name = "hanzo-arg0"
-version = "0.6.74"
+version = "0.6.79"
 dependencies = [
  "anyhow",
  "dotenvy",
@@ -2443,7 +2443,7 @@ dependencies = [
 
 [[package]]
 name = "hanzo-auto-drive-core"
-version = "0.6.74"
+version = "0.6.79"
 dependencies = [
  "anyhow",
  "chrono",
@@ -2467,7 +2467,7 @@ dependencies = [
 
 [[package]]
 name = "hanzo-auto-drive-diagnostics"
-version = "0.6.74"
+version = "0.6.79"
 dependencies = [
  "anyhow",
  "hanzo-auto-drive-core",
@@ -2494,7 +2494,7 @@ dependencies = [
 
 [[package]]
 name = "hanzo-backend-openapi-models"
-version = "0.6.74"
+version = "0.6.79"
 dependencies = [
  "serde",
  "serde_json",
@@ -2502,7 +2502,7 @@ dependencies = [
 
 [[package]]
 name = "hanzo-browser"
-version = "0.6.74"
+version = "0.6.79"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -2530,7 +2530,7 @@ dependencies = [
 
 [[package]]
 name = "hanzo-chatgpt"
-version = "0.6.74"
+version = "0.6.79"
 dependencies = [
  "anyhow",
  "clap",
@@ -2565,7 +2565,7 @@ dependencies = [
 
 [[package]]
 name = "hanzo-cloud-tasks"
-version = "0.6.74"
+version = "0.6.79"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -2593,7 +2593,7 @@ dependencies = [
 
 [[package]]
 name = "hanzo-cloud-tasks-client"
-version = "0.6.74"
+version = "0.6.79"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -2608,7 +2608,7 @@ dependencies = [
 
 [[package]]
 name = "hanzo-common"
-version = "0.6.74"
+version = "0.6.79"
 dependencies = [
  "clap",
  "hanzo-app-server-protocol",
@@ -2621,7 +2621,7 @@ dependencies = [
 
 [[package]]
 name = "hanzo-core"
-version = "0.6.74"
+version = "0.6.79"
 dependencies = [
  "agent-client-protocol",
  "anyhow",
@@ -2713,7 +2713,7 @@ dependencies = [
 
 [[package]]
 name = "hanzo-dev"
-version = "0.6.74"
+version = "0.6.79"
 dependencies = [
  "anyhow",
  "chrono",
@@ -2761,7 +2761,7 @@ dependencies = [
 
 [[package]]
 name = "hanzo-exec"
-version = "0.6.74"
+version = "0.6.79"
 dependencies = [
  "anyhow",
  "chrono",
@@ -2792,7 +2792,7 @@ dependencies = [
 
 [[package]]
 name = "hanzo-execpolicy"
-version = "0.6.74"
+version = "0.6.79"
 dependencies = [
  "allocative",
  "anyhow",
@@ -2812,7 +2812,7 @@ dependencies = [
 
 [[package]]
 name = "hanzo-file-search"
-version = "0.6.74"
+version = "0.6.79"
 dependencies = [
  "anyhow",
  "clap",
@@ -2825,7 +2825,7 @@ dependencies = [
 
 [[package]]
 name = "hanzo-git-apply"
-version = "0.6.74"
+version = "0.6.79"
 dependencies = [
  "once_cell",
  "regex",
@@ -2834,7 +2834,7 @@ dependencies = [
 
 [[package]]
 name = "hanzo-git-tooling"
-version = "0.6.74"
+version = "0.6.79"
 dependencies = [
  "pretty_assertions",
  "schemars 0.8.22",
@@ -2865,7 +2865,7 @@ dependencies = [
 
 [[package]]
 name = "hanzo-linux-sandbox"
-version = "0.6.74"
+version = "0.6.79"
 dependencies = [
  "clap",
  "hanzo-core",
@@ -2878,7 +2878,7 @@ dependencies = [
 
 [[package]]
 name = "hanzo-login"
-version = "0.6.74"
+version = "0.6.79"
 dependencies = [
  "base64 0.22.1",
  "chrono",
@@ -2900,7 +2900,7 @@ dependencies = [
 
 [[package]]
 name = "hanzo-mcp-client"
-version = "0.6.74"
+version = "0.6.79"
 dependencies = [
  "anyhow",
  "hanzo-mcp-types",
@@ -2913,7 +2913,7 @@ dependencies = [
 
 [[package]]
 name = "hanzo-mcp-server"
-version = "0.6.74"
+version = "0.6.79"
 dependencies = [
  "agent-client-protocol",
  "anyhow",
@@ -2938,7 +2938,7 @@ dependencies = [
 
 [[package]]
 name = "hanzo-mcp-types"
-version = "0.6.74"
+version = "0.6.79"
 dependencies = [
  "codex-mcp-types",
  "serde_json",
@@ -2946,7 +2946,7 @@ dependencies = [
 
 [[package]]
 name = "hanzo-ollama"
-version = "0.6.74"
+version = "0.6.79"
 dependencies = [
  "async-stream",
  "bytes",
@@ -2961,7 +2961,7 @@ dependencies = [
 
 [[package]]
 name = "hanzo-otel"
-version = "0.6.74"
+version = "0.6.79"
 dependencies = [
  "chrono",
  "eventsource-stream",
@@ -2982,14 +2982,14 @@ dependencies = [
 
 [[package]]
 name = "hanzo-process-hardening"
-version = "0.6.74"
+version = "0.6.79"
 dependencies = [
  "libc",
 ]
 
 [[package]]
 name = "hanzo-protocol"
-version = "0.6.74"
+version = "0.6.79"
 dependencies = [
  "anyhow",
  "base64 0.22.1",
@@ -3017,7 +3017,7 @@ dependencies = [
 
 [[package]]
 name = "hanzo-protocol-ts"
-version = "0.6.74"
+version = "0.6.79"
 dependencies = [
  "anyhow",
  "clap",
@@ -3029,7 +3029,7 @@ dependencies = [
 
 [[package]]
 name = "hanzo-responses-api-proxy"
-version = "0.6.74"
+version = "0.6.79"
 dependencies = [
  "anyhow",
  "clap",
@@ -3045,7 +3045,7 @@ dependencies = [
 
 [[package]]
 name = "hanzo-rmcp-client"
-version = "0.6.74"
+version = "0.6.79"
 dependencies = [
  "anyhow",
  "axum 0.8.8",
@@ -3062,7 +3062,7 @@ dependencies = [
 
 [[package]]
 name = "hanzo-tui"
-version = "0.6.74"
+version = "0.6.79"
 dependencies = [
  "anyhow",
  "arboard",
@@ -3159,7 +3159,7 @@ dependencies = [
 
 [[package]]
 name = "hanzo-tunnel-bridge"
-version = "0.6.74"
+version = "0.6.79"
 dependencies = [
  "hanzo-app-server-protocol",
  "hanzo-mcp-types",
@@ -3173,7 +3173,7 @@ dependencies = [
 
 [[package]]
 name = "hanzo-utils-absolute-path"
-version = "0.6.74"
+version = "0.6.79"
 dependencies = [
  "dirs",
  "path-absolutize",
@@ -3187,7 +3187,7 @@ dependencies = [
 
 [[package]]
 name = "hanzo-utils-cache"
-version = "0.6.74"
+version = "0.6.79"
 dependencies = [
  "lru",
  "sha1",
@@ -3196,7 +3196,7 @@ dependencies = [
 
 [[package]]
 name = "hanzo-utils-image"
-version = "0.6.74"
+version = "0.6.79"
 dependencies = [
  "base64 0.22.1",
  "hanzo-utils-cache",
@@ -3208,7 +3208,7 @@ dependencies = [
 
 [[package]]
 name = "hanzo-utils-json-to-toml"
-version = "0.6.74"
+version = "0.6.79"
 dependencies = [
  "pretty_assertions",
  "serde_json",
@@ -3217,7 +3217,7 @@ dependencies = [
 
 [[package]]
 name = "hanzo-utils-readiness"
-version = "0.6.74"
+version = "0.6.79"
 dependencies = [
  "async-trait",
  "thiserror 2.0.18",
@@ -3227,11 +3227,11 @@ dependencies = [
 
 [[package]]
 name = "hanzo-version"
-version = "0.6.74"
+version = "0.6.79"
 
 [[package]]
 name = "hanzo-zap"
-version = "0.6.74"
+version = "0.6.79"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -3258,7 +3258,7 @@ dependencies = [
 
 [[package]]
 name = "hanzo-zt"
-version = "0.6.74"
+version = "0.6.79"
 dependencies = [
  "async-trait",
  "base64 0.22.1",
@@ -3841,9 +3841,9 @@ dependencies = [
 
 [[package]]
 name = "instability"
-version = "0.3.11"
+version = "0.3.12"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "357b7205c6cd18dd2c86ed312d1e70add149aea98e7ef72b9fdf0270e555c11d"
+checksum = "5eb2d60ef19920a3a9193c3e371f726ec1dafc045dac788d0fb3704272458971"
 dependencies = [
  "darling 0.23.0",
  "indoc",
@@ -3970,9 +3970,9 @@ dependencies = [
 
 [[package]]
 name = "jni"
-version = "0.22.3"
+version = "0.22.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "295dc9997acda1562fdf8d299f56063c936443b60f078e63a5d8d3c34ef2642b"
+checksum = "5efd9a482cf3a427f00d6b35f14332adc7902ce91efb778580e180ff90fa3498"
 dependencies = [
  "cfg-if",
  "combine",
@@ -3987,9 +3987,9 @@ dependencies = [
 
 [[package]]
 name = "jni-macros"
-version = "0.22.2"
+version = "0.22.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "1c3d1da60c95c98847b26b9d45f4360fee718b31de746df016d9cd6de916a7ef"
+checksum = "a00109accc170f0bdb141fed3e393c565b6f5e072365c3bd58f5b062591560a3"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -5199,9 +5199,9 @@ checksum = "c33a9471896f1c69cecef8d20cbe2f7accd12527ce60845ff44c153bb2a21b49"
 
 [[package]]
 name = "portable-atomic-util"
-version = "0.2.5"
+version = "0.2.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "7a9db96d7fa8782dd8c15ce32ffe8680bbd1e978a43bf51a34d39483540495f5"
+checksum = "091397be61a01d4be58e7841595bd4bfedb15f1cd54977d79b8271e94ed799a3"
 dependencies = [
  "portable-atomic",
 ]
@@ -7223,9 +7223,9 @@ dependencies = [
 
 [[package]]
 name = "tinyvec"
-version = "1.10.0"
+version = "1.11.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "bfa5fdc3bce6191a1dbc8c02d5c8bffcf557bafa17c124c5264a458f1b0613fa"
+checksum = "3e61e67053d25a4e82c844e8424039d9745781b3fc4f32b8d55ed50f5f667ef3"
 dependencies = [
  "tinyvec_macros",
 ]
@@ -7315,13 +7315,9 @@ dependencies = [
  "futures-util",
  "log",
  "native-tls",
- "rustls",
- "rustls-pki-types",
  "tokio",
  "tokio-native-tls",
- "tokio-rustls",
  "tungstenite 0.23.0",
- "webpki-roots 0.26.11",
 ]
 
 [[package]]
@@ -7781,8 +7777,6 @@ dependencies = [
  "log",
  "native-tls",
  "rand 0.8.5",
- "rustls",
- "rustls-pki-types",
  "sha1",
  "thiserror 1.0.69",
  "utf-8",
