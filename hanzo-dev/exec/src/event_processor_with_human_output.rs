@@ -157,7 +157,7 @@ impl EventProcessor for EventProcessorWithHumanOutput {
     /// screen.
     fn print_config_summary(&mut self, config: &Config, prompt: &str) {
         const VERSION: &str = env!("CARGO_PKG_VERSION");
-        ts_println!(self, "OpenAI Codex v{} (research preview)", VERSION);
+        ts_println!(self, "Hanzo Dev v{}", VERSION);
 
         // Show which binary is being used to execute sub-agents so users can
         // confirm path mismatches when testing new builds.
@@ -233,7 +233,7 @@ impl EventProcessor for EventProcessorWithHumanOutput {
             EventMsg::AutoContextCheck(_) => {}
             EventMsg::AgentMessageDelta(AgentMessageDeltaEvent { delta }) => {
                 if !self.answer_started {
-                    ts_println!(self, "{}\n", "codex".style(self.italic).style(self.magenta));
+                    ts_println!(self, "{}\n", "hanzo".style(self.italic).style(self.magenta));
                     self.answer_started = true;
                 }
                 print!("{delta}");
@@ -298,7 +298,7 @@ impl EventProcessor for EventProcessorWithHumanOutput {
                     ts_println!(
                         self,
                         "{}\n{}",
-                        "codex".style(self.italic).style(self.magenta),
+                        "hanzo".style(self.italic).style(self.magenta),
                         message,
                     );
                 } else {
@@ -565,7 +565,7 @@ impl EventProcessor for EventProcessorWithHumanOutput {
                         ts_println!(
                             self,
                             "{}\n{}",
-                            "codex".style(self.italic).style(self.magenta),
+                            "hanzo".style(self.italic).style(self.magenta),
                             agent_reasoning_event.text,
                         );
                     } else {
@@ -573,7 +573,7 @@ impl EventProcessor for EventProcessorWithHumanOutput {
                         ts_println!(
                             self,
                             "{}\n{}",
-                            "codex".style(self.italic).style(self.magenta),
+                            "hanzo".style(self.italic).style(self.magenta),
                             agent_reasoning_event.text,
                         );
                     }

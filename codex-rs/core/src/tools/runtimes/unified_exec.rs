@@ -142,7 +142,7 @@ impl Approvable<UnifiedExecRequest> for UnifiedExecRuntime<'_> {
                     .request_command_approval(
                         turn,
                         call_id,
-                        None,
+                        /*approval_id*/ None,
                         command,
                         cwd,
                         reason,
@@ -151,7 +151,7 @@ impl Approvable<UnifiedExecRequest> for UnifiedExecRuntime<'_> {
                             .proposed_execpolicy_amendment()
                             .cloned(),
                         req.additional_permissions.clone(),
-                        None,
+                        /*skill_metadata*/ None,
                         available_decisions,
                     )
                     .await

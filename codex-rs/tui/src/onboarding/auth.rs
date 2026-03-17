@@ -149,19 +149,19 @@ impl KeyboardHandler for AuthModeWidget {
 
         match key_event.code {
             KeyCode::Up | KeyCode::Char('k') => {
-                self.move_highlight(-1);
+                self.move_highlight(/*delta*/ -1);
             }
             KeyCode::Down | KeyCode::Char('j') => {
-                self.move_highlight(1);
+                self.move_highlight(/*delta*/ 1);
             }
             KeyCode::Char('1') => {
-                self.select_option_by_index(0);
+                self.select_option_by_index(/*index*/ 0);
             }
             KeyCode::Char('2') => {
-                self.select_option_by_index(1);
+                self.select_option_by_index(/*index*/ 1);
             }
             KeyCode::Char('3') => {
-                self.select_option_by_index(2);
+                self.select_option_by_index(/*index*/ 2);
             }
             KeyCode::Char('4') => {
                 self.select_option_by_index(3);
