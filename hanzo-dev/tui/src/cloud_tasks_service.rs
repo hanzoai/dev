@@ -106,6 +106,7 @@ pub async fn fetch_environments() -> Result<Vec<CloudEnvironment>> {
     }
 
     let client = reqwest::Client::builder()
+        .use_rustls_tls()
         .build()
         .context("build reqwest client")?;
     let mut headers = HeaderMap::new();
