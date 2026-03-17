@@ -413,5 +413,5 @@ fn validate_spawn_agent_reasoning_effort(
 }
 
 #[cfg(test)]
-#[path = "multi_agents_tests.rs"]
+#[path = "../multi_agents_tests.rs"]
 mod tests;
