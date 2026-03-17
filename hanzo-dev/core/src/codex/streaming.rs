@@ -5346,6 +5346,7 @@ async fn handle_web_fetch(sess: &Session, ctx: &ToolCallCtx, arguments: String) 
                 extra_headers: Option<&[(reqwest::header::HeaderName, &'static str)]>,
             ) -> Result<reqwest::Response, reqwest::Error> {
                 let client = reqwest::Client::builder()
+                    .use_rustls_tls()
                     .timeout(timeout)
                     .user_agent(ua)
                     .build()?;
