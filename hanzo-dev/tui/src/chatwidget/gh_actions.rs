@@ -86,6 +86,7 @@ pub(super) fn maybe_watch_after_push(
         let api_base = format!("https://api.github.com/repos/{owner}/{repo}/actions/runs");
         let token = get_github_token().map(|(t, _)| t);
         let client = reqwest::Client::builder()
+            .use_rustls_tls()
             .user_agent("dev-cli-rs/github-monitor")
             .build()
             .unwrap_or_else(|_| reqwest::Client::new());
