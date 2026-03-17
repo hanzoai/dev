@@ -1,6 +1,5 @@
 ---
 source: tui/src/collab.rs
-assertion_line: 788
 expression: cell_to_text(&cell)
 ---
 • Resumed Robie [explorer]
