@@ -429,26 +429,37 @@ impl ModelProviderInfo {
     }
 
     /// If `env_key` is Some, returns the API key for this provider if present
-    /// (and non-empty) in the environment. If `env_key` is required but
-    /// cannot be found, returns an error.
+    /// (and non-empty) in the environment. Falls back to auto-discovered
+    /// credentials from Claude Code keychain, Codex CLI, or Hanzo IAM.
+    /// If no key can be found, returns an error.
     pub fn api_key(&self) -> crate::error::Result<Option<String>> {
         match &self.env_key {
             Some(env_key) => {
+                // 1. Try environment variable first.
                 let env_value = std::env::var(env_key);
-                env_value
-                    .and_then(|v| {
-                        if v.trim().is_empty() {
-                            Err(VarError::NotPresent)
-                        } else {
-                            Ok(Some(v))
-                        }
-                    })
-                    .map_err(|_| {
-                        crate::error::CodeErr::EnvVar(EnvVarError {
-                            var: env_key.clone(),
-                            instructions: self.env_key_instructions.clone(),
-                        })
-                    })
+                if let Ok(v) = &env_value {
+                    if !v.trim().is_empty() {
+                        return Ok(Some(v.clone()));
+                    }
+                }
+
+                // 2. Fall back to auto-discovered credentials.
+                let discovered = crate::auth::discover_credentials();
+                let fallback = match env_key.as_str() {
+                    "ANTHROPIC_API_KEY" => discovered.anthropic_api_key,
+                    "HANZO_API_KEY" => discovered.hanzo_access_token,
+                    "OPENAI_API_KEY" => discovered.openai_api_key,
+                    _ => None,
+                };
+                if let Some(key) = fallback {
+                    return Ok(Some(key));
+                }
+
+                // 3. No key found — return error.
+                Err(crate::error::CodeErr::EnvVar(EnvVarError {
+                    var: env_key.clone(),
+                    instructions: self.env_key_instructions.clone(),
+                }))
             }
             None => Ok(None),
         }

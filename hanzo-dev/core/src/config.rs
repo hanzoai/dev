@@ -111,6 +111,7 @@ pub(crate) use defaults::merge_with_default_agents;
 pub(crate) use validation::upgrade_legacy_model_slugs;
 
 pub(crate) const OPENAI_DEFAULT_MODEL: &str = "gpt-5.3-codex";
+pub(crate) const HANZO_DEFAULT_MODEL: &str = "zen4-pro";
 const OPENAI_DEFAULT_REVIEW_MODEL: &str = "gpt-5.3-codex";
 pub const GPT_5_CODEX_MEDIUM_MODEL: &str = "gpt-5.3-codex";
 pub(crate) const DEFAULT_SUBAGENT_MAX_DEPTH: i32 = 1;
@@ -1085,7 +1086,13 @@ impl Config {
         let model_provider_id = model_provider
             .or(config_profile.model_provider)
             .or(cfg.model_provider)
-            .unwrap_or_else(|| "openai".to_string());
+            .unwrap_or_else(|| {
+                if Self::is_using_hanzo_auth(&code_home) {
+                    "hanzo".to_string()
+                } else {
+                    "openai".to_string()
+                }
+            });
         let model_provider = model_providers
             .get(&model_provider_id)
             .ok_or_else(|| {
@@ -1236,6 +1243,7 @@ impl Config {
 
         // Determine auth mode early so defaults like model selection can depend on it.
         let using_chatgpt_auth = Self::is_using_chatgpt_auth(&code_home);
+        let using_hanzo_auth = Self::is_using_hanzo_auth(&code_home);
 
         let auto_switch_accounts_on_rate_limit = config_profile
             .auto_switch_accounts_on_rate_limit
@@ -1247,7 +1255,9 @@ impl Config {
             .or(cfg.api_key_fallback_on_all_accounts_limited)
             .unwrap_or(false);
 
-        let default_model_slug = if using_chatgpt_auth {
+        let default_model_slug = if using_hanzo_auth {
+            HANZO_DEFAULT_MODEL
+        } else if using_chatgpt_auth {
             GPT_5_CODEX_MEDIUM_MODEL
         } else {
             OPENAI_DEFAULT_MODEL
@@ -1705,6 +1715,16 @@ impl Config {
     }
 
     /// Check if we're using ChatGPT authentication
+    fn is_using_hanzo_auth(code_home: &Path) -> bool {
+        use hanzo_app_server_protocol::AuthMode;
+        use crate::CodexAuth;
+
+        match CodexAuth::from_code_home(code_home, AuthMode::Hanzo, "code_cli_rs") {
+            Ok(Some(auth)) => auth.mode == AuthMode::Hanzo,
+            _ => false,
+        }
+    }
+
     fn is_using_chatgpt_auth(code_home: &Path) -> bool {
         use hanzo_app_server_protocol::AuthMode;
         use crate::CodexAuth;
