@@ -481,12 +481,18 @@ jobs:
       - name: Stage npm packages
         env:
           GH_TOKEN: ${{ github.token }}
+          RELEASE_VERSION: ${{ steps.release_name.outputs.name }}
         run: |
           ./scripts/stage_npm_packages.py \
-            --release-version "${{ steps.release_name.outputs.name }}" \
+            --release-version "$RELEASE_VERSION" \
             --package hanzo-dev \
             --package hanzo-responses-api-proxy \
             --package hanzo-sdk
+
+      - name: Stage installer scripts
+        run: |
+          cp scripts/install/install.sh dist/install.sh
+          cp scripts/install/install.ps1 dist/install.ps1
 
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
@@ -534,10 +540,12 @@ jobs:
       - name: Download npm tarballs from release
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          RELEASE_TAG: ${{ needs.release.outputs.tag }}
+          RELEASE_VERSION: ${{ needs.release.outputs.version }}
         run: |
           set -euo pipefail
-          version="${{ needs.release.outputs.version }}"
-          tag="${{ needs.release.outputs.tag }}"
+          version="$RELEASE_VERSION"
+          tag="$RELEASE_TAG"
           mkdir -p dist/npm
           patterns=(
             "hanzo-dev-npm-${version}.tgz"
