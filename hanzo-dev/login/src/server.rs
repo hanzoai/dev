@@ -14,6 +14,7 @@ use crate::pkce::PkceCodes;
 use crate::pkce::generate_pkce;
 use base64::Engine;
 use chrono::Utc;
+use hanzo_app_server_protocol::AuthMode;
 use hanzo_core::auth::AuthDotJson;
 use hanzo_core::auth::get_auth_file;
 use hanzo_core::token_data::TokenData;
@@ -249,7 +250,8 @@ async fn process_request(
                             .await
                             .ok()
                     } else {
-                        None
+                        // Hanzo IAM: use the access_token as the bearer key.
+                        Some(tokens.access_token.clone())
                     };
                     if let Err(err) = persist_tokens_async(
                         &opts.code_home,
@@ -518,7 +520,7 @@ pub(crate) async fn persist_tokens_async(
         let tokens_for_store = tokens.clone();
         let last_refresh = Utc::now();
         let auth = AuthDotJson {
-            auth_mode: None,
+            auth_mode: if is_hanzo_issuer { Some(AuthMode::Hanzo) } else { None },
             openai_api_key: api_key,
             tokens: Some(tokens),
             last_refresh: Some(last_refresh),

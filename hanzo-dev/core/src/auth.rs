@@ -364,6 +364,105 @@ pub fn read_code_api_key_from_env() -> Option<String> {
         .filter(|value| !value.is_empty())
 }
 
+/// Discovered credentials from external sources (Claude Code, Codex CLI, env vars).
+#[derive(Debug, Clone, Default)]
+pub struct DiscoveredCredentials {
+    /// Anthropic API key (from Claude Code keychain or ANTHROPIC_API_KEY env)
+    pub anthropic_api_key: Option<String>,
+    /// OpenAI API key or access token (from Codex CLI auth or OPENAI_API_KEY env)
+    pub openai_api_key: Option<String>,
+    /// Hanzo IAM access token (from ~/.hanzo/auth.json)
+    pub hanzo_access_token: Option<String>,
+}
+
+/// Auto-discover API credentials from all available sources.
+/// Priority order per provider:
+///   1. Environment variable (ANTHROPIC_API_KEY, OPENAI_API_KEY, HANZO_API_KEY)
+///   2. Claude Code keychain (macOS) for Anthropic
+///   3. Codex CLI auth.json (~/.codex/auth.json) for OpenAI
+///   4. Hanzo auth.json (~/.hanzo/auth.json) for Hanzo
+pub fn discover_credentials() -> DiscoveredCredentials {
+    let mut creds = DiscoveredCredentials::default();
+
+    // --- Anthropic ---
+    creds.anthropic_api_key = env::var("ANTHROPIC_API_KEY")
+        .ok()
+        .filter(|s| !s.is_empty())
+        .or_else(read_claude_code_keychain_token);
+
+    // --- OpenAI ---
+    creds.openai_api_key = env::var("OPENAI_API_KEY")
+        .ok()
+        .filter(|s| !s.is_empty())
+        .or_else(read_codex_cli_token);
+
+    // --- Hanzo ---
+    creds.hanzo_access_token = env::var("HANZO_API_KEY")
+        .ok()
+        .filter(|s| !s.is_empty())
+        .or_else(read_hanzo_auth_token);
+
+    creds
+}
+
+/// Read the Anthropic OAuth token from Claude Code's macOS keychain entry.
+#[cfg(target_os = "macos")]
+fn read_claude_code_keychain_token() -> Option<String> {
+    let output = std::process::Command::new("security")
+        .args(["find-generic-password", "-s", "Claude Code-credentials", "-w"])
+        .output()
+        .ok()?;
+    if !output.status.success() {
+        return None;
+    }
+    let raw = String::from_utf8(output.stdout).ok()?;
+    let parsed: serde_json::Value = serde_json::from_str(raw.trim()).ok()?;
+    parsed
+        .get("claudeAiOauth")
+        .and_then(|v| v.get("accessToken"))
+        .and_then(|v| v.as_str())
+        .map(|s| s.to_string())
+}
+
+#[cfg(not(target_os = "macos"))]
+fn read_claude_code_keychain_token() -> Option<String> {
+    None
+}
+
+/// Read OpenAI access token from Codex CLI's auth.json.
+fn read_codex_cli_token() -> Option<String> {
+    let home = dirs::home_dir()?;
+    let codex_auth = home.join(".codex").join("auth.json");
+    let content = std::fs::read_to_string(&codex_auth).ok()?;
+    let parsed: serde_json::Value = serde_json::from_str(&content).ok()?;
+    // Codex stores the token in tokens.access_token
+    parsed
+        .get("tokens")
+        .and_then(|v| v.get("access_token"))
+        .and_then(|v| v.as_str())
+        .map(|s| s.to_string())
+}
+
+/// Read Hanzo IAM access token from ~/.hanzo/auth.json.
+fn read_hanzo_auth_token() -> Option<String> {
+    let home = dirs::home_dir()?;
+    let hanzo_auth = home.join(".hanzo").join("auth.json");
+    let content = std::fs::read_to_string(&hanzo_auth).ok()?;
+    let parsed: serde_json::Value = serde_json::from_str(&content).ok()?;
+    // First try openai_api_key (set by login flow), then tokens.access_token
+    parsed
+        .get("openai_api_key")
+        .and_then(|v| v.as_str())
+        .filter(|s| !s.is_empty())
+        .or_else(|| {
+            parsed
+                .get("tokens")
+                .and_then(|v| v.get("access_token"))
+                .and_then(|v| v.as_str())
+        })
+        .map(|s| s.to_string())
+}
+
 pub fn get_auth_file(code_home: &Path) -> PathBuf {
     code_home.join("auth.json")
 }
@@ -925,8 +1024,10 @@ pub struct AuthDotJson {
     pub last_refresh: Option<DateTime<Utc>>,
 }
 
-// Shared constant for token refresh (client id used for oauth token refresh flow)
-pub const CLIENT_ID: &str = "app_EMoamEEZ73f0CkXaXp7hrann";
+// Shared constant for token refresh (client id used for oauth token refresh flow).
+// For Hanzo IAM (hanzo.id), this is the `app-dev` application.
+// For OpenAI (--chatgpt), pass the OpenAI client ID via --client-id.
+pub const CLIENT_ID: &str = "app-hanzo";
 /// Client secret for the Hanzo IAM PKCE flow.
 pub const CLIENT_SECRET: &str = "";
 
