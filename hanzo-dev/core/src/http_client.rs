@@ -6,7 +6,9 @@ use std::path::PathBuf;
 /// NODE_EXTRA_CA_CERTS). This helps environments using corporate/mitm proxies
 /// whose CAs are distributed via system config or user-provided files.
 pub fn build_http_client() -> reqwest::Client {
-    let mut builder = reqwest::Client::builder();
+    let mut builder = reqwest::Client::builder()
+        // Force rustls – see default_client.rs for rationale.
+        .use_rustls_tls();
 
     // Helper to load a PEM or DER certificate file if it exists and is readable.
     fn load_cert(path: PathBuf) -> Option<reqwest::Certificate> {

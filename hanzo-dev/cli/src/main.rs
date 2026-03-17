@@ -1393,6 +1393,7 @@ async fn preview_main(args: PreviewArgs) -> anyhow::Result<()> {
     };
 
     let client = reqwest::Client::builder()
+        .use_rustls_tls()
         .user_agent("dev-preview/1")
         .build()?;
 

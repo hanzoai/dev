@@ -158,6 +158,10 @@ pub fn create_client(originator: &str) -> reqwest::Client {
     let ua = get_code_user_agent(Some(originator.value.as_str()));
 
     let mut builder = reqwest::Client::builder()
+        // Force rustls TLS backend – when both rustls-tls and native-tls features
+        // are compiled in (e.g. via chromiumoxide), reqwest defaults to native-tls
+        // (SecureTransport on macOS) which can fail against certain Go TLS servers.
+        .use_rustls_tls()
         // Set UA via dedicated helper to avoid header validation pitfalls
         .user_agent(ua)
         .default_headers(headers);
