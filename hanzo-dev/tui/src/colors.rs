@@ -307,7 +307,10 @@ pub(crate) fn overlay_scrim() -> Color {
     quantize_color_for_palette(Color::Rgb(r, g, b))
 }
 
-/// Background for assistant messages: theme background moved 5% toward theme info.
+/// Background for assistant messages: theme background tinted toward theme info.
+///
+/// On dark terminals 5% was nearly invisible (black + 5% blue ≈ (6,10,13)).
+/// Use 12% to give assistant cells a visible but subtle tint.
 pub(crate) fn assistant_bg() -> Color {
     match palette_mode() {
         PaletteMode::Ansi16 => {
@@ -320,7 +323,7 @@ pub(crate) fn assistant_bg() -> Color {
         PaletteMode::Ansi256 => {
             let bg = current_theme().background;
             let info = current_theme().info;
-            mix_toward(bg, info, 0.05)
+            mix_toward(bg, info, 0.12)
         }
     }
 }
@@ -334,7 +337,7 @@ pub(crate) fn assistant_mid_turn_bg() -> Color {
         PaletteMode::Ansi256 => {
             let bg = current_theme().background;
             let info = current_theme().info;
-            mix_toward(bg, info, 0.02)
+            mix_toward(bg, info, 0.06)
         }
     }
 }
