@@ -1,12 +1,13 @@
-## @hanzo/dev v0.6.77
+## @hanzo/dev v0.6.82
 
-This release improves automatic context selection defaults and strengthens context-mode reliability.
+This release fixes TLS connectivity to api.hanzo.ai, strips inline thinking tags from zen model output, and improves assistant message styling.
 
 ### Changes
 
-- Core/Context: default session context mode to `auto` for better out-of-the-box context selection.
-- Auto Context: enrich 1M-judge risk signals to improve context quality and decision reliability.
-- TUI/Context: persist explicit disabled state for 1M mode so settings stay consistent across sessions.
+- Transport: force rustls TLS backend on all reqwest clients — fixes "bad protocol version" errors when connecting to api.hanzo.ai on macOS (SecureTransport incompatibility with Go crypto/tls).
+- TUI/Rendering: strip `<think>...</think>` blocks from zen model streaming output instead of rendering them as raw text.
+- TUI/Rendering: boost assistant message background tint from 5% to 12% for visible contrast on dark terminals.
+- TUI/Rendering: extend assistant message background to full terminal width (edge-to-edge).
 
 ### Install
 
