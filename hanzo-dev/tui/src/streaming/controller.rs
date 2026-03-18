@@ -307,7 +307,14 @@ pub(crate) fn set_last_sequence_number(&mut self, kind: StreamKind, seq: Option<
             }
             parsed
         };
-        let visible_delta = parsed.visible_text;
+        // Strip <think>...</think> blocks from answer stream (zen models emit
+        // inline thinking tags that should not be rendered as visible text).
+        let visible_delta = if matches!(kind, StreamKind::Answer) {
+            let filtered = self.state_mut(kind).think_filter.filter(&parsed.visible_text);
+            filtered
+        } else {
+            parsed.visible_text
+        };
 
         tracing::debug!(
             "push_and_maybe_commit for {:?}, raw_len={} visible_len={} contains_nl={}",
@@ -767,6 +774,9 @@ pub(crate) fn set_last_sequence_number(&mut self, kind: StreamKind, seq: Option<
     /// Apply a full final answer: replace queued content with only the remaining tail,
     /// then finalize immediately and notify completion.
     pub(crate) fn apply_final_answer(&mut self, message: &str, sink: &impl HistorySink) -> bool {
+        // Strip <think>...</think> blocks from the final answer
+        let cleaned = super::strip_think_tags(message);
+        let message = cleaned.as_str();
         tracing::debug!("apply_final_answer called with: {:?}...", message.chars().take(100).collect::<String>());
         self.apply_full_final(StreamKind::Answer, message, true, sink)
     }
