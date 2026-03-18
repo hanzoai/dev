@@ -1136,6 +1136,7 @@
     "HookEventName": {
       "enum": [
         "sessionStart",
+        "userPromptSubmit",
         "stop"
       ],
       "type": "string"
@@ -1693,6 +1694,13 @@
         "usedPercent"
       ],
       "type": "object"
+    },
+    "RealtimeConversationVersion": {
+      "enum": [
+        "v1",
+        "v2"
+      ],
+      "type": "string"
     },
     "ReasoningEffort": {
       "description": "See https://platform.openai.com/docs/guides/reasoning?api-mode=responses#get-started-with-reasoning",
@@ -2857,10 +2865,14 @@
         },
         "threadId": {
           "type": "string"
+        },
+        "version": {
+          "$ref": "#/definitions/RealtimeConversationVersion"
         }
       },
       "required": [
-        "threadId"
+        "threadId",
+        "version"
       ],
       "type": "object"
     },
