@@ -73,6 +73,9 @@ pub(crate) struct EventProcessorWithHumanOutput {
     /// Auto Drive sessions keep running across multiple turns, so they leave
     /// this false and handle shutdown themselves.
     stop_on_task_complete: bool,
+    /// Filter for stripping <think>...</think> blocks from streamed output.
+    think_inside: bool,
+    think_partial: String,
 }
 
 impl EventProcessorWithHumanOutput {
@@ -105,6 +108,8 @@ impl EventProcessorWithHumanOutput {
                 last_message_path,
                 last_turn_diff: None,
                 stop_on_task_complete,
+                think_inside: false,
+                think_partial: String::new(),
             }
         } else {
             Self {
@@ -126,8 +131,107 @@ impl EventProcessorWithHumanOutput {
                 last_message_path,
                 last_turn_diff: None,
                 stop_on_task_complete,
+                think_inside: false,
+                think_partial: String::new(),
             }
         }
+    }
+}
+
+/// Strip all `<think>...</think>` blocks from a complete string.
+fn strip_think_tags(s: &str) -> String {
+    let mut result = String::with_capacity(s.len());
+    let mut remaining = s;
+    while let Some(start) = remaining.find("<think>").or_else(|| {
+        remaining.find("<think ").and_then(|i| remaining[i..].find('>').map(|_| i))
+    }) {
+        result.push_str(&remaining[..start]);
+        let after_open = if remaining[start..].starts_with("<think>") {
+            &remaining[start + 7..]
+        } else if let Some(gt) = remaining[start..].find('>') {
+            &remaining[start + gt + 1..]
+        } else {
+            break;
+        };
+        if let Some(end) = after_open.find("</think>") {
+            remaining = &after_open[end + 8..];
+        } else {
+            // Unclosed think tag — drop the rest
+            return result;
+        }
+    }
+    result.push_str(remaining);
+    result
+}
+
+impl EventProcessorWithHumanOutput {
+    /// Strip `<think>...</think>` blocks from streaming delta text.
+    fn filter_think_tags(&mut self, delta: &str) -> String {
+        let mut input = if self.think_partial.is_empty() {
+            delta.to_string()
+        } else {
+            let mut s = std::mem::take(&mut self.think_partial);
+            s.push_str(delta);
+            s
+        };
+        let mut output = String::new();
+        loop {
+            if self.think_inside {
+                if let Some(end) = input.find("</think>") {
+                    self.think_inside = false;
+                    input = input[end + 8..].to_string();
+                    continue;
+                }
+                // Check partial close tag at end
+                let tag = "</think>";
+                let mut partial = false;
+                for i in 1..tag.len() {
+                    if input.ends_with(&tag[..i]) {
+                        self.think_partial = input;
+                        partial = true;
+                        break;
+                    }
+                }
+                if !partial {
+                    // Drop entire input (inside think block)
+                }
+                break;
+            } else {
+                if let Some(start) = input.find("<think>") {
+                    output.push_str(&input[..start]);
+                    self.think_inside = true;
+                    input = input[start + 7..].to_string();
+                    continue;
+                }
+                if let Some(start) = input.find("<think ") {
+                    if let Some(gt) = input[start..].find('>') {
+                        output.push_str(&input[..start]);
+                        self.think_inside = true;
+                        input = input[start + gt + 1..].to_string();
+                        continue;
+                    }
+                }
+                // Check partial open tag at end
+                let tags = ["<think>", "<think "];
+                let mut partial_len = 0usize;
+                for tag in &tags {
+                    for i in 1..tag.len() {
+                        if input.ends_with(&tag[..i]) && i > partial_len {
+                            partial_len = i;
+                        }
+                    }
+                }
+                if partial_len > 0 {
+                    let safe = input.len() - partial_len;
+                    output.push_str(&input[..safe]);
+                    self.think_partial = input[safe..].to_string();
+                } else {
+                    output.push_str(&input);
+                }
+                break;
+            }
+        }
+        output
     }
 }
 
@@ -232,11 +336,16 @@ impl EventProcessor for EventProcessorWithHumanOutput {
             }
             EventMsg::AutoContextCheck(_) => {}
             EventMsg::AgentMessageDelta(AgentMessageDeltaEvent { delta }) => {
+                // Strip <think>...</think> blocks (zen models emit inline thinking)
+                let filtered = self.filter_think_tags(&delta);
+                if filtered.is_empty() {
+                    return CodexStatus::Running;
+                }
                 if !self.answer_started {
                     ts_println!(self, "{}\n", "hanzo".style(self.italic).style(self.magenta));
                     self.answer_started = true;
                 }
-                print!("{delta}");
+                print!("{filtered}");
                 #[expect(clippy::expect_used)]
                 std::io::stdout().flush().expect("could not flush stdout");
             }
@@ -292,6 +401,8 @@ impl EventProcessor for EventProcessorWithHumanOutput {
                 std::io::stdout().flush().expect("could not flush stdout");
             }
             EventMsg::AgentMessage(AgentMessageEvent { message }) => {
+                // Strip any <think>...</think> blocks from the final message
+                let message = strip_think_tags(&message);
                 // if answer_started is false, this means we haven't received any
                 // delta. Thus, we need to print the message as a new answer.
                 if !self.answer_started {
@@ -305,6 +416,8 @@ impl EventProcessor for EventProcessorWithHumanOutput {
                     println!();
                     self.answer_started = false;
                 }
+                self.think_inside = false;
+                self.think_partial.clear();
             }
             EventMsg::ExecCommandBegin(ExecCommandBeginEvent {
                 call_id,
