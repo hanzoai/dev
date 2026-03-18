@@ -41946,31 +41946,22 @@ impl WidgetRef for &ChatWidget<'_> {
                 // the light "hole" seen after we reduced redraws. For other
                 // cell types keep the default background (already painted by
                 // the frame bg fill above).
-                if (is_assistant || is_auto_review) && gutter_area.width > 0 && gutter_area.height > 0 {
+                if (is_assistant || is_auto_review) && visible_height > 0 {
                     let _perf_gutter_start = if self.perf_state.enabled {
                         Some(std::time::Instant::now())
                     } else {
                         None
                     };
                     let style = Style::default().bg(gutter_bg);
-                    let mut tint_x = gutter_area.x;
-                    let mut tint_width = gutter_area.width;
-                    if content_area.x > history_area.x {
-                        tint_x = content_area.x.saturating_sub(1);
-                        tint_width = tint_width.saturating_add(1);
-                    }
-                    let tint_rect = Rect::new(tint_x, gutter_area.y, tint_width, gutter_area.height);
-                    fill_rect(buf, tint_rect, Some(' '), style);
-                    // Also tint one column immediately to the right of the content area
-                    // so the assistant block is visually bookended. This column lives in the
-                    // right padding stripe; when the scrollbar is visible it will draw over
-                    // the far-right edge, which is fine.
-                    let right_col_x = content_area.x.saturating_add(content_area.width);
-                    let history_right = history_area.x.saturating_add(history_area.width);
-                    if right_col_x < history_right {
-                        let right_rect = Rect::new(right_col_x, item_area.y, 1, item_area.height);
-                        fill_rect(buf, right_rect, Some(' '), style);
-                    }
+                    // Paint the full width of the history area (including left/right
+                    // padding columns) so the assistant tint is edge-to-edge.
+                    let full_tint = Rect::new(
+                        history_area.x,
+                        screen_y,
+                        history_area.width,
+                        visible_height,
+                    );
+                    fill_rect(buf, full_tint, Some(' '), style);
                     if let Some(t0) = _perf_gutter_start {
                         let dt = t0.elapsed().as_nanos();
                         let mut p = self.perf_state.stats.borrow_mut();
