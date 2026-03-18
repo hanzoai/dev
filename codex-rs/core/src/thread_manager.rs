@@ -381,6 +381,7 @@ impl ThreadManager {
             persist_extended_history,
             metrics_service_name,
             parent_trace,
+            /*user_shell_override*/ None,
         ))
         .await
     }
@@ -420,6 +421,48 @@ impl ThreadManager {
             persist_extended_history,
             /*metrics_service_name*/ None,
             parent_trace,
+            /*user_shell_override*/ None,
+        ))
+        .await
+    }
+
+    pub(crate) async fn start_thread_with_user_shell_override_for_tests(
+        &self,
+        config: Config,
+        user_shell_override: crate::shell::Shell,
+    ) -> CodexResult<NewThread> {
+        Box::pin(self.state.spawn_thread(
+            config,
+            InitialHistory::New,
+            Arc::clone(&self.state.auth_manager),
+            self.agent_control(),
+            Vec::new(),
+            /*persist_extended_history*/ false,
+            /*metrics_service_name*/ None,
+            /*parent_trace*/ None,
+            /*user_shell_override*/ Some(user_shell_override),
+        ))
+        .await
+    }
+
+    pub(crate) async fn resume_thread_from_rollout_with_user_shell_override_for_tests(
+        &self,
+        config: Config,
+        rollout_path: PathBuf,
+        auth_manager: Arc<AuthManager>,
+        user_shell_override: crate::shell::Shell,
+    ) -> CodexResult<NewThread> {
+        let initial_history = RolloutRecorder::get_rollout_history(&rollout_path).await?;
+        Box::pin(self.state.spawn_thread(
+            config,
+            initial_history,
+            auth_manager,
+            self.agent_control(),
+            Vec::new(),
+            /*persist_extended_history*/ false,
+            /*metrics_service_name*/ None,
+            /*parent_trace*/ None,
+            /*user_shell_override*/ Some(user_shell_override),
         ))
         .await
     }
@@ -505,6 +548,7 @@ impl ThreadManager {
             persist_extended_history,
             /*metrics_service_name*/ None,
             parent_trace,
+            /*user_shell_override*/ None,
         ))
         .await
     }
@@ -566,10 +610,12 @@ impl ThreadManagerState {
             /*persist_extended_history*/ false,
             /*metrics_service_name*/ None,
             /*inherited_shell_snapshot*/ None,
+            /*inherited_exec_policy*/ None,
         ))
         .await
     }
 
+    #[allow(clippy::too_many_arguments)]
     pub(crate) async fn spawn_new_thread_with_source(
         &self,
         config: Config,
@@ -578,6 +624,7 @@ impl ThreadManagerState {
         persist_extended_history: bool,
         metrics_service_name: Option<String>,
         inherited_shell_snapshot: Option<Arc<ShellSnapshot>>,
+        inherited_exec_policy: Option<Arc<crate::exec_policy::ExecPolicyManager>>,
     ) -> CodexResult<NewThread> {
         Box::pin(self.spawn_thread_with_source(
             config,
@@ -589,7 +636,9 @@ impl ThreadManagerState {
             persist_extended_history,
             metrics_service_name,
             inherited_shell_snapshot,
+            inherited_exec_policy,
             /*parent_trace*/ None,
+            /*user_shell_override*/ None,
         ))
         .await
     }
@@ -601,6 +650,7 @@ impl ThreadManagerState {
         agent_control: AgentControl,
         session_source: SessionSource,
         inherited_shell_snapshot: Option<Arc<ShellSnapshot>>,
+        inherited_exec_policy: Option<Arc<crate::exec_policy::ExecPolicyManager>>,
     ) -> CodexResult<NewThread> {
         let initial_history = RolloutRecorder::get_rollout_history(&rollout_path).await?;
         Box::pin(self.spawn_thread_with_source(
@@ -613,11 +663,14 @@ impl ThreadManagerState {
             /*persist_extended_history*/ false,
             /*metrics_service_name*/ None,
             inherited_shell_snapshot,
+            inherited_exec_policy,
             /*parent_trace*/ None,
+            /*user_shell_override*/ None,
         ))
         .await
     }
 
+    #[allow(clippy::too_many_arguments)]
     pub(crate) async fn fork_thread_with_source(
         &self,
         config: Config,
@@ -626,6 +679,7 @@ impl ThreadManagerState {
         session_source: SessionSource,
         persist_extended_history: bool,
         inherited_shell_snapshot: Option<Arc<ShellSnapshot>>,
+        inherited_exec_policy: Option<Arc<crate::exec_policy::ExecPolicyManager>>,
     ) -> CodexResult<NewThread> {
         Box::pin(self.spawn_thread_with_source(
             config,
@@ -637,7 +691,9 @@ impl ThreadManagerState {
             persist_extended_history,
             /*metrics_service_name*/ None,
             inherited_shell_snapshot,
+            inherited_exec_policy,
             /*parent_trace*/ None,
+            /*user_shell_override*/ None,
         ))
         .await
     }
@@ -654,6 +710,7 @@ impl ThreadManagerState {
         persist_extended_history: bool,
         metrics_service_name: Option<String>,
         parent_trace: Option<W3cTraceContext>,
+        user_shell_override: Option<crate::shell::Shell>,
     ) -> CodexResult<NewThread> {
         Box::pin(self.spawn_thread_with_source(
             config,
@@ -665,7 +722,9 @@ impl ThreadManagerState {
             persist_extended_history,
             metrics_service_name,
             /*inherited_shell_snapshot*/ None,
+            /*inherited_exec_policy*/ None,
             parent_trace,
+            user_shell_override,
         ))
         .await
     }
@@ -682,7 +741,9 @@ impl ThreadManagerState {
         persist_extended_history: bool,
         metrics_service_name: Option<String>,
         inherited_shell_snapshot: Option<Arc<ShellSnapshot>>,
+        inherited_exec_policy: Option<Arc<crate::exec_policy::ExecPolicyManager>>,
         parent_trace: Option<W3cTraceContext>,
+        user_shell_override: Option<crate::shell::Shell>,
     ) -> CodexResult<NewThread> {
         let watch_registration = self
             .file_watcher
@@ -704,6 +765,8 @@ impl ThreadManagerState {
             persist_extended_history,
             metrics_service_name,
             inherited_shell_snapshot,
+            inherited_exec_policy,
+            user_shell_override,
             parent_trace,
         })
         .await?;
