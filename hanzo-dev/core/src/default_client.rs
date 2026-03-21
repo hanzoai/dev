@@ -169,7 +169,7 @@ pub fn create_client(originator: &str) -> reqwest::Client {
         builder = builder.no_proxy();
     }
 
-    builder.build().unwrap_or_else(|_| reqwest::Client::new())
+    builder.build().expect("failed to build reqwest client with rustls")
 }
 
 fn is_sandboxed() -> bool {

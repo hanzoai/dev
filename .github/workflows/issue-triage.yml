@@ -78,7 +78,7 @@ jobs:
     steps:
       - name: Check out repository (default branch)
         timeout-minutes: 5
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
         with:
           ref: ${{ env.DEFAULT_BRANCH }}
           fetch-depth: 1
@@ -115,7 +115,7 @@ jobs:
 
       - name: Setup Node.js
         timeout-minutes: 5
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v6
         with:
           node-version: "20"
 

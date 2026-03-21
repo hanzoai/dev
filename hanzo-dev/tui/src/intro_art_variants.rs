@@ -107,6 +107,7 @@ fn select_session_variant() -> ArtVariant {
 pub static SESSION_VARIANT: Lazy<ArtVariant> = Lazy::new(select_session_variant);
 
 /// Square H logo (Hanzo brand)
+#[allow(dead_code)]
 pub const SQUARE_H_LOGO: [&str; 7] = [
     "┌─────────────┐",
     "│ ██╗   ██╗   │",
@@ -281,6 +282,7 @@ pub fn hologram_art(version: &str) -> Vec<String> {
 }
 
 /// Get lines for the current session's art variant
+#[allow(dead_code)]
 pub fn get_session_art(version: &str) -> Vec<String> {
     get_art_for_variant(*SESSION_VARIANT, version)
 }
@@ -302,6 +304,7 @@ pub fn get_art_for_variant(variant: ArtVariant, version: &str) -> Vec<String> {
 }
 
 /// Get the height for the current session's art
+#[allow(dead_code)]
 pub fn get_session_art_height() -> u16 {
     match *SESSION_VARIANT {
         ArtVariant::Classic => 13,
@@ -318,18 +321,21 @@ pub fn get_session_art_height() -> u16 {
 }
 
 /// Matrix rain characters for animation
+#[allow(dead_code)]
 pub const MATRIX_CHARS: &[char] = &[
     '0', '1', '2', '3', '4', '5', '6', '7', '8', '9', 'A', 'B', 'C', 'D', 'E', 'F', 'ア', 'イ',
     'ウ', 'エ', 'オ', 'カ', 'キ', 'ク', 'ケ', 'コ', '░', '▒', '▓', '█',
 ];
 
 /// Get a random matrix character
+#[allow(dead_code)]
 pub fn random_matrix_char() -> char {
     let mut rng = rand::rng();
     MATRIX_CHARS[rng.random_range(0..MATRIX_CHARS.len())]
 }
 
 /// Color gradient for matrix effect (green -> yellow -> white)
+#[allow(dead_code)]
 pub fn matrix_gradient_color(intensity: f32) -> (u8, u8, u8) {
     let intensity = intensity.clamp(0.0, 1.0);
     if intensity < 0.5 {
