@@ -1055,11 +1055,11 @@ fn render_login_error_page(
     let (title, display_message, display_description, help_text) =
         if is_missing_codex_entitlement_error(code, error_description) {
             (
-                "You do not have access to Codex".to_string(),
-                "This account is not currently authorized to use Codex in this workspace."
+                "You do not have access to Hanzo Dev".to_string(),
+                "This account is not currently authorized to use Hanzo Dev in this workspace."
                     .to_string(),
-                "Contact your workspace administrator to request access to Codex.".to_string(),
-                "Contact your workspace administrator to get access to Codex, then return to Codex and try again."
+                "Contact your workspace administrator to request access to Hanzo Dev.".to_string(),
+                "Contact your workspace administrator to get access to Hanzo Dev, then return and try again."
                     .to_string(),
             )
         } else {

@@ -72,7 +72,7 @@ async fn init_backend(user_agent_suffix: &str) -> anyhow::Result<BackendContext>
         Some(auth) => auth,
         None => {
             eprintln!(
-                "Not signed in. Please run 'codex login' to sign in with ChatGPT, then re-run 'codex cloud'."
+                "Not signed in. Please run 'hanzo login' to sign in, then re-run 'hanzo cloud'."
             );
             std::process::exit(1);
         }
@@ -86,7 +86,7 @@ async fn init_backend(user_agent_suffix: &str) -> anyhow::Result<BackendContext>
         Ok(t) if !t.is_empty() => t,
         _ => {
             eprintln!(
-                "Not signed in. Please run 'codex login' to sign in with ChatGPT, then re-run 'codex cloud'."
+                "Not signed in. Please run 'hanzo login' to sign in, then re-run 'hanzo cloud'."
             );
             std::process::exit(1);
         }
@@ -209,7 +209,7 @@ async fn resolve_environment_id(ctx: &BackendContext, requested: &str) -> anyhow
         .collect::<Vec<_>>();
     match label_matches.as_slice() {
         [] => Err(anyhow!(
-            "environment '{trimmed}' not found; run `codex cloud` to list available environments"
+            "environment '{trimmed}' not found; run `hanzo cloud` to list available environments"
         )),
         [single] => Ok(single.id.clone()),
         [first, rest @ ..] => {
@@ -218,7 +218,7 @@ async fn resolve_environment_id(ctx: &BackendContext, requested: &str) -> anyhow
                 Ok(first_id.clone())
             } else {
                 Err(anyhow!(
-                    "environment label '{trimmed}' is ambiguous; run `codex cloud` to pick the desired environment id"
+                    "environment label '{trimmed}' is ambiguous; run `hanzo cloud` to pick the desired environment id"
                 ))
             }
         }

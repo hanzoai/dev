@@ -1028,8 +1028,9 @@ pub struct AuthDotJson {
 // For Hanzo IAM (hanzo.id), this is the `app-dev` application.
 // For OpenAI (--chatgpt), pass the OpenAI client ID via --client-id.
 pub const CLIENT_ID: &str = "app-hanzo";
-/// Client secret for the Hanzo IAM PKCE flow.
-pub const CLIENT_SECRET: &str = "";
+/// Publishable key for the Hanzo IAM OAuth flow. This is a public key (like
+/// Stripe's `pk_*` keys) and is safe to embed in client applications.
+pub const PUBLISHABLE_KEY: &str = "";
 
 use std::sync::RwLock;
 
