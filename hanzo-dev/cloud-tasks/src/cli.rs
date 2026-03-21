@@ -9,7 +9,7 @@ pub enum Command {
 
 #[derive(Parser, Debug, Default, Clone)]
 pub struct SubmitArgs {
-    /// The task prompt to submit to Codex Cloud
+    /// The task prompt to submit to Hanzo Cloud
     #[arg(value_name = "PROMPT")]
     pub prompt: String,
 

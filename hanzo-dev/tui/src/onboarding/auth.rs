@@ -276,11 +276,11 @@ impl AuthModeWidget {
             Line::from("  Review the code it writes and commands it runs")
                 .style(Style::default().add_modifier(Modifier::DIM)),
             Line::from(""),
-            Line::from("  Powered by your ChatGPT account"),
+            Line::from("  Powered by your Hanzo account"),
             Line::from(vec![
                 Span::raw("  Uses your plan's rate limits and "),
                 Span::styled(
-                    "\u{1b}]8;;https://chatgpt.com/#settings\u{7}training data preferences\u{1b}]8;;\u{7}",
+                    "\u{1b}]8;;https://hanzo.ai/settings\u{7}preferences\u{1b}]8;;\u{7}",
                     Style::default().add_modifier(Modifier::UNDERLINED),
                 ),
             ])

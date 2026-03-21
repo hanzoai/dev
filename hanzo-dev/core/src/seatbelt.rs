@@ -120,7 +120,7 @@ fn create_seatbelt_command_args(
     );
 
     if std::env::var("CODEX_DEBUG_PRINT_SEATBELT").is_ok() {
-        eprintln!("--- Codex Seatbelt Policy ---\n{}\n------------------------------", full_policy);
+        eprintln!("--- Hanzo Dev Seatbelt Policy ---\n{}\n----------------------------------", full_policy);
     }
 
     let mut seatbelt_args: Vec<String> = vec!["-p".to_string(), full_policy];

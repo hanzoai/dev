@@ -25124,7 +25124,7 @@ Have we met every part of this goal and is there no further work to do?"#
                 "Dark - Paper Light Pro".to_string()
             }
             hanzo_core::config_types::ThemeName::DarkMonochrome => "Dark - Monochrome".to_string(),
-            hanzo_core::config_types::ThemeName::DarkCodex => "Dark - Codex".to_string(),
+            hanzo_core::config_types::ThemeName::DarkCodex => "Dark - Hanzo".to_string(),
             hanzo_core::config_types::ThemeName::DarkCode => "Dark - Code".to_string(),
             hanzo_core::config_types::ThemeName::Custom => {
                 let mut label =
@@ -29689,7 +29689,7 @@ Have we met every part of this goal and is there no further work to do?"#
         use ratatui::text::Line;
         use ratatui::text::Span;
         use ratatui::widgets::Block;
-        use ratatui::widgets::Borders;
+        
         use ratatui::widgets::Paragraph;
 
         // Add same horizontal padding as the Message input (2 chars on each side)
@@ -38377,7 +38377,7 @@ impl ChatWidget<'_> {
     pub(crate) fn show_cloud_tasks_loading(&mut self) {
         let loading_item = SelectionItem {
             name: "Loading cloud tasks…".to_string(),
-            description: Some("Fetching latest tasks from Codex Cloud".to_string()),
+            description: Some("Fetching latest tasks from Hanzo Cloud".to_string()),
             is_current: true,
             actions: Vec::new(),
         };
@@ -38433,7 +38433,7 @@ impl ChatWidget<'_> {
     pub(crate) fn show_cloud_environment_loading(&mut self) {
         let loading_item = SelectionItem {
             name: "Loading environments…".to_string(),
-            description: Some("Fetching available Codex Cloud environments".to_string()),
+            description: Some("Fetching available Hanzo Cloud environments".to_string()),
             is_current: true,
             actions: Vec::new(),
         };
@@ -38658,7 +38658,7 @@ impl ChatWidget<'_> {
 
         let view = CustomPromptView::new(
             format!("Create cloud task ({env_display})"),
-            "Describe the change you want Codex to implement".to_string(),
+            "Describe the change you want Hanzo Dev to implement".to_string(),
             Some("Press Enter to submit · Esc cancel".to_string()),
             self.app_event_tx.clone(),
             None,

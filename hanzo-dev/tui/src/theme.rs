@@ -234,6 +234,7 @@ pub fn toggle_zen_mode() -> bool {
 
 /// Cycle gutter mode: None → Spacing → Full → None.
 /// Returns the new mode. Does NOT change zen/border state.
+#[allow(dead_code)]
 pub fn cycle_gutter_mode() -> GutterMode {
     let mut mode = GUTTER_MODE.write().unwrap();
     *mode = mode.next();
@@ -1671,7 +1672,7 @@ fn get_predefined_theme(name: ThemeName) -> Theme {
         },
 
         ThemeName::DarkCodex => Theme {
-            // Terminal-adaptive warm theme (openai/codex style)
+            // Terminal-adaptive warm theme (hanzo style)
             // Warm off-black bg, orange/amber accents
             primary: Color::Rgb(251, 146, 60), // #FB923C  orange-400
             secondary: Color::Rgb(253, 186, 116), // #FDBA74  orange-300
