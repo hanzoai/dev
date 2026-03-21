@@ -1,4 +1,4 @@
-## @hanzo/dev v0.6.82
+## @hanzo/dev v0.6.83
 
 This release fixes TLS connectivity to api.hanzo.ai, strips inline thinking tags from zen model output, and improves assistant message styling.
 

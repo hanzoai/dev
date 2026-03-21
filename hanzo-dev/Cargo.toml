@@ -45,7 +45,7 @@ members = [
 resolver = "2"
 
 [workspace.package]
-version = "0.6.82"
+version = "0.6.83"
 license = "MIT"
 repository = "https://github.com/hanzoai/dev"
 description = "Hanzo Dev - AI-powered development assistant"
