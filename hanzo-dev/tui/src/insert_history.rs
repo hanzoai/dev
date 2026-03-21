@@ -44,7 +44,6 @@ fn ratatui_color_to_crossterm(c: Color) -> CColor {
         Color::White => CColor::White,
         Color::Rgb(r, g, b) => CColor::Rgb { r, g, b },
         Color::Indexed(i) => CColor::AnsiValue(i),
-        _ => CColor::Reset,
     }
 }
 

@@ -43,7 +43,7 @@ jobs:
         **/yarn.lock
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
         with:
           ref: ${{ env.DEFAULT_BRANCH }}
           fetch-depth: 1
@@ -95,12 +95,12 @@ jobs:
             core.setOutput('slug', slug || '');
 
       - name: Setup Node.js
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v6
         with:
           node-version: "20"
 
       - name: Cache npm (npx) downloads
-        uses: actions/cache@v4
+        uses: actions/cache@v5
         with:
           path: |
             ~/.npm
@@ -109,7 +109,7 @@ jobs:
             npm-cache-${{ runner.os }}-node20-
 
       - name: Cache ripgrep binary
-        uses: actions/cache@v4
+        uses: actions/cache@v5
         with:
           path: ~/.local/tools/rg-13.0.0
           key: rg-${{ runner.os }}-13.0.0
@@ -132,7 +132,7 @@ jobs:
           rg --version
 
       - name: Cache jq binary
-        uses: actions/cache@v4
+        uses: actions/cache@v5
         with:
           path: ~/.local/tools/jq-1.7.1
           key: jq-${{ runner.os }}-1.7.1

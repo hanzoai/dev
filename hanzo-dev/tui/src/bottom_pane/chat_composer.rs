@@ -2,7 +2,7 @@ use ratatui::buffer::Buffer;
 use ratatui::layout::{Constraint, Layout, Margin, Rect};
 use ratatui::style::{Color, Modifier, Style, Stylize};
 use ratatui::text::{Line, Span};
-use ratatui::widgets::{Block, BorderType, Borders, StatefulWidgetRef, WidgetRef};
+use ratatui::widgets::{Block, BorderType, StatefulWidgetRef, WidgetRef};
 use hanzo_core::config_types::ContextMode;
 use hanzo_core::protocol::AutoContextPhase;
 use hanzo_core::protocol::TokenUsage;

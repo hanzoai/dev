@@ -41,6 +41,7 @@ impl PanelFrameStyle {
         }
     }
 
+    #[allow(dead_code)]
     pub(crate) fn overlay_transparent() -> Self {
         Self {
             title_alignment: Alignment::Left,

@@ -45,7 +45,6 @@ fn to_ct(c: RColor) -> CtColor {
         RColor::White => CtColor::White,
         RColor::Rgb(r, g, b) => CtColor::Rgb { r, g, b },
         RColor::Indexed(i) => CtColor::AnsiValue(i),
-        _ => CtColor::Reset,
     }
 }
 
@@ -66,9 +65,9 @@ pub(crate) fn migration_copy_for_key(key: &str) -> ModelMigrationCopy {
         hanzo_common::model_presets::HIDE_GPT5_1_MIGRATION_PROMPT_CONFIG => ModelMigrationCopy {
             heading: "Introducing our gpt-5.1 models",
             content: &[
-                "We've upgraded Codex to gpt-5.1, gpt-5.1-codex, and gpt-5.1-codex-mini.",
+                "We've upgraded Hanzo Dev to gpt-5.1, gpt-5.1-codex, and gpt-5.1-codex-mini.",
                 "Legacy gpt-5 models continue to work via -m or config.toml overrides.",
-                "Learn more: www.openai.com/index/gpt-5-1",
+                "Learn more: https://hanzo.ai/blog/gpt-5-1",
                 "Press Enter to continue.",
             ],
             can_opt_out: false,
@@ -76,9 +75,9 @@ pub(crate) fn migration_copy_for_key(key: &str) -> ModelMigrationCopy {
         hanzo_common::model_presets::HIDE_GPT_5_2_MIGRATION_PROMPT_CONFIG => ModelMigrationCopy {
             heading: "Upgrade available: GPT-5.2",
             content: &[
-                "OpenAI's latest frontier model is here! Improved knowledge, reasoning, and coding.",
+                "The latest frontier model is here! Improved knowledge, reasoning, and coding.",
                 "Switch now to get better results; you can keep your current model if you prefer.",
-                "Learn more: www.openai.com/index/gpt-5-2",
+                "Learn more: https://hanzo.ai/blog/gpt-5-2",
             ],
             can_opt_out: true,
         },
@@ -86,9 +85,9 @@ pub(crate) fn migration_copy_for_key(key: &str) -> ModelMigrationCopy {
             ModelMigrationCopy {
                 heading: "Upgrade available: GPT-5.3 Codex",
                 content: &[
-                    "OpenAI's latest frontier agentic coding model is here: gpt-5.3-codex.",
+                    "The latest frontier agentic coding model is here: gpt-5.3-codex.",
                     "Switch now for better coding results; you can keep your current model if you prefer.",
-                    "Learn more: https://openai.com/index/introducing-gpt-5-3-codex/",
+                    "Learn more: https://hanzo.ai/blog/gpt-5-3-codex",
                 ],
                 can_opt_out: true,
             }
@@ -97,9 +96,9 @@ pub(crate) fn migration_copy_for_key(key: &str) -> ModelMigrationCopy {
             ModelMigrationCopy {
                 heading: "Upgrade available: GPT-5.3 Codex",
                 content: &[
-                    "OpenAI's latest frontier agentic coding model is here: gpt-5.3-codex.",
+                    "The latest frontier agentic coding model is here: gpt-5.3-codex.",
                     "Switch now for better coding results; you can keep your current model if you prefer.",
-                    "Learn more: www.openai.com",
+                    "Learn more: https://hanzo.ai",
                 ],
                 can_opt_out: true,
             }

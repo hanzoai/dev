@@ -109,6 +109,7 @@ pub(crate) fn new_connecting_mcp_status(server_names: &[&str]) -> BackgroundEven
 }
 
 /// Replacement cell shown after MCP servers finish connecting.
+#[allow(dead_code)]
 pub(crate) fn new_connected_mcp_status(server_names: &[&str]) -> BackgroundEventCell {
     let desc = if server_names.is_empty() {
         "\nMCP servers connected".to_string()
