@@ -1028,7 +1028,7 @@ pub struct AuthDotJson {
 // For Hanzo IAM (hanzo.id), this is the `app-dev` application.
 // For OpenAI (--chatgpt), pass the OpenAI client ID via --client-id.
 // Hanzo IAM public client (PKCE only, no client_secret)
-pub const CLIENT_ID: &str = "app-hanzo";
+pub const CLIENT_ID: &str = "hanzo-app";
 
 use std::sync::RwLock;
 
