@@ -450,19 +450,16 @@ pub(crate) async fn exchange_code_for_tokens(
     }
 
     let client = hanzo_core::http_client::build_http_client();
-    // Send both code_verifier (PKCE) and publishable_key so the exchange works
-    // with both PKCE-only providers (OpenAI) and confidential-client providers
-    // (Casdoor/hanzo.id).
+    // PKCE-only token exchange (public client, no client_secret)
     let resp = client
         .post(format!("{issuer}/oauth/token"))
         .header("Content-Type", "application/x-www-form-urlencoded")
         .body(format!(
-            "grant_type=authorization_code&code={}&redirect_uri={}&client_id={}&code_verifier={}&client_secret={}",
+            "grant_type=authorization_code&code={}&redirect_uri={}&client_id={}&code_verifier={}",
             urlencoding::encode(code),
             urlencoding::encode(redirect_uri),
             urlencoding::encode(client_id),
             urlencoding::encode(&pkce.code_verifier),
-            urlencoding::encode(hanzo_core::auth::PUBLISHABLE_KEY),
         ))
         .send()
         .await

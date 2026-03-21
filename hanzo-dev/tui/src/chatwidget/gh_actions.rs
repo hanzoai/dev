@@ -89,7 +89,7 @@ pub(super) fn maybe_watch_after_push(
             .use_rustls_tls()
             .user_agent("dev-cli-rs/github-monitor")
             .build()
-            .unwrap_or_else(|_| reqwest::Client::new());
+            .expect("failed to build reqwest client with rustls");
 
         // Two-phase polling:
         // 1) Appearance window: up to 2 minutes to see a workflow run start
