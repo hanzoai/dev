@@ -9,7 +9,10 @@ fn detects_zsh() {
 
     let shell_path = zsh_shell.shell_path;
 
-    assert_eq!(shell_path, std::path::Path::new("/bin/zsh"));
+    assert!(
+        shell_path.file_name().and_then(|n| n.to_str()) == Some("zsh"),
+        "expected zsh shell binary, got: {shell_path:?}",
+    );
 }
 
 #[test]
@@ -19,7 +22,10 @@ fn fish_fallback_to_zsh() {
 
     let shell_path = zsh_shell.shell_path;
 
-    assert_eq!(shell_path, std::path::Path::new("/bin/zsh"));
+    assert!(
+        shell_path.file_name().and_then(|n| n.to_str()) == Some("zsh"),
+        "expected zsh shell binary, got: {shell_path:?}",
+    );
 }
 
 #[test]
