@@ -143,10 +143,9 @@ async fn end_to_end_login_flow_persists_auth_json() -> Result<()> {
     let auth_path = codex_home.join("auth.json");
     let data = std::fs::read_to_string(&auth_path)?;
     let json: serde_json::Value = serde_json::from_str(&data)?;
-    // The following assert is here because of the old oauth flow that exchanges tokens for an
-    // API key. See obtain_api_key in server.rs for details. Once we remove this old mechanism
-    // from the code, this test should be updated to expect that the API key is no longer present.
-    assert_eq!(json["OPENAI_API_KEY"], "access-123");
+    // The mock issuer is a plain http://127.0.0.1 URL which is neither an OpenAI nor a Claude
+    // issuer, so no API key exchange is attempted and the field stays null.
+    assert_eq!(json["OPENAI_API_KEY"], serde_json::Value::Null);
     assert_eq!(json["tokens"]["access_token"], "access-123");
     assert_eq!(json["tokens"]["refresh_token"], "refresh-123");
     assert_eq!(json["tokens"]["account_id"], chatgpt_account_id);
@@ -287,8 +286,8 @@ async fn oauth_access_denied_missing_entitlement_blocks_login_with_clear_error()
     assert!(resp.status().is_success());
     let body = resp.text().await?;
     assert!(
-        body.contains("You do not have access to Codex"),
-        "error body should clearly explain the Codex access denial"
+        body.contains("You do not have access to Hanzo Dev"),
+        "error body should clearly explain the Hanzo Dev access denial"
     );
     assert!(
         body.contains("Contact your workspace administrator"),
