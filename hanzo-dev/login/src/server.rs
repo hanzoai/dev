@@ -450,7 +450,7 @@ pub(crate) async fn exchange_code_for_tokens(
     }
 
     let client = hanzo_core::http_client::build_http_client();
-    // Send both code_verifier (PKCE) and client_secret so the exchange works
+    // Send both code_verifier (PKCE) and publishable_key so the exchange works
     // with both PKCE-only providers (OpenAI) and confidential-client providers
     // (Casdoor/hanzo.id).
     let resp = client
@@ -462,7 +462,7 @@ pub(crate) async fn exchange_code_for_tokens(
             urlencoding::encode(redirect_uri),
             urlencoding::encode(client_id),
             urlencoding::encode(&pkce.code_verifier),
-            urlencoding::encode(hanzo_core::auth::CLIENT_SECRET),
+            urlencoding::encode(hanzo_core::auth::PUBLISHABLE_KEY),
         ))
         .send()
         .await

@@ -315,7 +315,7 @@ impl AuthModeWidget {
         let mut lines: Vec<Line> = vec![
             Line::from(vec![
                 "  ".into(),
-                "Sign in with ChatGPT to use Codex as part of your paid plan".into(),
+                "Sign in with Hanzo to use Dev as part of your paid plan".into(),
             ]),
             Line::from(vec![
                 "  ".into(),
