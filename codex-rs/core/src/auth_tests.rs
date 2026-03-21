@@ -78,7 +78,21 @@ fn login_with_api_key_overwrites_existing_auth_json() {
 }
 
 #[test]
+#[serial(codex_api_key)]
 fn missing_auth_json_returns_none() {
+    // Clear env API keys so load_auth does not short-circuit.
+    let _hanzo_guard = EnvVarGuard::clear("HANZO_API_KEY");
+    let _openai_guard = EnvVarGuard::clear("OPENAI_API_KEY");
+    let _codex_guard = EnvVarGuard::clear("CODEX_API_KEY");
+
+    // On macOS, `load_auth` also reads Claude Code tokens from the Keychain.
+    // If a valid Keychain credential exists, from_auth_storage will return Some,
+    // which is correct behavior -- skip the test in that case.
+    if super::read_claude_code_keychain_token().is_some() {
+        eprintln!("skipping: Claude Code keychain token present");
+        return;
+    }
+
     let dir = tempdir().unwrap();
     let auth = CodexAuth::from_auth_storage(dir.path(), AuthCredentialsStoreMode::File)
         .expect("call should succeed");
@@ -285,6 +299,14 @@ impl EnvVarGuard {
         let original = env::var_os(key);
         unsafe {
             env::set_var(key, value);
+        }
+        Self { key, original }
+    }
+
+    fn clear(key: &'static str) -> Self {
+        let original = env::var_os(key);
+        unsafe {
+            env::remove_var(key);
         }
         Self { key, original }
     }
