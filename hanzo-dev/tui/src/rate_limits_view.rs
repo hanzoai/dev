@@ -10,7 +10,6 @@ use hanzo_common::elapsed::format_duration;
 use hanzo_core::protocol::RateLimitSnapshotEvent;
 use hanzo_protocol::num_format::format_with_separators;
 use ratatui::prelude::*;
-use ratatui::style::Stylize;
 use std::time::Duration;
 
 const WEEKLY_CELL: &str = "▇▇";

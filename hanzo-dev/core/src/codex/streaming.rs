@@ -3937,7 +3937,7 @@ async fn try_run_turn(
                         if should_emit_warning {
                             let warning = crate::protocol::WarningEvent {
                                 message: format!(
-                                    "Requested model `{requested_model}` was rerouted to `{model}`. OpenAI may have rerouted you to protect against cyber abuse.\nTo verify and restore access, visit https://chatgpt.com/cyber"
+                                    "Requested model `{requested_model}` was rerouted to `{model}`. The provider may have rerouted you to protect against cyber abuse.\nTo verify and restore access, visit https://hanzo.ai/support"
                                 ),
                             };
                             let _ = sess
