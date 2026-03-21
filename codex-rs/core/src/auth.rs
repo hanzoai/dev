@@ -676,7 +676,7 @@ async fn request_chatgpt_token_refresh(
     let refresh_request = RefreshRequest {
         client_id: if is_hanzo { HANZO_CLIENT_ID } else { CLIENT_ID },
         client_secret: if is_hanzo {
-            Some(HANZO_CLIENT_SECRET)
+            Some(HANZO_PUBLISHABLE_KEY)
         } else {
             None
         },
@@ -802,7 +802,9 @@ pub const CLIENT_ID: &str = "app_EMoamEEZ73f0CkXaXp7hrann";
 
 // Hanzo client credentials (for hanzo.id Casdoor OAuth)
 pub const HANZO_CLIENT_ID: &str = "app-hanzo";
-pub const HANZO_CLIENT_SECRET: &str = "3c7c4d9817bf0993681f6da2605e07ba5949da87a32862ed";
+/// Publishable key for the Hanzo IAM OAuth flow. This is a public key (like
+/// Stripe's `pk_*` keys) and is safe to embed in client applications.
+pub const HANZO_PUBLISHABLE_KEY: &str = "3c7c4d9817bf0993681f6da2605e07ba5949da87a32862ed";
 
 // Claude Code OAuth credentials (for Anthropic OAuth)
 pub const CLAUDE_CLIENT_ID: &str = "9d1c250a-e61b-44d9-88ed-5944d1962f5e";
