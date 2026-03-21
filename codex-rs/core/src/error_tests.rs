@@ -57,7 +57,7 @@ fn usage_limit_reached_error_formats_plus_plan() {
     };
     assert_eq!(
         err.to_string(),
-        "You've hit your usage limit. Upgrade to Pro (https://chatgpt.com/explore/pro), visit https://chatgpt.com/codex/settings/usage to purchase more credits or try again later."
+        "You've hit your usage limit. Check your plan and billing details, or upgrade your plan at hanzo.ai or try again later."
     );
 }
 
@@ -178,7 +178,7 @@ fn usage_limit_reached_error_formats_free_plan() {
     };
     assert_eq!(
         err.to_string(),
-        "You've hit your usage limit. Upgrade to Plus to continue using Codex (https://chatgpt.com/explore/plus), or try again later."
+        "You've hit your usage limit. Upgrade your plan at hanzo.ai to continue, or try again later."
     );
 }
 
@@ -192,7 +192,7 @@ fn usage_limit_reached_error_formats_go_plan() {
     };
     assert_eq!(
         err.to_string(),
-        "You've hit your usage limit. Upgrade to Plus to continue using Codex (https://chatgpt.com/explore/plus), or try again later."
+        "You've hit your usage limit. Upgrade your plan at hanzo.ai to continue, or try again later."
     );
 }
 
@@ -270,7 +270,7 @@ fn usage_limit_reached_error_formats_pro_plan_with_reset() {
             promo_message: None,
         };
         let expected = format!(
-            "You've hit your usage limit. Visit https://chatgpt.com/codex/settings/usage to purchase more credits or try again at {expected_time}."
+            "You've hit your usage limit. Check your plan and billing details or try again at {expected_time}."
         );
         assert_eq!(err.to_string(), expected);
     });
@@ -350,11 +350,10 @@ fn unexpected_status_non_html_is_unchanged() {
         identity_authorization_error: None,
         identity_error_code: None,
     };
-    let status = StatusCode::FORBIDDEN.to_string();
-    let url = "http://example.com/plain";
+    // 403 without Cloudflare markers triggers a friendly message.
     assert_eq!(
         err.to_string(),
-        format!("unexpected status {status}: plain text error, url: {url}")
+        "Access denied (403). Your API key may lack permissions, or run `hanzo login` to re-authenticate."
     );
 }
 
@@ -364,18 +363,16 @@ fn unexpected_status_prefers_error_message_when_present() {
         status: StatusCode::UNAUTHORIZED,
         body: r#"{"error":{"message":"Workspace is not authorized in this region."},"status":401}"#
             .to_string(),
-        url: Some("https://chatgpt.com/backend-api/codex/responses".to_string()),
+        url: Some("https://api.hanzo.ai/v1/responses".to_string()),
         cf_ray: None,
         request_id: Some("req-123".to_string()),
         identity_authorization_error: None,
         identity_error_code: None,
     };
-    let status = StatusCode::UNAUTHORIZED.to_string();
+    // 401 triggers the friendly message regardless of body content.
     assert_eq!(
         err.to_string(),
-        format!(
-            "unexpected status {status}: Workspace is not authorized in this region., url: https://chatgpt.com/backend-api/codex/responses, request id: req-123"
-        )
+        "Authentication failed (401). Run `hanzo login` to sign in."
     );
 }
 
@@ -403,40 +400,42 @@ fn unexpected_status_truncates_long_body_with_ellipsis() {
 
 #[test]
 fn unexpected_status_includes_cf_ray_and_request_id() {
+    // Use a non-401/403 status so the raw format (with cf-ray/request-id) is exercised.
     let err = UnexpectedResponseError {
-        status: StatusCode::UNAUTHORIZED,
+        status: StatusCode::BAD_REQUEST,
         body: "plain text error".to_string(),
-        url: Some("https://chatgpt.com/backend-api/codex/responses".to_string()),
+        url: Some("https://api.hanzo.ai/v1/responses".to_string()),
         cf_ray: Some("9c81f9f18f2fa49d-LHR".to_string()),
         request_id: Some("req-xyz".to_string()),
         identity_authorization_error: None,
         identity_error_code: None,
     };
-    let status = StatusCode::UNAUTHORIZED.to_string();
+    let status = StatusCode::BAD_REQUEST.to_string();
     assert_eq!(
         err.to_string(),
         format!(
-            "unexpected status {status}: plain text error, url: https://chatgpt.com/backend-api/codex/responses, cf-ray: 9c81f9f18f2fa49d-LHR, request id: req-xyz"
+            "unexpected status {status}: plain text error, url: https://api.hanzo.ai/v1/responses, cf-ray: 9c81f9f18f2fa49d-LHR, request id: req-xyz"
         )
     );
 }
 
 #[test]
 fn unexpected_status_includes_identity_auth_details() {
+    // Use a non-401/403 status so the raw format (with auth detail fields) is exercised.
     let err = UnexpectedResponseError {
-        status: StatusCode::UNAUTHORIZED,
+        status: StatusCode::BAD_REQUEST,
         body: "plain text error".to_string(),
-        url: Some("https://chatgpt.com/backend-api/codex/models".to_string()),
+        url: Some("https://api.hanzo.ai/v1/models".to_string()),
         cf_ray: Some("cf-ray-auth-401-test".to_string()),
         request_id: Some("req-auth".to_string()),
         identity_authorization_error: Some("missing_authorization_header".to_string()),
         identity_error_code: Some("token_expired".to_string()),
     };
-    let status = StatusCode::UNAUTHORIZED.to_string();
+    let status = StatusCode::BAD_REQUEST.to_string();
     assert_eq!(
         err.to_string(),
         format!(
-            "unexpected status {status}: plain text error, url: https://chatgpt.com/backend-api/codex/models, cf-ray: cf-ray-auth-401-test, request id: req-auth, auth error: missing_authorization_header, auth error code: token_expired"
+            "unexpected status {status}: plain text error, url: https://api.hanzo.ai/v1/models, cf-ray: cf-ray-auth-401-test, request id: req-auth, auth error: missing_authorization_header, auth error code: token_expired"
         )
     );
 }
@@ -454,7 +453,7 @@ fn usage_limit_reached_includes_hours_and_minutes() {
             promo_message: None,
         };
         let expected = format!(
-            "You've hit your usage limit. Upgrade to Pro (https://chatgpt.com/explore/pro), visit https://chatgpt.com/codex/settings/usage to purchase more credits or try again at {expected_time}."
+            "You've hit your usage limit. Check your plan and billing details, or upgrade your plan at hanzo.ai or try again at {expected_time}."
         );
         assert_eq!(err.to_string(), expected);
     });
@@ -514,4 +513,38 @@ fn usage_limit_reached_with_promo_message() {
         );
         assert_eq!(err.to_string(), expected);
     });
+}
+
+#[test]
+fn unexpected_status_401_shows_friendly_login_message() {
+    let err = UnexpectedResponseError {
+        status: StatusCode::UNAUTHORIZED,
+        body: "plain text error".to_string(),
+        url: Some("https://api.hanzo.ai/v1/responses".to_string()),
+        cf_ray: Some("ray-id".to_string()),
+        request_id: Some("req-123".to_string()),
+        identity_authorization_error: None,
+        identity_error_code: None,
+    };
+    assert_eq!(
+        err.to_string(),
+        "Authentication failed (401). Run `hanzo login` to sign in."
+    );
+}
+
+#[test]
+fn unexpected_status_403_shows_friendly_access_denied() {
+    let err = UnexpectedResponseError {
+        status: StatusCode::FORBIDDEN,
+        body: "some error".to_string(),
+        url: Some("https://api.hanzo.ai/v1/responses".to_string()),
+        cf_ray: None,
+        request_id: None,
+        identity_authorization_error: None,
+        identity_error_code: None,
+    };
+    assert_eq!(
+        err.to_string(),
+        "Access denied (403). Your API key may lack permissions, or run `hanzo login` to re-authenticate."
+    );
 }
