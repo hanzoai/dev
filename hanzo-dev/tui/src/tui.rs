@@ -55,7 +55,6 @@ fn to_ct(c: ratatui::style::Color) -> crossterm::style::Color {
         ratatui::style::Color::White => crossterm::style::Color::White,
         ratatui::style::Color::Rgb(r, g, b) => crossterm::style::Color::Rgb { r, g, b },
         ratatui::style::Color::Indexed(i) => crossterm::style::Color::AnsiValue(i),
-        _ => crossterm::style::Color::Reset,
     }
 }
 

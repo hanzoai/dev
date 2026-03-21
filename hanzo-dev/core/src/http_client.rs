@@ -49,5 +49,5 @@ pub fn build_http_client() -> reqwest::Client {
         }
     }
 
-    builder.build().unwrap_or_else(|_| reqwest::Client::new())
+    builder.build().expect("failed to build reqwest client with rustls")
 }

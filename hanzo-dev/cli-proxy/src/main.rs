@@ -646,7 +646,7 @@ async fn main() -> Result<()> {
 ╠══════════════════════════════════════════════════════════════════╣
 ║  All CLIs use subscription/login (API keys are stripped):        ║
 ║    claude-cli, claude-opus → Claude (Anthropic subscription)     ║
-║    codex, gpt-4o, o1       → Codex (OpenAI subscription)         ║
+║    codex, gpt-4o, o1       → OpenAI (subscription)               ║
 ║    gemini, gemini-2.5-pro  → Gemini (Google account)             ║
 ║    vibe, mistral           → Vibe (Mistral subscription)         ║
 ║    qwen, qwen-plus         → Qwen (Alibaba account)              ║

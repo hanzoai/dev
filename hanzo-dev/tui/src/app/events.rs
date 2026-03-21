@@ -13,7 +13,6 @@ use hanzo_cloud_tasks_client::{CloudTaskError, TaskId};
 use hanzo_core::config::add_project_allowed_command;
 use hanzo_core::config_types::Notifications;
 use hanzo_core::protocol::{Event, Op, SandboxPolicy};
-use hanzo_core::SessionCatalog;
 use hanzo_login::{AuthManager, AuthMode, ServerOptions};
 use portable_pty::PtySize;
 
@@ -81,7 +80,7 @@ impl App<'_> {
                         Some(AuthMode::ApiKey)
                     }
                 });
-            let supports_pro_only_models = remote_auth_manager.supports_pro_only_models();
+            let _supports_pro_only_models = remote_auth_manager.supports_pro_only_models();
             let presets = hanzo_common::model_presets::builtin_model_presets(
                 auth_mode,
             );

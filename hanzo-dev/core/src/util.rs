@@ -27,7 +27,7 @@ pub(crate) fn backoff(attempt: u64) -> Duration {
 pub(crate) async fn wait_for_connectivity(probe_url: &str) {
     // Cap individual waits to avoid very long sleeps while still backing off.
     const MAX_DELAY: Duration = Duration::from_secs(30);
-    let client = reqwest::Client::builder().use_rustls_tls().build().unwrap_or_else(|_| reqwest::Client::new());
+    let client = reqwest::Client::builder().use_rustls_tls().build().expect("failed to build reqwest client with rustls");
     let mut attempt: u64 = 1;
     loop {
         // Treat any HTTP response as proof that DNS + TLS + routing are back.

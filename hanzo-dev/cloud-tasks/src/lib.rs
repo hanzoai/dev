@@ -152,7 +152,7 @@ fn spawn_apply(
 
 // (no standalone patch summarizer needed – UI displays raw diffs)
 
-/// Entry point for the `codex cloud` subcommand.
+/// Entry point for the `hanzo cloud` subcommand.
 pub async fn run_main(cli: Cli, _hanzo_linux_sandbox_exe: Option<PathBuf>) -> anyhow::Result<()> {
     // Non-interactive submit mode: used by the core agent runner to create a
     // cloud task and return its id on stdout.
@@ -229,7 +229,7 @@ pub async fn run_main(cli: Cli, _hanzo_linux_sandbox_exe: Option<PathBuf>) -> an
                     }
                     _ => {
                         eprintln!(
-                            "Not signed in. Please run 'codex login' to sign in with ChatGPT, then re-run 'codex cloud'."
+                            "Not signed in. Please run 'hanzo login' to sign in, then re-run 'hanzo cloud'."
                         );
                         std::process::exit(1);
                     }
@@ -237,7 +237,7 @@ pub async fn run_main(cli: Cli, _hanzo_linux_sandbox_exe: Option<PathBuf>) -> an
             }
             None => {
                 eprintln!(
-                    "Not signed in. Please run 'codex login' to sign in with ChatGPT, then re-run 'codex cloud'."
+                    "Not signed in. Please run 'hanzo login' to sign in, then re-run 'hanzo cloud'."
                 );
                 std::process::exit(1);
             }
@@ -1558,12 +1558,12 @@ async fn run_submit(args: crate::cli::SubmitArgs) -> anyhow::Result<()> {
                     t
                 }
                 _ => {
-                    eprintln!("Not signed in. Run 'codex login' and retry.");
+                    eprintln!("Not signed in. Run 'hanzo login' and retry.");
                     std::process::exit(1);
                 }
             },
             None => {
-                eprintln!("Not signed in. Run 'codex login' and retry.");
+                eprintln!("Not signed in. Run 'hanzo login' and retry.");
                 std::process::exit(1);
             }
         };

@@ -186,6 +186,7 @@ pub(crate) enum AppEvent {
     CodexOp(hanzo_core::protocol::Op),
 
     /// Submit a response for a pending `request_user_input` tool call.
+    #[allow(dead_code)]
     RequestUserInputAnswer {
         turn_id: String,
         response: RequestUserInputResponse,
@@ -272,6 +273,7 @@ pub(crate) enum AppEvent {
     ResumePickerLoadFailed { message: String },
 
     /// Session nickname update finished
+    #[allow(dead_code)]
     SessionRenameCompleted { message: String },
 
     /// Signal that agents are about to start (triggered when /plan, /solve, /code commands are entered)
