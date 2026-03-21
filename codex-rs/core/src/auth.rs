@@ -793,8 +793,8 @@ impl RefreshResponse {
 // OpenAI client ID (for ChatGPT OAuth)
 pub const CLIENT_ID: &str = "app_EMoamEEZ73f0CkXaXp7hrann";
 
-// Hanzo client credentials (for hanzo.id Casdoor OAuth — public client, PKCE only)
-pub const HANZO_CLIENT_ID: &str = "app-hanzo";
+// Hanzo IAM (hanzo.id Casdoor OAuth — public client, PKCE only)
+pub const HANZO_CLIENT_ID: &str = "hanzo-app";
 
 // Claude Code OAuth credentials (for Anthropic OAuth)
 pub const CLAUDE_CLIENT_ID: &str = "9d1c250a-e61b-44d9-88ed-5944d1962f5e";
