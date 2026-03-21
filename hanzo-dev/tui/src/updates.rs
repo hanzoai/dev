@@ -40,6 +40,7 @@ static FORCE_UPGRADE_PREVIEW: AtomicU8 = AtomicU8::new(FORCE_UPGRADE_UNSET);
 static HIDE_UPGRADE_NOTICE: AtomicU8 = AtomicU8::new(FORCE_UPGRADE_UNSET);
 
 /// Set whether upgrade notice should be hidden (from config)
+#[allow(dead_code)]
 pub fn set_hide_upgrade_notice(hide: bool) {
     HIDE_UPGRADE_NOTICE.store(
         if hide {

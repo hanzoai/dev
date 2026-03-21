@@ -20,7 +20,7 @@ use std::path::PathBuf;
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, Default)]
 #[serde(rename_all = "kebab-case")]
 pub struct CodexToolCallParam {
-    /// The *initial user prompt* to start the Codex conversation.
+    /// The *initial user prompt* to start the Hanzo Dev conversation.
     pub prompt: String,
 
     /// Optional override for the model name (e.g. "o3", "o4-mini").
@@ -122,12 +122,12 @@ pub(crate) fn create_tool_for_code_tool_call_param() -> Tool {
 
     Tool {
         name: "codex".to_string(),
-        title: Some("Codex".to_string()),
+        title: Some("Hanzo Dev".to_string()),
         input_schema: tool_input_schema,
         // TODO(mbolin): This should be defined.
         output_schema: None,
         description: Some(
-            "Run a Codex session. Accepts configuration parameters matching the Codex Config struct.".to_string(),
+            "Run a Hanzo Dev session. Accepts configuration parameters matching the Config struct.".to_string(),
         ),
         annotations: None,
     }
@@ -155,7 +155,7 @@ pub(crate) fn create_tool_for_acp_new_session() -> Tool {
         title: Some(acp::AGENT_METHOD_NAMES.session_new.to_string()),
         input_schema,
         output_schema: Some(output_schema),
-        description: Some("Start a Codex session over ACP.".to_string()),
+        description: Some("Start a Hanzo Dev session over ACP.".to_string()),
         annotations: None,
     }
 }
@@ -177,7 +177,7 @@ pub(crate) fn create_tool_for_acp_prompt() -> Tool {
         title: Some(acp::AGENT_METHOD_NAMES.session_prompt.to_string()),
         input_schema,
         output_schema: None,
-        description: Some("Send a prompt to an existing ACP Codex session.".to_string()),
+        description: Some("Send a prompt to an existing ACP Hanzo Dev session.".to_string()),
         annotations: None,
     }
 }
@@ -198,7 +198,7 @@ pub(crate) fn create_tool_for_acp_set_model() -> Tool {
         title: Some(acp::AGENT_METHOD_NAMES.session_set_model.to_string()),
         input_schema,
         output_schema: None,
-        description: Some("Select a model for an existing ACP Codex session.".to_string()),
+        description: Some("Select a model for an existing ACP Hanzo Dev session.".to_string()),
         annotations: None,
     }
 }
@@ -293,7 +293,7 @@ pub struct CodexToolCallReplyParam {
     /// The *session id* for this conversation.
     pub session_id: String,
 
-    /// The *next user prompt* to continue the Codex conversation.
+    /// The *next user prompt* to continue the Hanzo Dev conversation.
     pub prompt: String,
 }
 
@@ -318,11 +318,11 @@ pub(crate) fn create_tool_for_code_tool_call_reply_param() -> Tool {
 
     Tool {
         name: "codex-reply".to_string(),
-        title: Some("Codex Reply".to_string()),
+        title: Some("Hanzo Dev Reply".to_string()),
         input_schema: tool_input_schema,
         output_schema: None,
         description: Some(
-            "Continue a Codex session by providing the session id and prompt.".to_string(),
+            "Continue a Hanzo Dev session by providing the session id and prompt.".to_string(),
         ),
         annotations: None,
     }
@@ -351,8 +351,8 @@ mod tests {
         let tool_json = serde_json::to_value(&tool).expect("tool serializes");
         let expected_tool_json = serde_json::json!({
           "name": "codex",
-          "title": "Codex",
-          "description": "Run a Codex session. Accepts configuration parameters matching the Codex Config struct.",
+          "title": "Hanzo Dev",
+          "description": "Run a Hanzo Dev session. Accepts configuration parameters matching the Config struct.",
           "inputSchema": {
             "type": "object",
             "properties": {
@@ -397,7 +397,7 @@ mod tests {
                 "type": "string"
               },
               "prompt": {
-                "description": "The *initial user prompt* to start the Codex conversation.",
+                "description": "The *initial user prompt* to start the Hanzo Dev conversation.",
                 "type": "string"
               },
               "base-instructions": {
@@ -419,11 +419,11 @@ mod tests {
         #[expect(clippy::expect_used)]
         let tool_json = serde_json::to_value(&tool).expect("tool serializes");
         let expected_tool_json = serde_json::json!({
-          "description": "Continue a Codex session by providing the session id and prompt.",
+          "description": "Continue a Hanzo Dev session by providing the session id and prompt.",
           "inputSchema": {
             "properties": {
               "prompt": {
-                "description": "The *next user prompt* to continue the Codex conversation.",
+                "description": "The *next user prompt* to continue the Hanzo Dev conversation.",
                 "type": "string"
               },
               "sessionId": {
@@ -438,7 +438,7 @@ mod tests {
             "type": "object",
           },
           "name": "codex-reply",
-          "title": "Codex Reply",
+          "title": "Hanzo Dev Reply",
         });
         assert_eq!(expected_tool_json, tool_json);
     }

@@ -131,7 +131,7 @@ pub enum CodexErr {
     AuthRefreshPermanent(String),
 
     #[error(
-        "To use Codex with your ChatGPT plan, upgrade to Plus: https://openai.com/chatgpt/pricing."
+        "To use Hanzo Dev with your plan, upgrade to a paid tier or set HANZO_API_KEY."
     )]
     UsageNotIncluded,
 
@@ -258,7 +258,7 @@ impl std::fmt::Display for UsageLimitReachedError {
         if is_plus {
             write!(
                 f,
-                "You've hit your usage limit. Upgrade to Pro (https://openai.com/chatgpt/pricing) or try again"
+                "You've hit your usage limit. Upgrade your plan at https://hanzo.ai/pricing or try again"
             )?;
             if let Some(secs) = self.resets_in_seconds {
                 let reset_duration = format_reset_duration(secs);
@@ -423,7 +423,7 @@ mod tests {
         };
         assert_eq!(
             err.to_string(),
-            "You've hit your usage limit. Upgrade to Pro (https://openai.com/chatgpt/pricing) or try again later."
+            "You've hit your usage limit. Upgrade your plan at https://hanzo.ai/pricing or try again later."
         );
     }
 
@@ -471,7 +471,7 @@ mod tests {
         };
         assert_eq!(
             err.to_string(),
-            "You've hit your usage limit. Upgrade to Pro (https://openai.com/chatgpt/pricing) or try again in 3 hours 32 minutes."
+            "You've hit your usage limit. Upgrade your plan at https://hanzo.ai/pricing or try again in 3 hours 32 minutes."
         );
     }
 
