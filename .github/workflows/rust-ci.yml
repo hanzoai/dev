@@ -1,10 +1,10 @@
 name: rust-ci
 
 on:
-  push:
-    branches: [main]
-  pull_request:
   workflow_dispatch:
+
+# This fork relies on the Release workflow for post-push validation.
+# Keep rust-ci available for manual runs, but suppress inherited auto-triggers.
 
 jobs:
   noop:
