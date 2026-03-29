@@ -59,16 +59,25 @@ struct ChatUsage {
 
 // ── ZAP Cloud Client ────────────────────────────────────────────────────
 
-/// A client that speaks the luxfi/zap binary wire protocol over TLS.
+/// Trait alias combining AsyncRead + AsyncWrite for use as a boxed stream.
+trait AsyncStream: tokio::io::AsyncRead + tokio::io::AsyncWrite + Unpin + Send {}
+impl<T: tokio::io::AsyncRead + tokio::io::AsyncWrite + Unpin + Send> AsyncStream for T {}
+
+/// A client that speaks the luxfi/zap binary wire protocol.
+///
+/// Uses TLS for remote endpoints and plain TCP for localhost connections.
 pub(crate) struct ZapCloudClient {
-    stream: tokio_rustls::client::TlsStream<TcpStream>,
+    stream: Box<dyn AsyncStream>,
     req_id: AtomicU32,
     #[allow(dead_code)]
     peer_id: String,
 }
 
 impl ZapCloudClient {
-    /// Connect to the ZAP endpoint via TLS 1.3, perform handshake.
+    /// Connect to the ZAP endpoint, perform handshake.
+    ///
+    /// Uses plain TCP for localhost (`localhost`, `127.0.0.1`, `::1`) and
+    /// TLS 1.3 for all other hosts.
     pub async fn connect(endpoint: Option<&str>) -> Result<Self> {
         let addr = endpoint.unwrap_or(DEFAULT_ZAP_ENDPOINT);
 
@@ -79,38 +88,53 @@ impl ZapCloudClient {
             .unwrap_or("zap.hanzo.ai")
             .to_string();
 
-        // TLS configuration
-        let mut root_store = rustls::RootCertStore::empty();
-        root_store.extend(webpki_roots::TLS_SERVER_ROOTS.iter().cloned());
-
-        let config = rustls::ClientConfig::builder()
-            .with_root_certificates(root_store)
-            .with_no_client_auth();
-
-        let connector = tokio_rustls::TlsConnector::from(Arc::new(config));
-        let server_name = rustls::pki_types::ServerName::try_from(host.clone())
-            .map_err(|e| CodeErr::ServerError(format!("ZAP: invalid server name '{host}': {e}")))?;
+        let is_localhost = host == "localhost" || host == "127.0.0.1" || host == "::1";
 
         let tcp = TcpStream::connect(addr)
             .await
             .map_err(|e| CodeErr::ServerError(format!("ZAP: TCP connect to {addr} failed: {e}")))?;
         tcp.set_nodelay(true).ok();
 
-        let mut tls = connector
-            .connect(server_name, tcp)
-            .await
-            .map_err(|e| CodeErr::ServerError(format!("ZAP: TLS handshake with {addr} failed: {e}")))?;
+        let mut stream: Box<dyn AsyncStream> =
+            if is_localhost {
+                debug!("ZAP: plain TCP connected to {} (localhost)", addr);
+                Box::new(tcp)
+            } else {
+                // TLS configuration
+                let mut root_store = rustls::RootCertStore::empty();
+                root_store.extend(webpki_roots::TLS_SERVER_ROOTS.iter().cloned());
 
-        debug!("ZAP: TLS 1.3 connected to {}", addr);
+                let config = rustls::ClientConfig::builder()
+                    .with_root_certificates(root_store)
+                    .with_no_client_auth();
+
+                let connector = tokio_rustls::TlsConnector::from(Arc::new(config));
+                let server_name = rustls::pki_types::ServerName::try_from(host.clone())
+                    .map_err(|e| {
+                        CodeErr::ServerError(format!("ZAP: invalid server name '{host}': {e}"))
+                    })?;
+
+                let tls = connector
+                    .connect(server_name, tcp)
+                    .await
+                    .map_err(|e| {
+                        CodeErr::ServerError(format!(
+                            "ZAP: TLS handshake with {addr} failed: {e}"
+                        ))
+                    })?;
+
+                debug!("ZAP: TLS 1.3 connected to {}", addr);
+                Box::new(tls)
+            };
 
         // Send handshake
         let handshake_bytes = build_handshake(CLIENT_NODE_ID);
-        write_frame(&mut tls, &handshake_bytes)
+        write_frame(&mut stream, &handshake_bytes)
             .await
             .map_err(|e| CodeErr::ServerError(format!("ZAP: handshake send failed: {e}")))?;
 
         // Read handshake response
-        let resp_data = read_frame(&mut tls)
+        let resp_data = read_frame(&mut stream)
             .await
             .map_err(|e| CodeErr::ServerError(format!("ZAP: handshake read failed: {e}")))?;
 
@@ -121,7 +145,7 @@ impl ZapCloudClient {
         debug!("ZAP: handshake complete, peer={}", peer_id);
 
         Ok(Self {
-            stream: tls,
+            stream,
             req_id: AtomicU32::new(0),
             peer_id,
         })
@@ -178,9 +202,9 @@ impl ZapCloudClient {
         }
     }
 
-    /// Gracefully shut down the TLS connection.
+    /// Gracefully shut down the connection.
     pub async fn close(mut self) {
-        self.stream.shutdown().await.ok();
+        AsyncWriteExt::shutdown(&mut self.stream).await.ok();
     }
 }
 

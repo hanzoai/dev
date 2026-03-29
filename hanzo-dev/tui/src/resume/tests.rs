@@ -7,9 +7,8 @@ use std::io::Write;
 use std::path::Path;
 
 use tempfile::TempDir;
-use uuid::Uuid;
 
-use hanzo_protocol::ConversationId;
+
 use hanzo_protocol::protocol::EventMsg as ProtoEventMsg;
 use hanzo_protocol::protocol::RecordedEvent;
 use hanzo_protocol::protocol::RolloutItem;
@@ -24,13 +23,16 @@ fn write_event_only_session(path: &Path, cwd: &Path) {
     let mut writer = BufWriter::new(file);
 
     let session_meta = SessionMeta {
-        id: ConversationId::from(Uuid::from_u128(0xDEAD_BEEF_u128)),
+        id: hanzo_protocol::ThreadId::from_string("00000000-0000-0000-0000-0000deadbeef").unwrap(),
+        forked_from_id: None,
         timestamp: "2025-10-06T12:00:00.000Z".to_string(),
         cwd: cwd.to_path_buf(),
         originator: "resume-test".to_string(),
         cli_version: "0.0.0-test".to_string(),
-        instructions: None,
+        base_instructions: None,
         source: SessionSource::Cli,
+        model_provider: None,
+        dynamic_tools: None,
     };
 
     let meta_line = RolloutLine {
@@ -49,8 +51,9 @@ fn write_event_only_session(path: &Path, cwd: &Path) {
         order: None,
         msg: ProtoEventMsg::UserMessage(UserMessageEvent {
             message: "restore me".to_string(),
-            kind: None,
             images: None,
+            local_images: Vec::new(),
+            text_elements: Vec::new(),
         }),
     };
     let event_line = RolloutLine {

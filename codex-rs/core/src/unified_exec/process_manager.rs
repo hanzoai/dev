@@ -680,6 +680,7 @@ impl UnifiedExecProcessManager {
             process_id: request.process_id,
             cwd,
             env,
+            explicit_env_overrides: context.turn.shell_environment_policy.r#set.clone(),
             network: request.network.clone(),
             tty: request.tty,
             sandbox_permissions: request.sandbox_permissions,

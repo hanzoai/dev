@@ -30724,7 +30724,6 @@ use hanzo_core::protocol::OrderMeta;
             supported_text_verbosity: &[TextVerbosity::Medium],
             is_default: false,
             upgrade: None,
-            pro_only: false,
             show_in_picker: true,
         }];
 
@@ -34121,7 +34120,7 @@ use hanzo_core::protocol::OrderMeta;
                 context: None,
                 suppress_ui_context: false,
                 model_override: Some("gpt-5.3-codex-spark".to_string()),
-                reasoning_effort_override: Some(ReasoningEffort::High),
+                reasoning_effort_override: Some(ReasoningEffort::High.to_string()),
             }),
             None,
             Vec::new(),
@@ -34156,7 +34155,7 @@ use hanzo_core::protocol::OrderMeta;
                 context: None,
                 suppress_ui_context: false,
                 model_override: Some("gpt-5.3-codex-spark".to_string()),
-                reasoning_effort_override: Some(ReasoningEffort::High),
+                reasoning_effort_override: Some(ReasoningEffort::High.to_string()),
             }),
             None,
             Vec::new(),

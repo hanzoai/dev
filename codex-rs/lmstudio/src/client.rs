@@ -30,9 +30,10 @@ impl LMStudioClient {
         })?;
 
         let client = reqwest::Client::builder()
+            .use_rustls_tls()
             .connect_timeout(std::time::Duration::from_secs(5))
             .build()
-            .unwrap_or_else(|_| reqwest::Client::new());
+            .expect("failed to build reqwest client with rustls");
 
         let client = LMStudioClient {
             client,

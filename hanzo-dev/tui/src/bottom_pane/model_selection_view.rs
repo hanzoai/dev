@@ -1136,7 +1136,6 @@ mod tests {
             supported_text_verbosity: &TEST_VERBOSITY,
             is_default: false,
             upgrade: None,
-            pro_only: false,
             show_in_picker: true,
         }
     }
