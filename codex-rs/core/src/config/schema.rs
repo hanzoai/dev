@@ -1,6 +1,7 @@
 use crate::config::ConfigToml;
 use crate::config::types::RawMcpServerConfig;
-use crate::features::FEATURES;
+use codex_features::FEATURES;
+use codex_features::legacy_feature_keys;
 use schemars::r#gen::SchemaGenerator;
 use schemars::r#gen::SchemaSettings;
 use schemars::schema::InstanceType;
@@ -21,11 +22,14 @@ pub(crate) fn features_schema(schema_gen: &mut SchemaGenerator) -> Schema {
 
     let mut validation = ObjectValidation::default();
     for feature in FEATURES {
+        if feature.id == codex_features::Feature::Artifact {
+            continue;
+        }
         validation
             .properties
             .insert(feature.key.to_string(), schema_gen.subschema_for::<bool>());
     }
-    for legacy_key in crate::features::legacy_feature_keys() {
+    for legacy_key in legacy_feature_keys() {
         validation
             .properties
             .insert(legacy_key.to_string(), schema_gen.subschema_for::<bool>());
