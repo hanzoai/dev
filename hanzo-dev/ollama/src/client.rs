@@ -284,7 +284,9 @@ impl OllamaClient {
         let client = reqwest::Client::builder()
             .connect_timeout(std::time::Duration::from_secs(5))
             .build()
-            .unwrap_or_else(|_| reqwest::Client::new());
+            .use_rustls_tls()
+            .build()
+            .expect("failed to build reqwest client with rustls");
         Self {
             client,
             host_root: host_root.into(),

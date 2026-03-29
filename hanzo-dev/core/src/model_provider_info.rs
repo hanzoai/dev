@@ -670,21 +670,21 @@ pub fn built_in_model_providers() -> HashMap<String, ModelProviderInfo> {
                 openrouter: None,
             },
         ),
-        // Hanzo Node - local AI node with OpenAI-compatible API (port 9550)
+        // Hanzo Node - local AI node via native ZAP binary transport (port 3692)
         (
             "hanzo-node",
             P {
                 name: "Hanzo Node".into(),
-                base_url: std::env::var("HANZO_NODE_BASE_URL")
+                base_url: std::env::var("HANZO_NODE_ZAP_URL")
                     .ok()
                     .filter(|v| !v.trim().is_empty())
-                    .or_else(|| Some("http://localhost:9550/v1".into())),
+                    .or_else(|| Some("localhost:3692".into())),
                 env_key: None,
                 env_key_instructions: Some(
                     "Hanzo Node runs locally - start with Hanzo Desktop or: hanzo-node".into(),
                 ),
                 experimental_bearer_token: None,
-                wire_api: WireApi::Chat,
+                wire_api: WireApi::Zap,
                 query_params: None,
                 http_headers: None,
                 env_http_headers: None,
