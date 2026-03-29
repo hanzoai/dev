@@ -92,6 +92,9 @@ pub(crate) enum SignInState {
     ChatGptDeviceCode(ContinueWithDeviceCodeState),
     ChatGptSuccessMessage,
     ChatGptSuccess,
+    HanzoIdContinueInBrowser(ContinueInBrowserState),
+    HanzoIdSuccessMessage,
+    HanzoIdSuccess,
     ApiKeyEntry(ApiKeyInputState),
     ApiKeyConfigured,
 }
@@ -162,6 +165,9 @@ impl KeyboardHandler for AuthModeWidget {
                     SignInState::ChatGptSuccessMessage => {
                         *self.sign_in_state.write().unwrap() = SignInState::ChatGptSuccess;
                     }
+                    SignInState::HanzoIdSuccessMessage => {
+                        *self.sign_in_state.write().unwrap() = SignInState::HanzoIdSuccess;
+                    }
                     _ => {}
                 }
             }
@@ -198,7 +204,8 @@ impl AuthModeWidget {
     pub(crate) fn cancel_active_attempt(&self) {
         let mut sign_in_state = self.sign_in_state.write().unwrap();
         match &*sign_in_state {
-            SignInState::ChatGptContinueInBrowser(state) => {
+            SignInState::ChatGptContinueInBrowser(state)
+            | SignInState::HanzoIdContinueInBrowser(state) => {
                 let request_handle = self.app_server_request_handle.clone();
                 let login_id = state.login_id.clone();
                 tokio::spawn(async move {
@@ -442,7 +449,12 @@ impl AuthModeWidget {
         let mut lines = vec![spans.into(), "".into()];
 
         let sign_in_state = self.sign_in_state.read().unwrap();
-        let auth_url = if let SignInState::ChatGptContinueInBrowser(state) = &*sign_in_state
+        let browser_state = match &*sign_in_state {
+            SignInState::ChatGptContinueInBrowser(state)
+            | SignInState::HanzoIdContinueInBrowser(state) => Some(state),
+            _ => None,
+        };
+        let auth_url = if let Some(state) = browser_state
             && !state.auth_url.is_empty()
         {
             lines.push("  If the link doesn't open automatically, open the following link to authenticate:".into());
@@ -509,6 +521,40 @@ impl AuthModeWidget {
     fn render_chatgpt_success(&self, area: Rect, buf: &mut Buffer) {
         let lines = vec![
             "✓ Signed in with your ChatGPT account"
+                .fg(Color::Green)
+                .into(),
+        ];
+
+        Paragraph::new(lines)
+            .wrap(Wrap { trim: false })
+            .render(area, buf);
+    }
+
+    fn render_success_message(&self, area: Rect, buf: &mut Buffer) {
+        let lines = vec![
+            "✓ Signed in with your Hanzo account".fg(Color::Green).into(),
+            "".into(),
+            "  Before you start:".into(),
+            "".into(),
+            "  Decide how much autonomy you want to grant Hanzo Dev".into(),
+            "".into(),
+            "  Hanzo Dev can make mistakes".into(),
+            "  Review the code it writes and commands it runs".dim().into(),
+            "".into(),
+            "  Powered by your Hanzo account".into(),
+            "  Uses your plan's rate limits".dim().into(),
+            "".into(),
+            "  Press Enter to continue".fg(Color::Cyan).into(),
+        ];
+
+        Paragraph::new(lines)
+            .wrap(Wrap { trim: false })
+            .render(area, buf);
+    }
+
+    fn render_hanzo_success(&self, area: Rect, buf: &mut Buffer) {
+        let lines = vec![
+            "✓ Signed in with your Hanzo account"
                 .fg(Color::Green)
                 .into(),
         ];
@@ -765,11 +811,57 @@ impl AuthModeWidget {
         }
     }
 
+    fn handle_existing_hanzo_login(&mut self) -> bool {
+        // AuthMode does not yet have a Hanzo variant; Hanzo logins are currently
+        // stored as Chatgpt auth mode.  When a dedicated Hanzo AuthMode is added
+        // to the protocol, check for it here.
+        false
+    }
+
     /// Kicks off the Hanzo OAuth flow via hanzo.id.
-    /// Reuses the same browser-based OAuth mechanism as ChatGPT login;
-    /// the login server routes to hanzo.id based on configuration.
+    /// Sends `LoginAccountParams::HanzoId` so the login server can distinguish
+    /// this from a ChatGPT login and route through hanzo.id.
     fn start_hanzo_login(&mut self) {
-        self.start_chatgpt_login();
+        if self.handle_existing_hanzo_login() {
+            return;
+        }
+
+        self.set_error(None);
+        let request_handle = self.app_server_request_handle.clone();
+        let sign_in_state = self.sign_in_state.clone();
+        let error = self.error.clone();
+        let request_frame = self.request_frame.clone();
+        tokio::spawn(async move {
+            match request_handle
+                .request_typed::<LoginAccountResponse>(ClientRequest::LoginAccount {
+                    request_id: onboarding_request_id(),
+                    params: LoginAccountParams::HanzoId,
+                })
+                .await
+            {
+                Ok(LoginAccountResponse::HanzoId { login_id, auth_url }) => {
+                    maybe_open_auth_url_in_browser(&request_handle, &auth_url);
+                    *error.write().unwrap() = None;
+                    *sign_in_state.write().unwrap() =
+                        SignInState::HanzoIdContinueInBrowser(ContinueInBrowserState {
+                            login_id,
+                            auth_url,
+                        });
+                }
+                Ok(other) => {
+                    *sign_in_state.write().unwrap() = SignInState::PickMode;
+                    *error.write().unwrap() = Some(format!(
+                        "Unexpected account/login/start response: {other:?}"
+                    ));
+                }
+                Err(err) => {
+                    *sign_in_state.write().unwrap() = SignInState::PickMode;
+                    *error.write().unwrap() = Some(format!("Login error: {err}"));
+                }
+            }
+            request_frame.schedule_frame();
+        });
+        self.request_frame.schedule_frame();
     }
 
     /// Kicks off the ChatGPT auth flow and keeps the UI state consistent with the attempt.
@@ -837,7 +929,11 @@ impl AuthModeWidget {
         let is_matching_login = matches!(
             &*guard,
             SignInState::ChatGptContinueInBrowser(state) if state.login_id == login_id
+        ) || matches!(
+            &*guard,
+            SignInState::HanzoIdContinueInBrowser(state) if state.login_id == login_id
         );
+        let is_hanzo = matches!(&*guard, SignInState::HanzoIdContinueInBrowser(_));
         drop(guard);
         if !is_matching_login {
             return;
@@ -845,7 +941,12 @@ impl AuthModeWidget {
 
         if notification.success {
             self.set_error(/*message*/ None);
-            *self.sign_in_state.write().unwrap() = SignInState::ChatGptSuccessMessage;
+            let new_state = if is_hanzo {
+                SignInState::HanzoIdSuccessMessage
+            } else {
+                SignInState::ChatGptSuccessMessage
+            };
+            *self.sign_in_state.write().unwrap() = new_state;
         } else {
             self.set_error(notification.error);
             *self.sign_in_state.write().unwrap() = SignInState::PickMode;
@@ -869,8 +970,12 @@ impl StepStateProvider for AuthModeWidget {
             | SignInState::ApiKeyEntry(_)
             | SignInState::ChatGptContinueInBrowser(_)
             | SignInState::ChatGptDeviceCode(_)
-            | SignInState::ChatGptSuccessMessage => StepState::InProgress,
-            SignInState::ChatGptSuccess | SignInState::ApiKeyConfigured => StepState::Complete,
+            | SignInState::ChatGptSuccessMessage
+            | SignInState::HanzoIdContinueInBrowser(_)
+            | SignInState::HanzoIdSuccessMessage => StepState::InProgress,
+            SignInState::ChatGptSuccess
+            | SignInState::HanzoIdSuccess
+            | SignInState::ApiKeyConfigured => StepState::Complete,
         }
     }
 }
@@ -882,7 +987,8 @@ impl WidgetRef for AuthModeWidget {
             SignInState::PickMode => {
                 self.render_pick_mode(area, buf);
             }
-            SignInState::ChatGptContinueInBrowser(_) => {
+            SignInState::ChatGptContinueInBrowser(_)
+            | SignInState::HanzoIdContinueInBrowser(_) => {
                 self.render_continue_in_browser(area, buf);
             }
             SignInState::ChatGptDeviceCode(state) => {
@@ -891,8 +997,14 @@ impl WidgetRef for AuthModeWidget {
             SignInState::ChatGptSuccessMessage => {
                 self.render_chatgpt_success_message(area, buf);
             }
+            SignInState::HanzoIdSuccessMessage => {
+                self.render_success_message(area, buf);
+            }
             SignInState::ChatGptSuccess => {
                 self.render_chatgpt_success(area, buf);
+            }
+            SignInState::HanzoIdSuccess => {
+                self.render_hanzo_success(area, buf);
             }
             SignInState::ApiKeyEntry(state) => {
                 self.render_api_key_entry(area, buf, state);
