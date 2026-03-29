@@ -1004,6 +1004,8 @@ jobs:
           git clone "https://x-access-token:${GH_PAT}@github.com/hanzoai/homebrew-tap.git" "$tmpdir"
           mkdir -p "$tmpdir/Formula"
           cp -f Formula/Dev.rb "$tmpdir/Formula/Dev.rb"
+          # Also publish as hanzo-dev.rb for `brew install hanzo-dev`
+          sed 's/^class Dev </class HanzoDev </' Formula/Dev.rb > "$tmpdir/Formula/hanzo-dev.rb"
           cd "$tmpdir"
           git config user.email "github-actions[bot]@users.noreply.github.com"
           git config user.name  "github-actions[bot]"
@@ -1013,7 +1015,7 @@ jobs:
             exit 0
           fi
           ver="${{ steps.version.outputs.version }}"
-          git commit -m "chore(homebrew): bump Code formula to v${ver}"
+          git commit -m "chore(homebrew): bump hanzo-dev formula to v${ver}"
           # Ensure default branch exists
           if ! git rev-parse --abbrev-ref --symbolic-full-name @{u} >/dev/null 2>&1; then
             git branch -M main || true
