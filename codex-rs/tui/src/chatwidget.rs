@@ -53,7 +53,7 @@ use crate::bottom_pane::TerminalTitleSetupView;
 use crate::mention_codec::LinkedMention;
 use crate::mention_codec::encode_history_mentions;
 use crate::model_catalog::ModelCatalog;
-use crate::multi_agents;
+use crate::collab as multi_agents;
 use crate::status::RateLimitWindowDisplay;
 use crate::status::StatusAccountDisplay;
 use crate::status::format_directory_display;

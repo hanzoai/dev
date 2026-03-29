@@ -1389,7 +1389,10 @@ mod tests {
             api_key: None,
             auth_dot_json: Arc::new(Mutex::new(Some(cached_auth))),
             auth_file,
-            client: reqwest::Client::new(),
+            client: reqwest::Client::builder()
+                .use_rustls_tls()
+                .build()
+                .expect("failed to build reqwest client with rustls"),
         };
 
         let rotated_access = rotated_tokens.access_token.clone();

@@ -316,7 +316,10 @@ async fn invoke_hanzo(request: &ChatRequest) -> Result<ChatResponse> {
 
     info!(url = %endpoint, model = %default_model, "Forwarding to Hanzo engine");
 
-    let client = reqwest::Client::new();
+    let client = reqwest::Client::builder()
+        .use_rustls_tls()
+        .build()
+        .expect("failed to build reqwest client with rustls");
 
     // Build the request body
     let body = serde_json::json!({
