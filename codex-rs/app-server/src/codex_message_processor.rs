@@ -987,8 +987,11 @@ impl CodexMessageProcessor {
                 self.login_chatgpt_device_code_v2(request_id).await;
             }
             LoginAccountParams::HanzoId => {
-                // Hanzo OAuth uses the same browser flow as ChatGPT
-                // but routes through hanzo.id
+                // Intentionally delegates to the same OAuth browser flow as ChatGPT.
+                // The underlying login_chatgpt_v2 issues a LoginAccountResponse::HanzoId
+                // (or ::Chatgpt) based on server-side config; the TUI uses the response
+                // variant to choose the correct UI flow.  When a dedicated Hanzo OAuth
+                // endpoint is added, this can be changed to a separate method.
                 self.login_chatgpt_v2(request_id).await;
             }
             LoginAccountParams::ChatgptAuthTokens {

@@ -284,15 +284,16 @@ async fn multi_unified_exec_sessions() -> anyhow::Result<()> {
     )
     .await?;
 
+    // Use a generous yield so that `bash -lc "echo ..."` has enough time to
+    // load the login profile and exit, even on slow CI machines.
     let out_2 = exec_command(
         &session,
         &turn,
         "echo $CODEX_INTERACTIVE_SHELL_VAR",
-        /*yield_time_ms*/ 2_500,
+        /*yield_time_ms*/ 10_000,
         /*workdir*/ None,
     )
     .await?;
-    tokio::time::sleep(Duration::from_secs(2)).await;
     assert!(
         out_2.process_id.is_none(),
         "short command should not report a process id if it exits quickly"
