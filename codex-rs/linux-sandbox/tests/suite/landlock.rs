@@ -4,6 +4,7 @@ use codex_core::config::types::ShellEnvironmentPolicy;
 use codex_core::error::CodexErr;
 use codex_core::error::Result;
 use codex_core::error::SandboxErr;
+use codex_core::exec::ExecCapturePolicy;
 use codex_core::exec::ExecParams;
 use codex_core::exec::process_exec_tool_call;
 use codex_core::exec_env::create_env;
@@ -44,7 +45,7 @@ const BWRAP_UNAVAILABLE_ERR: &str = "build-time bubblewrap is not available in t
 
 fn create_env_from_core_vars() -> HashMap<String, String> {
     let policy = ShellEnvironmentPolicy::default();
-    create_env(&policy, None)
+    create_env(&policy, /*thread_id*/ None)
 }
 
 #[expect(clippy::print_stdout)]
@@ -63,9 +64,15 @@ async fn run_cmd_output(
     writable_roots: &[PathBuf],
     timeout_ms: u64,
 ) -> codex_core::exec::ExecToolCallOutput {
-    run_cmd_result_with_writable_roots(cmd, writable_roots, timeout_ms, false, false)
-        .await
-        .expect("sandboxed command should execute")
+    run_cmd_result_with_writable_roots(
+        cmd,
+        writable_roots,
+        timeout_ms,
+        /*use_legacy_landlock*/ false,
+        /*network_access*/ false,
+    )
+    .await
+    .expect("sandboxed command should execute")
 }
 
 async fn run_cmd_result_with_writable_roots(
@@ -116,6 +123,7 @@ async fn run_cmd_result_with_policies(
         command: cmd.iter().copied().map(str::to_owned).collect(),
         cwd,
         expiration: timeout_ms.into(),
+        capture_policy: ExecCapturePolicy::ShellTool,
         env: create_env_from_core_vars(),
         network: None,
         sandbox_permissions: SandboxPermissions::UseDefault,
@@ -135,7 +143,7 @@ async fn run_cmd_result_with_policies(
         sandbox_cwd.as_path(),
         &codex_linux_sandbox_exe,
         use_legacy_landlock,
-        None,
+        /*stdout_stream*/ None,
     )
     .await
 }
@@ -156,8 +164,8 @@ async fn should_skip_bwrap_tests() -> bool {
         &["bash", "-lc", "true"],
         &[],
         NETWORK_TIMEOUT_MS,
-        false,
-        true,
+        /*use_legacy_landlock*/ false,
+        /*network_access*/ true,
     )
     .await
     {
@@ -217,8 +225,8 @@ async fn test_dev_null_write() {
         // We have seen timeouts when running this test in CI on GitHub,
         // so we are using a generous timeout until we can diagnose further.
         LONG_TIMEOUT_MS,
-        false,
-        true,
+        /*use_legacy_landlock*/ false,
+        /*network_access*/ true,
     )
     .await
     .expect("sandboxed command should execute");
@@ -241,8 +249,8 @@ async fn bwrap_populates_minimal_dev_nodes() {
         ],
         &[],
         LONG_TIMEOUT_MS,
-        false,
-        true,
+        /*use_legacy_landlock*/ false,
+        /*network_access*/ true,
     )
     .await
     .expect("sandboxed command should execute");
@@ -279,8 +287,8 @@ async fn bwrap_preserves_writable_dev_shm_bind_mount() {
         ],
         &[PathBuf::from("/dev/shm")],
         LONG_TIMEOUT_MS,
-        false,
-        true,
+        /*use_legacy_landlock*/ false,
+        /*network_access*/ true,
     )
     .await
     .expect("sandboxed command should execute");
@@ -326,8 +334,8 @@ async fn sandbox_ignores_missing_writable_roots_under_bwrap() {
         &["bash", "-lc", "printf sandbox-ok"],
         &[existing_root, missing_root],
         LONG_TIMEOUT_MS,
-        false,
-        true,
+        /*use_legacy_landlock*/ false,
+        /*network_access*/ true,
     )
     .await
     .expect("sandboxed command should execute");
@@ -358,7 +366,7 @@ async fn test_no_new_privs_is_enabled() {
 #[tokio::test]
 #[should_panic(expected = "Sandbox(Timeout")]
 async fn test_timeout() {
-    run_cmd(&["sleep", "2"], &[], 50).await;
+    run_cmd(&["sleep", "2"], &[], /*timeout_ms*/ 50).await;
 }
 
 /// Helper that runs `cmd` under the Linux sandbox and asserts that the command
@@ -375,6 +383,7 @@ async fn assert_network_blocked(cmd: &[&str]) {
         // Give the tool a generous 2-second timeout so even slow DNS timeouts
         // do not stall the suite.
         expiration: NETWORK_TIMEOUT_MS.into(),
+        capture_policy: ExecCapturePolicy::ShellTool,
         env: create_env_from_core_vars(),
         network: None,
         sandbox_permissions: SandboxPermissions::UseDefault,
@@ -394,8 +403,8 @@ async fn assert_network_blocked(cmd: &[&str]) {
         NetworkSandboxPolicy::from(&sandbox_policy),
         sandbox_cwd.as_path(),
         &codex_linux_sandbox_exe,
-        false,
-        None,
+        /*use_legacy_landlock*/ false,
+        /*stdout_stream*/ None,
     )
     .await;
 
@@ -470,8 +479,8 @@ async fn sandbox_blocks_git_and_codex_writes_inside_writable_root() {
             ],
             &[tmpdir.path().to_path_buf()],
             LONG_TIMEOUT_MS,
-            false,
-            true,
+            /*use_legacy_landlock*/ false,
+            /*network_access*/ true,
         )
         .await,
         ".git write should be denied under bubblewrap",
@@ -486,8 +495,8 @@ async fn sandbox_blocks_git_and_codex_writes_inside_writable_root() {
             ],
             &[tmpdir.path().to_path_buf()],
             LONG_TIMEOUT_MS,
-            false,
-            true,
+            /*use_legacy_landlock*/ false,
+            /*network_access*/ true,
         )
         .await,
         ".codex write should be denied under bubblewrap",
@@ -523,8 +532,8 @@ async fn sandbox_blocks_codex_symlink_replacement_attack() {
             ],
             &[tmpdir.path().to_path_buf()],
             LONG_TIMEOUT_MS,
-            false,
-            true,
+            /*use_legacy_landlock*/ false,
+            /*network_access*/ true,
         )
         .await,
         ".codex symlink replacement should be denied",
@@ -595,7 +604,7 @@ async fn sandbox_blocks_explicit_split_policy_carveouts_under_bwrap() {
             file_system_sandbox_policy,
             NetworkSandboxPolicy::Enabled,
             LONG_TIMEOUT_MS,
-            false,
+            /*use_legacy_landlock*/ false,
         )
         .await,
         "explicit split-policy carveout should be denied under bubblewrap",
@@ -677,7 +686,7 @@ async fn sandbox_reenables_writable_subpaths_under_unreadable_parents() {
         file_system_sandbox_policy,
         NetworkSandboxPolicy::Enabled,
         LONG_TIMEOUT_MS,
-        false,
+        /*use_legacy_landlock*/ false,
     )
     .await
     .expect("nested writable carveout should execute under bubblewrap");
@@ -728,7 +737,7 @@ async fn sandbox_blocks_root_read_carveouts_under_bwrap() {
             file_system_sandbox_policy,
             NetworkSandboxPolicy::Enabled,
             LONG_TIMEOUT_MS,
-            false,
+            /*use_legacy_landlock*/ false,
         )
         .await,
         "root-read carveout should be denied under bubblewrap",

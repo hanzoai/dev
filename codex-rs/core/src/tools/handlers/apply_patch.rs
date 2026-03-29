@@ -11,8 +11,7 @@ use crate::client_common::tools::ToolSpec;
 use crate::codex::Session;
 use crate::codex::TurnContext;
 use crate::function_tool::FunctionCallError;
-use crate::sandboxing::effective_file_system_sandbox_policy;
-use crate::sandboxing::merge_permission_profiles;
+use crate::tools::context::ApplyPatchToolOutput;
 use crate::tools::context::FunctionToolOutput;
 use crate::tools::context::SharedTurnDiffTracker;
 use crate::tools::context::ToolInvocation;
@@ -34,6 +33,9 @@ use codex_apply_patch::ApplyPatchAction;
 use codex_apply_patch::ApplyPatchFileChange;
 use codex_protocol::models::FileSystemPermissions;
 use codex_protocol::models::PermissionProfile;
+use codex_sandboxing::policy_transforms::effective_file_system_sandbox_policy;
+use codex_sandboxing::policy_transforms::merge_permission_profiles;
+use codex_sandboxing::policy_transforms::normalize_additional_permissions;
 use codex_utils_absolute_path::AbsolutePathBuf;
 use std::collections::BTreeSet;
 use std::sync::Arc;
@@ -66,7 +68,11 @@ fn to_abs_path(cwd: &Path, path: &Path) -> Option<AbsolutePathBuf> {
     AbsolutePathBuf::resolve_path_against_base(path, cwd).ok()
 }
 
-fn write_permissions_for_paths(file_paths: &[AbsolutePathBuf]) -> Option<PermissionProfile> {
+fn write_permissions_for_paths(
+    file_paths: &[AbsolutePathBuf],
+    file_system_sandbox_policy: &codex_protocol::permissions::FileSystemSandboxPolicy,
+    cwd: &Path,
+) -> Option<PermissionProfile> {
     let write_paths = file_paths
         .iter()
         .map(|path| {
@@ -74,6 +80,7 @@ fn write_permissions_for_paths(file_paths: &[AbsolutePathBuf]) -> Option<Permiss
                 .unwrap_or_else(|| path.clone())
                 .into_path_buf()
         })
+        .filter(|path| !file_system_sandbox_policy.can_write_path_with_cwd(path.as_path(), cwd))
         .collect::<BTreeSet<_>>()
         .into_iter()
         .map(AbsolutePathBuf::from_absolute_path)
@@ -88,7 +95,7 @@ fn write_permissions_for_paths(file_paths: &[AbsolutePathBuf]) -> Option<Permiss
         ..Default::default()
     })?;
 
-    crate::sandboxing::normalize_additional_permissions(permissions).ok()
+    normalize_additional_permissions(permissions).ok()
 }
 
 async fn effective_patch_permissions(
@@ -105,16 +112,16 @@ async fn effective_patch_permissions(
         session.granted_session_permissions().await.as_ref(),
         session.granted_turn_permissions().await.as_ref(),
     );
-    let effective_additional_permissions = apply_granted_turn_permissions(
-        session,
-        crate::sandboxing::SandboxPermissions::UseDefault,
-        write_permissions_for_paths(&file_paths),
-    )
-    .await;
     let file_system_sandbox_policy = effective_file_system_sandbox_policy(
         &turn.file_system_sandbox_policy,
         granted_permissions.as_ref(),
     );
+    let effective_additional_permissions = apply_granted_turn_permissions(
+        session,
+        crate::sandboxing::SandboxPermissions::UseDefault,
+        write_permissions_for_paths(&file_paths, &file_system_sandbox_policy, turn.cwd.as_path()),
+    )
+    .await;
 
     (
         file_paths,
@@ -125,7 +132,7 @@ async fn effective_patch_permissions(
 
 #[async_trait]
 impl ToolHandler for ApplyPatchHandler {
-    type Output = FunctionToolOutput;
+    type Output = ApplyPatchToolOutput;
 
     fn kind(&self) -> ToolKind {
         ToolKind::Function
@@ -179,7 +186,7 @@ impl ToolHandler for ApplyPatchHandler {
                 {
                     InternalApplyPatchInvocation::Output(item) => {
                         let content = item?;
-                        Ok(FunctionToolOutput::from_text(content, Some(true)))
+                        Ok(ApplyPatchToolOutput::from_text(content))
                     }
                     InternalApplyPatchInvocation::DelegateToExec(apply) => {
                         let changes = convert_apply_patch_to_protocol(&apply.action);
@@ -198,14 +205,11 @@ impl ToolHandler for ApplyPatchHandler {
                             file_paths,
                             changes,
                             exec_approval_requirement: apply.exec_approval_requirement,
-                            sandbox_permissions: effective_additional_permissions
-                                .sandbox_permissions,
                             additional_permissions: effective_additional_permissions
                                 .additional_permissions,
                             permissions_preapproved: effective_additional_permissions
                                 .permissions_preapproved,
                             timeout_ms: None,
-                            codex_exe: turn.codex_linux_sandbox_exe.clone(),
                         };
 
                         let mut orchestrator = ToolOrchestrator::new();
@@ -233,7 +237,7 @@ impl ToolHandler for ApplyPatchHandler {
                             Some(&tracker),
                         );
                         let content = emitter.finish(event_ctx, out).await?;
-                        Ok(FunctionToolOutput::from_text(content, Some(true)))
+                        Ok(ApplyPatchToolOutput::from_text(content))
                     }
                 }
             }
@@ -303,13 +307,11 @@ pub(crate) async fn intercept_apply_patch(
                         file_paths: approval_keys,
                         changes,
                         exec_approval_requirement: apply.exec_approval_requirement,
-                        sandbox_permissions: effective_additional_permissions.sandbox_permissions,
                         additional_permissions: effective_additional_permissions
                             .additional_permissions,
                         permissions_preapproved: effective_additional_permissions
                             .permissions_preapproved,
                         timeout_ms,
-                        codex_exe: turn.codex_linux_sandbox_exe.clone(),
                     };
 
                     let mut orchestrator = ToolOrchestrator::new();
