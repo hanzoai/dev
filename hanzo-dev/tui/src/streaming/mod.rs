@@ -302,3 +302,121 @@ impl HeaderEmitter {
         was_just_emitted
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    // ── ThinkTagFilter ──────────────────────────────────────────
+
+    #[test]
+    fn filter_complete_think_block() {
+        let mut f = ThinkTagFilter::new();
+        assert_eq!(f.filter("hello <think>secret</think> world"), "hello  world");
+    }
+
+    #[test]
+    fn filter_think_split_across_deltas() {
+        let mut f = ThinkTagFilter::new();
+        assert_eq!(f.filter("hi <thi"), "hi ");
+        assert_eq!(f.filter("nk>inside</think> ok"), " ok");
+    }
+
+    #[test]
+    fn filter_close_tag_split_across_deltas() {
+        let mut f = ThinkTagFilter::new();
+        assert_eq!(f.filter("<think>hidden</thi"), "");
+        assert_eq!(f.filter("nk>visible"), "visible");
+    }
+
+    #[test]
+    fn filter_empty_think_block() {
+        let mut f = ThinkTagFilter::new();
+        assert_eq!(f.filter("<think></think>"), "");
+    }
+
+    #[test]
+    fn filter_no_think_tags() {
+        let mut f = ThinkTagFilter::new();
+        assert_eq!(f.filter("just regular text"), "just regular text");
+    }
+
+    #[test]
+    fn filter_multiple_blocks() {
+        let mut f = ThinkTagFilter::new();
+        assert_eq!(
+            f.filter("a<think>x</think>b<think>y</think>c"),
+            "abc"
+        );
+    }
+
+    #[test]
+    fn filter_think_with_attributes() {
+        let mut f = ThinkTagFilter::new();
+        assert_eq!(f.filter("ok<think type=\"deep\">hidden</think>done"), "okdone");
+    }
+
+    #[test]
+    fn filter_multi_delta_sequence() {
+        let mut f = ThinkTagFilter::new();
+        // Simulate realistic streaming chunks
+        let chunks = ["He", "llo! <th", "ink>", "let me think...", "</thi", "nk>The answer is 42."];
+        let mut result = String::new();
+        for chunk in &chunks {
+            result.push_str(&f.filter(chunk));
+        }
+        assert_eq!(result, "Hello! The answer is 42.");
+    }
+
+    #[test]
+    fn filter_clear_resets_state() {
+        let mut f = ThinkTagFilter::new();
+        f.filter("<think>partial");
+        assert!(f.inside_think);
+        f.clear();
+        assert!(!f.inside_think);
+        assert_eq!(f.filter("normal text"), "normal text");
+    }
+
+    #[test]
+    fn filter_nested_angle_brackets_inside_think() {
+        let mut f = ThinkTagFilter::new();
+        assert_eq!(
+            f.filter("before<think>has <b>html</b> inside</think>after"),
+            "beforeafter"
+        );
+    }
+
+    // ── strip_think_tags ────────────────────────────────────────
+
+    #[test]
+    fn strip_complete_string() {
+        assert_eq!(strip_think_tags("a<think>x</think>b"), "ab");
+    }
+
+    #[test]
+    fn strip_multiple_blocks() {
+        assert_eq!(
+            strip_think_tags("1<think>a</think>2<think>b</think>3"),
+            "123"
+        );
+    }
+
+    #[test]
+    fn strip_no_tags() {
+        assert_eq!(strip_think_tags("plain text"), "plain text");
+    }
+
+    #[test]
+    fn strip_with_attributes() {
+        assert_eq!(
+            strip_think_tags("ok<think type=\"x\">hidden</think>done"),
+            "okdone"
+        );
+    }
+
+    #[test]
+    fn strip_unclosed_drops_remainder() {
+        assert_eq!(strip_think_tags("before<think>unclosed"), "before");
+    }
+}

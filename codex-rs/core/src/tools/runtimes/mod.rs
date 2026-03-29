@@ -52,7 +52,12 @@ pub(crate) fn maybe_wrap_shell_lc_with_snapshot(
     command: &[String],
     session_shell: &Shell,
     cwd: &Path,
+    explicit_env_overrides: &HashMap<String, String>,
 ) -> Vec<String> {
+    if cfg!(windows) {
+        return command.to_vec();
+    }
+
     let Some(snapshot) = session_shell.shell_snapshot() else {
         return command.to_vec();
     };
@@ -90,11 +95,64 @@ pub(crate) fn maybe_wrap_shell_lc_with_snapshot(
         .iter()
         .map(|arg| format!(" '{}'", shell_single_quote(arg)))
         .collect::<String>();
-    let rewritten_script = format!(
-        "if . '{snapshot_path}' >/dev/null 2>&1; then :; fi; exec '{original_shell}' -c '{original_script}'{trailing_args}"
-    );
+    let (override_captures, override_exports) = build_override_exports(explicit_env_overrides);
+    let rewritten_script = if override_exports.is_empty() {
+        format!(
+            "if . '{snapshot_path}' >/dev/null 2>&1; then :; fi\n\nexec '{original_shell}' -c '{original_script}'{trailing_args}"
+        )
+    } else {
+        format!(
+            "{override_captures}\n\nif . '{snapshot_path}' >/dev/null 2>&1; then :; fi\n\n{override_exports}\n\nexec '{original_shell}' -c '{original_script}'{trailing_args}"
+        )
+    };
 
     vec![shell_path.to_string(), "-c".to_string(), rewritten_script]
+}
+
+fn build_override_exports(explicit_env_overrides: &HashMap<String, String>) -> (String, String) {
+    let mut keys = explicit_env_overrides
+        .keys()
+        .filter(|key| is_valid_shell_variable_name(key))
+        .collect::<Vec<_>>();
+    keys.sort_unstable();
+
+    if keys.is_empty() {
+        return (String::new(), String::new());
+    }
+
+    let captures = keys
+        .iter()
+        .enumerate()
+        .map(|(idx, key)| {
+            format!(
+                "__CODEX_SNAPSHOT_OVERRIDE_SET_{idx}=\"${{{key}+x}}\"\n__CODEX_SNAPSHOT_OVERRIDE_{idx}=\"${{{key}-}}\""
+            )
+        })
+        .collect::<Vec<_>>()
+        .join("\n");
+    let restores = keys
+        .iter()
+        .enumerate()
+        .map(|(idx, key)| {
+            format!(
+                "if [ -n \"${{__CODEX_SNAPSHOT_OVERRIDE_SET_{idx}}}\" ]; then export {key}=\"${{__CODEX_SNAPSHOT_OVERRIDE_{idx}}}\"; else unset {key}; fi"
+            )
+        })
+        .collect::<Vec<_>>()
+        .join("\n");
+
+    (captures, restores)
+}
+
+fn is_valid_shell_variable_name(name: &str) -> bool {
+    let mut chars = name.chars();
+    let Some(first) = chars.next() else {
+        return false;
+    };
+    if !(first == '_' || first.is_ascii_alphabetic()) {
+        return false;
+    }
+    chars.all(|c| c == '_' || c.is_ascii_alphanumeric())
 }
 
 fn shell_single_quote(input: &str) -> String {

@@ -986,6 +986,11 @@ impl CodexMessageProcessor {
             LoginAccountParams::ChatgptDeviceCode => {
                 self.login_chatgpt_device_code_v2(request_id).await;
             }
+            LoginAccountParams::HanzoId => {
+                // Hanzo OAuth uses the same browser flow as ChatGPT
+                // but routes through hanzo.id
+                self.login_chatgpt_v2(request_id).await;
+            }
             LoginAccountParams::ChatgptAuthTokens {
                 access_token,
                 chatgpt_account_id,
