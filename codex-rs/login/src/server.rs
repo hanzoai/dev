@@ -20,21 +20,23 @@ use std::net::TcpStream;
 use std::path::Path;
 use std::path::PathBuf;
 use std::sync::Arc;
+use std::sync::LazyLock;
 use std::thread;
 use std::time::Duration;
 
+use crate::auth::AuthCredentialsStoreMode;
+use crate::auth::AuthDotJson;
+use crate::auth::save_auth;
+use crate::default_client::originator;
 use crate::pkce::PkceCodes;
 use crate::pkce::generate_pkce;
+use crate::token_data::TokenData;
+use crate::token_data::parse_chatgpt_jwt_claims;
 use base64::Engine;
 use chrono::Utc;
 use codex_app_server_protocol::AuthMode;
 use codex_client::build_reqwest_client_with_custom_ca;
-use codex_core::auth::AuthCredentialsStoreMode;
-use codex_core::auth::AuthDotJson;
-use codex_core::auth::save_auth;
-use codex_core::default_client::originator;
-use codex_core::token_data::TokenData;
-use codex_core::token_data::parse_chatgpt_jwt_claims;
+use codex_utils_template::Template;
 use rand::RngCore;
 use serde_json::Value as JsonValue;
 use tiny_http::Header;
@@ -46,11 +48,12 @@ use tracing::error;
 use tracing::info;
 use tracing::warn;
 
-const DEFAULT_ISSUER: &str = "https://hanzo.id";
-/// OpenAI issuer, available via `--issuer https://auth.openai.com`.
-#[allow(dead_code)]
-const OPENAI_ISSUER: &str = "https://auth.openai.com";
+const DEFAULT_ISSUER: &str = "https://auth.openai.com";
 const DEFAULT_PORT: u16 = 1455;
+static LOGIN_ERROR_PAGE_TEMPLATE: LazyLock<Template> = LazyLock::new(|| {
+    Template::parse(include_str!("assets/error.html"))
+        .unwrap_or_else(|err| panic!("login error page template must parse: {err}"))
+});
 
 /// Options for launching the local login callback server.
 #[derive(Debug, Clone)]
@@ -83,12 +86,6 @@ impl ServerOptions {
             forced_chatgpt_workspace_id,
             cli_auth_credentials_store_mode,
         }
-    }
-
-    /// Override the issuer URL.
-    pub fn with_issuer(mut self, issuer: String) -> Self {
-        self.issuer = issuer;
-        self
     }
 }
 
@@ -347,18 +344,10 @@ async fn process_request(
                             /*error_description*/ None,
                         );
                     }
-                    // Obtain API key via token-exchange (OpenAI only).
-                    // For Claude, the access_token (sk-ant-oat*) is the API key.
-                    // For Hanzo/Casdoor, the access_token IS the credential.
-                    let api_key = if is_claude_issuer(&opts.issuer) {
-                        Some(tokens.access_token.clone())
-                    } else if opts.issuer.contains("openai.com") {
-                        obtain_api_key(&opts.issuer, &opts.client_id, &tokens.id_token)
-                            .await
-                            .ok()
-                    } else {
-                        None
-                    };
+                    // Obtain API key via token-exchange and persist
+                    let api_key = obtain_api_key(&opts.issuer, &opts.client_id, &tokens.id_token)
+                        .await
+                        .ok();
                     if let Err(err) = persist_tokens_async(
                         &opts.codex_home,
                         api_key.clone(),
@@ -476,11 +465,6 @@ fn send_response_with_disconnect(
     writer.flush()
 }
 
-/// Returns `true` when `issuer` is Claude/Anthropic.
-fn is_claude_issuer(issuer: &str) -> bool {
-    issuer.contains("claude.ai") || issuer.contains("anthropic.com")
-}
-
 fn build_authorize_url(
     issuer: &str,
     client_id: &str,
@@ -489,37 +473,25 @@ fn build_authorize_url(
     state: &str,
     forced_chatgpt_workspace_id: Option<&str>,
 ) -> String {
-    let scope = if is_claude_issuer(issuer) {
-        "user:inference user:profile user:sessions:claude_code user:mcp_servers user:file_upload"
-    } else {
-        "openid profile email offline_access api.connectors.read api.connectors.invoke"
-    };
-
     let mut query = vec![
         ("response_type".to_string(), "code".to_string()),
         ("client_id".to_string(), client_id.to_string()),
         ("redirect_uri".to_string(), redirect_uri.to_string()),
-        ("scope".to_string(), scope.to_string()),
+        (
+            "scope".to_string(),
+            "openid profile email offline_access api.connectors.read api.connectors.invoke"
+                .to_string(),
+        ),
         (
             "code_challenge".to_string(),
             pkce.code_challenge.to_string(),
         ),
         ("code_challenge_method".to_string(), "S256".to_string()),
+        ("id_token_add_organizations".to_string(), "true".to_string()),
+        ("codex_cli_simplified_flow".to_string(), "true".to_string()),
         ("state".to_string(), state.to_string()),
+        ("originator".to_string(), originator().value),
     ];
-
-    // OpenAI / Hanzo-specific parameters
-    if !is_claude_issuer(issuer) {
-        query.push(("id_token_add_organizations".to_string(), "true".to_string()));
-        query.push((
-            "codex_cli_simplified_flow".to_string(),
-            "true".to_string(),
-        ));
-        query.push((
-            "originator".to_string(),
-            originator().value.as_str().to_string(),
-        ));
-    }
     if let Some(workspace_id) = forced_chatgpt_workspace_id {
         query.push(("allowed_workspace_id".to_string(), workspace_id.to_string()));
     }
@@ -718,8 +690,7 @@ pub(crate) async fn exchange_code_for_tokens(
 ) -> io::Result<ExchangedTokens> {
     #[derive(serde::Deserialize)]
     struct TokenResponse {
-        // Claude returns only access_token + refresh_token (no id_token).
-        id_token: Option<String>,
+        id_token: String,
         access_token: String,
         refresh_token: String,
     }
@@ -730,16 +701,8 @@ pub(crate) async fn exchange_code_for_tokens(
         redirect_uri = %redirect_uri,
         "starting oauth token exchange"
     );
-
-    // Claude uses a separate token endpoint.
-    let token_url = if is_claude_issuer(issuer) {
-        codex_core::auth::CLAUDE_TOKEN_URL.to_string()
-    } else {
-        format!("{issuer}/oauth/token")
-    };
-
     let resp = client
-        .post(&token_url)
+        .post(format!("{issuer}/oauth/token"))
         .header("Content-Type", "application/x-www-form-urlencoded")
         .body(format!(
             "grant_type=authorization_code&code={}&redirect_uri={}&client_id={}&code_verifier={}",
@@ -782,12 +745,8 @@ pub(crate) async fn exchange_code_for_tokens(
 
     let tokens: TokenResponse = resp.json().await.map_err(io::Error::other)?;
     info!(%status, "oauth token exchange succeeded");
-    // For Claude, use access_token as the id_token stand-in when id_token is absent.
-    let id_token = tokens
-        .id_token
-        .unwrap_or_else(|| tokens.access_token.clone());
     Ok(ExchangedTokens {
-        id_token,
+        id_token: tokens.id_token,
         access_token: tokens.access_token,
         refresh_token: tokens.refresh_token,
     })
@@ -855,12 +814,10 @@ fn compose_success_url(port: u16, issuer: &str, id_token: &str, access_token: &s
         .and_then(|v| v.as_str())
         .unwrap_or("");
 
-    let platform_url = if is_claude_issuer(issuer) {
-        "https://platform.claude.com"
-    } else if issuer.contains("openai.com") {
+    let platform_url = if issuer == DEFAULT_ISSUER {
         "https://platform.openai.com"
     } else {
-        "https://hanzo.ai"
+        "https://platform.api.openai.org"
     };
 
     let mut params = vec![
@@ -1050,16 +1007,15 @@ fn render_login_error_page(
     error_code: Option<&str>,
     error_description: Option<&str>,
 ) -> Vec<u8> {
-    let template = include_str!("assets/error.html");
     let code = error_code.unwrap_or("unknown_error");
     let (title, display_message, display_description, help_text) =
         if is_missing_codex_entitlement_error(code, error_description) {
             (
-                "You do not have access to Hanzo Dev".to_string(),
-                "This account is not currently authorized to use Hanzo Dev in this workspace."
+                "You do not have access to Codex".to_string(),
+                "This account is not currently authorized to use Codex in this workspace."
                     .to_string(),
-                "Contact your workspace administrator to request access to Hanzo Dev.".to_string(),
-                "Contact your workspace administrator to get access to Hanzo Dev, then return and try again."
+                "Contact your workspace administrator to request access to Codex.".to_string(),
+                "Contact your workspace administrator to get access to Codex, then return to Codex and try again."
                     .to_string(),
             )
         } else {
@@ -1071,12 +1027,15 @@ fn render_login_error_page(
                     .to_string(),
             )
         };
-    template
-        .replace("__ERROR_TITLE__", &html_escape(&title))
-        .replace("__ERROR_MESSAGE__", &html_escape(&display_message))
-        .replace("__ERROR_CODE__", &html_escape(code))
-        .replace("__ERROR_DESCRIPTION__", &html_escape(&display_description))
-        .replace("__ERROR_HELP__", &html_escape(&help_text))
+    LOGIN_ERROR_PAGE_TEMPLATE
+        .render([
+            ("error_title", html_escape(&title)),
+            ("error_message", html_escape(&display_message)),
+            ("error_code", html_escape(code)),
+            ("error_description", html_escape(&display_description)),
+            ("error_help", html_escape(&help_text)),
+        ])
+        .unwrap_or_else(|err| panic!("login error page template must render: {err}"))
         .into_bytes()
 }
 
@@ -1136,9 +1095,12 @@ mod tests {
     use pretty_assertions::assert_eq;
 
     use super::TokenEndpointErrorDetail;
+    use super::html_escape;
+    use super::is_missing_codex_entitlement_error;
     use super::parse_token_endpoint_error;
     use super::redact_sensitive_query_value;
     use super::redact_sensitive_url_parts;
+    use super::render_login_error_page;
     use super::sanitize_url_for_logging;
 
     #[test]
@@ -1237,5 +1199,40 @@ mod tests {
             redacted,
             "https://example.com/base?token=%3Credacted%3E&env=prod".to_string()
         );
+    }
+
+    #[test]
+    fn render_login_error_page_escapes_dynamic_fields() {
+        let body = String::from_utf8(render_login_error_page(
+            "<bad>",
+            Some("code&value"),
+            Some("\"quoted\""),
+        ))
+        .expect("login error page should be utf-8");
+
+        assert!(body.contains(&html_escape("Sign-in could not be completed")));
+        assert!(body.contains("&lt;bad&gt;"));
+        assert!(body.contains("code&amp;value"));
+        assert!(body.contains("&quot;quoted&quot;"));
+    }
+
+    #[test]
+    fn render_login_error_page_uses_entitlement_copy() {
+        let error_description = Some("missing_codex_entitlement");
+        assert!(is_missing_codex_entitlement_error(
+            "access_denied",
+            error_description
+        ));
+
+        let body = String::from_utf8(render_login_error_page(
+            "access denied",
+            Some("access_denied"),
+            error_description,
+        ))
+        .expect("login error page should be utf-8");
+
+        assert!(body.contains("You do not have access to Codex"));
+        assert!(body.contains("Contact your workspace administrator"));
+        assert!(!body.contains("missing_codex_entitlement"));
     }
 }

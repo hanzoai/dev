@@ -237,7 +237,11 @@ async fn test_fuzzy_file_search_sorts_and_includes_indices() -> Result<()> {
     let root_path = root.path().to_string_lossy().to_string();
     // Send fuzzyFileSearch request.
     let request_id = mcp
-        .send_fuzzy_file_search_request("abe", vec![root_path.clone()], None)
+        .send_fuzzy_file_search_request(
+            "abe",
+            vec![root_path.clone()],
+            /*cancellation_token*/ None,
+        )
         .await?;
 
     // Read response and verify shape and ordering.
@@ -257,6 +261,7 @@ async fn test_fuzzy_file_search_sorts_and_includes_indices() -> Result<()> {
                 {
                     "root": root_path.clone(),
                     "path": "abexy",
+                    "match_type": "file",
                     "file_name": "abexy",
                     "score": 84,
                     "indices": [0, 1, 2],
@@ -264,6 +269,7 @@ async fn test_fuzzy_file_search_sorts_and_includes_indices() -> Result<()> {
                 {
                     "root": root_path.clone(),
                     "path": sub_abce_rel,
+                    "match_type": "file",
                     "file_name": "abce",
                     "score": expected_score,
                     "indices": [4, 5, 7],
@@ -271,6 +277,7 @@ async fn test_fuzzy_file_search_sorts_and_includes_indices() -> Result<()> {
                 {
                     "root": root_path.clone(),
                     "path": "abcde",
+                    "match_type": "file",
                     "file_name": "abcde",
                     "score": 71,
                     "indices": [0, 1, 4],
@@ -295,7 +302,11 @@ async fn test_fuzzy_file_search_accepts_cancellation_token() -> Result<()> {
 
     let root_path = root.path().to_string_lossy().to_string();
     let request_id = mcp
-        .send_fuzzy_file_search_request("alp", vec![root_path.clone()], None)
+        .send_fuzzy_file_search_request(
+            "alp",
+            vec![root_path.clone()],
+            /*cancellation_token*/ None,
+        )
         .await?;
 
     let request_id_2 = mcp
