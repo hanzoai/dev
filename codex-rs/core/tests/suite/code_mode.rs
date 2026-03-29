@@ -1,9 +1,11 @@
 #![allow(clippy::expect_used, clippy::unwrap_used)]
 
 use anyhow::Result;
+use base64::Engine;
+use base64::engine::general_purpose::STANDARD as BASE64_STANDARD;
 use codex_core::config::types::McpServerConfig;
 use codex_core::config::types::McpServerTransportConfig;
-use codex_core::features::Feature;
+use codex_features::Feature;
 use codex_protocol::dynamic_tools::DynamicToolCallOutputContentItem;
 use codex_protocol::dynamic_tools::DynamicToolResponse;
 use codex_protocol::dynamic_tools::DynamicToolSpec;
@@ -205,6 +207,7 @@ async fn run_code_mode_turn_with_rmcp(
                     disabled_tools: None,
                     scopes: None,
                     oauth_resource: None,
+                    tools: HashMap::new(),
                 },
             );
             config
@@ -249,7 +252,7 @@ async fn code_mode_can_return_exec_command_output() -> Result<()> {
         r#"
 text(JSON.stringify(await tools.exec_command({ cmd: "printf code_mode_exec_marker" })));
 "#,
-        false,
+        /*include_apply_patch*/ false,
     )
     .await?;
 
@@ -261,9 +264,9 @@ text(JSON.stringify(await tools.exec_command({ cmd: "printf code_mode_exec_marke
             r"(?s)\A",
             r"Script completed\nWall time \d+\.\d seconds\nOutput:\n\z"
         ),
-        text_item(&items, 0),
+        text_item(&items, /*index*/ 0),
     );
-    let parsed: Value = serde_json::from_str(text_item(&items, 1))?;
+    let parsed: Value = serde_json::from_str(text_item(&items, /*index*/ 1))?;
     assert!(
         parsed
             .get("chunk_id")
@@ -361,6 +364,38 @@ text(output.output);
     Ok(())
 }
 
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn code_mode_update_plan_nested_tool_result_is_empty_object() -> Result<()> {
+    skip_if_no_network!(Ok(()));
+
+    let server = responses::start_mock_server().await;
+    let (_test, second_mock) = run_code_mode_turn(
+        &server,
+        "use exec to run update_plan",
+        r#"
+const result = await tools.update_plan({
+  plan: [{ step: "Run update_plan from code mode", status: "in_progress" }],
+});
+text(JSON.stringify(result));
+"#,
+        /*include_apply_patch*/ false,
+    )
+    .await?;
+
+    let req = second_mock.single_request();
+    let (output, success) = custom_tool_output_body_and_success(&req, "call-1");
+    assert_ne!(
+        success,
+        Some(false),
+        "exec update_plan call failed unexpectedly: {output}"
+    );
+
+    let parsed: Value = serde_json::from_str(&output)?;
+    assert_eq!(parsed, serde_json::json!({}));
+
+    Ok(())
+}
+
 #[cfg_attr(windows, ignore = "flaky on windows")]
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn code_mode_nested_tool_calls_can_run_in_parallel() -> Result<()> {
@@ -448,7 +483,7 @@ text(JSON.stringify(results));
         .expect("parallel code mode run should send a completion request");
     let items = custom_tool_output_items(&req, "call-1");
     assert_eq!(items.len(), 2);
-    assert_eq!(text_item(&items, 1), "[\"ok\",\"ok\"]");
+    assert_eq!(text_item(&items, /*index*/ 1), "[\"ok\",\"ok\"]");
 
     Ok(())
 }
@@ -468,7 +503,7 @@ text(JSON.stringify(await tools.exec_command({
   max_output_tokens: 100
 })));
 "#,
-        false,
+        /*include_apply_patch*/ false,
     )
     .await?;
 
@@ -480,7 +515,7 @@ text(JSON.stringify(await tools.exec_command({
             r"(?s)\A",
             r"Script completed\nWall time \d+\.\d seconds\nOutput:\n\z"
         ),
-        text_item(&items, 0),
+        text_item(&items, /*index*/ 0),
     );
     let expected_pattern = r#"(?sx)
 \A
@@ -489,7 +524,7 @@ Total\ output\ lines:\ 1\n
 .*…\d+\ tokens\ truncated….*
 \z
 "#;
-    assert_regex_match(expected_pattern, text_item(&items, 1));
+    assert_regex_match(expected_pattern, text_item(&items, /*index*/ 1));
 
     Ok(())
 }
@@ -507,7 +542,7 @@ text("before crash");
 text("still before crash");
 throw new Error("boom");
 "#,
-        false,
+        /*include_apply_patch*/ false,
     )
     .await?;
 
@@ -519,10 +554,10 @@ throw new Error("boom");
             r"(?s)\A",
             r"Script failed\nWall time \d+\.\d seconds\nOutput:\n\z"
         ),
-        text_item(&items, 0),
+        text_item(&items, /*index*/ 0),
     );
-    assert_eq!(text_item(&items, 1), "before crash");
-    assert_eq!(text_item(&items, 2), "still before crash");
+    assert_eq!(text_item(&items, /*index*/ 1), "before crash");
+    assert_eq!(text_item(&items, /*index*/ 2), "still before crash");
     assert_regex_match(
         r#"(?sx)
 \A
@@ -531,7 +566,47 @@ Error:\ boom\n
 (?:\s+at\ .+\n?)+
 \z
 "#,
-        text_item(&items, 3),
+        text_item(&items, /*index*/ 3),
+    );
+
+    Ok(())
+}
+
+#[cfg_attr(windows, ignore = "no exec_command on Windows")]
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn code_mode_exec_surfaces_handler_errors_as_exceptions() -> Result<()> {
+    skip_if_no_network!(Ok(()));
+
+    let server = responses::start_mock_server().await;
+    let (_test, second_mock) = run_code_mode_turn(
+        &server,
+        "surface nested tool handler failures as script exceptions",
+        r#"
+try {
+  await tools.exec_command({});
+  text("no-exception");
+} catch (error) {
+  text(`caught:${error?.message ?? String(error)}`);
+}
+"#,
+        /*include_apply_patch*/ false,
+    )
+    .await?;
+
+    let request = second_mock.single_request();
+    let (output, success) = custom_tool_output_body_and_success(&request, "call-1");
+    assert_ne!(
+        success,
+        Some(false),
+        "script should catch the nested tool error: {output}"
+    );
+    assert!(
+        output.contains("caught:"),
+        "expected caught exception text in output: {output}"
+    );
+    assert!(
+        !output.contains("no-exception"),
+        "nested tool error should not allow success path: {output}"
     );
 
     Ok(())
@@ -591,10 +666,10 @@ text("phase 3");
             r"(?s)\A",
             r"Script running with cell ID \d+\nWall time \d+\.\d seconds\nOutput:\n\z"
         ),
-        text_item(&first_items, 0),
+        text_item(&first_items, /*index*/ 0),
     );
-    assert_eq!(text_item(&first_items, 1), "phase 1");
-    let cell_id = extract_running_cell_id(text_item(&first_items, 0));
+    assert_eq!(text_item(&first_items, /*index*/ 1), "phase 1");
+    let cell_id = extract_running_cell_id(text_item(&first_items, /*index*/ 0));
 
     responses::mount_sse_once(
         &server,
@@ -632,13 +707,13 @@ text("phase 3");
             r"(?s)\A",
             r"Script running with cell ID \d+\nWall time \d+\.\d seconds\nOutput:\n\z"
         ),
-        text_item(&second_items, 0),
+        text_item(&second_items, /*index*/ 0),
     );
     assert_eq!(
-        extract_running_cell_id(text_item(&second_items, 0)),
+        extract_running_cell_id(text_item(&second_items, /*index*/ 0)),
         cell_id
     );
-    assert_eq!(text_item(&second_items, 1), "phase 2");
+    assert_eq!(text_item(&second_items, /*index*/ 1), "phase 2");
 
     responses::mount_sse_once(
         &server,
@@ -676,9 +751,9 @@ text("phase 3");
             r"(?s)\A",
             r"Script completed\nWall time \d+\.\d seconds\nOutput:\n\z"
         ),
-        text_item(&third_items, 0),
+        text_item(&third_items, /*index*/ 0),
     );
-    assert_eq!(text_item(&third_items, 1), "phase 3");
+    assert_eq!(text_item(&third_items, /*index*/ 1), "phase 3");
 
     Ok(())
 }
@@ -731,10 +806,10 @@ while (true) {}
             r"(?s)\A",
             r"Script running with cell ID \d+\nWall time \d+\.\d seconds\nOutput:\n\z"
         ),
-        text_item(&first_items, 0),
+        text_item(&first_items, /*index*/ 0),
     );
-    assert_eq!(text_item(&first_items, 1), "phase 1");
-    let cell_id = extract_running_cell_id(text_item(&first_items, 0));
+    assert_eq!(text_item(&first_items, /*index*/ 1), "phase 1");
+    let cell_id = extract_running_cell_id(text_item(&first_items, /*index*/ 0));
 
     responses::mount_sse_once(
         &server,
@@ -771,7 +846,7 @@ while (true) {}
             r"(?s)\A",
             r"Script terminated\nWall time \d+\.\d seconds\nOutput:\n\z"
         ),
-        text_item(&second_items, 0),
+        text_item(&second_items, /*index*/ 0),
     );
 
     Ok(())
@@ -832,8 +907,8 @@ text("session b done");
     let first_request = first_completion.single_request();
     let first_items = custom_tool_output_items(&first_request, "call-1");
     assert_eq!(first_items.len(), 2);
-    let session_a_id = extract_running_cell_id(text_item(&first_items, 0));
-    assert_eq!(text_item(&first_items, 1), "session a start");
+    let session_a_id = extract_running_cell_id(text_item(&first_items, /*index*/ 0));
+    assert_eq!(text_item(&first_items, /*index*/ 1), "session a start");
 
     responses::mount_sse_once(
         &server,
@@ -858,8 +933,8 @@ text("session b done");
     let second_request = second_completion.single_request();
     let second_items = custom_tool_output_items(&second_request, "call-2");
     assert_eq!(second_items.len(), 2);
-    let session_b_id = extract_running_cell_id(text_item(&second_items, 0));
-    assert_eq!(text_item(&second_items, 1), "session b start");
+    let session_b_id = extract_running_cell_id(text_item(&second_items, /*index*/ 0));
+    assert_eq!(text_item(&second_items, /*index*/ 1), "session b start");
     assert_ne!(session_a_id, session_b_id);
 
     fs::write(&session_a_gate, "ready")?;
@@ -898,9 +973,9 @@ text("session b done");
             r"(?s)\A",
             r"Script completed\nWall time \d+\.\d seconds\nOutput:\n\z"
         ),
-        text_item(&third_items, 0),
+        text_item(&third_items, /*index*/ 0),
     );
-    assert_eq!(text_item(&third_items, 1), "session a done");
+    assert_eq!(text_item(&third_items, /*index*/ 1), "session a done");
 
     fs::write(&session_b_gate, "ready")?;
     responses::mount_sse_once(
@@ -938,9 +1013,9 @@ text("session b done");
             r"(?s)\A",
             r"Script completed\nWall time \d+\.\d seconds\nOutput:\n\z"
         ),
-        text_item(&fourth_items, 0),
+        text_item(&fourth_items, /*index*/ 0),
     );
-    assert_eq!(text_item(&fourth_items, 1), "session b done");
+    assert_eq!(text_item(&fourth_items, /*index*/ 1), "session b done");
 
     Ok(())
 }
@@ -990,8 +1065,8 @@ text("phase 2");
     let first_request = first_completion.single_request();
     let first_items = custom_tool_output_items(&first_request, "call-1");
     assert_eq!(first_items.len(), 2);
-    let cell_id = extract_running_cell_id(text_item(&first_items, 0));
-    assert_eq!(text_item(&first_items, 1), "phase 1");
+    let cell_id = extract_running_cell_id(text_item(&first_items, /*index*/ 0));
+    assert_eq!(text_item(&first_items, /*index*/ 1), "phase 1");
 
     responses::mount_sse_once(
         &server,
@@ -1028,7 +1103,7 @@ text("phase 2");
             r"(?s)\A",
             r"Script terminated\nWall time \d+\.\d seconds\nOutput:\n\z"
         ),
-        text_item(&second_items, 0),
+        text_item(&second_items, /*index*/ 0),
     );
 
     responses::mount_sse_once(
@@ -1065,9 +1140,9 @@ text("after terminate");
             r"(?s)\A",
             r"Script completed\nWall time \d+\.\d seconds\nOutput:\n\z"
         ),
-        text_item(&third_items, 0),
+        text_item(&third_items, /*index*/ 0),
     );
-    assert_eq!(text_item(&third_items, 1), "after terminate");
+    assert_eq!(text_item(&third_items, /*index*/ 1), "after terminate");
 
     Ok(())
 }
@@ -1122,10 +1197,10 @@ async fn code_mode_wait_returns_error_for_unknown_session() -> Result<()> {
             r"(?s)\A",
             r"Script failed\nWall time \d+\.\d seconds\nOutput:\n\z"
         ),
-        text_item(&items, 0),
+        text_item(&items, /*index*/ 0),
     );
     assert_eq!(
-        text_item(&items, 1),
+        text_item(&items, /*index*/ 1),
         "Script error:\nexec cell 999999 not found"
     );
 
@@ -1193,8 +1268,8 @@ text("session b done");
     let first_request = first_completion.single_request();
     let first_items = custom_tool_output_items(&first_request, "call-1");
     assert_eq!(first_items.len(), 2);
-    let session_a_id = extract_running_cell_id(text_item(&first_items, 0));
-    assert_eq!(text_item(&first_items, 1), "session a start");
+    let session_a_id = extract_running_cell_id(text_item(&first_items, /*index*/ 0));
+    assert_eq!(text_item(&first_items, /*index*/ 1), "session a start");
 
     responses::mount_sse_once(
         &server,
@@ -1219,8 +1294,8 @@ text("session b done");
     let second_request = second_completion.single_request();
     let second_items = custom_tool_output_items(&second_request, "call-2");
     assert_eq!(second_items.len(), 2);
-    let session_b_id = extract_running_cell_id(text_item(&second_items, 0));
-    assert_eq!(text_item(&second_items, 1), "session b start");
+    let session_b_id = extract_running_cell_id(text_item(&second_items, /*index*/ 0));
+    assert_eq!(text_item(&second_items, /*index*/ 1), "session b start");
 
     fs::write(&session_a_gate, "ready")?;
     responses::mount_sse_once(
@@ -1258,10 +1333,10 @@ text("session b done");
             r"(?s)\A",
             r"Script running with cell ID \d+\nWall time \d+\.\d seconds\nOutput:\n\z"
         ),
-        text_item(&third_items, 0),
+        text_item(&third_items, /*index*/ 0),
     );
     assert_eq!(
-        extract_running_cell_id(text_item(&third_items, 0)),
+        extract_running_cell_id(text_item(&third_items, /*index*/ 0)),
         session_b_id
     );
 
@@ -1309,7 +1384,7 @@ text("session b done");
                     r"(?s)\A",
                     r"Script terminated\nWall time \d+\.\d seconds\nOutput:\n\z"
                 ),
-                text_item(&fourth_items, 0),
+                text_item(&fourth_items, /*index*/ 0),
             );
         }
         2 => {
@@ -1318,9 +1393,9 @@ text("session b done");
                     r"(?s)\A",
                     r"Script (?:completed|terminated)\nWall time \d+\.\d seconds\nOutput:\n\z"
                 ),
-                text_item(&fourth_items, 0),
+                text_item(&fourth_items, /*index*/ 0),
             );
-            assert_eq!(text_item(&fourth_items, 1), "session a done");
+            assert_eq!(text_item(&fourth_items, /*index*/ 1), "session a done");
         }
         other => panic!("unexpected number of content items: {other}"),
     }
@@ -1380,9 +1455,9 @@ text("after yield");
             r"(?s)\A",
             r"Script running with cell ID \d+\nWall time \d+\.\d seconds\nOutput:\n\z"
         ),
-        text_item(&first_items, 0),
+        text_item(&first_items, /*index*/ 0),
     );
-    assert_eq!(text_item(&first_items, 1), "before yield");
+    assert_eq!(text_item(&first_items, /*index*/ 1), "before yield");
 
     responses::mount_sse_once(
         &server,
@@ -1466,8 +1541,8 @@ text("token one token two token three token four token five token six token seve
     let first_request = first_completion.single_request();
     let first_items = custom_tool_output_items(&first_request, "call-1");
     assert_eq!(first_items.len(), 2);
-    assert_eq!(text_item(&first_items, 1), "phase 1");
-    let cell_id = extract_running_cell_id(text_item(&first_items, 0));
+    assert_eq!(text_item(&first_items, /*index*/ 1), "phase 1");
+    let cell_id = extract_running_cell_id(text_item(&first_items, /*index*/ 0));
 
     fs::write(&completion_gate, "ready")?;
     responses::mount_sse_once(
@@ -1506,7 +1581,7 @@ text("token one token two token three token four token five token six token seve
             r"(?s)\A",
             r"Script completed\nWall time \d+\.\d seconds\nOutput:\n\z"
         ),
-        text_item(&second_items, 0),
+        text_item(&second_items, /*index*/ 0),
     );
     let expected_pattern = r#"(?sx)
 \A
@@ -1515,7 +1590,7 @@ Total\ output\ lines:\ 1\n
 .*…\d+\ tokens\ truncated….*
 \z
 "#;
-    assert_regex_match(expected_pattern, text_item(&second_items, 1));
+    assert_regex_match(expected_pattern, text_item(&second_items, /*index*/ 1));
 
     Ok(())
 }
@@ -1531,7 +1606,7 @@ async fn code_mode_can_output_serialized_text_via_global_helper() -> Result<()> 
         r#"
 text({ json: true });
 "#,
-        false,
+        /*include_apply_patch*/ false,
     )
     .await?;
 
@@ -1552,6 +1627,44 @@ text({ json: true });
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn code_mode_notify_injects_additional_exec_tool_output_into_active_context() -> Result<()> {
+    skip_if_no_network!(Ok(()));
+
+    let server = responses::start_mock_server().await;
+    let (_test, second_mock) = run_code_mode_turn(
+        &server,
+        "use exec notify helper",
+        r#"
+notify("code_mode_notify_marker");
+await tools.test_sync_tool({});
+text("done");
+"#,
+        /*include_apply_patch*/ false,
+    )
+    .await?;
+
+    let req = second_mock.single_request();
+    let has_notify_output = req
+        .inputs_of_type("custom_tool_call_output")
+        .iter()
+        .any(|item| {
+            item.get("call_id").and_then(serde_json::Value::as_str) == Some("call-1")
+                && item
+                    .get("output")
+                    .and_then(serde_json::Value::as_str)
+                    .is_some_and(|text| text.contains("code_mode_notify_marker"))
+                && item.get("name").and_then(serde_json::Value::as_str) == Some("exec")
+        });
+    assert!(
+        has_notify_output,
+        "expected notify marker in custom_tool_call_output item: {:?}",
+        req.input()
+    );
+
+    Ok(())
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn code_mode_exit_stops_script_immediately() -> Result<()> {
     skip_if_no_network!(Ok(()));
 
@@ -1560,13 +1673,11 @@ async fn code_mode_exit_stops_script_immediately() -> Result<()> {
         &server,
         "use exec to stop script early with exit helper",
         r#"
-import { exit, text } from "@openai/code_mode";
-
 text("before");
 exit();
 text("after");
 "#,
-        false,
+        /*include_apply_patch*/ false,
     )
     .await?;
 
@@ -1584,9 +1695,9 @@ text("after");
             r"(?s)\A",
             r"Script completed\nWall time \d+\.\d seconds\nOutput:\n\z"
         ),
-        text_item(&items, 0),
+        text_item(&items, /*index*/ 0),
     );
-    assert_eq!(text_item(&items, 1), "before");
+    assert_eq!(text_item(&items, /*index*/ 1), "before");
     assert_eq!(output, "before");
 
     Ok(())
@@ -1605,7 +1716,7 @@ const circular = {};
 circular.self = circular;
 text(circular);
 "#,
-        false,
+        /*include_apply_patch*/ false,
     )
     .await?;
 
@@ -1625,10 +1736,10 @@ text(circular);
             r"(?s)\A",
             r"Script failed\nWall time \d+\.\d seconds\nOutput:\n\z"
         ),
-        text_item(&items, 0),
+        text_item(&items, /*index*/ 0),
     );
-    assert!(text_item(&items, 1).contains("Script error:"));
-    assert!(text_item(&items, 1).contains("Converting circular structure to JSON"));
+    assert!(text_item(&items, /*index*/ 1).contains("Script error:"));
+    assert!(text_item(&items, /*index*/ 1).contains("Converting circular structure to JSON"));
 
     Ok(())
 }
@@ -1645,7 +1756,7 @@ async fn code_mode_can_output_images_via_global_helper() -> Result<()> {
 image("https://example.com/image.jpg");
 image("data:image/png;base64,AAA");
 "#,
-        false,
+        /*include_apply_patch*/ false,
     )
     .await?;
 
@@ -1663,7 +1774,7 @@ image("data:image/png;base64,AAA");
             r"(?s)\A",
             r"Script completed\nWall time \d+\.\d seconds\nOutput:\n\z"
         ),
-        text_item(&items, 0),
+        text_item(&items, /*index*/ 0),
     );
     assert_eq!(
         items[1],
@@ -1684,6 +1795,90 @@ image("data:image/png;base64,AAA");
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn code_mode_can_use_view_image_result_with_image_helper() -> Result<()> {
+    skip_if_no_network!(Ok(()));
+
+    let server = responses::start_mock_server().await;
+    let mut builder = test_codex()
+        .with_model("gpt-5.3-codex")
+        .with_config(move |config| {
+            let _ = config.features.enable(Feature::CodeMode);
+            let _ = config.features.enable(Feature::ImageDetailOriginal);
+        });
+    let test = builder.build(&server).await?;
+
+    let image_bytes = BASE64_STANDARD.decode(
+        "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR4nGP4z8DwHwAFAAH/iZk9HQAAAABJRU5ErkJggg==",
+    )?;
+    let image_path = test.cwd_path().join("code_mode_view_image.png");
+    fs::write(&image_path, image_bytes)?;
+
+    let image_path_json = serde_json::to_string(&image_path.to_string_lossy().to_string())?;
+    let code = format!(
+        r#"
+const out = await tools.view_image({{ path: {image_path_json}, detail: "original" }});
+image(out);
+"#
+    );
+
+    responses::mount_sse_once(
+        &server,
+        sse(vec![
+            ev_response_created("resp-1"),
+            ev_custom_tool_call("call-1", "exec", &code),
+            ev_completed("resp-1"),
+        ]),
+    )
+    .await;
+
+    let second_mock = responses::mount_sse_once(
+        &server,
+        sse(vec![
+            ev_assistant_message("msg-1", "done"),
+            ev_completed("resp-2"),
+        ]),
+    )
+    .await;
+
+    test.submit_turn("use exec to call view_image and emit its image output")
+        .await?;
+
+    let req = second_mock.single_request();
+    let items = custom_tool_output_items(&req, "call-1");
+    let (_, success) = custom_tool_output_body_and_success(&req, "call-1");
+    assert_ne!(
+        success,
+        Some(false),
+        "code_mode view_image call failed unexpectedly"
+    );
+    assert_eq!(items.len(), 2);
+    assert_regex_match(
+        concat!(
+            r"(?s)\A",
+            r"Script completed\nWall time \d+\.\d seconds\nOutput:\n\z"
+        ),
+        text_item(&items, /*index*/ 0),
+    );
+
+    assert_eq!(
+        items[1].get("type").and_then(Value::as_str),
+        Some("input_image")
+    );
+
+    let emitted_image_url = items[1]
+        .get("image_url")
+        .and_then(Value::as_str)
+        .expect("image helper should emit an input_image item with image_url");
+    assert!(emitted_image_url.starts_with("data:image/png;base64,"));
+    assert_eq!(
+        items[1].get("detail").and_then(Value::as_str),
+        Some("original")
+    );
+
+    Ok(())
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn code_mode_can_apply_patch_via_nested_tool() -> Result<()> {
     skip_if_no_network!(Ok(()));
 
@@ -1694,8 +1889,13 @@ async fn code_mode_can_apply_patch_via_nested_tool() -> Result<()> {
     );
     let code = format!("text(await tools.apply_patch({patch:?}));\n");
 
-    let (test, second_mock) =
-        run_code_mode_turn(&server, "use exec to run apply_patch", &code, true).await?;
+    let (test, second_mock) = run_code_mode_turn(
+        &server,
+        "use exec to run apply_patch",
+        &code,
+        /*include_apply_patch*/ true,
+    )
+    .await?;
 
     let req = second_mock.single_request();
     let items = custom_tool_output_items(&req, "call-1");
@@ -1713,8 +1913,9 @@ async fn code_mode_can_apply_patch_via_nested_tool() -> Result<()> {
             r"(?s)\A",
             r"Script completed\nWall time \d+\.\d seconds\nOutput:\n\z"
         ),
-        text_item(&items, 0),
+        text_item(&items, /*index*/ 0),
     );
+    assert_eq!(text_item(&items, /*index*/ 1), "{}");
 
     let file_path = test.cwd_path().join(file_name);
     assert_eq!(fs::read_to_string(&file_path)?, "hello from code_mode\n");
@@ -1932,6 +2133,7 @@ text(JSON.stringify(Object.getOwnPropertyNames(globalThis).sort()));
         "SuppressedError",
         "Symbol",
         "SyntaxError",
+        "Temporal",
         "TypeError",
         "URIError",
         "Uint16Array",
@@ -1944,7 +2146,6 @@ text(JSON.stringify(Object.getOwnPropertyNames(globalThis).sort()));
         "WebAssembly",
         "__codexContentItems",
         "add_content",
-        "console",
         "decodeURI",
         "decodeURIComponent",
         "encodeURI",
@@ -1957,6 +2158,7 @@ text(JSON.stringify(Object.getOwnPropertyNames(globalThis).sort()));
         "isFinite",
         "isNaN",
         "load",
+        "notify",
         "parseFloat",
         "parseInt",
         "store",
@@ -1986,8 +2188,13 @@ const tool = ALL_TOOLS.find(({ name }) => name === "view_image");
 text(JSON.stringify(tool));
 "#;
 
-    let (_test, second_mock) =
-        run_code_mode_turn(&server, "use exec to inspect ALL_TOOLS", code, false).await?;
+    let (_test, second_mock) = run_code_mode_turn(
+        &server,
+        "use exec to inspect ALL_TOOLS",
+        code,
+        /*include_apply_patch*/ false,
+    )
+    .await?;
 
     let req = second_mock.single_request();
     let (output, success) = custom_tool_output_body_and_success(&req, "call-1");
@@ -2005,7 +2212,7 @@ text(JSON.stringify(tool));
         parsed,
         serde_json::json!({
             "name": "view_image",
-            "description": "View a local image from the filesystem (only use if given a full filepath by the user, and the image isn't already attached to the thread context within <image ...> tags).\n\nexec tool declaration:\n```ts\ndeclare const tools: { view_image(args: { path: string; }): Promise<unknown>; };\n```",
+            "description": "View a local image from the filesystem (only use if given a full filepath by the user, and the image isn't already attached to the thread context within <image ...> tags).\n\nexec tool declaration:\n```ts\ndeclare const tools: { view_image(args: { path: string; }): Promise<{ detail: string | null; image_url: string; }>; };\n```",
         })
     );
 
@@ -2076,23 +2283,16 @@ async fn code_mode_can_call_hidden_dynamic_tools() -> Result<()> {
                 }),
                 defer_loading: true,
             }],
-            false,
+            /*persist_extended_history*/ false,
         )
         .await?;
-    let test = TestCodex {
-        home: base_test.home,
-        cwd: base_test.cwd,
-        codex: new_thread.thread,
-        session_configured: new_thread.session_configured,
-        config: base_test.config,
-        thread_manager: base_test.thread_manager,
-    };
+    let mut test = base_test;
+    test.codex = new_thread.thread;
+    test.session_configured = new_thread.session_configured;
 
     let code = r#"
-import { ALL_TOOLS, hidden_dynamic_tool } from "tools.js";
-
 const tool = ALL_TOOLS.find(({ name }) => name === "hidden_dynamic_tool");
-const out = await hidden_dynamic_tool({ city: "Paris" });
+const out = await tools.hidden_dynamic_tool({ city: "Paris" });
 text(
   JSON.stringify({
     name: tool?.name ?? null,
@@ -2130,6 +2330,7 @@ text(
             final_output_json_schema: None,
             cwd: test.cwd.path().to_path_buf(),
             approval_policy: AskForApproval::Never,
+            approvals_reviewer: None,
             sandbox_policy: SandboxPolicy::DangerFullAccess,
             model: test.session_configured.model.clone(),
             effort: None,

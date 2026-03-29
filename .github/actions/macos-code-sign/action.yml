@@ -52,7 +52,7 @@ runs:
         cert_path="${RUNNER_TEMP}/apple_signing_certificate.p12"
         echo "$APPLE_CERTIFICATE" | base64 -d > "$cert_path"
 
-        keychain_path="${RUNNER_TEMP}/hanzo-signing.keychain-db"
+        keychain_path="${RUNNER_TEMP}/codex-signing.keychain-db"
         security create-keychain -p "$KEYCHAIN_PASSWORD" "$keychain_path"
         security set-keychain-settings -lut 21600 "$keychain_path"
         security unlock-keychain -p "$KEYCHAIN_PASSWORD" "$keychain_path"
@@ -132,9 +132,11 @@ runs:
           keychain_args+=(--keychain "${APPLE_CODESIGN_KEYCHAIN}")
         fi
 
+        entitlements_path="$GITHUB_ACTION_PATH/codex.entitlements.plist"
+
         for binary in dev hanzo-responses-api-proxy; do
           path="hanzo-dev/target/${TARGET}/release/${binary}"
-          codesign --force --options runtime --timestamp --sign "$APPLE_CODESIGN_IDENTITY" "${keychain_args[@]}" "$path"
+          codesign --force --options runtime --timestamp --entitlements "$entitlements_path" --sign "$APPLE_CODESIGN_IDENTITY" "${keychain_args[@]}" "$path"
         done
 
     - name: Notarize macOS binaries
@@ -166,7 +168,7 @@ runs:
 
         notarize_binary() {
           local binary="$1"
-          local source_path="hanzo-dev/target/${TARGET}/release/${binary}"
+          local source_path="codex-rs/target/${TARGET}/release/${binary}"
           local archive_path="${RUNNER_TEMP}/${binary}.zip"
 
           if [[ ! -f "$source_path" ]]; then
@@ -180,8 +182,8 @@ runs:
           notarize_submission "$binary" "$archive_path" "$notary_key_path"
         }
 
-        notarize_binary "dev"
-        notarize_binary "hanzo-responses-api-proxy"
+        notarize_binary "codex"
+        notarize_binary "codex-responses-api-proxy"
 
     - name: Sign and notarize macOS dmg
       if: ${{ inputs.sign-dmg == 'true' }}
@@ -210,8 +212,8 @@ runs:
 
         source "$GITHUB_ACTION_PATH/notary_helpers.sh"
 
-        dmg_name="dev-${TARGET}.dmg"
-        dmg_path="hanzo-dev/target/${TARGET}/release/${dmg_name}"
+        dmg_name="codex-${TARGET}.dmg"
+        dmg_path="codex-rs/target/${TARGET}/release/${dmg_name}"
 
         if [[ ! -f "$dmg_path" ]]; then
           echo "dmg $dmg_path not found"

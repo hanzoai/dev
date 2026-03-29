@@ -1,9 +1,9 @@
 use super::*;
 use crate::config::CONFIG_TOML_FILE;
 use crate::config::ConfigBuilder;
-use crate::features::Feature;
 use crate::plugins::AppConnectorId;
 use crate::plugins::PluginCapabilitySummary;
+use codex_features::Feature;
 use pretty_assertions::assert_eq;
 use std::fs;
 use std::path::Path;
@@ -49,6 +49,14 @@ fn split_qualified_tool_name_returns_server_and_tool() {
     assert_eq!(
         split_qualified_tool_name("mcp__alpha__do_thing"),
         Some(("alpha".to_string(), "do_thing".to_string()))
+    );
+}
+
+#[test]
+fn qualified_mcp_tool_name_prefix_sanitizes_server_names_without_lowercasing() {
+    assert_eq!(
+        qualified_mcp_tool_name_prefix("Some-Server"),
+        "mcp__Some_Server__".to_string()
     );
 }
 
@@ -159,7 +167,12 @@ fn codex_apps_server_config_uses_legacy_codex_apps_path() {
     let mut config = crate::config::test_config();
     config.chatgpt_base_url = "https://chatgpt.com".to_string();
 
-    let mut servers = with_codex_apps_mcp(HashMap::new(), false, None, &config);
+    let mut servers = with_codex_apps_mcp(
+        HashMap::new(),
+        /*connectors_enabled*/ false,
+        /*auth*/ None,
+        &config,
+    );
     assert!(!servers.contains_key(CODEX_APPS_MCP_SERVER_NAME));
 
     config
@@ -167,7 +180,9 @@ fn codex_apps_server_config_uses_legacy_codex_apps_path() {
         .enable(Feature::Apps)
         .expect("test config should allow apps");
 
-    servers = with_codex_apps_mcp(servers, true, None, &config);
+    servers = with_codex_apps_mcp(
+        servers, /*connectors_enabled*/ true, /*auth*/ None, &config,
+    );
     let server = servers
         .get(CODEX_APPS_MCP_SERVER_NAME)
         .expect("codex apps should be present when apps is enabled");
@@ -235,6 +250,7 @@ async fn effective_mcp_servers_include_plugins_without_overriding_user_config() 
             disabled_tools: None,
             scopes: None,
             oauth_resource: None,
+            tools: HashMap::new(),
         },
     );
     config
@@ -243,7 +259,7 @@ async fn effective_mcp_servers_include_plugins_without_overriding_user_config() 
         .expect("test config should accept MCP servers");
 
     let mcp_manager = McpManager::new(Arc::new(PluginsManager::new(config.codex_home.clone())));
-    let effective = mcp_manager.effective_servers(&config, None);
+    let effective = mcp_manager.effective_servers(&config, /*auth*/ None);
 
     let sample = effective.get("sample").expect("user server should exist");
     let docs = effective.get("docs").expect("plugin server should exist");

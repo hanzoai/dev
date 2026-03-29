@@ -1,8 +1,8 @@
 use super::*;
 
 use crate::config::test_config;
-use crate::features::Features;
 use crate::models_manager::manager::ModelsManager;
+use codex_features::Features;
 use pretty_assertions::assert_eq;
 
 #[test]
@@ -20,7 +20,7 @@ fn image_detail_original_feature_enables_explicit_original_without_force() {
         Some(ImageDetail::Original)
     );
     assert_eq!(
-        normalize_output_image_detail(&features, &model_info, None),
+        normalize_output_image_detail(&features, &model_info, /*detail*/ None),
         None
     );
 }
