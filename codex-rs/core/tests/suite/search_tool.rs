@@ -4,7 +4,7 @@
 use anyhow::Result;
 use codex_core::CodexAuth;
 use codex_core::config::Config;
-use codex_core::features::Feature;
+use codex_features::Feature;
 use codex_protocol::openai_models::ModelsResponse;
 use codex_protocol::protocol::AskForApproval;
 use codex_protocol::protocol::EventMsg;
@@ -86,7 +86,7 @@ fn tool_search_output_tools(request: &ResponsesRequest, call_id: &str) -> Vec<Va
         .unwrap_or_default()
 }
 
-fn configure_apps(config: &mut Config, apps_base_url: &str) {
+fn configure_apps_without_tool_search(config: &mut Config, apps_base_url: &str) {
     config
         .features
         .enable(Feature::Apps)
@@ -103,6 +103,14 @@ fn configure_apps(config: &mut Config, apps_base_url: &str) {
         .expect("gpt-5-codex exists in bundled models.json");
     model.supports_search_tool = true;
     config.model_catalog = Some(model_catalog);
+}
+
+fn configure_apps(config: &mut Config, apps_base_url: &str) {
+    configure_apps_without_tool_search(config, apps_base_url);
+    config
+        .features
+        .enable(Feature::ToolSearch)
+        .expect("test config should allow feature update");
 }
 
 fn configured_builder(apps_base_url: String) -> TestCodexBuilder {
@@ -165,6 +173,45 @@ async fn search_tool_flag_adds_tool_search() -> Result<()> {
             }
         })
     );
+
+    Ok(())
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn tool_search_disabled_by_default_exposes_apps_tools_directly() -> Result<()> {
+    skip_if_no_network!(Ok(()));
+
+    let server = start_mock_server().await;
+    let apps_server = AppsTestServer::mount_searchable(&server).await?;
+    let mock = mount_sse_once(
+        &server,
+        sse(vec![
+            ev_response_created("resp-1"),
+            ev_assistant_message("msg-1", "done"),
+            ev_completed("resp-1"),
+        ]),
+    )
+    .await;
+
+    let mut builder = test_codex()
+        .with_auth(CodexAuth::create_dummy_chatgpt_auth_for_testing())
+        .with_config(move |config| {
+            configure_apps_without_tool_search(config, apps_server.chatgpt_base_url.as_str())
+        });
+    let test = builder.build(&server).await?;
+
+    test.submit_turn_with_policies(
+        "list tools",
+        AskForApproval::Never,
+        SandboxPolicy::DangerFullAccess,
+    )
+    .await?;
+
+    let body = mock.single_request().body_json();
+    let tools = tool_names(&body);
+    assert!(!tools.iter().any(|name| name == TOOL_SEARCH_TOOL_NAME));
+    assert!(tools.iter().any(|name| name == CALENDAR_CREATE_TOOL));
+    assert!(tools.iter().any(|name| name == CALENDAR_LIST_TOOL));
 
     Ok(())
 }
@@ -423,6 +470,39 @@ async fn tool_search_returns_deferred_tools_without_follow_up_tool_injection() -
 
     let requests = mock.requests();
     assert_eq!(requests.len(), 3);
+
+    let apps_tool_call = server
+        .received_requests()
+        .await
+        .unwrap_or_default()
+        .into_iter()
+        .find_map(|request| {
+            let body: Value = serde_json::from_slice(&request.body).ok()?;
+            (request.url.path() == "/api/codex/apps"
+                && body.get("method").and_then(Value::as_str) == Some("tools/call"))
+            .then_some(body)
+        })
+        .expect("apps tools/call request should be recorded");
+
+    assert_eq!(
+        apps_tool_call.pointer("/params/_meta/_codex_apps"),
+        Some(&json!({
+            "resource_uri": CALENDAR_CREATE_EVENT_RESOURCE_URI,
+            "contains_mcp_source": true,
+            "connector_id": "calendar",
+        }))
+    );
+    assert_eq!(
+        apps_tool_call.pointer("/params/_meta/x-codex-turn-metadata/session_id"),
+        Some(&json!(test.session_configured.session_id.to_string()))
+    );
+    assert!(
+        apps_tool_call
+            .pointer("/params/_meta/x-codex-turn-metadata/turn_id")
+            .and_then(Value::as_str)
+            .is_some_and(|turn_id| !turn_id.is_empty()),
+        "apps tools/call should include turn metadata turn_id: {apps_tool_call:?}"
+    );
 
     let first_request_tools = tool_names(&requests[0].body_json());
     assert!(

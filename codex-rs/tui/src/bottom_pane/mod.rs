@@ -27,9 +27,9 @@ use crate::render::renderable::Renderable;
 use crate::render::renderable::RenderableItem;
 use crate::tui::FrameRequester;
 use bottom_pane_view::BottomPaneView;
-use codex_core::features::Features;
 use codex_core::plugins::PluginCapabilitySummary;
 use codex_core::skills::model::SkillMetadata;
+use codex_features::Features;
 use codex_file_search::FileMatch;
 use codex_protocol::request_user_input::RequestUserInputEvent;
 use codex_protocol::user_input::TextElement;
@@ -47,6 +47,7 @@ mod mcp_server_elicitation;
 mod multi_select_picker;
 mod request_user_input;
 mod status_line_setup;
+mod title_setup;
 pub(crate) use app_link_view::AppLinkElicitationTarget;
 pub(crate) use app_link_view::AppLinkSuggestionType;
 pub(crate) use app_link_view::AppLinkView;
@@ -100,6 +101,8 @@ pub(crate) use skills_toggle_view::SkillsToggleView;
 pub(crate) use status_line_setup::StatusLineItem;
 pub(crate) use status_line_setup::StatusLinePreviewData;
 pub(crate) use status_line_setup::StatusLineSetupView;
+pub(crate) use title_setup::TerminalTitleItem;
+pub(crate) use title_setup::TerminalTitleSetupView;
 mod paste_burst;
 mod pending_input_preview;
 mod pending_thread_approvals;
@@ -141,7 +144,6 @@ use crate::bottom_pane::prompt_args::parse_slash_name;
 pub(crate) use chat_composer::ChatComposer;
 pub(crate) use chat_composer::ChatComposerConfig;
 pub(crate) use chat_composer::InputResult;
-use codex_protocol::custom_prompts::CustomPrompt;
 
 use crate::status_indicator_widget::StatusDetailsCapitalization;
 use crate::status_indicator_widget::StatusIndicatorWidget;
@@ -263,6 +265,11 @@ impl BottomPane {
         self.request_redraw();
     }
 
+    pub fn set_plugins_command_enabled(&mut self, enabled: bool) {
+        self.composer.set_plugins_command_enabled(enabled);
+        self.request_redraw();
+    }
+
     pub fn take_mention_bindings(&mut self) -> Vec<MentionBinding> {
         self.composer.take_mention_bindings()
     }
@@ -322,11 +329,6 @@ impl BottomPane {
         self.request_redraw();
     }
 
-    pub fn set_voice_transcription_enabled(&mut self, enabled: bool) {
-        self.composer.set_voice_transcription_enabled(enabled);
-        self.request_redraw();
-    }
-
     /// Update the key hint shown next to queued messages so it matches the
     /// binding that `ChatWidget` actually listens for.
     pub(crate) fn set_queued_message_edit_binding(&mut self, binding: KeyBinding) {
@@ -367,17 +369,6 @@ impl BottomPane {
 
     /// Forward a key event to the active view or the composer.
     pub fn handle_key_event(&mut self, key_event: KeyEvent) -> InputResult {
-        // Do not globally intercept space; only composer handles hold-to-talk.
-        // While recording, route all keys to the composer so it can stop on release or next key.
-        #[cfg(not(target_os = "linux"))]
-        if self.composer.is_recording() {
-            let (_ir, needs_redraw) = self.composer.handle_key_event(key_event);
-            if needs_redraw {
-                self.request_redraw();
-            }
-            return InputResult::None;
-        }
-
         // If a modal/view is active, handle it here; otherwise forward to composer.
         if !self.view_stack.is_empty() {
             if key_event.kind == KeyEventKind::Release {
@@ -509,11 +500,7 @@ impl BottomPane {
         self.request_redraw();
     }
 
-    // Space hold timeout is handled inside ChatComposer via an internal timer.
     pub(crate) fn pre_draw_tick(&mut self) {
-        // Allow composer to process any time-based transitions before drawing
-        #[cfg(not(target_os = "linux"))]
-        self.composer.process_space_hold_trigger();
         self.composer.sync_popups();
     }
 
@@ -817,8 +804,10 @@ impl BottomPane {
         &mut self,
         queued: Vec<String>,
         pending_steers: Vec<String>,
+        rejected_steers: Vec<String>,
     ) {
         self.pending_input_preview.pending_steers = pending_steers;
+        self.pending_input_preview.rejected_steers = rejected_steers;
         self.pending_input_preview.queued_messages = queued;
         self.request_redraw();
     }
@@ -854,12 +843,6 @@ impl BottomPane {
         if let Some(status) = self.status.as_mut() {
             status.update_inline_message(self.unified_exec_footer.summary_text());
         }
-    }
-
-    /// Update custom prompts available for the slash popup.
-    pub(crate) fn set_custom_prompts(&mut self, prompts: Vec<CustomPrompt>) {
-        self.composer.set_custom_prompts(prompts);
-        self.request_redraw();
     }
 
     pub(crate) fn composer_is_empty(&self) -> bool {
@@ -1145,7 +1128,8 @@ impl BottomPane {
             }
             let has_pending_thread_approvals = !self.pending_thread_approvals.is_empty();
             let has_pending_input = !self.pending_input_preview.queued_messages.is_empty()
-                || !self.pending_input_preview.pending_steers.is_empty();
+                || !self.pending_input_preview.pending_steers.is_empty()
+                || !self.pending_input_preview.rejected_steers.is_empty();
             let has_status_or_footer =
                 self.status.is_some() || !self.unified_exec_footer.is_empty();
             let has_inline_previews = has_pending_thread_approvals || has_pending_input;
@@ -1196,21 +1180,15 @@ impl BottomPane {
 
 #[cfg(not(target_os = "linux"))]
 impl BottomPane {
-    pub(crate) fn insert_transcription_placeholder(&mut self, text: &str) -> String {
-        let id = self.composer.insert_transcription_placeholder(text);
+    pub(crate) fn insert_recording_meter_placeholder(&mut self, text: &str) -> String {
+        let id = self.composer.insert_recording_meter_placeholder(text);
         self.composer.sync_popups();
         self.request_redraw();
         id
     }
 
-    pub(crate) fn replace_transcription(&mut self, id: &str, text: &str) {
-        self.composer.replace_transcription(id, text);
-        self.composer.sync_popups();
-        self.request_redraw();
-    }
-
-    pub(crate) fn update_transcription_in_place(&mut self, id: &str, text: &str) -> bool {
-        let updated = self.composer.update_transcription_in_place(id, text);
+    pub(crate) fn update_recording_meter_in_place(&mut self, id: &str, text: &str) -> bool {
+        let updated = self.composer.update_recording_meter_in_place(id, text);
         if updated {
             self.composer.sync_popups();
             self.request_redraw();
@@ -1218,8 +1196,8 @@ impl BottomPane {
         updated
     }
 
-    pub(crate) fn remove_transcription_placeholder(&mut self, id: &str) {
-        self.composer.remove_transcription_placeholder(id);
+    pub(crate) fn remove_recording_meter_placeholder(&mut self, id: &str) {
+        self.composer.remove_recording_meter_placeholder(id);
         self.composer.sync_popups();
         self.request_redraw();
     }
@@ -1363,7 +1341,7 @@ mod tests {
         });
 
         // Start a running task so the status indicator is active above the composer.
-        pane.set_task_running(true);
+        pane.set_task_running(/*running*/ true);
 
         // Push an approval modal (e.g., command approval) which should hide the status view.
         pane.push_approval_request(exec_request(), &features);
@@ -1430,7 +1408,7 @@ mod tests {
         });
 
         // Begin a task: show initial status.
-        pane.set_task_running(true);
+        pane.set_task_running(/*running*/ true);
 
         // Use a height that allows the status line to be visible above the composer.
         let area = Rect::new(0, 0, 40, 6);
@@ -1457,10 +1435,10 @@ mod tests {
         });
 
         // Activate spinner (status view replaces composer) with no live ring.
-        pane.set_task_running(true);
+        pane.set_task_running(/*running*/ true);
 
         // Use height == desired_height; expect spacer + status + composer rows without trailing padding.
-        let height = pane.desired_height(30);
+        let height = pane.desired_height(/*width*/ 30);
         assert!(
             height >= 3,
             "expected at least 3 rows to render spacer, status, and composer; got {height}"
@@ -1487,7 +1465,7 @@ mod tests {
             skills: Some(Vec::new()),
         });
 
-        pane.set_task_running(true);
+        pane.set_task_running(/*running*/ true);
 
         let width = 48;
         let height = pane.desired_height(width);
@@ -1510,7 +1488,7 @@ mod tests {
             skills: Some(Vec::new()),
         });
 
-        pane.set_task_running(true);
+        pane.set_task_running(/*running*/ true);
         let width = 120;
         let before = pane.desired_height(width);
 
@@ -1539,14 +1517,18 @@ mod tests {
             skills: Some(Vec::new()),
         });
 
-        pane.set_task_running(true);
+        pane.set_task_running(/*running*/ true);
         pane.update_status(
             "Working".to_string(),
             Some("First detail line\nSecond detail line".to_string()),
             StatusDetailsCapitalization::CapitalizeFirst,
             STATUS_DETAILS_DEFAULT_MAX_LINES,
         );
-        pane.set_pending_input_preview(vec!["Queued follow-up question".to_string()], Vec::new());
+        pane.set_pending_input_preview(
+            vec!["Queued follow-up question".to_string()],
+            Vec::new(),
+            Vec::new(),
+        );
 
         let width = 48;
         let height = pane.desired_height(width);
@@ -1572,8 +1554,12 @@ mod tests {
             skills: Some(Vec::new()),
         });
 
-        pane.set_task_running(true);
-        pane.set_pending_input_preview(vec!["Queued follow-up question".to_string()], Vec::new());
+        pane.set_task_running(/*running*/ true);
+        pane.set_pending_input_preview(
+            vec!["Queued follow-up question".to_string()],
+            Vec::new(),
+            Vec::new(),
+        );
         pane.hide_status_indicator();
 
         let width = 48;
@@ -1600,8 +1586,12 @@ mod tests {
             skills: Some(Vec::new()),
         });
 
-        pane.set_task_running(true);
-        pane.set_pending_input_preview(vec!["Queued follow-up question".to_string()], Vec::new());
+        pane.set_task_running(/*running*/ true);
+        pane.set_pending_input_preview(
+            vec!["Queued follow-up question".to_string()],
+            Vec::new(),
+            Vec::new(),
+        );
 
         let width = 48;
         let height = pane.desired_height(width);
@@ -1683,14 +1673,12 @@ mod tests {
                 interface: None,
                 dependencies: None,
                 policy: None,
-                permission_profile: None,
-                managed_network_override: None,
                 path_to_skills_md: PathBuf::from("test-skill"),
                 scope: SkillScope::User,
             }]),
         });
 
-        pane.set_task_running(true);
+        pane.set_task_running(/*running*/ true);
 
         // Repro: a running task + skill popup + Esc should dismiss the popup, not interrupt.
         pane.insert_str("$");
@@ -1728,7 +1716,7 @@ mod tests {
             skills: Some(Vec::new()),
         });
 
-        pane.set_task_running(true);
+        pane.set_task_running(/*running*/ true);
 
         // Repro: a running task + slash-command popup + Esc should not interrupt the task.
         pane.insert_str("/");
@@ -1763,7 +1751,7 @@ mod tests {
             skills: Some(Vec::new()),
         });
 
-        pane.set_task_running(true);
+        pane.set_task_running(/*running*/ true);
 
         // Repro: `/agent ` hides the popup (cursor past command name). Esc should
         // keep editing command text instead of interrupting the running task.
@@ -1799,7 +1787,7 @@ mod tests {
             skills: Some(Vec::new()),
         });
 
-        pane.set_task_running(true);
+        pane.set_task_running(/*running*/ true);
         pane.show_selection_view(SelectionViewParams {
             title: Some("Agents".to_string()),
             items: vec![SelectionItem {
@@ -1847,7 +1835,7 @@ mod tests {
             skills: Some(Vec::new()),
         });
 
-        pane.set_task_running(true);
+        pane.set_task_running(/*running*/ true);
 
         pane.handle_key_event(KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE));
 

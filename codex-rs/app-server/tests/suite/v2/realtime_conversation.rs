@@ -21,10 +21,11 @@ use codex_app_server_protocol::ThreadRealtimeStartResponse;
 use codex_app_server_protocol::ThreadRealtimeStartedNotification;
 use codex_app_server_protocol::ThreadRealtimeStopParams;
 use codex_app_server_protocol::ThreadRealtimeStopResponse;
+use codex_app_server_protocol::ThreadRealtimeTranscriptUpdatedNotification;
 use codex_app_server_protocol::ThreadStartParams;
 use codex_app_server_protocol::ThreadStartResponse;
-use codex_core::features::FEATURES;
-use codex_core::features::Feature;
+use codex_features::FEATURES;
+use codex_features::Feature;
 use codex_protocol::protocol::RealtimeConversationVersion;
 use core_test_support::responses::start_websocket_server;
 use core_test_support::skip_if_no_network;
@@ -67,6 +68,24 @@ async fn realtime_conversation_streams_v2_notifications() -> Result<()> {
                 }
             }),
             json!({
+                "type": "conversation.item.input_audio_transcription.delta",
+                "delta": "delegate now"
+            }),
+            json!({
+                "type": "response.output_text.delta",
+                "delta": "working"
+            }),
+            json!({
+                "type": "conversation.item.done",
+                "item": {
+                    "id": "item_2",
+                    "type": "function_call",
+                    "name": "codex",
+                    "call_id": "handoff_1",
+                    "arguments": "{\"input_transcript\":\"delegate now\"}"
+                }
+            }),
+            json!({
                 "type": "error",
                 "message": "upstream boom"
             }),
@@ -80,7 +99,7 @@ async fn realtime_conversation_streams_v2_notifications() -> Result<()> {
         codex_home.path(),
         &responses_server.uri(),
         realtime_server.uri(),
-        true,
+        /*realtime_enabled*/ true,
     )?;
 
     let mut mcp = McpProcess::new(codex_home.path()).await?;
@@ -118,7 +137,9 @@ async fn realtime_conversation_streams_v2_notifications() -> Result<()> {
     assert!(started.session_id.is_some());
     assert_eq!(started.version, RealtimeConversationVersion::V2);
 
-    let startup_context_request = realtime_server.wait_for_request(0, 0).await;
+    let startup_context_request = realtime_server
+        .wait_for_request(/*connection_index*/ 0, /*request_index*/ 0)
+        .await;
     assert_eq!(
         startup_context_request.body_json()["type"].as_str(),
         Some("session.update")
@@ -179,6 +200,40 @@ async fn realtime_conversation_streams_v2_notifications() -> Result<()> {
     .await?;
     assert_eq!(item_added.thread_id, output_audio.thread_id);
     assert_eq!(item_added.item["type"], json!("message"));
+
+    let first_transcript_update = read_notification::<ThreadRealtimeTranscriptUpdatedNotification>(
+        &mut mcp,
+        "thread/realtime/transcriptUpdated",
+    )
+    .await?;
+    assert_eq!(first_transcript_update.thread_id, output_audio.thread_id);
+    assert_eq!(first_transcript_update.role, "user");
+    assert_eq!(first_transcript_update.text, "delegate now");
+
+    let second_transcript_update =
+        read_notification::<ThreadRealtimeTranscriptUpdatedNotification>(
+            &mut mcp,
+            "thread/realtime/transcriptUpdated",
+        )
+        .await?;
+    assert_eq!(second_transcript_update.thread_id, output_audio.thread_id);
+    assert_eq!(second_transcript_update.role, "assistant");
+    assert_eq!(second_transcript_update.text, "working");
+
+    let handoff_item_added = read_notification::<ThreadRealtimeItemAddedNotification>(
+        &mut mcp,
+        "thread/realtime/itemAdded",
+    )
+    .await?;
+    assert_eq!(handoff_item_added.thread_id, output_audio.thread_id);
+    assert_eq!(handoff_item_added.item["type"], json!("handoff_request"));
+    assert_eq!(handoff_item_added.item["handoff_id"], json!("handoff_1"));
+    assert_eq!(handoff_item_added.item["item_id"], json!("item_2"));
+    assert_eq!(
+        handoff_item_added.item["input_transcript"],
+        json!("delegate now")
+    );
+    assert_eq!(handoff_item_added.item["active_transcript"], json!([]));
 
     let realtime_error =
         read_notification::<ThreadRealtimeErrorNotification>(&mut mcp, "thread/realtime/error")
@@ -253,7 +308,7 @@ async fn realtime_conversation_stop_emits_closed_notification() -> Result<()> {
         codex_home.path(),
         &responses_server.uri(),
         realtime_server.uri(),
-        true,
+        /*realtime_enabled*/ true,
     )?;
 
     let mut mcp = McpProcess::new(codex_home.path()).await?;
@@ -325,7 +380,7 @@ async fn realtime_conversation_requires_feature_flag() -> Result<()> {
         codex_home.path(),
         &responses_server.uri(),
         realtime_server.uri(),
-        false,
+        /*realtime_enabled*/ false,
     )?;
 
     let mut mcp = McpProcess::new(codex_home.path()).await?;
