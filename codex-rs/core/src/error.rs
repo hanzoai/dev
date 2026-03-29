@@ -1,18 +1,20 @@
 use crate::exec::ExecToolCallOutput;
 use crate::network_policy_decision::NetworkPolicyDecisionPayload;
-use crate::token_data::KnownPlan;
-use crate::token_data::PlanType;
-use crate::truncate::TruncationPolicy;
-use crate::truncate::truncate_text;
 use chrono::DateTime;
 use chrono::Datelike;
 use chrono::Local;
 use chrono::Utc;
 use codex_async_utils::CancelErr;
+pub use codex_login::auth::RefreshTokenFailedError;
+pub use codex_login::auth::RefreshTokenFailedReason;
+use codex_login::token_data::KnownPlan;
+use codex_login::token_data::PlanType;
 use codex_protocol::ThreadId;
 use codex_protocol::protocol::CodexErrorInfo;
 use codex_protocol::protocol::ErrorEvent;
 use codex_protocol::protocol::RateLimitSnapshot;
+use codex_utils_output_truncation::TruncationPolicy;
+use codex_utils_output_truncation::truncate_text;
 use reqwest::StatusCode;
 use serde_json;
 use std::io;
@@ -268,30 +270,6 @@ impl std::fmt::Display for ResponseStreamFailed {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Error)]
-#[error("{message}")]
-pub struct RefreshTokenFailedError {
-    pub reason: RefreshTokenFailedReason,
-    pub message: String,
-}
-
-impl RefreshTokenFailedError {
-    pub fn new(reason: RefreshTokenFailedReason, message: impl Into<String>) -> Self {
-        Self {
-            reason,
-            message: message.into(),
-        }
-    }
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum RefreshTokenFailedReason {
-    Expired,
-    Exhausted,
-    Revoked,
-    Other,
-}
-
 #[derive(Debug)]
 pub struct UnexpectedResponseError {
     pub status: StatusCode,
@@ -470,7 +448,12 @@ impl std::fmt::Display for UsageLimitReachedError {
                 "You've hit your usage limit. Check your plan and billing details, or upgrade your plan at hanzo.ai{}",
                 retry_suffix_after_or(self.resets_at.as_ref())
             ),
-            Some(PlanType::Known(KnownPlan::Team)) | Some(PlanType::Known(KnownPlan::Business)) => {
+            Some(PlanType::Known(
+                KnownPlan::Team
+                | KnownPlan::SelfServeBusinessUsageBased
+                | KnownPlan::Business
+                | KnownPlan::EnterpriseCbpUsageBased,
+            )) => {
                 format!(
                     "You've hit your usage limit. To get more access now, send a request to your admin{}",
                     retry_suffix_after_or(self.resets_at.as_ref())
