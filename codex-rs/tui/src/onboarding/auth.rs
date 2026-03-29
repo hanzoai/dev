@@ -98,6 +98,7 @@ pub(crate) enum SignInState {
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum SignInOption {
+    HanzoId,
     ChatGpt,
     DeviceCode,
     ApiKey,
@@ -148,6 +149,9 @@ impl KeyboardHandler for AuthModeWidget {
             }
             KeyCode::Char('3') => {
                 self.select_option_by_index(/*index*/ 2);
+            }
+            KeyCode::Char('4') => {
+                self.select_option_by_index(/*index*/ 3);
             }
             KeyCode::Enter => {
                 let sign_in_state = { (*self.sign_in_state.read().unwrap()).clone() };
@@ -238,7 +242,8 @@ impl AuthModeWidget {
     }
 
     fn displayed_sign_in_options(&self) -> Vec<SignInOption> {
-        let mut options = vec![SignInOption::ChatGpt];
+        let mut options = vec![SignInOption::HanzoId];
+        options.push(SignInOption::ChatGpt);
         if self.is_chatgpt_login_allowed() {
             options.push(SignInOption::DeviceCode);
         }
@@ -249,7 +254,7 @@ impl AuthModeWidget {
     }
 
     fn selectable_sign_in_options(&self) -> Vec<SignInOption> {
-        let mut options = Vec::new();
+        let mut options = vec![SignInOption::HanzoId];
         if self.is_chatgpt_login_allowed() {
             options.push(SignInOption::ChatGpt);
             options.push(SignInOption::DeviceCode);
@@ -284,6 +289,9 @@ impl AuthModeWidget {
 
     fn handle_sign_in_option(&mut self, option: SignInOption) {
         match option {
+            SignInOption::HanzoId => {
+                self.start_hanzo_login();
+            }
             SignInOption::ChatGpt => {
                 if self.is_chatgpt_login_allowed() {
                     self.start_chatgpt_login();
@@ -305,7 +313,7 @@ impl AuthModeWidget {
     }
 
     fn disallow_api_login(&mut self) {
-        self.highlighted_mode = SignInOption::ChatGpt;
+        self.highlighted_mode = SignInOption::HanzoId;
         self.set_error(Some(API_KEY_DISABLED_MESSAGE.to_string()));
         *self.sign_in_state.write().unwrap() = SignInState::PickMode;
         self.request_frame.schedule_frame();
@@ -315,7 +323,7 @@ impl AuthModeWidget {
         let mut lines: Vec<Line> = vec![
             Line::from(vec![
                 "  ".into(),
-                "Sign in with ChatGPT to use Codex as part of your paid plan".into(),
+                "Sign in to Hanzo Dev with your preferred account".into(),
             ]),
             Line::from(vec![
                 "  ".into(),
@@ -362,6 +370,14 @@ impl AuthModeWidget {
 
         for (idx, option) in self.displayed_sign_in_options().into_iter().enumerate() {
             match option {
+                SignInOption::HanzoId => {
+                    lines.extend(create_mode_item(
+                        idx,
+                        option,
+                        "Sign in with Hanzo",
+                        "OAuth via hanzo.id — included with Hanzo plans",
+                    ));
+                }
                 SignInOption::ChatGpt => {
                     lines.extend(create_mode_item(
                         idx,
@@ -392,7 +408,7 @@ impl AuthModeWidget {
 
         if !self.is_api_login_allowed() {
             lines.push(
-                "  API key login is disabled by this workspace. Sign in with ChatGPT to continue."
+                "  API key login is disabled by this workspace. Sign in with Hanzo or ChatGPT to continue."
                     .dim()
                     .into(),
             );
@@ -749,6 +765,13 @@ impl AuthModeWidget {
         }
     }
 
+    /// Kicks off the Hanzo OAuth flow via hanzo.id.
+    /// Reuses the same browser-based OAuth mechanism as ChatGPT login;
+    /// the login server routes to hanzo.id based on configuration.
+    fn start_hanzo_login(&mut self) {
+        self.start_chatgpt_login();
+    }
+
     /// Kicks off the ChatGPT auth flow and keeps the UI state consistent with the attempt.
     fn start_chatgpt_login(&mut self) {
         // If we're already authenticated with ChatGPT, don't start a new login –
@@ -940,7 +963,7 @@ mod tests {
         .unwrap();
         let widget = AuthModeWidget {
             request_frame: FrameRequester::test_dummy(),
-            highlighted_mode: SignInOption::ChatGpt,
+            highlighted_mode: SignInOption::HanzoId,
             error: Arc::new(RwLock::new(None)),
             sign_in_state: Arc::new(RwLock::new(SignInState::PickMode)),
             codex_home: codex_home_path.clone(),

@@ -197,11 +197,14 @@ pub fn create_client() -> CodexHttpClient {
 /// This starts from the standard Codex user agent, default headers, and sandbox-specific proxy
 /// policy, then layers in shared custom CA handling from `CODEX_CA_CERTIFICATE` /
 /// `SSL_CERT_FILE`. The function remains infallible for compatibility with existing call sites, so
-/// a custom-CA or builder failure is logged and falls back to `reqwest::Client::new()`.
+/// a custom-CA or builder failure is logged and falls back to a rustls-only default client.
 pub fn build_reqwest_client() -> reqwest::Client {
     try_build_reqwest_client().unwrap_or_else(|error| {
-        tracing::warn!(error = %error, "failed to build default reqwest client");
-        reqwest::Client::new()
+        tracing::warn!(error = %error, "failed to build default reqwest client, using rustls fallback");
+        reqwest::Client::builder()
+            .use_rustls_tls()
+            .build()
+            .expect("failed to build fallback reqwest client with rustls")
     })
 }
 

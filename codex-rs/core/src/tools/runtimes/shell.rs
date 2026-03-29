@@ -225,6 +225,7 @@ impl ToolRuntime<ShellRequest, ExecToolCallOutput> for ShellRuntime {
             &req.command,
             session_shell.as_ref(),
             &req.cwd,
+            &req.explicit_env_overrides,
         );
         let command = if matches!(session_shell.shell_type, ShellType::PowerShell) {
             prefix_powershell_script_with_utf8(&command)

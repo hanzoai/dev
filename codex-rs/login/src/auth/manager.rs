@@ -574,11 +574,7 @@ fn load_auth(
 
     // Hanzo API key has highest priority.
     if let Some(api_key) = read_hanzo_api_key_from_env() {
-        let client = crate::default_client::create_client();
-        return Ok(Some(CodexAuth::from_api_key_with_client(
-            api_key.as_str(),
-            client,
-        )));
+        return Ok(Some(CodexAuth::from_api_key(api_key.as_str())));
     }
 
     // CODEX_API_KEY (legacy) takes precedence over provider-specific keys.
@@ -611,11 +607,7 @@ fn load_auth(
 
     // Try reading an existing Claude Code access token from the macOS Keychain.
     if let Some(claude_token) = read_claude_code_keychain_token() {
-        let client = crate::default_client::create_client();
-        return Ok(Some(CodexAuth::from_api_key_with_client(
-            claude_token.as_str(),
-            client,
-        )));
+        return Ok(Some(CodexAuth::from_api_key(claude_token.as_str())));
     }
 
     Ok(None)
@@ -776,7 +768,7 @@ impl RefreshResponse {
 pub const CLIENT_ID: &str = "app_EMoamEEZ73f0CkXaXp7hrann";
 
 // Hanzo IAM (hanzo.id Casdoor OAuth — public client, PKCE only)
-pub const HANZO_CLIENT_ID: &str = "hanzo-app";
+pub const HANZO_CLIENT_ID: &str = "hanzo-dev";
 
 // Claude Code OAuth credentials (for Anthropic OAuth)
 pub const CLAUDE_CLIENT_ID: &str = "9d1c250a-e61b-44d9-88ed-5944d1962f5e";
