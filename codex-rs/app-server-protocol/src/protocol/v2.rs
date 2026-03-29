@@ -1592,6 +1592,9 @@ pub enum LoginAccountParams {
     #[serde(rename = "chatgptDeviceCode")]
     #[ts(rename = "chatgptDeviceCode")]
     ChatgptDeviceCode,
+    #[serde(rename = "hanzoId")]
+    #[ts(rename = "hanzoId")]
+    HanzoId,
     /// [UNSTABLE] FOR OPENAI INTERNAL USE ONLY - DO NOT USE.
     /// The access token must contain the same scopes that Codex-managed ChatGPT auth tokens have.
     #[experimental("account/login/start.chatgptAuthTokens")]
@@ -1643,6 +1646,12 @@ pub enum LoginAccountResponse {
     #[serde(rename = "chatgptAuthTokens", rename_all = "camelCase")]
     #[ts(rename = "chatgptAuthTokens", rename_all = "camelCase")]
     ChatgptAuthTokens {},
+    #[serde(rename = "hanzoId", rename_all = "camelCase")]
+    #[ts(rename = "hanzoId", rename_all = "camelCase")]
+    HanzoId {
+        login_id: String,
+        auth_url: String,
+    },
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq, JsonSchema, TS)]

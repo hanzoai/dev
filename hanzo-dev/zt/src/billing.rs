@@ -13,7 +13,10 @@ pub struct BillingGuard {
 impl BillingGuard {
     pub fn new(commerce_url: &str, auth_token: &str) -> Self {
         Self {
-            http: reqwest::Client::new(),
+            http: reqwest::Client::builder()
+                .use_rustls_tls()
+                .build()
+                .expect("failed to build reqwest client with rustls"),
             commerce_url: commerce_url.trim_end_matches('/').to_string(),
             auth_token: auth_token.to_string(),
         }

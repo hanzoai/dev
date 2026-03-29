@@ -211,13 +211,13 @@ pub async fn login_with_claude_browser(
     codex_home: PathBuf,
     cli_auth_credentials_store_mode: AuthCredentialsStoreMode,
 ) -> std::io::Result<()> {
-    let opts = ServerOptions::new(
+    let mut opts = ServerOptions::new(
         codex_home,
         CLAUDE_CLIENT_ID.to_string(),
         None,
         cli_auth_credentials_store_mode,
-    )
-    .with_issuer(CLAUDE_ISSUER.to_string());
+    );
+    opts.issuer = CLAUDE_ISSUER.to_string();
     let server = run_login_server(opts)?;
 
     print_login_server_start(server.actual_port, &server.auth_url);
