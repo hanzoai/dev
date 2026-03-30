@@ -177,7 +177,7 @@ export async function runPostinstall(opts = {}) {
     const version = pkg.version;
 
     const isWin = platform === "win32";
-    const binaryName = `code-${targetTriple}`;
+    const binaryName = `dev-${targetTriple}`;
     const archiveName = isWin
       ? `${binaryName}.zip`
       : (() => {
