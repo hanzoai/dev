@@ -1517,6 +1517,15 @@ impl AuthManager {
         })
     }
 
+    /// Test helper used by dependent crates to simulate a terminal refresh failure.
+    pub fn seed_refresh_failure_for_testing(
+        &self,
+        auth: &CodexAuth,
+        error: RefreshTokenError,
+    ) {
+        self.record_permanent_refresh_failure_if_unchanged(auth, &error);
+    }
+
     pub fn from_auth(auth: CodexAuth, code_home: PathBuf, originator: String) -> Arc<Self> {
         let preferred_auth_mode = auth.mode;
         Arc::new(Self {
@@ -1536,7 +1545,7 @@ impl AuthManager {
         self.inner.read().ok().and_then(|c| c.auth.clone())
     }
 
-    fn refresh_failure_for_auth(&self, auth: &CodexAuth) -> Option<RefreshTokenError> {
+    pub fn refresh_failure_for_auth(&self, auth: &CodexAuth) -> Option<RefreshTokenError> {
         self.inner.read().ok().and_then(|cached| {
             cached
                 .permanent_refresh_failure
