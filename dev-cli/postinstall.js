@@ -373,15 +373,14 @@ export async function runPostinstall(options = {}) {
   );
   const version = packageJson.version;
 
-  // The release produces 'code-*' binaries; we'll download and rename to 'dev-*'
-  const binaries = ["code"];
+  // The release produces dev-* binaries directly
+  const binaries = ["dev"];
 
   console.log(`Installing @hanzo/dev v${version} for ${targetTriple}...`);
 
   for (const binary of binaries) {
     const binaryName = `${binary}-${targetTriple}${binaryExt}`;
-    const devBinaryName = `dev-${targetTriple}${binaryExt}`;
-    const localPath = join(binDir, devBinaryName);
+    const localPath = join(binDir, binaryName);
     const cachePath = getCachedBinaryPath(version, targetTriple, isWindows);
 
     // Fast path: if a valid cached binary exists, reuse it
@@ -407,7 +406,7 @@ export async function runPostinstall(options = {}) {
               chmodSync(localPath, 0o755);
             } catch {}
           }
-          console.log(`✓ ${devBinaryName} ready from user cache`);
+          console.log(`✓ ${binaryName} ready from user cache`);
           continue;
         }
       }
@@ -443,7 +442,7 @@ export async function runPostinstall(options = {}) {
 
     if (platformPkg) {
       try {
-        const src = join(platformPkg.dir, "bin", devBinaryName);
+        const src = join(platformPkg.dir, "bin", binaryName);
         if (!existsSync(src)) {
           throw new Error(
             `platform package missing binary: ${platformPkg.name}`,
@@ -469,7 +468,7 @@ export async function runPostinstall(options = {}) {
           } catch {}
         }
         console.log(
-          `✓ Installed ${devBinaryName} from ${platformPkg.name} (cached)`,
+          `✓ Installed ${binaryName} from ${platformPkg.name} (cached)`,
         );
         continue;
       } catch (e) {
@@ -586,9 +585,7 @@ export async function runPostinstall(options = {}) {
         }
         try {
           const extractedPath = join(unzipDest, binaryName);
-          // Rename code-* to dev-* in cache
-          const devCachePath = cachePath;
-          await writeCacheAtomic(extractedPath, devCachePath);
+          await writeCacheAtomic(extractedPath, cachePath);
           try {
             unlinkSync(extractedPath);
           } catch {}
@@ -630,17 +627,11 @@ export async function runPostinstall(options = {}) {
             unlinkSync(tmpPath);
           } catch {}
         }
-        // Rename code-* to dev-*
-        if (existsSync(downloadedPath)) {
-          if (mirrorToLocal) {
-            renameSync(downloadedPath, localPath);
-          } else {
-            const extractedPath = downloadedPath;
-            await writeCacheAtomic(extractedPath, cachePath);
-            try {
-              unlinkSync(extractedPath);
-            } catch {}
-          }
+        if (existsSync(downloadedPath) && !mirrorToLocal) {
+          await writeCacheAtomic(downloadedPath, cachePath);
+          try {
+            unlinkSync(downloadedPath);
+          } catch {}
         }
       }
 
@@ -661,7 +652,7 @@ export async function runPostinstall(options = {}) {
       }
 
       console.log(
-        `✓ Installed ${devBinaryName}${isWin || !mirrorToLocal ? " (cached)" : ""}`,
+        `✓ Installed ${binaryName}${isWin || !mirrorToLocal ? " (cached)" : ""}`,
       );
       if (!isWin && mirrorToLocal) {
         try {
@@ -669,7 +660,7 @@ export async function runPostinstall(options = {}) {
         } catch {}
       }
     } catch (error) {
-      console.error(`✗ Failed to install ${devBinaryName}: ${error.message}`);
+      console.error(`✗ Failed to install ${binaryName}: ${error.message}`);
       console.error(`  Downloaded from: ${downloadUrl}`);
     }
   }
