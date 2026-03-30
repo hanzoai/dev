@@ -1,20 +1,21 @@
-## @just-every/code v0.6.85
+## @just-every/code v0.6.86
 
-This release improves TUI/app-server reliability, streamlines plugin UX, and hardens auth and execution behavior.
+This release improves authentication reliability, CLI piping workflows, and stability across TUI, MCP, and sandbox paths.
 
 ### Changes
-
-- TUI/App Server: open ChatGPT login in the local browser, cancel active login on Ctrl+C, and always restore terminal state on early exit.
-- Plugins: improve `/plugins` UX with clearer labels/wording, better ordering, cleaner disabled rows, and less OAuth URL console noise during install.
-- Plugin Listing: surface marketplace loading errors, stop filtering plugin/list results, and refresh mentions after install/uninstall.
-- Auth: use access-token expiration consistently for proactive refresh and prevent repeated refresh storms after permanent token failures.
-- Core/App Server: add back-pressure and batching to `command/exec` and complete codex exec migration to the app server for more stable execution under load.
+- Auth: suppress stale tokens after refresh failures and avoid duplicate refresh attempts for more reliable sign-in.
+- CLI: add stdin piping support for `codex exec` to improve shell composition workflows.
+- TUI: polish app-server UX with plugin menu cleanup, skills picker scrolling fixes, and ghost subagent entry fixes.
+- MCP: improve startup reliability with increased startup timeout and fixes for startup warning regressions.
+- Sandbox: harden Windows and Linux sandbox behavior with network proxy support and safer `bwrap` resolution.
 
 ### Install
-
 ```bash
 npm install -g @just-every/code@latest
 code
 ```
 
-Compare: https://github.com/just-every/code/compare/v0.6.84...v0.6.85
+### Thanks
+Thanks to @felipecoury, @siggisim, and @sluongng for contributions!
+
+Compare: https://github.com/just-every/code/compare/v0.6.85...v0.6.86

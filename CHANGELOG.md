@@ -7,6 +7,14 @@
 
 - (none)
 
+## [0.6.86] - 2026-03-30
+
+- Auth: suppress stale tokens after refresh failures and avoid duplicate refresh attempts for more reliable sign-in. (5b172c2, 2c67a27)
+- CLI: add stdin piping support for `codex exec` to improve shell composition workflows. (71923f4)
+- TUI: polish app-server UX with plugin menu cleanup, skills picker scrolling fixes, and ghost subagent entry fixes. (f24c55f, 46b653e, 38e648c)
+- MCP: improve startup reliability with increased startup timeout and fixes for startup warning regressions. (3807807, 54d3ad1)
+- Sandbox: harden Windows and Linux sandbox behavior with network proxy support and safer `bwrap` resolution. (81fa047, b6050b4, ec089fd)
+
 ## [0.6.85] - 2026-03-24
 
 - TUI/App Server: open ChatGPT login in the local browser, cancel active login on Ctrl+C, and always restore terminal state on early exit. (1b863776, c023e9d9, 989e5139)
