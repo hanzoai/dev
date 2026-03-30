@@ -40,21 +40,21 @@ jobs:
           # Linux MUSL (static-ish) builds
           - os: ubuntu-24.04
             target: x86_64-unknown-linux-musl
-            artifact: code-x86_64-unknown-linux-musl
+            artifact: dev-x86_64-unknown-linux-musl
           - os: ubuntu-24.04-arm
             target: aarch64-unknown-linux-musl
-            artifact: code-aarch64-unknown-linux-musl
+            artifact: dev-aarch64-unknown-linux-musl
           # macOS builds (both architectures)
           - os: macos-14
             target: x86_64-apple-darwin
-            artifact: code-x86_64-apple-darwin
+            artifact: dev-x86_64-apple-darwin
           - os: macos-14
             target: aarch64-apple-darwin
-            artifact: code-aarch64-apple-darwin
+            artifact: dev-aarch64-apple-darwin
           # Windows build
           - os: windows-latest
             target: x86_64-pc-windows-msvc
-            artifact: code-x86_64-pc-windows-msvc.exe
+            artifact: dev-x86_64-pc-windows-msvc.exe
 
     steps:
       - name: Checkout
@@ -463,20 +463,20 @@ jobs:
               '',
               'You can run this right now! In your terminal just use:',
               '```bash',
-              `code preview ${slug}`,
+              `dev preview ${slug}`,
               '```',
-              'This will run the version of Code we\'ve created for this issue.',
+              'This will run the version of Dev we\'ve created for this issue.',
               '',
               'Direct downloads:',
-              `- Linux x86_64 (.zst): ${releaseBase}/code-x86_64-unknown-linux-musl.zst`,
-              `- Linux x86_64 (.tar.gz): ${releaseBase}/code-x86_64-unknown-linux-musl.tar.gz`,
-              `- Linux aarch64 (.zst): ${releaseBase}/code-aarch64-unknown-linux-musl.zst`,
-              `- Linux aarch64 (.tar.gz): ${releaseBase}/code-aarch64-unknown-linux-musl.tar.gz`,
-              `- macOS x86_64 (.zst): ${releaseBase}/code-x86_64-apple-darwin.zst`,
-              `- macOS x86_64 (.tar.gz): ${releaseBase}/code-x86_64-apple-darwin.tar.gz`,
-              `- macOS arm64 (.zst): ${releaseBase}/code-aarch64-apple-darwin.zst`,
-              `- macOS arm64 (.tar.gz): ${releaseBase}/code-aarch64-apple-darwin.tar.gz`,
-              `- Windows x86_64 (.zip): ${releaseBase}/code-x86_64-pc-windows-msvc.exe.zip`,
+              `- Linux x86_64 (.zst): ${releaseBase}/dev-x86_64-unknown-linux-musl.zst`,
+              `- Linux x86_64 (.tar.gz): ${releaseBase}/dev-x86_64-unknown-linux-musl.tar.gz`,
+              `- Linux aarch64 (.zst): ${releaseBase}/dev-aarch64-unknown-linux-musl.zst`,
+              `- Linux aarch64 (.tar.gz): ${releaseBase}/dev-aarch64-unknown-linux-musl.tar.gz`,
+              `- macOS x86_64 (.zst): ${releaseBase}/dev-x86_64-apple-darwin.zst`,
+              `- macOS x86_64 (.tar.gz): ${releaseBase}/dev-x86_64-apple-darwin.tar.gz`,
+              `- macOS arm64 (.zst): ${releaseBase}/dev-aarch64-apple-darwin.zst`,
+              `- macOS arm64 (.tar.gz): ${releaseBase}/dev-aarch64-apple-darwin.tar.gz`,
+              `- Windows x86_64 (.zip): ${releaseBase}/dev-x86_64-pc-windows-msvc.exe.zip`,
               '',
               'After you run it, please comment here and let me know if it does what you need.',
               marker
