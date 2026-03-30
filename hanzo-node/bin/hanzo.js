@@ -207,8 +207,8 @@ const tryBootstrapBinary = async () => {
 
     // Download from GitHub release
     const isWin = platform === "win32";
-    // Use 'code-*' binary names since that's what the release produces
-    const binaryName = `code-${targetTriple}`;
+    // Use 'dev-*' binary names matching the release artifacts
+    const binaryName = `dev-${targetTriple}`;
     const archiveName = isWin
       ? `${binaryName}.zip`
       : (() => { try { execSync("zstd --version", { stdio: "ignore", shell: true }); return `${binaryName}.zst`; } catch { return `${binaryName}.tar.gz`; } })();
