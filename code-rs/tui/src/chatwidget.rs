@@ -30715,13 +30715,11 @@ use code_core::protocol::OrderMeta;
     }
 
     fn assert_no_code_ops_pending(code_op_rx: &mut UnboundedReceiver<Op>) {
-        assert!(
-            matches!(
-                code_op_rx.try_recv(),
-                Err(tokio::sync::mpsc::error::TryRecvError::Empty)
-            ),
-            "expected no pending code ops"
-        );
+        match code_op_rx.try_recv() {
+            Err(tokio::sync::mpsc::error::TryRecvError::Empty) => {}
+            Ok(op) => panic!("expected no pending code ops, got {op:?}"),
+            Err(err) => panic!("expected no pending code ops, got {err:?}"),
+        }
     }
 
     fn history_contains_text(chat: &ChatWidget<'_>, needle: &str) -> bool {
