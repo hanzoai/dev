@@ -7,6 +7,11 @@
 
 - (none)
 
+## [0.6.87] - 2026-03-30
+
+- CI: switch `rust-ci-full` Windows jobs to hosted GitHub runners to reduce runner pool dependency in release validation. (bb2e39be)
+- CI: move Linux and Windows target matrices in `rust-ci-full` to hosted runners, improving cross-platform build reliability in restricted environments. (bb2e39be)
+
 ## [0.6.86] - 2026-03-30
 
 - Auth: suppress stale tokens after refresh failures and avoid duplicate refresh attempts for more reliable sign-in. (5b172c2, 2c67a27)
