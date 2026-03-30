@@ -184,7 +184,6 @@ impl Approvable<ShellRequest> for ShellRuntime {
                             .proposed_execpolicy_amendment()
                             .cloned(),
                         req.additional_permissions.clone(),
-                        /*skill_metadata*/ None,
                         available_decisions,
                     )
                     .await
@@ -254,8 +253,6 @@ impl ToolRuntime<ShellRequest, ExecToolCallOutput> for ShellRuntime {
         let options = ExecOptions {
             expiration: req.timeout_ms.into(),
             capture_policy: ExecCapturePolicy::ShellTool,
-            sandbox_permissions: req.sandbox_permissions,
-            justification: req.justification.clone(),
         };
         let env = attempt
             .env_for(command, options, req.network.as_ref())
