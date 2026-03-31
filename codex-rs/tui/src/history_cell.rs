@@ -93,6 +93,11 @@ use tracing::error;
 use unicode_segmentation::UnicodeSegmentation;
 use unicode_width::UnicodeWidthStr;
 
+#[cfg(feature = "browser")]
+pub mod browser;
+#[cfg(feature = "browser")]
+pub(crate) use browser::BrowserSessionCell;
+
 /// Represents an event to display in the conversation history. Returns its
 /// `Vec<Line<'static>>` representation to make it easier to display in a
 /// scrollable list.
