@@ -91,7 +91,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          TOOLCHAIN=$(python -c "import sys, pathlib; p=pathlib.Path('hanzo-dev/rust-toolchain.toml').read_text();
+          TOOLCHAIN=$(python -c "import sys, pathlib; p=pathlib.Path('codex-rs/rust-toolchain.toml').read_text();
           try:
               import tomllib as tl
           except ModuleNotFoundError:
@@ -111,7 +111,7 @@ jobs:
           prefix-key: v5-rust
           shared-key: dev-preflight-${{ steps.rust_toolchain.outputs.channel }}
           workspaces: |
-            hanzo-dev -> target
+            codex-rs -> target
           cache-targets: false
           cache-workspace-crates: true
           cache-on-failure: false
@@ -120,7 +120,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          cd hanzo-dev
+          cd codex-rs
           cargo build --locked --profile dev-fast --bin dev
 
       - name: CLI smokes (skip duplicated cargo tests)
@@ -146,7 +146,7 @@ jobs:
         shell: bash
         continue-on-error: true
         run: |
-          cd hanzo-dev
+          cd codex-rs
           cargo nextest run --no-fail-fast --locked
 
       - name: Free disk after tests
@@ -249,7 +249,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          TOOLCHAIN=$(python -c "import sys, pathlib; p=pathlib.Path('hanzo-dev/rust-toolchain.toml').read_text();
+          TOOLCHAIN=$(python -c "import sys, pathlib; p=pathlib.Path('codex-rs/rust-toolchain.toml').read_text();
           try:
               import tomllib as tl
           except ModuleNotFoundError:
@@ -272,7 +272,7 @@ jobs:
           prefix-key: v5-rust
           shared-key: dev-${{ matrix.target }}-toolchain-${{ steps.rust_toolchain.outputs.channel }}
           workspaces: |
-            hanzo-dev -> target
+            codex-rs -> target
           cache-targets: true
           cache-workspace-crates: true
           cache-on-failure: true
@@ -357,7 +357,7 @@ jobs:
 
       # Prefetch deps so --frozen works even with git deps
       - name: Prefetch dependencies (git + registry)
-        working-directory: hanzo-dev
+        working-directory: codex-rs
         env:
           CARGO_NET_GIT_FETCH_WITH_CLI: "true"
         run: cargo fetch --locked
@@ -373,7 +373,7 @@ jobs:
           CARGO_INCREMENTAL: "0" # keep off in CI; release builds + sccache
           RUST_BACKTRACE: "1"
         run: |
-          cd hanzo-dev
+          cd codex-rs
           cargo build --release --frozen --locked --timings --target ${{ matrix.target }} --bin dev
 
       - name: Post-build smoke (run binary) [Unix]
@@ -384,7 +384,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          exe="hanzo-dev/target/${{ matrix.target }}/release/dev"
+          exe="codex-rs/target/${{ matrix.target }}/release/dev"
           "$exe" --version
           "$exe" completion bash > /dev/null
 
@@ -392,7 +392,7 @@ jobs:
         if: matrix.os == 'windows-latest' && matrix.target == 'x86_64-pc-windows-msvc'
         shell: pwsh
         run: |
-          $exe = "hanzo-dev/target/${{ matrix.target }}/release/dev.exe"
+          $exe = "codex-rs/target/${{ matrix.target }}/release/dev.exe"
           & $exe --version | Out-Null
           & $exe completion bash | Out-Null
 
@@ -405,9 +405,9 @@ jobs:
         run: |
           mkdir -p artifacts
           if [[ "${{ matrix.os }}" == "windows-latest" ]]; then
-            cp hanzo-dev/target/${{ matrix.target }}/release/dev.exe artifacts/${{ matrix.artifact }}
+            cp codex-rs/target/${{ matrix.target }}/release/dev.exe artifacts/${{ matrix.artifact }}
           else
-            cp hanzo-dev/target/${{ matrix.target }}/release/dev artifacts/${{ matrix.artifact }}
+            cp codex-rs/target/${{ matrix.target }}/release/dev artifacts/${{ matrix.artifact }}
           fi
 
       - name: Compress artifacts (Windows)
@@ -469,7 +469,7 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: cargo-timings-${{ matrix.target }}
-          path: hanzo-dev/target/cargo-timings/*.html
+          path: codex-rs/target/cargo-timings/*.html
           if-no-files-found: ignore
           compression-level: 0
 
