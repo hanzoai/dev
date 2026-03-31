@@ -209,7 +209,17 @@ pub enum ResponseInputItem {
     },
     CustomToolCallOutput {
         call_id: String,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        #[ts(optional)]
+        name: Option<String>,
         output: FunctionCallOutputPayload,
+    },
+    ToolSearchOutput {
+        call_id: String,
+        status: String,
+        execution: String,
+        #[ts(type = "unknown[]")]
+        tools: Vec<serde_json::Value>,
     },
 }
 
@@ -291,11 +301,26 @@ pub enum ResponseItem {
         #[ts(skip)]
         id: Option<String>,
         name: String,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        #[ts(optional)]
+        namespace: Option<String>,
         // The Responses API returns the function call arguments as a *string* that contains
         // JSON, not as an already‑parsed object. We keep it as a raw string here and let
         // Session::handle_function_call parse it into a Value.
         arguments: String,
         call_id: String,
+    },
+    ToolSearchCall {
+        #[serde(default, skip_serializing)]
+        #[ts(skip)]
+        id: Option<String>,
+        call_id: Option<String>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        #[ts(optional)]
+        status: Option<String>,
+        execution: String,
+        #[ts(type = "unknown")]
+        arguments: serde_json::Value,
     },
     // NOTE: The `output` field for `function_call_output` uses a dedicated payload type with
     // custom serialization. On the wire it is either:
@@ -318,9 +343,22 @@ pub enum ResponseItem {
         name: String,
         input: String,
     },
+    // `custom_tool_call_output.output` uses the same wire encoding as
+    // `function_call_output.output` so freeform tools can return either plain
+    // text or structured content items.
     CustomToolCallOutput {
         call_id: String,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        #[ts(optional)]
+        name: Option<String>,
         output: FunctionCallOutputPayload,
+    },
+    ToolSearchOutput {
+        call_id: Option<String>,
+        status: String,
+        execution: String,
+        #[ts(type = "unknown[]")]
+        tools: Vec<serde_json::Value>,
     },
     // Emitted by the Responses API when the agent triggers a web search.
     // Example payload (from SSE `response.output_item.done`):
@@ -821,9 +859,26 @@ impl From<ResponseInputItem> for ResponseItem {
                 };
                 Self::FunctionCallOutput { call_id, output }
             }
-            ResponseInputItem::CustomToolCallOutput { call_id, output } => {
-                Self::CustomToolCallOutput { call_id, output }
-            }
+            ResponseInputItem::CustomToolCallOutput {
+                call_id,
+                name,
+                output,
+            } => Self::CustomToolCallOutput {
+                call_id,
+                name,
+                output,
+            },
+            ResponseInputItem::ToolSearchOutput {
+                call_id,
+                status,
+                execution,
+                tools,
+            } => Self::ToolSearchOutput {
+                call_id: Some(call_id),
+                status,
+                execution,
+                tools,
+            },
         }
     }
 }

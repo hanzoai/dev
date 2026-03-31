@@ -318,7 +318,7 @@ pub(crate) async fn stream_chat_completions(
                 });
                 push_tool_call_message(&mut messages, tool_call, reasoning);
             }
-            ResponseItem::CustomToolCallOutput { call_id, output } => {
+            ResponseItem::CustomToolCallOutput { call_id, output, .. } => {
                 messages.push(json!({
                     "role": "tool",
                     "tool_call_id": call_id,
@@ -329,6 +329,8 @@ pub(crate) async fn stream_chat_completions(
             | ResponseItem::WebSearchCall { .. }
             | ResponseItem::ImageGenerationCall { .. }
             | ResponseItem::GhostSnapshot { .. }
+            | ResponseItem::ToolSearchCall { .. }
+            | ResponseItem::ToolSearchOutput { .. }
             | ResponseItem::Other => {
                 // Omit these items from the conversation history.
                 continue;
