@@ -2,6 +2,7 @@ use crate::types::CodeTaskDetailsResponse;
 use crate::types::PaginatedListTaskListItem;
 use crate::types::TurnAttemptsSiblingTurnsResponse;
 use anyhow::Result;
+use reqwest::StatusCode;
 use reqwest::header::AUTHORIZATION;
 use reqwest::header::CONTENT_TYPE;
 use reqwest::header::HeaderMap;
@@ -9,6 +10,65 @@ use reqwest::header::HeaderName;
 use reqwest::header::HeaderValue;
 use reqwest::header::USER_AGENT;
 use serde::de::DeserializeOwned;
+use std::fmt;
+
+#[derive(Debug)]
+pub enum RequestError {
+    UnexpectedStatus {
+        method: String,
+        url: String,
+        status: StatusCode,
+        content_type: String,
+        body: String,
+    },
+    Other(anyhow::Error),
+}
+
+impl RequestError {
+    pub fn status(&self) -> Option<StatusCode> {
+        match self {
+            Self::UnexpectedStatus { status, .. } => Some(*status),
+            Self::Other(_) => None,
+        }
+    }
+
+    pub fn is_unauthorized(&self) -> bool {
+        self.status() == Some(StatusCode::UNAUTHORIZED)
+    }
+}
+
+impl fmt::Display for RequestError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::UnexpectedStatus {
+                method,
+                url,
+                status,
+                content_type,
+                body,
+            } => write!(
+                f,
+                "{method} {url} failed: {status}; content-type={content_type}; body={body}"
+            ),
+            Self::Other(err) => write!(f, "{err}"),
+        }
+    }
+}
+
+impl std::error::Error for RequestError {
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        match self {
+            Self::UnexpectedStatus { .. } => None,
+            Self::Other(err) => Some(err.as_ref()),
+        }
+    }
+}
+
+impl From<anyhow::Error> for RequestError {
+    fn from(err: anyhow::Error) -> Self {
+        Self::Other(err)
+    }
+}
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum PathStyle {
