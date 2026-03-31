@@ -7,6 +7,11 @@
 
 - (none)
 
+## [0.6.89] - 2026-03-31
+
+- CI: increase hosted-runner time budget for argument lint jobs to reduce timeout-related release failures. (46e59276)
+- CI: improve release pipeline stability by giving slower lint runs more time before cancellation. (46e59276)
+
 ## [0.6.87] - 2026-03-30
 
 - CI: switch `rust-ci-full` Windows jobs to hosted GitHub runners to reduce runner pool dependency in release validation. (bb2e39be)
