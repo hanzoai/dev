@@ -517,7 +517,9 @@ fn wire_api_override_from_env(env_key: &str) -> Option<WireApi> {
     }
 }
 
-pub fn built_in_model_providers() -> HashMap<String, ModelProviderInfo> {
+pub fn built_in_model_providers(
+    openai_base_url: Option<String>,
+) -> HashMap<String, ModelProviderInfo> {
     use ModelProviderInfo as P;
 
     // Built-in providers for common OpenAI-compatible endpoints.
@@ -529,13 +531,13 @@ pub fn built_in_model_providers() -> HashMap<String, ModelProviderInfo> {
             P {
                 name: "OpenAI".into(),
                 // Allow users to override the default OpenAI endpoint by
-                // exporting `OPENAI_BASE_URL`. This is useful when pointing
-                // Codex at a proxy, mock server, or Azure-style deployment
-                // without requiring a full TOML override for the built-in
-                // OpenAI provider.
-                base_url: std::env::var("OPENAI_BASE_URL")
+                // exporting `OPENAI_BASE_URL` or passing it via config.
+                // This is useful when pointing Codex at a proxy, mock server,
+                // or Azure-style deployment without requiring a full TOML
+                // override for the built-in OpenAI provider.
+                base_url: openai_base_url.or_else(|| std::env::var("OPENAI_BASE_URL")
                     .ok()
-                    .filter(|v| !v.trim().is_empty()),
+                    .filter(|v| !v.trim().is_empty())),
                 env_key: None,
                 env_key_instructions: None,
                 experimental_bearer_token: None,

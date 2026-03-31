@@ -796,6 +796,8 @@ fn map_ask_for_approval_from_wire(
                 sandbox_approval: config.sandbox_approval,
                 rules: config.rules,
                 mcp_elicitations: config.mcp_elicitations,
+                skill_approval: false,
+                request_permissions: false,
             })
         }
     }
