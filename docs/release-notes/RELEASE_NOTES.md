@@ -1,11 +1,11 @@
-## @just-every/code v0.6.87
+## @just-every/code v0.6.89
 
-This release improves CI reliability for cross-platform validation and release readiness.
+This release improves CI reliability so release validation is less likely to fail on slow hosted runners.
 
 ### Changes
 
-- CI: switch `rust-ci-full` Windows jobs to hosted GitHub runners to reduce runner pool dependency in release validation.
-- CI: move Linux and Windows target matrices in `rust-ci-full` to hosted runners, improving cross-platform build reliability in restricted environments.
+- CI: increase hosted-runner time budget for argument lint jobs to reduce timeout-related release failures.
+- CI: improve release pipeline stability by giving slower lint runs more time before cancellation.
 
 ### Install
 
@@ -14,4 +14,4 @@ npm install -g @just-every/code@latest
 code
 ```
 
-Compare: https://github.com/just-every/code/compare/v0.6.86...v0.6.87
+Compare: https://github.com/just-every/code/compare/v0.6.88...v0.6.89
