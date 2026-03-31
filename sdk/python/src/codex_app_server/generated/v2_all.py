@@ -187,7 +187,6 @@ class Granular(BaseModel):
     request_permissions: bool | None = False
     rules: bool
     sandbox_approval: bool
-    skill_approval: bool | None = False
 
 
 class GranularAskForApproval(BaseModel):
@@ -1282,7 +1281,7 @@ class InitializeCapabilities(BaseModel):
         list[str] | None,
         Field(
             alias="optOutNotificationMethods",
-            description="Exact notification method names that should be suppressed for this connection (for example `thread/started`).",
+            description="Exact notification method names that should be suppressed for this connection (for example `codex/event/session_configured`).",
         ),
     ] = None
 
@@ -1472,7 +1471,23 @@ class MarketplaceInterface(BaseModel):
     model_config = ConfigDict(
         populate_by_name=True,
     )
-    display_name: Annotated[str | None, Field(alias="displayName")] = None
+    root: MacOsAutomationPermissionValue | BundleIdsMacOsAutomationPermission
+
+
+class MacOsPreferencesPermission(Enum):
+    none = "none"
+    read_only = "read_only"
+    read_write = "read_write"
+
+
+class MacOsSeatbeltProfileExtensions(BaseModel):
+    model_config = ConfigDict(
+        populate_by_name=True,
+    )
+    macos_accessibility: bool | None = False
+    macos_automation: Annotated[MacOsAutomationPermission | None, Field()] = "none"
+    macos_calendar: bool | None = False
+    macos_preferences: MacOsPreferencesPermission | None = "read_only"
 
 
 class MarketplaceLoadErrorInfo(BaseModel):
@@ -1755,11 +1770,6 @@ class PlanType(Enum):
     unknown = "unknown"
 
 
-class PluginAuthPolicy(Enum):
-    on_install = "ON_INSTALL"
-    on_use = "ON_USE"
-
-
 class PluginInstallParams(BaseModel):
     model_config = ConfigDict(
         populate_by_name=True,
@@ -1775,18 +1785,11 @@ class PluginInstallParams(BaseModel):
     plugin_name: Annotated[str, Field(alias="pluginName")]
 
 
-class PluginInstallPolicy(Enum):
-    not_available = "NOT_AVAILABLE"
-    available = "AVAILABLE"
-    installed_by_default = "INSTALLED_BY_DEFAULT"
-
-
 class PluginInstallResponse(BaseModel):
     model_config = ConfigDict(
         populate_by_name=True,
     )
     apps_needing_auth: Annotated[list[AppSummary], Field(alias="appsNeedingAuth")]
-    auth_policy: Annotated[PluginAuthPolicy, Field(alias="authPolicy")]
 
 
 class PluginInterface(BaseModel):
@@ -1825,13 +1828,6 @@ class PluginListParams(BaseModel):
             description="Optional working directories used to discover repo marketplaces. When omitted, only home-scoped marketplaces and the official curated marketplace are considered."
         ),
     ] = None
-    force_remote_sync: Annotated[
-        bool | None,
-        Field(
-            alias="forceRemoteSync",
-            description="When true, reconcile the official curated marketplace against the remote plugin state before listing marketplaces.",
-        ),
-    ] = None
 
 
 class PluginReadParams(BaseModel):
@@ -1861,10 +1857,8 @@ class PluginSummary(BaseModel):
     model_config = ConfigDict(
         populate_by_name=True,
     )
-    auth_policy: Annotated[PluginAuthPolicy, Field(alias="authPolicy")]
     enabled: bool
     id: str
-    install_policy: Annotated[PluginInstallPolicy, Field(alias="installPolicy")]
     installed: bool
     interface: PluginInterface | None = None
     name: str
@@ -2140,23 +2134,8 @@ class FunctionCallResponseItem(BaseModel):
     call_id: str
     id: str | None = None
     name: str
-    namespace: str | None = None
     type: Annotated[
         Literal["function_call"], Field(title="FunctionCallResponseItemType")
-    ]
-
-
-class ToolSearchCallResponseItem(BaseModel):
-    model_config = ConfigDict(
-        populate_by_name=True,
-    )
-    arguments: Any
-    call_id: str | None = None
-    execution: str
-    id: str | None = None
-    status: str | None = None
-    type: Annotated[
-        Literal["tool_search_call"], Field(title="ToolSearchCallResponseItemType")
     ]
 
 
@@ -2171,19 +2150,6 @@ class CustomToolCallResponseItem(BaseModel):
     status: str | None = None
     type: Annotated[
         Literal["custom_tool_call"], Field(title="CustomToolCallResponseItemType")
-    ]
-
-
-class ToolSearchOutputResponseItem(BaseModel):
-    model_config = ConfigDict(
-        populate_by_name=True,
-    )
-    call_id: str | None = None
-    execution: str
-    status: str
-    tools: list
-    type: Annotated[
-        Literal["tool_search_output"], Field(title="ToolSearchOutputResponseItemType")
     ]
 
 
@@ -2895,7 +2861,6 @@ class ThreadForkParams(BaseModel):
     developer_instructions: Annotated[
         str | None, Field(alias="developerInstructions")
     ] = None
-    ephemeral: bool | None = None
     model: Annotated[
         str | None,
         Field(description="Configuration overrides for the forked thread, if any."),
@@ -4613,6 +4578,723 @@ class ConfigWarningNotification(BaseModel):
     summary: Annotated[str, Field(description="Concise summary of the warning.")]
 
 
+class ErrorNotification(BaseModel):
+    model_config = ConfigDict(
+        populate_by_name=True,
+    )
+    error: TurnError
+    thread_id: Annotated[str, Field(alias="threadId")]
+    turn_id: Annotated[str, Field(alias="turnId")]
+    will_retry: Annotated[bool, Field(alias="willRetry")]
+
+
+class ModelRerouteEventMsg(BaseModel):
+    model_config = ConfigDict(
+        populate_by_name=True,
+    )
+    from_model: str
+    reason: ModelRerouteReason
+    to_model: str
+    type: Annotated[Literal["model_reroute"], Field(title="ModelRerouteEventMsgType")]
+
+
+class TaskStartedEventMsg(BaseModel):
+    model_config = ConfigDict(
+        populate_by_name=True,
+    )
+    collaboration_mode_kind: ModeKind | None = "default"
+    model_context_window: int | None = None
+    turn_id: str
+    type: Annotated[Literal["task_started"], Field(title="TaskStartedEventMsgType")]
+
+
+class AgentMessageEventMsg(BaseModel):
+    model_config = ConfigDict(
+        populate_by_name=True,
+    )
+    message: str
+    phase: MessagePhase | None = None
+    type: Annotated[Literal["agent_message"], Field(title="AgentMessageEventMsgType")]
+
+
+class UserMessageEventMsg(BaseModel):
+    model_config = ConfigDict(
+        populate_by_name=True,
+    )
+    images: Annotated[
+        list[str] | None,
+        Field(
+            description="Image URLs sourced from `UserInput::Image`. These are safe to replay in legacy UI history events and correspond to images sent to the model."
+        ),
+    ] = None
+    local_images: Annotated[
+        list[str] | None,
+        Field(
+            description="Local file paths sourced from `UserInput::LocalImage`. These are kept so the UI can reattach images when editing history, and should not be sent to the model or treated as API-ready URLs."
+        ),
+    ] = []
+    message: str
+    text_elements: Annotated[
+        list[TextElement] | None,
+        Field(
+            description="UI-defined spans within `message` used to render or persist special elements."
+        ),
+    ] = []
+    type: Annotated[Literal["user_message"], Field(title="UserMessageEventMsgType")]
+
+
+class ThreadNameUpdatedEventMsg(BaseModel):
+    model_config = ConfigDict(
+        populate_by_name=True,
+    )
+    thread_id: ThreadId
+    thread_name: str | None = None
+    type: Annotated[
+        Literal["thread_name_updated"], Field(title="ThreadNameUpdatedEventMsgType")
+    ]
+
+
+class McpStartupUpdateEventMsg(BaseModel):
+    model_config = ConfigDict(
+        populate_by_name=True,
+    )
+    server: Annotated[str, Field(description="Server name being started.")]
+    status: Annotated[McpStartupStatus, Field(description="Current startup status.")]
+    type: Annotated[
+        Literal["mcp_startup_update"], Field(title="McpStartupUpdateEventMsgType")
+    ]
+
+
+class McpStartupCompleteEventMsg(BaseModel):
+    model_config = ConfigDict(
+        populate_by_name=True,
+    )
+    cancelled: list[str]
+    failed: list[McpStartupFailure]
+    ready: list[str]
+    type: Annotated[
+        Literal["mcp_startup_complete"], Field(title="McpStartupCompleteEventMsgType")
+    ]
+
+
+class McpToolCallBeginEventMsg(BaseModel):
+    model_config = ConfigDict(
+        populate_by_name=True,
+    )
+    call_id: Annotated[
+        str,
+        Field(
+            description="Identifier so this can be paired with the McpToolCallEnd event."
+        ),
+    ]
+    invocation: McpInvocation
+    type: Annotated[
+        Literal["mcp_tool_call_begin"], Field(title="McpToolCallBeginEventMsgType")
+    ]
+
+
+class McpToolCallEndEventMsg(BaseModel):
+    model_config = ConfigDict(
+        populate_by_name=True,
+    )
+    call_id: Annotated[
+        str,
+        Field(
+            description="Identifier for the corresponding McpToolCallBegin that finished."
+        ),
+    ]
+    duration: Duration
+    invocation: McpInvocation
+    result: Annotated[
+        ResultOfCallToolResultOrString,
+        Field(description="Result of the tool call. Note this could be an error."),
+    ]
+    type: Annotated[
+        Literal["mcp_tool_call_end"], Field(title="McpToolCallEndEventMsgType")
+    ]
+
+
+class WebSearchEndEventMsg(BaseModel):
+    model_config = ConfigDict(
+        populate_by_name=True,
+    )
+    action: ResponsesApiWebSearchAction
+    call_id: str
+    query: str
+    type: Annotated[Literal["web_search_end"], Field(title="WebSearchEndEventMsgType")]
+
+
+class ExecCommandBeginEventMsg(BaseModel):
+    model_config = ConfigDict(
+        populate_by_name=True,
+    )
+    call_id: Annotated[
+        str,
+        Field(
+            description="Identifier so this can be paired with the ExecCommandEnd event."
+        ),
+    ]
+    command: Annotated[list[str], Field(description="The command to be executed.")]
+    cwd: Annotated[
+        str,
+        Field(
+            description="The command's working directory if not the default cwd for the agent."
+        ),
+    ]
+    interaction_input: Annotated[
+        str | None,
+        Field(
+            description="Raw input sent to a unified exec session (if this is an interaction event)."
+        ),
+    ] = None
+    parsed_cmd: list[ParsedCommand]
+    process_id: Annotated[
+        str | None,
+        Field(
+            description="Identifier for the underlying PTY process (when available)."
+        ),
+    ] = None
+    source: Annotated[
+        ExecCommandSource | None,
+        Field(
+            description="Where the command originated. Defaults to Agent for backward compatibility."
+        ),
+    ] = "agent"
+    turn_id: Annotated[str, Field(description="Turn ID that this command belongs to.")]
+    type: Annotated[
+        Literal["exec_command_begin"], Field(title="ExecCommandBeginEventMsgType")
+    ]
+
+
+class ExecCommandOutputDeltaEventMsg(BaseModel):
+    model_config = ConfigDict(
+        populate_by_name=True,
+    )
+    call_id: Annotated[
+        str,
+        Field(
+            description="Identifier for the ExecCommandBegin that produced this chunk."
+        ),
+    ]
+    chunk: Annotated[
+        str, Field(description="Raw bytes from the stream (may not be valid UTF-8).")
+    ]
+    stream: Annotated[
+        ExecOutputStream, Field(description="Which stream produced this chunk.")
+    ]
+    type: Annotated[
+        Literal["exec_command_output_delta"],
+        Field(title="ExecCommandOutputDeltaEventMsgType"),
+    ]
+
+
+class ExecCommandEndEventMsg(BaseModel):
+    model_config = ConfigDict(
+        populate_by_name=True,
+    )
+    aggregated_output: Annotated[
+        str | None, Field(description="Captured aggregated output")
+    ] = ""
+    call_id: Annotated[
+        str, Field(description="Identifier for the ExecCommandBegin that finished.")
+    ]
+    command: Annotated[list[str], Field(description="The command that was executed.")]
+    cwd: Annotated[
+        str,
+        Field(
+            description="The command's working directory if not the default cwd for the agent."
+        ),
+    ]
+    duration: Annotated[
+        Duration, Field(description="The duration of the command execution.")
+    ]
+    exit_code: Annotated[int, Field(description="The command's exit code.")]
+    formatted_output: Annotated[
+        str,
+        Field(description="Formatted output from the command, as seen by the model."),
+    ]
+    interaction_input: Annotated[
+        str | None,
+        Field(
+            description="Raw input sent to a unified exec session (if this is an interaction event)."
+        ),
+    ] = None
+    parsed_cmd: list[ParsedCommand]
+    process_id: Annotated[
+        str | None,
+        Field(
+            description="Identifier for the underlying PTY process (when available)."
+        ),
+    ] = None
+    source: Annotated[
+        ExecCommandSource | None,
+        Field(
+            description="Where the command originated. Defaults to Agent for backward compatibility."
+        ),
+    ] = "agent"
+    status: Annotated[
+        ExecCommandStatus,
+        Field(description="Completion status for this command execution."),
+    ]
+    stderr: Annotated[str, Field(description="Captured stderr")]
+    stdout: Annotated[str, Field(description="Captured stdout")]
+    turn_id: Annotated[str, Field(description="Turn ID that this command belongs to.")]
+    type: Annotated[
+        Literal["exec_command_end"], Field(title="ExecCommandEndEventMsgType")
+    ]
+
+
+class RequestPermissionsEventMsg(BaseModel):
+    model_config = ConfigDict(
+        populate_by_name=True,
+    )
+    call_id: Annotated[
+        str,
+        Field(
+            description="Responses API call id for the associated tool call, if available."
+        ),
+    ]
+    permissions: PermissionProfile
+    reason: str | None = None
+    turn_id: Annotated[
+        str | None,
+        Field(
+            description="Turn ID that this request belongs to. Uses `#[serde(default)]` for backwards compatibility."
+        ),
+    ] = ""
+    type: Annotated[
+        Literal["request_permissions"], Field(title="RequestPermissionsEventMsgType")
+    ]
+
+
+class ElicitationRequestEventMsg(BaseModel):
+    model_config = ConfigDict(
+        populate_by_name=True,
+    )
+    id: RequestId
+    request: ElicitationRequest
+    server_name: str
+    turn_id: Annotated[
+        str | None,
+        Field(description="Turn ID that this elicitation belongs to, when known."),
+    ] = None
+    type: Annotated[
+        Literal["elicitation_request"], Field(title="ElicitationRequestEventMsgType")
+    ]
+
+
+class ApplyPatchApprovalRequestEventMsg(BaseModel):
+    model_config = ConfigDict(
+        populate_by_name=True,
+    )
+    call_id: Annotated[
+        str,
+        Field(
+            description="Responses API call id for the associated patch apply call, if available."
+        ),
+    ]
+    changes: dict[str, FileChange]
+    grant_root: Annotated[
+        str | None,
+        Field(
+            description="When set, the agent is asking the user to allow writes under this root for the remainder of the session."
+        ),
+    ] = None
+    reason: Annotated[
+        str | None,
+        Field(
+            description="Optional explanatory reason (e.g. request for extra write access)."
+        ),
+    ] = None
+    turn_id: Annotated[
+        str | None,
+        Field(
+            description="Turn ID that this patch belongs to. Uses `#[serde(default)]` for backwards compatibility with older senders."
+        ),
+    ] = ""
+    type: Annotated[
+        Literal["apply_patch_approval_request"],
+        Field(title="ApplyPatchApprovalRequestEventMsgType"),
+    ]
+
+
+class PatchApplyBeginEventMsg(BaseModel):
+    model_config = ConfigDict(
+        populate_by_name=True,
+    )
+    auto_approved: Annotated[
+        bool,
+        Field(
+            description="If true, there was no ApplyPatchApprovalRequest for this patch."
+        ),
+    ]
+    call_id: Annotated[
+        str,
+        Field(
+            description="Identifier so this can be paired with the PatchApplyEnd event."
+        ),
+    ]
+    changes: Annotated[
+        dict[str, FileChange], Field(description="The changes to be applied.")
+    ]
+    turn_id: Annotated[
+        str | None,
+        Field(
+            description="Turn ID that this patch belongs to. Uses `#[serde(default)]` for backwards compatibility."
+        ),
+    ] = ""
+    type: Annotated[
+        Literal["patch_apply_begin"], Field(title="PatchApplyBeginEventMsgType")
+    ]
+
+
+class PatchApplyEndEventMsg(BaseModel):
+    model_config = ConfigDict(
+        populate_by_name=True,
+    )
+    call_id: Annotated[
+        str, Field(description="Identifier for the PatchApplyBegin that finished.")
+    ]
+    changes: Annotated[
+        dict[str, FileChange] | None,
+        Field(
+            description="The changes that were applied (mirrors PatchApplyBeginEvent::changes)."
+        ),
+    ] = {}
+    status: Annotated[
+        PatchApplyStatus,
+        Field(description="Completion status for this patch application."),
+    ]
+    stderr: Annotated[
+        str, Field(description="Captured stderr (parser errors, IO failures, etc.).")
+    ]
+    stdout: Annotated[
+        str, Field(description="Captured stdout (summary printed by apply_patch).")
+    ]
+    success: Annotated[
+        bool, Field(description="Whether the patch was applied successfully.")
+    ]
+    turn_id: Annotated[
+        str | None,
+        Field(
+            description="Turn ID that this patch belongs to. Uses `#[serde(default)]` for backwards compatibility."
+        ),
+    ] = ""
+    type: Annotated[
+        Literal["patch_apply_end"], Field(title="PatchApplyEndEventMsgType")
+    ]
+
+
+class GetHistoryEntryResponseEventMsg(BaseModel):
+    model_config = ConfigDict(
+        populate_by_name=True,
+    )
+    entry: Annotated[
+        HistoryEntry | None,
+        Field(
+            description="The entry at the requested offset, if available and parseable."
+        ),
+    ] = None
+    log_id: Annotated[int, Field(ge=0)]
+    offset: Annotated[int, Field(ge=0)]
+    type: Annotated[
+        Literal["get_history_entry_response"],
+        Field(title="GetHistoryEntryResponseEventMsgType"),
+    ]
+
+
+class McpListToolsResponseEventMsg(BaseModel):
+    model_config = ConfigDict(
+        populate_by_name=True,
+    )
+    auth_statuses: Annotated[
+        dict[str, McpAuthStatus],
+        Field(description="Authentication status for each configured MCP server."),
+    ]
+    resource_templates: Annotated[
+        dict[str, list[ResourceTemplate]],
+        Field(description="Known resource templates grouped by server name."),
+    ]
+    resources: Annotated[
+        dict[str, list[Resource]],
+        Field(description="Known resources grouped by server name."),
+    ]
+    tools: Annotated[
+        dict[str, Tool],
+        Field(description="Fully qualified tool name -> tool definition."),
+    ]
+    type: Annotated[
+        Literal["mcp_list_tools_response"],
+        Field(title="McpListToolsResponseEventMsgType"),
+    ]
+
+
+class ListRemoteSkillsResponseEventMsg(BaseModel):
+    model_config = ConfigDict(
+        populate_by_name=True,
+    )
+    skills: list[RemoteSkillSummary]
+    type: Annotated[
+        Literal["list_remote_skills_response"],
+        Field(title="ListRemoteSkillsResponseEventMsgType"),
+    ]
+
+
+class TurnAbortedEventMsg(BaseModel):
+    model_config = ConfigDict(
+        populate_by_name=True,
+    )
+    reason: TurnAbortReason
+    turn_id: str | None = None
+    type: Annotated[Literal["turn_aborted"], Field(title="TurnAbortedEventMsgType")]
+
+
+class EnteredReviewModeEventMsg(BaseModel):
+    model_config = ConfigDict(
+        populate_by_name=True,
+    )
+    target: ReviewTarget
+    type: Annotated[
+        Literal["entered_review_mode"], Field(title="EnteredReviewModeEventMsgType")
+    ]
+    user_facing_hint: str | None = None
+
+
+class CollabAgentSpawnBeginEventMsg(BaseModel):
+    model_config = ConfigDict(
+        populate_by_name=True,
+    )
+    call_id: Annotated[str, Field(description="Identifier for the collab tool call.")]
+    prompt: Annotated[
+        str,
+        Field(
+            description="Initial prompt sent to the agent. Can be empty to prevent CoT leaking at the beginning."
+        ),
+    ]
+    sender_thread_id: Annotated[ThreadId, Field(description="Thread ID of the sender.")]
+    type: Annotated[
+        Literal["collab_agent_spawn_begin"],
+        Field(title="CollabAgentSpawnBeginEventMsgType"),
+    ]
+
+
+class CollabAgentSpawnEndEventMsg(BaseModel):
+    model_config = ConfigDict(
+        populate_by_name=True,
+    )
+    call_id: Annotated[str, Field(description="Identifier for the collab tool call.")]
+    new_agent_nickname: Annotated[
+        str | None, Field(description="Optional nickname assigned to the new agent.")
+    ] = None
+    new_agent_role: Annotated[
+        str | None, Field(description="Optional role assigned to the new agent.")
+    ] = None
+    new_thread_id: Annotated[
+        ThreadId | None,
+        Field(description="Thread ID of the newly spawned agent, if it was created."),
+    ] = None
+    prompt: Annotated[
+        str,
+        Field(
+            description="Initial prompt sent to the agent. Can be empty to prevent CoT leaking at the beginning."
+        ),
+    ]
+    sender_thread_id: Annotated[ThreadId, Field(description="Thread ID of the sender.")]
+    status: Annotated[
+        AgentStatus,
+        Field(
+            description="Last known status of the new agent reported to the sender agent."
+        ),
+    ]
+    type: Annotated[
+        Literal["collab_agent_spawn_end"],
+        Field(title="CollabAgentSpawnEndEventMsgType"),
+    ]
+
+
+class CollabAgentInteractionBeginEventMsg(BaseModel):
+    model_config = ConfigDict(
+        populate_by_name=True,
+    )
+    call_id: Annotated[str, Field(description="Identifier for the collab tool call.")]
+    prompt: Annotated[
+        str,
+        Field(
+            description="Prompt sent from the sender to the receiver. Can be empty to prevent CoT leaking at the beginning."
+        ),
+    ]
+    receiver_thread_id: Annotated[
+        ThreadId, Field(description="Thread ID of the receiver.")
+    ]
+    sender_thread_id: Annotated[ThreadId, Field(description="Thread ID of the sender.")]
+    type: Annotated[
+        Literal["collab_agent_interaction_begin"],
+        Field(title="CollabAgentInteractionBeginEventMsgType"),
+    ]
+
+
+class CollabAgentInteractionEndEventMsg(BaseModel):
+    model_config = ConfigDict(
+        populate_by_name=True,
+    )
+    call_id: Annotated[str, Field(description="Identifier for the collab tool call.")]
+    prompt: Annotated[
+        str,
+        Field(
+            description="Prompt sent from the sender to the receiver. Can be empty to prevent CoT leaking at the beginning."
+        ),
+    ]
+    receiver_agent_nickname: Annotated[
+        str | None,
+        Field(description="Optional nickname assigned to the receiver agent."),
+    ] = None
+    receiver_agent_role: Annotated[
+        str | None, Field(description="Optional role assigned to the receiver agent.")
+    ] = None
+    receiver_thread_id: Annotated[
+        ThreadId, Field(description="Thread ID of the receiver.")
+    ]
+    sender_thread_id: Annotated[ThreadId, Field(description="Thread ID of the sender.")]
+    status: Annotated[
+        AgentStatus,
+        Field(
+            description="Last known status of the receiver agent reported to the sender agent."
+        ),
+    ]
+    type: Annotated[
+        Literal["collab_agent_interaction_end"],
+        Field(title="CollabAgentInteractionEndEventMsgType"),
+    ]
+
+
+class CollabWaitingBeginEventMsg(BaseModel):
+    model_config = ConfigDict(
+        populate_by_name=True,
+    )
+    call_id: Annotated[str, Field(description="ID of the waiting call.")]
+    receiver_agents: Annotated[
+        list[CollabAgentRef] | None,
+        Field(description="Optional nicknames/roles for receivers."),
+    ] = None
+    receiver_thread_ids: Annotated[
+        list[ThreadId], Field(description="Thread ID of the receivers.")
+    ]
+    sender_thread_id: Annotated[ThreadId, Field(description="Thread ID of the sender.")]
+    type: Annotated[
+        Literal["collab_waiting_begin"], Field(title="CollabWaitingBeginEventMsgType")
+    ]
+
+
+class CollabWaitingEndEventMsg(BaseModel):
+    model_config = ConfigDict(
+        populate_by_name=True,
+    )
+    agent_statuses: Annotated[
+        list[CollabAgentStatusEntry] | None,
+        Field(description="Optional receiver metadata paired with final statuses."),
+    ] = None
+    call_id: Annotated[str, Field(description="ID of the waiting call.")]
+    sender_thread_id: Annotated[ThreadId, Field(description="Thread ID of the sender.")]
+    statuses: Annotated[
+        dict[str, AgentStatus],
+        Field(
+            description="Last known status of the receiver agents reported to the sender agent."
+        ),
+    ]
+    type: Annotated[
+        Literal["collab_waiting_end"], Field(title="CollabWaitingEndEventMsgType")
+    ]
+
+
+class CollabCloseBeginEventMsg(BaseModel):
+    model_config = ConfigDict(
+        populate_by_name=True,
+    )
+    call_id: Annotated[str, Field(description="Identifier for the collab tool call.")]
+    receiver_thread_id: Annotated[
+        ThreadId, Field(description="Thread ID of the receiver.")
+    ]
+    sender_thread_id: Annotated[ThreadId, Field(description="Thread ID of the sender.")]
+    type: Annotated[
+        Literal["collab_close_begin"], Field(title="CollabCloseBeginEventMsgType")
+    ]
+
+
+class CollabCloseEndEventMsg(BaseModel):
+    model_config = ConfigDict(
+        populate_by_name=True,
+    )
+    call_id: Annotated[str, Field(description="Identifier for the collab tool call.")]
+    receiver_agent_nickname: Annotated[
+        str | None,
+        Field(description="Optional nickname assigned to the receiver agent."),
+    ] = None
+    receiver_agent_role: Annotated[
+        str | None, Field(description="Optional role assigned to the receiver agent.")
+    ] = None
+    receiver_thread_id: Annotated[
+        ThreadId, Field(description="Thread ID of the receiver.")
+    ]
+    sender_thread_id: Annotated[ThreadId, Field(description="Thread ID of the sender.")]
+    status: Annotated[
+        AgentStatus,
+        Field(
+            description="Last known status of the receiver agent reported to the sender agent before the close."
+        ),
+    ]
+    type: Annotated[
+        Literal["collab_close_end"], Field(title="CollabCloseEndEventMsgType")
+    ]
+
+
+class CollabResumeBeginEventMsg(BaseModel):
+    model_config = ConfigDict(
+        populate_by_name=True,
+    )
+    call_id: Annotated[str, Field(description="Identifier for the collab tool call.")]
+    receiver_agent_nickname: Annotated[
+        str | None,
+        Field(description="Optional nickname assigned to the receiver agent."),
+    ] = None
+    receiver_agent_role: Annotated[
+        str | None, Field(description="Optional role assigned to the receiver agent.")
+    ] = None
+    receiver_thread_id: Annotated[
+        ThreadId, Field(description="Thread ID of the receiver.")
+    ]
+    sender_thread_id: Annotated[ThreadId, Field(description="Thread ID of the sender.")]
+    type: Annotated[
+        Literal["collab_resume_begin"], Field(title="CollabResumeBeginEventMsgType")
+    ]
+
+
+class CollabResumeEndEventMsg(BaseModel):
+    model_config = ConfigDict(
+        populate_by_name=True,
+    )
+    call_id: Annotated[str, Field(description="Identifier for the collab tool call.")]
+    receiver_agent_nickname: Annotated[
+        str | None,
+        Field(description="Optional nickname assigned to the receiver agent."),
+    ] = None
+    receiver_agent_role: Annotated[
+        str | None, Field(description="Optional role assigned to the receiver agent.")
+    ] = None
+    receiver_thread_id: Annotated[
+        ThreadId, Field(description="Thread ID of the receiver.")
+    ]
+    sender_thread_id: Annotated[ThreadId, Field(description="Thread ID of the sender.")]
+    status: Annotated[
+        AgentStatus,
+        Field(
+            description="Last known status of the receiver agent reported to the sender agent after resume."
+        ),
+    ]
+    type: Annotated[
+        Literal["collab_resume_end"], Field(title="CollabResumeEndEventMsgType")
+    ]
+
+
 class ExperimentalFeature(BaseModel):
     model_config = ConfigDict(
         populate_by_name=True,
@@ -5292,21 +5974,10 @@ class CollabAgentToolCallThreadItem(BaseModel):
     id: Annotated[
         str, Field(description="Unique identifier for this collab tool call.")
     ]
-    model: Annotated[
-        str | None,
-        Field(description="Model requested for the spawned agent, when applicable."),
-    ] = None
     prompt: Annotated[
         str | None,
         Field(
             description="Prompt text sent as part of the collab tool call, when available."
-        ),
-    ] = None
-    reasoning_effort: Annotated[
-        ReasoningEffort | None,
-        Field(
-            alias="reasoningEffort",
-            description="Reasoning effort requested for the spawned agent, when applicable.",
         ),
     ] = None
     receiver_thread_ids: Annotated[
@@ -5872,7 +6543,6 @@ class PluginListResponse(BaseModel):
         list[MarketplaceLoadErrorInfo] | None, Field(alias="marketplaceLoadErrors")
     ] = []
     marketplaces: list[PluginMarketplaceEntry]
-    remote_sync_error: Annotated[str | None, Field(alias="remoteSyncError")] = None
 
 
 class ProfileV2(BaseModel):
@@ -5929,11 +6599,9 @@ class ResponseItem(
         | ReasoningResponseItem
         | LocalShellCallResponseItem
         | FunctionCallResponseItem
-        | ToolSearchCallResponseItem
         | FunctionCallOutputResponseItem
         | CustomToolCallResponseItem
         | CustomToolCallOutputResponseItem
-        | ToolSearchOutputResponseItem
         | WebSearchCallResponseItem
         | ImageGenerationCallResponseItem
         | GhostSnapshotResponseItem
@@ -5949,11 +6617,9 @@ class ResponseItem(
         | ReasoningResponseItem
         | LocalShellCallResponseItem
         | FunctionCallResponseItem
-        | ToolSearchCallResponseItem
         | FunctionCallOutputResponseItem
         | CustomToolCallResponseItem
         | CustomToolCallOutputResponseItem
-        | ToolSearchOutputResponseItem
         | WebSearchCallResponseItem
         | ImageGenerationCallResponseItem
         | GhostSnapshotResponseItem
