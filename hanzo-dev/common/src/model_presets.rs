@@ -105,7 +105,6 @@ static PRESETS: Lazy<Vec<ModelPreset>> = Lazy::new(|| {
             supported_text_verbosity: ALL_TEXT_VERBOSITY,
             is_default: false,
             upgrade: None,
-            pro_only: false,
             show_in_picker: true,
         },
         ModelPreset {
