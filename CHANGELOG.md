@@ -7,6 +7,63 @@
 
 - (none)
 
+## [0.6.90] - 2026-03-31
+
+- CI: remove legacy Rust CI workflows to streamline repository automation and reduce maintenance overhead. (6966db8b)
+- CI: simplify workflow policy/docs after retiring Rust CI jobs, making release checks more predictable. (6966db8b)
+
+## [0.6.89] - 2026-03-31
+
+- CI: increase hosted-runner time budget for argument lint jobs to reduce timeout-related release failures. (46e59276)
+- CI: improve release pipeline stability by giving slower lint runs more time before cancellation. (46e59276)
+
+## [0.6.87] - 2026-03-30
+
+- CI: switch `rust-ci-full` Windows jobs to hosted GitHub runners to reduce runner pool dependency in release validation. (bb2e39be)
+- CI: move Linux and Windows target matrices in `rust-ci-full` to hosted runners, improving cross-platform build reliability in restricted environments. (bb2e39be)
+
+## [0.6.86] - 2026-03-30
+
+- Auth: suppress stale tokens after refresh failures and avoid duplicate refresh attempts for more reliable sign-in. (5b172c2, 2c67a27)
+- CLI: add stdin piping support for `codex exec` to improve shell composition workflows. (71923f4)
+- TUI: polish app-server UX with plugin menu cleanup, skills picker scrolling fixes, and ghost subagent entry fixes. (f24c55f, 46b653e, 38e648c)
+- MCP: improve startup reliability with increased startup timeout and fixes for startup warning regressions. (3807807, 54d3ad1)
+- Sandbox: harden Windows and Linux sandbox behavior with network proxy support and safer `bwrap` resolution. (81fa047, b6050b4, ec089fd)
+
+## [0.6.85] - 2026-03-24
+
+- TUI/App Server: open ChatGPT login in the local browser, cancel active login on Ctrl+C, and always restore terminal state on early exit. (1b863776, c023e9d9, 989e5139)
+- Plugins: improve `/plugins` UX with clearer labels/wording, better ordering, cleaner disabled rows, and less OAuth URL console noise during install. (66edc347, 2d5a3bfe, 3ba0e85e, 363b3739, b364faf4, 4b91a7b3)
+- Plugin Listing: surface marketplace loading errors, stop filtering plugin/list results, and refresh mentions after install/uninstall. (621862a7, c8506071, 0f90a346)
+- Auth: use access-token expiration consistently for proactive refresh and prevent repeated refresh storms after permanent token failures. (7dc2cd2e, b8dde290, 88694e84)
+- Core/App Server: add back-pressure and batching to `command/exec` and complete codex exec migration to the app server for more stable execution under load. (d61c03ca, 45f68843)
+
+## [0.6.84] - 2026-03-24
+
+- Models: add `gpt-5.4-mini` support and simplify auth refresh handling for smoother model access. (124314eb, f55f5c25)
+- TUI: refresh curated model choices and suppress clean auto-review notices to reduce chat noise. (12b37afd)
+- Plugins: add install/uninstall flows in the TUI and better plugin labeling/filtering in listings. (b5d0a551, 54801634)
+- Multi-agent: ship structured agent communication/output and custom watcher support for v2 runs. (37ac0c09, 191fd9fd, 52724491)
+- Core: improve command/runtime stability with safer PATH construction, vendored bubblewrap fallback, and unified realtime stop handling. (84fb180e, d1088158, 7b92a906)
+
+## [0.6.83] - 2026-03-23
+
+- CI: fall back to local Bazel execution when the BuildBuddy API key is unavailable, keeping release jobs running in restricted environments. (7fd302e2)
+- Release Workflows: apply the BuildBuddy fallback path to both `rusty-v8-release` and `v8-canary` for consistent publish reliability. (7fd302e2)
+
+## [0.6.82] - 2026-03-23
+
+- CI: fall back to local Bazel execution when the BuildBuddy API key is unavailable, preventing release pipeline failures in restricted environments. (c6eddcc3)
+- Release Workflows: apply the BuildBuddy fallback path to both `rusty-v8-release` and `v8-canary` jobs for consistent publish reliability. (c6eddcc3)
+
+## [0.6.80] - 2026-03-23
+
+- TUI/App Server: complete the app-server-backed TUI migration with restored composer history and remote resume/fork history. (db89b73a, 334164a6, 78e8ee45)
+- Plugins: add the first `/plugins` TUI menu and expand featured/product-scoped plugin install and sync flows. (f7201e5a, 825d0937, db5781a0, b1570d6c)
+- Approvals/Sandbox: introduce `request_permissions`, persist its decisions across turns, and improve Linux sandbox defaults and split-filesystem handling. (e6b93841, d241dc59, 04892b4c, dcc4d7b6)
+- Multi-agent: switch agent identifiers to path-like IDs and add graph-style network visibility for agent runs. (79ad7b24, 70cdb177)
+- Core/Realtime: reduce startup hangs and stabilize realtime/websocket session shutdown and error delivery. (6ea04103, 98be562f, c8446d7c)
+
 ## [0.6.77] - 2026-03-07
 
 - Core/Context: default session context mode to `auto` for better out-of-the-box context selection. (9a24bc71)

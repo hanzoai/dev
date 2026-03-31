@@ -1,19 +1,17 @@
-## @hanzo/dev v0.6.83
+## @just-every/code v0.6.90
 
-This release fixes TLS connectivity to api.hanzo.ai, strips inline thinking tags from zen model output, and improves assistant message styling.
+This release streamlines CI automation to keep release validation faster and more reliable.
 
 ### Changes
 
-- Transport: force rustls TLS backend on all reqwest clients — fixes "bad protocol version" errors when connecting to api.hanzo.ai on macOS (SecureTransport incompatibility with Go crypto/tls).
-- TUI/Rendering: strip `<think>...</think>` blocks from zen model streaming output instead of rendering them as raw text.
-- TUI/Rendering: boost assistant message background tint from 5% to 12% for visible contrast on dark terminals.
-- TUI/Rendering: extend assistant message background to full terminal width (edge-to-edge).
+- CI: remove legacy Rust CI workflows to streamline repository automation and reduce maintenance overhead.
+- CI: simplify workflow policy/docs after retiring Rust CI jobs, making release checks more predictable.
 
 ### Install
 
 ```bash
-npm install -g @hanzo/dev@latest
-dev
+npm install -g @just-every/code@latest
+code
 ```
 
-Compare: https://github.com/hanzoai/dev/compare/v0.6.76...v0.6.77
+Compare: https://github.com/just-every/code/compare/v0.6.89...v0.6.90
