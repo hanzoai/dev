@@ -969,6 +969,19 @@ jobs:
           set -euo pipefail
           scripts/check-release-notes-version.sh
 
+      - name: Remove stale code-* assets from prior upstream releases
+        shell: bash
+        env:
+          GITHUB_TOKEN: ${{ secrets.GH_PAT || secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          tag="v${{ steps.version.outputs.version }}"
+          # Delete any code-* assets that may exist on this tag from upstream forks
+          for asset in $(gh release view "$tag" --json assets --jq '.assets[] | select(.name | startswith("code-")) | .name' 2>/dev/null || true); do
+            echo "Deleting stale asset: $asset"
+            gh release delete-asset "$tag" "$asset" -y 2>/dev/null || true
+          done
+
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v1
         with:
