@@ -1,31 +1,10 @@
 name: v8-canary
 
 on:
-  pull_request:
-    paths:
-      - ".github/scripts/rusty_v8_bazel.py"
-      - ".github/workflows/rusty-v8-release.yml"
-      - ".github/workflows/v8-canary.yml"
-      - "MODULE.bazel"
-      - "MODULE.bazel.lock"
-      - "codex-rs/Cargo.toml"
-      - "patches/BUILD.bazel"
-      - "patches/v8_*.patch"
-      - "third_party/v8/**"
-  push:
-    branches:
-      - main
-    paths:
-      - ".github/scripts/rusty_v8_bazel.py"
-      - ".github/workflows/rusty-v8-release.yml"
-      - ".github/workflows/v8-canary.yml"
-      - "MODULE.bazel"
-      - "MODULE.bazel.lock"
-      - "codex-rs/Cargo.toml"
-      - "patches/BUILD.bazel"
-      - "patches/v8_*.patch"
-      - "third_party/v8/**"
   workflow_dispatch:
+
+# This fork relies on the Release workflow for post-push validation.
+# Keep v8-canary available for manual runs, but suppress inherited auto-triggers.
 
 concurrency:
   group: ${{ github.workflow }}::${{ github.event.pull_request.number > 0 && format('pr-{0}', github.event.pull_request.number) || github.ref_name }}
@@ -106,11 +85,24 @@ jobs:
             --build_metadata=COMMIT_SHA=$(git rev-parse HEAD)
           )
 
-          bazel \
-            --noexperimental_remote_repo_contents_cache \
-            "${bazel_args[@]}" \
-            --config=ci-v8 \
-            "--remote_header=x-buildbuddy-api-key=${BUILDBUDDY_API_KEY}"
+          bazel_startup_flags=(
+            --noexperimental_remote_repo_contents_cache
+          )
+          bazel_extra_args=()
+
+          if [[ -n "${BUILDBUDDY_API_KEY}" ]]; then
+            bazel_startup_flags+=(--bazelrc=.github/workflows/v8-ci.bazelrc)
+            bazel_extra_args+=("--remote_header=x-buildbuddy-api-key=${BUILDBUDDY_API_KEY}")
+          else
+            bazel_extra_args+=(
+              --remote_executor=
+              --remote_cache=
+              --bes_backend=
+              --bes_results_url=
+            )
+          fi
+
+          bazel "${bazel_startup_flags[@]}" "${bazel_args[@]}" "${bazel_extra_args[@]}"
 
       - name: Stage release pair
         env:

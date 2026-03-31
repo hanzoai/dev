@@ -4,6 +4,7 @@ packages:
   # Its postinstall also tries to download binaries, slowing CI.
   - codex-rs/responses-api-proxy/npm
   - sdk/typescript
+  - shell-tool-mcp
 
 ignoredBuiltDependencies:
   - esbuild
