@@ -96,6 +96,8 @@ mod audio_device {
 }
 mod bottom_pane;
 mod chatwidget;
+#[cfg(feature = "browser")]
+mod chrome_launch;
 mod cli;
 mod clipboard_paste;
 mod clipboard_text;
