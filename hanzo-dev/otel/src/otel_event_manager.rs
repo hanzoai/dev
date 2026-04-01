@@ -243,7 +243,7 @@ impl OtelEventManager {
         response
     }
 
-    fn sse_event(&self, kind: &str, duration: Duration) {
+    pub fn sse_event(&self, kind: &str, duration: Duration) {
         tracing::event!(
             tracing::Level::INFO,
             event.name = "dev.sse_event",

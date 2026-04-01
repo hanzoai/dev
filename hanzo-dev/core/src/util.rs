@@ -3,6 +3,7 @@ use std::time::Duration;
 
 use std::sync::Arc;
 
+use hanzo_backoff::BackoffPolicy;
 use rand::Rng;
 use reqwest;
 use shlex::try_join;
@@ -11,14 +12,15 @@ use tracing::debug;
 
 use crate::config::Config;
 
-const INITIAL_DELAY_MS: u64 = 200;
-const BACKOFF_FACTOR: f64 = 2.0;
+/// API backoff policy: 200ms initial, 2s cap, 2 retries.
+static API_POLICY: BackoffPolicy = BackoffPolicy::default_api();
 
 pub(crate) fn backoff(attempt: u64) -> Duration {
-    let exp = BACKOFF_FACTOR.powi(attempt.saturating_sub(1) as i32);
-    let base = (INITIAL_DELAY_MS as f64 * exp) as u64;
+    let base = API_POLICY
+        .delay_for_attempt(attempt as u32)
+        .unwrap_or(Duration::from_secs(2));
     let jitter = rand::rng().random_range(0.9..1.1);
-    Duration::from_millis((base as f64 * jitter) as u64)
+    Duration::from_millis((base.as_millis() as f64 * jitter) as u64)
 }
 
 /// Blocks until the given endpoint responds, pausing between attempts with

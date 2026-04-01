@@ -1,6 +1,7 @@
 [workspace]
 members = [
     "backend-client",
+    "backoff",
     "ansi-escape",
     "app-server",
     "app-server-protocol",
@@ -24,6 +25,7 @@ members = [
     "mcp-client",
     "mcp-server",
     "mcp-types",
+    "md-render",
     "ollama",
     "process-hardening",
     "protocol",
@@ -39,6 +41,7 @@ members = [
     "utils/json-to-toml",
     "utils/readiness",
     "tunnel-bridge",
+    "sse",
     "zap",
     "zt",
 ]
@@ -57,6 +60,7 @@ edition = "2024"
 
 [workspace.dependencies]
 # Internal
+hanzo-backoff = { path = "backoff", version = "0.6.74" }
 hanzo-ansi-escape = { path = "ansi-escape", version = "0.6.74" }
 hanzo-app-server = { path = "app-server", version = "0.6.74" }
 hanzo-app-server-protocol = { path = "app-server-protocol", version = "0.6.74" }
@@ -94,6 +98,7 @@ hanzo-utils-json-to-toml = { path = "utils/json-to-toml", version = "0.6.74" }
 hanzo-utils-readiness = { path = "utils/readiness", version = "0.6.74" }
 hanzo-auto-drive-core = { path = "code-auto-drive-core", version = "0.6.74" }
 hanzo-tunnel-bridge = { path = "tunnel-bridge", version = "0.6.74" }
+hanzo-sse = { path = "sse", version = "0.6.74" }
 hanzo-zap = { path = "zap", version = "0.6.74" }
 hanzo-zt = { path = "zt", version = "0.6.74" }
 mcp-types = { path = "mcp-types", package = "hanzo-mcp-types", version = "0.6.74" }
