@@ -85,11 +85,9 @@ fn force_upgrade_preview_enabled() -> bool {
 }
 
 pub fn upgrade_ui_enabled() -> bool {
-    // Check if user explicitly hid upgrade notices in config
-    if is_upgrade_notice_hidden() {
-        return false;
-    }
-    !cfg!(debug_assertions) || force_upgrade_preview_enabled()
+    // Upgrade banner disabled — updates handled via CI/CD releases.
+    // Users can check version with `dev --version` and update via npm/brew.
+    false
 }
 
 pub fn auto_upgrade_runtime_enabled() -> bool {
