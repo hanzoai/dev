@@ -13,7 +13,7 @@ use crate::auth_accounts;
 use bytes::Bytes;
 use hanzo_app_server_protocol::AuthMode;
 use hanzo_protocol::models::ResponseItem;
-use eventsource_stream::Eventsource;
+use hanzo_sse::SseParser;
 use futures::prelude::*;
 use httpdate::parse_http_date;
 use regex_lite::Regex;
@@ -2435,7 +2435,8 @@ async fn process_sse<S>(
 ) where
     S: Stream<Item = Result<Bytes>> + Unpin,
 {
-    let mut stream = stream.eventsource();
+    let mut sse_parser = SseParser::new();
+    let mut stream = stream;
 
     // If the stream stays completely silent for an extended period treat it as disconnected.
     // The response id returned from the "complete" message.
@@ -2456,66 +2457,107 @@ async fn process_sse<S>(
     let mut last_text_reasoning_content: HashMap<(String, u32, u32), String> = HashMap::new();
     let mut global_last_seq: Option<u64> = checkpoint.read().ok().and_then(|c| c.last_sequence);
 
-    loop {
-        let next_event = if let Some(manager) = otel_event_manager.as_ref() {
-            manager
-                .log_sse_event(|| timeout(idle_timeout, stream.next()))
-                .await
-        } else {
-            timeout(idle_timeout, stream.next()).await
-        };
+    // Pending SSE events parsed from the current chunk but not yet processed.
+    let mut pending_events: Vec<hanzo_sse::SseEvent> = Vec::new();
+    let mut pending_idx: usize = 0;
 
-        let sse = match next_event {
-            Ok(Some(Ok(sse))) => sse,
-            Ok(Some(Err(e))) => {
-                debug!("SSE Error: {e:#}");
-                let event = CodexErr::Stream(
-                    format!("[transport] {e}"),
-                    None,
-                    Some(request_id.clone()),
-                );
-                let _ = tx_event.send(Err(event)).await;
-                return;
+    loop {
+        // If we have buffered events, consume the next one.
+        let sse = if pending_idx < pending_events.len() {
+            let ev = pending_events[pending_idx].clone();
+            pending_idx += 1;
+            // Free memory once all events in the batch are consumed.
+            if pending_idx >= pending_events.len() {
+                pending_events.clear();
+                pending_idx = 0;
             }
-            Ok(None) => {
-                match response_completed {
-                    Some(completed) => {
-                        emit_completed_event(
-                            completed,
-                            &tx_event,
-                            otel_event_manager.as_ref(),
-                            &debug_logger,
-                            &request_id,
-                        )
-                        .await;
+            ev
+        } else {
+            // Read the next chunk from the byte stream.
+            let chunk_start = std::time::Instant::now();
+            let next_chunk = timeout(idle_timeout, stream.next()).await;
+            let chunk_duration = chunk_start.elapsed();
+
+            match next_chunk {
+                Ok(Some(Ok(chunk))) => {
+                    if let Some(manager) = otel_event_manager.as_ref() {
+                        manager.sse_event("chunk", chunk_duration);
                     }
-                    None => {
-                        let error = response_error.unwrap_or(CodexErr::Stream(
-                            "stream closed before response.completed".into(),
-                            None,
-                            Some(request_id.clone()),
-                        ));
-                        if let Some(manager) = otel_event_manager.as_ref() {
-                            manager.see_event_completed_failed(&error);
+                    match sse_parser.push(&chunk) {
+                        Ok(evts) => {
+                            pending_events = evts;
+                            pending_idx = 0;
                         }
-                        let _ = tx_event.send(Err(error)).await;
+                        Err(e) => {
+                            debug!("SSE parse error: {e}");
+                            let event = CodexErr::Stream(
+                                format!("[transport] {e}"),
+                                None,
+                                Some(request_id.clone()),
+                            );
+                            let _ = tx_event.send(Err(event)).await;
+                            return;
+                        }
                     }
+                    continue;
                 }
-                // Mark the request log as complete
-                if let Ok(logger) = debug_logger.lock() {
-                    let _ = logger.end_request_log(&request_id);
-                }
-                return;
-            }
-            Err(_) => {
-                let _ = tx_event
-                    .send(Err(CodexErr::Stream(
-                        "[idle] timeout waiting for SSE".into(),
+                Ok(Some(Err(e))) => {
+                    debug!("SSE Error: {e:#}");
+                    let event = CodexErr::Stream(
+                        format!("[transport] {e}"),
                         None,
                         Some(request_id.clone()),
-                    )))
-                    .await;
-                return;
+                    );
+                    let _ = tx_event.send(Err(event)).await;
+                    return;
+                }
+                Ok(None) => {
+                    // Stream ended -- flush trailing data from parser.
+                    let trailing = sse_parser.finish().unwrap_or_default();
+                    if !trailing.is_empty() {
+                        pending_events = trailing;
+                        pending_idx = 0;
+                        continue;
+                    }
+                    match response_completed {
+                        Some(completed) => {
+                            emit_completed_event(
+                                completed,
+                                &tx_event,
+                                otel_event_manager.as_ref(),
+                                &debug_logger,
+                                &request_id,
+                            )
+                            .await;
+                        }
+                        None => {
+                            let error = response_error.unwrap_or(CodexErr::Stream(
+                                "stream closed before response.completed".into(),
+                                None,
+                                Some(request_id.clone()),
+                            ));
+                            if let Some(manager) = otel_event_manager.as_ref() {
+                                manager.see_event_completed_failed(&error);
+                            }
+                            let _ = tx_event.send(Err(error)).await;
+                        }
+                    }
+                    // Mark the request log as complete
+                    if let Ok(logger) = debug_logger.lock() {
+                        let _ = logger.end_request_log(&request_id);
+                    }
+                    return;
+                }
+                Err(_) => {
+                    let _ = tx_event
+                        .send(Err(CodexErr::Stream(
+                            "[idle] timeout waiting for SSE".into(),
+                            None,
+                            Some(request_id.clone()),
+                        )))
+                        .await;
+                    return;
+                }
             }
         };
 
