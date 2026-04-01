@@ -56,6 +56,11 @@ pub enum SlashCommand {
     Personality,
     Realtime,
     Settings,
+    #[cfg(feature = "browser")]
+    Browser,
+    #[cfg(feature = "browser")]
+    #[strum(serialize = "chrome")]
+    Chrome,
     TestApproval,
     #[strum(serialize = "subagents")]
     MultiAgents,
@@ -113,6 +118,8 @@ impl SlashCommand {
             SlashCommand::Apps => "manage apps",
             SlashCommand::Plugins => "browse plugins",
             SlashCommand::Logout => "log out of Codex",
+            #[cfg(feature = "browser")]
+            SlashCommand::Browser | SlashCommand::Chrome => "connect to browser via CDP",
             SlashCommand::Rollout => "print the rollout file path",
             SlashCommand::TestApproval => "test approval request",
         }
@@ -178,6 +185,8 @@ impl SlashCommand {
             SlashCommand::TestApproval => true,
             SlashCommand::Realtime => true,
             SlashCommand::Settings => true,
+            #[cfg(feature = "browser")]
+            SlashCommand::Browser | SlashCommand::Chrome => true,
             SlashCommand::Collab => true,
             SlashCommand::Agent | SlashCommand::MultiAgents => true,
             SlashCommand::Statusline => false,
@@ -191,6 +200,8 @@ impl SlashCommand {
             SlashCommand::SandboxReadRoot => cfg!(target_os = "windows"),
             SlashCommand::Copy => !cfg!(target_os = "android"),
             SlashCommand::Rollout | SlashCommand::TestApproval => cfg!(debug_assertions),
+            #[cfg(feature = "browser")]
+            SlashCommand::Browser | SlashCommand::Chrome => true,
             _ => true,
         }
     }
