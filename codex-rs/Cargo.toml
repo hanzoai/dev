@@ -395,6 +395,13 @@ ignored = [
     "codex-v8-poc",
 ]
 
+[profile.dev-fast]
+inherits = "dev"
+opt-level = 1
+debug = 1
+incremental = true
+codegen-units = 256
+
 [profile.release]
 lto = "fat"
 split-debuginfo = "off"
