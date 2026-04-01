@@ -3,7 +3,7 @@ use std::time::Duration;
 
 use bytes::Bytes;
 use hanzo_otel::otel_event_manager::OtelEventManager;
-use eventsource_stream::Eventsource;
+use hanzo_sse::SseParser;
 use futures::Stream;
 use futures::StreamExt;
 use futures::TryStreamExt;
@@ -573,7 +573,8 @@ async fn process_chat_sse<S>(
 ) where
     S: Stream<Item = Result<Bytes>> + Unpin,
 {
-    let mut stream = stream.eventsource();
+    let mut sse_parser = SseParser::new();
+    let mut stream = stream;
 
     // State to accumulate a function call across streaming chunks.
     // OpenAI may split the `arguments` string over multiple `delta` events
@@ -652,61 +653,101 @@ async fn process_chat_sse<S>(
         }
     }
 
-    loop {
-        let next_event = if let Some(manager) = otel_event_manager.as_ref() {
-            manager
-                .log_sse_event(|| timeout(idle_timeout, stream.next()))
-                .await
-        } else {
-            timeout(idle_timeout, stream.next()).await
-        };
+    // Pending SSE events parsed from the current chunk but not yet processed.
+    let mut pending_events: Vec<hanzo_sse::SseEvent> = Vec::new();
+    let mut pending_idx: usize = 0;
 
-        let sse = match next_event {
-            Ok(Some(Ok(ev))) => ev,
-            Ok(Some(Err(e))) => {
-                let _ = tx_event
-                    .send(Err(CodexErr::Stream(
-                        format!("[transport] {e}"),
-                        None,
-                        Some(request_id.clone()),
-                    )))
-                    .await;
-                return;
+    loop {
+        // If we have buffered events, consume the next one.
+        let sse = if pending_idx < pending_events.len() {
+            let ev = pending_events[pending_idx].clone();
+            pending_idx += 1;
+            if pending_idx >= pending_events.len() {
+                pending_events.clear();
+                pending_idx = 0;
             }
-            Ok(None) => {
-                // Stream closed by server without an explicit end marker – log for diagnostics
-                tracing::debug!("chat SSE stream closed without [DONE] marker");
-                if let Ok(logger) = debug_logger.lock() {
-                    let _ = logger.append_response_event(
-                        &request_id,
-                        "stream_closed_without_done",
-                        &serde_json::json!({
-                            "assistant_len": assistant_text.len(),
-                            "reasoning_len": reasoning_text.len(),
-                        }),
-                    );
+            ev
+        } else {
+            // Read the next chunk from the byte stream.
+            let chunk_start = std::time::Instant::now();
+            let next_chunk = timeout(idle_timeout, stream.next()).await;
+            let chunk_duration = chunk_start.elapsed();
+
+            match next_chunk {
+                Ok(Some(Ok(chunk))) => {
+                    if let Some(manager) = otel_event_manager.as_ref() {
+                        manager.sse_event("chunk", chunk_duration);
+                    }
+                    match sse_parser.push(&chunk) {
+                        Ok(evts) => {
+                            pending_events = evts;
+                            pending_idx = 0;
+                        }
+                        Err(e) => {
+                            let _ = tx_event
+                                .send(Err(CodexErr::Stream(
+                                    format!("[transport] {e}"),
+                                    None,
+                                    Some(request_id.clone()),
+                                )))
+                                .await;
+                            return;
+                        }
+                    }
+                    continue;
                 }
-                flush_and_complete(
-                    &tx_event,
-                    &mut assistant_text,
-                    &mut reasoning_text,
-                    &current_item_id,
-                    current_response_id.as_deref(),
-                    &debug_logger,
-                    &request_id,
-                )
-                .await;
-                return;
-            }
-            Err(_) => {
-                let _ = tx_event
-                    .send(Err(CodexErr::Stream(
-                        "[idle] timeout waiting for SSE".into(),
-                        None,
-                        Some(request_id.clone()),
-                    )))
+                Ok(Some(Err(e))) => {
+                    let _ = tx_event
+                        .send(Err(CodexErr::Stream(
+                            format!("[transport] {e}"),
+                            None,
+                            Some(request_id.clone()),
+                        )))
+                        .await;
+                    return;
+                }
+                Ok(None) => {
+                    // Stream ended -- flush trailing data from parser.
+                    let trailing = sse_parser.finish().unwrap_or_default();
+                    if !trailing.is_empty() {
+                        pending_events = trailing;
+                        pending_idx = 0;
+                        continue;
+                    }
+                    // Stream closed by server without an explicit end marker.
+                    tracing::debug!("chat SSE stream closed without [DONE] marker");
+                    if let Ok(logger) = debug_logger.lock() {
+                        let _ = logger.append_response_event(
+                            &request_id,
+                            "stream_closed_without_done",
+                            &serde_json::json!({
+                                "assistant_len": assistant_text.len(),
+                                "reasoning_len": reasoning_text.len(),
+                            }),
+                        );
+                    }
+                    flush_and_complete(
+                        &tx_event,
+                        &mut assistant_text,
+                        &mut reasoning_text,
+                        &current_item_id,
+                        current_response_id.as_deref(),
+                        &debug_logger,
+                        &request_id,
+                    )
                     .await;
-                return;
+                    return;
+                }
+                Err(_) => {
+                    let _ = tx_event
+                        .send(Err(CodexErr::Stream(
+                            "[idle] timeout waiting for SSE".into(),
+                            None,
+                            Some(request_id.clone()),
+                        )))
+                        .await;
+                    return;
+                }
             }
         };
 
