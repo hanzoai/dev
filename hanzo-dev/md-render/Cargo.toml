@@ -1,0 +1,14 @@
+[package]
+name = "hanzo-md-render"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish = false
+
+[dependencies]
+crossterm = { workspace = true }
+pulldown-cmark = "0.13"
+syntect = { version = "5", default-features = false, features = ["default-fancy"] }
+
+[lints]
+workspace = true
