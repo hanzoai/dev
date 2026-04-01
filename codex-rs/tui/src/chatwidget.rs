@@ -5393,6 +5393,13 @@ impl ChatWidget {
                     );
                 }
             }
+            #[cfg(feature = "browser")]
+            SlashCommand::Browser | SlashCommand::Chrome => {
+                self.add_info_message(
+                    "Browser: connecting via CDP... Use /chrome to connect to an existing Chrome instance.".to_string(),
+                    Some("Launch Chrome with --remote-debugging-port=9222".to_string()),
+                );
+            }
             SlashCommand::TestApproval => {
                 use std::collections::HashMap;
 
