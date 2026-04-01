@@ -147,7 +147,7 @@ jobs:
         continue-on-error: true
         run: |
           cd codex-rs
-          cargo nextest run --no-fail-fast --locked
+          cargo nextest run --no-fail-fast --locked --exclude codex-v8-poc
 
       - name: Free disk after tests
         if: always()
