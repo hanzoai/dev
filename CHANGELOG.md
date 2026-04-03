@@ -7,6 +7,11 @@
 
 - (none)
 
+## [0.6.90] - 2026-03-31
+
+- CI: remove legacy Rust CI workflows to streamline repository automation and reduce maintenance overhead. (6966db8b)
+- CI: simplify workflow policy/docs after retiring Rust CI jobs, making release checks more predictable. (6966db8b)
+
 ## [0.6.89] - 2026-03-31
 
 - CI: increase hosted-runner time budget for argument lint jobs to reduce timeout-related release failures. (46e59276)

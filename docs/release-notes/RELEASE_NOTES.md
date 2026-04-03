@@ -1,11 +1,11 @@
-## @just-every/code v0.6.89
+## @just-every/code v0.6.90
 
-This release improves CI reliability so release validation is less likely to fail on slow hosted runners.
+This release streamlines CI automation to keep release validation faster and more reliable.
 
 ### Changes
 
-- CI: increase hosted-runner time budget for argument lint jobs to reduce timeout-related release failures.
-- CI: improve release pipeline stability by giving slower lint runs more time before cancellation.
+- CI: remove legacy Rust CI workflows to streamline repository automation and reduce maintenance overhead.
+- CI: simplify workflow policy/docs after retiring Rust CI jobs, making release checks more predictable.
 
 ### Install
 
@@ -14,4 +14,4 @@ npm install -g @just-every/code@latest
 code
 ```
 
-Compare: https://github.com/just-every/code/compare/v0.6.88...v0.6.89
+Compare: https://github.com/just-every/code/compare/v0.6.89...v0.6.90
