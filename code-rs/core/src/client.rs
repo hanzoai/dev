@@ -107,6 +107,7 @@ fn preferred_ws_version_from_env() -> ResponsesWebsocketVersion {
 // be replayed on every subsequent request within the same turn (retries,
 // continuations, websocket reconnects).
 const X_CODEX_TURN_STATE_HEADER: &str = "x-codex-turn-state";
+const X_CODEX_WINDOW_ID_HEADER: &str = "x-codex-window-id";
 
 const MODEL_CAP_MODEL_HEADER: &str = "x-codex-model-cap-model";
 const MODEL_CAP_RESET_AFTER_HEADER: &str = "x-codex-model-cap-reset-after-seconds";
@@ -404,6 +405,10 @@ impl ModelClient {
 
     pub fn code_home(&self) -> &Path {
         &self.config.code_home
+    }
+
+    fn current_window_id(&self, session_id: Uuid) -> String {
+        format!("{session_id}:0")
     }
 
     pub(crate) fn config(&self) -> &crate::config::Config {
@@ -829,6 +834,9 @@ impl ModelClient {
             req_builder = req_builder
                 .header("conversation_id", session_id_str.clone())
                 .header("session_id", session_id_str.clone());
+            if let Ok(window_id) = HeaderValue::from_str(&self.current_window_id(session_id)) {
+                req_builder = req_builder.header(X_CODEX_WINDOW_ID_HEADER, window_id);
+            }
 
             if let Some(auth) = auth.as_ref()
                 && auth.mode.is_chatgpt()
@@ -889,9 +897,13 @@ impl ModelClient {
             }
             let ws_payload_text = serde_json::to_string(&serde_json::Value::Object(ws_payload))?;
 
-            let connect = tokio_tungstenite::connect_async(ws_request).await;
+            let connect = timeout(
+                self.provider.websocket_connect_timeout(),
+                tokio_tungstenite::connect_async(ws_request),
+            )
+            .await;
             match connect {
-                Ok((mut ws_stream, response)) => {
+                Ok(Ok((mut ws_stream, response))) => {
                     let (tx_event, rx_event) = mpsc::channel::<Result<ResponseEvent>>(1600);
 
                     if let Some(value) = response
@@ -1041,7 +1053,7 @@ impl ModelClient {
 
                     return Ok(ResponseStream { rx_event });
                 }
-                Err(err) => {
+                Ok(Err(err)) => {
                     if websocket_connect_is_upgrade_required(&err) {
                         self.websockets_disabled.store(true, Ordering::Relaxed);
                         warn!("responses websocket upgrade required; falling back to HTTP responses transport");
@@ -1050,6 +1062,22 @@ impl ModelClient {
 
                     let err = CodexErr::Stream(
                         format!("[ws] failed to connect: {err}"),
+                        None,
+                        Some(request_id.clone()),
+                    );
+                    if (attempt as u64) < max_retries {
+                        tokio::time::sleep(backoff(attempt as u64)).await;
+                        continue;
+                    }
+                    self.websockets_disabled.store(true, Ordering::Relaxed);
+                    return Err(err);
+                }
+                Err(_) => {
+                    let err = CodexErr::Stream(
+                        format!(
+                            "[ws] timed out connecting after {} ms",
+                            self.provider.websocket_connect_timeout().as_millis()
+                        ),
                         None,
                         Some(request_id.clone()),
                     );
@@ -1272,6 +1300,9 @@ impl ModelClient {
                 .header("session_id", session_id_str.clone())
                 .header(reqwest::header::ACCEPT, "text/event-stream")
                 .json(&payload_json);
+            if let Ok(window_id) = HeaderValue::from_str(&self.current_window_id(session_id)) {
+                req_builder = req_builder.header(X_CODEX_WINDOW_ID_HEADER, window_id);
+            }
 
             if let Some(auth) = auth.as_ref()
                 && auth.mode.is_chatgpt()
@@ -1844,6 +1875,7 @@ impl ModelClient {
             .clone()
             .or_else(|| find_family_for_model(model_slug))
             .unwrap_or_else(|| self.config.model_family.clone());
+        let session_id = prompt.session_id_override.unwrap_or(self.session_id);
         let instructions = prompt.get_full_instructions(&family).into_owned();
         let payload = CompactHistoryRequest {
             model: model_slug,
@@ -1884,6 +1916,9 @@ impl ModelClient {
 
             request = attach_openai_subagent_header(request);
             request = attach_codex_beta_features_header(request, &self.config);
+            if let Ok(window_id) = HeaderValue::from_str(&self.current_window_id(session_id)) {
+                request = request.header(X_CODEX_WINDOW_ID_HEADER, window_id);
+            }
 
             if let Some(auth) = auth.as_ref()
                 && auth.mode.is_chatgpt()
