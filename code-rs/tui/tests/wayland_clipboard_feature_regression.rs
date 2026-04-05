@@ -49,7 +49,7 @@ fn tui_manifest_uses_workspace_arboard_dependency() {
 }
 
 #[test]
-fn cargo_lock_includes_wayland_clipboard_backend() {
+fn cargo_lock_arboard_entry_depends_on_wayland_clipboard_backend() {
     let cargo_lock = manifest_dir().join("..").join("Cargo.lock");
     let lockfile: toml::Value = toml::from_str(
         &std::fs::read_to_string(&cargo_lock)
@@ -62,8 +62,19 @@ fn cargo_lock_includes_wayland_clipboard_backend() {
         .and_then(toml::Value::as_array)
         .expect("Cargo.lock package list should exist");
 
+    let arboard = packages
+        .iter()
+        .find(|package| package.get("name").and_then(toml::Value::as_str) == Some("arboard"))
+        .and_then(toml::Value::as_table)
+        .expect("Cargo.lock should contain an arboard entry");
+
+    let dependencies = arboard
+        .get("dependencies")
+        .and_then(toml::Value::as_array)
+        .expect("Cargo.lock arboard entry should list dependencies");
+
     assert!(
-        packages.iter().any(|package| package.get("name").and_then(toml::Value::as_str) == Some("wl-clipboard-rs")),
-        "Cargo.lock should include wl-clipboard-rs when Wayland clipboard support is enabled"
+        dependencies.iter().any(|dependency| dependency.as_str() == Some("wl-clipboard-rs")),
+        "Cargo.lock arboard entry should include wl-clipboard-rs when Wayland clipboard support is enabled"
     );
 }
