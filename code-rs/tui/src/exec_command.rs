@@ -1,76 +1,10 @@
 use std::path::Path;
 use std::path::PathBuf;
 
-use shlex::try_join;
-
-pub(crate) fn escape_command(command: &[String]) -> String {
-    try_join(command.iter().map(String::as_str)).unwrap_or_else(|_| command.join(" "))
-}
+use code_core::util as core_util;
 
 pub(crate) fn strip_bash_lc_and_escape(command: &[String]) -> String {
-    match command {
-        // exactly three items
-        [first, second, third]
-            // first two must be "bash", "-lc"
-            if is_bash_like(first) && second == "-lc" =>
-        {
-            strip_shell_wrapper_for_display(third)
-        }
-        _ => escape_command(command),
-    }
-}
-
-fn strip_shell_wrapper_for_display(script: &str) -> String {
-    unwrap_profile_wrapper(script).unwrap_or(script).to_string()
-}
-
-fn unwrap_profile_wrapper(script: &str) -> Option<&str> {
-    let script = script.strip_prefix("set +m; ").unwrap_or(script);
-    let body = script.strip_prefix("source ")?;
-    let (rc_path, wrapped) = body.split_once(" && ")?;
-    if !looks_like_shell_rc_path(rc_path) {
-        return None;
-    }
-
-    wrapped
-        .strip_prefix('(')
-        .and_then(|inner| inner.strip_suffix(')'))
-        .or_else(|| {
-            wrapped
-                .strip_prefix("{\n")
-                .and_then(|inner| inner.strip_suffix("\n}"))
-        })
-}
-
-fn looks_like_shell_rc_path(path: &str) -> bool {
-    let Some(home) = std::env::var_os("HOME") else {
-        return false;
-    };
-    let home = Path::new(&home);
-    path == home.join(".bashrc").to_string_lossy() || path == home.join(".zshrc").to_string_lossy()
-}
-
-fn is_bash_like(cmd: &str) -> bool {
-    let trimmed = cmd.trim_matches('"').trim_matches('\'');
-    let lowered = Path::new(trimmed)
-        .file_name()
-        .and_then(|s| s.to_str())
-        .unwrap_or(trimmed)
-        .to_ascii_lowercase();
-    matches!(
-        lowered.as_str(),
-        "bash"
-            | "bash.exe"
-            | "sh"
-            | "sh.exe"
-            | "dash"
-            | "dash.exe"
-            | "zsh"
-            | "zsh.exe"
-            | "ksh"
-            | "ksh.exe"
-            | "busybox"
-    )
+    core_util::strip_bash_lc_and_escape(command)
 }
 
 /// If `path` is absolute and inside $HOME, return the part *after* the home
@@ -115,6 +49,13 @@ mod tests {
         ];
 
         assert_eq!(strip_bash_lc_and_escape(&command), "sed -n '1,220p' file.txt");
+    }
+
+    #[test]
+    fn strip_bash_lc_and_escape_shows_raw_shell_script_without_quotes() {
+        let command = vec!["git status --short".to_string()];
+
+        assert_eq!(strip_bash_lc_and_escape(&command), "git status --short");
     }
 
     #[test]

@@ -47,16 +47,23 @@ pub fn escape_command(command: &[String]) -> String {
     try_join(command.iter().map(|s| s.as_str())).unwrap_or_else(|_| command.join(" "))
 }
 
-pub fn strip_bash_lc_and_escape(command: &[String]) -> String {
+pub fn extract_shell_script(command: &[String]) -> Option<(usize, &str)> {
     match command {
+        [script] => Some((0, script.as_str())),
         [first, second, third]
             if is_shell_like_executable(first)
-                && second == "-lc" =>
+                && matches!(second.as_str(), "-lc" | "-c") =>
         {
-            strip_shell_wrapper_for_display(third)
+            Some((2, third.as_str()))
         }
-        _ => escape_command(command),
+        _ => None,
     }
+}
+
+pub fn strip_bash_lc_and_escape(command: &[String]) -> String {
+    extract_shell_script(command)
+        .map(|(_, script)| strip_shell_wrapper_for_display(script))
+        .unwrap_or_else(|| escape_command(command))
 }
 
 fn strip_shell_wrapper_for_display(script: &str) -> String {
@@ -167,6 +174,20 @@ mod tests {
         ];
 
         assert_eq!(strip_bash_lc_and_escape(&command), "sed -n '1,5p' file.txt");
+    }
+
+    #[test]
+    fn strip_bash_lc_and_escape_shows_raw_shell_script_without_quotes() {
+        let command = vec!["git status --short".to_string()];
+
+        assert_eq!(strip_bash_lc_and_escape(&command), "git status --short");
+    }
+
+    #[test]
+    fn strip_bash_lc_and_escape_shows_raw_multiline_shell_script_without_quotes() {
+        let command = vec!["cat <<'EOF'\nhello\nEOF".to_string()];
+
+        assert_eq!(strip_bash_lc_and_escape(&command), "cat <<'EOF'\nhello\nEOF");
     }
 
     #[test]

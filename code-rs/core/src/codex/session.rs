@@ -1,5 +1,6 @@
 use super::*;
 use serde_json::Value;
+use crate::util::extract_shell_script;
 use code_protocol::dynamic_tools::DynamicToolResponse;
 use code_protocol::dynamic_tools::DynamicToolSpec;
 use super::streaming::{
@@ -74,32 +75,10 @@ fn semantic_tokens(command: &[String]) -> Option<Vec<String>> {
     if command.is_empty() {
         return None;
     }
-    if let Some(tokens) = shell_script_tokens(command) {
-        return Some(tokens);
+    if let Some((_, script)) = extract_shell_script(command) {
+        return Some(shlex_split(script).unwrap_or_else(|| vec![script.to_string()]));
     }
     Some(command.to_vec())
-}
-
-fn shell_script_tokens(command: &[String]) -> Option<Vec<String>> {
-    if command.len() == 3 && is_shell_wrapper(&command[0], &command[1]) {
-        if let Some(tokens) = shlex_split(&command[2]) {
-            return Some(tokens);
-        }
-        return Some(vec![command[2].clone()]);
-    }
-    None
-}
-
-fn is_shell_wrapper(shell: &str, flag: &str) -> bool {
-    let file_name = Path::new(shell)
-        .file_name()
-        .and_then(|s| s.to_str())
-        .unwrap_or(shell)
-        .to_ascii_lowercase();
-    matches!(
-        file_name.as_str(),
-        "bash" | "sh" | "zsh" | "ksh" | "fish" | "dash"
-    ) && matches!(flag, "-lc" | "-c")
 }
 
 #[derive(Clone)]
@@ -349,7 +328,14 @@ pub(super) fn is_connectivity_error(err: &CodexErr) -> bool {
 #[cfg(test)]
 mod tests {
     use super::is_connectivity_error;
-    use super::{FollowUpTurnAction, QueuedUserInput, State, take_follow_up_turn_action};
+    use super::{
+        ApprovedCommandMatchKind,
+        ApprovedCommandPattern,
+        FollowUpTurnAction,
+        QueuedUserInput,
+        State,
+        take_follow_up_turn_action,
+    };
     use crate::error::CodexErr;
     use code_protocol::models::{ContentItem, ResponseInputItem};
 
@@ -423,6 +409,17 @@ mod tests {
         let second = take_follow_up_turn_action(&mut state).expect("queued user action");
         assert!(matches!(second, FollowUpTurnAction::QueuedUserInput(_)));
         assert!(state.pending_user_input.is_empty());
+    }
+
+    #[test]
+    fn approved_command_prefix_matches_raw_shell_script_tokens() {
+        let pattern = ApprovedCommandPattern::new(
+            vec!["git".to_string(), "status".to_string()],
+            ApprovedCommandMatchKind::Prefix,
+            None,
+        );
+
+        assert!(pattern.matches(&["git status --short".to_string()]));
     }
 }
 

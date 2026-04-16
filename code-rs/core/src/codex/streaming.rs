@@ -9675,12 +9675,12 @@ async fn handle_container_exec_with_params(
     }
 
 
-    // If the argv is a shell wrapper, analyze and optionally strip `confirm:`.
+    // If the command is a shell script, analyze and optionally strip `confirm:`.
     let mut params = params;
     let seq_hint_for_exec = seq_hint;
     let otel_event_manager = sess.client.get_otel_event_manager();
     let tool_name = "local_shell";
-    if let Some((script_index, script)) = extract_shell_script_from_wrapper(&params.command) {
+    if let Some((script_index, script)) = extract_shell_script(&params.command) {
         let trimmed = script.trim_start();
         let confirm_prefixes = ["confirm:", "CONFIRM:"];
         let has_confirm_prefix = confirm_prefixes
@@ -9848,8 +9848,8 @@ async fn handle_container_exec_with_params(
         };
     }
 
-    // If no shell wrapper, perform a lightweight argv inspection for sensitive git commands.
-    if extract_shell_script_from_wrapper(&params.command).is_none() {
+    // If no shell script is present, perform a lightweight argv inspection for sensitive git commands.
+    if extract_shell_script(&params.command).is_none() {
         let joined = params.command.join(" ");
         if !sess.confirm_guard.is_empty() {
             if let Some(pattern) = sess.confirm_guard.matched_pattern(&joined) {
@@ -12768,20 +12768,8 @@ async fn handle_browser_history(sess: &Session, ctx: &ToolCallCtx, arguments: St
     .await
 }
 
-fn extract_shell_script_from_wrapper(argv: &[String]) -> Option<(usize, String)> {
-    // Return (index_of_script, script) if argv matches: <shell> (-lc|-c) <script>
-    if argv.len() == 3 {
-        let shell = std::path::Path::new(&argv[0])
-            .file_name()
-            .and_then(|s| s.to_str())
-            .unwrap_or("");
-        let is_shell = matches!(shell, "bash" | "sh" | "zsh");
-        let is_flag = matches!(argv[1].as_str(), "-lc" | "-c");
-        if is_shell && is_flag {
-            return Some((2, argv[2].clone()));
-        }
-    }
-    None
+fn extract_shell_script(argv: &[String]) -> Option<(usize, String)> {
+    crate::util::extract_shell_script(argv).map(|(index, script)| (index, script.to_string()))
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -12791,7 +12779,7 @@ struct CatWriteSuggestion {
 }
 
 fn detect_cat_write(argv: &[String]) -> Option<CatWriteSuggestion> {
-    if let Some((_, script)) = extract_shell_script_from_wrapper(argv) {
+    if let Some((_, script)) = extract_shell_script(argv) {
         if script_contains_cat_write(&script) {
             return Some(CatWriteSuggestion {
                 label: "original_script",
@@ -12961,7 +12949,7 @@ struct PythonWriteSuggestion {
 }
 
 fn detect_python_write(argv: &[String]) -> Option<PythonWriteSuggestion> {
-    if let Some((_, script)) = extract_shell_script_from_wrapper(argv) {
+    if let Some((_, script)) = extract_shell_script(argv) {
         if script_contains_python_write(&script) {
             return Some(PythonWriteSuggestion {
                 label: "original_script",
@@ -13045,7 +13033,7 @@ struct RedundantCdSuggestion {
 
 fn detect_redundant_cd(argv: &[String], cwd: &Path) -> Option<RedundantCdSuggestion> {
     let normalized_cwd = normalize_path(cwd);
-    if let Some((script_index, script)) = extract_shell_script_from_wrapper(argv) {
+    if let Some((script_index, script)) = extract_shell_script(argv) {
         if let Some(suggestion) = detect_redundant_cd_in_shell(
             argv,
             script_index,
@@ -13237,6 +13225,16 @@ mod command_guard_detection_tests {
     }
 
     #[test]
+    fn detects_raw_shell_script_redundant_cd() {
+        let cwd = PathBuf::from("/tmp/project");
+        let argv = vec!["cd /tmp/project && ls".to_string()];
+
+        let suggestion = detect_redundant_cd(&argv, &cwd).expect("should flag redundant cd");
+        assert_eq!(suggestion.label, "original_script");
+        assert_eq!(suggestion.suggested, vec!["ls".to_string()]);
+    }
+
+    #[test]
     fn ignores_cd_to_different_directory() {
         let cwd = PathBuf::from("/tmp/project");
         let argv = vec![
@@ -13265,6 +13263,19 @@ mod command_guard_detection_tests {
         let argv = vec![
             "bash".to_string(),
             "-lc".to_string(),
+            "cat <<'EOF' > code-rs/git-tooling/Cargo.toml\n[package]\nname = \"demo\"\nEOF".to_string(),
+        ];
+
+        let suggestion = detect_cat_write(&argv).expect("should flag cat write");
+        assert_eq!(suggestion.label, "original_script");
+        assert!(suggestion
+            .original_value
+            .contains("cat <<'EOF' > code-rs/git-tooling/Cargo.toml"));
+    }
+
+    #[test]
+    fn detects_raw_shell_script_cat_heredoc_write() {
+        let argv = vec![
             "cat <<'EOF' > code-rs/git-tooling/Cargo.toml\n[package]\nname = \"demo\"\nEOF".to_string(),
         ];
 
