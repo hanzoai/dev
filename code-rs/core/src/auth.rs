@@ -82,6 +82,8 @@ impl std::error::Error for RefreshTokenError {}
 
 const REFRESH_TOKEN_ACCOUNT_MISMATCH_MESSAGE: &str =
     "Your access token could not be refreshed because you have since logged out or signed in to another account. Please sign in again.";
+const REFRESH_TOKEN_URL: &str = "https://auth.openai.com/oauth/token";
+pub const REFRESH_TOKEN_URL_OVERRIDE_ENV_VAR: &str = "CODEX_REFRESH_TOKEN_URL_OVERRIDE";
 
 impl PartialEq for CodexAuth {
     fn eq(&self, other: &Self) -> bool {
@@ -787,7 +789,7 @@ async fn try_refresh_token(
 
     // Use shared client factory to include standard headers
     let response = client
-        .post("https://auth.openai.com/oauth/token")
+        .post(refresh_token_endpoint())
         .header("Content-Type", "application/json")
         .json(&refresh_request)
         .send()
@@ -844,13 +846,27 @@ struct OpenAiErrorData {
 fn classify_refresh_failure(status: StatusCode, body: &str) -> RefreshTokenError {
     if let Ok(parsed) = serde_json::from_str::<OpenAiErrorWrapper>(body) {
         if let Some(error) = parsed.error {
-            if error.code.as_deref() == Some("refresh_token_reused") {
-                let message = error
-                    .message
-                    .unwrap_or_else(|| "refresh token already rotated".to_string());
-                return RefreshTokenError::transient(format!(
-                    "refresh_token_reused: {message}"
-                ));
+            if let Some(code) = error.code.as_deref()
+                && matches!(
+                    code,
+                    "refresh_token_expired"
+                        | "refresh_token_reused"
+                        | "refresh_token_invalidated"
+                )
+            {
+                let message = error.message.unwrap_or_else(|| match code {
+                    "refresh_token_expired" => {
+                        "refresh token expired; please sign in again".to_string()
+                    }
+                    "refresh_token_reused" => {
+                        "refresh token already rotated; please sign in again".to_string()
+                    }
+                    "refresh_token_invalidated" => {
+                        "refresh token revoked; please sign in again".to_string()
+                    }
+                    _ => "refresh token unavailable; please sign in again".to_string(),
+                });
+                return RefreshTokenError::permanent(format!("{code}: {message}"));
             }
         }
     }
@@ -909,6 +925,11 @@ fn classify_refresh_failure(status: StatusCode, body: &str) -> RefreshTokenError
     RefreshTokenError::transient(format!(
         "OAuth refresh failed with unexpected response ({status})"
     ))
+}
+
+fn refresh_token_endpoint() -> String {
+    env::var(REFRESH_TOKEN_URL_OVERRIDE_ENV_VAR)
+        .unwrap_or_else(|_| REFRESH_TOKEN_URL.to_string())
 }
 
 fn summarize_body(body: &str) -> String {
@@ -1237,7 +1258,7 @@ mod tests {
     }
 
     #[test]
-    fn refresh_token_reused_is_transient_and_detected() {
+    fn refresh_token_reused_is_permanent_and_detected() {
         let body = r#"{
   "error": {
     "message": "Your refresh token has already been used to generate a new access token. Please try signing in again.",
@@ -1247,7 +1268,7 @@ mod tests {
 }"#;
 
         let err = classify_refresh_failure(StatusCode::UNAUTHORIZED, body);
-        assert!(matches!(err.kind, RefreshTokenErrorKind::Transient));
+        assert!(matches!(err.kind, RefreshTokenErrorKind::Permanent));
         assert!(err.is_refresh_token_reused());
     }
 

@@ -7548,6 +7548,7 @@ fn to_exec_params(params: ShellToolCallParams, sess: &Session) -> ExecParams {
         .and_then(|p| p.requires_escalated_permissions().then_some(true));
     ExecParams {
         command: params.command,
+        shell_script: None,
         cwd: sess.resolve_path(params.workdir.clone()),
         timeout_ms,
         env: create_env(&sess.shell_environment_policy),
@@ -7561,39 +7562,20 @@ fn to_exec_params_from_shell_command(params: ShellCommandToolCallParams, sess: &
     let with_escalated_permissions = params
         .sandbox_permissions
         .and_then(|p| p.requires_escalated_permissions().then_some(true));
-    let command = sess
-        .user_shell
-        .format_default_shell_invocation(vec![params.command.clone()])
-        .unwrap_or_else(|| default_shell_command(params.command));
+    let use_login_shell = params.login.unwrap_or(true);
 
     ExecParams {
-        command,
+        command: vec![params.command.clone()],
+        shell_script: Some(crate::exec::DeferredShellScript {
+            command: params.command,
+            use_login_shell,
+        }),
         cwd: sess.resolve_path(params.workdir.clone()),
         timeout_ms,
         env: create_env(&sess.shell_environment_policy),
         with_escalated_permissions,
         justification: params.justification,
     }
-}
-
-#[cfg(unix)]
-fn default_shell_command(command: String) -> Vec<String> {
-    vec!["sh".to_string(), "-lc".to_string(), command]
-}
-
-#[cfg(target_os = "windows")]
-fn default_shell_command(command: String) -> Vec<String> {
-    vec![
-        "powershell.exe".to_string(),
-        "-NoProfile".to_string(),
-        "-Command".to_string(),
-        command,
-    ]
-}
-
-#[cfg(all(not(unix), not(target_os = "windows")))]
-fn default_shell_command(command: String) -> Vec<String> {
-    vec![command]
 }
 
 fn resolve_agent_read_only(
