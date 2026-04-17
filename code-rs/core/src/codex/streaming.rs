@@ -2567,12 +2567,17 @@ async fn run_agent(sess: Arc<Session>, turn_context: Arc<TurnContext>, sub_id: S
                         }
                         (
                             ResponseItem::CustomToolCall { .. },
-                            Some(ResponseInputItem::CustomToolCallOutput { call_id, output }),
+                            Some(ResponseInputItem::CustomToolCallOutput {
+                                call_id,
+                                name,
+                                output,
+                            }),
                         ) => {
                             items_to_record_in_conversation_history.push(item.clone());
                             items_to_record_in_conversation_history.push(
                                 ResponseItem::CustomToolCallOutput {
                                     call_id: call_id.clone(),
+                                    name: name.clone(),
                                     output: output.clone(),
                                 },
                             );
@@ -3897,6 +3902,7 @@ async fn try_run_turn(
             })
             .map(|call_id| ResponseItem::CustomToolCallOutput {
                 call_id: call_id.clone(),
+                name: None,
                 output: FunctionCallOutputPayload::from_text("aborted".to_string()),
             })
             .collect::<Vec<_>>()
