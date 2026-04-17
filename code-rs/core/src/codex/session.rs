@@ -1,4 +1,5 @@
 use super::*;
+use crate::protocol::TaskOriginKind;
 use serde_json::Value;
 use crate::util::extract_shell_script;
 use code_protocol::dynamic_tools::DynamicToolResponse;
@@ -433,6 +434,12 @@ pub(super) struct BackgroundExecState {
     pub(super) task_handle: Option<tokio::task::JoinHandle<()>>,
     pub(super) order_meta_for_end: crate::protocol::OrderMeta,
     pub(super) sub_id: String,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(super) struct TaskLifecycleInfo {
+    pub(super) origin: TaskOriginKind,
+    pub(super) visible_to_user: bool,
 }
 
 /// Context for an initialized model agent
@@ -1022,7 +1029,12 @@ impl Session {
         state.current_task = Some(agent);
     }
 
-    pub(super) async fn start_internal_pending_only_turn(self: &Arc<Self>, sentinel: &str) -> bool {
+    pub(super) async fn start_internal_pending_only_turn(
+        self: &Arc<Self>,
+        sentinel: &str,
+        origin: TaskOriginKind,
+        visible_to_user: bool,
+    ) -> bool {
         let should_start = {
             let state = self.state.lock().unwrap();
             state.current_task.is_none()
@@ -1038,13 +1050,25 @@ impl Session {
         let sentinel_input = vec![InputItem::Text {
             text: sentinel.to_string(),
         }];
-        let agent = AgentTask::spawn(Arc::clone(self), turn_context, sub_id, sentinel_input);
+        let agent = AgentTask::spawn(
+            Arc::clone(self),
+            turn_context,
+            sub_id,
+            sentinel_input,
+            origin,
+            visible_to_user,
+        );
         self.set_task(agent);
         true
     }
 
     pub async fn start_pending_only_turn_if_idle(self: &Arc<Self>) -> bool {
-        self.start_internal_pending_only_turn(PENDING_ONLY_SENTINEL).await
+        self.start_internal_pending_only_turn(
+            PENDING_ONLY_SENTINEL,
+            TaskOriginKind::PendingInput,
+            false,
+        )
+        .await
     }
 
     pub async fn start_post_turn_pending_only_turn_if_idle(self: &Arc<Self>) -> bool {
@@ -1063,7 +1087,11 @@ impl Session {
             return false;
         }
 
-        self.start_internal_pending_only_turn(POST_TURN_PENDING_ONLY_SENTINEL)
+        self.start_internal_pending_only_turn(
+            POST_TURN_PENDING_ONLY_SENTINEL,
+            TaskOriginKind::PostTurn,
+            false,
+        )
             .await
     }
 
@@ -1095,6 +1123,18 @@ impl Session {
 
     pub fn has_running_task(&self) -> bool {
         self.state.lock().unwrap().current_task.is_some()
+    }
+
+    pub(super) fn task_lifecycle(&self, sub_id: &str) -> Option<TaskLifecycleInfo> {
+        let state = self.state.lock().unwrap();
+        let task = state.current_task.as_ref()?;
+        if task.sub_id != sub_id {
+            return None;
+        }
+        Some(TaskLifecycleInfo {
+            origin: task.origin,
+            visible_to_user: task.visible_to_user,
+        })
     }
 
     pub fn queue_user_input(&self, queued: QueuedUserInput) {

@@ -27,6 +27,9 @@ use crate::account_switching::RateLimitSwitchState;
 use crate::agent_tool::current_agent_spawn_depth;
 use crate::agent_tool::external_agent_command_exists;
 use crate::protocol::McpListToolsResponseEvent;
+use crate::protocol::TaskLifecycleEvent;
+use crate::protocol::TaskLifecyclePhase;
+use crate::protocol::TaskOriginKind;
 use code_app_server_protocol::AuthMode as AppAuthMode;
 use code_protocol::models::ContentItem;
 use code_protocol::models::ResponseItem;
@@ -76,6 +79,8 @@ pub(super) struct AgentTask {
     pub(super) sub_id: String,
     handle: AbortHandle,
     kind: AgentTaskKind,
+    pub(super) origin: TaskOriginKind,
+    pub(super) visible_to_user: bool,
 }
 
 impl AgentTask {
@@ -84,13 +89,17 @@ impl AgentTask {
         turn_context: Arc<TurnContext>,
         sub_id: String,
         input: Vec<InputItem>,
+        origin: TaskOriginKind,
+        visible_to_user: bool,
     ) -> Self {
         let handle = {
             let sess_clone = Arc::clone(&sess);
             let tc_clone = Arc::clone(&turn_context);
             let sub_clone = sub_id.clone();
+            let origin_clone = origin;
+            let visible_clone = visible_to_user;
             tokio::spawn(async move {
-                run_agent(sess_clone, tc_clone, sub_clone, input).await;
+                run_agent(sess_clone, tc_clone, sub_clone, input, origin_clone, visible_clone).await;
             })
             .abort_handle()
         };
@@ -99,6 +108,8 @@ impl AgentTask {
             sub_id,
             handle,
             kind: AgentTaskKind::Regular,
+            origin,
+            visible_to_user,
         }
     }
 
@@ -128,6 +139,8 @@ impl AgentTask {
             sub_id,
             handle,
             kind: AgentTaskKind::Compact,
+            origin: TaskOriginKind::ManualCompact,
+            visible_to_user: false,
         }
     }
 
@@ -142,7 +155,15 @@ impl AgentTask {
             let tc_clone = Arc::clone(&turn_context);
             let sub_clone = sub_id.clone();
             tokio::spawn(async move {
-                run_agent(sess_clone, tc_clone, sub_clone, input).await;
+                run_agent(
+                    sess_clone,
+                    tc_clone,
+                    sub_clone,
+                    input,
+                    TaskOriginKind::Review,
+                    false,
+                )
+                .await;
             })
             .abort_handle()
         };
@@ -151,6 +172,8 @@ impl AgentTask {
             sub_id,
             handle,
             kind: AgentTaskKind::Review,
+            origin: TaskOriginKind::Review,
+            visible_to_user: false,
         }
     }
 
@@ -277,7 +300,14 @@ pub(super) async fn submission_loop(
                     let sentinel_input = vec![InputItem::Text {
                         text: PENDING_ONLY_SENTINEL.to_string(),
                     }];
-                    let agent = AgentTask::spawn(Arc::clone(&sess), turn_context, sub_id, sentinel_input);
+                    let agent = AgentTask::spawn(
+                        Arc::clone(&sess),
+                        turn_context,
+                        sub_id,
+                        sentinel_input,
+                        TaskOriginKind::OutOfTurnDeveloper,
+                        false,
+                    );
                     sess.set_task(agent);
                 }
             }
@@ -945,6 +975,7 @@ pub(super) async fn submission_loop(
                     sub.id.clone(),
                     items,
                     final_output_json_schema,
+                    TaskOriginKind::User,
                 )
                 .await;
             }
@@ -970,7 +1001,14 @@ pub(super) async fn submission_loop(
                 } else {
                     // No task running: treat this as immediate user input without aborting.
                     sess.cleanup_old_status_items().await;
-                    spawn_user_turn(Arc::clone(sess), sub.id.clone(), items, None).await;
+                    spawn_user_turn(
+                        Arc::clone(sess),
+                        sub.id.clone(),
+                        items,
+                        None,
+                        TaskOriginKind::QueuedUser,
+                    )
+                    .await;
                 }
             }
             Op::ExecApproval {
@@ -2191,13 +2229,14 @@ async fn spawn_user_turn(
     sub_id: String,
     items: Vec<InputItem>,
     final_output_json_schema: Option<serde_json::Value>,
+    origin: TaskOriginKind,
 ) {
     maybe_run_auto_context_compaction(&sess, &sub_id, &items).await;
     let turn_context = match final_output_json_schema {
         Some(schema) => sess.make_turn_context_with_schema(Some(schema)),
         None => sess.make_turn_context(),
     };
-    let agent = AgentTask::spawn(Arc::clone(&sess), turn_context, sub_id, items);
+    let agent = AgentTask::spawn(Arc::clone(&sess), turn_context, sub_id, items, origin, true);
     sess.set_task(agent);
 }
 
@@ -2317,8 +2356,27 @@ fn parse_review_output_event(text: &str) -> ReviewOutputEvent {
 ///   back to the model in the next turn.
 /// - If the model sends only an assistant message, we record it in the
 ///   conversation history and consider the agent complete.
-async fn run_agent(sess: Arc<Session>, turn_context: Arc<TurnContext>, sub_id: String, input: Vec<InputItem>) {
+async fn run_agent(
+    sess: Arc<Session>,
+    turn_context: Arc<TurnContext>,
+    sub_id: String,
+    input: Vec<InputItem>,
+    origin: TaskOriginKind,
+    visible_to_user: bool,
+) {
     if input.is_empty() {
+        return;
+    }
+    let lifecycle = sess.make_event(
+        &sub_id,
+        EventMsg::TaskLifecycle(TaskLifecycleEvent {
+            phase: TaskLifecyclePhase::Started,
+            origin,
+            visible_to_user,
+            last_agent_message: None,
+        }),
+    );
+    if sess.tx_event.send(lifecycle).await.is_err() {
         return;
     }
     let event = sess.make_event(&sub_id, EventMsg::TaskStarted);
@@ -2773,6 +2831,17 @@ async fn run_agent(sess: Arc<Session>, turn_context: Arc<TurnContext>, sub_id: S
     }
 
     sess.remove_task(&sub_id);
+    let lifecycle = sess.make_event(
+        &sub_id,
+        EventMsg::TaskLifecycle(TaskLifecycleEvent {
+            phase: TaskLifecyclePhase::Quiescent,
+            origin,
+            visible_to_user,
+            last_agent_message: last_task_message.clone(),
+        }),
+    );
+    sess.tx_event.send(lifecycle).await.ok();
+
     let event = sess.make_event(
         &sub_id,
         EventMsg::TaskComplete(TaskCompleteEvent {
@@ -2790,7 +2859,11 @@ async fn run_agent(sess: Arc<Session>, turn_context: Arc<TurnContext>, sub_id: S
     if let Some(action) = sess.take_follow_up_turn_action() {
         match action {
             FollowUpTurnAction::PostTurnPendingInput => {
-                sess.start_internal_pending_only_turn(POST_TURN_PENDING_ONLY_SENTINEL)
+                sess.start_internal_pending_only_turn(
+                    POST_TURN_PENDING_ONLY_SENTINEL,
+                    TaskOriginKind::PostTurn,
+                    false,
+                )
                     .await;
             }
             FollowUpTurnAction::ManualCompact(compact_sub_id) => {
@@ -2806,7 +2879,11 @@ async fn run_agent(sess: Arc<Session>, turn_context: Arc<TurnContext>, sub_id: S
                 );
             }
             FollowUpTurnAction::PendingInput => {
-                sess.start_internal_pending_only_turn(PENDING_ONLY_SENTINEL)
+                sess.start_internal_pending_only_turn(
+                    PENDING_ONLY_SENTINEL,
+                    TaskOriginKind::PendingInput,
+                    false,
+                )
                     .await;
             }
             FollowUpTurnAction::QueuedUserInput(queued) => {
@@ -2815,7 +2892,14 @@ async fn run_agent(sess: Arc<Session>, turn_context: Arc<TurnContext>, sub_id: S
                     sess_clone.cleanup_old_status_items().await;
                     let submission_id = queued.submission_id;
                     let items = queued.core_items;
-                    spawn_user_turn(sess_clone, submission_id, items, None).await;
+                    spawn_user_turn(
+                        sess_clone,
+                        submission_id,
+                        items,
+                        None,
+                        TaskOriginKind::QueuedUser,
+                    )
+                    .await;
                 });
             }
         }
@@ -4669,6 +4753,19 @@ async fn handle_request_user_input(
         }),
     )
     .await;
+
+    if let Some(task) = sess.task_lifecycle(&ctx.sub_id) {
+        let lifecycle = sess.make_event(
+            &ctx.sub_id,
+            EventMsg::TaskLifecycle(TaskLifecycleEvent {
+                phase: TaskLifecyclePhase::AwaitingExternalInput,
+                origin: task.origin,
+                visible_to_user: task.visible_to_user,
+                last_agent_message: None,
+            }),
+        );
+        sess.tx_event.send(lifecycle).await.ok();
+    }
 
     let response = match rx_response.await {
         Ok(response) => response,
@@ -11175,7 +11272,14 @@ async fn enqueue_agent_completion_wake(
         let sentinel_input = vec![InputItem::Text {
             text: PENDING_ONLY_SENTINEL.to_string(),
         }];
-        let agent = AgentTask::spawn(Arc::clone(sess), turn_context, sub_id, sentinel_input);
+        let agent = AgentTask::spawn(
+            Arc::clone(sess),
+            turn_context,
+            sub_id,
+            sentinel_input,
+            TaskOriginKind::OutOfTurnDeveloper,
+            false,
+        );
         sess.set_task(agent);
     }
 }
