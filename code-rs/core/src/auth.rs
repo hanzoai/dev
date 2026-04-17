@@ -5,16 +5,14 @@ use serde::Deserialize;
 use serde::Serialize;
 use std::env;
 use std::fs::File;
-use std::fs::OpenOptions;
 use std::io::Read;
 use std::io::Write;
-#[cfg(unix)]
-use std::os::unix::fs::OpenOptionsExt;
 use std::path::Path;
 use std::path::PathBuf;
 use std::sync::Arc;
 use std::sync::Mutex;
 use std::time::Duration;
+use tempfile::NamedTempFile;
 
 use code_app_server_protocol::AuthMode;
 
@@ -731,15 +729,20 @@ pub fn try_read_auth_json(auth_file: &Path) -> std::io::Result<AuthDotJson> {
 
 pub fn write_auth_json(auth_file: &Path, auth_dot_json: &AuthDotJson) -> std::io::Result<()> {
     let json_data = serde_json::to_string_pretty(auth_dot_json)?;
-    let mut options = OpenOptions::new();
-    options.truncate(true).write(true).create(true);
-    #[cfg(unix)]
-    {
-        options.mode(0o600);
+    let parent = auth_file.parent().ok_or_else(|| {
+        std::io::Error::new(
+            std::io::ErrorKind::InvalidInput,
+            format!("auth path has no parent: {}", auth_file.display()),
+        )
+    })?;
+    if !parent.exists() {
+        std::fs::create_dir_all(parent)?;
     }
-    let mut file = options.open(auth_file)?;
+    let mut file = NamedTempFile::new_in(parent)?;
     file.write_all(json_data.as_bytes())?;
     file.flush()?;
+    file.as_file_mut().sync_all()?;
+    file.persist(auth_file).map_err(|err| err.error)?;
     Ok(())
 }
 
