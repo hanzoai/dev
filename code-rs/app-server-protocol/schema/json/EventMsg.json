@@ -1589,6 +1589,12 @@
             "callId": {
               "type": "string"
             },
+            "namespace": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
             "tool": {
               "type": "string"
             },
@@ -6687,6 +6693,12 @@
         "arguments": true,
         "callId": {
           "type": "string"
+        },
+        "namespace": {
+          "type": [
+            "string",
+            "null"
+          ]
         },
         "tool": {
           "type": "string"

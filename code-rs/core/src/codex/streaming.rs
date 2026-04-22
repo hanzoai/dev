@@ -4349,6 +4349,7 @@ async fn handle_response_item(
         }
         ResponseItem::FunctionCall {
             name,
+            namespace,
             arguments,
             call_id,
             ..
@@ -4359,6 +4360,7 @@ async fn handle_response_item(
                     sess,
                     turn_diff_tracker,
                     sub_id.to_string(),
+                    namespace,
                     name,
                     arguments,
                     call_id,
@@ -4590,6 +4592,7 @@ async fn handle_function_call(
     sess: &Session,
     turn_diff_tracker: &mut TurnDiffTracker,
     sub_id: String,
+    namespace: Option<String>,
     name: String,
     arguments: String,
     call_id: String,
@@ -4664,8 +4667,8 @@ async fn handle_function_call(
             .await
         }
         _ => {
-            if sess.is_dynamic_tool(&name) {
-                return handle_dynamic_tool_call(sess, &ctx, name, arguments).await;
+            if sess.is_dynamic_tool(namespace.as_deref(), &name) {
+                return handle_dynamic_tool_call(sess, &ctx, namespace, name, arguments).await;
             }
             match sess.mcp_connection_manager.parse_tool_name(&name) {
                 Some((server, tool_name)) => {
@@ -4803,6 +4806,7 @@ async fn handle_request_user_input(
 async fn handle_dynamic_tool_call(
     sess: &Session,
     ctx: &ToolCallCtx,
+    namespace: Option<String>,
     tool_name: String,
     arguments: String,
 ) -> ResponseInputItem {
@@ -4839,6 +4843,7 @@ async fn handle_dynamic_tool_call(
         EventMsg::DynamicToolCallRequest(code_protocol::dynamic_tools::DynamicToolCallRequest {
             call_id: ctx.call_id.clone(),
             turn_id: ctx.sub_id.clone(),
+            namespace,
             tool: tool_name,
             arguments: args,
         }),

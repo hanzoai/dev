@@ -381,6 +381,8 @@ pub struct ToolsV2 {
 #[serde(rename_all = "camelCase")]
 #[ts(export_to = "v2/")]
 pub struct DynamicToolSpec {
+    #[ts(optional)]
+    pub namespace: Option<String>,
     pub name: String,
     pub description: String,
     pub input_schema: JsonValue,
@@ -3252,6 +3254,8 @@ pub struct DynamicToolCallParams {
     pub thread_id: String,
     pub turn_id: String,
     pub call_id: String,
+    #[ts(optional = nullable)]
+    pub namespace: Option<String>,
     pub tool: String,
     pub arguments: JsonValue,
 }

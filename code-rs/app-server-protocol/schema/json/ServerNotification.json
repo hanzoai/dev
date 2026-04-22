@@ -2258,6 +2258,12 @@
             "callId": {
               "type": "string"
             },
+            "namespace": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
             "tool": {
               "type": "string"
             },

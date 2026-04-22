@@ -29,6 +29,24 @@ pub struct ResponsesApiTool {
     pub(crate) parameters: JsonSchema,
 }
 
+#[derive(Debug, Clone, Serialize, PartialEq)]
+pub struct ResponsesApiNamespace {
+    pub(crate) name: String,
+    pub(crate) description: String,
+    pub(crate) tools: Vec<ResponsesApiNamespaceTool>,
+}
+
+#[derive(Debug, Clone, Serialize, PartialEq)]
+#[serde(tag = "type")]
+pub enum ResponsesApiNamespaceTool {
+    #[serde(rename = "function")]
+    Function(ResponsesApiTool),
+}
+
+fn default_namespace_description(namespace_name: &str) -> String {
+    format!("Tools in the {namespace_name} namespace.")
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct FreeformTool {
     pub(crate) name: String,
@@ -51,6 +69,8 @@ pub struct FreeformToolFormat {
 pub enum OpenAiTool {
     #[serde(rename = "function")]
     Function(ResponsesApiTool),
+    #[serde(rename = "namespace")]
+    Namespace(ResponsesApiNamespace),
     #[serde(rename = "tool_search")]
     ToolSearch {
         execution: String,
@@ -1019,15 +1039,44 @@ pub(crate) fn mcp_tool_to_openai_tool(
 
 fn dynamic_tool_to_openai_tool(
     tool: &DynamicToolSpec,
-) -> Result<ResponsesApiTool, serde_json::Error> {
+) -> Result<OpenAiTool, serde_json::Error> {
     let input_schema = parse_tool_input_schema(&tool.input_schema)?;
 
-    Ok(ResponsesApiTool {
+    let output_tool = ResponsesApiTool {
         name: tool.name.clone(),
         description: tool.description.clone(),
         strict: false,
         parameters: input_schema,
+    };
+
+    Ok(match tool.namespace.as_ref() {
+        Some(namespace) => OpenAiTool::Namespace(ResponsesApiNamespace {
+            name: namespace.clone(),
+            description: default_namespace_description(namespace),
+            tools: vec![ResponsesApiNamespaceTool::Function(output_tool)],
+        }),
+        None => OpenAiTool::Function(output_tool),
     })
+}
+
+fn push_openai_tool_coalescing_namespaces(tools: &mut Vec<OpenAiTool>, tool: OpenAiTool) {
+    match tool {
+        OpenAiTool::Namespace(mut namespace) => {
+            if let Some(existing_namespace) = tools.iter_mut().find_map(|tool| match tool {
+                OpenAiTool::Namespace(existing_namespace)
+                    if existing_namespace.name == namespace.name =>
+                {
+                    Some(existing_namespace)
+                }
+                _ => None,
+            }) {
+                existing_namespace.tools.append(&mut namespace.tools);
+            } else {
+                tools.push(OpenAiTool::Namespace(namespace));
+            }
+        }
+        other => tools.push(other),
+    }
 }
 
 fn parse_tool_input_schema(input_schema: &JsonValue) -> Result<JsonSchema, serde_json::Error> {
@@ -1271,7 +1320,9 @@ pub fn get_openai_tools(
     if !dynamic_tools.is_empty() {
         for tool in dynamic_tools {
             match dynamic_tool_to_openai_tool(tool) {
-                Ok(converted_tool) => tools.push(OpenAiTool::Function(converted_tool)),
+                Ok(converted_tool) => {
+                    push_openai_tool_coalescing_namespaces(&mut tools, converted_tool)
+                }
                 Err(e) => {
                     tracing::error!(
                         "Failed to convert dynamic tool {:?} to OpenAI tool: {e:?}",
@@ -1478,6 +1529,7 @@ mod tests {
             .iter()
             .map(|tool| match tool {
                 OpenAiTool::Function(ResponsesApiTool { name, .. }) => name,
+                OpenAiTool::Namespace(ResponsesApiNamespace { name, .. }) => name,
                 OpenAiTool::ToolSearch { .. } => "tool_search",
                 OpenAiTool::LocalShell {} => "local_shell",
                 OpenAiTool::ImageGeneration { .. } => "image_generation",
