@@ -234,9 +234,7 @@ impl ToolsConfig {
             web_search_request: include_web_search_request,
             web_search_external: true,
             web_search_tool_type: model_family.web_search_tool_type,
-            // Only advertise image_generation when the backend model metadata
-            // explicitly says the model supports it.
-            image_gen_tool: model_family.supports_image_generation,
+            image_gen_tool: false,
             search_tool: false,
             include_view_image_tool,
             web_search_allowed_domains: None,
