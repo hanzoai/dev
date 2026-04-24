@@ -768,7 +768,8 @@ impl ModelClient {
                 include,
                 service_tier: match self.config.service_tier {
                     Some(ServiceTier::Fast) => Some("priority".to_string()),
-                    _ => None,
+                    Some(service_tier) => Some(service_tier.to_string()),
+                    None => None,
                 },
                 prompt_cache_key: Some(session_id_str.clone()),
             };
@@ -1244,7 +1245,8 @@ impl ModelClient {
                 include,
                 service_tier: match self.config.service_tier {
                     Some(ServiceTier::Fast) => Some("priority".to_string()),
-                    _ => None,
+                    Some(service_tier) => Some(service_tier.to_string()),
+                    None => None,
                 },
                 // Use a stable per-process cache key (session id). With store=false this is inert.
                 prompt_cache_key: Some(session_id_str.clone()),

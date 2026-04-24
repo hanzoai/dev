@@ -24,7 +24,11 @@ pub(crate) async fn chatgpt_get_request<T: DeserializeOwned>(
 
     // Make direct HTTP request to ChatGPT backend API with the token
     let client = code_core::http_client::build_http_client();
-    let url = format!("{chatgpt_base_url}{path}");
+    let url = format!(
+        "{}/{}",
+        chatgpt_base_url.trim_end_matches('/'),
+        path.trim_start_matches('/')
+    );
 
     let token = auth.get_token_data().await?;
     let account_id = token.account_id.ok_or_else(|| {

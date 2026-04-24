@@ -23463,6 +23463,7 @@ Have we met every part of this goal and is there no further work to do?"#
         let persisted_service_tier = match (profile.as_deref(), self.config.service_tier) {
             (Some(_), None) => Some("standard"),
             (_, Some(ServiceTier::Fast)) => Some("fast"),
+            (_, Some(ServiceTier::Flex)) => Some("flex"),
             (_, Some(ServiceTier::Standard)) => Some("standard"),
             (_, None) => None,
         };
