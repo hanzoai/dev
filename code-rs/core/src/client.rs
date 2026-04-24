@@ -915,6 +915,15 @@ impl ModelClient {
                 Ok(Ok((mut ws_stream, response))) => {
                     let (tx_event, rx_event) = mpsc::channel::<Result<ResponseEvent>>(1600);
 
+                    let response_headers = header_map_to_json(response.headers());
+                    if tx_event
+                        .send(Ok(ResponseEvent::ResponseHeaders(response_headers)))
+                        .await
+                        .is_err()
+                    {
+                        debug!("receiver dropped response headers event");
+                    }
+
                     if let Some(value) = response
                         .headers()
                         .get(X_CODEX_TURN_STATE_HEADER)
@@ -1386,11 +1395,21 @@ impl ModelClient {
                                 "x_request_id": resp.headers()
                                     .get("x-request-id")
                                     .and_then(|v| v.to_str().ok())
-                                    .unwrap_or_default()
+                                    .unwrap_or_default(),
+                                "headers": header_map_to_json(resp.headers()),
                             }),
                         );
                     }
                     let (tx_event, rx_event) = mpsc::channel::<Result<ResponseEvent>>(1600);
+
+                    let response_headers = header_map_to_json(resp.headers());
+                    if tx_event
+                        .send(Ok(ResponseEvent::ResponseHeaders(response_headers)))
+                        .await
+                        .is_err()
+                    {
+                        debug!("receiver dropped response headers event");
+                    }
 
                     if let Some(snapshot) = parse_rate_limit_snapshot(resp.headers()) {
                         debug!(
@@ -1686,6 +1705,7 @@ impl ModelClient {
                                 "error",
                                 &serde_json::json!({
                                     "status": status.as_u16(),
+                                    "headers": header_map_to_json(&headers),
                                     "body": body_text
                                 }),
                             );
