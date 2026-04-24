@@ -2,6 +2,7 @@ use crate::SkillsManager;
 use crate::agent::AgentControl;
 use crate::codex_thread::CodexThread;
 use crate::config::Config;
+use crate::config::ThreadStoreConfig;
 use crate::environment_selection::default_thread_environment_selections;
 use crate::environment_selection::selected_primary_environment;
 use crate::environment_selection::validate_environment_selections;
@@ -17,6 +18,7 @@ use crate::session::INITIAL_SUBMIT_ID;
 use crate::shell_snapshot::ShellSnapshot;
 use crate::skills_watcher::SkillsWatcher;
 use crate::skills_watcher::SkillsWatcherEvent;
+use crate::tasks::InterruptedTurnHistoryMarker;
 use crate::tasks::interrupted_turn_history_marker;
 use codex_analytics::AnalyticsEventsClient;
 use codex_app_server_protocol::ThreadHistoryBuilder;
@@ -24,11 +26,11 @@ use codex_app_server_protocol::TurnStatus;
 use codex_exec_server::EnvironmentManager;
 use codex_login::AuthManager;
 use codex_login::CodexAuth;
+use codex_model_provider::create_model_provider;
 use codex_model_provider_info::ModelProviderInfo;
-use codex_model_provider_info::OPENAI_PROVIDER_ID;
 use codex_models_manager::collaboration_mode_presets::CollaborationModesConfig;
-use codex_models_manager::manager::ModelsManager;
 use codex_models_manager::manager::RefreshStrategy;
+use codex_models_manager::manager::SharedModelsManager;
 use codex_protocol::ThreadId;
 use codex_protocol::config_types::CollaborationModeMask;
 use codex_protocol::error::CodexErr;
@@ -51,6 +53,8 @@ use codex_protocol::protocol::TurnEnvironmentSelection;
 use codex_protocol::protocol::W3cTraceContext;
 use codex_rollout::RolloutConfig;
 use codex_state::DirectionalThreadSpawnEdgeStatus;
+#[cfg(debug_assertions)]
+use codex_thread_store::InMemoryThreadStore;
 use codex_thread_store::LocalThreadStore;
 use codex_thread_store::RemoteThreadStore;
 use codex_thread_store::ThreadStore;
@@ -224,7 +228,7 @@ pub(crate) struct ThreadManagerState {
     threads: Arc<RwLock<HashMap<ThreadId, Arc<CodexThread>>>>,
     thread_created_tx: broadcast::Sender<ThreadId>,
     auth_manager: Arc<AuthManager>,
-    models_manager: Arc<ModelsManager>,
+    models_manager: SharedModelsManager,
     environment_manager: Arc<EnvironmentManager>,
     skills_manager: Arc<SkillsManager>,
     plugins_manager: Arc<PluginsManager>,
@@ -240,27 +244,24 @@ pub fn build_models_manager(
     config: &Config,
     auth_manager: Arc<AuthManager>,
     collaboration_modes_config: CollaborationModesConfig,
-) -> Arc<ModelsManager> {
-    let openai_models_provider = config
-        .model_providers
-        .get(OPENAI_PROVIDER_ID)
-        .cloned()
-        .unwrap_or_else(|| ModelProviderInfo::create_openai_provider(/*base_url*/ None));
-
-    Arc::new(ModelsManager::new_with_provider(
+) -> SharedModelsManager {
+    let provider = create_model_provider(config.model_provider.clone(), Some(auth_manager));
+    provider.models_manager(
         config.codex_home.to_path_buf(),
-        auth_manager,
         config.model_catalog.clone(),
         collaboration_modes_config,
-        openai_models_provider,
-    ))
+    )
 }
 
 fn configured_thread_store(config: &Config) -> Arc<dyn ThreadStore> {
-    if let Some(endpoint) = config.experimental_thread_store_endpoint.as_deref() {
-        return Arc::new(RemoteThreadStore::new(endpoint));
+    match &config.experimental_thread_store {
+        ThreadStoreConfig::Local => {
+            Arc::new(LocalThreadStore::new(RolloutConfig::from_view(config)))
+        }
+        ThreadStoreConfig::Remote { endpoint } => Arc::new(RemoteThreadStore::new(endpoint)),
+        #[cfg(debug_assertions)]
+        ThreadStoreConfig::InMemory { id } => InMemoryThreadStore::for_id(id),
     }
-    Arc::new(LocalThreadStore::new(RolloutConfig::from_view(config)))
 }
 
 impl ThreadManager {
@@ -364,11 +365,12 @@ impl ThreadManager {
             state: Arc::new(ThreadManagerState {
                 threads: Arc::new(RwLock::new(HashMap::new())),
                 thread_created_tx,
-                models_manager: Arc::new(ModelsManager::with_provider_for_tests(
-                    codex_home,
-                    auth_manager.clone(),
-                    provider,
-                )),
+                models_manager: create_model_provider(provider, Some(auth_manager.clone()))
+                    .models_manager(
+                        codex_home,
+                        /*config_model_catalog*/ None,
+                        CollaborationModesConfig::default(),
+                    ),
                 environment_manager,
                 skills_manager,
                 plugins_manager,
@@ -422,7 +424,7 @@ impl ThreadManager {
         validate_environment_selections(self.state.environment_manager.as_ref(), environments)
     }
 
-    pub fn get_models_manager(&self) -> Arc<ModelsManager> {
+    pub fn get_models_manager(&self) -> SharedModelsManager {
         self.state.models_manager.clone()
     }
 
@@ -750,25 +752,48 @@ impl ThreadManager {
     {
         let snapshot = snapshot.into();
         let history = RolloutRecorder::get_rollout_history(&path).await?;
-        let snapshot_state = snapshot_turn_state(&history);
-        let history = match snapshot {
-            ForkSnapshot::TruncateBeforeNthUserMessage(nth_user_message) => {
-                truncate_before_nth_user_message(history, nth_user_message, &snapshot_state)
-            }
-            ForkSnapshot::Interrupted => {
-                let history = match history {
-                    InitialHistory::New => InitialHistory::New,
-                    InitialHistory::Cleared => InitialHistory::Cleared,
-                    InitialHistory::Forked(history) => InitialHistory::Forked(history),
-                    InitialHistory::Resumed(resumed) => InitialHistory::Forked(resumed.history),
-                };
-                if snapshot_state.ends_mid_turn {
-                    append_interrupted_boundary(history, snapshot_state.active_turn_id)
-                } else {
-                    history
-                }
-            }
-        };
+        self.fork_thread_from_history(
+            snapshot,
+            config,
+            history,
+            persist_extended_history,
+            parent_trace,
+        )
+        .await
+    }
+
+    /// Fork an existing thread from already-loaded store history.
+    pub async fn fork_thread_from_history<S>(
+        &self,
+        snapshot: S,
+        config: Config,
+        history: InitialHistory,
+        persist_extended_history: bool,
+        parent_trace: Option<W3cTraceContext>,
+    ) -> CodexResult<NewThread>
+    where
+        S: Into<ForkSnapshot>,
+    {
+        self.fork_thread_with_initial_history(
+            snapshot.into(),
+            config,
+            history,
+            persist_extended_history,
+            parent_trace,
+        )
+        .await
+    }
+
+    async fn fork_thread_with_initial_history(
+        &self,
+        snapshot: ForkSnapshot,
+        config: Config,
+        history: InitialHistory,
+        persist_extended_history: bool,
+        parent_trace: Option<W3cTraceContext>,
+    ) -> CodexResult<NewThread> {
+        let interrupted_marker = InterruptedTurnHistoryMarker::from_config(&config);
+        let history = fork_history_from_snapshot(snapshot, history, interrupted_marker);
         let thread_store = configured_thread_store(&config);
         let environments = default_thread_environment_selections(
             self.state.environment_manager.as_ref(),
@@ -1228,10 +1253,44 @@ fn snapshot_turn_state(history: &InitialHistory) -> SnapshotTurnState {
     }
 }
 
+fn fork_history_from_snapshot(
+    snapshot: ForkSnapshot,
+    history: InitialHistory,
+    interrupted_marker: InterruptedTurnHistoryMarker,
+) -> InitialHistory {
+    let snapshot_state = snapshot_turn_state(&history);
+    match snapshot {
+        ForkSnapshot::TruncateBeforeNthUserMessage(nth_user_message) => {
+            truncate_before_nth_user_message(history, nth_user_message, &snapshot_state)
+        }
+        ForkSnapshot::Interrupted => {
+            let history = match history {
+                InitialHistory::New => InitialHistory::New,
+                InitialHistory::Cleared => InitialHistory::Cleared,
+                InitialHistory::Forked(history) => InitialHistory::Forked(history),
+                InitialHistory::Resumed(resumed) => InitialHistory::Forked(resumed.history),
+            };
+            if snapshot_state.ends_mid_turn {
+                append_interrupted_boundary(
+                    history,
+                    snapshot_state.active_turn_id,
+                    interrupted_marker,
+                )
+            } else {
+                history
+            }
+        }
+    }
+}
+
 /// Append the same persisted interrupt boundary used by the live interrupt path
 /// to an existing fork snapshot after the source thread has been confirmed to
 /// be mid-turn.
-fn append_interrupted_boundary(history: InitialHistory, turn_id: Option<String>) -> InitialHistory {
+fn append_interrupted_boundary(
+    history: InitialHistory,
+    turn_id: Option<String>,
+    interrupted_marker: InterruptedTurnHistoryMarker,
+) -> InitialHistory {
     let aborted_event = RolloutItem::EventMsg(EventMsg::TurnAborted(TurnAbortedEvent {
         turn_id,
         reason: TurnAbortReason::Interrupted,
@@ -1240,19 +1299,25 @@ fn append_interrupted_boundary(history: InitialHistory, turn_id: Option<String>)
     }));
 
     match history {
-        InitialHistory::New | InitialHistory::Cleared => InitialHistory::Forked(vec![
-            RolloutItem::ResponseItem(interrupted_turn_history_marker()),
-            aborted_event,
-        ]),
+        InitialHistory::New | InitialHistory::Cleared => {
+            let mut history = Vec::new();
+            if let Some(marker) = interrupted_turn_history_marker(interrupted_marker) {
+                history.push(RolloutItem::ResponseItem(marker));
+            }
+            history.push(aborted_event);
+            InitialHistory::Forked(history)
+        }
         InitialHistory::Forked(mut history) => {
-            history.push(RolloutItem::ResponseItem(interrupted_turn_history_marker()));
+            if let Some(marker) = interrupted_turn_history_marker(interrupted_marker) {
+                history.push(RolloutItem::ResponseItem(marker));
+            }
             history.push(aborted_event);
             InitialHistory::Forked(history)
         }
         InitialHistory::Resumed(mut resumed) => {
-            resumed
-                .history
-                .push(RolloutItem::ResponseItem(interrupted_turn_history_marker()));
+            if let Some(marker) = interrupted_turn_history_marker(interrupted_marker) {
+                resumed.history.push(RolloutItem::ResponseItem(marker));
+            }
             resumed.history.push(aborted_event);
             InitialHistory::Forked(resumed.history)
         }

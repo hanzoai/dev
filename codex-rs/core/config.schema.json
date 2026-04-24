@@ -36,6 +36,10 @@
         "$ref": "#/definitions/AgentRoleToml"
       },
       "properties": {
+        "interrupt_message": {
+          "description": "Whether to record a model-visible message when an agent turn is interrupted. Defaults to true.",
+          "type": "boolean"
+        },
         "job_max_runtime_seconds": {
           "description": "Default maximum runtime in seconds for agent job workers.",
           "format": "uint64",
@@ -1709,7 +1713,7 @@
     },
     "RawMcpServerConfig": {
       "additionalProperties": false,
-      "description": "Raw MCP config shape used for deserialization and JSON Schema generation.\n\nKeep `TryFrom<RawMcpServerConfig> for McpServerConfig` exhaustively destructuring this struct so new TOML fields cannot be added here without updating the validation/mapping logic that produces [`McpServerConfig`].",
+      "description": "Raw MCP config shape used for deserialization and supported-field JSON Schema generation.\n\nFields that are accepted only to produce targeted validation errors should be skipped in the generated schema.\n\nKeep `TryFrom<RawMcpServerConfig> for McpServerConfig` exhaustively destructuring this struct so new TOML fields cannot be added here without updating the validation/mapping logic that produces [`McpServerConfig`].",
       "properties": {
         "args": {
           "default": null,
@@ -1717,9 +1721,6 @@
             "type": "string"
           },
           "type": "array"
-        },
-        "bearer_token": {
-          "type": "string"
         },
         "bearer_token_env_var": {
           "type": "string"
@@ -2091,6 +2092,42 @@
         }
       },
       "type": "object"
+    },
+    "ThreadStoreToml": {
+      "oneOf": [
+        {
+          "properties": {
+            "type": {
+              "enum": [
+                "local"
+              ],
+              "type": "string"
+            }
+          },
+          "required": [
+            "type"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "endpoint": {
+              "type": "string"
+            },
+            "type": {
+              "enum": [
+                "remote"
+              ],
+              "type": "string"
+            }
+          },
+          "required": [
+            "endpoint",
+            "type"
+          ],
+          "type": "object"
+        }
+      ]
     },
     "ToolSuggestConfig": {
       "additionalProperties": false,
@@ -2487,6 +2524,14 @@
     "experimental_thread_config_endpoint": {
       "description": "Experimental / do not use. When set, app-server fetches thread-scoped config from a remote service at this endpoint.",
       "type": "string"
+    },
+    "experimental_thread_store": {
+      "allOf": [
+        {
+          "$ref": "#/definitions/ThreadStoreToml"
+        }
+      ],
+      "description": "Experimental / do not use. Selects the thread store implementation."
     },
     "experimental_thread_store_endpoint": {
       "description": "Experimental / do not use. When set, app-server uses a remote thread store at this endpoint instead of the local filesystem/SQLite store.",

@@ -66,10 +66,8 @@ use codex_mcp::McpConnectionManager;
 use codex_mcp::McpRuntimeEnvironment;
 use codex_mcp::ToolInfo;
 use codex_mcp::codex_apps_tools_cache_key;
-#[cfg(test)]
-use codex_models_manager::collaboration_mode_presets::CollaborationModesConfig;
-use codex_models_manager::manager::ModelsManager;
 use codex_models_manager::manager::RefreshStrategy;
+use codex_models_manager::manager::SharedModelsManager;
 use codex_network_proxy::NetworkProxy;
 use codex_network_proxy::NetworkProxyAuditMetadata;
 use codex_network_proxy::normalize_host;
@@ -92,11 +90,12 @@ use codex_protocol::dynamic_tools::DynamicToolSpec;
 use codex_protocol::items::TurnItem;
 use codex_protocol::items::UserMessageItem;
 use codex_protocol::mcp::CallToolResult;
+use codex_protocol::models::AdditionalPermissionProfile;
 use codex_protocol::models::BaseInstructions;
 use codex_protocol::models::PermissionProfile;
+use codex_protocol::models::SandboxEnforcement;
 use codex_protocol::models::format_allow_prefixes;
 use codex_protocol::openai_models::ModelInfo;
-use codex_protocol::permissions::FileSystemSandboxKind;
 use codex_protocol::permissions::FileSystemSandboxPolicy;
 use codex_protocol::permissions::NetworkSandboxPolicy;
 use codex_protocol::protocol::FileChange;
@@ -391,7 +390,7 @@ pub struct CodexSpawnOk {
 pub(crate) struct CodexSpawnArgs {
     pub(crate) config: Config,
     pub(crate) auth_manager: Arc<AuthManager>,
-    pub(crate) models_manager: Arc<ModelsManager>,
+    pub(crate) models_manager: SharedModelsManager,
     pub(crate) environment_manager: Arc<EnvironmentManager>,
     pub(crate) skills_manager: Arc<SkillsManager>,
     pub(crate) plugins_manager: Arc<PluginsManager>,
@@ -1845,7 +1844,7 @@ impl Session {
         reason: Option<String>,
         network_approval_context: Option<NetworkApprovalContext>,
         proposed_execpolicy_amendment: Option<ExecPolicyAmendment>,
-        additional_permissions: Option<PermissionProfile>,
+        additional_permissions: Option<AdditionalPermissionProfile>,
         available_decisions: Option<Vec<ReviewDecision>>,
     ) -> ReviewDecision {
         //  command-level approvals use `call_id`.
@@ -2267,7 +2266,8 @@ impl Session {
             PermissionGrantScope::Turn => {
                 if let Some(turn_state) = originating_turn_state {
                     let mut ts = turn_state.lock().await;
-                    let permissions: PermissionProfile = response.permissions.clone().into();
+                    let permissions: AdditionalPermissionProfile =
+                        response.permissions.clone().into();
                     ts.record_granted_permissions(permissions);
                     if response.strict_auto_review {
                         ts.enable_strict_auto_review();
@@ -2285,7 +2285,7 @@ impl Session {
         clippy::await_holding_invalid_type,
         reason = "active turn reads must stay consistent with the matching turn state"
     )]
-    pub(crate) async fn granted_turn_permissions(&self) -> Option<PermissionProfile> {
+    pub(crate) async fn granted_turn_permissions(&self) -> Option<AdditionalPermissionProfile> {
         let active = self.active_turn.lock().await;
         let active = active.as_ref()?;
         let ts = active.turn_state.lock().await;
@@ -2305,7 +2305,7 @@ impl Session {
         ts.strict_auto_review_enabled()
     }
 
-    pub(crate) async fn granted_session_permissions(&self) -> Option<PermissionProfile> {
+    pub(crate) async fn granted_session_permissions(&self) -> Option<AdditionalPermissionProfile> {
         let state = self.state.lock().await;
         state.granted_permissions()
     }
@@ -2627,12 +2627,8 @@ impl Session {
             }
         }
         if turn_context.config.include_skill_instructions {
-            let implicit_skills = turn_context
-                .turn_skills
-                .outcome
-                .allowed_skills_for_implicit_invocation();
             let available_skills = build_available_skills(
-                &implicit_skills,
+                &turn_context.turn_skills.outcome,
                 default_skill_metadata_budget(turn_context.model_info.context_window),
                 SkillRenderSideEffects::ThreadStart {
                     session_telemetry: &self.services.session_telemetry,

@@ -317,6 +317,9 @@ pub struct ConfigToml {
     /// Experimental / do not use. When set, app-server fetches thread-scoped
     /// config from a remote service at this endpoint.
     pub experimental_thread_config_endpoint: Option<String>,
+
+    /// Experimental / do not use. Selects the thread store implementation.
+    pub experimental_thread_store: Option<ThreadStoreToml>,
     pub projects: Option<HashMap<String, ProjectConfig>>,
 
     /// Controls the web search tool mode: disabled, cached, or live.
@@ -411,6 +414,20 @@ pub struct ConfigToml {
     pub experimental_use_freeform_apply_patch: Option<bool>,
     /// Preferred OSS provider for local models, e.g. "lmstudio" or "ollama".
     pub oss_provider: Option<String>,
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq, JsonSchema)]
+#[serde(tag = "type", rename_all = "snake_case")]
+pub enum ThreadStoreToml {
+    Local {},
+    Remote {
+        endpoint: String,
+    },
+    #[cfg(debug_assertions)]
+    #[schemars(skip)]
+    InMemory {
+        id: String,
+    },
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone, Default, PartialEq, Eq, JsonSchema)]
@@ -566,6 +583,9 @@ pub struct AgentsToml {
     /// Default maximum runtime in seconds for agent job workers.
     #[schemars(range(min = 1))]
     pub job_max_runtime_seconds: Option<u64>,
+    /// Whether to record a model-visible message when an agent turn is interrupted.
+    /// Defaults to true.
+    pub interrupt_message: Option<bool>,
 
     /// User-defined role declarations keyed by role name.
     ///
