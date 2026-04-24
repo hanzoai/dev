@@ -179,7 +179,7 @@ impl RemoteModelsManager {
         }
 
         if let Some(auth) = auth.as_ref()
-            && auth.mode.is_chatgpt()
+            && auth.uses_codex_backend()
             && let Some(account_id) = auth.get_account_id()
         {
             request = request.header("chatgpt-account-id", account_id);
@@ -317,13 +317,7 @@ impl RemoteModelsManager {
 
     fn models_url(&self, auth: &Option<CodexAuth>) -> crate::error::Result<Url> {
         let base_url = self.provider.base_url.clone().unwrap_or_else(|| {
-            if matches!(
-                auth,
-                Some(CodexAuth {
-                    mode: AuthMode::ChatGPT | AuthMode::ChatgptAuthTokens,
-                    ..
-                })
-            ) {
+            if auth.as_ref().is_some_and(CodexAuth::uses_codex_backend) {
                 "https://chatgpt.com/backend-api/codex".to_string()
             } else {
                 "https://api.openai.com/v1".to_string()
