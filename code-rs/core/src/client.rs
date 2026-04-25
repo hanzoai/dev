@@ -365,6 +365,17 @@ impl ModelClient {
         }
     }
 
+    fn apply_requested_model_headers(
+        &self,
+        req_builder: reqwest::RequestBuilder,
+        model: &str,
+    ) -> reqwest::RequestBuilder {
+        req_builder.headers(crate::default_client::requested_model_headers(
+            Some(self.config.responses_originator_header.as_str()),
+            model,
+        ))
+    }
+
     fn current_reasoning_param(
         &self,
         family: &ModelFamily,
@@ -631,6 +642,7 @@ impl ModelClient {
                     model_slug,
                     &self.client,
                     &self.provider,
+                    self.config.responses_originator_header.as_str(),
                     &self.debug_logger,
                     self.auth_manager.clone(),
                     self.otel_event_manager.clone(),
@@ -821,6 +833,7 @@ impl ModelClient {
                     url,
                 )
                 .await?;
+            req_builder = self.apply_requested_model_headers(req_builder, request_model);
 
             let has_beta_header = req_builder
                 .try_clone()
@@ -1293,6 +1306,7 @@ impl ModelClient {
                 .provider
                 .create_request_builder_with_auth(&self.client, &auth)
                 .await?;
+            req_builder = self.apply_requested_model_headers(req_builder, request_model);
 
             let has_beta_header = req_builder
                 .try_clone()
@@ -1927,6 +1941,7 @@ impl ModelClient {
                 .provider
                 .create_compact_request_builder_with_auth(&self.client, &auth)
                 .await?;
+            request = self.apply_requested_model_headers(request, model_slug);
 
             // Ensure Responses API beta header is present for compact calls. Mirror the
             // streaming path: use the public "responses=v1" header for the public OpenAI
