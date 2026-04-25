@@ -46,7 +46,7 @@ pub enum WireApi {
     Chat,
 
     /// Native ZAP binary transport over TLS 1.3+PQ.
-    /// Connects to zap.hanzo.ai:9651 (or ZAP_ENDPOINT env) and sends
+    /// Connects to zap.hanzo.ai:9999 (or ZAP_ENDPOINT env) and sends
     /// chat completions as MsgType 100 (native cloud service) messages.
     Zap,
 }
