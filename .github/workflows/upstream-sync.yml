@@ -1,0 +1,126 @@
+# Periodic upstream sync. Fetches `just-every/code` (the canonical fork base
+# Hanzo dev tracks), attempts a merge into `merge-upstream-updates`, opens
+# a PR for review on conflict, auto-merges on clean.
+#
+# Hanzo overlay paths are kept distinct from upstream so most syncs are clean.
+# Conflicting paths are flagged for manual resolution; the bot does NOT
+# resolve content conflicts — those need eyes.
+#
+# Trigger: every 6 hours on schedule, plus manual via workflow_dispatch.
+
+name: upstream-sync
+
+on:
+  schedule:
+    - cron: '0 */6 * * *'
+  workflow_dispatch:
+    inputs:
+      upstream_remote:
+        description: 'Upstream remote URL'
+        required: false
+        default: 'https://github.com/just-every/code.git'
+      upstream_branch:
+        description: 'Upstream branch to sync from'
+        required: false
+        default: 'main'
+
+permissions:
+  contents: write
+  pull-requests: write
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    steps:
+      - name: checkout main
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: configure git
+        run: |
+          git config user.name 'hanzo-upstream-sync[bot]'
+          git config user.email 'hanzo-upstream-sync@users.noreply.github.com'
+
+      - name: fetch upstream
+        env:
+          UPSTREAM_URL: ${{ github.event.inputs.upstream_remote || 'https://github.com/just-every/code.git' }}
+          UPSTREAM_BRANCH: ${{ github.event.inputs.upstream_branch || 'main' }}
+        run: |
+          git remote add upstream "$UPSTREAM_URL"
+          git fetch upstream "$UPSTREAM_BRANCH" --tags --no-recurse-submodules
+
+      - name: short-circuit if already in sync
+        id: sync_check
+        env:
+          UPSTREAM_BRANCH: ${{ github.event.inputs.upstream_branch || 'main' }}
+        run: |
+          BEHIND=$(git rev-list --count "main..upstream/$UPSTREAM_BRANCH")
+          echo "behind=$BEHIND" >> "$GITHUB_OUTPUT"
+          if [ "$BEHIND" = "0" ]; then
+            echo "Already at upstream HEAD; nothing to do."
+          fi
+
+      - name: prepare merge branch
+        if: steps.sync_check.outputs.behind != '0'
+        env:
+          UPSTREAM_BRANCH: ${{ github.event.inputs.upstream_branch || 'main' }}
+        run: |
+          BRANCH="merge-upstream-$(date -u +%Y%m%d-%H%M%S)"
+          echo "MERGE_BRANCH=$BRANCH" >> "$GITHUB_ENV"
+          git checkout -b "$BRANCH" main
+
+      - name: attempt merge
+        id: merge
+        if: steps.sync_check.outputs.behind != '0'
+        env:
+          UPSTREAM_BRANCH: ${{ github.event.inputs.upstream_branch || 'main' }}
+        run: |
+          set +e
+          git merge --no-edit "upstream/$UPSTREAM_BRANCH" -m "merge upstream/$UPSTREAM_BRANCH"
+          STATUS=$?
+          if [ "$STATUS" -ne 0 ]; then
+            CONFLICTS=$(git diff --name-only --diff-filter=U | tr '\n' ' ')
+            git merge --abort
+            git checkout main
+            echo "status=conflict" >> "$GITHUB_OUTPUT"
+            echo "conflicts=$CONFLICTS" >> "$GITHUB_OUTPUT"
+          else
+            echo "status=clean" >> "$GITHUB_OUTPUT"
+          fi
+          exit 0
+
+      - name: push merge branch (clean)
+        if: steps.merge.outputs.status == 'clean'
+        run: |
+          git push origin "$MERGE_BRANCH"
+
+      - name: open PR (clean — auto-merge eligible)
+        if: steps.merge.outputs.status == 'clean'
+        uses: peter-evans/create-pull-request@v6
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+          branch: ${{ env.MERGE_BRANCH }}
+          base: main
+          title: 'sync: upstream just-every/code (clean)'
+          body: |
+            Automated upstream sync. Merge produced no conflicts.
+
+            Behind by ${{ steps.sync_check.outputs.behind }} commits before this PR.
+
+            Auto-merge will land this once required checks pass.
+          labels: upstream-sync, automerge
+
+      - name: open PR (conflict — needs human)
+        if: steps.merge.outputs.status == 'conflict'
+        run: |
+          # Push only the marker branch (no commits beyond main); the PR body documents
+          # conflicting paths so a human can drive the resolution locally.
+          git push origin "$MERGE_BRANCH" || true
+          gh issue create \
+            --title "upstream-sync: conflict on $(date -u +%Y-%m-%d)" \
+            --label upstream-sync,conflict \
+            --body "Automated upstream sync hit conflicts. Behind by ${{ steps.sync_check.outputs.behind }} commits. Conflicting paths:\n\n\`\`\`\n${{ steps.merge.outputs.conflicts }}\n\`\`\`\n\nResolve locally:\n\`\`\`\ngit fetch origin\ngit checkout main\ngit merge upstream/${{ github.event.inputs.upstream_branch || 'main' }}\n# resolve conflicts\ngit push\n\`\`\`"
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
