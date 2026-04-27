@@ -1,6 +1,6 @@
 //! ZAP cloud service client for the dev CLI.
 //!
-//! Connects to `zap.hanzo.ai:9651` via TLS 1.3, performs the luxfi/zap
+//! Connects to `zap.hanzo.ai:9999` via TLS 1.3, performs the luxfi/zap
 //! handshake, and sends MsgType 100 cloud service requests (chat.completions).
 //!
 //! This is the real native ZAP binary transport — no HTTP, no fallback.
@@ -23,7 +23,7 @@ use tokio::sync::mpsc;
 use tracing::debug;
 use tracing::warn;
 
-const DEFAULT_ZAP_ENDPOINT: &str = "zap.hanzo.ai:9651";
+const DEFAULT_ZAP_ENDPOINT: &str = "zap.hanzo.ai:9999";
 const CLIENT_NODE_ID: &str = "dev-client";
 
 // ── OpenAI-compatible response types ────────────────────────────────────
