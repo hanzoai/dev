@@ -109,18 +109,31 @@ just log [args]            # Tail state SQLite logs
 
 ## Merge Strategy (from upstream)
 
-1. `git fetch openai` (remote points to local clone at `/Users/z/work/openai/codex`)
-2. `git merge openai/main` — resolve conflicts preserving Hanzo branding
-3. Common conflict areas: `justfile`, `package.json`, hooks, TUI module names
-4. Upstream renames to watch: `multi_agents` → `collab`, `HookResult` → `HookOutcome`
-5. After merge: `cargo check --manifest-path codex-rs/Cargo.toml` to verify
-6. Then fix any compile errors in hanzo-dev workspace that depend on codex-rs types
+Upstream is `openai/codex`. Sync is automated via `.github/workflows/upstream-sync.yml`
+(weekly, Mon 06:00 UTC, also `workflow_dispatch`). The workflow:
+
+1. fetches `upstream/main`
+2. merges into a fresh `upstream-sync/<UTC-date>` branch
+3. opens a **draft** PR — never auto-merges
+4. on conflict, commits the merge with conflict markers in place and opens a draft PR
+   labelled `upstream-sync,conflict` listing the paths
+
+There is exactly one upstream sync workflow. Do not add a second.
+
+Manual resolution recipe when CI flags a conflict:
+
+1. `git fetch origin && git checkout upstream-sync/<date>`
+2. resolve conflicts; common areas: `justfile`, `package.json`, hooks, TUI module names
+3. upstream renames to watch: `multi_agents` → `collab`, `HookResult` → `HookOutcome`
+4. `cargo check --manifest-path codex-rs/Cargo.toml`
+5. fix any hanzo-dev compile errors that depend on codex-rs types
+6. `git push --force-with-lease && gh pr ready`
 
 **Remotes:**
 
 - `origin` — `git@github.com:hanzoai/dev.git`
-- `openai` — `/Users/z/work/openai/codex` (local mirror)
-- `openai-upstream` — `https://github.com/openai/codex.git`
+- `openai` — `/Users/z/work/openai/codex` (local mirror, dev-only convenience)
+- `upstream` — `https://github.com/openai/codex.git` (canonical sync source)
 
 ## npm Distribution
 
