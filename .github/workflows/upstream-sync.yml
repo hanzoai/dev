@@ -1,0 +1,161 @@
+# Periodic upstream sync.
+#
+# Fetches upstream, opens a DRAFT PR with the merge result on a branch named
+# `upstream-sync/<UTC-date>`. NEVER auto-merges. On conflict the workflow
+# pushes the in-progress merge (with conflict markers committed) so a human
+# can `git checkout` the branch, resolve, force-push, mark ready.
+#
+# One way: this is the only upstream sync entry point for this repo. Do not
+# add a second workflow.
+
+name: upstream-sync
+
+on:
+  schedule:
+    # Weekly, Monday 06:00 UTC. Codex moves fast, but a weekly cadence keeps
+    # PR noise low and gives a human time to review/land each batch.
+    - cron: '0 6 * * 1'
+  workflow_dispatch:
+    inputs:
+      upstream_url:
+        description: 'Upstream git URL'
+        required: false
+        default: 'https://github.com/openai/codex.git'
+      upstream_branch:
+        description: 'Upstream branch'
+        required: false
+        default: 'main'
+
+permissions:
+  contents: write
+  pull-requests: write
+  issues: write
+
+concurrency:
+  group: upstream-sync
+  cancel-in-progress: false
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      UPSTREAM_URL: ${{ inputs.upstream_url || 'https://github.com/openai/codex.git' }}
+      UPSTREAM_BRANCH: ${{ inputs.upstream_branch || 'main' }}
+    steps:
+      - name: checkout main
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: configure git
+        run: |
+          git config user.name 'hanzo-upstream-sync[bot]'
+          git config user.email 'hanzo-upstream-sync@users.noreply.github.com'
+
+      - name: fetch upstream
+        run: |
+          git remote add upstream "$UPSTREAM_URL" 2>/dev/null || git remote set-url upstream "$UPSTREAM_URL"
+          git fetch upstream "$UPSTREAM_BRANCH" --no-tags --no-recurse-submodules
+
+      - name: short-circuit if in sync
+        id: behind
+        run: |
+          BEHIND=$(git rev-list --count "main..upstream/$UPSTREAM_BRANCH")
+          echo "count=$BEHIND" >> "$GITHUB_OUTPUT"
+          if [ "$BEHIND" = "0" ]; then echo "Already at upstream HEAD."; fi
+
+      - name: create sync branch
+        if: steps.behind.outputs.count != '0'
+        run: |
+          DATE=$(date -u +%Y-%m-%d)
+          BRANCH="upstream-sync/$DATE"
+          # If a branch from earlier today exists, suffix with run id to keep it unique.
+          if git ls-remote --exit-code --heads origin "$BRANCH" >/dev/null 2>&1; then
+            BRANCH="$BRANCH-${{ github.run_id }}"
+          fi
+          echo "BRANCH=$BRANCH" >> "$GITHUB_ENV"
+          git checkout -b "$BRANCH" main
+
+      - name: attempt merge
+        id: merge
+        if: steps.behind.outputs.count != '0'
+        run: |
+          set +e
+          git merge --no-edit --no-ff "upstream/$UPSTREAM_BRANCH" \
+            -m "merge: upstream/$UPSTREAM_BRANCH ($(date -u +%Y-%m-%d))"
+          MERGE_STATUS=$?
+          if [ "$MERGE_STATUS" -ne 0 ]; then
+            CONFLICTS=$(git diff --name-only --diff-filter=U)
+            # Commit the conflict markers as-is so the branch is pushable and
+            # a human can `git checkout` and resolve in place. NEVER auto-resolve.
+            git add -A
+            git commit --no-verify -m "merge: upstream/$UPSTREAM_BRANCH WITH CONFLICTS — needs human resolution"
+            {
+              echo 'status=conflict'
+              echo 'conflicts<<EOF'
+              echo "$CONFLICTS"
+              echo 'EOF'
+            } >> "$GITHUB_OUTPUT"
+          else
+            echo 'status=clean' >> "$GITHUB_OUTPUT"
+          fi
+          exit 0
+
+      - name: push sync branch
+        if: steps.behind.outputs.count != '0'
+        run: git push origin "$BRANCH"
+
+      - name: open draft PR (clean)
+        if: steps.merge.outputs.status == 'clean'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh pr create \
+            --draft \
+            --base main \
+            --head "$BRANCH" \
+            --title "sync: upstream $UPSTREAM_URL@$UPSTREAM_BRANCH ($(date -u +%Y-%m-%d))" \
+            --label upstream-sync \
+            --body "Automated upstream sync. Merge produced no conflicts.
+
+Behind by ${{ steps.behind.outputs.count }} commits before this PR.
+
+This PR is intentionally a **draft**. A human MUST review and mark ready before merge. Auto-merge is disabled by policy."
+
+      - name: open draft PR (conflict)
+        if: steps.merge.outputs.status == 'conflict'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          CONFLICTS: ${{ steps.merge.outputs.conflicts }}
+        run: |
+          gh pr create \
+            --draft \
+            --base main \
+            --head "$BRANCH" \
+            --title "sync: upstream $UPSTREAM_URL@$UPSTREAM_BRANCH — CONFLICTS ($(date -u +%Y-%m-%d))" \
+            --label upstream-sync,conflict \
+            --body "Automated upstream sync hit conflicts. The merge commit was pushed **with conflict markers committed** so this branch is checkoutable.
+
+Behind by ${{ steps.behind.outputs.count }} commits.
+
+## Conflicts
+
+\`\`\`
+$CONFLICTS
+\`\`\`
+
+## Resolve locally
+
+\`\`\`
+git fetch origin
+git checkout $BRANCH
+# Files have conflict markers committed. Resolve, then:
+git add -A
+git commit --amend --no-edit  # or new commit, your call
+git push --force-with-lease origin $BRANCH
+gh pr ready  # mark this PR ready for review
+\`\`\`
+
+Auto-resolution is disabled by policy. A human must drive this."
