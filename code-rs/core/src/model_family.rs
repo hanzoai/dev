@@ -22,14 +22,10 @@ const GPT_5_1_INSTRUCTIONS: &str = include_str!("../gpt_5_1_prompt.md");
 const GPT_5_2_INSTRUCTIONS: &str = include_str!("../gpt_5_2_prompt.md");
 const GPT_5_1_CODEX_MAX_INSTRUCTIONS: &str = include_str!("../gpt-5.1-codex-max_prompt.md");
 const GPT_5_2_CODEX_INSTRUCTIONS: &str = include_str!("../gpt-5.2-codex_prompt.md");
-
-const GPT_5_2_CODEX_INSTRUCTIONS_TEMPLATE: &str = include_str!(
-    "../templates/model_instructions/gpt-5.2-codex_instructions_template.md",
-);
-const PERSONALITY_FRIENDLY: &str =
-    include_str!("../templates/personalities/gpt-5.2-codex_friendly.md");
-const PERSONALITY_PRAGMATIC: &str =
-    include_str!("../templates/personalities/gpt-5.2-codex_pragmatic.md");
+const DEFAULT_PERSONALITY_HEADER: &str = "You are Codex, a coding agent based on GPT-5. You and the user share the same workspace and collaborate to achieve the user's goals.";
+const LOCAL_FRIENDLY_TEMPLATE: &str =
+    "You optimize for team morale and being a supportive teammate as much as code quality.";
+const LOCAL_PRAGMATIC_TEMPLATE: &str = "You are a deeply pragmatic, effective software engineer.";
 
 const CONTEXT_WINDOW_272K: u64 = 272_000;
 const CONTEXT_WINDOW_200K: u64 = 200_000;
@@ -153,14 +149,13 @@ pub(crate) fn base_instructions_override_for_personality(
     }
     let personality_message = match personality {
         Some(Personality::None) => "",
-        Some(Personality::Friendly) => PERSONALITY_FRIENDLY,
-        Some(Personality::Pragmatic) => PERSONALITY_PRAGMATIC,
+        Some(Personality::Friendly) => LOCAL_FRIENDLY_TEMPLATE,
+        Some(Personality::Pragmatic) => LOCAL_PRAGMATIC_TEMPLATE,
         None => "",
     };
-    Some(
-        GPT_5_2_CODEX_INSTRUCTIONS_TEMPLATE
-            .replace("{{ personality }}", personality_message),
-    )
+    Some(format!(
+        "{DEFAULT_PERSONALITY_HEADER}\n\n{personality_message}\n\n{BASE_INSTRUCTIONS}"
+    ))
 }
 
 macro_rules! model_family {
@@ -211,7 +206,9 @@ fn apply_upstream_model_overrides(mut family: ModelFamily) -> ModelFamily {
     };
 
     family.base_instructions = model_info.base_instructions.clone();
-    family.context_window = model_info.context_window.and_then(|limit| u64::try_from(limit).ok());
+    family.context_window = model_info
+        .resolved_context_window()
+        .and_then(|limit| u64::try_from(limit).ok());
     family.default_reasoning_effort = model_info.default_reasoning_level.map(|effort| match effort {
         code_protocol::openai_models::ReasoningEffort::None
         | code_protocol::openai_models::ReasoningEffort::Minimal => ReasoningEffort::Minimal,
@@ -223,7 +220,18 @@ fn apply_upstream_model_overrides(mut family: ModelFamily) -> ModelFamily {
     family.default_reasoning_summary = model_info.default_reasoning_summary.into();
     family.supports_reasoning_summaries = model_info.supports_reasoning_summaries;
     family.supports_parallel_tool_calls = model_info.supports_parallel_tool_calls;
+    if let Some(tool_type) = model_info.apply_patch_tool_type.as_ref() {
+        family.apply_patch_tool_type = Some(match tool_type {
+            code_protocol::openai_models::ApplyPatchToolType::Freeform => {
+                ApplyPatchToolType::Freeform
+            }
+            code_protocol::openai_models::ApplyPatchToolType::Function => ApplyPatchToolType::Function,
+        });
+    }
     family.web_search_tool_type = model_info.web_search_tool_type;
+    family.supports_search_tool = model_info.supports_search_tool;
+    family.additional_speed_tiers = model_info.additional_speed_tiers.clone();
+    family.prefer_websockets = model_info.prefer_websockets;
     family.supports_image_detail_original = model_info.supports_image_detail_original;
     family.supports_image_generation = supports_image_generation(model_info);
     family.uses_local_shell_tool = matches!(model_info.shell_type, ConfigShellToolType::Local);
@@ -484,6 +492,9 @@ fn supports_image_generation(model_info: &ModelInfo) -> bool {
 
 #[cfg(test)]
 mod tests {
+    use crate::config_types::ReasoningEffort;
+    use crate::tool_apply_patch::ApplyPatchToolType;
+
     use super::find_family_for_model;
 
     #[test]
@@ -491,6 +502,26 @@ mod tests {
         let family = find_family_for_model("gpt-5.4").expect("known upstream model");
 
         assert!(family.supports_image_generation);
+    }
+
+    #[test]
+    fn bundled_model_metadata_applies_upstream_tool_flags() {
+        let family = find_family_for_model("gpt-5.5").expect("known upstream model");
+
+        assert_eq!(
+            family.apply_patch_tool_type,
+            Some(ApplyPatchToolType::Freeform)
+        );
+        assert!(family.uses_shell_command_tool);
+        assert!(family.supports_search_tool);
+        assert!(family.prefer_websockets);
+    }
+
+    #[test]
+    fn bundled_model_metadata_applies_upstream_reasoning_default() {
+        let family = find_family_for_model("gpt-5.4").expect("known upstream model");
+
+        assert_eq!(family.default_reasoning_effort, Some(ReasoningEffort::XHigh));
     }
 }
 
