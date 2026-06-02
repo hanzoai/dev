@@ -1,64 +1,36 @@
 # Getting Started
 
-This guide gets a published OpenAI Codex Python SDK beta installation running
-with a multi-turn thread.
+This is the fastest path from install to a multi-turn thread using the public SDK surface.
 
-## 1. Install
+The SDK is experimental. Treat the API, bundled runtime strategy, and packaging details as unstable until the first public release.
 
-Install the SDK:
+## 1) Install
+
+From repo root:
 
 ```bash
-pip install openai-codex
+cd sdk/python
+uv sync
+source .venv/bin/activate
 ```
 
 Requirements:
 
 - Python `>=3.10`
-- An existing Codex account session, or one of the login flows below
+- uv
+- installed `openai-codex-cli-bin` runtime package, or an explicit `codex_bin` override
+- local Codex auth/session configured
 
-The SDK installs its compatible `openai-codex-cli-bin` runtime dependency
-automatically. While beta releases are the only published SDK releases, this
-normal install command selects the latest beta. After a stable release exists,
-use `pip install --pre openai-codex` to opt into a newer prerelease.
-
-## 2. Authenticate When Needed
-
-Existing Codex authentication is reused automatically. For ChatGPT browser
-login:
+## 2) Run your first turn (sync)
 
 ```python
-from openai_codex import Codex
+from codex_app_server import Codex
 
 with Codex() as codex:
-    login = codex.login_chatgpt()
-    print(login.auth_url)
-    print(login.wait().success)
-```
+    server = codex.metadata.serverInfo
+    print("Server:", None if server is None else server.name, None if server is None else server.version)
 
-For device-code login:
-
-```python
-with Codex() as codex:
-    login = codex.login_chatgpt_device_code()
-    print(login.verification_url, login.user_code)
-    print(login.wait().success)
-```
-
-For API-key login:
-
-```python
-with Codex() as codex:
-    codex.login_api_key("sk-...")
-    print(codex.account().account)
-```
-
-## 3. Run A Turn
-
-```python
-from openai_codex import Codex, Sandbox
-
-with Codex() as codex:
-    thread = codex.thread_start(sandbox=Sandbox.workspace_write)
+    thread = codex.thread_start(model="gpt-5.4", config={"model_reasoning_effort": "high"})
     result = thread.run("Say hello in one sentence.")
 
     print("Thread:", thread.id)
@@ -66,66 +38,43 @@ with Codex() as codex:
     print("Items:", len(result.items))
 ```
 
-`Thread.run(...)` starts a turn, waits for completion, and returns
-`TurnResult`. Plain strings are shorthand for `TextInput(...)`.
+What happened:
 
-Use `Thread.turn(...)` when you need a `TurnHandle` for streaming, steering,
-or interrupting an active turn.
+- `Codex()` started and initialized `codex app-server`.
+- `thread_start(...)` created a thread.
+- `thread.run("...")` started a turn, consumed events until completion, and returned the final assistant response plus collected items and usage.
+- `result.final_response` is `None` when no final-answer or phase-less assistant message item completes for the turn.
+- use `thread.turn(...)` when you need a `TurnHandle` for streaming, steering, interrupting, or turn IDs/status
+- one client can have only one active turn consumer (`thread.run(...)`, `TurnHandle.stream()`, or `TurnHandle.run()`) at a time in the current experimental build
 
-## 4. Choose Sandbox Access
-
-Use one enum for the initial thread and later turn overrides:
-
-```python
-from openai_codex import Codex, Sandbox
-
-with Codex() as codex:
-    thread = codex.thread_start(sandbox=Sandbox.workspace_write)
-    thread.run("Make the requested changes.")
-    review = thread.run("Review the diff only.", sandbox=Sandbox.read_only)
-```
-
-Available presets:
-
-- `Sandbox.read_only`: read files without allowing writes.
-- `Sandbox.workspace_write`: read files and write inside the workspace and
-  configured writable roots; this is the normal default for workspace work.
-- `Sandbox.full_access`: run without filesystem access restrictions.
-
-When `sandbox=` is omitted, Codex uses its configured default. A turn override
-also applies to subsequent turns on that thread.
-
-## 5. Continue A Thread
+## 3) Continue the same thread (multi-turn)
 
 ```python
-from openai_codex import Codex
+from codex_app_server import Codex
 
 with Codex() as codex:
-    thread = codex.thread_start()
-    thread.run("Summarize Rust ownership in two bullets.")
-    result = thread.run("Now explain it to a Python developer.")
-    print(result.final_response)
+    thread = codex.thread_start(model="gpt-5.4", config={"model_reasoning_effort": "high"})
+
+    first = thread.run("Summarize Rust ownership in 2 bullets.")
+    second = thread.run("Now explain it to a Python developer.")
+
+    print("first:", first.final_response)
+    print("second:", second.final_response)
 ```
 
-To resume a stored thread later:
+## 4) Async parity
 
-```python
-with Codex() as codex:
-    thread = codex.thread_resume("thr_123")
-    print(thread.run("Continue where we left off.").final_response)
-```
-
-## 6. Use The Async Client
+Use `async with AsyncCodex()` as the normal async entrypoint. `AsyncCodex`
+initializes lazily, and context entry makes startup/shutdown explicit.
 
 ```python
 import asyncio
-
-from openai_codex import AsyncCodex, Sandbox
+from codex_app_server import AsyncCodex
 
 
 async def main() -> None:
     async with AsyncCodex() as codex:
-        thread = await codex.thread_start(sandbox=Sandbox.workspace_write)
+        thread = await codex.thread_start(model="gpt-5.4", config={"model_reasoning_effort": "high"})
         result = await thread.run("Continue where we left off.")
         print(result.final_response)
 
@@ -133,36 +82,29 @@ async def main() -> None:
 asyncio.run(main())
 ```
 
-## 7. Get Help
-
-Python's built-in documentation tools cover the curated SDK surface:
+## 5) Resume an existing thread
 
 ```python
-import openai_codex
-from openai_codex import Codex, CodexConfig
+from codex_app_server import Codex
 
-help(openai_codex)
-help(Codex)
-help(CodexConfig)
+THREAD_ID = "thr_123"  # replace with a real id
+
+with Codex() as codex:
+    thread = codex.thread_resume(THREAD_ID)
+    result = thread.run("Continue where we left off.")
+    print(result.final_response)
 ```
 
-```bash
-python -m pydoc openai_codex
+## 6) Generated models
+
+The convenience wrappers live at the package root, but the canonical app-server models live under:
+
+```python
+from codex_app_server.generated.v2_all import Turn, TurnStatus, ThreadReadResponse
 ```
 
-## Developing From This Repository
+## 7) Next stops
 
-Contributors working from a checkout can install development dependencies from
-the repository:
-
-```bash
-cd sdk/python
-uv sync --extra dev
-source .venv/bin/activate
-```
-
-## Next Stops
-
-- [API reference](https://github.com/openai/codex/blob/main/sdk/python/docs/api-reference.md)
-- [FAQ](https://github.com/openai/codex/blob/main/sdk/python/docs/faq.md)
-- [Runnable examples](https://github.com/openai/codex/blob/main/sdk/python/examples/README.md)
+- API surface and signatures: `docs/api-reference.md`
+- Common decisions/pitfalls: `docs/faq.md`
+- End-to-end runnable examples: `examples/README.md`

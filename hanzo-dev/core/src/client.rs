@@ -56,7 +56,6 @@ use crate::config::Config;
 use crate::config_types::ReasoningEffort as ReasoningEffortConfig;
 use crate::config_types::ReasoningSummary as ReasoningSummaryConfig;
 use crate::config_types::ContextMode;
-use crate::config_types::ServiceTier;
 use crate::config_types::TextVerbosity as TextVerbosityConfig;
 use crate::debug_logger::DebugLogger;
 use crate::default_client::create_client;
@@ -107,6 +106,7 @@ fn preferred_ws_version_from_env() -> ResponsesWebsocketVersion {
 // be replayed on every subsequent request within the same turn (retries,
 // continuations, websocket reconnects).
 const X_CODEX_TURN_STATE_HEADER: &str = "x-codex-turn-state";
+const X_CODEX_WINDOW_ID_HEADER: &str = "x-codex-window-id";
 
 const MODEL_CAP_MODEL_HEADER: &str = "x-codex-model-cap-model";
 const MODEL_CAP_RESET_AFTER_HEADER: &str = "x-codex-model-cap-reset-after-seconds";
@@ -155,6 +155,10 @@ struct CompactHistoryRequest<'a> {
     #[serde(borrow)]
     input: &'a [ResponseItem],
     instructions: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    service_tier: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    prompt_cache_key: Option<&'a str>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -364,6 +368,17 @@ impl ModelClient {
         }
     }
 
+    fn apply_requested_model_headers(
+        &self,
+        req_builder: reqwest::RequestBuilder,
+        model: &str,
+    ) -> reqwest::RequestBuilder {
+        req_builder.headers(crate::default_client::requested_model_headers(
+            Some(self.config.responses_originator_header.as_str()),
+            model,
+        ))
+    }
+
     fn current_reasoning_param(
         &self,
         family: &ModelFamily,
@@ -404,6 +419,10 @@ impl ModelClient {
 
     pub fn code_home(&self) -> &Path {
         &self.config.code_home
+    }
+
+    fn current_window_id(&self, session_id: Uuid) -> String {
+        format!("{session_id}:0")
     }
 
     pub(crate) fn config(&self) -> &crate::config::Config {
@@ -469,6 +488,13 @@ impl ModelClient {
             } else {
                 AuthMode::ApiKey
             }));
+        let image_generation_auth_allowed = self
+            .auth_manager
+            .as_ref()
+            .and_then(|manager| manager.auth().map(|auth| auth.mode))
+            .is_some_and(|mode| matches!(mode, AuthMode::Chatgpt));
+        tools_config.image_gen_tool = model_family.supports_image_generation
+            && image_generation_auth_allowed;
         let supports_pro_only_models = self
             .auth_manager
             .as_ref()
@@ -501,7 +527,9 @@ impl ModelClient {
         let base_shell_type = tools_config.shell_type.clone();
         let base_uses_native_shell = matches!(
             &base_shell_type,
-            ConfigShellToolType::LocalShell | ConfigShellToolType::StreamableShell
+            ConfigShellToolType::LocalShell
+                | ConfigShellToolType::StreamableShell
+                | ConfigShellToolType::ShellCommand { .. }
         );
 
         tools_config.shell_type = match sandbox_policy.clone() {
@@ -617,6 +645,7 @@ impl ModelClient {
                     model_slug,
                     &self.client,
                     &self.provider,
+                    self.config.responses_originator_header.as_str(),
                     &self.debug_logger,
                     self.auth_manager.clone(),
                     self.otel_event_manager.clone(),
@@ -776,10 +805,10 @@ impl ModelClient {
                 store: self.provider.is_azure_responses_endpoint(),
                 stream: true,
                 include,
-                service_tier: match self.config.service_tier {
-                    Some(ServiceTier::Fast) => Some("priority".to_string()),
-                    _ => None,
-                },
+                service_tier: self
+                    .config
+                    .service_tier
+                    .map(|service_tier| service_tier.request_value().to_string()),
                 prompt_cache_key: Some(session_id_str.clone()),
             };
 
@@ -804,7 +833,8 @@ impl ModelClient {
                 }
             }
 
-            let auth = auth_manager.as_ref().and_then(|m| m.auth());
+            let base_auth = auth_manager.as_ref().and_then(|m| m.auth());
+            let auth = self.provider.effective_auth(&base_auth).await?;
             let endpoint = self.provider.get_full_url(&auth);
 
             let url = reqwest::Url::parse(&endpoint).map_err(|err| {
@@ -822,8 +852,14 @@ impl ModelClient {
             };
             let mut req_builder = self
                 .provider
-                .create_request_builder_for_url(&self.client, &auth, reqwest::Method::GET, url)
+                .create_request_builder_for_url_with_auth(
+                    &self.client,
+                    &auth,
+                    reqwest::Method::GET,
+                    url,
+                )
                 .await?;
+            req_builder = self.apply_requested_model_headers(req_builder, request_model);
 
             let has_beta_header = req_builder
                 .try_clone()
@@ -846,7 +882,11 @@ impl ModelClient {
             }
             req_builder = req_builder
                 .header("conversation_id", session_id_str.clone())
-                .header("session_id", session_id_str.clone());
+                .header("session_id", session_id_str.clone())
+                .header("thread_id", session_id_str.clone());
+            if let Ok(window_id) = HeaderValue::from_str(&self.current_window_id(session_id)) {
+                req_builder = req_builder.header(X_CODEX_WINDOW_ID_HEADER, window_id);
+            }
 
             if let Some(auth) = auth.as_ref()
                 && auth.mode.is_chatgpt()
@@ -907,10 +947,23 @@ impl ModelClient {
             }
             let ws_payload_text = serde_json::to_string(&serde_json::Value::Object(ws_payload))?;
 
-            let connect = tokio_tungstenite::connect_async(ws_request).await;
+            let connect = timeout(
+                self.provider.websocket_connect_timeout(),
+                tokio_tungstenite::connect_async(ws_request),
+            )
+            .await;
             match connect {
-                Ok((mut ws_stream, response)) => {
+                Ok(Ok((mut ws_stream, response))) => {
                     let (tx_event, rx_event) = mpsc::channel::<Result<ResponseEvent>>(1600);
+
+                    let response_headers = header_map_to_json(response.headers());
+                    if tx_event
+                        .send(Ok(ResponseEvent::ResponseHeaders(response_headers)))
+                        .await
+                        .is_err()
+                    {
+                        debug!("receiver dropped response headers event");
+                    }
 
                     if let Some(value) = response
                         .headers()
@@ -1059,7 +1112,7 @@ impl ModelClient {
 
                     return Ok(ResponseStream { rx_event });
                 }
-                Err(err) => {
+                Ok(Err(err)) => {
                     if websocket_connect_is_upgrade_required(&err) {
                         self.websockets_disabled.store(true, Ordering::Relaxed);
                         warn!("responses websocket upgrade required; falling back to HTTP responses transport");
@@ -1068,6 +1121,22 @@ impl ModelClient {
 
                     let err = CodexErr::Stream(
                         format!("[ws] failed to connect: {err}"),
+                        None,
+                        Some(request_id.clone()),
+                    );
+                    if (attempt as u64) < max_retries {
+                        tokio::time::sleep(backoff(attempt as u64)).await;
+                        continue;
+                    }
+                    self.websockets_disabled.store(true, Ordering::Relaxed);
+                    return Err(err);
+                }
+                Err(_) => {
+                    let err = CodexErr::Stream(
+                        format!(
+                            "[ws] timed out connecting after {} ms",
+                            self.provider.websocket_connect_timeout().as_millis()
+                        ),
                         None,
                         Some(request_id.clone()),
                     );
@@ -1214,10 +1283,10 @@ impl ModelClient {
                 store: azure_workaround,
                 stream: true,
                 include,
-                service_tier: match self.config.service_tier {
-                    Some(ServiceTier::Fast) => Some("priority".to_string()),
-                    _ => None,
-                },
+                service_tier: self
+                    .config
+                    .service_tier
+                    .map(|service_tier| service_tier.request_value().to_string()),
                 // Use a stable per-process cache key (session id). With store=false this is inert.
                 prompt_cache_key: Some(session_id_str.clone()),
             };
@@ -1250,7 +1319,8 @@ impl ModelClient {
             let mut auth_refresh_error: Option<RefreshTokenError> = None;
 
             // Always fetch the latest auth in case a prior attempt refreshed the token.
-            let auth = auth_manager.as_ref().and_then(|m| m.auth());
+            let base_auth = auth_manager.as_ref().and_then(|m| m.auth());
+            let auth = self.provider.effective_auth(&base_auth).await?;
 
             trace!(
                 "POST to {}: {}",
@@ -1260,8 +1330,9 @@ impl ModelClient {
 
             let mut req_builder = self
                 .provider
-                .create_request_builder(&self.client, &auth)
+                .create_request_builder_with_auth(&self.client, &auth)
                 .await?;
+            req_builder = self.apply_requested_model_headers(req_builder, request_model);
 
             let has_beta_header = req_builder
                 .try_clone()
@@ -1287,8 +1358,12 @@ impl ModelClient {
                 // Send `conversation_id`/`session_id` so the server can hit the prompt-cache.
                 .header("conversation_id", session_id_str.clone())
                 .header("session_id", session_id_str.clone())
+                .header("thread_id", session_id_str.clone())
                 .header(reqwest::header::ACCEPT, "text/event-stream")
                 .json(&payload_json);
+            if let Ok(window_id) = HeaderValue::from_str(&self.current_window_id(session_id)) {
+                req_builder = req_builder.header(X_CODEX_WINDOW_ID_HEADER, window_id);
+            }
 
             if let Some(auth) = auth.as_ref()
                 && auth.mode.is_chatgpt()
@@ -1363,11 +1438,21 @@ impl ModelClient {
                                 "x_request_id": resp.headers()
                                     .get("x-request-id")
                                     .and_then(|v| v.to_str().ok())
-                                    .unwrap_or_default()
+                                    .unwrap_or_default(),
+                                "headers": header_map_to_json(resp.headers()),
                             }),
                         );
                     }
                     let (tx_event, rx_event) = mpsc::channel::<Result<ResponseEvent>>(1600);
+
+                    let response_headers = header_map_to_json(resp.headers());
+                    if tx_event
+                        .send(Ok(ResponseEvent::ResponseHeaders(response_headers)))
+                        .await
+                        .is_err()
+                    {
+                        debug!("receiver dropped response headers event");
+                    }
 
                     if let Some(snapshot) = parse_rate_limit_snapshot(resp.headers()) {
                         debug!(
@@ -1449,7 +1534,9 @@ impl ModelClient {
                         .and_then(|raw| parse_retry_after_header(raw, now));
 
                     if status == StatusCode::UNAUTHORIZED {
-                        if let Some(manager) = auth_manager.as_ref() {
+                        if self.provider.has_command_auth() {
+                            self.provider.invalidate_cached_auth_token();
+                        } else if let Some(manager) = auth_manager.as_ref() {
                             match manager.refresh_token_classified().await {
                                 Ok(Some(_)) => {}
                                 Ok(None) => {
@@ -1461,7 +1548,7 @@ impl ModelClient {
                                     auth_refresh_error = Some(err);
                                 }
                             }
-                        } else {
+                        } else if auth.is_none() {
                             auth_refresh_error = Some(RefreshTokenError::permanent(
                                 "Authentication manager unavailable; please log in again.",
                             ));
@@ -1661,6 +1748,7 @@ impl ModelClient {
                                 "error",
                                 &serde_json::json!({
                                     "status": status.as_u16(),
+                                    "headers": header_map_to_json(&headers),
                                     "body": body_text
                                 }),
                             );
@@ -1859,25 +1947,37 @@ impl ModelClient {
             .clone()
             .or_else(|| find_family_for_model(model_slug))
             .unwrap_or_else(|| self.config.model_family.clone());
+        let session_id = prompt.session_id_override.unwrap_or(self.session_id);
+        let session_id_str = session_id.to_string();
         let instructions = prompt.get_full_instructions(&family).into_owned();
-        let payload = CompactHistoryRequest {
-            model: model_slug,
-            input: &prompt.input,
-            instructions: instructions.clone(),
-        };
-        let payload_json = serde_json::json!({
-            "model": payload.model,
-            "input": payload.input,
-            "instructions": instructions,
-        });
         let mut request_id = String::new();
 
         loop {
-            let auth = auth_manager.as_ref().and_then(|m| m.auth());
+            let base_auth = auth_manager.as_ref().and_then(|m| m.auth());
+            let auth = self.provider.effective_auth(&base_auth).await?;
+            let service_tier = if auth
+                .as_ref()
+                .is_some_and(|auth| auth.mode == AuthMode::ApiKey)
+            {
+                None
+            } else {
+                self.config
+                    .service_tier
+                    .map(|service_tier| service_tier.request_value().to_string())
+            };
+            let payload = CompactHistoryRequest {
+                model: model_slug,
+                input: &prompt.input,
+                instructions: instructions.clone(),
+                service_tier,
+                prompt_cache_key: Some(session_id_str.as_str()),
+            };
+            let payload_json = serde_json::to_value(&payload)?;
             let mut request = self
                 .provider
-                .create_compact_request_builder(&self.client, &auth)
+                .create_compact_request_builder_with_auth(&self.client, &auth)
                 .await?;
+            request = self.apply_requested_model_headers(request, model_slug);
 
             // Ensure Responses API beta header is present for compact calls. Mirror the
             // streaming path: use the public "responses=v1" header for the public OpenAI
@@ -1898,6 +1998,14 @@ impl ModelClient {
 
             request = attach_openai_subagent_header(request);
             request = attach_codex_beta_features_header(request, &self.config);
+            if let Ok(window_id) = HeaderValue::from_str(&self.current_window_id(session_id)) {
+                request = request.header(X_CODEX_WINDOW_ID_HEADER, window_id);
+            }
+
+            request = request
+                .header("conversation_id", session_id_str.clone())
+                .header("session_id", session_id_str.clone())
+                .header("thread_id", session_id_str.clone());
 
             if let Some(auth) = auth.as_ref()
                 && auth.mode.is_chatgpt()
@@ -3057,6 +3165,7 @@ mod tests {
             env_key: None,
             env_key_instructions: None,
             experimental_bearer_token: None,
+            auth: None,
             wire_api: WireApi::Responses,
             query_params: None,
             http_headers: None,
@@ -3064,6 +3173,7 @@ mod tests {
             request_max_retries: Some(0),
             stream_max_retries: None,
             stream_idle_timeout_ms: None,
+            websocket_connect_timeout_ms: None,
             requires_openai_auth: false,
             openrouter: None,
         };
@@ -3105,6 +3215,7 @@ mod tests {
             env_key: None,
             env_key_instructions: None,
             experimental_bearer_token: None,
+            auth: None,
             wire_api: WireApi::Responses,
             query_params: None,
             http_headers: None,
@@ -3112,6 +3223,7 @@ mod tests {
             request_max_retries: Some(0),
             stream_max_retries: None,
             stream_idle_timeout_ms: None,
+            websocket_connect_timeout_ms: None,
             requires_openai_auth: false,
             openrouter: None,
         };
@@ -3155,6 +3267,7 @@ mod tests {
             env_key: None,
             env_key_instructions: None,
             experimental_bearer_token: None,
+            auth: None,
             wire_api: WireApi::Responses,
             query_params: None,
             http_headers: Some(headers),
@@ -3162,6 +3275,7 @@ mod tests {
             request_max_retries: Some(0),
             stream_max_retries: None,
             stream_idle_timeout_ms: None,
+            websocket_connect_timeout_ms: None,
             requires_openai_auth: false,
             openrouter: None,
         };
@@ -3302,6 +3416,7 @@ mod tests {
             env_key: Some("TEST_API_KEY".to_string()),
             env_key_instructions: None,
             experimental_bearer_token: None,
+            auth: None,
             wire_api: WireApi::Responses,
             query_params: None,
             http_headers: None,
@@ -3309,6 +3424,7 @@ mod tests {
             request_max_retries: Some(0),
             stream_max_retries: Some(0),
             stream_idle_timeout_ms: Some(1000),
+            websocket_connect_timeout_ms: None,
             requires_openai_auth: false,
             openrouter: None,
         };
@@ -3368,6 +3484,7 @@ mod tests {
             env_key: Some("TEST_API_KEY".to_string()),
             env_key_instructions: None,
             experimental_bearer_token: None,
+            auth: None,
             wire_api: WireApi::Responses,
             query_params: None,
             http_headers: None,
@@ -3375,6 +3492,7 @@ mod tests {
             request_max_retries: Some(0),
             stream_max_retries: Some(0),
             stream_idle_timeout_ms: Some(1000),
+            websocket_connect_timeout_ms: None,
             requires_openai_auth: false,
             openrouter: None,
         };
@@ -3420,6 +3538,7 @@ mod tests {
             env_key: Some("TEST_API_KEY".to_string()),
             env_key_instructions: None,
             experimental_bearer_token: None,
+            auth: None,
             wire_api: WireApi::Responses,
             query_params: None,
             http_headers: None,
@@ -3427,6 +3546,7 @@ mod tests {
             request_max_retries: Some(0),
             stream_max_retries: Some(0),
             stream_idle_timeout_ms: Some(1000),
+            websocket_connect_timeout_ms: None,
             requires_openai_auth: false,
             openrouter: None,
         };
@@ -3515,6 +3635,7 @@ mod tests {
             env_key: Some("TEST_API_KEY".to_string()),
             env_key_instructions: None,
             experimental_bearer_token: None,
+            auth: None,
             wire_api: WireApi::Responses,
             query_params: None,
             http_headers: None,
@@ -3522,6 +3643,7 @@ mod tests {
             request_max_retries: Some(0),
             stream_max_retries: Some(0),
             stream_idle_timeout_ms: Some(1000),
+            websocket_connect_timeout_ms: None,
             requires_openai_auth: false,
             openrouter: None,
         };
@@ -3622,6 +3744,7 @@ mod tests {
                 env_key: Some("TEST_API_KEY".to_string()),
                 env_key_instructions: None,
                 experimental_bearer_token: None,
+                auth: None,
                 wire_api: WireApi::Responses,
                 query_params: None,
                 http_headers: None,
@@ -3629,6 +3752,7 @@ mod tests {
                 request_max_retries: Some(0),
                 stream_max_retries: Some(0),
                 stream_idle_timeout_ms: Some(1000),
+                websocket_connect_timeout_ms: None,
                 requires_openai_auth: false,
                 openrouter: None,
             };
@@ -3862,6 +3986,7 @@ mod tests {
             env_key: Some("TEST_API_KEY".to_string()),
             env_key_instructions: None,
             experimental_bearer_token: None,
+            auth: None,
             wire_api: WireApi::Responses,
             query_params: None,
             http_headers: None,
@@ -3869,6 +3994,7 @@ mod tests {
             request_max_retries: Some(0),
             stream_max_retries: Some(0),
             stream_idle_timeout_ms: Some(1000),
+            websocket_connect_timeout_ms: None,
             requires_openai_auth: false,
             openrouter: None,
         };
@@ -3893,6 +4019,7 @@ mod tests {
             env_key: Some("TEST_API_KEY".to_string()),
             env_key_instructions: None,
             experimental_bearer_token: None,
+            auth: None,
             wire_api: WireApi::Responses,
             query_params: None,
             http_headers: None,
@@ -3900,6 +4027,7 @@ mod tests {
             request_max_retries: Some(0),
             stream_max_retries: Some(0),
             stream_idle_timeout_ms: Some(1000),
+            websocket_connect_timeout_ms: None,
             requires_openai_auth: false,
             openrouter: None,
         };
@@ -3927,6 +4055,7 @@ mod tests {
             env_key: Some("TEST_API_KEY".to_string()),
             env_key_instructions: None,
             experimental_bearer_token: None,
+            auth: None,
             wire_api: WireApi::Responses,
             query_params: None,
             http_headers: None,
@@ -3934,6 +4063,7 @@ mod tests {
             request_max_retries: Some(0),
             stream_max_retries: Some(0),
             stream_idle_timeout_ms: Some(1000),
+            websocket_connect_timeout_ms: None,
             requires_openai_auth: false,
             openrouter: None,
         };
@@ -3958,6 +4088,7 @@ mod tests {
             env_key: Some("TEST_API_KEY".to_string()),
             env_key_instructions: None,
             experimental_bearer_token: None,
+            auth: None,
             wire_api: WireApi::Responses,
             query_params: None,
             http_headers: None,
@@ -3965,6 +4096,7 @@ mod tests {
             request_max_retries: Some(0),
             stream_max_retries: Some(0),
             stream_idle_timeout_ms: Some(1000),
+            websocket_connect_timeout_ms: None,
             requires_openai_auth: false,
             openrouter: None,
         };
@@ -3989,6 +4121,7 @@ mod tests {
             env_key: Some("TEST_API_KEY".to_string()),
             env_key_instructions: None,
             experimental_bearer_token: None,
+            auth: None,
             wire_api: WireApi::Responses,
             query_params: None,
             http_headers: None,
@@ -3996,6 +4129,7 @@ mod tests {
             request_max_retries: Some(0),
             stream_max_retries: Some(0),
             stream_idle_timeout_ms: Some(1000),
+            websocket_connect_timeout_ms: None,
             requires_openai_auth: false,
             openrouter: None,
         };
