@@ -65,6 +65,36 @@ mod validation;
 use defaults::{default_responses_originator, default_review_model, default_true_local};
 
 const OPENAI_BASE_URL_ENV_VAR: &str = "OPENAI_BASE_URL";
+const RESERVED_MODEL_PROVIDER_IDS: [&str; 2] = ["openai", "oss"];
+
+fn validate_reserved_model_provider_ids(
+    model_providers: &HashMap<String, ModelProviderInfo>,
+) -> Result<(), String> {
+    let mut conflicts = model_providers
+        .keys()
+        .filter(|key| RESERVED_MODEL_PROVIDER_IDS.contains(&key.as_str()))
+        .map(|key| format!("`{key}`"))
+        .collect::<Vec<_>>();
+    conflicts.sort_unstable();
+    if conflicts.is_empty() {
+        Ok(())
+    } else {
+        Err(format!(
+            "model_providers contains reserved built-in provider IDs: {}. Built-in providers cannot be overridden. Rename your custom provider.",
+            conflicts.join(", ")
+        ))
+    }
+}
+
+fn validate_model_providers(model_providers: &HashMap<String, ModelProviderInfo>) -> Result<(), String> {
+    validate_reserved_model_provider_ids(model_providers)?;
+    for (key, provider) in model_providers {
+        provider
+            .validate()
+            .map_err(|message| format!("model_providers.{key}: {message}"))?;
+    }
+    Ok(())
+}
 
 pub use builder::ConfigBuilder;
 pub use defaults::set_default_originator;
@@ -200,7 +230,7 @@ pub struct Config {
     /// Whether planning should inherit the chat model instead of using a dedicated override.
     pub planning_use_chat_model: bool,
 
-    /// Model used specifically for review sessions. Defaults to "gpt-5.2-codex".
+    /// Model used specifically for review sessions. Defaults to "gpt-5.5".
     pub review_model: String,
 
     /// Reasoning effort used when running review sessions.
@@ -425,6 +455,7 @@ pub struct Config {
     /// Optional service tier preference for model requests.
     ///
     /// `Some(Fast)` sends `service_tier=priority` to the Responses API.
+    /// `Some(Flex)` sends `service_tier=flex` to the Responses API.
     /// `None` sends no override (legacy standard behavior).
     pub service_tier: Option<ServiceTier>,
 
@@ -1100,6 +1131,8 @@ impl Config {
         }
         let effective_openai_base_url = openai_base_url.or(openai_base_url_from_env);
 
+        validate_model_providers(&cfg.model_providers).map_err(std::io::Error::other)?;
+
         let mut model_providers = built_in_model_providers(effective_openai_base_url);
         // Merge user-defined providers into the built-in list.
         for (key, provider) in cfg.model_providers.into_iter() {
@@ -1299,6 +1332,7 @@ impl Config {
 
         let service_tier = match config_profile.service_tier.or(cfg.service_tier) {
             Some(ServiceTier::Fast) => Some(ServiceTier::Fast),
+            Some(ServiceTier::Flex) => Some(ServiceTier::Flex),
             Some(ServiceTier::Standard) => None,
             None => None,
         };
@@ -1369,11 +1403,12 @@ impl Config {
                 || agent.name.eq_ignore_ascii_case("codex")
                 || agent.name.eq_ignore_ascii_case("claude")
                 || agent.name.eq_ignore_ascii_case("gemini")
+                || agent.name.eq_ignore_ascii_case("copilot")
                 || agent.name.eq_ignore_ascii_case("qwen")
                 || agent.name.eq_ignore_ascii_case("cloud")
             {
                 tracing::warn!(
-                    "legacy agent name '{}' detected; update config to use model slugs (e.g., code-gpt-5.3-codex)",
+                    "legacy agent name '{}' detected; update config to use model slugs (e.g., code-gpt-5.5)",
                     agent.name
                 );
             }
@@ -2392,12 +2427,14 @@ model_verbosity = "high"
             wire_api: crate::WireApi::Chat,
             env_key_instructions: None,
             experimental_bearer_token: None,
+            auth: None,
             query_params: None,
             http_headers: None,
             env_http_headers: None,
             request_max_retries: Some(4),
             stream_max_retries: Some(10),
             stream_idle_timeout_ms: Some(300_000),
+            websocket_connect_timeout_ms: None,
             requires_openai_auth: false,
             openrouter: None,
         };
@@ -2803,7 +2840,7 @@ model_verbosity = "high"
         assert_eq!(config.auto_drive.model_routing_entries.len(), 2);
         assert_eq!(
             config.auto_drive.model_routing_entries[0].model,
-            "gpt-5.3-codex"
+            "gpt-5.5"
         );
         assert_eq!(
             config.auto_drive.model_routing_entries[0].reasoning_levels,
@@ -2811,7 +2848,7 @@ model_verbosity = "high"
         );
         assert_eq!(
             config.auto_drive.model_routing_entries[1].model,
-            "gpt-5.3-codex-spark"
+            "gpt-5.4-mini"
         );
         assert_eq!(
             config.auto_drive.model_routing_entries[1].reasoning_levels,
@@ -2875,13 +2912,13 @@ model_verbosity = "high"
         auto_drive.model_routing_enabled = true;
         auto_drive.model_routing_entries = vec![
             AutoDriveModelRoutingEntry {
-                model: "gpt-5.3-codex".to_string(),
+                model: "gpt-5.5".to_string(),
                 enabled: false,
                 reasoning_levels: vec![ReasoningEffort::High],
                 description: String::new(),
             },
             AutoDriveModelRoutingEntry {
-                model: "gpt-5.3-codex-spark".to_string(),
+                model: "gpt-5.4-mini".to_string(),
                 enabled: false,
                 reasoning_levels: vec![ReasoningEffort::High],
                 description: String::new(),
@@ -3043,6 +3080,29 @@ model_verbosity = "high"
     }
 
     #[test]
+    fn upgrade_legacy_model_slugs_updates_provider_agent_presets() {
+        let mut cfg = ConfigToml {
+            model: Some("claude-opus-4.6".to_string()),
+            review_model: Some("gemini-3-flash".to_string()),
+            ..Default::default()
+        };
+        cfg.profiles.insert(
+            "claude".to_string(),
+            ConfigProfile {
+                model: Some("claude-sonnet-4.5".to_string()),
+                ..Default::default()
+            },
+        );
+
+        upgrade_legacy_model_slugs(&mut cfg);
+
+        assert_eq!(cfg.model.as_deref(), Some("claude-opus-4.8"));
+        assert_eq!(cfg.review_model.as_deref(), Some("gemini-3.5-flash"));
+        let profile = cfg.profiles.get("claude").expect("profile exists");
+        assert_eq!(profile.model.as_deref(), Some("claude-sonnet-4.6"));
+    }
+
+    #[test]
     fn test_compact_prompt_override_prefers_cli_string() -> std::io::Result<()> {
         let fixture = create_test_fixture()?;
         let mut cfg = fixture.cfg.clone();
@@ -3126,10 +3186,12 @@ model_verbosity = "high"
             .map(|agent| agent.name.to_ascii_lowercase())
             .collect();
 
+        assert!(enabled_names.contains("code-gpt-5.5"));
         assert!(enabled_names.contains("code-gpt-5.3-codex"));
         assert!(enabled_names.contains("code-gpt-5.4"));
-        assert!(enabled_names.contains("claude-sonnet-4.5"));
-        assert!(enabled_names.contains("gemini-3-pro"));
+        assert!(enabled_names.contains("claude-sonnet-4.6"));
+        assert!(enabled_names.contains("gemini-3.1-pro"));
+        assert!(enabled_names.contains("gemini-3.5-flash"));
         assert!(enabled_names.contains("qwen-3-coder"));
         Ok(())
     }
@@ -3254,14 +3316,14 @@ mod agent_merge_tests {
 
         let mini = merged
             .iter()
-            .find(|a| a.name.eq_ignore_ascii_case("code-gpt-5.1-codex-mini"))
+            .find(|a| a.name.eq_ignore_ascii_case("code-gpt-5.4-mini"))
             .expect("mini present");
 
         assert!(!mini.enabled, "disabled state should persist for alias");
         assert_eq!(
             merged
                 .iter()
-                .filter(|a| a.name.eq_ignore_ascii_case("code-gpt-5.1-codex-mini"))
+                .filter(|a| a.name.eq_ignore_ascii_case("code-gpt-5.4-mini"))
                 .count(),
             1,
             "should dedupe alias/canonical"
@@ -3270,19 +3332,19 @@ mod agent_merge_tests {
 
     #[test]
     fn disabled_codex_mini_slug_is_preserved_with_command() {
-        let agents = vec![agent("code-gpt-5.1-codex-mini", "coder", false)];
+        let agents = vec![agent("code-gpt-5.4-mini", "coder", false)];
         let merged = merge_with_default_agents(agents);
 
         let mini = merged
             .iter()
-            .find(|a| a.name.eq_ignore_ascii_case("code-gpt-5.1-codex-mini"))
+            .find(|a| a.name.eq_ignore_ascii_case("code-gpt-5.4-mini"))
             .expect("mini present");
 
         assert!(!mini.enabled, "disabled state should persist for canonical slug");
         assert_eq!(
             merged
                 .iter()
-                .filter(|a| a.name.eq_ignore_ascii_case("code-gpt-5.1-codex-mini"))
+                .filter(|a| a.name.eq_ignore_ascii_case("code-gpt-5.4-mini"))
                 .count(),
             1,
             "should dedupe canonical entry"
@@ -3293,20 +3355,20 @@ mod agent_merge_tests {
     fn codex_mini_alias_then_canonical_last_wins_disabled() {
         let agents = vec![
             agent("codex-mini", "coder", true),
-            agent("code-gpt-5.1-codex-mini", "coder", false),
+            agent("code-gpt-5.4-mini", "coder", false),
         ];
         let merged = merge_with_default_agents(agents);
 
         let mini = merged
             .iter()
-            .find(|a| a.name.eq_ignore_ascii_case("code-gpt-5.1-codex-mini"))
+            .find(|a| a.name.eq_ignore_ascii_case("code-gpt-5.4-mini"))
             .expect("mini present");
 
         assert!(!mini.enabled, "later canonical disable should win");
         assert_eq!(
             merged
                 .iter()
-                .filter(|a| a.name.eq_ignore_ascii_case("code-gpt-5.1-codex-mini"))
+                .filter(|a| a.name.eq_ignore_ascii_case("code-gpt-5.4-mini"))
                 .count(),
             1,
             "should dedupe alias and canonical"
@@ -3316,21 +3378,21 @@ mod agent_merge_tests {
     #[test]
     fn codex_mini_canonical_then_alias_last_wins_disabled() {
         let agents = vec![
-            agent("code-gpt-5.1-codex-mini", "coder", true),
+            agent("code-gpt-5.4-mini", "coder", true),
             agent("codex-mini", "coder", false),
         ];
         let merged = merge_with_default_agents(agents);
 
         let mini = merged
             .iter()
-            .find(|a| a.name.eq_ignore_ascii_case("code-gpt-5.1-codex-mini"))
+            .find(|a| a.name.eq_ignore_ascii_case("code-gpt-5.4-mini"))
             .expect("mini present");
 
         assert!(!mini.enabled, "later alias disable should win");
         assert_eq!(
             merged
                 .iter()
-                .filter(|a| a.name.eq_ignore_ascii_case("code-gpt-5.1-codex-mini"))
+                .filter(|a| a.name.eq_ignore_ascii_case("code-gpt-5.4-mini"))
                 .count(),
             1,
             "should dedupe alias and canonical"
@@ -3341,20 +3403,20 @@ mod agent_merge_tests {
     fn gemini_alias_and_canonical_dedupe_prefers_last_state() {
         let agents = vec![
             agent("gemini-2.5-pro", "gemini", true),
-            agent("gemini-3-pro", "gemini", false),
+            agent("gemini-3.1-pro", "gemini", false),
         ];
         let merged = merge_with_default_agents(agents);
 
         let gemini = merged
             .iter()
-            .find(|a| a.name.eq_ignore_ascii_case("gemini-3-pro"))
+            .find(|a| a.name.eq_ignore_ascii_case("gemini-3.1-pro"))
             .expect("gemini present");
 
         assert!(!gemini.enabled, "later canonical disable should win");
         assert_eq!(
             merged
                 .iter()
-                .filter(|a| a.name.eq_ignore_ascii_case("gemini-3-pro"))
+                .filter(|a| a.name.eq_ignore_ascii_case("gemini-3.1-pro"))
                 .count(),
             1,
             "should dedupe gemini alias/canonical"
@@ -3364,21 +3426,21 @@ mod agent_merge_tests {
     #[test]
     fn gemini_alias_disable_overrides_prior_canonical_enable() {
         let agents = vec![
-            agent("gemini-3-pro", "gemini", true),
+            agent("gemini-3.1-pro", "gemini", true),
             agent("gemini-2.5-pro", "gemini", false),
         ];
         let merged = merge_with_default_agents(agents);
 
         let gemini = merged
             .iter()
-            .find(|a| a.name.eq_ignore_ascii_case("gemini-3-pro"))
+            .find(|a| a.name.eq_ignore_ascii_case("gemini-3.1-pro"))
             .expect("gemini present");
 
         assert!(!gemini.enabled, "later alias disable should win");
         assert_eq!(
             merged
                 .iter()
-                .filter(|a| a.name.eq_ignore_ascii_case("gemini-3-pro"))
+                .filter(|a| a.name.eq_ignore_ascii_case("gemini-3.1-pro"))
                 .count(),
             1,
             "should dedupe gemini alias/canonical"
@@ -3415,6 +3477,23 @@ mod agent_merge_tests {
         )?;
 
         assert_eq!(config.service_tier, Some(ServiceTier::Fast));
+        Ok(())
+    }
+
+    #[test]
+    fn service_tier_flex_preserves_override() -> anyhow::Result<()> {
+        let code_home = TempDir::new()?;
+        let cfg = toml::from_str::<ConfigToml>(r#"service_tier = "flex""#)?;
+        let config = Config::load_from_base_config_with_overrides(
+            cfg,
+            ConfigOverrides {
+                cwd: Some(code_home.path().to_path_buf()),
+                ..Default::default()
+            },
+            code_home.path().to_path_buf(),
+        )?;
+
+        assert_eq!(config.service_tier, Some(ServiceTier::Flex));
         Ok(())
     }
 
@@ -3465,6 +3544,30 @@ context_mode = "1m"
         let cfg = toml::from_str::<ConfigToml>(
             r#"
 model = "gpt-5.3-codex"
+context_mode = "1m"
+"#,
+        )?;
+        let config = Config::load_from_base_config_with_overrides(
+            cfg,
+            ConfigOverrides {
+                cwd: Some(code_home.path().to_path_buf()),
+                ..Default::default()
+            },
+            code_home.path().to_path_buf(),
+        )?;
+
+        assert_eq!(config.context_mode, Some(ContextMode::OneM));
+        assert_eq!(config.model_context_window, Some(272_000));
+        assert_eq!(config.model_auto_compact_token_limit, Some(244_800));
+        Ok(())
+    }
+
+    #[test]
+    fn context_mode_one_m_is_inert_for_gpt_5_5() -> anyhow::Result<()> {
+        let code_home = TempDir::new()?;
+        let cfg = toml::from_str::<ConfigToml>(
+            r#"
+model = "gpt-5.5"
 context_mode = "1m"
 "#,
         )?;

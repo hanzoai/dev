@@ -31,7 +31,6 @@ const MODEL_CACHE_FILE: &str = "models_cache.json";
 const DEFAULT_MODEL_CACHE_TTL: Duration = Duration::from_secs(300);
 const REMOTE_MODELS_REQUEST_TIMEOUT: Duration = Duration::from_secs(10);
 const CODEX_AUTO_BALANCED_MODEL: &str = "codex-auto-balanced";
-const IMAGE_GENERATION_TOOL: &str = "image_generation";
 
 #[derive(Debug, Default, Clone)]
 struct RemoteModelsState {
@@ -179,7 +178,7 @@ impl RemoteModelsManager {
         }
 
         if let Some(auth) = auth.as_ref()
-            && auth.mode.is_chatgpt()
+            && auth.uses_codex_backend()
             && let Some(account_id) = auth.get_account_id()
         {
             request = request.header("chatgpt-account-id", account_id);
@@ -267,11 +266,7 @@ impl RemoteModelsManager {
 
         let info = {
             let state = self.state.read().await;
-            state
-                .models
-                .iter()
-                .find(|info| info.slug.eq_ignore_ascii_case(model))
-                .cloned()
+            find_remote_model_info(&state.models, model)
         };
         let Some(info) = info else {
             return family;
@@ -321,13 +316,7 @@ impl RemoteModelsManager {
 
     fn models_url(&self, auth: &Option<CodexAuth>) -> crate::error::Result<Url> {
         let base_url = self.provider.base_url.clone().unwrap_or_else(|| {
-            if matches!(
-                auth,
-                Some(CodexAuth {
-                    mode: AuthMode::ChatGPT | AuthMode::ChatgptAuthTokens,
-                    ..
-                })
-            ) {
+            if auth.as_ref().is_some_and(CodexAuth::uses_codex_backend) {
                 "https://chatgpt.com/backend-api/codex".to_string()
             } else {
                 "https://api.openai.com/v1".to_string()
@@ -356,6 +345,39 @@ impl RemoteModelsManager {
     fn cache_path(&self) -> PathBuf {
         self.code_home.join(MODEL_CACHE_FILE)
     }
+}
+
+fn namespaced_model_suffix(model: &str) -> Option<&str> {
+    let (namespace, suffix) = model.split_once('/')?;
+    if suffix.contains('/') {
+        return None;
+    }
+    if !namespace
+        .chars()
+        .all(|ch| ch.is_ascii_alphanumeric() || ch == '_' || ch == '-')
+    {
+        return None;
+    }
+    Some(suffix)
+}
+
+fn find_remote_model_info(models: &[ModelInfo], model: &str) -> Option<ModelInfo> {
+    models
+        .iter()
+        .filter(|info| model.eq_ignore_ascii_case(&info.slug) || model.starts_with(&info.slug))
+        .cloned()
+        .max_by_key(|info| info.slug.len())
+        .or_else(|| {
+            namespaced_model_suffix(model).and_then(|suffix| {
+                models
+                    .iter()
+                    .filter(|info| {
+                        suffix.eq_ignore_ascii_case(&info.slug) || suffix.starts_with(&info.slug)
+                    })
+                    .cloned()
+                    .max_by_key(|info| info.slug.len())
+            })
+        })
 }
 
 pub fn apply_model_info_overrides(info: &ModelInfo, family: ModelFamily) -> ModelFamily {
@@ -391,10 +413,9 @@ fn apply_model_info_overrides_with_personality(
 
     family.web_search_tool_type = map_web_search_tool_type(info.web_search_tool_type);
     family.supports_image_detail_original = info.supports_image_detail_original;
-    family.supports_image_generation = info
-        .experimental_supported_tools
-        .iter()
-        .any(|tool| tool == IMAGE_GENERATION_TOOL);
+    family.supports_image_generation = supports_image_generation(info);
+    family.additional_speed_tiers = info.additional_speed_tiers.clone();
+    family.supports_search_tool = info.supports_search_tool;
 
     if let Some(limit) = info.auto_compact_token_limit() {
         family.set_auto_compact_token_limit(Some(limit));
@@ -412,11 +433,119 @@ fn apply_model_info_overrides_with_personality(
     family
 }
 
+#[cfg(test)]
+mod tests {
+    use super::apply_model_info_overrides_with_personality;
+    use super::derive_default_model_family;
+    use super::find_remote_model_info;
+    use code_protocol::config_types::ReasoningSummary;
+    use code_protocol::openai_models::ConfigShellToolType;
+    use code_protocol::openai_models::InputModality;
+    use code_protocol::openai_models::ModelInfo;
+    use code_protocol::openai_models::ModelVisibility;
+    use code_protocol::openai_models::TruncationPolicyConfig;
+    use code_protocol::openai_models::WebSearchToolType;
+    use code_protocol::openai_models::default_input_modalities;
+
+    fn model(slug: &str) -> ModelInfo {
+        ModelInfo {
+            slug: slug.to_string(),
+            display_name: slug.to_string(),
+            description: None,
+            default_reasoning_level: None,
+            supported_reasoning_levels: Vec::new(),
+            shell_type: ConfigShellToolType::Default,
+            visibility: ModelVisibility::None,
+            supported_in_api: true,
+            priority: 0,
+            additional_speed_tiers: Vec::new(),
+            service_tiers: Vec::new(),
+            default_service_tier: None,
+            availability_nux: None,
+            upgrade: None,
+            base_instructions: String::new(),
+            model_messages: None,
+            supports_reasoning_summaries: false,
+            default_reasoning_summary: ReasoningSummary::Auto,
+            support_verbosity: false,
+            default_verbosity: None,
+            apply_patch_tool_type: None,
+            web_search_tool_type: WebSearchToolType::Text,
+            truncation_policy: TruncationPolicyConfig::bytes(10_000),
+            supports_parallel_tool_calls: false,
+            supports_image_detail_original: false,
+            context_window: None,
+            max_context_window: None,
+            auto_compact_token_limit: None,
+            effective_context_window_percent: 95,
+            experimental_supported_tools: Vec::new(),
+            input_modalities: default_input_modalities(),
+            supports_search_tool: false,
+            tool_mode: None,
+            prefer_websockets: false,
+            used_fallback_model_metadata: false,
+        }
+    }
+
+    #[test]
+    fn find_remote_model_info_matches_namespaced_suffix() {
+        let models = vec![model("gpt-5.3-codex")];
+
+        let found = find_remote_model_info(&models, "custom/gpt-5.3-codex")
+            .expect("namespaced slug should resolve");
+
+        assert_eq!(found.slug, "gpt-5.3-codex");
+    }
+
+    #[test]
+    fn find_remote_model_info_matches_hyphenated_namespace_suffix() {
+        let models = vec![model("gpt-5.3-codex")];
+
+        let found = find_remote_model_info(&models, "custom-provider/gpt-5.3-codex")
+            .expect("hyphenated provider namespace should resolve");
+
+        assert_eq!(found.slug, "gpt-5.3-codex");
+    }
+
+    #[test]
+    fn find_remote_model_info_rejects_multi_segment_namespace() {
+        let models = vec![model("gpt-5.3-codex")];
+
+        assert!(find_remote_model_info(&models, "foo/bar/gpt-5.3-codex").is_none());
+    }
+
+    #[test]
+    fn image_generation_support_tracks_image_input_modality() {
+        let mut family = derive_default_model_family("gpt-5.4");
+        family.supports_image_generation = false;
+        let mut info = model("gpt-5.4");
+        info.input_modalities = vec![InputModality::Text, InputModality::Image];
+
+        let family = apply_model_info_overrides_with_personality(&info, family, None);
+
+        assert!(family.supports_image_generation);
+
+        let mut text_only_info = info;
+        text_only_info.input_modalities = vec![InputModality::Text];
+        let text_only_family = apply_model_info_overrides_with_personality(
+            &text_only_info,
+            derive_default_model_family("gpt-5.4"),
+            None,
+        );
+
+        assert!(!text_only_family.supports_image_generation);
+    }
+}
+
 fn map_web_search_tool_type(tool_type: WebSearchToolType) -> WebSearchToolType {
     match tool_type {
         WebSearchToolType::Text => WebSearchToolType::Text,
         WebSearchToolType::TextAndImage => WebSearchToolType::TextAndImage,
     }
+}
+
+fn supports_image_generation(info: &ModelInfo) -> bool {
+    info.input_modalities.contains(&InputModality::Image)
 }
 
 fn map_personality(personality: ConfigPersonality) -> ProtocolPersonality {
