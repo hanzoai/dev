@@ -8,19 +8,29 @@ updates:
       - hanzo-dev/*
     schedule:
       interval: weekly
+    cooldown:
+      default-days: 7
   - package-ecosystem: devcontainers
     directory: /
     schedule:
       interval: weekly
+    cooldown:
+      default-days: 7
   - package-ecosystem: docker
     directory: codex-cli
     schedule:
       interval: weekly
+    cooldown:
+      default-days: 7
   - package-ecosystem: github-actions
     directory: /
     schedule:
       interval: weekly
+    cooldown:
+      default-days: 7
   - package-ecosystem: rust-toolchain
     directory: hanzo-dev
     schedule:
       interval: weekly
+    cooldown:
+      default-days: 7
