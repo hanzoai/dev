@@ -1827,6 +1827,12 @@ struct PendingRequestUserInput {
     questions: Vec<hanzo_protocol::request_user_input::RequestUserInputQuestion>,
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+struct PendingTaskLifecycle {
+    origin: TaskOriginKind,
+    visible_to_user: bool,
+}
+
 #[derive(Clone)]
 struct RenderRequestSeed {
     history_id: HistoryId,
@@ -1844,6 +1850,7 @@ pub(crate) struct ChatWidget<'a> {
     login_add_view_state: Option<Weak<RefCell<LoginAddAccountState>>>,
     active_exec_cell: Option<ExecCell>,
     history_cells: Vec<Box<dyn HistoryCell>>, // Store all history in memory
+    clipboard_lease: Option<crate::clipboard_copy::ClipboardLease>,
     history_cell_ids: Vec<Option<HistoryId>>,
     history_live_window: Option<(usize, usize)>,
     history_frozen_width: u16,
@@ -1915,6 +1922,8 @@ pub(crate) struct ChatWidget<'a> {
     pending_turn_origin: Option<TurnOrigin>,
     pending_request_user_input: Option<PendingRequestUserInput>,
     current_turn_origin: Option<TurnOrigin>,
+    pending_task_lifecycle: Option<PendingTaskLifecycle>,
+    current_task_lifecycle: Option<PendingTaskLifecycle>,
     // Tracks whether lingering running exec/tool cells have been cleared for the
     // current turn. Reset on TaskStarted; set after the first assistant message
     // (delta or final) arrives, which is more reliable than TaskComplete.
@@ -3104,6 +3113,75 @@ fn image_record_from_path(path: &Path) -> Option<ImageRecord> {
     })
 }
 
+fn image_generation_replay_artifact_path(
+    code_home: &Path,
+    session_id: uuid::Uuid,
+    call_id: &str,
+) -> PathBuf {
+    fn sanitize(value: &str) -> String {
+        let sanitized: String = value
+            .chars()
+            .map(|ch| {
+                if ch.is_ascii_alphanumeric() || ch == '-' || ch == '_' {
+                    ch
+                } else {
+                    '_'
+                }
+            })
+            .collect();
+        if sanitized.is_empty() {
+            "generated_image".to_string()
+        } else {
+            sanitized
+        }
+    }
+
+    code_home
+        .join("generated_images")
+        .join(sanitize(&session_id.to_string()))
+        .join(format!("{}.png", sanitize(call_id)))
+}
+
+fn ensure_replayed_image_generation_artifact(
+    code_home: &Path,
+    session_id: Option<uuid::Uuid>,
+    call_id: &str,
+    result: &str,
+) -> Option<PathBuf> {
+    let session_id = session_id?;
+    let path = image_generation_replay_artifact_path(code_home, session_id, call_id);
+    if path.exists() {
+        return Some(path);
+    }
+    if result.starts_with("data:") {
+        return None;
+    }
+    let bytes = match BASE64_STANDARD.decode(result.trim().as_bytes()) {
+        Ok(bytes) => bytes,
+        Err(err) => {
+            tracing::warn!("failed to decode replayed image generation result: {err}");
+            return None;
+        }
+    };
+    if let Some(parent) = path.parent() {
+        if let Err(err) = std::fs::create_dir_all(parent) {
+            tracing::warn!(
+                "failed to create generated image replay dir {}: {err}",
+                parent.display()
+            );
+            return None;
+        }
+    }
+    if let Err(err) = std::fs::write(&path, bytes) {
+        tracing::warn!(
+            "failed to write replayed image generation artifact {}: {err}",
+            path.display()
+        );
+        return None;
+    }
+    Some(path)
+}
+
 fn image_view_path_from_params(params: &serde_json::Value, cwd: &Path) -> Option<PathBuf> {
     let path = params.get("path").and_then(|value| value.as_str())?;
     let trimmed = path.trim();
@@ -4173,9 +4251,20 @@ impl ChatWidget<'_> {
         {
             self.bottom_pane.set_task_running(false);
             self.bottom_pane.update_status_text(String::new());
-            self.auto_on_turn_complete();
             self.flush_deferred_auto_review_notice_if_idle();
         }
+    }
+
+    fn current_task_output_is_hidden(&self) -> bool {
+        self.current_task_lifecycle
+            .as_ref()
+            .map(|task| !task.visible_to_user)
+            .unwrap_or(false)
+    }
+
+    fn current_task_should_skip_auto_review(&self) -> bool {
+        self.current_task_output_is_hidden()
+            || matches!(self.current_turn_origin, Some(TurnOrigin::Developer))
     }
 
     fn foreground_activity_running_excluding_auto_review(&self) -> bool {
@@ -4835,6 +4924,31 @@ impl ChatWidget<'_> {
                     "background",
                     None,
                 );
+            }
+            ResponseItem::ImageGenerationCall { id, status, result, .. } => {
+                let key = self.next_internal_key();
+                let path = ensure_replayed_image_generation_artifact(
+                    &self.config.code_home,
+                    self.session_id,
+                    &id,
+                    &result,
+                );
+                if let Some(record) = path.as_ref().and_then(|path| image_record_from_path(path)) {
+                    let cell = Box::new(history_cell::ImageOutputCell::from_record(record));
+                    let _ = self.history_insert_with_key_global(cell, key);
+                } else {
+                    let state = history_cell::plain_message_state_from_lines(
+                        vec![Line::from(format!(
+                            "Image generation result `{id}` replayed with status `{status}`."
+                        ))],
+                        HistoryCellType::Notice,
+                    );
+                    let _ = self.history_insert_plain_state_with_key(
+                        state,
+                        key,
+                        "image-generation-replay",
+                    );
+                }
             }
             _ => {
                 // Ignore other item kinds for replay (tool calls, etc.)
@@ -6849,6 +6963,7 @@ impl ChatWidget<'_> {
             login_add_view_state: None,
             active_exec_cell: None,
             history_cells,
+            clipboard_lease: None,
             config: config.clone(),
             mcp_tools_by_server: HashMap::new(),
             mcp_server_failures: HashMap::new(),
@@ -6890,6 +7005,8 @@ impl ChatWidget<'_> {
             pending_turn_origin: None,
             pending_request_user_input: None,
             current_turn_origin: None,
+            pending_task_lifecycle: None,
+            current_task_lifecycle: None,
             cleared_lingering_execs_this_turn: true,
             exec: ExecState {
                 running_commands: HashMap::new(),
@@ -7222,6 +7339,7 @@ impl ChatWidget<'_> {
             login_add_view_state: None,
             active_exec_cell: None,
             history_cells,
+            clipboard_lease: None,
             config: config.clone(),
             mcp_tools_by_server: HashMap::new(),
             mcp_server_failures: HashMap::new(),
@@ -7260,6 +7378,8 @@ impl ChatWidget<'_> {
             pending_turn_origin: None,
             pending_request_user_input: None,
             current_turn_origin: None,
+            pending_task_lifecycle: None,
+            current_task_lifecycle: None,
             cleared_lingering_execs_this_turn: true,
             exec: ExecState {
                 running_commands: HashMap::new(),
@@ -13812,7 +13932,51 @@ impl ChatWidget<'_> {
                 );
                 tools::web_search_begin(self, ev.call_id, ev.query, event.order.as_ref(), ok)
             }
+            EventMsg::ImageGenerationBegin(ImageGenerationBeginEvent { call_id }) => {
+                self.ensure_spinner_for_activity("image-generation-begin");
+                tracing::info!(
+                    "[order] ImageGenerationBegin call_id={} seq={}",
+                    call_id,
+                    event.event_seq
+                );
+            }
+            EventMsg::TaskLifecycle(TaskLifecycleEvent {
+                phase,
+                origin,
+                visible_to_user,
+                last_agent_message,
+            }) => {
+                let lifecycle = PendingTaskLifecycle {
+                    origin,
+                    visible_to_user,
+                };
+                match phase {
+                    TaskLifecyclePhase::Started | TaskLifecyclePhase::AwaitingExternalInput => {
+                        self.pending_task_lifecycle = Some(lifecycle);
+                    }
+                    TaskLifecyclePhase::Quiescent => {
+                        self.current_task_lifecycle = Some(lifecycle);
+                        if self.auto_state.is_active() && !visible_to_user {
+                            if let Some(item) = last_agent_message
+                                .as_deref()
+                                .map(str::trim)
+                                .filter(|text| !text.is_empty())
+                                .and_then(|text| {
+                                    Self::auto_drive_make_assistant_message(text.to_string())
+                                })
+                            {
+                                self.auto_history.append_raw(std::slice::from_ref(&item));
+                            }
+                        }
+                        self.auto_on_turn_complete();
+                    }
+                }
+            }
             EventMsg::AgentMessage(AgentMessageEvent { message }) => {
+                if self.current_task_output_is_hidden() {
+                    tracing::debug!("Suppressing hidden AgentMessage for current task");
+                    return;
+                }
                 // If the user requested an interrupt, ignore late final answers.
                 if self.stream_state.drop_streaming {
                     tracing::debug!("Ignoring AgentMessage after interrupt");
@@ -13925,7 +14089,62 @@ impl ChatWidget<'_> {
                 };
                 tools::web_search_complete(self, ev.call_id, ev.query, event.order.as_ref(), ok)
             }
+            EventMsg::ImageGenerationEnd(ImageGenerationEndEvent {
+                call_id: _,
+                status,
+                revised_prompt: _,
+                result: _,
+                saved_path,
+            }) => {
+                let ok = match event.order.as_ref() {
+                    Some(om) => self.provider_order_key_from_order_meta(om),
+                    None => {
+                        tracing::warn!("missing OrderMeta on ImageGenerationEnd; using synthetic key");
+                        self.next_internal_key()
+                    }
+                };
+
+                if let Some(path) = saved_path.as_ref() {
+                    if let Some(record) = image_record_from_path(path.as_path()) {
+                        let cell = Box::new(history_cell::ImageOutputCell::from_record(record));
+                        let _ = self.history_insert_with_key_global(cell, ok);
+                    } else {
+                        let state = history_cell::plain_message_state_from_lines(
+                            vec![Line::from(format!(
+                                "Generated image saved to {}",
+                                path.display()
+                            ))],
+                            HistoryCellType::Notice,
+                        );
+                        let _ = self.history_insert_plain_state_with_key(
+                            state,
+                            ok,
+                            "image-generation",
+                        );
+                    }
+                } else {
+                    let state = history_cell::plain_message_state_from_lines(
+                        vec![Line::from(format!(
+                            "Image generation finished with status `{status}`, but the image could not be saved."
+                        ))],
+                        HistoryCellType::Notice,
+                    );
+                    let _ = self.history_insert_plain_state_with_key(
+                        state,
+                        ok,
+                        "image-generation",
+                    );
+                }
+
+                self.bottom_pane
+                    .update_status_text("responding".to_string());
+                self.maybe_hide_spinner();
+            }
             EventMsg::AgentMessageDelta(AgentMessageDeltaEvent { delta }) => {
+                if self.current_task_output_is_hidden() {
+                    tracing::debug!("Suppressing hidden AgentMessageDelta for current task");
+                    return;
+                }
                 tracing::debug!("AgentMessageDelta: {:?}", delta);
                 // If the user requested an interrupt, ignore late deltas.
                 if self.stream_state.drop_streaming {
@@ -13975,6 +14194,10 @@ impl ChatWidget<'_> {
                     .update_status_text("responding".to_string());
             }
             EventMsg::AgentReasoning(AgentReasoningEvent { text }) => {
+                if self.current_task_output_is_hidden() {
+                    tracing::debug!("Suppressing hidden AgentReasoning for current task");
+                    return;
+                }
                 // Ignore late reasoning if we've dropped streaming due to interrupt.
                 if self.stream_state.drop_streaming {
                     tracing::debug!("Ignoring AgentReasoning after interrupt");
@@ -14032,6 +14255,10 @@ impl ChatWidget<'_> {
                 self.mark_needs_redraw();
             }
             EventMsg::AgentReasoningDelta(AgentReasoningDeltaEvent { delta }) => {
+                if self.current_task_output_is_hidden() {
+                    tracing::debug!("Suppressing hidden AgentReasoningDelta for current task");
+                    return;
+                }
                 tracing::debug!("AgentReasoningDelta: {:?}", delta);
                 if self.stream_state.drop_streaming {
                     tracing::debug!("Ignoring Reasoning delta after interrupt");
@@ -14079,6 +14306,10 @@ impl ChatWidget<'_> {
                 self.bottom_pane.update_status_text("thinking".to_string());
             }
             EventMsg::AgentReasoningSectionBreak(AgentReasoningSectionBreakEvent {}) => {
+                if self.current_task_output_is_hidden() {
+                    tracing::debug!("Suppressing hidden AgentReasoningSectionBreak for current task");
+                    return;
+                }
                 // Insert section break in reasoning stream
                 let sink = AppEventHistorySink(self.app_event_tx.clone());
                 self.stream.insert_reasoning_section_break(&sink);
@@ -14111,7 +14342,12 @@ impl ChatWidget<'_> {
                 // after every tool call.
                 self.turn_sequence = self.turn_sequence.saturating_add(1);
                 self.turn_had_code_edits = false;
-                self.current_turn_origin = self.pending_turn_origin.take();
+                self.current_task_lifecycle = self.pending_task_lifecycle.take();
+                self.current_turn_origin = if self.current_task_output_is_hidden() {
+                    Some(TurnOrigin::Developer)
+                } else {
+                    self.pending_turn_origin.take()
+                };
                 self.cleared_lingering_execs_this_turn = false;
                 self.ensure_lingering_execs_cleared();
 
@@ -14215,8 +14451,8 @@ impl ChatWidget<'_> {
                 // Final re-check for idle state
                 self.maybe_hide_spinner();
                 self.maybe_trigger_auto_review();
-                self.auto_on_turn_complete();
                 self.emit_turn_complete_notification(last_agent_message);
+                self.current_task_lifecycle = None;
                 self.suppress_next_agent_hint = false;
                 self.mark_needs_redraw();
                 self.flush_history_snapshot_if_needed(true);
@@ -14225,6 +14461,10 @@ impl ChatWidget<'_> {
             EventMsg::AgentReasoningRawContentDelta(AgentReasoningRawContentDeltaEvent {
                 delta,
             }) => {
+                if self.current_task_output_is_hidden() {
+                    tracing::debug!("Suppressing hidden AgentReasoningRawContentDelta for current task");
+                    return;
+                }
                 if self.stream_state.drop_streaming {
                     tracing::debug!("Ignoring RawContent delta after interrupt");
                     self.stop_spinner();
@@ -14264,6 +14504,10 @@ impl ChatWidget<'_> {
                 );
             }
             EventMsg::AgentReasoningRawContent(AgentReasoningRawContentEvent { text }) => {
+                if self.current_task_output_is_hidden() {
+                    tracing::debug!("Suppressing hidden AgentReasoningRawContent for current task");
+                    return;
+                }
                 if self.stream_state.drop_streaming {
                     tracing::debug!("Ignoring AgentReasoningRawContent after interrupt");
                     self.stop_spinner();
@@ -16867,6 +17111,43 @@ impl ChatWidget<'_> {
         self.show_settings_overlay(Some(SettingsSection::Skills));
     }
 
+    /// Copy the last assistant response (raw markdown) to the system clipboard.
+    pub(crate) fn copy_last_agent_markdown(&mut self) {
+        self.copy_last_agent_markdown_with(crate::clipboard_copy::copy_to_clipboard);
+    }
+
+    fn copy_last_agent_markdown_with(
+        &mut self,
+        copy_fn: impl FnOnce(&str) -> Result<Option<crate::clipboard_copy::ClipboardLease>, String>,
+    ) {
+        let markdown = self.history_cells.iter().rev().find_map(|cell| {
+            cell.as_any()
+                .downcast_ref::<history_cell::AssistantMarkdownCell>()
+                .map(|assistant| assistant.markdown().to_string())
+                .filter(|text| !text.is_empty())
+        });
+
+        match markdown {
+            Some(markdown) => match copy_fn(&markdown) {
+                Ok(lease) => {
+                    self.clipboard_lease = lease;
+                    self.history_push_plain_state(history_cell::plain_message_state_from_lines(
+                        vec![Line::from("Copied last message to clipboard")],
+                        crate::history_cell::HistoryCellType::Notice,
+                    ));
+                }
+                Err(error) => self.history_push_plain_state(history_cell::new_error_event(
+                    format!("Copy failed: {error}"),
+                )),
+            },
+            None => self.history_push_plain_state(history_cell::new_error_event(
+                "No agent response to copy".to_string(),
+            )),
+        }
+
+        self.request_redraw();
+    }
+
     #[allow(dead_code)]
     pub(crate) fn add_agents_output(&mut self) {
         use ratatui::text::Line;
@@ -18422,8 +18703,14 @@ impl ChatWidget<'_> {
 
         #[cfg(target_os = "macos")]
         {
-            let brew_formula = macos_brew_formula_for_command(&cmd);
-            let script = format!("brew install {brew_formula}");
+            let script = if cmd.eq_ignore_ascii_case("agy")
+                || cmd.eq_ignore_ascii_case("antigravity")
+            {
+                "curl -fsSL https://antigravity.google/cli/install.sh | bash".to_string()
+            } else {
+                let brew_formula = macos_brew_formula_for_command(&cmd);
+                format!("brew install {brew_formula}")
+            };
             let command = vec!["/bin/bash".to_string(), "-lc".to_string(), script.clone()];
             return Some((command, script));
         }
@@ -18479,10 +18766,14 @@ fi\n\
             }
 
             let lowercase = agent_name.trim().to_ascii_lowercase();
+            let cmd_lowercase = cmd.trim().to_ascii_lowercase();
             let script = match lowercase.as_str() {
                 "claude" => linux_agent_install_script(&cmd, "@anthropic-ai/claude-code"),
                 "gemini" => linux_agent_install_script(&cmd, "@google/gemini-cli"),
                 "qwen" => linux_agent_install_script(&cmd, "@qwen-code/qwen-code"),
+                _ if cmd_lowercase == "agy" || cmd_lowercase == "antigravity" => {
+                    "curl -fsSL https://antigravity.google/cli/install.sh | bash".to_string()
+                }
                 _ => format!(
                     "{cmd} --version || (echo \"Please install {cmd} via your package manager\" && false)",
                     cmd = cmd
@@ -22759,14 +23050,15 @@ Have we met every part of this goal and is there no further work to do?"#
     }
 
     fn curated_model_presets(presets: Vec<ModelPreset>) -> Vec<ModelPreset> {
-        const MODEL_PICKER_ORDER: [&str; 4] = [
+        const MODEL_PICKER_ORDER: [&str; 5] = [
+            "gpt-5.5",
             "gpt-5.4",
             "gpt-5.4-mini",
             "gpt-5.3-codex",
             "gpt-5.3-codex-spark",
         ];
 
-        let curated: Vec<ModelPreset> = MODEL_PICKER_ORDER
+        let mut curated: Vec<ModelPreset> = MODEL_PICKER_ORDER
             .into_iter()
             .filter_map(|model| {
                 presets.iter().find(|preset| {
@@ -22776,6 +23068,21 @@ Have we met every part of this goal and is there no further work to do?"#
             })
             .cloned()
             .collect();
+
+        let curated_slugs: std::collections::HashSet<String> = curated
+            .iter()
+            .flat_map(|preset| {
+                [
+                    preset.id.to_ascii_lowercase(),
+                    preset.model.to_ascii_lowercase(),
+                ]
+            })
+            .collect();
+
+        curated.extend(presets.iter().filter(|preset| {
+            !curated_slugs.contains(&preset.id.to_ascii_lowercase())
+                && !curated_slugs.contains(&preset.model.to_ascii_lowercase())
+        }).cloned());
 
         if curated.is_empty() { presets } else { curated }
     }
@@ -23201,6 +23508,7 @@ Have we met every part of this goal and is there no further work to do?"#
         let persisted_service_tier = match (profile.as_deref(), self.config.service_tier) {
             (Some(_), None) => Some("standard"),
             (_, Some(ServiceTier::Fast)) => Some("fast"),
+            (_, Some(ServiceTier::Flex)) => Some("flex"),
             (_, Some(ServiceTier::Standard)) => Some("standard"),
             (_, None) => None,
         };
@@ -23273,8 +23581,19 @@ Have we met every part of this goal and is there no further work to do?"#
         self.refresh_settings_overview_rows();
 
         let status = match self.config.context_mode {
-            Some(ContextMode::OneM) => "1M context enabled.".to_string(),
-            Some(ContextMode::Auto) => "Auto Context enabled.".to_string(),
+            Some(ContextMode::OneM) if supports_extended_context(&self.config.model) => {
+                "1M context enabled.".to_string()
+            }
+            Some(ContextMode::OneM) => {
+                "1M context is unavailable for this model and will only apply on supported models."
+                    .to_string()
+            }
+            Some(ContextMode::Auto) if supports_extended_context(&self.config.model) => {
+                "Auto Context enabled.".to_string()
+            }
+            Some(ContextMode::Auto) => {
+                "Auto Context will only expand on supported models.".to_string()
+            }
             Some(ContextMode::Disabled) | None => "Context mode disabled.".to_string(),
         };
         self.bottom_pane.flash_footer_notice(status);
@@ -31025,6 +31344,76 @@ use hanzo_core::protocol::OrderMeta;
     }
 
     #[test]
+    fn builtin_model_presets_include_gpt_5_5() {
+        let presets = builtin_model_presets(Some(AuthMode::ChatGPT), true);
+        assert!(presets.iter().any(|preset| preset.id == "gpt-5.5"));
+    }
+
+    #[test]
+    fn curated_model_presets_appends_new_remote_models() {
+        let mut gpt_5_5 = builtin_model_presets(Some(AuthMode::ChatGPT), true)
+            .into_iter()
+            .find(|preset| preset.id == "gpt-5.4")
+            .expect("expected gpt-5.4 builtin preset");
+        gpt_5_5.id = "gpt-5.5".to_string();
+        gpt_5_5.model = "gpt-5.5".to_string();
+        gpt_5_5.display_name = "GPT-5.5".to_string();
+
+        let presets = vec![
+            gpt_5_5,
+            ModelPreset {
+                id: "gpt-5.4".to_string(),
+                model: "gpt-5.4".to_string(),
+                display_name: "gpt-5.4".to_string(),
+                description: "Frontier flagship model.".to_string(),
+                default_reasoning_effort: ReasoningEffort::Medium.into(),
+                supported_reasoning_efforts: vec![ReasoningEffortPreset {
+                    effort: ReasoningEffort::Medium.into(),
+                    description: "balanced".to_string(),
+                }],
+                supported_text_verbosity: &[TextVerbosity::Medium],
+                is_default: false,
+                upgrade: None,
+                pro_only: false,
+                show_in_picker: true,
+            },
+        ];
+
+        let curated = ChatWidget::curated_model_presets(presets);
+        let ids: Vec<&str> = curated.iter().map(|preset| preset.id.as_str()).collect();
+        assert_eq!(ids, vec!["gpt-5.5", "gpt-5.4"]);
+    }
+
+    #[test]
+    fn curated_model_presets_deduplicates_alias_slugs() {
+        let canonical = ModelPreset {
+            id: "alias/gpt-5.5".to_string(),
+            model: "gpt-5.5".to_string(),
+            display_name: "GPT-5.5".to_string(),
+            description: "Frontier flagship model.".to_string(),
+            default_reasoning_effort: ReasoningEffort::Medium.into(),
+            supported_reasoning_efforts: vec![ReasoningEffortPreset {
+                effort: ReasoningEffort::Medium.into(),
+                description: "balanced".to_string(),
+            }],
+            supported_text_verbosity: &[TextVerbosity::Medium],
+            is_default: false,
+            upgrade: None,
+            pro_only: false,
+            show_in_picker: true,
+        };
+        let duplicate = ModelPreset {
+            id: "gpt-5.5".to_string(),
+            model: "gpt-5.5".to_string(),
+            ..canonical.clone()
+        };
+
+        let curated = ChatWidget::curated_model_presets(vec![canonical, duplicate]);
+        let ids: Vec<&str> = curated.iter().map(|preset| preset.id.as_str()).collect();
+        assert_eq!(ids, vec!["alias/gpt-5.5"]);
+    }
+
+    #[test]
     fn model_command_accepts_supported_non_curated_builtin_model() {
         let _runtime_guard = enter_test_runtime_guard();
         let mut harness = ChatWidgetHarness::new();
@@ -34745,8 +35134,8 @@ use hanzo_core::protocol::OrderMeta;
             write: false,
             write_requested: Some(false),
             models: Some(vec![
-                "claude-sonnet-4.5".to_string(),
-                "gemini-3-pro".to_string(),
+                "claude-sonnet-4.6".to_string(),
+                "gemini-3.1-pro".to_string(),
             ]),
         }];
         chat.auto_state.pending_agent_timing = Some(AutoTurnAgentsTiming::Blocking);
@@ -34760,7 +35149,7 @@ use hanzo_core::protocol::OrderMeta;
         assert!(message.contains("Run diagnostics"));
         assert!(message.contains("Please run agent.create"));
         assert!(message.contains("write: false"));
-        assert!(message.contains("Models: [claude-sonnet-4.5, gemini-3-pro]"));
+        assert!(message.contains("Models: [claude-sonnet-4.6, gemini-3.1-pro]"));
         assert!(message.contains("Draft alternative fix"));
         assert!(message.contains("Focus on parser module"));
         assert!(message.contains("agent.wait"));
@@ -34770,13 +35159,25 @@ use hanzo_core::protocol::OrderMeta;
     }
 
     #[test]
-    fn auto_drive_waits_for_turn_completion_before_updating_coordinator() {
+    fn auto_drive_waits_for_quiescent_lifecycle_before_updating_coordinator() {
         let mut harness = ChatWidgetHarness::new();
         let chat = harness.chat();
 
         chat.auto_state.set_phase(AutoRunPhase::Active);
         chat.auto_state.on_prompt_submitted();
         chat.auto_state.set_coordinator_waiting(false);
+
+        chat.handle_code_event(Event {
+            id: "turn-1".to_string(),
+            event_seq: 0,
+            msg: EventMsg::TaskLifecycle(TaskLifecycleEvent {
+                phase: TaskLifecyclePhase::Started,
+                origin: TaskOriginKind::User,
+                visible_to_user: true,
+                last_agent_message: None,
+            }),
+            order: None,
+        });
 
         chat.handle_code_event(Event {
             id: "turn-1".to_string(),
@@ -34806,8 +35207,101 @@ use hanzo_core::protocol::OrderMeta;
         });
 
         assert!(
+            chat.auto_state.is_waiting_for_response(),
+            "TaskComplete alone should not advance Auto Drive"
+        );
+
+        chat.handle_code_event(Event {
+            id: "turn-1".to_string(),
+            event_seq: 2,
+            msg: EventMsg::TaskLifecycle(TaskLifecycleEvent {
+                phase: TaskLifecyclePhase::Quiescent,
+                origin: TaskOriginKind::User,
+                visible_to_user: true,
+                last_agent_message: Some("First assistant update".to_string()),
+            }),
+            order: None,
+        });
+
+        assert!(
             !chat.auto_state.is_waiting_for_response(),
-            "TaskComplete should be the first point that advances Auto Drive"
+            "TaskLifecycle(quiescent) should be the first point that advances Auto Drive"
+        );
+    }
+
+    #[test]
+    fn hidden_out_of_turn_developer_turn_stays_out_of_visible_history() {
+        let mut harness = ChatWidgetHarness::new();
+        let chat = harness.chat();
+
+        chat.auto_state.set_phase(AutoRunPhase::Active);
+        chat.auto_state.on_prompt_submitted();
+        chat.auto_state.set_coordinator_waiting(false);
+
+        let before = chat.history_cells.len();
+
+        chat.handle_code_event(Event {
+            id: "hidden-turn".to_string(),
+            event_seq: 0,
+            msg: EventMsg::TaskLifecycle(TaskLifecycleEvent {
+                phase: TaskLifecyclePhase::Started,
+                origin: TaskOriginKind::OutOfTurnDeveloper,
+                visible_to_user: false,
+                last_agent_message: None,
+            }),
+            order: None,
+        });
+
+        chat.handle_code_event(Event {
+            id: "hidden-turn".to_string(),
+            event_seq: 0,
+            msg: EventMsg::TaskStarted,
+            order: None,
+        });
+
+        chat.handle_code_event(Event {
+            id: "hidden-turn".to_string(),
+            event_seq: 1,
+            msg: EventMsg::AgentMessage(AgentMessageEvent {
+                message: "Background build passed cleanly.".to_string(),
+            }),
+            order: None,
+        });
+
+        assert_eq!(
+            chat.history_cells.len(),
+            before,
+            "hidden out-of-turn developer turns should not render visible assistant output"
+        );
+
+        chat.handle_code_event(Event {
+            id: "hidden-turn".to_string(),
+            event_seq: 2,
+            msg: EventMsg::TaskLifecycle(TaskLifecycleEvent {
+                phase: TaskLifecyclePhase::Quiescent,
+                origin: TaskOriginKind::OutOfTurnDeveloper,
+                visible_to_user: false,
+                last_agent_message: Some("Background build passed cleanly.".to_string()),
+            }),
+            order: None,
+        });
+
+        let hidden_observation_present = chat.auto_history.raw_snapshot().iter().any(|item| {
+            matches!(
+                item,
+                code_protocol::models::ResponseItem::Message { role, content, .. }
+                    if role == "assistant"
+                        && content.iter().any(|entry| matches!(
+                            entry,
+                            code_protocol::models::ContentItem::OutputText { text }
+                                if text.contains("Background build passed cleanly.")
+                        ))
+            )
+        });
+
+        assert!(
+            hidden_observation_present,
+            "hidden out-of-turn developer turns should still update Auto Drive history"
         );
     }
 
@@ -36840,7 +37334,7 @@ impl ChatWidget<'_> {
         if !self.turn_had_code_edits && self.pending_auto_review_range.is_none() {
             return;
         }
-        if matches!(self.current_turn_origin, Some(TurnOrigin::Developer)) {
+        if self.current_task_should_skip_auto_review() {
             return;
         }
 

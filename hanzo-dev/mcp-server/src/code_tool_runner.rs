@@ -302,6 +302,8 @@ async fn run_code_tool_session_inner(
                     | EventMsg::ExitedReviewMode(_)
                     | EventMsg::CustomToolCallBegin(_)
                     | EventMsg::CustomToolCallEnd(_)
+                    | EventMsg::ImageGenerationBegin(_)
+                    | EventMsg::ImageGenerationEnd(_)
                     | EventMsg::ViewImageToolCall(_) => {
                         // For now, we do not do anything extra for these
                         // events. Note that
