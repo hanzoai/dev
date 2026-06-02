@@ -5,16 +5,14 @@ use serde::Deserialize;
 use serde::Serialize;
 use std::env;
 use std::fs::File;
-use std::fs::OpenOptions;
 use std::io::Read;
 use std::io::Write;
-#[cfg(unix)]
-use std::os::unix::fs::OpenOptionsExt;
 use std::path::Path;
 use std::path::PathBuf;
 use std::sync::Arc;
 use std::sync::Mutex;
 use std::time::Duration;
+use tempfile::NamedTempFile;
 
 use hanzo_app_server_protocol::AuthMode;
 
@@ -82,6 +80,8 @@ impl std::error::Error for RefreshTokenError {}
 
 const REFRESH_TOKEN_ACCOUNT_MISMATCH_MESSAGE: &str =
     "Your access token could not be refreshed because you have since logged out or signed in to another account. Please sign in again.";
+const REFRESH_TOKEN_URL: &str = "https://auth.openai.com/oauth/token";
+pub const REFRESH_TOKEN_URL_OVERRIDE_ENV_VAR: &str = "CODEX_REFRESH_TOKEN_URL_OVERRIDE";
 
 impl PartialEq for CodexAuth {
     fn eq(&self, other: &Self) -> bool {
@@ -247,8 +247,17 @@ impl CodexAuth {
             .and_then(|t| t.id_token.chatgpt_plan_type.as_ref().map(|p| p.as_string()))
     }
 
+    pub fn is_fedramp_account(&self) -> bool {
+        self.get_current_token_data()
+            .is_some_and(|t| t.id_token.is_fedramp_account())
+    }
+
+    pub fn uses_codex_backend(&self) -> bool {
+        matches!(self.mode, AuthMode::ChatGPT | AuthMode::ChatgptAuthTokens)
+    }
+
     pub fn supports_pro_only_models(&self) -> bool {
-        self.mode.is_chatgpt()
+        self.uses_codex_backend()
             && self
                 .get_plan_type()
                 .is_some_and(|plan| plan.eq_ignore_ascii_case("pro"))
@@ -347,7 +356,9 @@ fn should_proactively_refresh_auth(
     if let Some(access_token) = access_token
         && let Ok(Some(expires_at)) = parse_jwt_expiration(access_token)
     {
-        return expires_at <= Utc::now();
+        return expires_at
+            <= Utc::now()
+                + chrono::Duration::minutes(CHATGPT_ACCESS_TOKEN_REFRESH_WINDOW_MINUTES);
     }
 
     last_refresh.is_some_and(|last_refresh| {
@@ -578,7 +589,11 @@ pub async fn auth_for_stored_account(
             let now = Utc::now();
             let refresh_needed = if account.mode == AuthMode::ChatGPT {
                 if let Ok(Some(expires_at)) = parse_jwt_expiration(&tokens.access_token) {
-                    expires_at <= now
+                    expires_at
+                        <= now
+                            + chrono::Duration::minutes(
+                                CHATGPT_ACCESS_TOKEN_REFRESH_WINDOW_MINUTES,
+                            )
                 } else {
                     last_refresh
                         .map(|last| last < now - chrono::Duration::days(28))
@@ -825,15 +840,20 @@ pub fn try_read_auth_json(auth_file: &Path) -> std::io::Result<AuthDotJson> {
 
 pub fn write_auth_json(auth_file: &Path, auth_dot_json: &AuthDotJson) -> std::io::Result<()> {
     let json_data = serde_json::to_string_pretty(auth_dot_json)?;
-    let mut options = OpenOptions::new();
-    options.truncate(true).write(true).create(true);
-    #[cfg(unix)]
-    {
-        options.mode(0o600);
+    let parent = auth_file.parent().ok_or_else(|| {
+        std::io::Error::new(
+            std::io::ErrorKind::InvalidInput,
+            format!("auth path has no parent: {}", auth_file.display()),
+        )
+    })?;
+    if !parent.exists() {
+        std::fs::create_dir_all(parent)?;
     }
-    let mut file = options.open(auth_file)?;
+    let mut file = NamedTempFile::new_in(parent)?;
     file.write_all(json_data.as_bytes())?;
     file.flush()?;
+    file.as_file_mut().sync_all()?;
+    file.persist(auth_file).map_err(|err| err.error)?;
     Ok(())
 }
 
@@ -888,7 +908,7 @@ async fn try_refresh_token(
 
     // Use shared client factory to include standard headers
     let response = client
-        .post("https://auth.openai.com/oauth/token")
+        .post(refresh_token_endpoint())
         .header("Content-Type", "application/json")
         .json(&refresh_request)
         .send()
@@ -945,13 +965,27 @@ struct OpenAiErrorData {
 fn classify_refresh_failure(status: StatusCode, body: &str) -> RefreshTokenError {
     if let Ok(parsed) = serde_json::from_str::<OpenAiErrorWrapper>(body) {
         if let Some(error) = parsed.error {
-            if error.code.as_deref() == Some("refresh_token_reused") {
-                let message = error
-                    .message
-                    .unwrap_or_else(|| "refresh token already rotated".to_string());
-                return RefreshTokenError::transient(format!(
-                    "refresh_token_reused: {message}"
-                ));
+            if let Some(code) = error.code.as_deref()
+                && matches!(
+                    code,
+                    "refresh_token_expired"
+                        | "refresh_token_reused"
+                        | "refresh_token_invalidated"
+                )
+            {
+                let message = error.message.unwrap_or_else(|| match code {
+                    "refresh_token_expired" => {
+                        "refresh token expired; please sign in again".to_string()
+                    }
+                    "refresh_token_reused" => {
+                        "refresh token already rotated; please sign in again".to_string()
+                    }
+                    "refresh_token_invalidated" => {
+                        "refresh token revoked; please sign in again".to_string()
+                    }
+                    _ => "refresh token unavailable; please sign in again".to_string(),
+                });
+                return RefreshTokenError::permanent(format!("{code}: {message}"));
             }
         }
     }
@@ -1010,6 +1044,11 @@ fn classify_refresh_failure(status: StatusCode, body: &str) -> RefreshTokenError
     RefreshTokenError::transient(format!(
         "OAuth refresh failed with unexpected response ({status})"
     ))
+}
+
+fn refresh_token_endpoint() -> String {
+    env::var(REFRESH_TOKEN_URL_OVERRIDE_ENV_VAR)
+        .unwrap_or_else(|_| REFRESH_TOKEN_URL.to_string())
 }
 
 fn summarize_body(body: &str) -> String {
@@ -1167,6 +1206,7 @@ mod tests {
                     id_token: IdTokenInfo {
                         email: Some("user@example.com".to_string()),
                         chatgpt_plan_type: Some(PlanType::Known(KnownPlan::Pro)),
+                        chatgpt_account_is_fedramp: false,
                         raw_jwt: fake_jwt,
                     },
                     access_token: "test-access-token".to_string(),
@@ -1220,6 +1260,7 @@ mod tests {
                     id_token: IdTokenInfo {
                         email: Some("user@example.com".to_string()),
                         chatgpt_plan_type: Some(PlanType::Known(KnownPlan::Pro)),
+                        chatgpt_account_is_fedramp: false,
                         raw_jwt: fake_jwt,
                     },
                     access_token: "test-access-token".to_string(),
@@ -1341,7 +1382,7 @@ mod tests {
     }
 
     #[test]
-    fn refresh_token_reused_is_transient_and_detected() {
+    fn refresh_token_reused_is_permanent_and_detected() {
         let body = r#"{
   "error": {
     "message": "Your refresh token has already been used to generate a new access token. Please try signing in again.",
@@ -1351,7 +1392,7 @@ mod tests {
 }"#;
 
         let err = classify_refresh_failure(StatusCode::UNAUTHORIZED, body);
-        assert!(matches!(err.kind, RefreshTokenErrorKind::Transient));
+        assert!(matches!(err.kind, RefreshTokenErrorKind::Permanent));
         assert!(err.is_refresh_token_reused());
     }
 
@@ -1442,12 +1483,15 @@ mod tests {
         let fresh = Utc::now() - chrono::Duration::days(1);
         let stale = Utc::now() - chrono::Duration::days(29);
         let future_access = build_jwt(serde_json::json!({ "exp": Utc::now().timestamp() + 3600 }));
+        let expiring_access =
+            build_jwt(serde_json::json!({ "exp": Utc::now().timestamp() + 240 }));
         let expired_access = build_jwt(serde_json::json!({ "exp": Utc::now().timestamp() - 60 }));
 
         assert!(!should_proactively_refresh_auth(Some(fresh), None));
         assert!(should_proactively_refresh_auth(Some(stale), None));
         assert!(!should_proactively_refresh_auth(None, None));
         assert!(!should_proactively_refresh_auth(Some(stale), Some(&future_access)));
+        assert!(should_proactively_refresh_auth(Some(fresh), Some(&expiring_access)));
         assert!(should_proactively_refresh_auth(Some(fresh), Some(&expired_access)));
     }
 

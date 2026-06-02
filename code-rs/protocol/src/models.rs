@@ -209,6 +209,9 @@ pub enum ResponseInputItem {
     },
     CustomToolCallOutput {
         call_id: String,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        #[ts(optional)]
+        name: Option<String>,
         output: FunctionCallOutputPayload,
     },
     ToolSearchOutput {
@@ -342,6 +345,9 @@ pub enum ResponseItem {
     },
     CustomToolCallOutput {
         call_id: String,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        #[ts(optional)]
+        name: Option<String>,
         output: FunctionCallOutputPayload,
     },
     ToolSearchOutput {
@@ -386,6 +392,11 @@ pub enum ResponseItem {
     #[serde(alias = "compaction")]
     CompactionSummary {
         encrypted_content: String,
+    },
+    ContextCompaction {
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        #[ts(optional)]
+        encrypted_content: Option<String>,
     },
     #[serde(other)]
     Other,
@@ -854,9 +865,15 @@ impl From<ResponseInputItem> for ResponseItem {
                 };
                 Self::FunctionCallOutput { call_id, output }
             }
-            ResponseInputItem::CustomToolCallOutput { call_id, output } => {
-                Self::CustomToolCallOutput { call_id, output }
-            }
+            ResponseInputItem::CustomToolCallOutput {
+                call_id,
+                name,
+                output,
+            } => Self::CustomToolCallOutput {
+                call_id,
+                name,
+                output,
+            },
             ResponseInputItem::ToolSearchOutput {
                 call_id,
                 status,
@@ -1677,6 +1694,7 @@ mod tests {
     fn serializes_custom_tool_image_outputs_as_array() -> Result<()> {
         let item = ResponseInputItem::CustomToolCallOutput {
             call_id: "call1".into(),
+            name: None,
             output: FunctionCallOutputPayload::from_content_items(vec![
                 FunctionCallOutputContentItem::InputImage {
                     image_url: "data:image/png;base64,BASE64".into(),
@@ -1765,6 +1783,36 @@ mod tests {
             ResponseItem::CompactionSummary {
                 encrypted_content: "abc".into(),
             }
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn deserializes_context_compaction() -> Result<()> {
+        let json = r#"{"type":"context_compaction","encrypted_content":"abc"}"#;
+
+        let item: ResponseItem = serde_json::from_str(json)?;
+
+        assert_eq!(
+            item,
+            ResponseItem::ContextCompaction {
+                encrypted_content: Some("abc".into()),
+            }
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn serializes_context_compaction_trigger_without_payload() -> Result<()> {
+        let item = ResponseItem::ContextCompaction {
+            encrypted_content: None,
+        };
+
+        assert_eq!(
+            serde_json::to_value(item)?,
+            serde_json::json!({
+                "type": "context_compaction",
+            })
         );
         Ok(())
     }

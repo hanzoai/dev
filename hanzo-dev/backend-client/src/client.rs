@@ -3,6 +3,8 @@ use crate::types::PaginatedListTaskListItem;
 use crate::types::TurnAttemptsSiblingTurnsResponse;
 use anyhow::Result;
 use reqwest::StatusCode;
+use reqwest::cookie::CookieStore;
+use reqwest::cookie::Jar;
 use reqwest::header::AUTHORIZATION;
 use reqwest::header::CONTENT_TYPE;
 use reqwest::header::HeaderMap;
@@ -11,6 +13,116 @@ use reqwest::header::HeaderValue;
 use reqwest::header::USER_AGENT;
 use serde::de::DeserializeOwned;
 use std::fmt;
+use std::sync::Arc;
+use std::sync::LazyLock;
+
+static SHARED_CHATGPT_CLOUDFLARE_COOKIE_STORE: LazyLock<Arc<ChatGptCloudflareCookieStore>> =
+    LazyLock::new(|| Arc::new(ChatGptCloudflareCookieStore::default()));
+
+#[derive(Debug, Default)]
+struct ChatGptCloudflareCookieStore {
+    jar: Jar,
+}
+
+impl CookieStore for ChatGptCloudflareCookieStore {
+    fn set_cookies(
+        &self,
+        cookie_headers: &mut dyn Iterator<Item = &HeaderValue>,
+        url: &reqwest::Url,
+    ) {
+        if !is_chatgpt_cookie_url(url) {
+            return;
+        }
+
+        let mut cloudflare_cookie_headers =
+            cookie_headers.filter(|header| is_allowed_cloudflare_set_cookie_header(header));
+        self.jar.set_cookies(&mut cloudflare_cookie_headers, url);
+    }
+
+    fn cookies(&self, url: &reqwest::Url) -> Option<HeaderValue> {
+        if is_chatgpt_cookie_url(url) {
+            self.jar.cookies(url).and_then(only_cloudflare_cookies)
+        } else {
+            None
+        }
+    }
+}
+
+fn is_allowed_chatgpt_host(host: &str) -> bool {
+    const EXACT_HOSTS: &[&str] = &["chatgpt.com", "chat.openai.com", "chatgpt-staging.com"];
+    const SUBDOMAIN_SUFFIXES: &[&str] = &[".chatgpt.com", ".chatgpt-staging.com"];
+
+    EXACT_HOSTS.contains(&host)
+        || SUBDOMAIN_SUFFIXES
+            .iter()
+            .any(|suffix| host.ends_with(suffix))
+}
+
+fn with_chatgpt_cloudflare_cookie_store(
+    builder: reqwest::ClientBuilder,
+) -> reqwest::ClientBuilder {
+    builder.cookie_provider(Arc::clone(&SHARED_CHATGPT_CLOUDFLARE_COOKIE_STORE))
+}
+
+fn is_chatgpt_cookie_url(url: &reqwest::Url) -> bool {
+    if url.scheme() != "https" {
+        return false;
+    }
+
+    let Some(host) = url.host_str() else {
+        return false;
+    };
+
+    is_allowed_chatgpt_host(host)
+}
+
+fn is_allowed_cloudflare_set_cookie_header(header: &HeaderValue) -> bool {
+    header
+        .to_str()
+        .ok()
+        .and_then(set_cookie_name)
+        .is_some_and(is_allowed_cloudflare_cookie_name)
+}
+
+fn set_cookie_name(header: &str) -> Option<&str> {
+    let (name, _) = header.split_once('=')?;
+    let name = name.trim();
+    (!name.is_empty()).then_some(name)
+}
+
+fn only_cloudflare_cookies(header: HeaderValue) -> Option<HeaderValue> {
+    let header = header.to_str().ok()?;
+    let cookies = header
+        .split(';')
+        .filter_map(|cookie| {
+            let cookie = cookie.trim();
+            let name = cookie.split_once('=')?.0.trim();
+            is_allowed_cloudflare_cookie_name(name).then_some(cookie)
+        })
+        .collect::<Vec<_>>()
+        .join("; ");
+
+    if cookies.is_empty() {
+        None
+    } else {
+        HeaderValue::from_str(&cookies).ok()
+    }
+}
+
+fn is_allowed_cloudflare_cookie_name(name: &str) -> bool {
+    matches!(
+        name,
+        "__cf_bm"
+            | "__cflb"
+            | "__cfruid"
+            | "__cfseq"
+            | "__cfwaitingroom"
+            | "_cfuvid"
+            | "cf_clearance"
+            | "cf_ob_info"
+            | "cf_use_ob"
+    ) || name.starts_with("cf_chl_")
+}
 
 #[derive(Debug)]
 pub enum RequestError {
@@ -95,6 +207,7 @@ pub struct Client {
     bearer_token: Option<String>,
     user_agent: Option<HeaderValue>,
     chatgpt_account_id: Option<String>,
+    chatgpt_account_is_fedramp: bool,
     path_style: PathStyle,
 }
 
@@ -120,6 +233,7 @@ impl Client {
             bearer_token: None,
             user_agent: None,
             chatgpt_account_id: None,
+            chatgpt_account_is_fedramp: false,
             path_style,
         })
     }
@@ -138,6 +252,11 @@ impl Client {
 
     pub fn with_chatgpt_account_id(mut self, account_id: impl Into<String>) -> Self {
         self.chatgpt_account_id = Some(account_id.into());
+        self
+    }
+
+    pub fn with_fedramp_routing_header(mut self) -> Self {
+        self.chatgpt_account_is_fedramp = true;
         self
     }
 
@@ -164,6 +283,11 @@ impl Client {
             && let Ok(hv) = HeaderValue::from_str(acc)
         {
             h.insert(name, hv);
+        }
+        if self.chatgpt_account_is_fedramp
+            && let Ok(name) = HeaderName::from_bytes(b"X-OpenAI-Fedramp")
+        {
+            h.insert(name, HeaderValue::from_static("true"));
         }
         h
     }
