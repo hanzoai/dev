@@ -11,7 +11,7 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from urllib.parse import quote
 
-SCRIPT_VERSION = 5
+SCRIPT_VERSION = 4
 QUALIFYING_KIND_LABELS = ("bug", "enhancement")
 REACTION_KEYS = ("+1", "-1", "laugh", "hooray", "confused", "heart", "rocket", "eyes")
 BASE_ATTENTION_WINDOW_HOURS = 24.0
@@ -393,15 +393,9 @@ def is_bot_login(login):
     return bool(login) and login.lower().endswith("[bot]")
 
 
-def human_login_key(user_obj):
-    login = extract_login(user_obj)
-    if not login or is_bot_login(login):
-        return ""
-    return login.casefold()
-
-
 def is_human_user(user_obj):
-    return bool(human_login_key(user_obj))
+    login = extract_login(user_obj)
+    return bool(login) and not is_bot_login(login)
 
 
 def label_names(issue):
@@ -473,26 +467,22 @@ def reaction_summary(item):
 def reaction_event_summary(reactions, since, until):
     counts = {}
     total = 0
-    users = set()
     for reaction in reactions or []:
         if not isinstance(reaction, dict):
             continue
         if not is_in_window(str(reaction.get("created_at") or ""), since, until):
             continue
-        user_key = human_login_key(reaction.get("user"))
-        if not user_key:
+        if not is_human_user(reaction.get("user")):
             continue
         content = str(reaction.get("content") or "")
         if not content:
             continue
         counts[content] = counts.get(content, 0) + 1
         total += 1
-        users.add(user_key)
     return {
         "total": total,
         "counts": counts,
         "upvotes": counts.get("+1", 0),
-        "users": sorted(users, key=str.casefold),
     }
 
 
@@ -628,21 +618,13 @@ def summarize_issue(
     new_comment_reaction_total = sum(
         comment["reaction_total"] for comment in new_comments
     )
-    new_issue_user_key = human_login_key(issue.get("user")) if new_issue else ""
-    new_issue_user_interaction = bool(new_issue_user_key)
+    new_issue_user_interaction = new_issue and is_human_user(issue.get("user"))
     new_comment_user_interactions = sum(
         1 for comment in new_comments if comment["human_user_interaction"]
     )
-    interaction_user_keys = set(issue_reaction_events_summary["users"])
-    interaction_user_keys.update(comment_reaction_events_summary["users"])
-    if new_issue_user_key:
-        interaction_user_keys.add(new_issue_user_key)
-    interaction_user_keys.update(
-        comment["author"].casefold()
-        for comment in new_comments
-        if comment["human_user_interaction"]
+    user_interactions = (
+        int(new_issue_user_interaction) + new_comment_user_interactions + new_reactions
     )
-    user_interactions = len(interaction_user_keys)
     attention_level = attention_level_for(user_interactions, attention_thresholds)
     attention_marker = attention_marker_for(user_interactions, attention_thresholds)
     updated_without_visible_new_post = (
@@ -975,7 +957,6 @@ def collect_digest(args):
             "New issue comments are filtered by comment creation time within the window from the fetched comment set.",
             "Reaction events are counted by GitHub reaction created_at timestamps for hydrated issues and fetched comments.",
             "Current reaction totals are standing engagement signals; new_reactions and new_upvotes are windowed activity.",
-            "user_interactions counts unique human users per issue across new issues, new comments, and new reactions; repeated actions by the same user count once.",
             "The collector does not assign semantic clusters; use summary_inputs as model-ready evidence for report-time clustering.",
             "Pure reaction-only issues may be missed if GitHub issue search does not surface them via updated_at.",
             "Issues updated during the window without a new issue body or new comment are retained because label/status edits can still be useful owner signals.",

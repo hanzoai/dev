@@ -46,6 +46,7 @@ const SEARCH_TOOL_DEVELOPER_INSTRUCTIONS: &str =
     include_str!("../../templates/search_tool/developer_instructions.md");
 const SEARCH_TOOL_BM25_TOOL_NAME: &str = "search_tool_bm25";
 const CODEX_APPS_TOOL_PREFIX: &str = "mcp__codex_apps__";
+const GENERATED_IMAGE_ARTIFACTS_DIR: &str = "generated_images";
 const AUTO_CONTEXT_JUDGE_MIN_TOKENS: u64 = 150_000;
 const AUTO_CONTEXT_FORCE_COMPACT_MARGIN_TOKENS: u64 = 20_000;
 const AUTO_CONTEXT_ESTIMATED_BYTES_PER_TOKEN: u64 = 4;
@@ -67,12 +68,34 @@ const AUTO_CONTEXT_JUDGE_DEVELOPER_MESSAGE: &str = concat!(
     "only when nearby context appears genuinely essential to finishing the active thread correctly."
 );
 
+#[derive(Clone, Debug, Default)]
+struct ImageGenerationTurnMetadata {
+    requested_model: String,
+    latest_response_model: Option<String>,
+    response_headers: Option<serde_json::Value>,
+}
+
+#[derive(serde::Serialize)]
+struct ImageGenerationSidecar<'a> {
+    call_id: &'a str,
+    status: &'a str,
+    revised_prompt: Option<&'a str>,
+    artifact_path: String,
+    requested_model: &'a str,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    latest_response_model: Option<&'a str>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    response_headers: Option<&'a serde_json::Value>,
+}
+
 /// A series of Turns in response to user input.
 pub(super) struct AgentTask {
     sess: Arc<Session>,
     pub(super) sub_id: String,
     handle: AbortHandle,
     kind: AgentTaskKind,
+    pub(super) origin: TaskOriginKind,
+    pub(super) visible_to_user: bool,
 }
 
 impl AgentTask {
@@ -81,13 +104,17 @@ impl AgentTask {
         turn_context: Arc<TurnContext>,
         sub_id: String,
         input: Vec<InputItem>,
+        origin: TaskOriginKind,
+        visible_to_user: bool,
     ) -> Self {
         let handle = {
             let sess_clone = Arc::clone(&sess);
             let tc_clone = Arc::clone(&turn_context);
             let sub_clone = sub_id.clone();
+            let origin_clone = origin;
+            let visible_clone = visible_to_user;
             tokio::spawn(async move {
-                run_agent(sess_clone, tc_clone, sub_clone, input).await;
+                run_agent(sess_clone, tc_clone, sub_clone, input, origin_clone, visible_clone).await;
             })
             .abort_handle()
         };
@@ -96,6 +123,8 @@ impl AgentTask {
             sub_id,
             handle,
             kind: AgentTaskKind::Regular,
+            origin,
+            visible_to_user,
         }
     }
 
@@ -125,6 +154,8 @@ impl AgentTask {
             sub_id,
             handle,
             kind: AgentTaskKind::Compact,
+            origin: TaskOriginKind::ManualCompact,
+            visible_to_user: false,
         }
     }
 
@@ -139,7 +170,15 @@ impl AgentTask {
             let tc_clone = Arc::clone(&turn_context);
             let sub_clone = sub_id.clone();
             tokio::spawn(async move {
-                run_agent(sess_clone, tc_clone, sub_clone, input).await;
+                run_agent(
+                    sess_clone,
+                    tc_clone,
+                    sub_clone,
+                    input,
+                    TaskOriginKind::Review,
+                    false,
+                )
+                .await;
             })
             .abort_handle()
         };
@@ -148,6 +187,8 @@ impl AgentTask {
             sub_id,
             handle,
             kind: AgentTaskKind::Review,
+            origin: TaskOriginKind::Review,
+            visible_to_user: false,
         }
     }
 
@@ -274,7 +315,14 @@ pub(super) async fn submission_loop(
                     let sentinel_input = vec![InputItem::Text {
                         text: PENDING_ONLY_SENTINEL.to_string(),
                     }];
-                    let agent = AgentTask::spawn(Arc::clone(&sess), turn_context, sub_id, sentinel_input);
+                    let agent = AgentTask::spawn(
+                        Arc::clone(&sess),
+                        turn_context,
+                        sub_id,
+                        sentinel_input,
+                        TaskOriginKind::OutOfTurnDeveloper,
+                        false,
+                    );
                     sess.set_task(agent);
                 }
             }
@@ -671,6 +719,12 @@ pub(super) async fn submission_loop(
                     } else {
                         AppAuthMode::ApiKey
                     }));
+                let image_generation_auth_allowed = auth_manager
+                    .as_ref()
+                    .and_then(|manager| manager.auth().map(|auth| auth.mode))
+                    .is_some_and(|mode| matches!(mode, AppAuthMode::Chatgpt));
+                tools_config.image_gen_tool = config.model_family.supports_image_generation
+                    && image_generation_auth_allowed;
                 let supports_pro_only_models = auth_manager
                     .as_ref()
                     .is_some_and(|manager| manager.supports_pro_only_models());
@@ -942,6 +996,7 @@ pub(super) async fn submission_loop(
                     sub.id.clone(),
                     items,
                     final_output_json_schema,
+                    TaskOriginKind::User,
                 )
                 .await;
             }
@@ -967,7 +1022,14 @@ pub(super) async fn submission_loop(
                 } else {
                     // No task running: treat this as immediate user input without aborting.
                     sess.cleanup_old_status_items().await;
-                    spawn_user_turn(Arc::clone(sess), sub.id.clone(), items, None).await;
+                    spawn_user_turn(
+                        Arc::clone(sess),
+                        sub.id.clone(),
+                        items,
+                        None,
+                        TaskOriginKind::QueuedUser,
+                    )
+                    .await;
                 }
             }
             Op::ExecApproval {
@@ -2188,13 +2250,14 @@ async fn spawn_user_turn(
     sub_id: String,
     items: Vec<InputItem>,
     final_output_json_schema: Option<serde_json::Value>,
+    origin: TaskOriginKind,
 ) {
     maybe_run_auto_context_compaction(&sess, &sub_id, &items).await;
     let turn_context = match final_output_json_schema {
         Some(schema) => sess.make_turn_context_with_schema(Some(schema)),
         None => sess.make_turn_context(),
     };
-    let agent = AgentTask::spawn(Arc::clone(&sess), turn_context, sub_id, items);
+    let agent = AgentTask::spawn(Arc::clone(&sess), turn_context, sub_id, items, origin, true);
     sess.set_task(agent);
 }
 
@@ -2314,8 +2377,27 @@ fn parse_review_output_event(text: &str) -> ReviewOutputEvent {
 ///   back to the model in the next turn.
 /// - If the model sends only an assistant message, we record it in the
 ///   conversation history and consider the agent complete.
-async fn run_agent(sess: Arc<Session>, turn_context: Arc<TurnContext>, sub_id: String, input: Vec<InputItem>) {
+async fn run_agent(
+    sess: Arc<Session>,
+    turn_context: Arc<TurnContext>,
+    sub_id: String,
+    input: Vec<InputItem>,
+    origin: TaskOriginKind,
+    visible_to_user: bool,
+) {
     if input.is_empty() {
+        return;
+    }
+    let lifecycle = sess.make_event(
+        &sub_id,
+        EventMsg::TaskLifecycle(TaskLifecycleEvent {
+            phase: TaskLifecyclePhase::Started,
+            origin,
+            visible_to_user,
+            last_agent_message: None,
+        }),
+    );
+    if sess.tx_event.send(lifecycle).await.is_err() {
         return;
     }
     let event = sess.make_event(&sub_id, EventMsg::TaskStarted);
@@ -2747,6 +2829,17 @@ async fn run_agent(sess: Arc<Session>, turn_context: Arc<TurnContext>, sub_id: S
     }
 
     sess.remove_task(&sub_id);
+    let lifecycle = sess.make_event(
+        &sub_id,
+        EventMsg::TaskLifecycle(TaskLifecycleEvent {
+            phase: TaskLifecyclePhase::Quiescent,
+            origin,
+            visible_to_user,
+            last_agent_message: last_task_message.clone(),
+        }),
+    );
+    sess.tx_event.send(lifecycle).await.ok();
+
     let event = sess.make_event(
         &sub_id,
         EventMsg::TaskComplete(TaskCompleteEvent {
@@ -2764,7 +2857,11 @@ async fn run_agent(sess: Arc<Session>, turn_context: Arc<TurnContext>, sub_id: S
     if let Some(action) = sess.take_follow_up_turn_action() {
         match action {
             FollowUpTurnAction::PostTurnPendingInput => {
-                sess.start_internal_pending_only_turn(POST_TURN_PENDING_ONLY_SENTINEL)
+                sess.start_internal_pending_only_turn(
+                    POST_TURN_PENDING_ONLY_SENTINEL,
+                    TaskOriginKind::PostTurn,
+                    false,
+                )
                     .await;
             }
             FollowUpTurnAction::ManualCompact(compact_sub_id) => {
@@ -2780,7 +2877,11 @@ async fn run_agent(sess: Arc<Session>, turn_context: Arc<TurnContext>, sub_id: S
                 );
             }
             FollowUpTurnAction::PendingInput => {
-                sess.start_internal_pending_only_turn(PENDING_ONLY_SENTINEL)
+                sess.start_internal_pending_only_turn(
+                    PENDING_ONLY_SENTINEL,
+                    TaskOriginKind::PendingInput,
+                    false,
+                )
                     .await;
             }
             FollowUpTurnAction::QueuedUserInput(queued) => {
@@ -2789,7 +2890,14 @@ async fn run_agent(sess: Arc<Session>, turn_context: Arc<TurnContext>, sub_id: S
                     sess_clone.cleanup_old_status_items().await;
                     let submission_id = queued.submission_id;
                     let items = queued.core_items;
-                    spawn_user_turn(sess_clone, submission_id, items, None).await;
+                    spawn_user_turn(
+                        sess_clone,
+                        submission_id,
+                        items,
+                        None,
+                        TaskOriginKind::QueuedUser,
+                    )
+                    .await;
                 });
             }
         }
@@ -3868,6 +3976,7 @@ async fn try_run_turn(
         .clone()
         .unwrap_or_else(|| sess.client.get_model());
     let mut latest_response_model: Option<String> = None;
+    let mut latest_response_headers: Option<serde_json::Value> = None;
     let mut stream = match sess.client.clone().stream(&prompt).await {
         Ok(stream) => stream,
         Err(e) => {
@@ -3958,6 +4067,9 @@ async fn try_run_turn(
                 );
             }
             ResponseEvent::ServerReasoningIncluded(_included) => {}
+            ResponseEvent::ResponseHeaders(headers) => {
+                latest_response_headers = Some(headers);
+            }
             ResponseEvent::OutputItemDone { item, sequence_number, output_index } => {
                 let (item, rollout_ids) = crate::memories::sanitize_response_item(item);
                 if !rollout_ids.is_empty() {
@@ -3967,7 +4079,21 @@ async fn try_run_turn(
                     });
                 }
                 let response =
-                    handle_response_item(sess, turn_diff_tracker, sub_id, item.clone(), sequence_number, output_index, attempt_req).await?;
+                    handle_response_item(
+                        sess,
+                        turn_diff_tracker,
+                        sub_id,
+                        item.clone(),
+                        sequence_number,
+                        output_index,
+                        attempt_req,
+                        &ImageGenerationTurnMetadata {
+                            requested_model: requested_model.clone(),
+                            latest_response_model: latest_response_model.clone(),
+                            response_headers: latest_response_headers.clone(),
+                        },
+                    )
+                    .await?;
 
                 // Save into scratchpad so we can seed a retry if the stream drops later.
                 sess.scratchpad_push(&item, &response, &sub_id);
@@ -4153,6 +4279,7 @@ async fn handle_response_item(
     seq_hint: Option<u64>,
     output_index: Option<u32>,
     attempt_req: u64,
+    image_generation_metadata: &ImageGenerationTurnMetadata,
 ) -> CodexResult<Option<ResponseInputItem>> {
     debug!(?item, "Output item");
     let output = match item {
@@ -4168,7 +4295,7 @@ async fn handle_response_item(
             }
             None
         }
-        ResponseItem::CompactionSummary { .. } => {
+        ResponseItem::CompactionSummary { .. } | ResponseItem::ContextCompaction { .. } => {
             // Keep compaction summaries in history; no user-visible event to emit.
             None
         }
@@ -4209,6 +4336,7 @@ async fn handle_response_item(
         }
         ResponseItem::FunctionCall {
             name,
+            namespace,
             arguments,
             call_id,
             ..
@@ -4219,6 +4347,7 @@ async fn handle_response_item(
                     sess,
                     turn_diff_tracker,
                     sub_id.to_string(),
+                    namespace,
                     name,
                     arguments,
                     call_id,
@@ -4305,13 +4434,206 @@ async fn handle_response_item(
             }
             None
         }
-        ResponseItem::ImageGenerationCall { .. } => None,
+        ResponseItem::ImageGenerationCall {
+            id,
+            status,
+            revised_prompt,
+            result,
+        } => {
+            handle_image_generation_call(
+                sess,
+                sub_id,
+                id,
+                status,
+                revised_prompt,
+                result,
+                seq_hint,
+                output_index,
+                attempt_req,
+                image_generation_metadata,
+            )
+            .await;
+            None
+        }
         ResponseItem::GhostSnapshot { .. } => None,
         ResponseItem::ToolSearchCall { .. } => None,
         ResponseItem::ToolSearchOutput { .. } => None,
         ResponseItem::Other => None,
     };
     Ok(output)
+}
+
+async fn handle_image_generation_call(
+    sess: &Session,
+    sub_id: &str,
+    call_id: String,
+    status: String,
+    revised_prompt: Option<String>,
+    result: String,
+    seq_hint: Option<u64>,
+    output_index: Option<u32>,
+    attempt_req: u64,
+    metadata: &ImageGenerationTurnMetadata,
+) {
+    let order = crate::protocol::OrderMeta {
+        request_ordinal: attempt_req,
+        output_index,
+        sequence_number: seq_hint,
+    };
+    let begin = sess.make_event_with_order(
+        sub_id,
+        EventMsg::ImageGenerationBegin(crate::protocol::ImageGenerationBeginEvent {
+            call_id: call_id.clone(),
+        }),
+        order.clone(),
+        seq_hint,
+    );
+    sess.send_event(begin).await;
+
+    let saved_path = match save_image_generation_result(
+        sess.client.code_home(),
+        &sess.session_uuid().to_string(),
+        &call_id,
+        &result,
+    )
+    .await
+    {
+        Ok(path) => {
+            let image_output_dir = path
+                .as_path()
+                .parent()
+                .map(Path::to_path_buf)
+                .unwrap_or_else(|| sess.client.code_home().to_path_buf());
+            let text = format!(
+                "Generated images are saved under {}. This image was saved to {}.\nIf you need to use a generated image at another path, copy it and leave the original in place unless the user explicitly asks you to delete it.",
+                image_output_dir.display(),
+                path.display()
+            );
+            let message = ResponseItem::Message {
+                id: None,
+                role: "developer".to_string(),
+                content: vec![ContentItem::InputText { text }],
+                end_turn: None,
+                phase: None,
+            };
+            sess.record_conversation_items(&[message]).await;
+            Some(path)
+        }
+        Err(err) => {
+            let expected_path = image_generation_artifact_path(
+                sess.client.code_home(),
+                &sess.session_uuid().to_string(),
+                &call_id,
+            );
+            warn!(
+                "failed to save image generation result to {}: {err}",
+                expected_path.display()
+            );
+            None
+        }
+    };
+
+    if let Some(path) = saved_path.as_ref()
+        && let Err(err) = save_image_generation_sidecar(
+            path,
+            &call_id,
+            &status,
+            revised_prompt.as_deref(),
+            metadata,
+        )
+        .await
+    {
+        warn!(
+            "failed to save image generation metadata sidecar for {}: {err}",
+            path.display()
+        );
+    }
+
+    let end = sess.make_event_with_order(
+        sub_id,
+        EventMsg::ImageGenerationEnd(crate::protocol::ImageGenerationEndEvent {
+            call_id,
+            status,
+            revised_prompt,
+            result,
+            saved_path,
+        }),
+        order,
+        seq_hint,
+    );
+    sess.send_event(end).await;
+}
+
+fn image_generation_artifact_path(code_home: &Path, session_id: &str, call_id: &str) -> PathBuf {
+    fn sanitize(value: &str) -> String {
+        let sanitized: String = value
+            .chars()
+            .map(|ch| {
+                if ch.is_ascii_alphanumeric() || ch == '-' || ch == '_' {
+                    ch
+                } else {
+                    '_'
+                }
+            })
+            .collect();
+        if sanitized.is_empty() {
+            "generated_image".to_string()
+        } else {
+            sanitized
+        }
+    }
+
+    code_home
+        .join(GENERATED_IMAGE_ARTIFACTS_DIR)
+        .join(sanitize(session_id))
+        .join(format!("{}.png", sanitize(call_id)))
+}
+
+async fn save_image_generation_result(
+    code_home: &Path,
+    session_id: &str,
+    call_id: &str,
+    result: &str,
+) -> std::result::Result<code_utils_absolute_path::AbsolutePathBuf, String> {
+    let bytes = base64::engine::general_purpose::STANDARD
+        .decode(result.trim().as_bytes())
+        .map_err(|err| format!("invalid image generation payload: {err}"))?;
+    let path = image_generation_artifact_path(code_home, session_id, call_id);
+    if let Some(parent) = path.parent() {
+        tokio::fs::create_dir_all(parent)
+            .await
+            .map_err(|err| err.to_string())?;
+    }
+    tokio::fs::write(&path, bytes)
+        .await
+        .map_err(|err| err.to_string())?;
+    code_utils_absolute_path::AbsolutePathBuf::from_absolute_path(path)
+        .map_err(|err| err.to_string())
+}
+
+async fn save_image_generation_sidecar(
+    artifact_path: &code_utils_absolute_path::AbsolutePathBuf,
+    call_id: &str,
+    status: &str,
+    revised_prompt: Option<&str>,
+    metadata: &ImageGenerationTurnMetadata,
+) -> std::result::Result<code_utils_absolute_path::AbsolutePathBuf, String> {
+    let sidecar_path = artifact_path.as_path().with_extension("metadata.json");
+    let sidecar = ImageGenerationSidecar {
+        call_id,
+        status,
+        revised_prompt,
+        artifact_path: artifact_path.display().to_string(),
+        requested_model: &metadata.requested_model,
+        latest_response_model: metadata.latest_response_model.as_deref(),
+        response_headers: metadata.response_headers.as_ref(),
+    };
+    let json = serde_json::to_vec_pretty(&sidecar).map_err(|err| err.to_string())?;
+    tokio::fs::write(&sidecar_path, json)
+        .await
+        .map_err(|err| err.to_string())?;
+    code_utils_absolute_path::AbsolutePathBuf::from_absolute_path(sidecar_path)
+        .map_err(|err| err.to_string())
 }
 
 fn web_search_query(query: &Option<String>, queries: &Option<Vec<String>>) -> Option<String> {
@@ -4432,6 +4754,7 @@ async fn handle_function_call(
     sess: &Session,
     turn_diff_tracker: &mut TurnDiffTracker,
     sub_id: String,
+    namespace: Option<String>,
     name: String,
     arguments: String,
     call_id: String,
@@ -4465,8 +4788,8 @@ async fn handle_function_call(
         "code_bridge" | "code_bridge_subscription" => handle_code_bridge(sess, &ctx, arguments).await,
         SEARCH_TOOL_BM25_TOOL_NAME => handle_search_tool_bm25(sess, &ctx, arguments).await,
         _ => {
-            if sess.is_dynamic_tool(&name) {
-                return handle_dynamic_tool_call(sess, &ctx, name, arguments).await;
+            if sess.is_dynamic_tool(namespace.as_deref(), &name) {
+                return handle_dynamic_tool_call(sess, &ctx, namespace, name, arguments).await;
             }
             match sess.mcp_connection_manager.parse_tool_name(&name) {
                 Some((server, tool_name)) => {
@@ -4555,6 +4878,19 @@ async fn handle_request_user_input(
     )
     .await;
 
+    if let Some(task) = sess.task_lifecycle(&ctx.sub_id) {
+        let lifecycle = sess.make_event(
+            &ctx.sub_id,
+            EventMsg::TaskLifecycle(TaskLifecycleEvent {
+                phase: TaskLifecyclePhase::AwaitingExternalInput,
+                origin: task.origin,
+                visible_to_user: task.visible_to_user,
+                last_agent_message: None,
+            }),
+        );
+        sess.tx_event.send(lifecycle).await.ok();
+    }
+
     let response = match rx_response.await {
         Ok(response) => response,
         Err(_) => {
@@ -4591,6 +4927,7 @@ async fn handle_request_user_input(
 async fn handle_dynamic_tool_call(
     sess: &Session,
     ctx: &ToolCallCtx,
+    namespace: Option<String>,
     tool_name: String,
     arguments: String,
 ) -> ResponseInputItem {
@@ -4627,6 +4964,7 @@ async fn handle_dynamic_tool_call(
         EventMsg::DynamicToolCallRequest(hanzo_protocol::dynamic_tools::DynamicToolCallRequest {
             call_id: ctx.call_id.clone(),
             turn_id: ctx.sub_id.clone(),
+            namespace,
             tool: tool_name,
             arguments: args,
         }),
@@ -7424,6 +7762,7 @@ fn to_exec_params(params: ShellToolCallParams, sess: &Session) -> ExecParams {
         .and_then(|p| p.requires_escalated_permissions().then_some(true));
     ExecParams {
         command: params.command,
+        shell_script: None,
         cwd: sess.resolve_path(params.workdir.clone()),
         timeout_ms,
         env: create_env(&sess.shell_environment_policy),
@@ -7943,6 +8282,7 @@ fn resolve_agent_command_for_check(
         "code" | "codex" | "cloud" => ("coder".to_string(), true),
         "claude" => ("claude".to_string(), false),
         "gemini" => ("gemini".to_string(), false),
+        "antigravity" | "agy" => ("agy".to_string(), false),
         "qwen" => ("qwen".to_string(), false),
         other => (other.to_string(), false),
     }
@@ -9507,12 +9847,12 @@ async fn handle_container_exec_with_params(
     }
 
 
-    // If the argv is a shell wrapper, analyze and optionally strip `confirm:`.
+    // If the command is a shell script, analyze and optionally strip `confirm:`.
     let mut params = params;
     let seq_hint_for_exec = seq_hint;
     let otel_event_manager = sess.client.get_otel_event_manager();
     let tool_name = "local_shell";
-    if let Some((script_index, script)) = extract_shell_script_from_wrapper(&params.command) {
+    if let Some((script_index, script)) = extract_shell_script(&params.command) {
         let trimmed = script.trim_start();
         let confirm_prefixes = ["confirm:", "CONFIRM:"];
         let has_confirm_prefix = confirm_prefixes
@@ -9680,8 +10020,8 @@ async fn handle_container_exec_with_params(
         };
     }
 
-    // If no shell wrapper, perform a lightweight argv inspection for sensitive git commands.
-    if extract_shell_script_from_wrapper(&params.command).is_none() {
+    // If no shell script is present, perform a lightweight argv inspection for sensitive git commands.
+    if extract_shell_script(&params.command).is_none() {
         let joined = params.command.join(" ");
         if !sess.confirm_guard.is_empty() {
             if let Some(pattern) = sess.confirm_guard.matched_pattern(&joined) {
@@ -11001,7 +11341,14 @@ async fn enqueue_agent_completion_wake(
         let sentinel_input = vec![InputItem::Text {
             text: PENDING_ONLY_SENTINEL.to_string(),
         }];
-        let agent = AgentTask::spawn(Arc::clone(sess), turn_context, sub_id, sentinel_input);
+        let agent = AgentTask::spawn(
+            Arc::clone(sess),
+            turn_context,
+            sub_id,
+            sentinel_input,
+            TaskOriginKind::OutOfTurnDeveloper,
+            false,
+        );
         sess.set_task(agent);
     }
 }
@@ -12596,20 +12943,8 @@ async fn handle_browser_history(sess: &Session, ctx: &ToolCallCtx, arguments: St
     .await
 }
 
-fn extract_shell_script_from_wrapper(argv: &[String]) -> Option<(usize, String)> {
-    // Return (index_of_script, script) if argv matches: <shell> (-lc|-c) <script>
-    if argv.len() == 3 {
-        let shell = std::path::Path::new(&argv[0])
-            .file_name()
-            .and_then(|s| s.to_str())
-            .unwrap_or("");
-        let is_shell = matches!(shell, "bash" | "sh" | "zsh");
-        let is_flag = matches!(argv[1].as_str(), "-lc" | "-c");
-        if is_shell && is_flag {
-            return Some((2, argv[2].clone()));
-        }
-    }
-    None
+fn extract_shell_script(argv: &[String]) -> Option<(usize, String)> {
+    crate::util::extract_shell_script(argv).map(|(index, script)| (index, script.to_string()))
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -12619,7 +12954,7 @@ struct CatWriteSuggestion {
 }
 
 fn detect_cat_write(argv: &[String]) -> Option<CatWriteSuggestion> {
-    if let Some((_, script)) = extract_shell_script_from_wrapper(argv) {
+    if let Some((_, script)) = extract_shell_script(argv) {
         if script_contains_cat_write(&script) {
             return Some(CatWriteSuggestion {
                 label: "original_script",
@@ -12789,7 +13124,7 @@ struct PythonWriteSuggestion {
 }
 
 fn detect_python_write(argv: &[String]) -> Option<PythonWriteSuggestion> {
-    if let Some((_, script)) = extract_shell_script_from_wrapper(argv) {
+    if let Some((_, script)) = extract_shell_script(argv) {
         if script_contains_python_write(&script) {
             return Some(PythonWriteSuggestion {
                 label: "original_script",
@@ -12873,7 +13208,7 @@ struct RedundantCdSuggestion {
 
 fn detect_redundant_cd(argv: &[String], cwd: &Path) -> Option<RedundantCdSuggestion> {
     let normalized_cwd = normalize_path(cwd);
-    if let Some((script_index, script)) = extract_shell_script_from_wrapper(argv) {
+    if let Some((script_index, script)) = extract_shell_script(argv) {
         if let Some(suggestion) = detect_redundant_cd_in_shell(
             argv,
             script_index,
@@ -13065,6 +13400,16 @@ mod command_guard_detection_tests {
     }
 
     #[test]
+    fn detects_raw_shell_script_redundant_cd() {
+        let cwd = PathBuf::from("/tmp/project");
+        let argv = vec!["cd /tmp/project && ls".to_string()];
+
+        let suggestion = detect_redundant_cd(&argv, &cwd).expect("should flag redundant cd");
+        assert_eq!(suggestion.label, "original_script");
+        assert_eq!(suggestion.suggested, vec!["ls".to_string()]);
+    }
+
+    #[test]
     fn ignores_cd_to_different_directory() {
         let cwd = PathBuf::from("/tmp/project");
         let argv = vec![
@@ -13093,6 +13438,19 @@ mod command_guard_detection_tests {
         let argv = vec![
             "bash".to_string(),
             "-lc".to_string(),
+            "cat <<'EOF' > code-rs/git-tooling/Cargo.toml\n[package]\nname = \"demo\"\nEOF".to_string(),
+        ];
+
+        let suggestion = detect_cat_write(&argv).expect("should flag cat write");
+        assert_eq!(suggestion.label, "original_script");
+        assert!(suggestion
+            .original_value
+            .contains("cat <<'EOF' > code-rs/git-tooling/Cargo.toml"));
+    }
+
+    #[test]
+    fn detects_raw_shell_script_cat_heredoc_write() {
+        let argv = vec![
             "cat <<'EOF' > code-rs/git-tooling/Cargo.toml\n[package]\nname = \"demo\"\nEOF".to_string(),
         ];
 
@@ -13647,8 +14005,12 @@ mod tests {
         choose_larger_context_model_from_candidates,
         ContextFallbackCandidate,
         format_exec_output_with_limit,
+        image_generation_artifact_path,
         is_context_overflow_stream_error,
         is_usage_limit_stream_error,
+        save_image_generation_result,
+        save_image_generation_sidecar,
+        ImageGenerationTurnMetadata,
         spark_fallback_model,
         TRUNCATION_MARKER,
     };
@@ -13667,6 +14029,78 @@ mod tests {
             duration: Duration::from_secs(1),
             timed_out: false,
         }
+    }
+
+    #[test]
+    fn image_generation_artifact_path_sanitizes_session_and_call_ids() {
+        let dir = TempDir::new().expect("tempdir");
+        let path = image_generation_artifact_path(dir.path(), "session/../1", "../ig?..123");
+
+        assert_eq!(
+            path,
+            dir.path()
+                .join("generated_images")
+                .join("session____1")
+                .join("___ig___123.png")
+        );
+    }
+
+    #[tokio::test]
+    async fn save_image_generation_result_writes_png_payload() {
+        let dir = TempDir::new().expect("tempdir");
+        let saved_path = save_image_generation_result(dir.path(), "session-1", "ig_123", "Zm9v")
+            .await
+            .expect("image should save");
+
+        assert_eq!(std::fs::read(saved_path.as_path()).expect("saved file"), b"foo");
+    }
+
+    #[tokio::test]
+    async fn save_image_generation_sidecar_writes_metadata() {
+        let dir = TempDir::new().expect("tempdir");
+        let saved_path = save_image_generation_result(dir.path(), "session-1", "ig_123", "Zm9v")
+            .await
+            .expect("image should save");
+        let metadata = ImageGenerationTurnMetadata {
+            requested_model: "gpt-5.4".to_string(),
+            latest_response_model: Some("gpt-5.4-2026-04-01".to_string()),
+            response_headers: Some(serde_json::json!({
+                "x-request-id": ["req_123"],
+            })),
+        };
+
+        let sidecar_path = save_image_generation_sidecar(
+            &saved_path,
+            "ig_123",
+            "completed",
+            Some("A tiny square"),
+            &metadata,
+        )
+        .await
+        .expect("metadata should save");
+
+        assert_eq!(
+            sidecar_path.as_path(),
+            saved_path.as_path().with_extension("metadata.json")
+        );
+        let sidecar: Value = serde_json::from_slice(
+            &std::fs::read(sidecar_path.as_path()).expect("sidecar file"),
+        )
+        .expect("sidecar json");
+        assert_eq!(sidecar["call_id"], "ig_123");
+        assert_eq!(sidecar["requested_model"], "gpt-5.4");
+        assert_eq!(sidecar["latest_response_model"], "gpt-5.4-2026-04-01");
+        assert_eq!(sidecar["response_headers"]["x-request-id"][0], "req_123");
+    }
+
+    #[tokio::test]
+    async fn save_image_generation_result_rejects_non_standard_base64() {
+        let dir = TempDir::new().expect("tempdir");
+        let err = save_image_generation_result(dir.path(), "session-1", "ig_123", "_-8")
+            .await
+            .expect_err("invalid payload should fail");
+
+        assert!(err.contains("invalid image generation payload"));
     }
 
     #[test]
