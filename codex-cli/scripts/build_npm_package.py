@@ -3,6 +3,7 @@
 
 import argparse
 import json
+import os
 import shutil
 import subprocess
 import sys
@@ -241,9 +242,6 @@ def stage_sources(staging_dir: Path, version: str, package: str) -> None:
         bin_dir = staging_dir / "bin"
         bin_dir.mkdir(parents=True, exist_ok=True)
         shutil.copy2(CODEX_CLI_ROOT / "bin" / "codex.js", bin_dir / "codex.js")
-        rg_manifest = CODEX_CLI_ROOT / "bin" / "rg"
-        if rg_manifest.exists():
-            shutil.copy2(rg_manifest, bin_dir / "rg")
 
         readme_src = REPO_ROOT / "README.md"
         if readme_src.exists():
@@ -335,7 +333,7 @@ def compute_platform_package_version(version: str, platform_tag: str) -> str:
 
 
 def run_command(cmd: list[str], cwd: Path | None = None) -> None:
-    print("+", " ".join(cmd))
+    print("+", " ".join(cmd), flush=True)
     subprocess.run(cmd, cwd=cwd, check=True)
 
 
@@ -370,7 +368,7 @@ def copy_native_binaries(
     if not vendor_src.exists():
         raise RuntimeError(f"Vendor source directory not found: {vendor_src}")
 
-    components_set = {component for component in components if component in COMPONENT_DEST_DIR}
+    components_set = set(components)
     if not components_set:
         return
 
@@ -388,22 +386,25 @@ def copy_native_binaries(
         if target_filter is not None and target_dir.name not in target_filter:
             continue
 
-        dest_target_dir = vendor_dest / target_dir.name
-        dest_target_dir.mkdir(parents=True, exist_ok=True)
         copied_targets.add(target_dir.name)
 
-        for component in components_set:
-            dest_dir_name = COMPONENT_DEST_DIR.get(component)
-            if dest_dir_name is None:
-                continue
+        dest_target_dir = vendor_dest / target_dir.name
 
-            src_component_dir = target_dir / dest_dir_name
+        if CODEX_PACKAGE_COMPONENT in components_set:
+            if dest_target_dir.exists():
+                shutil.rmtree(dest_target_dir)
+            shutil.copytree(target_dir, dest_target_dir)
+        else:
+            dest_target_dir.mkdir(parents=True, exist_ok=True)
+
+        for component in sorted(components_set - {CODEX_PACKAGE_COMPONENT}):
+            src_component_dir = target_dir / component
             if not src_component_dir.exists():
                 raise RuntimeError(
                     f"Missing native component '{component}' in vendor source: {src_component_dir}"
                 )
 
-            dest_component_dir = dest_target_dir / dest_dir_name
+            dest_component_dir = dest_target_dir / component
             if dest_component_dir.exists():
                 shutil.rmtree(dest_component_dir)
             shutil.copytree(src_component_dir, dest_component_dir)
@@ -414,16 +415,23 @@ def copy_native_binaries(
             missing_list = ", ".join(missing_targets)
             raise RuntimeError(f"Missing target directories in vendor source: {missing_list}")
 
-
 def run_npm_pack(staging_dir: Path, output_path: Path) -> Path:
     output_path = output_path.resolve()
     output_path.parent.mkdir(parents=True, exist_ok=True)
 
     with tempfile.TemporaryDirectory(prefix="hanzo-dev-npm-pack-") as pack_dir_str:
         pack_dir = Path(pack_dir_str)
+        npm_cache_dir = pack_dir / "npm-cache"
+        npm_logs_dir = pack_dir / "npm-logs"
+        npm_cache_dir.mkdir()
+        npm_logs_dir.mkdir()
+        env = os.environ.copy()
+        env["NPM_CONFIG_CACHE"] = str(npm_cache_dir)
+        env["NPM_CONFIG_LOGS_DIR"] = str(npm_logs_dir)
         stdout = subprocess.check_output(
             ["npm", "pack", "--json", "--pack-destination", str(pack_dir)],
             cwd=staging_dir,
+            env=env,
             text=True,
         )
         try:
