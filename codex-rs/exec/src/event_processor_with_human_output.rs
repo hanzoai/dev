@@ -8,11 +8,11 @@ use codex_app_server_protocol::ServerNotification;
 use codex_app_server_protocol::ThreadItem;
 use codex_app_server_protocol::ThreadTokenUsage;
 use codex_app_server_protocol::TurnStatus;
-use codex_core::WireApi;
 use codex_core::config::Config;
+use codex_model_provider_info::WireApi;
 use codex_protocol::num_format::format_with_separators;
-use codex_protocol::protocol::SandboxPolicy;
 use codex_protocol::protocol::SessionConfiguredEvent;
+use codex_utils_sandbox_summary::summarize_permission_profile;
 use owo_colors::OwoColorize;
 use owo_colors::Style;
 
@@ -216,7 +216,7 @@ impl EventProcessor for EventProcessorWithHumanOutput {
         session_configured_event: &SessionConfiguredEvent,
     ) {
         const VERSION: &str = env!("CARGO_PKG_VERSION");
-        eprintln!("OpenAI Codex v{VERSION} (research preview)\n--------");
+        eprintln!("OpenAI Codex v{VERSION}\n--------");
         for (key, value) in config_summary_entries(config, session_configured_event) {
             eprintln!("{} {}", format!("{key}:").style(self.bold), value);
         }
@@ -292,6 +292,7 @@ impl EventProcessor for EventProcessorWithHumanOutput {
                 );
                 CodexStatus::Running
             }
+            ServerNotification::ModelVerification(_) => CodexStatus::Running,
             ServerNotification::ThreadTokenUsageUpdated(notification) => {
                 self.last_total_token_usage = Some(notification.token_usage);
                 CodexStatus::Running
@@ -419,6 +420,7 @@ fn config_summary_entries(
     config: &Config,
     session_configured_event: &SessionConfiguredEvent,
 ) -> Vec<(&'static str, String)> {
+    let permission_profile = config.permissions.effective_permission_profile();
     let mut entries = vec![
         ("workdir", config.cwd.display().to_string()),
         ("model", session_configured_event.model.clone()),
@@ -432,7 +434,11 @@ fn config_summary_entries(
         ),
         (
             "sandbox",
-            summarize_sandbox_policy(config.permissions.sandbox_policy.get()),
+            summarize_permission_profile(
+                &permission_profile,
+                &config.cwd,
+                config.effective_workspace_roots().as_slice(),
+            ),
         ),
     ];
     if config.model_provider.wire_api == WireApi::Responses {
@@ -456,55 +462,6 @@ fn config_summary_entries(
         session_configured_event.session_id.to_string(),
     ));
     entries
-}
-
-fn summarize_sandbox_policy(sandbox_policy: &SandboxPolicy) -> String {
-    match sandbox_policy {
-        SandboxPolicy::DangerFullAccess => "danger-full-access".to_string(),
-        SandboxPolicy::ReadOnly { network_access, .. } => {
-            let mut summary = "read-only".to_string();
-            if *network_access {
-                summary.push_str(" (network access enabled)");
-            }
-            summary
-        }
-        SandboxPolicy::ExternalSandbox { network_access } => {
-            let mut summary = "external-sandbox".to_string();
-            if matches!(
-                network_access,
-                codex_protocol::protocol::NetworkAccess::Enabled
-            ) {
-                summary.push_str(" (network access enabled)");
-            }
-            summary
-        }
-        SandboxPolicy::WorkspaceWrite {
-            writable_roots,
-            network_access,
-            exclude_tmpdir_env_var,
-            exclude_slash_tmp,
-            read_only_access: _,
-        } => {
-            let mut summary = "workspace-write".to_string();
-            let mut writable_entries = vec!["workdir".to_string()];
-            if !*exclude_slash_tmp {
-                writable_entries.push("/tmp".to_string());
-            }
-            if !*exclude_tmpdir_env_var {
-                writable_entries.push("$TMPDIR".to_string());
-            }
-            writable_entries.extend(
-                writable_roots
-                    .iter()
-                    .map(|path| path.to_string_lossy().to_string()),
-            );
-            summary.push_str(&format!(" [{}]", writable_entries.join(", ")));
-            if *network_access {
-                summary.push_str(" (network access enabled)");
-            }
-            summary
-        }
-    }
 }
 
 fn reasoning_text(
@@ -564,350 +521,5 @@ fn should_print_final_message_to_tty(
 }
 
 #[cfg(test)]
-mod tests {
-    use codex_app_server_protocol::ThreadItem;
-    use codex_app_server_protocol::Turn;
-    use codex_app_server_protocol::TurnStatus;
-    use owo_colors::Style;
-
-    use super::EventProcessorWithHumanOutput;
-    use super::final_message_from_turn_items;
-    use super::reasoning_text;
-    use super::should_print_final_message_to_stdout;
-    use super::should_print_final_message_to_tty;
-    use crate::event_processor::EventProcessor;
-    use codex_app_server_protocol::ServerNotification;
-
-    #[test]
-    fn suppresses_final_stdout_message_when_both_streams_are_terminals() {
-        assert!(!should_print_final_message_to_stdout(
-            Some("hello"),
-            /*stdout_is_terminal*/ true,
-            /*stderr_is_terminal*/ true
-        ));
-    }
-
-    #[test]
-    fn prints_final_stdout_message_when_stdout_is_not_terminal() {
-        assert!(should_print_final_message_to_stdout(
-            Some("hello"),
-            /*stdout_is_terminal*/ false,
-            /*stderr_is_terminal*/ true
-        ));
-    }
-
-    #[test]
-    fn prints_final_stdout_message_when_stderr_is_not_terminal() {
-        assert!(should_print_final_message_to_stdout(
-            Some("hello"),
-            /*stdout_is_terminal*/ true,
-            /*stderr_is_terminal*/ false
-        ));
-    }
-
-    #[test]
-    fn suppresses_final_stdout_message_when_missing() {
-        assert!(!should_print_final_message_to_stdout(
-            /*final_message*/ None, /*stdout_is_terminal*/ false,
-            /*stderr_is_terminal*/ false
-        ));
-    }
-
-    #[test]
-    fn prints_final_tty_message_when_not_yet_rendered() {
-        assert!(should_print_final_message_to_tty(
-            Some("hello"),
-            /*final_message_rendered*/ false,
-            /*stdout_is_terminal*/ true,
-            /*stderr_is_terminal*/ true
-        ));
-    }
-
-    #[test]
-    fn suppresses_final_tty_message_when_already_rendered() {
-        assert!(!should_print_final_message_to_tty(
-            Some("hello"),
-            /*final_message_rendered*/ true,
-            /*stdout_is_terminal*/ true,
-            /*stderr_is_terminal*/ true
-        ));
-    }
-
-    #[test]
-    fn reasoning_text_prefers_summary_when_raw_reasoning_is_hidden() {
-        let text = reasoning_text(
-            &["summary".to_string()],
-            &["raw".to_string()],
-            /*show_raw_agent_reasoning*/ false,
-        );
-
-        assert_eq!(text.as_deref(), Some("summary"));
-    }
-
-    #[test]
-    fn reasoning_text_uses_raw_content_when_enabled() {
-        let text = reasoning_text(
-            &["summary".to_string()],
-            &["raw".to_string()],
-            /*show_raw_agent_reasoning*/ true,
-        );
-
-        assert_eq!(text.as_deref(), Some("raw"));
-    }
-
-    #[test]
-    fn final_message_from_turn_items_uses_latest_agent_message() {
-        let message = final_message_from_turn_items(&[
-            ThreadItem::AgentMessage {
-                id: "msg-1".to_string(),
-                text: "first".to_string(),
-                phase: None,
-                memory_citation: None,
-            },
-            ThreadItem::Plan {
-                id: "plan-1".to_string(),
-                text: "plan".to_string(),
-            },
-            ThreadItem::AgentMessage {
-                id: "msg-2".to_string(),
-                text: "second".to_string(),
-                phase: None,
-                memory_citation: None,
-            },
-        ]);
-
-        assert_eq!(message.as_deref(), Some("second"));
-    }
-
-    #[test]
-    fn final_message_from_turn_items_falls_back_to_latest_plan() {
-        let message = final_message_from_turn_items(&[
-            ThreadItem::Reasoning {
-                id: "reasoning-1".to_string(),
-                summary: vec!["inspect".to_string()],
-                content: Vec::new(),
-            },
-            ThreadItem::Plan {
-                id: "plan-1".to_string(),
-                text: "first plan".to_string(),
-            },
-            ThreadItem::Plan {
-                id: "plan-2".to_string(),
-                text: "final plan".to_string(),
-            },
-        ]);
-
-        assert_eq!(message.as_deref(), Some("final plan"));
-    }
-
-    #[test]
-    fn turn_completed_recovers_final_message_from_turn_items() {
-        let mut processor = EventProcessorWithHumanOutput {
-            bold: Style::new(),
-            cyan: Style::new(),
-            dimmed: Style::new(),
-            green: Style::new(),
-            italic: Style::new(),
-            magenta: Style::new(),
-            red: Style::new(),
-            yellow: Style::new(),
-            show_agent_reasoning: true,
-            show_raw_agent_reasoning: false,
-            last_message_path: None,
-            final_message: None,
-            final_message_rendered: false,
-            emit_final_message_on_shutdown: false,
-            last_total_token_usage: None,
-        };
-
-        let status = processor.process_server_notification(ServerNotification::TurnCompleted(
-            codex_app_server_protocol::TurnCompletedNotification {
-                thread_id: "thread-1".to_string(),
-                turn: Turn {
-                    id: "turn-1".to_string(),
-                    items: vec![ThreadItem::AgentMessage {
-                        id: "msg-1".to_string(),
-                        text: "final answer".to_string(),
-                        phase: None,
-                        memory_citation: None,
-                    }],
-                    status: TurnStatus::Completed,
-                    error: None,
-                },
-            },
-        ));
-
-        assert_eq!(
-            status,
-            crate::event_processor::CodexStatus::InitiateShutdown
-        );
-        assert_eq!(processor.final_message.as_deref(), Some("final answer"));
-    }
-
-    #[test]
-    fn turn_completed_overwrites_stale_final_message_from_turn_items() {
-        let mut processor = EventProcessorWithHumanOutput {
-            bold: Style::new(),
-            cyan: Style::new(),
-            dimmed: Style::new(),
-            green: Style::new(),
-            italic: Style::new(),
-            magenta: Style::new(),
-            red: Style::new(),
-            yellow: Style::new(),
-            show_agent_reasoning: true,
-            show_raw_agent_reasoning: false,
-            last_message_path: None,
-            final_message: Some("stale answer".to_string()),
-            final_message_rendered: true,
-            emit_final_message_on_shutdown: false,
-            last_total_token_usage: None,
-        };
-
-        let status = processor.process_server_notification(ServerNotification::TurnCompleted(
-            codex_app_server_protocol::TurnCompletedNotification {
-                thread_id: "thread-1".to_string(),
-                turn: Turn {
-                    id: "turn-1".to_string(),
-                    items: vec![ThreadItem::AgentMessage {
-                        id: "msg-1".to_string(),
-                        text: "final answer".to_string(),
-                        phase: None,
-                        memory_citation: None,
-                    }],
-                    status: TurnStatus::Completed,
-                    error: None,
-                },
-            },
-        ));
-
-        assert_eq!(
-            status,
-            crate::event_processor::CodexStatus::InitiateShutdown
-        );
-        assert_eq!(processor.final_message.as_deref(), Some("final answer"));
-        assert!(!processor.final_message_rendered);
-    }
-
-    #[test]
-    fn turn_completed_preserves_streamed_final_message_when_turn_items_are_empty() {
-        let mut processor = EventProcessorWithHumanOutput {
-            bold: Style::new(),
-            cyan: Style::new(),
-            dimmed: Style::new(),
-            green: Style::new(),
-            italic: Style::new(),
-            magenta: Style::new(),
-            red: Style::new(),
-            yellow: Style::new(),
-            show_agent_reasoning: true,
-            show_raw_agent_reasoning: false,
-            last_message_path: None,
-            final_message: Some("streamed answer".to_string()),
-            final_message_rendered: false,
-            emit_final_message_on_shutdown: false,
-            last_total_token_usage: None,
-        };
-
-        let status = processor.process_server_notification(ServerNotification::TurnCompleted(
-            codex_app_server_protocol::TurnCompletedNotification {
-                thread_id: "thread-1".to_string(),
-                turn: Turn {
-                    id: "turn-1".to_string(),
-                    items: Vec::new(),
-                    status: TurnStatus::Completed,
-                    error: None,
-                },
-            },
-        ));
-
-        assert_eq!(
-            status,
-            crate::event_processor::CodexStatus::InitiateShutdown
-        );
-        assert_eq!(processor.final_message.as_deref(), Some("streamed answer"));
-        assert!(processor.emit_final_message_on_shutdown);
-    }
-
-    #[test]
-    fn turn_failed_clears_stale_final_message() {
-        let mut processor = EventProcessorWithHumanOutput {
-            bold: Style::new(),
-            cyan: Style::new(),
-            dimmed: Style::new(),
-            green: Style::new(),
-            italic: Style::new(),
-            magenta: Style::new(),
-            red: Style::new(),
-            yellow: Style::new(),
-            show_agent_reasoning: true,
-            show_raw_agent_reasoning: false,
-            last_message_path: None,
-            final_message: Some("partial answer".to_string()),
-            final_message_rendered: true,
-            emit_final_message_on_shutdown: true,
-            last_total_token_usage: None,
-        };
-
-        let status = processor.process_server_notification(ServerNotification::TurnCompleted(
-            codex_app_server_protocol::TurnCompletedNotification {
-                thread_id: "thread-1".to_string(),
-                turn: Turn {
-                    id: "turn-1".to_string(),
-                    items: Vec::new(),
-                    status: TurnStatus::Failed,
-                    error: None,
-                },
-            },
-        ));
-
-        assert_eq!(
-            status,
-            crate::event_processor::CodexStatus::InitiateShutdown
-        );
-        assert_eq!(processor.final_message, None);
-        assert!(!processor.final_message_rendered);
-        assert!(!processor.emit_final_message_on_shutdown);
-    }
-
-    #[test]
-    fn turn_interrupted_clears_stale_final_message() {
-        let mut processor = EventProcessorWithHumanOutput {
-            bold: Style::new(),
-            cyan: Style::new(),
-            dimmed: Style::new(),
-            green: Style::new(),
-            italic: Style::new(),
-            magenta: Style::new(),
-            red: Style::new(),
-            yellow: Style::new(),
-            show_agent_reasoning: true,
-            show_raw_agent_reasoning: false,
-            last_message_path: None,
-            final_message: Some("partial answer".to_string()),
-            final_message_rendered: true,
-            emit_final_message_on_shutdown: true,
-            last_total_token_usage: None,
-        };
-
-        let status = processor.process_server_notification(ServerNotification::TurnCompleted(
-            codex_app_server_protocol::TurnCompletedNotification {
-                thread_id: "thread-1".to_string(),
-                turn: Turn {
-                    id: "turn-1".to_string(),
-                    items: Vec::new(),
-                    status: TurnStatus::Interrupted,
-                    error: None,
-                },
-            },
-        ));
-
-        assert_eq!(
-            status,
-            crate::event_processor::CodexStatus::InitiateShutdown
-        );
-        assert_eq!(processor.final_message, None);
-        assert!(!processor.final_message_rendered);
-        assert!(!processor.emit_final_message_on_shutdown);
-    }
-}
+#[path = "event_processor_with_human_output_tests.rs"]
+mod tests;

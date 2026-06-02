@@ -4,8 +4,6 @@ use app_test_support::DEFAULT_CLIENT_NAME;
 use app_test_support::write_chatgpt_auth;
 use codex_core::auth::AuthCredentialsStoreMode;
 use codex_core::config::ConfigBuilder;
-use codex_core::config::types::OtelExporterKind;
-use codex_core::config::types::OtelHttpProtocol;
 use pretty_assertions::assert_eq;
 use serde_json::Value;
 use std::collections::HashMap;
