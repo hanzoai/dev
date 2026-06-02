@@ -2,7 +2,6 @@ name: 💻 CLI Bug
 description: Report an issue in the Dev CLI
 labels:
   - bug
-  - needs triage
 body:
   - type: markdown
     attributes:
@@ -12,6 +11,8 @@ body:
         If you need help or support using Code, and are not reporting a bug, please post on [code/discussions](https://github.com/hanzoai/dev/discussions), where you can ask questions or engage with others on ideas for how to improve Code.
 
         Make sure you are running the [latest](https://npmjs.com/package/@hanzo/dev) version of the Code CLI. The bug you are experiencing may already have been fixed.
+
+        If your version supports it, please run `codex doctor --json` and paste the output in the "Codex doctor report" field below. This helps us diagnose install, config, auth, terminal, MCP, network, and local state issues.
 
   - type: input
     id: version
@@ -34,9 +35,19 @@ body:
     id: terminal
     attributes:
       label: What terminal emulator and version are you using (if applicable)?
-      description: Also note any multiplexer in use (screen / tmux / zellij)
       description: |
-        E.g, VSCode, Terminal.app, iTerm2, Ghostty, Windows Terminal (WSL / PowerShell)
+        Also note any multiplexer in use (screen / tmux / zellij).
+        E.g., VS Code, Terminal.app, iTerm2, Ghostty, Windows Terminal (WSL / PowerShell)
+  - type: textarea
+    id: doctor
+    attributes:
+      label: Codex doctor report
+      description: |
+        If available, run `codex doctor --json` and paste the full output here.
+
+        The report is designed to redact secrets, but please review it before submitting.
+        If your Codex version does not support `doctor`, write `not available`.
+      render: json
   - type: textarea
     id: steps
     attributes:

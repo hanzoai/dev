@@ -1,21 +1,24 @@
 use super::*;
 use crate::agent::control::ListedAgent;
+use crate::tools::handlers::multi_agents_spec::create_list_agents_tool;
+use codex_tools::ToolSpec;
 
 pub(crate) struct Handler;
 
-#[async_trait]
-impl ToolHandler for Handler {
-    type Output = ListAgentsResult;
-
-    fn kind(&self) -> ToolKind {
-        ToolKind::Function
+#[async_trait::async_trait]
+impl ToolExecutor<ToolInvocation> for Handler {
+    fn tool_name(&self) -> ToolName {
+        ToolName::plain("list_agents")
     }
 
-    fn matches_kind(&self, payload: &ToolPayload) -> bool {
-        matches!(payload, ToolPayload::Function { .. })
+    fn spec(&self) -> ToolSpec {
+        create_list_agents_tool()
     }
 
-    async fn handle(&self, invocation: ToolInvocation) -> Result<Self::Output, FunctionCallError> {
+    async fn handle(
+        &self,
+        invocation: ToolInvocation,
+    ) -> Result<Box<dyn crate::tools::context::ToolOutput>, FunctionCallError> {
         let ToolInvocation {
             session,
             turn,
@@ -27,7 +30,7 @@ impl ToolHandler for Handler {
         session
             .services
             .agent_control
-            .register_session_root(session.conversation_id, &turn.session_source);
+            .register_session_root(session.conversation_id, turn.parent_thread_id);
         let agents = session
             .services
             .agent_control
@@ -35,11 +38,18 @@ impl ToolHandler for Handler {
             .await
             .map_err(collab_spawn_error)?;
 
-        Ok(ListAgentsResult { agents })
+        Ok(boxed_tool_output(ListAgentsResult { agents }))
+    }
+}
+
+impl CoreToolRuntime for Handler {
+    fn matches_kind(&self, payload: &ToolPayload) -> bool {
+        matches!(payload, ToolPayload::Function { .. })
     }
 }
 
 #[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
 struct ListAgentsArgs {
     path_prefix: Option<String>,
 }

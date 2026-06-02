@@ -1,7 +1,6 @@
 #![allow(warnings, clippy::all)]
 
 use super::*;
-use crate::config::RolloutConfig;
 use chrono::DateTime;
 use chrono::NaiveDateTime;
 use chrono::Timelike;
@@ -24,16 +23,6 @@ use std::path::PathBuf;
 use tempfile::tempdir;
 use uuid::Uuid;
 
-fn test_config(codex_home: PathBuf) -> RolloutConfig {
-    RolloutConfig {
-        sqlite_home: codex_home.clone(),
-        cwd: codex_home.clone(),
-        codex_home,
-        model_provider_id: "test-provider".to_string(),
-        generate_memories: true,
-    }
-}
-
 #[tokio::test]
 async fn extract_metadata_from_rollout_uses_session_meta() {
     let dir = tempdir().expect("tempdir");
@@ -46,11 +35,13 @@ async fn extract_metadata_from_rollout_uses_session_meta() {
     let session_meta = SessionMeta {
         id,
         forked_from_id: None,
+        parent_thread_id: None,
         timestamp: "2026-01-27T12:34:56Z".to_string(),
         cwd: dir.path().to_path_buf(),
         originator: "cli".to_string(),
         cli_version: "0.0.0".to_string(),
         source: SessionSource::default(),
+        thread_source: None,
         agent_path: None,
         agent_nickname: None,
         agent_role: None,
@@ -97,11 +88,13 @@ async fn extract_metadata_from_rollout_returns_latest_memory_mode() {
     let session_meta = SessionMeta {
         id,
         forked_from_id: None,
+        parent_thread_id: None,
         timestamp: "2026-01-27T12:34:56Z".to_string(),
         cwd: dir.path().to_path_buf(),
         originator: "cli".to_string(),
         cli_version: "0.0.0".to_string(),
         source: SessionSource::default(),
+        thread_source: None,
         agent_path: None,
         agent_nickname: None,
         agent_role: None,
@@ -210,8 +203,7 @@ async fn backfill_sessions_resumes_from_watermark_and_marks_complete() {
     ))
     .await;
 
-    let config = test_config(codex_home.clone());
-    backfill_sessions(runtime.as_ref(), &config).await;
+    backfill_sessions(runtime.as_ref(), codex_home.as_path(), "test-provider").await;
 
     let first_id = ThreadId::from_string(&first_uuid.to_string()).expect("first thread id");
     let second_id = ThreadId::from_string(&second_uuid.to_string()).expect("second thread id");
@@ -278,8 +270,7 @@ async fn backfill_sessions_preserves_existing_git_branch_and_fills_missing_git_f
         .await
         .expect("existing metadata upsert");
 
-    let config = test_config(codex_home.clone());
-    backfill_sessions(runtime.as_ref(), &config).await;
+    backfill_sessions(runtime.as_ref(), codex_home.as_path(), "test-provider").await;
 
     let persisted = runtime
         .get_thread(thread_id)
@@ -313,8 +304,7 @@ async fn backfill_sessions_normalizes_cwd_before_upsert() {
         .await
         .expect("initialize runtime");
 
-    let config = test_config(codex_home.clone());
-    backfill_sessions(runtime.as_ref(), &config).await;
+    backfill_sessions(runtime.as_ref(), codex_home.as_path(), "test-provider").await;
 
     let thread_id = ThreadId::from_string(&thread_uuid.to_string()).expect("thread id");
     let stored = runtime
@@ -359,11 +349,13 @@ fn write_rollout_in_sessions_with_cwd(
     let session_meta = SessionMeta {
         id,
         forked_from_id: None,
+        parent_thread_id: None,
         timestamp: event_ts.to_string(),
         cwd,
         originator: "cli".to_string(),
         cli_version: "0.0.0".to_string(),
         source: SessionSource::default(),
+        thread_source: None,
         agent_path: None,
         agent_nickname: None,
         agent_role: None,

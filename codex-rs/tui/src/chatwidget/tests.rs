@@ -1,8 +1,8 @@
 //! Exercises `ChatWidget` event handling and rendering invariants.
 //!
-//! These tests treat the widget as the adapter between `codex_protocol::protocol::EventMsg` inputs and
-//! the TUI output. Many assertions are snapshot-based so that layout regressions and status/header
-//! changes show up as stable, reviewable diffs.
+//! These tests cover both app-server-native inputs and focused widget helpers. Many assertions are
+//! snapshot-based so that layout regressions and status/header changes show up as stable,
+//! reviewable diffs.
 
 pub(super) use super::*;
 pub(super) use crate::app_event::AppEvent;
