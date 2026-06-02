@@ -46,6 +46,7 @@ pub(crate) async fn stream_chat_completions(
     model_slug: &str,
     client: &reqwest::Client,
     provider: &ModelProviderInfo,
+    responses_originator_header: &str,
     debug_logger: &Arc<Mutex<DebugLogger>>,
     auth_manager: Option<Arc<AuthManager>>,
     otel_event_manager: Option<OtelEventManager>,
@@ -88,7 +89,9 @@ pub(crate) async fn stream_chat_completions(
             ResponseItem::FunctionCallOutput { .. } | ResponseItem::ToolSearchOutput { .. } => {
                 last_emitted_role = Some("tool")
             }
-            ResponseItem::CompactionSummary { .. } => last_emitted_role = Some("assistant"),
+            ResponseItem::CompactionSummary { .. } | ResponseItem::ContextCompaction { .. } => {
+                last_emitted_role = Some("assistant")
+            }
             ResponseItem::Reasoning { .. } | ResponseItem::Other => {}
             ResponseItem::CustomToolCall { .. } => {}
             ResponseItem::CustomToolCallOutput { .. } => {}
@@ -220,7 +223,7 @@ pub(crate) async fn stream_chat_completions(
                     messages.push(json!({"role": role, "content": text}));
                 }
             }
-            ResponseItem::CompactionSummary { .. } => {
+            ResponseItem::CompactionSummary { .. } | ResponseItem::ContextCompaction { .. } => {
                 // Compaction summaries are only meaningful to the Responses API; omit them
                 // when translating to Chat Completions.
                 continue;
@@ -391,8 +394,13 @@ pub(crate) async fn stream_chat_completions(
     loop {
         attempt += 1;
 
-        let auth = auth_manager.as_ref().and_then(|m| m.auth());
-        let mut req_builder = provider.create_request_builder(client, &auth).await?;
+        let base_auth = auth_manager.as_ref().and_then(|m| m.auth());
+        let auth = provider.effective_auth(&base_auth).await?;
+        let mut req_builder = provider.create_request_builder_with_auth(client, &auth).await?;
+        req_builder = req_builder.headers(crate::default_client::requested_model_headers(
+            Some(responses_originator_header),
+            model_slug,
+        ));
 
         if let Some(auth) = auth.as_ref() {
             if auth.mode.is_chatgpt() {
@@ -456,6 +464,19 @@ pub(crate) async fn stream_chat_completions(
             }
             Ok(res) => {
                 let status = res.status();
+                if status == StatusCode::UNAUTHORIZED && provider.has_command_auth() {
+                    provider.invalidate_cached_auth_token();
+                    if attempt > max_retries {
+                        return Err(CodexErr::RetryLimit(RetryLimitReachedError {
+                            status,
+                            request_id: None,
+                            retryable: true,
+                        }));
+                    }
+                    let delay = backoff(attempt);
+                    tokio::time::sleep(delay).await;
+                    continue;
+                }
                 if !(status == StatusCode::TOO_MANY_REQUESTS || status.is_server_error()) {
                     let body = (res.text().await).unwrap_or_default();
                     if let Ok(logger) = debug_logger.lock() {
@@ -1140,6 +1161,9 @@ where
                 }
                 Poll::Ready(Some(Ok(ResponseEvent::ModelsEtag(etag)))) => {
                     return Poll::Ready(Some(Ok(ResponseEvent::ModelsEtag(etag))));
+                }
+                Poll::Ready(Some(Ok(ResponseEvent::ResponseHeaders(headers)))) => {
+                    return Poll::Ready(Some(Ok(ResponseEvent::ResponseHeaders(headers))));
                 }
                 Poll::Ready(Some(Ok(ResponseEvent::Completed {
                     response_id,
