@@ -1,15 +1,12 @@
 /**
  * @hanzo/zap — Hanzo-branded ZAP SDK
  *
- * Thin wrapper over @zap-proto/zap (canonical ZAP protocol).
+ * Thin wrapper over @zap-proto/zap (the canonical native ZAP wire runtime).
+ * Re-exports the canonical surface verbatim — builder, client (ZapClient),
+ * envelope, pipeline, view, and wire — so `@hanzo/zap` stays byte-compatible
+ * with github.com/zap-proto/go and the luxfi/zap transport.
  *
  * @packageDocumentation
  */
 
-// Re-export everything from canonical @zap-proto/zap
-export * from '@zap-proto/zap';
-
-// ── Backward-compat aliases ──────────────────────────────────────────
-import { Client, Server } from '@zap-proto/zap';
-export { Client as ZapClient };
-export { Server as ZapServer };
+export * from "@zap-proto/zap";
