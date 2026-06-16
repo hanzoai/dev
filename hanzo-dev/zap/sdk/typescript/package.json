@@ -58,7 +58,7 @@
     "url": "https://github.com/hanzoai/dev/issues"
   },
   "dependencies": {
-    "@zap-proto/zap": "^1.0.0"
+    "@zap-proto/zap": "^1.2.0"
   },
   "devDependencies": {
     "@types/node": "^22.0.0",
