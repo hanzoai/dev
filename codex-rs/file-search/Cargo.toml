@@ -16,9 +16,6 @@ doctest = false
 [lints]
 workspace = true
 
-[lints]
-workspace = true
-
 [dependencies]
 anyhow = { workspace = true }
 clap = { workspace = true, features = ["derive"] }

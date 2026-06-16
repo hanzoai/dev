@@ -12,9 +12,6 @@ doctest = false
 [lints]
 workspace = true
 
-[lints]
-workspace = true
-
 [dependencies]
 anyhow = "1"
 serde = { version = "1", features = ["derive"] }

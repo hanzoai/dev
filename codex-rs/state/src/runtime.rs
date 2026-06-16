@@ -59,19 +59,31 @@ use tracing::warn;
 
 mod agent_jobs;
 mod backfill;
+mod external_agent_config_imports;
 mod goals;
 mod logs;
 mod memories;
+mod recovery;
 mod remote_control;
 #[cfg(test)]
 mod test_support;
 mod threads;
 
+pub use external_agent_config_imports::ExternalAgentConfigImportDetailsRecord;
+pub use external_agent_config_imports::ExternalAgentConfigImportFailureRecord;
+pub use external_agent_config_imports::ExternalAgentConfigImportHistoryRecord;
+pub use external_agent_config_imports::ExternalAgentConfigImportSuccessRecord;
 pub use goals::GoalAccountingMode;
 pub use goals::GoalAccountingOutcome;
 pub use goals::GoalStore;
 pub use goals::GoalUpdate;
 pub use memories::MemoryStore;
+pub use recovery::RuntimeDbBackup;
+pub use recovery::backup_runtime_db_for_fresh_start;
+pub use recovery::is_sqlite_corruption_error;
+pub use recovery::runtime_db_path_for_corruption_error;
+pub use recovery::sqlite_error_detail_is_corruption;
+pub use recovery::sqlite_error_detail_is_lock;
 pub use remote_control::RemoteControlEnrollmentRecord;
 pub use threads::ThreadFilterOptions;
 
@@ -180,35 +192,27 @@ impl StateRuntime {
         telemetry_override: Option<&dyn DbTelemetry>,
     ) -> anyhow::Result<Arc<Self>> {
         tokio::fs::create_dir_all(&codex_home).await?;
-        let current_state_name = state_db_filename();
-        let current_logs_name = logs_db_filename();
-        remove_legacy_db_files(
-            &codex_home,
-            current_state_name.as_str(),
-            STATE_DB_FILENAME,
-            "state",
-        )
-        .await;
-        remove_legacy_db_files(
-            &codex_home,
-            current_logs_name.as_str(),
-            LOGS_DB_FILENAME,
-            "logs",
-        )
-        .await;
-        let state_path = state_db_path(codex_home.as_path());
-        let logs_path = logs_db_path(codex_home.as_path());
-        let pool = match open_state_sqlite(&state_path, &STATE_MIGRATOR).await {
+        let state_migrator = runtime_state_migrator();
+        let logs_migrator = runtime_logs_migrator();
+        let goals_migrator = runtime_goals_migrator();
+        let memories_migrator = runtime_memories_migrator();
+        let state_path = STATE_DB.path(codex_home.as_path());
+        let logs_path = LOGS_DB.path(codex_home.as_path());
+        let goals_path = GOALS_DB.path(codex_home.as_path());
+        let memories_path = MEMORIES_DB.path(codex_home.as_path());
+        let pool = match open_state_sqlite(&state_path, &state_migrator, telemetry_override).await {
             Ok(db) => Arc::new(db),
             Err(err) => {
                 warn!("failed to open state db at {}: {err}", state_path.display());
                 return Err(err);
             }
         };
-        let logs_pool = match open_logs_sqlite(&logs_path, &LOGS_MIGRATOR).await {
+        let logs_pool = match open_logs_sqlite(&logs_path, &logs_migrator, telemetry_override).await
+        {
             Ok(db) => Arc::new(db),
             Err(err) => {
                 warn!("failed to open logs db at {}: {err}", logs_path.display());
+                close_sqlite_pools(&[pool.as_ref()]).await;
                 return Err(err);
             }
         };
@@ -217,6 +221,7 @@ impl StateRuntime {
                 Ok(db) => Arc::new(db),
                 Err(err) => {
                     warn!("failed to open goals db at {}: {err}", goals_path.display());
+                    close_sqlite_pools(&[pool.as_ref(), logs_pool.as_ref()]).await;
                     return Err(err);
                 }
             };
@@ -233,6 +238,7 @@ impl StateRuntime {
                     "failed to open memories db at {}: {err}",
                     memories_path.display()
                 );
+                close_sqlite_pools(&[pool.as_ref(), logs_pool.as_ref(), goals_pool.as_ref()]).await;
                 return Err(err);
             }
         };
@@ -245,7 +251,16 @@ impl StateRuntime {
             started.elapsed(),
             &backfill_state_result,
         );
-        backfill_state_result?;
+        if let Err(err) = backfill_state_result {
+            close_sqlite_pools(&[
+                pool.as_ref(),
+                logs_pool.as_ref(),
+                goals_pool.as_ref(),
+                memories_pool.as_ref(),
+            ])
+            .await;
+            return Err(err);
+        }
         let started = Instant::now();
         let thread_updated_at_millis_result: anyhow::Result<Option<i64>> =
             sqlx::query_scalar("SELECT MAX(threads.updated_at_ms) FROM threads")
@@ -259,7 +274,19 @@ impl StateRuntime {
             started.elapsed(),
             &thread_updated_at_millis_result,
         );
-        let thread_updated_at_millis = thread_updated_at_millis_result?;
+        let thread_updated_at_millis = match thread_updated_at_millis_result {
+            Ok(value) => value,
+            Err(err) => {
+                close_sqlite_pools(&[
+                    pool.as_ref(),
+                    logs_pool.as_ref(),
+                    goals_pool.as_ref(),
+                    memories_pool.as_ref(),
+                ])
+                .await;
+                return Err(err);
+            }
+        };
         let thread_updated_at_millis = thread_updated_at_millis.unwrap_or(0);
         let runtime = Arc::new(Self {
             thread_goals: GoalStore::new(Arc::clone(&goals_pool)),
@@ -292,6 +319,14 @@ impl StateRuntime {
         &self.memories
     }
 
+    /// Close all SQLite pools and wait for outstanding pool workers to exit.
+    pub async fn close(&self) {
+        self.memories.close().await;
+        self.thread_goals.close().await;
+        self.logs_pool.close().await;
+        self.pool.close().await;
+    }
+
     pub async fn clear_memory_data_in_sqlite_home(sqlite_home: &Path) -> anyhow::Result<bool> {
         let memories_path = MEMORIES_DB.path(sqlite_home);
         if !tokio::fs::try_exists(&memories_path).await? {
@@ -311,6 +346,12 @@ impl StateRuntime {
     }
 }
 
+async fn close_sqlite_pools(pools: &[&SqlitePool]) {
+    for pool in pools {
+        pool.close().await;
+    }
+}
+
 fn base_sqlite_options(path: &Path) -> SqliteConnectOptions {
     SqliteConnectOptions::new()
         .filename(path)
@@ -321,19 +362,50 @@ fn base_sqlite_options(path: &Path) -> SqliteConnectOptions {
         .log_statements(LevelFilter::Off)
 }
 
-async fn open_state_sqlite(path: &Path, migrator: &'static Migrator) -> anyhow::Result<SqlitePool> {
-    let options = base_sqlite_options(path);
-    let pool = SqlitePoolOptions::new()
-        .max_connections(5)
-        .connect_with(options)
-        .await?;
-    migrator.run(&pool).await?;
-    Ok(pool)
+async fn open_state_sqlite(
+    path: &Path,
+    migrator: &Migrator,
+    telemetry_override: Option<&dyn DbTelemetry>,
+) -> anyhow::Result<SqlitePool> {
+    // New state DBs should use incremental auto-vacuum, but retrofitting an
+    // existing DB requires a full VACUUM. Do not attempt that during process
+    // startup: it is maintenance work that can contend with foreground writers.
+    open_sqlite(path, migrator, STATE_DB, telemetry_override).await
 }
 
-async fn open_logs_sqlite(path: &Path, migrator: &'static Migrator) -> anyhow::Result<SqlitePool> {
+async fn open_logs_sqlite(
+    path: &Path,
+    migrator: &Migrator,
+    telemetry_override: Option<&dyn DbTelemetry>,
+) -> anyhow::Result<SqlitePool> {
+    open_sqlite(path, migrator, LOGS_DB, telemetry_override).await
+}
+
+async fn open_goals_sqlite(
+    path: &Path,
+    migrator: &Migrator,
+    telemetry_override: Option<&dyn DbTelemetry>,
+) -> anyhow::Result<SqlitePool> {
+    open_sqlite(path, migrator, GOALS_DB, telemetry_override).await
+}
+
+async fn open_memories_sqlite(
+    path: &Path,
+    migrator: &Migrator,
+    telemetry_override: Option<&dyn DbTelemetry>,
+) -> anyhow::Result<SqlitePool> {
+    open_sqlite(path, migrator, MEMORIES_DB, telemetry_override).await
+}
+
+async fn open_sqlite(
+    path: &Path,
+    migrator: &Migrator,
+    spec: RuntimeDbSpec,
+    telemetry_override: Option<&dyn DbTelemetry>,
+) -> anyhow::Result<SqlitePool> {
     let options = base_sqlite_options(path).auto_vacuum(SqliteAutoVacuum::Incremental);
-    let pool = SqlitePoolOptions::new()
+    let started = Instant::now();
+    let pool_result = SqlitePoolOptions::new()
         .max_connections(5)
         .connect_with(options)
         .await
@@ -345,7 +417,8 @@ async fn open_logs_sqlite(path: &Path, migrator: &'static Migrator) -> anyhow::R
         started.elapsed(),
         &pool_result,
     );
-    let pool = pool_result?;
+    let pool = pool_result
+        .map_err(|source| recovery::RuntimeDbInitError::new(spec.label, "open", path, source))?;
     let started = Instant::now();
     let migrate_result = migrator.run(&pool).await.map_err(anyhow::Error::from);
     crate::telemetry::record_init_result(
@@ -355,13 +428,26 @@ async fn open_logs_sqlite(path: &Path, migrator: &'static Migrator) -> anyhow::R
         started.elapsed(),
         &migrate_result,
     );
-    migrate_result?;
+    if let Err(source) = migrate_result {
+        pool.close().await;
+        return Err(recovery::RuntimeDbInitError::new(spec.label, "migrate", path, source).into());
+    }
     Ok(pool)
 }
 
 pub(super) async fn ensure_backfill_state_row_in_pool(
     pool: &sqlx::SqlitePool,
 ) -> anyhow::Result<()> {
+    // Eagerly check if the operation would have no effect to avoid blocking waiting for a SQLite
+    // writer for no reason in the hot startup path.
+    if sqlx::query_scalar::<_, i64>("SELECT 1 FROM backfill_state WHERE id = 1")
+        .fetch_optional(pool)
+        .await?
+        .is_some()
+    {
+        return Ok(());
+    }
+
     sqlx::query(
         r#"
 INSERT INTO backfill_state (id, status, last_watermark, last_success_at, updated_at)

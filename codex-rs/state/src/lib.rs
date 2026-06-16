@@ -82,6 +82,8 @@ pub const LOGS_DB_FILENAME: &str = "logs";
 pub const LOGS_DB_VERSION: u32 = 2;
 pub const STATE_DB_FILENAME: &str = "state";
 pub const STATE_DB_VERSION: u32 = 5;
+pub const GOALS_DB_FILENAME: &str = "goals_1.sqlite";
+pub const MEMORIES_DB_FILENAME: &str = "memories_1.sqlite";
 
 /// Errors encountered during DB operations. Tags: [stage]
 pub const DB_ERROR_METRIC: &str = "codex.db.error";

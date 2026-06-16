@@ -250,7 +250,8 @@ fn model_provider_auth_from_proto(
         command: auth.command,
         args: auth.args,
         timeout_ms,
-        refresh_interval_ms: auth.refresh_interval_ms,
+        refresh_interval_ms: NonZeroU64::new(auth.refresh_interval_ms)
+            .ok_or_else(|| parse_error("remote thread config returned zero auth refresh_interval_ms"))?,
         cwd,
     })
 }

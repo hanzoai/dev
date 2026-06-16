@@ -13,9 +13,6 @@ doctest = false
 [lints]
 workspace = true
 
-[lints]
-workspace = true
-
 [dependencies]
 ansi-to-tui = { workspace = true }
 ratatui = { workspace = true, features = [

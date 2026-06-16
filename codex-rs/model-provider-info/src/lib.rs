@@ -6,8 +6,13 @@
 //!      key. These override or extend the defaults at runtime.
 
 use codex_api::Provider as ApiProvider;
-use codex_api::provider::RetryConfig as ApiRetryConfig;
+use codex_api::RetryConfig as ApiRetryConfig;
+use codex_api::is_azure_responses_provider;
+use codex_app_server_protocol::AuthMode;
 use codex_protocol::config_types::ModelProviderAuthInfo;
+use codex_protocol::error::CodexErr;
+use codex_protocol::error::EnvVarError;
+use codex_protocol::error::Result as CodexResult;
 use http::HeaderMap;
 use http::header::HeaderName;
 use http::header::HeaderValue;
@@ -97,6 +102,9 @@ pub struct ModelProviderInfo {
     /// Command-backed bearer-token configuration for this provider.
     pub auth: Option<ModelProviderAuthInfo>,
 
+    /// AWS SigV4 auth configuration for this provider.
+    pub aws: Option<ModelProviderAwsAuthInfo>,
+
     /// Which wire protocol this provider expects.
     #[serde(default)]
     pub wire_api: WireApi,
@@ -142,7 +150,7 @@ pub struct ModelProviderAwsAuthInfo {
 }
 
 impl ModelProviderInfo {
-    pub(crate) fn validate(&self) -> std::result::Result<(), String> {
+    pub fn validate(&self) -> std::result::Result<(), String> {
         let Some(auth) = self.auth.as_ref() else {
             return Ok(());
         };
@@ -172,7 +180,7 @@ impl ModelProviderInfo {
         }
     }
 
-    fn build_header_map(&self) -> crate::error::Result<HeaderMap> {
+    fn build_header_map(&self) -> CodexResult<HeaderMap> {
         let capacity = self.http_headers.as_ref().map_or(0, HashMap::len)
             + self.env_http_headers.as_ref().map_or(0, HashMap::len);
         let mut headers = HeaderMap::with_capacity(capacity);
@@ -289,6 +297,7 @@ impl ModelProviderInfo {
             env_key_instructions: None,
             experimental_bearer_token: None,
             auth: None,
+            aws: None,
             wire_api: WireApi::Responses,
             query_params: None,
             http_headers: Some(
@@ -456,6 +465,7 @@ pub fn create_oss_provider_with_base_url(base_url: &str, wire_api: WireApi) -> M
         env_key_instructions: None,
         experimental_bearer_token: None,
         auth: None,
+        aws: None,
         wire_api,
         query_params: None,
         http_headers: None,

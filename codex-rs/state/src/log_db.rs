@@ -19,6 +19,7 @@
 //! # }
 //! ```
 
+use std::future::Future;
 use std::sync::OnceLock;
 use std::time::Duration;
 use std::time::SystemTime;
@@ -46,20 +47,57 @@ use crate::StateRuntime;
 const LOG_QUEUE_CAPACITY: usize = 512;
 const LOG_BATCH_SIZE: usize = 128;
 const LOG_FLUSH_INTERVAL: Duration = Duration::from_secs(2);
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct LogSinkQueueConfig {
+    pub queue_capacity: usize,
+    pub batch_size: usize,
+    pub flush_interval: Duration,
+}
+
+impl Default for LogSinkQueueConfig {
+    fn default() -> Self {
+        Self {
+            queue_capacity: LOG_QUEUE_CAPACITY,
+            batch_size: LOG_BATCH_SIZE,
+            flush_interval: LOG_FLUSH_INTERVAL,
+        }
+    }
+}
+
+impl LogSinkQueueConfig {
+    fn normalized(self) -> Self {
+        Self {
+            queue_capacity: self.queue_capacity.max(1),
+            batch_size: self.batch_size.max(1),
+            flush_interval: if self.flush_interval.is_zero() {
+                LOG_FLUSH_INTERVAL
+            } else {
+                self.flush_interval
+            },
+        }
+    }
+}
+
+/// A tracing log writer that can flush entries accepted by its queue.
+///
+/// Implementations should keep `Layer::on_event` non-blocking for ordinary log
+/// events. `flush` should wait for entries accepted before the flush command to
+/// be processed by the writer.
+pub trait LogWriter<S>: Layer<S>
+where
+    S: tracing::Subscriber + for<'a> LookupSpan<'a>,
+{
+    fn flush(&self) -> impl Future<Output = ()> + Send + '_;
+}
+
 pub struct LogDbLayer {
     sender: mpsc::Sender<LogDbCommand>,
     process_uuid: String,
 }
 
 pub fn start(state_db: std::sync::Arc<StateRuntime>) -> LogDbLayer {
-    let process_uuid = current_process_log_uuid().to_string();
-    let (sender, receiver) = mpsc::channel(LOG_QUEUE_CAPACITY);
-    tokio::spawn(run_inserter(std::sync::Arc::clone(&state_db), receiver));
-
-    LogDbLayer {
-        sender,
-        process_uuid,
-    }
+    LogDbLayer::start(state_db)
 }
 
 impl Clone for LogDbLayer {
@@ -151,6 +189,17 @@ where
 
     fn on_event(&self, event: &Event<'_>, ctx: tracing_subscriber::layer::Context<'_, S>) {
         let metadata = event.metadata();
+        // The SDK emits DEBUG timer meta-events every second per process; these
+        // were over 30% of retained logs in measured high-fanout Code environments.
+        if metadata.target() == "opentelemetry_sdk"
+            && matches!(
+                *metadata.level(),
+                tracing::Level::TRACE | tracing::Level::DEBUG
+            )
+        {
+            return;
+        }
+
         let mut visitor = MessageVisitor::default();
         event.record(&mut visitor);
         let thread_id = visitor
@@ -412,6 +461,10 @@ impl Visit for MessageVisitor {
         self.record_field(field, format!("{value:?}"));
     }
 }
+
+#[cfg(test)]
+#[path = "log_db_filter_tests.rs"]
+mod filter_tests;
 
 #[cfg(test)]
 mod tests {

@@ -11,9 +11,6 @@ doctest = false
 [lints]
 workspace = true
 
-[lints]
-workspace = true
-
 [dependencies]
 anyhow = { workspace = true }
 assert_cmd = { workspace = true }

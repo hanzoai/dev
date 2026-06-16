@@ -240,8 +240,6 @@ pub enum Feature {
     RemoteModels,
     /// Removed legacy git commit attribution guidance flag.
     CodexGitCommit,
-    /// Persist rollout metadata to a local SQLite database.
-    Sqlite,
     /// Removed compatibility flag for the deleted apply_patch fallback feature.
     ApplyPatchFreeform,
     /// Removed compatibility flag for the deleted unavailable-tool placeholder backfill.

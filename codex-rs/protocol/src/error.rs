@@ -192,6 +192,7 @@ impl CodexErr {
             | CodexErr::Spawn
             | CodexErr::SessionConfiguredNotFirstEvent
             | CodexErr::UsageLimitReached(_)
+            | CodexErr::CyberPolicy { .. }
             | CodexErr::ServerOverloaded => false,
             // 401/403 are auth failures — retrying won't help, the user needs to (re-)login.
             CodexErr::UnexpectedStatus(err)
@@ -242,6 +243,12 @@ impl CodexErr {
                 http_status_code: self.http_status_code_value(),
             },
             CodexErr::RefreshTokenFailed(_) => CodexErrorInfo::Unauthorized,
+            CodexErr::UnexpectedStatus(err)
+                if err.status == StatusCode::UNAUTHORIZED
+                    || err.status == StatusCode::FORBIDDEN =>
+            {
+                CodexErrorInfo::Unauthorized
+            }
             CodexErr::SessionConfiguredNotFirstEvent
             | CodexErr::InternalServerError
             | CodexErr::InternalAgentDied => CodexErrorInfo::InternalServerError,
@@ -543,10 +550,12 @@ impl std::fmt::Display for UsageLimitReachedError {
                     retry_suffix_after_or(self.resets_at.as_ref())
                 )
             }
-            Some(PlanType::Known(KnownPlan::Pro)) => format!(
-                "You've hit your usage limit. Check your plan and billing details{}",
-                retry_suffix_after_or(self.resets_at.as_ref())
-            ),
+            Some(PlanType::Known(KnownPlan::Pro)) | Some(PlanType::Known(KnownPlan::ProLite)) => {
+                format!(
+                    "You've hit your usage limit. Check your plan and billing details{}",
+                    retry_suffix_after_or(self.resets_at.as_ref())
+                )
+            }
             Some(PlanType::Known(KnownPlan::Enterprise))
             | Some(PlanType::Known(KnownPlan::Edu)) => format!(
                 "You've hit your usage limit.{}",
@@ -637,73 +646,6 @@ impl std::fmt::Display for EnvVarError {
             write!(f, " {instructions}")?;
         }
         Ok(())
-    }
-}
-
-impl CodexErr {
-    /// Minimal shim so that existing `e.downcast_ref::<CodexErr>()` checks continue to compile
-    /// after replacing `anyhow::Error` in the return signature. This mirrors the behavior of
-    /// `anyhow::Error::downcast_ref` but works directly on our concrete enum.
-    pub fn downcast_ref<T: std::any::Any>(&self) -> Option<&T> {
-        (self as &dyn std::any::Any).downcast_ref::<T>()
-    }
-
-    /// Translate core error to client-facing protocol error.
-    pub fn to_codex_protocol_error(&self) -> CodexErrorInfo {
-        match self {
-            CodexErr::ContextWindowExceeded => CodexErrorInfo::ContextWindowExceeded,
-            CodexErr::UsageLimitReached(_)
-            | CodexErr::QuotaExceeded
-            | CodexErr::UsageNotIncluded => CodexErrorInfo::UsageLimitExceeded,
-            CodexErr::ServerOverloaded => CodexErrorInfo::ServerOverloaded,
-            CodexErr::RetryLimit(_) => CodexErrorInfo::ResponseTooManyFailedAttempts {
-                http_status_code: self.http_status_code_value(),
-            },
-            CodexErr::ConnectionFailed(_) => CodexErrorInfo::HttpConnectionFailed {
-                http_status_code: self.http_status_code_value(),
-            },
-            CodexErr::ResponseStreamFailed(_) => CodexErrorInfo::ResponseStreamConnectionFailed {
-                http_status_code: self.http_status_code_value(),
-            },
-            CodexErr::RefreshTokenFailed(_) => CodexErrorInfo::Unauthorized,
-            CodexErr::UnexpectedStatus(err)
-                if err.status == StatusCode::UNAUTHORIZED
-                    || err.status == StatusCode::FORBIDDEN =>
-            {
-                CodexErrorInfo::Unauthorized
-            }
-            CodexErr::SessionConfiguredNotFirstEvent
-            | CodexErr::InternalServerError
-            | CodexErr::InternalAgentDied => CodexErrorInfo::InternalServerError,
-            CodexErr::UnsupportedOperation(_)
-            | CodexErr::ThreadNotFound(_)
-            | CodexErr::AgentLimitReached { .. } => CodexErrorInfo::BadRequest,
-            CodexErr::Sandbox(_) => CodexErrorInfo::SandboxError,
-            _ => CodexErrorInfo::Other,
-        }
-    }
-
-    pub fn to_error_event(&self, message_prefix: Option<String>) -> ErrorEvent {
-        let error_message = self.to_string();
-        let message: String = match message_prefix {
-            Some(prefix) => format!("{prefix}: {error_message}"),
-            None => error_message,
-        };
-        ErrorEvent {
-            message,
-            codex_error_info: Some(self.to_codex_protocol_error()),
-        }
-    }
-
-    pub fn http_status_code_value(&self) -> Option<u16> {
-        let http_status_code = match self {
-            CodexErr::RetryLimit(err) => Some(err.status),
-            CodexErr::UnexpectedStatus(err) => Some(err.status),
-            CodexErr::ConnectionFailed(err) => err.source.status(),
-            CodexErr::ResponseStreamFailed(err) => err.source.status(),
-            _ => None,
-        };
-        http_status_code.as_ref().map(StatusCode::as_u16)
     }
 }
 

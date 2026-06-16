@@ -1686,7 +1686,7 @@ dependencies = [
  "futures",
  "futures-timer",
  "pin-project-lite",
- "reqwest",
+ "reqwest 0.12.28",
  "serde",
  "serde_json",
  "thiserror 1.0.69",
@@ -1922,6 +1922,7 @@ dependencies = [
  "codex-model-provider",
  "codex-plugin",
  "codex-protocol",
+ "codex-utils-absolute-path",
  "os_info",
  "pretty_assertions",
  "serde",
@@ -2299,9 +2300,9 @@ dependencies = [
  "fs2",
  "futures",
  "once_cell",
- "rand 0.9.2",
+ "rand 0.9.3",
  "regex",
- "reqwest",
+ "reqwest 0.12.28",
  "serde",
  "serde_json",
  "tempfile",
@@ -3942,16 +3943,11 @@ dependencies = [
  "codex-chatgpt",
  "codex-cli",
  "codex-cloud-config",
- "codex-config",
- "codex-connectors",
- "codex-core-plugins",
- "codex-core-skills",
- "codex-exec-server",
+ "codex-core",
  "codex-features",
  "codex-feedback",
  "codex-file-search",
  "codex-git-utils",
- "codex-install-context",
  "codex-login",
  "codex-mcp",
  "codex-message-history",
@@ -7396,12 +7392,6 @@ dependencies = [
  "hash32",
  "stable_deref_trait",
 ]
-
-[[package]]
-name = "heck"
-version = "0.4.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "95505c38b4572b2d910cecb0281560f54b440a19336cbbcb27bf6ce6adc6f5a8"
 
 [[package]]
 name = "heck"
@@ -13881,7 +13871,7 @@ dependencies = [
  "httparse",
  "log",
  "rand 0.8.5",
- "sha1",
+ "sha1 0.10.6",
  "thiserror 1.0.69",
  "utf-8",
 ]
@@ -15206,15 +15196,6 @@ checksum = "a277a57398d4bfa075df44f501a17cfdf8542d224f0d36095a2adc7aee4ef0a5"
 dependencies = [
  "cfg-if",
  "windows-sys 0.48.0",
-]
-
-[[package]]
-name = "winres"
-version = "0.1.12"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "b68db261ef59e9e52806f688020631e987592bd83619edccda9c47d42cde4f6c"
-dependencies = [
- "toml 0.5.11",
 ]
 
 [[package]]
