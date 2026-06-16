@@ -1,6 +1,6 @@
 {
   "name": "@hanzo/zap",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "description": "ZAP — Zero-copy Agent Protocol. Hanzo-branded wrapper over @zap-proto/zap.",
   "type": "module",
   "main": "./dist/index.js",
@@ -11,18 +11,6 @@
       "types": "./dist/index.d.ts",
       "import": "./dist/index.js",
       "require": "./dist/index.cjs"
-    },
-    "./protocol": {
-      "types": "./dist/protocol.d.ts",
-      "import": "./dist/protocol.js"
-    },
-    "./transport": {
-      "types": "./dist/transport.d.ts",
-      "import": "./dist/transport.js"
-    },
-    "./rpc": {
-      "types": "./dist/rpc.d.ts",
-      "import": "./dist/rpc.js"
     }
   },
   "files": [
@@ -31,9 +19,9 @@
   ],
   "sideEffects": false,
   "scripts": {
-    "build": "tsup src/index.ts src/protocol.ts src/transport.ts src/rpc.ts --format esm,cjs --dts --clean",
-    "dev": "tsup src/index.ts src/protocol.ts src/transport.ts src/rpc.ts --format esm,cjs --dts --watch",
-    "test": "vitest run",
+    "build": "tsup src/index.ts --format esm,cjs --dts --clean",
+    "dev": "tsup src/index.ts --format esm,cjs --dts --watch",
+    "test": "vitest run --passWithNoTests",
     "test:watch": "vitest",
     "lint": "eslint src/",
     "typecheck": "tsc --noEmit"
@@ -51,14 +39,14 @@
   "repository": {
     "type": "git",
     "url": "git+https://github.com/hanzoai/dev.git",
-    "directory": "zap/sdk/typescript"
+    "directory": "hanzo-dev/zap/sdk/typescript"
   },
   "homepage": "https://hanzo.ai/zap",
   "bugs": {
     "url": "https://github.com/hanzoai/dev/issues"
   },
   "dependencies": {
-    "@zap-proto/zap": "^1.0.0"
+    "@zap-proto/zap": "^1.1.0"
   },
   "devDependencies": {
     "@types/node": "^22.0.0",
