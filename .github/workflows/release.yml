@@ -31,7 +31,7 @@ permissions:
 jobs:
   npm-auth-check:
     name: Validate npm auth
-    runs-on: ubuntu-latest
+    runs-on: [self-hosted, linux, amd64]
     if: "!contains(github.event.head_commit.message, '[skip ci]')"
     timeout-minutes: 5
     # Fail fast if npm auth is not usable; downstream jobs should not continue.
@@ -65,7 +65,7 @@ jobs:
   preflight-tests:
     name: Preflight Tests (Linux fast E2E)
     needs: [npm-auth-check]
-    runs-on: ubuntu-24.04
+    runs-on: [self-hosted, linux, amd64]
     env:
       CARGO_TARGET_DIR: /mnt/cargo-target
     steps:
@@ -163,7 +163,7 @@ jobs:
   determine-version:
     name: Determine Version
     needs: [npm-auth-check]
-    runs-on: ubuntu-latest
+    runs-on: [self-hosted, linux, amd64]
     outputs:
       version: ${{ steps.version.outputs.version }}
     steps:
@@ -209,27 +209,29 @@ jobs:
   build-binaries:
     name: Build ${{ matrix.target }}
     needs: [determine-version]
-    runs-on: ${{ matrix.os }}
+    # Self-hosted Hanzo runner fleet (arcd; topology in hanzoai/universe
+    # infra/runners). Off GitHub-hosted runners / billing.
+    runs-on: ${{ matrix.runs_on }}
     strategy:
       matrix:
         include:
           # Linux builds
-          - os: ubuntu-24.04
+          - runs_on: [self-hosted, linux, amd64]
             target: x86_64-unknown-linux-musl
             artifact: dev-x86_64-unknown-linux-musl
-          - os: ubuntu-24.04-arm
+          - runs_on: [self-hosted, linux, arm64]
             target: aarch64-unknown-linux-musl
             artifact: dev-aarch64-unknown-linux-musl
           # (GNU variants omitted to reduce asset duplication; npm defaults to musl)
-          # macOS builds
-          - os: macos-14
+          # macOS builds (dbc m4max; x86_64 cross-compiled on arm64 host)
+          - runs_on: [self-hosted, macos, arm64]
             target: x86_64-apple-darwin
             artifact: dev-x86_64-apple-darwin
-          - os: macos-14
+          - runs_on: [self-hosted, macos, arm64]
             target: aarch64-apple-darwin
             artifact: dev-aarch64-apple-darwin
-          # Windows build
-          - os: windows-latest
+          # Windows build (evo)
+          - runs_on: [self-hosted, windows, amd64]
             target: x86_64-pc-windows-msvc
             artifact: dev-x86_64-pc-windows-msvc.exe
 
@@ -476,7 +478,7 @@ jobs:
   release:
     name: Publish to npm
     needs: [determine-version, build-binaries, preflight-tests]
-    runs-on: ubuntu-latest
+    runs-on: [self-hosted, linux, amd64]
     if: "!contains(github.event.head_commit.message, '[skip ci]')"
     timeout-minutes: 30
     env:
