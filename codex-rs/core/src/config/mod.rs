@@ -2285,7 +2285,7 @@ impl Config {
         let model_provider_id = model_provider
             .or(config_profile.model_provider)
             .or(cfg.model_provider)
-            .unwrap_or_else(|| "openai".to_string());
+            .unwrap_or_else(|| crate::model_provider_info::HANZO_PROVIDER_ID.to_string());
         let model_provider = model_providers
             .get(&model_provider_id)
             .ok_or_else(|| {
