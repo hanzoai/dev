@@ -1143,6 +1143,52 @@ struct RefreshResponse {
 // Shared constant for token refresh (client id used for oauth token refresh flow)
 pub const CLIENT_ID: &str = "app_EMoamEEZ73f0CkXaXp7hrann";
 
+// Hanzo IAM (hanzo.id Casdoor OAuth — public client, PKCE only)
+pub const HANZO_CLIENT_ID: &str = "hanzo-dev";
+pub const HANZO_ISSUER: &str = "https://hanzo.id";
+
+// Claude Code OAuth credentials (for Anthropic OAuth)
+pub const CLAUDE_CLIENT_ID: &str = "9d1c250a-e61b-44d9-88ed-5944d1962f5e";
+pub const CLAUDE_ISSUER: &str = "https://claude.ai";
+pub const CLAUDE_TOKEN_URL: &str = "https://platform.claude.com/v1/oauth/token";
+pub const CLAUDE_API_KEY_URL: &str =
+    "https://api.anthropic.com/api/oauth/claude_cli/create_api_key";
+pub const ANTHROPIC_API_KEY_ENV_VAR: &str = "ANTHROPIC_API_KEY";
+
+/// Anthropic API key from env (for Claude-compatible endpoint via API key).
+pub fn read_anthropic_api_key_from_env() -> Option<String> {
+    read_non_empty_env_var(ANTHROPIC_API_KEY_ENV_VAR)
+}
+
+/// Attempts to read an existing Claude Code access token from the macOS Keychain.
+#[cfg(target_os = "macos")]
+pub fn read_claude_code_keychain_token() -> Option<String> {
+    use std::process::Command;
+    let output = Command::new("security")
+        .args(["find-generic-password", "-s", "Claude Code-credentials", "-w"])
+        .output()
+        .ok()?;
+    if !output.status.success() {
+        return None;
+    }
+    let json_str = String::from_utf8(output.stdout).ok()?;
+    let parsed: serde_json::Value = serde_json::from_str(json_str.trim()).ok()?;
+    let oauth = parsed.get("claudeAiOauth")?;
+    let access_token = oauth.get("accessToken")?.as_str()?;
+    if let Some(expires_at) = oauth.get("expiresAt").and_then(|v| v.as_i64()) {
+        let now_ms = chrono::Utc::now().timestamp_millis();
+        if now_ms >= expires_at {
+            return None;
+        }
+    }
+    Some(access_token.to_string())
+}
+
+#[cfg(not(target_os = "macos"))]
+pub fn read_claude_code_keychain_token() -> Option<String> {
+    None
+}
+
 pub fn oauth_client_id() -> String {
     std::env::var(CLIENT_ID_OVERRIDE_ENV_VAR)
         .ok()

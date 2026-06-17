@@ -485,6 +485,10 @@ struct LoginCommand {
     #[arg(long = "device-auth")]
     use_device_code: bool,
 
+    /// Login provider: hanzo (default), openai, or claude.
+    #[arg(long = "provider", value_name = "PROVIDER")]
+    provider: Option<LoginProvider>,
+
     /// EXPERIMENTAL: Use custom OAuth issuer base URL (advanced)
     /// Override the OAuth issuer base URL (advanced)
     #[arg(long = "experimental_issuer", value_name = "URL", hide = true)]
@@ -496,6 +500,16 @@ struct LoginCommand {
 
     #[command(subcommand)]
     action: Option<LoginSubcommand>,
+}
+
+#[derive(Debug, Clone, clap::ValueEnum)]
+enum LoginProvider {
+    /// Hanzo IAM (hanzo.id) — default.
+    Hanzo,
+    /// OpenAI / ChatGPT.
+    Openai,
+    /// Claude Code (Anthropic).
+    Claude,
 }
 
 #[derive(Debug, clap::Subcommand)]
@@ -1374,7 +1388,40 @@ async fn cli_main(
                         let access_token = read_access_token_from_stdin();
                         run_login_with_access_token(login_cli.config_overrides, access_token).await;
                     } else {
-                        run_login_with_chatgpt(login_cli.config_overrides).await;
+                        match login_cli.provider {
+                            Some(LoginProvider::Openai) => {
+                                run_login_with_chatgpt(login_cli.config_overrides).await;
+                            }
+                            Some(LoginProvider::Claude) => {
+                                // Reuse an existing Claude Code session if present;
+                                // otherwise guide the user to the API-key path.
+                                match codex_login::read_claude_code_keychain_token() {
+                                    Some(token) => {
+                                        run_login_with_api_key(login_cli.config_overrides, token)
+                                            .await;
+                                    }
+                                    None => {
+                                        eprintln!(
+                                            "No Claude Code session found. Set ANTHROPIC_API_KEY for the Claude-compatible endpoint, or sign in with Claude Code first."
+                                        );
+                                        std::process::exit(1);
+                                    }
+                                }
+                            }
+                            // Hanzo IAM (hanzo.id) is the default.
+                            Some(LoginProvider::Hanzo) | None => {
+                                run_login_with_device_code(
+                                    login_cli.config_overrides,
+                                    login_cli
+                                        .issuer_base_url
+                                        .or_else(|| Some(codex_login::HANZO_ISSUER.to_string())),
+                                    login_cli
+                                        .client_id
+                                        .or_else(|| Some(codex_login::HANZO_CLIENT_ID.to_string())),
+                                )
+                                .await;
+                            }
+                        }
                     }
                 }
             }
