@@ -37,6 +37,10 @@ pub const OPENAI_PROVIDER_ID: &str = "openai";
 const HANZO_PROVIDER_NAME: &str = "Hanzo";
 pub const HANZO_PROVIDER_ID: &str = "hanzo";
 const HANZO_BASE_URL: &str = "https://api.hanzo.ai/v1";
+// Native local inference via hanzo engine / hanzo-node (`hanzo serve`),
+// which exposes an OpenAI-compatible API on http://localhost:1234/v1.
+pub const HANZO_LOCAL_PROVIDER_ID: &str = "hanzo-local";
+const HANZO_LOCAL_BASE_URL: &str = "http://localhost:1234/v1";
 pub const CHATGPT_CODEX_BASE_URL: &str = "https://chatgpt.com/backend-api/codex";
 const AMAZON_BEDROCK_PROVIDER_NAME: &str = "Amazon Bedrock";
 pub const AMAZON_BEDROCK_PROVIDER_ID: &str = "amazon-bedrock";
@@ -459,6 +463,12 @@ pub fn built_in_model_providers(
     // `model_providers` in config.toml to add their own providers.
     [
         (HANZO_PROVIDER_ID, P::create_hanzo_provider()),
+        // Native local inference: hanzo engine (`hanzo serve`) / hanzo-node serve
+        // an OpenAI-compatible API on http://localhost:1234/v1.
+        (
+            HANZO_LOCAL_PROVIDER_ID,
+            create_oss_provider_with_base_url(HANZO_LOCAL_BASE_URL, WireApi::Responses),
+        ),
         (OPENAI_PROVIDER_ID, openai_provider),
         (AMAZON_BEDROCK_PROVIDER_ID, amazon_bedrock_provider),
         (
