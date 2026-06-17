@@ -87,6 +87,30 @@
       ],
       "title": "ChatgptAuthTokensv2::LoginAccountResponse",
       "type": "object"
+    },
+    {
+      "properties": {
+        "authUrl": {
+          "type": "string"
+        },
+        "loginId": {
+          "type": "string"
+        },
+        "type": {
+          "enum": [
+            "hanzoId"
+          ],
+          "title": "HanzoIdv2::LoginAccountResponseType",
+          "type": "string"
+        }
+      },
+      "required": [
+        "authUrl",
+        "loginId",
+        "type"
+      ],
+      "title": "HanzoIdv2::LoginAccountResponse",
+      "type": "object"
     }
   ],
   "title": "LoginAccountResponse"
