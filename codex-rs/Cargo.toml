@@ -529,6 +529,15 @@ strip = false
 # Balance parallel release code generation against binary size.
 codegen-units = 4
 
+# Production/shippable profile: small, stripped binary for npm distribution.
+# (Default `release` keeps symbols for symbolication; this is what packaging ships.)
+[profile.release-prod]
+inherits = "release"
+lto = "fat"
+codegen-units = 1
+strip = "symbols"
+debug = false
+
 [profile.profiling]
 inherits = "release"
 debug = "full"
