@@ -31,6 +31,9 @@ const MAX_REQUEST_MAX_RETRIES: u64 = 100;
 
 const OPENAI_PROVIDER_NAME: &str = "OpenAI";
 pub const OPENAI_PROVIDER_ID: &str = "openai";
+const HANZO_PROVIDER_NAME: &str = "Hanzo";
+pub const HANZO_PROVIDER_ID: &str = "hanzo";
+const HANZO_BASE_URL: &str = "https://api.hanzo.ai/v1";
 const CHAT_WIRE_API_REMOVED_ERROR: &str = "`wire_api = \"chat\"` is no longer supported.\nHow to fix: set `wire_api = \"responses\"` in your provider config.\nMore info: https://github.com/openai/codex/discussions/7782";
 pub(crate) const LEGACY_OLLAMA_CHAT_PROVIDER_ID: &str = "ollama-chat";
 pub(crate) const OLLAMA_CHAT_PROVIDER_REMOVED_ERROR: &str = "`ollama-chat` is no longer supported.\nHow to fix: replace `ollama-chat` with `ollama` in `model_provider`, `oss_provider`, or `--local-provider`.\nMore info: https://github.com/openai/codex/discussions/7782";
@@ -309,6 +312,39 @@ impl ModelProviderInfo {
         }
     }
 
+    /// Hanzo AI gateway (api.hanzo.ai) — OpenAI-compatible, speaks the Responses
+    /// wire API. Authenticated with `HANZO_API_KEY` (or a Hanzo IAM token from
+    /// `dev login`). This is the default provider for the `dev` CLI.
+    pub fn create_hanzo_provider() -> ModelProviderInfo {
+        ModelProviderInfo {
+            name: HANZO_PROVIDER_NAME.into(),
+            base_url: Some(HANZO_BASE_URL.to_string()),
+            // Auth flows through the auth layer (Hanzo IAM OAuth from `dev login`,
+            // or HANZO_API_KEY/CODEX_API_KEY env -> CodexAuth::from_api_key), the
+            // same way the OpenAI provider works. Do not set `env_key` here, or it
+            // would become a hard requirement even when a managed token is present.
+            env_key: None,
+            env_key_instructions: None,
+            experimental_bearer_token: None,
+            auth: None,
+            wire_api: WireApi::Responses,
+            query_params: None,
+            http_headers: Some(
+                [("version".to_string(), env!("CARGO_PKG_VERSION").to_string())]
+                    .into_iter()
+                    .collect(),
+            ),
+            env_http_headers: None,
+            request_max_retries: None,
+            stream_max_retries: None,
+            stream_idle_timeout_ms: None,
+            websocket_connect_timeout_ms: None,
+            requires_openai_auth: true,
+            // api.hanzo.ai serves Responses over HTTP; do not assume websocket.
+            supports_websockets: false,
+        }
+    }
+
     pub fn is_openai(&self) -> bool {
         self.name == OPENAI_PROVIDER_NAME
     }
@@ -336,6 +372,7 @@ pub fn built_in_model_providers(
     // open source ("oss") providers by default. Users are encouraged to add to
     // `model_providers` in config.toml to add their own providers.
     [
+        (HANZO_PROVIDER_ID, P::create_hanzo_provider()),
         (OPENAI_PROVIDER_ID, openai_provider),
         (
             OLLAMA_OSS_PROVIDER_ID,
