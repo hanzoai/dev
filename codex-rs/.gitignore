@@ -7,3 +7,8 @@
 # Value of CARGO_TARGET_DIR when using .devcontainer/devcontainer.json.
 /target-arm64/
 vendor/
+
+# Vendored bubblewrap source is required by linux-sandbox/build.rs (kept in-tree for reproducible local+CI builds)
+!vendor/
+!vendor/bubblewrap/
+!vendor/bubblewrap/**
