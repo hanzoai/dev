@@ -674,7 +674,14 @@ fn persist_tokens(
 
     let tokens = auth_dot_json.tokens.get_or_insert_with(TokenData::default);
     if let Some(id_token) = id_token {
-        tokens.id_token = parse_chatgpt_jwt_claims(&id_token).map_err(std::io::Error::other)?;
+        // A refresh response may not re-issue a parseable id token (e.g. a
+        // provider that omits `id_token` on refresh, leaving only an opaque
+        // access token in the fallback slot). In that case keep the existing
+        // id-token claims and still apply the new access/refresh tokens rather
+        // than failing the whole refresh.
+        if let Ok(claims) = parse_chatgpt_jwt_claims(&id_token) {
+            tokens.id_token = claims;
+        }
     }
     if let Some(access_token) = access_token {
         tokens.access_token = access_token;
