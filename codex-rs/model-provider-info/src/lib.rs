@@ -41,6 +41,21 @@ const HANZO_BASE_URL: &str = "https://api.hanzo.ai/v1";
 // which exposes an OpenAI-compatible API on http://localhost:1234/v1.
 pub const HANZO_LOCAL_PROVIDER_ID: &str = "hanzo-local";
 const HANZO_LOCAL_BASE_URL: &str = "http://localhost:1234/v1";
+// Generic node provider: works against ANY Hanzo/Lux/Zoo node (they run the
+// same OpenAI-compatible serve API). Point it at a node with HANZO_NODE_URL;
+// defaults to the local node on http://localhost:1234/v1.
+pub const NODE_PROVIDER_ID: &str = "node";
+
+/// A provider for any Hanzo/Lux/Zoo node. Base URL comes from `HANZO_NODE_URL`
+/// (e.g. http://some-node:1234/v1), defaulting to the local node.
+pub fn create_node_provider() -> ModelProviderInfo {
+    let base_url = std::env::var("HANZO_NODE_URL")
+        .ok()
+        .map(|v| v.trim().to_string())
+        .filter(|v| !v.is_empty())
+        .unwrap_or_else(|| HANZO_LOCAL_BASE_URL.to_string());
+    create_oss_provider_with_base_url(&base_url, WireApi::Responses)
+}
 pub const CHATGPT_CODEX_BASE_URL: &str = "https://chatgpt.com/backend-api/codex";
 const AMAZON_BEDROCK_PROVIDER_NAME: &str = "Amazon Bedrock";
 pub const AMAZON_BEDROCK_PROVIDER_ID: &str = "amazon-bedrock";
@@ -469,6 +484,8 @@ pub fn built_in_model_providers(
             HANZO_LOCAL_PROVIDER_ID,
             create_oss_provider_with_base_url(HANZO_LOCAL_BASE_URL, WireApi::Responses),
         ),
+        // Any Hanzo/Lux/Zoo node (set HANZO_NODE_URL; defaults to local node).
+        (NODE_PROVIDER_ID, create_node_provider()),
         (OPENAI_PROVIDER_ID, openai_provider),
         (AMAZON_BEDROCK_PROVIDER_ID, amazon_bedrock_provider),
         (
