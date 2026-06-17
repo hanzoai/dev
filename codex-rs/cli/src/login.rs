@@ -158,6 +158,57 @@ pub async fn login_with_chatgpt(
     server.block_until_done().await
 }
 
+/// Browser PKCE login against Hanzo IAM (hanzo.id). Uses the same local
+/// callback server as ChatGPT login, but with the Hanzo client id + issuer so
+/// the authorize/token URLs resolve to https://hanzo.id/v1/iam/oauth/*.
+pub async fn login_with_hanzo(
+    codex_home: std::path::PathBuf,
+    cli_auth_credentials_store_mode: codex_login::AuthCredentialsStoreMode,
+    auth_keyring_backend_kind: codex_login::AuthKeyringBackendKind,
+) -> std::io::Result<()> {
+    clear_existing_auth_before_login(
+        &codex_home,
+        cli_auth_credentials_store_mode,
+        auth_keyring_backend_kind,
+    )
+    .await;
+
+    let mut opts = ServerOptions::new(
+        codex_home,
+        codex_login::HANZO_CLIENT_ID.to_string(),
+        None,
+        cli_auth_credentials_store_mode,
+        auth_keyring_backend_kind,
+    );
+    opts.issuer = codex_login::HANZO_ISSUER.to_string();
+    let server = run_login_server(opts)?;
+    print_login_server_start(server.actual_port, &server.auth_url);
+    server.block_until_done().await
+}
+
+pub async fn run_login_with_hanzo(cli_config_overrides: CliConfigOverrides) -> ! {
+    let config = load_config_or_exit(cli_config_overrides).await;
+    let _login_log_guard = init_login_file_logging(&config);
+    tracing::info!("starting Hanzo IAM (hanzo.id) browser login flow");
+
+    match login_with_hanzo(
+        config.codex_home.to_path_buf(),
+        config.cli_auth_credentials_store_mode,
+        config.auth_keyring_backend_kind(),
+    )
+    .await
+    {
+        Ok(_) => {
+            eprintln!("{LOGIN_SUCCESS_MESSAGE} (Hanzo)");
+            std::process::exit(0);
+        }
+        Err(e) => {
+            eprintln!("Error logging in with Hanzo: {e}");
+            std::process::exit(1);
+        }
+    }
+}
+
 pub async fn run_login_with_chatgpt(cli_config_overrides: CliConfigOverrides) -> ! {
     let config = load_config_or_exit(cli_config_overrides).await;
     let _login_log_guard = init_login_file_logging(&config);

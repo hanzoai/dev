@@ -16,6 +16,7 @@ use codex_cli::run_login_status;
 use codex_cli::run_login_with_access_token;
 use codex_cli::run_login_with_api_key;
 use codex_cli::run_login_with_chatgpt;
+use codex_cli::run_login_with_hanzo;
 use codex_cli::run_login_with_device_code;
 use codex_cli::run_logout;
 use codex_cloud_tasks::Cli as CloudTasksCli;
@@ -1408,18 +1409,10 @@ async fn cli_main(
                                     }
                                 }
                             }
-                            // Hanzo IAM (hanzo.id) is the default.
+                            // Hanzo IAM (hanzo.id) is the default — browser PKCE
+                            // against https://hanzo.id/v1/iam/oauth/*.
                             Some(LoginProvider::Hanzo) | None => {
-                                run_login_with_device_code(
-                                    login_cli.config_overrides,
-                                    login_cli
-                                        .issuer_base_url
-                                        .or_else(|| Some(codex_login::HANZO_ISSUER.to_string())),
-                                    login_cli
-                                        .client_id
-                                        .or_else(|| Some(codex_login::HANZO_CLIENT_ID.to_string())),
-                                )
-                                .await;
+                                run_login_with_hanzo(login_cli.config_overrides).await;
                             }
                         }
                     }

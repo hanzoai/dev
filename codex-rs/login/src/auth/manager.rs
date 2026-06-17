@@ -1145,7 +1145,11 @@ pub const CLIENT_ID: &str = "app_EMoamEEZ73f0CkXaXp7hrann";
 
 // Hanzo IAM (hanzo.id Casdoor OAuth — public client, PKCE only)
 pub const HANZO_CLIENT_ID: &str = "hanzo-dev";
-pub const HANZO_ISSUER: &str = "https://hanzo.id";
+// OAuth issuer base. hanzo.id (Casdoor) serves OIDC under /v1/iam, so the login
+// server's `{issuer}/oauth/authorize` + `{issuer}/oauth/token` resolve to
+// https://hanzo.id/v1/iam/oauth/authorize and .../oauth/token (verified against
+// hanzo.id/.well-known/openid-configuration).
+pub const HANZO_ISSUER: &str = "https://hanzo.id/v1/iam";
 
 // Claude Code OAuth credentials (for Anthropic OAuth)
 pub const CLAUDE_CLIENT_ID: &str = "9d1c250a-e61b-44d9-88ed-5944d1962f5e";
