@@ -8586,6 +8586,22 @@
             "type": "object"
           },
           {
+            "properties": {
+              "type": {
+                "enum": [
+                  "hanzoId"
+                ],
+                "title": "HanzoIdv2::LoginAccountParamsType",
+                "type": "string"
+              }
+            },
+            "required": [
+              "type"
+            ],
+            "title": "HanzoIdv2::LoginAccountParams",
+            "type": "object"
+          },
+          {
             "description": "[UNSTABLE] FOR OPENAI INTERNAL USE ONLY - DO NOT USE. The access token must contain the same scopes that Codex-managed ChatGPT auth tokens have.",
             "properties": {
               "accessToken": {
@@ -8710,6 +8726,30 @@
               "type"
             ],
             "title": "ChatgptAuthTokensv2::LoginAccountResponse",
+            "type": "object"
+          },
+          {
+            "properties": {
+              "authUrl": {
+                "type": "string"
+              },
+              "loginId": {
+                "type": "string"
+              },
+              "type": {
+                "enum": [
+                  "hanzoId"
+                ],
+                "title": "HanzoIdv2::LoginAccountResponseType",
+                "type": "string"
+              }
+            },
+            "required": [
+              "authUrl",
+              "loginId",
+              "type"
+            ],
+            "title": "HanzoIdv2::LoginAccountResponse",
             "type": "object"
           }
         ],
