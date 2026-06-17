@@ -1,13 +1,13 @@
+#![allow(clippy::expect_used)]
 use std::fs;
 use std::path::Path;
 use std::path::PathBuf;
 
 fn rust_sources_under(dir: &Path) -> Vec<PathBuf> {
     let mut files = Vec::new();
-    let entries =
-        fs::read_dir(dir).unwrap_or_else(|err| panic!("failed to read {}: {err}", dir.display()));
+    let entries = fs::read_dir(dir).expect("source directory should be readable");
     for entry in entries {
-        let entry = entry.unwrap_or_else(|err| panic!("failed to read dir entry: {err}"));
+        let entry = entry.expect("source directory entry should be readable");
         let path = entry.path();
         if path.is_dir() {
             files.extend(rust_sources_under(&path));
@@ -21,9 +21,12 @@ fn rust_sources_under(dir: &Path) -> Vec<PathBuf> {
 
 #[test]
 fn tui_runtime_source_does_not_depend_on_manager_escape_hatches() {
-    let src_dir = codex_utils_cargo_bin::find_resource!("src")
-        .unwrap_or_else(|err| panic!("failed to resolve src runfile: {err}"));
-    let sources = rust_sources_under(&src_dir);
+    let src_file = codex_utils_cargo_bin::find_resource!("src/chatwidget.rs")
+        .expect("chatwidget source runfile should resolve");
+    let src_dir = src_file
+        .parent()
+        .expect("chatwidget source file should have a parent");
+    let sources = rust_sources_under(src_dir);
     let forbidden = [
         "AuthManager",
         "ThreadManager",
@@ -34,8 +37,7 @@ fn tui_runtime_source_does_not_depend_on_manager_escape_hatches() {
     let violations: Vec<String> = sources
         .iter()
         .flat_map(|path| {
-            let contents = fs::read_to_string(path)
-                .unwrap_or_else(|err| panic!("failed to read {}: {err}", path.display()));
+            let contents = fs::read_to_string(path).expect("Rust source file should be readable");
             let path_display = path.display().to_string();
             forbidden
                 .iter()

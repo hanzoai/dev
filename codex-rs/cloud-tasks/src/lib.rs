@@ -1,10 +1,10 @@
 mod app;
 mod cli;
-pub mod env_detect;
+pub(crate) mod env_detect;
 mod new_task;
-pub mod scrollable_diff;
+pub(crate) mod scrollable_diff;
 mod ui;
-pub mod util;
+pub(crate) mod util;
 pub use cli::Cli;
 
 use anyhow::anyhow;
@@ -12,6 +12,7 @@ use chrono::Utc;
 use codex_cloud_tasks_client::TaskStatus;
 use codex_git_utils::current_branch_name;
 use codex_git_utils::default_branch_name;
+use codex_login::default_client::get_codex_user_agent;
 use owo_colors::OwoColorize;
 use owo_colors::Stream;
 use std::cmp::Ordering;
@@ -40,23 +41,25 @@ struct BackendContext {
 }
 
 async fn init_backend(user_agent_suffix: &str) -> anyhow::Result<BackendContext> {
+    #[cfg(debug_assertions)]
     let use_mock = matches!(
         std::env::var("CODEX_CLOUD_TASKS_MODE").ok().as_deref(),
         Some("mock") | Some("MOCK")
     );
     let base_url = std::env::var("CODEX_CLOUD_TASKS_BASE_URL")
-        .unwrap_or_else(|_| "https://api.hanzo.ai".to_string());
+        .unwrap_or_else(|_| "https://chatgpt.com/backend-api".to_string());
 
     set_user_agent_suffix(user_agent_suffix);
 
+    #[cfg(debug_assertions)]
     if use_mock {
         return Ok(BackendContext {
-            backend: Arc::new(codex_cloud_tasks_client::MockClient),
+            backend: Arc::new(codex_cloud_tasks_mock_client::MockClient),
             base_url,
         });
     }
 
-    let ua = codex_core::default_client::get_codex_user_agent();
+    let ua = get_codex_user_agent();
     let mut http = codex_cloud_tasks_client::HttpClient::new(base_url.clone())?.with_user_agent(ua);
     let style = if base_url.contains("/backend-api") {
         "wham"
@@ -65,7 +68,7 @@ async fn init_backend(user_agent_suffix: &str) -> anyhow::Result<BackendContext>
     };
     append_error_log(format!("startup: base_url={base_url} path_style={style}"));
 
-    let auth_manager = util::load_auth_manager().await;
+    let auth_manager = util::load_auth_manager(Some(base_url.clone())).await;
     let auth = match auth_manager.as_ref() {
         Some(manager) => manager.auth().await,
         None => None,
@@ -74,7 +77,7 @@ async fn init_backend(user_agent_suffix: &str) -> anyhow::Result<BackendContext>
         Some(auth) => auth,
         None => {
             eprintln!(
-                "Not signed in. Please run 'hanzo login' to sign in, then re-run 'hanzo cloud'."
+                "Not signed in. Please run 'codex login' to sign in with ChatGPT, then re-run 'codex cloud'."
             );
             std::process::exit(1);
         }
@@ -84,23 +87,17 @@ async fn init_backend(user_agent_suffix: &str) -> anyhow::Result<BackendContext>
         append_error_log(format!("auth: mode=ChatGPT account_id={acc}"));
     }
 
-    let token = match auth.get_token() {
-        Ok(t) if !t.is_empty() => t,
-        _ => {
-            eprintln!(
-                "Not signed in. Please run 'hanzo login' to sign in, then re-run 'hanzo cloud'."
-            );
-            std::process::exit(1);
-        }
-    };
+    if !auth.uses_codex_backend() {
+        eprintln!(
+            "Not signed in. Please run 'codex login' to sign in with ChatGPT, then re-run 'codex cloud'."
+        );
+        std::process::exit(1);
+    }
 
-    http = http.with_bearer_token(token.clone());
-    if let Some(acc) = auth
-        .get_account_id()
-        .or_else(|| util::extract_chatgpt_account_id(&token))
-    {
+    let auth_provider = codex_model_provider::auth_provider_from_auth(&auth);
+    http = http.with_auth_provider(auth_provider);
+    if let Some(acc) = auth.get_account_id() {
         append_error_log(format!("auth: set ChatGPT-Account-Id header: {acc}"));
-        http = http.with_chatgpt_account_id(acc);
     }
 
     Ok(BackendContext {
@@ -109,16 +106,20 @@ async fn init_backend(user_agent_suffix: &str) -> anyhow::Result<BackendContext>
     })
 }
 
-#[async_trait::async_trait]
 trait GitInfoProvider {
-    async fn default_branch_name(&self, path: &std::path::Path) -> Option<String>;
+    fn default_branch_name(
+        &self,
+        path: &std::path::Path,
+    ) -> impl std::future::Future<Output = Option<String>> + Send;
 
-    async fn current_branch_name(&self, path: &std::path::Path) -> Option<String>;
+    fn current_branch_name(
+        &self,
+        path: &std::path::Path,
+    ) -> impl std::future::Future<Output = Option<String>> + Send;
 }
 
 struct RealGitInfo;
 
-#[async_trait::async_trait]
 impl GitInfoProvider for RealGitInfo {
     async fn default_branch_name(&self, path: &std::path::Path) -> Option<String> {
         default_branch_name(path).await
@@ -211,7 +212,7 @@ async fn resolve_environment_id(ctx: &BackendContext, requested: &str) -> anyhow
         .collect::<Vec<_>>();
     match label_matches.as_slice() {
         [] => Err(anyhow!(
-            "environment '{trimmed}' not found; run `hanzo cloud` to list available environments"
+            "environment '{trimmed}' not found; run `codex cloud` to list available environments"
         )),
         [single] => Ok(single.id.clone()),
         [first, rest @ ..] => {
@@ -220,7 +221,7 @@ async fn resolve_environment_id(ctx: &BackendContext, requested: &str) -> anyhow
                 Ok(first_id.clone())
             } else {
                 Err(anyhow!(
-                    "environment label '{trimmed}' is ambiguous; run `hanzo cloud` to pick the desired environment id"
+                    "environment label '{trimmed}' is ambiguous; run `codex cloud` to pick the desired environment id"
                 ))
             }
         }
@@ -802,7 +803,7 @@ pub async fn run_main(cli: Cli, _codex_linux_sandbox_exe: Option<PathBuf>) -> an
     append_error_log(format!(
         "startup: wham_force_internal={} ua={}",
         force_internal,
-        codex_core::default_client::get_codex_user_agent()
+        get_codex_user_agent()
     ));
     // Non-blocking initial load so the in-box spinner can animate
     app.status = "Loading tasks…".to_string();
@@ -842,7 +843,7 @@ pub async fn run_main(cli: Cli, _codex_linux_sandbox_exe: Option<PathBuf>) -> an
         tokio::spawn(async move {
             let base_url = util::normalize_base_url(
                 &std::env::var("CODEX_CLOUD_TASKS_BASE_URL")
-                    .unwrap_or_else(|_| "https://api.hanzo.ai".to_string()),
+                    .unwrap_or_else(|_| "https://chatgpt.com/backend-api".to_string()),
             );
             let headers = util::build_chatgpt_headers().await;
             let res = crate::env_detect::list_environments(&base_url, &headers).await;
@@ -857,7 +858,7 @@ pub async fn run_main(cli: Cli, _codex_linux_sandbox_exe: Option<PathBuf>) -> an
         tokio::spawn(async move {
             let base_url = util::normalize_base_url(
                 &std::env::var("CODEX_CLOUD_TASKS_BASE_URL")
-                    .unwrap_or_else(|_| "https://api.hanzo.ai".to_string()),
+                    .unwrap_or_else(|_| "https://chatgpt.com/backend-api".to_string()),
             );
             // Build headers: UA + ChatGPT auth if available
             let headers = util::build_chatgpt_headers().await;
@@ -1083,7 +1084,7 @@ pub async fn run_main(cli: Cli, _codex_linux_sandbox_exe: Option<PathBuf>) -> an
                                         tokio::spawn(async move {
                                             let base_url = crate::util::normalize_base_url(
                                                 &std::env::var("CODEX_CLOUD_TASKS_BASE_URL")
-                                                    .unwrap_or_else(|_| "https://api.hanzo.ai".to_string()),
+                                                    .unwrap_or_else(|_| "https://chatgpt.com/backend-api".to_string()),
                                             );
                                             let headers = crate::util::build_chatgpt_headers().await;
                                             let res = crate::env_detect::list_environments(&base_url, &headers).await;
@@ -1467,7 +1468,7 @@ pub async fn run_main(cli: Cli, _codex_linux_sandbox_exe: Option<PathBuf>) -> an
                             if should_fetch {
                                     let tx = tx.clone();
                                     tokio::spawn(async move {
-            let base_url = crate::util::normalize_base_url(&std::env::var("CODEX_CLOUD_TASKS_BASE_URL").unwrap_or_else(|_| "https://api.hanzo.ai".to_string()));
+            let base_url = crate::util::normalize_base_url(&std::env::var("CODEX_CLOUD_TASKS_BASE_URL").unwrap_or_else(|_| "https://chatgpt.com/backend-api".to_string()));
             let headers = crate::util::build_chatgpt_headers().await;
                                         let res = crate::env_detect::list_environments(&base_url, &headers).await;
                                         let _ = tx.send(app::AppEvent::EnvironmentsLoaded(res));
@@ -1593,7 +1594,7 @@ pub async fn run_main(cli: Cli, _codex_linux_sandbox_exe: Option<PathBuf>) -> an
                                         let total = ov.attempt_display_total();
                                         let current = ov.selected_attempt + 1;
                                         app.status = format!("Viewing attempt {current} of {total}");
-                                        ov.sd.to_top();
+                                        ov.sd.scroll_to_top();
                                         needs_redraw = true;
                                     }
                             };
@@ -1655,7 +1656,7 @@ pub async fn run_main(cli: Cli, _codex_linux_sandbox_exe: Option<PathBuf>) -> an
                                         tokio::spawn(async move {
                                             let base_url = crate::util::normalize_base_url(
                                                 &std::env::var("CODEX_CLOUD_TASKS_BASE_URL")
-                                                    .unwrap_or_else(|_| "https://api.hanzo.ai".to_string()),
+                                                    .unwrap_or_else(|_| "https://chatgpt.com/backend-api".to_string()),
                                             );
                                             let headers = crate::util::build_chatgpt_headers().await;
                                             let res = crate::env_detect::list_environments(&base_url, &headers).await;
@@ -1669,7 +1670,7 @@ pub async fn run_main(cli: Cli, _codex_linux_sandbox_exe: Option<PathBuf>) -> an
                                         let has_diff = ov.current_attempt().is_some_and(app::AttemptView::has_diff) || ov.base_can_apply;
                                         if has_text && has_diff {
                                             ov.set_view(app::DetailView::Prompt);
-                                            ov.sd.to_top();
+                                            ov.sd.scroll_to_top();
                                             needs_redraw = true;
                                         }
                                     }
@@ -1680,7 +1681,7 @@ pub async fn run_main(cli: Cli, _codex_linux_sandbox_exe: Option<PathBuf>) -> an
                                         let has_diff = ov.current_attempt().is_some_and(app::AttemptView::has_diff) || ov.base_can_apply;
                                         if has_text && has_diff {
                                             ov.set_view(app::DetailView::Diff);
-                                            ov.sd.to_top();
+                                            ov.sd.scroll_to_top();
                                             needs_redraw = true;
                                         }
                                     }
@@ -1711,8 +1712,8 @@ pub async fn run_main(cli: Cli, _codex_linux_sandbox_exe: Option<PathBuf>) -> an
                                     if let Some(ov) = &mut app.diff_overlay { let step = ov.sd.state.viewport_h.saturating_sub(1) as i16; ov.sd.page_by(-step); }
                                     needs_redraw = true;
                                 }
-                                KeyCode::Home => { if let Some(ov) = &mut app.diff_overlay { ov.sd.to_top(); } needs_redraw = true; }
-                                KeyCode::End  => { if let Some(ov) = &mut app.diff_overlay { ov.sd.to_bottom(); } needs_redraw = true; }
+                                KeyCode::Home => { if let Some(ov) = &mut app.diff_overlay { ov.sd.scroll_to_top(); } needs_redraw = true; }
+                                KeyCode::End  => { if let Some(ov) = &mut app.diff_overlay { ov.sd.scroll_to_bottom(); } needs_redraw = true; }
                                 _ => {}
                             }
                         } else if app.env_modal.is_some() {
@@ -1832,7 +1833,7 @@ pub async fn run_main(cli: Cli, _codex_linux_sandbox_exe: Option<PathBuf>) -> an
                                     if should_fetch {
                                     let tx = tx.clone();
                                     tokio::spawn(async move {
-                                        let base_url = crate::util::normalize_base_url(&std::env::var("CODEX_CLOUD_TASKS_BASE_URL").unwrap_or_else(|_| "https://api.hanzo.ai".to_string()));
+                                        let base_url = crate::util::normalize_base_url(&std::env::var("CODEX_CLOUD_TASKS_BASE_URL").unwrap_or_else(|_| "https://chatgpt.com/backend-api".to_string()));
                                         let headers = crate::util::build_chatgpt_headers().await;
                                         let res = crate::env_detect::list_environments(&base_url, &headers).await;
                                         let _ = tx.send(app::AppEvent::EnvironmentsLoaded(res));
@@ -2132,10 +2133,10 @@ mod tests {
     use super::*;
     use crate::resolve_git_ref_with_git_info;
     use codex_cloud_tasks_client::DiffSummary;
-    use codex_cloud_tasks_client::MockClient;
     use codex_cloud_tasks_client::TaskId;
     use codex_cloud_tasks_client::TaskStatus;
     use codex_cloud_tasks_client::TaskSummary;
+    use codex_cloud_tasks_mock_client::MockClient;
     use codex_tui::ComposerAction;
     use codex_tui::ComposerInput;
     use crossterm::event::KeyCode;
@@ -2159,7 +2160,6 @@ mod tests {
         }
     }
 
-    #[async_trait::async_trait]
     impl super::GitInfoProvider for StubGitInfo {
         async fn default_branch_name(&self, _path: &std::path::Path) -> Option<String> {
             self.default_branch.clone()
