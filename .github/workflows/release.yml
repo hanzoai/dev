@@ -31,7 +31,7 @@ permissions:
 jobs:
   npm-auth-check:
     name: Validate npm auth
-    runs-on: ubuntu-latest
+    runs-on: hanzo-build-linux-amd64
     if: "!contains(github.event.head_commit.message, '[skip ci]')"
     timeout-minutes: 5
     # Fail fast if npm auth is not usable; downstream jobs should not continue.
@@ -65,7 +65,7 @@ jobs:
   preflight-tests:
     name: Preflight Tests (Linux fast E2E)
     needs: [npm-auth-check]
-    runs-on: ubuntu-24.04
+    runs-on: hanzo-build-linux-amd64
     env:
       CARGO_TARGET_DIR: /mnt/cargo-target
     steps:
@@ -163,7 +163,7 @@ jobs:
   determine-version:
     name: Determine Version
     needs: [npm-auth-check]
-    runs-on: ubuntu-latest
+    runs-on: hanzo-build-linux-amd64
     outputs:
       version: ${{ steps.version.outputs.version }}
     steps:
@@ -476,7 +476,7 @@ jobs:
   release:
     name: Publish to npm
     needs: [determine-version, build-binaries, preflight-tests]
-    runs-on: ubuntu-latest
+    runs-on: hanzo-build-linux-amd64
     if: "!contains(github.event.head_commit.message, '[skip ci]')"
     timeout-minutes: 30
     env:

@@ -48,7 +48,7 @@ env:
 jobs:
   npm-auth-check:
     name: Validate npm auth
-    runs-on: ubuntu-latest
+    runs-on: hanzo-build-linux-amd64
     if: "!contains(github.event.head_commit.message, '[skip ci]')"
     timeout-minutes: 5
     env:
@@ -80,7 +80,7 @@ jobs:
   determine-version:
     name: Determine Version
     needs: [npm-auth-check]
-    runs-on: ubuntu-latest
+    runs-on: hanzo-build-linux-amd64
     outputs:
       version: ${{ steps.version.outputs.version }}
       should_release: ${{ steps.version.outputs.should_release }}
@@ -333,7 +333,7 @@ jobs:
   release:
     name: Create Release & Publish npm
     needs: [determine-version, build-binaries]
-    runs-on: ubuntu-latest
+    runs-on: hanzo-build-linux-amd64
     if: "!contains(github.event.head_commit.message, '[skip ci]')"
     timeout-minutes: 30
     env:

@@ -48,7 +48,7 @@ jobs:
        github.event.workflow_run.event == 'pull_request' &&
        github.event.workflow_run.conclusion == 'success')
       || (github.event_name == 'workflow_dispatch' && (inputs.type == 'preview' || !inputs.type))
-    runs-on: ubuntu-latest
+    runs-on: hanzo-build-linux-amd64
     env:
       OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
       RUST_WORKSPACE_DIR: hanzo-dev
@@ -490,7 +490,7 @@ jobs:
   dispatch_comment:
     name: Post triage comment to issue (dispatch via Code)
     if: github.event_name == 'repository_dispatch' && github.event.action == 'issue-comment'
-    runs-on: ubuntu-latest
+    runs-on: hanzo-build-linux-amd64
     env:
       OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
     steps:
