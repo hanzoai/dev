@@ -54,7 +54,7 @@ jobs:
   # ==========================================================================
   validate:
     name: Validate Configuration
-    runs-on: ubuntu-latest
+    runs-on: hanzo-deploy-linux-amd64
 
     steps:
       - name: Checkout
@@ -116,7 +116,7 @@ jobs:
   # ==========================================================================
   build-images:
     name: Build Docker Images
-    runs-on: ubuntu-latest
+    runs-on: hanzo-build-linux-amd64
     needs: validate
     if: github.event_name == 'push' || github.event.inputs.action == 'deploy'
 
@@ -208,7 +208,7 @@ jobs:
   # ==========================================================================
   terraform-plan:
     name: Terraform Plan
-    runs-on: ubuntu-latest
+    runs-on: hanzo-build-linux-amd64
     needs: validate
     if: github.event_name == 'pull_request' || github.event.inputs.action == 'plan'
 
@@ -294,7 +294,7 @@ jobs:
   # ==========================================================================
   terraform-apply:
     name: Terraform Apply
-    runs-on: ubuntu-latest
+    runs-on: hanzo-build-linux-amd64
     needs: [validate, build-images]
     if: |
       (github.event_name == 'push' && github.ref == 'refs/heads/main') ||
@@ -354,7 +354,7 @@ jobs:
   # ==========================================================================
   deploy-app:
     name: Deploy to DO App Platform
-    runs-on: ubuntu-latest
+    runs-on: hanzo-deploy-linux-amd64
     needs: [build-images, terraform-apply]
     if: |
       (github.event_name == 'push' && github.ref == 'refs/heads/main') ||
@@ -421,7 +421,7 @@ jobs:
   # ==========================================================================
   migrate:
     name: Run Migrations
-    runs-on: ubuntu-latest
+    runs-on: hanzo-deploy-linux-amd64
     needs: deploy-app
     if: github.event_name == 'push'
 
@@ -480,7 +480,7 @@ jobs:
   # ==========================================================================
   health-check:
     name: Health Check
-    runs-on: ubuntu-latest
+    runs-on: hanzo-build-linux-amd64
     needs: deploy-app
     if: always() && needs.deploy-app.result == 'success'
 
@@ -518,7 +518,7 @@ jobs:
   # ==========================================================================
   cleanup:
     name: Cleanup Staging
-    runs-on: ubuntu-latest
+    runs-on: hanzo-build-linux-amd64
     if: github.event_name == 'pull_request' && github.event.action == 'closed'
 
     steps:
