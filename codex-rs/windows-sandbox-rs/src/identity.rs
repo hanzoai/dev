@@ -1,24 +1,26 @@
 use crate::dpapi;
 use crate::logging::debug_log;
-use crate::policy::SandboxPolicy;
-use crate::setup::gather_read_roots;
-use crate::setup::gather_write_roots;
-use crate::setup::offline_proxy_settings_from_env;
-use crate::setup::run_elevated_setup;
-use crate::setup::sandbox_users_path;
-use crate::setup::setup_marker_path;
+use crate::resolved_permissions::ResolvedWindowsSandboxPermissions;
 use crate::setup::SandboxNetworkIdentity;
 use crate::setup::SandboxUserRecord;
 use crate::setup::SandboxUsersFile;
 use crate::setup::SetupMarker;
-use anyhow::anyhow;
+use crate::setup::gather_read_roots;
+use crate::setup::gather_write_roots_for_permissions;
+use crate::setup::offline_proxy_settings_from_env;
+use crate::setup::run_elevated_setup;
+use crate::setup::run_setup_refresh_with_overrides;
+use crate::setup::sandbox_users_path;
+use crate::setup::setup_marker_path;
 use anyhow::Context;
 use anyhow::Result;
-use base64::engine::general_purpose::STANDARD as BASE64_STANDARD;
+use anyhow::anyhow;
 use base64::Engine;
+use base64::engine::general_purpose::STANDARD as BASE64_STANDARD;
 use std::collections::HashMap;
 use std::fs;
 use std::path::Path;
+use std::path::PathBuf;
 
 #[derive(Debug, Clone)]
 struct SandboxIdentity {
@@ -95,6 +97,19 @@ fn load_users(codex_home: &Path) -> Result<Option<SandboxUsersFile>> {
     }
 }
 
+fn remove_sandbox_users_file(codex_home: &Path, reason: &str) -> Result<()> {
+    let path = sandbox_users_path(codex_home);
+    debug_log(
+        &format!("{reason}; deleting {}", path.display()),
+        Some(codex_home),
+    );
+    match fs::remove_file(&path) {
+        Ok(()) => Ok(()),
+        Err(err) if err.kind() == std::io::ErrorKind::NotFound => Ok(()),
+        Err(err) => Err(err).with_context(|| format!("delete {}", path.display())),
+    }
+}
+
 fn decode_password(record: &SandboxUserRecord) -> Result<String> {
     let blob = BASE64_STANDARD
         .decode(record.password.as_bytes())
@@ -127,20 +142,28 @@ fn select_identity(
     }))
 }
 
+#[allow(clippy::too_many_arguments)]
 pub fn require_logon_sandbox_creds(
-    policy: &SandboxPolicy,
-    policy_cwd: &Path,
+    permissions: &ResolvedWindowsSandboxPermissions,
     command_cwd: &Path,
     env_map: &HashMap<String, String>,
     codex_home: &Path,
+    read_roots_override: Option<&[PathBuf]>,
+    read_roots_include_platform_defaults: bool,
+    write_roots_override: Option<&[PathBuf]>,
+    deny_read_paths_override: &[PathBuf],
+    deny_write_paths_override: &[PathBuf],
     proxy_enforced: bool,
 ) -> Result<SandboxCreds> {
     let sandbox_dir = crate::setup::sandbox_dir(codex_home);
-    let needed_read = gather_read_roots(command_cwd, policy, codex_home);
-    let needed_write = gather_write_roots(policy, policy_cwd, command_cwd, env_map);
-    let network_identity = SandboxNetworkIdentity::from_policy(policy, proxy_enforced);
-    let desired_offline_proxy_settings =
-        offline_proxy_settings_from_env(env_map, network_identity);
+    let needed_read = read_roots_override
+        .map(<[PathBuf]>::to_vec)
+        .unwrap_or_else(|| gather_read_roots(command_cwd, permissions, env_map, codex_home));
+    let needed_write = write_roots_override
+        .map(<[PathBuf]>::to_vec)
+        .unwrap_or_else(|| gather_write_roots_for_permissions(permissions, command_cwd, env_map));
+    let network_identity = SandboxNetworkIdentity::from_permissions(permissions, proxy_enforced);
+    let desired_offline_proxy_settings = offline_proxy_settings_from_env(env_map, network_identity);
     // NOTE: Do not add CODEX_HOME/.sandbox to `needed_write`; it must remain non-writable by the
     // restricted capability token. The setup helper's `lock_sandbox_dir` is responsible for
     // granting the sandbox group access to this directory without granting the capability SID.
@@ -156,8 +179,9 @@ pub fn require_logon_sandbox_creds(
             } else {
                 let selected = select_identity(network_identity, codex_home)?;
                 if selected.is_none() {
-                    setup_reason =
-                        Some("sandbox users missing or incompatible with marker version".to_string());
+                    setup_reason = Some(
+                        "sandbox users missing or incompatible with marker version".to_string(),
+                    );
                 }
                 selected
             }
@@ -179,28 +203,38 @@ pub fn require_logon_sandbox_creds(
         }
         run_elevated_setup(
             crate::setup::SandboxSetupRequest {
-                policy,
-                policy_cwd,
+                permissions,
                 command_cwd,
                 env_map,
                 codex_home,
                 proxy_enforced,
             },
             crate::setup::SetupRootOverrides {
-                read_roots: Some(needed_read),
-                write_roots: Some(needed_write),
+                read_roots: Some(needed_read.clone()),
+                read_roots_include_platform_defaults,
+                write_roots: Some(needed_write.clone()),
+                deny_read_paths: Some(deny_read_paths_override.to_vec()),
+                deny_write_paths: Some(deny_write_paths_override.to_vec()),
             },
         )?;
         identity = select_identity(network_identity, codex_home)?;
     }
     // Always refresh ACLs (non-elevated) for current roots via the setup binary.
-    crate::setup::run_setup_refresh(
-        policy,
-        policy_cwd,
-        command_cwd,
-        env_map,
-        codex_home,
-        proxy_enforced,
+    run_setup_refresh_with_overrides(
+        crate::setup::SandboxSetupRequest {
+            permissions,
+            command_cwd,
+            env_map,
+            codex_home,
+            proxy_enforced,
+        },
+        crate::setup::SetupRootOverrides {
+            read_roots: Some(needed_read),
+            read_roots_include_platform_defaults,
+            write_roots: Some(needed_write),
+            deny_read_paths: Some(deny_read_paths_override.to_vec()),
+            deny_write_paths: Some(deny_write_paths_override.to_vec()),
+        },
     )?;
     let identity = identity.ok_or_else(|| {
         anyhow!(
@@ -211,4 +245,61 @@ pub fn require_logon_sandbox_creds(
         username: identity.username,
         password: identity.password,
     })
+}
+
+#[allow(clippy::too_many_arguments)]
+pub(crate) fn refresh_logon_sandbox_creds(
+    permissions: &ResolvedWindowsSandboxPermissions,
+    command_cwd: &Path,
+    env_map: &HashMap<String, String>,
+    codex_home: &Path,
+    read_roots_override: Option<&[PathBuf]>,
+    read_roots_include_platform_defaults: bool,
+    write_roots_override: Option<&[PathBuf]>,
+    deny_read_paths_override: &[PathBuf],
+    deny_write_paths_override: &[PathBuf],
+    proxy_enforced: bool,
+) -> Result<SandboxCreds> {
+    remove_sandbox_users_file(codex_home, "sandbox user login failed")?;
+    require_logon_sandbox_creds(
+        permissions,
+        command_cwd,
+        env_map,
+        codex_home,
+        read_roots_override,
+        read_roots_include_platform_defaults,
+        write_roots_override,
+        deny_read_paths_override,
+        deny_write_paths_override,
+        proxy_enforced,
+    )
+}
+
+#[cfg(test)]
+mod tests {
+    use super::remove_sandbox_users_file;
+    use crate::setup::sandbox_users_path;
+    use std::fs;
+    use tempfile::TempDir;
+
+    #[test]
+    fn remove_sandbox_users_file_deletes_existing_file() {
+        let codex_home = TempDir::new().expect("tempdir");
+        let users_path = sandbox_users_path(codex_home.path());
+        fs::create_dir_all(users_path.parent().expect("sandbox secrets dir"))
+            .expect("create sandbox secrets dir");
+        fs::write(&users_path, "users").expect("write users");
+
+        remove_sandbox_users_file(codex_home.path(), "stale creds").expect("remove users");
+        assert!(!users_path.exists());
+    }
+
+    #[test]
+    fn remove_sandbox_users_file_ignores_missing_file() {
+        let codex_home = TempDir::new().expect("tempdir");
+        let users_path = sandbox_users_path(codex_home.path());
+
+        remove_sandbox_users_file(codex_home.path(), "stale creds").expect("remove users");
+        assert!(!users_path.exists());
+    }
 }

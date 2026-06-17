@@ -1,9 +1,11 @@
 use codex_features::Feature;
+use codex_utils_path_uri::PathUri;
 use core_test_support::responses::ev_completed;
 use core_test_support::responses::ev_response_created;
 use core_test_support::responses::mount_sse_once;
 use core_test_support::responses::sse;
 use core_test_support::responses::start_mock_server;
+use core_test_support::skip_if_wine_exec;
 use core_test_support::test_codex::test_codex;
 
 const HIERARCHICAL_AGENTS_SNIPPET: &str =
@@ -11,6 +13,8 @@ const HIERARCHICAL_AGENTS_SNIPPET: &str =
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn hierarchical_agents_appends_to_project_doc_in_user_instructions() {
+    // TODO(anp): Remove after instruction-source helpers use target-native paths.
+    skip_if_wine_exec!("requires native cross-OS instruction-source paths");
     let server = start_mock_server().await;
     let resp_mock = mount_sse_once(
         &server,
@@ -18,21 +22,24 @@ async fn hierarchical_agents_appends_to_project_doc_in_user_instructions() {
     )
     .await;
 
-    let mut builder = test_codex().with_config(|config| {
-        config
-            .features
-            .enable(Feature::ChildAgentsMd)
-            .expect("test config should allow feature update");
-        std::fs::write(
+    let mut builder = test_codex()
+        .with_config(|config| {
             config
-                .cwd
-                .join("AGENTS.md")
-                .expect("absolute AGENTS.md path"),
-            "be nice",
-        )
-        .expect("write AGENTS.md");
-    });
-    let test = builder.build(&server).await.expect("build test codex");
+                .features
+                .enable(Feature::ChildAgentsMd)
+                .expect("test config should allow feature update");
+        })
+        .with_workspace_setup(|cwd, fs| async move {
+            let agents_md = cwd.join("AGENTS.md");
+            let agents_md_uri = PathUri::from_path(&agents_md)?;
+            fs.write_file(&agents_md_uri, b"be nice".to_vec(), /*sandbox*/ None)
+                .await?;
+            Ok::<(), anyhow::Error>(())
+        });
+    let test = builder
+        .build_with_remote_env(&server)
+        .await
+        .expect("build test codex");
 
     test.submit_turn("hello").await.expect("submit turn");
 
@@ -40,7 +47,7 @@ async fn hierarchical_agents_appends_to_project_doc_in_user_instructions() {
     let user_messages = request.message_input_texts("user");
     let instructions = user_messages
         .iter()
-        .find(|text| text.starts_with("# AGENTS.md instructions for "))
+        .find(|text| text.starts_with("# AGENTS.md instructions"))
         .expect("instructions message");
     assert!(
         instructions.contains("be nice"),
@@ -73,7 +80,10 @@ async fn hierarchical_agents_emits_when_no_project_doc() {
             .enable(Feature::ChildAgentsMd)
             .expect("test config should allow feature update");
     });
-    let test = builder.build(&server).await.expect("build test codex");
+    let test = builder
+        .build_with_remote_env(&server)
+        .await
+        .expect("build test codex");
 
     test.submit_turn("hello").await.expect("submit turn");
 
@@ -81,7 +91,7 @@ async fn hierarchical_agents_emits_when_no_project_doc() {
     let user_messages = request.message_input_texts("user");
     let instructions = user_messages
         .iter()
-        .find(|text| text.starts_with("# AGENTS.md instructions for "))
+        .find(|text| text.starts_with("# AGENTS.md instructions"))
         .expect("instructions message");
     assert!(
         instructions.contains(HIERARCHICAL_AGENTS_SNIPPET),

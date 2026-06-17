@@ -1,11 +1,10 @@
 use super::*;
 use base64::Engine;
 use base64::engine::general_purpose::STANDARD as BASE64_STANDARD;
-use codex_git_utils::GhostCommit;
 use codex_protocol::AgentPath;
-use codex_protocol::config_types::ReasoningSummary;
 use codex_protocol::models::BaseInstructions;
 use codex_protocol::models::ContentItem;
+use codex_protocol::models::DEFAULT_IMAGE_DETAIL;
 use codex_protocol::models::FunctionCallOutputBody;
 use codex_protocol::models::FunctionCallOutputContentItem;
 use codex_protocol::models::FunctionCallOutputPayload;
@@ -15,6 +14,7 @@ use codex_protocol::models::LocalShellExecAction;
 use codex_protocol::models::LocalShellStatus;
 use codex_protocol::models::ReasoningItemContent;
 use codex_protocol::models::ReasoningItemReasoningSummary;
+use codex_protocol::models::ResponseItemMetadata;
 use codex_protocol::openai_models::InputModality;
 use codex_protocol::openai_models::default_input_modalities;
 use codex_protocol::protocol::AskForApproval;
@@ -25,6 +25,7 @@ use codex_utils_output_truncation::TruncationPolicy;
 use codex_utils_output_truncation::truncate_text;
 use image::ImageBuffer;
 use image::ImageFormat;
+use image::Luma;
 use image::Rgba;
 use pretty_assertions::assert_eq;
 use regex_lite::Regex;
@@ -40,8 +41,8 @@ fn assistant_msg(text: &str) -> ResponseItem {
         content: vec![ContentItem::OutputText {
             text: text.to_string(),
         }],
-        end_turn: None,
         phase: None,
+        metadata: None,
     }
 }
 
@@ -59,8 +60,8 @@ fn inter_agent_assistant_msg(text: &str) -> ResponseItem {
         content: vec![ContentItem::OutputText {
             text: serde_json::to_string(&communication).unwrap(),
         }],
-        end_turn: None,
         phase: None,
+        metadata: None,
     }
 }
 
@@ -79,8 +80,8 @@ fn user_msg(text: &str) -> ResponseItem {
         content: vec![ContentItem::OutputText {
             text: text.to_string(),
         }],
-        end_turn: None,
         phase: None,
+        metadata: None,
     }
 }
 
@@ -91,8 +92,8 @@ fn user_input_text_msg(text: &str) -> ResponseItem {
         content: vec![ContentItem::InputText {
             text: text.to_string(),
         }],
-        end_turn: None,
         phase: None,
+        metadata: None,
     }
 }
 
@@ -103,8 +104,8 @@ fn developer_msg(text: &str) -> ResponseItem {
         content: vec![ContentItem::InputText {
             text: text.to_string(),
         }],
-        end_turn: None,
         phase: None,
+        metadata: None,
     }
 }
 
@@ -118,31 +119,31 @@ fn developer_msg_with_fragments(texts: &[&str]) -> ResponseItem {
                 text: (*text).to_string(),
             })
             .collect(),
-        end_turn: None,
         phase: None,
+        metadata: None,
     }
 }
 
 fn reference_context_item() -> TurnContextItem {
     TurnContextItem {
         turn_id: Some("reference-turn".to_string()),
-        trace_id: None,
         cwd: PathBuf::from("/tmp/reference-cwd"),
+        workspace_roots: None,
         current_date: Some("2026-03-23".to_string()),
         timezone: Some("America/Los_Angeles".to_string()),
         approval_policy: AskForApproval::OnRequest,
         sandbox_policy: SandboxPolicy::new_read_only_policy(),
+        permission_profile: None,
         network: None,
+        file_system_sandbox_policy: None,
         model: "gpt-test".to_string(),
+        comp_hash: None,
         personality: None,
         collaboration_mode: None,
+        multi_agent_version: None,
         realtime_active: Some(false),
         effort: None,
-        summary: ReasoningSummary::Auto,
-        user_instructions: None,
-        developer_instructions: None,
-        final_output_json_schema: None,
-        truncation_policy: Some(codex_protocol::protocol::TruncationPolicy::Tokens(10_000)),
+        summary: codex_protocol::config_types::ReasoningSummary::Auto,
     }
 }
 
@@ -151,6 +152,7 @@ fn custom_tool_call_output(call_id: &str, output: &str) -> ResponseItem {
         call_id: call_id.to_string(),
         name: None,
         output: FunctionCallOutputPayload::from_text(output.to_string()),
+        metadata: None,
     }
 }
 
@@ -164,6 +166,7 @@ fn reasoning_msg(text: &str) -> ResponseItem {
             text: text.to_string(),
         }]),
         encrypted_content: None,
+        metadata: None,
     }
 }
 
@@ -175,6 +178,7 @@ fn reasoning_with_encrypted_content(len: usize) -> ResponseItem {
         }],
         content: None,
         encrypted_content: Some("a".repeat(len)),
+        metadata: None,
     }
 }
 
@@ -197,8 +201,8 @@ fn filters_non_api_messages() {
         content: vec![ContentItem::OutputText {
             text: "ignored".to_string(),
         }],
-        end_turn: None,
         phase: None,
+        metadata: None,
     };
     let reasoning = reasoning_msg("thinking...");
     h.record_items([&system, &reasoning, &ResponseItem::Other], policy);
@@ -221,6 +225,7 @@ fn filters_non_api_messages() {
                     text: "thinking...".to_string(),
                 }]),
                 encrypted_content: None,
+                metadata: None,
             },
             ResponseItem::Message {
                 id: None,
@@ -228,8 +233,8 @@ fn filters_non_api_messages() {
                 content: vec![ContentItem::OutputText {
                     text: "hi".to_string()
                 }],
-                end_turn: None,
                 phase: None,
+                metadata: None,
             },
             ResponseItem::Message {
                 id: None,
@@ -237,8 +242,8 @@ fn filters_non_api_messages() {
                 content: vec![ContentItem::OutputText {
                     text: "hello".to_string()
                 }],
-                end_turn: None,
                 phase: None,
+                metadata: None,
             }
         ]
     );
@@ -381,13 +386,14 @@ fn for_prompt_strips_images_when_model_does_not_support_images() {
                 },
                 ContentItem::InputImage {
                     image_url: "https://example.com/img.png".to_string(),
+                    detail: Some(DEFAULT_IMAGE_DETAIL),
                 },
                 ContentItem::InputText {
                     text: "caption".to_string(),
                 },
             ],
-            end_turn: None,
             phase: None,
+            metadata: None,
         },
         ResponseItem::FunctionCall {
             id: None,
@@ -395,6 +401,7 @@ fn for_prompt_strips_images_when_model_does_not_support_images() {
             namespace: None,
             arguments: "{}".to_string(),
             call_id: "call-1".to_string(),
+            metadata: None,
         },
         ResponseItem::FunctionCallOutput {
             call_id: "call-1".to_string(),
@@ -404,9 +411,10 @@ fn for_prompt_strips_images_when_model_does_not_support_images() {
                 },
                 FunctionCallOutputContentItem::InputImage {
                     image_url: "https://example.com/result.png".to_string(),
-                    detail: None,
+                    detail: Some(DEFAULT_IMAGE_DETAIL),
                 },
             ]),
+            metadata: None,
         },
         ResponseItem::CustomToolCall {
             id: None,
@@ -414,6 +422,7 @@ fn for_prompt_strips_images_when_model_does_not_support_images() {
             call_id: "tool-1".to_string(),
             name: "js_repl".to_string(),
             input: "view_image".to_string(),
+            metadata: None,
         },
         ResponseItem::CustomToolCallOutput {
             call_id: "tool-1".to_string(),
@@ -424,9 +433,10 @@ fn for_prompt_strips_images_when_model_does_not_support_images() {
                 },
                 FunctionCallOutputContentItem::InputImage {
                     image_url: "https://example.com/js-repl-result.png".to_string(),
-                    detail: None,
+                    detail: Some(DEFAULT_IMAGE_DETAIL),
                 },
             ]),
+            metadata: None,
         },
     ];
     let history = create_history_with_items(items);
@@ -449,8 +459,8 @@ fn for_prompt_strips_images_when_model_does_not_support_images() {
                     text: "caption".to_string(),
                 },
             ],
-            end_turn: None,
             phase: None,
+            metadata: None,
         },
         ResponseItem::FunctionCall {
             id: None,
@@ -458,6 +468,7 @@ fn for_prompt_strips_images_when_model_does_not_support_images() {
             namespace: None,
             arguments: "{}".to_string(),
             call_id: "call-1".to_string(),
+            metadata: None,
         },
         ResponseItem::FunctionCallOutput {
             call_id: "call-1".to_string(),
@@ -470,6 +481,7 @@ fn for_prompt_strips_images_when_model_does_not_support_images() {
                         .to_string(),
                 },
             ]),
+            metadata: None,
         },
         ResponseItem::CustomToolCall {
             id: None,
@@ -477,6 +489,7 @@ fn for_prompt_strips_images_when_model_does_not_support_images() {
             call_id: "tool-1".to_string(),
             name: "js_repl".to_string(),
             input: "view_image".to_string(),
+            metadata: None,
         },
         ResponseItem::CustomToolCallOutput {
             call_id: "tool-1".to_string(),
@@ -490,6 +503,7 @@ fn for_prompt_strips_images_when_model_does_not_support_images() {
                         .to_string(),
                 },
             ]),
+            metadata: None,
         },
     ];
     assert_eq!(stripped, expected);
@@ -505,10 +519,11 @@ fn for_prompt_strips_images_when_model_does_not_support_images() {
             },
             ContentItem::InputImage {
                 image_url: "https://example.com/img.png".to_string(),
+                detail: Some(DEFAULT_IMAGE_DETAIL),
             },
         ],
-        end_turn: None,
         phase: None,
+        metadata: None,
     }]);
     let preserved = with_images.for_prompt(&modalities);
     assert_eq!(preserved.len(), 1);
@@ -528,6 +543,7 @@ fn for_prompt_preserves_image_generation_calls_when_images_are_supported() {
             status: "generating".to_string(),
             revised_prompt: Some("lobster".to_string()),
             result: "Zm9v".to_string(),
+            metadata: None,
         },
         ResponseItem::Message {
             id: None,
@@ -535,8 +551,8 @@ fn for_prompt_preserves_image_generation_calls_when_images_are_supported() {
             content: vec![ContentItem::InputText {
                 text: "hi".to_string(),
             }],
-            end_turn: None,
             phase: None,
+            metadata: None,
         },
     ]);
 
@@ -548,6 +564,7 @@ fn for_prompt_preserves_image_generation_calls_when_images_are_supported() {
                 status: "generating".to_string(),
                 revised_prompt: Some("lobster".to_string()),
                 result: "Zm9v".to_string(),
+                metadata: None,
             },
             ResponseItem::Message {
                 id: None,
@@ -555,8 +572,8 @@ fn for_prompt_preserves_image_generation_calls_when_images_are_supported() {
                 content: vec![ContentItem::InputText {
                     text: "hi".to_string(),
                 }],
-                end_turn: None,
                 phase: None,
+                metadata: None,
             }
         ]
     );
@@ -571,14 +588,15 @@ fn for_prompt_clears_image_generation_result_when_images_are_unsupported() {
             content: vec![ContentItem::InputText {
                 text: "generate a lobster".to_string(),
             }],
-            end_turn: None,
             phase: None,
+            metadata: None,
         },
         ResponseItem::ImageGenerationCall {
             id: "ig_123".to_string(),
             status: "completed".to_string(),
             revised_prompt: Some("lobster".to_string()),
             result: "Zm9v".to_string(),
+            metadata: None,
         },
     ]);
 
@@ -591,33 +609,18 @@ fn for_prompt_clears_image_generation_result_when_images_are_unsupported() {
                 content: vec![ContentItem::InputText {
                     text: "generate a lobster".to_string(),
                 }],
-                end_turn: None,
                 phase: None,
+                metadata: None,
             },
             ResponseItem::ImageGenerationCall {
                 id: "ig_123".to_string(),
                 status: "completed".to_string(),
                 revised_prompt: Some("lobster".to_string()),
                 result: String::new(),
+                metadata: None,
             },
         ]
     );
-}
-
-#[test]
-fn get_history_for_prompt_drops_ghost_commits() {
-    let items = vec![ResponseItem::GhostSnapshot {
-        ghost_commit: GhostCommit::new(
-            "ghost-1".to_string(),
-            /*parent*/ None,
-            Vec::new(),
-            Vec::new(),
-        ),
-    }];
-    let history = create_history_with_items(items);
-    let modalities = default_input_modalities();
-    let filtered = history.for_prompt(&modalities);
-    assert_eq!(filtered, vec![]);
 }
 
 #[test]
@@ -651,10 +654,12 @@ fn remove_first_item_removes_matching_output_for_function_call() {
             namespace: None,
             arguments: "{}".to_string(),
             call_id: "call-1".to_string(),
+            metadata: None,
         },
         ResponseItem::FunctionCallOutput {
             call_id: "call-1".to_string(),
             output: FunctionCallOutputPayload::from_text("ok".to_string()),
+            metadata: None,
         },
     ];
     let mut h = create_history_with_items(items);
@@ -668,6 +673,7 @@ fn remove_first_item_removes_matching_call_for_output() {
         ResponseItem::FunctionCallOutput {
             call_id: "call-2".to_string(),
             output: FunctionCallOutputPayload::from_text("ok".to_string()),
+            metadata: None,
         },
         ResponseItem::FunctionCall {
             id: None,
@@ -675,33 +681,12 @@ fn remove_first_item_removes_matching_call_for_output() {
             namespace: None,
             arguments: "{}".to_string(),
             call_id: "call-2".to_string(),
+            metadata: None,
         },
     ];
     let mut h = create_history_with_items(items);
     h.remove_first_item();
     assert_eq!(h.raw_items(), vec![]);
-}
-
-#[test]
-fn remove_last_item_removes_matching_call_for_output() {
-    let items = vec![
-        user_msg("before tool call"),
-        ResponseItem::FunctionCall {
-            id: None,
-            name: "do_it".to_string(),
-            namespace: None,
-            arguments: "{}".to_string(),
-            call_id: "call-delete-last".to_string(),
-        },
-        ResponseItem::FunctionCallOutput {
-            call_id: "call-delete-last".to_string(),
-            output: FunctionCallOutputPayload::from_text("ok".to_string()),
-        },
-    ];
-    let mut h = create_history_with_items(items);
-
-    assert!(h.remove_last_item());
-    assert_eq!(h.raw_items(), vec![user_msg("before tool call")]);
 }
 
 #[test]
@@ -714,11 +699,12 @@ fn replace_last_turn_images_replaces_tool_output_images() {
                 body: FunctionCallOutputBody::ContentItems(vec![
                     FunctionCallOutputContentItem::InputImage {
                         image_url: "data:image/png;base64,AAA".to_string(),
-                        detail: None,
+                        detail: Some(DEFAULT_IMAGE_DETAIL),
                     },
                 ]),
                 success: Some(true),
             },
+            metadata: None,
         },
     ];
     let mut history = create_history_with_items(items);
@@ -739,6 +725,7 @@ fn replace_last_turn_images_replaces_tool_output_images() {
                     ]),
                     success: Some(true),
                 },
+                metadata: None,
             },
         ]
     );
@@ -751,9 +738,10 @@ fn replace_last_turn_images_does_not_touch_user_images() {
         role: "user".to_string(),
         content: vec![ContentItem::InputImage {
             image_url: "data:image/png;base64,AAA".to_string(),
+            detail: Some(DEFAULT_IMAGE_DETAIL),
         }],
-        end_turn: None,
         phase: None,
+        metadata: None,
     }];
     let mut history = create_history_with_items(items.clone());
 
@@ -775,10 +763,12 @@ fn remove_first_item_handles_local_shell_pair() {
                 env: None,
                 user: None,
             }),
+            metadata: None,
         },
         ResponseItem::FunctionCallOutput {
             call_id: "call-3".to_string(),
             output: FunctionCallOutputPayload::from_text("ok".to_string()),
+            metadata: None,
         },
     ];
     let mut h = create_history_with_items(items);
@@ -1000,11 +990,13 @@ fn remove_first_item_handles_custom_tool_pair() {
             call_id: "tool-1".to_string(),
             name: "my_tool".to_string(),
             input: "{}".to_string(),
+            metadata: None,
         },
         ResponseItem::CustomToolCallOutput {
             call_id: "tool-1".to_string(),
             name: None,
             output: FunctionCallOutputPayload::from_text("ok".to_string()),
+            metadata: None,
         },
     ];
     let mut h = create_history_with_items(items);
@@ -1026,10 +1018,12 @@ fn normalization_retains_local_shell_outputs() {
                 env: None,
                 user: None,
             }),
+            metadata: None,
         },
         ResponseItem::FunctionCallOutput {
             call_id: "shell-1".to_string(),
             output: FunctionCallOutputPayload::from_text("Total output lines: 1\n\nok".to_string()),
+            metadata: None,
         },
     ];
 
@@ -1053,6 +1047,9 @@ fn record_items_truncates_function_call_output_content() {
             body: FunctionCallOutputBody::Text(long_output.clone()),
             success: Some(true),
         },
+        metadata: Some(ResponseItemMetadata {
+            turn_id: Some("turn-1".to_string()),
+        }),
     };
 
     history.record_items([&item], policy);
@@ -1073,6 +1070,7 @@ fn record_items_truncates_function_call_output_content() {
         }
         other => panic!("unexpected history item: {other:?}"),
     }
+    assert_eq!(history.items[0].turn_id(), Some("turn-1"));
 }
 
 #[test]
@@ -1085,6 +1083,7 @@ fn record_items_truncates_custom_tool_call_output_content() {
         call_id: "tool-200".to_string(),
         name: None,
         output: FunctionCallOutputPayload::from_text(long_output.clone()),
+        metadata: None,
     };
 
     history.record_items([&item], policy);
@@ -1118,6 +1117,7 @@ fn record_items_respects_custom_token_limit() {
             body: FunctionCallOutputBody::Text(long_output),
             success: Some(true),
         },
+        metadata: None,
     };
 
     history.record_items([&item], policy);
@@ -1237,6 +1237,7 @@ fn normalize_adds_missing_output_for_function_call() {
         namespace: None,
         arguments: "{}".to_string(),
         call_id: "call-x".to_string(),
+        metadata: None,
     }];
     let mut h = create_history_with_items(items);
 
@@ -1251,10 +1252,12 @@ fn normalize_adds_missing_output_for_function_call() {
                 namespace: None,
                 arguments: "{}".to_string(),
                 call_id: "call-x".to_string(),
+                metadata: None,
             },
             ResponseItem::FunctionCallOutput {
                 call_id: "call-x".to_string(),
                 output: FunctionCallOutputPayload::from_text("aborted".to_string()),
+                metadata: None,
             },
         ]
     );
@@ -1269,6 +1272,7 @@ fn normalize_adds_missing_output_for_custom_tool_call() {
         call_id: "tool-x".to_string(),
         name: "custom".to_string(),
         input: "{}".to_string(),
+        metadata: None,
     }];
     let mut h = create_history_with_items(items);
 
@@ -1283,11 +1287,13 @@ fn normalize_adds_missing_output_for_custom_tool_call() {
                 call_id: "tool-x".to_string(),
                 name: "custom".to_string(),
                 input: "{}".to_string(),
+                metadata: None,
             },
             ResponseItem::CustomToolCallOutput {
                 call_id: "tool-x".to_string(),
                 name: None,
                 output: FunctionCallOutputPayload::from_text("aborted".to_string()),
+                metadata: None,
             },
         ]
     );
@@ -1307,6 +1313,7 @@ fn normalize_adds_missing_output_for_local_shell_call_with_id() {
             env: None,
             user: None,
         }),
+        metadata: None,
     }];
     let mut h = create_history_with_items(items);
 
@@ -1326,10 +1333,12 @@ fn normalize_adds_missing_output_for_local_shell_call_with_id() {
                     env: None,
                     user: None,
                 }),
+                metadata: None,
             },
             ResponseItem::FunctionCallOutput {
                 call_id: "shell-1".to_string(),
                 output: FunctionCallOutputPayload::from_text("aborted".to_string()),
+                metadata: None,
             },
         ]
     );
@@ -1341,6 +1350,7 @@ fn normalize_removes_orphan_function_call_output() {
     let items = vec![ResponseItem::FunctionCallOutput {
         call_id: "orphan-1".to_string(),
         output: FunctionCallOutputPayload::from_text("ok".to_string()),
+        metadata: None,
     }];
     let mut h = create_history_with_items(items);
 
@@ -1356,6 +1366,7 @@ fn normalize_removes_orphan_custom_tool_call_output() {
         call_id: "orphan-2".to_string(),
         name: None,
         output: FunctionCallOutputPayload::from_text("ok".to_string()),
+        metadata: None,
     }];
     let mut h = create_history_with_items(items);
 
@@ -1375,11 +1386,13 @@ fn normalize_mixed_inserts_and_removals() {
             namespace: None,
             arguments: "{}".to_string(),
             call_id: "c1".to_string(),
+            metadata: None,
         },
         // Orphan output that should be removed
         ResponseItem::FunctionCallOutput {
             call_id: "c2".to_string(),
             output: FunctionCallOutputPayload::from_text("ok".to_string()),
+            metadata: None,
         },
         // Will get an inserted custom tool output
         ResponseItem::CustomToolCall {
@@ -1388,6 +1401,7 @@ fn normalize_mixed_inserts_and_removals() {
             call_id: "t1".to_string(),
             name: "tool".to_string(),
             input: "{}".to_string(),
+            metadata: None,
         },
         // Local shell call also gets an inserted function call output
         ResponseItem::LocalShellCall {
@@ -1401,6 +1415,7 @@ fn normalize_mixed_inserts_and_removals() {
                 env: None,
                 user: None,
             }),
+            metadata: None,
         },
     ];
     let mut h = create_history_with_items(items);
@@ -1416,10 +1431,12 @@ fn normalize_mixed_inserts_and_removals() {
                 namespace: None,
                 arguments: "{}".to_string(),
                 call_id: "c1".to_string(),
+                metadata: None,
             },
             ResponseItem::FunctionCallOutput {
                 call_id: "c1".to_string(),
                 output: FunctionCallOutputPayload::from_text("aborted".to_string()),
+                metadata: None,
             },
             ResponseItem::CustomToolCall {
                 id: None,
@@ -1427,11 +1444,13 @@ fn normalize_mixed_inserts_and_removals() {
                 call_id: "t1".to_string(),
                 name: "tool".to_string(),
                 input: "{}".to_string(),
+                metadata: None,
             },
             ResponseItem::CustomToolCallOutput {
                 call_id: "t1".to_string(),
                 name: None,
                 output: FunctionCallOutputPayload::from_text("aborted".to_string()),
+                metadata: None,
             },
             ResponseItem::LocalShellCall {
                 id: None,
@@ -1444,10 +1463,12 @@ fn normalize_mixed_inserts_and_removals() {
                     env: None,
                     user: None,
                 }),
+                metadata: None,
             },
             ResponseItem::FunctionCallOutput {
                 call_id: "s1".to_string(),
                 output: FunctionCallOutputPayload::from_text("aborted".to_string()),
+                metadata: None,
             },
         ]
     );
@@ -1461,6 +1482,7 @@ fn normalize_adds_missing_output_for_function_call_inserts_output() {
         namespace: None,
         arguments: "{}".to_string(),
         call_id: "call-x".to_string(),
+        metadata: None,
     }];
     let mut h = create_history_with_items(items);
     h.normalize_history(&default_input_modalities());
@@ -1473,10 +1495,12 @@ fn normalize_adds_missing_output_for_function_call_inserts_output() {
                 namespace: None,
                 arguments: "{}".to_string(),
                 call_id: "call-x".to_string(),
+                metadata: None,
             },
             ResponseItem::FunctionCallOutput {
                 call_id: "call-x".to_string(),
                 output: FunctionCallOutputPayload::from_text("aborted".to_string()),
+                metadata: None,
             },
         ]
     );
@@ -1490,6 +1514,7 @@ fn normalize_adds_missing_output_for_tool_search_call() {
         status: Some("completed".to_string()),
         execution: "client".to_string(),
         arguments: "{}".into(),
+        metadata: None,
     }];
     let mut h = create_history_with_items(items);
 
@@ -1504,12 +1529,14 @@ fn normalize_adds_missing_output_for_tool_search_call() {
                 status: Some("completed".to_string()),
                 execution: "client".to_string(),
                 arguments: "{}".into(),
+                metadata: None,
             },
             ResponseItem::ToolSearchOutput {
                 call_id: Some("search-call-x".to_string()),
                 status: "completed".to_string(),
                 execution: "client".to_string(),
                 tools: Vec::new(),
+                metadata: None,
             },
         ]
     );
@@ -1525,6 +1552,7 @@ fn normalize_adds_missing_output_for_custom_tool_call_panics_in_debug() {
         call_id: "tool-x".to_string(),
         name: "custom".to_string(),
         input: "{}".to_string(),
+        metadata: None,
     }];
     let mut h = create_history_with_items(items);
     h.normalize_history(&default_input_modalities());
@@ -1545,6 +1573,7 @@ fn normalize_adds_missing_output_for_local_shell_call_with_id_panics_in_debug() 
             env: None,
             user: None,
         }),
+        metadata: None,
     }];
     let mut h = create_history_with_items(items);
     h.normalize_history(&default_input_modalities());
@@ -1557,6 +1586,7 @@ fn normalize_removes_orphan_function_call_output_panics_in_debug() {
     let items = vec![ResponseItem::FunctionCallOutput {
         call_id: "orphan-1".to_string(),
         output: FunctionCallOutputPayload::from_text("ok".to_string()),
+        metadata: None,
     }];
     let mut h = create_history_with_items(items);
     h.normalize_history(&default_input_modalities());
@@ -1570,6 +1600,7 @@ fn normalize_removes_orphan_custom_tool_call_output_panics_in_debug() {
         call_id: "orphan-2".to_string(),
         name: None,
         output: FunctionCallOutputPayload::from_text("ok".to_string()),
+        metadata: None,
     }];
     let mut h = create_history_with_items(items);
     h.normalize_history(&default_input_modalities());
@@ -1583,6 +1614,7 @@ fn normalize_removes_orphan_client_tool_search_output() {
         status: "completed".to_string(),
         execution: "client".to_string(),
         tools: Vec::new(),
+        metadata: None,
     }];
     let mut h = create_history_with_items(items);
 
@@ -1600,6 +1632,7 @@ fn normalize_removes_orphan_client_tool_search_output_panics_in_debug() {
         status: "completed".to_string(),
         execution: "client".to_string(),
         tools: Vec::new(),
+        metadata: None,
     }];
     let mut h = create_history_with_items(items);
     h.normalize_history(&default_input_modalities());
@@ -1612,6 +1645,7 @@ fn normalize_keeps_server_tool_search_output_without_matching_call() {
         status: "completed".to_string(),
         execution: "server".to_string(),
         tools: Vec::new(),
+        metadata: None,
     }];
     let mut h = create_history_with_items(items);
 
@@ -1624,6 +1658,7 @@ fn normalize_keeps_server_tool_search_output_without_matching_call() {
             status: "completed".to_string(),
             execution: "server".to_string(),
             tools: Vec::new(),
+            metadata: None,
         }]
     );
 }
@@ -1639,10 +1674,12 @@ fn normalize_mixed_inserts_and_removals_panics_in_debug() {
             namespace: None,
             arguments: "{}".to_string(),
             call_id: "c1".to_string(),
+            metadata: None,
         },
         ResponseItem::FunctionCallOutput {
             call_id: "c2".to_string(),
             output: FunctionCallOutputPayload::from_text("ok".to_string()),
+            metadata: None,
         },
         ResponseItem::CustomToolCall {
             id: None,
@@ -1650,6 +1687,7 @@ fn normalize_mixed_inserts_and_removals_panics_in_debug() {
             call_id: "t1".to_string(),
             name: "tool".to_string(),
             input: "{}".to_string(),
+            metadata: None,
         },
         ResponseItem::LocalShellCall {
             id: None,
@@ -1662,6 +1700,7 @@ fn normalize_mixed_inserts_and_removals_panics_in_debug() {
                 env: None,
                 user: None,
             }),
+            metadata: None,
         },
     ];
     let mut h = create_history_with_items(items);
@@ -1679,10 +1718,13 @@ fn image_data_url_payload_does_not_dominate_message_estimate() {
             ContentItem::InputText {
                 text: "Here is the screenshot".to_string(),
             },
-            ContentItem::InputImage { image_url },
+            ContentItem::InputImage {
+                image_url,
+                detail: Some(DEFAULT_IMAGE_DETAIL),
+            },
         ],
-        end_turn: None,
         phase: None,
+        metadata: None,
     };
     let text_only_item = ResponseItem::Message {
         id: None,
@@ -1690,8 +1732,8 @@ fn image_data_url_payload_does_not_dominate_message_estimate() {
         content: vec![ContentItem::InputText {
             text: "Here is the screenshot".to_string(),
         }],
-        end_turn: None,
         phase: None,
+        metadata: None,
     };
 
     let raw_len = serde_json::to_string(&image_item).unwrap().len() as i64;
@@ -1716,9 +1758,10 @@ fn image_data_url_payload_does_not_dominate_function_call_output_estimate() {
             },
             FunctionCallOutputContentItem::InputImage {
                 image_url,
-                detail: None,
+                detail: Some(DEFAULT_IMAGE_DETAIL),
             },
         ]),
+        metadata: None,
     };
 
     let raw_len = serde_json::to_string(&item).unwrap().len() as i64;
@@ -1742,9 +1785,10 @@ fn image_data_url_payload_does_not_dominate_custom_tool_call_output_estimate() {
             },
             FunctionCallOutputContentItem::InputImage {
                 image_url,
-                detail: None,
+                detail: Some(DEFAULT_IMAGE_DETAIL),
             },
         ]),
+        metadata: None,
     };
 
     let raw_len = serde_json::to_string(&item).unwrap().len() as i64;
@@ -1762,18 +1806,20 @@ fn non_base64_image_urls_are_unchanged() {
         role: "user".to_string(),
         content: vec![ContentItem::InputImage {
             image_url: "https://example.com/foo.png".to_string(),
+            detail: Some(DEFAULT_IMAGE_DETAIL),
         }],
-        end_turn: None,
         phase: None,
+        metadata: None,
     };
     let function_output_item = ResponseItem::FunctionCallOutput {
         call_id: "call-1".to_string(),
         output: FunctionCallOutputPayload::from_content_items(vec![
             FunctionCallOutputContentItem::InputImage {
                 image_url: "file:///tmp/foo.png".to_string(),
-                detail: None,
+                detail: Some(DEFAULT_IMAGE_DETAIL),
             },
         ]),
+        metadata: None,
     };
 
     assert_eq!(
@@ -1787,15 +1833,37 @@ fn non_base64_image_urls_are_unchanged() {
 }
 
 #[test]
+fn encrypted_function_output_uses_plaintext_byte_estimate() {
+    let encrypted_content = "A".repeat(1_868);
+    let item = ResponseItem::FunctionCallOutput {
+        call_id: "call-encrypted".to_string(),
+        output: FunctionCallOutputPayload::from_content_items(vec![
+            FunctionCallOutputContentItem::EncryptedContent {
+                encrypted_content: encrypted_content.clone(),
+            },
+        ]),
+        metadata: None,
+    };
+
+    let raw_len = serde_json::to_string(&item).unwrap().len() as i64;
+    let estimated = estimate_response_item_model_visible_bytes(&item);
+    let expected = raw_len - encrypted_content.len() as i64
+        + estimate_encrypted_function_output_length(encrypted_content.len()) as i64;
+
+    assert_eq!(estimated, expected);
+}
+
+#[test]
 fn data_url_without_base64_marker_is_unchanged() {
     let item = ResponseItem::Message {
         id: None,
         role: "user".to_string(),
         content: vec![ContentItem::InputImage {
             image_url: "data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg'/>".to_string(),
+            detail: Some(DEFAULT_IMAGE_DETAIL),
         }],
-        end_turn: None,
         phase: None,
+        metadata: None,
     };
 
     assert_eq!(
@@ -1813,9 +1881,10 @@ fn non_image_base64_data_url_is_unchanged() {
         output: FunctionCallOutputPayload::from_content_items(vec![
             FunctionCallOutputContentItem::InputImage {
                 image_url,
-                detail: None,
+                detail: Some(DEFAULT_IMAGE_DETAIL),
             },
         ]),
+        metadata: None,
     };
 
     let raw_len = serde_json::to_string(&item).unwrap().len() as i64;
@@ -1831,9 +1900,12 @@ fn mixed_case_data_url_markers_are_adjusted() {
     let item = ResponseItem::Message {
         id: None,
         role: "user".to_string(),
-        content: vec![ContentItem::InputImage { image_url }],
-        end_turn: None,
+        content: vec![ContentItem::InputImage {
+            image_url,
+            detail: Some(DEFAULT_IMAGE_DETAIL),
+        }],
         phase: None,
+        metadata: None,
     };
 
     let raw_len = serde_json::to_string(&item).unwrap().len() as i64;
@@ -1858,13 +1930,15 @@ fn multiple_inline_images_apply_multiple_fixed_costs() {
             },
             ContentItem::InputImage {
                 image_url: image_url_one,
+                detail: Some(DEFAULT_IMAGE_DETAIL),
             },
             ContentItem::InputImage {
                 image_url: image_url_two,
+                detail: Some(DEFAULT_IMAGE_DETAIL),
             },
         ],
-        end_turn: None,
         phase: None,
+        metadata: None,
     };
 
     let raw_len = serde_json::to_string(&item).unwrap().len() as i64;
@@ -1898,11 +1972,45 @@ fn original_detail_images_scale_with_dimensions() {
                 detail: Some(ImageDetail::Original),
             },
         ]),
+        metadata: None,
     };
 
     let raw_len = serde_json::to_string(&item).unwrap().len() as i64;
     let estimated = estimate_response_item_model_visible_bytes(&item);
     let expected = raw_len - payload.len() as i64 + EXPECTED_ORIGINAL_DETAIL_IMAGE_BYTES;
+
+    assert_eq!(estimated, expected);
+}
+
+#[test]
+fn original_detail_images_are_capped_at_max_patch_count() {
+    // 3201x3201 at 32px patches yields 101 * 101 = 10,201 patches,
+    // which exceeds the original-detail patch budget.
+    let width = 3201;
+    let height = 3201;
+    let image = ImageBuffer::from_pixel(width, height, Luma([12u8]));
+    let mut bytes = std::io::Cursor::new(Vec::new());
+    image
+        .write_to(&mut bytes, ImageFormat::Png)
+        .expect("encode png");
+    let payload = BASE64_STANDARD.encode(bytes.get_ref());
+    let image_url = format!("data:image/png;base64,{payload}");
+    let item = ResponseItem::FunctionCallOutput {
+        call_id: "call-original-capped".to_string(),
+        output: FunctionCallOutputPayload::from_content_items(vec![
+            FunctionCallOutputContentItem::InputImage {
+                image_url,
+                detail: Some(ImageDetail::Original),
+            },
+        ]),
+        metadata: None,
+    };
+
+    let raw_len = serde_json::to_string(&item).unwrap().len() as i64;
+    let estimated = estimate_response_item_model_visible_bytes(&item);
+    let capped_original_detail_image_bytes =
+        i64::try_from(approx_bytes_for_tokens(ORIGINAL_IMAGE_MAX_PATCHES)).unwrap();
+    let expected = raw_len - payload.len() as i64 + capped_original_detail_image_bytes;
 
     assert_eq!(estimated, expected);
 }
@@ -1929,6 +2037,7 @@ fn original_detail_webp_images_scale_with_dimensions() {
                 detail: Some(ImageDetail::Original),
             },
         ]),
+        metadata: None,
     };
 
     let raw_len = serde_json::to_string(&item).unwrap().len() as i64;
@@ -1946,8 +2055,8 @@ fn text_only_items_unchanged() {
         content: vec![ContentItem::OutputText {
             text: "Hello world, this is a response.".to_string(),
         }],
-        end_turn: None,
         phase: None,
+        metadata: None,
     };
 
     let estimated = estimate_response_item_model_visible_bytes(&item);

@@ -29,8 +29,9 @@ use mcp_test_support::create_mock_responses_server;
 use mcp_test_support::create_shell_command_sse_response;
 use mcp_test_support::format_with_current_shell;
 
-// Allow ample time on slower CI or under load to avoid flakes.
-const DEFAULT_READ_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(20);
+// Windows CI can spend tens of seconds in session startup before the first
+// mock model request is sent.
+const DEFAULT_READ_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(60);
 
 /// Test that a shell command that is not on the "trusted" list triggers an
 /// elicitation request to the MCP and that sending the approval runs the
@@ -46,9 +47,9 @@ async fn test_shell_command_approval_triggers_elicitation() {
 
     // Apparently `#[tokio::test]` must return `()`, so we create a helper
     // function that returns `Result` so we can use `?` in favor of `unwrap`.
-    if let Err(err) = shell_command_approval_triggers_elicitation().await {
-        panic!("failure: {err}");
-    }
+    shell_command_approval_triggers_elicitation()
+        .await
+        .expect("shell command approval should trigger elicitation");
 }
 
 async fn shell_command_approval_triggers_elicitation() -> anyhow::Result<()> {
@@ -60,17 +61,24 @@ async fn shell_command_approval_triggers_elicitation() -> anyhow::Result<()> {
         .path()
         .join(created_filename);
 
-    let shell_command = if cfg!(windows) {
-        vec![
-            "New-Item".to_string(),
-            "-ItemType".to_string(),
-            "File".to_string(),
-            "-Path".to_string(),
-            created_filename.to_string(),
-            "-Force".to_string(),
-        ]
+    let (shell_command, timeout_ms) = if cfg!(windows) {
+        (
+            vec![
+                "New-Item".to_string(),
+                "-ItemType".to_string(),
+                "File".to_string(),
+                "-Path".to_string(),
+                created_filename.to_string(),
+                "-Force".to_string(),
+            ],
+            // `powershell.exe` startup can be slow on loaded Windows CI workers
+            10_000,
+        )
     } else {
-        vec!["touch".to_string(), created_filename.to_string()]
+        (
+            vec!["touch".to_string(), created_filename.to_string()],
+            5_000,
+        )
     };
     let expected_shell_command =
         format_with_current_shell(&shlex::try_join(shell_command.iter().map(String::as_str))?);
@@ -83,7 +91,7 @@ async fn shell_command_approval_triggers_elicitation() -> anyhow::Result<()> {
         create_shell_command_sse_response(
             shell_command.clone(),
             Some(workdir_for_shell_function_call.path()),
-            Some(5_000),
+            Some(timeout_ms),
             "call1234",
         )?,
         create_final_assistant_message_sse_response("File created!")?,
@@ -138,7 +146,6 @@ async fn shell_command_approval_triggers_elicitation() -> anyhow::Result<()> {
         .await?;
 
     // Verify task_complete notification arrives before the tool call completes.
-    #[expect(clippy::expect_used)]
     let _task_complete = timeout(
         DEFAULT_READ_TIMEOUT,
         mcp_process.read_stream_until_legacy_task_complete_notification(),
@@ -217,9 +224,9 @@ async fn test_patch_approval_triggers_elicitation() {
         return;
     }
 
-    if let Err(err) = patch_approval_triggers_elicitation().await {
-        panic!("failure: {err}");
-    }
+    patch_approval_triggers_elicitation()
+        .await
+        .expect("patch approval should trigger elicitation");
 }
 
 async fn patch_approval_triggers_elicitation() -> anyhow::Result<()> {
@@ -253,6 +260,11 @@ async fn patch_approval_triggers_elicitation() -> anyhow::Result<()> {
         .send_codex_tool_call(CodexToolCallParam {
             cwd: Some(cwd.path().to_string_lossy().to_string()),
             prompt: "please modify the test file".to_string(),
+            // This test exercises patch approval elicitation, not local sandbox setup.
+            config: Some(HashMap::from([(
+                "sandbox_mode".to_string(),
+                json!("danger-full-access"),
+            )])),
             ..Default::default()
         })
         .await?;
@@ -288,7 +300,7 @@ async fn patch_approval_triggers_elicitation() -> anyhow::Result<()> {
         Some(create_expected_patch_approval_elicitation_request_params(
             expected_changes,
             /*grant_root*/ None, // No grant_root expected
-            /*reason*/ None, // No reason expected
+            /*reason*/ None,
             codex_request_id.to_string(),
             params.codex_event_id.clone(),
             params.thread_id,
@@ -343,13 +355,13 @@ async fn test_codex_tool_passes_base_instructions() {
 
     // Apparently `#[tokio::test]` must return `()`, so we create a helper
     // function that returns `Result` so we can use `?` in favor of `unwrap`.
-    if let Err(err) = codex_tool_passes_base_instructions().await {
-        panic!("failure: {err}");
-    }
+    codex_tool_passes_base_instructions()
+        .await
+        .expect("codex tool should pass base instructions");
 }
 
 async fn codex_tool_passes_base_instructions() -> anyhow::Result<()> {
-    #![expect(clippy::expect_used, clippy::unwrap_used)]
+    #![expect(clippy::unwrap_used)]
 
     let server =
         create_mock_responses_server(vec![create_final_assistant_message_sse_response("Enjoy!")?])

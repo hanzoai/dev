@@ -1,5 +1,5 @@
-use codex_core::LMSTUDIO_OSS_PROVIDER_ID;
 use codex_core::config::Config;
+use codex_model_provider_info::LMSTUDIO_OSS_PROVIDER_ID;
 use std::io;
 use std::path::Path;
 
@@ -30,10 +30,9 @@ impl LMStudioClient {
         })?;
 
         let client = reqwest::Client::builder()
-            .use_rustls_tls()
             .connect_timeout(std::time::Duration::from_secs(5))
             .build()
-            .expect("failed to build reqwest client with rustls");
+            .unwrap_or_else(|_| reqwest::Client::new());
 
         let client = LMStudioClient {
             client,
