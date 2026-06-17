@@ -6,9 +6,37 @@ use pretty_assertions::assert_eq;
 use tempfile::TempDir;
 
 fn codex_command(codex_home: &Path) -> Result<assert_cmd::Command> {
-    let mut cmd = assert_cmd::Command::new(codex_utils_cargo_bin::cargo_bin("dev")?);
+    let mut cmd = assert_cmd::Command::new(codex_utils_cargo_bin::cargo_bin("codex")?);
     cmd.env("CODEX_HOME", codex_home);
     Ok(cmd)
+}
+
+#[test]
+fn strict_config_rejects_unknown_config_override() -> Result<()> {
+    let codex_home = TempDir::new()?;
+
+    let mut cmd = codex_command(codex_home.path())?;
+    cmd.args(["--strict-config", "-c", "foo=bar", "mcp-server"])
+        .assert()
+        .failure()
+        .stderr(contains("unknown configuration field"));
+
+    Ok(())
+}
+
+#[test]
+fn strict_config_is_not_supported_for_cloud_command() -> Result<()> {
+    let codex_home = TempDir::new()?;
+
+    let mut cmd = codex_command(codex_home.path())?;
+    cmd.args(["--strict-config", "-c", "foo=bar", "cloud", "list"])
+        .assert()
+        .failure()
+        .stderr(contains(
+            "`--strict-config` is not supported for `codex cloud`",
+        ));
+
+    Ok(())
 }
 
 #[tokio::test]

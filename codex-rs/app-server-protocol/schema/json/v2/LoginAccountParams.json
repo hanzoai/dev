@@ -23,6 +23,9 @@
     },
     {
       "properties": {
+        "codexStreamlinedLogin": {
+          "type": "boolean"
+        },
         "type": {
           "enum": [
             "chatgpt"
@@ -51,22 +54,6 @@
         "type"
       ],
       "title": "ChatgptDeviceCodev2::LoginAccountParams",
-      "type": "object"
-    },
-    {
-      "properties": {
-        "type": {
-          "enum": [
-            "hanzoId"
-          ],
-          "title": "HanzoIdv2::LoginAccountParamsType",
-          "type": "string"
-        }
-      },
-      "required": [
-        "type"
-      ],
-      "title": "HanzoIdv2::LoginAccountParams",
       "type": "object"
     },
     {
