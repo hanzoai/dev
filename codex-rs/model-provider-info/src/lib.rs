@@ -34,6 +34,9 @@ const MAX_REQUEST_MAX_RETRIES: u64 = 100;
 
 const OPENAI_PROVIDER_NAME: &str = "OpenAI";
 pub const OPENAI_PROVIDER_ID: &str = "openai";
+const HANZO_PROVIDER_NAME: &str = "Hanzo";
+pub const HANZO_PROVIDER_ID: &str = "hanzo";
+const HANZO_BASE_URL: &str = "https://api.hanzo.ai/v1";
 pub const CHATGPT_CODEX_BASE_URL: &str = "https://chatgpt.com/backend-api/codex";
 const AMAZON_BEDROCK_PROVIDER_NAME: &str = "Amazon Bedrock";
 pub const AMAZON_BEDROCK_PROVIDER_ID: &str = "amazon-bedrock";
@@ -358,6 +361,37 @@ impl ModelProviderInfo {
         }
     }
 
+    /// Hanzo AI gateway (api.hanzo.ai) — OpenAI-compatible, Responses wire API
+    /// over HTTP. Auth flows through the auth layer (Hanzo IAM OAuth from
+    /// `dev login`, or HANZO_API_KEY/CODEX_API_KEY), mirroring the OpenAI
+    /// provider. Default provider for the `dev` CLI.
+    pub fn create_hanzo_provider() -> ModelProviderInfo {
+        ModelProviderInfo {
+            name: HANZO_PROVIDER_NAME.into(),
+            base_url: Some(HANZO_BASE_URL.to_string()),
+            env_key: None,
+            env_key_instructions: None,
+            experimental_bearer_token: None,
+            auth: None,
+            aws: None,
+            wire_api: WireApi::Responses,
+            query_params: None,
+            http_headers: Some(
+                [("version".to_string(), env!("CARGO_PKG_VERSION").to_string())]
+                    .into_iter()
+                    .collect(),
+            ),
+            env_http_headers: None,
+            request_max_retries: None,
+            stream_max_retries: None,
+            stream_idle_timeout_ms: None,
+            websocket_connect_timeout_ms: None,
+            requires_openai_auth: true,
+            // api.hanzo.ai serves Responses over HTTP, not websocket.
+            supports_websockets: false,
+        }
+    }
+
     pub fn create_amazon_bedrock_provider(
         aws: Option<ModelProviderAwsAuthInfo>,
     ) -> ModelProviderInfo {
@@ -424,6 +458,7 @@ pub fn built_in_model_providers(
     // open source ("oss") providers by default. Users are encouraged to add to
     // `model_providers` in config.toml to add their own providers.
     [
+        (HANZO_PROVIDER_ID, P::create_hanzo_provider()),
         (OPENAI_PROVIDER_ID, openai_provider),
         (AMAZON_BEDROCK_PROVIDER_ID, amazon_bedrock_provider),
         (
