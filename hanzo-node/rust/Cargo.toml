@@ -81,6 +81,11 @@ async-stream = "0.3"
 tokio-stream = "0.1"
 futures = "0.3"
 
+# Canonical inference engine (optional, default-off behind the `engine` feature).
+# Path-deps into the sibling `engine` workspace; compiled only when `engine` is on.
+hanzo-server-core = { path = "../../../engine/hanzo-server-core", optional = true, default-features = false }
+hanzo-engine = { path = "../../../engine/hanzo-engine", optional = true }
+
 [build-dependencies]
 tonic-build = "0.12"
 
@@ -92,6 +97,24 @@ tokio-test = "0.4"
 default = []
 full = ["mlx"]
 mlx = []  # Optional MLX acceleration support
+
+# Embed the canonical Hanzo inference engine in-process (serves the OpenAI/
+# Anthropic/Responses HTTP API alongside gRPC). Default-off and purely additive:
+# with `engine` disabled the node builds and behaves exactly as before.
+engine = ["dep:hanzo-server-core", "dep:hanzo-engine"]
+
+# Hardware acceleration backends. Each forwards to the matching engine feature.
+# Mirror of hanzo-server/Cargo.toml. All imply `engine`.
+cuda = ["engine", "hanzo-server-core/cuda", "hanzo-engine/cuda"]
+cudnn = ["engine", "hanzo-server-core/cudnn", "hanzo-engine/cudnn"]
+metal = ["engine", "hanzo-server-core/metal", "hanzo-engine/metal"]
+rocm = ["engine", "hanzo-server-core/rocm", "hanzo-engine/rocm"]
+vulkan = ["engine", "hanzo-server-core/vulkan", "hanzo-engine/vulkan"]
+accelerate = ["engine", "hanzo-server-core/accelerate", "hanzo-engine/accelerate"]
+mkl = ["engine", "hanzo-server-core/mkl", "hanzo-engine/mkl"]
+nccl = ["engine", "hanzo-server-core/nccl", "hanzo-engine/nccl"]
+flash-attn = ["cuda", "hanzo-server-core/flash-attn", "hanzo-engine/flash-attn"]
+flash-attn-v3 = ["cuda", "hanzo-server-core/flash-attn-v3", "hanzo-engine/flash-attn-v3"]
 
 [lints.rust]
 # Match hanzo-dev linting style
