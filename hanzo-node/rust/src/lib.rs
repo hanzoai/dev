@@ -25,6 +25,46 @@ pub use iam::{IamConfig, IamService};
 use std::sync::Arc;
 use tokio::sync::RwLock;
 
+/// Default bind address for the embedded canonical engine HTTP API.
+/// Matches the `node` provider contract used by hanzo-dev.
+pub const DEFAULT_ENGINE_API_ADDR: &str = "0.0.0.0:36900";
+
+/// Configuration for the optional in-process canonical inference engine.
+///
+/// When `enabled` and a model is configured (only meaningful with the `engine`
+/// feature compiled in), the node serves the engine's OpenAI/Anthropic/Responses
+/// HTTP API on `engine_api_addr`, concurrently with the gRPC server. When the
+/// `engine` feature is off, or `enabled` is false, this is inert and the node
+/// behaves identically to before.
+#[derive(Debug, Clone)]
+pub struct EngineConfig {
+    /// Serve the embedded engine HTTP API. No-op unless the `engine` feature is built.
+    pub enabled: bool,
+    /// Force CPU-only inference.
+    pub cpu: bool,
+    /// Bind address for the engine HTTP API.
+    pub engine_api_addr: String,
+    /// Model to load via the auto loader. Required for the engine to actually start.
+    #[cfg(feature = "engine")]
+    pub model: Option<hanzo_engine::ModelSelected>,
+}
+
+impl Default for EngineConfig {
+    fn default() -> Self {
+        Self {
+            enabled: false,
+            cpu: false,
+            engine_api_addr: DEFAULT_ENGINE_API_ADDR.to_string(),
+            #[cfg(feature = "engine")]
+            model: None,
+        }
+    }
+}
+
+/// Shared canonical-engine state, re-exported for downstream callers.
+#[cfg(feature = "engine")]
+pub use hanzo_server_core::types::SharedHanzoState;
+
 /// Node configuration
 #[derive(Debug, Clone)]
 pub struct NodeConfig {
@@ -50,6 +90,8 @@ pub struct NodeConfig {
     pub iam: IamConfig,
     /// Lux node endpoint for consensus replication (e.g., "http://localhost:9650")
     pub lux_endpoint: Option<String>,
+    /// Embedded canonical inference engine configuration (default-off).
+    pub engine: EngineConfig,
 }
 
 impl Default for NodeConfig {
@@ -66,6 +108,7 @@ impl Default for NodeConfig {
             mlx_enabled: false,
             iam: IamConfig::default(),
             lux_endpoint: None,
+            engine: EngineConfig::default(),
         }
     }
 }
@@ -88,6 +131,8 @@ pub struct HanzoNode {
     compute: Arc<compute::ComputeManager>,
     iam: Arc<IamService>,
     start_time: std::time::Instant,
+    #[cfg(feature = "engine")]
+    hanzo_state: Option<SharedHanzoState>,
 }
 
 impl HanzoNode {
@@ -117,6 +162,9 @@ impl HanzoNode {
             tracing::warn!("IAM authentication disabled - all requests will be allowed");
         }
 
+        #[cfg(feature = "engine")]
+        let hanzo_state = Self::build_engine_state(&config.engine).await?;
+
         Ok(Self {
             config,
             state: Arc::new(RwLock::new(NodeState::Starting)),
@@ -125,7 +173,37 @@ impl HanzoNode {
             compute,
             iam,
             start_time: std::time::Instant::now(),
+            #[cfg(feature = "engine")]
+            hanzo_state,
         })
+    }
+
+    /// Build the embedded canonical-engine state when enabled and a model is set.
+    /// Returns `Ok(None)` (and the node serves gRPC only) when the engine is
+    /// disabled or no model is configured.
+    #[cfg(feature = "engine")]
+    async fn build_engine_state(cfg: &EngineConfig) -> Result<Option<SharedHanzoState>> {
+        use hanzo_server_core::hanzo_for_server_builder::HanzoForServerBuilder;
+
+        if !cfg.enabled {
+            return Ok(None);
+        }
+        let Some(model) = cfg.model.clone() else {
+            tracing::warn!(
+                "Embedded engine enabled but no model configured; engine HTTP API will not start. \
+                 Pass --model/HANZO_ENGINE_MODEL to load one."
+            );
+            return Ok(None);
+        };
+
+        tracing::info!(cpu = cfg.cpu, "Loading embedded canonical engine model");
+        let state = HanzoForServerBuilder::new()
+            .with_model(model)
+            .with_cpu(cfg.cpu)
+            .build()
+            .await
+            .map_err(|e| Error::Config(format!("Failed to build embedded engine: {e}")))?;
+        Ok(Some(state))
     }
 
     /// Start the node
@@ -162,9 +240,52 @@ impl HanzoNode {
             "Hanzo Node is ready"
         );
 
+        // When the embedded engine is built, serve its HTTP API concurrently with
+        // gRPC. Otherwise keep the original behavior: gRPC blocks until shutdown.
+        #[cfg(feature = "engine")]
+        if let Some(state) = self.hanzo_state.clone() {
+            return self.run_with_engine(rpc_server, state).await;
+        }
+
         // Run the gRPC server (this blocks until shutdown)
         rpc_server.run().await?;
 
+        Ok(())
+    }
+
+    /// Serve the gRPC server and the embedded engine HTTP API concurrently.
+    #[cfg(feature = "engine")]
+    async fn run_with_engine(
+        &self,
+        rpc_server: rpc::RpcServer,
+        state: SharedHanzoState,
+    ) -> Result<()> {
+        use hanzo_server_core::hanzo_server_router_builder::HanzoServerRouterBuilder;
+
+        // hanzo-server-core is pulled with default-features = false, so its
+        // `swagger-ui` feature is off and the /docs + /api-doc routes are compiled
+        // out. The router therefore exposes only the API surface (chat/completions,
+        // responses, messages, models, ...), which is what we want for the node.
+        let app = HanzoServerRouterBuilder::new()
+            .with_hanzo(state)
+            .build()
+            .await
+            .map_err(|e| Error::Config(format!("Failed to build engine router: {e}")))?;
+
+        let addr = self.config.engine.engine_api_addr.clone();
+        let listener = tokio::net::TcpListener::bind(&addr).await?;
+        tracing::info!(engine_api = %addr, "Embedded engine HTTP API listening");
+
+        let grpc = tokio::spawn(async move { rpc_server.run().await });
+        let engine = tokio::spawn(async move {
+            axum::serve(listener, app)
+                .await
+                .map_err(Error::from)
+        });
+
+        let (grpc_res, engine_res) = tokio::join!(grpc, engine);
+        grpc_res.map_err(|e| Error::Internal(format!("gRPC task panicked: {e}")))??;
+        engine_res.map_err(|e| Error::Internal(format!("engine task panicked: {e}")))??;
         Ok(())
     }
 
