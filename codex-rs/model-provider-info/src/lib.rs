@@ -43,17 +43,21 @@ pub const HANZO_LOCAL_PROVIDER_ID: &str = "hanzo-local";
 const HANZO_LOCAL_BASE_URL: &str = "http://localhost:1234/v1";
 // Generic node provider: works against ANY Hanzo/Lux/Zoo node (they run the
 // same OpenAI-compatible serve API). Point it at a node with HANZO_NODE_URL;
-// defaults to the local node on http://localhost:1234/v1.
+// defaults to the Hanzo Desktop embedded engine on http://localhost:36900/v1
+// (hanzo-desktop's embedded_engine default port; endpoints /v1/chat/completions,
+// /v1/embeddings, /v1/models). Standalone `hanzo serve` (port 1234) is `hanzo-local`.
 pub const NODE_PROVIDER_ID: &str = "node";
+const HANZO_NODE_BASE_URL: &str = "http://localhost:36900/v1";
 
-/// A provider for any Hanzo/Lux/Zoo node. Base URL comes from `HANZO_NODE_URL`
-/// (e.g. http://some-node:1234/v1), defaulting to the local node.
+/// A provider for any Hanzo/Lux/Zoo node (incl. the Hanzo Desktop embedded
+/// engine). Base URL comes from `HANZO_NODE_URL` (e.g. http://some-node:36900/v1),
+/// defaulting to the local desktop node on :36900.
 pub fn create_node_provider() -> ModelProviderInfo {
     let base_url = std::env::var("HANZO_NODE_URL")
         .ok()
         .map(|v| v.trim().to_string())
         .filter(|v| !v.is_empty())
-        .unwrap_or_else(|| HANZO_LOCAL_BASE_URL.to_string());
+        .unwrap_or_else(|| HANZO_NODE_BASE_URL.to_string());
     create_oss_provider_with_base_url(&base_url, WireApi::Responses)
 }
 pub const CHATGPT_CODEX_BASE_URL: &str = "https://chatgpt.com/backend-api/codex";
