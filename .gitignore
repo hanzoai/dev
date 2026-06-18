@@ -52,6 +52,7 @@ hanzo-dev/bin/
 # Rust build artifacts
 /target/
 /codex-rs/target/
+/hanzo-node/rust/target/
 **/*.rs.bk
 
 # Local Cargo caches (never commit)
