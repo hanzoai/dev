@@ -1,0 +1,5 @@
+# The optional `engine` feature pulls in hanzo-engine's candle fork (hanzo-ml),
+# whose SIMD kernels require `-C target-cpu=native` to compile. This is a no-op
+# for the default (engine-off) build, so it is safe to set unconditionally.
+[build]
+rustflags = ["-C", "target-cpu=native"]

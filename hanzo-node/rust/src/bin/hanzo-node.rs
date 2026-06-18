@@ -25,6 +25,9 @@ fn print_help() {
     println!("    --bootstrap <ADDR>      Bootstrap peer address (can be repeated)");
     println!("    --operator <ADDR>       Operator wallet address");
     println!("    --mlx                   Enable MLX acceleration (macOS only)");
+    println!("    --engine-port <ADDR>    Embedded engine HTTP API address or port (default: 0.0.0.0:36900)");
+    println!("    --model <ID>            Load this model into the embedded engine (requires `engine` build feature)");
+    println!("    --engine-cpu            Force CPU-only inference for the embedded engine");
     println!("    -h, --help              Print help");
     println!("    -V, --version           Print version");
     println!();
@@ -37,7 +40,56 @@ fn print_help() {
     println!("    HANZO_NETWORK_ID        Network ID");
     println!("    HANZO_OPERATOR          Operator wallet address");
     println!("    HANZO_MLX               Enable MLX acceleration (1/true)");
+    println!("    HANZO_ENGINE_ADDR       Embedded engine HTTP API address or port");
+    println!("    HANZO_ENGINE_MODEL      Model ID to load into the embedded engine");
     println!("    RUST_LOG                Log level (e.g., info, debug, hanzo_node=debug)");
+}
+
+/// Normalize an engine API spec: a bare port becomes `0.0.0.0:<port>`, an
+/// `addr:port` is taken as-is.
+fn normalize_engine_addr(spec: &str) -> String {
+    if spec.parse::<u16>().is_ok() {
+        format!("0.0.0.0:{spec}")
+    } else {
+        spec.to_string()
+    }
+}
+
+/// Apply a model id to the engine config. With the `engine` feature this builds
+/// a `ModelSelected::Run` auto-loader selector and enables the engine; without
+/// it, the model id is recorded only to emit a warning.
+fn apply_engine_model(config: &mut NodeConfig, model_id: String) {
+    #[cfg(feature = "engine")]
+    {
+        config.engine.enabled = true;
+        config.engine.model = Some(hanzo_engine::ModelSelected::Run {
+            model_id,
+            tokenizer_json: None,
+            dtype: hanzo_engine::ModelDType::Auto,
+            topology: None,
+            organization: None,
+            write_uqff: None,
+            from_uqff: None,
+            imatrix: None,
+            calibration_file: None,
+            max_edge: None,
+            max_seq_len: hanzo_engine::AutoDeviceMapParams::DEFAULT_MAX_SEQ_LEN,
+            max_batch_size: hanzo_engine::AutoDeviceMapParams::DEFAULT_MAX_BATCH_SIZE,
+            max_num_images: None,
+            max_image_length: None,
+            hf_cache_path: None,
+            matformer_config_path: None,
+            matformer_slice_name: None,
+        });
+    }
+    #[cfg(not(feature = "engine"))]
+    {
+        let _ = (&mut *config, model_id);
+        tracing::warn!(
+            "--model/HANZO_ENGINE_MODEL was set but this binary was built without the \
+             `engine` feature; the embedded engine is unavailable and the flag is ignored."
+        );
+    }
 }
 
 fn parse_args() -> Result<Option<NodeConfig>> {
@@ -68,6 +120,12 @@ fn parse_args() -> Result<Option<NodeConfig>> {
     }
     if let Ok(v) = env::var("HANZO_MLX") {
         config.mlx_enabled = v == "1" || v.to_lowercase() == "true";
+    }
+    if let Ok(v) = env::var("HANZO_ENGINE_ADDR") {
+        config.engine.engine_api_addr = normalize_engine_addr(&v);
+    }
+    if let Ok(v) = env::var("HANZO_ENGINE_MODEL") {
+        apply_engine_model(&mut config, v);
     }
 
     let mut i = 1;
@@ -140,6 +198,25 @@ fn parse_args() -> Result<Option<NodeConfig>> {
             "--mlx" => {
                 config.mlx_enabled = true;
             }
+            "--engine-port" | "--engine-addr" => {
+                i += 1;
+                if i >= args.len() {
+                    return Err(hanzo_node::Error::Config(
+                        "--engine-port requires a value".into(),
+                    ));
+                }
+                config.engine.engine_api_addr = normalize_engine_addr(&args[i]);
+            }
+            "--model" => {
+                i += 1;
+                if i >= args.len() {
+                    return Err(hanzo_node::Error::Config("--model requires a value".into()));
+                }
+                apply_engine_model(&mut config, args[i].clone());
+            }
+            "--engine-cpu" => {
+                config.engine.cpu = true;
+            }
             arg if arg.starts_with('-') => {
                 return Err(hanzo_node::Error::Config(format!("Unknown option: {arg}")));
             }
@@ -174,6 +251,13 @@ async fn main() -> Result<()> {
         network_id = %config.network_id,
         "Starting Hanzo Node"
     );
+
+    if config.engine.enabled {
+        tracing::info!(
+            engine_api = %format!("http://{}", config.engine.engine_api_addr),
+            "Embedded engine enabled; HTTP API (OpenAI/Anthropic/Responses) will serve here"
+        );
+    }
 
     // Create and start the node
     let node = HanzoNode::new(config).await?;
