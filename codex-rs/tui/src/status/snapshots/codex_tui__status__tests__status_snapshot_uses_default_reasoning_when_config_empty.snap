@@ -1,5 +1,6 @@
 ---
 source: tui/src/status/tests.rs
+assertion_line: 1513
 expression: sanitized
 ---
 /status
@@ -14,6 +15,7 @@ expression: sanitized
 │                    control.sock (v0.133.0)                                  │
 │                                                                             │
 │  Model:            gpt-5.1-codex-max (reasoning medium, summaries auto)     │
+│  Model provider:   Hanzo                                                    │
 │  Directory: [[workspace]]                                                   │
 │  Permissions:      Custom (workspace with network access, Ask for approval) │
 │  Agents.md:        <none>                                                   │
