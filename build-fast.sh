@@ -167,7 +167,7 @@ while [ $# -gt 0 ]; do
 done
 
 if [ -z "$WORKSPACE_CHOICE" ]; then
-  WORKSPACE_CHOICE="dev"
+  WORKSPACE_CHOICE="codex"
 fi
 
 if [ "$ARG_PROFILE" = "pref" ]; then
@@ -194,26 +194,6 @@ fi
 
 REPO_ROOT="${SCRIPT_DIR}"
 
-# Guard against regressions where a hanzo-dev crate references ../codex-rs.
-if [ "${BUILD_FAST_SKIP_CODEX_GUARD:-0}" != "1" ]; then
-  echo "Running codex path dependency guard..."
-  (
-    cd "$REPO_ROOT"
-    scripts/check-codex-path-deps.sh
-  )
-fi
-
-if [ "$WORKSPACE_CHOICE" = "both" ]; then
-  if [ "$RUN_AFTER_BUILD" -eq 1 ]; then
-    echo "Error: --workspace both cannot be combined with 'run'." >&2
-    exit 1
-  fi
-  for ws in codex code; do
-    WORKSPACE="$ws" "$0" "${PASSTHROUGH_ARGS[@]}" --workspace "$ws"
-  done
-  exit 0
-fi
-
 if [ -n "${HANZO_HOME:-}" ] && [ -n "${HANZO_HOME}" ]; then
   CACHE_HOME="${HANZO_HOME%/}"
 elif [ -n "${CODEX_HOME:-}" ] && [ -n "${CODEX_HOME}" ]; then
@@ -233,16 +213,13 @@ case "${CACHE_HOME}" in
 esac
 
 case "$WORKSPACE_CHOICE" in
-  codex|codex-rs)
+  codex|codex-rs|dev|hanzo-dev)
+    # One tree after consolidation: every alias resolves to codex-rs.
     WORKSPACE_DIR="codex-rs"
     CRATE_PREFIX="codex"
     ;;
-  dev|hanzo-dev)
-    WORKSPACE_DIR="hanzo-dev"
-    CRATE_PREFIX="dev"
-    ;;
   *)
-    echo "Error: Unknown workspace '${WORKSPACE_CHOICE}'. Use codex, dev, or both." >&2
+    echo "Error: Unknown workspace '${WORKSPACE_CHOICE}'. Use codex." >&2
     exit 1
     ;;
 esac

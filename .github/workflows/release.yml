@@ -91,7 +91,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          TOOLCHAIN=$(python -c "import sys, pathlib; p=pathlib.Path('hanzo-dev/rust-toolchain.toml').read_text();
+          TOOLCHAIN=$(python -c "import sys, pathlib; p=pathlib.Path('codex-rs/rust-toolchain.toml').read_text();
           try:
               import tomllib as tl
           except ModuleNotFoundError:
@@ -111,7 +111,7 @@ jobs:
           prefix-key: v5-rust
           shared-key: dev-preflight-${{ steps.rust_toolchain.outputs.channel }}
           workspaces: |
-            hanzo-dev -> target
+            codex-rs -> target
           cache-targets: false
           cache-workspace-crates: true
           cache-on-failure: false
@@ -120,7 +120,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          cd hanzo-dev
+          cd codex-rs
           cargo build --locked --profile dev-fast --bin dev
 
       - name: CLI smokes (skip duplicated cargo tests)
@@ -146,7 +146,7 @@ jobs:
         shell: bash
         continue-on-error: true
         run: |
-          cd hanzo-dev
+          cd codex-rs
           cargo nextest run --no-fail-fast --locked --exclude codex-v8-poc
 
       - name: Free disk after tests
@@ -251,7 +251,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          TOOLCHAIN=$(python -c "import sys, pathlib; p=pathlib.Path('hanzo-dev/rust-toolchain.toml').read_text();
+          TOOLCHAIN=$(python -c "import sys, pathlib; p=pathlib.Path('codex-rs/rust-toolchain.toml').read_text();
           try:
               import tomllib as tl
           except ModuleNotFoundError:
@@ -274,7 +274,7 @@ jobs:
           prefix-key: v5-rust
           shared-key: dev-${{ matrix.target }}-toolchain-${{ steps.rust_toolchain.outputs.channel }}
           workspaces: |
-            hanzo-dev -> target
+            codex-rs -> target
           cache-targets: true
           cache-workspace-crates: true
           cache-on-failure: true
@@ -359,7 +359,7 @@ jobs:
 
       # Prefetch deps so --frozen works even with git deps
       - name: Prefetch dependencies (git + registry)
-        working-directory: hanzo-dev
+        working-directory: codex-rs
         env:
           CARGO_NET_GIT_FETCH_WITH_CLI: "true"
         run: cargo fetch --locked
@@ -369,13 +369,32 @@ jobs:
         shell: bash
         run: echo "CODE_VERSION=${{ needs.determine-version.outputs.version }}" >> "$GITHUB_ENV"
 
+      # codex-rs pulls v8 via the code-mode crates. There is no rusty_v8
+      # prebuilt for musl, so fetch the prebuilt static lib + bindings (same
+      # recipe as rust-release.yml). gnu/darwin/windows build v8 the normal way.
+      - name: Configure musl rusty_v8 artifact overrides
+        if: contains(matrix.target, 'musl')
+        env:
+          TARGET: ${{ matrix.target }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          version="$(python3 "${GITHUB_WORKSPACE}/.github/scripts/rusty_v8_bazel.py" resolved-v8-crate-version)"
+          base_url="https://github.com/openai/codex/releases/download/rusty-v8-v${version}"
+          binding_dir="${RUNNER_TEMP}/rusty_v8"
+          binding_path="${binding_dir}/src_binding_release_${TARGET}.rs"
+          mkdir -p "${binding_dir}"
+          curl -fsSL "${base_url}/src_binding_release_${TARGET}.rs" -o "${binding_path}"
+          echo "RUSTY_V8_ARCHIVE=${base_url}/librusty_v8_release_${TARGET}.a.gz" >> "$GITHUB_ENV"
+          echo "RUSTY_V8_SRC_BINDING_PATH=${binding_path}" >> "$GITHUB_ENV"
+
       - name: Build binaries (with timings)
         shell: bash
         env:
           CARGO_INCREMENTAL: "0" # keep off in CI; release builds + sccache
           RUST_BACKTRACE: "1"
         run: |
-          cd hanzo-dev
+          cd codex-rs
           cargo build --release --frozen --locked --timings --target ${{ matrix.target }} --bin dev
 
       - name: Post-build smoke (run binary) [Unix]
@@ -386,7 +405,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          exe="hanzo-dev/target/${{ matrix.target }}/release/dev"
+          exe="codex-rs/target/${{ matrix.target }}/release/dev"
           "$exe" --version
           "$exe" completion bash > /dev/null
 
@@ -394,7 +413,7 @@ jobs:
         if: matrix.os == 'windows-latest' && matrix.target == 'x86_64-pc-windows-msvc'
         shell: pwsh
         run: |
-          $exe = "hanzo-dev/target/${{ matrix.target }}/release/dev.exe"
+          $exe = "codex-rs/target/${{ matrix.target }}/release/dev.exe"
           & $exe --version | Out-Null
           & $exe completion bash | Out-Null
 
@@ -407,9 +426,9 @@ jobs:
         run: |
           mkdir -p artifacts
           if [[ "${{ matrix.os }}" == "windows-latest" ]]; then
-            cp hanzo-dev/target/${{ matrix.target }}/release/dev.exe artifacts/${{ matrix.artifact }}
+            cp codex-rs/target/${{ matrix.target }}/release/dev.exe artifacts/${{ matrix.artifact }}
           else
-            cp hanzo-dev/target/${{ matrix.target }}/release/dev artifacts/${{ matrix.artifact }}
+            cp codex-rs/target/${{ matrix.target }}/release/dev artifacts/${{ matrix.artifact }}
           fi
 
       - name: Compress artifacts (Windows)
@@ -471,7 +490,7 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: cargo-timings-${{ matrix.target }}
-          path: hanzo-dev/target/cargo-timings/*.html
+          path: codex-rs/target/cargo-timings/*.html
           if-no-files-found: ignore
           compression-level: 0
 

@@ -70,7 +70,6 @@ This log tracks the merge of upstream changes into the fork.
 
 ## Merge Strategy
 
-- [ ] Review diff summary (\`diff-crates.sh --all\`)
 - [ ] Identify critical changes (\`highlight-critical-changes.sh --all\`)
 - [ ] Plan integration approach
 - [ ] Apply changes crate-by-crate
