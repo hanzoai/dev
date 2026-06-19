@@ -520,6 +520,16 @@ opt-level = 0
 debug = "none"
 strip = "symbols"
 
+# Fast iterative builds (used by build-fast.sh, pre-release.sh, release.yml
+# preflight). Ported from the former hanzo-dev workspace during consolidation.
+[profile.dev-fast]
+inherits = "dev"
+opt-level = 1
+debug = 1
+incremental = true
+codegen-units = 256
+lto = "off"
+
 [profile.release]
 lto = "thin"
 debug = "line-tables-only"

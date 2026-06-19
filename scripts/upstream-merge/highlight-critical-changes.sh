@@ -40,16 +40,16 @@ CRITICAL_PATTERN_KEYS=(
 
 CRITICAL_PATTERN_REGEXES=(
     'prompts/.*\.md'
-    'codex-rs/core/src/openai_tools\.rs|hanzo-dev/core/src/openai_tools\.rs'
-    'codex-rs/core/src/agent_tool\.rs|hanzo-dev/core/src/agent_tool\.rs'
-    'codex-rs/core/src/protocol\.rs|hanzo-dev/core/src/protocol\.rs'
-    'codex-rs/app-server-protocol/src/.*|hanzo-dev/app-server-protocol/src/.*'
-    'codex-rs/mcp-types/src/.*|hanzo-dev/mcp-types/src/.*'
-    'codex-rs/core/src/codex\.rs|hanzo-dev/core/src/codex\.rs'
-    'codex-rs/exec/src/.*|hanzo-dev/exec/src/.*'
-    'codex-rs/apply-patch/src/.*|hanzo-dev/apply-patch/src/.*'
-    'codex-rs/core/src/acp\.rs|hanzo-dev/core/src/acp\.rs'
-    'codex-rs/core/src/config.*\.rs|hanzo-dev/core/src/config.*\.rs'
+    'codex-rs/core/src/openai_tools\.rs'
+    'codex-rs/core/src/agent_tool\.rs'
+    'codex-rs/core/src/protocol\.rs'
+    'codex-rs/app-server-protocol/src/.*'
+    'codex-rs/mcp-types/src/.*'
+    'codex-rs/core/src/codex\.rs'
+    'codex-rs/exec/src/.*'
+    'codex-rs/apply-patch/src/.*'
+    'codex-rs/core/src/acp\.rs'
+    'codex-rs/core/src/config.*\.rs'
 )
 
 pattern_for_category() {
@@ -210,8 +210,8 @@ HEADER
 main() {
     # Check if diff files exist
     if [[ ! -d "$OUTPUT_DIR" ]] || [[ -z "$(ls -A $OUTPUT_DIR/*.diff 2>/dev/null)" ]]; then
-        echo "⚠️  No diff files found. Run diff-crates.sh first:"
-        echo "   ./scripts/upstream-merge/diff-crates.sh --all"
+        echo "⚠️  No diff files found in ${OUTPUT_DIR}."
+        echo "   Generate per-crate diffs there before running this script."
         exit 1
     fi
 
