@@ -964,7 +964,7 @@ text(result.output);
             &custom_tool_output_items(&second_mock.single_request(), "call-1"),
             /*index*/ 1
         ),
-        "Total output lines: 1\n\n0123456789…5 tokens truncated…0123456789"
+        "Warning: truncated output (original token count: 10)\nTotal output lines: 1\n\n0123456789…5 tokens truncated…0123456789"
     );
 
     Ok(())
