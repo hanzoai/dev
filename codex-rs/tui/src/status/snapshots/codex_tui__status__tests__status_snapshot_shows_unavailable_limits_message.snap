@@ -1,5 +1,6 @@
 ---
 source: tui/src/status/tests.rs
+assertion_line: 1709
 expression: sanitized
 ---
 /status
@@ -11,6 +12,7 @@ expression: sanitized
 │ information on rate limits and credits                                      │
 │                                                                             │
 │  Model:            gpt-5.1-codex-max (reasoning none, summaries auto)       │
+│  Model provider:   Hanzo                                                    │
 │  Directory: [[workspace]]                                                   │
 │  Permissions:      Custom (workspace with network access, Ask for approval) │
 │  Agents.md:        <none>                                                   │
