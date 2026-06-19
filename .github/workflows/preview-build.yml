@@ -31,8 +31,8 @@ jobs:
       # Consistent Cargo/rustup homes for caching across all workflows
       CARGO_HOME: ${{ github.workspace }}/.cargo-home
       RUSTUP_HOME: ${{ github.workspace }}/.cargo-home/rustup
-      RUST_WORKSPACE_DIR: hanzo-dev
-      CARGO_TARGET_DIR: ${{ github.workspace }}/hanzo-dev/target
+      RUST_WORKSPACE_DIR: codex-rs
+      CARGO_TARGET_DIR: ${{ github.workspace }}/codex-rs/target
     strategy:
       fail-fast: false
       matrix:
@@ -79,7 +79,7 @@ jobs:
           prefix-key: v1-preview
           shared-key: preview-${{ matrix.target }}-rust-1.90
           workspaces: |
-            hanzo-dev -> target
+            codex-rs -> target
           cache-targets: true
           cache-workspace-crates: true
           cache-on-failure: true
@@ -139,6 +139,25 @@ jobs:
         env:
           CARGO_NET_GIT_FETCH_WITH_CLI: "true"
         run: cargo fetch --locked
+
+      # codex-rs pulls v8 via the code-mode crates. There is no rusty_v8
+      # prebuilt for musl, so fetch the prebuilt static lib + bindings (same
+      # recipe as release.yml). gnu/darwin/windows build v8 the normal way.
+      - name: Configure musl rusty_v8 artifact overrides
+        if: contains(matrix.target, 'musl')
+        env:
+          TARGET: ${{ matrix.target }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          version="$(python3 "${GITHUB_WORKSPACE}/.github/scripts/rusty_v8_bazel.py" resolved-v8-crate-version)"
+          base_url="https://github.com/openai/codex/releases/download/rusty-v8-v${version}"
+          binding_dir="${RUNNER_TEMP}/rusty_v8"
+          binding_path="${binding_dir}/src_binding_release_${TARGET}.rs"
+          mkdir -p "${binding_dir}"
+          curl -fsSL "${base_url}/src_binding_release_${TARGET}.rs" -o "${binding_path}"
+          echo "RUSTY_V8_ARCHIVE=${base_url}/librusty_v8_release_${TARGET}.a.gz" >> "$GITHUB_ENV"
+          echo "RUSTY_V8_SRC_BINDING_PATH=${binding_path}" >> "$GITHUB_ENV"
 
       - name: Build code (release)
         shell: bash

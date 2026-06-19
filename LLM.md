@@ -5,6 +5,10 @@ Fork of OpenAI Codex CLI. Rust-based AI development assistant in the terminal.
 - **Repo**: https://github.com/hanzoai/dev
 - **Upstream**: https://github.com/openai/codex
 
+## Changelog
+
+- [2026-06-18] Consolidated to ONE Rust workspace (codex-rs). Deleted hanzo-dev + 4 other parallel trees (code-rs, standalone-hanzo-dev, published-hanzo-dev, codex-rs/tui2). release.yml now builds codex-rs --bin dev for all platforms incl musl (via prebuilt rusty_v8 artifacts, same recipe as rust-release.yml). Ported code-version crate → codex-rs (so CODE_VERSION is consumed; `dev --version` shows real version). dev-fast profile added to codex-rs/Cargo.toml. Binary branded dev / Hanzo Dev.
+
 ## Stack
 
 - Rust 2024 edition (workspace of ~50 crates)
@@ -16,11 +20,10 @@ Fork of OpenAI Codex CLI. Rust-based AI development assistant in the terminal.
 
 ```
 /Users/z/work/hanzo/dev/
-├── codex-rs/              # Rust workspace (main source)
+├── codex-rs/              # THE Rust workspace (one tree; binary `dev` from crate codex-cli)
 │   ├── cli/               # CLI entrypoint
 │   ├── core/              # Business logic, config, auth
 │   ├── tui/               # Terminal UI (Ratatui)
-│   ├── tui2/              # Next-gen TUI
 │   ├── exec/              # Command execution with sandboxing
 │   ├── exec-server/       # Execution server
 │   ├── protocol/          # Shared protocol definitions
@@ -30,12 +33,12 @@ Fork of OpenAI Codex CLI. Rust-based AI development assistant in the terminal.
 │   ├── config/            # Configuration
 │   ├── app-server/        # App server
 │   ├── linux-sandbox/     # Linux sandboxing
+│   ├── code-version/      # Version crate (CODE_VERSION → `dev --version`)
 │   ├── ollama/            # Ollama integration
 │   ├── lmstudio/          # LM Studio integration
 │   └── ...                # ~50 total crates
 ├── codex-cli/             # Legacy TypeScript CLI (deprecated)
 ├── hanzo-node/            # npm wrapper package
-├── hanzo-dev/             # Alt build target
 ├── tests/                 # Integration tests
 └── .github/               # CI workflows
 ```
@@ -69,12 +72,9 @@ Default provider: `hanzo` at `https://api.hanzo.ai/v1`
 ## Commands
 
 ```bash
-# Build (codex-rs workspace)
+# Build (codex-rs workspace — the one tree; binary `dev`)
 cargo build --manifest-path codex-rs/Cargo.toml --release -p codex-cli
 cargo check --manifest-path codex-rs/Cargo.toml
-
-# Build (hanzo-dev workspace)
-cargo build --manifest-path hanzo-dev/Cargo.toml --release -p hanzo-dev
 
 # Fast dev build
 ./build-fast.sh
@@ -126,8 +126,7 @@ Manual resolution recipe when CI flags a conflict:
 2. resolve conflicts; common areas: `justfile`, `package.json`, hooks, TUI module names
 3. upstream renames to watch: `multi_agents` → `collab`, `HookResult` → `HookOutcome`
 4. `cargo check --manifest-path codex-rs/Cargo.toml`
-5. fix any hanzo-dev compile errors that depend on codex-rs types
-6. `git push --force-with-lease && gh pr ready`
+5. `git push --force-with-lease && gh pr ready`
 
 **Remotes:**
 
@@ -151,7 +150,14 @@ Primary config home: `~/.hanzo` (legacy `~/.code`/`~/.codex` still read).
 
 ## Zero Trust SDK (`hanzo-zt`)
 
-Crate at `hanzo-dev/zt/` providing ZT overlay networking with ZAP transport.
+> NOTE: the in-repo Rust `hanzo-zt` crate (formerly `hanzo-dev/zt/`) and its
+> `cloud.rs` CLI integration did NOT survive the one-tree consolidation — they
+> lived in the deleted `hanzo-dev/` tree and are not present in `codex-rs/`.
+> The cross-language SDKs and docs site below live in SEPARATE external repos
+> (`~/work/hanzozt/`, `~/work/hanzo/docs/`) and are unaffected. The design notes
+> are retained here for reference / future re-port into `codex-rs/`.
+
+Provides ZT overlay networking with ZAP transport.
 
 ### Architecture
 
@@ -189,7 +195,7 @@ App → ZAP Client → ZT Transport → ZT Fabric → ZT Service
 
 ### CLI Integration
 
-`hanzo-dev/cli/src/cloud.rs` has `#[cfg(feature = "zt")]` branch:
+The CLI integration (formerly `hanzo-dev/cli/src/cloud.rs`) had a `#[cfg(feature = "zt")]` branch:
 
 - URLs starting with `zt://` use ZtContext.dial() instead of WebSocket
 - Feature `zt = ["dep:hanzo-zt"]` in cli's Cargo.toml
@@ -207,7 +213,7 @@ All SDKs follow the same pattern (ZT REST API + ZAP framing + Hanzo IAM + billin
 
 | Language       | Location                                                          | Status                                        |
 | -------------- | ----------------------------------------------------------------- | --------------------------------------------- |
-| **Rust**       | `hanzo-dev/zt/`                                                   | 9 tests pass, 0 warnings                      |
+| **Rust**       | (removed; was `hanzo-dev/zt/`, re-port into `codex-rs/` TBD)      | 9 tests passed pre-consolidation              |
 | **Go**         | `~/work/hanzozt/sdk-golang/{zap,auth/hanzo,billing}/`             | 5 tests pass (fork deps need module path fix) |
 | **TypeScript** | `~/work/hanzozt/zt-sdk-nodejs/src/{zap,auth,billing}/`            | Complete                                      |
 | **Python**     | `~/work/hanzozt/zt-sdk-py/hanzozt/{zap,auth,billing}/`            | 11 tests pass                                 |

@@ -1,4 +1,0 @@
-(executable
- (name agent)
- (public_name zap-agent-ocaml)
- (libraries unix))

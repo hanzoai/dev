@@ -6,7 +6,7 @@ export CARGO_TARGET_DIR=${CARGO_TARGET_DIR:-"$ROOT_DIR/target"}
 unset GIT_DIR GIT_WORK_TREE GIT_INDEX_FILE GIT_COMMON_DIR
 
 echo "[pre-release] building CLI (dev-fast)"
-cd "$ROOT_DIR/hanzo-dev"
+cd "$ROOT_DIR/codex-rs"
 cargo build --locked --profile dev-fast --bin dev
 
 echo "[pre-release] running CLI smokes (skip cargo tests)"
