@@ -615,6 +615,10 @@ async fn integration_creates_and_checks_session_file() -> anyhow::Result<()> {
         .arg("--skip-git-repo-check")
         .arg("-c")
         .arg(format!("openai_base_url=\"{}/v1\"", server.uri()))
+        // Default provider is `hanzo`; pin openai so the openai_base_url override
+        // above routes the built-in openai provider.
+        .arg("-c")
+        .arg("model_provider=\"openai\"")
         .arg("-C")
         .arg(&repo_root)
         .arg(&prompt2)
