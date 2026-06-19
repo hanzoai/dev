@@ -520,7 +520,7 @@ install_dev() {
             cd "$source_dir"
 
             if ./build-fast.sh; then
-                local bin_path="./hanzo-dev/target/dev-fast/dev"
+                local bin_path="./codex-rs/target/dev-fast/dev"
                 if [[ -f "$bin_path" ]]; then
                     cp "$bin_path" "$HANZO_BIN/dev"
                     chmod +x "$HANZO_BIN/dev"
@@ -868,10 +868,10 @@ install_hanzod() {
     log_step "Installing Hanzod..."
 
     if [[ "$MODE" == "dev" ]]; then
-        # Build from source requires the hanzo-dev directory
-        if [[ -d "/Users/z/work/hanzo/dev/hanzo-dev" ]]; then
+        # Build from source requires the codex-rs workspace
+        if [[ -d "/Users/z/work/hanzo/dev/codex-rs" ]]; then
             log_info "Building Hanzod from source..."
-            cd /Users/z/work/hanzo/dev/hanzo-dev
+            cd /Users/z/work/hanzo/dev/codex-rs
             cargo build --release
             cp target/release/hanzod "$HANZO_BIN/" 2>/dev/null || true
         else

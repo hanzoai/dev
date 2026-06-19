@@ -5,10 +5,10 @@
   "scripts": {
     "format": "prettier --check '*.json' '!(CLAUDE|LLM|AGENTS).md' 'docs/*.md' '.github/workflows/*.yml' 'scripts/*.js' 'cli-proxy/*.js' 'dev-cli/*.js' 'dev-cli/scripts/*.js' 'console/*.js' 'dev-cli/*.js' 'hanzo-cli/*.js' 'hanzo-node/*.js'",
     "format:fix": "prettier --write '*.json' '!(CLAUDE|LLM|AGENTS).md' 'docs/*.md' '.github/workflows/*.yml' 'scripts/*.js' 'cli-proxy/*.js' 'dev-cli/*.js' 'dev-cli/scripts/*.js' 'console/*.js' 'dev-cli/*.js' 'hanzo-cli/*.js' 'hanzo-node/*.js'",
-    "build": "cd hanzo-dev && cargo build --release --bin dev --bin dev-tui --bin dev-exec",
-    "build:dev": "cd hanzo-dev && cargo build --bin dev --bin dev-tui --bin dev-exec",
-    "build:quick": "cd hanzo-dev && cargo build --release --bin dev",
-    "test:local": "if [ -d hanzo-dev ]; then (cd hanzo-dev && cargo run -p hanzo-dev -- --version); elif [ -d codex-cli ]; then (cd codex-cli && npm link && codex --version); else echo 'no CLI workspace found' >&2; exit 1; fi",
+    "build": "cd codex-rs && cargo build --release --bin dev",
+    "build:dev": "cd codex-rs && cargo build --bin dev",
+    "build:quick": "cd codex-rs && cargo build --release --bin dev",
+    "test:local": "cd codex-rs && cargo run -p codex-cli --bin dev -- --version",
     "fix": "cargo fmt && cargo fix --allow-dirty && cargo clippy --fix --allow-dirty",
     "write-hooks-schema": "cargo run --manifest-path ./codex-rs/Cargo.toml -p codex-hooks --bin write_hooks_schema_fixtures"
   },
