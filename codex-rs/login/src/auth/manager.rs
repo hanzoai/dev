@@ -545,6 +545,14 @@ impl ChatgptAuth {
 pub const OPENAI_API_KEY_ENV_VAR: &str = "OPENAI_API_KEY";
 pub const CODEX_API_KEY_ENV_VAR: &str = "CODEX_API_KEY";
 pub const HANZO_API_KEY_ENV_VAR: &str = "HANZO_API_KEY";
+/// Per-user / per-org attributable key. Set by the playground when it
+/// provisions a bot pod so brokered sessions and LLM calls bill the user
+/// rather than the shared service account. Preferred over `HANZO_API_KEY`.
+pub const HANZO_USER_KEY_ENV_VAR: &str = "HANZO_USER_KEY";
+/// Comma-separated list of service keys that must NEVER be used to open an
+/// attributable (billed) session. A key on this list is treated as "no key"
+/// so resolution falls through to a user-scoped credential.
+pub const BALANCE_EXEMPT_KEYS_ENV_VAR: &str = "BALANCE_EXEMPT_KEYS";
 pub const CODEX_ACCESS_TOKEN_ENV_VAR: &str = "CODEX_ACCESS_TOKEN";
 
 pub fn read_openai_api_key_from_env() -> Option<String> {
@@ -563,6 +571,11 @@ pub fn read_hanzo_api_key_from_env() -> Option<String> {
     read_non_empty_env_var(HANZO_API_KEY_ENV_VAR)
 }
 
+/// Per-user/org attributable Hanzo key (`HANZO_USER_KEY`).
+pub fn read_hanzo_user_key_from_env() -> Option<String> {
+    read_non_empty_env_var(HANZO_USER_KEY_ENV_VAR)
+}
+
 pub fn read_codex_access_token_from_env() -> Option<String> {
     read_non_empty_env_var(CODEX_ACCESS_TOKEN_ENV_VAR)
 }
@@ -572,6 +585,61 @@ fn read_non_empty_env_var(key: &str) -> Option<String> {
         .ok()
         .map(|value| value.trim().to_string())
         .filter(|value| !value.is_empty())
+}
+
+/// Parse the exempt-key list from `BALANCE_EXEMPT_KEYS` (comma-separated,
+/// whitespace-trimmed, empties dropped).
+fn read_balance_exempt_keys_from_env() -> Vec<String> {
+    parse_exempt_keys(env::var(BALANCE_EXEMPT_KEYS_ENV_VAR).ok().as_deref())
+}
+
+/// Split a comma-separated exempt-key spec into trimmed, non-empty entries.
+fn parse_exempt_keys(spec: Option<&str>) -> Vec<String> {
+    spec.into_iter()
+        .flat_map(|s| s.split(','))
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+        .map(str::to_string)
+        .collect()
+}
+
+/// True when `k` is a shared service key listed in `BALANCE_EXEMPT_KEYS` and
+/// therefore must not be used to authenticate a per-user billed session.
+fn is_exempt_service_key(k: &str, exempt: &[String]) -> bool {
+    let k = k.trim();
+    !k.is_empty() && exempt.iter().any(|e| e == k)
+}
+
+/// Pure precedence for choosing the env-derived auth token used to open a
+/// billed session / brokered LLM call.
+///
+/// 1. `HANZO_USER_KEY` always wins (per-user/org attributable) — even if it
+///    somehow appears on the exempt list, an explicit user key is honored.
+/// 2. Otherwise the first of `api_key` (CODEX/HANZO) / `openai_key` that is
+///    NOT on the exempt list. An exempt key is skipped so it cannot create an
+///    unattributable session.
+///
+/// Kept pure (no env access) so precedence is unit-tested without process-global
+/// env races.
+fn pick_token(
+    user_key: Option<String>,
+    api_key: Option<String>,
+    openai_key: Option<String>,
+    exempt: &[String],
+) -> Option<String> {
+    non_empty(user_key).or_else(|| {
+        [api_key, openai_key]
+            .into_iter()
+            .filter_map(non_empty)
+            .find(|k| !is_exempt_service_key(k, exempt))
+    })
+}
+
+/// Trim and drop empties, normalizing a candidate key to `Option`.
+fn non_empty(value: Option<String>) -> Option<String> {
+    value
+        .map(|v| v.trim().to_string())
+        .filter(|v| !v.is_empty())
 }
 
 async fn verified_agent_identity_record(
@@ -924,12 +992,25 @@ async fn load_auth(
     keyring_backend_kind: AuthKeyringBackendKind,
 ) -> std::io::Result<Option<CodexAuth>> {
     // API key via env var takes precedence over any other auth method.
-    if enable_codex_api_key_env && let Some(api_key) = read_codex_api_key_from_env() {
-        return Ok(Some(CodexAuth::from_api_key(api_key.as_str())));
-    }
-
-    // Hanzo IAM API key for the default `hanzo` provider (api.hanzo.ai).
-    if let Some(api_key) = read_hanzo_api_key_from_env() {
+    //
+    // Prefer a per-user/org attributable key (`HANZO_USER_KEY`, set by the
+    // playground for bot pods) so brokered sessions and the default `hanzo`
+    // provider's LLM calls bill the user. A shared service key listed in
+    // `BALANCE_EXEMPT_KEYS` is skipped here (treated as "no key") so it cannot
+    // open an unattributable session; resolution then falls through to the
+    // user-scoped credential on disk. See `pick_token`.
+    let exempt = read_balance_exempt_keys_from_env();
+    let codex_api_key = if enable_codex_api_key_env {
+        read_codex_api_key_from_env()
+    } else {
+        None
+    };
+    if let Some(api_key) = pick_token(
+        read_hanzo_user_key_from_env(),
+        codex_api_key,
+        read_hanzo_api_key_from_env(),
+        &exempt,
+    ) {
         return Ok(Some(CodexAuth::from_api_key(api_key.as_str())));
     }
 
@@ -2249,3 +2330,100 @@ impl AuthManager {
 #[cfg(test)]
 #[path = "auth_tests.rs"]
 mod tests;
+
+#[cfg(test)]
+mod pick_token_tests {
+    use super::is_exempt_service_key;
+    use super::parse_exempt_keys;
+    use super::pick_token;
+
+    fn exempt(spec: &str) -> Vec<String> {
+        parse_exempt_keys(Some(spec))
+    }
+
+    fn s(v: &str) -> Option<String> {
+        Some(v.to_string())
+    }
+
+    #[test]
+    fn hanzo_user_key_wins_over_service_keys() {
+        // HANZO_USER_KEY present -> always chosen, regardless of api/openai keys.
+        let got = pick_token(s("user-123"), s("codex-svc"), s("hanzo-svc"), &[]);
+        assert_eq!(got.as_deref(), Some("user-123"));
+    }
+
+    #[test]
+    fn user_key_wins_even_when_listed_exempt() {
+        // An explicit user key is honored even if it appears on the exempt list.
+        let got = pick_token(s("user-123"), s("codex-svc"), None, &exempt("user-123"));
+        assert_eq!(got.as_deref(), Some("user-123"));
+    }
+
+    #[test]
+    fn empty_user_key_is_ignored() {
+        // Empty / whitespace HANZO_USER_KEY must not be treated as a user key.
+        assert_eq!(
+            pick_token(s(""), s("codex-svc"), None, &[]).as_deref(),
+            Some("codex-svc"),
+        );
+        assert_eq!(
+            pick_token(s("   "), s("codex-svc"), None, &[]).as_deref(),
+            Some("codex-svc"),
+        );
+        assert_eq!(
+            pick_token(None, s("codex-svc"), None, &[]).as_deref(),
+            Some("codex-svc"),
+        );
+    }
+
+    #[test]
+    fn exempt_api_key_is_skipped_falls_through() {
+        // The first candidate (api_key) is exempt -> skip it and use the next.
+        let got = pick_token(None, s("codex-svc"), s("hanzo-user"), &exempt("codex-svc"));
+        assert_eq!(got.as_deref(), Some("hanzo-user"));
+    }
+
+    #[test]
+    fn all_candidates_exempt_yields_none() {
+        // Every env candidate is an exempt service key -> no env token; caller
+        // falls through to the on-disk user-scoped credential.
+        let got = pick_token(
+            None,
+            s("codex-svc"),
+            s("hanzo-svc"),
+            &exempt("codex-svc, hanzo-svc"),
+        );
+        assert_eq!(got, None);
+    }
+
+    #[test]
+    fn non_exempt_api_key_is_used() {
+        // A non-exempt service key is used as-is when no user key is present.
+        let got = pick_token(None, s("codex-live"), None, &exempt("some-other-key"));
+        assert_eq!(got.as_deref(), Some("codex-live"));
+        // And with no exempt list at all.
+        let got = pick_token(None, None, s("hanzo-live"), &[]);
+        assert_eq!(got.as_deref(), Some("hanzo-live"));
+    }
+
+    #[test]
+    fn is_exempt_service_key_matches_trimmed_entries() {
+        let list = exempt(" a-key , b-key ,, c-key ");
+        assert_eq!(list, vec!["a-key", "b-key", "c-key"]);
+        assert!(is_exempt_service_key("a-key", &list));
+        assert!(is_exempt_service_key("  b-key  ", &list)); // candidate trimmed
+        assert!(is_exempt_service_key("c-key", &list));
+        assert!(!is_exempt_service_key("d-key", &list));
+        // Empty candidate is never "exempt" (it's just absent).
+        assert!(!is_exempt_service_key("", &list));
+        assert!(!is_exempt_service_key("a-key", &[]));
+    }
+
+    #[test]
+    fn parse_exempt_keys_handles_none_and_empty() {
+        assert!(parse_exempt_keys(None).is_empty());
+        assert!(parse_exempt_keys(Some("")).is_empty());
+        assert!(parse_exempt_keys(Some("  ,  , ")).is_empty());
+        assert_eq!(parse_exempt_keys(Some("solo")), vec!["solo"]);
+    }
+}
