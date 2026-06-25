@@ -386,8 +386,15 @@ impl ModelProviderInfo {
 
     /// Hanzo AI gateway (api.hanzo.ai) — OpenAI-compatible, Responses wire API
     /// over HTTP. Auth flows through the auth layer (Hanzo IAM OAuth from
-    /// `dev login`, or HANZO_API_KEY/CODEX_API_KEY), mirroring the OpenAI
-    /// provider. Default provider for the `dev` CLI.
+    /// `dev login`, or HANZO_USER_KEY/HANZO_API_KEY/CODEX_API_KEY), mirroring
+    /// the OpenAI provider. Default provider for the `dev` CLI.
+    ///
+    /// `env_key` is intentionally `None`: this provider does NOT read a key via
+    /// the `env_key` literal. Per-user/org attribution (prefer HANZO_USER_KEY,
+    /// skip BALANCE_EXEMPT_KEYS service keys) is resolved in ONE place —
+    /// `codex_login::load_auth` / `pick_token` — so both brokered relay sessions
+    /// and direct LLM calls bill the same user. Do NOT set
+    /// `env_key: Some("HANZO_API_KEY")` here; it would bypass that logic.
     pub fn create_hanzo_provider() -> ModelProviderInfo {
         ModelProviderInfo {
             name: HANZO_PROVIDER_NAME.into(),
