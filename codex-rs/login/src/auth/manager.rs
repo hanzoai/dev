@@ -1224,9 +1224,12 @@ struct RefreshResponse {
 // Shared constant for token refresh (client id used for oauth token refresh flow)
 pub const CLIENT_ID: &str = "app_EMoamEEZ73f0CkXaXp7hrann";
 
-// Hanzo IAM (hanzo.id Casdoor OAuth — public client, PKCE only)
-pub const HANZO_CLIENT_ID: &str = "hanzo-dev";
-// OAuth issuer base. hanzo.id (Casdoor) serves OIDC under /v1/iam, so the login
+// Hanzo IAM (hanzo.id OAuth — public client). "hanzo-app" is the live canonical
+// Hanzo client (the <org>-<app> convention; verified responding on hanzo.id's
+// authorize + device endpoints). Browser PKCE and the RFC 8628 device flow both
+// use it.
+pub const HANZO_CLIENT_ID: &str = "hanzo-app";
+// OAuth issuer base. hanzo.id (IAM) serves OIDC under /v1/iam, so the login
 // server's `{issuer}/oauth/authorize` + `{issuer}/oauth/token` resolve to
 // https://hanzo.id/v1/iam/oauth/authorize and .../oauth/token (verified against
 // hanzo.id/.well-known/openid-configuration).
@@ -1250,7 +1253,12 @@ pub fn read_anthropic_api_key_from_env() -> Option<String> {
 pub fn read_claude_code_keychain_token() -> Option<String> {
     use std::process::Command;
     let output = Command::new("security")
-        .args(["find-generic-password", "-s", "Claude Code-credentials", "-w"])
+        .args([
+            "find-generic-password",
+            "-s",
+            "Claude Code-credentials",
+            "-w",
+        ])
         .output()
         .ok()?;
     if !output.status.success() {
