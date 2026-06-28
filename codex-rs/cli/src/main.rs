@@ -16,8 +16,9 @@ use codex_cli::run_login_status;
 use codex_cli::run_login_with_access_token;
 use codex_cli::run_login_with_api_key;
 use codex_cli::run_login_with_chatgpt;
-use codex_cli::run_login_with_hanzo;
 use codex_cli::run_login_with_device_code;
+use codex_cli::run_login_with_hanzo;
+use codex_cli::run_login_with_hanzo_device_code;
 use codex_cli::run_logout;
 use codex_cloud_tasks::Cli as CloudTasksCli;
 use codex_exec::Cli as ExecCli;
@@ -1372,12 +1373,34 @@ async fn cli_main(
                         );
                         std::process::exit(1);
                     } else if login_cli.use_device_code {
-                        run_login_with_device_code(
-                            login_cli.config_overrides,
-                            login_cli.issuer_base_url,
-                            login_cli.client_id,
-                        )
-                        .await;
+                        // Device-code login routes by provider (it previously
+                        // always used the OpenAI scheme, ignoring --provider).
+                        match login_cli.provider {
+                            Some(LoginProvider::Openai) => {
+                                // OpenAI/ChatGPT proprietary /deviceauth scheme.
+                                run_login_with_device_code(
+                                    login_cli.config_overrides,
+                                    login_cli.issuer_base_url,
+                                    login_cli.client_id,
+                                )
+                                .await;
+                            }
+                            Some(LoginProvider::Claude) => {
+                                eprintln!(
+                                    "Claude does not support device-code login. Set ANTHROPIC_API_KEY, or use `dev login --provider claude`."
+                                );
+                                std::process::exit(1);
+                            }
+                            // Hanzo IAM (hanzo.id) default — standards RFC 8628.
+                            Some(LoginProvider::Hanzo) | None => {
+                                run_login_with_hanzo_device_code(
+                                    login_cli.config_overrides,
+                                    login_cli.issuer_base_url,
+                                    login_cli.client_id,
+                                )
+                                .await;
+                            }
+                        }
                     } else if login_cli.api_key.is_some() {
                         eprintln!(
                             "The --api-key flag is no longer supported. Pipe the key instead, e.g. `printenv OPENAI_API_KEY | codex login --with-api-key`."
