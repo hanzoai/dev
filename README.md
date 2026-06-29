@@ -1,3 +1,5 @@
+<p align="center"><img src=".github/hero.svg" alt="dev" width="880"></p>
+
 <img src="docs/images/every-logo.png" alt="Every Code Logo" width="400">
 
 &ensp;
