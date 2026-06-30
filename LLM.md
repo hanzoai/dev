@@ -65,7 +65,7 @@ Fork of OpenAI Codex CLI. Rust-based AI development assistant in the terminal.
 | --------- | -------------------------------------- | ------------------------------- |
 | `ApiKey`  | `HANZO_API_KEY` / `OPENAI_API_KEY` env | "API key (...xxxxx)"            |
 | `ChatGPT` | OpenAI OAuth JWT                       | "Logged in as [email]"          |
-| `Hanzo`   | hanzo.id Casdoor JWT                   | "Logged in to Hanzo as [email]" |
+| `Hanzo`   | hanzo.id IAM JWT                       | "Logged in to Hanzo as [email]" |
 
 Default provider: `hanzo` at `https://api.hanzo.ai/v1`
 

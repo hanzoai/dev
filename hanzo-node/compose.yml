@@ -135,7 +135,7 @@ services:
     depends_on:
       - prometheus
 
-  # IAM Service (Casdoor) - Optional authentication provider
+  # IAM Service - Optional authentication provider
   iam-db:
     image: ghcr.io/hanzoai/sql:latest
     container_name: hanzo-iam-db
