@@ -63,7 +63,7 @@ pub struct IamConfig {
     #[serde(default = "default_allow_anonymous_health")]
     pub allow_anonymous_health: bool,
 
-    /// Casdoor/IAM service base URL
+    /// IAM service base URL
     pub iam_base_url: Option<String>,
 }
 

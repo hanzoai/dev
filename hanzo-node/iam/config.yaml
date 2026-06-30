@@ -9,7 +9,7 @@ enabled: false
 
 # JWT Configuration
 jwt:
-  # OIDC issuer URL (e.g., Casdoor, Auth0, Keycloak)
+  # OIDC issuer URL (e.g., Hanzo IAM, Auth0, Keycloak)
   # issuer: "https://auth.hanzo.ai"
 
   # Expected audience (your client ID)
@@ -43,15 +43,15 @@ authorization:
   # Allow anonymous access to health endpoints
   allow_anonymous_health: true
 
-# Casdoor Integration (optional)
-casdoor:
-  # Base URL of Casdoor server
+# Hanzo IAM Integration (optional)
+iam:
+  # Base URL of the Hanzo IAM server
   # base_url: "http://localhost:8080"
 
-  # Organization name in Casdoor
+  # Organization name in Hanzo IAM
   # organization: "hanzo"
 
-  # Application name in Casdoor
+  # Application name in Hanzo IAM
   # application: "hanzo-node"
 
 # Role Definitions

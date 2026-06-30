@@ -157,7 +157,7 @@ HANZO_IAM_SECRET=your-secret-at-least-32-chars
 
 ### Docker Compose IAM Profile
 
-Start with IAM (Casdoor):
+Start with IAM:
 ```bash
 docker compose --profile iam up -d
 ```
