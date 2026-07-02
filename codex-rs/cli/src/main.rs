@@ -46,6 +46,7 @@ use std::path::PathBuf;
 use std::sync::Arc;
 use supports_color::Stream;
 
+mod agent_cmd;
 #[cfg(any(target_os = "macos", target_os = "windows"))]
 mod app_cmd;
 #[cfg(any(target_os = "macos", target_os = "windows"))]
@@ -61,6 +62,7 @@ mod state_db_recovery;
 #[cfg(not(windows))]
 mod wsl_paths;
 
+use crate::agent_cmd::AgentCli;
 use crate::mcp_cmd::McpCli;
 use crate::plugin_cmd::PluginCli;
 use crate::plugin_cmd::PluginSubcommand;
@@ -197,6 +199,9 @@ enum Subcommand {
     /// [EXPERIMENTAL] Browse tasks from dev Cloud and apply changes locally.
     #[clap(name = "cloud", alias = "cloud-tasks")]
     Cloud(CloudTasksCli),
+
+    /// Run Hanzo Cloud agents from the terminal.
+    Agent(AgentCli),
 
     /// Internal: run the responses API proxy.
     #[clap(hide = true)]
@@ -1498,6 +1503,18 @@ async fn cli_main(
             codex_cloud_tasks::run_main(cloud_cli, arg0_paths.codex_linux_sandbox_exe.clone())
                 .await?;
         }
+        Some(Subcommand::Agent(mut agent_cli)) => {
+            reject_remote_mode_for_subcommand(
+                root_remote.as_deref(),
+                root_remote_auth_token_env.as_deref(),
+                "agent",
+            )?;
+            prepend_config_flags(
+                &mut agent_cli.config_overrides,
+                root_config_overrides.clone(),
+            );
+            agent_cmd::run_main(agent_cli).await?;
+        }
         Some(Subcommand::Sandbox(mut sandbox_cli)) => {
             #[cfg(target_os = "windows")]
             if let Some(setup_cli) = sandbox_setup::parse_setup_command(&sandbox_cli.command)? {
@@ -2180,6 +2197,7 @@ fn unsupported_subcommand_name_for_strict_config(
         Some(Subcommand::Completion(_)) => Some("completion"),
         Some(Subcommand::Update) => Some("update"),
         Some(Subcommand::Cloud(_)) => Some("cloud"),
+        Some(Subcommand::Agent(_)) => Some("agent"),
         Some(Subcommand::Sandbox(_)) => Some("sandbox"),
         Some(Subcommand::Debug(_)) => Some("debug"),
         Some(Subcommand::Execpolicy(_)) => Some("execpolicy"),
