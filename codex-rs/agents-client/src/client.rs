@@ -11,6 +11,11 @@ use crate::types::Agent;
 use crate::types::AgentDetail;
 use crate::types::Run;
 
+/// Cap on the response body we will buffer from any single request. Agent
+/// output is text; 16 MiB is far beyond any legitimate run while still bounding
+/// memory against a hostile or runaway host.
+const MAX_BODY_BYTES: usize = 16 * 1024 * 1024;
+
 /// HTTP client for the `/v1/agents` surface. Holds the API base and an auth
 /// provider that injects the bearer JWT; the gateway derives `X-Org-Id` from it.
 #[derive(Clone)]
@@ -73,17 +78,32 @@ impl HttpClient {
         req.headers(self.auth.to_auth_headers())
     }
 
-    /// Send `req`, returning `(status, body)` regardless of status code.
+    /// Send `req`, returning `(status, body)` regardless of status code. The
+    /// body is read chunk-by-chunk and capped at [`MAX_BODY_BYTES`] so a hostile
+    /// or malfunctioning host cannot exhaust memory by streaming an unbounded
+    /// response (a `Content-Length` header would be advisory and can lie, so the
+    /// cap is enforced on the bytes actually received).
     async fn send(req: reqwest::RequestBuilder) -> Result<(StatusCode, String)> {
-        let resp = req
+        let mut resp = req
             .send()
             .await
             .map_err(|e| AgentsError::Http(e.to_string()))?;
         let status = resp.status();
-        let body = resp
-            .text()
+        let mut buf: Vec<u8> = Vec::new();
+        while let Some(chunk) = resp
+            .chunk()
             .await
-            .map_err(|e| AgentsError::Http(e.to_string()))?;
+            .map_err(|e| AgentsError::Http(e.to_string()))?
+        {
+            if buf.len() + chunk.len() > MAX_BODY_BYTES {
+                return Err(AgentsError::Http(format!(
+                    "response body exceeds {MAX_BODY_BYTES} bytes"
+                )));
+            }
+            buf.extend_from_slice(&chunk);
+        }
+        let body = String::from_utf8(buf)
+            .map_err(|e| AgentsError::Http(format!("response body was not valid UTF-8: {e}")))?;
         Ok((status, body))
     }
 
@@ -121,11 +141,13 @@ impl HttpClient {
     }
 
     pub(crate) async fn get(&self, name: &str) -> Result<AgentDetail> {
+        validate_name(name)?;
         let url = format!("{}/v1/agents/{}", self.base_url, encode_segment(name));
         self.get_json(&url).await
     }
 
     pub(crate) async fn run(&self, name: &str, input: &str) -> Result<Run> {
+        validate_name(name)?;
         let url = format!("{}/v1/agents/{}/run", self.base_url, encode_segment(name));
         let req = self
             .request(reqwest::Method::POST, &url)
@@ -147,9 +169,35 @@ impl HttpClient {
     }
 }
 
+/// Human-readable description of the agent-name grammar the server enforces
+/// (`^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$`), quoted in [`AgentsError::InvalidName`].
+pub(crate) const NAME_RULE: &str =
+    "1-64 chars, starting with a letter or digit, then letters, digits, '.', '-' or '_'";
+
+/// Validate an agent name against the server's grammar *before* it is placed in
+/// a URL path. This is the real boundary check: percent-encoding alone does not
+/// stop a dot-only segment (`.` / `..`) from being collapsed by URL
+/// normalization and rewriting the request to a different endpoint (e.g. `..`
+/// would turn `/v1/agents/../run` into `/v1/run`, sending the bearer token to
+/// an unintended route). Rejecting anything outside the grammar closes that and
+/// gives the caller an honest error instead of a mangled request.
+fn validate_name(name: &str) -> Result<()> {
+    let ok = name.len() <= 64
+        && matches!(name.bytes().next(), Some(b) if b.is_ascii_alphanumeric())
+        && name
+            .bytes()
+            .all(|b| b.is_ascii_alphanumeric() || matches!(b, b'.' | b'-' | b'_'));
+    if ok {
+        Ok(())
+    } else {
+        Err(AgentsError::InvalidName(name.to_string()))
+    }
+}
+
 /// Percent-encode a path segment's reserved characters. Agent names are already
-/// constrained server-side to `^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$`; this is a
-/// boundary safeguard against a stray `/` or space corrupting the path.
+/// constrained by [`validate_name`] to `^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$`; this
+/// remains as defense-in-depth so a segment can never carry an unescaped
+/// separator into the path.
 fn encode_segment(seg: &str) -> String {
     let mut out = String::with_capacity(seg.len());
     for b in seg.bytes() {
@@ -231,6 +279,71 @@ mod tests {
         assert_eq!(encode_segment("helper"), "helper");
         assert_eq!(encode_segment("my.agent-1_x"), "my.agent-1_x");
         assert_eq!(encode_segment("a/b c"), "a%2Fb%20c");
+    }
+
+    #[test]
+    fn validate_name_accepts_the_server_grammar() {
+        for name in ["a", "helper", "my.agent-1_x", "A0", &"z".repeat(64)] {
+            assert!(validate_name(name).is_ok(), "should accept {name:?}");
+        }
+    }
+
+    #[test]
+    fn validate_name_rejects_dot_segments_and_separators() {
+        // Dot-only / leading-dot names are the traversal vectors: without this
+        // check, ".." collapses `/v1/agents/../run` down to `/v1/run`.
+        for name in [
+            "", ".", "..", "...", ".hidden", "-x", "_x", "a/b", "a b", "a?b", "a#b", "a%2e",
+        ] {
+            let err = validate_name(name).unwrap_err();
+            assert!(
+                matches!(err, AgentsError::InvalidName(_)),
+                "should reject {name:?}, got {err:?}"
+            );
+        }
+        // Over-length (65 chars) is rejected.
+        assert!(matches!(
+            validate_name(&"z".repeat(65)).unwrap_err(),
+            AgentsError::InvalidName(_)
+        ));
+    }
+
+    #[test]
+    fn invalid_name_error_quotes_the_name_and_the_rule() {
+        let err = validate_name("..").unwrap_err();
+        let msg = err.to_string();
+        assert!(msg.contains("\"..\""), "should quote the offending name: {msg}");
+        assert!(msg.contains(NAME_RULE), "should state the rule: {msg}");
+    }
+
+    #[tokio::test]
+    async fn run_rejects_traversal_name_before_hitting_network() {
+        // No mock is mounted: if the client dialed out this would 404/hang. The
+        // request must be refused client-side, so the URL is never built.
+        let err = client("http://127.0.0.1:1")
+            .run("..", "hi")
+            .await
+            .unwrap_err();
+        assert!(matches!(err, AgentsError::InvalidName(_)), "got {err:?}");
+    }
+
+    #[tokio::test]
+    async fn oversized_response_body_is_capped() {
+        let server = MockServer::start().await;
+        // 17 MiB of 'a' — one byte over the 16 MiB cap.
+        let big = "a".repeat(super::MAX_BODY_BYTES + 1);
+        Mock::given(method("GET"))
+            .and(path("/v1/agents"))
+            .respond_with(ResponseTemplate::new(200).set_body_string(big))
+            .mount(&server)
+            .await;
+
+        let err = client(&server.uri()).list().await.unwrap_err();
+        assert!(matches!(err, AgentsError::Http(_)), "got {err:?}");
+        assert!(
+            err.to_string().contains("exceeds"),
+            "should report the cap: {err}"
+        );
     }
 
     #[test]
@@ -347,6 +460,26 @@ mod tests {
         assert!(!run.is_ok());
         assert_eq!(run.status, "error");
         assert_eq!(run.error, "upstream model timeout");
+    }
+
+    #[tokio::test]
+    async fn run_502_with_non_run_json_is_a_server_error_not_a_default_run() {
+        // Regression guard: a server error whose body is arbitrary JSON (no
+        // required Run fields) must NOT deserialize into an all-default Run and
+        // masquerade as a silent empty success. `id`/`status`/`model` are
+        // required, so the body fails Run decode and surfaces as a server error.
+        let server = MockServer::start().await;
+        Mock::given(method("POST"))
+            .and(path("/v1/agents/helper/run"))
+            .respond_with(
+                ResponseTemplate::new(502)
+                    .set_body_json(json!({ "message": "bad gateway", "upstream": "down" })),
+            )
+            .mount(&server)
+            .await;
+
+        let err = client(&server.uri()).run("helper", "hi").await.unwrap_err();
+        assert!(matches!(err, AgentsError::Server(_)), "got {err:?}");
     }
 
     #[tokio::test]

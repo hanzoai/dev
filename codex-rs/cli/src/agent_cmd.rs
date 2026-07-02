@@ -87,6 +87,12 @@ pub async fn run_main(cli: AgentCli) -> anyhow::Result<()> {
 async fn init_backend(overrides: &CliConfigOverrides) -> anyhow::Result<HttpClient> {
     let base_url =
         std::env::var("CODEX_AGENTS_BASE_URL").unwrap_or_else(|_| DEFAULT_BASE_URL.to_string());
+    // The signed-in hanzo.id bearer JWT is attached to every request, so the
+    // base URL is a trust boundary: an attacker who can set CODEX_AGENTS_BASE_URL
+    // (poisoned profile, CI env, dotfile) could otherwise redirect the token to
+    // a host of their choosing. Restrict it to HTTPS *.hanzo.ai (plus loopback
+    // for local testing), mirroring `validate_api_key_remote_host` in main.rs.
+    validate_base_url(&base_url)?;
 
     let parsed_overrides = overrides
         .parse_overrides()
@@ -113,6 +119,41 @@ async fn init_backend(overrides: &CliConfigOverrides) -> anyhow::Result<HttpClie
     Ok(HttpClient::new(base_url)?
         .with_user_agent(get_codex_user_agent())
         .with_auth_provider(auth_provider))
+}
+
+/// Restrict the agents API base URL to HTTPS `hanzo.ai` (and its subdomains),
+/// or a loopback host for local testing, so the bearer token is only ever sent
+/// to trusted hosts. Mirrors `validate_api_key_remote_host` in `main.rs`.
+fn validate_base_url(base_url: &str) -> anyhow::Result<()> {
+    let url = url::Url::parse(base_url)
+        .map_err(|err| anyhow!("invalid CODEX_AGENTS_BASE_URL {base_url:?}: {err}"))?;
+    let host = url
+        .host()
+        .ok_or_else(|| anyhow!("CODEX_AGENTS_BASE_URL must include a host: {base_url:?}"))?;
+
+    let is_loopback = match &host {
+        url::Host::Domain(host) => host.eq_ignore_ascii_case("localhost"),
+        url::Host::Ipv4(ip) => ip.is_loopback(),
+        url::Host::Ipv6(ip) => ip.is_loopback(),
+    };
+    let is_hanzo_host = match &host {
+        url::Host::Domain(host) => {
+            let host = host.to_ascii_lowercase();
+            host == "hanzo.ai" || host.ends_with(".hanzo.ai")
+        }
+        _ => false,
+    };
+    let is_allowed = match url.scheme() {
+        "https" => is_loopback || is_hanzo_host,
+        "http" => is_loopback,
+        _ => false,
+    };
+    if !is_allowed {
+        return Err(anyhow!(
+            "CODEX_AGENTS_BASE_URL must be an HTTPS hanzo.ai host (or a loopback host for testing); refusing to send credentials to {base_url:?}"
+        ));
+    }
+    Ok(())
 }
 
 async fn run_list(backend: &HttpClient, args: ListArgs) -> anyhow::Result<()> {
@@ -154,10 +195,14 @@ async fn run_run(backend: &HttpClient, args: RunArgs) -> anyhow::Result<()> {
     let input = resolve_prompt(args.prompt)?;
     let run = backend.run_agent(&args.name, &input).await?;
     if args.json {
+        // Emit the full run to stdout regardless of outcome so scripts always
+        // get the record, but still exit non-zero for a recorded failure so the
+        // exit code matches the human-readable path.
         println!("{}", serde_json::to_string_pretty(&run)?);
     } else if run.is_ok() {
         println!("{}", run.output);
-    } else {
+    }
+    if !run.is_ok() {
         // The run executed and was recorded as a failure; report it honestly.
         return Err(anyhow!(
             "agent run failed ({}): {}",
@@ -220,6 +265,57 @@ fn resolve_prompt(prompt: Option<String>) -> anyhow::Result<String> {
                 ));
             }
             Ok(buffer)
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::validate_base_url;
+
+    #[test]
+    fn base_url_allows_hanzo_https_and_subdomains() {
+        for url in [
+            "https://api.hanzo.ai",
+            "https://api.hanzo.ai/",
+            "https://hanzo.ai",
+            "https://cloud.staging.hanzo.ai",
+            "https://API.HANZO.AI", // scheme/host are case-insensitive
+        ] {
+            assert!(validate_base_url(url).is_ok(), "should allow {url}");
+        }
+    }
+
+    #[test]
+    fn base_url_allows_loopback_for_testing() {
+        for url in [
+            "http://127.0.0.1:8787",
+            "https://127.0.0.1:8787",
+            "http://localhost:3000",
+            "http://[::1]:8080",
+        ] {
+            assert!(validate_base_url(url).is_ok(), "should allow {url}");
+        }
+    }
+
+    #[test]
+    fn base_url_rejects_credential_exfiltration_vectors() {
+        for url in [
+            "https://evil.com",
+            "http://api.hanzo.ai",              // plaintext to a real host
+            "https://hanzo.ai.evil.com",        // suffix-spoof
+            "https://evilhanzo.ai",             // no dot boundary
+            "https://api.hanzo.ai.attacker.io", // trailing-domain trick
+            "https://not-hanzo.ai",             // different apex
+            "https://api.hanzo.ai@evil.com",    // userinfo bypass — host is evil.com
+            "ftp://api.hanzo.ai",               // wrong scheme
+            "file:///etc/passwd",
+            "not a url",
+        ] {
+            assert!(
+                validate_base_url(url).is_err(),
+                "should reject {url}"
+            );
         }
     }
 }
