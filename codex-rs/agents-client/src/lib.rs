@@ -50,6 +50,10 @@ pub enum AgentsError {
     /// The response body could not be decoded into the expected shape.
     #[error("decode error: {0}")]
     Decode(String),
+    /// The agent name is not a valid org-unique handle. Rejected client-side so
+    /// a dot-segment (`.`/`..`) can never rewrite the request path.
+    #[error("invalid agent name {0:?}: expected {expected}", expected = crate::client::NAME_RULE)]
+    InvalidName(String),
 }
 
 pub type Result<T> = std::result::Result<T, AgentsError>;
