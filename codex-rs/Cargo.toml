@@ -4,6 +4,7 @@ members = [
     "analytics",
     "agent-graph-store",
     "agent-identity",
+    "agents-client",
     "backend-client",
     "bwrap",
     "ansi-escape",
@@ -152,6 +153,7 @@ codex-app-server-test-client = { path = "app-server-test-client" }
 codex-apply-patch = { path = "apply-patch" }
 codex-arg0 = { path = "arg0" }
 codex-async-utils = { path = "async-utils" }
+codex-agents-client = { path = "agents-client" }
 codex-backend-client = { path = "backend-client" }
 codex-chatgpt = { path = "chatgpt" }
 codex-cli = { path = "cli" }
