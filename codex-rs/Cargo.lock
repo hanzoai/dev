@@ -1895,6 +1895,21 @@ dependencies = [
 ]
 
 [[package]]
+name = "codex-agents-client"
+version = "0.0.0"
+dependencies = [
+ "anyhow",
+ "codex-api",
+ "pretty_assertions",
+ "reqwest 0.12.28",
+ "serde",
+ "serde_json",
+ "thiserror 2.0.18",
+ "tokio",
+ "wiremock",
+]
+
+[[package]]
 name = "codex-analytics"
 version = "0.0.0"
 dependencies = [
@@ -2315,6 +2330,7 @@ dependencies = [
  "assert_matches",
  "clap",
  "clap_complete",
+ "codex-agents-client",
  "codex-api",
  "codex-app-server",
  "codex-app-server-daemon",
