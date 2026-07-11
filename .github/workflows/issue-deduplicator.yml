@@ -11,7 +11,7 @@ jobs:
     name: Identify potential duplicates (all issues)
     # Prevent runs on forks (requires OpenAI API key, wastes Actions minutes)
     if: github.repository == 'openai/codex' && (github.event.action == 'opened' || (github.event.action == 'labeled' && github.event.label.name == 'codex-deduplicate'))
-    runs-on: ubuntu-latest
+    runs-on: hanzo-build-linux-amd64
     permissions:
       contents: read
     outputs:
@@ -147,7 +147,7 @@ jobs:
     # Pass 1 may drop sudo on the runner, so run the fallback in a fresh job.
     needs: gather-duplicates-all
     if: ${{ needs.gather-duplicates-all.result == 'success' && needs.gather-duplicates-all.outputs.has_matches != 'true' }}
-    runs-on: ubuntu-latest
+    runs-on: hanzo-build-linux-amd64
     permissions:
       contents: read
     outputs:
@@ -282,7 +282,7 @@ jobs:
       - gather-duplicates-all
       - gather-duplicates-open
     if: ${{ always() && needs.gather-duplicates-all.result == 'success' && (needs.gather-duplicates-open.result == 'success' || needs.gather-duplicates-open.result == 'skipped') }}
-    runs-on: ubuntu-latest
+    runs-on: hanzo-build-linux-amd64
     permissions:
       contents: read
     outputs:
@@ -336,7 +336,7 @@ jobs:
     name: Comment with potential duplicates
     needs: select-final
     if: ${{ always() && needs.select-final.result == 'success' }}
-    runs-on: ubuntu-latest
+    runs-on: hanzo-build-linux-amd64
     permissions:
       contents: read
       issues: write
