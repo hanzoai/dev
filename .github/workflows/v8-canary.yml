@@ -12,7 +12,7 @@ concurrency:
 
 jobs:
   metadata:
-    runs-on: ubuntu-latest
+    runs-on: hanzo-build-linux-amd64
     outputs:
       v8_version: ${{ steps.v8_version.outputs.version }}
 

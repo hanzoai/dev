@@ -11,7 +11,7 @@ jobs:
   # --- CI that doesn't need specific targets ---------------------------------
   general:
     name: Format / etc
-    runs-on: ubuntu-24.04
+    runs-on: hanzo-build-linux-amd64
     defaults:
       run:
         working-directory: codex-rs
@@ -25,7 +25,7 @@ jobs:
 
   cargo_shear:
     name: cargo shear
-    runs-on: ubuntu-24.04
+    runs-on: hanzo-build-linux-amd64
     defaults:
       run:
         working-directory: codex-rs
@@ -41,7 +41,7 @@ jobs:
 
   argument_comment_lint_package:
     name: Argument comment lint package
-    runs-on: ubuntu-24.04
+    runs-on: hanzo-build-linux-amd64
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
       - uses: dtolnay/rust-toolchain@a0b273b48ed29de4470960879e8381ff45632f26 # 1.93.0
@@ -751,7 +751,7 @@ jobs:
         tests,
       ]
     if: always()
-    runs-on: ubuntu-24.04
+    runs-on: hanzo-build-linux-amd64
     steps:
       - name: Summarize
         shell: bash

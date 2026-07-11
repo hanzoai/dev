@@ -17,7 +17,7 @@ concurrency:
 
 jobs:
   tag-check:
-    runs-on: ubuntu-latest
+    runs-on: hanzo-build-linux-amd64
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
       - uses: dtolnay/rust-toolchain@c2b55edffaf41a251c410bb32bed22afefa800f1 # 1.92
@@ -408,7 +408,7 @@ jobs:
       - argument-comment-lint-release-assets
       - zsh-release-assets
     name: release
-    runs-on: ubuntu-latest
+    runs-on: hanzo-build-linux-amd64
     permissions:
       contents: write
       actions: read
@@ -575,7 +575,7 @@ jobs:
     if: ${{ needs.release.outputs.should_publish_npm == 'true' }}
     name: publish-npm
     needs: release
-    runs-on: ubuntu-latest
+    runs-on: hanzo-build-linux-amd64
     permissions:
       id-token: write # Required for OIDC
       contents: read
@@ -687,7 +687,7 @@ jobs:
     if: ${{ !contains(needs.release.outputs.version, '-') }}
     # This job only invokes a GitHub Action to open/update the winget-pkgs PR;
     # it does not execute Windows-only tooling, so Linux is sufficient.
-    runs-on: ubuntu-latest
+    runs-on: hanzo-build-linux-amd64
     permissions:
       contents: read
 
@@ -707,7 +707,7 @@ jobs:
     permissions:
       contents: write
     needs: release
-    runs-on: ubuntu-latest
+    runs-on: hanzo-build-linux-amd64
 
     steps:
       - name: Update latest-alpha-cli branch

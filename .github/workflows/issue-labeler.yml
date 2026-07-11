@@ -11,7 +11,7 @@ jobs:
     name: Generate label suggestions
     # Prevent runs on forks (requires OpenAI API key, wastes Actions minutes)
     if: github.repository == 'openai/codex' && (github.event.action == 'opened' || (github.event.action == 'labeled' && github.event.label.name == 'codex-label'))
-    runs-on: ubuntu-latest
+    runs-on: hanzo-build-linux-amd64
     permissions:
       contents: read
     outputs:
@@ -90,7 +90,7 @@ jobs:
     name: Apply labels from Codex output
     needs: gather-labels
     if: ${{ needs.gather-labels.result != 'skipped' }}
-    runs-on: ubuntu-latest
+    runs-on: hanzo-build-linux-amd64
     permissions:
       contents: read
       issues: write

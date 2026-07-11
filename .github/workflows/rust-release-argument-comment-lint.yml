@@ -10,7 +10,7 @@ on:
 jobs:
   skip:
     if: ${{ !inputs.publish }}
-    runs-on: ubuntu-latest
+    runs-on: hanzo-build-linux-amd64
     steps:
       - run: echo "Skipping argument-comment-lint release assets for prerelease tag"
 
