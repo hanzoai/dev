@@ -1,10 +1,10 @@
-<p align="center"><img src=".github/hero.svg" alt="dev" width="880"></p>
+<p align="center"><img src=".github/hero.svg" alt="Hanzo Dev" width="880"></p>
 
-<img src="docs/images/every-logo.png" alt="Every Code Logo" width="400">
+<img src="docs/images/hanzo-logo.svg" alt="Hanzo Dev" width="400">
 
 &ensp;
 
-**Every Code** (Code for short) is a fast, local coding agent for your terminal. It's a community-driven fork of `openai/codex` focused on real developer ergonomics: Browser integration, multi-agents, theming, and reasoning control — all while staying compatible with upstream.
+**Hanzo Dev** (Dev for short) is a fast, local coding agent for your terminal. It is a community-driven fork of [`just-every/code`](https://github.com/just-every/code) (itself a fork of [`openai/codex`](https://github.com/openai/codex)) focused on real developer ergonomics: Browser integration, multi-agents, theming, and reasoning control — all while staying compatible with upstream and defaulting to the Hanzo LLM gateway.
 
 &ensp;
 
@@ -28,17 +28,13 @@
 
   See commit `60727b068` and related Auto Drive hardening commits in git history for details.
 
-- **Auto Review** – background ghost-commit watcher runs reviews in a separate worktree whenever a turn changes code; uses `codex-5.1-mini-high` and reports issues plus ready-to-apply fixes without blocking the main thread.
-- **Code Bridge** – Sentry-style local bridge that streams errors, console, screenshots, and control from running apps into Code; ships an MCP server; install by asking Code to pull `https://github.com/just-every/code-bridge`.
+- **Auto Review** – background ghost-commit watcher runs reviews in a separate worktree whenever a turn changes code; reports issues plus ready-to-apply fixes without blocking the main thread.
 - **Plays well with Auto Drive** – reviews run in parallel with long Auto Drive tasks so quality checks land while the flow keeps moving.
 - **Quality-first focus** – the release shifts emphasis from "can the model write this file" to "did we verify it works".
-- _From v0.5.0:_ rename to Every Code, upgraded `/auto` planning/recovery, unified `/settings`, faster streaming/history with card-based activity, and more reliable `/resume` + `/undo`.
-
-[Read the full notes in RELEASE_NOTES.md](docs/release-notes/RELEASE_NOTES.md)
 
 &ensp;
 
-## Why Every Code
+## Why Hanzo Dev
 
 - 🚀 **Auto Drive orchestration** – Multi-agent automation that now self-heals and ships complete tasks.
 - 🌐 **Browser Integration** – CDP support, headless browsing, screenshots captured inline.
@@ -47,37 +43,6 @@
 - 🎨 **Theme system** – Switch between accessible presets, customize accents, and preview live via `/themes`.
 - 🔌 **MCP support** – Extend with filesystem, DBs, APIs, or your own tools.
 - 🔒 **Safety modes** – Read-only, approvals, and workspace sandboxing.
-
-&ensp;
-
-## AI Videos
-
-&ensp;
-
-<p align="center">
-  <a href="https://www.youtube.com/watch?v=Ra3q8IVpIOc">
-    <img src="docs/images/video-auto-review-play.jpg" alt="Play Auto Review video" width="100%">
-  </a><br>
-  <strong>Auto Review</strong>
-</p>
-
-&ensp;
-
-<p align="center">
-  <a href="https://youtu.be/UOASHZPruQk">
-    <img src="docs/images/video-auto-drive-new-play.jpg" alt="Play Introducing Auto Drive video" width="100%">
-  </a><br>
-  <strong>Auto Drive Overview</strong>
-</p>
-
-&ensp;
-
-<p align="center">
-  <a href="https://youtu.be/sV317OhiysQ">
-    <img src="docs/images/video-v03-play.jpg" alt="Play Multi-Agent Support video" width="100%">
-  </a><br>
-  <strong>Multi-Agent Promo</strong>
-</p>
 
 &ensp;
 
@@ -100,14 +65,15 @@ Note: If another tool already provides a `code` command (e.g. VS Code), our CLI 
 
 **Authenticate** (one of the following):
 
+- **Hanzo** (default) – Sign in to Hanzo IAM (hanzo.id) or set `export HANZO_API_KEY=xyz`, then run `dev`. Requests route to the Hanzo LLM gateway at `https://api.hanzo.ai/v1`.
 - **Sign in with ChatGPT** (Plus/Pro/Team; uses models available to your plan)
-  - Run `code` and pick "Sign in with ChatGPT"
-- **API key** (usage-based)
-  - Set `export OPENAI_API_KEY=xyz` and run `code`
+  - Run `dev` and pick "Sign in with ChatGPT"
+- **OpenAI API key** (usage-based)
+  - Set `export OPENAI_API_KEY=xyz` and run `dev`
 
 ### Install Claude & Gemini (optional)
 
-Every Code supports orchestrating other AI CLI tools. Install these and config to use alongside Code.
+Hanzo Dev supports orchestrating other AI CLI tools. Install these to use alongside Dev.
 
 ```bash
 # Ensure Node.js 20+ is available locally (installs into ~/.n)
@@ -137,7 +103,7 @@ qwen --version
 ### Browser
 
 ```bash
-# Connect code to external Chrome browser (running CDP)
+# Connect Dev to external Chrome browser (running CDP)
 /chrome        # Connect with auto-detect port
 /chrome 9222   # Connect to specific port
 
@@ -149,15 +115,15 @@ qwen --version
 ### Agents
 
 ```bash
-# Plan code changes (Claude, Gemini and GPT-5 consensus)
+# Plan code changes (multi-model consensus)
 # All agents review task and create a consolidated plan
 /plan "Stop the AI from ordering pizza at 3AM"
 
-# Solve complex problems (Claude, Gemini and GPT-5 race)
+# Solve complex problems (multi-model race)
 # Fastest preferred (see https://arxiv.org/abs/2505.17813)
 /solve "Why does deleting one user drop the whole database?"
 
-# Write code! (Claude, Gemini and GPT-5 consensus)
+# Write code! (multi-model consensus)
 # Creates multiple worktrees then implements the optimal solution
 /code "Show dark mode when I feel cranky"
 ```
@@ -191,7 +157,7 @@ qwen --version
 ## CLI reference
 
 ```shell
-code [options] [prompt]
+dev [options] [prompt]
 
 Options:
   --model <name>        Override the model for the active provider (e.g. gpt-5.1)
@@ -211,7 +177,7 @@ Note: `--model` only changes the model name sent to the active provider. To use 
 
 ## Memory & project docs
 
-Every Code can remember context across sessions:
+Hanzo Dev can remember context across sessions:
 
 1. **Create an `AGENTS.md` or `CLAUDE.md` file** in your project root:
 
@@ -231,7 +197,7 @@ This is a React TypeScript application with:
 - `/server/` - Backend services
 ```
 
-2. **Session memory**: Every Code maintains conversation history
+2. **Session memory**: Hanzo Dev maintains conversation history
 3. **Codebase analysis**: Automatically understands project structure
 
 &ensp;
@@ -242,27 +208,27 @@ For automation and CI/CD:
 
 ```shell
 # Run a specific task
-code --no-approval "run tests and fix any failures"
+dev --no-approval "run tests and fix any failures"
 
 # Generate reports
-code --read-only "analyze code quality and generate report"
+dev --read-only "analyze code quality and generate report"
 
 # Batch processing
-code --config output_format=json "list all TODO comments"
+dev --config output_format=json "list all TODO comments"
 ```
 
 &ensp;
 
 ## Model Context Protocol (MCP)
 
-Every Code supports MCP for extended capabilities:
+Hanzo Dev supports MCP for extended capabilities:
 
 - **File operations**: Advanced file system access
 - **Database connections**: Query and modify databases
 - **API integrations**: Connect to external services
 - **Custom tools**: Build your own extensions
 
-Configure MCP in `~/.code/config.toml` Define each server under a named table like `[mcp_servers.<name>]` (this maps to the JSON `mcpServers` object used by other clients):
+Configure MCP in `config.toml`. Define each server under a named table like `[mcp_servers.<name>]` (this maps to the JSON `mcpServers` object used by other clients):
 
 ```toml
 [mcp_servers.filesystem]
@@ -274,15 +240,12 @@ args = ["-y", "@modelcontextprotocol/server-filesystem", "/path/to/project"]
 
 ## Configuration
 
-Main config file: `~/.code/config.toml`
-
-> [!NOTE]
-> Every Code reads from both `~/.code/` and `~/.codex/` for backwards compatibility, but it only writes updates to `~/.code/`. If you switch back to Codex and it fails to start, remove `~/.codex/config.toml`. If Every Code appears to miss settings after upgrading, copy your legacy `~/.codex/config.toml` into `~/.code/`.
+Main config file: `config.toml` in the Dev config home (`$CODEX_HOME`, defaulting to `~/.codex`; legacy `~/.code` is also read).
 
 ```toml
 # Model settings
 model = "gpt-5.1"
-model_provider = "openai"
+model_provider = "hanzo"
 
 # Behavior
 approval_policy = "on-request"  # untrusted | on-failure | on-request | never
@@ -304,8 +267,10 @@ model_reasoning_summary = "detailed"
 
 ### Environment variables
 
-- `CODE_HOME`: Override config directory location
-- `OPENAI_API_KEY`: Use API key instead of ChatGPT auth
+- `HANZO_API_KEY`: Hanzo IAM API key for the default Hanzo LLM gateway provider
+- `HANZO_NODE_URL`: Override the local Hanzo node provider base URL
+- `CODEX_HOME`: Override config directory location
+- `OPENAI_API_KEY`: Use an OpenAI API key instead of Hanzo/ChatGPT auth
 - `OPENAI_BASE_URL`: Use OpenAI-compatible API endpoints (chat or responses)
 - `OPENAI_WIRE_API`: Force the built-in OpenAI provider to use `chat` or `responses` wiring
 
@@ -313,41 +278,41 @@ model_reasoning_summary = "detailed"
 
 ## FAQ
 
-**How is this different from the original?**
+**How is this different from upstream?**
 
-> This fork adds browser integration, multi-agent commands (`/plan`, `/solve`, `/code`), theme system, and enhanced reasoning controls while maintaining full compatibility.
+> This fork defaults to the Hanzo LLM gateway and Hanzo IAM auth, and adds browser integration, multi-agent commands (`/plan`, `/solve`, `/code`), a theme system, and enhanced reasoning controls while maintaining full compatibility with `openai/codex`.
 
 **Can I use my existing Codex configuration?**
 
-> Yes. Every Code reads from both `~/.code/` (primary) and legacy `~/.codex/` directories. We only write to `~/.code/`, so Codex will keep running if you switch back; copy or remove legacy files if you notice conflicts.
+> Yes. Hanzo Dev reads the standard config home (`$CODEX_HOME`, default `~/.codex`) plus legacy `~/.code`, so existing configuration keeps working.
 
 **Does this work with ChatGPT Plus?**
 
-> Absolutely. Use the same "Sign in with ChatGPT" flow as the original.
+> Yes. Use the "Sign in with ChatGPT" flow.
 
 **Is my data secure?**
 
-> Yes. Authentication stays on your machine, and we don't proxy your credentials or conversations.
+> Authentication stays on your machine; credentials and conversations are not proxied by this CLI.
 
 &ensp;
 
 ## Contributing
 
-We welcome contributions! Every Code maintains compatibility with upstream while adding community-requested features.
+We welcome contributions! Hanzo Dev maintains compatibility with upstream while adding community-requested features.
 
 ### Development workflow
 
 ```bash
 # Clone and setup
-git clone https://github.com/just-every/code.git
-cd code
+git clone https://github.com/hanzoai/dev.git
+cd dev
 npm install
 
 # Build (use fast build for development)
 ./build-fast.sh
 
 # Run locally
-./code-rs/target/dev-fast/code
+cargo run --manifest-path codex-rs/Cargo.toml -p codex-cli --bin dev
 ```
 
 #### Git hooks
@@ -375,12 +340,12 @@ The `pre-push` hook runs `./pre-release.sh` automatically when pushing to `main`
 
 ### License & attribution
 
-- This project is a community fork of `openai/codex` under **Apache-2.0**. We preserve upstream LICENSE and NOTICE files.
-- **Every Code** (Code) is **not** affiliated with, sponsored by, or endorsed by OpenAI.
+- This project is a community fork of [`just-every/code`](https://github.com/just-every/code), itself a fork of [`openai/codex`](https://github.com/openai/codex), under **Apache-2.0**. We preserve the upstream LICENSE and NOTICE files.
+- **Hanzo Dev** is **not** affiliated with, sponsored by, or endorsed by OpenAI.
 
 ### Your responsibilities
 
-Using OpenAI, Anthropic or Google services through Every Code means you agree to **their Terms and policies**. In particular:
+Using Hanzo, OpenAI, Anthropic or Google services through Hanzo Dev means you agree to **their Terms and policies**. In particular:
 
 - **Don't** programmatically scrape/extract content outside intended flows.
 - **Don't** bypass or interfere with rate limits, quotas, or safety mitigations.
@@ -389,12 +354,12 @@ Using OpenAI, Anthropic or Google services through Every Code means you agree to
 
 ### Privacy
 
-- Your auth file lives at `~/.code/auth.json`
+- Your auth file lives in the Dev config home (`$CODEX_HOME`, default `~/.codex`).
 - Inputs/outputs you send to AI providers are handled under their Terms and Privacy Policy; consult those documents (and any org-level data-sharing settings).
 
 ### Subject to change
 
-AI providers can change eligibility, limits, models, or authentication flows. Every Code supports **both** ChatGPT sign-in and API-key modes so you can pick what fits (local/hobby vs CI/automation).
+AI providers can change eligibility, limits, models, or authentication flows. Hanzo Dev supports Hanzo IAM, ChatGPT sign-in, and API-key modes so you can pick what fits (local/hobby vs CI/automation).
 
 &ensp;
 
@@ -402,8 +367,8 @@ AI providers can change eligibility, limits, models, or authentication flows. Ev
 
 Apache 2.0 - See [LICENSE](LICENSE) file for details.
 
-Every Code is a community fork of the original Codex CLI. We maintain compatibility while adding enhanced features requested by the developer community.
+Hanzo Dev is a community fork of `just-every/code` and `openai/codex`. We maintain compatibility while adding enhanced features requested by the developer community.
 
 ## &ensp;
 
-**Need help?** Open an issue on [GitHub](https://github.com/just-every/code/issues) or check our documentation.
+**Need help?** Open an issue on [GitHub](https://github.com/hanzoai/dev/issues).
