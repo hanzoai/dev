@@ -329,6 +329,7 @@ async fn enqueue_primary_thread_session_replays_turns_before_initial_prompt_subm
         has_codex_backend_auth: false,
         model_catalog: app.model_catalog.clone(),
         feedback: codex_feedback::CodexFeedback::new(),
+        reward_signals: codex_reward_signals::RewardSignals::disabled(),
         is_first_run: false,
         status_account_display: None,
         runtime_model_provider_base_url: None,
@@ -4600,6 +4601,7 @@ fn test_turn(turn_id: &str, status: TurnStatus, items: Vec<ThreadItem>) -> Turn 
         started_at: None,
         completed_at: None,
         duration_ms: None,
+        response_id: None,
     }
 }
 
@@ -5300,6 +5302,7 @@ async fn replay_thread_snapshot_replays_turn_history_in_order() {
                     started_at: None,
                     completed_at: None,
                     duration_ms: None,
+                    response_id: None,
                 },
                 Turn {
                     id: "turn-2".to_string(),
@@ -5325,6 +5328,7 @@ async fn replay_thread_snapshot_replays_turn_history_in_order() {
                     started_at: None,
                     completed_at: None,
                     duration_ms: None,
+                    response_id: None,
                 },
             ],
             events: Vec::new(),
@@ -5378,6 +5382,7 @@ async fn replace_chat_widget_reseeds_collab_agent_metadata_for_replay() {
         has_codex_backend_auth: app.chat_widget.has_codex_backend_auth(),
         model_catalog: app.model_catalog.clone(),
         feedback: app.feedback.clone(),
+        reward_signals: codex_reward_signals::RewardSignals::disabled(),
         is_first_run: false,
         status_account_display: app.chat_widget.status_account_display().cloned(),
         runtime_model_provider_base_url: app

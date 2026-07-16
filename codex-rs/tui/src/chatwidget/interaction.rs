@@ -378,6 +378,8 @@ impl ChatWidget {
                 self.quit_shortcut_expires_at = None;
                 self.quit_shortcut_key = None;
                 self.bottom_pane.clear_quit_shortcut_hint();
+                // User is discarding a turn mid-generation: content-free `abandon`.
+                self.send_reward_signal(RewardSignal::Abandon);
                 self.pause_active_goal_for_interrupt();
                 self.submit_op(AppCommand::interrupt_and_restore_prompt_if_no_output());
             } else {
@@ -396,6 +398,8 @@ impl ChatWidget {
         self.arm_quit_shortcut(key);
 
         if self.is_cancellable_work_active() {
+            // User is discarding a turn mid-generation: content-free `abandon`.
+            self.send_reward_signal(RewardSignal::Abandon);
             self.pause_active_goal_for_interrupt();
             self.submit_op(AppCommand::interrupt_and_restore_prompt_if_no_output());
         }

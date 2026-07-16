@@ -5,7 +5,11 @@
 
 ## [Unreleased]
 
-- (none)
+- Reward-signal collection (content-free router training feedback): the TUI sends
+  content-free reward signals — a response id plus an enum (rating on exit,
+  `regenerate` on backtrack, `abandon` on mid-turn interrupt), never any
+  prompt/response/file/code text — to the Hanzo gateway. Gated to the Hanzo
+  provider; opt out via `HANZO_FEEDBACK=0` or `reward_signals = false`. (hanzo-node 0.6.53)
 
 ## [0.6.90] - 2026-03-31
 

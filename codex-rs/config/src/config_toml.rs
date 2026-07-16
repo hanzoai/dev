@@ -462,6 +462,10 @@ pub struct ConfigToml {
     /// Defaults to `true`.
     pub check_for_update_on_startup: Option<bool>,
 
+    /// When `true` (default), sends content-free reward signals to the Hanzo
+    /// gateway for router training. Set to `false` to opt out locally.
+    pub reward_signals: Option<bool>,
+
     /// When true, disables burst-paste detection for typed input entirely.
     /// All characters are inserted as they are received, and no buffering
     /// or placeholder replacement will occur for fast keypress bursts.

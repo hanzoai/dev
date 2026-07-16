@@ -1035,6 +1035,13 @@ pub struct Config {
     /// Defaults to `true`.
     pub check_for_update_on_startup: bool,
 
+    /// When `true`, sends content-free reward signals (ids + an enum + an
+    /// optional rating; never any prompt/response/file/code text) to the Hanzo
+    /// gateway so router training gets production feedback. Only ever sent when
+    /// the active provider is the Hanzo gateway. Defaults to `true`; also
+    /// overridable via the `HANZO_FEEDBACK=0|false|off` environment variable.
+    pub reward_signals: bool,
+
     /// When true, disables burst-paste detection for typed input entirely.
     /// All characters are inserted as they are received, and no buffering
     /// or placeholder replacement will occur for fast keypress bursts.
@@ -3359,6 +3366,7 @@ impl Config {
         let review_model = override_review_model.or(cfg.review_model);
 
         let check_for_update_on_startup = cfg.check_for_update_on_startup.unwrap_or(true);
+        let reward_signals = cfg.reward_signals.unwrap_or(true);
         let model_catalog = load_model_catalog(cfg.model_catalog_json.clone())?;
 
         let log_dir = cfg
@@ -3662,6 +3670,7 @@ impl Config {
             active_project,
             notices,
             check_for_update_on_startup,
+            reward_signals,
             disable_paste_burst: cfg.disable_paste_burst.unwrap_or(false),
             analytics_enabled: cfg.analytics.as_ref().and_then(|a| a.enabled),
             feedback_enabled: cfg
