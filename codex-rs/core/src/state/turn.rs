@@ -97,6 +97,10 @@ pub(crate) struct TurnState {
     pub(crate) tool_calls: u64,
     pub(crate) has_memory_citation: bool,
     pub(crate) token_usage_at_turn_start: TokenUsage,
+    /// Provider response id of the last completed response in this turn, if any.
+    /// Surfaced via `TurnComplete` so the UI can attach content-free reward
+    /// signals to the exact response.
+    pub(crate) last_response_id: Option<String>,
 }
 
 pub(crate) struct PendingRequestPermissions {

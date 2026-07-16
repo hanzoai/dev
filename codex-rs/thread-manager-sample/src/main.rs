@@ -281,6 +281,7 @@ fn new_config(model: Option<String>, arg0_paths: Arg0DispatchPaths) -> anyhow::R
         active_project: ProjectConfig { trust_level: None },
         notices: Notice::default(),
         check_for_update_on_startup: false,
+        reward_signals: false,
         disable_paste_burst: false,
         analytics_enabled: Some(false),
         feedback_enabled: false,

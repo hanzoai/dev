@@ -41,6 +41,7 @@ async fn experimental_mode_plan_is_ignored_on_startup() {
         has_codex_backend_auth: false,
         model_catalog: test_model_catalog(&cfg),
         feedback: codex_feedback::CodexFeedback::new(),
+        reward_signals: codex_reward_signals::RewardSignals::disabled(),
         is_first_run: true,
         status_account_display: None,
         runtime_model_provider_base_url: None,
