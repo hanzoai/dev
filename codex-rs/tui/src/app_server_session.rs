@@ -2353,6 +2353,7 @@ mod tests {
                     started_at: None,
                     completed_at: None,
                     duration_ms: None,
+                    response_id: None,
                 }],
             },
             model: "gpt-5.4".to_string(),

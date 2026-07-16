@@ -893,6 +893,7 @@ mod tests {
                     started_at: None,
                     completed_at: Some(0),
                     duration_ms: None,
+                    response_id: None,
                 },
             })
         ));

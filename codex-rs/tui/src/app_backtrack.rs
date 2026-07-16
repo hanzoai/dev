@@ -226,6 +226,10 @@ impl App {
             selection,
             thread_id: self.chat_widget.thread_id(),
         });
+        // Backtracking to re-run a turn discards the prior response: emit a
+        // content-free `regenerate` reward signal for the response being redone.
+        self.chat_widget
+            .send_reward_signal(codex_reward_signals::Signal::Regenerate);
         self.chat_widget
             .submit_op(AppCommand::thread_rollback(num_turns));
         self.chat_widget.set_remote_image_urls(remote_image_urls);

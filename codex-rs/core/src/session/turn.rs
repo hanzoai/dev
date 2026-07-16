@@ -247,7 +247,14 @@ pub(crate) async fn run_turn(
                 let SamplingRequestResult {
                     needs_follow_up: model_needs_follow_up,
                     last_agent_message: sampling_request_last_agent_message,
+                    response_id: sampling_request_response_id,
                 } = sampling_request_output;
+                // Record the latest response id on the turn so `TurnComplete`
+                // can carry it to the UI for content-free reward signals.
+                if sampling_request_response_id.is_some() {
+                    sess.record_turn_response_id(sampling_request_response_id)
+                        .await;
+                }
                 can_drain_pending_input = true;
                 let (has_pending_input, token_status, estimated_token_count) = async {
                     let has_pending_input =
@@ -1242,6 +1249,9 @@ pub(crate) async fn built_tools(
 struct SamplingRequestResult {
     needs_follow_up: bool,
     last_agent_message: Option<String>,
+    /// Provider response id from the completed response, threaded up so the turn
+    /// can surface it (content-free reward signals attach to this id).
+    response_id: Option<String>,
 }
 
 /// Ephemeral per-response state for streaming a single proposed plan.
@@ -2003,6 +2013,7 @@ async fn try_run_sampling_request(
                     break Ok(SamplingRequestResult {
                         needs_follow_up: true,
                         last_agent_message,
+                        response_id: None,
                     });
                 }
             }
@@ -2118,9 +2129,9 @@ async fn try_run_sampling_request(
                 sess.services.models_manager.refresh_if_new_etag(etag).await;
             }
             ResponseEvent::Completed {
+                response_id,
                 token_usage,
                 end_turn,
-                ..
             } => {
                 flush_assistant_text_segments_all(
                     &sess,
@@ -2136,9 +2147,11 @@ async fn try_run_sampling_request(
                 if let Some(false) = end_turn {
                     needs_follow_up = true;
                 }
+                let response_id = (!response_id.is_empty()).then_some(response_id);
                 break Ok(SamplingRequestResult {
                     needs_follow_up,
                     last_agent_message,
+                    response_id,
                 });
             }
             ResponseEvent::OutputTextDelta(delta) => {

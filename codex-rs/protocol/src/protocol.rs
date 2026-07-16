@@ -1945,6 +1945,12 @@ pub struct TurnCompleteEvent {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     #[ts(type = "number | null", optional)]
     pub time_to_first_token_ms: Option<i64>,
+    /// Provider response id of the last completed response in this turn, when
+    /// available. Carried through so surfaces can attach content-free reward
+    /// signals (router-training feedback) to the exact response.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(type = "string | null", optional)]
+    pub response_id: Option<String>,
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize, JsonSchema, TS)]

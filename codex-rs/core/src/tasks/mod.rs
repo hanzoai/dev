@@ -578,12 +578,13 @@ impl Session {
             .input_queue
             .take_pending_input_for_turn_state(turn_state.as_ref())
             .await;
-        let (turn_had_memory_citation, turn_tool_calls, token_usage_at_turn_start) = {
+        let (turn_had_memory_citation, turn_tool_calls, token_usage_at_turn_start, last_response_id) = {
             let ts = turn_state.lock().await;
             (
                 ts.has_memory_citation,
                 ts.tool_calls,
                 ts.token_usage_at_turn_start.clone(),
+                ts.last_response_id.clone(),
             )
         };
         if !pending_input.is_empty() {
@@ -748,6 +749,7 @@ impl Session {
             completed_at,
             duration_ms,
             time_to_first_token_ms,
+            response_id: last_response_id,
         });
         self.send_event(turn_context.as_ref(), event).await;
         self.services

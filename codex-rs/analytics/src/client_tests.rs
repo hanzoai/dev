@@ -362,6 +362,7 @@ fn sample_turn_start_response() -> ClientResponsePayload {
             started_at: None,
             completed_at: None,
             duration_ms: None,
+            response_id: None,
         },
     })
 }
