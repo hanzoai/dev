@@ -2723,6 +2723,7 @@ async fn record_initial_history_forked_hydrates_previous_turn_settings() {
                 completed_at: None,
                 duration_ms: None,
                 time_to_first_token_ms: None,
+                response_id: None,
             },
         )),
     ];
@@ -2923,6 +2924,7 @@ async fn thread_rollback_recomputes_previous_turn_settings_and_reference_context
             completed_at: None,
             duration_ms: None,
             time_to_first_token_ms: None,
+            response_id: None,
         })),
         RolloutItem::EventMsg(EventMsg::TurnStarted(
             codex_protocol::protocol::TurnStartedEvent {
@@ -2952,6 +2954,7 @@ async fn thread_rollback_recomputes_previous_turn_settings_and_reference_context
             completed_at: None,
             duration_ms: None,
             time_to_first_token_ms: None,
+            response_id: None,
         })),
     ])
     .await;
@@ -3038,6 +3041,7 @@ async fn thread_rollback_restores_cleared_reference_context_item_after_compactio
             completed_at: None,
             duration_ms: None,
             time_to_first_token_ms: None,
+            response_id: None,
         })),
         RolloutItem::EventMsg(EventMsg::TurnStarted(
             codex_protocol::protocol::TurnStartedEvent {
@@ -3059,6 +3063,7 @@ async fn thread_rollback_restores_cleared_reference_context_item_after_compactio
             completed_at: None,
             duration_ms: None,
             time_to_first_token_ms: None,
+            response_id: None,
         })),
         RolloutItem::EventMsg(EventMsg::TurnStarted(
             codex_protocol::protocol::TurnStartedEvent {
@@ -3091,6 +3096,7 @@ async fn thread_rollback_restores_cleared_reference_context_item_after_compactio
             completed_at: None,
             duration_ms: None,
             time_to_first_token_ms: None,
+            response_id: None,
         })),
     ])
     .await;
@@ -3149,6 +3155,7 @@ async fn thread_rollback_persists_marker_and_replays_cumulatively() {
             completed_at: None,
             duration_ms: None,
             time_to_first_token_ms: None,
+            response_id: None,
         })),
         RolloutItem::EventMsg(EventMsg::TurnStarted(
             codex_protocol::protocol::TurnStartedEvent {
@@ -3176,6 +3183,7 @@ async fn thread_rollback_persists_marker_and_replays_cumulatively() {
             completed_at: None,
             duration_ms: None,
             time_to_first_token_ms: None,
+            response_id: None,
         })),
         RolloutItem::EventMsg(EventMsg::TurnStarted(
             codex_protocol::protocol::TurnStartedEvent {
@@ -3203,6 +3211,7 @@ async fn thread_rollback_persists_marker_and_replays_cumulatively() {
             completed_at: None,
             duration_ms: None,
             time_to_first_token_ms: None,
+            response_id: None,
         })),
     ])
     .await;
@@ -8859,6 +8868,7 @@ async fn task_finish_emits_turn_item_lifecycle_for_leftover_pending_user_input()
             turn_id,
             last_agent_message: None,
             time_to_first_token_ms: None,
+            response_id: None,
             ..
         }) if turn_id == tc.sub_id
     ));

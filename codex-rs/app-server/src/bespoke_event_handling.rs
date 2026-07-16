@@ -167,6 +167,7 @@ pub(crate) async fn apply_bespoke_event_handling(
                     started_at: payload.started_at,
                     completed_at: None,
                     duration_ms: None,
+                    response_id: None,
                 });
                 turn.items.clear();
                 turn.items_view = TurnItemsView::NotLoaded;
@@ -1320,6 +1321,7 @@ struct TurnCompletionMetadata {
     started_at: Option<i64>,
     completed_at: Option<i64>,
     duration_ms: Option<i64>,
+    response_id: Option<String>,
 }
 
 async fn emit_turn_completed_with_status(
@@ -1339,6 +1341,7 @@ async fn emit_turn_completed_with_status(
             started_at: turn_completion_metadata.started_at,
             completed_at: turn_completion_metadata.completed_at,
             duration_ms: turn_completion_metadata.duration_ms,
+            response_id: turn_completion_metadata.response_id,
         },
     };
     outgoing
@@ -1523,6 +1526,7 @@ async fn handle_turn_complete(
             started_at: turn_summary.started_at,
             completed_at: turn_complete_event.completed_at,
             duration_ms: turn_complete_event.duration_ms,
+            response_id: turn_complete_event.response_id.clone(),
         },
         outgoing,
     )
@@ -1547,6 +1551,7 @@ async fn handle_turn_interrupted(
             started_at: turn_summary.started_at,
             completed_at: turn_aborted_event.completed_at,
             duration_ms: turn_aborted_event.duration_ms,
+            response_id: None,
         },
         outgoing,
     )
@@ -2305,6 +2310,7 @@ mod tests {
             completed_at: Some(TEST_TURN_COMPLETED_AT),
             duration_ms: Some(TEST_TURN_DURATION_MS),
             time_to_first_token_ms: None,
+            response_id: None,
         }
     }
 
