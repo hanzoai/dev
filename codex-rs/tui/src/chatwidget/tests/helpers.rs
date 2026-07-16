@@ -188,6 +188,7 @@ pub(super) async fn make_chatwidget_manual_with_auth(
         has_codex_backend_auth,
         model_catalog,
         feedback: codex_feedback::CodexFeedback::new(),
+        reward_signals: codex_reward_signals::RewardSignals::disabled(),
         is_first_run: true,
         status_account_display: None,
         runtime_model_provider_base_url: None,
@@ -976,6 +977,7 @@ pub(super) fn app_server_turn(
         started_at: None,
         completed_at: None,
         duration_ms,
+        response_id: None,
     }
 }
 

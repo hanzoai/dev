@@ -1899,6 +1899,16 @@ impl Session {
         Ok(())
     }
 
+    /// Record the provider response id for the active turn so `TurnComplete`
+    /// can surface it. No-op if there is no active turn.
+    pub(crate) async fn record_turn_response_id(&self, response_id: Option<String>) {
+        let mut active = self.active_turn.lock().await;
+        if let Some(at) = active.as_mut() {
+            let mut ts = at.turn_state.lock().await;
+            ts.last_response_id = response_id;
+        }
+    }
+
     pub(crate) async fn turn_context_for_sub_id(&self, sub_id: &str) -> Option<Arc<TurnContext>> {
         let active = self.active_turn.lock().await;
         active
