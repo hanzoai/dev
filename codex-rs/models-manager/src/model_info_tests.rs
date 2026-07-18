@@ -72,3 +72,22 @@ fn model_context_window_uses_model_value_without_override() {
 
     assert_eq!(updated, model);
 }
+
+/// The bundled catalog ships an `enso` entry with a full 1M-token window so the
+/// Hanzo flagship is NOT silently capped at the unknown-slug fallback (272k).
+/// Prefix matching means `enso`, `enso-1m`, etc. all resolve to this entry.
+#[test]
+fn bundled_enso_declares_one_million_token_window() {
+    let catalog = crate::bundled_models_response().expect("bundled models.json parses");
+    let enso = catalog
+        .models
+        .iter()
+        .find(|m| m.slug == "enso")
+        .expect("bundled catalog must contain the `enso` model");
+
+    assert_eq!(enso.context_window, Some(1_000_000));
+    assert_eq!(enso.max_context_window, Some(1_000_000));
+    assert_eq!(enso.resolved_context_window(), Some(1_000_000));
+    // Auto-compaction must key off the true window (90% of 1M), not the 272k floor.
+    assert_eq!(enso.auto_compact_token_limit(), Some(900_000));
+}
