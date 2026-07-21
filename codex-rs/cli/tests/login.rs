@@ -83,22 +83,17 @@ async fn device_login_revokes_existing_auth_before_requesting_new_tokens() -> Re
         .expect(1)
         .mount(&server)
         .await;
+    // Hanzo device login is standard RFC 8628: POST {issuer}/oauth/device for the
+    // device+user codes, then poll POST {issuer}/oauth/token with the device_code
+    // grant. (The legacy OpenAI /api/accounts/deviceauth/* scheme is not used.)
     Mock::given(method("POST"))
-        .and(path("/api/accounts/deviceauth/usercode"))
+        .and(path("/oauth/device"))
         .respond_with(ResponseTemplate::new(200).set_body_json(json!({
-            "device_auth_id": "device-auth-123",
+            "device_code": "device-code-123",
             "user_code": "CODE-12345",
-            "interval": "0",
-        })))
-        .expect(1)
-        .mount(&server)
-        .await;
-    Mock::given(method("POST"))
-        .and(path("/api/accounts/deviceauth/token"))
-        .respond_with(ResponseTemplate::new(200).set_body_json(json!({
-            "authorization_code": "authorization-code-123",
-            "code_challenge": "code-challenge-123",
-            "code_verifier": "code-verifier-123",
+            "verification_uri": "https://hanzo.id/v1/iam/oauth/device",
+            "interval": 0,
+            "expires_in": 900,
         })))
         .expect(1)
         .mount(&server)
@@ -154,8 +149,7 @@ async fn device_login_revokes_existing_auth_before_requesting_new_tokens() -> Re
         paths,
         vec![
             "/oauth/revoke",
-            "/api/accounts/deviceauth/usercode",
-            "/api/accounts/deviceauth/token",
+            "/oauth/device",
             "/oauth/token",
         ]
     );

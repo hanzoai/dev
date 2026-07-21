@@ -105,8 +105,10 @@ async fn init_backend(overrides: &CliConfigOverrides) -> anyhow::Result<HttpClie
         config.codex_home.to_path_buf(),
         /*enable_codex_api_key_env*/ false,
         config.cli_auth_credentials_store_mode,
+        config.forced_chatgpt_workspace_id.clone(),
         Some(config.chatgpt_base_url.clone()),
         config.auth_keyring_backend_kind(),
+        config.auth_route_config(),
     )
     .await;
 

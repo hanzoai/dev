@@ -137,7 +137,7 @@ fork_intermediate_child (void)
   if (pid == -1)
     die_with_error ("Can't fork for --pidns");
 
-  /* The parent process is not needed */
+  /* Parent is an process not needed */
   if (pid != 0)
     exit (0);
 }

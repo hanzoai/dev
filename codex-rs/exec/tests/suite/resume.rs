@@ -354,12 +354,14 @@ async fn exec_resume_accepts_global_flags_after_subcommand() -> anyhow::Result<(
         .success();
 
     // Resume while passing global flags after the subcommand to ensure clap accepts them.
-    let mut cmd = test.cmd();
-    cmd.arg("resume").arg("--last");
-    for override_arg in core_test_support::test_codex_exec::mock_server_config_overrides(&server) {
-        cmd.arg("--config").arg(override_arg);
-    }
-    cmd.arg("--json")
+    let base = format!("{}/v1", server.uri());
+    let base_config = format!("openai_base_url={}", serde_json::to_string(&base)?);
+    test.cmd()
+        .arg("resume")
+        .arg("--last")
+        .arg("--config")
+        .arg(base_config)
+        .arg("--json")
         .arg("--model")
         .arg("gpt-5.2-codex")
         .arg("--config")
