@@ -1881,6 +1881,21 @@ dependencies = [
 ]
 
 [[package]]
+name = "codex-agents-client"
+version = "0.0.0"
+dependencies = [
+ "anyhow",
+ "codex-api",
+ "pretty_assertions",
+ "reqwest 0.12.28",
+ "serde",
+ "serde_json",
+ "thiserror 2.0.18",
+ "tokio",
+ "wiremock",
+]
+
+[[package]]
 name = "codex-analytics"
 version = "0.0.0"
 dependencies = [
@@ -2312,6 +2327,7 @@ dependencies = [
  "assert_matches",
  "clap",
  "clap_complete",
+ "codex-agents-client",
  "codex-api",
  "codex-app-server",
  "codex-app-server-daemon",
@@ -2351,6 +2367,7 @@ dependencies = [
  "codex-utils-cargo-bin",
  "codex-utils-cli",
  "codex-utils-path",
+ "codex-version",
  "codex-windows-sandbox",
  "crossterm",
  "http 1.4.0",
@@ -4153,6 +4170,7 @@ dependencies = [
  "codex-utils-sandbox-summary",
  "codex-utils-sleep-inhibitor",
  "codex-utils-string",
+ "codex-version",
  "codex-windows-sandbox",
  "color-eyre",
  "core_test_support",
@@ -4455,6 +4473,10 @@ dependencies = [
  "pretty_assertions",
  "v8",
 ]
+
+[[package]]
+name = "codex-version"
+version = "0.0.0"
 
 [[package]]
 name = "codex-web-search-extension"

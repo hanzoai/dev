@@ -4,6 +4,8 @@ members = [
     "analytics",
     "agent-graph-store",
     "agent-identity",
+    "agents-client",
+    "code-version",
     "backend-client",
     "bwrap",
     "ansi-escape",
@@ -142,8 +144,10 @@ app_test_support = { path = "app-server/tests/common" }
 codex-analytics = { path = "analytics" }
 codex-agent-graph-store = { path = "agent-graph-store" }
 codex-agent-identity = { path = "agent-identity" }
+codex-agents-client = { path = "agents-client" }
 codex-ansi-escape = { path = "ansi-escape" }
 codex-api = { path = "codex-api" }
+codex-version = { path = "code-version" }
 codex-aws-auth = { path = "aws-auth" }
 codex-app-server = { path = "app-server" }
 codex-app-server-transport = { path = "app-server-transport" }

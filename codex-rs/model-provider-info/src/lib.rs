@@ -35,6 +35,32 @@ const MAX_REQUEST_MAX_RETRIES: u64 = 100;
 const OPENAI_PROVIDER_NAME: &str = "OpenAI";
 const OPENAI_ACTOR_AUTHORIZATION_HEADER: &str = "x-openai-actor-authorization";
 pub const OPENAI_PROVIDER_ID: &str = "openai";
+const HANZO_PROVIDER_NAME: &str = "Hanzo";
+pub const HANZO_PROVIDER_ID: &str = "hanzo";
+const HANZO_BASE_URL: &str = "https://api.hanzo.ai/v1";
+// Native local inference via hanzo engine / hanzo-node (`hanzo serve`),
+// which exposes an OpenAI-compatible API on http://localhost:1234/v1.
+pub const HANZO_LOCAL_PROVIDER_ID: &str = "hanzo-local";
+const HANZO_LOCAL_BASE_URL: &str = "http://localhost:1234/v1";
+// Generic node provider: works against ANY Hanzo/Lux/Zoo node (they run the
+// same OpenAI-compatible serve API). Point it at a node with HANZO_NODE_URL;
+// defaults to the Hanzo Desktop embedded engine on http://localhost:36900/v1
+// (hanzo-desktop's embedded_engine default port; endpoints /v1/chat/completions,
+// /v1/embeddings, /v1/models). Standalone `hanzo serve` (port 1234) is `hanzo-local`.
+pub const NODE_PROVIDER_ID: &str = "node";
+const HANZO_NODE_BASE_URL: &str = "http://localhost:36900/v1";
+
+/// A provider for any Hanzo/Lux/Zoo node (incl. the Hanzo Desktop embedded
+/// engine). Base URL comes from `HANZO_NODE_URL` (e.g. http://some-node:36900/v1),
+/// defaulting to the local desktop node on :36900.
+pub fn create_node_provider() -> ModelProviderInfo {
+    let base_url = std::env::var("HANZO_NODE_URL")
+        .ok()
+        .map(|v| v.trim().to_string())
+        .filter(|v| !v.is_empty())
+        .unwrap_or_else(|| HANZO_NODE_BASE_URL.to_string());
+    create_oss_provider_with_base_url(&base_url, WireApi::Responses)
+}
 pub const CHATGPT_CODEX_BASE_URL: &str = "https://chatgpt.com/backend-api/codex";
 const AMAZON_BEDROCK_PROVIDER_NAME: &str = "Amazon Bedrock";
 pub const AMAZON_BEDROCK_PROVIDER_ID: &str = "amazon-bedrock";
@@ -363,6 +389,44 @@ impl ModelProviderInfo {
         }
     }
 
+    /// Hanzo AI gateway (api.hanzo.ai) — OpenAI-compatible, Responses wire API
+    /// over HTTP. Auth flows through the auth layer (Hanzo IAM OAuth from
+    /// `dev login`, or HANZO_USER_KEY/HANZO_API_KEY/CODEX_API_KEY), mirroring
+    /// the OpenAI provider. Default provider for the `dev` CLI.
+    ///
+    /// `env_key` is intentionally `None`: this provider does NOT read a key via
+    /// the `env_key` literal. Per-user/org attribution (prefer HANZO_USER_KEY,
+    /// skip BALANCE_EXEMPT_KEYS service keys) is resolved in ONE place —
+    /// `codex_login::load_auth` / `pick_token` — so both brokered relay sessions
+    /// and direct LLM calls bill the same user. Do NOT set
+    /// `env_key: Some("HANZO_API_KEY")` here; it would bypass that logic.
+    pub fn create_hanzo_provider() -> ModelProviderInfo {
+        ModelProviderInfo {
+            name: HANZO_PROVIDER_NAME.into(),
+            base_url: Some(HANZO_BASE_URL.to_string()),
+            env_key: None,
+            env_key_instructions: None,
+            experimental_bearer_token: None,
+            auth: None,
+            aws: None,
+            wire_api: WireApi::Responses,
+            query_params: None,
+            http_headers: Some(
+                [("version".to_string(), env!("CARGO_PKG_VERSION").to_string())]
+                    .into_iter()
+                    .collect(),
+            ),
+            env_http_headers: None,
+            request_max_retries: None,
+            stream_max_retries: None,
+            stream_idle_timeout_ms: None,
+            websocket_connect_timeout_ms: None,
+            requires_openai_auth: true,
+            // api.hanzo.ai serves Responses over HTTP, not websocket.
+            supports_websockets: false,
+        }
+    }
+
     pub fn create_amazon_bedrock_provider(
         aws: Option<ModelProviderAwsAuthInfo>,
     ) -> ModelProviderInfo {
@@ -442,6 +506,15 @@ pub fn built_in_model_providers(
     // open source ("oss") providers by default. Users are encouraged to add to
     // `model_providers` in config.toml to add their own providers.
     [
+        (HANZO_PROVIDER_ID, P::create_hanzo_provider()),
+        // Native local inference: hanzo engine (`hanzo serve`) / hanzo-node serve
+        // an OpenAI-compatible API on http://localhost:1234/v1.
+        (
+            HANZO_LOCAL_PROVIDER_ID,
+            create_oss_provider_with_base_url(HANZO_LOCAL_BASE_URL, WireApi::Responses),
+        ),
+        // Any Hanzo/Lux/Zoo node (set HANZO_NODE_URL; defaults to local node).
+        (NODE_PROVIDER_ID, create_node_provider()),
         (OPENAI_PROVIDER_ID, openai_provider),
         (AMAZON_BEDROCK_PROVIDER_ID, amazon_bedrock_provider),
         (
