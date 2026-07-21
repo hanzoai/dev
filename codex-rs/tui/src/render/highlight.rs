@@ -1,7 +1,8 @@
 //! Syntax highlighting engine for the TUI.
 //!
 //! Wraps [syntect] with the [two_face] grammar and theme bundles to provide
-//! ~250-language syntax highlighting and 32 bundled color themes.  The module
+//! ~250-language syntax highlighting and 33 bundled color themes (the 32 from
+//! two_face plus Alucard, the light companion to Dracula).  The module
 //! owns five process-global singletons:
 //!
 //! | Singleton | Type | Purpose |
@@ -112,7 +113,7 @@ pub(crate) fn validate_theme_name(name: Option<&str>, codex_home: Option<&Path>)
         .map(|home| custom_theme_path(name, home).display().to_string())
         .unwrap_or_else(|| format!("$CODEX_HOME/themes/{name}.tmTheme"));
     // Bundled themes always resolve.
-    if parse_theme_name(name).is_some() {
+    if resolve_bundled_theme(name).is_some() {
         return None;
     }
     // Custom themes must parse successfully; an unreadable/invalid file should
@@ -185,37 +186,52 @@ fn load_custom_theme(name: &str, codex_home: &Path) -> Option<Theme> {
     ThemeSet::get_theme(custom_theme_path(name, codex_home)).ok()
 }
 
-fn adaptive_default_theme_selection() -> (EmbeddedThemeName, &'static str) {
-    match crate::terminal_palette::default_bg() {
-        Some(bg) if crate::color::is_light(bg) => {
-            (EmbeddedThemeName::CatppuccinLatte, "catppuccin-latte")
+/// Alucard — Dracula's light companion — shipped as a `.tmTheme` asset embedded
+/// in the binary.  two_face has no light Dracula, so Hanzo Dev bundles its own,
+/// with the same palette the `hanzo code claude` wrapper uses on light terminals.
+const ALUCARD_TMTHEME: &str = include_str!("alucard.tmTheme");
+
+/// Resolve an extra bundled theme (a `.tmTheme` asset compiled into the binary)
+/// by kebab-case name.  Returns `None` for names outside this small set.
+fn extra_bundled_theme(name: &str) -> Option<Theme> {
+    match name {
+        "alucard" => {
+            ThemeSet::load_from_reader(&mut std::io::Cursor::new(ALUCARD_TMTHEME.as_bytes())).ok()
         }
-        _ => (EmbeddedThemeName::CatppuccinMocha, "catppuccin-mocha"),
+        _ => None,
     }
 }
 
-fn adaptive_default_embedded_theme_name() -> EmbeddedThemeName {
-    adaptive_default_theme_selection().0
+/// Resolve any bundled theme by kebab-case name — the two_face embedded set or
+/// an extra `.tmTheme` asset (currently just Alucard).  This is the single seam
+/// through which both user overrides and the adaptive default resolve.
+fn resolve_bundled_theme(name: &str) -> Option<Theme> {
+    if let Some(embedded) = parse_theme_name(name) {
+        return Some(two_face::theme::extra().get(embedded).clone());
+    }
+    extra_bundled_theme(name)
 }
 
-/// Return the kebab-case name of the adaptive default syntax theme selected
-/// from terminal background lightness.
+/// The adaptive default syntax theme name: **Dracula** on dark terminals and
+/// **Alucard** (Dracula's light companion) on light ones — mirroring the
+/// `hanzo code claude` auto theme policy.  Both ship bundled in the binary.
 pub(crate) fn adaptive_default_theme_name() -> &'static str {
-    adaptive_default_theme_selection().1
+    match crate::terminal_palette::default_bg() {
+        Some(bg) if crate::color::is_light(bg) => "alucard",
+        _ => "dracula",
+    }
 }
 
 /// Build the theme from current override/default-theme settings.
 /// Extracted from the old `theme()` init closure so it can be reused.
 fn resolve_theme_with_override(name: Option<&str>, codex_home: Option<&Path>) -> Theme {
-    let ts = two_face::theme::extra();
-
     // Honor user-configured theme if valid.
     if let Some(name) = name {
-        // 1. Try bundled theme by kebab-case name.
-        if let Some(theme_name) = parse_theme_name(name) {
-            return ts.get(theme_name).clone();
+        // 1. Bundled theme (two_face embedded or extra .tmTheme asset).
+        if let Some(theme) = resolve_bundled_theme(name) {
+            return theme;
         }
-        // 2. Try loading {CODEX_HOME}/themes/{name}.tmTheme from disk.
+        // 2. Custom {CODEX_HOME}/themes/{name}.tmTheme from disk.
         if let Some(home) = codex_home
             && let Some(theme) = load_custom_theme(name, home)
         {
@@ -224,7 +240,8 @@ fn resolve_theme_with_override(name: Option<&str>, codex_home: Option<&Path>) ->
         tracing::debug!("Theme \"{name}\" not recognized; using default theme");
     }
 
-    ts.get(adaptive_default_embedded_theme_name()).clone()
+    resolve_bundled_theme(adaptive_default_theme_name())
+        .unwrap_or_else(|| two_face::theme::extra().get(EmbeddedThemeName::Dracula).clone())
 }
 
 /// Build the theme from current override/default-theme settings.
@@ -332,7 +349,7 @@ fn foreground_style_for_scopes_with_theme(theme: &Theme, scope_names: &[&str]) -
 pub(crate) fn configured_theme_name() -> String {
     // Explicit user override?
     if let Some(Some(name)) = THEME_OVERRIDE.get() {
-        if parse_theme_name(name).is_some() {
+        if resolve_bundled_theme(name).is_some() {
             return name.clone();
         }
         if let Some(Some(home)) = CODEX_HOME.get()
@@ -347,10 +364,9 @@ pub(crate) fn configured_theme_name() -> String {
 /// Resolve a theme name to a `Theme` (bundled or custom). Returns `None`
 /// when the name is unknown and no matching `.tmTheme` file exists.
 pub(crate) fn resolve_theme_by_name(name: &str, codex_home: Option<&Path>) -> Option<Theme> {
-    let ts = two_face::theme::extra();
-    // Bundled theme?
-    if let Some(embedded) = parse_theme_name(name) {
-        return Some(ts.get(embedded).clone());
+    // Bundled theme (two_face embedded or extra .tmTheme asset)?
+    if let Some(theme) = resolve_bundled_theme(name) {
+        return Some(theme);
     }
     // Custom .tmTheme file?
     if let Some(home) = codex_home
@@ -411,9 +427,10 @@ pub(crate) fn list_available_themes(codex_home: Option<&Path>) -> Vec<ThemeEntry
     entries
 }
 
-/// All 32 bundled theme names in kebab-case, ordered alphabetically.
+/// All 33 bundled theme names in kebab-case, ordered alphabetically.
 const BUILTIN_THEME_NAMES: &[&str] = &[
     "1337",
+    "alucard",
     "ansi",
     "base16",
     "base16-256",
@@ -1571,6 +1588,52 @@ mod tests {
             assert!(
                 mapped.contains(variant),
                 "EmbeddedThemeName::{variant:?} has no kebab-case mapping in parse_theme_name"
+            );
+        }
+    }
+
+    #[test]
+    fn alucard_is_bundled_via_extra_asset_not_two_face() {
+        // Alucard ships as an embedded .tmTheme asset, deliberately outside the
+        // two_face set (which `parse_theme_name_is_exhaustive` pins at 32).
+        assert_eq!(parse_theme_name("alucard"), None);
+        let theme = extra_bundled_theme("alucard").expect("bundled alucard.tmTheme must parse");
+        assert!(
+            theme.settings.background.is_some(),
+            "alucard carries its light cream background"
+        );
+        assert!(resolve_bundled_theme("alucard").is_some());
+    }
+
+    #[test]
+    fn adaptive_default_is_dracula_or_alucard() {
+        let name = adaptive_default_theme_name();
+        assert!(
+            name == "dracula" || name == "alucard",
+            "adaptive default must be a Hanzo bundled theme, got {name:?}"
+        );
+        assert!(
+            resolve_bundled_theme(name).is_some(),
+            "adaptive default {name:?} must resolve to a bundled theme"
+        );
+    }
+
+    #[test]
+    fn resolve_theme_by_name_resolves_alucard() {
+        assert!(resolve_theme_by_name("alucard", /*codex_home*/ None).is_some());
+    }
+
+    #[test]
+    fn validate_theme_name_none_for_alucard() {
+        assert!(validate_theme_name(Some("alucard"), /*codex_home*/ None).is_none());
+    }
+
+    #[test]
+    fn every_builtin_theme_name_resolves() {
+        for name in BUILTIN_THEME_NAMES {
+            assert!(
+                resolve_bundled_theme(name).is_some(),
+                "BUILTIN_THEME_NAMES entry {name:?} must resolve to a bundled theme"
             );
         }
     }

@@ -19,6 +19,7 @@ use codex_login::login_with_api_key;
 use codex_login::logout_with_revoke;
 use codex_login::run_device_code_login;
 use codex_login::run_login_server;
+use codex_login::run_oidc_device_code_login;
 use codex_protocol::auth::AuthMode;
 use codex_protocol::config_types::ForcedLoginMethod;
 use codex_utils_cli::CliConfigOverrides;
@@ -162,6 +163,61 @@ pub async fn login_with_chatgpt(
     print_login_server_start(server.actual_port, &server.auth_url);
 
     server.block_until_done().await
+}
+
+/// Browser PKCE login against Hanzo IAM (hanzo.id). Uses the same local
+/// callback server as ChatGPT login, but with the Hanzo client id + issuer so
+/// the authorize/token URLs resolve to https://hanzo.id/v1/iam/oauth/*.
+pub async fn login_with_hanzo(
+    codex_home: PathBuf,
+    cli_auth_credentials_store_mode: AuthCredentialsStoreMode,
+    auth_keyring_backend_kind: AuthKeyringBackendKind,
+    auth_route_config: Option<AuthRouteConfig>,
+) -> std::io::Result<()> {
+    clear_existing_auth_before_login(
+        &codex_home,
+        cli_auth_credentials_store_mode,
+        auth_keyring_backend_kind,
+        auth_route_config.as_ref(),
+    )
+    .await;
+
+    let mut opts = ServerOptions::new(
+        codex_home,
+        codex_login::HANZO_CLIENT_ID.to_string(),
+        None,
+        cli_auth_credentials_store_mode,
+        auth_keyring_backend_kind,
+        auth_route_config,
+    );
+    opts.issuer = codex_login::HANZO_ISSUER.to_string();
+    let server = run_login_server(opts)?;
+    print_login_server_start(server.actual_port, &server.auth_url);
+    server.block_until_done().await
+}
+
+pub async fn run_login_with_hanzo(cli_config_overrides: CliConfigOverrides) -> ! {
+    let config = load_config_or_exit(cli_config_overrides).await;
+    let _login_log_guard = init_login_file_logging(&config);
+    tracing::info!("starting Hanzo IAM (hanzo.id) browser login flow");
+
+    match login_with_hanzo(
+        config.codex_home.to_path_buf(),
+        config.cli_auth_credentials_store_mode,
+        config.auth_keyring_backend_kind(),
+        config.auth_route_config(),
+    )
+    .await
+    {
+        Ok(_) => {
+            eprintln!("{LOGIN_SUCCESS_MESSAGE} (Hanzo)");
+            std::process::exit(0);
+        }
+        Err(e) => {
+            eprintln!("Error logging in with Hanzo: {e}");
+            std::process::exit(1);
+        }
+    }
 }
 
 pub async fn run_login_with_chatgpt(cli_config_overrides: CliConfigOverrides) -> ! {
@@ -342,6 +398,51 @@ pub async fn run_login_with_device_code(
         }
         Err(e) => {
             eprintln!("Error logging in with device code: {e}");
+            std::process::exit(1);
+        }
+    }
+}
+
+/// Headless RFC 8628 device login against Hanzo IAM. Standards-OIDC — distinct
+/// from `run_login_with_device_code`, which speaks the OpenAI device scheme for
+/// ChatGPT. Defaults to hanzo.id + the `hanzo-app` client; `issuer_base_url` /
+/// `client_id` override them (e.g. `https://lux.id/v1/iam` + `lux-app`, or
+/// `https://zoolabs.id/v1/iam` + `zoo-app`).
+pub async fn run_login_with_hanzo_device_code(
+    cli_config_overrides: CliConfigOverrides,
+    issuer_base_url: Option<String>,
+    client_id: Option<String>,
+) -> ! {
+    let config = load_config_or_exit(cli_config_overrides).await;
+    let _login_log_guard = init_login_file_logging(&config);
+    tracing::info!("starting Hanzo IAM (hanzo.id) device code login flow");
+
+    let auth_route_config = config.auth_route_config();
+    clear_existing_auth_before_login(
+        &config.codex_home,
+        config.cli_auth_credentials_store_mode,
+        config.auth_keyring_backend_kind(),
+        auth_route_config.as_ref(),
+    )
+    .await;
+
+    let mut opts = ServerOptions::new(
+        config.codex_home.to_path_buf(),
+        client_id.unwrap_or_else(|| codex_login::HANZO_CLIENT_ID.to_string()),
+        None,
+        config.cli_auth_credentials_store_mode,
+        config.auth_keyring_backend_kind(),
+        auth_route_config,
+    );
+    opts.issuer = issuer_base_url.unwrap_or_else(|| codex_login::HANZO_ISSUER.to_string());
+
+    match run_oidc_device_code_login(opts, codex_login::HANZO_DEVICE_SCOPE).await {
+        Ok(()) => {
+            eprintln!("{LOGIN_SUCCESS_MESSAGE} (Hanzo)");
+            std::process::exit(0);
+        }
+        Err(e) => {
+            eprintln!("Error logging in with Hanzo device code: {e}");
             std::process::exit(1);
         }
     }

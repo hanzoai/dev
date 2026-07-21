@@ -17,6 +17,8 @@ use codex_cli::run_login_with_access_token;
 use codex_cli::run_login_with_api_key;
 use codex_cli::run_login_with_chatgpt;
 use codex_cli::run_login_with_device_code;
+use codex_cli::run_login_with_hanzo;
+use codex_cli::run_login_with_hanzo_device_code;
 use codex_cli::run_logout;
 use codex_cloud_tasks::Cli as CloudTasksCli;
 use codex_exec::Cli as ExecCli;
@@ -44,6 +46,7 @@ use std::path::PathBuf;
 use std::sync::Arc;
 use supports_color::Stream;
 
+mod agent_cmd;
 #[cfg(any(target_os = "macos", target_os = "windows"))]
 mod app_cmd;
 #[cfg(any(target_os = "macos", target_os = "windows"))]
@@ -60,6 +63,7 @@ mod state_db_recovery;
 #[cfg(not(windows))]
 mod wsl_paths;
 
+use crate::agent_cmd::AgentCli;
 use crate::mcp_cmd::McpCli;
 use crate::plugin_cmd::PluginCli;
 use crate::plugin_cmd::PluginSubcommand;
@@ -88,20 +92,21 @@ use codex_protocol::protocol::AskForApproval;
 use codex_protocol::user_input::UserInput;
 use codex_terminal_detection::TerminalName;
 
-/// Codex CLI
+/// Hanzo Dev
 ///
 /// If no subcommand is specified, options will be forwarded to the interactive CLI.
 #[derive(Debug, Parser)]
 #[clap(
     author,
-    version,
+    name = "dev",
+    version = codex_version::CODE_VERSION,
     // If a sub‑command is given, ignore requirements of the default args.
     subcommand_negates_reqs = true,
     // The executable is sometimes invoked via a platform‑specific name like
-    // `codex-x86_64-unknown-linux-musl`, but the help output should always use
-    // the generic `codex` command name that users run.
-    bin_name = "codex",
-    override_usage = "codex [OPTIONS] [PROMPT]\n       codex [OPTIONS] <COMMAND> [ARGS]"
+    // `dev-x86_64-unknown-linux-musl`, but the help output should always use
+    // the generic `dev` command name that users run.
+    bin_name = "dev",
+    override_usage = "dev [OPTIONS] [PROMPT]\n       dev [OPTIONS] <COMMAND> [ARGS]"
 )]
 struct MultitoolCli {
     #[clap(flatten)]
@@ -122,7 +127,7 @@ struct MultitoolCli {
 
 #[derive(Debug, clap::Subcommand)]
 enum Subcommand {
-    /// Run Codex non-interactively.
+    /// Run dev non-interactively.
     #[clap(visible_alias = "e")]
     Exec(ExecCli),
 
@@ -135,13 +140,13 @@ enum Subcommand {
     /// Remove stored authentication credentials.
     Logout(LogoutCommand),
 
-    /// Manage external MCP servers for Codex.
+    /// Manage external MCP servers for dev.
     Mcp(McpCli),
 
-    /// Manage Codex plugins.
+    /// Manage dev plugins.
     Plugin(PluginCli),
 
-    /// Start Codex as an MCP server (stdio).
+    /// Start dev as an MCP server (stdio).
     McpServer(McpServerCommand),
 
     /// [experimental] Run the app server or related tooling.
@@ -157,13 +162,13 @@ enum Subcommand {
     /// Generate shell completion scripts.
     Completion(CompletionCommand),
 
-    /// Update Codex to the latest version.
+    /// Update dev to the latest version.
     Update,
 
-    /// Diagnose local Codex installation, config, auth, and runtime health.
+    /// Diagnose local dev installation, config, auth, and runtime health.
     Doctor(DoctorCommand),
 
-    /// Run commands within a Codex-provided sandbox.
+    /// Run commands within a dev-provided sandbox.
     Sandbox(HostSandboxArgs),
 
     /// Debugging tools.
@@ -173,7 +178,7 @@ enum Subcommand {
     #[clap(hide = true)]
     Execpolicy(ExecpolicyCommand),
 
-    /// Apply the latest diff produced by Codex agent as a `git apply` to your local working tree.
+    /// Apply the latest diff produced by dev agent as a `git apply` to your local working tree.
     #[clap(visible_alias = "a")]
     Apply(ApplyCommand),
 
@@ -192,9 +197,12 @@ enum Subcommand {
     /// Fork a previous interactive session (picker by default; use --last to fork the most recent).
     Fork(ForkCommand),
 
-    /// [EXPERIMENTAL] Browse tasks from Codex Cloud and apply changes locally.
+    /// [EXPERIMENTAL] Browse tasks from dev Cloud and apply changes locally.
     #[clap(name = "cloud", alias = "cloud-tasks")]
     Cloud(CloudTasksCli),
+
+    /// Run Hanzo Cloud agents from the terminal.
+    Agent(AgentCli),
 
     /// Internal: run the responses API proxy.
     #[clap(hide = true)]
@@ -486,6 +494,10 @@ struct LoginCommand {
     #[arg(long = "device-auth")]
     use_device_code: bool,
 
+    /// Login provider: hanzo (default), openai, or claude.
+    #[arg(long = "provider", value_name = "PROVIDER")]
+    provider: Option<LoginProvider>,
+
     /// EXPERIMENTAL: Use custom OAuth issuer base URL (advanced)
     /// Override the OAuth issuer base URL (advanced)
     #[arg(long = "experimental_issuer", value_name = "URL", hide = true)]
@@ -497,6 +509,16 @@ struct LoginCommand {
 
     #[command(subcommand)]
     action: Option<LoginSubcommand>,
+}
+
+#[derive(Debug, Clone, clap::ValueEnum)]
+enum LoginProvider {
+    /// Hanzo IAM (hanzo.id) — default.
+    Hanzo,
+    /// OpenAI / ChatGPT.
+    Openai,
+    /// Claude Code (Anthropic).
+    Claude,
 }
 
 #[derive(Debug, clap::Subcommand)]
@@ -1357,12 +1379,34 @@ async fn cli_main(
                         );
                         std::process::exit(1);
                     } else if login_cli.use_device_code {
-                        run_login_with_device_code(
-                            login_cli.config_overrides,
-                            login_cli.issuer_base_url,
-                            login_cli.client_id,
-                        )
-                        .await;
+                        // Device-code login routes by provider (it previously
+                        // always used the OpenAI scheme, ignoring --provider).
+                        match login_cli.provider {
+                            Some(LoginProvider::Openai) => {
+                                // OpenAI/ChatGPT proprietary /deviceauth scheme.
+                                run_login_with_device_code(
+                                    login_cli.config_overrides,
+                                    login_cli.issuer_base_url,
+                                    login_cli.client_id,
+                                )
+                                .await;
+                            }
+                            Some(LoginProvider::Claude) => {
+                                eprintln!(
+                                    "Claude does not support device-code login. Set ANTHROPIC_API_KEY, or use `dev login --provider claude`."
+                                );
+                                std::process::exit(1);
+                            }
+                            // Hanzo IAM (hanzo.id) default — standards RFC 8628.
+                            Some(LoginProvider::Hanzo) | None => {
+                                run_login_with_hanzo_device_code(
+                                    login_cli.config_overrides,
+                                    login_cli.issuer_base_url,
+                                    login_cli.client_id,
+                                )
+                                .await;
+                            }
+                        }
                     } else if login_cli.api_key.is_some() {
                         eprintln!(
                             "The --api-key flag is no longer supported. Pipe the key instead, e.g. `printenv OPENAI_API_KEY | codex login --with-api-key`."
@@ -1375,7 +1419,32 @@ async fn cli_main(
                         let access_token = read_access_token_from_stdin();
                         run_login_with_access_token(login_cli.config_overrides, access_token).await;
                     } else {
-                        run_login_with_chatgpt(login_cli.config_overrides).await;
+                        match login_cli.provider {
+                            Some(LoginProvider::Openai) => {
+                                run_login_with_chatgpt(login_cli.config_overrides).await;
+                            }
+                            Some(LoginProvider::Claude) => {
+                                // Reuse an existing Claude Code session if present;
+                                // otherwise guide the user to the API-key path.
+                                match codex_login::read_claude_code_keychain_token() {
+                                    Some(token) => {
+                                        run_login_with_api_key(login_cli.config_overrides, token)
+                                            .await;
+                                    }
+                                    None => {
+                                        eprintln!(
+                                            "No Claude Code session found. Set ANTHROPIC_API_KEY for the Claude-compatible endpoint, or sign in with Claude Code first."
+                                        );
+                                        std::process::exit(1);
+                                    }
+                                }
+                            }
+                            // Hanzo IAM (hanzo.id) is the default — browser PKCE
+                            // against https://hanzo.id/v1/iam/oauth/*.
+                            Some(LoginProvider::Hanzo) | None => {
+                                run_login_with_hanzo(login_cli.config_overrides).await;
+                            }
+                        }
                     }
                 }
             }
@@ -1434,6 +1503,18 @@ async fn cli_main(
             );
             codex_cloud_tasks::run_main(cloud_cli, arg0_paths.codex_linux_sandbox_exe.clone())
                 .await?;
+        }
+        Some(Subcommand::Agent(mut agent_cli)) => {
+            reject_remote_mode_for_subcommand(
+                root_remote.as_deref(),
+                root_remote_auth_token_env.as_deref(),
+                "agent",
+            )?;
+            prepend_config_flags(
+                &mut agent_cli.config_overrides,
+                root_config_overrides.clone(),
+            );
+            agent_cmd::run_main(agent_cli).await?;
         }
         Some(Subcommand::Sandbox(mut sandbox_cli)) => {
             #[cfg(target_os = "windows")]
@@ -2131,6 +2212,7 @@ fn unsupported_subcommand_name_for_strict_config(
         Some(Subcommand::Completion(_)) => Some("completion"),
         Some(Subcommand::Update) => Some("update"),
         Some(Subcommand::Cloud(_)) => Some("cloud"),
+        Some(Subcommand::Agent(_)) => Some("agent"),
         Some(Subcommand::Sandbox(_)) => Some("sandbox"),
         Some(Subcommand::Debug(_)) => Some("debug"),
         Some(Subcommand::Execpolicy(_)) => Some("execpolicy"),
@@ -2843,15 +2925,15 @@ mod tests {
     fn plugin_marketplace_help_uses_plugin_namespace() {
         let help = help_from_args(&["codex", "plugin", "marketplace", "--help"]);
         assert!(
-            help.contains("Usage: codex plugin marketplace [OPTIONS] <COMMAND>"),
+            help.contains("Usage: dev plugin marketplace [OPTIONS] <COMMAND>"),
             "{help}"
         );
 
         for (subcommand, usage) in [
-            ("add", "Usage: codex plugin marketplace add"),
-            ("list", "Usage: codex plugin marketplace list"),
-            ("upgrade", "Usage: codex plugin marketplace upgrade"),
-            ("remove", "Usage: codex plugin marketplace remove"),
+            ("add", "Usage: dev plugin marketplace add"),
+            ("list", "Usage: dev plugin marketplace list"),
+            ("upgrade", "Usage: dev plugin marketplace upgrade"),
+            ("remove", "Usage: dev plugin marketplace remove"),
         ] {
             let help = help_from_args(&["codex", "plugin", "marketplace", subcommand, "--help"]);
             assert!(help.contains(usage), "{help}");
