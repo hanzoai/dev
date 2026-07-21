@@ -689,13 +689,4 @@ else
     fi
 fi
 
-# Smoke-test --not-a-security-boundary
-#
-# Setting up an unavailable automount and triggering the right conditions is
-# complicated to do here, but we can at least check that the option is there,
-# and that it stays there.
-
-$RUN --not-a-security-boundary true
-ok "Accepts --not-a-security-boundary"
-
 done_testing

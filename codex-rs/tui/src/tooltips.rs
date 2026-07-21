@@ -9,10 +9,10 @@ const ANNOUNCEMENT_TIP_URL: &str =
 const IS_MACOS: bool = cfg!(target_os = "macos");
 const IS_WINDOWS: bool = cfg!(target_os = "windows");
 
-const APP_TOOLTIP: &str = "Try the **Codex App**. Run 'codex app' or visit https://chatgpt.com/codex?app-landing-page=true";
+const APP_TOOLTIP: &str = "Try the **Desktop app**. Run 'codex app' or visit https://chatgpt.com/codex?app-landing-page=true";
 const FAST_TOOLTIP: &str =
     "*New* Use **/fast** to enable our fastest inference with increased plan usage.";
-const OTHER_TOOLTIP: &str = "*New* Build faster with the **Codex App**. Run 'codex app' or visit https://chatgpt.com/codex?app-landing-page=true";
+const OTHER_TOOLTIP: &str = "*New* Build faster with the **Desktop app**. Run 'codex app' or visit https://chatgpt.com/codex?app-landing-page=true";
 const OTHER_TOOLTIP_NON_MAC: &str = "*New* Build faster with Codex.";
 const FREE_GO_TOOLTIP: &str =
     "*New* For a limited time, Codex is included in your plan for free – let’s build together.";
@@ -450,7 +450,7 @@ from_date = "2000-01-01"
     #[test]
     fn announcement_tip_toml_parse_comments() {
         let toml = r#"
-# Example announcement tips for Codex TUI.
+# Example announcement tips for Hanzo Dev TUI.
 # Each [[announcements]] entry is evaluated in order; the last matching one is shown.
 # Dates are UTC, formatted as YYYY-MM-DD. The from_date is inclusive and the to_date is exclusive.
 # version_regex matches against the CLI version (env!("CARGO_PKG_VERSION")); omit to apply to all versions.
@@ -459,7 +459,7 @@ from_date = "2000-01-01"
 # target_oses optionally restricts the announcement to operating systems like ["macos", "windows"].
 
 [[announcements]]
-content = "Welcome to Codex! Check out the new onboarding flow."
+content = "Welcome to Hanzo Dev! Check out the new onboarding flow."
 from_date = "2024-10-01"
 to_date = "2024-10-15"
 target_app = "cli"

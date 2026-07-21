@@ -401,9 +401,13 @@
               "type": "string"
             },
             "subpath": {
-              "type": [
-                "string",
-                "null"
+              "anyOf": [
+                {
+                  "$ref": "#/definitions/LegacyAppPathString"
+                },
+                {
+                  "type": "null"
+                }
               ]
             }
           },
@@ -455,9 +459,13 @@
               "type": "string"
             },
             "subpath": {
-              "type": [
-                "string",
-                "null"
+              "anyOf": [
+                {
+                  "$ref": "#/definitions/LegacyAppPathString"
+                },
+                {
+                  "type": "null"
+                }
               ]
             }
           },
@@ -547,13 +555,21 @@
     "cwd": {
       "anyOf": [
         {
-          "$ref": "#/definitions/AbsolutePathBuf"
+          "$ref": "#/definitions/LegacyAppPathString"
         },
         {
           "type": "null"
         }
       ],
       "description": "The command's working directory."
+    },
+    "environmentId": {
+      "default": null,
+      "description": "Environment in which the command will run.",
+      "type": [
+        "string",
+        "null"
+      ]
     },
     "itemId": {
       "type": "string"

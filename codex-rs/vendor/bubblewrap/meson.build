@@ -1,7 +1,7 @@
 project(
   'bubblewrap',
   'c',
-  version : '0.12.0',
+  version : '0.11.2',
   meson_version : '>=0.49.0',
   default_options : [
     'warning_level=2',
@@ -85,6 +85,15 @@ if selinux_dep.found()
   if selinux_dep.version().version_compare('>=2.3')
     cdata.set('HAVE_SELINUX_2_3', 1)
   endif
+endif
+
+if get_option('require_userns')
+  cdata.set('ENABLE_REQUIRE_USERNS', 1)
+endif
+
+if get_option('support_setuid')
+  cdata.set('ENABLE_SUPPORT_SETUID', 1)
+  warning('running bubblewrap setuid is deprecated and risky. Most recent operating systems support unprivileged user namespaces and we recommend using that. Support for this will be removed in the next version.')
 endif
 
 configure_file(

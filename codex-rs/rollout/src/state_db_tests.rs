@@ -10,6 +10,7 @@ use codex_protocol::protocol::EventMsg;
 use codex_protocol::protocol::RolloutLine;
 use codex_protocol::protocol::SessionMeta;
 use codex_protocol::protocol::SessionMetaLine;
+use codex_protocol::protocol::ThreadHistoryMode;
 use codex_protocol::protocol::UserMessageEvent;
 use pretty_assertions::assert_eq;
 use std::path::Path;
@@ -28,6 +29,22 @@ fn cursor_to_anchor_normalizes_timestamp_format() {
         .expect("nanosecond");
 
     assert_eq!(anchor.ts, expected_ts);
+    assert_eq!(anchor.id, None);
+}
+
+#[test]
+fn cursor_to_anchor_preserves_recency_tie_breaker() {
+    let id = ThreadId::from_string("00000000-0000-0000-0000-000000000123")
+        .expect("thread id should parse");
+    let token = format!("2026-01-27T12:34:56Z|{id}");
+    let cursor = parse_cursor(&token).expect("cursor should parse");
+    let anchor = cursor_to_anchor(Some(&cursor)).expect("anchor should parse");
+
+    assert_eq!(anchor.id, Some(id));
+    assert_eq!(
+        serde_json::to_string(&cursor).expect("cursor should serialize"),
+        format!("\"{token}\"")
+    );
 }
 
 #[tokio::test]
@@ -95,7 +112,8 @@ async fn try_init_times_out_waiting_for_stuck_startup_backfill() -> anyhow::Resu
 async fn reconcile_rollout_preserves_existing_explicit_title() -> anyhow::Result<()> {
     let home = TempDir::new().expect("temp dir");
     let thread_id = ThreadId::new();
-    let rollout_path = write_rollout_with_user_message(home.path(), thread_id, "Hey")?;
+    let rollout_path =
+        write_rollout_with_user_message(home.path(), thread_id, "Hey", ThreadHistoryMode::Legacy)?;
     let runtime =
         codex_state::StateRuntime::init(home.path().to_path_buf(), "test-provider".to_string())
             .await?;
@@ -129,10 +147,59 @@ async fn reconcile_rollout_preserves_existing_explicit_title() -> anyhow::Result
     Ok(())
 }
 
+#[tokio::test]
+async fn reconcile_rollout_preserves_existing_paginated_memory_mode() -> anyhow::Result<()> {
+    let home = TempDir::new().expect("temp dir");
+    let thread_id = ThreadId::new();
+    let rollout_path = write_rollout_with_user_message(
+        home.path(),
+        thread_id,
+        "Hey",
+        ThreadHistoryMode::Paginated,
+    )?;
+    let runtime =
+        codex_state::StateRuntime::init(home.path().to_path_buf(), "test-provider".to_string())
+            .await?;
+
+    reconcile_rollout(
+        Some(runtime.as_ref()),
+        rollout_path.as_path(),
+        "test-provider",
+        /*builder*/ None,
+        &[],
+        /*archived_only*/ None,
+        /*new_thread_memory_mode*/ None,
+    )
+    .await;
+    assert!(
+        runtime
+            .set_thread_memory_mode(thread_id, "disabled")
+            .await?
+    );
+
+    reconcile_rollout(
+        Some(runtime.as_ref()),
+        rollout_path.as_path(),
+        "test-provider",
+        /*builder*/ None,
+        &[],
+        /*archived_only*/ None,
+        /*new_thread_memory_mode*/ None,
+    )
+    .await;
+
+    assert_eq!(
+        runtime.get_thread_memory_mode(thread_id).await?.as_deref(),
+        Some("disabled")
+    );
+    Ok(())
+}
+
 fn write_rollout_with_user_message(
     home: &Path,
     thread_id: ThreadId,
     message: &str,
+    history_mode: ThreadHistoryMode,
 ) -> anyhow::Result<std::path::PathBuf> {
     let dir = home.join("sessions/2026/06/01");
     std::fs::create_dir_all(dir.as_path())?;
@@ -140,8 +207,10 @@ fn write_rollout_with_user_message(
     let lines = [
         RolloutLine {
             timestamp: "2026-06-01T14:26:25Z".to_string(),
+            ordinal: None,
             item: RolloutItem::SessionMeta(SessionMetaLine {
                 meta: SessionMeta {
+                    session_id: thread_id.into(),
                     id: thread_id,
                     forked_from_id: None,
                     parent_thread_id: None,
@@ -157,14 +226,20 @@ fn write_rollout_with_user_message(
                     model_provider: Some("test-provider".to_string()),
                     base_instructions: None,
                     dynamic_tools: None,
+                    selected_capability_roots: Vec::new(),
                     memory_mode: None,
+                    history_mode,
+                    history_base: None,
+                    subagent_history_start_ordinal: None,
                     multi_agent_version: None,
+                    context_window: None,
                 },
                 git: None,
             }),
         },
         RolloutLine {
             timestamp: "2026-06-01T14:26:26Z".to_string(),
+            ordinal: None,
             item: RolloutItem::EventMsg(EventMsg::UserMessage(UserMessageEvent {
                 message: message.to_string(),
                 ..Default::default()

@@ -23,6 +23,7 @@ use crate::catalog::SkillAuthority;
 use crate::catalog::SkillCatalog;
 use crate::catalog::SkillSourceKind;
 use crate::provider::SkillListQuery;
+use crate::shadow_selection_experiment::ShadowSelectionExperiment;
 use crate::sources::SkillProviders;
 use crate::state::SkillsThreadState;
 
@@ -37,11 +38,13 @@ pub(crate) fn skill_tools(
     providers: SkillProviders,
     mcp_resources: Option<Arc<McpResourceClient>>,
     thread_state: Arc<SkillsThreadState>,
+    shadow_selection: Arc<ShadowSelectionExperiment>,
 ) -> Vec<Arc<dyn ToolExecutor<ToolCall>>> {
     let context = SkillToolContext {
         providers,
         mcp_resources,
         thread_state,
+        shadow_selection,
     };
     vec![
         Arc::new(list::ListTool {
@@ -56,6 +59,7 @@ struct SkillToolContext {
     providers: SkillProviders,
     mcp_resources: Option<Arc<McpResourceClient>>,
     thread_state: Arc<SkillsThreadState>,
+    shadow_selection: Arc<ShadowSelectionExperiment>,
 }
 
 impl SkillToolContext {
@@ -68,11 +72,12 @@ impl SkillToolContext {
                         self.providers.list_orchestrator_for_turn(SkillListQuery {
                             turn_id: turn_id.to_string(),
                             executor_roots: Vec::new(),
-                            host: None,
+                            host_snapshot: None,
                             include_host_skills: false,
                             include_bundled_skills: false,
                             include_orchestrator_skills: true,
                             mcp_resources: self.mcp_resources.clone(),
+                            executor_capability_discovery: None,
                         }),
                     )
                     .await
