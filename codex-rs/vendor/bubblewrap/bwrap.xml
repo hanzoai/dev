@@ -42,7 +42,8 @@
 
 <refsect1><title>Description</title>
 <para>
-  <command>bwrap</command> is an unprivileged low-level sandboxing tool. You
+  <command>bwrap</command> is a unprivileged low-level sandboxing tool
+  (optionally setuid on older distributions). You
   are unlikely to use it directly from the commandline, although that is possible.
 </para>
 <para>
@@ -55,7 +56,7 @@
 <para>
   By default, <command>bwrap</command> creates a new mount namespace for the sandbox.
   Optionally it also sets up new user, ipc, pid, network and uts namespaces (but note the
-  user namespace is required if bwrap is not run as root).
+  user namespace is required if bwrap is not installed setuid root).
   The application in the sandbox can be made to run with a different UID and GID.
 </para>
 <para>
@@ -161,7 +162,7 @@
     <varlistentry>
       <term><option>--userns <arg choice="plain">FD</arg></option></term>
       <listitem><para>Use an existing user namespace instead of creating a new one. The namespace must fulfil the permission requirements for setns(), which generally means that it must be a descendant of the currently active user namespace, owned by the same user. </para>
-      </listitem>
+      <para>This is incompatible with --unshare-user, and doesn't work in the setuid version of bubblewrap.</para></listitem>
     </varlistentry>
     <varlistentry>
       <term><option>--userns2 <arg choice="plain">FD</arg></option></term>
@@ -178,7 +179,8 @@
         <literal>user.max_user_namespaces</literal> sysctl to 1, and then
         entering a nested user namespace which is unable to raise that limit
         in the outer namespace.
-        This option requires <option>--unshare-user</option>.
+        This option requires <option>--unshare-user</option>, and doesn't work
+        in the setuid version of bubblewrap.
       </para></listitem>
     </varlistentry>
     <varlistentry>
@@ -375,7 +377,8 @@
           <option>--overlay-src</option> to precede it.
         </para>
         <para>
-          Using <arg choice="plain">--ro-overlay</arg> or providing
+          None of these options are available in the setuid version of
+          bubblewrap. Using <arg choice="plain">--ro-overlay</arg> or providing
           more than one <option>--overlay-src</option> requires a Linux kernel
           version of 4.0 or later.
         </para>
@@ -613,38 +616,6 @@
         options are processed in the order they are specified on the
         command line.  Please be careful to the order they are specified.
       </para></listitem>
-    </varlistentry>
-    <varlistentry>
-      <term><option>--not-a-security-boundary</option></term>
-      <listitem>
-        <para>
-          Declare that this invocation of <command>bwrap</command>
-          is not intended to create a security boundary
-          between the sandbox and the host system.
-          When this option is given,
-          certain non-fatal sandbox setup failures
-          (such as a subdirectory remount failing
-          because an automounter did not respond in time)
-          will produce a warning and will be skipped,
-          rather than causing <command>bwrap</command> to exit with an error.
-          In future releases of bubblewrap
-          the effect of this option might be extended
-          to make other sandbox setup operations non-fatal
-        </para>
-        <para>
-          This option is intended for callers
-          such as <application>xdg-dbus-proxy</application> or Steam
-          that use <command>bwrap</command>
-          to adjust the filesystem layout for a process,
-          but do not rely on it to create a security boundary.
-        </para>
-        <para>
-          Other operations that are fundamental to establishing the sandbox
-          (creating namespaces, <function>pivot_root</function>,
-          dropping capabilities)
-          will still cause a hard failure regardless of this option.
-        </para>
-      </listitem>
     </varlistentry>
   </variablelist>
 </refsect1>

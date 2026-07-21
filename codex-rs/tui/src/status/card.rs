@@ -710,7 +710,7 @@ impl HistoryCell for StatusHistoryCell {
         let mut lines: Vec<Line<'static>> = Vec::new();
         lines.push(Line::from(vec![
             Span::from(format!("{}>_ ", FieldFormatter::INDENT)).dim(),
-            Span::from("OpenAI Codex").bold(),
+            Span::from("Hanzo Dev").bold(),
             Span::from(" ").dim(),
             Span::from(format!("(v{CODEX_CLI_VERSION})")).dim(),
         ]));
@@ -893,10 +893,10 @@ impl HistoryCell for StatusHistoryCell {
             if let Some(start_byte) = visible.find(CHATGPT_USAGE_URL) {
                 let start = visible[..start_byte].width();
                 line.hyperlinks
-                    .push(crate::terminal_hyperlinks::TerminalHyperlink {
-                        columns: start..start + CHATGPT_USAGE_URL.width(),
-                        destination: CHATGPT_USAGE_URL.to_string(),
-                    });
+                    .push(crate::terminal_hyperlinks::TerminalHyperlink::web(
+                        start..start + CHATGPT_USAGE_URL.width(),
+                        CHATGPT_USAGE_URL.to_string(),
+                    ));
             }
         }
         lines

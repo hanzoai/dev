@@ -55,6 +55,11 @@ static uid_t real_uid;
 static gid_t real_gid;
 static uid_t overflow_uid;
 static gid_t overflow_gid;
+#ifdef ENABLE_SUPPORT_SETUID
+static bool is_privileged; /* See acquire_privs() */
+#else
+#define is_privileged 0
+#endif
 static const char *argv0;
 static const char *host_tty_dev;
 static int proc_fd = -1;
@@ -94,7 +99,6 @@ static int opt_tmp_overlay_count = 0;
 static int next_perms = -1;
 static size_t next_size_arg = 0;
 static int next_overlay_src_count = 0;
-static bool opt_not_a_security_boundary = false;
 
 #define CAP_TO_MASK_0(x) (1L << ((x) & 31))
 #define CAP_TO_MASK_1(x) CAP_TO_MASK_0(x - 32)
@@ -169,6 +173,28 @@ struct _LockFile
   int         fd;
   LockFile   *next;
 };
+
+enum {
+  PRIV_SEP_OP_DONE,
+  PRIV_SEP_OP_BIND_MOUNT,
+  PRIV_SEP_OP_OVERLAY_MOUNT,
+  PRIV_SEP_OP_PROC_MOUNT,
+  PRIV_SEP_OP_TMPFS_MOUNT,
+  PRIV_SEP_OP_DEVPTS_MOUNT,
+  PRIV_SEP_OP_MQUEUE_MOUNT,
+  PRIV_SEP_OP_REMOUNT_RO_NO_RECURSIVE,
+  PRIV_SEP_OP_SET_HOSTNAME,
+};
+
+typedef struct
+{
+  uint32_t op;
+  uint32_t flags;
+  uint32_t perms;
+  size_t   size_arg;
+  uint32_t arg1_offset;
+  uint32_t arg2_offset;
+} PrivSepOp;
 
 /*
  * DEFINE_LINKED_LIST:
@@ -290,7 +316,7 @@ usage (int ecode, FILE *out)
            "    --level-prefix               Prepend e.g. <3> to diagnostic messages\n"
            "    --unshare-all                Unshare every namespace we support by default\n"
            "    --share-net                  Retain the network namespace (can only combine with --unshare-all)\n"
-           "    --unshare-user               Create new user namespace (may be automatically implied if not root)\n"
+           "    --unshare-user               Create new user namespace (may be automatically implied if not setuid)\n"
            "    --unshare-user-try           Create new user namespace if possible else continue by skipping it\n"
            "    --unshare-ipc                Create new ipc namespace\n"
            "    --unshare-pid                Create new pid namespace\n"
@@ -351,8 +377,6 @@ usage (int ecode, FILE *out)
            "    --perms OCTAL                Set permissions of next argument (--bind-data, --file, etc.)\n"
            "    --size BYTES                 Set size of next argument (only for --tmpfs)\n"
            "    --chmod OCTAL PATH           Change permissions of PATH (must already exist)\n"
-           "    --not-a-security-boundary    Do not fail hard when some sandbox setup steps fail;\n"
-           "                                 use only when the sandbox is not a security boundary\n"
           );
   exit (ecode);
 }
@@ -663,6 +687,23 @@ static uint32_t requested_caps[2] = {0, 0};
 #define REQUIRED_CAPS_1 0
 
 static void
+set_required_caps (void)
+{
+  struct __user_cap_header_struct hdr = { _LINUX_CAPABILITY_VERSION_3, 0 };
+  struct __user_cap_data_struct data[2] = { { 0 } };
+
+  /* Drop all non-require capabilities */
+  data[0].effective = REQUIRED_CAPS_0;
+  data[0].permitted = REQUIRED_CAPS_0;
+  data[0].inheritable = 0;
+  data[1].effective = REQUIRED_CAPS_1;
+  data[1].permitted = REQUIRED_CAPS_1;
+  data[1].inheritable = 0;
+  if (capset (&hdr, data) < 0)
+    die_with_error ("capset failed");
+}
+
+static void
 drop_all_caps (bool keep_requested_caps)
 {
   struct __user_cap_header_struct hdr = { _LINUX_CAPABILITY_VERSION_3, 0 };
@@ -676,7 +717,10 @@ drop_all_caps (bool keep_requested_caps)
        * <https://github.com/projectatomic/bubblewrap/pull/122>
        */
       if (!opt_cap_add_or_drop_used && real_uid == 0)
-        return;
+        {
+          assert (!is_privileged);
+          return;
+        }
       data[0].effective = requested_caps[0];
       data[0].permitted = requested_caps[0];
       data[0].inheritable = requested_caps[0];
@@ -692,7 +736,7 @@ drop_all_caps (bool keep_requested_caps)
        * the init process unconditionally. Since due to the systemd seccomp
        * filter that will fail, let's just ignore it.
        */
-      if (errno == EPERM && real_uid == 0)
+      if (errno == EPERM && real_uid == 0 && !is_privileged)
         return;
       else
         die_with_error ("capset failed");
@@ -778,9 +822,25 @@ drop_cap_bounding_set (bool drop_all)
 static void
 set_ambient_capabilities (void)
 {
+  if (is_privileged)
+    return;
   prctl_caps (requested_caps, false, true);
 }
 
+/* This acquires the privileges that the bwrap will need it to work.
+ * If bwrap is not setuid, then this does nothing, and it relies on
+ * unprivileged user namespaces to be used. This case is
+ * "is_privileged = false".
+ *
+ * If bwrap is setuid, then we do things in phases.
+ * The first part is run as euid 0, but with fsuid as the real user.
+ * The second part, inside the child, is run as the real user but with
+ * capabilities.
+ * And finally we drop all capabilities.
+ * The reason for the above dance is to avoid having the setup phase
+ * being able to read files the user can't, while at the same time
+ * working around various kernel issues. See below for details.
+ */
 static void
 acquire_privs (void)
 {
@@ -791,8 +851,40 @@ acquire_privs (void)
   /* Are we setuid ? */
   if (real_uid != euid)
     {
-      /* Historically we supported this, but now we only do user namespaces */
-      die ("setuid use of bubblewrap is not supported");
+#ifdef ENABLE_SUPPORT_SETUID
+      uid_t new_fsuid;
+
+      if (euid != 0)
+        die ("Unexpected setuid user %d, should be 0", euid);
+
+      is_privileged = true;
+      /* We want to keep running as euid=0 until at the clone()
+       * operation because doing so will make the user namespace be
+       * owned by root, which makes it not ptrace:able by the user as
+       * it otherwise would be. After that we will run fully as the
+       * user, which is necessary e.g. to be able to read from a fuse
+       * mount from the user.
+       *
+       * However, we don't want to accidentally mis-use euid=0 for
+       * escalated filesystem access before the clone(), so we set
+       * fsuid to the uid.
+       */
+      if (setfsuid (real_uid) < 0)
+        die_with_error ("Unable to set fsuid");
+
+      /* setfsuid can't properly report errors, check that it worked (as per manpage) */
+      new_fsuid = setfsuid (-1);
+      if (new_fsuid != real_uid)
+        die_with_error ("Unable to set fsuid (was %d)", (int)new_fsuid);
+
+      /* We never need capabilities after execve(), so lets drop everything from the bounding set */
+      drop_cap_bounding_set (true);
+
+      /* Keep only the required capabilities for setup */
+      set_required_caps ();
+#else
+      die ("setuid use of bubblewrap is not supported in this build");
+#endif
     }
   else if (real_uid != 0 && has_caps ())
     {
@@ -837,17 +929,41 @@ switch_to_user_with_privs (void)
       if (opt_sandbox_gid != real_gid && setgid (opt_sandbox_gid) < 0)
         die_with_error ("unable to switch to gid %d", opt_sandbox_gid);
     }
+
+  if (!is_privileged)
+    return;
+
+  /* Tell kernel not clear capabilities when later dropping root uid */
+  if (prctl (PR_SET_KEEPCAPS, 1, 0, 0, 0) < 0)
+    die_with_error ("prctl(PR_SET_KEEPCAPS) failed");
+
+  if (setuid (opt_sandbox_uid) < 0)
+    die_with_error ("unable to drop root uid");
+
+  /* Regain effective required capabilities from permitted */
+  set_required_caps ();
 }
 
 /* Call setuid() and use capset() to adjust capabilities */
 static void
-drop_privs (bool keep_requested_caps)
+drop_privs (bool keep_requested_caps,
+            bool already_changed_uid,
+            bool set_dumpable)
 {
+  assert (!keep_requested_caps || !is_privileged);
+  /* Drop root uid */
+  if (is_privileged && !already_changed_uid &&
+      setuid (opt_sandbox_uid) < 0)
+    die_with_error ("unable to drop root uid");
+
   drop_all_caps (keep_requested_caps);
 
-  /* We don't have any privs now, so mark us dumpable which makes /proc/self be owned by the user instead of root */
-  if (prctl (PR_SET_DUMPABLE, 1, 0, 0, 0) != 0)
-    die_with_error ("can't set dumpable");
+  if (set_dumpable)
+    {
+      /* We don't have any privs now, so mark us dumpable which makes /proc/self be owned by the user instead of root */
+      if (prctl (PR_SET_DUMPABLE, 1, 0, 0, 0) != 0)
+        die_with_error ("can't set dumpable");
+    }
 }
 
 static void
@@ -863,6 +979,7 @@ write_uid_gid_map (uid_t sandbox_uid,
   cleanup_free char *gid_map = NULL;
   cleanup_free char *dir = NULL;
   cleanup_fd int dir_fd = -1;
+  uid_t old_fsuid = (uid_t)-1;
 
   if (pid == -1)
     dir = xstrdup ("self");
@@ -885,6 +1002,11 @@ write_uid_gid_map (uid_t sandbox_uid,
   else
     gid_map = xasprintf ("%d %d 1\n", sandbox_gid, parent_gid);
 
+  /* We have to be root to be allowed to write to the uid map
+   * for setuid apps, so temporary set fsuid to 0 */
+  if (is_privileged)
+    old_fsuid = setfsuid (0);
+
   if (write_file_at (dir_fd, "uid_map", uid_map) != 0)
     die_with_error ("setting up uid map");
 
@@ -902,51 +1024,188 @@ write_uid_gid_map (uid_t sandbox_uid,
 
   if (write_file_at (dir_fd, "gid_map", gid_map) != 0)
     die_with_error ("setting up gid map");
+
+  if (is_privileged)
+    {
+      setfsuid (old_fsuid);
+      if ((uid_t) setfsuid (-1) != real_uid)
+        die ("Unable to re-set fsuid");
+    }
 }
 
 static void
-setup_op_bind_mount (bind_option_t options,
-                     const char *src,
-                     const char *dest)
+privileged_op (int         privileged_op_socket,
+               uint32_t    op,
+               uint32_t    flags,
+               uint32_t    perms,
+               size_t      size_arg,
+               const char *arg1,
+               const char *arg2)
 {
   bind_mount_result bind_result;
   char *failing_path = NULL;
 
-  /* We always bind directories recursively, otherwise this would let us
-     access files that are otherwise covered on the host */
-  bind_result = bind_mount (proc_fd, src, dest, BIND_RECURSIVE | options, &failing_path);
+  if (privileged_op_socket != -1)
+    {
+      uint32_t buffer[2048];  /* 8k, but is int32 to guarantee nice alignment */
+      PrivSepOp *op_buffer = (PrivSepOp *) buffer;
+      size_t buffer_size = sizeof (PrivSepOp);
+      uint32_t arg1_offset = 0, arg2_offset = 0;
 
-  if (bind_result != BIND_MOUNT_SUCCESS)
-    die_with_bind_result (bind_result, errno, failing_path,
-                          "Can't bind mount %s on %s", src, dest);
+      /* We're unprivileged, send this request to the privileged part */
 
-  assert (failing_path == NULL);    /* otherwise we would have died */
+      if (arg1 != NULL)
+        {
+          arg1_offset = buffer_size;
+          buffer_size += strlen (arg1) + 1;
+        }
+      if (arg2 != NULL)
+        {
+          arg2_offset = buffer_size;
+          buffer_size += strlen (arg2) + 1;
+        }
+
+      if (buffer_size >= sizeof (buffer))
+        die ("privilege separation operation to large");
+
+      op_buffer->op = op;
+      op_buffer->flags = flags;
+      op_buffer->perms = perms;
+      op_buffer->size_arg = size_arg;
+      op_buffer->arg1_offset = arg1_offset;
+      op_buffer->arg2_offset = arg2_offset;
+      if (arg1 != NULL)
+        strcpy ((char *) buffer + arg1_offset, arg1);
+      if (arg2 != NULL)
+        strcpy ((char *) buffer + arg2_offset, arg2);
+
+      if (TEMP_FAILURE_RETRY (write (privileged_op_socket, buffer, buffer_size)) != (ssize_t)buffer_size)
+        die ("Can't write to privileged_op_socket");
+
+      if (TEMP_FAILURE_RETRY (read (privileged_op_socket, buffer, 1)) != 1)
+        die ("Can't read from privileged_op_socket");
+
+      return;
+    }
+
+  /*
+   * This runs a privileged request for the unprivileged setup
+   * code. Note that since the setup code is unprivileged it is not as
+   * trusted, so we need to verify that all requests only affect the
+   * child namespace as set up by the privileged parts of the setup,
+   * and that all the code is very careful about handling input.
+   *
+   * This means:
+   *  * Bind mounts are safe, since we always use filesystem namespace. They
+   *     must be recursive though, as otherwise you can use a non-recursive bind
+   *     mount to access an otherwise over-mounted mountpoint.
+   *  * Mounting proc, tmpfs, mqueue, devpts in the child namespace is assumed to
+   *    be safe.
+   *  * Remounting RO (even non-recursive) is safe because it decreases privileges.
+   *  * sethostname() is safe only if we set up a UTS namespace
+   */
+  switch (op)
+    {
+    case PRIV_SEP_OP_DONE:
+      break;
+
+    case PRIV_SEP_OP_REMOUNT_RO_NO_RECURSIVE:
+      bind_result = bind_mount (proc_fd, NULL, arg2, BIND_READONLY, &failing_path);
+
+      if (bind_result != BIND_MOUNT_SUCCESS)
+        die_with_bind_result (bind_result, errno, failing_path,
+                              "Can't remount readonly on %s", arg2);
+
+      assert (failing_path == NULL);    /* otherwise we would have died */
+      break;
+
+    case PRIV_SEP_OP_BIND_MOUNT:
+      /* We always bind directories recursively, otherwise this would let us
+         access files that are otherwise covered on the host */
+      bind_result = bind_mount (proc_fd, arg1, arg2, BIND_RECURSIVE | flags, &failing_path);
+
+      if (bind_result != BIND_MOUNT_SUCCESS)
+        die_with_bind_result (bind_result, errno, failing_path,
+                              "Can't bind mount %s on %s", arg1, arg2);
+
+      assert (failing_path == NULL);    /* otherwise we would have died */
+      break;
+
+    case PRIV_SEP_OP_PROC_MOUNT:
+      if (mount ("proc", arg1, "proc", MS_NOSUID | MS_NOEXEC | MS_NODEV, NULL) != 0)
+        die_with_mount_error ("Can't mount proc on %s", arg1);
+      break;
+
+    case PRIV_SEP_OP_TMPFS_MOUNT:
+      {
+        cleanup_free char *mode = NULL;
+
+        /* This check should be unnecessary since we checked this when parsing
+         * the --size option as well. However, better be safe than sorry. */
+        if (size_arg > MAX_TMPFS_BYTES)
+          die_with_error ("Specified tmpfs size too large (%zu > %zu)", size_arg, MAX_TMPFS_BYTES);
+
+        if (size_arg != 0)
+          mode = xasprintf ("mode=%#o,size=%zu", perms, size_arg);
+        else
+          mode = xasprintf ("mode=%#o", perms);
+
+        cleanup_free char *opt = label_mount (mode, opt_file_label);
+        if (mount ("tmpfs", arg1, "tmpfs", MS_NOSUID | MS_NODEV, opt) != 0)
+          die_with_mount_error ("Can't mount tmpfs on %s", arg1);
+        break;
+      }
+
+    case PRIV_SEP_OP_DEVPTS_MOUNT:
+      if (mount ("devpts", arg1, "devpts", MS_NOSUID | MS_NOEXEC,
+                 "newinstance,ptmxmode=0666,mode=620") != 0)
+        die_with_mount_error ("Can't mount devpts on %s", arg1);
+      break;
+
+    case PRIV_SEP_OP_MQUEUE_MOUNT:
+      if (mount ("mqueue", arg1, "mqueue", 0, NULL) != 0)
+        die_with_mount_error ("Can't mount mqueue on %s", arg1);
+      break;
+
+    case PRIV_SEP_OP_OVERLAY_MOUNT:
+      if (is_privileged)
+        die ("Overlay mounts are not supported in setuid mode");
+      if (mount ("overlay", arg2, "overlay", MS_MGC_VAL | MS_NOSUID | MS_NODEV, arg1) != 0)
+        {
+          /* The standard message for ELOOP, "Too many levels of symbolic
+           * links", is not helpful here. */
+          if (errno == ELOOP)
+            die ("Can't make overlay mount on %s with options %s: "
+                "Overlay directories may not overlap",
+                arg2, arg1);
+          die_with_mount_error ("Can't make overlay mount on %s with options %s",
+                                arg2, arg1);
+        }
+      break;
+
+    case PRIV_SEP_OP_SET_HOSTNAME:
+      /* This is checked at the start, but lets verify it here in case
+         something manages to send hacked priv-sep operation requests. */
+      if (!opt_unshare_uts)
+        die ("Refusing to set hostname in original namespace");
+      if (arg1 == NULL)
+        die ("Hostname argument is NULL");
+      if (sethostname (arg1, strlen(arg1)) != 0)
+        die_with_error ("Can't set hostname to %s", arg1);
+      break;
+
+    default:
+      die ("Unexpected privileged op %d", op);
+    }
 }
 
+/* This is run unprivileged in the child namespace but can request
+ * some privileged operations (also in the child namespace) via the
+ * privileged_op_socket.
+ */
 static void
-setup_op_tmpfs_mount (uint32_t    perms,
-                      size_t      size,
-                      const char *dest)
-{
-  cleanup_free char *mode = NULL;
-
-  /* This check should be unnecessary since we checked this when parsing
-   * the --size option as well. However, better be safe than sorry. */
-  if (size > MAX_TMPFS_BYTES)
-    die_with_error ("Specified tmpfs size too large (%zu > %zu)", size, MAX_TMPFS_BYTES);
-
-  if (size != 0)
-    mode = xasprintf ("mode=%#o,size=%zu", perms, size);
-  else
-    mode = xasprintf ("mode=%#o", perms);
-
-  cleanup_free char *opt = label_mount (mode, opt_file_label);
-  if (mount ("tmpfs", dest, "tmpfs", MS_NOSUID | MS_NODEV, opt) != 0)
-    die_with_mount_error ("Can't mount tmpfs on %s", dest);
-}
-
-static void
-setup_newroot (bool unshare_pid)
+setup_newroot (bool unshare_pid,
+               int  privileged_op_socket)
 {
   SetupOp *op;
   int tmp_overlay_idx = 0;
@@ -1006,18 +1265,11 @@ setup_newroot (bool unshare_pid)
           else if (ensure_file (dest, 0444) != 0)
             die_with_error ("Can't create file at %s", op->dest);
 
-          bind_option_t bind_flags = 0;
-
-          if (opt_not_a_security_boundary)
-            bind_flags |= BIND_FAIL_OPEN;
-
-          if (op->type == SETUP_RO_BIND_MOUNT)
-            bind_flags |= BIND_READONLY;
-
-          if (op->type == SETUP_DEV_BIND_MOUNT)
-            bind_flags |= BIND_DEVICES;
-
-          setup_op_bind_mount (bind_flags, source, dest);
+          privileged_op (privileged_op_socket,
+                         PRIV_SEP_OP_BIND_MOUNT,
+                         (op->type == SETUP_RO_BIND_MOUNT ? BIND_READONLY : 0) |
+                         (op->type == SETUP_DEV_BIND_MOUNT ? BIND_DEVICES : 0),
+                         0, 0, source, dest);
 
           if (op->fd >= 0)
             {
@@ -1079,35 +1331,15 @@ setup_newroot (bool unshare_pid)
 
             strappend (&sb, ",userxattr");
 
-            if (mount ("overlay", dest, "overlay", MS_MGC_VAL | MS_NOSUID | MS_NODEV, sb.str) != 0)
-              {
-                /* The standard message for ELOOP, "Too many levels of symbolic
-                 * links", is not helpful here. */
-                if (errno == ELOOP)
-                  die ("Can't make overlay mount on %s with options %s: "
-                       "Overlay directories may not overlap",
-                       dest, sb.str);
-                die_with_mount_error ("Can't make overlay mount on %s with options %s",
-                                      dest, sb.str);
-              }
-
+            privileged_op (privileged_op_socket,
+                           PRIV_SEP_OP_OVERLAY_MOUNT, 0, 0, 0, sb.str, dest);
             free (sb.str);
           }
           break;
 
         case SETUP_REMOUNT_RO_NO_RECURSIVE:
-          {
-            char *failing_path = NULL;
-            bind_mount_result bind_result;
-
-            bind_result = bind_mount (proc_fd, NULL, dest, BIND_READONLY, &failing_path);
-
-            if (bind_result != BIND_MOUNT_SUCCESS)
-              die_with_bind_result (bind_result, errno, failing_path,
-                                    "Can't remount readonly on %s", dest);
-
-            assert (failing_path == NULL);    /* otherwise we would have died */
-          }
+          privileged_op (privileged_op_socket,
+                         PRIV_SEP_OP_REMOUNT_RO_NO_RECURSIVE, 0, 0, 0, NULL, dest);
           break;
 
         case SETUP_MOUNT_PROC:
@@ -1117,13 +1349,16 @@ setup_newroot (bool unshare_pid)
           if (unshare_pid || opt_pidns_fd != -1)
             {
               /* Our own procfs */
-              if (mount ("proc", dest, "proc", MS_NOSUID | MS_NOEXEC | MS_NODEV, NULL) != 0)
-                die_with_mount_error ("Can't mount proc on %s", dest);
+              privileged_op (privileged_op_socket,
+                             PRIV_SEP_OP_PROC_MOUNT, 0, 0, 0,
+                             dest, NULL);
             }
           else
             {
               /* Use system procfs, as we share pid namespace anyway */
-              setup_op_bind_mount (0, "oldroot/proc", dest);
+              privileged_op (privileged_op_socket,
+                             PRIV_SEP_OP_BIND_MOUNT, 0, 0, 0,
+                             "oldroot/proc", dest);
             }
 
           /* There are a bunch of weird old subdirs of /proc that could potentially be
@@ -1143,7 +1378,9 @@ setup_newroot (bool unshare_pid)
                   die_with_error ("Can't access %s", subdir);
                 }
 
-              setup_op_bind_mount (BIND_READONLY, subdir, subdir);
+              privileged_op (privileged_op_socket,
+                             PRIV_SEP_OP_BIND_MOUNT, BIND_READONLY, 0, 0,
+                             subdir, subdir);
             }
 
           break;
@@ -1152,7 +1389,9 @@ setup_newroot (bool unshare_pid)
           if (ensure_dir (dest, 0755) != 0)
             die_with_error ("Can't mkdir %s", op->dest);
 
-          setup_op_tmpfs_mount (0755, 0, dest);
+          privileged_op (privileged_op_socket,
+                         PRIV_SEP_OP_TMPFS_MOUNT, 0, 0755, 0,
+                         dest, NULL);
 
           static const char *const devnodes[] = { "null", "zero", "full", "random", "urandom", "tty" };
           for (i = 0; i < N_ELEMENTS (devnodes); i++)
@@ -1161,7 +1400,9 @@ setup_newroot (bool unshare_pid)
               cleanup_free char *node_src = strconcat ("/oldroot/dev/", devnodes[i]);
               if (create_file (node_dest, 0444, NULL) != 0)
                 die_with_error ("Can't create file %s/%s", op->dest, devnodes[i]);
-              setup_op_bind_mount (BIND_DEVICES, node_src, node_dest);
+              privileged_op (privileged_op_socket,
+                             PRIV_SEP_OP_BIND_MOUNT, BIND_DEVICES, 0, 0,
+                             node_src, node_dest);
             }
 
           static const char *const stdionodes[] = { "stdin", "stdout", "stderr" };
@@ -1193,10 +1434,8 @@ setup_newroot (bool unshare_pid)
 
             if (mkdir (pts, 0755) == -1)
               die_with_error ("Can't create %s/devpts", op->dest);
-
-            if (mount ("devpts", pts, "devpts", MS_NOSUID | MS_NOEXEC,
-                       "newinstance,ptmxmode=0666,mode=620") != 0)
-              die_with_mount_error ("Can't mount devpts on %s", pts);
+            privileged_op (privileged_op_socket,
+                           PRIV_SEP_OP_DEVPTS_MOUNT, 0, 0, 0, pts, NULL);
 
             if (symlink ("pts/ptmx", ptmx) != 0)
               die_with_error ("Can't make symlink at %s/ptmx", op->dest);
@@ -1215,7 +1454,9 @@ setup_newroot (bool unshare_pid)
               if (create_file (dest_console, 0444, NULL) != 0)
                 die_with_error ("creating %s/console", op->dest);
 
-              setup_op_bind_mount (BIND_DEVICES, src_tty_dev, dest_console);
+              privileged_op (privileged_op_socket,
+                             PRIV_SEP_OP_BIND_MOUNT, BIND_DEVICES, 0, 0,
+                             src_tty_dev, dest_console);
             }
 
           break;
@@ -1228,15 +1469,18 @@ setup_newroot (bool unshare_pid)
           if (ensure_dir (dest, 0755) != 0)
             die_with_error ("Can't mkdir %s", op->dest);
 
-          setup_op_tmpfs_mount (op->perms, op->size, dest);
+          privileged_op (privileged_op_socket,
+                         PRIV_SEP_OP_TMPFS_MOUNT, 0, op->perms, op->size,
+                         dest, NULL);
           break;
 
         case SETUP_MOUNT_MQUEUE:
           if (ensure_dir (dest, 0755) != 0)
             die_with_error ("Can't mkdir %s", op->dest);
 
-          if (mount ("mqueue", dest, "mqueue", 0, NULL) != 0)
-            die_with_mount_error ("Can't mount mqueue on %s", dest);
+          privileged_op (privileged_op_socket,
+                         PRIV_SEP_OP_MQUEUE_MOUNT, 0, 0, 0,
+                         dest, NULL);
           break;
 
         case SETUP_MAKE_DIR:
@@ -1313,8 +1557,10 @@ setup_newroot (bool unshare_pid)
             if (ensure_file (dest, 0444) != 0)
               die_with_error ("Can't create file at %s", op->dest);
 
-            setup_op_bind_mount ((op->type == SETUP_MAKE_RO_BIND_FILE ? BIND_READONLY : 0),
-                                 tempfile, dest);
+            privileged_op (privileged_op_socket,
+                           PRIV_SEP_OP_BIND_MOUNT,
+                           (op->type == SETUP_MAKE_RO_BIND_FILE ? BIND_READONLY : 0),
+                           0, 0, tempfile, dest);
 
             /* Remove the file so we're sure the app can't get to it in any other way.
                Its outside the container chroot, so it shouldn't be possible, but lets
@@ -1349,10 +1595,9 @@ setup_newroot (bool unshare_pid)
 
         case SETUP_SET_HOSTNAME:
           assert (op->dest != NULL);  /* guaranteed by the constructor */
-          if (op->dest == NULL)
-            die ("Hostname argument is NULL");
-          if (sethostname (op->dest, strlen(op->dest)) != 0)
-            die_with_error ("Can't set hostname to %s", op->dest);
+          privileged_op (privileged_op_socket,
+                         PRIV_SEP_OP_SET_HOSTNAME, 0, 0, 0,
+                         op->dest, NULL);
           break;
 
         case SETUP_OVERLAY_SRC:  /* handled by SETUP_OVERLAY_MOUNT */
@@ -1360,6 +1605,8 @@ setup_newroot (bool unshare_pid)
           die ("Unexpected type %d", op->type);
         }
     }
+  privileged_op (privileged_op_socket,
+                 PRIV_SEP_OP_DONE, 0, 0, 0, NULL, NULL);
 }
 
 /* Do not leak file descriptors already used by setup_newroot () */
@@ -1427,6 +1674,59 @@ resolve_symlinks_in_ops (void)
           break;
         }
     }
+}
+
+
+static const char *
+resolve_string_offset (void    *buffer,
+                       size_t   buffer_size,
+                       uint32_t offset)
+{
+  if (offset == 0)
+    return NULL;
+
+  if (offset > buffer_size)
+    die ("Invalid string offset %d (buffer size %zd)", offset, buffer_size);
+
+  return (const char *) buffer + offset;
+}
+
+static uint32_t
+read_priv_sec_op (int          read_socket,
+                  void        *buffer,
+                  size_t       buffer_size,
+                  uint32_t    *flags,
+                  uint32_t    *perms,
+                  size_t      *size_arg,
+                  const char **arg1,
+                  const char **arg2)
+{
+  const PrivSepOp *op = (const PrivSepOp *) buffer;
+  ssize_t rec_len;
+
+  do
+    rec_len = read (read_socket, buffer, buffer_size - 1);
+  while (rec_len == -1 && errno == EINTR);
+
+  if (rec_len < 0)
+    die_with_error ("Can't read from unprivileged helper");
+
+  if (rec_len == 0)
+    exit (1); /* Privileged helper died and printed error, so exit silently */
+
+  if ((size_t)rec_len < sizeof (PrivSepOp))
+    die ("Invalid size %zd from unprivileged helper", rec_len);
+
+  /* Guarantee zero termination of any strings */
+  ((char *) buffer)[rec_len] = 0;
+
+  *flags = op->flags;
+  *perms = op->perms;
+  *size_arg = op->size_arg;
+  *arg1 = resolve_string_offset (buffer, rec_len, op->arg1_offset);
+  *arg2 = resolve_string_offset (buffer, rec_len, op->arg2_offset);
+
+  return op->op;
 }
 
 static void __attribute__ ((noreturn))
@@ -1742,6 +2042,9 @@ parse_args_recurse (int          *argcp,
         }
       else if (strcmp (arg, "--overlay-src") == 0)
         {
+          if (is_privileged)
+            die ("The --overlay-src option is not permitted in setuid mode");
+
           next_overlay_src_count++;
 
           argv += 1;
@@ -1750,6 +2053,9 @@ parse_args_recurse (int          *argcp,
       else if (strcmp (arg, "--overlay") == 0)
         {
           SetupOp *workdir_op;
+
+          if (is_privileged)
+            die ("The --overlay option is not permitted in setuid mode");
 
           if (argc < 4)
             die ("--overlay takes three arguments");
@@ -1769,6 +2075,9 @@ parse_args_recurse (int          *argcp,
         }
       else if (strcmp (arg, "--tmp-overlay") == 0)
         {
+          if (is_privileged)
+            die ("The --tmp-overlay option is not permitted in setuid mode");
+
           if (argc < 2)
             die ("--tmp-overlay takes an argument");
 
@@ -1785,6 +2094,9 @@ parse_args_recurse (int          *argcp,
         }
       else if (strcmp (arg, "--ro-overlay") == 0)
         {
+          if (is_privileged)
+            die ("The --ro-overlay option is not permitted in setuid mode");
+
           if (argc < 2)
             die ("--ro-overlay takes an argument");
 
@@ -2387,6 +2699,9 @@ parse_args_recurse (int          *argcp,
           unsigned long long size;
           char *endptr = NULL;
 
+          if (is_privileged)
+            die ("The --size option is not permitted in setuid mode");
+
           if (argc < 2)
             die ("--size takes an argument");
 
@@ -2438,10 +2753,6 @@ parse_args_recurse (int          *argcp,
 
           argv += 2;
           argc -= 2;
-        }
-      else if (strcmp (arg, "--not-a-security-boundary") == 0)
-        {
-          opt_not_a_security_boundary = true;
         }
       else if (strcmp (arg, "--") == 0)
         {
@@ -2644,6 +2955,9 @@ main (int    argc,
   args_data = opt_args_data;
   opt_args_data = NULL;
 
+  if ((requested_caps[0] || requested_caps[1]) && is_privileged)
+    die ("--cap-add in setuid mode can be used only by root");
+
   if (opt_userns_block_fd != -1 && !opt_unshare_user)
     die ("--userns-block-fd requires --unshare-user");
 
@@ -2651,20 +2965,45 @@ main (int    argc,
     die ("--userns-block-fd requires --info-fd");
 
   if (opt_userns_fd != -1 && opt_unshare_user)
-    die ("--userns is not compatible with --unshare-user");
+    die ("--userns not compatible --unshare-user");
 
   if (opt_userns_fd != -1 && opt_unshare_user_try)
-    die ("--userns is not compatible with --unshare-user-try");
+    die ("--userns not compatible --unshare-user-try");
 
   if (opt_disable_userns && !opt_unshare_user)
     die ("--disable-userns requires --unshare-user");
 
   if (opt_disable_userns && opt_userns_block_fd != -1)
-    die ("--disable-userns is not compatible with --userns-block-fd");
+    die ("--disable-userns is not compatible with  --userns-block-fd");
 
-  /* We have to do this if we we're not root, so let's just DWIM */
-  if (getuid () != 0 && opt_userns_fd == -1)
+  /* Technically using setns() is probably safe even in the privileged
+   * case, because we got passed in a file descriptor to the
+   * namespace, and that can only be gotten if you have ptrace
+   * permissions against the target, and then you could do whatever to
+   * the namespace anyway.
+   *
+   * However, for practical reasons this isn't possible to use,
+   * because (as described in acquire_privs()) setuid bwrap causes
+   * root to own the namespaces that it creates, so you will not be
+   * able to access these namespaces anyway. So, best just not support
+   * it anyway.
+   */
+  if (opt_userns_fd != -1 && is_privileged)
+    die ("--userns doesn't work in setuid mode");
+
+  if (opt_userns2_fd != -1 && is_privileged)
+    die ("--userns2 doesn't work in setuid mode");
+
+  /* We have to do this if we weren't installed setuid (and we're not
+   * root), so let's just DWIM */
+  if (!is_privileged && getuid () != 0 && opt_userns_fd == -1)
     opt_unshare_user = true;
+
+#ifdef ENABLE_REQUIRE_USERNS
+  /* In this build option, we require userns. */
+  if (is_privileged && getuid () != 0 && opt_userns_fd == -1)
+    opt_unshare_user = true;
+#endif
 
   if (opt_unshare_user_try &&
       stat ("/proc/self/ns/user", &sbuf) == 0)
@@ -2690,8 +3029,8 @@ main (int    argc,
         }
 
       /* Debian lets you disable *unprivileged* user namespaces. However this is not
-         a problem if we're privileged, and if we're not then opt_unshare_user is true
-         already, and there is not much we can do, it's just a non-working setup. */
+         a problem if we're privileged, and if we're not opt_unshare_user is true
+         already, and there is not much we can do, its just a non-working setup. */
 
       if (!disabled)
         opt_unshare_user = true;
@@ -2812,8 +3151,8 @@ main (int    argc,
       if (opt_unshare_user)
         {
           if (errno == EINVAL)
-            die ("Creating new namespace failed, likely because the kernel does not support user namespaces.");
-          else if (errno == EPERM)
+            die ("Creating new namespace failed, likely because the kernel does not support user namespaces.  bwrap must be installed setuid on such systems.");
+          else if (errno == EPERM && !is_privileged)
             die ("No permissions to create a new namespace, likely because the kernel does not allow non-privileged user namespaces. On e.g. debian this can be enabled with 'sysctl kernel.unprivileged_userns_clone=1'.");
         }
 
@@ -2840,13 +3179,28 @@ main (int    argc,
       /* Discover namespace ids before we drop privileges */
       namespace_ids_read (pid);
 
+      if (is_privileged && opt_unshare_user && opt_userns_block_fd == -1)
+        {
+          /* We're running as euid 0, but the uid we want to map is
+           * not 0. This means we're not allowed to write this from
+           * the child user namespace, so we do it from the parent.
+           *
+           * Also, we map uid/gid 0 in the namespace (to overflowuid)
+           * if opt_needs_devpts is true, because otherwise the mount
+           * of devpts fails due to root not being mapped.
+           */
+          write_uid_gid_map (ns_uid, real_uid,
+                             ns_gid, real_gid,
+                             pid, true, opt_needs_devpts);
+        }
+
       /* Initial launched process, wait for pid 1 or exec:ed command to exit */
 
       if (opt_userns2_fd != -1 && setns (opt_userns2_fd, CLONE_NEWUSER) != 0)
         die_with_error ("Setting userns2 failed");
 
       /* We don't need any privileges in the launcher, drop them immediately. */
-      drop_privs (false);
+      drop_privs (false, false, true);
 
       /* Optionally bind our lifecycle to that of the parent */
       handle_die_with_parent ();
@@ -2943,7 +3297,7 @@ main (int    argc,
 
   ns_uid = opt_sandbox_uid;
   ns_gid = opt_sandbox_gid;
-  if (opt_unshare_user && opt_userns_block_fd == -1)
+  if (!is_privileged && opt_unshare_user && opt_userns_block_fd == -1)
     {
       /* In the unprivileged case we have to write the uid/gid maps in
        * the child, because we have no caps in the parent */
@@ -3019,7 +3373,58 @@ main (int    argc,
   if (chdir ("/") != 0)
     die_with_error ("chdir / (base path)");
 
-  setup_newroot (opt_unshare_pid);
+  if (is_privileged)
+    {
+      pid_t child;
+      int privsep_sockets[2];
+
+      if (socketpair (AF_UNIX, SOCK_SEQPACKET | SOCK_CLOEXEC, 0, privsep_sockets) != 0)
+        die_with_error ("Can't create privsep socket");
+
+      child = fork ();
+      if (child == -1)
+        die_with_error ("Can't fork unprivileged helper");
+
+      if (child == 0)
+        {
+          /* Unprivileged setup process.
+           * Note: Don't set dumpable, because we can still perform privileged
+           * operations via privileged_op(). */
+          drop_privs (false, true, false);
+          close (privsep_sockets[0]);
+          setup_newroot (opt_unshare_pid, privsep_sockets[1]);
+          exit (0);
+        }
+      else
+        {
+          int status;
+          uint32_t buffer[2048];  /* 8k, but is int32 to guarantee nice alignment */
+          uint32_t op, flags, perms;
+          size_t size_arg;
+          const char *arg1, *arg2;
+          cleanup_fd int unpriv_socket = -1;
+
+          unpriv_socket = privsep_sockets[0];
+          close (privsep_sockets[1]);
+
+          do
+            {
+              op = read_priv_sec_op (unpriv_socket, buffer, sizeof (buffer),
+                                     &flags, &perms, &size_arg, &arg1, &arg2);
+              privileged_op (-1, op, flags, perms, size_arg, arg1, arg2);
+              if (TEMP_FAILURE_RETRY (write (unpriv_socket, buffer, 1)) != 1)
+                die ("Can't write to op_socket");
+            }
+          while (op != PRIV_SEP_OP_DONE);
+
+          TEMP_FAILURE_RETRY (waitpid (child, &status, 0));
+          /* Continue post setup */
+        }
+    }
+  else
+    {
+      setup_newroot (opt_unshare_pid, -1);
+    }
 
   close_ops_fd ();
 
@@ -3114,7 +3519,7 @@ main (int    argc,
     }
 
   /* All privileged ops are done now, so drop caps we don't need */
-  drop_privs (true);
+  drop_privs (!is_privileged, true, true);
 
   if (opt_block_fd != -1)
     {
@@ -3219,7 +3624,8 @@ main (int    argc,
   /* Optionally bind our lifecycle */
   handle_die_with_parent ();
 
-  set_ambient_capabilities ();
+  if (!is_privileged)
+    set_ambient_capabilities ();
 
   /* Should be the last thing before execve() so that filters don't
    * need to handle anything above */
