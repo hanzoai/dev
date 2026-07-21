@@ -24,7 +24,7 @@ use serde::Deserialize;
 
 use crate::server::ServerOptions;
 use crate::server::persist_tokens_async;
-use codex_client::build_reqwest_client_with_custom_ca;
+use codex_http_client::build_reqwest_client_with_custom_ca;
 
 const ANSI_BLUE: &str = "\x1b[94m";
 const ANSI_GRAY: &str = "\x1b[90m";

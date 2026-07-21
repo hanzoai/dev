@@ -11,6 +11,7 @@ use chrono::Utc;
 use codex_protocol::ThreadId;
 use codex_protocol::protocol::RolloutItem;
 use codex_protocol::protocol::SessionSource;
+use codex_protocol::protocol::ThreadHistoryMode;
 pub use codex_state::LogEntry;
 use codex_state::ThreadMetadataBuilder;
 use codex_utils_path::normalize_for_path_comparison;
@@ -290,7 +291,10 @@ fn cursor_to_anchor(cursor: Option<&Cursor>) -> Option<codex_state::Anchor> {
     let millis = cursor.timestamp().unix_timestamp_nanos() / 1_000_000;
     let millis = i64::try_from(millis).ok()?;
     let ts = chrono::DateTime::<Utc>::from_timestamp_millis(millis)?;
-    Some(codex_state::Anchor { ts })
+    Some(codex_state::Anchor {
+        ts,
+        id: cursor.thread_id(),
+    })
 }
 
 pub fn normalize_cwd_for_state_db(cwd: &Path) -> PathBuf {
@@ -336,6 +340,7 @@ pub async fn list_thread_ids_db(
             match sort_key {
                 ThreadSortKey::CreatedAt => codex_state::SortKey::CreatedAt,
                 ThreadSortKey::UpdatedAt => codex_state::SortKey::UpdatedAt,
+                ThreadSortKey::RecencyAt => codex_state::SortKey::RecencyAt,
             },
             allowed_sources.as_slice(),
             model_providers.as_deref(),
@@ -363,7 +368,7 @@ pub async fn list_threads_db(
     allowed_sources: &[SessionSource],
     model_providers: Option<&[String]>,
     cwd_filters: Option<&[PathBuf]>,
-    parent_thread_id: Option<ThreadId>,
+    relation_filter: Option<codex_state::ThreadRelationFilter>,
     archived: bool,
     search_term: Option<&str>,
 ) -> Option<codex_state::ThreadsPage> {
@@ -401,6 +406,7 @@ pub async fn list_threads_db(
         sort_key: match sort_key {
             ThreadSortKey::CreatedAt => codex_state::SortKey::CreatedAt,
             ThreadSortKey::UpdatedAt => codex_state::SortKey::UpdatedAt,
+            ThreadSortKey::RecencyAt => codex_state::SortKey::RecencyAt,
         },
         sort_direction: match sort_direction {
             SortDirection::Asc => codex_state::SortDirection::Asc,
@@ -408,17 +414,17 @@ pub async fn list_threads_db(
         },
         search_term,
     };
-    let page = match parent_thread_id {
-        Some(parent_thread_id) => {
-            ctx.list_threads_by_parent(page_size, parent_thread_id, filters)
+    let page = match relation_filter {
+        Some(relation_filter) => {
+            ctx.list_threads_by_relation(page_size, relation_filter, filters)
                 .await
         }
         None => ctx.list_threads(page_size, filters).await,
     };
     match page {
         Ok(mut page) => {
-            // Parent-filtered listings intentionally treat persisted state as authoritative.
-            if parent_thread_id.is_some() {
+            // Relationship-filtered listings intentionally treat persisted state as authoritative.
+            if relation_filter.is_some() {
                 return Some(page);
             }
             let mut valid_items = Vec::with_capacity(page.items.len());
@@ -523,9 +529,14 @@ pub async fn reconcile_rollout(
     let mut metadata = outcome.metadata;
     let memory_mode = outcome.memory_mode.unwrap_or_else(|| "enabled".to_string());
     metadata.cwd = normalize_cwd_for_state_db(&metadata.cwd);
-    if let Ok(Some(existing_metadata)) = ctx.get_thread(metadata.id).await {
-        metadata.prefer_existing_git_info(&existing_metadata);
-        metadata.prefer_existing_explicit_title(&existing_metadata);
+    let existing_metadata = ctx.get_thread(metadata.id).await.ok().flatten();
+    // Paginated metadata updates are SQLite-only. Use the rollout mode to seed a
+    // missing row, then keep the value from SQLite.
+    let restore_memory_mode_from_rollout =
+        existing_metadata.is_none() || matches!(metadata.history_mode, ThreadHistoryMode::Legacy);
+    if let Some(existing_metadata) = existing_metadata.as_ref() {
+        metadata.prefer_existing_git_info(existing_metadata);
+        metadata.prefer_existing_explicit_title(existing_metadata);
     }
     match archived_only {
         Some(true) if metadata.archived_at.is_none() => {
@@ -543,9 +554,10 @@ pub async fn reconcile_rollout(
         );
         return;
     }
-    if let Err(err) = ctx
-        .set_thread_memory_mode(metadata.id, memory_mode.as_str())
-        .await
+    if restore_memory_mode_from_rollout
+        && let Err(err) = ctx
+            .set_thread_memory_mode(metadata.id, memory_mode.as_str())
+            .await
     {
         warn!(
             "state db reconcile_rollout memory_mode update failed {}: {err}",

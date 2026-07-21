@@ -40,6 +40,10 @@ impl ToolExecutor<ToolInvocation> for WriteStdinHandler {
         create_write_stdin_tool()
     }
 
+    fn supports_parallel_tool_calls(&self) -> bool {
+        true
+    }
+
     fn handle(&self, invocation: ToolInvocation) -> codex_tools::ToolExecutorFuture<'_> {
         Box::pin(self.handle_call(invocation))
     }
@@ -75,7 +79,7 @@ impl WriteStdinHandler {
                 input: &args.chars,
                 yield_time_ms: args.yield_time_ms,
                 max_output_tokens: args.max_output_tokens,
-                truncation_policy: turn.truncation_policy,
+                truncation_policy: turn.model_info.truncation_policy.into(),
             })
             .await
             .map_err(|err| {
