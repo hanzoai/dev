@@ -9,8 +9,8 @@ expression: "(preview, transcript)"
             Span::from(" "),
             Span::from("Running").bold(),
             Span::from(" "),
-            Span::from("echo").fg(Color::Rgb(137, 180, 250)),
-            Span::from(" output").fg(Color::Rgb(205, 214, 244)),
+            Span::from("echo").fg(Color::Rgb(139, 233, 253)),
+            Span::from(" output").fg(Color::Rgb(248, 248, 242)),
         ]),
         Line::from_iter([
             Span::from("  └ ").dim(),
@@ -26,8 +26,8 @@ expression: "(preview, transcript)"
     [
         Line::from_iter([
             Span::from("$ ").magenta(),
-            Span::from("echo").fg(Color::Rgb(137, 180, 250)),
-            Span::from(" output").fg(Color::Rgb(205, 214, 244)),
+            Span::from("echo").fg(Color::Rgb(139, 233, 253)),
+            Span::from(" output").fg(Color::Rgb(248, 248, 242)),
         ]),
         Line::from_iter([
             Span::from("head error that wraps onto the next row").red(),
