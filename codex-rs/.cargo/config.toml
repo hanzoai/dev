@@ -9,3 +9,12 @@ rustflags = ["-C", "link-arg=/STACK:8388608", "-C", "link-arg=/arm64hazardfree"]
 
 [target.'cfg(all(windows, target_env = "gnu"))']
 rustflags = ["-C", "link-arg=-Wl,--stack,8388608"]
+
+# `cargo test` runs each test on a 2 MiB spawned thread, which overflows on
+# codex's large async futures. nextest (the CI runner, see .config/nextest.toml)
+# runs each test in its own process on the 8 MiB main thread, so they pass there;
+# this gives plain `cargo test` the same 8 MiB headroom. Only affects
+# cargo-launched processes (tests, `cargo run`) — never the shipped binary, which
+# is executed directly and so never reads this.
+[env]
+RUST_MIN_STACK = "8388608"

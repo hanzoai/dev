@@ -22,9 +22,9 @@ impl TestCodexExecBuilder {
     }
     pub fn cmd_with_server(&self, server: &MockServer) -> assert_cmd::Command {
         let mut cmd = self.cmd();
-        let base = format!("{}/v1", server.uri());
-        cmd.arg("-c")
-            .arg(format!("openai_base_url={}", toml_string_literal(&base)));
+        for override_arg in mock_server_config_overrides(server) {
+            cmd.arg("-c").arg(override_arg);
+        }
         cmd
     }
 
@@ -38,6 +38,21 @@ impl TestCodexExecBuilder {
 
 fn toml_string_literal(value: &str) -> String {
     serde_json::to_string(value).expect("serialize TOML string literal")
+}
+
+/// Config overrides that point a spawned binary's model traffic at `server`,
+/// independent of the production default provider (`hanzo`). Single source of
+/// truth for "use this mock endpoint": the default `hanzo` provider would reach
+/// the real api.hanzo.ai, so we set `openai_base_url` to the mock AND pin the
+/// `openai` provider so that override is the one actually used. Consumed by
+/// [`TestCodexExecBuilder::cmd_with_server`] and by tests that build their own
+/// command (e.g. `resume`).
+pub fn mock_server_config_overrides(server: &MockServer) -> Vec<String> {
+    let base = format!("{}/v1", server.uri());
+    vec![
+        format!("openai_base_url={}", toml_string_literal(&base)),
+        format!("model_provider={}", toml_string_literal("openai")),
+    ]
 }
 
 pub fn test_codex_exec() -> TestCodexExecBuilder {

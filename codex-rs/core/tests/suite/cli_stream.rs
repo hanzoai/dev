@@ -74,6 +74,10 @@ fn personal_access_token_exec_command(server: &MockServer, home: &TempDir) -> Co
         .arg("--skip-git-repo-check")
         .arg("-c")
         .arg(format!("openai_base_url=\"{}/api/codex\"", server.uri()))
+        // Default provider is `hanzo`; this PAT/ChatGPT flow exercises the
+        // openai provider, so pin it to honor the openai_base_url override above.
+        .arg("-c")
+        .arg("model_provider=\"openai\"")
         .arg("-c")
         .arg(format!("chatgpt_base_url=\"{}/backend-api\"", server.uri()))
         .arg("-C")
@@ -275,6 +279,10 @@ async fn responses_mode_stream_cli_supports_openai_base_url_config_override() {
         .arg("--skip-git-repo-check")
         .arg("-c")
         .arg(format!("openai_base_url=\"{}/v1\"", server.uri()))
+        // Default provider is `hanzo`; pin openai so the openai_base_url override
+        // above routes the built-in openai provider.
+        .arg("-c")
+        .arg("model_provider=\"openai\"")
         .arg("-C")
         .arg(&repo_root)
         .arg("hello?");
@@ -446,6 +454,10 @@ async fn responses_api_stream_cli() {
         .arg("--skip-git-repo-check")
         .arg("-c")
         .arg(format!("openai_base_url=\"{}/v1\"", server.uri()))
+        // Default provider is `hanzo`; pin openai so the openai_base_url override
+        // above routes the built-in openai provider.
+        .arg("-c")
+        .arg("model_provider=\"openai\"")
         .arg("-C")
         .arg(&repo_root)
         .arg("hello?");
@@ -487,6 +499,10 @@ async fn integration_creates_and_checks_session_file() -> anyhow::Result<()> {
         .arg("--skip-git-repo-check")
         .arg("-c")
         .arg(format!("openai_base_url=\"{}/v1\"", server.uri()))
+        // Default provider is `hanzo`; pin openai so the openai_base_url override
+        // above routes the built-in openai provider.
+        .arg("-c")
+        .arg("model_provider=\"openai\"")
         .arg("-C")
         .arg(&repo_root)
         .arg(&prompt);
@@ -603,6 +619,10 @@ async fn integration_creates_and_checks_session_file() -> anyhow::Result<()> {
         .arg("--skip-git-repo-check")
         .arg("-c")
         .arg(format!("openai_base_url=\"{}/v1\"", server.uri()))
+        // Default provider is `hanzo`; pin openai so the openai_base_url override
+        // above routes the built-in openai provider.
+        .arg("-c")
+        .arg("model_provider=\"openai\"")
         .arg("-C")
         .arg(&repo_root)
         .arg(&prompt2)
