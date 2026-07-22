@@ -1,5 +1,65 @@
+Hanzo Dev
+Copyright Hanzo AI, Inc.
+
+Hanzo Dev is a downstream fork. Provenance:
+
+  Forked from Every Code — https://github.com/just-every/code (Apache-2.0),
+  which is itself a fork of OpenAI Codex CLI — https://github.com/openai/codex
+  (Apache-2.0).
+
+This product includes software developed by OpenAI and by the Every Code
+community, licensed under the Apache License, Version 2.0. The upstream
+LICENSE and the third-party attributions below are preserved unchanged.
+
+----------------------------------------------------------------------
+DEVIATIONS FROM UPSTREAM
+----------------------------------------------------------------------
+
+The following describe how this fork differs from upstream. They are
+behavioral facts about the code in this tree, not marketing.
+
+- Product and binary rebranded to "Hanzo Dev": the CLI ships as the `dev`
+  binary (codex-rs/cli/Cargo.toml `name = "dev"`; codex-rs/cli/src/main.rs
+  banner `/// Hanzo Dev`), distributed as the npm package `@hanzo/dev`
+  ("Hanzo AI coding assistant"); the workspace root is `hanzo-dev-monorepo`.
+
+- Default model provider is the Hanzo LLM gateway: `HANZO_PROVIDER_ID = "hanzo"`
+  targeting `https://api.hanzo.ai/v1` (OpenAI-compatible, Responses wire API).
+  When no provider is configured, config resolution falls back to `hanzo`
+  (codex-rs/core/src/config/mod.rs; codex-rs/model-provider-info/src/lib.rs).
+
+- Added a `Hanzo` authentication mode backed by Hanzo IAM (hanzo.id OAuth):
+  public client `HANZO_CLIENT_ID = "hanzo-app"`, credentials from
+  `HANZO_API_KEY` / `HANZO_USER_KEY` (codex-rs/login/src/auth/manager.rs,
+  codex-rs/cli/src/login.rs), alongside the existing ApiKey and ChatGPT modes.
+
+- Added Hanzo local/self-hosted provider defaults: `HANZO_LOCAL_BASE_URL`
+  (http://localhost:1234/v1) and `HANZO_NODE_BASE_URL` (http://localhost:36900/v1),
+  the latter overridable via `HANZO_NODE_URL` (codex-rs/model-provider-info/src/lib.rs).
+
+- OpenAI and ChatGPT remain first-class, selectable providers (OPENAI_API_KEY,
+  "Sign in with ChatGPT", `https://api.openai.com/v1`); nothing OpenAI-specific
+  was disabled — Hanzo is added as the default, not a replacement.
+
+- Consolidated to a single Rust workspace (codex-rs) that builds the `dev`
+  binary; parallel legacy trees were removed (see CLAUDE.md changelog).
+
+- Added Hanzo-specific subtrees not present upstream: `hanzo-node/` and
+  `dev-cli/` npm distribution, `hanzo-cli/`, `platform/`, `deploy/`, `sdk/`,
+  `contracts/`, and `oss-payments/`.
+
+- On systems where `code` is already taken (e.g. VS Code) the CLI is also
+  installed as `coder` (codex-cli/bin/coder.js).
+
+- Upstream tracking is automated via `.github/workflows/upstream-sync.yml`,
+  which merges `openai/codex@main` into a draft PR (never auto-merged).
+
+----------------------------------------------------------------------
+UPSTREAM AND THIRD-PARTY NOTICES (preserved per Apache-2.0 section 4(d))
+----------------------------------------------------------------------
+
 OpenAI Codex
-Copyright 2025 OpenAI
+Copyright 2025 OpenAI
 
 This project includes code derived from [Ratatui](https://github.com/ratatui/ratatui), licensed under the MIT license.
 Copyright (c) 2016-2022 Florian Dehau
