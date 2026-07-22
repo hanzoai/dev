@@ -295,6 +295,7 @@ pub(crate) async fn run_turn(
                 let SamplingRequestResult {
                     needs_follow_up: model_needs_follow_up,
                     last_agent_message: sampling_request_last_agent_message,
+                    response_id: sampling_request_response_id,
                 } = sampling_request_output;
                 if model_needs_follow_up {
                     sess.input_queue
@@ -302,6 +303,12 @@ pub(crate) async fn run_turn(
                             &sess.active_turn,
                             &turn_context.sub_id,
                         )
+                        .await;
+                }
+                // Record the latest response id on the turn so `TurnComplete`
+                // can carry it to the UI for content-free reward signals.
+                if sampling_request_response_id.is_some() {
+                    sess.record_turn_response_id(sampling_request_response_id)
                         .await;
                 }
                 can_drain_pending_input = true;
@@ -1352,6 +1359,9 @@ pub(crate) async fn built_tools(
 struct SamplingRequestResult {
     needs_follow_up: bool,
     last_agent_message: Option<String>,
+    /// Provider response id from the completed response, threaded up so the turn
+    /// can surface it (content-free reward signals attach to this id).
+    response_id: Option<String>,
 }
 
 /// Ephemeral per-response state for streaming a single proposed plan.
@@ -2139,6 +2149,7 @@ async fn try_run_sampling_request(
                     break Ok(SamplingRequestResult {
                         needs_follow_up: true,
                         last_agent_message,
+                        response_id: None,
                     });
                 }
             }
@@ -2292,7 +2303,7 @@ async fn try_run_sampling_request(
                 sess.send_event(
                     &turn_context,
                     EventMsg::RawResponseCompleted(RawResponseCompletedEvent {
-                        response_id,
+                        response_id: response_id.clone(),
                         token_usage: token_usage.clone(),
                     }),
                 )
@@ -2308,9 +2319,11 @@ async fn try_run_sampling_request(
                 if let Some(false) = end_turn {
                     needs_follow_up = true;
                 }
+                let response_id = (!response_id.is_empty()).then_some(response_id);
                 break Ok(SamplingRequestResult {
                     needs_follow_up,
                     last_agent_message,
+                    response_id,
                 });
             }
             ResponseEvent::OutputTextDelta(delta) => {

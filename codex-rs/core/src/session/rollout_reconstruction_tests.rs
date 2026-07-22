@@ -95,6 +95,7 @@ fn completed_user_turn_rollout(
     rollout_items.extend(items);
     rollout_items.push(RolloutItem::EventMsg(EventMsg::TurnComplete(
         codex_protocol::protocol::TurnCompleteEvent {
+            response_id: None,
             turn_id,
             last_agent_message: None,
             error: None,
@@ -284,6 +285,7 @@ async fn record_initial_history_resumed_hydrates_previous_turn_settings_from_lif
                 completed_at: None,
                 duration_ms: None,
                 time_to_first_token_ms: None,
+                response_id: None,
             },
         )),
     ];
@@ -361,6 +363,7 @@ async fn reconstruct_history_rollback_keeps_history_and_metadata_in_sync_for_com
                 completed_at: None,
                 duration_ms: None,
                 time_to_first_token_ms: None,
+                response_id: None,
             },
         )),
         RolloutItem::EventMsg(EventMsg::TurnStarted(
@@ -397,6 +400,7 @@ async fn reconstruct_history_rollback_keeps_history_and_metadata_in_sync_for_com
                 completed_at: None,
                 duration_ms: None,
                 time_to_first_token_ms: None,
+                response_id: None,
             },
         )),
         RolloutItem::EventMsg(EventMsg::ThreadRolledBack(
@@ -478,6 +482,7 @@ async fn reconstruct_history_rollback_keeps_history_and_metadata_in_sync_for_inc
                 completed_at: None,
                 duration_ms: None,
                 time_to_first_token_ms: None,
+                response_id: None,
             },
         )),
         RolloutItem::EventMsg(EventMsg::TurnStarted(
@@ -577,6 +582,7 @@ async fn reconstruct_history_rollback_skips_non_user_turns_for_history_and_metad
                 completed_at: None,
                 duration_ms: None,
                 time_to_first_token_ms: None,
+                response_id: None,
             },
         )),
         RolloutItem::EventMsg(EventMsg::TurnStarted(
@@ -609,6 +615,7 @@ async fn reconstruct_history_rollback_skips_non_user_turns_for_history_and_metad
                 completed_at: None,
                 duration_ms: None,
                 time_to_first_token_ms: None,
+                response_id: None,
             },
         )),
         RolloutItem::EventMsg(EventMsg::TurnStarted(
@@ -630,6 +637,7 @@ async fn reconstruct_history_rollback_skips_non_user_turns_for_history_and_metad
                 completed_at: None,
                 duration_ms: None,
                 time_to_first_token_ms: None,
+                response_id: None,
             },
         )),
         RolloutItem::EventMsg(EventMsg::ThreadRolledBack(
@@ -709,6 +717,7 @@ async fn reconstruct_history_rollback_counts_inter_agent_assistant_turns() {
                 completed_at: None,
                 duration_ms: None,
                 time_to_first_token_ms: None,
+                response_id: None,
             },
         )),
         RolloutItem::EventMsg(EventMsg::TurnStarted(
@@ -732,6 +741,7 @@ async fn reconstruct_history_rollback_counts_inter_agent_assistant_turns() {
                 completed_at: None,
                 duration_ms: None,
                 time_to_first_token_ms: None,
+                response_id: None,
             },
         )),
         RolloutItem::EventMsg(EventMsg::ThreadRolledBack(
@@ -806,6 +816,7 @@ async fn reconstruct_history_rollback_clears_history_and_metadata_when_exceeding
                 completed_at: None,
                 duration_ms: None,
                 time_to_first_token_ms: None,
+                response_id: None,
             },
         )),
         RolloutItem::EventMsg(EventMsg::ThreadRolledBack(
@@ -861,6 +872,7 @@ async fn record_initial_history_resumed_rollback_skips_only_user_turns() {
                 completed_at: None,
                 duration_ms: None,
                 time_to_first_token_ms: None,
+                response_id: None,
             },
         )),
         // Standalone task turn (no UserMessage) should not consume rollback skips.
@@ -882,6 +894,7 @@ async fn record_initial_history_resumed_rollback_skips_only_user_turns() {
                 completed_at: None,
                 duration_ms: None,
                 time_to_first_token_ms: None,
+                response_id: None,
             },
         )),
         RolloutItem::EventMsg(EventMsg::ThreadRolledBack(
@@ -941,6 +954,7 @@ async fn record_initial_history_resumed_rollback_drops_incomplete_user_turn_comp
                 completed_at: None,
                 duration_ms: None,
                 time_to_first_token_ms: None,
+                response_id: None,
             },
         )),
         RolloutItem::EventMsg(EventMsg::TurnStarted(
@@ -1272,6 +1286,7 @@ async fn reconstruct_history_legacy_compaction_without_replacement_history_clear
                 completed_at: None,
                 duration_ms: None,
                 time_to_first_token_ms: None,
+                response_id: None,
             },
         )),
     ];
@@ -1354,6 +1369,7 @@ async fn record_initial_history_resumed_turn_context_after_compaction_reestablis
                 completed_at: None,
                 duration_ms: None,
                 time_to_first_token_ms: None,
+                response_id: None,
             },
         )),
     ];
@@ -1468,6 +1484,7 @@ async fn record_initial_history_resumed_aborted_turn_without_id_clears_active_tu
                 completed_at: None,
                 duration_ms: None,
                 time_to_first_token_ms: None,
+                response_id: None,
             },
         )),
         RolloutItem::EventMsg(EventMsg::TurnStarted(
@@ -1593,6 +1610,7 @@ async fn record_initial_history_resumed_unmatched_abort_preserves_active_turn_fo
                 completed_at: None,
                 duration_ms: None,
                 time_to_first_token_ms: None,
+                response_id: None,
             },
         )),
         RolloutItem::EventMsg(EventMsg::TurnStarted(
@@ -1633,6 +1651,7 @@ async fn record_initial_history_resumed_unmatched_abort_preserves_active_turn_fo
                 completed_at: None,
                 duration_ms: None,
                 time_to_first_token_ms: None,
+                response_id: None,
             },
         )),
     ];
@@ -1725,6 +1744,7 @@ async fn record_initial_history_resumed_trailing_incomplete_turn_compaction_clea
                 completed_at: None,
                 duration_ms: None,
                 time_to_first_token_ms: None,
+                response_id: None,
             },
         )),
         RolloutItem::EventMsg(EventMsg::TurnStarted(
@@ -1896,6 +1916,7 @@ async fn record_initial_history_resumed_replaced_incomplete_compacted_turn_clear
                 completed_at: None,
                 duration_ms: None,
                 time_to_first_token_ms: None,
+                response_id: None,
             },
         )),
         RolloutItem::EventMsg(EventMsg::TurnStarted(

@@ -1614,6 +1614,7 @@ async fn paginated_history_lists_use_projected_turns_and_items() -> Result<()> {
     timeout(DEFAULT_READ_TIMEOUT, mcp.initialize()).await??;
 
     let expected_turn_1_full = Turn {
+        response_id: None,
         id: "turn-1".to_string(),
         items: vec![
             ThreadItem::UserMessage {
@@ -1641,6 +1642,7 @@ async fn paginated_history_lists_use_projected_turns_and_items() -> Result<()> {
         duration_ms: Some(10_000),
     };
     let expected_turn_2_full = Turn {
+        response_id: None,
         id: "turn-2".to_string(),
         items: vec![ThreadItem::UserMessage {
             id: "user-2".to_string(),
@@ -1809,6 +1811,7 @@ async fn paginated_history_lists_use_projected_turns_and_items() -> Result<()> {
     assert_eq!(
         first_page.data,
         vec![Turn {
+            response_id: None,
             id: "turn-1".to_string(),
             items: vec![
                 ThreadItem::UserMessage {
@@ -1844,6 +1847,7 @@ async fn paginated_history_lists_use_projected_turns_and_items() -> Result<()> {
     assert_eq!(
         second_page.data,
         vec![Turn {
+            response_id: None,
             id: "turn-2".to_string(),
             items: Vec::new(),
             items_view: TurnItemsView::NotLoaded,
@@ -2178,6 +2182,7 @@ fn paginated_turn_started(turn_id: &str) -> RolloutItem {
 
 fn paginated_turn_completed(turn_id: &str) -> RolloutItem {
     RolloutItem::EventMsg(EventMsg::TurnComplete(TurnCompleteEvent {
+        response_id: None,
         turn_id: turn_id.to_string(),
         last_agent_message: None,
         error: None,

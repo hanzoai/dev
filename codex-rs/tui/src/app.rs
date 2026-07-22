@@ -150,6 +150,8 @@ use codex_models_manager::model_presets::HIDE_GPT5_1_MIGRATION_PROMPT_CONFIG;
 use codex_otel::SessionTelemetry;
 use codex_otel::TelemetryAuthMode;
 use codex_protocol::ThreadId;
+use codex_reward_signals::RewardSignals;
+use codex_reward_signals::Signal as RewardSignal;
 use codex_protocol::config_types::Personality;
 #[cfg(target_os = "windows")]
 use codex_protocol::config_types::WindowsSandboxLevel;
@@ -622,6 +624,43 @@ fn active_turn_not_steerable_turn_error(error: &TypedRequestError) -> Option<App
     .then_some(turn_error)
 }
 
+/// Build the content-free reward-signal client from the resolved config.
+///
+/// Sends are gated three ways: the config key (`reward_signals`), the env
+/// opt-out (`HANZO_FEEDBACK=0|false|off`), and the provider-locality gate inside
+/// [`RewardSignals::new`] (Hanzo gateway only). The bearer token reused here is
+/// the same one the model client uses for this provider.
+///
+/// Privacy note: server-side org/user *training* opt-in is the preferred
+/// enforcement point but is not present yet, so the client sends unconditionally
+/// once the caller has not locally opted out and the provider is the gateway.
+async fn build_reward_signals(config: &Config, base_url: Option<&str>) -> RewardSignals {
+    if !config.reward_signals || reward_signals_env_opted_out() {
+        return RewardSignals::disabled();
+    }
+    RewardSignals::new(base_url, reward_signals_token(config).await, true)
+}
+
+fn reward_signals_env_opted_out() -> bool {
+    match std::env::var("HANZO_FEEDBACK") {
+        Ok(value) => matches!(value.trim().to_ascii_lowercase().as_str(), "0" | "false" | "off"),
+        Err(_) => false,
+    }
+}
+
+/// Resolve the bearer token the model client uses for the active provider:
+/// prefer the provider's env key, then fall back to stored auth (hanzo.id JWT).
+async fn reward_signals_token(config: &Config) -> Option<String> {
+    if let Ok(Some(api_key)) = config.model_provider.api_key() {
+        return Some(api_key);
+    }
+    codex_login::AuthManager::shared_from_config(config, /*enable_codex_api_key_env*/ false)
+        .await
+        .auth()
+        .await
+        .and_then(|auth| auth.get_token().ok())
+}
+
 async fn resolve_runtime_model_provider_base_url(provider: &ModelProviderInfo) -> Option<String> {
     let provider = create_model_provider(provider.clone(), /*auth_manager*/ None);
     match provider.runtime_base_url().await {
@@ -747,6 +786,7 @@ impl App {
             has_codex_backend_auth: self.chat_widget.has_codex_backend_auth(),
             model_catalog: self.model_catalog.clone(),
             feedback: self.feedback.clone(),
+            reward_signals: self.chat_widget.reward_signals().clone(),
             is_first_run: false,
             status_account_display: self.chat_widget.status_account_display().cloned(),
             runtime_model_provider_base_url: self
@@ -879,6 +919,8 @@ impl App {
         let runtime_model_provider_base_url =
             resolve_runtime_model_provider_base_url(&config.model_provider).await;
         let runtime_model_provider_ms = runtime_model_provider_started_at.elapsed().as_millis();
+        let reward_signals =
+            build_reward_signals(&config, runtime_model_provider_base_url.as_deref()).await;
 
         let enhanced_keys_supported = tui.enhanced_keys_supported();
         let wait_for_initial_session_configured =
@@ -917,6 +959,7 @@ impl App {
                     has_codex_backend_auth,
                     model_catalog: model_catalog.clone(),
                     feedback: feedback.clone(),
+                    reward_signals: reward_signals.clone(),
                     is_first_run,
                     status_account_display: status_account_display.clone(),
                     runtime_model_provider_base_url: runtime_model_provider_base_url.clone(),
@@ -957,6 +1000,7 @@ impl App {
                     has_codex_backend_auth,
                     model_catalog: model_catalog.clone(),
                     feedback: feedback.clone(),
+                    reward_signals: reward_signals.clone(),
                     is_first_run,
                     status_account_display: status_account_display.clone(),
                     runtime_model_provider_base_url: runtime_model_provider_base_url.clone(),
@@ -996,6 +1040,7 @@ impl App {
                     has_codex_backend_auth,
                     model_catalog: model_catalog.clone(),
                     feedback: feedback.clone(),
+                    reward_signals: reward_signals.clone(),
                     is_first_run,
                     status_account_display: status_account_display.clone(),
                     runtime_model_provider_base_url: runtime_model_provider_base_url.clone(),
@@ -1264,6 +1309,28 @@ See the Codex keymap documentation for supported actions and examples."
                 return Err(err);
             }
         };
+
+        // One-shot end-of-session rating prompt (content-free reward signal).
+        // Only on a normal user exit, when a response id exists to attach it to
+        // and the reward client is live. `send_now` awaits delivery because a
+        // detached task would be killed as the process exits; a short timeout
+        // ensures exit is never delayed past ~1.5s.
+        if matches!(exit_reason, ExitReason::UserRequested)
+            && app.chat_widget.reward_signals().is_enabled()
+            && let Some(request_id) = app.chat_widget.last_request_id().map(str::to_string)
+        {
+            let signal = match crate::rating_prompt::run_exit_rating_prompt(tui).await {
+                crate::rating_prompt::RatingOutcome::Rated(rating) => RewardSignal::Rating(rating),
+                crate::rating_prompt::RatingOutcome::Dismissed => RewardSignal::Dismiss,
+            };
+            let _ = tokio::time::timeout(
+                std::time::Duration::from_millis(1500),
+                app.chat_widget.reward_signals().send_now(request_id, signal),
+            )
+            .await;
+            let _ = tui.terminal.clear();
+        }
+
         let thread_id = app.chat_widget.thread_id().or(app.primary_thread_id);
         let resume_hint = resume_hint_for_resumable_thread(
             thread_id,

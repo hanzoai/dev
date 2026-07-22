@@ -27,6 +27,7 @@ impl ChatWidget {
                 started_at,
                 completed_at,
                 duration_ms,
+                response_id,
             } = turn;
             if matches!(status, TurnStatus::InProgress) {
                 self.turn_lifecycle.last_turn_id = Some(turn_id.clone());
@@ -60,6 +61,7 @@ impl ChatWidget {
                             started_at,
                             completed_at,
                             duration_ms,
+                            response_id,
                         },
                     },
                     Some(replay_kind),

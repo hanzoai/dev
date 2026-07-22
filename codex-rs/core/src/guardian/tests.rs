@@ -2238,6 +2238,7 @@ async fn guardian_reused_trunk_ignores_stale_prior_turn_completion() -> anyhow::
                 completed_at: None,
                 duration_ms: None,
                 time_to_first_token_ms: Some(1),
+                response_id: None,
             }),
         })
         .await;

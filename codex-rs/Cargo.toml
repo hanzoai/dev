@@ -79,6 +79,7 @@ members = [
     "process-hardening",
     "protocol",
     "prompts",
+    "reward-signals",
     "rollout",
     "rollout-trace",
     "rmcp-client",
@@ -221,6 +222,7 @@ codex-model-provider = { path = "model-provider" }
 codex-process-hardening = { path = "process-hardening" }
 codex-protocol = { path = "protocol" }
 codex-prompts = { path = "prompts" }
+codex-reward-signals = { path = "reward-signals" }
 codex-responses-api-proxy = { path = "responses-api-proxy" }
 codex-response-debug-context = { path = "response-debug-context" }
 codex-rmcp-client = { path = "rmcp-client" }
