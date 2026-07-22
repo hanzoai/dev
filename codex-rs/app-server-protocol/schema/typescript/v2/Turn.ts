@@ -34,4 +34,8 @@ completedAt: number | null,
 /**
  * Duration between turn start and completion in milliseconds, if known.
  */
-durationMs: number | null, };
+durationMs: number | null,
+/**
+ * Provider response id of the last completed response in this turn, if known.
+ */
+responseId?: string | null, };

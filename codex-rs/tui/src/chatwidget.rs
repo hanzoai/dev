@@ -113,6 +113,8 @@ use codex_app_server_protocol::ThreadTokenUsage;
 use codex_app_server_protocol::ToolRequestUserInputParams;
 use codex_app_server_protocol::Turn;
 use codex_app_server_protocol::TurnCompletedNotification;
+use codex_reward_signals::RewardSignals;
+use codex_reward_signals::Signal as RewardSignal;
 use codex_app_server_protocol::TurnPlanStepStatus;
 use codex_app_server_protocol::TurnStatus;
 use codex_app_server_protocol::UserInput;
@@ -497,6 +499,7 @@ pub(crate) struct ChatWidgetInit {
     pub(crate) has_codex_backend_auth: bool,
     pub(crate) model_catalog: Arc<ModelCatalog>,
     pub(crate) feedback: codex_feedback::CodexFeedback,
+    pub(crate) reward_signals: RewardSignals,
     pub(crate) is_first_run: bool,
     pub(crate) status_account_display: Option<StatusAccountDisplay>,
     pub(crate) runtime_model_provider_base_url: Option<String>,
@@ -695,6 +698,11 @@ pub(crate) struct ChatWidget {
     last_rendered_width: std::cell::Cell<Option<usize>>,
     // Feedback sink for /feedback
     feedback: codex_feedback::CodexFeedback,
+    // Content-free reward-signal client (router-training feedback).
+    reward_signals: RewardSignals,
+    // Provider response id of the last completed turn this session, if any.
+    // Used to attach reward signals (regenerate/abandon/rating) to a response.
+    last_request_id: Option<String>,
     // Current session rollout path (if known)
     current_rollout_path: Option<PathBuf>,
     // Current working directory (if known)
@@ -1827,6 +1835,24 @@ impl ChatWidget {
 
     pub(crate) fn thread_name(&self) -> Option<String> {
         self.thread_name.clone()
+    }
+
+    /// Provider response id of the last completed turn this session, if any.
+    pub(crate) fn last_request_id(&self) -> Option<&str> {
+        self.last_request_id.as_deref()
+    }
+
+    /// The session's content-free reward-signal client.
+    pub(crate) fn reward_signals(&self) -> &RewardSignals {
+        &self.reward_signals
+    }
+
+    /// Fire a content-free reward signal for the last response id seen this
+    /// session. Silent no-op when disabled or no response id exists yet.
+    pub(crate) fn send_reward_signal(&self, signal: RewardSignal) {
+        if let Some(request_id) = self.last_request_id.as_deref() {
+            self.reward_signals.send(request_id, signal);
+        }
     }
 
     /// Returns the current thread's precomputed rollout path.

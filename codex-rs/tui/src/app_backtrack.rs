@@ -178,6 +178,10 @@ impl App {
             nth_user_message: selection.nth_user_message,
             prompt: selection.prompt,
         });
+        // Backtracking to re-run a turn discards the prior response: emit a
+        // content-free `regenerate` reward signal for the response being redone.
+        self.chat_widget
+            .send_reward_signal(codex_reward_signals::Signal::Regenerate);
     }
 
     pub(crate) fn restore_backtrack_prompt_after_branch_error(

@@ -1582,6 +1582,7 @@ impl From<PendingTurn> for Turn {
             started_at: value.started_at,
             completed_at: value.completed_at,
             duration_ms: value.duration_ms,
+            response_id: None,
         }
     }
 }
@@ -1597,6 +1598,7 @@ impl From<&PendingTurn> for Turn {
             started_at: value.started_at,
             completed_at: value.completed_at,
             duration_ms: value.duration_ms,
+            response_id: None,
         }
     }
 }
@@ -1779,6 +1781,7 @@ mod tests {
                 review_output: None,
             }),
             EventMsg::TurnComplete(TurnCompleteEvent {
+                response_id: None,
                 turn_id: "turn-1".into(),
                 started_at: None,
                 last_agent_message: None,
@@ -1839,6 +1842,7 @@ mod tests {
                 completed_at_ms: 0,
             }),
             EventMsg::TurnComplete(TurnCompleteEvent {
+                response_id: None,
                 turn_id: "turn-1".into(),
                 started_at: None,
                 last_agent_message: None,
@@ -1959,6 +1963,7 @@ mod tests {
                 completed_at: None,
                 duration_ms: None,
                 time_to_first_token_ms: None,
+                response_id: None,
             }),
         ];
 
@@ -2012,6 +2017,7 @@ mod tests {
                 completed_at: None,
                 duration_ms: None,
                 time_to_first_token_ms: None,
+                response_id: None,
             }),
         ];
 
@@ -2059,6 +2065,7 @@ mod tests {
                 completed_at_ms: 1_000,
             }),
             EventMsg::TurnComplete(TurnCompleteEvent {
+                response_id: None,
                 turn_id: turn_id.to_string(),
                 started_at: None,
                 last_agent_message: None,
@@ -2124,6 +2131,7 @@ mod tests {
                 completed_at_ms: 1_000,
             }),
             EventMsg::TurnComplete(TurnCompleteEvent {
+                response_id: None,
                 turn_id: turn_id.to_string(),
                 started_at: None,
                 last_agent_message: None,
@@ -2201,6 +2209,7 @@ mod tests {
                 completed_at: None,
                 duration_ms: None,
                 time_to_first_token_ms: None,
+                response_id: None,
             }),
         ];
 
@@ -2281,6 +2290,7 @@ mod tests {
                 completed_at: None,
                 duration_ms: None,
                 time_to_first_token_ms: None,
+                response_id: None,
             })),
         ];
 
@@ -2295,6 +2305,7 @@ mod tests {
                 started_at: None,
                 completed_at: None,
                 duration_ms: None,
+                response_id: None,
                 items_view: TurnItemsView::Full,
                 items: vec![
                     ThreadItem::UserMessage {
@@ -2635,6 +2646,7 @@ mod tests {
                 completed_at: None,
                 duration_ms: None,
                 time_to_first_token_ms: None,
+                response_id: None,
             }),
         ];
 
@@ -3228,6 +3240,7 @@ mod tests {
                 completed_at: None,
                 duration_ms: None,
                 time_to_first_token_ms: None,
+                response_id: None,
             }),
             EventMsg::TurnStarted(TurnStartedEvent {
                 turn_id: "turn-b".into(),
@@ -3272,6 +3285,7 @@ mod tests {
                 completed_at: None,
                 duration_ms: None,
                 time_to_first_token_ms: None,
+                response_id: None,
             }),
         ];
 
@@ -3330,6 +3344,7 @@ mod tests {
                 completed_at: None,
                 duration_ms: None,
                 time_to_first_token_ms: None,
+                response_id: None,
             }),
             EventMsg::TurnStarted(TurnStartedEvent {
                 turn_id: "turn-b".into(),
@@ -3374,6 +3389,7 @@ mod tests {
                 completed_at: None,
                 duration_ms: None,
                 time_to_first_token_ms: None,
+                response_id: None,
             }),
         ];
 
@@ -3564,6 +3580,7 @@ mod tests {
                 completed_at: None,
                 duration_ms: None,
                 time_to_first_token_ms: None,
+                response_id: None,
             }),
             EventMsg::TurnStarted(TurnStartedEvent {
                 turn_id: "turn-b".into(),
@@ -3588,6 +3605,7 @@ mod tests {
                 completed_at: None,
                 duration_ms: None,
                 time_to_first_token_ms: None,
+                response_id: None,
             }),
             EventMsg::AgentMessage(AgentMessageEvent {
                 message: "still in b".into(),
@@ -3602,6 +3620,7 @@ mod tests {
                 completed_at: None,
                 duration_ms: None,
                 time_to_first_token_ms: None,
+                response_id: None,
             }),
         ];
 
@@ -3642,6 +3661,7 @@ mod tests {
                 completed_at: None,
                 duration_ms: None,
                 time_to_first_token_ms: None,
+                response_id: None,
             }),
             EventMsg::TurnStarted(TurnStartedEvent {
                 turn_id: "turn-b".into(),
@@ -3710,6 +3730,7 @@ mod tests {
                 completed_at: None,
                 duration_ms: None,
                 time_to_first_token_ms: None,
+                response_id: None,
             })),
         ];
 
@@ -3723,6 +3744,7 @@ mod tests {
                 started_at: None,
                 completed_at: None,
                 duration_ms: None,
+                response_id: None,
                 items_view: TurnItemsView::Full,
                 items: Vec::new(),
             }]
@@ -3974,6 +3996,7 @@ mod tests {
                 completed_at: None,
                 duration_ms: None,
                 time_to_first_token_ms: None,
+                response_id: None,
             }),
             EventMsg::Error(ErrorEvent {
                 message: "request-level failure".into(),
@@ -3996,6 +4019,7 @@ mod tests {
                 started_at: None,
                 completed_at: None,
                 duration_ms: None,
+                response_id: None,
                 items_view: TurnItemsView::Full,
                 items: vec![ThreadItem::UserMessage {
                     id: "item-1".into(),
@@ -4041,6 +4065,7 @@ mod tests {
                 completed_at: None,
                 duration_ms: None,
                 time_to_first_token_ms: None,
+                response_id: None,
             }),
         ];
 
@@ -4098,6 +4123,7 @@ mod tests {
                 completed_at: None,
                 duration_ms: None,
                 time_to_first_token_ms: None,
+                response_id: None,
             })),
         ];
 
@@ -4181,6 +4207,7 @@ mod tests {
                 completed_at: None,
                 duration_ms: None,
                 time_to_first_token_ms: None,
+                response_id: None,
             })),
         ];
 
@@ -4350,6 +4377,7 @@ mod tests {
                 completed_at: Some(20),
                 duration_ms: Some(123),
                 time_to_first_token_ms: None,
+                response_id: None,
             }),
         ));
 
@@ -4434,6 +4462,7 @@ mod tests {
                 completed_at: Some(20),
                 duration_ms: Some(123),
                 time_to_first_token_ms: None,
+                response_id: None,
             })),
         ]);
 

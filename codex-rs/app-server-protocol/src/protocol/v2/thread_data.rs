@@ -252,6 +252,10 @@ pub struct Turn {
     /// Duration between turn start and completion in milliseconds, if known.
     #[ts(type = "number | null")]
     pub duration_ms: Option<i64>,
+    /// Provider response id of the last completed response in this turn, if known.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(type = "string | null", optional)]
+    pub response_id: Option<String>,
 }
 
 #[derive(Default, Serialize, Deserialize, Debug, Clone, Copy, PartialEq, Eq, JsonSchema, TS)]
