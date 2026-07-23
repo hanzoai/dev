@@ -5,7 +5,6 @@
 #![deny(clippy::print_stdout)]
 
 mod cli;
-mod cloud_session;
 mod event_processor;
 mod event_processor_with_human_output;
 pub(crate) mod event_processor_with_jsonl_output;
@@ -957,7 +956,15 @@ async fn run_exec_session(args: ExecRunArgs) -> anyhow::Result<()> {
     // Best-effort: register this run with Hanzo Cloud so it streams live to the
     // hanzo.bot playground. Entirely additive — a signed-out or offline host
     // yields `None` and the run proceeds untouched.
-    let cloud_session = cloud_session::CloudSession::start(&config).await;
+    let cloud_session = codex_cloud_session::CloudSession::start(
+        &config,
+        codex_cloud_session::SessionMeta {
+            model: config.model.clone().unwrap_or_default(),
+            cwd: config.cwd.to_path_buf(),
+            provider: config.model_provider_id.clone(),
+        },
+    )
+    .await;
 
     // Run the loop until the task is complete.
     // Track whether a fatal error was reported by the server so we can

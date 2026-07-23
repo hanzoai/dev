@@ -27,6 +27,7 @@ members = [
     "code-mode-protocol",
     "codex-home",
     "cloud-config",
+    "cloud-session",
     "cloud-tasks",
     "cloud-tasks-client",
     "cloud-tasks-mock-client",
@@ -165,6 +166,7 @@ codex-cli = { path = "cli" }
 codex-client = { path = "codex-client" }
 codex-collaboration-mode-templates = { path = "collaboration-mode-templates" }
 codex-cloud-config = { path = "cloud-config" }
+codex-cloud-session = { path = "cloud-session" }
 codex-cloud-tasks-client = { path = "cloud-tasks-client" }
 codex-cloud-tasks-mock-client = { path = "cloud-tasks-mock-client" }
 codex-code-mode = { path = "code-mode" }

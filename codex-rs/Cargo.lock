@@ -2434,6 +2434,20 @@ dependencies = [
 ]
 
 [[package]]
+name = "codex-cloud-session"
+version = "0.0.0"
+dependencies = [
+ "codex-agents-client",
+ "codex-app-server-protocol",
+ "codex-git-utils",
+ "codex-login",
+ "codex-model-provider",
+ "serde",
+ "serde_json",
+ "tokio",
+]
+
+[[package]]
 name = "codex-cloud-tasks"
 version = "0.0.0"
 dependencies = [
@@ -2866,18 +2880,17 @@ dependencies = [
  "anyhow",
  "assert_cmd",
  "clap",
- "codex-agents-client",
  "codex-app-server-client",
  "codex-app-server-protocol",
  "codex-apply-patch",
  "codex-arg0",
  "codex-cloud-config",
+ "codex-cloud-session",
  "codex-config",
  "codex-core",
  "codex-feedback",
  "codex-git-utils",
  "codex-login",
- "codex-model-provider",
  "codex-model-provider-info",
  "codex-otel",
  "codex-protocol",
@@ -4147,6 +4160,7 @@ dependencies = [
  "codex-arg0",
  "codex-cli",
  "codex-cloud-config",
+ "codex-cloud-session",
  "codex-config",
  "codex-connectors",
  "codex-core-plugins",

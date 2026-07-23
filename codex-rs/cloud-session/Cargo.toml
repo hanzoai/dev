@@ -1,0 +1,21 @@
+[package]
+name = "codex-cloud-session"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies]
+codex-agents-client = { workspace = true }
+codex-app-server-protocol = { workspace = true }
+codex-git-utils = { workspace = true }
+codex-login = { workspace = true }
+codex-model-provider = { workspace = true }
+serde = { workspace = true, features = ["derive"] }
+serde_json = { workspace = true }
+tokio = { workspace = true, features = ["rt"] }
+
+[lib]
+doctest = false
