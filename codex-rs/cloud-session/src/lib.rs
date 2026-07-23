@@ -18,7 +18,12 @@
 //! the diff text — so nothing sensitive rides the stream.
 
 use std::path::PathBuf;
+use std::sync::Arc;
+use std::sync::atomic::AtomicBool;
+use std::sync::atomic::Ordering;
+use std::time::Duration;
 
+use codex_agents_client::ControlCommand;
 use codex_agents_client::HttpClient;
 use codex_agents_client::SessionRegister;
 use codex_app_server_protocol::CollabAgentTool;
@@ -53,6 +58,9 @@ pub struct SessionMeta {
 pub struct CloudSession {
     client: HttpClient,
     id: String,
+    /// Cleared on [`finish`] so the control poller stops draining once the run
+    /// is over. Shared with the detached poller task.
+    active: Arc<AtomicBool>,
 }
 
 impl CloudSession {
@@ -112,7 +120,37 @@ impl CloudSession {
         Some(Self {
             client,
             id: session.id,
+            active: Arc::new(AtomicBool::new(true)),
         })
+    }
+
+    /// Poll the cloud for steering commands (pause/resume/stop/message the
+    /// dashboard posted) and hand each to `apply`, until the run ends. Detached
+    /// and best-effort: a poll failure is ignored and retried; `apply` is the
+    /// frontend's own reaction (e.g. exec sends its interrupt on `stop`). The
+    /// poller stops once [`finish`] clears the active flag.
+    pub fn spawn_control<F>(&self, apply: F)
+    where
+        F: Fn(ControlCommand) + Send + 'static,
+    {
+        let client = self.client.clone();
+        let id = self.id.clone();
+        let active = Arc::clone(&self.active);
+        tokio::spawn(async move {
+            let mut cursor: i64 = 0;
+            while active.load(Ordering::Relaxed) {
+                tokio::time::sleep(Duration::from_secs(2)).await;
+                if !active.load(Ordering::Relaxed) {
+                    return;
+                }
+                if let Ok(batch) = client.drain_control(&id, cursor).await {
+                    cursor = batch.cursor.max(cursor);
+                    for command in batch.commands {
+                        apply(command);
+                    }
+                }
+            }
+        });
     }
 
     /// Map a server notification to zero or more cloud events and emit each on
@@ -127,8 +165,10 @@ impl CloudSession {
         }
     }
 
-    /// Mark the run terminal (`done` | `error`). Best-effort.
+    /// Mark the run terminal (`done` | `error`). Best-effort. Also stops the
+    /// control poller so it drains no further once the run is over.
     pub async fn finish(self, status: &str) {
+        self.active.store(false, Ordering::Relaxed);
         let _ = self.client.patch_session_status(&self.id, status).await;
     }
 }

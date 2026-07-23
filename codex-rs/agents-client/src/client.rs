@@ -9,6 +9,7 @@ use crate::api::AgentsBackend;
 use crate::model_provider_unauthenticated;
 use crate::types::Agent;
 use crate::types::AgentDetail;
+use crate::types::ControlBatch;
 use crate::types::Run;
 use crate::types::Session;
 use crate::types::SessionRegister;
@@ -244,6 +245,23 @@ impl HttpClient {
         }
         Ok(())
     }
+
+    /// Drain steering commands newer than `after` for a session
+    /// (`GET /v1/agents/sessions/:id/control?after=N`). Cursor-driven: pass the
+    /// returned [`ControlBatch::cursor`] as the next `after` so an applied
+    /// command is never seen twice. Owner-scoped server-side by the bearer.
+    pub async fn drain_control(&self, id: &str, after: i64) -> Result<ControlBatch> {
+        let url = format!(
+            "{}/v1/agents/sessions/{}/control?after={after}",
+            self.base_url,
+            encode_segment(id)
+        );
+        let (status, body) = Self::send(self.request(reqwest::Method::GET, &url)).await?;
+        if !status.is_success() {
+            return Err(Self::server_error(status, &body));
+        }
+        Self::decode(&body)
+    }
 }
 
 /// Human-readable description of the agent-name grammar the server enforces
@@ -328,6 +346,7 @@ mod tests {
     use wiremock::matchers::header;
     use wiremock::matchers::method;
     use wiremock::matchers::path;
+    use wiremock::matchers::query_param;
 
     use super::*;
 
@@ -389,7 +408,10 @@ mod tests {
     fn invalid_name_error_quotes_the_name_and_the_rule() {
         let err = validate_name("..").unwrap_err();
         let msg = err.to_string();
-        assert!(msg.contains("\"..\""), "should quote the offending name: {msg}");
+        assert!(
+            msg.contains("\"..\""),
+            "should quote the offending name: {msg}"
+        );
         assert!(msg.contains(NAME_RULE), "should state the rule: {msg}");
     }
 
@@ -581,16 +603,50 @@ mod tests {
         Mock::given(method("POST"))
             .and(path("/v1/agents/sessions"))
             .and(header(AUTHORIZATION.as_str(), "Bearer jwt-123"))
-            .and(body_json(serde_json::json!({ "agent": "hanzo-code", "host": "mac" })))
+            .and(body_json(
+                serde_json::json!({ "agent": "hanzo-code", "host": "mac" }),
+            ))
             .respond_with(ResponseTemplate::new(201).set_body_json(serde_json::json!({
                 "id": "sess_abc", "agent": "hanzo-code", "status": "running"
             })))
             .mount(&server)
             .await;
-        let req = SessionRegister { agent: "hanzo-code".into(), host: "mac".into(), ..Default::default() };
+        let req = SessionRegister {
+            agent: "hanzo-code".into(),
+            host: "mac".into(),
+            ..Default::default()
+        };
         let sess = client(&server.uri()).register_session(&req).await.unwrap();
         assert_eq!(sess.id, "sess_abc");
         assert_eq!(sess.status, "running");
+    }
+
+    #[tokio::test]
+    async fn drain_control_parses_commands_and_cursor() {
+        let server = MockServer::start().await;
+        Mock::given(method("GET"))
+            .and(path("/v1/agents/sessions/sess_abc/control"))
+            .and(query_param("after", "3"))
+            .and(header(AUTHORIZATION.as_str(), "Bearer jwt-123"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+                "commands": [
+                    { "seq": 4, "command": "message", "message": "keep going" },
+                    { "seq": 5, "command": "stop" }
+                ],
+                "cursor": 5
+            })))
+            .mount(&server)
+            .await;
+        let batch = client(&server.uri())
+            .drain_control("sess_abc", 3)
+            .await
+            .unwrap();
+        assert_eq!(batch.cursor, 5);
+        assert_eq!(batch.commands.len(), 2);
+        assert_eq!(batch.commands[0].command, "message");
+        assert_eq!(batch.commands[0].message, "keep going");
+        assert_eq!(batch.commands[1].command, "stop");
+        assert_eq!(batch.commands[1].seq, 5);
     }
 
     #[tokio::test]
@@ -607,7 +663,11 @@ mod tests {
             .mount(&server)
             .await;
         client(&server.uri())
-            .append_session_event("sess_abc", "message", serde_json::json!({ "role": "assistant", "text": "hi" }))
+            .append_session_event(
+                "sess_abc",
+                "message",
+                serde_json::json!({ "role": "assistant", "text": "hi" }),
+            )
             .await
             .unwrap();
     }
@@ -629,7 +689,13 @@ mod tests {
             .mount(&server)
             .await;
         let c = client(&server.uri());
-        assert_eq!(c.patch_session_status("sess_abc", "done").await.unwrap().status, "done");
+        assert_eq!(
+            c.patch_session_status("sess_abc", "done")
+                .await
+                .unwrap()
+                .status,
+            "done"
+        );
         c.stop_session("sess_abc").await.unwrap();
     }
 
@@ -638,7 +704,10 @@ mod tests {
         let server = MockServer::start().await;
         Mock::given(method("POST"))
             .and(path("/v1/agents/sessions/sess_x/events"))
-            .respond_with(ResponseTemplate::new(404).set_body_json(serde_json::json!({ "error": "session not found" })))
+            .respond_with(
+                ResponseTemplate::new(404)
+                    .set_body_json(serde_json::json!({ "error": "session not found" })),
+            )
             .mount(&server)
             .await;
         let err = client(&server.uri())

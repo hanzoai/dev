@@ -23,6 +23,8 @@ pub use api::AgentsBackend;
 pub use client::HttpClient;
 pub use types::Agent;
 pub use types::AgentDetail;
+pub use types::ControlBatch;
+pub use types::ControlCommand;
 pub use types::Run;
 pub use types::Session;
 pub use types::SessionRegister;
