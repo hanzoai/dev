@@ -81,22 +81,15 @@ jobs:
         with:
           fetch-depth: 0
 
-      - name: Setup Python 3.12
-        uses: actions/setup-python@v5
-        with:
-          python-version: "3.12"
-
+      # Read the toolchain channel with pure shell — the macOS self-hosted
+      # runners have no writable tool cache, so `actions/setup-python` fails on
+      # `mkdir /Users/runner`. Python was only used to parse one TOML line.
       - name: Read Rust toolchain channel
         id: rust_toolchain
         shell: bash
         run: |
           set -euo pipefail
-          TOOLCHAIN=$(python -c "import sys, pathlib; p=pathlib.Path('codex-rs/rust-toolchain.toml').read_text();
-          try:
-              import tomllib as tl
-          except ModuleNotFoundError:
-              import tomli as tl
-          print(tl.loads(p)['toolchain']['channel'])")
+          TOOLCHAIN=$(sed -n 's/^[[:space:]]*channel[[:space:]]*=[[:space:]]*"\(.*\)".*/\1/p' codex-rs/rust-toolchain.toml | head -1)
           echo "channel=$TOOLCHAIN" >> "$GITHUB_OUTPUT"
           echo "RUST_TOOLCHAIN=$TOOLCHAIN" >> "$GITHUB_ENV"
 
@@ -241,22 +234,15 @@ jobs:
         with:
           fetch-depth: 0
 
-      - name: Setup Python 3.12
-        uses: actions/setup-python@v5
-        with:
-          python-version: "3.12"
-
+      # Read the toolchain channel with pure shell — the macOS self-hosted
+      # runners have no writable tool cache, so `actions/setup-python` fails on
+      # `mkdir /Users/runner`. Python was only used to parse one TOML line.
       - name: Read Rust toolchain channel
         id: rust_toolchain
         shell: bash
         run: |
           set -euo pipefail
-          TOOLCHAIN=$(python -c "import sys, pathlib; p=pathlib.Path('codex-rs/rust-toolchain.toml').read_text();
-          try:
-              import tomllib as tl
-          except ModuleNotFoundError:
-              import tomli as tl
-          print(tl.loads(p)['toolchain']['channel'])")
+          TOOLCHAIN=$(sed -n 's/^[[:space:]]*channel[[:space:]]*=[[:space:]]*"\(.*\)".*/\1/p' codex-rs/rust-toolchain.toml | head -1)
           echo "channel=$TOOLCHAIN" >> "$GITHUB_OUTPUT"
           echo "RUST_TOOLCHAIN=$TOOLCHAIN" >> "$GITHUB_ENV"
 
@@ -279,19 +265,10 @@ jobs:
           cache-workspace-crates: true
           cache-on-failure: true
 
-      # sccache: skip compiles when possible (doesn't skip linking)
-      - name: Setup sccache (GHA backend)
-        uses: mozilla-actions/sccache-action@v0.0.9
-        with:
-          version: v0.10.0
-          token: ${{ secrets.GITHUB_TOKEN }}
-      - name: Enable sccache
-        shell: bash
-        run: |
-          echo "SCCACHE_GHA_ENABLED=true" >> "$GITHUB_ENV"
-          echo "RUSTC_WRAPPER=sccache" >> "$GITHUB_ENV"
-          echo "SCCACHE_IDLE_TIMEOUT=1800" >> "$GITHUB_ENV"
-          echo "SCCACHE_CACHE_SIZE=10G" >> "$GITHUB_ENV"
+      # sccache removed: its GitHub-Actions cache backend isn't available on the
+      # self-hosted fleet, and the action's post step failed the build with
+      # "Unable to locate executable file: undefined". The Swatinem/rust-cache
+      # above already persists target/ across runs, so builds stay fast.
 
       # -------- Platform tuning (minimal, proven) --------
 
