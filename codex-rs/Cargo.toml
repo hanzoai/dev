@@ -540,6 +540,15 @@ opt-level = 0
 debug = "none"
 strip = "symbols"
 
+# Fast local + CI iteration build (`build-fast.sh`, release.yml preflight).
+[profile.dev-fast]
+inherits = "dev"
+opt-level = 1
+debug = 1
+incremental = true
+codegen-units = 256
+lto = "off"
+
 [profile.release]
 lto = "thin"
 debug = "line-tables-only"
