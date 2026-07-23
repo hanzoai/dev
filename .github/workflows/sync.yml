@@ -1,0 +1,45 @@
+name: Sync to git.hanzo.ai
+# hanzoai/dev is NATIVE on git.hanzo.ai (hanzoai/git) — the canonical repo where
+# CI/CD runs: build/test/release from .hanzo/workflows/ on the Hanzo git-runner
+# fleet. GitHub is the DOWNSTREAM MIRROR. The hanzo-cloud-app App already mirrors
+# on push; this is the explicit, self-documenting belt-and-suspenders — its
+# presence in .github/ signals "this repo migrated to git.hanzo.ai."
+#
+# IDEMPOTENT: mirror-sync just tells Gitea to pull HEAD, so N nudges == 1 (same
+# latest state); concurrency coalesces a burst of pushes to one in-flight sync.
+# FAST: no checkout, one bounded curl, hard timeouts. FAIL-SOFT: a missing token
+# or hiccup never fails the push (the App webhook still mirrors). Set
+# HANZO_GIT_TOKEN to enable the nudge.
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+# Only the newest push's sync needs to run — cancel any older in-flight one (it
+# would pull a now-stale HEAD). This is what makes rapid pushes idempotent + cheap.
+concurrency:
+  group: sync-git-hanzo-ai
+  cancel-in-progress: true
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    timeout-minutes: 2
+    steps:
+      - name: Nudge git.hanzo.ai to pull HEAD (mirror-sync)
+        continue-on-error: true
+        env:
+          HANZO_GIT_TOKEN: ${{ secrets.HANZO_GIT_TOKEN }}
+        run: |
+          set -u
+          if [ -z "${HANZO_GIT_TOKEN:-}" ]; then
+            echo "HANZO_GIT_TOKEN not set — relying on the hanzo-cloud-app webhook mirror. Skipping nudge."
+            exit 0
+          fi
+          if curl -fsS --max-time 20 --retry 2 --retry-delay 2 -X POST \
+               -H "Authorization: token ${HANZO_GIT_TOKEN}" \
+               "https://git.hanzo.ai/api/v1/repos/hanzoai/dev/mirror-sync"; then
+            echo "git.hanzo.ai mirror-sync triggered"
+          else
+            echo "mirror-sync nudge failed (non-fatal) — the App webhook still mirrors"
+          fi

@@ -1,4 +1,10 @@
 name: Release
+# NATIVE CI. hanzoai/dev is canonical on git.hanzo.ai (hanzoai/git); CI/CD runs
+# here on the Hanzo git-runner fleet — `hanzo-build-linux-amd64` / `-arm64` for
+# Linux, `macos-latest` (the M4 Max) for darwin, `windows-latest` for Windows.
+# NO github.com Actions: GitHub is only a downstream mirror, and .github/ carries
+# just the sync nudge. Cuts a `dev` CLI release (npm @hanzo/dev + platform
+# binaries); the version floor is read from tags, patch auto-bumps.
 
 on:
   workflow_dispatch: {}
@@ -31,7 +37,7 @@ permissions:
 jobs:
   npm-auth-check:
     name: Validate npm auth
-    runs-on: [self-hosted, linux, amd64]
+    runs-on: hanzo-build-linux-amd64
     if: "!contains(github.event.head_commit.message, '[skip ci]')"
     timeout-minutes: 5
     # Fail fast if npm auth is not usable; downstream jobs should not continue.
@@ -65,7 +71,7 @@ jobs:
   preflight-tests:
     name: Preflight Tests (Linux fast E2E)
     needs: [npm-auth-check]
-    runs-on: [self-hosted, linux, amd64]
+    runs-on: hanzo-build-linux-amd64
     env:
       CARGO_TARGET_DIR: /mnt/cargo-target
     steps:
@@ -156,7 +162,7 @@ jobs:
   determine-version:
     name: Determine Version
     needs: [npm-auth-check]
-    runs-on: [self-hosted, linux, amd64]
+    runs-on: hanzo-build-linux-amd64
     outputs:
       version: ${{ steps.version.outputs.version }}
     steps:
@@ -209,22 +215,22 @@ jobs:
       matrix:
         include:
           # Linux builds
-          - runs_on: [self-hosted, linux, amd64]
+          - runs_on: hanzo-build-linux-amd64
             target: x86_64-unknown-linux-musl
             artifact: dev-x86_64-unknown-linux-musl
-          - runs_on: [self-hosted, linux, arm64]
+          - runs_on: hanzo-build-linux-arm64
             target: aarch64-unknown-linux-musl
             artifact: dev-aarch64-unknown-linux-musl
           # (GNU variants omitted to reduce asset duplication; npm defaults to musl)
           # macOS builds (dbc m4max; x86_64 cross-compiled on arm64 host)
-          - runs_on: [self-hosted, macos, arm64]
+          - runs_on: macos-latest
             target: x86_64-apple-darwin
             artifact: dev-x86_64-apple-darwin
-          - runs_on: [self-hosted, macos, arm64]
+          - runs_on: macos-latest
             target: aarch64-apple-darwin
             artifact: dev-aarch64-apple-darwin
           # Windows build (evo)
-          - runs_on: [self-hosted, windows, amd64]
+          - runs_on: windows-latest
             target: x86_64-pc-windows-msvc
             artifact: dev-x86_64-pc-windows-msvc.exe
 
@@ -474,7 +480,7 @@ jobs:
   release:
     name: Publish to npm
     needs: [determine-version, build-binaries, preflight-tests]
-    runs-on: [self-hosted, linux, amd64]
+    runs-on: hanzo-build-linux-amd64
     if: "!contains(github.event.head_commit.message, '[skip ci]')"
     timeout-minutes: 30
     env:
