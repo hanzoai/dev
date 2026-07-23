@@ -5,6 +5,7 @@
 #![deny(clippy::print_stdout)]
 
 mod cli;
+mod cloud_session;
 mod event_processor;
 mod event_processor_with_human_output;
 pub(crate) mod event_processor_with_jsonl_output;
@@ -953,6 +954,11 @@ async fn run_exec_session(args: ExecRunArgs) -> anyhow::Result<()> {
     };
     exec_span.record("turn.id", task_id.as_str());
 
+    // Best-effort: register this run with Hanzo Cloud so it streams live to the
+    // hanzo.bot playground. Entirely additive — a signed-out or offline host
+    // yields `None` and the run proceeds untouched.
+    let cloud_session = cloud_session::CloudSession::start(&config).await;
+
     // Run the loop until the task is complete.
     // Track whether a fatal error was reported by the server so we can
     // exit with a non-zero status for automation-friendly signaling.
@@ -1027,6 +1033,12 @@ async fn run_exec_session(args: ExecRunArgs) -> anyhow::Result<()> {
                     )
                     .await;
 
+                    // Mirror the (backfilled) event to the cloud session before
+                    // it is consumed by the local processor. Fire-and-forget.
+                    if let Some(cloud) = cloud_session.as_ref() {
+                        cloud.observe(&notification);
+                    }
+
                     match event_processor.process_server_notification(notification) {
                         CodexStatus::Running => {}
                         CodexStatus::InitiateShutdown => {
@@ -1054,6 +1066,12 @@ async fn run_exec_session(args: ExecRunArgs) -> anyhow::Result<()> {
 
     if let Err(err) = client.shutdown().await {
         warn!("in-process app-server shutdown failed: {err}");
+    }
+    // Mark the cloud session terminal before exiting.
+    if let Some(cloud) = cloud_session {
+        cloud
+            .finish(if error_seen { "error" } else { "done" })
+            .await;
     }
     event_processor.print_final_output();
     if error_seen {
