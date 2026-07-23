@@ -21,8 +21,11 @@ use std::path::PathBuf;
 
 use codex_agents_client::HttpClient;
 use codex_agents_client::SessionRegister;
+use codex_app_server_protocol::CollabAgentTool;
 use codex_app_server_protocol::ServerNotification;
 use codex_app_server_protocol::ThreadItem;
+use codex_app_server_protocol::TokenUsageBreakdown;
+use codex_app_server_protocol::UserInput;
 use codex_git_utils::get_git_repo_root;
 use codex_login::AuthManager;
 use codex_login::AuthManagerConfig;
@@ -158,6 +161,8 @@ fn map_events(notification: &ServerNotification) -> Vec<(&'static str, Value)> {
     use ServerNotification as N;
     match notification {
         N::ItemCompleted(completed) => map_item(&completed.item),
+        N::TurnStarted(_) => vec![("status", json!({ "status": "running" }))],
+        N::TurnCompleted(_) => vec![("status", json!({ "status": "idle" }))],
         N::TurnPlanUpdated(plan) => vec![(
             "task",
             json!({
@@ -171,6 +176,16 @@ fn map_events(notification: &ServerNotification) -> Vec<(&'static str, Value)> {
                     .collect::<Vec<_>>()
             }),
         )],
+        N::ThreadTokenUsageUpdated(usage) => match token_total(&usage.token_usage.total) {
+            Some(tokens) => vec![(
+                "context",
+                json!({
+                    "tokens": tokens,
+                    "contextWindow": usage.token_usage.model_context_window,
+                }),
+            )],
+            None => Vec::new(),
+        },
         N::Error(err) => vec![(
             "status",
             json!({ "status": "error", "error": clip(&err.error.message) }),
@@ -182,11 +197,30 @@ fn map_events(notification: &ServerNotification) -> Vec<(&'static str, Value)> {
 fn map_item(item: &ThreadItem) -> Vec<(&'static str, Value)> {
     use ThreadItem as I;
     match item {
+        I::UserMessage { content, .. } => {
+            let text = user_text(content);
+            if text.is_empty() {
+                Vec::new()
+            } else {
+                vec![("message", json!({ "role": "user", "text": clip(&text) }))]
+            }
+        }
         I::AgentMessage { text, .. } => {
             vec![(
                 "message",
                 json!({ "role": "assistant", "text": clip(text) }),
             )]
+        }
+        I::CollabAgentToolCall {
+            tool,
+            receiver_thread_ids,
+            ..
+        } if matches!(tool, CollabAgentTool::SpawnAgent) => {
+            let agent = receiver_thread_ids
+                .first()
+                .cloned()
+                .unwrap_or_else(|| "sub-agent".to_string());
+            vec![("spawn", json!({ "agent": agent }))]
         }
         I::Reasoning {
             summary, content, ..
@@ -252,6 +286,41 @@ fn map_item(item: &ThreadItem) -> Vec<(&'static str, Value)> {
     }
 }
 
+/// Concatenate the text parts of a user message; image parts are dropped.
+fn user_text(content: &[UserInput]) -> String {
+    content
+        .iter()
+        .filter_map(|part| match part {
+            UserInput::Text { text, .. } => Some(text.as_str()),
+            _ => None,
+        })
+        .collect::<Vec<_>>()
+        .join("\n")
+}
+
+/// A single total-token count from a usage breakdown: an explicit total when the
+/// wire provides one, else input + output. Field-name tolerant so it survives
+/// schema tweaks without breaking the stream.
+fn token_total(breakdown: &TokenUsageBreakdown) -> Option<u64> {
+    let obj = serde_json::to_value(breakdown).ok()?;
+    let obj = obj.as_object()?;
+    if let Some(total) = obj.get("total_tokens").and_then(|v| v.as_u64()) {
+        return Some(total);
+    }
+    let input = obj
+        .get("input_tokens")
+        .and_then(|v| v.as_u64())
+        .unwrap_or(0);
+    let output = obj
+        .get("output_tokens")
+        .and_then(|v| v.as_u64())
+        .unwrap_or(0);
+    match input + output {
+        0 => None,
+        sum => Some(sum),
+    }
+}
+
 /// Truncate to a character budget, appending an ellipsis when clipped.
 fn clip(s: &str) -> String {
     if s.chars().count() <= MAX_FIELD_CHARS {
@@ -302,6 +371,7 @@ mod tests {
     use codex_app_server_protocol::PatchApplyStatus;
     use codex_app_server_protocol::PatchChangeKind;
     use codex_app_server_protocol::TurnError;
+    use codex_app_server_protocol::UserInput;
 
     #[test]
     fn trusted_base_urls_are_hanzo_https_or_loopback() {
@@ -357,6 +427,38 @@ mod tests {
         let serialized = payload.to_string();
         assert!(!serialized.contains("sk-topsecret"));
         assert!(!serialized.contains("old_line"));
+    }
+
+    #[test]
+    fn user_message_maps_to_user_role() {
+        let item = ThreadItem::UserMessage {
+            id: "u1".to_string(),
+            client_id: None,
+            content: vec![UserInput::Text {
+                text: "fix the bug".to_string(),
+                text_elements: vec![],
+            }],
+        };
+        let events = map_item(&item);
+        assert_eq!(events.len(), 1);
+        assert_eq!(events[0].0, "message");
+        assert_eq!(events[0].1["role"], "user");
+        assert_eq!(events[0].1["text"], "fix the bug");
+    }
+
+    #[test]
+    fn user_text_joins_text_parts() {
+        let content = vec![
+            UserInput::Text {
+                text: "a".to_string(),
+                text_elements: vec![],
+            },
+            UserInput::Text {
+                text: "b".to_string(),
+                text_elements: vec![],
+            },
+        ];
+        assert_eq!(user_text(&content), "a\nb");
     }
 
     #[test]
