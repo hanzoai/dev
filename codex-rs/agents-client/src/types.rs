@@ -63,3 +63,47 @@ impl Run {
         self.status == "ok"
     }
 }
+
+/// A live agent SESSION as the cloud registry (`/v1/agents/sessions`) reports it.
+/// The CLI registers one per `hanzo code`/`dev` run so the run is watchable in the
+/// hanzo.bot playground fleet; `id` is the handle every later call (events, patch,
+/// stop) and the `hanzo.bot/sessions/<id>` deep-link use.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Session {
+    pub id: String,
+    #[serde(default)]
+    pub agent: String,
+    #[serde(default)]
+    pub status: String,
+    #[serde(default)]
+    pub title: String,
+    #[serde(default)]
+    pub host: String,
+    #[serde(default)]
+    pub cwd: String,
+    #[serde(default)]
+    pub repo: String,
+}
+
+/// The fields to register a session with (`POST /v1/agents/sessions`). Only
+/// `agent` is required by the server; the rest are optional execution context.
+#[derive(Clone, Debug, Default, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SessionRegister {
+    pub agent: String,
+    #[serde(skip_serializing_if = "String::is_empty")]
+    pub title: String,
+    #[serde(skip_serializing_if = "String::is_empty")]
+    pub host: String,
+    #[serde(skip_serializing_if = "String::is_empty")]
+    pub cwd: String,
+    #[serde(skip_serializing_if = "String::is_empty")]
+    pub repo: String,
+    #[serde(skip_serializing_if = "String::is_empty")]
+    pub target: String,
+    #[serde(skip_serializing_if = "String::is_empty")]
+    pub provider: String,
+    #[serde(skip_serializing_if = "String::is_empty")]
+    pub account: String,
+}

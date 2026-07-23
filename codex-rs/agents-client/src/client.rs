@@ -10,6 +10,8 @@ use crate::model_provider_unauthenticated;
 use crate::types::Agent;
 use crate::types::AgentDetail;
 use crate::types::Run;
+use crate::types::Session;
+use crate::types::SessionRegister;
 
 /// Cap on the response body we will buffer from any single request. Agent
 /// output is text; 16 MiB is far beyond any legitimate run while still bounding
@@ -166,6 +168,81 @@ impl HttpClient {
                 }
             }
         }
+    }
+
+    // ── session telemetry — make a `hanzo code`/`dev` run watchable in the
+    //    hanzo.bot playground fleet (`/v1/agents/sessions`). Every call is
+    //    best-effort at the call site: session tracking must never fail a run. ──
+
+    /// Register a session (`POST /v1/agents/sessions`) → the created [`Session`]
+    /// whose `id` backs the `hanzo.bot/sessions/<id>` deep-link and every later
+    /// event/patch/stop call.
+    pub async fn register_session(&self, req: &SessionRegister) -> Result<Session> {
+        let url = format!("{}/v1/agents/sessions", self.base_url);
+        let (status, body) =
+            Self::send(self.request(reqwest::Method::POST, &url).json(req)).await?;
+        if !status.is_success() {
+            return Err(Self::server_error(status, &body));
+        }
+        Self::decode(&body)
+    }
+
+    /// Append ONE event (`POST /v1/agents/sessions/:id/events`). `kind` is one of
+    /// message|tool-call|spawn|log|status|control; `payload` is the render-contract
+    /// JSON the playground viewer consumes. Fire-and-observe: returns the server
+    /// error but callers ignore it (telemetry is never load-bearing).
+    pub async fn append_session_event(
+        &self,
+        id: &str,
+        kind: &str,
+        payload: serde_json::Value,
+    ) -> Result<()> {
+        let url = format!(
+            "{}/v1/agents/sessions/{}/events",
+            self.base_url,
+            encode_segment(id)
+        );
+        let req = self
+            .request(reqwest::Method::POST, &url)
+            .json(&serde_json::json!({ "kind": kind, "payload": payload }));
+        let (status, body) = Self::send(req).await?;
+        if !status.is_success() {
+            return Err(Self::server_error(status, &body));
+        }
+        Ok(())
+    }
+
+    /// Update a session's status (`PATCH /v1/agents/sessions/:id`) →
+    /// running|paused|done|error. Used to mark a run terminal on exit.
+    pub async fn patch_session_status(&self, id: &str, status: &str) -> Result<Session> {
+        let url = format!(
+            "{}/v1/agents/sessions/{}",
+            self.base_url,
+            encode_segment(id)
+        );
+        let req = self
+            .request(reqwest::Method::PATCH, &url)
+            .json(&serde_json::json!({ "status": status }));
+        let (rc, body) = Self::send(req).await?;
+        if !rc.is_success() {
+            return Err(Self::server_error(rc, &body));
+        }
+        Self::decode(&body)
+    }
+
+    /// Stop a session (`POST /v1/agents/sessions/:id/stop`) — the definitive
+    /// terminal transition (also cancels the durable task run server-side).
+    pub async fn stop_session(&self, id: &str) -> Result<()> {
+        let url = format!(
+            "{}/v1/agents/sessions/{}/stop",
+            self.base_url,
+            encode_segment(id)
+        );
+        let (status, body) = Self::send(self.request(reqwest::Method::POST, &url)).await?;
+        if !status.is_success() {
+            return Err(Self::server_error(status, &body));
+        }
+        Ok(())
     }
 }
 
@@ -496,5 +573,79 @@ mod tests {
         let err = client(&server.uri()).run("helper", "hi").await.unwrap_err();
         assert!(matches!(err, AgentsError::Server(_)));
         assert!(err.to_string().contains("inference is not configured"));
+    }
+
+    #[tokio::test]
+    async fn register_session_posts_and_parses_id() {
+        let server = MockServer::start().await;
+        Mock::given(method("POST"))
+            .and(path("/v1/agents/sessions"))
+            .and(header(AUTHORIZATION.as_str(), "Bearer jwt-123"))
+            .and(body_json(serde_json::json!({ "agent": "hanzo-code", "host": "mac" })))
+            .respond_with(ResponseTemplate::new(201).set_body_json(serde_json::json!({
+                "id": "sess_abc", "agent": "hanzo-code", "status": "running"
+            })))
+            .mount(&server)
+            .await;
+        let req = SessionRegister { agent: "hanzo-code".into(), host: "mac".into(), ..Default::default() };
+        let sess = client(&server.uri()).register_session(&req).await.unwrap();
+        assert_eq!(sess.id, "sess_abc");
+        assert_eq!(sess.status, "running");
+    }
+
+    #[tokio::test]
+    async fn append_event_posts_kind_and_payload() {
+        let server = MockServer::start().await;
+        Mock::given(method("POST"))
+            .and(path("/v1/agents/sessions/sess_abc/events"))
+            .and(header(AUTHORIZATION.as_str(), "Bearer jwt-123"))
+            .and(body_json(serde_json::json!({
+                "kind": "message",
+                "payload": { "role": "assistant", "text": "hi" }
+            })))
+            .respond_with(ResponseTemplate::new(201))
+            .mount(&server)
+            .await;
+        client(&server.uri())
+            .append_session_event("sess_abc", "message", serde_json::json!({ "role": "assistant", "text": "hi" }))
+            .await
+            .unwrap();
+    }
+
+    #[tokio::test]
+    async fn patch_status_and_stop() {
+        let server = MockServer::start().await;
+        Mock::given(method("PATCH"))
+            .and(path("/v1/agents/sessions/sess_abc"))
+            .and(body_json(serde_json::json!({ "status": "done" })))
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+                "id": "sess_abc", "status": "done"
+            })))
+            .mount(&server)
+            .await;
+        Mock::given(method("POST"))
+            .and(path("/v1/agents/sessions/sess_abc/stop"))
+            .respond_with(ResponseTemplate::new(200))
+            .mount(&server)
+            .await;
+        let c = client(&server.uri());
+        assert_eq!(c.patch_session_status("sess_abc", "done").await.unwrap().status, "done");
+        c.stop_session("sess_abc").await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn session_event_surfaces_server_error() {
+        let server = MockServer::start().await;
+        Mock::given(method("POST"))
+            .and(path("/v1/agents/sessions/sess_x/events"))
+            .respond_with(ResponseTemplate::new(404).set_body_json(serde_json::json!({ "error": "session not found" })))
+            .mount(&server)
+            .await;
+        let err = client(&server.uri())
+            .append_session_event("sess_x", "status", serde_json::json!({ "status": "done" }))
+            .await
+            .unwrap_err();
+        assert!(matches!(err, AgentsError::Server(_)), "got {err:?}");
+        assert!(err.to_string().contains("session not found"));
     }
 }
