@@ -878,10 +878,11 @@ async fn run_exec_session(args: ExecRunArgs) -> anyhow::Result<()> {
     info!("Codex initialized with event: {session_configured:?}");
 
     let (interrupt_tx, mut interrupt_rx) = mpsc::unbounded_channel::<()>();
+    let ctrl_c_tx = interrupt_tx.clone();
     tokio::spawn(async move {
         if tokio::signal::ctrl_c().await.is_ok() {
             tracing::debug!("Keyboard interrupt");
-            let _ = interrupt_tx.send(());
+            let _ = ctrl_c_tx.send(());
         }
     });
 
@@ -965,6 +966,18 @@ async fn run_exec_session(args: ExecRunArgs) -> anyhow::Result<()> {
         },
     )
     .await;
+
+    // Apply cloud steering: a `stop` posted from the dashboard interrupts the
+    // turn through the same channel as a local Ctrl-C. (message/pause/resume are
+    // delivered to this handler too, for a later increment.)
+    if let Some(cloud) = cloud_session.as_ref() {
+        let interrupt = interrupt_tx.clone();
+        cloud.spawn_control(move |command| {
+            if command.command == "stop" {
+                let _ = interrupt.send(());
+            }
+        });
+    }
 
     // Run the loop until the task is complete.
     // Track whether a fatal error was reported by the server so we can

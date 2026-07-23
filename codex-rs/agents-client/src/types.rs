@@ -107,3 +107,29 @@ pub struct SessionRegister {
     #[serde(skip_serializing_if = "String::is_empty")]
     pub account: String,
 }
+
+/// One steering command drained from `GET /v1/agents/sessions/:id/control` — a
+/// pause/resume/stop/message the dashboard posted, which the running surface
+/// applies. `seq` is the cursor position; `payload` is command-specific JSON.
+#[derive(Clone, Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ControlCommand {
+    pub seq: i64,
+    #[serde(default)]
+    pub command: String,
+    #[serde(default)]
+    pub message: String,
+    #[serde(default)]
+    pub payload: Option<serde_json::Value>,
+}
+
+/// A cursor-driven batch of control commands. Poll again with `cursor` as the
+/// next `after`, so an already-applied command is never redelivered.
+#[derive(Clone, Debug, Default, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ControlBatch {
+    #[serde(default)]
+    pub commands: Vec<ControlCommand>,
+    #[serde(default)]
+    pub cursor: i64,
+}
