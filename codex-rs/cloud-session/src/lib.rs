@@ -1,23 +1,31 @@
 //! Best-effort live streaming of a `hanzo code` run to the Hanzo Cloud session
 //! registry, so the run shows up in the hanzo.bot playground (`/sessions/:id`).
 //!
-//! This is entirely additive and defensive. Registration and every event emit
-//! are fire-and-forget: if the user is signed out, offline, or the registry
-//! errors, streaming silently disables and the run itself is never affected.
-//! Opt out with `HANZO_SESSION_TRACKING=0`.
+//! Shared by every frontend (`exec`, `tui`): each taps the same
+//! `ServerNotification` stream and mirrors it to the cloud. The type is
+//! decoupled from any concrete `Config` — it authenticates through the
+//! [`AuthManagerConfig`] trait and takes run metadata as a plain [`SessionMeta`]
+//! value, so both the exec and interactive paths reuse one implementation.
+//!
+//! Entirely additive and defensive. Registration and every event emit are
+//! fire-and-forget: if the user is signed out, offline, or the registry errors,
+//! streaming silently disables and the run itself is never affected. Opt out
+//! with `HANZO_SESSION_TRACKING=0`.
 //!
 //! Event kinds and payloads follow the playground render contract
 //! (`describeEvent`): `message`, `tool-call`, `log`, `status`, `task`,
 //! `file_update`. File changes carry ONLY metadata (path + line counts) — never
 //! the diff text — so nothing sensitive rides the stream.
 
+use std::path::PathBuf;
+
 use codex_agents_client::HttpClient;
 use codex_agents_client::SessionRegister;
 use codex_app_server_protocol::ServerNotification;
 use codex_app_server_protocol::ThreadItem;
-use codex_core::config::Config;
 use codex_git_utils::get_git_repo_root;
 use codex_login::AuthManager;
+use codex_login::AuthManagerConfig;
 use serde::Serialize;
 use serde_json::Value;
 use serde_json::json;
@@ -28,10 +36,18 @@ const DEFAULT_BASE_URL: &str = "https://api.hanzo.ai";
 /// registry's 64 KiB body limit even when several fields are populated.
 const MAX_FIELD_CHARS: usize = 8_000;
 
+/// The run details a session is registered with — supplied by the caller from
+/// whichever `Config` it holds, so this crate stays free of any config type.
+pub struct SessionMeta {
+    pub model: String,
+    pub cwd: PathBuf,
+    pub provider: String,
+}
+
 /// A registered cloud session that mirrors this run's events. Cheaply cloned
 /// internals (`reqwest::Client` + `Arc` auth) let each emit run on its own
 /// detached task without blocking the run loop.
-pub(crate) struct CloudSession {
+pub struct CloudSession {
     client: HttpClient,
     id: String,
 }
@@ -41,7 +57,7 @@ impl CloudSession {
     /// out, the user is signed out, the base URL is untrusted, or the registry
     /// is unreachable. Never returns an error to the caller — a failure to
     /// track must not surface in a normal run.
-    pub(crate) async fn start(config: &Config) -> Option<Self> {
+    pub async fn start(config: &impl AuthManagerConfig, meta: SessionMeta) -> Option<Self> {
         if std::env::var("HANZO_SESSION_TRACKING").ok().as_deref() == Some("0") {
             return None;
         }
@@ -55,16 +71,8 @@ impl CloudSession {
             return None;
         }
 
-        let auth_manager = AuthManager::new(
-            config.codex_home.to_path_buf(),
-            /*enable_codex_api_key_env*/ false,
-            config.cli_auth_credentials_store_mode,
-            config.forced_chatgpt_workspace_id.clone(),
-            Some(config.chatgpt_base_url.clone()),
-            config.auth_keyring_backend_kind(),
-            config.auth_route_config(),
-        )
-        .await;
+        let auth_manager =
+            AuthManager::shared_from_config(config, /*enable_codex_api_key_env*/ false).await;
         // Signed out → nothing to track; stay silent.
         let auth = auth_manager.auth().await?;
         let auth_provider = codex_model_provider::auth_provider_from_auth(&auth);
@@ -73,24 +81,23 @@ impl CloudSession {
             .ok()?
             .with_auth_provider(auth_provider);
 
-        let repo = get_git_repo_root(&config.cwd.to_path_buf())
+        let repo = get_git_repo_root(&meta.cwd)
             .and_then(|root| root.file_name().map(|n| n.to_string_lossy().into_owned()))
             .unwrap_or_default();
-        let model = config.model.clone().unwrap_or_default();
         let title = if repo.is_empty() {
-            model.clone()
+            meta.model.clone()
         } else {
-            format!("{repo} · {model}")
+            format!("{repo} · {}", meta.model)
         };
 
         let reg = SessionRegister {
-            agent: model,
+            agent: meta.model,
             title,
             host: hostname(),
-            cwd: config.cwd.to_string_lossy().into_owned(),
+            cwd: meta.cwd.to_string_lossy().into_owned(),
             repo,
             target: String::new(),
-            provider: config.model_provider_id.clone(),
+            provider: meta.provider,
             account: String::new(),
         };
 
@@ -107,7 +114,7 @@ impl CloudSession {
 
     /// Map a server notification to zero or more cloud events and emit each on
     /// its own detached task. Never blocks the run loop and never fails a run.
-    pub(crate) fn observe(&self, notification: &ServerNotification) {
+    pub fn observe(&self, notification: &ServerNotification) {
         for (kind, payload) in map_events(notification) {
             let client = self.client.clone();
             let id = self.id.clone();
@@ -118,7 +125,7 @@ impl CloudSession {
     }
 
     /// Mark the run terminal (`done` | `error`). Best-effort.
-    pub(crate) async fn finish(self, status: &str) {
+    pub async fn finish(self, status: &str) {
         let _ = self.client.patch_session_status(&self.id, status).await;
     }
 }

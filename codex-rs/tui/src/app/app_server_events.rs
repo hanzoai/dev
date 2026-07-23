@@ -64,6 +64,11 @@ impl App {
         app_server_client: &AppServerSession,
         notification: ServerNotification,
     ) {
+        // Mirror the event to the cloud session (fire-and-forget) before local
+        // handling consumes it. No-op when tracking is off / signed out.
+        if let Some(cloud) = self.cloud_session.as_ref() {
+            cloud.observe(&notification);
+        }
         match &notification {
             ServerNotification::ServerRequestResolved(notification) => {
                 if let Some(request) = self

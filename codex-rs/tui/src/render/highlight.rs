@@ -240,8 +240,11 @@ fn resolve_theme_with_override(name: Option<&str>, codex_home: Option<&Path>) ->
         tracing::debug!("Theme \"{name}\" not recognized; using default theme");
     }
 
-    resolve_bundled_theme(adaptive_default_theme_name())
-        .unwrap_or_else(|| two_face::theme::extra().get(EmbeddedThemeName::Dracula).clone())
+    resolve_bundled_theme(adaptive_default_theme_name()).unwrap_or_else(|| {
+        two_face::theme::extra()
+            .get(EmbeddedThemeName::Dracula)
+            .clone()
+    })
 }
 
 /// Build the theme from current override/default-theme settings.

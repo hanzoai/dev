@@ -150,8 +150,6 @@ use codex_models_manager::model_presets::HIDE_GPT5_1_MIGRATION_PROMPT_CONFIG;
 use codex_otel::SessionTelemetry;
 use codex_otel::TelemetryAuthMode;
 use codex_protocol::ThreadId;
-use codex_reward_signals::RewardSignals;
-use codex_reward_signals::Signal as RewardSignal;
 use codex_protocol::config_types::Personality;
 #[cfg(target_os = "windows")]
 use codex_protocol::config_types::WindowsSandboxLevel;
@@ -164,6 +162,8 @@ use codex_protocol::openai_models::ModelUpgrade;
 use codex_protocol::openai_models::ReasoningEffort as ReasoningEffortConfig;
 #[cfg(target_os = "windows")]
 use codex_protocol::permissions::FileSystemSandboxKind;
+use codex_reward_signals::RewardSignals;
+use codex_reward_signals::Signal as RewardSignal;
 use codex_rollout::StateDbHandle;
 use codex_terminal_detection::user_agent;
 use codex_utils_absolute_path::AbsolutePathBuf;
@@ -514,6 +514,9 @@ pub(crate) struct App {
     workspace_command_runner: Option<WorkspaceCommandRunner>,
     /// Config is stored here so we can recreate ChatWidgets as needed.
     pub(crate) config: Config,
+    /// Live cloud-session mirror for this run — `None` when tracking is opted
+    /// out or the user is signed out. Streams events to the hanzo.bot playground.
+    cloud_session: Option<codex_cloud_session::CloudSession>,
     launch_cwd: PathBuf,
     pub(crate) state_db: Option<StateDbHandle>,
     cli_kv_overrides: Vec<(String, TomlValue)>,
@@ -643,7 +646,10 @@ async fn build_reward_signals(config: &Config, base_url: Option<&str>) -> Reward
 
 fn reward_signals_env_opted_out() -> bool {
     match std::env::var("HANZO_FEEDBACK") {
-        Ok(value) => matches!(value.trim().to_ascii_lowercase().as_str(), "0" | "false" | "off"),
+        Ok(value) => matches!(
+            value.trim().to_ascii_lowercase().as_str(),
+            "0" | "false" | "off"
+        ),
         Err(_) => false,
     }
 }
@@ -1078,6 +1084,7 @@ See the Codex keymap documentation for supported actions and examples."
             chat_widget,
             workspace_command_runner: Some(workspace_command_runner),
             config,
+            cloud_session: None,
             launch_cwd,
             state_db,
             cli_kv_overrides,
@@ -1224,6 +1231,20 @@ See the Codex keymap documentation for supported actions and examples."
         #[cfg(debug_assertions)]
         let pre_loop_exit_reason: Option<ExitReason> = None;
 
+        // Best-effort: register this interactive run with Hanzo Cloud so it
+        // streams live to the hanzo.bot playground. Additive — signed-out or
+        // offline yields `None` and the session proceeds untouched.
+        let cloud_session = codex_cloud_session::CloudSession::start(
+            &app.config,
+            codex_cloud_session::SessionMeta {
+                model: app.config.model.clone().unwrap_or_default(),
+                cwd: app.config.cwd.to_path_buf(),
+                provider: String::new(),
+            },
+        )
+        .await;
+        app.cloud_session = cloud_session;
+
         let exit_reason_result = if let Some(exit_reason) = pre_loop_exit_reason {
             Ok(exit_reason)
         } else {
@@ -1288,6 +1309,16 @@ See the Codex keymap documentation for supported actions and examples."
                 }
             }
         };
+        // Mark the cloud session terminal before tearing down.
+        if let Some(cloud) = app.cloud_session.take() {
+            cloud
+                .finish(if exit_reason_result.is_ok() {
+                    "done"
+                } else {
+                    "error"
+                })
+                .await;
+        }
         if let Err(err) = app_server.shutdown().await {
             tracing::warn!(error = %err, "failed to shut down embedded app server");
         }
@@ -1325,7 +1356,9 @@ See the Codex keymap documentation for supported actions and examples."
             };
             let _ = tokio::time::timeout(
                 std::time::Duration::from_millis(1500),
-                app.chat_widget.reward_signals().send_now(request_id, signal),
+                app.chat_widget
+                    .reward_signals()
+                    .send_now(request_id, signal),
             )
             .await;
             let _ = tui.terminal.clear();
