@@ -24,6 +24,8 @@ pub use client::HttpClient;
 pub use types::Agent;
 pub use types::AgentDetail;
 pub use types::Run;
+pub use types::Session;
+pub use types::SessionRegister;
 
 /// Default provider for an unauthenticated client: adds no headers. A real
 /// caller replaces it via [`HttpClient::with_auth_provider`].
