@@ -1,9 +1,35 @@
-# Hanzo Dev
+# Hanzo Dev — LLM.md
 
-Fork of OpenAI Codex CLI. Rust-based AI development assistant in the terminal.
+Fast, local AI coding agent for the terminal. Rust CLI, published as `@hanzo/dev`
+(binary `dev`, alias `coder`). Community fork of `just-every/code` ← `openai/codex`, Apache-2.0.
 
 - **Repo**: https://github.com/hanzoai/dev
 - **Upstream**: https://github.com/openai/codex
+
+## Canonical role
+A **product app** in the umbrella org (`hanzoai/dev`) — the terminal coding agent, not
+an SDK. Defaults to Hanzo AI (the Open AI Cloud) at `api.hanzo.ai/v1` and orchestrates
+multi-agent `/plan` `/solve` `/code` `/auto` flows. For the one-way SDK model (full cloud
+SDK + AI/agents lib, one impl one place), see `~/work/hanzo/SDK-ARCHITECTURE.md`.
+
+## Brand rules (hard — enforce in all docs)
+- Never "LLM gateway"; never position vs LiteLLM. Hanzo is a full AI cloud, not a proxy.
+- `/v1/` only — never an `/api/` path prefix (the `api.hanzo.ai` host is fine).
+- Zen models are our own family — never present upstream model names as ours.
+- Voice: "Hanzo — the Open AI Cloud." Modern, crisp, developer-first.
+
+## Build / run
+- Run:    `npx -y @hanzo/dev`   ·   install: `npm i -g @hanzo/dev` → `dev`
+- Source: `cargo run --manifest-path codex-rs/Cargo.toml -p codex-cli --bin dev`
+- Fast dev build: `./build-fast.sh`   ·   tests: `cargo test`
+
+## Key entry points
+- `codex-rs/` — THE Rust workspace (~50 crates); binary `dev` from crate `codex-cli`
+- `codex-rs/cli` CLI · `codex-rs/core` auth/config/providers · `codex-rs/tui` Ratatui UI
+- `config.toml` in `$CODEX_HOME` (default `~/.codex`; legacy `~/.code`)
+- `AGENTS.md` / `CLAUDE.md` — project memory the agent reads
+
+Detailed engineering reference (stack, crates, merge strategy, npm dist) follows below.
 
 ## Changelog
 
