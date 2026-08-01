@@ -34,12 +34,21 @@ jobs:
     # - New or reopened issues
     # - When the bot is manually assigned to an issue
     # - When someone comments on an open issue currently assigned to the bot
+    # Authorization is author association, checked before anything reads the
+    # issue. The rate limit and the safety classifier downstream are abuse
+    # controls, not an authorization boundary: their input is the issue text,
+    # so an untrusted author decides what they see. While the repo was private
+    # every actor was already an org member and this held implicitly; state it
+    # explicitly so it still holds in public, where the trigger is open to
+    # anyone and the job carries a PAT with org write.
     if: >-
       (github.event_name == 'issues' &&
+        contains(fromJson('["OWNER","MEMBER","COLLABORATOR"]'), github.event.issue.author_association) &&
         (github.event.action == 'opened' || github.event.action == 'reopened' ||
          (github.event.action == 'assigned' && github.event.assignee.login == 'just-every-code')))
       ||
       (github.event_name == 'issue_comment' &&
+        contains(fromJson('["OWNER","MEMBER","COLLABORATOR"]'), github.event.comment.author_association) &&
         (github.event.action == 'created' || github.event.action == 'edited') &&
         github.event.issue.state == 'open' &&
         contains(toJson(github.event.issue.assignees), 'just-every-code') &&
