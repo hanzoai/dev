@@ -3,6 +3,14 @@ edition = "2024"
 name = "code-cli"
 version = { workspace = true }
 
+# `dev` is the product. It is what `hanzo code` launches (by bare name, off
+# PATH) and what the installer contract promises.
+[[bin]]
+name = "dev"
+path = "src/main.rs"
+
+# `code` stays as an alias so existing installs keep working. It is the same
+# program — an alias, never the canonical name.
 [[bin]]
 name = "code"
 path = "src/main.rs"

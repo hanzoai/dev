@@ -51,6 +51,8 @@ mod truncate;
 mod unified_exec;
 mod user_instructions;
 pub use model_provider_info::BUILT_IN_OSS_MODEL_PROVIDER_ID;
+pub use model_provider_info::HANZO_PROVIDER_ID;
+pub use model_provider_info::create_hanzo_provider;
 pub use model_provider_info::ModelProviderInfo;
 pub use model_provider_info::OpenRouterConfig;
 pub use model_provider_info::OpenRouterProviderConfig;

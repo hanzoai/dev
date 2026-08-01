@@ -70,22 +70,18 @@ ARTIFACTS_DIR="$(mktemp -d)"
 trap 'rm -rf "$ARTIFACTS_DIR"' EXIT
 
 # NB: The GitHub CLI `gh` must be installed and authenticated.
-gh run download --dir "$ARTIFACTS_DIR" --repo just-every/code "$WORKFLOW_ID"
+gh run download --dir "$ARTIFACTS_DIR" --repo hanzoai/dev "$WORKFLOW_ID"
 
-# x64 Linux
-zstd -d "$ARTIFACTS_DIR/x86_64-unknown-linux-musl/code-x86_64-unknown-linux-musl.zst" \
-    -o "$BIN_DIR/code-x86_64-unknown-linux-musl"
-# ARM64 Linux
-zstd -d "$ARTIFACTS_DIR/aarch64-unknown-linux-musl/code-aarch64-unknown-linux-musl.zst" \
-    -o "$BIN_DIR/code-aarch64-unknown-linux-musl"
-# x64 macOS
-zstd -d "$ARTIFACTS_DIR/x86_64-apple-darwin/code-x86_64-apple-darwin.zst" \
-    -o "$BIN_DIR/code-x86_64-apple-darwin"
-# ARM64 macOS
-zstd -d "$ARTIFACTS_DIR/aarch64-apple-darwin/code-aarch64-apple-darwin.zst" \
-    -o "$BIN_DIR/code-aarch64-apple-darwin"
-# x64 Windows
-zstd -d "$ARTIFACTS_DIR/x86_64-pc-windows-msvc/code-x86_64-pc-windows-msvc.exe.zst" \
-    -o "$BIN_DIR/code-x86_64-pc-windows-msvc.exe"
+# Each build job uploads its artifact as `binaries-<target>` containing
+# `dev-<target>[.exe].zst`.
+for target in \
+  x86_64-unknown-linux-musl \
+  aarch64-unknown-linux-musl \
+  x86_64-apple-darwin \
+  aarch64-apple-darwin \
+  x86_64-pc-windows-msvc.exe
+do
+  zstd -d "$ARTIFACTS_DIR/binaries-${target%.exe}/dev-$target.zst" -o "$BIN_DIR/dev-$target"
+done
 
 echo "Installed native dependencies into $BIN_DIR"

@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// Unified entry point for the Code CLI (fork of OpenAI Codex).
+// Unified entry point for the Code CLI.
 
 import path from "path";
 import { fileURLToPath } from "url";
@@ -14,7 +14,7 @@ const __dirname = path.dirname(__filename);
 const { platform, arch } = process;
 
 // Important: Never delegate to another system's `code` binary (e.g., VS Code).
-// When users run via `npx @just-every/code`, we must always execute our
+// When users run via `npx @hanzo/dev`, we must always execute our
 // packaged native binary by absolute path to avoid PATH collisions.
 
 const isWSL = () => {
@@ -73,8 +73,8 @@ if (!targetTriple) {
   throw new Error(`Unsupported platform: ${platform} (${arch})`);
 }
 
-// Prefer new 'code-*' binary names; fall back to legacy 'coder-*' if missing.
-let binaryPath = path.join(__dirname, "..", "bin", `code-${targetTriple}`);
+// Prefer new 'dev-*' binary names; fall back to legacy 'coder-*' if missing.
+let binaryPath = path.join(__dirname, "..", "bin", `dev-${targetTriple}`);
 let legacyBinaryPath = path.join(__dirname, "..", "bin", `coder-${targetTriple}`);
 
 // --- Bootstrap helper (runs if the binary is missing, e.g. Bun blocked postinstall) ---
@@ -120,7 +120,7 @@ const getCacheDir = (version) => {
   } else {
     base = process.env.XDG_CACHE_HOME || path.join(home, ".cache");
   }
-  const dir = path.join(base, "just-every", "code", version);
+  const dir = path.join(base, "hanzoai", "dev", version);
   if (!existsSync(dir)) mkdirSync(dir, { recursive: true });
   return dir;
 };
@@ -129,7 +129,7 @@ const getCachedBinaryPath = (version) => {
   // targetTriple already includes the proper extension on Windows ("...msvc.exe").
   // Do not append another suffix; just use the exact targetTriple-derived name.
   const cacheDir = getCacheDir(version);
-  return path.join(cacheDir, `code-${targetTriple}`);
+  return path.join(cacheDir, `dev-${targetTriple}`);
 };
 
 let lastBootstrapError = null;
@@ -188,20 +188,20 @@ const tryBootstrapBinary = async () => {
     try {
       const req = (await import("module")).createRequire(import.meta.url);
       const name = (() => {
-        if (platform === "win32") return "@just-every/code-win32-x64"; // may be unpublished; falls through
+        if (platform === "win32") return "@hanzo/dev-win32-x64"; // may be unpublished; falls through
         const plt = nodePlatform();
         const cpu = nodeArch();
-        if (plt === "darwin" && cpu === "arm64") return "@just-every/code-darwin-arm64";
-        if (plt === "darwin" && cpu === "x64") return "@just-every/code-darwin-x64";
-        if (plt === "linux" && cpu === "x64") return "@just-every/code-linux-x64-musl";
-        if (plt === "linux" && cpu === "arm64") return "@just-every/code-linux-arm64-musl";
+        if (plt === "darwin" && cpu === "arm64") return "@hanzo/dev-darwin-arm64";
+        if (plt === "darwin" && cpu === "x64") return "@hanzo/dev-darwin-x64";
+        if (plt === "linux" && cpu === "x64") return "@hanzo/dev-linux-x64-musl";
+        if (plt === "linux" && cpu === "arm64") return "@hanzo/dev-linux-arm64-musl";
         return null;
       })();
       if (name) {
         try {
           const pkgJson = req.resolve(`${name}/package.json`);
           const pkgDir = path.dirname(pkgJson);
-          const src = path.join(pkgDir, "bin", `code-${targetTriple}`);
+          const src = path.join(pkgDir, "bin", `dev-${targetTriple}`);
           if (existsSync(src)) {
             // Always ensure cache has the binary; on Unix mirror into node_modules
             copyFileSync(src, cachePath);
@@ -218,9 +218,9 @@ const tryBootstrapBinary = async () => {
     // 4) Download from GitHub release
     const isWin = platform === "win32";
     const archiveName = isWin
-      ? `code-${targetTriple}.zip`
-      : (() => { try { execSync("zstd --version", { stdio: "ignore", shell: true }); return `code-${targetTriple}.zst`; } catch { return `code-${targetTriple}.tar.gz`; } })();
-    const url = `https://github.com/just-every/code/releases/download/v${version}/${archiveName}`;
+      ? `dev-${targetTriple}.zip`
+      : (() => { try { execSync("zstd --version", { stdio: "ignore", shell: true }); return `dev-${targetTriple}.zst`; } catch { return `dev-${targetTriple}.tar.gz`; } })();
+    const url = `https://github.com/hanzoai/dev/releases/download/v${version}/${archiveName}`;
     const tmp = path.join(binDir, `.${archiveName}.part`);
     return httpsDownload(url, tmp)
       .then(() => {
@@ -314,11 +314,11 @@ if (existsSync(binaryPath)) {
     console.error(`Bootstrap error: ${msg}`);
   }
   console.error(`Please try reinstalling the package:`);
-  console.error(`  npm uninstall -g @just-every/code`);
-  console.error(`  npm install -g @just-every/code`);
+  console.error(`  npm uninstall -g @hanzo/dev`);
+  console.error(`  npm install -g @hanzo/dev`);
   if (isWSL()) {
     console.error("Detected WSL. Install inside WSL (Ubuntu) separately:");
-    console.error("  npx -y @just-every/code@latest  (run inside WSL)");
+    console.error("  npx -y @hanzo/dev@latest  (run inside WSL)");
     console.error("If installed globally on Windows, those binaries are not usable from WSL.");
   }
   process.exit(1);
@@ -332,15 +332,15 @@ if (!validation.ok) {
   console.error(`The native binary at ${binaryPath} appears invalid: ${validation.reason}`);
   console.error("This can happen if the download failed or was modified by antivirus/proxy.");
   console.error("Please try reinstalling:");
-  console.error("  npm uninstall -g @just-every/code");
-  console.error("  npm install -g @just-every/code");
+  console.error("  npm uninstall -g @hanzo/dev");
+  console.error("  npm install -g @hanzo/dev");
   if (platform === "win32") {
     console.error("If the issue persists, clear npm cache and disable antivirus temporarily:");
     console.error("  npm cache clean --force");
   }
   if (isWSL()) {
     console.error("Detected WSL. Ensure you install/run inside WSL, not Windows:");
-    console.error("  npx -y @just-every/code@latest  (inside WSL)");
+    console.error("  npx -y @hanzo/dev@latest  (inside WSL)");
   }
   process.exit(1);
 }
@@ -359,15 +359,15 @@ try {
         cmd,
       ], { encoding: "utf8" });
       const line = (out.stdout || "").split(/\r?\n/).map((s) => s.trim()).filter(Boolean)[0];
-      if (line && !line.includes("@just-every/code")) {
+      if (line && !line.includes("@hanzo/dev")) {
         otherCode = line;
       }
     } catch {}
     if (otherCode) {
-      console.error(`@just-every/code: running bundled binary -> ${binaryPath}`);
+      console.error(`@hanzo/dev: running bundled binary -> ${binaryPath}`);
       console.error(`Note: a different 'code' exists at ${otherCode}; not delegating.`);
     } else {
-      console.error(`@just-every/code: running bundled binary -> ${binaryPath}`);
+      console.error(`@hanzo/dev: running bundled binary -> ${binaryPath}`);
     }
   }
 } catch {}
@@ -390,18 +390,18 @@ child.on("error", (err) => {
   if (code === 'EACCES') {
     console.error(`Permission denied: ${binaryPath}`);
     console.error(`Try running: chmod +x "${binaryPath}"`);
-    console.error(`Or reinstall the package with: npm install -g @just-every/code`);
+    console.error(`Or reinstall the package with: npm install -g @hanzo/dev`);
   } else if (code === 'EFTYPE' || code === 'ENOEXEC') {
     console.error(`Failed to execute native binary: ${binaryPath}`);
     console.error("The file may be corrupt or of the wrong type. Reinstall usually fixes this:");
-    console.error("  npm uninstall -g @just-every/code && npm install -g @just-every/code");
+    console.error("  npm uninstall -g @hanzo/dev && npm install -g @hanzo/dev");
     if (platform === 'win32') {
       console.error("On Windows, ensure the .exe downloaded correctly (proxy/AV can interfere).");
       console.error("Try clearing cache: npm cache clean --force");
     }
     if (isWSL()) {
       console.error("Detected WSL. Windows binaries cannot be executed from WSL.");
-      console.error("Install inside WSL and run there: npx -y @just-every/code@latest");
+      console.error("Install inside WSL and run there: npx -y @hanzo/dev@latest");
     }
   } else {
     console.error(err);

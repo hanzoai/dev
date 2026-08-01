@@ -43,7 +43,7 @@ function getCacheDir(version) {
   } else {
     base = process.env.XDG_CACHE_HOME || join(home, '.cache');
   }
-  const dir = join(base, 'just-every', 'code', version);
+  const dir = join(base, 'hanzoai', 'dev', version);
   if (!existsSync(dir)) mkdirSync(dir, { recursive: true });
   return dir;
 }
@@ -51,21 +51,22 @@ function getCacheDir(version) {
 function getCachedBinaryPath(version, targetTriple, isWindows) {
   const ext = isWindows ? '.exe' : '';
   const cacheDir = getCacheDir(version);
-  return join(cacheDir, `code-${targetTriple}${ext}`);
+  return join(cacheDir, `dev-${targetTriple}${ext}`);
 }
 
-const CODE_SHIM_SIGNATURES = [
-  '@just-every/code',
-  'bin/coder.js',
-  '$(dirname "$0")/coder',
-  '%~dp0coder'
+// Substrings that appear only in shims we wrote ourselves. Used before removing
+// or replacing a `code` on PATH, so a third party's `code` is never touched.
+const SHIM_SIGNATURES = [
+  '@hanzo/dev',
+  '$(dirname "$0")/dev',
+  '%~dp0dev'
 ];
 
 function shimContentsLookOurs(contents) {
-  return CODE_SHIM_SIGNATURES.some(sig => contents.includes(sig));
+  return SHIM_SIGNATURES.some(sig => contents.includes(sig));
 }
 
-function looksLikeOurCodeShim(path) {
+function looksLikeOurShim(path) {
   try {
     const contents = readFileSync(path, 'utf8');
     return shimContentsLookOurs(contents);
@@ -309,9 +310,9 @@ async function main() {
         if (!looksLikeOurs) {
           console.warn('[notice] Found an existing `code` on PATH at:');
           console.warn(`         ${resolved}`);
-          console.warn('[notice] We will still install our CLI, also available as `coder`.');
-          console.warn('         If `code` runs another tool, prefer using: coder');
-          console.warn('         Or run our CLI explicitly via: npx -y @just-every/code');
+          console.warn('[notice] We will still install our CLI, also available as `dev`.');
+          console.warn('         If `code` runs another tool, prefer using: dev');
+          console.warn('         Or run our CLI explicitly via: npx -y @hanzo/dev');
         }
       }
     } catch {
@@ -333,9 +334,9 @@ async function main() {
   const version = packageJson.version;
   
   // Download only the primary binary; we'll create wrappers for legacy names.
-  const binaries = ['code'];
-  
-  console.log(`Installing @just-every/code v${version} for ${targetTriple}...`);
+  const binaries = ['dev'];
+
+  console.log(`Installing @hanzo/dev v${version} for ${targetTriple}...`);
   
   for (const binary of binaries) {
     const binaryName = `${binary}-${targetTriple}${binaryExt}`;
@@ -373,13 +374,13 @@ async function main() {
     const require = createRequire(import.meta.url);
     const platformPkg = (() => {
       const name = (() => {
-        if (isWindows) return '@just-every/code-win32-x64';
+        if (isWindows) return '@hanzo/dev-win32-x64';
         const plt = platform();
         const cpu = arch();
-        if (plt === 'darwin' && cpu === 'arm64') return '@just-every/code-darwin-arm64';
-        if (plt === 'darwin' && cpu === 'x64') return '@just-every/code-darwin-x64';
-        if (plt === 'linux' && cpu === 'x64') return '@just-every/code-linux-x64-musl';
-        if (plt === 'linux' && cpu === 'arm64') return '@just-every/code-linux-arm64-musl';
+        if (plt === 'darwin' && cpu === 'arm64') return '@hanzo/dev-darwin-arm64';
+        if (plt === 'darwin' && cpu === 'x64') return '@hanzo/dev-darwin-x64';
+        if (plt === 'linux' && cpu === 'x64') return '@hanzo/dev-linux-x64-musl';
+        if (plt === 'linux' && cpu === 'arm64') return '@hanzo/dev-linux-arm64-musl';
         return null;
       })();
       if (!name) return null;
@@ -420,15 +421,8 @@ async function main() {
     // - Windows: .zip
     // - macOS/Linux: prefer .zst if `zstd` CLI is available; otherwise use .tar.gz
     const isWin = isWindows;
-    const isWSL = (() => {
-      if (platform() !== 'linux') return false;
-      try {
-        const ver = readFileSync('/proc/version', 'utf8').toLowerCase();
-        return ver.includes('microsoft') || !!process.env.WSL_DISTRO_NAME;
-      } catch { return false; }
-    })();
     const binDirReal = (() => { try { return realpathSync(binDir); } catch { return binDir; } })();
-    const mirrorToLocal = !(isWin || (isWSL && isPathOnWindowsFs(binDirReal)));
+    const mirrorToLocal = !(isWin || (isWSL() && isPathOnWindowsFs(binDirReal)));
     let useZst = false;
     if (!isWin) {
       try {
@@ -439,12 +433,12 @@ async function main() {
       }
     }
     const archiveName = isWin ? `${binaryName}.zip` : (useZst ? `${binaryName}.zst` : `${binaryName}.tar.gz`);
-    const downloadUrl = `https://github.com/just-every/code/releases/download/v${version}/${archiveName}`;
+    const downloadUrl = `https://github.com/hanzoai/dev/releases/download/v${version}/${archiveName}`;
 
     console.log(`Downloading ${archiveName}...`);
     try {
       const needsIsolation = isWin || (!isWin && !mirrorToLocal); // Windows or WSL-on-NTFS
-      let safeTempDir = needsIsolation ? join(tmpdir(), 'just-every', 'code', version) : binDir;
+      let safeTempDir = needsIsolation ? join(tmpdir(), 'hanzoai', 'dev', version) : binDir;
       // Ensure staging dir exists; if tmp fails (permissions/space), fall back to user cache.
       if (needsIsolation) {
         try {
@@ -547,7 +541,7 @@ async function main() {
   }
 
   // Create platform-specific symlink/copy for main binary
-  const mainBinary = `code-${targetTriple}${binaryExt}`;
+  const mainBinary = `dev-${targetTriple}${binaryExt}`;
   const mainBinaryPath = join(binDir, mainBinary);
   
   if (existsSync(mainBinaryPath) || existsSync(getCachedBinaryPath(version, targetTriple, platform() === 'win32'))) {
@@ -557,26 +551,25 @@ async function main() {
       if (!stats.size) throw new Error('binary is empty (download likely failed)');
       const valid = validateDownloadedBinary(probePath);
       if (!valid.ok) {
-        console.warn(`⚠ Main code binary appears invalid: ${valid.reason}`);
+        console.warn(`⚠ Main dev binary appears invalid: ${valid.reason}`);
         console.warn('  Try reinstalling or check your network/proxy settings.');
       }
     } catch (e) {
-      console.warn(`⚠ Main code binary appears invalid: ${e.message}`);
+      console.warn(`⚠ Main dev binary appears invalid: ${e.message}`);
       console.warn('  Try reinstalling or check your network/proxy settings.');
     }
-    console.log('Setting up main code binary...');
+    console.log('Setting up main dev binary...');
     
     // On Windows, we can't use symlinks easily, so update the JS wrapper
     // On Unix, the JS wrapper will find the correct binary
     console.log('✓ Installation complete!');
   } else {
-    console.warn('⚠ Main code binary not found. You may need to build from source.');
+    console.warn('⚠ Main dev binary not found. You may need to build from source.');
   }
 
-  // Handle collisions (e.g., VS Code) and add wrappers. We no longer publish a
-  // `code` bin in package.json. Instead, for global installs we create a `code`
-  // wrapper only when there is no conflicting `code` earlier on PATH. This avoids
-  // hijacking the VS Code CLI while still giving users a friendly name when safe.
+  // `dev` is the only bin in package.json, so the package manager always creates
+  // it and every wrapper below forwards to it. `code` is an alias we create only
+  // when nothing else owns that name on PATH, so we never hijack another CLI.
   // For upgrades from older versions that published a `code` bin, we also remove
   // our old shim if a conflict is detected.
   if (isGlobal && !isNpx) try {
@@ -585,7 +578,7 @@ async function main() {
     const ua = process.env.npm_config_user_agent || '';
     const isBun = ua.includes('bun') || !!process.env.BUN_INSTALL;
 
-    const installedCmds = new Set(['coder']); // global install always exposes coder via package manager
+    const installedCmds = new Set(['dev']); // global install always exposes dev via package manager
     const skippedCmds = [];
 
     // Helper to resolve all 'code' on PATH
@@ -630,18 +623,18 @@ async function main() {
           console.log(`⚠ Could not remove Bun shim '${bunShim}': ${e.message}`);
         }
       } else if (!other) {
-        // No conflict: create a wrapper that forwards to `coder`
+        // No conflict: create a wrapper that forwards to `dev`
         try {
           const wrapperPath = bunShim;
           if (isWindows) {
-            const content = `@echo off\r\n"%~dp0coder" %*\r\n`;
+            const content = `@echo off\r\n"%~dp0dev" %*\r\n`;
             writeFileSync(wrapperPath, content);
           } else {
-            const content = `#!/bin/sh\nexec "$(dirname \"$0\")/coder" "$@"\n`;
+            const content = `#!/bin/sh\nexec "$(dirname \"$0\")/dev" "$@"\n`;
             writeFileSync(wrapperPath, content);
             chmodSync(wrapperPath, 0o755);
           }
-          console.log("✓ Created 'code' wrapper -> coder (bun)");
+          console.log("✓ Created 'code' wrapper -> dev (bun)");
           installedCmds.add('code');
         } catch (e) {
           console.log(`⚠ Failed to create 'code' wrapper (bun): ${e.message}`);
@@ -653,13 +646,13 @@ async function main() {
       console.log(`Commands installed (bun): ${list}`);
       if (skippedCmds.length) {
         for (const s of skippedCmds) console.error(`Commands skipped: ${s.name} (${s.reason})`);
-        console.error('→ Use `coder` to run this tool.');
+        console.error('→ Use `dev` to run this tool.');
       }
       // Final friendly usage hint
       if (installedCmds.has('code')) {
-        console.log("Use 'code' to launch Code.");
+        console.log("Use 'code' to launch Hanzo Dev.");
       } else {
-        console.log("Use 'coder' to launch Code.");
+        console.log("Use 'dev' to launch Hanzo Dev.");
       }
     } else {
       // npm/pnpm/yarn path
@@ -668,7 +661,7 @@ async function main() {
       const candidates = resolveAllOnPath();
       const others = candidates.filter(p => p && (!ourShim || p !== ourShim));
       const ourShimExists = ourShim && existsSync(ourShim);
-      const shimLooksOurs = ourShimExists && looksLikeOurCodeShim(ourShim);
+      const shimLooksOurs = ourShimExists && looksLikeOurShim(ourShim);
       const conflictPaths = [
         ...others,
         ...(ourShimExists && !shimLooksOurs ? [ourShim] : []),
@@ -680,21 +673,23 @@ async function main() {
         try {
           const wrapperPath = join(globalBin, isWindows ? `${name}.cmd` : name);
           if (isWindows) {
-            const content = `@echo off\r\n"%~dp0${collision ? 'coder' : 'code'}" ${args} %*\r\n`;
+            const content = `@echo off\r\n"%~dp0dev" ${args} %*\r\n`;
             writeFileSync(wrapperPath, content);
           } else {
-            const content = `#!/bin/sh\nexec "$(dirname \"$0\")/${collision ? 'coder' : 'code'}" ${args} "$@"\n`;
+            const content = `#!/bin/sh\nexec "$(dirname \"$0\")/dev" ${args} "$@"\n`;
             writeFileSync(wrapperPath, content);
             chmodSync(wrapperPath, 0o755);
           }
-          console.log(`✓ Created wrapper '${name}' -> ${collision ? 'coder' : 'code'} ${args}`);
+          console.log(`✓ Created wrapper '${name}' -> dev ${args}`);
           installedCmds.add(name);
         } catch (e) {
           console.log(`⚠ Failed to create '${name}' wrapper: ${e.message}`);
         }
       };
 
-      // Always create legacy wrappers so existing scripts keep working
+      // Always create legacy wrappers so existing scripts keep working.
+      // These are distinct commands and keep their own names; only their target
+      // changed from `code` to `dev`.
       ensureWrapper('code-tui', '');
       ensureWrapper('code-exec', 'exec');
 
@@ -721,20 +716,20 @@ async function main() {
           } catch (e) {
             console.error(`⚠ Could not remove npm shim '${ourShim}': ${e.message}`);
           }
-          console.error('→ Use `coder` to run this tool.');
+          console.error('→ Use `dev` to run this tool.');
         } else {
           console.log('Note: could not determine npm global bin; skipping alias creation.');
         }
       } else {
-        // No collision; ensure a 'code' wrapper exists forwarding to 'coder'
+        // No collision; ensure a 'code' wrapper exists forwarding to 'dev'
         if (globalBin) {
           try {
             const content = isWindows
-              ? `@echo off\r\n"%~dp0coder" %*\r\n`
-              : `#!/bin/sh\nexec "$(dirname \"$0\")/coder" "$@"\n`;
+              ? `@echo off\r\n"%~dp0dev" %*\r\n`
+              : `#!/bin/sh\nexec "$(dirname \"$0\")/dev" "$@"\n`;
             writeFileSync(ourShim, content);
             if (!isWindows) chmodSync(ourShim, 0o755);
-            console.log("✓ Created 'code' wrapper -> coder");
+            console.log("✓ Created 'code' wrapper -> dev");
             installedCmds.add('code');
           } catch (e) {
             console.log(`⚠ Failed to create 'code' wrapper: ${e.message}`);
@@ -750,9 +745,9 @@ async function main() {
       }
       // Final friendly usage hint
       if (installedCmds.has('code')) {
-        console.log("Use 'code' to launch Code.");
+        console.log("Use 'code' to launch Hanzo Dev.");
       } else {
-        console.log("Use 'coder' to launch Code.");
+        console.log("Use 'dev' to launch Hanzo Dev.");
       }
     }
   } catch {

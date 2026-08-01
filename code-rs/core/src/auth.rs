@@ -22,6 +22,11 @@ use crate::token_data::{parse_id_token, PlanType};
 use crate::token_data::KnownPlan;
 use crate::config::resolve_code_path_for_read;
 
+/// The command a human runs to authenticate. It lives here once so no message
+/// can drift into naming a command that does not exist — `hanzo login` is not
+/// one, and gets swallowed as an AI task.
+pub const LOGIN_COMMAND: &str = "hanzo auth login";
+
 #[derive(Debug, Clone)]
 pub struct CodexAuth {
     pub mode: AuthMode,
@@ -349,7 +354,7 @@ fn load_auth(
             }
             None => {
                 // We have an API key but no tokens in the auth.json file.
-                // Perhaps the user ran `codex login --api-key <KEY>` or updated
+                // Perhaps the user ran `dev login --api-key <KEY>` or updated
                 // auth.json by hand. Either way, let's assume they are trying
                 // to use their API key.
                 return Ok(Some(CodexAuth::from_api_key_with_client(api_key, client)));

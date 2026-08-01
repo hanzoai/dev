@@ -225,7 +225,7 @@ async fn load_config() -> Result<CloudTasksConfig> {
     );
     let auth = auth_manager
         .auth()
-        .ok_or_else(|| anyhow!("Not signed in. Run `codex login` to authenticate with ChatGPT."))?;
+        .ok_or_else(|| anyhow!("Not signed in. Run `dev login` to authenticate with ChatGPT."))?;
     let token = auth
         .get_token()
         .await

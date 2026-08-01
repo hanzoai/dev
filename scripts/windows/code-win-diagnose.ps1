@@ -33,24 +33,24 @@ try {
 } catch { Warn ("npm config read failed: " + $_) }
 
 # 2) Resolve versions and tarballs from NPM
-Step "Resolve @just-every/code@$Version (npm)"
+Step "Resolve @hanzo/dev@$Version (npm)"
 $mainVersion = $null
-try { $mainVersion = (npm view "@just-every/code@$Version" version) } catch {}
-if (-not $mainVersion) { Err "Could not resolve @just-every/code@$Version"; exit 1 }
+try { $mainVersion = (npm view "@hanzo/dev@$Version" version) } catch {}
+if (-not $mainVersion) { Err "Could not resolve @hanzo/dev@$Version"; exit 1 }
 $mainTar = $null
-try { $mainTar = (npm view "@just-every/code@$mainVersion" dist.tarball) } catch {}
+try { $mainTar = (npm view "@hanzo/dev@$mainVersion" dist.tarball) } catch {}
 Info ("main version = " + $mainVersion)
 Info ("main tarball = " + ($mainTar ?? "<none>"))
 
-Step "Resolve @just-every/code-win32-x64@$mainVersion (npm)"
+Step "Resolve @hanzo/dev-win32-x64@$mainVersion (npm)"
 $winVersion = $null; $winTar = $null
-try { $winVersion = (npm view "@just-every/code-win32-x64@$mainVersion" version) } catch {}
+try { $winVersion = (npm view "@hanzo/dev-win32-x64@$mainVersion" version) } catch {}
 if ($winVersion) {
-  try { $winTar = (npm view "@just-every/code-win32-x64@$mainVersion" dist.tarball) } catch {}
+  try { $winTar = (npm view "@hanzo/dev-win32-x64@$mainVersion" dist.tarball) } catch {}
   Info ("win version  = " + $winVersion)
   Info ("win tarball  = " + ($winTar ?? "<none>"))
 } else {
-  Warn ("@just-every/code-win32-x64@$mainVersion not found on npm")
+  Warn ("@hanzo/dev-win32-x64@$mainVersion not found on npm")
 }
 
 # 3) Download + inspect npm tarballs
@@ -80,7 +80,7 @@ if ($gotMain) {
   try {
     mkdir p1 | Out-Null
     tar -xzf $t1 -C p1
-    Step ("@just-every/code@" + $mainVersion + " contents")
+    Step ("@hanzo/dev@" + $mainVersion + " contents")
     dir p1/package
     Info "\nHead of bin/coder.js:"
     Get-Content p1/package/bin/coder.js -TotalCount 30 | ForEach-Object { "  " + $_ }
@@ -97,7 +97,7 @@ if ($gotWin) {
   try {
     mkdir p2 | Out-Null
     tar -xzf $t2 -C p2
-    Step ("@just-every/code-win32-x64@" + $mainVersion + " contents")
+    Step ("@hanzo/dev-win32-x64@" + $mainVersion + " contents")
     dir p2/package/bin
   } catch {
     Warn ("Could not extract or inspect win tarball: " + $_)
@@ -106,7 +106,7 @@ if ($gotWin) {
 
 # 4) Compute target triple and cache paths
 $triple = "x86_64-pc-windows-msvc.exe"  # Windows x64
-$cacheDir = Join-Path $env:LOCALAPPDATA ("just-every\code\" + $mainVersion)
+$cacheDir = Join-Path $env:LOCALAPPDATA ("hanzoai\dev\" + $mainVersion)
 $expectOK  = Join-Path $cacheDir ("code-" + $triple)   # correct
 $expectBAD = $expectOK + ".exe"                          # incorrect (double .exe)
 Step "Cache expectations"
@@ -117,7 +117,7 @@ Info ("exists OK?  " + ([string](Test-Path $expectOK)))
 Info ("exists BAD? " + ([string](Test-Path $expectBAD)))
 
 # 5) GitHub release asset (fallback path)
-$ghZip = "https://github.com/just-every/code/releases/download/v$mainVersion/code-$triple.zip"
+$ghZip = "https://github.com/hanzoai/dev/releases/download/v$mainVersion/dev-$triple.zip"
 Step "GitHub asset (fallback) HEAD check"
 try {
   $resp = Invoke-WebRequest -UseBasicParsing -Uri $ghZip -Method Head
@@ -160,7 +160,7 @@ try {
 Step "Global npm prefix + expected node_modules bin path"
 $prefix = $null
 try { $prefix = (npm prefix -g 2>$null) } catch {}
-$nmBin  = if ($prefix) { Join-Path $prefix "node_modules\@just-every\code\bin" } else { "<unknown>" }
+$nmBin  = if ($prefix) { Join-Path $prefix "node_modules\@hanzo\dev\bin" } else { "<unknown>" }
 Info ("prefix = " + ($prefix ?? "<none>"))
 Info ("bin dir= " + $nmBin)
 if ($prefix -and (Test-Path $nmBin)) { dir $nmBin } else { Info "(bin dir not present - expected for npx, present for global installs)" }

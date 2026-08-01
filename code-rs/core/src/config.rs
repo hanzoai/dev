@@ -32,6 +32,7 @@ use crate::git_info::resolve_root_git_project_for_trust;
 use crate::model_family::ModelFamily;
 use crate::model_family::derive_default_model_family;
 use crate::model_family::find_family_for_model;
+use crate::model_provider_info::HANZO_PROVIDER_ID;
 use crate::model_provider_info::ModelProviderInfo;
 use crate::model_provider_info::built_in_model_providers;
 use crate::openai_model_info::get_model_info;
@@ -63,6 +64,16 @@ use toml_edit::Item as TomlItem;
 use toml_edit::Table as TomlTable;
 use which::which;
 
+/// `dev`'s default model: Zen 5 Coder on the Hanzo Cloud.
+///
+/// It is a coding agent, so the default is the coding member of the Zen family.
+/// Anything else stays selectable — this is the one you get without asking.
+pub const HANZO_DEFAULT_MODEL: &str = "zen5-coder";
+/// Reviews run on the same model that wrote the code.
+pub const HANZO_DEFAULT_REVIEW_MODEL: &str = "zen5-coder";
+
+/// Defaults used only when the caller has explicitly selected the `openai`
+/// provider. They are not `dev`'s defaults.
 const OPENAI_DEFAULT_MODEL: &str = "gpt-5-codex";
 const OPENAI_DEFAULT_REVIEW_MODEL: &str = "gpt-5-codex";
 pub const GPT_5_CODEX_MEDIUM_MODEL: &str = "gpt-5-codex";
@@ -1954,7 +1965,7 @@ impl Config {
         let model_provider_id = model_provider
             .or(config_profile.model_provider)
             .or(cfg.model_provider)
-            .unwrap_or_else(|| "openai".to_string());
+            .unwrap_or_else(|| HANZO_PROVIDER_ID.to_string());
         let model_provider = model_providers
             .get(&model_provider_id)
             .ok_or_else(|| {
@@ -2082,7 +2093,12 @@ impl Config {
         // Determine auth mode early so defaults like model selection can depend on it.
         let using_chatgpt_auth = Self::is_using_chatgpt_auth(&code_home);
 
-        let default_model_slug = if using_chatgpt_auth {
+        // The default model follows the selected provider: a model id is only
+        // meaningful to the endpoint that serves it. Asking the Hanzo Cloud for
+        // an OpenAI id is a 400, and vice versa.
+        let default_model_slug = if model_provider_id == HANZO_PROVIDER_ID {
+            HANZO_DEFAULT_MODEL
+        } else if using_chatgpt_auth {
             GPT_5_CODEX_MEDIUM_MODEL
         } else {
             OPENAI_DEFAULT_MODEL
@@ -2149,10 +2165,16 @@ impl Config {
             }
         }
 
-        // Default review model when not set in config; allow CLI override to take precedence.
-        let review_model = override_review_model
-            .or(cfg.review_model)
-            .unwrap_or_else(default_review_model);
+        // Default review model when not set in config; allow CLI override to take
+        // precedence. Like `model`, it follows the provider — a review model id is
+        // only meaningful to the endpoint that serves it.
+        let review_model = override_review_model.or(cfg.review_model).unwrap_or_else(|| {
+            if model_provider_id == HANZO_PROVIDER_ID {
+                HANZO_DEFAULT_REVIEW_MODEL.to_string()
+            } else {
+                OPENAI_DEFAULT_REVIEW_MODEL.to_string()
+            }
+        });
 
         let config = Self {
             model,
@@ -2341,10 +2363,6 @@ impl Config {
             Ok(Some(s))
         }
     }
-}
-
-fn default_review_model() -> String {
-    OPENAI_DEFAULT_REVIEW_MODEL.to_string()
 }
 
 fn env_path(var: &str) -> std::io::Result<Option<PathBuf>> {

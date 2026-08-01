@@ -1,11 +1,11 @@
-# just-every/homebrew-tap
+# hanzoai/homebrew-tap
 
 Unofficial tap for Code (terminal coding agent).
 
 ## Usage
 
 ```bash
-brew tap just-every/tap
+brew tap hanzoai/tap
 brew install code
 ```
 

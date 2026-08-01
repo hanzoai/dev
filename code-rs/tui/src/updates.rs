@@ -117,8 +117,8 @@ struct ReleaseInfo {
 }
 
 const VERSION_FILENAME: &str = "version.json";
-const LATEST_RELEASE_URL: &str = "https://api.github.com/repos/just-every/code/releases/latest";
-pub const CODE_RELEASE_URL: &str = "https://github.com/just-every/code/releases/latest";
+const LATEST_RELEASE_URL: &str = "https://api.github.com/repos/hanzoai/dev/releases/latest";
+pub const CODE_RELEASE_URL: &str = "https://github.com/hanzoai/dev/releases/latest";
 
 const AUTO_UPGRADE_LOCK_FILE: &str = "auto-upgrade.lock";
 const AUTO_UPGRADE_LOCK_TTL: Duration = Duration::from_secs(900); // 15 minutes
@@ -140,9 +140,9 @@ pub fn resolve_upgrade_resolution() -> UpgradeResolution {
                 "npm".to_string(),
                 "install".to_string(),
                 "-g".to_string(),
-                "@just-every/code@latest".to_string(),
+                "@hanzo/dev@latest".to_string(),
             ],
-            display: "npm install -g @just-every/code@latest".to_string(),
+            display: "npm install -g @hanzo/dev@latest".to_string(),
         };
     }
 

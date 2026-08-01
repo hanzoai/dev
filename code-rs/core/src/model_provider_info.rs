@@ -365,15 +365,27 @@ const DEFAULT_OLLAMA_PORT: u32 = 11434;
 
 pub const BUILT_IN_OSS_MODEL_PROVIDER_ID: &str = "oss";
 
+/// The Hanzo Cloud — `dev`'s home and its default. Every other provider stays
+/// configurable; this is the one you get without asking.
+pub const HANZO_PROVIDER_ID: &str = "hanzo";
+
+/// Where the Hanzo Cloud answers. Override with `HANZO_BASE_URL` for a private
+/// deployment; the `hanzo` CLI does exactly that when its active network points
+/// somewhere other than the public gateway.
+const HANZO_BASE_URL: &str = "https://api.hanzo.ai/v1";
+
+/// The bearer `dev` reads. `hanzo code` sets it on the child process, and
+/// `hanzo auth login` is how a human fills it in.
+const HANZO_ENV_KEY: &str = "HANZO_USER_KEY";
+
 /// Built-in default provider list.
 pub fn built_in_model_providers() -> HashMap<String, ModelProviderInfo> {
     use ModelProviderInfo as P;
 
-    // We do not want to be in the business of adjucating which third-party
-    // providers are bundled with Codex CLI, so we only include the OpenAI and
-    // open source ("oss") providers by default. Users are encouraged to add to
-    // `model_providers` in config.toml to add their own providers.
+    // The Hanzo Cloud is the default. The rest are bundled because people ask
+    // for them; add any other via `model_providers` in config.toml.
     [
+        (HANZO_PROVIDER_ID, create_hanzo_provider()),
         (
             "openai",
             P {
@@ -424,6 +436,42 @@ pub fn built_in_model_providers() -> HashMap<String, ModelProviderInfo> {
     .into_iter()
     .map(|(k, v)| (k.to_string(), v))
     .collect()
+}
+
+/// The Hanzo Cloud provider — `dev`'s default.
+///
+/// Speaks the Responses wire at `api.hanzo.ai/v1` and reads its bearer from
+/// `HANZO_USER_KEY`. `requires_openai_auth` is false: this account is ours, so
+/// the ChatGPT login dance never applies to it.
+pub fn create_hanzo_provider() -> ModelProviderInfo {
+    let base_url = std::env::var("HANZO_BASE_URL")
+        .ok()
+        .filter(|v| !v.trim().is_empty())
+        .unwrap_or_else(|| HANZO_BASE_URL.to_string());
+
+    ModelProviderInfo {
+        name: "Hanzo".into(),
+        base_url: Some(base_url),
+        env_key: Some(HANZO_ENV_KEY.into()),
+        env_key_instructions: Some(
+            "Sign in with `hanzo auth login`, or set HANZO_USER_KEY to a key from \
+             https://hanzo.ai/settings/keys."
+                .into(),
+        ),
+        wire_api: WireApi::Responses,
+        query_params: None,
+        http_headers: Some(
+            [("version".to_string(), code_version::version().to_string())]
+                .into_iter()
+                .collect(),
+        ),
+        env_http_headers: None,
+        request_max_retries: None,
+        stream_max_retries: None,
+        stream_idle_timeout_ms: None,
+        requires_openai_auth: false,
+        openrouter: None,
+    }
 }
 
 pub fn create_oss_provider() -> ModelProviderInfo {

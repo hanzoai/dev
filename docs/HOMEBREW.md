@@ -2,7 +2,7 @@ Homebrew (macOS)
 
 This repository now includes a helper script to generate a Homebrew formula
 from the latest GitHub release artifacts. Publishing to Homebrew requires a
-tap repository (for example, `just-every/homebrew-tap`). Once a tap exists,
+tap repository (for example, `hanzoai/homebrew-tap`). Once a tap exists,
 you can generate and publish the formula like so:
 
 1) Generate the formula for the latest version:
@@ -17,7 +17,7 @@ and update the `url`/`sha256` if needed.
 3) Users can then install with:
 
 ```
-brew tap just-every/tap
+brew tap hanzoai/tap
 brew install code
 ```
 

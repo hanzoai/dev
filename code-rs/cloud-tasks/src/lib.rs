@@ -225,7 +225,7 @@ pub async fn run_main(cli: Cli, _code_linux_sandbox_exe: Option<PathBuf>) -> any
                     }
                     _ => {
                         eprintln!(
-                            "Not signed in. Please run 'codex login' to sign in with ChatGPT, then re-run 'codex cloud'."
+                            "Not signed in. Please run 'dev login' to sign in with ChatGPT, then re-run 'codex cloud'."
                         );
                         std::process::exit(1);
                     }
@@ -233,7 +233,7 @@ pub async fn run_main(cli: Cli, _code_linux_sandbox_exe: Option<PathBuf>) -> any
             }
             None => {
                 eprintln!(
-                    "Not signed in. Please run 'codex login' to sign in with ChatGPT, then re-run 'codex cloud'."
+                    "Not signed in. Please run 'dev login' to sign in with ChatGPT, then re-run 'codex cloud'."
                 );
                 std::process::exit(1);
             }
@@ -1540,12 +1540,12 @@ async fn run_submit(args: crate::cli::SubmitArgs) -> anyhow::Result<()> {
                     t
                 }
                 _ => {
-                    eprintln!("Not signed in. Run 'codex login' and retry.");
+                    eprintln!("Not signed in. Run 'dev login' and retry.");
                     std::process::exit(1);
                 }
             },
             None => {
-                eprintln!("Not signed in. Run 'codex login' and retry.");
+                eprintln!("Not signed in. Run 'dev login' and retry.");
                 std::process::exit(1);
             }
         };

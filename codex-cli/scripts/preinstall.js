@@ -33,17 +33,17 @@ function tryExec(cmd, opts = {}) {
 // 1) Stop our native binary if it is holding locks. Avoid killing unrelated tools.
 // Only available on native Windows; skip entirely on WSL to avoid noise.
 if (isWin) {
-  tryExec('taskkill /IM code-x86_64-pc-windows-msvc.exe /F');
+  tryExec('taskkill /IM dev-x86_64-pc-windows-msvc.exe /F');
 }
 
 // 2) Remove stale staging dirs from previous failed installs under the global
-//    @just-every scope, which npm will reuse (e.g., .code-XXXXX). Remove only
+//    @hanzo scope, which npm will reuse (e.g., .dev-XXXXX). Remove only
 //    old entries and never the current staging or live package.
 try {
   let scopeDir = '';
   try {
     const root = execSync('npm root -g', { stdio: ['ignore', 'pipe', 'ignore'], shell: true }).toString().trim();
-    scopeDir = path.join(root, '@just-every');
+    scopeDir = path.join(root, '@hanzo');
   } catch {
     // Fall back to guessing from this script location: <staging>\..\..\
     const here = path.resolve(path.dirname(fileURLToPath(import.meta.url)));
@@ -54,7 +54,7 @@ try {
     const maxAgeMs = 2 * 60 * 60 * 1000; // 2 hours
     const currentDir = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
     for (const name of readdirSync(scopeDir)) {
-      if (!name.startsWith('.code-')) continue;
+      if (!name.startsWith('.dev-')) continue;
       const p = path.join(scopeDir, name);
       if (path.resolve(p) === currentDir) continue; // never remove our current dir
       try {
