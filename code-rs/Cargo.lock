@@ -1293,6 +1293,7 @@ dependencies = [
  "code-core",
  "code-ollama",
  "code-protocol",
+ "code-version",
  "opentelemetry-appender-tracing",
  "owo-colors",
  "serde",

@@ -418,9 +418,12 @@ impl MessageProcessor {
         });
 
         let auth_methods = serde_json::json!([{
-            "id": "code-login",
-            "name": "Use Code login",
-            "description": "Run `code login` (ChatGPT or API key) before connecting."
+            "id": "hanzo-login",
+            "name": "Use Hanzo login",
+            "description": format!(
+                "Run `{}` before connecting.",
+                code_core::auth::LOGIN_COMMAND
+            ),
         }]);
 
         let result = serde_json::json!({

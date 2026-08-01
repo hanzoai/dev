@@ -141,12 +141,7 @@ impl EventProcessor for EventProcessorWithHumanOutput {
     /// for the session. This mirrors the information shown in the TUI welcome
     /// screen.
     fn print_config_summary(&mut self, config: &Config, prompt: &str) {
-        const VERSION: &str = env!("CARGO_PKG_VERSION");
-        ts_println!(
-            self,
-            "OpenAI Codex v{} (research preview)\n--------",
-            VERSION
-        );
+        ts_println!(self, "Hanzo Dev v{}\n--------", code_version::version());
 
         let entries = create_config_summary_entries(config);
 

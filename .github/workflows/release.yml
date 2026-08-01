@@ -57,13 +57,13 @@ jobs:
         run: |
           set -euo pipefail
           cd code-rs
-          cargo build --locked --profile dev-fast --bin code
+          cargo build --locked --profile dev-fast --bin dev
 
       - name: CLI smokes (skip duplicated cargo tests)
         shell: bash
         env:
           SKIP_CARGO_TESTS: "1"
-          CI_CLI_BIN: ${{ env.CARGO_TARGET_DIR }}/dev-fast/code
+          CI_CLI_BIN: ${{ env.CARGO_TARGET_DIR }}/dev-fast/dev
         run: bash scripts/ci-tests.sh
 
       - name: Install cargo-nextest
@@ -112,12 +112,12 @@ jobs:
           set -euo pipefail
           CURRENT_VERSION=$(node -p "require('./package.json').version")
           PKGS=(
-            "@just-every/code"
-            "@just-every/code-darwin-arm64"
-            "@just-every/code-darwin-x64"
-            "@just-every/code-linux-x64-musl"
-            "@just-every/code-linux-arm64-musl"
-            "@just-every/code-win32-x64"
+            "@hanzo/dev"
+            "@hanzo/dev-darwin-arm64"
+            "@hanzo/dev-darwin-x64"
+            "@hanzo/dev-linux-x64-musl"
+            "@hanzo/dev-linux-arm64-musl"
+            "@hanzo/dev-win32-x64"
           )
           # Find the highest published version across all packages
           MAX_PUBLISHED="0.0.0"
@@ -157,22 +157,22 @@ jobs:
           # Linux builds
           - os: ubuntu-24.04
             target: x86_64-unknown-linux-musl
-            artifact: code-x86_64-unknown-linux-musl
+            artifact: dev-x86_64-unknown-linux-musl
           - os: ubuntu-24.04-arm
             target: aarch64-unknown-linux-musl
-            artifact: code-aarch64-unknown-linux-musl
+            artifact: dev-aarch64-unknown-linux-musl
           # (GNU variants omitted to reduce asset duplication; npm defaults to musl)
           # macOS builds
           - os: macos-14
             target: x86_64-apple-darwin
-            artifact: code-x86_64-apple-darwin
+            artifact: dev-x86_64-apple-darwin
           - os: macos-14
             target: aarch64-apple-darwin
-            artifact: code-aarch64-apple-darwin
+            artifact: dev-aarch64-apple-darwin
           # Windows build
           - os: windows-latest
             target: x86_64-pc-windows-msvc
-            artifact: code-x86_64-pc-windows-msvc.exe
+            artifact: dev-x86_64-pc-windows-msvc.exe
 
     steps:
       - name: Checkout code
@@ -296,7 +296,7 @@ jobs:
           RUST_BACKTRACE: "1"
         run: |
           cd code-rs
-          cargo build --release --frozen --locked --timings --target ${{ matrix.target }} --bin code
+          cargo build --release --frozen --locked --timings --target ${{ matrix.target }} --bin dev
 
       - name: Post-build smoke (run binary) [Unix]
         if: |
@@ -306,7 +306,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          exe="code-rs/target/${{ matrix.target }}/release/code"
+          exe="code-rs/target/${{ matrix.target }}/release/dev"
           "$exe" --version
           "$exe" completion bash > /dev/null
 
@@ -314,7 +314,7 @@ jobs:
         if: matrix.os == 'windows-latest' && matrix.target == 'x86_64-pc-windows-msvc'
         shell: pwsh
         run: |
-          $exe = "code-rs/target/${{ matrix.target }}/release/code.exe"
+          $exe = "code-rs/target/${{ matrix.target }}/release/dev.exe"
           & $exe --version | Out-Null
           & $exe completion bash | Out-Null
 
@@ -327,9 +327,9 @@ jobs:
         run: |
           mkdir -p artifacts
           if [[ "${{ matrix.os }}" == "windows-latest" ]]; then
-            cp code-rs/target/${{ matrix.target }}/release/code.exe artifacts/${{ matrix.artifact }}
+            cp code-rs/target/${{ matrix.target }}/release/dev.exe artifacts/${{ matrix.artifact }}
           else
-            cp code-rs/target/${{ matrix.target }}/release/code artifacts/${{ matrix.artifact }}
+            cp code-rs/target/${{ matrix.target }}/release/dev artifacts/${{ matrix.artifact }}
           fi
 
       - name: Compress artifacts (Windows)
@@ -449,10 +449,10 @@ jobs:
           set -euo pipefail
           mkdir -p release-assets
           shopt -s nullglob
-          # Gather all built "code-*" files (zst/tar.gz/zip or raw) recursively under artifacts/
+          # Gather all built "dev-*" files (zst/tar.gz/zip or raw) recursively under artifacts/
           while IFS= read -r -d '' f; do
             cp "$f" release-assets/
-          done < <(find artifacts -type f -name 'code-*' -print0)
+          done < <(find artifacts -type f -name 'dev-*' -print0)
           # Show what we collected
           ls -la release-assets/ || true
 
@@ -467,11 +467,11 @@ jobs:
 
           map_target() {
             case "$1" in
-              aarch64-apple-darwin) echo "os=darwin cpu=arm64 pkg=@just-every/code-darwin-arm64" ;;
-              x86_64-apple-darwin) echo "os=darwin cpu=x64 pkg=@just-every/code-darwin-x64" ;;
-              x86_64-unknown-linux-musl) echo "os=linux cpu=x64 pkg=@just-every/code-linux-x64-musl" ;;
-              aarch64-unknown-linux-musl) echo "os=linux cpu=arm64 pkg=@just-every/code-linux-arm64-musl" ;;
-              x86_64-pc-windows-msvc.exe) echo "os=win32 cpu=x64 pkg=@just-every/code-win32-x64" ;;
+              aarch64-apple-darwin) echo "os=darwin cpu=arm64 pkg=@hanzo/dev-darwin-arm64" ;;
+              x86_64-apple-darwin) echo "os=darwin cpu=x64 pkg=@hanzo/dev-darwin-x64" ;;
+              x86_64-unknown-linux-musl) echo "os=linux cpu=x64 pkg=@hanzo/dev-linux-x64-musl" ;;
+              aarch64-unknown-linux-musl) echo "os=linux cpu=arm64 pkg=@hanzo/dev-linux-arm64-musl" ;;
+              x86_64-pc-windows-msvc.exe) echo "os=win32 cpu=x64 pkg=@hanzo/dev-win32-x64" ;;
               *) echo "" ;;
             esac
           }
@@ -506,14 +506,14 @@ jobs:
           for f in release-assets/*; do
             b="$(basename "$f")"
             # Derive target triple from the filename while preserving optional .exe (Windows):
-            # code-<triple>[.exe].(zst|tar.gz|zip) -> <triple>[.exe]
+            # dev-<triple>[.exe].(zst|tar.gz|zip) -> <triple>[.exe]
             case "$b" in
               *.tar.gz) base="${b%.tar.gz}" ;;
               *.zst)    base="${b%.zst}" ;;
               *.zip)    base="${b%.zip}" ;;
               *)        base="$b" ;;
             esac
-            t="${base#code-}"
+            t="${base#dev-}"
             meta="$(map_target "$t")" || true
             if [ -z "$meta" ]; then
               echo "Skipping unrecognized artifact: $b"
@@ -525,7 +525,7 @@ jobs:
             rawbin="$(decompress_to "$f" "$workdir/bin")"
             chmod +x "$rawbin" || true
             # package.json
-            printf '{\n  "name": "%s",\n  "version": "%s",\n  "license": "Apache-2.0",\n  "description": "Platform binary for @just-every/code (%s)",\n  "os": ["%s"],\n  "cpu": ["%s"],\n  "files": ["bin/"],\n  "private": false\n}\n' \
+            printf '{\n  "name": "%s",\n  "version": "%s",\n  "license": "Apache-2.0",\n  "description": "Platform binary for @hanzo/dev (%s)",\n  "os": ["%s"],\n  "cpu": ["%s"],\n  "files": ["bin/"],\n  "private": false\n}\n' \
               "$pkg" "$NEW_VERSION" "$t" "$os" "$cpu" > "$workdir/package.json"
           done
 
@@ -561,11 +561,11 @@ jobs:
           # Note: These are platform-filtered in the target packages, so npm will fetch only one.
           tmp=$(mktemp)
           jq '.optionalDependencies = {
-            "@just-every/code-darwin-arm64": "'"$NEW_VERSION"'",
-            "@just-every/code-darwin-x64": "'"$NEW_VERSION"'",
-            "@just-every/code-linux-x64-musl": "'"$NEW_VERSION"'",
-            "@just-every/code-linux-arm64-musl": "'"$NEW_VERSION"'",
-            "@just-every/code-win32-x64": "'"$NEW_VERSION"'"
+            "@hanzo/dev-darwin-arm64": "'"$NEW_VERSION"'",
+            "@hanzo/dev-darwin-x64": "'"$NEW_VERSION"'",
+            "@hanzo/dev-linux-x64-musl": "'"$NEW_VERSION"'",
+            "@hanzo/dev-linux-arm64-musl": "'"$NEW_VERSION"'",
+            "@hanzo/dev-win32-x64": "'"$NEW_VERSION"'"
           }' package.json > "$tmp" && mv "$tmp" package.json
           git add package.json
           if git diff --staged --quiet; then
@@ -632,22 +632,22 @@ jobs:
           mkdir -p .code-bin release-notes
           # Always start from a blank file so stale content never leaks through
           : > release-notes/RELEASE_NOTES.md
-          LNX_ZST=$(ls -1 release-assets/code-x86_64-unknown-linux-musl.* 2>/dev/null | head -n1 || true)
+          LNX_ZST=$(ls -1 release-assets/dev-x86_64-unknown-linux-musl.* 2>/dev/null | head -n1 || true)
           if [ -z "$LNX_ZST" ]; then
             echo "Could not find linux x86_64 Code artifact in release-assets/" >&2
             exit 1
           fi
           case "$LNX_ZST" in
             *.zst)
-              zstd -d -q --force "$LNX_ZST" -o .code-bin/code ;;
+              zstd -d -q --force "$LNX_ZST" -o .code-bin/dev ;;
             *.tar.gz)
-              tar -xzf "$LNX_ZST" -C .code-bin && mv .code-bin/code-x86_64-unknown-linux-musl .code-bin/code ;;
+              tar -xzf "$LNX_ZST" -C .code-bin && mv .code-bin/dev-x86_64-unknown-linux-musl .code-bin/dev ;;
             *.zip)
-              unzip -q -o "$LNX_ZST" -d .code-bin && mv .code-bin/code-x86_64-unknown-linux-musl .code-bin/code ;;
+              unzip -q -o "$LNX_ZST" -d .code-bin && mv .code-bin/dev-x86_64-unknown-linux-musl .code-bin/dev ;;
             *)
-              cp "$LNX_ZST" .code-bin/code ;;
+              cp "$LNX_ZST" .code-bin/dev ;;
           esac
-          chmod +x .code-bin/code
+          chmod +x .code-bin/dev
 
           # Prepare context for the model.
           DATE=$(date -u +%Y-%m-%d)
@@ -684,14 +684,14 @@ jobs:
 
           Release Notes (release-notes/RELEASE_NOTES.md)
           - Write exactly these sections in order; include the optional Thanks section only when applicable:
-            1) Title: ## @just-every/code v${NEW_VERSION}
+            1) Title: ## @hanzo/dev v${NEW_VERSION}
             2) One brief intro sentence (1–2 lines max).
             3) Section header: ### Changes
                - The same 2–5 bullets as in the changelog (you may omit SHAs).
             4) Section header: ### Install
                Code block with exactly:
-               npm install -g @just-every/code@latest
-               code
+               npm install -g @hanzo/dev@latest
+               dev
             5) Optional section header: ### Thanks
                - Include ONE line like: "Thanks to @alice and @bob for contributions!"
                - Only include if at least one merged PR in ${RANGE} is authored by an external contributor.
@@ -716,7 +716,7 @@ jobs:
           # Run Code in fully automated exec mode against the repo root.
           # Note: the working-directory flag is `--cd` on the `exec` subcommand.
           OPENAI_BASE_URL="http://127.0.0.1:5058/v1" \
-          ./.code-bin/code exec --cd "$GITHUB_WORKSPACE" --full-auto --skip-git-repo-check < release-notes/prompt.expanded.txt | tee .github/auto/RELEASE_AGENT_OUT.txt || {
+          ./.code-bin/dev exec --cd "$GITHUB_WORKSPACE" --full-auto --skip-git-repo-check < release-notes/prompt.expanded.txt | tee .github/auto/RELEASE_AGENT_OUT.txt || {
             echo "Code exec returned non-zero; continuing to check for outputs..." >&2
           }
 
@@ -773,7 +773,7 @@ jobs:
             awk -v v="${NEW_VERSION}" '/^## /{p=($2==("v"v)||$2==v)} p{print}' CHANGELOG.md > release-notes/RELEASE_NOTES.md || true
           fi
           if [ ! -s release-notes/RELEASE_NOTES.md ]; then
-            printf "## @just-every/code v%s\n\nSee CHANGELOG.md for details." "${NEW_VERSION}" > release-notes/RELEASE_NOTES.md
+            printf "## @hanzo/dev v%s\n\nSee CHANGELOG.md for details." "${NEW_VERSION}" > release-notes/RELEASE_NOTES.md
           fi
 
           # Commit CHANGELOG changes if any.
@@ -816,7 +816,7 @@ jobs:
             awk -v v="${NEW_VERSION}" '/^## /{p=($2==("v"v)||$2==v)} p{print}' CHANGELOG.md > release-notes/RELEASE_NOTES.md || true
           fi
           if [ ! -s release-notes/RELEASE_NOTES.md ]; then
-            printf "## @just-every/code v%s\n\nSee CHANGELOG.md for details." "${NEW_VERSION}" > release-notes/RELEASE_NOTES.md
+            printf "## @hanzo/dev v%s\n\nSee CHANGELOG.md for details." "${NEW_VERSION}" > release-notes/RELEASE_NOTES.md
           fi
 
       - name: Assert release notes exist
@@ -947,14 +947,14 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GH_PAT || secrets.GITHUB_TOKEN }}
 
       # --- Homebrew Tap Update -------------------------------------------------
-      - name: Generate Homebrew formula (Code.rb)
+      - name: Generate Homebrew formula (hanzo-dev.rb)
         shell: bash
         run: |
           set -euo pipefail
           bash scripts/generate-homebrew-formula.sh
-          test -s Formula/Code.rb || { echo "Formula/Code.rb missing" >&2; exit 1; }
+          test -s Formula/hanzo-dev.rb || { echo "Formula/hanzo-dev.rb missing" >&2; exit 1; }
 
-      - name: Publish Homebrew formula to just-every/homebrew-tap
+      - name: Publish Homebrew formula to hanzoai/homebrew-tap
         shell: bash
         env:
           GH_PAT: ${{ secrets.GH_PAT || secrets.GITHUB_TOKEN }}
@@ -965,9 +965,9 @@ jobs:
             exit 0
           fi
           tmpdir=$(mktemp -d)
-          git clone "https://x-access-token:${GH_PAT}@github.com/just-every/homebrew-tap.git" "$tmpdir"
+          git clone "https://x-access-token:${GH_PAT}@github.com/hanzoai/homebrew-tap.git" "$tmpdir"
           mkdir -p "$tmpdir/Formula"
-          cp -f Formula/Code.rb "$tmpdir/Formula/Code.rb"
+          cp -f Formula/hanzo-dev.rb "$tmpdir/Formula/hanzo-dev.rb"
           cd "$tmpdir"
           git config user.email "github-actions[bot]@users.noreply.github.com"
           git config user.name  "github-actions[bot]"
@@ -977,7 +977,7 @@ jobs:
             exit 0
           fi
           ver="${{ steps.version.outputs.version }}"
-          git commit -m "chore(homebrew): bump Code formula to v${ver}"
+          git commit -m "chore(homebrew): bump hanzo-dev formula to v${ver}"
           # Ensure default branch exists
           if ! git rev-parse --abbrev-ref --symbolic-full-name @{u} >/dev/null 2>&1; then
             git branch -M main || true
@@ -1013,7 +1013,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          name="@just-every/code"
+          name="@hanzo/dev"
           version=$(jq -r '.version' package.json)
           echo "Preparing to publish $name@$version"
           existing=$(npm view "$name@$version" version 2>/dev/null || true)
