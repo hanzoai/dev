@@ -886,6 +886,55 @@ jobs:
           set -euo pipefail
           scripts/check-release-notes-version.sh
 
+      - name: Canonical install assets + checksums
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd release-assets
+          shopt -s nullglob
+          # The convention hanzoai/cli/install.sh consumes, and the only thing it
+          # knows: <bin>-<os>-<arch>.tar.gz, unpacking to a single file named
+          # <bin>, beside <asset>.sha256. The Rust-triple assets stay as they are
+          # for npm and Homebrew; this adds the pair the installer can consume.
+          canon() {
+            case "$1" in
+              x86_64-unknown-linux-musl)  echo linux-amd64 ;;
+              aarch64-unknown-linux-musl) echo linux-arm64 ;;
+              x86_64-apple-darwin)        echo darwin-amd64 ;;
+              aarch64-apple-darwin)       echo darwin-arm64 ;;
+              x86_64-pc-windows-msvc.exe) echo windows-amd64 ;;
+              *)                          echo "" ;;
+            esac
+          }
+          for f in *.tar.gz *.zip; do
+            base="${f%.tar.gz}"; base="${base%.zip}"
+            bin="${base%%-*}"; triple="${base#*-}"
+            target="$(canon "$triple")"
+            if [ -z "$target" ]; then continue; fi
+            out="${bin}-${target}.tar.gz"
+            if [ -e "$out" ]; then continue; fi
+            rm -rf .canon && mkdir .canon
+            case "$f" in
+              *.tar.gz) tar -xzf "$f" -C .canon ;;
+              *.zip)    unzip -qo "$f" -d .canon ;;
+            esac
+            member="$(find .canon -type f | head -n1)"
+            case "$target" in
+              windows-*) name="${bin}.exe" ;;
+              *)         name="${bin}" ;;
+            esac
+            if [ "$member" != ".canon/$name" ]; then mv "$member" ".canon/$name"; fi
+            tar -czf "$out" -C .canon "$name"
+            rm -rf .canon
+          done
+          # An asset without a checksum cannot be installed: the installer refuses
+          # anything it cannot verify. Emit one per asset, after every asset exists.
+          for f in *; do
+            case "$f" in *.sha256) continue ;; esac
+            if [ -f "$f" ]; then sha256sum "$f" > "$f.sha256"; fi
+          done
+          ls -la
+
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v1
         with:
