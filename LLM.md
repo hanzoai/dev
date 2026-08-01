@@ -20,6 +20,47 @@ Optional regression checks (recommended when touching the Rust workspace):
 
 When debugging regressions or bugs, write a failing test (or targeted reproduction script) first and confirm it captures the issue before touching code—if it can’t fail, you can’t be confident the fix works.
 
+## Product identity — do not let a merge take it back
+
+`dev` is the Hanzo coding agent. `hanzo code` launches a bare `dev` off PATH, so
+these are contract, not preference:
+
+| Property | Value | Where |
+|---|---|---|
+| Default provider | `hanzo` — api.hanzo.ai/v1, Responses wire, bearer `HANZO_USER_KEY` | `code-rs/core/src/model_provider_info.rs` |
+| Default model | `zen5-coder` (Zen family) | `code-rs/core/src/config.rs` |
+| Login command | `hanzo auth login` | `code-rs/core/src/auth.rs` `LOGIN_COMMAND` |
+| Canonical binary | `dev` (declared first; `code` is an alias to the same program) | `code-rs/cli/Cargo.toml` |
+| npm | `@hanzo/dev` + `@hanzo/dev-<target>` | `codex-cli/package.json`, `.github/workflows/release.yml` |
+| Homebrew | `hanzoai/homebrew-tap`, `Formula/hanzo-dev.rb`, assets `dev-<triple>` | `scripts/generate-homebrew-formula.sh` |
+
+**`code-rs/` is the workspace that SHIPS.** `codex-rs/` is the vendored upstream
+copy. A change that only edits `codex-rs/` changes nothing a user runs — this is
+the single easiest mistake to make here, and `.github/merge-policy.json` made it
+for a long time (every glob pointed at `codex-rs/**`).
+
+**Why there is a test for all of this.** `upstream-merge.yml` merges
+`openai/codex` every 30 minutes. A one-time edit to a default is a suggestion
+that lasts until the next merge. `code-rs/core/tests/hanzo_identity.rs` asserts
+every row above and fails the build if any regresses. Upstream has no file at
+that path, so a merge can neither conflict with it nor carry it away along with
+the thing it guards. If it goes red after a merge: re-apply the identity, do not
+delete the test. (It is not decorative — it caught the un-retargeted release
+pipeline and only went green once the pipeline was genuinely fixed.)
+
+**Model ids are not guessable.** `GET https://api.hanzo.ai/v1/models` needs a
+bearer and is the only authority. The previous default, `gpt-5-codex`, is not in
+the catalog and returns `400 model is not available` from our own gateway —
+which is why `hanzo`'s CLI passes `-c model=` on every launch. Verify a model id
+against `/v1/responses` (the wire `dev` speaks) before making it a default; some
+ids answer on chat/completions but return system-prompt text on responses.
+
+**Packaging is a supply chain.** `codex-cli/postinstall.js` runs on every
+`npm install` and downloads and executes a binary. It, and the TUI auto-updater
+(`code-rs/tui/src/updates.rs`), must point at `hanzoai/dev`. `codex-cli/.pack/`
+is `npm pack` output that CI regenerates — it is gitignored on purpose; when it
+was committed it was a second, stale home for that download URL.
+
 ## Strict Ordering In The TUI History
 
 The TUI enforces strict, per‑turn ordering for all streamed content. Every
