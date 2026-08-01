@@ -162,6 +162,11 @@ Bugs and feature requests: [github.com/hanzoai/dev/issues](https://github.com/ha
 
 ## License
 
-Apache-2.0 — see [LICENSE](LICENSE). Hanzo Dev began as a fork of
-`openai/codex`; upstream `LICENSE` and `NOTICE` are preserved, and the project
-is not affiliated with or endorsed by OpenAI.
+Apache-2.0 — see [LICENSE](LICENSE).
+
+## Lineage
+
+Hanzo Dev is a fork of [just-every/code](https://github.com/just-every/code), which is
+itself a fork of [openai/codex](https://github.com/openai/codex). Both are Apache-2.0,
+and this repository preserves the upstream `LICENSE` and `NOTICE`. Hanzo Dev is not
+affiliated with, sponsored by, or endorsed by either project.
