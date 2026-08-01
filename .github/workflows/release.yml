@@ -376,14 +376,24 @@ jobs:
           done
 
       - name: Upload binaries (compressed)
-        uses: actions/upload-artifact@v4
+        # v3, not v4+: this workflow runs on git.hanzo.ai, which presents as GHES.
+        # The v4 action refuses outright — "GHESNotSupportedError: @actions/artifact
+        # v2.0.0+ ... not currently supported on GHES" — so the job builds its
+        # artifact and then discards it at the last step, and reads as a build
+        # failure when the build actually succeeded.
+        uses: actions/upload-artifact@v3
         with:
           name: binaries-${{ matrix.target }}
           path: artifacts/
           compression-level: 0
 
       - name: Upload cargo timings
-        uses: actions/upload-artifact@v4
+        # v3, not v4+: this workflow runs on git.hanzo.ai, which presents as GHES.
+        # The v4 action refuses outright — "GHESNotSupportedError: @actions/artifact
+        # v2.0.0+ ... not currently supported on GHES" — so the job builds its
+        # artifact and then discards it at the last step, and reads as a build
+        # failure when the build actually succeeded.
+        uses: actions/upload-artifact@v3
         with:
           name: cargo-timings-${{ matrix.target }}
           path: code-rs/target/cargo-timings/*.html
@@ -424,7 +434,12 @@ jobs:
           for i in {1..30}; do if nc -z 127.0.0.1 5058; then break; else sleep 0.2; fi; done || true
 
       - name: Download all artifacts
-        uses: actions/download-artifact@v4
+        # v3, not v4+: this workflow runs on git.hanzo.ai, which presents as GHES.
+        # The v4 action refuses outright — "GHESNotSupportedError: @actions/artifact
+        # v2.0.0+ ... not currently supported on GHES" — so the job builds its
+        # artifact and then discards it at the last step, and reads as a build
+        # failure when the build actually succeeded.
+        uses: actions/download-artifact@v3
         with:
           path: artifacts/
 
