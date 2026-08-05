@@ -192,3 +192,20 @@ read-only = true
 agents = ["claude", "gemini", "qwen"]
 orchestrator-instructions = "Perform a multi-agent code review; reconcile disagreements into actionable feedback."
 agent-instructions = "Provide inline comments, cite files/lines, and suggest precise diffs."
+
+# ── Hanzo MCP — native code intelligence + web tools over api.hanzo.ai ──────────
+# One server gives the agent every Hanzo grounded tool:
+#   code_search / code_context / code_ask / code_index  -> /v1/code/*  (cross-repo
+#       semantic index over every git.hanzo.ai repo — text|regex|symbol|semantic|hybrid)
+#   web_search                                          -> /v1/websearch/search
+#   web_read                                            -> /v1/crawl   (SSRF-guarded fetch)
+#   research                                            -> /v1/ask  mode=research
+#                                                          (the iterated deep-research survey)
+# The Rust binary `hanzo-mcp` (github.com/hanzoai/mcp) speaks stdio JSON-RPC.
+# Auth uses your Hanzo bearer from the environment (HANZO_API_KEY).
+[mcp_servers.hanzo]
+command = "hanzo-mcp"
+args = ["--transport", "stdio"]
+# Python alternative — same tool surface, run via uv:
+#   command = "uvx"
+#   args = ["hanzo-mcp"]
