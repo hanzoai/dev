@@ -95,7 +95,14 @@ jobs:
 
   determine-version:
     name: Determine Version
-    runs-on: ubuntu-latest
+    # ubuntu-24.04, not the ubuntu-latest alias. Measured on run 31128398197:
+    # `Preflight Tests` (ubuntu-24.04) had a runner in five seconds, while this
+    # job sat on ubuntu-latest for fifteen minutes and was cancelled with
+    # "The job was not acquired by Runner of type hosted even after multiple
+    # attempts" — taking the whole release with it. The alias also silently
+    # re-points when GitHub rotates the default image; naming the version means
+    # the runner we get is the runner we chose.
+    runs-on: ubuntu-24.04
     outputs:
       version: ${{ steps.version.outputs.version }}
     steps:
@@ -410,7 +417,14 @@ jobs:
   release:
     name: Publish to npm
     needs: [determine-version, build-binaries, preflight-tests]
-    runs-on: ubuntu-latest
+    # ubuntu-24.04, not the ubuntu-latest alias. Measured on run 31128398197:
+    # `Preflight Tests` (ubuntu-24.04) had a runner in five seconds, while this
+    # job sat on ubuntu-latest for fifteen minutes and was cancelled with
+    # "The job was not acquired by Runner of type hosted even after multiple
+    # attempts" — taking the whole release with it. The alias also silently
+    # re-points when GitHub rotates the default image; naming the version means
+    # the runner we get is the runner we chose.
+    runs-on: ubuntu-24.04
     if: "!contains(github.event.head_commit.message, '[skip ci]')"
     timeout-minutes: 30
     env:
