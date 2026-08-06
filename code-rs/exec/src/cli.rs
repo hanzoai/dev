@@ -10,6 +10,14 @@ pub struct Cli {
     #[command(subcommand)]
     pub command: Option<Command>,
 
+    /// Run Auto Drive instead of a single non-interactive turn.
+    #[arg(long = "auto", default_value_t = false)]
+    pub auto_drive: bool,
+
+    /// Use Auto Review models and limits for /review runs.
+    #[arg(long = "auto-review", default_value_t = false)]
+    pub auto_review: bool,
+
     /// Optional image(s) to attach to the initial prompt.
     #[arg(
         long = "image",
@@ -68,6 +76,11 @@ pub struct Cli {
     #[clap(skip)]
     pub config_overrides: CliConfigOverrides,
 
+    /// Optional developer-role message to prepend to every turn for demos.
+    /// Set by the multitool root CLI via `--demo`.
+    #[clap(skip)]
+    pub demo_developer_message: Option<String>,
+
     /// Specifies color settings for use in the output.
     #[arg(long = "color", value_enum, default_value_t = Color::Auto)]
     pub color: Color,
@@ -76,6 +89,22 @@ pub struct Cli {
     #[arg(long = "json", default_value_t = false)]
     pub json: bool,
 
+    /// Maximum wall-clock time budget (seconds) before aborting the run.
+    ///
+    /// When this budget is at least 50% consumed, the coordinator receives
+    /// increasingly frequent reminders to converge and finish.
+    #[arg(
+        long = "max-seconds",
+        value_name = "SECONDS",
+        value_parser = clap::value_parser!(u64).range(1..)
+    )]
+    pub max_seconds: Option<u64>,
+
+    /// Maximum number of Auto Drive coordinator turns before stopping (0 = unlimited).
+    /// Only meaningful when --auto is enabled.
+    #[arg(long = "turn-cap", value_name = "TURNS")]
+    pub turn_cap: Option<u32>,
+
     /// Whether to include the plan tool in the conversation.
     #[arg(long = "include-plan-tool", default_value_t = false)]
     pub include_plan_tool: bool,
@@ -83,6 +112,12 @@ pub struct Cli {
     /// Specifies file where the last message from the agent should be written.
     #[arg(long = "output-last-message")]
     pub last_message_file: Option<PathBuf>,
+
+    /// When running /review, write the structured review output JSON to this file.
+    /// Includes every review pass (e.g., auto-resolve loops) so findings are not
+    /// lost when later passes report "no issues".
+    #[arg(long = "review-output-json", value_name = "FILE")]
+    pub review_output_json: Option<PathBuf>,
 
     /// Initial instructions for the agent. If not provided as an argument (or
     /// if `-` is used), instructions are read from stdin.

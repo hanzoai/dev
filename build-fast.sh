@@ -14,6 +14,7 @@ Environment flags:
   DETERMINISTIC=1                     Add -C debuginfo=0; promotes to release-prod unless DETERMINISTIC_FORCE_RELEASE=0
   DETERMINISTIC_FORCE_RELEASE=0|1     Keep dev-fast (0) or switch to release-prod (1, default)
   DETERMINISTIC_NO_UUID=1             macOS only: strip LC_UUID on final executables
+  BUILD_FAST_BINS="code code-tui"      Override bins to build (space or comma separated)
   --workspace codex|code|both         Select workspace to build (default: code)
 
 Examples:
@@ -25,6 +26,63 @@ Examples:
   ./build-fast.sh perf
   ./build-fast.sh perf run
 USAGE
+}
+
+trim() {
+  local value="${1:-}"
+  value="${value#${value%%[![:space:]]*}}"
+  value="${value%${value##*[![:space:]]}}"
+  printf '%s' "$value"
+}
+
+hash_string() {
+  local input="${1:-}"
+  if command -v shasum >/dev/null 2>&1; then
+    printf '%s' "$input" | shasum -a 256 | awk '{print $1}'
+  elif command -v sha256sum >/dev/null 2>&1; then
+    printf '%s' "$input" | sha256sum | awk '{print $1}'
+  else
+    python3 - <<'PY' 2>/dev/null
+import hashlib, sys
+data = sys.stdin.read().encode()
+print(hashlib.sha256(data).hexdigest())
+PY
+  fi
+}
+
+sanitize_cache_key() {
+  local raw="${1:-}"
+  # Replace any unsupported characters with '-'
+  raw="${raw//[^A-Za-z0-9._-]/-}"
+  # Collapse repeated separators
+  while [[ "$raw" == *--* ]]; do
+    raw="${raw//--/-}"
+  done
+  # Trim leading and trailing dashes
+  while [[ "$raw" == -* ]]; do
+    raw="${raw#-}"
+  done
+  while [[ "$raw" == *- ]]; do
+    raw="${raw%-}"
+  done
+  if [ -z "$raw" ]; then
+    raw="default"
+  fi
+  # Prevent overly long directory names
+  if [ "${#raw}" -gt 120 ]; then
+    raw="${raw:0:120}"
+  fi
+  printf '%s' "$raw"
+}
+
+bin_requested() {
+  local needle="${1:-}"
+  for candidate in "${TARGET_BINS[@]}"; do
+    if [ "${candidate}" = "${needle}" ]; then
+      return 0
+    fi
+  done
+  return 1
 }
 
 resolve_bin_path() {
@@ -112,6 +170,39 @@ if [ -z "$WORKSPACE_CHOICE" ]; then
   WORKSPACE_CHOICE="code"
 fi
 
+if [ "$ARG_PROFILE" = "pref" ]; then
+  ARG_PROFILE="perf"
+fi
+
+# Resolve repository paths relative to this script so absolute invocation works
+SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" >/dev/null 2>&1 && pwd)"
+if [ -n "${CODE_CALLER_CWD:-}" ]; then
+  if ! CALLER_CWD="$(cd "${CODE_CALLER_CWD}" >/dev/null 2>&1 && pwd)"; then
+    echo "Error: CODE_CALLER_CWD is not a valid directory: ${CODE_CALLER_CWD}" >&2
+    exit 1
+  fi
+else
+  CALLER_CWD="$(pwd)"
+fi
+
+if [[ "${SCRIPT_DIR}" == */.code/working/*/branches/* ]]; then
+  WORKTREE_PARENT="${SCRIPT_DIR%/branches/*}"
+  REPO_NAME="$(basename "${WORKTREE_PARENT}")"
+else
+  REPO_NAME="$(basename "${SCRIPT_DIR}")"
+fi
+
+REPO_ROOT="${SCRIPT_DIR}"
+
+# Guard against regressions where a code-rs crate references ../codex-rs.
+if [ "${BUILD_FAST_SKIP_CODEX_GUARD:-0}" != "1" ]; then
+  echo "Running codex path dependency guard..."
+  (
+    cd "$REPO_ROOT"
+    scripts/check-codex-path-deps.sh
+  )
+fi
+
 if [ "$WORKSPACE_CHOICE" = "both" ]; then
   if [ "$RUN_AFTER_BUILD" -eq 1 ]; then
     echo "Error: --workspace both cannot be combined with 'run'." >&2
@@ -123,17 +214,23 @@ if [ "$WORKSPACE_CHOICE" = "both" ]; then
   exit 0
 fi
 
-if [ "$ARG_PROFILE" = "pref" ]; then
-  ARG_PROFILE="perf"
+if [ -n "${CODE_HOME:-}" ] && [ -n "${CODE_HOME}" ]; then
+  CACHE_HOME="${CODE_HOME%/}"
+elif [ -n "${CODEX_HOME:-}" ] && [ -n "${CODEX_HOME}" ]; then
+  CACHE_HOME="${CODEX_HOME%/}"
+else
+  if [ -d "/mnt/data" ] && [ -w "/mnt/data" ]; then
+    CACHE_HOME="/mnt/data/.code"
+  else
+    CACHE_HOME="${REPO_ROOT}/.code"
+  fi
 fi
-
-# Resolve repository paths relative to this script so absolute invocation works
-SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" >/dev/null 2>&1 && pwd)"
-if [ "${CHECK_RELEASE_NOTES_VERSION_RUN:-0}" = "0" ]; then
-  export CHECK_RELEASE_NOTES_VERSION_RUN=1
-  "${SCRIPT_DIR}/scripts/check-release-notes-version.sh"
-fi
-CALLER_CWD="$(pwd)"
+case "${CACHE_HOME}" in
+  /*) ;;
+  *)
+    CACHE_HOME="${REPO_ROOT}/${CACHE_HOME#./}"
+    ;;
+esac
 
 case "$WORKSPACE_CHOICE" in
   codex|codex-rs)
@@ -156,23 +253,87 @@ if [ ! -d "$WORKSPACE_PATH" ]; then
   exit 1
 fi
 
+TARGET_CACHE_ROOT="${CACHE_HOME}/working/_target-cache/${REPO_NAME}"
+
 # Change to the selected Rust workspace root regardless of caller CWD
 cd "${WORKSPACE_PATH}"
 
-CLI_PACKAGE="$(sed -n 's/^name\s*=\s*"\(.*\)"/\1/p' cli/Cargo.toml | head -n1)"
-TUI_PACKAGE="$(sed -n 's/^name\s*=\s*"\(.*\)"/\1/p' tui/Cargo.toml | head -n1)"
-EXEC_PACKAGE="$(sed -n 's/^name\s*=\s*"\(.*\)"/\1/p' exec/Cargo.toml | head -n1)"
+WORKTREE_ROOT="$(git rev-parse --show-toplevel 2>/dev/null || pwd)"
+if [ -z "${BUILD_FAST_CACHE_KEY:-}" ]; then
+  if git rev-parse --is-inside-work-tree >/dev/null 2>&1; then
+    BRANCH_NAME_RAW="$(git rev-parse --abbrev-ref HEAD 2>/dev/null || echo HEAD)"
+    if [ "${BRANCH_NAME_RAW}" = "HEAD" ]; then
+      BRANCH_NAME_RAW="detached-$(git rev-parse --short HEAD 2>/dev/null || date +%Y%m%d%H%M%S)"
+    fi
+  else
+    BRANCH_NAME_RAW="unknown"
+  fi
+  BRANCH_FINGERPRINT="$(hash_string "${BRANCH_NAME_RAW}")"
+  BRANCH_HASH_SHORT="${BRANCH_FINGERPRINT:0:12}"
+  WORKTREE_HASH="$(hash_string "${WORKTREE_ROOT}")"
+  WORKTREE_HASH_SHORT="${WORKTREE_HASH:0:12}"
+  CACHE_KEY_RAW="${BRANCH_NAME_RAW}-${BRANCH_HASH_SHORT}-${WORKTREE_HASH_SHORT}"
+  CACHE_KEY_SOURCE="branch/worktree"
+else
+  CACHE_KEY_RAW="${BUILD_FAST_CACHE_KEY}"
+  CACHE_KEY_SOURCE="override"
+fi
+
+CACHE_KEY="$(sanitize_cache_key "${CACHE_KEY_RAW}")"
+if [ -z "${CACHE_KEY}" ]; then
+  CACHE_KEY="default"
+fi
+
+TARGET_CACHE_DIR="${TARGET_CACHE_ROOT}/${CACHE_KEY}/${WORKSPACE_DIR}"
+
+if [ -z "${CARGO_TARGET_DIR:-}" ]; then
+  TARGET_CACHE_DIR_ABS="${TARGET_CACHE_DIR}"
+  case "${TARGET_CACHE_DIR_ABS}" in
+    /*) ;;
+    *)
+      TARGET_CACHE_DIR_ABS="${REPO_ROOT}/${TARGET_CACHE_DIR_ABS#./}"
+      ;;
+  esac
+  mkdir -p "${TARGET_CACHE_DIR_ABS}" 2>/dev/null || true
+  export CARGO_TARGET_DIR="${TARGET_CACHE_DIR_ABS}"
+else
+  TARGET_CACHE_DIR_ABS="${CARGO_TARGET_DIR}"
+fi
+
+echo "Cache bucket: ${CACHE_KEY} (${CACHE_KEY_SOURCE})"
+
+CLI_PACKAGE="$(sed -En 's/^name[[:space:]]*=[[:space:]]*"(.*)"/\1/p' cli/Cargo.toml | head -n1)"
+TUI_PACKAGE="$(sed -En 's/^name[[:space:]]*=[[:space:]]*"(.*)"/\1/p' tui/Cargo.toml | head -n1)"
+EXEC_PACKAGE="$(sed -En 's/^name[[:space:]]*=[[:space:]]*"(.*)"/\1/p' exec/Cargo.toml | head -n1)"
 CRATE_PREFIX="${CLI_PACKAGE%%-*}"
 EXEC_BIN="$(awk 'BEGIN{inbin=0} /^\[\[bin\]\]/{inbin=1; next} inbin && /^name[[:space:]]*=/{gsub(/.*"/,"",$0); gsub(/"/,"",$0); print; exit}' exec/Cargo.toml)"
 if [ -z "${EXEC_BIN}" ]; then
   EXEC_BIN="${EXEC_PACKAGE}"
 fi
 
-# Compute repository root (the directory containing this script)
-# Note: We intentionally set REPO_ROOT to SCRIPT_DIR so any defaults (like CARGO_HOME)
-# resolve inside the repository, not its parent. This prevents permission issues on CI
-# where the parent folder may be owned by a different user.
-REPO_ROOT="${SCRIPT_DIR}"
+TARGET_BINS=()
+if [ -n "${BUILD_FAST_BINS:-}" ]; then
+  for raw_bin in ${BUILD_FAST_BINS//,/ }; do
+    bin_candidate="$(trim "$raw_bin")"
+    if [ -n "${bin_candidate}" ]; then
+      TARGET_BINS+=("${bin_candidate}")
+    fi
+  done
+fi
+if [ "${#TARGET_BINS[@]}" -eq 0 ]; then
+  TARGET_BINS=("${CRATE_PREFIX}")
+fi
+PRIMARY_PRESENT=0
+for candidate in "${TARGET_BINS[@]}"; do
+  if [ "${candidate}" = "${CRATE_PREFIX}" ]; then
+    PRIMARY_PRESENT=1
+    break
+  fi
+done
+if [ "$PRIMARY_PRESENT" -eq 0 ]; then
+  TARGET_BINS=("${CRATE_PREFIX}" "${TARGET_BINS[@]}")
+fi
+PRIMARY_BIN="${TARGET_BINS[0]}"
 
 # Default to preserving caller environment unless explicitly disabled
 KEEP_ENV="${KEEP_ENV:-1}"
@@ -284,6 +445,23 @@ if [ "${KEEP_ENV}" != "1" ]; then
   CANONICAL_ENV_APPLIED=1
 else
   CANONICAL_ENV_APPLIED=0
+fi
+
+if [ -z "${CARGO_TARGET_DIR:-}" ]; then
+  export CARGO_TARGET_DIR="${TARGET_CACHE_DIR_ABS}"
+fi
+
+if command -v sccache >/dev/null 2>&1; then
+  if [ -z "${RUSTC_WRAPPER:-}" ]; then
+    export RUSTC_WRAPPER="$(command -v sccache)"
+  fi
+  if [ -z "${SCCACHE_DIR:-}" ]; then
+    export SCCACHE_DIR="${CACHE_HOME}/sccache"
+  fi
+  if [ -z "${SCCACHE_CACHE_SIZE:-}" ]; then
+    export SCCACHE_CACHE_SIZE="50G"
+  fi
+  mkdir -p "${SCCACHE_DIR}" 2>/dev/null || true
 fi
 
 # Optional debug symbol override for profiling sessions
@@ -465,8 +643,12 @@ fi
 
 # Build with or without --locked based on lockfile validity
 # Keep stderr and stdout separate so downstream tools can capture both streams.
-echo "Using exec bin: ${EXEC_BIN}"
-${USE_CARGO} build ${USE_LOCKED} --profile "${PROFILE}" --bin "${CRATE_PREFIX}" --bin "${CRATE_PREFIX}-tui" --bin "${EXEC_BIN}"
+CARGO_BIN_ARGS=()
+for bin in "${TARGET_BINS[@]}"; do
+  CARGO_BIN_ARGS+=("--bin" "${bin}")
+done
+echo "Building bins: ${TARGET_BINS[*]}"
+${USE_CARGO} build ${USE_LOCKED} --profile "${PROFILE}" "${CARGO_BIN_ARGS[@]}"
 
 # Check if build succeeded
 if [ $? -eq 0 ]; then
@@ -555,6 +737,23 @@ if [ $? -eq 0 ]; then
       create_cli_symlinks "./code-cli/bin" "${CLI_TARGET_CODE}"
     fi
 
+    BIN_DIR="./bin"
+    mkdir -p "${BIN_DIR}"
+    BIN_DIR_ABS="$(cd "${BIN_DIR}" >/dev/null 2>&1 && pwd)"
+    for BIN_NAME in "${TARGET_BINS[@]}"; do
+      BIN_TARGET_PATH="${TARGET_DIR_ABS}/${BIN_SUBDIR}/${BIN_NAME}"
+      if [ -e "${BIN_TARGET_PATH}" ]; then
+        # Use a per-process temp file to avoid races when multiple build-fast
+        # invocations run concurrently in the same repo.
+        TMP_BIN_PATH="${BIN_DIR}/${BIN_NAME}.tmp.${BASHPID:-$$}"
+        rm -f "${TMP_BIN_PATH}" 2>/dev/null || true
+        cp -f "${BIN_TARGET_PATH}" "${TMP_BIN_PATH}"
+        mv -f "${TMP_BIN_PATH}" "${BIN_DIR}/${BIN_NAME}"
+        chmod +x "${BIN_DIR}/${BIN_NAME}" 2>/dev/null || true
+      fi
+    done
+    RUN_BIN_PATH="${BIN_DIR_ABS}/${PRIMARY_BIN}"
+
     # Ensure repo-local developer alias stays mapped to latest build output
     # so the user's `${CRATE_PREFIX}-dev` alias keeps working when pointing at target/dev-fast/${CRATE_PREFIX}
     # Only create this symlink if we're not already building in dev-fast profile
@@ -571,9 +770,15 @@ if [ $? -eq 0 ]; then
     # dependencies/proc-macro dylibs are not affected.
     if [ "${DETERMINISTIC_NO_UUID:-}" = "1" ] && [ "$(uname -s)" = "Darwin" ]; then
       echo "Deterministic post-link: removing LC_UUID from executables"
-      ${USE_CARGO} rustc ${USE_LOCKED} --profile "${PROFILE}" -p "${CLI_PACKAGE}" --bin "${CRATE_PREFIX}" -- -C link-arg=-Wl,-no_uuid || true
-      ${USE_CARGO} rustc ${USE_LOCKED} --profile "${PROFILE}" -p "${TUI_PACKAGE}" --bin "${CRATE_PREFIX}-tui" -- -C link-arg=-Wl,-no_uuid || true
-      ${USE_CARGO} rustc ${USE_LOCKED} --profile "${PROFILE}" -p "${EXEC_PACKAGE}" --bin "${EXEC_BIN}" -- -C link-arg=-Wl,-no_uuid || true
+      if bin_requested "${CRATE_PREFIX}"; then
+        ${USE_CARGO} rustc ${USE_LOCKED} --profile "${PROFILE}" -p "${CLI_PACKAGE}" --bin "${CRATE_PREFIX}" -- -C link-arg=-Wl,-no_uuid || true
+      fi
+      if bin_requested "${CRATE_PREFIX}-tui"; then
+        ${USE_CARGO} rustc ${USE_LOCKED} --profile "${PROFILE}" -p "${TUI_PACKAGE}" --bin "${CRATE_PREFIX}-tui" -- -C link-arg=-Wl,-no_uuid || true
+      fi
+      if bin_requested "${EXEC_BIN}"; then
+        ${USE_CARGO} rustc ${USE_LOCKED} --profile "${PROFILE}" -p "${EXEC_PACKAGE}" --bin "${EXEC_BIN}" -- -C link-arg=-Wl,-no_uuid || true
+      fi
     fi
 
     # Compute absolute path and SHA256 for clarity (after any post-linking)
@@ -600,13 +805,17 @@ if [ $? -eq 0 ]; then
     fi
 
     if [ "$RUN_AFTER_BUILD" -eq 1 ]; then
-      if [ ! -x "${ABS_BIN_PATH}" ]; then
-        echo "❌ Run failed: ${ABS_BIN_PATH} is missing or not executable"
+      RUN_PATH="${RUN_BIN_PATH}"
+      if [ ! -x "${RUN_PATH}" ]; then
+        RUN_PATH="${TARGET_DIR_ABS}/${BIN_SUBDIR}/${PRIMARY_BIN}"
+      fi
+      if [ ! -x "${RUN_PATH}" ]; then
+        echo "❌ Run failed: ${RUN_PATH} is missing or not executable"
         exit 1
       fi
-      echo "Running ${ABS_BIN_PATH} (cwd: ${CALLER_CWD})..."
+      echo "Running ${RUN_PATH} (cwd: ${CALLER_CWD})..."
       (
-        cd "${CALLER_CWD}" && "${ABS_BIN_PATH}"
+        cd "${CALLER_CWD}" && "${RUN_PATH}"
       )
       RUN_STATUS=$?
       if [ $RUN_STATUS -ne 0 ]; then

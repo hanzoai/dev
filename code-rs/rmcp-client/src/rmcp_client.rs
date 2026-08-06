@@ -1,4 +1,5 @@
 use std::collections::HashMap;
+use std::env;
 use std::ffi::OsString;
 use std::io;
 use std::process::Stdio;
@@ -14,6 +15,7 @@ use mcp_types::InitializeRequestParams;
 use mcp_types::InitializeResult;
 use mcp_types::ListToolsRequestParams;
 use mcp_types::ListToolsResult;
+use mcp_types::MCP_SCHEMA_VERSION;
 use rmcp::model::CallToolRequestParam;
 use rmcp::model::InitializeRequestParam;
 use rmcp::model::PaginatedRequestParam;
@@ -32,6 +34,8 @@ use tracing::info;
 use tracing::warn;
 
 use crate::logging_client_handler::LoggingClientHandler;
+use crate::utils::apply_default_headers;
+use crate::utils::build_default_headers;
 use crate::utils::convert_call_tool_result;
 use crate::utils::convert_to_mcp;
 use crate::utils::convert_to_rmcp;
@@ -58,6 +62,13 @@ pub struct RmcpClient {
     state: Mutex<ClientState>,
 }
 
+fn resolve_streamable_http_bearer_token(
+    bearer_token: Option<String>,
+    bearer_token_env_var: Option<String>,
+) -> Option<String> {
+    bearer_token.or_else(|| bearer_token_env_var.and_then(|env_var| env::var(env_var).ok()))
+}
+
 impl RmcpClient {
     pub async fn new_stdio_client(
         program: OsString,
@@ -65,18 +76,42 @@ impl RmcpClient {
         env: Option<HashMap<String, String>>,
     ) -> io::Result<Self> {
         let program_name = program.to_string_lossy().into_owned();
-        let mut command = Command::new(&program);
-        command
-            .kill_on_drop(true)
-            .stdin(Stdio::piped())
-            .stdout(Stdio::piped())
-            .env_clear()
-            .envs(create_env_for_mcp_server(env))
-            .args(&args);
+        let mut last_err: Option<io::Error> = None;
+        let mut spawned: Option<(TokioChildProcess, Option<tokio::process::ChildStderr>)> = None;
 
-        let (transport, stderr) = TokioChildProcess::builder(command)
-            .stderr(Stdio::piped())
-            .spawn()?;
+        for delay_ms in [0_u64, 10, 50] {
+            let mut command = Command::new(&program);
+            command
+                .kill_on_drop(true)
+                .stdin(Stdio::piped())
+                .stdout(Stdio::piped())
+                .env_clear()
+                .envs(create_env_for_mcp_server(env.clone()))
+                .args(&args);
+
+            match TokioChildProcess::builder(command)
+                .stderr(Stdio::piped())
+                .spawn()
+            {
+                Ok(child) => {
+                    spawned = Some(child);
+                    break;
+                }
+                Err(err)
+                    if err.kind() == io::ErrorKind::WouldBlock
+                        || matches!(err.raw_os_error(), Some(35) | Some(12)) =>
+                {
+                    last_err = Some(err);
+                    if delay_ms > 0 {
+                        time::sleep(Duration::from_millis(delay_ms)).await;
+                    }
+                }
+                Err(err) => return Err(err),
+            }
+        }
+
+        let (transport, stderr) = spawned
+            .ok_or_else(|| last_err.unwrap_or_else(|| io::Error::other("failed to spawn rmcp server")))?;
 
         if let Some(stderr) = stderr {
             tokio::spawn(async move {
@@ -103,13 +138,24 @@ impl RmcpClient {
         })
     }
 
-    pub fn new_streamable_http_client(url: String, bearer_token: Option<String>) -> Result<Self> {
+    pub fn new_streamable_http_client(
+        url: String,
+        bearer_token: Option<String>,
+        bearer_token_env_var: Option<String>,
+        http_headers: Option<HashMap<String, String>>,
+        env_http_headers: Option<HashMap<String, String>>,
+    ) -> Result<Self> {
+        let default_headers = build_default_headers(http_headers, env_http_headers)?;
+        let bearer_token =
+            resolve_streamable_http_bearer_token(bearer_token, bearer_token_env_var);
+
         let mut config = StreamableHttpClientTransportConfig::with_uri(url);
         if let Some(token) = bearer_token {
-            config = config.auth_header(format!("Bearer {token}"));
+            config = config.auth_header(token);
         }
 
-        let transport = StreamableHttpClientTransport::from_config(config);
+        let http_client = apply_default_headers(reqwest::Client::builder(), &default_headers).build()?;
+        let transport = StreamableHttpClientTransport::with_client(http_client, config);
 
         Ok(Self {
             state: Mutex::new(ClientState::Connecting {
@@ -149,20 +195,30 @@ impl RmcpClient {
         };
 
         let service = match timeout {
-            Some(duration) => time::timeout(duration, service_future)
-                .await
-                .map_err(|_| anyhow!("timed out handshaking with MCP server after {duration:?}"))?
-                .map_err(|err| anyhow!("handshaking with MCP server failed: {err}"))?,
-            None => service_future
-                .await
-                .map_err(|err| anyhow!("handshaking with MCP server failed: {err}"))?,
+            Some(duration) => match time::timeout(duration, service_future).await {
+                Ok(Ok(service)) => service,
+                Ok(Err(err)) => return Err(handshake_failed_error(err)),
+                Err(_) => return Err(handshake_timeout_error(duration)),
+            },
+            None => match service_future.await {
+                Ok(service) => service,
+                Err(err) => return Err(handshake_failed_error(err)),
+            },
         };
 
         let initialize_result_rmcp = service
             .peer()
             .peer_info()
             .ok_or_else(|| anyhow!("handshake succeeded but server info was missing"))?;
-        let initialize_result = convert_to_mcp(initialize_result_rmcp)?;
+        let initialize_result: InitializeResult = convert_to_mcp(initialize_result_rmcp)?;
+
+        if initialize_result.protocol_version != MCP_SCHEMA_VERSION {
+            let reported_version = initialize_result.protocol_version.clone();
+            return Err(anyhow!(
+                "MCP server reported protocol version {reported_version}, but this client expects {}. Update either side so both speak the same schema.",
+                MCP_SCHEMA_VERSION
+            ));
+        }
 
         {
             let mut guard = self.state.lock().await;
@@ -208,6 +264,69 @@ impl RmcpClient {
         match &*guard {
             ClientState::Ready { service } => Ok(Arc::clone(service)),
             ClientState::Connecting { .. } => Err(anyhow!("MCP client not initialized")),
+        }
+    }
+
+    pub async fn shutdown(&self) {
+        if let Ok(service) = self.service().await {
+            service.cancellation_token().cancel();
+        }
+    }
+}
+
+fn handshake_failed_error(err: impl Into<anyhow::Error>) -> anyhow::Error {
+    let err = err.into();
+    anyhow!(
+        "handshaking with MCP server failed: {err} (this client supports MCP schema version {MCP_SCHEMA_VERSION})"
+    )
+}
+
+fn handshake_timeout_error(duration: Duration) -> anyhow::Error {
+    anyhow!(
+        "timed out handshaking with MCP server after {duration:?} (expected MCP schema version {MCP_SCHEMA_VERSION})"
+    )
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn mcp_schema_version_is_well_formed() {
+        assert!(!MCP_SCHEMA_VERSION.is_empty());
+        let parts: Vec<&str> = MCP_SCHEMA_VERSION.split('-').collect();
+        assert_eq!(
+            parts.len(),
+            3,
+            "MCP_SCHEMA_VERSION should be in YYYY-MM-DD format"
+        );
+        assert!(parts.iter().all(|segment| !segment.trim().is_empty()));
+    }
+
+    #[test]
+    fn streamable_http_bearer_token_uses_explicit_value_without_prefixing() {
+        let token = resolve_streamable_http_bearer_token(Some("Bearer token".to_string()), None)
+            .expect("token should resolve");
+        assert_eq!(token, "Bearer token");
+    }
+
+    #[test]
+    fn streamable_http_bearer_token_reads_env_fallback() {
+        let original = std::env::var_os("CODE_TEST_MCP_TOKEN");
+        unsafe {
+            std::env::set_var("CODE_TEST_MCP_TOKEN", "env-token");
+        }
+
+        let token = resolve_streamable_http_bearer_token(
+            None,
+            Some("CODE_TEST_MCP_TOKEN".to_string()),
+        )
+        .expect("token should resolve from env");
+        assert_eq!(token, "env-token");
+
+        match original {
+            Some(value) => unsafe { std::env::set_var("CODE_TEST_MCP_TOKEN", value) },
+            None => unsafe { std::env::remove_var("CODE_TEST_MCP_TOKEN") },
         }
     }
 }

@@ -1,109 +1,157 @@
-use async_trait::async_trait;
-use serde::Deserialize;
-
-use crate::function_tool::FunctionCallError;
+use crate::sandboxing::SandboxPermissions;
+use crate::shell::Shell;
+use crate::shell::ShellType;
+use crate::shell::get_shell_by_model_provided_path;
 use crate::tools::context::ToolInvocation;
 use crate::tools::context::ToolOutput;
 use crate::tools::context::ToolPayload;
-use crate::tools::registry::ToolHandler;
-use crate::tools::registry::ToolKind;
-use crate::unified_exec::UnifiedExecRequest;
+use crate::tools::hook_names::HookToolName;
+use crate::tools::registry::PostToolUsePayload;
+use codex_exec_server::Environment;
+use codex_protocol::models::AdditionalPermissionProfile;
+use codex_tools::UnifiedExecShellMode;
+use serde::Deserialize;
+use std::path::PathBuf;
+use std::sync::Arc;
 
-pub struct UnifiedExecHandler;
+#[cfg(test)]
+use crate::tools::handlers::parse_arguments;
 
-#[derive(Deserialize)]
-struct UnifiedExecArgs {
-    input: Vec<String>,
+mod exec_command;
+mod write_stdin;
+
+pub use exec_command::ExecCommandHandler;
+pub(crate) use exec_command::ExecCommandHandlerOptions;
+pub use write_stdin::WriteStdinHandler;
+
+#[derive(Debug, Deserialize)]
+pub(crate) struct ExecCommandArgs {
+    pub(crate) cmd: String,
     #[serde(default)]
-    session_id: Option<String>,
+    shell: Option<String>,
     #[serde(default)]
-    timeout_ms: Option<u64>,
+    login: Option<bool>,
+    #[serde(default = "default_tty")]
+    tty: bool,
+    #[serde(default = "default_exec_yield_time_ms")]
+    yield_time_ms: u64,
+    #[serde(default)]
+    max_output_tokens: Option<usize>,
+    #[serde(default)]
+    sandbox_permissions: Option<SandboxPermissions>,
+    #[serde(default)]
+    additional_permissions: Option<AdditionalPermissionProfile>,
+    #[serde(default)]
+    justification: Option<String>,
+    #[serde(default)]
+    prefix_rule: Option<Vec<String>>,
 }
 
-#[async_trait]
-impl ToolHandler for UnifiedExecHandler {
-    fn kind(&self) -> ToolKind {
-        ToolKind::UnifiedExec
-    }
+#[derive(Debug, Deserialize)]
+struct ExecCommandEnvironmentArgs {
+    #[serde(default)]
+    environment_id: Option<String>,
+    // Keep this raw until after environment selection; relative paths must be
+    // resolved against the selected environment cwd, not the process cwd.
+    #[serde(default)]
+    workdir: Option<String>,
+}
 
-    fn matches_kind(&self, payload: &ToolPayload) -> bool {
-        matches!(
-            payload,
-            ToolPayload::UnifiedExec { .. } | ToolPayload::Function { .. }
-        )
-    }
+fn default_exec_yield_time_ms() -> u64 {
+    10_000
+}
 
-    async fn handle(&self, invocation: ToolInvocation) -> Result<ToolOutput, FunctionCallError> {
-        let ToolInvocation {
-            session, payload, ..
-        } = invocation;
+fn default_write_stdin_yield_time_ms() -> u64 {
+    250
+}
 
-        let args = match payload {
-            ToolPayload::UnifiedExec { arguments } | ToolPayload::Function { arguments } => {
-                serde_json::from_str::<UnifiedExecArgs>(&arguments).map_err(|err| {
-                    FunctionCallError::RespondToModel(format!(
-                        "failed to parse function arguments: {err:?}"
-                    ))
-                })?
-            }
-            _ => {
-                return Err(FunctionCallError::RespondToModel(
-                    "unified_exec handler received unsupported payload".to_string(),
-                ));
-            }
-        };
+fn default_tty() -> bool {
+    false
+}
 
-        let UnifiedExecArgs {
-            input,
-            session_id,
-            timeout_ms,
-        } = args;
+#[derive(Debug)]
+pub(crate) struct ResolvedCommand {
+    pub(crate) command: Vec<String>,
+    pub(crate) shell_type: ShellType,
+}
 
-        let parsed_session_id = if let Some(session_id) = session_id {
-            match session_id.parse::<i32>() {
-                Ok(parsed) => Some(parsed),
-                Err(output) => {
-                    return Err(FunctionCallError::RespondToModel(format!(
-                        "invalid session_id: {session_id} due to error {output:?}"
-                    )));
-                }
-            }
-        } else {
-            None
-        };
+fn post_unified_exec_tool_use_payload(
+    invocation: &ToolInvocation,
+    result: &dyn ToolOutput,
+) -> Option<PostToolUsePayload> {
+    let ToolPayload::Function { .. } = &invocation.payload else {
+        return None;
+    };
 
-        let request = UnifiedExecRequest {
-            session_id: parsed_session_id,
-            input_chunks: &input,
-            timeout_ms,
-        };
+    let tool_input = result.post_tool_use_input(&invocation.payload)?;
+    let tool_use_id = result.post_tool_use_id(&invocation.call_id);
+    let tool_response = result.post_tool_use_response(&tool_use_id, &invocation.payload)?;
+    Some(PostToolUsePayload {
+        tool_name: HookToolName::bash(),
+        tool_use_id,
+        tool_input,
+        tool_response,
+    })
+}
 
-        let value = session
-            .run_unified_exec_request(request)
-            .await
-            .map_err(|err| {
-                FunctionCallError::RespondToModel(format!("unified exec failed: {err:?}"))
-            })?;
-
-        #[derive(serde::Serialize)]
-        struct SerializedUnifiedExecResult {
-            session_id: Option<String>,
-            output: String,
+pub(crate) fn get_command(
+    args: &ExecCommandArgs,
+    session_shell: Arc<Shell>,
+    shell_mode: &UnifiedExecShellMode,
+    allow_login_shell: bool,
+) -> Result<ResolvedCommand, String> {
+    let use_login_shell = match args.login {
+        Some(true) if !allow_login_shell => {
+            return Err(
+                "login shell is disabled by config; omit `login` or set it to false.".to_string(),
+            );
         }
+        Some(use_login_shell) => use_login_shell,
+        None => allow_login_shell,
+    };
 
-        let content = serde_json::to_string(&SerializedUnifiedExecResult {
-            session_id: value.session_id.map(|id| id.to_string()),
-            output: value.output,
-        })
-        .map_err(|err| {
-            FunctionCallError::RespondToModel(format!(
-                "failed to serialize unified exec output: {err:?}"
-            ))
-        })?;
+    match shell_mode {
+        UnifiedExecShellMode::Direct => {
+            let model_shell = args
+                .shell
+                .as_ref()
+                .map(|shell_str| get_shell_by_model_provided_path(&PathBuf::from(shell_str)));
+            let shell = model_shell.as_ref().unwrap_or(session_shell.as_ref());
+            Ok(ResolvedCommand {
+                command: shell.derive_exec_args(&args.cmd, use_login_shell),
+                shell_type: shell.shell_type,
+            })
+        }
+        UnifiedExecShellMode::ZshFork(zsh_fork_config) => {
+            if args.shell.is_some() {
+                return Err(
+                    "`shell` is not supported for local zsh-fork exec; omit `shell` to use zsh-fork, or target a remote environment where `shell` is supported.".to_string(),
+                );
+            }
 
-        Ok(ToolOutput::Function {
-            content,
-            success: Some(true),
-        })
+            Ok(ResolvedCommand {
+                command: vec![
+                    zsh_fork_config.shell_zsh_path.to_string_lossy().to_string(),
+                    if use_login_shell { "-lc" } else { "-c" }.to_string(),
+                    args.cmd.clone(),
+                ],
+                shell_type: ShellType::Zsh,
+            })
+        }
     }
 }
+
+pub(crate) fn shell_mode_for_environment(
+    turn_shell_mode: &UnifiedExecShellMode,
+    environment: &Environment,
+) -> UnifiedExecShellMode {
+    if environment.is_remote() {
+        UnifiedExecShellMode::Direct
+    } else {
+        turn_shell_mode.clone()
+    }
+}
+
+#[cfg(test)]
+#[path = "unified_exec_tests.rs"]
+mod tests;

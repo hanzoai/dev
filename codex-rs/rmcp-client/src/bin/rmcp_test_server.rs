@@ -5,11 +5,11 @@ use std::sync::Arc;
 use rmcp::ErrorData as McpError;
 use rmcp::ServiceExt;
 use rmcp::handler::server::ServerHandler;
-use rmcp::model::CallToolRequestParam;
+use rmcp::model::CallToolRequestParams;
 use rmcp::model::CallToolResult;
 use rmcp::model::JsonObject;
 use rmcp::model::ListToolsResult;
-use rmcp::model::PaginatedRequestParam;
+use rmcp::model::PaginatedRequestParams;
 use rmcp::model::ServerCapabilities;
 use rmcp::model::ServerInfo;
 use rmcp::model::Tool;
@@ -45,51 +45,62 @@ impl TestToolServer {
         }))
         .expect("echo tool schema should deserialize");
 
-        Tool::new(
+        let mut tool = Tool::new(
             Cow::Borrowed("echo"),
             Cow::Borrowed("Echo back the provided message and include environment data."),
             Arc::new(schema),
-        )
+        );
+        #[expect(clippy::expect_used)]
+        let output_schema: JsonObject = serde_json::from_value(json!({
+            "type": "object",
+            "properties": {
+                "echo": { "type": "string" },
+                "env": {
+                    "anyOf": [
+                        { "type": "string" },
+                        { "type": "null" }
+                    ]
+                }
+            },
+            "required": ["echo", "env"],
+            "additionalProperties": false
+        }))
+        .expect("echo tool output schema should deserialize");
+        tool.output_schema = Some(Arc::new(output_schema));
+        tool
     }
 }
 
 #[derive(Deserialize)]
 struct EchoArgs {
     message: String,
-    #[allow(dead_code)]
     env_var: Option<String>,
 }
 
 impl ServerHandler for TestToolServer {
     fn get_info(&self) -> ServerInfo {
-        ServerInfo {
-            capabilities: ServerCapabilities::builder()
+        ServerInfo::new(
+            ServerCapabilities::builder()
                 .enable_tools()
                 .enable_tool_list_changed()
                 .build(),
-            ..ServerInfo::default()
-        }
+        )
     }
 
     fn list_tools(
         &self,
-        _request: Option<PaginatedRequestParam>,
+        _request: Option<PaginatedRequestParams>,
         _context: rmcp::service::RequestContext<rmcp::service::RoleServer>,
     ) -> impl std::future::Future<Output = Result<ListToolsResult, McpError>> + Send + '_ {
         let tools = self.tools.clone();
-        async move {
-            Ok(ListToolsResult {
-                tools: (*tools).clone(),
-                next_cursor: None,
-            })
-        }
+        async move { Ok(ListToolsResult::with_all_items((*tools).clone())) }
     }
 
     async fn call_tool(
         &self,
-        request: CallToolRequestParam,
+        request: CallToolRequestParams,
         _context: rmcp::service::RequestContext<rmcp::service::RoleServer>,
-    ) -> Result<CallToolResult, McpError> {
+    ) -> Result<rmcp::model::CallToolResponse, McpError> {
         match request.name.as_ref() {
             "echo" => {
                 let args: EchoArgs = match request.arguments {
@@ -106,17 +117,15 @@ impl ServerHandler for TestToolServer {
                 };
 
                 let env_snapshot: HashMap<String, String> = std::env::vars().collect();
+                let env_name = args.env_var.as_deref().unwrap_or("MCP_TEST_VALUE");
                 let structured_content = json!({
                     "echo": args.message,
-                    "env": env_snapshot.get("MCP_TEST_VALUE"),
+                    "env": env_snapshot.get(env_name),
                 });
 
-                Ok(CallToolResult {
-                    content: Vec::new(),
-                    structured_content: Some(structured_content),
-                    is_error: Some(false),
-                    meta: None,
-                })
+                let mut result = CallToolResult::success(Vec::new());
+                result.structured_content = Some(structured_content);
+                Ok(result.into())
             }
             other => Err(McpError::invalid_params(
                 format!("unknown tool: {other}"),

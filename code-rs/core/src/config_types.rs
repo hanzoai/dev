@@ -17,6 +17,97 @@ use serde::Serialize;
 use strum_macros::Display;
 
 pub const DEFAULT_OTEL_ENVIRONMENT: &str = "dev";
+pub const DEFAULT_MEMORIES_MAX_ROLLOUTS_PER_STARTUP: usize = 16;
+pub const DEFAULT_MEMORIES_MAX_ROLLOUT_AGE_DAYS: i64 = 30;
+pub const DEFAULT_MEMORIES_MIN_ROLLOUT_IDLE_HOURS: i64 = 6;
+pub const DEFAULT_MEMORIES_MAX_RAW_MEMORIES_FOR_GLOBAL: usize = 256;
+pub const DEFAULT_MEMORIES_MAX_UNUSED_DAYS: i64 = 30;
+
+#[derive(Deserialize, Debug, Clone, PartialEq, Eq, Default)]
+pub struct MemoriesToml {
+    #[serde(default)]
+    pub no_memories_if_mcp_or_web_search: Option<bool>,
+    pub generate_memories: Option<bool>,
+    pub use_memories: Option<bool>,
+    #[serde(default, alias = "max_raw_memories_for_consolidation")]
+    pub max_raw_memories_for_global: Option<usize>,
+    pub max_unused_days: Option<i64>,
+    pub max_rollout_age_days: Option<i64>,
+    pub max_rollouts_per_startup: Option<usize>,
+    pub min_rollout_idle_hours: Option<i64>,
+    /// Optional override for the model used by stage 1 extraction.
+    #[serde(default, alias = "extract_model")]
+    pub phase_1_model: Option<String>,
+    /// Optional override for the model used by stage 2 consolidation.
+    #[serde(default, alias = "consolidation_model")]
+    pub phase_2_model: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct MemoriesConfig {
+    pub no_memories_if_mcp_or_web_search: bool,
+    pub generate_memories: bool,
+    pub use_memories: bool,
+    pub max_raw_memories_for_global: usize,
+    pub max_unused_days: i64,
+    pub max_rollout_age_days: i64,
+    pub max_rollouts_per_startup: usize,
+    pub min_rollout_idle_hours: i64,
+    pub phase_1_model: Option<String>,
+    pub phase_2_model: Option<String>,
+}
+
+impl Default for MemoriesConfig {
+    fn default() -> Self {
+        Self {
+            no_memories_if_mcp_or_web_search: false,
+            generate_memories: true,
+            use_memories: true,
+            max_raw_memories_for_global: DEFAULT_MEMORIES_MAX_RAW_MEMORIES_FOR_GLOBAL,
+            max_unused_days: DEFAULT_MEMORIES_MAX_UNUSED_DAYS,
+            max_rollout_age_days: DEFAULT_MEMORIES_MAX_ROLLOUT_AGE_DAYS,
+            max_rollouts_per_startup: DEFAULT_MEMORIES_MAX_ROLLOUTS_PER_STARTUP,
+            min_rollout_idle_hours: DEFAULT_MEMORIES_MIN_ROLLOUT_IDLE_HOURS,
+            phase_1_model: None,
+            phase_2_model: None,
+        }
+    }
+}
+
+impl From<MemoriesToml> for MemoriesConfig {
+    fn from(toml: MemoriesToml) -> Self {
+        let defaults = Self::default();
+        Self {
+            no_memories_if_mcp_or_web_search: toml
+                .no_memories_if_mcp_or_web_search
+                .unwrap_or(defaults.no_memories_if_mcp_or_web_search),
+            generate_memories: toml.generate_memories.unwrap_or(defaults.generate_memories),
+            use_memories: toml.use_memories.unwrap_or(defaults.use_memories),
+            max_raw_memories_for_global: toml
+                .max_raw_memories_for_global
+                .unwrap_or(defaults.max_raw_memories_for_global)
+                .min(4096),
+            max_unused_days: toml
+                .max_unused_days
+                .unwrap_or(defaults.max_unused_days)
+                .clamp(0, 365),
+            max_rollout_age_days: toml
+                .max_rollout_age_days
+                .unwrap_or(defaults.max_rollout_age_days)
+                .clamp(0, 365),
+            max_rollouts_per_startup: toml
+                .max_rollouts_per_startup
+                .unwrap_or(defaults.max_rollouts_per_startup)
+                .clamp(1, 1024),
+            min_rollout_idle_hours: toml
+                .min_rollout_idle_hours
+                .unwrap_or(defaults.min_rollout_idle_hours)
+                .clamp(0, 168),
+            phase_1_model: toml.phase_1_model,
+            phase_2_model: toml.phase_2_model,
+        }
+    }
+}
 
 #[derive(Deserialize, Debug, Clone, PartialEq)]
 #[serde(rename_all = "kebab-case")]
@@ -80,6 +171,14 @@ pub struct McpServerConfig {
     /// Default timeout for MCP tool calls initiated via this server.
     #[serde(default, with = "option_duration_secs")]
     pub tool_timeout_sec: Option<Duration>,
+
+    /// Explicit allow-list of tools exposed from this server.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub enabled_tools: Option<Vec<String>>,
+
+    /// Explicit deny-list of tools. Applied after `enabled_tools`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub disabled_tools: Option<Vec<String>>,
 }
 
 impl<'de> Deserialize<'de> for McpServerConfig {
@@ -97,6 +196,12 @@ impl<'de> Deserialize<'de> for McpServerConfig {
 
             url: Option<String>,
             bearer_token: Option<String>,
+            bearer_token_env_var: Option<String>,
+            #[serde(default)]
+            http_headers: Option<HashMap<String, String>>,
+            #[serde(default)]
+            env_http_headers: Option<HashMap<String, String>>,
+            oauth_resource: Option<String>,
 
             #[serde(default)]
             startup_timeout_sec: Option<f64>,
@@ -104,6 +209,10 @@ impl<'de> Deserialize<'de> for McpServerConfig {
             startup_timeout_ms: Option<u64>,
             #[serde(default, with = "option_duration_secs")]
             tool_timeout_sec: Option<Duration>,
+            #[serde(default)]
+            enabled_tools: Option<Vec<String>>,
+            #[serde(default)]
+            disabled_tools: Option<Vec<String>>,
         }
 
         let raw = RawMcpServerConfig::deserialize(deserializer)?;
@@ -116,6 +225,8 @@ impl<'de> Deserialize<'de> for McpServerConfig {
             (None, Some(ms)) => Some(Duration::from_millis(ms)),
             (None, None) => None,
         };
+        let enabled_tools = raw.enabled_tools.clone();
+        let disabled_tools = raw.disabled_tools.clone();
 
         fn throw_if_set<E, T>(transport: &str, field: &str, value: Option<&T>) -> Result<(), E>
         where
@@ -136,10 +247,22 @@ impl<'de> Deserialize<'de> for McpServerConfig {
                 env,
                 url,
                 bearer_token,
+                bearer_token_env_var,
+                http_headers,
+                env_http_headers,
+                oauth_resource,
                 ..
             } => {
                 throw_if_set("stdio", "url", url.as_ref())?;
                 throw_if_set("stdio", "bearer_token", bearer_token.as_ref())?;
+                throw_if_set(
+                    "stdio",
+                    "bearer_token_env_var",
+                    bearer_token_env_var.as_ref(),
+                )?;
+                throw_if_set("stdio", "http_headers", http_headers.as_ref())?;
+                throw_if_set("stdio", "env_http_headers", env_http_headers.as_ref())?;
+                throw_if_set("stdio", "oauth_resource", oauth_resource.as_ref())?;
                 McpServerTransportConfig::Stdio {
                     command,
                     args: args.unwrap_or_default(),
@@ -149,6 +272,10 @@ impl<'de> Deserialize<'de> for McpServerConfig {
             RawMcpServerConfig {
                 url: Some(url),
                 bearer_token,
+                bearer_token_env_var,
+                http_headers,
+                env_http_headers,
+                oauth_resource,
                 command,
                 args,
                 env,
@@ -157,7 +284,14 @@ impl<'de> Deserialize<'de> for McpServerConfig {
                 throw_if_set("streamable_http", "command", command.as_ref())?;
                 throw_if_set("streamable_http", "args", args.as_ref())?;
                 throw_if_set("streamable_http", "env", env.as_ref())?;
-                McpServerTransportConfig::StreamableHttp { url, bearer_token }
+                McpServerTransportConfig::StreamableHttp {
+                    url,
+                    bearer_token,
+                    bearer_token_env_var,
+                    http_headers,
+                    env_http_headers,
+                    oauth_resource,
+                }
             }
             _ => return Err(SerdeError::custom("invalid transport")),
         };
@@ -166,6 +300,8 @@ impl<'de> Deserialize<'de> for McpServerConfig {
             transport,
             startup_timeout_sec,
             tool_timeout_sec: raw.tool_timeout_sec,
+            enabled_tools,
+            disabled_tools,
         })
     }
 }
@@ -189,6 +325,18 @@ pub enum McpServerTransportConfig {
         /// This should be used with caution because it lives on disk in clear text.
         #[serde(default, skip_serializing_if = "Option::is_none")]
         bearer_token: Option<String>,
+        /// Name of the environment variable holding an HTTP bearer token.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        bearer_token_env_var: Option<String>,
+        /// Additional HTTP headers to include in requests to this server.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        http_headers: Option<HashMap<String, String>>,
+        /// HTTP headers where the value is sourced from an environment variable.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        env_http_headers: Option<HashMap<String, String>>,
+        /// Optional OAuth resource parameter (RFC 8707) for providers that require it.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        oauth_resource: Option<String>,
     },
 }
 
@@ -365,6 +513,11 @@ pub struct SubagentCommandConfig {
 #[derive(Deserialize, Debug, Clone, PartialEq, Default)]
 #[serde(rename_all = "kebab-case")]
 pub struct SubagentsToml {
+    /// Maximum nesting depth for agent-spawned agent runs.
+    /// `1` allows root sessions to spawn agents, but blocks further nesting.
+    #[serde(default)]
+    pub max_depth: Option<i32>,
+
     #[serde(default)]
     pub commands: Vec<SubagentCommandConfig>,
 }
@@ -666,6 +819,10 @@ pub struct Tui {
     #[serde(default)]
     pub theme: ThemeConfig,
 
+    /// Auto Drive behavioral defaults (legacy location; prefer top-level `[auto_drive]`).
+    #[serde(default)]
+    pub auto_drive: Option<AutoDriveSettings>,
+
     /// Cached autodetect result so we can skip probing the terminal repeatedly.
     #[serde(default)]
     pub cached_terminal_background: Option<CachedTerminalBackground>,
@@ -699,8 +856,12 @@ pub struct Tui {
     pub alternate_screen: bool,
 
     /// Remember whether Auto Resolve is enabled for `/review` flows.
-    #[serde(default)]
+    #[serde(default = "default_true")]
     pub review_auto_resolve: bool,
+
+    /// Run a background `/review` after turns that modify code.
+    #[serde(default = "default_true")]
+    pub auto_review_enabled: bool,
 }
 
 // Important: Provide a manual Default so that when no config file exists and we
@@ -712,6 +873,7 @@ impl Default for Tui {
     fn default() -> Self {
         Self {
             theme: ThemeConfig::default(),
+            auto_drive: None,
             cached_terminal_background: None,
             highlight: HighlightConfig::default(),
             show_reasoning: false,
@@ -719,8 +881,204 @@ impl Default for Tui {
             spinner: SpinnerSelection::default(),
             notifications: Notifications::default(),
             alternate_screen: true,
-            review_auto_resolve: false,
+            review_auto_resolve: true,
+            auto_review_enabled: true,
         }
+    }
+}
+
+/// User acknowledgements for in-product notices (distinct from notifications).
+#[derive(Deserialize, Debug, Clone, PartialEq, Default)]
+pub struct Notice {
+    pub hide_full_access_warning: Option<bool>,
+    pub hide_gpt5_1_migration_prompt: Option<bool>,
+    #[serde(rename = "hide_gpt-5.1-codex-max_migration_prompt")]
+    pub hide_gpt_5_1_codex_max_migration_prompt: Option<bool>,
+    pub hide_gpt5_2_migration_prompt: Option<bool>,
+    pub hide_gpt5_2_codex_migration_prompt: Option<bool>,
+}
+
+#[derive(Serialize, Debug, Clone, Copy, PartialEq, Eq)]
+#[serde(transparent)]
+pub struct AutoResolveAttemptLimit(u32);
+
+impl AutoResolveAttemptLimit {
+    pub const ALLOWED: [u32; 9] = [0, 1, 2, 3, 4, 5, 10, 20, 40];
+    pub const DEFAULT: u32 = 10;
+
+    pub fn get(self) -> u32 {
+        self.0
+    }
+
+    pub fn try_new(value: u32) -> Result<Self, &'static str> {
+        if Self::ALLOWED.contains(&value) {
+            Ok(Self(value))
+        } else {
+            Err("auto_resolve_review_attempts must be one of {0,1,2,3,4,5,10,20,40}")
+        }
+    }
+}
+
+impl Default for AutoResolveAttemptLimit {
+    fn default() -> Self {
+        Self(Self::DEFAULT)
+    }
+}
+
+impl<'de> Deserialize<'de> for AutoResolveAttemptLimit {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        let raw = u32::deserialize(deserializer)?;
+        Self::try_new(raw).map_err(D::Error::custom)
+    }
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq)]
+pub struct AutoDriveModelRoutingEntry {
+    pub model: String,
+
+    #[serde(default = "default_true")]
+    pub enabled: bool,
+
+    #[serde(default = "default_auto_drive_model_routing_reasoning_levels")]
+    pub reasoning_levels: Vec<ReasoningEffort>,
+
+    #[serde(default)]
+    pub description: String,
+}
+
+fn default_auto_drive_model_routing_reasoning_levels() -> Vec<ReasoningEffort> {
+    vec![ReasoningEffort::High]
+}
+
+pub fn default_auto_drive_model_routing_entries() -> Vec<AutoDriveModelRoutingEntry> {
+    vec![
+        AutoDriveModelRoutingEntry {
+            model: "gpt-5.5".to_string(),
+            enabled: true,
+            reasoning_levels: vec![ReasoningEffort::High, ReasoningEffort::XHigh],
+            description: "Hard planning and complex problem solving".to_string(),
+        },
+        AutoDriveModelRoutingEntry {
+            model: "gpt-5.4-mini".to_string(),
+            enabled: true,
+            reasoning_levels: vec![ReasoningEffort::High],
+            description: "Fast implementation loops and failing-test iteration".to_string(),
+        },
+    ]
+}
+
+/// Auto Drive behavioral defaults persisted via `config.toml`.
+#[derive(Deserialize, Debug, Clone, PartialEq)]
+pub struct AutoDriveSettings {
+    #[serde(default = "default_true")]
+    pub review_enabled: bool,
+
+    #[serde(default = "default_true")]
+    pub agents_enabled: bool,
+
+    #[serde(default = "default_true")]
+    pub qa_automation_enabled: bool,
+
+    #[serde(default = "default_true")]
+    pub cross_check_enabled: bool,
+
+    #[serde(default = "default_true")]
+    pub observer_enabled: bool,
+
+    /// Enable coordinator routing of user prompts during Auto Drive turns.
+    #[serde(default = "default_true")]
+    pub coordinator_routing: bool,
+
+    /// Allow the coordinator to select the CLI model and reasoning effort per turn.
+    #[serde(default = "default_true")]
+    pub model_routing_enabled: bool,
+
+    /// Per-model routing entries used by coordinator-driven CLI model routing.
+    #[serde(default = "default_auto_drive_model_routing_entries")]
+    pub model_routing_entries: Vec<AutoDriveModelRoutingEntry>,
+
+    #[serde(default)]
+    pub continue_mode: AutoDriveContinueMode,
+
+    /// Model used for the Auto Drive coordinator and follow-on turns.
+    #[serde(default = "default_auto_drive_model")]
+    pub model: String,
+
+    /// Reasoning effort applied to the Auto Drive model.
+    #[serde(default = "default_auto_drive_reasoning_effort")]
+    pub model_reasoning_effort: ReasoningEffort,
+
+    #[serde(default)]
+    pub auto_resolve_review_attempts: AutoResolveAttemptLimit,
+
+    #[serde(default)]
+    pub auto_review_followup_attempts: AutoResolveAttemptLimit,
+
+    /// Maximum number of coordinator turns before stopping the session (0 = unlimited).
+    #[serde(default = "default_auto_drive_coordinator_turn_cap")]
+    pub coordinator_turn_cap: u32,
+}
+
+impl Default for AutoDriveSettings {
+    fn default() -> Self {
+        Self {
+            review_enabled: true,
+            agents_enabled: true,
+            qa_automation_enabled: true,
+            cross_check_enabled: true,
+            observer_enabled: true,
+            coordinator_routing: true,
+            model_routing_enabled: true,
+            model_routing_entries: default_auto_drive_model_routing_entries(),
+            continue_mode: AutoDriveContinueMode::TenSeconds,
+            model: default_auto_drive_model(),
+            model_reasoning_effort: default_auto_drive_reasoning_effort(),
+            auto_resolve_review_attempts: AutoResolveAttemptLimit::default(),
+            auto_review_followup_attempts: AutoResolveAttemptLimit::default(),
+            coordinator_turn_cap: default_auto_drive_coordinator_turn_cap(),
+        }
+    }
+}
+
+const fn default_auto_drive_coordinator_turn_cap() -> u32 {
+    0
+}
+
+fn default_auto_drive_model() -> String {
+    // Keep aligned with the coordinator's preferred model fallback.
+    String::from("gpt-5.1")
+}
+
+const fn default_auto_drive_reasoning_effort() -> ReasoningEffort {
+    ReasoningEffort::High
+}
+
+#[derive(Deserialize, Debug, Clone, Copy, PartialEq, Eq)]
+#[serde(rename_all = "kebab-case")]
+pub enum AutoDriveContinueMode {
+    Immediate,
+    TenSeconds,
+    SixtySeconds,
+    Manual,
+}
+
+impl AutoDriveContinueMode {
+    pub fn seconds(self) -> Option<u8> {
+        match self {
+            Self::Immediate => Some(0),
+            Self::TenSeconds => Some(10),
+            Self::SixtySeconds => Some(60),
+            Self::Manual => None,
+        }
+    }
+}
+
+impl Default for AutoDriveContinueMode {
+    fn default() -> Self {
+        Self::TenSeconds
     }
 }
 
@@ -763,6 +1121,7 @@ pub struct StreamConfig {
     /// Explicit values above still take precedence if set.
     #[serde(default)]
     pub responsive: bool,
+
 }
 
 impl Default for StreamConfig {
@@ -780,36 +1139,69 @@ impl Default for StreamConfig {
     }
 }
 
-#[derive(Deserialize, Debug, Clone, PartialEq, Eq, Default, Hash)]
-#[serde(rename_all = "kebab-case")]
-pub enum ReasoningSummaryFormat {
-    #[default]
-    None,
-    Experimental,
-}
-
 /// Theme configuration for the TUI
-#[derive(Deserialize, Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct ThemeConfig {
     /// Name of the predefined theme to use
-    #[serde(default)]
     pub name: ThemeName,
 
     /// Custom color overrides (optional)
-    #[serde(default)]
     pub colors: ThemeColors,
 
     /// Optional display name when using a custom theme generated by the user.
     /// Not used for built-in themes. If `name == Custom` and this is set, the
     /// UI may display it in place of the generic "Custom" label.
-    #[serde(default)]
     pub label: Option<String>,
 
     /// Optional hint whether the custom theme targets a dark background.
     /// When present and `name == Custom`, the UI can show "Dark - <label>"
     /// or "Light - <label>" in lists.
-    #[serde(default)]
     pub is_dark: Option<bool>,
+}
+
+impl<'de> Deserialize<'de> for ThemeConfig {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        #[derive(Deserialize)]
+        #[serde(untagged)]
+        enum ThemeConfigRepr {
+            Structured {
+                #[serde(default)]
+                name: ThemeName,
+                #[serde(default)]
+                colors: ThemeColors,
+                #[serde(default)]
+                label: Option<String>,
+                #[serde(default)]
+                is_dark: Option<bool>,
+            },
+            LegacySyntaxTheme(String),
+        }
+
+        match ThemeConfigRepr::deserialize(deserializer)? {
+            ThemeConfigRepr::Structured {
+                name,
+                colors,
+                label,
+                is_dark,
+            } => Ok(Self {
+                name,
+                colors,
+                label,
+                is_dark,
+            }),
+            // Older Code releases used `tui.theme = "..."` for the syntax
+            // highlighting theme. The fork now stores application appearance
+            // under `[tui.theme]`; retain a usable default until `/theme`
+            // rewrites the setting in the current format.
+            ThemeConfigRepr::LegacySyntaxTheme(legacy_theme) => {
+                let _ = legacy_theme;
+                Ok(Self::default())
+            }
+        }
+    }
 }
 
 impl Default for ThemeConfig {
@@ -1043,7 +1435,7 @@ pub type EnvironmentVariablePattern = WildMatchPattern<'*', '?'>;
 /// 3. If `exclude` is not empty, filter the map using the provided patterns.
 /// 4. Insert any entries from `r#set` into the map.
 /// 5. If non-empty, filter the map using the `include_only` patterns.
-#[derive(Debug, Clone, PartialEq, Default)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct ShellEnvironmentPolicy {
     /// Starting point when building the environment.
     pub inherit: ShellEnvironmentPolicyInherit,
@@ -1065,11 +1457,24 @@ pub struct ShellEnvironmentPolicy {
     pub use_profile: bool,
 }
 
+impl Default for ShellEnvironmentPolicy {
+    fn default() -> Self {
+        Self {
+            inherit: ShellEnvironmentPolicyInherit::All,
+            ignore_default_excludes: true,
+            exclude: Vec::new(),
+            r#set: HashMap::new(),
+            include_only: Vec::new(),
+            use_profile: false,
+        }
+    }
+}
+
 impl From<ShellEnvironmentPolicyToml> for ShellEnvironmentPolicy {
     fn from(toml: ShellEnvironmentPolicyToml) -> Self {
         // Default to inheriting the full environment when not specified.
         let inherit = toml.inherit.unwrap_or(ShellEnvironmentPolicyInherit::All);
-        let ignore_default_excludes = toml.ignore_default_excludes.unwrap_or(false);
+        let ignore_default_excludes = toml.ignore_default_excludes.unwrap_or(true);
         let exclude = toml
             .exclude
             .unwrap_or_default()
@@ -1097,7 +1502,7 @@ impl From<ShellEnvironmentPolicyToml> for ShellEnvironmentPolicy {
 }
 
 /// See https://platform.openai.com/docs/guides/reasoning?api-mode=responses#get-started-with-reasoning
-#[derive(Debug, Serialize, Deserialize, Default, Clone, Copy, PartialEq, Eq, Display)]
+#[derive(Debug, Serialize, Deserialize, Default, Clone, Copy, PartialEq, Eq, Display, Hash)]
 #[serde(rename_all = "lowercase")]
 #[strum(serialize_all = "lowercase")]
 pub enum ReasoningEffort {
@@ -1108,6 +1513,7 @@ pub enum ReasoningEffort {
     #[default]
     Medium,
     High,
+    XHigh,
     /// Deprecated: previously disabled reasoning. Kept for internal use only.
     #[serde(skip)]
     None,
@@ -1128,6 +1534,55 @@ pub enum ReasoningSummary {
     None,
 }
 
+#[derive(Debug, Serialize, Deserialize, Clone, Copy, PartialEq, Eq, Display)]
+#[serde(rename_all = "lowercase")]
+#[strum(serialize_all = "lowercase")]
+pub enum ServiceTier {
+    /// Legacy compatibility value for older local config files.
+    #[serde(alias = "default")]
+    Standard,
+    Fast,
+    Flex,
+}
+
+/// Request/config sentinel for explicit standard routing.
+///
+/// This is not a catalog service tier id. It means the user intentionally
+/// selected no service tier, so model catalog defaults should not apply.
+pub const SERVICE_TIER_DEFAULT_REQUEST_VALUE: &str = "default";
+
+impl ServiceTier {
+    pub const fn request_value(self) -> &'static str {
+        match self {
+            Self::Standard => SERVICE_TIER_DEFAULT_REQUEST_VALUE,
+            Self::Fast => "priority",
+            Self::Flex => "flex",
+        }
+    }
+
+    pub fn from_request_value(value: &str) -> Option<Self> {
+        match value {
+            "default" | "standard" => Some(Self::Standard),
+            "fast" | "priority" => Some(Self::Fast),
+            "flex" => Some(Self::Flex),
+            _ => None,
+        }
+    }
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone, Copy, PartialEq, Eq, Display)]
+#[serde(rename_all = "lowercase")]
+pub enum ContextMode {
+    #[serde(rename = "1m")]
+    #[serde(alias = "\"1m\"")]
+    #[strum(to_string = "1m")]
+    OneM,
+    #[serde(alias = "\"auto\"")]
+    Auto,
+    #[serde(alias = "\"disabled\"")]
+    Disabled,
+}
+
 /// Text verbosity level for OpenAI API responses.
 /// Controls the level of detail in the model's text responses.
 #[derive(Debug, Serialize, Deserialize, Default, Clone, Copy, PartialEq, Eq, Display)]
@@ -1138,6 +1593,15 @@ pub enum TextVerbosity {
     #[default]
     Medium,
     High,
+}
+
+#[derive(Debug, Serialize, Deserialize, Default, Clone, Copy, PartialEq, Eq)]
+#[serde(rename_all = "kebab-case")]
+pub enum Personality {
+    None,
+    Friendly,
+    #[default]
+    Pragmatic,
 }
 
 #[derive(Debug, Deserialize)]
@@ -1171,6 +1635,8 @@ pub enum ProjectHookEvent {
     SessionStart,
     #[serde(rename = "session.end")]
     SessionEnd,
+    #[serde(rename = "user.prompt_submit", alias = "UserPromptSubmit")]
+    UserPromptSubmit,
     #[serde(rename = "tool.before")]
     ToolBefore,
     #[serde(rename = "tool.after")]
@@ -1179,6 +1645,8 @@ pub enum ProjectHookEvent {
     FileBeforeWrite,
     #[serde(rename = "file.after_write")]
     FileAfterWrite,
+    #[serde(rename = "stop", alias = "Stop")]
+    Stop,
 }
 
 impl ProjectHookEvent {
@@ -1186,10 +1654,12 @@ impl ProjectHookEvent {
         match self {
             ProjectHookEvent::SessionStart => "session.start",
             ProjectHookEvent::SessionEnd => "session.end",
+            ProjectHookEvent::UserPromptSubmit => "user.prompt_submit",
             ProjectHookEvent::ToolBefore => "tool.before",
             ProjectHookEvent::ToolAfter => "tool.after",
             ProjectHookEvent::FileBeforeWrite => "file.before_write",
             ProjectHookEvent::FileAfterWrite => "file.after_write",
+            ProjectHookEvent::Stop => "stop",
         }
     }
 
@@ -1197,10 +1667,12 @@ impl ProjectHookEvent {
         match self {
             ProjectHookEvent::SessionStart => "session_start",
             ProjectHookEvent::SessionEnd => "session_end",
+            ProjectHookEvent::UserPromptSubmit => "user_prompt_submit",
             ProjectHookEvent::ToolBefore => "tool_before",
             ProjectHookEvent::ToolAfter => "tool_after",
             ProjectHookEvent::FileBeforeWrite => "file_before_write",
             ProjectHookEvent::FileAfterWrite => "file_after_write",
+            ProjectHookEvent::Stop => "stop",
         }
     }
 }
@@ -1237,13 +1709,72 @@ pub struct ProjectCommandConfig {
     pub timeout_ms: Option<u64>,
 }
 
+/// Retention policy configuration for env_ctx_v2 timeline management.
+#[derive(Deserialize, Debug, Clone, PartialEq, Eq)]
+#[serde(rename_all = "kebab-case")]
+pub struct RetentionConfig {
+    /// Maximum number of environment context deltas to retain (default: 3)
+    #[serde(default = "default_max_env_deltas")]
+    pub max_env_deltas: usize,
+    /// Maximum number of browser snapshots to retain (default: 2)
+    #[serde(default = "default_max_browser_snapshots")]
+    pub max_browser_snapshots: usize,
+    /// Maximum total bytes for all retained env_ctx items (default: 100KB)
+    #[serde(default = "default_max_total_bytes")]
+    pub max_total_bytes: usize,
+    /// Always keep the most recent environment baseline snapshot (default: true)
+    #[serde(default = "default_true_bool")]
+    pub keep_latest_baseline: bool,
+}
+
+fn default_max_env_deltas() -> usize {
+    3
+}
+
+fn default_max_browser_snapshots() -> usize {
+    2
+}
+
+fn default_max_total_bytes() -> usize {
+    100 * 1024
+}
+
+impl Default for RetentionConfig {
+    fn default() -> Self {
+        Self {
+            max_env_deltas: default_max_env_deltas(),
+            max_browser_snapshots: default_max_browser_snapshots(),
+            max_total_bytes: default_max_total_bytes(),
+            keep_latest_baseline: true,
+        }
+    }
+}
+
 impl From<code_protocol::config_types::ReasoningEffort> for ReasoningEffort {
     fn from(v: code_protocol::config_types::ReasoningEffort) -> Self {
         match v {
+            code_protocol::config_types::ReasoningEffort::None => ReasoningEffort::None,
             code_protocol::config_types::ReasoningEffort::Minimal => ReasoningEffort::Minimal,
             code_protocol::config_types::ReasoningEffort::Low => ReasoningEffort::Low,
             code_protocol::config_types::ReasoningEffort::Medium => ReasoningEffort::Medium,
             code_protocol::config_types::ReasoningEffort::High => ReasoningEffort::High,
+            code_protocol::config_types::ReasoningEffort::XHigh
+            | code_protocol::config_types::ReasoningEffort::Max => ReasoningEffort::XHigh,
+            code_protocol::config_types::ReasoningEffort::Custom(_) => ReasoningEffort::Medium,
+        }
+    }
+}
+
+impl From<ReasoningEffort> for code_protocol::config_types::ReasoningEffort {
+    fn from(v: ReasoningEffort) -> Self {
+        match v {
+            ReasoningEffort::Minimal | ReasoningEffort::None => {
+                code_protocol::config_types::ReasoningEffort::Minimal
+            }
+            ReasoningEffort::Low => code_protocol::config_types::ReasoningEffort::Low,
+            ReasoningEffort::Medium => code_protocol::config_types::ReasoningEffort::Medium,
+            ReasoningEffort::High => code_protocol::config_types::ReasoningEffort::High,
+            ReasoningEffort::XHigh => code_protocol::config_types::ReasoningEffort::XHigh,
         }
     }
 }
@@ -1337,7 +1868,11 @@ mod tests {
             cfg.transport,
             McpServerTransportConfig::StreamableHttp {
                 url: "https://example.com/mcp".to_string(),
-                bearer_token: None
+                bearer_token: None,
+                bearer_token_env_var: None,
+                http_headers: None,
+                env_http_headers: None,
+                oauth_resource: None
             }
         );
     }
@@ -1356,7 +1891,83 @@ mod tests {
             cfg.transport,
             McpServerTransportConfig::StreamableHttp {
                 url: "https://example.com/mcp".to_string(),
-                bearer_token: Some("secret".to_string())
+                bearer_token: Some("secret".to_string()),
+                bearer_token_env_var: None,
+                http_headers: None,
+                env_http_headers: None,
+                oauth_resource: None
+            }
+        );
+    }
+
+    #[test]
+    fn deserialize_streamable_http_server_config_with_header_sources() {
+        let cfg: McpServerConfig = toml::from_str(
+            r#"
+            url = "https://example.com/mcp"
+            bearer_token_env_var = "MCP_TOKEN"
+            http_headers = { "X-Foo" = "bar" }
+            env_http_headers = { "X-Token" = "MCP_HEADER" }
+        "#,
+        )
+        .expect("should deserialize http config with header sources");
+
+        assert_eq!(
+            cfg.transport,
+            McpServerTransportConfig::StreamableHttp {
+                url: "https://example.com/mcp".to_string(),
+                bearer_token: None,
+                bearer_token_env_var: Some("MCP_TOKEN".to_string()),
+                http_headers: Some(HashMap::from([("X-Foo".to_string(), "bar".to_string())])),
+                env_http_headers: Some(HashMap::from([(
+                    "X-Token".to_string(),
+                    "MCP_HEADER".to_string(),
+                )])),
+                oauth_resource: None,
+            }
+        );
+    }
+
+    #[test]
+    fn deserialize_mcp_tool_filters() {
+        let cfg: McpServerConfig = toml::from_str(
+            r#"
+            url = "https://example.com/mcp"
+            enabled_tools = ["search_code"]
+            disabled_tools = ["delete_repo"]
+        "#,
+        )
+        .expect("should deserialize MCP tool filters");
+
+        assert_eq!(
+            cfg.enabled_tools,
+            Some(vec!["search_code".to_string()])
+        );
+        assert_eq!(
+            cfg.disabled_tools,
+            Some(vec!["delete_repo".to_string()])
+        );
+    }
+
+    #[test]
+    fn deserialize_streamable_http_server_config_with_oauth_resource() {
+        let cfg: McpServerConfig = toml::from_str(
+            r#"
+            url = "https://example.com/mcp"
+            oauth_resource = "https://api.example.com"
+        "#,
+        )
+        .expect("should deserialize http config with oauth_resource");
+
+        assert_eq!(
+            cfg.transport,
+            McpServerTransportConfig::StreamableHttp {
+                url: "https://example.com/mcp".to_string(),
+                bearer_token: None,
+                bearer_token_env_var: None,
+                http_headers: None,
+                env_http_headers: None,
+                oauth_resource: Some("https://api.example.com".to_string())
             }
         );
     }
@@ -1392,5 +2003,96 @@ mod tests {
         "#,
         )
         .expect_err("should reject bearer token for stdio transport");
+    }
+
+    #[test]
+    fn deserialize_rejects_http_headers_for_stdio_transport() {
+        toml::from_str::<McpServerConfig>(
+            r#"
+            command = "echo"
+            http_headers = { "X-Foo" = "bar" }
+        "#,
+        )
+        .expect_err("should reject http_headers for stdio transport");
+    }
+
+    #[test]
+    fn deserialize_rejects_oauth_resource_for_stdio_transport() {
+        let err = toml::from_str::<McpServerConfig>(
+            r#"
+            command = "echo"
+            oauth_resource = "https://api.example.com"
+        "#,
+        )
+        .expect_err("should reject oauth_resource for stdio transport");
+
+        assert!(
+            err.to_string()
+                .contains("oauth_resource is not supported for stdio"),
+            "unexpected error: {err}"
+        );
+    }
+
+    #[test]
+    fn deserialize_memories_upstream_aliases() {
+        let cfg: MemoriesToml = toml::from_str(
+            r#"
+            no_memories_if_mcp_or_web_search = true
+            max_raw_memories_for_consolidation = 7
+            extract_model = "gpt-5-mini"
+            consolidation_model = "gpt-5"
+        "#,
+        )
+        .expect("should deserialize memories aliases");
+
+        assert_eq!(cfg.no_memories_if_mcp_or_web_search, Some(true));
+        assert_eq!(cfg.max_raw_memories_for_global, Some(7));
+        assert_eq!(cfg.phase_1_model.as_deref(), Some("gpt-5-mini"));
+        assert_eq!(cfg.phase_2_model.as_deref(), Some("gpt-5"));
+    }
+
+    #[test]
+    fn memories_config_defaults_and_aliases_flow_through() {
+        let toml = MemoriesToml {
+            no_memories_if_mcp_or_web_search: Some(true),
+            generate_memories: None,
+            use_memories: Some(false),
+            max_raw_memories_for_global: Some(9),
+            max_unused_days: None,
+            max_rollout_age_days: None,
+            max_rollouts_per_startup: None,
+            min_rollout_idle_hours: None,
+            phase_1_model: Some("phase1".to_string()),
+            phase_2_model: Some("phase2".to_string()),
+        };
+
+        let cfg: MemoriesConfig = toml.into();
+        assert_eq!(cfg.no_memories_if_mcp_or_web_search, true);
+        assert_eq!(cfg.generate_memories, true);
+        assert_eq!(cfg.use_memories, false);
+        assert_eq!(cfg.max_raw_memories_for_global, 9);
+        assert_eq!(cfg.phase_1_model.as_deref(), Some("phase1"));
+        assert_eq!(cfg.phase_2_model.as_deref(), Some("phase2"));
+    }
+
+    #[test]
+    fn project_hook_event_deserializes_upstream_aliases() {
+        let user_prompt: ProjectHookConfig = toml::from_str(
+            r#"
+            event = "UserPromptSubmit"
+            run = ["echo", "hello"]
+        "#,
+        )
+        .expect("should deserialize user prompt submit alias");
+        let stop: ProjectHookConfig = toml::from_str(
+            r#"
+            event = "Stop"
+            run = ["echo", "hello"]
+        "#,
+        )
+        .expect("should deserialize stop alias");
+
+        assert_eq!(user_prompt.event, ProjectHookEvent::UserPromptSubmit);
+        assert_eq!(stop.event, ProjectHookEvent::Stop);
     }
 }

@@ -149,26 +149,56 @@ impl CommandPopup {
             }
         }
         for (idx, p) in self.prompts.iter().enumerate() {
-            let display = format!("{PROMPTS_CMD_PREFIX}:{}", p.name);
-            if let Some((indices, score)) = fuzzy_match(&display, filter) {
+            let prefixed = format!("{PROMPTS_CMD_PREFIX}:{}", p.name);
+            let mut best: Option<(Vec<usize>, i32)> = None;
+            if let Some((indices, score)) = fuzzy_match(&prefixed, filter) {
+                best = Some((indices, score));
+            }
+            if let Some((indices, score)) = fuzzy_match(&p.name, filter) {
+                match best {
+                    Some((_, s)) if score < s => best = Some((indices, score)),
+                    Some((_, s)) if score == s => best = Some((indices, score)),
+                    None => best = Some((indices, score)),
+                    _ => {}
+                }
+            }
+            if let Some((indices, score)) = best {
                 out.push((CommandItem::UserPrompt(idx), Some(indices), score));
             }
         }
-        // When filtering, sort by ascending score and then by name for stability.
+        // When filtering, sort by ascending score, then prefer built-ins over
+        // subagents over prompts to keep core commands easy to reach on exact
+        // matches (e.g., `/prompts` should not auto-select a custom prompt),
+        // and finally fall back to name for stability.
         out.sort_by(|a, b| {
-            a.2.cmp(&b.2).then_with(|| {
-                let an = match a.0 {
-                    CommandItem::Builtin(c) => c.command(),
-                    CommandItem::UserPrompt(i) => &self.prompts[i].name,
-                    CommandItem::Subagent(i) => &self.subagents[i],
-                };
-                let bn = match b.0 {
-                    CommandItem::Builtin(c) => c.command(),
-                    CommandItem::UserPrompt(i) => &self.prompts[i].name,
-                    CommandItem::Subagent(i) => &self.subagents[i],
-                };
-                an.cmp(bn)
-            })
+            use std::cmp::Ordering;
+
+            let score_cmp = a.2.cmp(&b.2);
+            if score_cmp != Ordering::Equal {
+                return score_cmp;
+            }
+
+            let rank = |item: &CommandItem| match item {
+                CommandItem::Builtin(_) => 0,
+                CommandItem::Subagent(_) => 1,
+                CommandItem::UserPrompt(_) => 2,
+            };
+            let rank_cmp = rank(&a.0).cmp(&rank(&b.0));
+            if rank_cmp != Ordering::Equal {
+                return rank_cmp;
+            }
+
+            let an = match a.0 {
+                CommandItem::Builtin(c) => c.command(),
+                CommandItem::UserPrompt(i) => &self.prompts[i].name,
+                CommandItem::Subagent(i) => &self.subagents[i],
+            };
+            let bn = match b.0 {
+                CommandItem::Builtin(c) => c.command(),
+                CommandItem::UserPrompt(i) => &self.prompts[i].name,
+                CommandItem::Subagent(i) => &self.subagents[i],
+            };
+            an.cmp(bn)
         });
         out
     }
@@ -225,10 +255,21 @@ impl WidgetRef for CommandPopup {
                             format!("/{}", cmd.command()),
                             Some(cmd.description().to_string()),
                         ),
-                        CommandItem::UserPrompt(i) => (
-                            format!("/{}", self.prompts[i].name),
-                            None,
-                        ),
+                        CommandItem::UserPrompt(i) => {
+                            let prompt = &self.prompts[i];
+                            let preview = prompt
+                                .content
+                                .lines()
+                                .next()
+                                .unwrap_or("")
+                                .trim();
+                            let desc = if preview.is_empty() {
+                                None
+                            } else {
+                                Some(format!("[custom] {preview}"))
+                            };
+                            (format!("/{}", prompt.name), desc)
+                        }
                         CommandItem::Subagent(i) => (
                             format!("/{}", self.subagents[i]),
                             Some("custom subagent".to_string()),
@@ -254,5 +295,34 @@ impl WidgetRef for CommandPopup {
             MAX_POPUP_ROWS,
             false,
         );
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::path::PathBuf;
+
+    fn prompt(name: &str, content: &str) -> CustomPrompt {
+        CustomPrompt {
+            name: name.to_string(),
+            path: PathBuf::new(),
+            content: content.to_string(),
+            description: None,
+            argument_hint: None,
+        }
+    }
+
+    #[test]
+    fn prefers_builtin_over_prompt_with_identical_score() {
+        let mut popup = CommandPopup::new_with_filter(false);
+        popup.set_prompts(vec![prompt("issues", "do something")]);
+
+        // Filter to the prompts command; both the built-in "/prompts" and the
+        // custom prompt (via "prompts:issues") are perfect prefix matches.
+        popup.on_composer_text_change("/prompts".to_string());
+
+        let first = popup.filtered_items().first().copied();
+        assert!(matches!(first, Some(CommandItem::Builtin(SlashCommand::Prompts))));
     }
 }

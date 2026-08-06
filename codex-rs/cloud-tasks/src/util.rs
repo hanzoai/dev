@@ -1,9 +1,16 @@
-use base64::Engine as _;
+use chrono::DateTime;
+use chrono::Local;
 use chrono::Utc;
-use reqwest::header::HeaderMap;
+use http::header::HeaderMap;
+
+use codex_core::config::Config;
+use codex_http_client::HttpClientFactory;
+use codex_http_client::OutboundProxyPolicy;
+use codex_login::AuthManager;
+use std::sync::Arc;
 
 pub fn set_user_agent_suffix(suffix: &str) {
-    if let Ok(mut guard) = codex_core::default_client::USER_AGENT_SUFFIX.lock() {
+    if let Ok(mut guard) = codex_login::default_client::USER_AGENT_SUFFIX.lock() {
         guard.replace(suffix.to_string());
     }
 }
@@ -37,57 +44,85 @@ pub fn normalize_base_url(input: &str) -> String {
     base_url
 }
 
-/// Extract the ChatGPT account id from a JWT token, when present.
-pub fn extract_chatgpt_account_id(token: &str) -> Option<String> {
-    let mut parts = token.split('.');
-    let (_h, payload_b64, _s) = match (parts.next(), parts.next(), parts.next()) {
-        (Some(h), Some(p), Some(s)) if !h.is_empty() && !p.is_empty() && !s.is_empty() => (h, p, s),
-        _ => return None,
+pub async fn load_auth_manager(
+    chatgpt_base_url: Option<String>,
+) -> (Option<Arc<AuthManager>>, HttpClientFactory) {
+    // TODO: pass in cli overrides once cloud tasks properly support them.
+    let config = match Config::load_with_cli_overrides(Vec::new()).await {
+        Ok(config) => config,
+        Err(error) => {
+            append_error_log(format!(
+                "failed to load auth config; using transport-default proxy handling: {error}"
+            ));
+            let http_client_factory = HttpClientFactory::new(OutboundProxyPolicy::ReqwestDefault);
+            return (None, http_client_factory);
+        }
     };
-    let payload_bytes = base64::engine::general_purpose::URL_SAFE_NO_PAD
-        .decode(payload_b64)
-        .ok()?;
-    let v: serde_json::Value = serde_json::from_slice(&payload_bytes).ok()?;
-    v.get("https://api.openai.com/auth")
-        .and_then(|auth| auth.get("chatgpt_account_id"))
-        .and_then(|id| id.as_str())
-        .map(str::to_string)
+    let http_client_factory = config.http_client_factory();
+    let mut auth_config = config.auth_config();
+    auth_config.chatgpt_base_url = chatgpt_base_url.or(Some(config.chatgpt_base_url.clone()));
+    let auth_manager =
+        AuthManager::shared_from_auth_config(auth_config, /*enable_codex_api_key_env*/ false).await;
+    (Some(auth_manager), http_client_factory)
 }
 
 /// Build headers for ChatGPT-backed requests: `User-Agent`, optional `Authorization`,
 /// and optional `ChatGPT-Account-Id`.
 pub async fn build_chatgpt_headers() -> HeaderMap {
-    use reqwest::header::AUTHORIZATION;
-    use reqwest::header::HeaderName;
-    use reqwest::header::HeaderValue;
-    use reqwest::header::USER_AGENT;
+    use http::header::HeaderValue;
+    use http::header::USER_AGENT;
 
     set_user_agent_suffix("codex_cloud_tasks_tui");
-    let ua = codex_core::default_client::get_codex_user_agent();
+    let ua = codex_login::default_client::get_codex_user_agent();
     let mut headers = HeaderMap::new();
     headers.insert(
         USER_AGENT,
         HeaderValue::from_str(&ua).unwrap_or(HeaderValue::from_static("codex-cli")),
     );
-    if let Ok(home) = codex_core::config::find_codex_home() {
-        let am = codex_login::AuthManager::new(home, false);
-        if let Some(auth) = am.auth()
-            && let Ok(tok) = auth.get_token().await
-            && !tok.is_empty()
-        {
-            let v = format!("Bearer {tok}");
-            if let Ok(hv) = HeaderValue::from_str(&v) {
-                headers.insert(AUTHORIZATION, hv);
-            }
-            if let Some(acc) = auth
-                .get_account_id()
-                .or_else(|| extract_chatgpt_account_id(&tok))
-                && let Ok(name) = HeaderName::from_bytes(b"ChatGPT-Account-Id")
-                && let Ok(hv) = HeaderValue::from_str(&acc)
-            {
-                headers.insert(name, hv);
-            }
-        }
+    if let Some(am) = load_auth_manager(/*chatgpt_base_url*/ None).await.0
+        && let Some(auth) = am.auth().await
+        && auth.uses_codex_backend()
+    {
+        headers.extend(codex_model_provider::auth_provider_from_auth(&auth).to_auth_headers());
     }
     headers
+}
+
+/// Construct a browser-friendly task URL for the given backend base URL.
+pub fn task_url(base_url: &str, task_id: &str) -> String {
+    let normalized = normalize_base_url(base_url);
+    if let Some(root) = normalized.strip_suffix("/backend-api") {
+        return format!("{root}/codex/tasks/{task_id}");
+    }
+    if let Some(root) = normalized.strip_suffix("/api/codex") {
+        return format!("{root}/codex/tasks/{task_id}");
+    }
+    if normalized.ends_with("/codex") {
+        return format!("{normalized}/tasks/{task_id}");
+    }
+    format!("{normalized}/codex/tasks/{task_id}")
+}
+
+pub fn format_relative_time(reference: DateTime<Utc>, ts: DateTime<Utc>) -> String {
+    let mut secs = (reference - ts).num_seconds();
+    if secs < 0 {
+        secs = 0;
+    }
+    if secs < 60 {
+        return format!("{secs}s ago");
+    }
+    let mins = secs / 60;
+    if mins < 60 {
+        return format!("{mins}m ago");
+    }
+    let hours = mins / 60;
+    if hours < 24 {
+        return format!("{hours}h ago");
+    }
+    let local = ts.with_timezone(&Local);
+    local.format("%b %e %H:%M").to_string()
+}
+
+pub fn format_relative_time_now(ts: DateTime<Utc>) -> String {
+    format_relative_time(Utc::now(), ts)
 }

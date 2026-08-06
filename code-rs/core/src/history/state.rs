@@ -2,7 +2,7 @@ use crate::plan_tool::StepStatus;
 use crate::parse_command::ParsedCommand;
 use crate::protocol::{FileChange, RateLimitSnapshotEvent, TokenUsage};
 use serde::{Deserialize, Serialize};
-use std::collections::{HashMap, HashSet};
+use std::collections::{BTreeMap, HashMap, HashSet};
 use std::path::PathBuf;
 use std::time::{Duration, SystemTime};
 
@@ -27,6 +27,7 @@ pub enum HistoryRecord {
     Patch(PatchRecord),
     BackgroundEvent(BackgroundEventRecord),
     Notice(NoticeRecord),
+    Context(ContextRecord),
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -111,6 +112,7 @@ pub enum HistoryDomainRecord {
     Diff(DiffRecord),
     Explore(ExploreRecord),
     Notice(NoticeRecord),
+    Context(ContextRecord),
 }
 
 impl From<HistoryRecord> for HistoryDomainRecord {
@@ -135,6 +137,7 @@ impl From<HistoryRecord> for HistoryDomainRecord {
             HistoryRecord::Patch(state) => HistoryDomainRecord::Patch(state),
             HistoryRecord::BackgroundEvent(state) => HistoryDomainRecord::BackgroundEvent(state),
             HistoryRecord::Notice(state) => HistoryDomainRecord::Notice(state),
+            HistoryRecord::Context(state) => HistoryDomainRecord::Context(state),
         }
     }
 }
@@ -247,6 +250,12 @@ impl From<NoticeRecord> for HistoryDomainRecord {
     }
 }
 
+impl From<ContextRecord> for HistoryDomainRecord {
+    fn from(state: ContextRecord) -> Self {
+        HistoryDomainRecord::Context(state)
+    }
+}
+
 impl HistoryDomainRecord {
     fn into_history_record(self) -> HistoryRecord {
         match self {
@@ -325,6 +334,10 @@ impl HistoryDomainRecord {
             HistoryDomainRecord::Notice(mut state) => {
                 state.id = HistoryId::ZERO;
                 HistoryRecord::Notice(state)
+            }
+            HistoryDomainRecord::Context(mut state) => {
+                state.id = HistoryId::ZERO;
+                HistoryRecord::Context(state)
             }
         }
     }
@@ -669,6 +682,148 @@ fn stream_len(chunks: &[ExecStreamChunk]) -> usize {
         .unwrap_or(0)
 }
 
+fn retained_stream_len(chunks: &[ExecStreamChunk]) -> usize {
+    if chunks.is_empty() {
+        return 0;
+    }
+    let first_offset = chunks.first().map(|chunk| chunk.offset).unwrap_or(0);
+    stream_len(chunks).saturating_sub(first_offset)
+}
+
+fn retained_exec_record_bytes(record: &ExecRecord) -> usize {
+    retained_stream_len(&record.stdout_chunks).saturating_add(retained_stream_len(&record.stderr_chunks))
+}
+
+fn truncated_prefix_len(chunks: &[ExecStreamChunk]) -> usize {
+    chunks.first().map(|chunk| chunk.offset).unwrap_or(0)
+}
+
+fn truncate_exec_stream(chunks: &mut Vec<ExecStreamChunk>, truncate_at: usize) {
+    while let Some(last) = chunks.last_mut() {
+        let last_start = last.offset;
+        let last_end = last_start.saturating_add(last.content.len());
+        if truncate_at >= last_end {
+            break;
+        }
+        if truncate_at <= last_start {
+            chunks.pop();
+            continue;
+        }
+        let keep = truncate_at.saturating_sub(last_start);
+        last.content.truncate(keep);
+        break;
+    }
+}
+
+fn append_exec_chunk(chunks: &mut Vec<ExecStreamChunk>, chunk: ExecStreamChunk) {
+    truncate_exec_stream(chunks, chunk.offset);
+    if let Some(last) = chunks.last_mut() {
+        let last_end = last.offset.saturating_add(last.content.len());
+        if chunk.offset == last_end {
+            last.content.push_str(&chunk.content);
+            prune_exec_stream(chunks, MAX_EXEC_STREAM_RETAINED_BYTES);
+            return;
+        }
+    }
+    chunks.push(chunk);
+    prune_exec_stream(chunks, MAX_EXEC_STREAM_RETAINED_BYTES);
+}
+
+fn prune_exec_stream(chunks: &mut Vec<ExecStreamChunk>, max_bytes: usize) {
+    if chunks.is_empty() {
+        return;
+    }
+
+    let retained = retained_stream_len(chunks);
+    if retained <= max_bytes {
+        return;
+    }
+
+    let mut bytes_to_drop = retained.saturating_sub(max_bytes);
+    let mut drop_chunks = 0usize;
+
+    while drop_chunks < chunks.len() {
+        let chunk_len = chunks[drop_chunks].content.len();
+        if bytes_to_drop >= chunk_len {
+            bytes_to_drop = bytes_to_drop.saturating_sub(chunk_len);
+            drop_chunks += 1;
+        } else {
+            break;
+        }
+    }
+
+    if drop_chunks > 0 {
+        chunks.drain(..drop_chunks);
+    }
+
+    if bytes_to_drop > 0 {
+        if let Some(first) = chunks.first_mut() {
+            let drain = bytes_to_drop.min(first.content.len());
+            first.offset = first.offset.saturating_add(drain);
+            first.content.drain(..drain);
+        }
+    }
+}
+
+fn append_assistant_delta(deltas: &mut Vec<AssistantStreamDelta>, delta: AssistantStreamDelta) -> usize {
+    if let Some(last) = deltas.last_mut() {
+        if delta.sequence.is_some() && delta.sequence == last.sequence {
+            last.delta.push_str(&delta.delta);
+            return prune_assistant_stream(deltas, MAX_ASSISTANT_STREAM_RETAINED_BYTES);
+        }
+        if delta.sequence.is_none() && last.sequence.is_none() {
+            last.delta.push_str(&delta.delta);
+            return prune_assistant_stream(deltas, MAX_ASSISTANT_STREAM_RETAINED_BYTES);
+        }
+    }
+    deltas.push(delta);
+    prune_assistant_stream(deltas, MAX_ASSISTANT_STREAM_RETAINED_BYTES)
+}
+
+fn prune_assistant_stream(deltas: &mut Vec<AssistantStreamDelta>, max_bytes: usize) -> usize {
+    if max_bytes == 0 {
+        let dropped = deltas.iter().map(|d| d.delta.len()).sum();
+        deltas.clear();
+        return dropped;
+    }
+
+    let mut total: usize = deltas.iter().map(|d| d.delta.len()).sum();
+    if total <= max_bytes {
+        return 0;
+    }
+
+    let mut truncated = 0usize;
+    while total > max_bytes && !deltas.is_empty() {
+        if let Some(first) = deltas.first_mut() {
+            let first_len = first.delta.len();
+            if total.saturating_sub(first_len) >= max_bytes {
+                let removed = deltas.remove(0);
+                truncated = truncated.saturating_add(removed.delta.len());
+                total = total.saturating_sub(first_len);
+                continue;
+            }
+
+            let mut drain = total - max_bytes;
+            drain = drain.min(first_len);
+            while drain < first_len && !first.delta.is_char_boundary(drain) {
+                drain += 1;
+            }
+
+            if drain >= first_len {
+                let removed = deltas.remove(0);
+                truncated = truncated.saturating_add(removed.delta.len());
+                total = total.saturating_sub(first_len);
+                continue;
+            }
+
+            first.delta.drain(..drain);
+            truncated = truncated.saturating_add(drain);
+            total = total.saturating_sub(drain);
+        }
+    }
+    truncated
+}
+
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct AssistantStreamDelta {
     pub delta: String,
@@ -686,6 +841,8 @@ pub struct AssistantStreamState {
     pub metadata: Option<MessageMetadata>,
     pub in_progress: bool,
     pub last_updated_at: SystemTime,
+    #[serde(default)]
+    pub truncated_prefix_bytes: usize,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -696,6 +853,11 @@ pub struct AssistantMessageState {
     pub citations: Vec<String>,
     pub metadata: Option<MessageMetadata>,
     pub token_usage: Option<TokenUsage>,
+    /// True when this assistant output was emitted before the final Answer
+    /// within the same turn (e.g., mid‑turn progress update). Used by the TUI
+    /// to suppress gutter/bold styling.
+    #[serde(default)]
+    pub mid_turn: bool,
     pub created_at: SystemTime,
 }
 
@@ -766,6 +928,10 @@ pub enum ExploreSummary {
         annotation: Option<String>,
         range: Option<(u32, u32)>,
     },
+    Count {
+        target: Option<String>,
+        annotation: Option<String>,
+    },
     Command {
         display: String,
         annotation: Option<String>,
@@ -834,11 +1000,363 @@ pub struct NoticeRecord {
     pub body: Vec<MessageLine>,
 }
 
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ContextDeltaField {
+    Cwd,
+    GitBranch,
+    ReasoningEffort,
+    BrowserSnapshot,
+}
+
+impl Default for ContextDeltaField {
+    fn default() -> Self {
+        ContextDeltaField::Cwd
+    }
+}
+
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ContextDeltaRecord {
+    pub field: ContextDeltaField,
+    pub previous: Option<String>,
+    pub current: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub sequence: Option<u64>,
+}
+
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ContextBrowserSnapshotRecord {
+    #[serde(default)]
+    pub url: Option<String>,
+    #[serde(default)]
+    pub title: Option<String>,
+    #[serde(default)]
+    pub captured_at: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub width: Option<u32>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub height: Option<u32>,
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub metadata: BTreeMap<String, String>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct ContextRecord {
+    pub id: HistoryId,
+    pub cwd: Option<String>,
+    pub git_branch: Option<String>,
+    pub reasoning_effort: Option<String>,
+    pub browser_session_active: bool,
+    pub deltas: Vec<ContextDeltaRecord>,
+    pub browser_snapshot: Option<ContextBrowserSnapshotRecord>,
+    pub expanded: bool,
+}
+
+impl Default for ContextRecord {
+    fn default() -> Self {
+        Self {
+            id: HistoryId::ZERO,
+            cwd: None,
+            git_branch: None,
+            reasoning_effort: None,
+            browser_session_active: false,
+            deltas: Vec::new(),
+            browser_snapshot: None,
+            expanded: false,
+        }
+    }
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub struct HistoryId(pub u64);
 
 impl HistoryId {
     pub const ZERO: HistoryId = HistoryId(0);
+}
+
+const EXEC_STREAM_CHUNK_THRESHOLD: usize = 2048;
+const EXEC_STREAM_CHUNK_STEP: usize = 256;
+const EXEC_STREAM_BYTE_THRESHOLD: usize = 8 * 1024 * 1024;
+const EXEC_STREAM_BYTE_STEP: usize = 2 * 1024 * 1024;
+
+/// Maximum per-stream payload we retain in memory for exec stdout/stderr.
+/// Older bytes are truncated from the front once this threshold is exceeded.
+pub const MAX_EXEC_STREAM_RETAINED_BYTES: usize = 32 * 1024 * 1024; // 32 MiB
+
+/// Global cap across *all* exec streams we keep in memory. When exceeded, we
+/// progressively trim the oldest exec records down to a small tail to keep RSS
+/// bounded during long Auto Drive runs with many noisy commands.
+pub const GLOBAL_EXEC_STREAM_RETAINED_BYTES: usize = 256 * 1024 * 1024; // 256 MiB total
+
+/// Target tail to keep per stream when pruning old exec records to honor the
+/// global cap. Chosen to preserve recent context without retaining full logs.
+pub const EXEC_STREAM_PRUNE_TARGET_BYTES: usize = 512 * 1024; // 512 KiB per stream
+
+/// Maximum bytes retained in memory for assistant streaming output.
+pub const MAX_ASSISTANT_STREAM_RETAINED_BYTES: usize = 6 * 1024 * 1024; // 6 MiB
+
+const ASSISTANT_STREAM_CHUNK_THRESHOLD: usize = 2048;
+const ASSISTANT_STREAM_CHUNK_STEP: usize = 256;
+const ASSISTANT_STREAM_BYTE_THRESHOLD: usize = 6 * 1024 * 1024;
+const ASSISTANT_STREAM_BYTE_STEP: usize = 1 * 1024 * 1024;
+
+#[derive(Default, Clone, Debug, PartialEq, Eq)]
+struct StreamLogState {
+    last_chunk_log: usize,
+    last_byte_log: usize,
+    total_chunks: usize,
+    total_bytes: usize,
+    last_truncated_log: usize,
+    truncated_bytes: usize,
+}
+
+#[derive(Default, Clone, Debug, PartialEq, Eq)]
+struct HistoryUsageTracker {
+    exec: HashMap<HistoryId, StreamLogState>,
+    assistant: HashMap<HistoryId, StreamLogState>,
+}
+
+#[derive(Default, Clone, Debug, PartialEq, Eq)]
+struct UsageTrackerSnapshot {
+    exec: Option<StreamLogState>,
+    assistant: Option<StreamLogState>,
+}
+
+impl HistoryUsageTracker {
+    fn reset(&mut self) {
+        self.exec.clear();
+        self.assistant.clear();
+    }
+
+    fn on_insert(&mut self, record: &HistoryRecord) {
+        match record {
+            HistoryRecord::Exec(state) => {
+                if state.id != HistoryId::ZERO {
+                    let entry = self.exec.entry(state.id).or_default();
+                    let chunk_count = state.stdout_chunks.len().saturating_add(state.stderr_chunks.len());
+                    let byte_count = stream_len(&state.stdout_chunks)
+                        .saturating_add(stream_len(&state.stderr_chunks));
+                    entry.total_chunks = entry.total_chunks.max(chunk_count);
+                    entry.total_bytes = entry.total_bytes.max(byte_count);
+                }
+            }
+            HistoryRecord::AssistantStream(state) => {
+                if state.id != HistoryId::ZERO {
+                    let entry = self.assistant.entry(state.id).or_default();
+                    let chunk_count = state.deltas.len();
+                    let byte_count: usize = state.deltas.iter().map(|delta| delta.delta.len()).sum();
+                    entry.total_chunks = entry.total_chunks.max(chunk_count);
+                    entry.total_bytes = entry.total_bytes.max(byte_count);
+                }
+            }
+            _ => {}
+        }
+    }
+
+    fn on_remove(&mut self, id: HistoryId) {
+        self.exec.remove(&id);
+        self.assistant.remove(&id);
+    }
+
+    fn add_exec_delta(&mut self, id: HistoryId, chunk_count: usize, byte_count: usize) {
+        if id == HistoryId::ZERO {
+            return;
+        }
+        let entry = self.exec.entry(id).or_default();
+        entry.total_chunks = entry.total_chunks.saturating_add(chunk_count);
+        entry.total_bytes = entry.total_bytes.saturating_add(byte_count);
+    }
+
+    fn add_assistant_delta(&mut self, id: HistoryId, byte_count: usize) {
+        if id == HistoryId::ZERO {
+            return;
+        }
+        let entry = self.assistant.entry(id).or_default();
+        entry.total_chunks = entry.total_chunks.saturating_add(1);
+        entry.total_bytes = entry.total_bytes.saturating_add(byte_count);
+    }
+
+    fn take_snapshot(&mut self, record: &HistoryRecord) -> UsageTrackerSnapshot {
+        match record {
+            HistoryRecord::Exec(state) => UsageTrackerSnapshot {
+                exec: self.exec.remove(&state.id),
+                assistant: None,
+            },
+            HistoryRecord::AssistantStream(state) => UsageTrackerSnapshot {
+                exec: None,
+                assistant: self.assistant.remove(&state.id),
+            },
+            _ => UsageTrackerSnapshot::default(),
+        }
+    }
+
+    fn restore_snapshot(&mut self, record: &HistoryRecord, snapshot: UsageTrackerSnapshot) {
+        if let Some(state) = snapshot.exec {
+            if let HistoryRecord::Exec(exec_record) = record {
+                if exec_record.id != HistoryId::ZERO {
+                    self.exec.insert(exec_record.id, state);
+                }
+            }
+        }
+        if let Some(state) = snapshot.assistant {
+            if let HistoryRecord::AssistantStream(stream_record) = record {
+                if stream_record.id != HistoryId::ZERO {
+                    self.assistant.insert(stream_record.id, state);
+                }
+            }
+        }
+    }
+
+    fn observe_exec(&mut self, record: &ExecRecord, label: &'static str) {
+        if record.id == HistoryId::ZERO {
+            return;
+        }
+        let stdout_chunks = record.stdout_chunks.len();
+        let stderr_chunks = record.stderr_chunks.len();
+        let observed_chunks = stdout_chunks.saturating_add(stderr_chunks);
+        let stdout_bytes = stream_len(&record.stdout_chunks);
+        let stderr_bytes = stream_len(&record.stderr_chunks);
+        let stdout_retained = retained_stream_len(&record.stdout_chunks);
+        let stderr_retained = retained_stream_len(&record.stderr_chunks);
+        let stdout_truncated = truncated_prefix_len(&record.stdout_chunks);
+        let stderr_truncated = truncated_prefix_len(&record.stderr_chunks);
+        let observed_bytes = stdout_bytes.saturating_add(stderr_bytes);
+        let state = self.exec.entry(record.id).or_default();
+        state.total_chunks = state.total_chunks.max(observed_chunks);
+        state.total_bytes = state.total_bytes.max(observed_bytes);
+        state.truncated_bytes = state
+            .truncated_bytes
+            .max(stdout_truncated.saturating_add(stderr_truncated));
+        let total_chunks = state.total_chunks;
+        let total_bytes = state.total_bytes;
+
+        let mut should_log = false;
+        if total_chunks >= EXEC_STREAM_CHUNK_THRESHOLD
+            && total_chunks >= state.last_chunk_log.saturating_add(EXEC_STREAM_CHUNK_STEP)
+        {
+            state.last_chunk_log = total_chunks;
+            should_log = true;
+        }
+        if total_bytes >= EXEC_STREAM_BYTE_THRESHOLD
+            && total_bytes >= state.last_byte_log.saturating_add(EXEC_STREAM_BYTE_STEP)
+        {
+            state.last_byte_log = total_bytes;
+            should_log = true;
+        }
+
+        let truncated_bytes = stdout_truncated.saturating_add(stderr_truncated);
+        if truncated_bytes > state.last_truncated_log {
+            state.last_truncated_log = truncated_bytes;
+            should_log = true;
+        }
+
+        if should_log {
+            let preview = command_preview(&record.command);
+            tracing::warn!(
+                target = "codex::history::memory",
+                %label,
+                history_id = record.id.0,
+                status = ?record.status,
+                stdout_chunks,
+                stderr_chunks,
+                stdout_bytes,
+                stderr_bytes,
+                stdout_retained,
+                stderr_retained,
+                stdout_truncated,
+                stderr_truncated,
+                total_chunks,
+                total_bytes,
+                command = %preview,
+                "exec stream buffers accumulating many chunks or bytes"
+            );
+        }
+    }
+
+    fn observe_assistant(&mut self, state: &AssistantStreamState, label: &'static str) {
+        if state.id == HistoryId::ZERO {
+            return;
+        }
+        let chunk_count = state.deltas.len().max(self
+            .assistant
+            .get(&state.id)
+            .map(|entry| entry.total_chunks)
+            .unwrap_or(0));
+        let byte_count: usize = state.deltas.iter().map(|delta| delta.delta.len()).sum();
+        let tracker = self.assistant.entry(state.id).or_default();
+        tracker.total_chunks = tracker.total_chunks.max(chunk_count);
+        tracker.total_bytes = tracker.total_bytes.max(byte_count);
+
+        let mut should_log = false;
+        if chunk_count >= ASSISTANT_STREAM_CHUNK_THRESHOLD
+            && chunk_count >= tracker
+                .last_chunk_log
+                .saturating_add(ASSISTANT_STREAM_CHUNK_STEP)
+        {
+            tracker.last_chunk_log = chunk_count;
+            should_log = true;
+        }
+        if byte_count >= ASSISTANT_STREAM_BYTE_THRESHOLD
+            && byte_count
+                >= tracker
+                    .last_byte_log
+                    .saturating_add(ASSISTANT_STREAM_BYTE_STEP)
+        {
+            tracker.last_byte_log = byte_count;
+            should_log = true;
+        }
+
+        if should_log {
+            let preview = assistant_preview(state);
+            tracing::warn!(
+                target = "codex::history::memory",
+                %label,
+                history_id = state.id.0,
+                delta_chunks = chunk_count,
+                delta_bytes = byte_count,
+                preview = %preview,
+                "assistant stream retaining many deltas"
+            );
+        }
+    }
+}
+
+fn command_preview(command: &[String]) -> String {
+    if command.is_empty() {
+        return "<empty command>".to_string();
+    }
+    let joined = command.join(" ");
+    truncate_display(&joined)
+}
+
+fn assistant_preview(state: &AssistantStreamState) -> String {
+    if !state.preview_markdown.trim().is_empty() {
+        return truncate_display(state.preview_markdown.trim());
+    }
+    if let Some(last) = state.deltas.last() {
+        if !last.delta.trim().is_empty() {
+            return truncate_display(last.delta.trim());
+        }
+    }
+    "<empty preview>".to_string()
+}
+
+fn truncate_display(input: &str) -> String {
+    const MAX_CHARS: usize = 80;
+    let mut chars = input.chars();
+    let mut preview = String::new();
+    for _ in 0..MAX_CHARS {
+        if let Some(ch) = chars.next() {
+            preview.push(ch);
+        } else {
+            break;
+        }
+    }
+    if chars.next().is_some() {
+        preview.push_str("...");
+    }
+    preview
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -876,6 +1394,12 @@ pub struct HistoryState {
     pub stream_lookup: HashMap<String, HistoryId>,
     #[serde(skip)]
     id_index: HashMap<HistoryId, usize>,
+    #[serde(skip)]
+    usage_tracker: HistoryUsageTracker,
+    #[serde(skip)]
+    exec_stream_retained_total_bytes: usize,
+    #[serde(skip)]
+    exec_stream_retained_by_id: HashMap<HistoryId, usize>,
 }
 
 #[allow(dead_code)]
@@ -888,6 +1412,9 @@ impl HistoryState {
             tool_call_lookup: HashMap::new(),
             stream_lookup: HashMap::new(),
             id_index: HashMap::new(),
+            usage_tracker: HistoryUsageTracker::default(),
+            exec_stream_retained_total_bytes: 0,
+            exec_stream_retained_by_id: HashMap::new(),
         }
     }
 
@@ -982,6 +1509,7 @@ impl HistoryState {
             citations,
             metadata,
             token_usage,
+            mid_turn: false,
             created_at: SystemTime::now(),
         };
         let id = self.next_history_id();
@@ -1077,6 +1605,62 @@ impl HistoryState {
             self.rebuild_lookup_maps();
         }
         self.rebuild_id_index();
+        self.usage_tracker.reset();
+        for record in &self.records {
+            self.usage_tracker.on_insert(record);
+        }
+        self.rebuild_exec_stream_retained_totals();
+    }
+
+    fn rebuild_exec_stream_retained_totals(&mut self) {
+        let mut total = 0usize;
+        let mut by_id: HashMap<HistoryId, usize> = HashMap::new();
+
+        for record in &self.records {
+            let HistoryRecord::Exec(exec) = record else {
+                continue;
+            };
+            if exec.id == HistoryId::ZERO {
+                continue;
+            }
+            let retained = retained_exec_record_bytes(exec);
+            by_id.insert(exec.id, retained);
+            total = total.saturating_add(retained);
+        }
+
+        self.exec_stream_retained_total_bytes = total;
+        self.exec_stream_retained_by_id = by_id;
+    }
+
+    fn set_exec_stream_retained(&mut self, id: HistoryId, retained: usize) {
+        if id == HistoryId::ZERO {
+            return;
+        }
+        let prev = self.exec_stream_retained_by_id.insert(id, retained).unwrap_or(0);
+        match retained.cmp(&prev) {
+            std::cmp::Ordering::Greater => {
+                self.exec_stream_retained_total_bytes = self
+                    .exec_stream_retained_total_bytes
+                    .saturating_add(retained.saturating_sub(prev));
+            }
+            std::cmp::Ordering::Less => {
+                self.exec_stream_retained_total_bytes = self
+                    .exec_stream_retained_total_bytes
+                    .saturating_sub(prev.saturating_sub(retained));
+            }
+            std::cmp::Ordering::Equal => {}
+        }
+    }
+
+    fn remove_exec_stream_retained(&mut self, id: HistoryId) {
+        if id == HistoryId::ZERO {
+            return;
+        }
+        if let Some(prev) = self.exec_stream_retained_by_id.remove(&id) {
+            self.exec_stream_retained_total_bytes = self
+                .exec_stream_retained_total_bytes
+                .saturating_sub(prev);
+        }
     }
 
     pub fn truncate_after(&mut self, id: HistoryId) -> Vec<HistoryRecord> {
@@ -1086,6 +1670,9 @@ impl HistoryState {
             self.tool_call_lookup.clear();
             self.stream_lookup.clear();
             self.next_id = 1;
+            self.usage_tracker.reset();
+            self.exec_stream_retained_total_bytes = 0;
+            self.exec_stream_retained_by_id.clear();
             return removed;
         }
 
@@ -1139,6 +1726,7 @@ impl HistoryState {
                 if let Some(call_id) = state.call_id.as_ref() {
                     self.exec_call_lookup.insert(call_id.clone(), state.id);
                 }
+                self.set_exec_stream_retained(state.id, retained_exec_record_bytes(state));
             }
             HistoryRecord::MergedExec(state) => {
                 for segment in &state.segments {
@@ -1163,6 +1751,7 @@ impl HistoryState {
             }
             _ => {}
         }
+        self.usage_tracker.on_insert(record);
     }
 
     fn unregister_record(&mut self, record: &HistoryRecord) {
@@ -1177,6 +1766,7 @@ impl HistoryState {
                         self.exec_call_lookup.remove(call_id);
                     }
                 }
+                self.remove_exec_stream_retained(state.id);
             }
             HistoryRecord::MergedExec(state) => {
                 for segment in &state.segments {
@@ -1224,6 +1814,7 @@ impl HistoryState {
             }
             _ => {}
         }
+        self.usage_tracker.on_remove(record.id());
     }
 
     fn rebuild_lookup_maps(&mut self) {
@@ -1277,9 +1868,12 @@ impl HistoryState {
                 if let Some(existing) = self.records.get(index).cloned() {
                     let id = existing.id();
                     let record = record.with_id(id);
+                    let preserved_usage = self.usage_tracker.take_snapshot(&existing);
                     self.unregister_record(&existing);
                     self.records[index] = record.clone();
                     self.register_record(&record);
+                    self.usage_tracker
+                        .restore_snapshot(&record, preserved_usage);
                     HistoryMutation::Replaced { index, id, record }
                 } else {
                     HistoryMutation::Noop
@@ -1322,18 +1916,36 @@ impl HistoryState {
                 stdout_chunk,
                 stderr_chunk,
             } => {
-                if let Some(HistoryRecord::Exec(existing)) = self.records.get(index).cloned() {
-                    let mut updated = existing;
-                    if let Some(chunk) = stdout_chunk {
-                        updated.stdout_chunks.push(chunk);
+                let (id, retained) = match self.records.get_mut(index) {
+                    Some(HistoryRecord::Exec(existing)) => {
+                        if let Some(chunk) = stdout_chunk {
+                            let chunk_len = chunk.content.len();
+                            self.usage_tracker.add_exec_delta(existing.id, 1, chunk_len);
+                            append_exec_chunk(&mut existing.stdout_chunks, chunk);
+                        }
+                        if let Some(chunk) = stderr_chunk {
+                            let chunk_len = chunk.content.len();
+                            self.usage_tracker.add_exec_delta(existing.id, 1, chunk_len);
+                            append_exec_chunk(&mut existing.stderr_chunks, chunk);
+                        }
+                        self.usage_tracker
+                            .observe_exec(existing, "domain:update-exec-stream");
+                        let retained = retained_exec_record_bytes(existing);
+                        (existing.id, retained)
                     }
-                    if let Some(chunk) = stderr_chunk {
-                        updated.stderr_chunks.push(chunk);
-                    }
-                    self.apply_event(HistoryEvent::Replace {
+                    _ => return HistoryMutation::Noop,
+                };
+
+                self.set_exec_stream_retained(id, retained);
+
+                self.enforce_exec_stream_global_limit();
+
+                if let Some(record) = self.records.get(index).cloned() {
+                    HistoryMutation::Replaced {
                         index,
-                        record: HistoryRecord::Exec(updated),
-                    })
+                        id,
+                        record,
+                    }
                 } else {
                     HistoryMutation::Noop
                 }
@@ -1353,26 +1965,51 @@ impl HistoryState {
                         self.records.get(idx).cloned()
                     {
                         let mut updated = existing;
-                        if let Some(delta) = delta {
-                            updated.deltas.push(delta);
+                        if let Some(delta_clone) = delta.clone() {
+                            self.usage_tracker
+                                .add_assistant_delta(updated.id, delta_clone.delta.len());
+                            let truncated = append_assistant_delta(&mut updated.deltas, delta_clone);
+                            if truncated > 0 {
+                                updated.truncated_prefix_bytes = updated
+                                    .truncated_prefix_bytes
+                                    .saturating_add(truncated);
+                            }
                         }
-                        updated.preview_markdown = preview_markdown;
+                        updated.preview_markdown = preview_markdown.clone();
                         if let Some(meta) = metadata.clone() {
                             updated.citations = meta.citations.clone();
                             updated.metadata = Some(meta);
                         }
                         updated.in_progress = true;
                         updated.last_updated_at = now;
-                        return self.apply_event(HistoryEvent::Replace {
+                        self.usage_tracker
+                            .observe_assistant(&updated, "domain:assistant-stream");
+                        let mutation = self.apply_event(HistoryEvent::Replace {
                             index: idx,
                             record: HistoryRecord::AssistantStream(updated),
                         });
+                        if !matches!(mutation, HistoryMutation::Noop) {
+                            return mutation;
+                        }
                     }
                 }
 
                 let mut deltas = Vec::new();
-                if let Some(delta) = delta {
-                    deltas.push(delta);
+                let mut truncated_prefix_bytes = 0usize;
+                if let Some(delta_value) = delta {
+                    if let Some(existing_id) = self.records
+                        .iter()
+                        .find_map(|record| match record {
+                            HistoryRecord::AssistantStream(state) if state.stream_id == stream_id => {
+                                Some(state.id)
+                            }
+                            _ => None,
+                        })
+                    {
+                        self.usage_tracker
+                            .add_assistant_delta(existing_id, delta_value.delta.len());
+                    }
+                    truncated_prefix_bytes = append_assistant_delta(&mut deltas, delta_value);
                 }
                 let citations = metadata
                     .as_ref()
@@ -1387,6 +2024,7 @@ impl HistoryState {
                     metadata,
                     in_progress: true,
                     last_updated_at: now,
+                    truncated_prefix_bytes,
                 };
                 let record = HistoryRecord::AssistantStream(assistant_state);
                 self.apply_event(HistoryEvent::Insert {
@@ -1483,26 +2121,54 @@ impl HistoryState {
                         if let Some(tail) = stdout_tail {
                             if !tail.is_empty() {
                                 let offset = stream_len(&updated.stdout_chunks);
-                                updated.stdout_chunks.push(ExecStreamChunk {
-                                    offset,
-                                    content: tail,
-                                });
+                                self.usage_tracker
+                                    .add_exec_delta(updated.id, 1, tail.len());
+                                append_exec_chunk(
+                                    &mut updated.stdout_chunks,
+                                    ExecStreamChunk {
+                                        offset,
+                                        content: tail,
+                                    },
+                                );
                             }
                         }
                         if let Some(tail) = stderr_tail {
                             if !tail.is_empty() {
                                 let offset = stream_len(&updated.stderr_chunks);
-                                updated.stderr_chunks.push(ExecStreamChunk {
-                                    offset,
-                                    content: tail,
-                                });
+                                self.usage_tracker
+                                    .add_exec_delta(updated.id, 1, tail.len());
+                                append_exec_chunk(
+                                    &mut updated.stderr_chunks,
+                                    ExecStreamChunk {
+                                        offset,
+                                        content: tail,
+                                    },
+                                );
                             }
                         }
 
-                        self.apply_event(HistoryEvent::Replace {
+                        self.usage_tracker
+                            .observe_exec(&updated, "domain:finish-exec");
+                        let id = updated.id;
+                        let mutation = self.apply_event(HistoryEvent::Replace {
                             index: idx,
                             record: HistoryRecord::Exec(updated),
-                        })
+                        });
+                        if matches!(mutation, HistoryMutation::Noop) {
+                            return mutation;
+                        }
+
+                        self.enforce_exec_stream_global_limit();
+
+                        if let Some(record) = self.records.get(idx).cloned() {
+                            HistoryMutation::Replaced {
+                                index: idx,
+                                id,
+                                record,
+                            }
+                        } else {
+                            HistoryMutation::Noop
+                        }
                     } else {
                         HistoryMutation::Noop
                     }
@@ -1510,6 +2176,60 @@ impl HistoryState {
                     HistoryMutation::Noop
                 }
             }
+        }
+    }
+
+    /// Keep total in-memory exec stream payload bounded across all history
+    /// records. When the cumulative retained bytes exceed
+    /// `GLOBAL_EXEC_STREAM_RETAINED_BYTES`, progressively prune the oldest exec
+    /// records down to `EXEC_STREAM_PRUNE_TARGET_BYTES` per stream.
+    fn enforce_exec_stream_global_limit(&mut self) {
+        if self.exec_stream_retained_total_bytes <= GLOBAL_EXEC_STREAM_RETAINED_BYTES {
+            return;
+        }
+
+        let mut bytes_to_drop =
+            self.exec_stream_retained_total_bytes - GLOBAL_EXEC_STREAM_RETAINED_BYTES;
+
+        let retained_by_id = &mut self.exec_stream_retained_by_id;
+        let total_retained = &mut self.exec_stream_retained_total_bytes;
+
+        for record in &mut self.records {
+            if bytes_to_drop == 0 {
+                break;
+            }
+
+            let HistoryRecord::Exec(exec) = record else {
+                continue;
+            };
+
+            let before = retained_by_id
+                .get(&exec.id)
+                .copied()
+                .unwrap_or_else(|| retained_exec_record_bytes(exec));
+            if before == 0 {
+                continue;
+            }
+
+            prune_exec_stream(&mut exec.stdout_chunks, EXEC_STREAM_PRUNE_TARGET_BYTES);
+            prune_exec_stream(&mut exec.stderr_chunks, EXEC_STREAM_PRUNE_TARGET_BYTES);
+
+            let after = retained_exec_record_bytes(exec);
+            let prev = retained_by_id.insert(exec.id, after).unwrap_or(0);
+            match after.cmp(&prev) {
+                std::cmp::Ordering::Greater => {
+                    *total_retained = (*total_retained)
+                        .saturating_add(after.saturating_sub(prev));
+                }
+                std::cmp::Ordering::Less => {
+                    *total_retained = (*total_retained)
+                        .saturating_sub(prev.saturating_sub(after));
+                }
+                std::cmp::Ordering::Equal => {}
+            }
+
+            let dropped = before.saturating_sub(after);
+            bytes_to_drop = bytes_to_drop.saturating_sub(dropped);
         }
     }
 }
@@ -1610,6 +2330,10 @@ impl WithId for HistoryRecord {
                 state.id = id;
                 HistoryRecord::Notice(state)
             }
+            HistoryRecord::Context(mut state) => {
+                state.id = id;
+                HistoryRecord::Context(state)
+            }
         }
     }
 }
@@ -1636,6 +2360,7 @@ impl HistoryRecord {
             HistoryRecord::Patch(state) => state.id,
             HistoryRecord::BackgroundEvent(state) => state.id,
             HistoryRecord::Notice(state) => state.id,
+            HistoryRecord::Context(state) => state.id,
         }
     }
 }
@@ -1704,6 +2429,7 @@ mod tests {
             HistoryRecord::Patch(state) => state.id = HistoryId::ZERO,
             HistoryRecord::BackgroundEvent(state) => state.id = HistoryId::ZERO,
             HistoryRecord::Notice(state) => state.id = HistoryId::ZERO,
+            HistoryRecord::Context(state) => state.id = HistoryId::ZERO,
         }
     }
 
@@ -1797,6 +2523,54 @@ mod tests {
     }
 
     #[test]
+    fn exec_stream_truncates_to_memory_cap() {
+        let mut state = HistoryState::new();
+        let inserted_id = match state.apply_domain_event(HistoryDomainEvent::StartExec {
+            index: state.records.len(),
+            call_id: Some("call-clip".into()),
+            command: vec!["cat".into(), "large.log".into()],
+            parsed: Vec::new(),
+            action: ExecAction::Run,
+            started_at: SystemTime::UNIX_EPOCH,
+            working_dir: None,
+            env: Vec::new(),
+            tags: Vec::new(),
+        }) {
+            HistoryMutation::Inserted { id, .. } => id,
+            other => panic!("unexpected mutation: {other:?}"),
+        };
+
+        let oversized = "x".repeat(MAX_EXEC_STREAM_RETAINED_BYTES + 1024);
+        let exec_index = state.index_of(inserted_id).expect("exec index present");
+        state.apply_domain_event(HistoryDomainEvent::UpdateExecStream {
+            index: exec_index,
+            stdout_chunk: Some(ExecStreamChunk { offset: 0, content: oversized.clone() }),
+            stderr_chunk: None,
+        });
+
+        let exec_record = match state.record(inserted_id).expect("exec record") {
+            HistoryRecord::Exec(record) => record.clone(),
+            other => panic!("expected exec record, got {other:?}"),
+        };
+
+        let retained = retained_stream_len(&exec_record.stdout_chunks);
+        assert_eq!(retained, MAX_EXEC_STREAM_RETAINED_BYTES);
+
+        let truncated = truncated_prefix_len(&exec_record.stdout_chunks);
+        assert_eq!(truncated, oversized.len() - MAX_EXEC_STREAM_RETAINED_BYTES);
+
+        let mut flattened = String::new();
+        let mut sorted = exec_record.stdout_chunks.clone();
+        sorted.sort_by_key(|chunk| chunk.offset);
+        for chunk in sorted {
+            flattened.push_str(&chunk.content);
+        }
+        assert_eq!(flattened.len(), MAX_EXEC_STREAM_RETAINED_BYTES);
+        let expected_tail = oversized[oversized.len() - MAX_EXEC_STREAM_RETAINED_BYTES..].to_string();
+        assert_eq!(flattened, expected_tail);
+    }
+
+    #[test]
     fn finalize_assistant_updates_existing_records() {
         let mut state = HistoryState::new();
 
@@ -1845,6 +2619,7 @@ mod tests {
             citations: Vec::new(),
             metadata: None,
             token_usage: None,
+            mid_turn: false,
             created_at: SystemTime::UNIX_EPOCH,
         });
 
@@ -1893,6 +2668,7 @@ mod tests {
             citations: Vec::new(),
             metadata: None,
             token_usage: None,
+            mid_turn: false,
             created_at: SystemTime::UNIX_EPOCH,
         });
 
@@ -2124,6 +2900,7 @@ mod tests {
             metadata: None,
             in_progress: true,
             last_updated_at: SystemTime::UNIX_EPOCH,
+            truncated_prefix_bytes: 0,
         }));
 
         let snapshot = state.snapshot();
@@ -2153,6 +2930,7 @@ mod tests {
             token_usage: Some(TokenUsage {
                 input_tokens: 10,
                 cached_input_tokens: 2,
+                cache_write_input_tokens: 0,
                 output_tokens: 5,
                 reasoning_output_tokens: 1,
                 total_tokens: 16,
@@ -2293,6 +3071,7 @@ mod tests {
             metadata: Some(metadata.clone()),
             in_progress: true,
             last_updated_at: now,
+            truncated_prefix_bytes: 0,
         }));
 
         records.push(HistoryRecord::AssistantMessage(AssistantMessageState {
@@ -2302,6 +3081,7 @@ mod tests {
             citations: vec!["cite".into()],
             metadata: Some(metadata.clone()),
             token_usage: metadata.token_usage.clone(),
+            mid_turn: false,
             created_at: now,
         }));
 

@@ -14,6 +14,7 @@ use crate::pkce::PkceCodes;
 use crate::pkce::generate_pkce;
 use base64::Engine;
 use chrono::Utc;
+use code_app_server_protocol::AuthMode;
 use code_core::auth::AuthDotJson;
 use code_core::auth::get_auth_file;
 use code_core::token_data::TokenData;
@@ -121,15 +122,18 @@ pub fn run_login_server(opts: ServerOptions) -> io::Result<LoginServer> {
     let (tx, mut rx) = tokio::sync::mpsc::channel::<Request>(16);
     let _server_handle = {
         let server = server.clone();
-        thread::spawn(move || -> io::Result<()> {
-            while let Ok(request) = server.recv() {
-                tx.blocking_send(request).map_err(|e| {
-                    eprintln!("Failed to send request to channel: {e}");
-                    io::Error::other("Failed to send request to channel")
-                })?;
-            }
-            Ok(())
-        })
+        thread::Builder::new()
+            .name("login-server-listener".to_string())
+            .spawn(move || -> io::Result<()> {
+                while let Ok(request) = server.recv() {
+                    tx.blocking_send(request).map_err(|e| {
+                        eprintln!("Failed to send request to channel: {e}");
+                        io::Error::other("Failed to send request to channel")
+                    })?;
+                }
+                Ok(())
+            })
+            .map_err(|err| io::Error::other(format!("failed to spawn login listener thread: {err}")))?
     };
 
     let shutdown_notify = Arc::new(tokio::sync::Notify::new());
@@ -316,11 +320,14 @@ fn build_authorize_url(
         ("response_type", "code"),
         ("client_id", client_id),
         ("redirect_uri", redirect_uri),
-        ("scope", "openid profile email offline_access"),
+        (
+            "scope",
+            "openid profile email offline_access api.connectors.read api.connectors.invoke",
+        ),
         ("code_challenge", &pkce.code_challenge),
         ("code_challenge_method", "S256"),
         ("id_token_add_organizations", "true"),
-        ("code_cli_simplified_flow", "true"),
+        ("codex_cli_simplified_flow", "true"),
         ("state", state),
         ("originator", originator),
     ];
@@ -482,6 +489,7 @@ pub(crate) async fn persist_tokens_async(
         let tokens_for_store = tokens.clone();
         let last_refresh = Utc::now();
         let auth = AuthDotJson {
+            auth_mode: Some(AuthMode::ChatGPT),
             openai_api_key: api_key,
             tokens: Some(tokens),
             last_refresh: Some(last_refresh),
@@ -613,4 +621,36 @@ pub(crate) async fn obtain_api_key(
     }
     let body: ExchangeResp = resp.json().await.map_err(io::Error::other)?;
     Ok(body.access_token)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn authorize_url_uses_codex_simplified_flow_parameter() {
+        let pkce = PkceCodes {
+            code_verifier: "verifier".to_string(),
+            code_challenge: "challenge".to_string(),
+        };
+        let auth_url = build_authorize_url(
+            "https://auth.openai.com",
+            "client",
+            "http://localhost:1455/auth/callback",
+            &pkce,
+            "state",
+            "code_cli_rs",
+        );
+        let parsed = url::Url::parse(&auth_url).expect("valid auth url");
+        let params = parsed.query_pairs().collect::<std::collections::HashMap<_, _>>();
+
+        assert_eq!(
+            params.get("codex_cli_simplified_flow").map(|value| value.as_ref()),
+            Some("true")
+        );
+        assert!(
+            !params.contains_key("code_cli_simplified_flow"),
+            "OpenAI auth rejects the fork-local parameter name as unknown"
+        );
+    }
 }

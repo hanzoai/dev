@@ -1,6 +1,22 @@
 use ratatui::text::Line;
 use ratatui::text::Span;
 
+/// Create a ratatui `Line` that borrows the contents of another line.
+pub fn line_to_borrowed<'a>(line: &'a Line<'_>) -> Line<'a> {
+    Line {
+        style: line.style,
+        alignment: line.alignment,
+        spans: line
+            .spans
+            .iter()
+            .map(|span| Span {
+                style: span.style,
+                content: std::borrow::Cow::Borrowed(span.content.as_ref()),
+            })
+            .collect(),
+    }
+}
+
 /// Clone a borrowed ratatui `Line` into an owned `'static` line.
 pub fn line_to_static(line: &Line<'_>) -> Line<'static> {
     Line {
@@ -26,6 +42,7 @@ pub fn push_owned_lines<'a>(src: &[Line<'a>], out: &mut Vec<Line<'static>>) {
 
 /// Consider a line blank if it has no spans or only spans whose contents are
 /// empty or consist solely of spaces (no tabs/newlines).
+#[cfg(test)]
 pub fn is_blank_line_spaces_only(line: &Line<'_>) -> bool {
     if line.spans.is_empty() {
         return true;

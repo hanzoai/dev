@@ -53,11 +53,13 @@ pub enum SlashCommand {
     Browser,
     Chrome,
     New,
+    Clear,
     Init,
     Compact,
     Undo,
     Review,
     Cloud,
+    Copy,
     Diff,
     Mention,
     Cmd,
@@ -67,20 +69,24 @@ pub enum SlashCommand {
     Update,
     Notifications,
     Theme,
+    Settings,
     Model,
+    Fast,
     Reasoning,
     Verbosity,
     Prompts,
+    Skills,
     Perf,
     Demo,
     Agents,
     Auto,
     Branch,
     Merge,
-    Github,
+    Push,
     Validation,
     Mcp,
     Resume,
+    Rename,
     Login,
     // Prompt-expanding commands
     Plan,
@@ -88,6 +94,7 @@ pub enum SlashCommand {
     Code,
     Logout,
     Quit,
+    Exit,
     #[cfg(debug_assertions)]
     TestApproval,
 }
@@ -96,9 +103,10 @@ impl SlashCommand {
     /// User-visible description shown in the popup.
     pub fn description(self) -> &'static str {
         match self {
-            SlashCommand::Chrome => "connect to Chrome",
+            SlashCommand::Chrome => "connect to your Chrome browser",
             SlashCommand::Browser => "open internal browser",
             SlashCommand::Resume => "resume a past session for this folder",
+            SlashCommand::Rename => "rename the current session",
             SlashCommand::Plan => "create a comprehensive plan (multiple agents)",
             SlashCommand::Solve => "solve a challenging problem (multiple agents)",
             SlashCommand::Code => "perform a coding task (multiple agents)",
@@ -110,26 +118,31 @@ impl SlashCommand {
             SlashCommand::Undo => "restore the workspace to the last Code snapshot",
             SlashCommand::Review => "review your changes for potential issues",
             SlashCommand::Cloud => "browse, apply, and create cloud tasks",
-            SlashCommand::Quit => "exit Code",
+            SlashCommand::Quit | SlashCommand::Exit => "exit Code",
+            SlashCommand::Clear => "clear the terminal and start a new chat",
+            SlashCommand::Copy => "copy last response as markdown",
             SlashCommand::Diff => "show git diff (including untracked files)",
             SlashCommand::Mention => "mention a file",
             SlashCommand::Cmd => "run a project command",
             SlashCommand::Status => "show current session configuration and token usage",
-            SlashCommand::Limits => "visualize weekly and hourly rate limits",
+            SlashCommand::Limits => "adjust session limits",
             SlashCommand::Update => "check for updates and optionally upgrade",
-            SlashCommand::Notifications => "toggle TUI notifications (status/on/off)",
-            SlashCommand::Theme => "switch between color themes",
-            SlashCommand::Prompts => "show example prompts",
-            SlashCommand::Model => "choose model & reasoning effort",
-            SlashCommand::Agents => "create and configure agents",
+            SlashCommand::Notifications => "manage notification settings",
+            SlashCommand::Theme => "customize the app theme",
+            SlashCommand::Settings => "manage all settings in one place",
+            SlashCommand::Prompts => "manage custom prompts",
+            SlashCommand::Skills => "manage skills",
+            SlashCommand::Model => "choose your default model",
+            SlashCommand::Fast => "open model settings with the Fast mode toggle",
+            SlashCommand::Agents => "configure agents",
             SlashCommand::Auto => "work autonomously on long tasks with Auto Drive",
             SlashCommand::Branch => {
                 "work in an isolated /branch then /merge when done (great for parallel work)"
             }
             SlashCommand::Merge => "merge current worktree branch back to default",
-            SlashCommand::Github => "GitHub Actions watcher (status/on/off)",
+            SlashCommand::Push => "commit, push, and monitor workflows",
             SlashCommand::Validation => "control validation harness (status/on/off)",
-            SlashCommand::Mcp => "manage MCP servers (status/on/off/add)",
+            SlashCommand::Mcp => "manage MCP servers",
             SlashCommand::Perf => "performance tracing (on/off/show/reset)",
             SlashCommand::Demo => "populate history with demo cells (dev/perf only)",
             SlashCommand::Login => "manage Code sign-ins (add/select/disconnect)",
@@ -151,6 +164,18 @@ impl SlashCommand {
             self,
             SlashCommand::Plan | SlashCommand::Solve | SlashCommand::Code
         )
+    }
+
+    pub fn settings_section_from_args<'a>(&self, args: &'a str) -> Option<&'a str> {
+        if *self != SlashCommand::Settings {
+            return None;
+        }
+        let section = args.split_whitespace().next().unwrap_or("");
+        if section.is_empty() {
+            None
+        } else {
+            Some(section)
+        }
     }
 
     /// Returns true if this command requires additional arguments after the command.
@@ -212,12 +237,12 @@ pub fn process_slash_command_message(message: &str) -> ProcessedCommand {
 
     let has_slash = trimmed.starts_with('/');
     let command_portion = if has_slash { &trimmed[1..] } else { trimmed };
-    let parts: Vec<&str> = command_portion.splitn(2, ' ').collect();
-    let command_str = parts.first().copied().unwrap_or("");
-    let args_raw = parts.get(1).map(|s| s.trim()).unwrap_or("");
+    let mut parts = command_portion.splitn(2, |c: char| c.is_whitespace());
+    let command_str = parts.next().unwrap_or("");
+    let args_raw = parts.next().map(|s| s.trim()).unwrap_or("");
     let canonical_command = command_str.to_ascii_lowercase();
 
-    if matches!(canonical_command.as_str(), "quit" | "exit") {
+    if !has_slash && matches!(canonical_command.as_str(), "quit" | "exit") {
         if !has_slash && !args_raw.is_empty() {
             return ProcessedCommand::NotCommand(message.to_string());
         }
@@ -289,4 +314,59 @@ pub enum ProcessedCommand {
     NotCommand(String),
     /// Error processing the command
     Error(String),
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn plan_command_with_newline_arguments_is_recognized() {
+        let msg = "/plan\nBuild a release plan\n- tighten scope";
+        match process_slash_command_message(msg) {
+            ProcessedCommand::ExpandedPrompt(prompt) => {
+                assert!(prompt.contains("Build a release plan"));
+                assert!(prompt.contains("tighten scope"));
+            }
+            other => panic!("expected ExpandedPrompt, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn auto_command_with_newline_arguments_is_regular_command() {
+        let msg = "/auto\ninspect the failing build";
+        match process_slash_command_message(msg) {
+            ProcessedCommand::RegularCommand(SlashCommand::Auto, command_text) => {
+                assert!(command_text.contains("inspect the failing build"));
+            }
+            other => panic!("expected RegularCommand, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn fast_command_is_regular_command() {
+        match process_slash_command_message("/fast") {
+            ProcessedCommand::RegularCommand(SlashCommand::Fast, command_text) => {
+                assert_eq!(command_text, "/fast");
+            }
+            other => panic!("expected RegularCommand, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn upstream_compat_commands_are_regular_commands() {
+        for (input, expected) in [
+            ("/exit", SlashCommand::Exit),
+            ("/clear", SlashCommand::Clear),
+            ("/copy", SlashCommand::Copy),
+        ] {
+            match process_slash_command_message(input) {
+                ProcessedCommand::RegularCommand(command, command_text) => {
+                    assert_eq!(command, expected);
+                    assert_eq!(command_text, input);
+                }
+                other => panic!("expected RegularCommand for {input}, got {:?}", other),
+            }
+        }
+    }
 }

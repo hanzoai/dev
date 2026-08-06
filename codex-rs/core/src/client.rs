@@ -1,1415 +1,2451 @@
-use std::io::BufRead;
-use std::path::Path;
-use std::sync::OnceLock;
-use std::time::Duration;
+//! Session- and turn-scoped helpers for talking to model provider APIs.
+//!
+//! `ModelClient` is intended to live for the lifetime of a Codex session and holds the stable
+//! configuration and state needed to talk to a provider (auth, provider selection, conversation id,
+//! and transport fallback state).
+//!
+//! Per-turn settings (model selection, reasoning controls, telemetry context, and turn metadata)
+//! are passed explicitly to streaming and unary methods so that the turn lifetime is visible at the
+//! call site.
+//!
+//! A [`ModelClientSession`] is created per turn and is used to stream one or more Responses API
+//! requests during that turn. It caches a Responses WebSocket connection (opened lazily) and stores
+//! per-turn state such as the `x-codex-turn-state` token used for sticky routing.
+//!
+//! WebSocket prewarm is a v2-only `response.create` with `generate=false`; it waits for completion
+//! so the next request can reuse the same connection and `previous_response_id`.
+//!
+//! Turn execution performs prewarm as a best-effort step before the first stream request so the
+//! subsequent request can reuse the same connection.
+//!
+//! ## Retry-Budget Tradeoff
+//!
+//! WebSocket prewarm is treated as the first websocket connection attempt for a turn. If it
+//! fails, normal stream retry/fallback logic handles recovery on the same turn.
 
-use crate::AuthManager;
-use crate::auth::CodexAuth;
-use crate::error::RetryLimitReachedError;
-use crate::error::UnexpectedResponseError;
-use bytes::Bytes;
-use codex_app_server_protocol::AuthMode;
-use codex_protocol::ConversationId;
-use eventsource_stream::Eventsource;
-use futures::prelude::*;
-use regex_lite::Regex;
-use reqwest::StatusCode;
-use reqwest::header::HeaderMap;
-use serde::Deserialize;
-use serde::Serialize;
-use serde_json::Value;
+use std::collections::HashMap;
+use std::sync::Arc;
+use std::sync::Mutex as StdMutex;
+use std::sync::OnceLock;
+use std::sync::atomic::AtomicBool;
+use std::sync::atomic::Ordering;
+
+use codex_api::AgentIdentityTelemetry;
+use codex_api::ApiError;
+use codex_api::AuthProvider;
+use codex_api::CompactClient as ApiCompactClient;
+use codex_api::CompactionInput as ApiCompactionInput;
+use codex_api::Compression;
+use codex_api::MemoriesClient as ApiMemoriesClient;
+use codex_api::MemorySummarizeInput as ApiMemorySummarizeInput;
+use codex_api::MemorySummarizeOutput as ApiMemorySummarizeOutput;
+use codex_api::Provider as ApiProvider;
+use codex_api::RawMemory as ApiRawMemory;
+use codex_api::RealtimeCallClient as ApiRealtimeCallClient;
+use codex_api::RealtimeSessionConfig as ApiRealtimeSessionConfig;
+use codex_api::Reasoning;
+use codex_api::ReasoningContext;
+use codex_api::RequestTelemetry;
+use codex_api::ReqwestTransport;
+use codex_api::ResponseCreateWsRequest;
+use codex_api::ResponsesApiRequest;
+use codex_api::ResponsesClient as ApiResponsesClient;
+use codex_api::ResponsesOptions as ApiResponsesOptions;
+use codex_api::ResponsesWebsocketClient as ApiWebSocketResponsesClient;
+use codex_api::ResponsesWebsocketConnection as ApiWebSocketConnection;
+use codex_api::ResponsesWsRequest;
+use codex_api::SharedAuthProvider;
+use codex_api::SseTelemetry;
+use codex_api::StreamOptions;
+use codex_api::TransportError;
+use codex_api::WebsocketTelemetry;
+use codex_api::auth_header_telemetry;
+use codex_api::build_session_headers;
+use codex_api::create_text_param_for_request;
+use codex_api::response_create_client_metadata;
+use codex_http_client::ClientRouteClass;
+use codex_http_client::HttpClientFactory;
+use codex_login::AuthManager;
+use codex_login::CodexAuth;
+use codex_login::RefreshTokenError;
+use codex_login::UnauthorizedRecovery;
+use codex_login::default_client::add_originator_header;
+use codex_login::default_client::create_client_for_route;
+use codex_otel::SessionTelemetry;
+use codex_otel::current_span_w3c_trace_context;
+use codex_protocol::auth::AuthMode;
+
+use codex_protocol::ThreadId;
+use codex_protocol::config_types::ReasoningSummary as ReasoningSummaryConfig;
+use codex_protocol::config_types::Verbosity as VerbosityConfig;
+use codex_protocol::models::ContentItem;
+use codex_protocol::models::ResponseItem;
+use codex_protocol::openai_models::ModelInfo;
+use codex_protocol::openai_models::ReasoningEffort as ReasoningEffortConfig;
+use codex_protocol::protocol::InternalSessionSource;
+use codex_protocol::protocol::SessionSource;
+use codex_protocol::protocol::W3cTraceContext;
+use codex_rollout_trace::CompactionTraceContext;
+use codex_rollout_trace::InferenceTraceAttempt;
+use codex_rollout_trace::InferenceTraceContext;
+use codex_tools::create_tools_json_for_responses_api;
+use codex_tools::create_tools_json_for_responses_lite;
+use codex_tools::create_tools_raw_json_for_responses_api;
+use eventsource_stream::Event;
+use eventsource_stream::EventStreamError;
+use futures::StreamExt;
+use http::HeaderMap as ApiHeaderMap;
+use http::HeaderValue;
+use http::StatusCode;
+use std::time::Duration;
+use std::time::Instant;
 use tokio::sync::mpsc;
-use tokio::time::timeout;
-use tokio_util::io::ReaderStream;
-use tracing::debug;
+use tokio::sync::oneshot;
+use tokio::sync::oneshot::error::TryRecvError;
+use tokio_tungstenite::tungstenite::Error;
+use tokio_tungstenite::tungstenite::Message;
+use tokio_util::sync::CancellationToken;
+use tracing::instrument;
 use tracing::trace;
 use tracing::warn;
 
-use crate::chat_completions::AggregateStreamExt;
-use crate::chat_completions::stream_chat_completions;
+use crate::attestation::AttestationContext;
+use crate::attestation::AttestationProvider;
+use crate::attestation::X_OAI_ATTESTATION_HEADER;
 use crate::client_common::Prompt;
 use crate::client_common::ResponseEvent;
 use crate::client_common::ResponseStream;
-use crate::client_common::ResponsesApiRequest;
-use crate::client_common::create_reasoning_param_for_request;
-use crate::client_common::create_text_param_for_request;
-use crate::config::Config;
-use crate::default_client::create_client;
-use crate::error::CodexErr;
-use crate::error::Result;
-use crate::error::UsageLimitReachedError;
-use crate::flags::CODEX_RS_SSE_FIXTURE;
-use crate::model_family::ModelFamily;
-use crate::model_provider_info::ModelProviderInfo;
-use crate::model_provider_info::WireApi;
-use crate::openai_model_info::get_model_info;
-use crate::openai_tools::create_tools_json_for_responses_api;
-use crate::protocol::RateLimitSnapshot;
-use crate::protocol::RateLimitWindow;
-use crate::protocol::TokenUsage;
-use crate::token_data::PlanType;
-use crate::util::backoff;
-use codex_otel::otel_event_manager::OtelEventManager;
-use codex_protocol::config_types::ReasoningEffort as ReasoningEffortConfig;
-use codex_protocol::config_types::ReasoningSummary as ReasoningSummaryConfig;
-use codex_protocol::models::ResponseItem;
-use std::sync::Arc;
+use crate::feedback_tags;
+use crate::responses_metadata::CodexResponsesMetadata;
+use crate::responses_metadata::subagent_header_value;
+use crate::util::emit_feedback_auth_recovery_tags;
+use codex_feedback::FeedbackRequestTags;
+use codex_feedback::emit_feedback_request_tags_with_auth_env;
+use codex_login::auth::AgentIdentityAuthPolicy;
+use codex_login::auth_env_telemetry::AuthEnvTelemetry;
+use codex_login::auth_env_telemetry::collect_auth_env_telemetry;
+use codex_model_provider::AgentIdentitySessionFallback;
+use codex_model_provider::ProviderAuthScope;
+use codex_model_provider::SharedModelProvider;
+use codex_model_provider::create_model_provider;
+#[cfg(test)]
+use codex_model_provider_info::DEFAULT_WEBSOCKET_CONNECT_TIMEOUT_MS;
+use codex_model_provider_info::ModelProviderInfo;
+use codex_model_provider_info::WireApi;
+use codex_protocol::error::CodexErr;
+use codex_protocol::error::Result;
+use codex_response_debug_context::extract_response_debug_context;
+use codex_response_debug_context::extract_response_debug_context_from_api_error;
+use codex_response_debug_context::telemetry_api_error_message;
+use codex_response_debug_context::telemetry_transport_error_message;
 
-#[derive(Debug, Deserialize)]
-struct ErrorResponse {
-    error: Error,
+pub const OPENAI_BETA_HEADER: &str = "OpenAI-Beta";
+pub const X_CODEX_INSTALLATION_ID_HEADER: &str = "x-codex-installation-id";
+pub const X_CODEX_TURN_STATE_HEADER: &str = "x-codex-turn-state";
+pub const X_CODEX_TURN_METADATA_HEADER: &str = "x-codex-turn-metadata";
+pub const X_CODEX_PARENT_THREAD_ID_HEADER: &str = "x-codex-parent-thread-id";
+pub const X_CODEX_WINDOW_ID_HEADER: &str = "x-codex-window-id";
+pub const X_OPENAI_MEMGEN_REQUEST_HEADER: &str = "x-openai-memgen-request";
+pub const X_OPENAI_SUBAGENT_HEADER: &str = "x-openai-subagent";
+pub const X_RESPONSESAPI_INCLUDE_TIMING_METRICS_HEADER: &str =
+    "x-responsesapi-include-timing-metrics";
+const X_CODEX_WS_STREAM_REQUEST_START_MS_CLIENT_METADATA_KEY: &str =
+    "x-codex-ws-stream-request-start-ms";
+const WS_REQUEST_HEADER_RESPONSES_LITE_CLIENT_METADATA_KEY: &str =
+    "ws_request_header_x_openai_internal_codex_responses_lite";
+const RESPONSES_WEBSOCKETS_V2_BETA_HEADER_VALUE: &str = "responses_websockets=2026-02-06";
+const X_OPENAI_INTERNAL_CODEX_RESPONSES_LITE_HEADER: &str =
+    "x-openai-internal-codex-responses-lite";
+const REALTIME_CALLS_ENDPOINT: &str = "/realtime/calls";
+const RESPONSES_ENDPOINT: &str = "/responses";
+const RESPONSES_COMPACT_ENDPOINT: &str = "/responses/compact";
+// `/responses/compact` is unary, so the timeout covers the full response rather than one idle
+// period between stream events.
+const COMPACT_REQUEST_TIMEOUT_IDLE_MULTIPLIER: u32 = 4;
+const MEMORIES_SUMMARIZE_ENDPOINT: &str = "/memories/trace_summarize";
+#[cfg(test)]
+pub(crate) const WEBSOCKET_CONNECT_TIMEOUT: Duration =
+    Duration::from_millis(DEFAULT_WEBSOCKET_CONNECT_TIMEOUT_MS);
+
+pub(crate) struct CompactConversationRequestSettings {
+    pub(crate) effort: Option<ReasoningEffortConfig>,
+    pub(crate) summary: ReasoningSummaryConfig,
+    pub(crate) service_tier: Option<String>,
 }
 
-#[derive(Debug, Deserialize)]
-struct Error {
-    r#type: Option<String>,
-    code: Option<String>,
-    message: Option<String>,
+fn reasoning_effort_for_request(effort: ReasoningEffortConfig) -> ReasoningEffortConfig {
+    match effort {
+        ReasoningEffortConfig::Ultra => ReasoningEffortConfig::Max,
+        effort => effort,
+    }
+}
 
-    // Optional fields available on "usage_limit_reached" and "usage_not_included" errors
-    plan_type: Option<PlanType>,
-    resets_in_seconds: Option<u64>,
+fn session_telemetry_for_request(
+    session_telemetry: &SessionTelemetry,
+    request: &ResponsesApiRequest,
+) -> SessionTelemetry {
+    session_telemetry.clone().with_inference_request(
+        request.service_tier.as_deref(),
+        request
+            .reasoning
+            .as_ref()
+            .and_then(|reasoning| reasoning.effort.as_ref()),
+    )
+}
+
+/// Session-scoped state shared by all [`ModelClient`] clones.
+///
+/// This is intentionally kept minimal so `ModelClient` does not need to hold a full `Config`. Most
+/// configuration is per turn and is passed explicitly to streaming/unary methods.
+#[derive(Debug)]
+struct ModelClientState {
+    thread_id: ThreadId,
+    provider: SharedModelProvider,
+    auth_env_telemetry: AuthEnvTelemetry,
+    session_source: SessionSource,
+    originator: String,
+    model_verbosity: Option<VerbosityConfig>,
+    enable_request_compression: bool,
+    include_timing_metrics: bool,
+    beta_features_header: Option<String>,
+    concurrent_reasoning_summaries_enabled: bool,
+    include_attestation: bool,
+    attestation_provider: Option<Arc<dyn AttestationProvider>>,
+    disable_websockets: AtomicBool,
+    agent_identity_session_fallback: AgentIdentitySessionFallback,
+    cached_websocket_session: StdMutex<WebsocketSession>,
+}
+
+/// Resolved API client setup for a single request attempt.
+///
+/// Keeping this as a single bundle ensures prewarm and normal request paths
+/// share the same auth/provider setup flow.
+struct CurrentClientSetup {
+    auth: Option<CodexAuth>,
+    api_provider: ApiProvider,
+    api_auth: SharedAuthProvider,
+    agent_identity_telemetry: Option<AgentIdentityTelemetry>,
+}
+
+#[derive(Clone, Copy)]
+struct RequestRouteTelemetry {
+    endpoint: &'static str,
+}
+
+impl RequestRouteTelemetry {
+    fn for_endpoint(endpoint: &'static str) -> Self {
+        Self { endpoint }
+    }
+}
+
+/// A session-scoped client for model-provider API calls.
+///
+/// This holds configuration and state that should be shared across turns within a Codex session
+/// (auth, provider selection, thread id, and transport fallback state).
+///
+/// WebSocket fallback is session-scoped: once a turn activates the HTTP fallback, subsequent turns
+/// will also use HTTP for the remainder of the session.
+///
+/// Turn-scoped settings (model selection, reasoning controls, telemetry context, and turn
+/// metadata) are passed explicitly to the relevant methods to keep turn lifetime visible at the
+/// call site.
+#[derive(Debug, Clone)]
+pub struct ModelClient {
+    state: Arc<ModelClientState>,
+    agent_identity_policy: AgentIdentityAuthPolicy,
+    prompt_cache_key_override: Option<String>,
+    http_client_factory: HttpClientFactory,
+}
+
+/// A turn-scoped streaming session created from a [`ModelClient`].
+///
+/// The session establishes a Responses WebSocket connection lazily and reuses it across multiple
+/// requests within the turn. It also caches per-turn state:
+///
+/// - The last full request, so subsequent calls can reuse incremental websocket request payloads
+///   only when the current request is an incremental extension of the previous one.
+/// - The `x-codex-turn-state` sticky-routing token, which must be replayed for all requests within
+///   the same turn.
+///
+/// Create a fresh `ModelClientSession` for each Codex turn. Reusing it across turns would replay
+/// the previous turn's sticky-routing token into the next turn, which violates the client/server
+/// contract and can cause routing bugs.
+pub struct ModelClientSession {
+    client: ModelClient,
+    websocket_session: WebsocketSession,
+    /// Turn state for sticky routing.
+    ///
+    /// This is an `OnceLock` that stores the turn state value received from the server
+    /// on turn start via the `x-codex-turn-state` response header. Once set, this value
+    /// should be sent back to the server in the `x-codex-turn-state` request header for
+    /// all subsequent requests within the same turn to maintain sticky routing.
+    ///
+    /// This is a contract between the client and server: we receive it at turn start,
+    /// keep sending it unchanged between turn requests (e.g., for retries, incremental
+    /// appends, or continuation requests), and must not send it between different turns.
+    turn_state: Arc<OnceLock<String>>,
 }
 
 #[derive(Debug, Clone)]
-pub struct ModelClient {
-    config: Arc<Config>,
-    auth_manager: Option<Arc<AuthManager>>,
-    otel_event_manager: OtelEventManager,
-    client: reqwest::Client,
-    provider: ModelProviderInfo,
-    conversation_id: ConversationId,
-    effort: Option<ReasoningEffortConfig>,
-    summary: ReasoningSummaryConfig,
+struct LastResponse {
+    response_id: String,
+    items_added: Vec<ResponseItem>,
+}
+
+#[derive(Debug, Default)]
+struct WebsocketSession {
+    connection: Option<ApiWebSocketConnection>,
+    last_request: Option<ResponsesApiRequest>,
+    last_response_rx: Option<oneshot::Receiver<LastResponse>>,
+    last_response_from_untraced_warmup: bool,
+    connection_reused: StdMutex<bool>,
+}
+
+// This is intentionally not a `PartialEq` implementation: request equality includes `input` and
+// `client_metadata`, while websocket reuse compares the input separately and ignores metadata.
+// Keep the destructuring exhaustive so new request fields require an explicit reuse decision.
+fn responses_request_properties_match(
+    previous: &ResponsesApiRequest,
+    current: &ResponsesApiRequest,
+) -> bool {
+    let ResponsesApiRequest {
+        model: previous_model,
+        instructions: previous_instructions,
+        input: _,
+        tools: previous_tools,
+        tool_choice: previous_tool_choice,
+        parallel_tool_calls: previous_parallel_tool_calls,
+        reasoning: previous_reasoning,
+        store: previous_store,
+        stream: previous_stream,
+        stream_options: _,
+        include: previous_include,
+        service_tier: previous_service_tier,
+        prompt_cache_key: previous_prompt_cache_key,
+        text: previous_text,
+        client_metadata: _,
+    } = previous;
+    let ResponsesApiRequest {
+        model: current_model,
+        instructions: current_instructions,
+        input: _,
+        tools: current_tools,
+        tool_choice: current_tool_choice,
+        parallel_tool_calls: current_parallel_tool_calls,
+        reasoning: current_reasoning,
+        store: current_store,
+        stream: current_stream,
+        stream_options: _,
+        include: current_include,
+        service_tier: current_service_tier,
+        prompt_cache_key: current_prompt_cache_key,
+        text: current_text,
+        client_metadata: _,
+    } = current;
+
+    previous_model == current_model
+        && previous_instructions == current_instructions
+        && previous_tools == current_tools
+        && previous_tool_choice == current_tool_choice
+        && previous_parallel_tool_calls == current_parallel_tool_calls
+        && previous_reasoning == current_reasoning
+        && previous_store == current_store
+        && previous_stream == current_stream
+        // Stream options control delivery for this response, not the context
+        // referenced by `previous_response_id`.
+        && previous_include == current_include
+        && previous_service_tier == current_service_tier
+        && previous_prompt_cache_key == current_prompt_cache_key
+        && previous_text == current_text
+}
+
+fn response_items_equal_ignoring_internal_metadata(
+    previous: &ResponseItem,
+    current: &ResponseItem,
+) -> bool {
+    if previous == current {
+        return true;
+    }
+
+    let mut previous = previous.clone();
+    previous.clear_internal_chat_message_metadata_passthrough();
+    let mut current = current.clone();
+    current.clear_internal_chat_message_metadata_passthrough();
+    previous == current
+}
+
+impl WebsocketSession {
+    fn set_connection_reused(&self, connection_reused: bool) {
+        *self
+            .connection_reused
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner) = connection_reused;
+    }
+
+    fn connection_reused(&self) -> bool {
+        *self
+            .connection_reused
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+    }
+}
+
+enum WebsocketStreamOutcome {
+    Stream(ResponseStream),
+    FallbackToHttp,
+}
+
+/// Result of opening a WebRTC Realtime call.
+///
+/// The SDP answer goes back to the client. The call id and auth headers stay on the server so the
+/// ordinary Realtime WebSocket machinery can join the same in-progress call as a sideband
+/// controller.
+pub(crate) struct RealtimeWebrtcCallStart {
+    pub(crate) sdp: String,
+    pub(crate) call_id: String,
+    pub(crate) sideband_headers: ApiHeaderMap,
+}
+
+/// Reuses the API-auth material that created the WebRTC call for the sideband WebSocket join.
+///
+/// API-key sessions send that API bearer. ChatGPT-auth sessions send their bearer plus account id;
+/// transceiver is responsible for accepting that same call-create identity on the direct
+/// `api.openai.com` sideband path.
+fn sideband_websocket_auth_headers(api_auth: &dyn AuthProvider) -> ApiHeaderMap {
+    let mut headers = ApiHeaderMap::new();
+    api_auth.add_auth_headers(&mut headers);
+    headers
 }
 
 impl ModelClient {
+    #[allow(clippy::too_many_arguments)]
+    /// Creates a new session-scoped `ModelClient`.
+    ///
+    /// All arguments are expected to be stable for the lifetime of a Codex session. Per-turn values
+    /// are passed to [`ModelClientSession::stream`] (and other turn-scoped methods) explicitly. The
+    /// HTTP client factory must come from the effective session configuration so every transport
+    /// observes the resolved outbound proxy policy.
     pub fn new(
-        config: Arc<Config>,
         auth_manager: Option<Arc<AuthManager>>,
-        otel_event_manager: OtelEventManager,
-        provider: ModelProviderInfo,
-        effort: Option<ReasoningEffortConfig>,
-        summary: ReasoningSummaryConfig,
-        conversation_id: ConversationId,
+        agent_identity_policy: AgentIdentityAuthPolicy,
+        thread_id: ThreadId,
+        provider_info: ModelProviderInfo,
+        session_source: SessionSource,
+        originator: String,
+        model_verbosity: Option<VerbosityConfig>,
+        enable_request_compression: bool,
+        include_timing_metrics: bool,
+        beta_features_header: Option<String>,
+        concurrent_reasoning_summaries_enabled: bool,
+        attestation_provider: Option<Arc<dyn AttestationProvider>>,
+        http_client_factory: HttpClientFactory,
     ) -> Self {
-        let client = create_client();
-
+        let model_provider = create_model_provider(provider_info, auth_manager);
+        let codex_api_key_env_enabled = model_provider
+            .auth_manager()
+            .as_ref()
+            .is_some_and(|manager| manager.codex_api_key_env_enabled());
+        let auth_env_telemetry =
+            collect_auth_env_telemetry(model_provider.info(), codex_api_key_env_enabled);
+        let include_attestation = model_provider.supports_attestation();
         Self {
-            config,
-            auth_manager,
-            otel_event_manager,
-            client,
-            provider,
-            conversation_id,
-            effort,
-            summary,
+            state: Arc::new(ModelClientState {
+                thread_id,
+                provider: model_provider,
+                auth_env_telemetry,
+                session_source,
+                originator,
+                model_verbosity,
+                enable_request_compression,
+                include_timing_metrics,
+                beta_features_header,
+                concurrent_reasoning_summaries_enabled,
+                include_attestation,
+                attestation_provider,
+                disable_websockets: AtomicBool::new(false),
+                agent_identity_session_fallback: AgentIdentitySessionFallback::default(),
+                cached_websocket_session: StdMutex::new(WebsocketSession::default()),
+            }),
+            agent_identity_policy,
+            prompt_cache_key_override: None,
+            http_client_factory,
         }
     }
 
-    pub fn get_model_context_window(&self) -> Option<u64> {
-        self.config
-            .model_context_window
-            .or_else(|| get_model_info(&self.config.model_family).map(|info| info.context_window))
+    pub(crate) fn with_prompt_cache_key_override(
+        mut self,
+        prompt_cache_key_override: Option<String>,
+    ) -> Self {
+        self.prompt_cache_key_override = prompt_cache_key_override;
+        self
     }
 
-    pub fn get_auto_compact_token_limit(&self) -> Option<i64> {
-        self.config.model_auto_compact_token_limit.or_else(|| {
-            get_model_info(&self.config.model_family).and_then(|info| info.auto_compact_token_limit)
-        })
+    fn prompt_cache_key(&self, responses_metadata: &CodexResponsesMetadata) -> String {
+        self.prompt_cache_key_override
+            .clone()
+            .unwrap_or_else(|| responses_metadata.session_id.clone())
     }
 
-    /// Dispatches to either the Responses or Chat implementation depending on
-    /// the provider config.  Public callers always invoke `stream()` – the
-    /// specialised helpers are private to avoid accidental misuse.
-    pub async fn stream(&self, prompt: &Prompt) -> Result<ResponseStream> {
-        match self.provider.wire_api {
-            WireApi::Responses => self.stream_responses(prompt).await,
-            WireApi::Chat => {
-                // Create the raw streaming connection first.
-                let response_stream = stream_chat_completions(
-                    prompt,
-                    &self.config.model_family,
-                    &self.client,
-                    &self.provider,
-                    &self.otel_event_manager,
-                )
-                .await?;
-
-                // Wrap it with the aggregation adapter so callers see *only*
-                // the final assistant message per turn (matching the
-                // behaviour of the Responses API).
-                let mut aggregated = if self.config.show_raw_agent_reasoning {
-                    crate::chat_completions::AggregatedChatStream::streaming_mode(response_stream)
-                } else {
-                    response_stream.aggregate()
-                };
-
-                // Bridge the aggregated stream back into a standard
-                // `ResponseStream` by forwarding events through a channel.
-                let (tx, rx) = mpsc::channel::<Result<ResponseEvent>>(16);
-
-                tokio::spawn(async move {
-                    use futures::StreamExt;
-                    while let Some(ev) = aggregated.next().await {
-                        // Exit early if receiver hung up.
-                        if tx.send(ev).await.is_err() {
-                            break;
-                        }
-                    }
-                });
-
-                Ok(ResponseStream { rx_event: rx })
-            }
+    /// Creates a fresh turn-scoped streaming session.
+    ///
+    /// This constructor does not perform network I/O itself; the session opens a websocket lazily
+    /// when the first stream request is issued.
+    pub fn new_session(&self) -> ModelClientSession {
+        ModelClientSession {
+            client: self.clone(),
+            websocket_session: self.take_cached_websocket_session(),
+            turn_state: Arc::new(OnceLock::new()),
         }
     }
 
-    /// Implementation for the OpenAI *Responses* experimental API.
-    async fn stream_responses(&self, prompt: &Prompt) -> Result<ResponseStream> {
-        if let Some(path) = &*CODEX_RS_SSE_FIXTURE {
-            // short circuit for tests
-            warn!(path, "Streaming from fixture");
-            return stream_from_fixture(
-                path,
-                self.provider.clone(),
-                self.otel_event_manager.clone(),
-            )
-            .await;
+    pub(crate) fn auth_manager(&self) -> Option<Arc<AuthManager>> {
+        self.state.provider.auth_manager()
+    }
+
+    fn take_cached_websocket_session(&self) -> WebsocketSession {
+        let mut cached_websocket_session = self
+            .state
+            .cached_websocket_session
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        std::mem::take(&mut *cached_websocket_session)
+    }
+
+    fn store_cached_websocket_session(&self, websocket_session: WebsocketSession) {
+        *self
+            .state
+            .cached_websocket_session
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner) = websocket_session;
+    }
+
+    pub(crate) fn force_http_fallback(
+        &self,
+        session_telemetry: &SessionTelemetry,
+        _model_info: &ModelInfo,
+    ) -> bool {
+        let websocket_enabled = self.responses_websocket_enabled();
+        let activated =
+            websocket_enabled && !self.state.disable_websockets.swap(true, Ordering::Relaxed);
+        if activated {
+            warn!("falling back to HTTP");
+            session_telemetry.counter(
+                "codex.transport.fallback_to_http",
+                /*inc*/ 1,
+                &[("from_wire_api", "responses_websocket")],
+            );
         }
 
-        let auth_manager = self.auth_manager.clone();
+        self.store_cached_websocket_session(WebsocketSession::default());
+        activated
+    }
 
-        let full_instructions = prompt.get_full_instructions(&self.config.model_family);
-        let tools_json = create_tools_json_for_responses_api(&prompt.tools)?;
-        let reasoning = create_reasoning_param_for_request(
-            &self.config.model_family,
-            self.effort,
-            self.summary,
+    /// Compacts the current conversation history using the Compact endpoint.
+    ///
+    /// This is a unary call (no streaming) that returns a new list of
+    /// `ResponseItem`s representing the compacted transcript.
+    ///
+    /// The model selection and telemetry context are passed explicitly to keep `ModelClient`
+    /// session-scoped.
+    #[allow(clippy::too_many_arguments)]
+    pub(crate) async fn compact_conversation_history(
+        &self,
+        prompt: &Prompt,
+        model_info: &ModelInfo,
+        turn_state: Option<Arc<OnceLock<String>>>,
+        settings: CompactConversationRequestSettings,
+        session_telemetry: &SessionTelemetry,
+        compaction_trace: &CompactionTraceContext,
+        responses_metadata: &CodexResponsesMetadata,
+    ) -> Result<Vec<ResponseItem>> {
+        if prompt.input.is_empty() {
+            return Ok(Vec::new());
+        }
+        let client_setup = self.current_client_setup().await?;
+        let transport =
+            self.build_api_transport(&client_setup.api_provider, RESPONSES_COMPACT_ENDPOINT)?;
+        let request_telemetry = Self::build_request_telemetry(
+            session_telemetry,
+            AuthRequestTelemetryContext::new(
+                client_setup.auth.as_ref().map(CodexAuth::auth_mode),
+                client_setup.api_auth.as_ref(),
+                client_setup.agent_identity_telemetry.clone(),
+                PendingUnauthorizedRetry::default(),
+            ),
+            RequestRouteTelemetry::for_endpoint(RESPONSES_COMPACT_ENDPOINT),
+            self.state.auth_env_telemetry.clone(),
         );
-
-        let include: Vec<String> = if reasoning.is_some() {
-            vec!["reasoning.encrypted_content".to_string()]
-        } else {
-            vec![]
-        };
-
-        let input_with_instructions = prompt.get_formatted_input();
-
-        let verbosity = match &self.config.model_family.family {
-            family if family == "gpt-5" => self.config.model_verbosity,
-            _ => {
-                if self.config.model_verbosity.is_some() {
-                    warn!(
-                        "model_verbosity is set but ignored for non-gpt-5 model family: {}",
-                        self.config.model_family.family
-                    );
-                }
-
-                None
-            }
-        };
-
-        // Only include `text.verbosity` for GPT-5 family models
-        let text = create_text_param_for_request(verbosity, &prompt.output_schema);
-
-        // In general, we want to explicitly send `store: false` when using the Responses API,
-        // but in practice, the Azure Responses API rejects `store: false`:
-        //
-        // - If store = false and id is sent an error is thrown that ID is not found
-        // - If store = false and id is not sent an error is thrown that ID is required
-        //
-        // For Azure, we send `store: true` and preserve reasoning item IDs.
-        let azure_workaround = self.provider.is_azure_responses_endpoint();
-
-        let payload = ResponsesApiRequest {
-            model: &self.config.model,
-            instructions: &full_instructions,
-            input: &input_with_instructions,
-            tools: &tools_json,
-            tool_choice: "auto",
-            parallel_tool_calls: prompt.parallel_tool_calls,
+        let request = self.build_responses_request(
+            &client_setup.api_provider,
+            prompt,
+            model_info,
+            settings.effort,
+            settings.summary,
+            settings.service_tier,
+            responses_metadata,
+        )?;
+        let ResponsesApiRequest {
+            model,
+            instructions,
+            mut input,
+            tools,
+            parallel_tool_calls,
             reasoning,
-            store: azure_workaround,
-            stream: true,
-            include,
-            prompt_cache_key: Some(self.conversation_id.to_string()),
+            service_tier,
+            prompt_cache_key,
+            text,
+            ..
+        } = request;
+        self.prepare_response_items_for_request(&mut input);
+        let payload = ApiCompactionInput {
+            model: &model,
+            input: &input,
+            instructions: &instructions,
+            tools,
+            parallel_tool_calls,
+            reasoning,
+            service_tier: service_tier.as_deref(),
+            prompt_cache_key: prompt_cache_key.as_deref(),
             text,
         };
 
-        let mut payload_json = serde_json::to_value(&payload)?;
-        if azure_workaround {
-            attach_item_ids(&mut payload_json, &input_with_instructions);
+        let mut extra_headers = ApiHeaderMap::new();
+        if let Ok(header_value) = HeaderValue::from_str(&responses_metadata.installation_id) {
+            extra_headers.insert(X_CODEX_INSTALLATION_ID_HEADER, header_value);
         }
-
-        let max_attempts = self.provider.request_max_retries();
-        for attempt in 0..=max_attempts {
-            match self
-                .attempt_stream_responses(attempt, &payload_json, &auth_manager)
-                .await
-            {
-                Ok(stream) => {
-                    return Ok(stream);
-                }
-                Err(StreamAttemptError::Fatal(e)) => {
-                    return Err(e);
-                }
-                Err(retryable_attempt_error) => {
-                    if attempt == max_attempts {
-                        return Err(retryable_attempt_error.into_error());
-                    }
-
-                    tokio::time::sleep(retryable_attempt_error.delay(attempt)).await;
-                }
-            }
+        extra_headers.extend(build_responses_headers(
+            self.state.beta_features_header.as_deref(),
+            turn_state.as_ref(),
+        ));
+        add_originator_header(&mut extra_headers, self.state.originator.as_str());
+        extra_headers.extend(self.build_responses_compatibility_headers(responses_metadata));
+        extra_headers.extend(build_session_headers(
+            Some(responses_metadata.session_id.to_string()),
+            Some(responses_metadata.thread_id.to_string()),
+        ));
+        if let Some(header_value) = self.generate_attestation_header_for().await {
+            extra_headers.insert(X_OAI_ATTESTATION_HEADER, header_value);
         }
-
-        unreachable!("stream_responses_attempt should always return");
+        add_responses_lite_header(&mut extra_headers, model_info.use_responses_lite);
+        let compact_request_timeout = client_setup
+            .api_provider
+            .stream_idle_timeout
+            .saturating_mul(COMPACT_REQUEST_TIMEOUT_IDLE_MULTIPLIER);
+        let client =
+            ApiCompactClient::new(transport, client_setup.api_provider, client_setup.api_auth)
+                .with_telemetry(Some(request_telemetry));
+        let trace_attempt = compaction_trace.start_attempt(&payload);
+        let result = client
+            .compact_input(
+                &payload,
+                extra_headers,
+                compact_request_timeout,
+                turn_state.as_deref(),
+            )
+            .await
+            .map_err(|error| self.state.provider.map_api_error(error));
+        trace_attempt.record_result(result.as_deref());
+        result
     }
 
-    /// Single attempt to start a streaming Responses API call.
-    async fn attempt_stream_responses(
+    pub(crate) async fn create_realtime_call_with_headers(
         &self,
-        attempt: u64,
-        payload_json: &Value,
-        auth_manager: &Option<Arc<AuthManager>>,
-    ) -> std::result::Result<ResponseStream, StreamAttemptError> {
-        // Always fetch the latest auth in case a prior attempt refreshed the token.
-        let auth = auth_manager.as_ref().and_then(|m| m.auth());
-
-        trace!(
-            "POST to {}: {:?}",
-            self.provider.get_full_url(&auth),
-            serde_json::to_string(payload_json)
-        );
-
-        let mut req_builder = self
-            .provider
-            .create_request_builder(&self.client, &auth)
+        sdp: String,
+        session_config: ApiRealtimeSessionConfig,
+        mut extra_headers: ApiHeaderMap,
+        api_provider_override: Option<ApiProvider>,
+    ) -> Result<RealtimeWebrtcCallStart> {
+        // Create the media call over HTTP first, then retain matching auth so realtime can attach
+        // the server-side control WebSocket to the call id from that HTTP response.
+        let client_setup = self.current_client_setup().await?;
+        if let Some(header_value) = self.generate_attestation_header_for().await {
+            extra_headers.insert(X_OAI_ATTESTATION_HEADER, header_value);
+        }
+        let mut sideband_headers = extra_headers.clone();
+        sideband_headers.extend(sideband_websocket_auth_headers(
+            client_setup.api_auth.as_ref(),
+        ));
+        let api_provider = api_provider_override.unwrap_or(client_setup.api_provider);
+        let transport = self.build_api_transport(&api_provider, REALTIME_CALLS_ENDPOINT)?;
+        let response = ApiRealtimeCallClient::new(transport, api_provider, client_setup.api_auth)
+            .create_with_session_and_headers(sdp, session_config, extra_headers)
             .await
-            .map_err(StreamAttemptError::Fatal)?;
+            .map_err(|error| self.state.provider.map_api_error(error))?;
+        Ok(RealtimeWebrtcCallStart {
+            sdp: response.sdp,
+            call_id: response.call_id,
+            sideband_headers,
+        })
+    }
 
-        req_builder = req_builder
-            .header("OpenAI-Beta", "responses=experimental")
-            // Send session_id for compatibility.
-            .header("conversation_id", self.conversation_id.to_string())
-            .header("session_id", self.conversation_id.to_string())
-            .header(reqwest::header::ACCEPT, "text/event-stream")
-            .json(payload_json);
-
-        if let Some(auth) = auth.as_ref()
-            && auth.mode == AuthMode::ChatGPT
-            && let Some(account_id) = auth.get_account_id()
-        {
-            req_builder = req_builder.header("chatgpt-account-id", account_id);
+    /// Builds memory summaries for each provided normalized raw memory.
+    ///
+    /// This is a unary call (no streaming) to `/v1/memories/trace_summarize`.
+    ///
+    /// The model selection, reasoning effort, and telemetry context are passed explicitly to keep
+    /// `ModelClient` session-scoped.
+    pub async fn summarize_memories(
+        &self,
+        raw_memories: Vec<ApiRawMemory>,
+        model_info: &ModelInfo,
+        effort: Option<ReasoningEffortConfig>,
+        session_telemetry: &SessionTelemetry,
+    ) -> Result<Vec<ApiMemorySummarizeOutput>> {
+        if raw_memories.is_empty() {
+            return Ok(Vec::new());
         }
 
-        let res = self
-            .otel_event_manager
-            .log_request(attempt, || req_builder.send())
-            .await;
+        let client_setup = self.current_client_setup().await?;
+        let transport =
+            self.build_api_transport(&client_setup.api_provider, MEMORIES_SUMMARIZE_ENDPOINT)?;
+        let request_telemetry = Self::build_request_telemetry(
+            session_telemetry,
+            AuthRequestTelemetryContext::new(
+                client_setup.auth.as_ref().map(CodexAuth::auth_mode),
+                client_setup.api_auth.as_ref(),
+                client_setup.agent_identity_telemetry.clone(),
+                PendingUnauthorizedRetry::default(),
+            ),
+            RequestRouteTelemetry::for_endpoint(MEMORIES_SUMMARIZE_ENDPOINT),
+            self.state.auth_env_telemetry.clone(),
+        );
+        let client =
+            ApiMemoriesClient::new(transport, client_setup.api_provider, client_setup.api_auth)
+                .with_telemetry(Some(request_telemetry));
 
-        let mut request_id = None;
-        if let Ok(resp) = &res {
-            request_id = resp
-                .headers()
-                .get("cf-ray")
-                .map(|v| v.to_str().unwrap_or_default().to_string());
+        let payload = ApiMemorySummarizeInput {
+            model: model_info.slug.clone(),
+            raw_memories,
+            reasoning: effort
+                .map(reasoning_effort_for_request)
+                .map(|effort| Reasoning {
+                    effort: Some(effort),
+                    summary: None,
+                    context: None,
+                }),
+        };
 
-            trace!(
-                "Response status: {}, cf-ray: {:?}",
-                resp.status(),
-                request_id
+        client
+            .summarize_input(&payload, self.build_subagent_headers())
+            .await
+            .map_err(|error| self.state.provider.map_api_error(error))
+    }
+
+    fn build_subagent_headers(&self) -> ApiHeaderMap {
+        let mut extra_headers = ApiHeaderMap::new();
+        add_originator_header(&mut extra_headers, self.state.originator.as_str());
+        if let Some(subagent) = subagent_header_value(&self.state.session_source)
+            && let Ok(val) = HeaderValue::from_str(&subagent)
+        {
+            extra_headers.insert(X_OPENAI_SUBAGENT_HEADER, val);
+        }
+        if matches!(
+            self.state.session_source,
+            SessionSource::Internal(InternalSessionSource::MemoryConsolidation)
+        ) {
+            extra_headers.insert(
+                X_OPENAI_MEMGEN_REQUEST_HEADER,
+                HeaderValue::from_static("true"),
             );
         }
+        extra_headers
+    }
 
-        match res {
-            Ok(resp) if resp.status().is_success() => {
-                let (tx_event, rx_event) = mpsc::channel::<Result<ResponseEvent>>(1600);
+    fn build_responses_compatibility_headers(
+        &self,
+        responses_metadata: &CodexResponsesMetadata,
+    ) -> ApiHeaderMap {
+        let mut extra_headers = responses_metadata.compatibility_headers();
+        if matches!(
+            self.state.session_source,
+            SessionSource::Internal(InternalSessionSource::MemoryConsolidation)
+        ) {
+            extra_headers.insert(
+                X_OPENAI_MEMGEN_REQUEST_HEADER,
+                HeaderValue::from_static("true"),
+            );
+        }
+        extra_headers
+    }
 
-                if let Some(snapshot) = parse_rate_limit_snapshot(resp.headers())
-                    && tx_event
-                        .send(Ok(ResponseEvent::RateLimits(snapshot)))
-                        .await
-                        .is_err()
+    fn build_ws_client_metadata(
+        &self,
+        responses_metadata: &CodexResponsesMetadata,
+        use_responses_lite: bool,
+    ) -> HashMap<String, String> {
+        let mut client_metadata = responses_metadata.client_metadata();
+        if use_responses_lite {
+            client_metadata.insert(
+                WS_REQUEST_HEADER_RESPONSES_LITE_CLIENT_METADATA_KEY.to_string(),
+                "true".to_string(),
+            );
+        }
+        client_metadata
+    }
+
+    async fn generate_attestation_header_for(&self) -> Option<HeaderValue> {
+        if !self.state.include_attestation {
+            return None;
+        }
+
+        self.state
+            .attestation_provider
+            .as_ref()?
+            .header_for_request(AttestationContext {
+                thread_id: self.state.thread_id,
+            })
+            .await
+    }
+
+    /// Builds request telemetry for unary API calls (e.g., Compact endpoint).
+    fn build_request_telemetry(
+        session_telemetry: &SessionTelemetry,
+        auth_context: AuthRequestTelemetryContext,
+        request_route_telemetry: RequestRouteTelemetry,
+        auth_env_telemetry: AuthEnvTelemetry,
+    ) -> Arc<dyn RequestTelemetry> {
+        let telemetry = Arc::new(ApiTelemetry::new(
+            session_telemetry.clone(),
+            auth_context,
+            request_route_telemetry,
+            auth_env_telemetry,
+        ));
+        let request_telemetry: Arc<dyn RequestTelemetry> = telemetry;
+        request_telemetry
+    }
+
+    fn build_reasoning(
+        model_info: &ModelInfo,
+        effort: Option<ReasoningEffortConfig>,
+        summary: ReasoningSummaryConfig,
+    ) -> Reasoning {
+        Reasoning {
+            effort: effort
+                .or_else(|| model_info.default_reasoning_level.clone())
+                .map(reasoning_effort_for_request),
+            summary: (model_info.supports_reasoning_summary_parameter
+                && summary != ReasoningSummaryConfig::None)
+                .then_some(summary),
+            // When Responses Lite is disabled, omit context so Responses uses the default,
+            // which is currently `current_turn`.
+            context: model_info
+                .use_responses_lite
+                .then_some(ReasoningContext::AllTurns),
+        }
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    fn build_responses_request(
+        &self,
+        provider: &codex_api::Provider,
+        prompt: &Prompt,
+        model_info: &ModelInfo,
+        effort: Option<ReasoningEffortConfig>,
+        summary: ReasoningSummaryConfig,
+        service_tier: Option<String>,
+        responses_metadata: &CodexResponsesMetadata,
+    ) -> Result<ResponsesApiRequest> {
+        let mut input = prompt.get_formatted_input_for_request(model_info.use_responses_lite);
+        let is_openai = self.state.provider.info().is_openai();
+        if !is_openai {
+            for item in &mut input {
+                item.clear_internal_chat_message_metadata_passthrough();
+                if let ResponseItem::FunctionCall {
+                    encrypted_function_args,
+                    ..
+                } = item
                 {
-                    debug!("receiver dropped rate limit snapshot event");
+                    *encrypted_function_args = None;
                 }
-
-                // spawn task to process SSE
-                let stream = resp.bytes_stream().map_err(CodexErr::Reqwest);
-                tokio::spawn(process_sse(
-                    stream,
-                    tx_event,
-                    self.provider.stream_idle_timeout(),
-                    self.otel_event_manager.clone(),
-                ));
-
-                Ok(ResponseStream { rx_event })
             }
-            Ok(res) => {
-                let status = res.status();
-
-                // Pull out Retry‑After header if present.
-                let retry_after_secs = res
-                    .headers()
-                    .get(reqwest::header::RETRY_AFTER)
-                    .and_then(|v| v.to_str().ok())
-                    .and_then(|s| s.parse::<u64>().ok());
-                let retry_after = retry_after_secs.map(|s| Duration::from_millis(s * 1_000));
-
-                if status == StatusCode::UNAUTHORIZED
-                    && let Some(manager) = auth_manager.as_ref()
-                    && manager.auth().is_some()
-                {
-                    let _ = manager.refresh_token().await;
-                }
-
-                // The OpenAI Responses endpoint returns structured JSON bodies even for 4xx/5xx
-                // errors. When we bubble early with only the HTTP status the caller sees an opaque
-                // "unexpected status 400 Bad Request" which makes debugging nearly impossible.
-                // Instead, read (and include) the response text so higher layers and users see the
-                // exact error message (e.g. "Unknown parameter: 'input[0].metadata'"). The body is
-                // small and this branch only runs on error paths so the extra allocation is
-                // negligible.
-                if !(status == StatusCode::TOO_MANY_REQUESTS
-                    || status == StatusCode::UNAUTHORIZED
-                    || status.is_server_error())
-                {
-                    // Surface the error body to callers. Use `unwrap_or_default` per Clippy.
-                    let body = res.text().await.unwrap_or_default();
-                    return Err(StreamAttemptError::Fatal(CodexErr::UnexpectedStatus(
-                        UnexpectedResponseError {
-                            status,
-                            body,
-                            request_id: None,
-                        },
-                    )));
-                }
-
-                if status == StatusCode::TOO_MANY_REQUESTS {
-                    let rate_limit_snapshot = parse_rate_limit_snapshot(res.headers());
-                    let body = res.json::<ErrorResponse>().await.ok();
-                    if let Some(ErrorResponse { error }) = body {
-                        if error.r#type.as_deref() == Some("usage_limit_reached") {
-                            // Prefer the plan_type provided in the error message if present
-                            // because it's more up to date than the one encoded in the auth
-                            // token.
-                            let plan_type = error
-                                .plan_type
-                                .or_else(|| auth.as_ref().and_then(CodexAuth::get_plan_type));
-                            let resets_in_seconds = error.resets_in_seconds;
-                            let codex_err = CodexErr::UsageLimitReached(UsageLimitReachedError {
-                                plan_type,
-                                resets_in_seconds,
-                                rate_limits: rate_limit_snapshot,
-                            });
-                            return Err(StreamAttemptError::Fatal(codex_err));
-                        } else if error.r#type.as_deref() == Some("usage_not_included") {
-                            return Err(StreamAttemptError::Fatal(CodexErr::UsageNotIncluded));
-                        }
-                    }
-                }
-
-                Err(StreamAttemptError::RetryableHttpError {
-                    status,
-                    retry_after,
-                    request_id,
-                })
-            }
-            Err(e) => Err(StreamAttemptError::RetryableTransportError(e.into())),
         }
-    }
-
-    pub fn get_provider(&self) -> ModelProviderInfo {
-        self.provider.clone()
-    }
-
-    pub fn get_otel_event_manager(&self) -> OtelEventManager {
-        self.otel_event_manager.clone()
-    }
-
-    /// Returns the currently configured model slug.
-    pub fn get_model(&self) -> String {
-        self.config.model.clone()
-    }
-
-    /// Returns the currently configured model family.
-    pub fn get_model_family(&self) -> ModelFamily {
-        self.config.model_family.clone()
-    }
-
-    /// Returns the current reasoning effort setting.
-    pub fn get_reasoning_effort(&self) -> Option<ReasoningEffortConfig> {
-        self.effort
-    }
-
-    /// Returns the current reasoning summary setting.
-    pub fn get_reasoning_summary(&self) -> ReasoningSummaryConfig {
-        self.summary
-    }
-
-    pub fn get_auth_manager(&self) -> Option<Arc<AuthManager>> {
-        self.auth_manager.clone()
-    }
-}
-
-enum StreamAttemptError {
-    RetryableHttpError {
-        status: StatusCode,
-        retry_after: Option<Duration>,
-        request_id: Option<String>,
-    },
-    RetryableTransportError(CodexErr),
-    Fatal(CodexErr),
-}
-
-impl StreamAttemptError {
-    /// attempt is 0-based.
-    fn delay(&self, attempt: u64) -> Duration {
-        // backoff() uses 1-based attempts.
-        let backoff_attempt = attempt + 1;
-        match self {
-            Self::RetryableHttpError { retry_after, .. } => {
-                retry_after.unwrap_or_else(|| backoff(backoff_attempt))
+        let (instructions, tools) = if model_info.use_responses_lite {
+            let tools = if self.state.provider.capabilities().namespace_tools {
+                create_tools_json_for_responses_lite(&prompt.tools)?
+            } else {
+                create_tools_json_for_responses_api(&prompt.tools)?
+            };
+            let mut prefix = vec![ResponseItem::AdditionalTools {
+                id: None,
+                role: "developer".to_string(),
+                tools,
+            }];
+            if !prompt.base_instructions.text.is_empty() {
+                prefix.push(ResponseItem::Message {
+                    id: None,
+                    role: "developer".to_string(),
+                    content: vec![ContentItem::InputText {
+                        text: prompt.base_instructions.text.clone(),
+                    }],
+                    phase: None,
+                    internal_chat_message_metadata_passthrough: None,
+                });
             }
-            Self::RetryableTransportError { .. } => backoff(backoff_attempt),
-            Self::Fatal(_) => {
-                // Should not be called on Fatal errors.
-                Duration::from_secs(0)
+            input.splice(0..0, prefix);
+            (String::new(), None)
+        } else {
+            (
+                prompt.base_instructions.text.clone(),
+                Some(create_tools_raw_json_for_responses_api(&prompt.tools)?.into()),
+            )
+        };
+        let reasoning = Self::build_reasoning(model_info, effort, summary);
+        let stream_options = (self.state.concurrent_reasoning_summaries_enabled
+            && is_openai
+            && reasoning.summary.is_some())
+        .then_some(StreamOptions {
+            reasoning_summary_delivery: codex_api::ReasoningSummaryDelivery::SequentialCutoff,
+        });
+        let include = vec!["reasoning.encrypted_content".to_string()];
+        let verbosity = if model_info.support_verbosity {
+            self.state.model_verbosity.or(model_info.default_verbosity)
+        } else {
+            if self.state.model_verbosity.is_some() {
+                warn!(
+                    "model_verbosity is set but ignored as the model does not support verbosity: {}",
+                    model_info.slug
+                );
+            }
+            None
+        };
+        let text = create_text_param_for_request(
+            verbosity,
+            &prompt.output_schema,
+            prompt.output_schema_strict,
+        );
+        let prompt_cache_key = Some(self.prompt_cache_key(responses_metadata));
+        let service_tier = model_info.service_tier_for_request(service_tier);
+        let request = ResponsesApiRequest {
+            model: model_info.slug.clone(),
+            instructions,
+            input,
+            tools,
+            tool_choice: "auto".to_string(),
+            parallel_tool_calls: prompt.parallel_tool_calls && !model_info.use_responses_lite,
+            reasoning: Some(reasoning),
+            store: provider.is_azure_responses_endpoint(),
+            stream: true,
+            stream_options,
+            include,
+            service_tier,
+            prompt_cache_key,
+            text,
+            client_metadata: Some(responses_metadata.client_metadata()),
+        };
+        Ok(request)
+    }
+
+    fn prepare_response_items_for_request(&self, input: &mut [ResponseItem]) {
+        for item in input {
+            if item.id().is_some_and(|id| !id.is_prefixed()) {
+                item.set_id(/*new_id*/ None);
             }
         }
     }
 
-    fn into_error(self) -> CodexErr {
-        match self {
-            Self::RetryableHttpError {
-                status, request_id, ..
-            } => {
-                if status == StatusCode::INTERNAL_SERVER_ERROR {
-                    CodexErr::InternalServerError
-                } else {
-                    CodexErr::RetryLimit(RetryLimitReachedError { status, request_id })
-                }
-            }
-            Self::RetryableTransportError(error) => error,
-            Self::Fatal(error) => error,
-        }
-    }
-}
-
-#[derive(Debug, Deserialize, Serialize)]
-struct SseEvent {
-    #[serde(rename = "type")]
-    kind: String,
-    response: Option<Value>,
-    item: Option<Value>,
-    delta: Option<String>,
-}
-
-#[derive(Debug, Deserialize)]
-struct ResponseCompleted {
-    id: String,
-    usage: Option<ResponseCompletedUsage>,
-}
-
-#[derive(Debug, Deserialize)]
-struct ResponseCompletedUsage {
-    input_tokens: u64,
-    input_tokens_details: Option<ResponseCompletedInputTokensDetails>,
-    output_tokens: u64,
-    output_tokens_details: Option<ResponseCompletedOutputTokensDetails>,
-    total_tokens: u64,
-}
-
-impl From<ResponseCompletedUsage> for TokenUsage {
-    fn from(val: ResponseCompletedUsage) -> Self {
-        TokenUsage {
-            input_tokens: val.input_tokens,
-            cached_input_tokens: val
-                .input_tokens_details
-                .map(|d| d.cached_tokens)
-                .unwrap_or(0),
-            output_tokens: val.output_tokens,
-            reasoning_output_tokens: val
-                .output_tokens_details
-                .map(|d| d.reasoning_tokens)
-                .unwrap_or(0),
-            total_tokens: val.total_tokens,
-        }
-    }
-}
-
-#[derive(Debug, Deserialize)]
-struct ResponseCompletedInputTokensDetails {
-    cached_tokens: u64,
-}
-
-#[derive(Debug, Deserialize)]
-struct ResponseCompletedOutputTokensDetails {
-    reasoning_tokens: u64,
-}
-
-fn attach_item_ids(payload_json: &mut Value, original_items: &[ResponseItem]) {
-    let Some(input_value) = payload_json.get_mut("input") else {
-        return;
-    };
-    let serde_json::Value::Array(items) = input_value else {
-        return;
-    };
-
-    for (value, item) in items.iter_mut().zip(original_items.iter()) {
-        if let ResponseItem::Reasoning { id, .. }
-        | ResponseItem::Message { id: Some(id), .. }
-        | ResponseItem::WebSearchCall { id: Some(id), .. }
-        | ResponseItem::FunctionCall { id: Some(id), .. }
-        | ResponseItem::LocalShellCall { id: Some(id), .. }
-        | ResponseItem::CustomToolCall { id: Some(id), .. } = item
+    /// Returns whether the Responses-over-WebSocket transport is active for this session.
+    ///
+    /// WebSocket use is controlled by provider capability and session-scoped fallback state.
+    pub fn responses_websocket_enabled(&self) -> bool {
+        if !self.state.provider.info().supports_websockets
+            || self.state.disable_websockets.load(Ordering::Relaxed)
         {
-            if id.is_empty() {
-                continue;
-            }
-
-            if let Some(obj) = value.as_object_mut() {
-                obj.insert("id".to_string(), Value::String(id.clone()));
-            }
+            return false;
         }
+
+        true
+    }
+
+    /// Returns auth + provider configuration resolved from the current session auth state.
+    ///
+    /// This centralizes setup used by both prewarm and normal request paths so they stay in
+    /// lockstep when auth/provider resolution changes.
+    async fn current_client_setup(&self) -> Result<CurrentClientSetup> {
+        let auth = self.state.provider.auth().await;
+        let api_provider = self.state.provider.api_provider().await?;
+        let resolved_auth = self
+            .state
+            .provider
+            .api_auth_for_scope(ProviderAuthScope {
+                agent_identity_policy: self.agent_identity_policy,
+                session_source: self.state.session_source.clone(),
+                agent_identity_session_fallback: self.state.agent_identity_session_fallback.clone(),
+            })
+            .await?;
+        Ok(CurrentClientSetup {
+            auth,
+            api_provider,
+            api_auth: resolved_auth.auth,
+            agent_identity_telemetry: resolved_auth.agent_identity_telemetry,
+        })
+    }
+
+    fn build_api_transport(
+        &self,
+        api_provider: &ApiProvider,
+        endpoint: &str,
+    ) -> Result<ReqwestTransport> {
+        let request_url = api_provider.url_for_path(endpoint);
+        let client = create_client_for_route(
+            &self.http_client_factory,
+            &request_url,
+            ClientRouteClass::Api,
+        )
+        .map_err(std::io::Error::from)?;
+        Ok(ReqwestTransport::from_http_client(client))
+    }
+
+    pub(crate) async fn prewarm_auth(&self) -> Result<()> {
+        self.current_client_setup().await.map(|_| ())
+    }
+
+    /// Opens a websocket connection using the same header and telemetry wiring as normal turns.
+    ///
+    /// Both startup prewarm and in-turn `needs_new` reconnects call this path so handshake
+    /// behavior remains consistent across both flows.
+    #[allow(clippy::too_many_arguments)]
+    async fn connect_websocket(
+        &self,
+        session_telemetry: &SessionTelemetry,
+        api_provider: codex_api::Provider,
+        api_auth: SharedAuthProvider,
+        responses_metadata: &CodexResponsesMetadata,
+        auth_context: AuthRequestTelemetryContext,
+        request_route_telemetry: RequestRouteTelemetry,
+    ) -> std::result::Result<ApiWebSocketConnection, ApiError> {
+        let headers = self.build_websocket_headers(responses_metadata).await;
+        let websocket_telemetry = ModelClientSession::build_websocket_telemetry(
+            session_telemetry,
+            auth_context.clone(),
+            request_route_telemetry,
+            self.state.auth_env_telemetry.clone(),
+        );
+        let websocket_connect_timeout = self.state.provider.info().websocket_connect_timeout();
+        let start = Instant::now();
+        let result = match tokio::time::timeout(
+            websocket_connect_timeout,
+            ApiWebSocketResponsesClient::new(api_provider, api_auth).connect(
+                &self.http_client_factory,
+                headers,
+                codex_login::default_client::default_headers(),
+                /*turn_state*/ None,
+                Some(websocket_telemetry),
+            ),
+        )
+        .await
+        {
+            Ok(result) => result,
+            Err(_) => Err(ApiError::Transport(TransportError::Timeout)),
+        };
+        let error_message = result.as_ref().err().map(telemetry_api_error_message);
+        let response_debug = result
+            .as_ref()
+            .err()
+            .map(extract_response_debug_context_from_api_error)
+            .unwrap_or_default();
+        let status = result.as_ref().err().and_then(api_error_http_status);
+        session_telemetry.record_websocket_connect(
+            start.elapsed(),
+            status,
+            error_message.as_deref(),
+            auth_context.auth_header_attached,
+            auth_context.auth_header_name,
+            auth_context.retry_after_unauthorized,
+            auth_context.recovery_mode,
+            auth_context.recovery_phase,
+            request_route_telemetry.endpoint,
+            /*connection_reused*/ false,
+            response_debug.request_id.as_deref(),
+            response_debug.cf_ray.as_deref(),
+            response_debug.auth_error.as_deref(),
+            response_debug.auth_error_code.as_deref(),
+            auth_context.agent_identity_telemetry(),
+        );
+        emit_feedback_request_tags_with_auth_env(
+            &FeedbackRequestTags {
+                endpoint: request_route_telemetry.endpoint,
+                auth_header_attached: auth_context.auth_header_attached,
+                auth_header_name: auth_context.auth_header_name,
+                auth_mode: auth_context.auth_mode,
+                auth_retry_after_unauthorized: Some(auth_context.retry_after_unauthorized),
+                auth_recovery_mode: auth_context.recovery_mode,
+                auth_recovery_phase: auth_context.recovery_phase,
+                auth_connection_reused: Some(false),
+                auth_request_id: response_debug.request_id.as_deref(),
+                auth_cf_ray: response_debug.cf_ray.as_deref(),
+                auth_error: response_debug.auth_error.as_deref(),
+                auth_error_code: response_debug.auth_error_code.as_deref(),
+                auth_recovery_followup_success: auth_context
+                    .retry_after_unauthorized
+                    .then_some(result.is_ok()),
+                auth_recovery_followup_status: auth_context
+                    .retry_after_unauthorized
+                    .then_some(status)
+                    .flatten(),
+            },
+            &self.state.auth_env_telemetry,
+        );
+        result
+    }
+
+    /// Builds websocket handshake headers for both prewarm and turn-time reconnect.
+    async fn build_websocket_headers(
+        &self,
+        responses_metadata: &CodexResponsesMetadata,
+    ) -> ApiHeaderMap {
+        let mut headers = build_responses_headers(
+            self.state.beta_features_header.as_deref(),
+            /*turn_state*/ None,
+        );
+        add_originator_header(&mut headers, self.state.originator.as_str());
+        if let Ok(header_value) = HeaderValue::from_str(&responses_metadata.thread_id) {
+            headers.insert("x-client-request-id", header_value);
+        }
+        headers.extend(build_session_headers(
+            Some(responses_metadata.session_id.to_string()),
+            Some(responses_metadata.thread_id.to_string()),
+        ));
+        headers.extend(self.build_responses_compatibility_headers(responses_metadata));
+        if let Some(header_value) = self.generate_attestation_header_for().await {
+            headers.insert(X_OAI_ATTESTATION_HEADER, header_value);
+        }
+        headers.insert(
+            OPENAI_BETA_HEADER,
+            HeaderValue::from_static(RESPONSES_WEBSOCKETS_V2_BETA_HEADER_VALUE),
+        );
+        if self.state.include_timing_metrics {
+            headers.insert(
+                X_RESPONSESAPI_INCLUDE_TIMING_METRICS_HEADER,
+                HeaderValue::from_static("true"),
+            );
+        }
+        headers
     }
 }
 
-fn parse_rate_limit_snapshot(headers: &HeaderMap) -> Option<RateLimitSnapshot> {
-    let primary = parse_rate_limit_window(
-        headers,
-        "x-codex-primary-used-percent",
-        "x-codex-primary-window-minutes",
-        "x-codex-primary-reset-after-seconds",
-    );
-
-    let secondary = parse_rate_limit_window(
-        headers,
-        "x-codex-secondary-used-percent",
-        "x-codex-secondary-window-minutes",
-        "x-codex-secondary-reset-after-seconds",
-    );
-
-    Some(RateLimitSnapshot { primary, secondary })
+impl Drop for ModelClientSession {
+    fn drop(&mut self) {
+        let websocket_session = std::mem::take(&mut self.websocket_session);
+        self.client
+            .store_cached_websocket_session(websocket_session);
+    }
 }
 
-fn parse_rate_limit_window(
-    headers: &HeaderMap,
-    used_percent_header: &str,
-    window_minutes_header: &str,
-    resets_header: &str,
-) -> Option<RateLimitWindow> {
-    let used_percent: Option<f64> = parse_header_f64(headers, used_percent_header);
+impl ModelClientSession {
+    pub(crate) fn turn_state(&self) -> Arc<OnceLock<String>> {
+        Arc::clone(&self.turn_state)
+    }
 
-    used_percent.and_then(|used_percent| {
-        let window_minutes = parse_header_u64(headers, window_minutes_header);
-        let resets_in_seconds = parse_header_u64(headers, resets_header);
+    fn reset_websocket_session(&mut self) {
+        self.websocket_session.connection = None;
+        self.websocket_session.last_request = None;
+        self.websocket_session.last_response_rx = None;
+        self.websocket_session.last_response_from_untraced_warmup = false;
+        self.websocket_session
+            .set_connection_reused(/*connection_reused*/ false);
+    }
 
-        let has_data = used_percent != 0.0
-            || window_minutes.is_some_and(|minutes| minutes != 0)
-            || resets_in_seconds.is_some_and(|seconds| seconds != 0);
+    #[allow(clippy::too_many_arguments)]
+    /// Builds shared Responses API transport options and request-body options.
+    ///
+    /// Keeping option construction in one place ensures request-scoped headers are consistent
+    /// regardless of transport choice.
+    async fn build_responses_options(
+        &self,
+        responses_metadata: &CodexResponsesMetadata,
+        compression: Compression,
+        use_responses_lite: bool,
+    ) -> ApiResponsesOptions {
+        ApiResponsesOptions {
+            session_id: Some(responses_metadata.session_id.to_string()),
+            thread_id: Some(responses_metadata.thread_id.to_string()),
+            session_source: Some(self.client.state.session_source.clone()),
+            extra_headers: {
+                let mut headers = build_responses_headers(
+                    self.client.state.beta_features_header.as_deref(),
+                    Some(&self.turn_state),
+                );
+                add_originator_header(&mut headers, self.client.state.originator.as_str());
+                headers.extend(
+                    self.client
+                        .build_responses_compatibility_headers(responses_metadata),
+                );
+                if let Some(header_value) = self.client.generate_attestation_header_for().await {
+                    headers.insert(X_OAI_ATTESTATION_HEADER, header_value);
+                }
+                add_responses_lite_header(&mut headers, use_responses_lite);
+                headers
+            },
+            compression,
+            turn_state: Some(Arc::clone(&self.turn_state)),
+        }
+    }
 
-        has_data.then_some(RateLimitWindow {
-            used_percent,
-            window_minutes,
-            resets_in_seconds,
-        })
-    })
-}
+    /// Checks whether the current request is an incremental extension of the previous request.
+    /// We only reuse an incremental input delta when non-input request fields are unchanged and
+    /// `input` is a strict extension of the previous known input. Server-returned output items
+    /// are treated as part of the baseline so we do not resend them.
+    fn get_incremental_items(
+        &self,
+        request: &ResponsesApiRequest,
+        last_response: Option<&LastResponse>,
+        allow_empty_delta: bool,
+    ) -> Option<Vec<ResponseItem>> {
+        let previous_request = self.websocket_session.last_request.as_ref()?;
+        if !responses_request_properties_match(previous_request, request) {
+            trace!("incremental request failed, websocket reuse properties didn't match");
+            return None;
+        }
 
-fn parse_header_f64(headers: &HeaderMap, name: &str) -> Option<f64> {
-    parse_header_str(headers, name)?
-        .parse::<f64>()
-        .ok()
-        .filter(|v| v.is_finite())
-}
+        let response_items =
+            last_response.map_or(&[][..], |response| response.items_added.as_slice());
+        let previous_items_len = previous_request
+            .input
+            .len()
+            .checked_add(response_items.len())?;
+        let Some((request_items_to_compare, incremental_items)) =
+            request.input.split_at_checked(previous_items_len)
+        else {
+            trace!("incremental request failed, incompatible request length");
+            return None;
+        };
+        let previous_items = previous_request.input.iter().chain(response_items);
+        if !previous_items
+            .zip(request_items_to_compare)
+            .all(|(previous, current)| {
+                response_items_equal_ignoring_internal_metadata(previous, current)
+            })
+        {
+            trace!("incremental request failed, items didn't match");
+            return None;
+        }
+        if !allow_empty_delta && incremental_items.is_empty() {
+            return None;
+        }
+        Some(incremental_items.to_vec())
+    }
 
-fn parse_header_u64(headers: &HeaderMap, name: &str) -> Option<u64> {
-    parse_header_str(headers, name)?.parse::<u64>().ok()
-}
+    fn get_last_response(&mut self) -> Option<LastResponse> {
+        self.websocket_session
+            .last_response_rx
+            .take()
+            .and_then(|mut receiver| match receiver.try_recv() {
+                Ok(last_response) => Some(last_response),
+                Err(TryRecvError::Closed) | Err(TryRecvError::Empty) => None,
+            })
+    }
 
-fn parse_header_str<'a>(headers: &'a HeaderMap, name: &str) -> Option<&'a str> {
-    headers.get(name)?.to_str().ok()
-}
+    fn prepare_websocket_request(
+        &mut self,
+        request: &ResponsesApiRequest,
+    ) -> (Option<(String, Vec<ResponseItem>)>, bool) {
+        let Some(last_response) = self.get_last_response() else {
+            return (None, false);
+        };
+        let previous_response_id_from_untraced_warmup =
+            self.websocket_session.last_response_from_untraced_warmup;
+        let Some(incremental_items) = self.get_incremental_items(
+            request,
+            Some(&last_response),
+            /*allow_empty_delta*/ true,
+        ) else {
+            return (None, false);
+        };
 
-async fn process_sse<S>(
-    stream: S,
-    tx_event: mpsc::Sender<Result<ResponseEvent>>,
-    idle_timeout: Duration,
-    otel_event_manager: OtelEventManager,
-) where
-    S: Stream<Item = Result<Bytes>> + Unpin,
-{
-    let mut stream = stream.eventsource();
+        if last_response.response_id.is_empty() {
+            trace!("incremental request failed, no previous response id");
+            return (None, false);
+        }
 
-    // If the stream stays completely silent for an extended period treat it as disconnected.
-    // The response id returned from the "complete" message.
-    let mut response_completed: Option<ResponseCompleted> = None;
-    let mut response_error: Option<CodexErr> = None;
+        (
+            Some((last_response.response_id, incremental_items)),
+            previous_response_id_from_untraced_warmup,
+        )
+    }
 
-    loop {
-        let sse = match otel_event_manager
-            .log_sse_event(|| timeout(idle_timeout, stream.next()))
+    /// Opportunistically preconnects a websocket for this turn-scoped client session.
+    ///
+    /// This performs only connection setup; it never sends prompt payloads.
+    pub async fn preconnect_websocket(
+        &mut self,
+        session_telemetry: &SessionTelemetry,
+        responses_metadata: &CodexResponsesMetadata,
+    ) -> std::result::Result<(), ApiError> {
+        if !self.client.responses_websocket_enabled() {
+            return Ok(());
+        }
+        if self.websocket_session.connection.is_some() {
+            return Ok(());
+        }
+
+        let client_setup = self.client.current_client_setup().await.map_err(|err| {
+            ApiError::Stream(format!(
+                "failed to build websocket prewarm client setup: {err}"
+            ))
+        })?;
+        let auth_context = AuthRequestTelemetryContext::new(
+            client_setup.auth.as_ref().map(CodexAuth::auth_mode),
+            client_setup.api_auth.as_ref(),
+            client_setup.agent_identity_telemetry.clone(),
+            PendingUnauthorizedRetry::default(),
+        );
+        let connection = self
+            .client
+            .connect_websocket(
+                session_telemetry,
+                client_setup.api_provider,
+                client_setup.api_auth,
+                responses_metadata,
+                auth_context,
+                RequestRouteTelemetry::for_endpoint(RESPONSES_ENDPOINT),
+            )
+            .await?;
+        self.websocket_session.connection = Some(connection);
+        self.websocket_session
+            .set_connection_reused(/*connection_reused*/ false);
+        Ok(())
+    }
+    /// Returns a websocket connection for this turn.
+    #[instrument(
+        name = "model_client.websocket_connection",
+        level = "info",
+        skip_all,
+        fields(
+            provider = %self.client.state.provider.info().name,
+            wire_api = %self.client.state.provider.info().wire_api,
+            transport = "responses_websocket",
+            api.path = "responses",
+            turn.has_metadata_header = params.responses_metadata.has_turn_metadata()
+        )
+    )]
+    async fn websocket_connection(
+        &mut self,
+        params: WebsocketConnectParams<'_>,
+    ) -> std::result::Result<&ApiWebSocketConnection, ApiError> {
+        let WebsocketConnectParams {
+            session_telemetry,
+            api_provider,
+            api_auth,
+            responses_metadata,
+            auth_context,
+            request_route_telemetry,
+        } = params;
+        let needs_new = match self.websocket_session.connection.as_ref() {
+            Some(conn) => conn.is_closed().await,
+            None => true,
+        };
+
+        if needs_new {
+            self.websocket_session.last_request = None;
+            self.websocket_session.last_response_rx = None;
+            self.websocket_session.last_response_from_untraced_warmup = false;
+            let new_conn = match self
+                .client
+                .connect_websocket(
+                    session_telemetry,
+                    api_provider,
+                    api_auth,
+                    responses_metadata,
+                    auth_context,
+                    request_route_telemetry,
+                )
+                .await
+            {
+                Ok(new_conn) => new_conn,
+                Err(err) => {
+                    if matches!(err, ApiError::Transport(TransportError::Timeout)) {
+                        self.reset_websocket_session();
+                    }
+                    return Err(err);
+                }
+            };
+            self.websocket_session.connection = Some(new_conn);
+            self.websocket_session
+                .set_connection_reused(/*connection_reused*/ false);
+        } else {
+            self.websocket_session
+                .set_connection_reused(/*connection_reused*/ true);
+        }
+
+        self.websocket_session
+            .connection
+            .as_ref()
+            .ok_or(ApiError::Stream(
+                "websocket connection is unavailable".to_string(),
+            ))
+    }
+
+    fn responses_request_compression(&self, auth: Option<&CodexAuth>) -> Compression {
+        if self.client.state.enable_request_compression
+            && auth.is_some_and(CodexAuth::uses_codex_backend)
+            && self.client.state.provider.info().is_openai()
+        {
+            Compression::Zstd
+        } else {
+            Compression::None
+        }
+    }
+
+    /// Streams a turn via the OpenAI Responses API.
+    ///
+    /// Handles reasoning summaries, verbosity, and the `text` controls used for output schemas.
+    #[allow(clippy::too_many_arguments)]
+    #[instrument(
+        name = "model_client.stream_responses_api",
+        level = "info",
+        skip_all,
+        fields(
+            model = %model_info.slug,
+            wire_api = %self.client.state.provider.info().wire_api,
+            transport = "responses_http",
+            http.method = "POST",
+            api.path = "responses",
+            turn.has_metadata_header = responses_metadata.has_turn_metadata()
+        )
+    )]
+    async fn stream_responses_api(
+        &self,
+        prompt: &Prompt,
+        model_info: &ModelInfo,
+        session_telemetry: &SessionTelemetry,
+        effort: Option<ReasoningEffortConfig>,
+        summary: ReasoningSummaryConfig,
+        service_tier: Option<String>,
+        responses_metadata: &CodexResponsesMetadata,
+        inference_trace: &InferenceTraceContext,
+    ) -> Result<ResponseStream> {
+        let auth_manager = self.client.state.provider.auth_manager();
+        let mut auth_recovery = auth_manager
+            .as_ref()
+            .map(AuthManager::unauthorized_recovery);
+        let mut pending_retry = PendingUnauthorizedRetry::default();
+        loop {
+            let client_setup = self.client.current_client_setup().await?;
+            let transport = self
+                .client
+                .build_api_transport(&client_setup.api_provider, RESPONSES_ENDPOINT)?;
+            let request_auth_context = AuthRequestTelemetryContext::new(
+                client_setup.auth.as_ref().map(CodexAuth::auth_mode),
+                client_setup.api_auth.as_ref(),
+                client_setup.agent_identity_telemetry.clone(),
+                pending_retry,
+            );
+            let (request_telemetry, sse_telemetry) = Self::build_streaming_telemetry(
+                session_telemetry,
+                request_auth_context,
+                RequestRouteTelemetry::for_endpoint(RESPONSES_ENDPOINT),
+                self.client.state.auth_env_telemetry.clone(),
+            );
+            let compression = self.responses_request_compression(client_setup.auth.as_ref());
+            let mut options = self
+                .build_responses_options(
+                    responses_metadata,
+                    compression,
+                    model_info.use_responses_lite,
+                )
+                .await;
+
+            let mut request = self.client.build_responses_request(
+                &client_setup.api_provider,
+                prompt,
+                model_info,
+                effort.clone(),
+                summary,
+                service_tier.clone(),
+                responses_metadata,
+            )?;
+            self.client
+                .prepare_response_items_for_request(&mut request.input);
+            let request_session_telemetry =
+                session_telemetry_for_request(session_telemetry, &request);
+            let inference_trace_attempt = inference_trace.start_attempt();
+            inference_trace_attempt.add_request_headers(&mut options.extra_headers);
+            inference_trace_attempt.record_started(&request);
+            let client = ApiResponsesClient::new(
+                transport,
+                client_setup.api_provider,
+                client_setup.api_auth,
+            )
+            .with_telemetry(Some(request_telemetry), Some(sse_telemetry));
+            let stream_result = client.stream_request(request, options).await;
+
+            match stream_result {
+                Ok(stream) => {
+                    let (stream, _) = map_response_stream(
+                        stream,
+                        request_session_telemetry,
+                        inference_trace_attempt,
+                        Arc::clone(&self.client.state.provider),
+                    );
+                    return Ok(stream);
+                }
+                Err(ApiError::Transport(
+                    unauthorized_transport @ TransportError::Http { status, .. },
+                )) if status == StatusCode::UNAUTHORIZED => {
+                    let response_debug_context =
+                        extract_response_debug_context(&unauthorized_transport);
+                    inference_trace_attempt.record_failed(
+                        &unauthorized_transport,
+                        response_debug_context.request_id.as_deref(),
+                        /*output_items*/ &[],
+                    );
+                    pending_retry = PendingUnauthorizedRetry::from_recovery(
+                        handle_unauthorized(
+                            unauthorized_transport,
+                            &mut auth_recovery,
+                            session_telemetry,
+                            &self.client.state.provider,
+                        )
+                        .await?,
+                    );
+                    continue;
+                }
+                Err(err) => {
+                    let response_debug_context =
+                        extract_response_debug_context_from_api_error(&err);
+                    let err = self.client.state.provider.map_api_error(err);
+                    inference_trace_attempt.record_failed(
+                        &err,
+                        response_debug_context.request_id.as_deref(),
+                        /*output_items*/ &[],
+                    );
+                    return Err(err);
+                }
+            }
+        }
+    }
+
+    /// Streams a turn via the Responses API over WebSocket transport.
+    #[allow(clippy::too_many_arguments)]
+    #[instrument(
+        name = "model_client.stream_responses_websocket",
+        level = "info",
+        skip_all,
+        fields(
+            model = %model_info.slug,
+            wire_api = %self.client.state.provider.info().wire_api,
+            transport = "responses_websocket",
+            api.path = "responses",
+            turn.has_metadata_header = responses_metadata.has_turn_metadata(),
+            websocket.warmup = warmup
+        )
+    )]
+    async fn stream_responses_websocket(
+        &mut self,
+        prompt: &Prompt,
+        model_info: &ModelInfo,
+        session_telemetry: &SessionTelemetry,
+        effort: Option<ReasoningEffortConfig>,
+        summary: ReasoningSummaryConfig,
+        service_tier: Option<String>,
+        responses_metadata: &CodexResponsesMetadata,
+        warmup: bool,
+        request_trace: Option<W3cTraceContext>,
+        inference_trace: &InferenceTraceContext,
+    ) -> Result<WebsocketStreamOutcome> {
+        let auth_manager = self.client.state.provider.auth_manager();
+
+        let mut auth_recovery = auth_manager
+            .as_ref()
+            .map(AuthManager::unauthorized_recovery);
+        let mut pending_retry = PendingUnauthorizedRetry::default();
+        loop {
+            let client_setup = self.client.current_client_setup().await?;
+            let request_auth_context = AuthRequestTelemetryContext::new(
+                client_setup.auth.as_ref().map(CodexAuth::auth_mode),
+                client_setup.api_auth.as_ref(),
+                client_setup.agent_identity_telemetry.clone(),
+                pending_retry,
+            );
+            let mut request = self.client.build_responses_request(
+                &client_setup.api_provider,
+                prompt,
+                model_info,
+                effort.clone(),
+                summary,
+                service_tier.clone(),
+                responses_metadata,
+            )?;
+            let request_session_telemetry = if warmup {
+                // `generate=false` prewarm is connection setup, not an inference request.
+                session_telemetry.clone()
+            } else {
+                session_telemetry_for_request(session_telemetry, &request)
+            };
+            let mut client_metadata = self
+                .client
+                .build_ws_client_metadata(responses_metadata, model_info.use_responses_lite);
+            if let Some(turn_state) = self.turn_state.get() {
+                client_metadata.insert(X_CODEX_TURN_STATE_HEADER.to_string(), turn_state.clone());
+            }
+            match self
+                .websocket_connection(WebsocketConnectParams {
+                    session_telemetry,
+                    api_provider: client_setup.api_provider,
+                    api_auth: client_setup.api_auth,
+                    responses_metadata,
+                    auth_context: request_auth_context,
+                    request_route_telemetry: RequestRouteTelemetry::for_endpoint(
+                        RESPONSES_ENDPOINT,
+                    ),
+                })
+                .await
+            {
+                Ok(_) => {}
+                Err(ApiError::Transport(TransportError::Http { status, .. }))
+                    if status == StatusCode::UPGRADE_REQUIRED =>
+                {
+                    return Ok(WebsocketStreamOutcome::FallbackToHttp);
+                }
+                Err(ApiError::Transport(
+                    unauthorized_transport @ TransportError::Http { status, .. },
+                )) if status == StatusCode::UNAUTHORIZED => {
+                    pending_retry = PendingUnauthorizedRetry::from_recovery(
+                        handle_unauthorized(
+                            unauthorized_transport,
+                            &mut auth_recovery,
+                            session_telemetry,
+                            &self.client.state.provider,
+                        )
+                        .await?,
+                    );
+                    continue;
+                }
+                Err(err) => return Err(self.client.state.provider.map_api_error(err)),
+            }
+
+            let (incremental_request, previous_response_id_from_untraced_warmup) =
+                self.prepare_websocket_request(&request);
+            let inference_trace_attempt = if warmup {
+                // Prewarm sends `generate=false`; it is connection setup, not a
+                // model inference attempt that should appear in rollout traces.
+                InferenceTraceAttempt::disabled()
+            } else {
+                inference_trace.start_attempt()
+            };
+            if previous_response_id_from_untraced_warmup {
+                // The transport can reuse an untraced warmup response id and omit the
+                // already-sent input, but rollout replay needs the logical model-visible
+                // request rather than the compressed websocket delta.
+                inference_trace_attempt.record_started(&request);
+            }
+
+            let (previous_response_id, mut incremental_items) = match incremental_request {
+                Some((response_id, items)) => (Some(response_id), Some(items)),
+                None => (None, None),
+            };
+            let original_item_ids = if let Some(incremental_items) = &mut incremental_items {
+                self.client
+                    .prepare_response_items_for_request(incremental_items);
+                None
+            } else {
+                let original_item_ids = request
+                    .input
+                    .iter()
+                    .map(|item| item.id().cloned())
+                    .collect::<Vec<_>>();
+                self.client
+                    .prepare_response_items_for_request(&mut request.input);
+                Some(original_item_ids)
+            };
+            let ws_payload = ResponseCreateWsRequest {
+                previous_response_id,
+                input: incremental_items.as_deref().unwrap_or(&request.input),
+                generate: if warmup { Some(false) } else { None },
+                client_metadata: response_create_client_metadata(
+                    Some(client_metadata),
+                    request_trace.as_ref(),
+                ),
+                ..ResponseCreateWsRequest::from(&request)
+            };
+            let mut ws_request = ResponsesWsRequest::ResponseCreate(ws_payload);
+            stamp_ws_stream_request_start_ms(&mut ws_request);
+            if !previous_response_id_from_untraced_warmup {
+                inference_trace_attempt.record_started(&ws_request);
+            }
+
+            let websocket_connection =
+                self.websocket_session.connection.as_ref().ok_or_else(|| {
+                    self.client.state.provider.map_api_error(ApiError::Stream(
+                        "websocket connection is unavailable".to_string(),
+                    ))
+                })?;
+            let stream_result = websocket_connection
+                .stream_request(
+                    ws_request,
+                    self.websocket_session.connection_reused(),
+                    Some(Arc::clone(&self.turn_state)),
+                )
+                .await;
+            if let Some(original_item_ids) = original_item_ids {
+                for (item, original_item_id) in request.input.iter_mut().zip(original_item_ids) {
+                    item.set_id(original_item_id);
+                }
+            }
+            self.websocket_session.last_request = Some(request);
+            self.websocket_session.last_response_from_untraced_warmup = warmup;
+            let stream_result = stream_result.map_err(|err| {
+                let response_debug_context = extract_response_debug_context_from_api_error(&err);
+                let err = self.client.state.provider.map_api_error(err);
+                inference_trace_attempt.record_failed(
+                    &err,
+                    response_debug_context.request_id.as_deref(),
+                    /*output_items*/ &[],
+                );
+                err
+            })?;
+            let (stream, last_request_rx) = map_response_stream(
+                stream_result,
+                request_session_telemetry,
+                inference_trace_attempt,
+                Arc::clone(&self.client.state.provider),
+            );
+            self.websocket_session.last_response_rx = Some(last_request_rx);
+            return Ok(WebsocketStreamOutcome::Stream(stream));
+        }
+    }
+
+    /// Builds request and SSE telemetry for streaming API calls.
+    fn build_streaming_telemetry(
+        session_telemetry: &SessionTelemetry,
+        auth_context: AuthRequestTelemetryContext,
+        request_route_telemetry: RequestRouteTelemetry,
+        auth_env_telemetry: AuthEnvTelemetry,
+    ) -> (Arc<dyn RequestTelemetry>, Arc<dyn SseTelemetry>) {
+        let telemetry = Arc::new(ApiTelemetry::new(
+            session_telemetry.clone(),
+            auth_context,
+            request_route_telemetry,
+            auth_env_telemetry,
+        ));
+        let request_telemetry: Arc<dyn RequestTelemetry> = telemetry.clone();
+        let sse_telemetry: Arc<dyn SseTelemetry> = telemetry;
+        (request_telemetry, sse_telemetry)
+    }
+
+    /// Builds telemetry for the Responses API WebSocket transport.
+    fn build_websocket_telemetry(
+        session_telemetry: &SessionTelemetry,
+        auth_context: AuthRequestTelemetryContext,
+        request_route_telemetry: RequestRouteTelemetry,
+        auth_env_telemetry: AuthEnvTelemetry,
+    ) -> Arc<dyn WebsocketTelemetry> {
+        let telemetry = Arc::new(ApiTelemetry::new(
+            session_telemetry.clone(),
+            auth_context,
+            request_route_telemetry,
+            auth_env_telemetry,
+        ));
+        let websocket_telemetry: Arc<dyn WebsocketTelemetry> = telemetry;
+        websocket_telemetry
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    pub async fn prewarm_websocket(
+        &mut self,
+        prompt: &Prompt,
+        model_info: &ModelInfo,
+        session_telemetry: &SessionTelemetry,
+        effort: Option<ReasoningEffortConfig>,
+        summary: ReasoningSummaryConfig,
+        service_tier: Option<String>,
+        responses_metadata: &CodexResponsesMetadata,
+    ) -> Result<()> {
+        if !self.client.responses_websocket_enabled() {
+            return Ok(());
+        }
+        if self.websocket_session.last_request.is_some() {
+            return Ok(());
+        }
+
+        let disabled_trace = InferenceTraceContext::disabled();
+        match self
+            .stream_responses_websocket(
+                prompt,
+                model_info,
+                session_telemetry,
+                effort,
+                summary,
+                service_tier,
+                responses_metadata,
+                /*warmup*/ true,
+                current_span_w3c_trace_context(),
+                &disabled_trace,
+            )
             .await
         {
-            Ok(Some(Ok(sse))) => sse,
-            Ok(Some(Err(e))) => {
-                debug!("SSE Error: {e:#}");
-                let event = CodexErr::Stream(e.to_string(), None);
-                let _ = tx_event.send(Err(event)).await;
-                return;
-            }
-            Ok(None) => {
-                match response_completed {
-                    Some(ResponseCompleted {
-                        id: response_id,
-                        usage,
-                    }) => {
-                        if let Some(token_usage) = &usage {
-                            otel_event_manager.sse_event_completed(
-                                token_usage.input_tokens,
-                                token_usage.output_tokens,
-                                token_usage
-                                    .input_tokens_details
-                                    .as_ref()
-                                    .map(|d| d.cached_tokens),
-                                token_usage
-                                    .output_tokens_details
-                                    .as_ref()
-                                    .map(|d| d.reasoning_tokens),
-                                token_usage.total_tokens,
-                            );
-                        }
-                        let event = ResponseEvent::Completed {
-                            response_id,
-                            token_usage: usage.map(Into::into),
-                        };
-                        let _ = tx_event.send(Ok(event)).await;
-                    }
-                    None => {
-                        let error = response_error.unwrap_or(CodexErr::Stream(
-                            "stream closed before response.completed".into(),
-                            None,
-                        ));
-                        otel_event_manager.see_event_completed_failed(&error);
-
-                        let _ = tx_event.send(Err(error)).await;
+            Ok(WebsocketStreamOutcome::Stream(mut stream)) => {
+                // Wait for the v2 warmup request to complete before sending the first turn request.
+                while let Some(event) = stream.next().await {
+                    match event {
+                        Ok(ResponseEvent::Completed { .. }) => break,
+                        Err(err) => return Err(err),
+                        _ => {}
                     }
                 }
-                return;
+                Ok(())
             }
-            Err(_) => {
-                let _ = tx_event
-                    .send(Err(CodexErr::Stream(
-                        "idle timeout waiting for SSE".into(),
-                        None,
-                    )))
-                    .await;
-                return;
+            Ok(WebsocketStreamOutcome::FallbackToHttp) => {
+                self.try_switch_fallback_transport(session_telemetry, model_info);
+                Ok(())
             }
-        };
+            Err(err) => Err(err),
+        }
+    }
 
-        let raw = sse.data.clone();
-        trace!("SSE event: {}", raw);
-
-        let event: SseEvent = match serde_json::from_str(&sse.data) {
-            Ok(event) => event,
-            Err(e) => {
-                debug!("Failed to parse SSE event: {e}, data: {}", &sse.data);
-                continue;
-            }
-        };
-
-        match event.kind.as_str() {
-            // Individual output item finalised. Forward immediately so the
-            // rest of the agent can stream assistant text/functions *live*
-            // instead of waiting for the final `response.completed` envelope.
-            //
-            // IMPORTANT: We used to ignore these events and forward the
-            // duplicated `output` array embedded in the `response.completed`
-            // payload.  That produced two concrete issues:
-            //   1. No real‑time streaming – the user only saw output after the
-            //      entire turn had finished, which broke the "typing" UX and
-            //      made long‑running turns look stalled.
-            //   2. Duplicate `function_call_output` items – both the
-            //      individual *and* the completed array were forwarded, which
-            //      confused the backend and triggered 400
-            //      "previous_response_not_found" errors because the duplicated
-            //      IDs did not match the incremental turn chain.
-            //
-            // The fix is to forward the incremental events *as they come* and
-            // drop the duplicated list inside `response.completed`.
-            "response.output_item.done" => {
-                let Some(item_val) = event.item else { continue };
-                let Ok(item) = serde_json::from_value::<ResponseItem>(item_val) else {
-                    debug!("failed to parse ResponseItem from output_item.done");
-                    continue;
-                };
-
-                let event = ResponseEvent::OutputItemDone(item);
-                if tx_event.send(Ok(event)).await.is_err() {
-                    return;
-                }
-            }
-            "response.output_text.delta" => {
-                if let Some(delta) = event.delta {
-                    let event = ResponseEvent::OutputTextDelta(delta);
-                    if tx_event.send(Ok(event)).await.is_err() {
-                        return;
-                    }
-                }
-            }
-            "response.reasoning_summary_text.delta" => {
-                if let Some(delta) = event.delta {
-                    let event = ResponseEvent::ReasoningSummaryDelta(delta);
-                    if tx_event.send(Ok(event)).await.is_err() {
-                        return;
-                    }
-                }
-            }
-            "response.reasoning_text.delta" => {
-                if let Some(delta) = event.delta {
-                    let event = ResponseEvent::ReasoningContentDelta(delta);
-                    if tx_event.send(Ok(event)).await.is_err() {
-                        return;
-                    }
-                }
-            }
-            "response.created" => {
-                if event.response.is_some() {
-                    let _ = tx_event.send(Ok(ResponseEvent::Created {})).await;
-                }
-            }
-            "response.failed" => {
-                if let Some(resp_val) = event.response {
-                    response_error = Some(CodexErr::Stream(
-                        "response.failed event received".to_string(),
-                        None,
-                    ));
-
-                    let error = resp_val.get("error");
-
-                    if let Some(error) = error {
-                        match serde_json::from_value::<Error>(error.clone()) {
-                            Ok(error) => {
-                                if is_context_window_error(&error) {
-                                    response_error = Some(CodexErr::ContextWindowExceeded);
-                                } else {
-                                    let delay = try_parse_retry_after(&error);
-                                    let message = error.message.clone().unwrap_or_default();
-                                    response_error = Some(CodexErr::Stream(message, delay));
-                                }
-                            }
-                            Err(e) => {
-                                let error = format!("failed to parse ErrorResponse: {e}");
-                                debug!(error);
-                                response_error = Some(CodexErr::Stream(error, None))
-                            }
-                        }
-                    }
-                }
-            }
-            // Final response completed – includes array of output items & id
-            "response.completed" => {
-                if let Some(resp_val) = event.response {
-                    match serde_json::from_value::<ResponseCompleted>(resp_val) {
-                        Ok(r) => {
-                            response_completed = Some(r);
-                        }
-                        Err(e) => {
-                            let error = format!("failed to parse ResponseCompleted: {e}");
-                            debug!(error);
-                            response_error = Some(CodexErr::Stream(error, None));
-                            continue;
-                        }
-                    };
-                };
-            }
-            "response.content_part.done"
-            | "response.function_call_arguments.delta"
-            | "response.custom_tool_call_input.delta"
-            | "response.custom_tool_call_input.done" // also emitted as response.output_item.done
-            | "response.in_progress"
-            | "response.output_text.done" => {}
-            "response.output_item.added" => {
-                if let Some(item) = event.item.as_ref() {
-                    // Detect web_search_call begin and forward a synthetic event upstream.
-                    if let Some(ty) = item.get("type").and_then(|v| v.as_str())
-                        && ty == "web_search_call"
+    #[allow(clippy::too_many_arguments)]
+    /// Streams a single model request within the current turn.
+    ///
+    /// The caller is responsible for passing per-turn settings explicitly (model selection,
+    /// reasoning settings, telemetry context, and turn metadata). This method will prefer the
+    /// Responses WebSocket transport when the provider supports it and it remains healthy, and will
+    /// fall back to the HTTP Responses API transport otherwise. The trace context may be enabled or
+    /// disabled, but is always explicit so transport paths do not need separate trace/no-trace
+    /// branches.
+    pub async fn stream(
+        &mut self,
+        prompt: &Prompt,
+        model_info: &ModelInfo,
+        session_telemetry: &SessionTelemetry,
+        effort: Option<ReasoningEffortConfig>,
+        summary: ReasoningSummaryConfig,
+        service_tier: Option<String>,
+        responses_metadata: &CodexResponsesMetadata,
+        inference_trace: &InferenceTraceContext,
+    ) -> Result<ResponseStream> {
+        let wire_api = self.client.state.provider.info().wire_api;
+        match wire_api {
+            WireApi::Responses => {
+                if self.client.responses_websocket_enabled() {
+                    let request_trace = current_span_w3c_trace_context();
+                    match self
+                        .stream_responses_websocket(
+                            prompt,
+                            model_info,
+                            session_telemetry,
+                            effort.clone(),
+                            summary,
+                            service_tier.clone(),
+                            responses_metadata,
+                            /*warmup*/ false,
+                            request_trace,
+                            inference_trace,
+                        )
+                        .await?
                     {
-                        let call_id = item
-                            .get("id")
-                            .and_then(|v| v.as_str())
-                            .unwrap_or("")
-                            .to_string();
-                        let ev = ResponseEvent::WebSearchCallBegin { call_id };
-                        if tx_event.send(Ok(ev)).await.is_err() {
-                            return;
+                        WebsocketStreamOutcome::Stream(stream) => return Ok(stream),
+                        WebsocketStreamOutcome::FallbackToHttp => {
+                            self.try_switch_fallback_transport(session_telemetry, model_info);
                         }
                     }
                 }
+
+                self.stream_responses_api(
+                    prompt,
+                    model_info,
+                    session_telemetry,
+                    effort,
+                    summary,
+                    service_tier,
+                    responses_metadata,
+                    inference_trace,
+                )
+                .await
             }
-            "response.reasoning_summary_part.added" => {
-                // Boundary between reasoning summary sections (e.g., titles).
-                let event = ResponseEvent::ReasoningSummaryPartAdded;
-                if tx_event.send(Ok(event)).await.is_err() {
+        }
+    }
+
+    /// Permanently disables WebSockets for this Codex session and resets WebSocket state.
+    ///
+    /// This is used after exhausting the provider retry budget, to force subsequent requests onto
+    /// the HTTP transport.
+    ///
+    /// Returns `true` if this call activated fallback, or `false` if fallback was already active.
+    pub(crate) fn try_switch_fallback_transport(
+        &mut self,
+        session_telemetry: &SessionTelemetry,
+        model_info: &ModelInfo,
+    ) -> bool {
+        let activated = self
+            .client
+            .force_http_fallback(session_telemetry, model_info);
+        self.websocket_session = WebsocketSession::default();
+        activated
+    }
+}
+
+/// Stamp a ResponsesWsRequest with the current time.
+///
+/// Meant to be called just before sending the request over the socket, to capture realistic
+/// transport timing.
+fn stamp_ws_stream_request_start_ms(request: &mut ResponsesWsRequest<'_>) {
+    let ResponsesWsRequest::ResponseCreate(payload) = request;
+    payload
+        .client_metadata
+        .get_or_insert_with(HashMap::new)
+        .insert(
+            X_CODEX_WS_STREAM_REQUEST_START_MS_CLIENT_METADATA_KEY.to_string(),
+            crate::turn_timing::now_unix_timestamp_ms().to_string(),
+        );
+}
+
+/// Builds the extra headers attached to Responses API requests.
+///
+/// These headers implement Codex-specific conventions:
+///
+/// - `x-codex-beta-features`: comma-separated beta feature keys enabled for the session.
+/// - `x-codex-turn-state`: sticky routing token captured earlier in the turn.
+fn build_responses_headers(
+    beta_features_header: Option<&str>,
+    turn_state: Option<&Arc<OnceLock<String>>>,
+) -> ApiHeaderMap {
+    let mut headers = ApiHeaderMap::new();
+    if let Some(value) = beta_features_header
+        && !value.is_empty()
+        && let Ok(header_value) = HeaderValue::from_str(value)
+    {
+        headers.insert("x-codex-beta-features", header_value);
+    }
+    if let Some(turn_state) = turn_state
+        && let Some(state) = turn_state.get()
+        && let Ok(header_value) = HeaderValue::from_str(state)
+    {
+        headers.insert(X_CODEX_TURN_STATE_HEADER, header_value);
+    }
+    headers
+}
+
+fn add_responses_lite_header(headers: &mut ApiHeaderMap, use_responses_lite: bool) {
+    if use_responses_lite {
+        headers.insert(
+            X_OPENAI_INTERNAL_CODEX_RESPONSES_LITE_HEADER,
+            HeaderValue::from_static("true"),
+        );
+    }
+}
+
+const RESPONSE_STREAM_CHANNEL_CAPACITY: usize = 1600;
+const STREAM_DROPPED_REASON: &str = "response stream dropped before provider terminal event";
+
+fn map_response_stream(
+    api_stream: codex_api::ResponseStream,
+    session_telemetry: SessionTelemetry,
+    inference_trace_attempt: InferenceTraceAttempt,
+    provider: SharedModelProvider,
+) -> (ResponseStream, oneshot::Receiver<LastResponse>) {
+    let codex_api::ResponseStream {
+        rx_event,
+        upstream_request_id,
+    } = api_stream;
+    let api_stream = codex_api::ResponseStream {
+        rx_event,
+        upstream_request_id: None,
+    };
+    map_response_events(
+        upstream_request_id,
+        api_stream,
+        session_telemetry,
+        inference_trace_attempt,
+        provider,
+    )
+}
+
+fn map_response_events<S>(
+    upstream_request_id: Option<String>,
+    api_stream: S,
+    session_telemetry: SessionTelemetry,
+    inference_trace_attempt: InferenceTraceAttempt,
+    provider: SharedModelProvider,
+) -> (ResponseStream, oneshot::Receiver<LastResponse>)
+where
+    S: futures::Stream<Item = std::result::Result<ResponseEvent, ApiError>>
+        + Unpin
+        + Send
+        + 'static,
+{
+    let (tx_event, rx_event) =
+        mpsc::channel::<Result<ResponseEvent>>(RESPONSE_STREAM_CHANNEL_CAPACITY);
+    let (tx_last_response, rx_last_response) = oneshot::channel::<LastResponse>();
+    let consumer_dropped = CancellationToken::new();
+    let consumer_dropped_for_stream = consumer_dropped.clone();
+
+    tokio::spawn(async move {
+        let mut logged_error = false;
+        let mut tx_last_response = Some(tx_last_response);
+        let mut items_added: Vec<ResponseItem> = Vec::new();
+        let (request_start, mut ttft_ms) = (Instant::now(), None);
+        let mut api_stream = api_stream;
+        let upstream_request_id = upstream_request_id.as_deref();
+        if let Some(upstream_request_id) = upstream_request_id {
+            feedback_tags!(last_model_request_id = upstream_request_id);
+        }
+        loop {
+            let event = tokio::select! {
+                _ = consumer_dropped.cancelled() => {
+                    inference_trace_attempt.record_cancelled(
+                        STREAM_DROPPED_REASON,
+                        upstream_request_id,
+                        &items_added,
+                    );
                     return;
                 }
+                event = api_stream.next() => event,
+            };
+            let Some(event) = event else {
+                break;
+            };
+            match event {
+                Ok(ResponseEvent::OutputItemDone(item)) => {
+                    items_added.push(item.clone());
+                    if tx_event
+                        .send(Ok(ResponseEvent::OutputItemDone(item)))
+                        .await
+                        .is_err()
+                    {
+                        inference_trace_attempt.record_cancelled(
+                            STREAM_DROPPED_REASON,
+                            upstream_request_id,
+                            &items_added,
+                        );
+                        return;
+                    }
+                }
+                Ok(ResponseEvent::Completed {
+                    response_id,
+                    token_usage,
+                    end_turn,
+                }) => {
+                    feedback_tags!(last_model_response_id = &response_id);
+                    if let Some(usage) = &token_usage {
+                        session_telemetry.sse_event_completed(usage, ttft_ms);
+                    }
+                    inference_trace_attempt.record_completed(
+                        &response_id,
+                        upstream_request_id,
+                        &token_usage,
+                        &items_added,
+                    );
+                    if let Some(sender) = tx_last_response.take() {
+                        let _ = sender.send(LastResponse {
+                            response_id: response_id.clone(),
+                            items_added: std::mem::take(&mut items_added),
+                        });
+                    }
+                    if tx_event
+                        .send(Ok(ResponseEvent::Completed {
+                            response_id,
+                            token_usage,
+                            end_turn,
+                        }))
+                        .await
+                        .is_err()
+                    {
+                        return;
+                    }
+                }
+                Ok(event) => {
+                    if matches!(&event, ResponseEvent::OutputItemAdded(_)) && ttft_ms.is_none() {
+                        ttft_ms = Some(
+                            i64::try_from(request_start.elapsed().as_millis()).unwrap_or(i64::MAX),
+                        );
+                    }
+                    if tx_event.send(Ok(event)).await.is_err() {
+                        inference_trace_attempt.record_cancelled(
+                            STREAM_DROPPED_REASON,
+                            upstream_request_id,
+                            &items_added,
+                        );
+                        return;
+                    }
+                }
+                Err(err) => {
+                    let response_debug_context =
+                        extract_response_debug_context_from_api_error(&err);
+                    let upstream_request_id =
+                        upstream_request_id.or(response_debug_context.request_id.as_deref());
+                    if let Some(upstream_request_id) = upstream_request_id {
+                        feedback_tags!(last_model_request_id = upstream_request_id);
+                    }
+                    let mapped = provider.map_api_error(err);
+                    inference_trace_attempt.record_failed(
+                        &mapped,
+                        upstream_request_id,
+                        &items_added,
+                    );
+                    if !logged_error {
+                        session_telemetry.see_event_completed_failed(&mapped);
+                        logged_error = true;
+                    }
+                    if tx_event.send(Err(mapped)).await.is_err() {
+                        return;
+                    }
+                }
             }
-            "response.reasoning_summary_text.done" => {}
-            _ => {}
+        }
+        inference_trace_attempt.record_failed(
+            "stream closed before response.completed",
+            upstream_request_id,
+            &items_added,
+        );
+    });
+
+    (
+        ResponseStream {
+            rx_event,
+            consumer_dropped: consumer_dropped_for_stream,
+        },
+        rx_last_response,
+    )
+}
+
+/// Handles a 401 response by optionally refreshing ChatGPT tokens once.
+///
+/// When refresh succeeds, the caller should retry the API call; otherwise
+/// the mapped `CodexErr` is returned to the caller.
+#[derive(Clone, Copy, Debug)]
+struct UnauthorizedRecoveryExecution {
+    mode: &'static str,
+    phase: &'static str,
+}
+
+#[derive(Clone, Copy, Debug, Default)]
+struct PendingUnauthorizedRetry {
+    retry_after_unauthorized: bool,
+    recovery_mode: Option<&'static str>,
+    recovery_phase: Option<&'static str>,
+}
+
+impl PendingUnauthorizedRetry {
+    fn from_recovery(recovery: UnauthorizedRecoveryExecution) -> Self {
+        Self {
+            retry_after_unauthorized: true,
+            recovery_mode: Some(recovery.mode),
+            recovery_phase: Some(recovery.phase),
         }
     }
 }
 
-/// used in tests to stream from a text SSE file
-async fn stream_from_fixture(
-    path: impl AsRef<Path>,
-    provider: ModelProviderInfo,
-    otel_event_manager: OtelEventManager,
-) -> Result<ResponseStream> {
-    let (tx_event, rx_event) = mpsc::channel::<Result<ResponseEvent>>(1600);
-    let f = std::fs::File::open(path.as_ref())?;
-    let lines = std::io::BufReader::new(f).lines();
-
-    // insert \n\n after each line for proper SSE parsing
-    let mut content = String::new();
-    for line in lines {
-        content.push_str(&line?);
-        content.push_str("\n\n");
-    }
-
-    let rdr = std::io::Cursor::new(content);
-    let stream = ReaderStream::new(rdr).map_err(CodexErr::Io);
-    tokio::spawn(process_sse(
-        stream,
-        tx_event,
-        provider.stream_idle_timeout(),
-        otel_event_manager,
-    ));
-    Ok(ResponseStream { rx_event })
+#[derive(Clone, Debug, Default)]
+struct AuthRequestTelemetryContext {
+    auth_mode: Option<&'static str>,
+    auth_header_attached: bool,
+    auth_header_name: Option<&'static str>,
+    agent_identity_telemetry: Option<AgentIdentityTelemetry>,
+    retry_after_unauthorized: bool,
+    recovery_mode: Option<&'static str>,
+    recovery_phase: Option<&'static str>,
 }
 
-fn rate_limit_regex() -> &'static Regex {
-    static RE: OnceLock<Regex> = OnceLock::new();
-
-    #[expect(clippy::unwrap_used)]
-    RE.get_or_init(|| Regex::new(r"Please try again in (\d+(?:\.\d+)?)(s|ms)").unwrap())
-}
-
-fn try_parse_retry_after(err: &Error) -> Option<Duration> {
-    if err.code != Some("rate_limit_exceeded".to_string()) {
-        return None;
+impl AuthRequestTelemetryContext {
+    fn new(
+        auth_mode: Option<AuthMode>,
+        api_auth: &dyn AuthProvider,
+        agent_identity_telemetry: Option<AgentIdentityTelemetry>,
+        retry: PendingUnauthorizedRetry,
+    ) -> Self {
+        let auth_telemetry = auth_header_telemetry(api_auth);
+        Self {
+            auth_mode: auth_mode.map(|mode| match mode {
+                AuthMode::ApiKey | AuthMode::BedrockApiKey => "ApiKey",
+                AuthMode::Chatgpt
+                | AuthMode::ChatgptAuthTokens
+                | AuthMode::Headers
+                | AuthMode::AgentIdentity
+                | AuthMode::PersonalAccessToken => "Chatgpt",
+            }),
+            auth_header_attached: auth_telemetry.attached,
+            auth_header_name: auth_telemetry.name,
+            agent_identity_telemetry,
+            retry_after_unauthorized: retry.retry_after_unauthorized,
+            recovery_mode: retry.recovery_mode,
+            recovery_phase: retry.recovery_phase,
+        }
     }
 
-    // parse the Please try again in 1.898s format using regex
-    let re = rate_limit_regex();
-    if let Some(message) = &err.message
-        && let Some(captures) = re.captures(message)
+    fn agent_identity_telemetry(&self) -> Option<&AgentIdentityTelemetry> {
+        self.agent_identity_telemetry.as_ref()
+    }
+}
+
+struct WebsocketConnectParams<'a> {
+    session_telemetry: &'a SessionTelemetry,
+    api_provider: codex_api::Provider,
+    api_auth: SharedAuthProvider,
+    responses_metadata: &'a CodexResponsesMetadata,
+    auth_context: AuthRequestTelemetryContext,
+    request_route_telemetry: RequestRouteTelemetry,
+}
+
+async fn handle_unauthorized(
+    transport: TransportError,
+    auth_recovery: &mut Option<UnauthorizedRecovery>,
+    session_telemetry: &SessionTelemetry,
+    provider: &SharedModelProvider,
+) -> Result<UnauthorizedRecoveryExecution> {
+    let debug = extract_response_debug_context(&transport);
+    if let Some(recovery) = auth_recovery
+        && recovery.has_next()
     {
-        let seconds = captures.get(1);
-        let unit = captures.get(2);
-
-        if let (Some(value), Some(unit)) = (seconds, unit) {
-            let value = value.as_str().parse::<f64>().ok()?;
-            let unit = unit.as_str();
-
-            if unit == "s" {
-                return Some(Duration::from_secs_f64(value));
-            } else if unit == "ms" {
-                return Some(Duration::from_millis(value as u64));
+        let mode = recovery.mode_name();
+        let phase = recovery.step_name();
+        return match recovery.next().await {
+            Ok(step_result) => {
+                session_telemetry.record_auth_recovery(
+                    mode,
+                    phase,
+                    "recovery_succeeded",
+                    debug.request_id.as_deref(),
+                    debug.cf_ray.as_deref(),
+                    debug.auth_error.as_deref(),
+                    debug.auth_error_code.as_deref(),
+                    /*recovery_reason*/ None,
+                    step_result.auth_state_changed(),
+                );
+                emit_feedback_auth_recovery_tags(
+                    mode,
+                    phase,
+                    "recovery_succeeded",
+                    debug.request_id.as_deref(),
+                    debug.cf_ray.as_deref(),
+                    debug.auth_error.as_deref(),
+                    debug.auth_error_code.as_deref(),
+                );
+                Ok(UnauthorizedRecoveryExecution { mode, phase })
             }
-        }
+            Err(RefreshTokenError::Permanent(failed)) => {
+                session_telemetry.record_auth_recovery(
+                    mode,
+                    phase,
+                    "recovery_failed_permanent",
+                    debug.request_id.as_deref(),
+                    debug.cf_ray.as_deref(),
+                    debug.auth_error.as_deref(),
+                    debug.auth_error_code.as_deref(),
+                    /*recovery_reason*/ None,
+                    /*auth_state_changed*/ None,
+                );
+                emit_feedback_auth_recovery_tags(
+                    mode,
+                    phase,
+                    "recovery_failed_permanent",
+                    debug.request_id.as_deref(),
+                    debug.cf_ray.as_deref(),
+                    debug.auth_error.as_deref(),
+                    debug.auth_error_code.as_deref(),
+                );
+                Err(CodexErr::RefreshTokenFailed(failed))
+            }
+            Err(RefreshTokenError::Transient(other)) => {
+                session_telemetry.record_auth_recovery(
+                    mode,
+                    phase,
+                    "recovery_failed_transient",
+                    debug.request_id.as_deref(),
+                    debug.cf_ray.as_deref(),
+                    debug.auth_error.as_deref(),
+                    debug.auth_error_code.as_deref(),
+                    /*recovery_reason*/ None,
+                    /*auth_state_changed*/ None,
+                );
+                emit_feedback_auth_recovery_tags(
+                    mode,
+                    phase,
+                    "recovery_failed_transient",
+                    debug.request_id.as_deref(),
+                    debug.cf_ray.as_deref(),
+                    debug.auth_error.as_deref(),
+                    debug.auth_error_code.as_deref(),
+                );
+                Err(CodexErr::Io(other))
+            }
+        };
     }
-    None
+
+    let (mode, phase, recovery_reason) = match auth_recovery.as_ref() {
+        Some(recovery) => (
+            recovery.mode_name(),
+            recovery.step_name(),
+            Some(recovery.unavailable_reason()),
+        ),
+        None => ("none", "none", Some("auth_manager_missing")),
+    };
+    session_telemetry.record_auth_recovery(
+        mode,
+        phase,
+        "recovery_not_run",
+        debug.request_id.as_deref(),
+        debug.cf_ray.as_deref(),
+        debug.auth_error.as_deref(),
+        debug.auth_error_code.as_deref(),
+        recovery_reason,
+        /*auth_state_changed*/ None,
+    );
+    emit_feedback_auth_recovery_tags(
+        mode,
+        phase,
+        "recovery_not_run",
+        debug.request_id.as_deref(),
+        debug.cf_ray.as_deref(),
+        debug.auth_error.as_deref(),
+        debug.auth_error_code.as_deref(),
+    );
+
+    Err(provider.map_api_error(ApiError::Transport(transport)))
 }
 
-fn is_context_window_error(error: &Error) -> bool {
-    error.code.as_deref() == Some("context_length_exceeded")
+fn api_error_http_status(error: &ApiError) -> Option<u16> {
+    match error {
+        ApiError::Transport(TransportError::Http { status, .. }) => Some(status.as_u16()),
+        _ => None,
+    }
+}
+
+struct ApiTelemetry {
+    session_telemetry: SessionTelemetry,
+    auth_context: AuthRequestTelemetryContext,
+    request_route_telemetry: RequestRouteTelemetry,
+    auth_env_telemetry: AuthEnvTelemetry,
+}
+
+impl ApiTelemetry {
+    fn new(
+        session_telemetry: SessionTelemetry,
+        auth_context: AuthRequestTelemetryContext,
+        request_route_telemetry: RequestRouteTelemetry,
+        auth_env_telemetry: AuthEnvTelemetry,
+    ) -> Self {
+        Self {
+            session_telemetry,
+            auth_context,
+            request_route_telemetry,
+            auth_env_telemetry,
+        }
+    }
+}
+
+impl RequestTelemetry for ApiTelemetry {
+    fn on_request(
+        &self,
+        attempt: u64,
+        status: Option<StatusCode>,
+        error: Option<&TransportError>,
+        duration: Duration,
+    ) {
+        let error_message = error.map(telemetry_transport_error_message);
+        let status = status.map(|s| s.as_u16());
+        let debug = error
+            .map(extract_response_debug_context)
+            .unwrap_or_default();
+        self.session_telemetry.record_api_request(
+            attempt,
+            status,
+            error_message.as_deref(),
+            duration,
+            self.auth_context.auth_header_attached,
+            self.auth_context.auth_header_name,
+            self.auth_context.retry_after_unauthorized,
+            self.auth_context.recovery_mode,
+            self.auth_context.recovery_phase,
+            self.request_route_telemetry.endpoint,
+            debug.request_id.as_deref(),
+            debug.cf_ray.as_deref(),
+            debug.auth_error.as_deref(),
+            debug.auth_error_code.as_deref(),
+            self.auth_context.agent_identity_telemetry(),
+        );
+        emit_feedback_request_tags_with_auth_env(
+            &FeedbackRequestTags {
+                endpoint: self.request_route_telemetry.endpoint,
+                auth_header_attached: self.auth_context.auth_header_attached,
+                auth_header_name: self.auth_context.auth_header_name,
+                auth_mode: self.auth_context.auth_mode,
+                auth_retry_after_unauthorized: Some(self.auth_context.retry_after_unauthorized),
+                auth_recovery_mode: self.auth_context.recovery_mode,
+                auth_recovery_phase: self.auth_context.recovery_phase,
+                auth_connection_reused: None,
+                auth_request_id: debug.request_id.as_deref(),
+                auth_cf_ray: debug.cf_ray.as_deref(),
+                auth_error: debug.auth_error.as_deref(),
+                auth_error_code: debug.auth_error_code.as_deref(),
+                auth_recovery_followup_success: self
+                    .auth_context
+                    .retry_after_unauthorized
+                    .then_some(error.is_none()),
+                auth_recovery_followup_status: self
+                    .auth_context
+                    .retry_after_unauthorized
+                    .then_some(status)
+                    .flatten(),
+            },
+            &self.auth_env_telemetry,
+        );
+    }
+}
+
+impl SseTelemetry for ApiTelemetry {
+    fn on_sse_poll(
+        &self,
+        result: &std::result::Result<
+            Option<std::result::Result<Event, EventStreamError<TransportError>>>,
+            tokio::time::error::Elapsed,
+        >,
+        duration: Duration,
+    ) {
+        self.session_telemetry.log_sse_event(result, duration);
+    }
+}
+
+impl WebsocketTelemetry for ApiTelemetry {
+    fn on_ws_request(&self, duration: Duration, error: Option<&ApiError>, connection_reused: bool) {
+        let error_message = error.map(telemetry_api_error_message);
+        let status = error.and_then(api_error_http_status);
+        let debug = error
+            .map(extract_response_debug_context_from_api_error)
+            .unwrap_or_default();
+        self.session_telemetry.record_websocket_request(
+            duration,
+            error_message.as_deref(),
+            connection_reused,
+            self.auth_context.agent_identity_telemetry(),
+        );
+        emit_feedback_request_tags_with_auth_env(
+            &FeedbackRequestTags {
+                endpoint: self.request_route_telemetry.endpoint,
+                auth_header_attached: self.auth_context.auth_header_attached,
+                auth_header_name: self.auth_context.auth_header_name,
+                auth_mode: self.auth_context.auth_mode,
+                auth_retry_after_unauthorized: Some(self.auth_context.retry_after_unauthorized),
+                auth_recovery_mode: self.auth_context.recovery_mode,
+                auth_recovery_phase: self.auth_context.recovery_phase,
+                auth_connection_reused: Some(connection_reused),
+                auth_request_id: debug.request_id.as_deref(),
+                auth_cf_ray: debug.cf_ray.as_deref(),
+                auth_error: debug.auth_error.as_deref(),
+                auth_error_code: debug.auth_error_code.as_deref(),
+                auth_recovery_followup_success: self
+                    .auth_context
+                    .retry_after_unauthorized
+                    .then_some(error.is_none()),
+                auth_recovery_followup_status: self
+                    .auth_context
+                    .retry_after_unauthorized
+                    .then_some(status)
+                    .flatten(),
+            },
+            &self.auth_env_telemetry,
+        );
+    }
+
+    fn on_ws_event(
+        &self,
+        result: &std::result::Result<Option<std::result::Result<Message, Error>>, ApiError>,
+        duration: Duration,
+    ) {
+        self.session_telemetry
+            .record_websocket_event(result, duration);
+    }
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-    use assert_matches::assert_matches;
-    use serde_json::json;
-    use tokio::sync::mpsc;
-    use tokio_test::io::Builder as IoBuilder;
-    use tokio_util::io::ReaderStream;
-
-    // ────────────────────────────
-    // Helpers
-    // ────────────────────────────
-
-    /// Runs the SSE parser on pre-chunked byte slices and returns every event
-    /// (including any final `Err` from a stream-closure check).
-    async fn collect_events(
-        chunks: &[&[u8]],
-        provider: ModelProviderInfo,
-        otel_event_manager: OtelEventManager,
-    ) -> Vec<Result<ResponseEvent>> {
-        let mut builder = IoBuilder::new();
-        for chunk in chunks {
-            builder.read(chunk);
-        }
-
-        let reader = builder.build();
-        let stream = ReaderStream::new(reader).map_err(CodexErr::Io);
-        let (tx, mut rx) = mpsc::channel::<Result<ResponseEvent>>(16);
-        tokio::spawn(process_sse(
-            stream,
-            tx,
-            provider.stream_idle_timeout(),
-            otel_event_manager,
-        ));
-
-        let mut events = Vec::new();
-        while let Some(ev) = rx.recv().await {
-            events.push(ev);
-        }
-        events
-    }
-
-    /// Builds an in-memory SSE stream from JSON fixtures and returns only the
-    /// successfully parsed events (panics on internal channel errors).
-    async fn run_sse(
-        events: Vec<serde_json::Value>,
-        provider: ModelProviderInfo,
-        otel_event_manager: OtelEventManager,
-    ) -> Vec<ResponseEvent> {
-        let mut body = String::new();
-        for e in events {
-            let kind = e
-                .get("type")
-                .and_then(|v| v.as_str())
-                .expect("fixture event missing type");
-            if e.as_object().map(|o| o.len() == 1).unwrap_or(false) {
-                body.push_str(&format!("event: {kind}\n\n"));
-            } else {
-                body.push_str(&format!("event: {kind}\ndata: {e}\n\n"));
-            }
-        }
-
-        let (tx, mut rx) = mpsc::channel::<Result<ResponseEvent>>(8);
-        let stream = ReaderStream::new(std::io::Cursor::new(body)).map_err(CodexErr::Io);
-        tokio::spawn(process_sse(
-            stream,
-            tx,
-            provider.stream_idle_timeout(),
-            otel_event_manager,
-        ));
-
-        let mut out = Vec::new();
-        while let Some(ev) = rx.recv().await {
-            out.push(ev.expect("channel closed"));
-        }
-        out
-    }
-
-    fn otel_event_manager() -> OtelEventManager {
-        OtelEventManager::new(
-            ConversationId::new(),
-            "test",
-            "test",
-            None,
-            Some(AuthMode::ChatGPT),
-            false,
-            "test".to_string(),
-        )
-    }
-
-    // ────────────────────────────
-    // Tests from `implement-test-for-responses-api-sse-parser`
-    // ────────────────────────────
-
-    #[tokio::test]
-    async fn parses_items_and_completed() {
-        let item1 = json!({
-            "type": "response.output_item.done",
-            "item": {
-                "type": "message",
-                "role": "assistant",
-                "content": [{"type": "output_text", "text": "Hello"}]
-            }
-        })
-        .to_string();
-
-        let item2 = json!({
-            "type": "response.output_item.done",
-            "item": {
-                "type": "message",
-                "role": "assistant",
-                "content": [{"type": "output_text", "text": "World"}]
-            }
-        })
-        .to_string();
-
-        let completed = json!({
-            "type": "response.completed",
-            "response": { "id": "resp1" }
-        })
-        .to_string();
-
-        let sse1 = format!("event: response.output_item.done\ndata: {item1}\n\n");
-        let sse2 = format!("event: response.output_item.done\ndata: {item2}\n\n");
-        let sse3 = format!("event: response.completed\ndata: {completed}\n\n");
-
-        let provider = ModelProviderInfo {
-            name: "test".to_string(),
-            base_url: Some("https://test.com".to_string()),
-            env_key: Some("TEST_API_KEY".to_string()),
-            env_key_instructions: None,
-            wire_api: WireApi::Responses,
-            query_params: None,
-            http_headers: None,
-            env_http_headers: None,
-            request_max_retries: Some(0),
-            stream_max_retries: Some(0),
-            stream_idle_timeout_ms: Some(1000),
-            requires_openai_auth: false,
-        };
-
-        let otel_event_manager = otel_event_manager();
-
-        let events = collect_events(
-            &[sse1.as_bytes(), sse2.as_bytes(), sse3.as_bytes()],
-            provider,
-            otel_event_manager,
-        )
-        .await;
-
-        assert_eq!(events.len(), 3);
-
-        matches!(
-            &events[0],
-            Ok(ResponseEvent::OutputItemDone(ResponseItem::Message { role, .. }))
-                if role == "assistant"
-        );
-
-        matches!(
-            &events[1],
-            Ok(ResponseEvent::OutputItemDone(ResponseItem::Message { role, .. }))
-                if role == "assistant"
-        );
-
-        match &events[2] {
-            Ok(ResponseEvent::Completed {
-                response_id,
-                token_usage,
-            }) => {
-                assert_eq!(response_id, "resp1");
-                assert!(token_usage.is_none());
-            }
-            other => panic!("unexpected third event: {other:?}"),
-        }
-    }
-
-    #[tokio::test]
-    async fn error_when_missing_completed() {
-        let item1 = json!({
-            "type": "response.output_item.done",
-            "item": {
-                "type": "message",
-                "role": "assistant",
-                "content": [{"type": "output_text", "text": "Hello"}]
-            }
-        })
-        .to_string();
-
-        let sse1 = format!("event: response.output_item.done\ndata: {item1}\n\n");
-        let provider = ModelProviderInfo {
-            name: "test".to_string(),
-            base_url: Some("https://test.com".to_string()),
-            env_key: Some("TEST_API_KEY".to_string()),
-            env_key_instructions: None,
-            wire_api: WireApi::Responses,
-            query_params: None,
-            http_headers: None,
-            env_http_headers: None,
-            request_max_retries: Some(0),
-            stream_max_retries: Some(0),
-            stream_idle_timeout_ms: Some(1000),
-            requires_openai_auth: false,
-        };
-
-        let otel_event_manager = otel_event_manager();
-
-        let events = collect_events(&[sse1.as_bytes()], provider, otel_event_manager).await;
-
-        assert_eq!(events.len(), 2);
-
-        matches!(events[0], Ok(ResponseEvent::OutputItemDone(_)));
-
-        match &events[1] {
-            Err(CodexErr::Stream(msg, _)) => {
-                assert_eq!(msg, "stream closed before response.completed")
-            }
-            other => panic!("unexpected second event: {other:?}"),
-        }
-    }
-
-    #[tokio::test]
-    async fn error_when_error_event() {
-        let raw_error = r#"{"type":"response.failed","sequence_number":3,"response":{"id":"resp_689bcf18d7f08194bf3440ba62fe05d803fee0cdac429894","object":"response","created_at":1755041560,"status":"failed","background":false,"error":{"code":"rate_limit_exceeded","message":"Rate limit reached for gpt-5 in organization org-AAA on tokens per min (TPM): Limit 30000, Used 22999, Requested 12528. Please try again in 11.054s. Visit https://platform.openai.com/account/rate-limits to learn more."}, "usage":null,"user":null,"metadata":{}}}"#;
-
-        let sse1 = format!("event: response.failed\ndata: {raw_error}\n\n");
-        let provider = ModelProviderInfo {
-            name: "test".to_string(),
-            base_url: Some("https://test.com".to_string()),
-            env_key: Some("TEST_API_KEY".to_string()),
-            env_key_instructions: None,
-            wire_api: WireApi::Responses,
-            query_params: None,
-            http_headers: None,
-            env_http_headers: None,
-            request_max_retries: Some(0),
-            stream_max_retries: Some(0),
-            stream_idle_timeout_ms: Some(1000),
-            requires_openai_auth: false,
-        };
-
-        let otel_event_manager = otel_event_manager();
-
-        let events = collect_events(&[sse1.as_bytes()], provider, otel_event_manager).await;
-
-        assert_eq!(events.len(), 1);
-
-        match &events[0] {
-            Err(CodexErr::Stream(msg, delay)) => {
-                assert_eq!(
-                    msg,
-                    "Rate limit reached for gpt-5 in organization org-AAA on tokens per min (TPM): Limit 30000, Used 22999, Requested 12528. Please try again in 11.054s. Visit https://platform.openai.com/account/rate-limits to learn more."
-                );
-                assert_eq!(*delay, Some(Duration::from_secs_f64(11.054)));
-            }
-            other => panic!("unexpected second event: {other:?}"),
-        }
-    }
-
-    #[tokio::test]
-    async fn context_window_error_is_fatal() {
-        let raw_error = r#"{"type":"response.failed","sequence_number":3,"response":{"id":"resp_5c66275b97b9baef1ed95550adb3b7ec13b17aafd1d2f11b","object":"response","created_at":1759510079,"status":"failed","background":false,"error":{"code":"context_length_exceeded","message":"Your input exceeds the context window of this model. Please adjust your input and try again."},"usage":null,"user":null,"metadata":{}}}"#;
-
-        let sse1 = format!("event: response.failed\ndata: {raw_error}\n\n");
-        let provider = ModelProviderInfo {
-            name: "test".to_string(),
-            base_url: Some("https://test.com".to_string()),
-            env_key: Some("TEST_API_KEY".to_string()),
-            env_key_instructions: None,
-            wire_api: WireApi::Responses,
-            query_params: None,
-            http_headers: None,
-            env_http_headers: None,
-            request_max_retries: Some(0),
-            stream_max_retries: Some(0),
-            stream_idle_timeout_ms: Some(1000),
-            requires_openai_auth: false,
-        };
-
-        let otel_event_manager = otel_event_manager();
-
-        let events = collect_events(&[sse1.as_bytes()], provider, otel_event_manager).await;
-
-        assert_eq!(events.len(), 1);
-
-        match &events[0] {
-            Err(err @ CodexErr::ContextWindowExceeded) => {
-                assert_eq!(err.to_string(), CodexErr::ContextWindowExceeded.to_string());
-            }
-            other => panic!("unexpected context window event: {other:?}"),
-        }
-    }
-
-    #[tokio::test]
-    async fn context_window_error_with_newline_is_fatal() {
-        let raw_error = r#"{"type":"response.failed","sequence_number":4,"response":{"id":"resp_fatal_newline","object":"response","created_at":1759510080,"status":"failed","background":false,"error":{"code":"context_length_exceeded","message":"Your input exceeds the context window of this model. Please adjust your input and try\nagain."},"usage":null,"user":null,"metadata":{}}}"#;
-
-        let sse1 = format!("event: response.failed\ndata: {raw_error}\n\n");
-        let provider = ModelProviderInfo {
-            name: "test".to_string(),
-            base_url: Some("https://test.com".to_string()),
-            env_key: Some("TEST_API_KEY".to_string()),
-            env_key_instructions: None,
-            wire_api: WireApi::Responses,
-            query_params: None,
-            http_headers: None,
-            env_http_headers: None,
-            request_max_retries: Some(0),
-            stream_max_retries: Some(0),
-            stream_idle_timeout_ms: Some(1000),
-            requires_openai_auth: false,
-        };
-
-        let otel_event_manager = otel_event_manager();
-
-        let events = collect_events(&[sse1.as_bytes()], provider, otel_event_manager).await;
-
-        assert_eq!(events.len(), 1);
-
-        match &events[0] {
-            Err(err @ CodexErr::ContextWindowExceeded) => {
-                assert_eq!(err.to_string(), CodexErr::ContextWindowExceeded.to_string());
-            }
-            other => panic!("unexpected context window event: {other:?}"),
-        }
-    }
-
-    // ────────────────────────────
-    // Table-driven test from `main`
-    // ────────────────────────────
-
-    /// Verifies that the adapter produces the right `ResponseEvent` for a
-    /// variety of incoming `type` values.
-    #[tokio::test]
-    async fn table_driven_event_kinds() {
-        struct TestCase {
-            name: &'static str,
-            event: serde_json::Value,
-            expect_first: fn(&ResponseEvent) -> bool,
-            expected_len: usize,
-        }
-
-        fn is_created(ev: &ResponseEvent) -> bool {
-            matches!(ev, ResponseEvent::Created)
-        }
-        fn is_output(ev: &ResponseEvent) -> bool {
-            matches!(ev, ResponseEvent::OutputItemDone(_))
-        }
-        fn is_completed(ev: &ResponseEvent) -> bool {
-            matches!(ev, ResponseEvent::Completed { .. })
-        }
-
-        let completed = json!({
-            "type": "response.completed",
-            "response": {
-                "id": "c",
-                "usage": {
-                    "input_tokens": 0,
-                    "input_tokens_details": null,
-                    "output_tokens": 0,
-                    "output_tokens_details": null,
-                    "total_tokens": 0
-                },
-                "output": []
-            }
-        });
-
-        let cases = vec![
-            TestCase {
-                name: "created",
-                event: json!({"type": "response.created", "response": {}}),
-                expect_first: is_created,
-                expected_len: 2,
-            },
-            TestCase {
-                name: "output_item.done",
-                event: json!({
-                    "type": "response.output_item.done",
-                    "item": {
-                        "type": "message",
-                        "role": "assistant",
-                        "content": [
-                            {"type": "output_text", "text": "hi"}
-                        ]
-                    }
-                }),
-                expect_first: is_output,
-                expected_len: 2,
-            },
-            TestCase {
-                name: "unknown",
-                event: json!({"type": "response.new_tool_event"}),
-                expect_first: is_completed,
-                expected_len: 1,
-            },
-        ];
-
-        for case in cases {
-            let mut evs = vec![case.event];
-            evs.push(completed.clone());
-
-            let provider = ModelProviderInfo {
-                name: "test".to_string(),
-                base_url: Some("https://test.com".to_string()),
-                env_key: Some("TEST_API_KEY".to_string()),
-                env_key_instructions: None,
-                wire_api: WireApi::Responses,
-                query_params: None,
-                http_headers: None,
-                env_http_headers: None,
-                request_max_retries: Some(0),
-                stream_max_retries: Some(0),
-                stream_idle_timeout_ms: Some(1000),
-                requires_openai_auth: false,
-            };
-
-            let otel_event_manager = otel_event_manager();
-
-            let out = run_sse(evs, provider, otel_event_manager).await;
-            assert_eq!(out.len(), case.expected_len, "case {}", case.name);
-            assert!(
-                (case.expect_first)(&out[0]),
-                "first event mismatch in case {}",
-                case.name
-            );
-        }
-    }
-
-    #[test]
-    fn test_try_parse_retry_after() {
-        let err = Error {
-            r#type: None,
-            message: Some("Rate limit reached for gpt-5 in organization org- on tokens per min (TPM): Limit 1, Used 1, Requested 19304. Please try again in 28ms. Visit https://platform.openai.com/account/rate-limits to learn more.".to_string()),
-            code: Some("rate_limit_exceeded".to_string()),
-            plan_type: None,
-            resets_in_seconds: None
-        };
-
-        let delay = try_parse_retry_after(&err);
-        assert_eq!(delay, Some(Duration::from_millis(28)));
-    }
-
-    #[test]
-    fn test_try_parse_retry_after_no_delay() {
-        let err = Error {
-            r#type: None,
-            message: Some("Rate limit reached for gpt-5 in organization <ORG> on tokens per min (TPM): Limit 30000, Used 6899, Requested 24050. Please try again in 1.898s. Visit https://platform.openai.com/account/rate-limits to learn more.".to_string()),
-            code: Some("rate_limit_exceeded".to_string()),
-            plan_type: None,
-            resets_in_seconds: None
-        };
-        let delay = try_parse_retry_after(&err);
-        assert_eq!(delay, Some(Duration::from_secs_f64(1.898)));
-    }
-
-    #[test]
-    fn error_response_deserializes_old_schema_known_plan_type_and_serializes_back() {
-        use crate::token_data::KnownPlan;
-        use crate::token_data::PlanType;
-
-        let json = r#"{"error":{"type":"usage_limit_reached","plan_type":"pro","resets_in_seconds":3600}}"#;
-        let resp: ErrorResponse =
-            serde_json::from_str(json).expect("should deserialize old schema");
-
-        assert_matches!(resp.error.plan_type, Some(PlanType::Known(KnownPlan::Pro)));
-
-        let plan_json = serde_json::to_string(&resp.error.plan_type).expect("serialize plan_type");
-        assert_eq!(plan_json, "\"pro\"");
-    }
-
-    #[test]
-    fn error_response_deserializes_old_schema_unknown_plan_type_and_serializes_back() {
-        use crate::token_data::PlanType;
-
-        let json =
-            r#"{"error":{"type":"usage_limit_reached","plan_type":"vip","resets_in_seconds":60}}"#;
-        let resp: ErrorResponse =
-            serde_json::from_str(json).expect("should deserialize old schema");
-
-        assert_matches!(resp.error.plan_type, Some(PlanType::Unknown(ref s)) if s == "vip");
-
-        let plan_json = serde_json::to_string(&resp.error.plan_type).expect("serialize plan_type");
-        assert_eq!(plan_json, "\"vip\"");
-    }
-}
+#[path = "client_tests.rs"]
+mod tests;

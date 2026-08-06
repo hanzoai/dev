@@ -1,36 +1,35 @@
 ---
 source: tui/tests/vt100_chatwidget_snapshot.rs
-assertion_line: 663
 expression: output
 ---
- ┌────────────────────────────────────────────────────────────────────────────┐
- │                                    Code                                    │
- └────────────────────────────────────────────────────────────────────────────┘
- ┌ Agents ────────────────────────────────────────────────────────────────────┐
- │ • QA Bot (running 0s) — Executing smoke tests         Ctrl+A open terminal │
- └────────────────────────────────────────────────────────────────────────────┘
-     Task: Run targeted regression suite
-     Duration: 1m44s
+ +----------------------------------------------------------------------------+
+ |                                 Every Code                                 |
+ +----------------------------------------------------------------------------+
 
-     Plan
-       • Init workspace
-       • Nextest smoke
-       • Summarize
 
-     Status
-       QA Bot       running — Executing smoke tests
 
-     Latest result
-       Regression sweep complete
-       - 58 tests passed
-       - 0 failures
+ • I can help with various tasks including:
 
-     Actions
-       Started agent run for qa-bot
-       Status update — QA Bot: running — Executing smoke tests
-       Agent run completed in 1m44s
+   - Writing code
+   - Reading files
+   - Running commands
 
- ┌───────────────────────────── ✶ Responding... ──────────────────────────────┐
- │ What can I code for you today?                                             │
- └────────────────────────────────────────────────────────────────────────────┘
-   Read Only  (Shift+Tab change)                                   Ctrl+H help
+
+ › Kick off QA bot regression run
+
+   +- qa-bot
+   |
+   |  Run targeted regression suite
+   |
+   |  Agents
+   |    • claude  running  (Xs)
+   |
+   |  Actions
+   |   MM:SS  Started agent run for qa-bot
+   |
+   +- [Ctrl+A] Expand · [Esc] Stop
+
+ +----------------------------- ✶ Responding... -----------------------------+
+ | What can I code for you today?                                             |
+ +----------------------------------------------------------------------------+
+ Read Only  (Shift+Tab change)                       Ctrl+G editor  •  API key

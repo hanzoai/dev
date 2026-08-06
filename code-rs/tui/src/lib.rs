@@ -4,6 +4,16 @@
 #![deny(clippy::print_stdout, clippy::print_stderr)]
 #![deny(clippy::disallowed_methods)]
 use app::App;
+use code_common::model_presets::{
+    all_model_presets,
+    ModelPreset,
+    HIDE_GPT5_1_MIGRATION_PROMPT_CONFIG,
+    HIDE_GPT_5_1_CODEX_MAX_MIGRATION_PROMPT_CONFIG,
+    HIDE_GPT_5_2_MIGRATION_PROMPT_CONFIG,
+};
+use code_core::config_edit::{self, CONFIG_KEY_EFFORT, CONFIG_KEY_MODEL};
+use code_core::config_types::Notice;
+use code_core::config_types::ReasoningEffort;
 use code_core::BUILT_IN_OSS_MODEL_PROVIDER_ID;
 use code_core::config::set_cached_terminal_background;
 use code_core::config::Config;
@@ -21,12 +31,25 @@ use code_core::config_types::ThemeName;
 use regex_lite::Regex;
 use code_login::AuthMode;
 use code_login::CodexAuth;
+use model_migration::{migration_copy_for_key, run_model_migration_prompt, ModelMigrationOutcome};
 use code_ollama::DEFAULT_OSS_MODEL;
 use code_protocol::config_types::SandboxMode;
 use std::fs::OpenOptions;
-use std::path::PathBuf;
+use std::io;
+use std::backtrace::Backtrace;
+use std::path::{Path, PathBuf};
+use code_core::review_coord::{
+    bump_snapshot_epoch, clear_stale_lock_if_dead, read_lock_info, try_acquire_lock,
+};
+use std::sync::Once;
 use std::sync::OnceLock;
+use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::time::{Duration, Instant};
 use tracing_appender::non_blocking;
+use tracing_appender::rolling;
+use tracing_subscriber::filter::LevelFilter;
+use tracing_subscriber::prelude::*;
 use tracing_subscriber::EnvFilter;
 use uuid::Uuid;
 
@@ -35,18 +58,23 @@ mod app_event;
 mod app_event_sender;
 mod account_label;
 mod bottom_pane;
+mod chrome_launch;
 mod chatwidget;
 mod citation_regex;
 mod cloud_tasks_service;
 mod cli;
 mod common;
 mod colors;
+pub mod card_theme;
 mod diff_render;
 mod exec_command;
+mod external_editor;
 mod file_search;
+pub mod gradient_background;
 mod get_git_diff;
 mod glitch_animation;
 mod auto_drive_strings;
+mod auto_drive_style;
 mod header_wave;
 mod history_cell;
 mod history;
@@ -55,17 +83,20 @@ pub mod live_wrap;
 mod markdown;
 mod markdown_render;
 mod markdown_renderer;
+mod memory_citation;
+mod remote_model_presets;
 mod markdown_stream;
 mod syntax_highlight;
 pub mod onboarding;
 pub mod public_widgets;
 mod render;
+mod model_migration;
 // mod scroll_view; // Orphaned after trait-based HistoryCell migration
 mod session_log;
 mod shimmer;
 mod slash_command;
 mod rate_limits_view;
-mod resume;
+pub mod resume;
 mod streaming;
 mod sanitize;
 mod layout_consts;
@@ -74,6 +105,7 @@ mod terminal_info;
 mod text_formatting;
 mod text_processing;
 mod theme;
+mod thread_spawner;
 mod util {
     pub mod buffer;
     pub mod list_window;
@@ -87,6 +119,7 @@ mod foundation;
 mod ui_consts;
 mod user_approval_widget;
 mod height_manager;
+mod clipboard_copy;
 mod clipboard_paste;
 mod greeting;
 // Upstream introduced a standalone status indicator widget. Our fork renders
@@ -105,8 +138,44 @@ pub use cli::Cli;
 pub use self::markdown_render::render_markdown_text;
 pub use public_widgets::composer_input::{ComposerAction, ComposerInput};
 
+const TUI_LOG_MAX_BYTES: u64 = 50 * 1024 * 1024;
+const TUI_LOG_BACKUPS: usize = 2;
+
+fn rotate_log_file(log_dir: &Path, file_name: &str) {
+    let path = log_dir.join(file_name);
+    let Ok(meta) = std::fs::metadata(&path) else {
+        return;
+    };
+    if meta.len() <= TUI_LOG_MAX_BYTES {
+        return;
+    }
+    if TUI_LOG_BACKUPS == 0 {
+        let _ = std::fs::remove_file(&path);
+        return;
+    }
+
+    let oldest = log_dir.join(format!("{file_name}.{TUI_LOG_BACKUPS}"));
+    let _ = std::fs::remove_file(&oldest);
+
+    if TUI_LOG_BACKUPS > 1 {
+        for idx in (1..TUI_LOG_BACKUPS).rev() {
+            let from = log_dir.join(format!("{file_name}.{idx}"));
+            let to = log_dir.join(format!("{file_name}.{}", idx + 1));
+            let _ = std::fs::rename(&from, &to);
+        }
+    }
+
+    let rotated = log_dir.join(format!("{file_name}.1"));
+    if std::fs::rename(&path, rotated).is_err() {
+        if let Ok(file) = std::fs::OpenOptions::new().write(true).open(&path) {
+            let _ = file.set_len(0);
+        }
+    }
+}
+
 #[cfg(feature = "test-helpers")]
 pub mod test_helpers {
+    pub use crate::chatwidget::smoke_helpers::AutoContinueModeFixture;
     pub use crate::chatwidget::smoke_helpers::ChatWidgetHarness;
     pub use crate::chatwidget::smoke_helpers::LayoutMetrics;
     #[cfg(test)]
@@ -288,22 +357,44 @@ pub struct ExitSummary {
     pub session_id: Option<Uuid>,
 }
 
-pub fn resume_command_name() -> &'static str {
-    static COMMAND: OnceLock<&'static str> = OnceLock::new();
-    COMMAND.get_or_init(|| {
-        let arg0 = std::env::args().next();
-        let invoked = arg0
-            .as_ref()
-            .and_then(|value| std::path::Path::new(value).file_name())
-            .and_then(|name| name.to_str())
-            .unwrap_or("");
+fn empty_exit_summary() -> ExitSummary {
+    ExitSummary {
+        token_usage: code_core::protocol::TokenUsage::default(),
+        session_id: None,
+    }
+}
 
-        if invoked.eq_ignore_ascii_case("coder") {
-            "coder"
-        } else {
-            "code"
+fn derive_resume_command_name(arg0: Option<std::ffi::OsString>) -> String {
+    if let Some(raw) = arg0 {
+        if let Some(name) = std::path::Path::new(&raw)
+            .file_name()
+            .and_then(|value| value.to_str())
+            .filter(|value| !value.is_empty())
+        {
+            return name.to_string();
         }
-    })
+
+        let lossy = raw.to_string_lossy();
+        if !lossy.is_empty() {
+            return lossy.into_owned();
+        }
+    }
+
+    std::env::current_exe()
+        .ok()
+        .and_then(|path| {
+            path.file_name()
+                .and_then(|value| value.to_str())
+                .map(str::to_owned)
+        })
+        .unwrap_or_else(|| "code".to_string())
+}
+
+pub fn resume_command_name() -> &'static str {
+    static COMMAND: OnceLock<String> = OnceLock::new();
+    COMMAND
+        .get_or_init(|| derive_resume_command_name(std::env::args_os().next()))
+        .as_str()
 }
 
 pub async fn run_main(
@@ -315,7 +406,7 @@ pub async fn run_main(
     let (sandbox_mode, approval_policy) = if cli.full_auto {
         (
             Some(SandboxMode::WorkspaceWrite),
-            Some(AskForApproval::OnRequest),
+            Some(AskForApproval::OnFailure),
         )
     } else if cli.dangerously_bypass_approvals_and_sandbox {
         (
@@ -368,6 +459,9 @@ pub async fn run_main(
         tools_web_search_request: Some(cli.web_search),
         mcp_servers: None,
         experimental_client_tools: None,
+        dynamic_tools: None,
+        compact_prompt_override: cli.compact_prompt_override.clone(),
+        compact_prompt_override_file: cli.compact_prompt_file.clone(),
     };
 
     // Parse `-c` overrides from the CLI.
@@ -392,6 +486,29 @@ pub async fn run_main(
         }
     };
 
+    code_core::config::migrate_legacy_log_dirs(&code_home);
+
+    let housekeeping_home = code_home.clone();
+    let housekeeping_stop = Arc::new(AtomicBool::new(false));
+    let housekeeping_stop_worker = Arc::clone(&housekeeping_stop);
+    let housekeeping_handle = thread_spawner::spawn_lightweight("housekeeping", move || {
+        const HOUSEKEEPING_INTERVAL: Duration = Duration::from_secs(30 * 60);
+        const HOUSEKEEPING_POLL_INTERVAL: Duration = Duration::from_secs(10);
+
+        let mut next_run_at = Instant::now();
+        while !housekeeping_stop_worker.load(Ordering::Relaxed) {
+            let now = Instant::now();
+            if now >= next_run_at {
+                if let Err(err) = code_core::run_housekeeping_if_due(&housekeeping_home) {
+                    tracing::warn!("code home housekeeping failed: {err}");
+                }
+                next_run_at = now + HOUSEKEEPING_INTERVAL;
+            }
+
+            std::thread::sleep(HOUSEKEEPING_POLL_INTERVAL);
+        }
+    });
+
     let workspace_write_network_access_explicit = {
         let cli_override = cli_kv_overrides
             .iter()
@@ -414,7 +531,7 @@ pub async fn run_main(
         // Load configuration and support CLI overrides.
 
         #[allow(clippy::print_stderr)]
-        match Config::load_with_cli_overrides(cli_kv_overrides.clone(), overrides) {
+        match Config::load_with_cli_overrides(cli_kv_overrides.clone(), overrides.clone()) {
             Ok(config) => config,
             Err(err) => {
                 eprintln!("Error loading configuration: {err}");
@@ -422,6 +539,100 @@ pub async fn run_main(
             }
         }
     };
+
+    config.demo_developer_message = cli.demo_developer_message.clone();
+
+    let cli_model_override = cli.model.is_some()
+        || cli_kv_overrides
+            .iter()
+            .any(|(path, _)| path == "model" || path.ends_with(".model"));
+    if !cli_model_override && !cli.oss {
+        let auth_mode = if config.using_chatgpt_auth {
+            AuthMode::ChatGPT
+        } else {
+            AuthMode::ApiKey
+        };
+        if let Some(plan) = determine_migration_plan(&config, auth_mode) {
+            let should_auto_accept = auth_mode.is_chatgpt()
+                && (plan.hide_key != code_common::model_presets::HIDE_GPT_5_2_CODEX_MIGRATION_PROMPT_CONFIG
+                    || (plan.current.id.eq_ignore_ascii_case("gpt-5.1-codex")
+                        && plan
+                            .target
+                            .id
+                            .eq_ignore_ascii_case("gpt-5.2-codex")));
+
+            if should_auto_accept {
+                if let Err(err) = persist_migration_acceptance(
+                    &code_home,
+                    cli.config_profile.as_deref(),
+                    plan,
+                )
+                .await
+                {
+                    tracing::warn!("failed to persist migration acceptance: {err}");
+                } else {
+                    match Config::load_with_cli_overrides(
+                        cli_kv_overrides.clone(),
+                        overrides.clone(),
+                    ) {
+                        Ok(updated) => {
+                            config = updated;
+                            config.demo_developer_message = cli.demo_developer_message.clone();
+                        }
+                        Err(err) => {
+                            eprintln!("Error reloading configuration: {err}");
+                            std::process::exit(1);
+                        }
+                    }
+                }
+            } else {
+                let copy = migration_copy_for_key(plan.hide_key);
+                match run_model_migration_prompt(&copy)? {
+                    ModelMigrationOutcome::Accepted => {
+                        if let Err(err) = persist_migration_acceptance(
+                            &code_home,
+                            cli.config_profile.as_deref(),
+                            plan,
+                        )
+                        .await
+                        {
+                            tracing::warn!("failed to persist migration acceptance: {err}");
+                        } else {
+                            match Config::load_with_cli_overrides(
+                                cli_kv_overrides.clone(),
+                                overrides.clone(),
+                            ) {
+                                Ok(updated) => {
+                                    config = updated;
+                                    config.demo_developer_message = cli.demo_developer_message.clone();
+                                }
+                                Err(err) => {
+                                    eprintln!("Error reloading configuration: {err}");
+                                    std::process::exit(1);
+                                }
+                            }
+                        }
+                    }
+                    ModelMigrationOutcome::Rejected => {
+                        let hide_key = plan.hide_key;
+                        if let Err(err) = persist_notice_hide(
+                            &code_home,
+                            cli.config_profile.as_deref(),
+                            hide_key,
+                        )
+                        .await
+                        {
+                            tracing::warn!("failed to persist migration opt-out: {err}");
+                        }
+                        set_notice_flag(&mut config.notices, hide_key);
+                    }
+                    ModelMigrationOutcome::Exit => {
+                        return Ok(empty_exit_summary());
+                    }
+                }
+            }
+        }
+    }
 
     let startup_footer_notice = None;
 
@@ -452,42 +663,71 @@ pub async fn run_main(
 
     let log_dir = code_core::config::log_dir(&config)?;
     std::fs::create_dir_all(&log_dir)?;
-    // Open (or create) your log file, appending to it.
-    let mut log_file_opts = OpenOptions::new();
-    log_file_opts.create(true).append(true);
 
-    // Ensure the file is only readable and writable by the current user.
-    // Doing the equivalent to `chmod 600` on Windows is quite a bit more code
-    // and requires the Windows API crates, so we can reconsider that when
-    // Code CLI is officially supported on Windows.
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::OpenOptionsExt;
-        log_file_opts.mode(0o600);
-    }
+    let (env_layer, _log_guard) = if cli.debug {
+        rotate_log_file(&log_dir, "codex-tui.log");
+        // Open (or create) your log file, appending to it.
+        let mut log_file_opts = OpenOptions::new();
+        log_file_opts.create(true).append(true);
 
-    let log_file = log_file_opts.open(log_dir.join("codex-tui.log"))?;
+        // Ensure the file is only readable and writable by the current user.
+        // Doing the equivalent to `chmod 600` on Windows is quite a bit more code
+        // and requires the Windows API crates, so we can reconsider that when
+        // Code CLI is officially supported on Windows.
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::OpenOptionsExt;
+            log_file_opts.mode(0o600);
+        }
 
-    // Wrap file in non‑blocking writer.
-    let (non_blocking, _guard) = non_blocking(log_file);
+        let log_file = log_file_opts.open(log_dir.join("codex-tui.log"))?;
 
-    let default_filter = if cli.debug {
-        "code_core=info,code_tui=info,code_browser=info"
+        // Wrap file in non‑blocking writer.
+        let (log_writer, log_guard) = non_blocking(log_file);
+
+        let default_filter = "code_core=info,code_tui=info,code_browser=warn,code_auto_drive_core=info";
+
+        // use RUST_LOG env var, defaulting based on debug flag.
+        let env_filter = || {
+            EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new(default_filter))
+        };
+
+        let env_layer = tracing_subscriber::fmt::layer()
+            .with_target(false)
+            .with_span_events(tracing_subscriber::fmt::format::FmtSpan::CLOSE)
+            .with_ansi(false)
+            .with_writer(log_writer)
+            .with_filter(env_filter());
+
+        (Some(env_layer), Some(log_guard))
     } else {
-        "code_core=warn,code_tui=warn,code_browser=warn"
+        (None, None)
     };
 
-    // use RUST_LOG env var, defaulting based on debug flag.
-    let env_filter = || {
-        EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new(default_filter))
-    };
+    let critical_dir = log_dir.clone();
+    let critical_appender = rolling::daily(&critical_dir, "critical.log");
+    let (critical_writer, _critical_guard) = non_blocking(critical_appender);
 
-    let _ = tracing_subscriber::fmt()
-        .with_env_filter(env_filter())
+    let critical_layer = tracing_subscriber::fmt::layer()
         .with_target(false)
-        .with_span_events(tracing_subscriber::fmt::format::FmtSpan::CLOSE)
         .with_ansi(false)
-        .with_writer(non_blocking)
+        .with_thread_ids(true)
+        .with_thread_names(true)
+        .with_writer(critical_writer)
+        .with_filter(LevelFilter::ERROR);
+
+    let otel = match std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        code_core::otel_init::build_provider(&config, env!("CARGO_PKG_VERSION"))
+    })) {
+        Ok(Ok(otel)) => otel,
+        Ok(Err(_)) | Err(_) => None,
+    };
+    let otel_logger_layer = otel.as_ref().map(|provider| provider.logger_layer());
+
+    let _ = tracing_subscriber::registry()
+        .with(env_layer)
+        .with(critical_layer)
+        .with(otel_logger_layer)
         .try_init();
 
     if cli.oss {
@@ -496,23 +736,87 @@ pub async fn run_main(
             .map_err(|e| std::io::Error::other(format!("OSS setup failed: {e}")))?;
     }
 
-    let _otel = code_core::otel_init::build_provider(&config, env!("CARGO_PKG_VERSION"));
-
     let latest_upgrade_version = if crate::updates::upgrade_ui_enabled() {
         updates::get_upgrade_version(&config)
     } else {
         None
     };
 
-    run_ratatui_app(
+    let run_result = run_ratatui_app(
         cli,
         config,
         should_show_trust_screen,
         startup_footer_notice,
         latest_upgrade_version,
         theme_configured_explicitly,
-    )
-        .map_err(|err| std::io::Error::other(err.to_string()))
+    );
+
+    housekeeping_stop.store(true, Ordering::Relaxed);
+    if let Some(handle) = housekeeping_handle {
+        if let Err(err) = handle.join() {
+            tracing::warn!("code home housekeeping task panicked: {err:?}");
+        }
+    } else {
+        tracing::warn!("housekeeping thread spawn skipped: background thread limit reached");
+    }
+
+    run_result.map_err(|err| std::io::Error::other(err.to_string()))
+}
+
+pub(crate) fn install_unified_panic_hook() {
+    static PANIC_HOOK_ONCE: Once = Once::new();
+
+    PANIC_HOOK_ONCE.call_once(|| {
+        let prev_hook = std::panic::take_hook();
+        std::panic::set_hook(Box::new(move |info| {
+            let current_thread = std::thread::current();
+            let thread_name = current_thread.name().unwrap_or("unnamed");
+            let thread_id = format!("{:?}", current_thread.id());
+            let backtrace = Backtrace::force_capture().to_string();
+
+            let location = info
+                .location()
+                .map(|location| (location.file(), location.line(), location.column()));
+
+            session_log::log_panic(
+                &info.to_string(),
+                thread_name,
+                &thread_id,
+                location,
+                &backtrace,
+            );
+
+            if let Some(location) = info.location() {
+                tracing::error!(
+                    thread_name,
+                    thread_id,
+                    file = location.file(),
+                    line = location.line(),
+                    column = location.column(),
+                    panic = %info,
+                    backtrace = %backtrace,
+                    session_log_path = session_log::log_path().as_ref().map(|path| path.display().to_string()),
+                    "panic captured"
+                );
+            } else {
+                tracing::error!(
+                    thread_name,
+                    thread_id,
+                    panic = %info,
+                    backtrace = %backtrace,
+                    session_log_path = session_log::log_path().as_ref().map(|path| path.display().to_string()),
+                    "panic captured"
+                );
+            }
+
+            if let Err(err) = crate::tui::restore() {
+                tracing::warn!("failed to restore terminal after panic: {err}");
+            }
+
+            prev_hook(info);
+            std::process::exit(1);
+        }));
+    });
 }
 
 fn run_ratatui_app(
@@ -524,16 +828,7 @@ fn run_ratatui_app(
     theme_configured_explicitly: bool,
 ) -> color_eyre::Result<ExitSummary> {
     color_eyre::install()?;
-
-    // Forward panic reports through tracing so they appear in the UI status
-    // line, but do not swallow the default/color-eyre panic handler.
-    // Chain to the previous hook so users still get a rich panic report
-    // (including backtraces) after we restore the terminal.
-    let prev_hook = std::panic::take_hook();
-    std::panic::set_hook(Box::new(move |info| {
-        tracing::error!("panic: {info}");
-        prev_hook(info);
-    }));
+    install_unified_panic_hook();
     maybe_apply_terminal_theme_detection(&mut config, theme_configured_explicitly);
 
     let (mut terminal, terminal_info) = tui::init(&config)?;
@@ -596,6 +891,18 @@ fn run_ratatui_app(
         print_timing_summary(&summary);
     }
 
+    #[cfg(unix)]
+    let sigterm_triggered = app.sigterm_triggered();
+    #[cfg(unix)]
+    app.clear_sigterm_guard();
+    drop(app);
+    #[cfg(unix)]
+    if sigterm_triggered {
+        unsafe {
+            libc::raise(libc::SIGTERM);
+        }
+    }
+
     // ignore error when collecting usage – report underlying error instead
     app_result.map(|_| ExitSummary {
         token_usage: usage,
@@ -654,12 +961,60 @@ fn reclaim_worktrees_from_file(path: &std::path::Path, label: &str) {
     }
 
     eprintln!("Cleaning remaining worktrees for {} ({}).", label, entries.len());
+    let current_pid = std::process::id();
     for (git_root, worktree) in entries {
         let Some(wt_str) = worktree.to_str() else { continue };
-        let _ = Command::new("git")
+
+        // Retry a few times if the global review lock is busy.
+        let mut acquired = None;
+        let mut lock_info = None;
+        for attempt in 0..3 {
+            acquired = try_acquire_lock("tui-worktree-cleanup", &git_root)
+                .ok()
+                .flatten();
+            if acquired.is_some() {
+                break;
+            }
+
+            // If the lock holder died, clear it and retry immediately.
+            if let Ok(true) = clear_stale_lock_if_dead(Some(&git_root)) {
+                continue;
+            }
+
+            // Remember who is holding the lock for diagnostics and potential self-cleanup.
+            lock_info = read_lock_info(Some(&git_root));
+            if matches!(lock_info.as_ref(), Some(info) if info.pid == current_pid) {
+                // Our own process still holds the lock (e.g., background task still winding down).
+                // Proceed without a guard so we still reclaim our worktrees on shutdown.
+                break;
+            }
+
+            std::thread::sleep(std::time::Duration::from_millis(150 * (attempt + 1)));
+        }
+
+        let lock_is_self = matches!(lock_info.as_ref(), Some(info) if info.pid == current_pid);
+
+        if acquired.is_none() && !lock_is_self {
+            let detail = lock_info
+                .as_ref()
+                .map(|info| format!("pid {} (intent: {})", info.pid, info.intent))
+                .unwrap_or_else(|| "unknown holder".to_string());
+            eprintln!(
+                "Deferring cleanup of {} — cleanup lock busy ({detail}); will retry on next shutdown",
+                worktree.display()
+            );
+            continue;
+        }
+
+        if let Ok(out) = Command::new("git")
             .current_dir(&git_root)
             .args(["worktree", "remove", wt_str, "--force"])
-            .output();
+            .output()
+        {
+            if out.status.success() {
+                bump_snapshot_epoch();
+            }
+        }
         let _ = std::fs::remove_dir_all(&worktree);
     }
     let _ = std::fs::remove_file(path);
@@ -749,6 +1104,157 @@ fn maybe_apply_terminal_theme_detection(config: &mut Config, theme_configured_ex
                 "Terminal theme autodetect unavailable; using configured default theme"
             );
         }
+    }
+}
+
+#[derive(Clone, Copy)]
+struct MigrationPlan {
+    current: &'static ModelPreset,
+    target: &'static ModelPreset,
+    hide_key: &'static str,
+    new_effort: Option<ReasoningEffort>,
+}
+
+fn determine_migration_plan(config: &Config, auth_mode: AuthMode) -> Option<MigrationPlan> {
+    let current_slug = config.model.to_ascii_lowercase();
+    let presets = all_model_presets();
+    let current = find_migration_preset(presets, &current_slug)?;
+    let upgrade = current.upgrade.as_ref()?;
+    if notice_hidden(&config.notices, upgrade.migration_config_key.as_str()) {
+        return None;
+    }
+    let target = presets
+        .iter()
+        .find(|preset| preset.id.eq_ignore_ascii_case(&upgrade.id))?;
+    if !auth_allows_target(auth_mode, target) {
+        return None;
+    }
+    let new_effort = None;
+    Some(MigrationPlan {
+        current,
+        target,
+        hide_key: upgrade.migration_config_key.as_str(),
+        new_effort,
+    })
+}
+
+fn find_migration_preset<'a>(presets: &'a [ModelPreset], slug_lower: &str) -> Option<&'a ModelPreset> {
+    let slug_no_prefix = slug_lower
+        .rsplit_once(':')
+        .map(|(_, rest)| rest)
+        .unwrap_or(slug_lower);
+    let slug_no_prefix = slug_no_prefix
+        .rsplit_once('/')
+        .map(|(_, rest)| rest)
+        .unwrap_or(slug_no_prefix);
+    let slug_no_test = slug_no_prefix.strip_prefix("test-").unwrap_or(slug_no_prefix);
+
+    if let Some(preset) = presets.iter().find(|preset| {
+        preset.id.eq_ignore_ascii_case(slug_no_test)
+            || preset.model.eq_ignore_ascii_case(slug_no_test)
+            || preset.display_name.eq_ignore_ascii_case(slug_no_test)
+    }) {
+        return Some(preset);
+    }
+
+    let mut best: Option<&ModelPreset> = None;
+    let mut best_len = 0usize;
+    for preset in presets.iter() {
+        for candidate in [&preset.id, &preset.model, &preset.display_name] {
+            let candidate_lower = candidate.to_ascii_lowercase();
+            if slug_no_test.starts_with(candidate_lower.as_str()) {
+                let candidate_len = candidate.len();
+                if candidate_len > best_len {
+                    best = Some(preset);
+                    best_len = candidate_len;
+                }
+                break;
+            }
+        }
+    }
+
+    best
+}
+
+const NOTICE_TABLE: &str = "notice";
+
+async fn persist_migration_acceptance(
+    code_home: &Path,
+    profile: Option<&str>,
+    plan: MigrationPlan,
+) -> io::Result<()> {
+    let mut pending: Vec<(Vec<&str>, String)> = Vec::new();
+    pending.push((vec![CONFIG_KEY_MODEL], plan.target.model.to_string()));
+
+    if let Some(effort) = plan.new_effort {
+        pending.push((
+            vec![CONFIG_KEY_EFFORT],
+            reasoning_effort_to_str(effort).to_string(),
+        ));
+    }
+
+    pending.push((vec![NOTICE_TABLE, plan.hide_key], "true".to_string()));
+
+    let overrides: Vec<(&[&str], &str)> = pending
+        .iter()
+        .map(|(path, value)| (path.as_slice(), value.as_str()))
+        .collect();
+
+    config_edit::persist_overrides(code_home, profile, &overrides)
+        .await
+        .map_err(|err| io::Error::other(err.to_string()))
+}
+
+async fn persist_notice_hide(
+    code_home: &Path,
+    profile: Option<&str>,
+    hide_key: &'static str,
+) -> io::Result<()> {
+    let notice_path = [NOTICE_TABLE, hide_key];
+    let overrides = [(&notice_path[..], "true")];
+    config_edit::persist_overrides(code_home, profile, &overrides)
+        .await
+        .map_err(|err| io::Error::other(err.to_string()))
+}
+
+fn set_notice_flag(notices: &mut Notice, key: &str) {
+    if key == HIDE_GPT5_1_MIGRATION_PROMPT_CONFIG {
+        notices.hide_gpt5_1_migration_prompt = Some(true);
+    } else if key == HIDE_GPT_5_1_CODEX_MAX_MIGRATION_PROMPT_CONFIG {
+        notices.hide_gpt_5_1_codex_max_migration_prompt = Some(true);
+    } else if key == HIDE_GPT_5_2_MIGRATION_PROMPT_CONFIG {
+        notices.hide_gpt5_2_migration_prompt = Some(true);
+    } else if key == code_common::model_presets::HIDE_GPT_5_2_CODEX_MIGRATION_PROMPT_CONFIG {
+        notices.hide_gpt5_2_codex_migration_prompt = Some(true);
+    }
+}
+
+fn notice_hidden(notices: &Notice, key: &str) -> bool {
+    if key == HIDE_GPT5_1_MIGRATION_PROMPT_CONFIG {
+        notices.hide_gpt5_1_migration_prompt.unwrap_or(false)
+    } else if key == HIDE_GPT_5_1_CODEX_MAX_MIGRATION_PROMPT_CONFIG {
+        notices.hide_gpt_5_1_codex_max_migration_prompt.unwrap_or(false)
+    } else if key == HIDE_GPT_5_2_MIGRATION_PROMPT_CONFIG {
+        notices.hide_gpt5_2_migration_prompt.unwrap_or(false)
+    } else if key == code_common::model_presets::HIDE_GPT_5_2_CODEX_MIGRATION_PROMPT_CONFIG {
+        notices.hide_gpt5_2_codex_migration_prompt.unwrap_or(false)
+    } else {
+        false
+    }
+}
+
+fn auth_allows_target(auth_mode: AuthMode, target: &ModelPreset) -> bool {
+    !(matches!(auth_mode, AuthMode::ApiKey) && target.id.eq_ignore_ascii_case("gpt-5.2-codex"))
+}
+
+fn reasoning_effort_to_str(effort: ReasoningEffort) -> &'static str {
+    match effort {
+        ReasoningEffort::Minimal => "minimal",
+        ReasoningEffort::Low => "low",
+        ReasoningEffort::Medium => "medium",
+        ReasoningEffort::High => "high",
+        ReasoningEffort::XHigh => "xhigh",
+        ReasoningEffort::None => "none",
     }
 }
 
@@ -911,6 +1417,8 @@ mod tests {
 
         let overrides = ConfigOverrides {
             cwd: Some(workspace.path().to_path_buf()),
+            compact_prompt_override: None,
+            compact_prompt_override_file: None,
             ..Default::default()
         };
 
@@ -1008,5 +1516,27 @@ mod tests {
         }
 
         Ok(())
+    }
+
+    #[test]
+    fn resume_command_uses_invocation_basename() {
+        let derived = derive_resume_command_name(Some(std::ffi::OsString::from(
+            "/usr/local/bin/coder",
+        )));
+        assert_eq!(derived, "coder");
+    }
+
+    #[test]
+    fn resume_command_falls_back_to_current_exe() {
+        let expected = std::env::current_exe()
+            .ok()
+            .and_then(|path| {
+                path.file_name()
+                    .and_then(|value| value.to_str())
+                    .map(str::to_owned)
+            })
+            .unwrap_or_else(|| "code".to_string());
+
+        assert_eq!(derive_resume_command_name(None), expected);
     }
 }

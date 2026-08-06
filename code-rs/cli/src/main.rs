@@ -15,17 +15,22 @@ use code_cli::login::run_login_with_api_key;
 use code_cli::login::run_login_with_chatgpt;
 use code_cli::login::run_login_with_device_code;
 use code_cli::login::run_logout;
+mod bridge;
 mod llm;
 use llm::{LlmCli, run_llm};
 use code_common::CliConfigOverrides;
-use code_core::find_conversation_path_by_id_str;
-use code_core::RolloutRecorder;
+use code_core::{entry_to_rollout_path, SessionCatalog, SessionQuery};
+use code_core::spawn::spawn_std_command_with_retry;
+use code_protocol::protocol::SessionSource;
 use code_cloud_tasks::Cli as CloudTasksCli;
 use code_exec::Cli as ExecCli;
 use code_responses_api_proxy::Args as ResponsesApiProxyArgs;
 use code_tui::Cli as TuiCli;
 use code_tui::ExitSummary;
 use code_tui::resume_command_name;
+use serde::{Deserialize, Serialize};
+use serde_json;
+use std::fs;
 use std::path::Path;
 use std::path::PathBuf;
 use std::process;
@@ -35,7 +40,7 @@ mod mcp_cmd;
 
 use crate::mcp_cmd::McpCli;
 
-const CLI_COMMAND_NAME: &str = "dev";
+const CLI_COMMAND_NAME: &str = "code";
 pub(crate) const CODEX_SECURE_MODE_ENV_VAR: &str = "CODEX_SECURE_MODE";
 
 /// As early as possible in the process lifecycle, apply hardening measures
@@ -57,20 +62,20 @@ fn pre_main_hardening() {
     }
 }
 
-/// Hanzo Dev — the Hanzo coding agent.
+/// Codex CLI
 ///
 /// If no subcommand is specified, options will be forwarded to the interactive CLI.
 #[derive(Debug, Parser)]
 #[clap(
     author,
-    name = "dev",
+    name = "code",
     version = code_version::version(),
     // If a sub‑command is given, ignore requirements of the default args.
     subcommand_negates_reqs = true,
     // The executable is sometimes invoked via a platform‑specific name like
-    // `dev-x86_64-unknown-linux-musl`, or via the `code` alias, but the help
-    // output should always name the product: `dev`.
-    bin_name = "dev"
+    // `codex-x86_64-unknown-linux-musl`, but the help output should always use
+    // the generic `code` command name that users run.
+    bin_name = "code"
 )]
 struct MultitoolCli {
     #[clap(flatten)]
@@ -79,15 +84,27 @@ struct MultitoolCli {
     #[clap(flatten)]
     interactive: TuiCli,
 
+    /// Run Auto Drive when executing non-interactive sessions.
+    #[clap(long = "auto", global = true, default_value_t = false)]
+    auto_drive: bool,
+
+    /// Developer-role message to prepend to every turn for demos.
+    #[clap(long = "demo", global = true, value_name = "TEXT")]
+    demo_developer_message: Option<String>,
+
     #[clap(subcommand)]
     subcommand: Option<Subcommand>,
 }
 
 #[derive(Debug, clap::Subcommand)]
 enum Subcommand {
-    /// Run Hanzo Dev non-interactively.
+    /// Run Codex non-interactively.
     #[clap(visible_alias = "e")]
     Exec(ExecCli),
+
+    /// Run Auto Drive in headless mode (alias for `exec --auto --full-auto`).
+    #[clap(name = "auto")]
+    Auto(ExecCli),
 
     /// Manage login.
     Login(LoginCommand),
@@ -95,11 +112,11 @@ enum Subcommand {
     /// Remove stored authentication credentials.
     Logout(LogoutCommand),
 
-    /// [experimental] Run Hanzo Dev as an MCP server and manage MCP servers.
+    /// [experimental] Run Codex as an MCP server and manage MCP servers.
     #[clap(visible_alias = "acp")]
     Mcp(McpCli),
 
-    /// [experimental] Run the Hanzo Dev MCP server (stdio transport).
+    /// [experimental] Run the Codex MCP server (stdio transport).
     McpServer,
 
     /// [experimental] Run the app server.
@@ -115,7 +132,7 @@ enum Subcommand {
     #[clap(hide = false)]
     OrderReplay(OrderReplayArgs),
 
-    /// Apply the latest diff produced by the agent as a `git apply` to your local working tree.
+    /// Apply the latest diff produced by Codex agent as a `git apply` to your local working tree.
     #[clap(visible_alias = "a")]
     Apply(ApplyCommand),
 
@@ -141,6 +158,9 @@ enum Subcommand {
 
     /// Side-channel LLM utilities (no TUI events).
     Llm(LlmCli),
+
+    /// Manage Code Bridge subscription for this workspace.
+    Bridge(BridgeCommand),
 }
 
 #[derive(Debug, Parser)]
@@ -171,6 +191,119 @@ struct DebugArgs {
     cmd: DebugCommand,
 }
 
+#[derive(Debug, Parser)]
+struct BridgeCommand {
+    #[command(subcommand)]
+    action: BridgeAction,
+}
+
+#[derive(Debug, clap::Subcommand)]
+enum BridgeAction {
+    /// View or change the bridge subscription for the current workspace.
+    Subscription(BridgeSubscriptionCommand),
+
+    /// Show bridge metadata for the current workspace.
+    #[clap(alias = "ls")]
+    List(BridgeListCommand),
+
+    /// Stream live bridge events.
+    Tail(BridgeTailCommand),
+
+    /// Request a screenshot from control-capable bridge clients.
+    Screenshot(BridgeScreenshotCommand),
+
+    /// Execute JavaScript via the bridge control channel (eval).
+    #[clap(alias = "js")]
+    Javascript(BridgeJavascriptCommand),
+}
+
+#[derive(Debug, Parser)]
+struct BridgeSubscriptionCommand {
+    /// Show the current desired subscription (defaults if no override file).
+    #[arg(long, default_value_t = false)]
+    show: bool,
+
+    /// CSV list of levels: errors,warn,info,trace (default: errors).
+    #[arg(long, value_delimiter = ',')]
+    levels: Option<Vec<String>>,
+
+    /// CSV list of capabilities: screenshot,pageview,control,console,error.
+    #[arg(long, value_delimiter = ',')]
+    capabilities: Option<Vec<String>>,
+
+    /// LLM overload filter: off|minimal|aggressive.
+    #[arg(long, value_name = "FILTER")]
+    filter: Option<String>,
+
+    /// Remove the override file and revert to defaults (errors only).
+    #[arg(long, default_value_t = false)]
+    clear: bool,
+}
+
+#[derive(Debug, Parser)]
+struct BridgeListCommand {}
+
+#[derive(Debug, Parser)]
+struct BridgeTailCommand {
+    /// Minimum level to subscribe to (errors|warn|info|trace).
+    #[arg(long, default_value = "info", value_parser = ["errors", "warn", "info", "trace"])]
+    level: String,
+
+    /// Bridge target to use (index from `code bridge list` or metadata path).
+    #[arg(long = "bridge", value_name = "PATH|INDEX")]
+    bridge: Option<String>,
+
+    /// Print raw JSON frames instead of summaries.
+    #[arg(long, default_value_t = false)]
+    raw: bool,
+}
+
+#[derive(Debug, Parser)]
+struct BridgeScreenshotCommand {
+    /// Seconds to wait for a control response/screenshot.
+    #[arg(long, default_value_t = 10)]
+    timeout: u64,
+
+    /// Bridge target to use (index from `code bridge list` or metadata path).
+    #[arg(long = "bridge", value_name = "PATH|INDEX")]
+    bridge: Option<String>,
+}
+
+#[derive(Debug, Parser)]
+struct BridgeJavascriptCommand {
+    /// JavaScript to run inside the bridge client (eval).
+    code: String,
+
+    /// Seconds to wait for a control response.
+    #[arg(long, default_value_t = 10)]
+    timeout: u64,
+
+    /// Bridge target to use (index from `code bridge list` or metadata path).
+    #[arg(long = "bridge", value_name = "PATH|INDEX")]
+    bridge: Option<String>,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct SubscriptionOverride {
+    #[serde(default = "default_levels")]
+    levels: Vec<String>,
+    #[serde(default)]
+    capabilities: Vec<String>,
+    #[serde(default = "default_filter", alias = "llm_filter")]
+    llm_filter: String,
+}
+
+const SUBSCRIPTION_OVERRIDE_FILE: &str = "code-bridge.subscription.json";
+
+fn default_levels() -> Vec<String> {
+    vec!["errors".to_string()]
+}
+
+fn default_filter() -> String {
+    "off".to_string()
+}
+
 #[derive(Debug, clap::Subcommand)]
 enum DebugCommand {
     /// Run a command under Seatbelt (macOS only).
@@ -187,7 +320,7 @@ struct LoginCommand {
 
     #[arg(
         long = "with-api-key",
-        help = "Read the API key from stdin (e.g. `printenv OPENAI_API_KEY | dev login --with-api-key`)"
+        help = "Read the API key from stdin (e.g. `printenv OPENAI_API_KEY | codex login --with-api-key`)"
     )]
     with_api_key: bool,
 
@@ -245,8 +378,7 @@ struct OrderReplayArgs {
     /// Path to a response.json captured under ~/.code/debug_logs/*_response.json
     /// (legacy ~/.codex/debug_logs/ is still read).
     response_json: std::path::PathBuf,
-    /// Path to codex-tui.log (typically ~/.code/log/codex-tui.log; legacy
-    /// ~/.codex/log/codex-tui.log is still read).
+    /// Path to codex-tui.log (typically ~/.code/debug_logs/codex-tui.log).
     tui_log: std::path::PathBuf,
 }
 
@@ -254,7 +386,7 @@ struct OrderReplayArgs {
 struct PreviewArgs {
     /// Slug identifier (e.g., faster-downloads)
     slug: String,
-    /// Optional owner/repo to override (defaults to hanzoai/dev or $GITHUB_REPOSITORY)
+    /// Optional owner/repo to override (defaults to just-every/code or $GITHUB_REPOSITORY)
     #[arg(long = "repo", value_name = "OWNER/REPO")]
     repo: Option<String>,
     /// Output directory where the binary will be extracted
@@ -266,6 +398,8 @@ struct PreviewArgs {
 }
 
 fn main() -> anyhow::Result<()> {
+    code_utils_rustls_provider::ensure_rustls_crypto_provider();
+
     arg0_dispatch_or_else(|code_linux_sandbox_exe| async move {
         cli_main(code_linux_sandbox_exe).await?;
         Ok(())
@@ -276,10 +410,32 @@ async fn cli_main(code_linux_sandbox_exe: Option<PathBuf>) -> anyhow::Result<()>
     let MultitoolCli {
         config_overrides: root_config_overrides,
         mut interactive,
+        auto_drive,
+        demo_developer_message,
         subcommand,
     } = MultitoolCli::parse();
 
     interactive.finalize_defaults();
+    interactive.demo_developer_message = demo_developer_message.clone();
+
+    // The TUI already runs housekeeping. For headless `exec` sessions, kick off
+    // housekeeping early so stale worktrees/branches don't accumulate.
+    let housekeeping_handle = match &subcommand {
+        Some(Subcommand::Exec(_)) | Some(Subcommand::Auto(_)) => {
+            match code_core::config::find_code_home() {
+                Ok(code_home) => Some(std::thread::spawn(move || {
+                    if let Err(err) = code_core::run_housekeeping_if_due(&code_home) {
+                        tracing::warn!("code home housekeeping failed: {err}");
+                    }
+                })),
+                Err(err) => {
+                    tracing::warn!("failed to resolve code home for housekeeping: {err}");
+                    None
+                }
+            }
+        }
+        _ => None,
+    };
 
     match subcommand {
         None => {
@@ -306,6 +462,22 @@ async fn cli_main(code_linux_sandbox_exe: Option<PathBuf>) -> anyhow::Result<()>
             }
         }
         Some(Subcommand::Exec(mut exec_cli)) => {
+            if auto_drive {
+                exec_cli.auto_drive = true;
+            }
+            exec_cli.demo_developer_message = demo_developer_message.clone();
+            prepend_config_flags(
+                &mut exec_cli.config_overrides,
+                root_config_overrides.clone(),
+            );
+            code_exec::run_main(exec_cli, code_linux_sandbox_exe).await?;
+        }
+        Some(Subcommand::Auto(mut exec_cli)) => {
+            exec_cli.auto_drive = true;
+            if !exec_cli.full_auto && !exec_cli.dangerously_bypass_approvals_and_sandbox {
+                exec_cli.full_auto = true;
+            }
+            exec_cli.demo_developer_message = demo_developer_message.clone();
             prepend_config_flags(
                 &mut exec_cli.config_overrides,
                 root_config_overrides.clone(),
@@ -373,7 +545,7 @@ async fn cli_main(code_linux_sandbox_exe: Option<PathBuf>) -> anyhow::Result<()>
                         .await;
                     } else if login_cli.api_key.is_some() {
                         eprintln!(
-                            "The --api-key flag is no longer supported. Pipe the key instead, e.g. `printenv OPENAI_API_KEY | dev login --with-api-key`."
+                            "The --api-key flag is no longer supported. Pipe the key instead, e.g. `printenv OPENAI_API_KEY | codex login --with-api-key`."
                         );
                         std::process::exit(1);
                     } else if login_cli.with_api_key {
@@ -449,6 +621,9 @@ async fn cli_main(code_linux_sandbox_exe: Option<PathBuf>) -> anyhow::Result<()>
         Some(Subcommand::Preview(args)) => {
             preview_main(args).await?;
         }
+        Some(Subcommand::Bridge(bridge_cli)) => {
+            run_bridge_command(bridge_cli).await?;
+        }
         Some(Subcommand::Llm(mut llm_cli)) => {
             prepend_config_flags(
                 &mut llm_cli.config_overrides,
@@ -456,6 +631,10 @@ async fn cli_main(code_linux_sandbox_exe: Option<PathBuf>) -> anyhow::Result<()>
             );
             run_llm(llm_cli).await?;
         }
+    }
+
+    if let Some(handle) = housekeeping_handle {
+        let _ = handle.join();
     }
 
     Ok(())
@@ -470,6 +649,330 @@ fn prepend_config_flags(
     subcommand_config_overrides
         .raw_overrides
         .splice(0..0, cli_config_overrides.raw_overrides);
+}
+
+async fn run_bridge_command(cmd: BridgeCommand) -> anyhow::Result<()> {
+    match cmd.action {
+        BridgeAction::Subscription(sub_cmd) => run_bridge_subscription(sub_cmd),
+        BridgeAction::List(list_cmd) => run_bridge_list(list_cmd).await,
+        BridgeAction::Tail(tail_cmd) => run_bridge_tail(tail_cmd).await,
+        BridgeAction::Screenshot(shot_cmd) => run_bridge_screenshot(shot_cmd).await,
+        BridgeAction::Javascript(js_cmd) => run_bridge_javascript(js_cmd).await,
+    }
+}
+
+fn run_bridge_subscription(cmd: BridgeSubscriptionCommand) -> anyhow::Result<()> {
+    let cwd = std::env::current_dir().context("cannot read current dir")?;
+    let override_path = resolve_subscription_override_path(&cwd);
+
+    if cmd.clear {
+        if override_path.exists() {
+            fs::remove_file(&override_path).context("failed to remove subscription override")?;
+            println!(
+                "Removed {}. The running Code session will revert to defaults (errors only) within a few seconds.",
+                override_path.display()
+            );
+        } else {
+            println!("No override file to remove at {}", override_path.display());
+        }
+        return Ok(());
+    }
+
+    if cmd.show && cmd.levels.is_none() && cmd.capabilities.is_none() && cmd.filter.is_none() {
+        let sub = read_subscription_file(&override_path)?;
+        println!("Subscription override path: {}", override_path.display());
+        println!("levels       : {}", sub.levels.join(", "));
+        println!("capabilities : {}", sub.capabilities.join(", "));
+        println!("llm_filter   : {}", sub.llm_filter);
+        println!("(Running Code picks up changes every ~5s.)");
+        return Ok(());
+    }
+
+    let mut sub = read_subscription_file(&override_path)?;
+
+    if let Some(levels) = cmd.levels {
+        sub.levels = normalise_cli_vec(levels, default_levels());
+    }
+    if let Some(caps) = cmd.capabilities {
+        sub.capabilities = normalise_cli_vec(caps, Vec::new());
+    }
+    if let Some(filter) = cmd.filter {
+        sub.llm_filter = filter.trim().to_lowercase();
+    }
+
+    if let Some(parent) = override_path.parent() {
+        fs::create_dir_all(parent).context("failed to create .code dir")?;
+    }
+    let data = serde_json::to_string_pretty(&sub).context("serialize subscription")?;
+    fs::write(&override_path, data).context("write subscription override")?;
+
+    println!("Updated {}", override_path.display());
+    println!("levels       : {}", sub.levels.join(", "));
+    println!("capabilities : {}", sub.capabilities.join(", "));
+    println!("llm_filter   : {}", sub.llm_filter);
+    println!("Running Code session will resubscribe within ~5s.");
+    Ok(())
+}
+
+async fn run_bridge_list(_cmd: BridgeListCommand) -> anyhow::Result<()> {
+    let cwd = std::env::current_dir().context("cannot read current dir")?;
+    let targets = bridge::discover_bridge_targets(&cwd)?;
+    if targets.is_empty() {
+        println!(
+            "No Code Bridge metadata found. Start `code-bridge-host` in this workspace and try again."
+        );
+        return Ok(());
+    }
+
+    for (idx, target) in targets.iter().enumerate() {
+        let prefix = if targets.len() > 1 {
+            format!("#{} ", idx + 1)
+        } else {
+            String::new()
+        };
+        let indent = if targets.len() > 1 { "   " } else { "" };
+
+        println!("{}Bridge metadata : {}", prefix, target.meta_path.display());
+        println!("{}url             : {}", indent, target.meta.url);
+        if let Some(ws) = target.meta.workspace_path.as_deref() {
+            println!("{}workspace       : {ws}", indent);
+        }
+        if let Some(pid) = target.meta.pid {
+            println!("{}host pid        : {pid}", indent);
+        }
+
+        let hb = match target.heartbeat_age_ms {
+            Some(ms) => {
+                let secs = ms as f64 / 1000.0;
+                if target.stale {
+                    format!("{secs:.1}s ago (stale)")
+                } else {
+                    format!("{secs:.1}s ago")
+                }
+            }
+            None => "unknown".to_string(),
+        };
+        println!("{}heartbeat       : {hb}", indent);
+        println!("{}stale           : {}", indent, if target.stale { "yes" } else { "no" });
+        if target.stale {
+            println!("{}⚠ metadata looks stale; restart code-bridge-host if this persists.", indent);
+        }
+
+        match bridge::list_control_capable(target).await {
+            Ok(count) => println!("{}control-capable : {count} bridge client(s)", indent),
+            Err(err) => println!("{}control-capable : unknown ({err})", indent),
+        }
+
+        if idx + 1 < targets.len() {
+            println!();
+        }
+    }
+
+    Ok(())
+}
+
+async fn run_bridge_tail(cmd: BridgeTailCommand) -> anyhow::Result<()> {
+    let target = select_bridge_target(cmd.bridge.as_deref())?;
+    bridge::tail_events(&target, &cmd.level, cmd.raw).await
+}
+
+async fn run_bridge_screenshot(cmd: BridgeScreenshotCommand) -> anyhow::Result<()> {
+    let target = select_bridge_target(cmd.bridge.as_deref())?;
+    let outcome = bridge::request_screenshot(&target, cmd.timeout).await?;
+
+    println!(
+        "Forwarded to {} control-capable bridge(s).",
+        outcome.delivered
+    );
+
+    if let Some(res) = outcome.result.as_ref() {
+        let ok = res.get("ok").and_then(|v| v.as_bool()).unwrap_or(false);
+        if ok {
+            let payload = res
+                .get("result")
+                .map(|v| v.to_string())
+                .unwrap_or_else(|| "ok".to_string());
+            println!("Control result  : {payload}");
+        } else {
+            let msg = res
+                .get("error")
+                .and_then(|e| e.get("message"))
+                .and_then(|m| m.as_str())
+                .unwrap_or("control failed");
+            println!("Control result  : {msg}");
+        }
+    } else {
+        println!("Control result  : (no response)");
+    }
+
+    if let Some(bytes) = outcome.screenshot_bytes {
+        let kb = bytes / 1024;
+        let mime = outcome.screenshot_mime.unwrap_or_else(|| "unknown".to_string());
+        println!("Screenshot      : {kb} KB ({mime})");
+    } else {
+        println!("Screenshot      : no screenshot event received");
+    }
+
+    Ok(())
+}
+
+async fn run_bridge_javascript(cmd: BridgeJavascriptCommand) -> anyhow::Result<()> {
+    let target = select_bridge_target(cmd.bridge.as_deref())?;
+    let outcome = bridge::run_javascript(&target, &cmd.code, cmd.timeout).await?;
+
+    println!(
+        "Forwarded to {} control-capable bridge(s).",
+        outcome.delivered
+    );
+
+    if let Some(res) = outcome.result.as_ref() {
+        let ok = res.get("ok").and_then(|v| v.as_bool()).unwrap_or(false);
+        if ok {
+            let payload = res
+                .get("result")
+                .map(|v| v.to_string())
+                .unwrap_or_else(|| "ok".to_string());
+            println!("Result          : {payload}");
+        } else {
+            let msg = res
+                .get("error")
+                .and_then(|e| e.get("message"))
+                .and_then(|m| m.as_str())
+                .unwrap_or("control failed");
+            println!("Result          : {msg}");
+        }
+    } else {
+        println!("Result          : (no response)");
+    }
+
+    Ok(())
+}
+
+fn select_bridge_target(selector: Option<&str>) -> anyhow::Result<bridge::BridgeTarget> {
+    let cwd = std::env::current_dir().context("cannot read current dir")?;
+    let targets = bridge::discover_bridge_targets(&cwd)?;
+    if targets.is_empty() {
+        return Err(anyhow!(
+            "No Code Bridge metadata found. Start `code-bridge-host` in this workspace and try again."
+        ));
+    }
+
+    let Some(selector) = selector.map(str::trim).filter(|s| !s.is_empty()) else {
+        return Ok(targets[0].clone());
+    };
+
+    if let Ok(idx) = selector.parse::<usize>() {
+        if idx == 0 || idx > targets.len() {
+            anyhow::bail!("Bridge index out of range (found {}).", targets.len());
+        }
+        return Ok(targets[idx - 1].clone());
+    }
+
+    let path = PathBuf::from(selector);
+    for target in &targets {
+        if paths_match(&target.meta_path, &path) {
+            return Ok(target.clone());
+        }
+        if let Some(ws) = target.meta.workspace_path.as_deref() {
+            if ws == selector || ws.ends_with(selector) || ws.contains(selector) {
+                return Ok(target.clone());
+            }
+        }
+    }
+
+    anyhow::bail!(
+        "No bridge matched '{selector}'. Use `code bridge list` to see available bridges."
+    );
+}
+
+fn paths_match(left: &Path, right: &Path) -> bool {
+    if left == right {
+        return true;
+    }
+    match (left.canonicalize(), right.canonicalize()) {
+        (Ok(l), Ok(r)) => l == r,
+        _ => false,
+    }
+}
+
+fn read_subscription_file(path: &Path) -> anyhow::Result<SubscriptionOverride> {
+    if path.exists() {
+        let data = fs::read_to_string(path).context("read subscription override")?;
+        let sub: SubscriptionOverride = serde_json::from_str(&data).context("parse subscription override")?;
+        Ok(sub)
+    } else {
+        Ok(SubscriptionOverride {
+            levels: default_levels(),
+            capabilities: Vec::new(),
+            llm_filter: "off".to_string(),
+        })
+    }
+}
+
+fn normalise_cli_vec(values: Vec<String>, fallback: Vec<String>) -> Vec<String> {
+    let mut vals: Vec<String> = values
+        .into_iter()
+        .map(|v| v.trim().to_lowercase())
+        .filter(|v| !v.is_empty())
+        .collect();
+    if vals.is_empty() {
+        return fallback;
+    }
+    vals.sort();
+    vals.dedup();
+    vals
+}
+
+fn find_subscription_override_path(start: &Path) -> Option<PathBuf> {
+    let mut current = Some(start);
+    while let Some(dir) = current {
+        let candidate = dir.join(".code").join(SUBSCRIPTION_OVERRIDE_FILE);
+        if candidate.exists() {
+            return Some(candidate);
+        }
+        current = dir.parent();
+    }
+    None
+}
+
+fn resolve_subscription_override_path(start: &Path) -> PathBuf {
+    if let Some(path) = find_subscription_override_path(start) {
+        return path;
+    }
+
+    if let Some(dir) = find_meta_dir(start) {
+        return dir.join(SUBSCRIPTION_OVERRIDE_FILE);
+    }
+
+    if let Some(dir) = find_code_dir(start) {
+        return dir.join(SUBSCRIPTION_OVERRIDE_FILE);
+    }
+
+    start.join(".code").join(SUBSCRIPTION_OVERRIDE_FILE)
+}
+
+fn find_meta_dir(start: &Path) -> Option<PathBuf> {
+    let mut current = Some(start);
+    while let Some(dir) = current {
+        let candidate = dir.join(".code").join("code-bridge.json");
+        if candidate.exists() {
+            return candidate.parent().map(Path::to_path_buf);
+        }
+        current = dir.parent();
+    }
+    None
+}
+
+fn find_code_dir(start: &Path) -> Option<PathBuf> {
+    let mut current = Some(start);
+    while let Some(dir) = current {
+        let candidate = dir.join(".code");
+        if candidate.is_dir() {
+            return Some(candidate);
+        }
+        current = dir.parent();
+    }
+    None
 }
 
 /// Build the final `TuiCli` for a `codex resume` invocation.
@@ -583,32 +1086,44 @@ fn resolve_resume_path(session_id: Option<&str>, last: bool) -> anyhow::Result<O
     }
 
     let code_home = code_core::config::find_code_home()
-        .context("failed to locate the Hanzo Dev home directory")?;
+        .context("failed to locate Codex home directory")?;
 
-    // Build the async work once, then execute it either on the existing
-    // runtime (from a helper thread) or a fresh current-thread runtime.
-    // Clone borrowed inputs so the async task can be 'static when spawned.
     let sess = session_id.map(|s| s.to_string());
     let fetch = async move {
+        let catalog = SessionCatalog::new(code_home.clone());
         if let Some(id) = sess.as_deref() {
-            let maybe = find_conversation_path_by_id_str(&code_home, id)
+            let entry = catalog
+                .find_by_id(id)
                 .await
                 .context("failed to look up session by id")?;
-            Ok(maybe)
-        } else if last {
-            let page = RolloutRecorder::list_conversations(&code_home, 1, None, &[])
+            Ok(entry.map(|entry| entry_to_rollout_path(&code_home, &entry)))
+    } else if last {
+        let query = SessionQuery {
+            cwd: None,
+            git_root: None,
+            sources: vec![SessionSource::Cli, SessionSource::VSCode, SessionSource::Exec],
+            min_user_messages: 1,
+            include_archived: false,
+            include_deleted: false,
+            limit: Some(1),
+        };
+            let entry = catalog
+                .get_latest(&query)
                 .await
-                .context("failed to list recorded sessions")?;
-            Ok(page.items.first().map(|it| it.path.clone()))
+                .context("failed to get latest session from catalog")?;
+            Ok(entry.map(|entry| entry_to_rollout_path(&code_home, &entry)))
         } else {
             Ok(None)
         }
-    };
+        };
 
     match TokioHandle::try_current() {
         Ok(handle) => {
             let handle = handle.clone();
-            std::thread::spawn(move || handle.block_on(fetch))
+            std::thread::Builder::new()
+                .name("resume-lookup".to_string())
+                .spawn(move || handle.block_on(fetch))
+                .map_err(|err| anyhow!("resume lookup thread spawn failed: {err}"))?
                 .join()
                 .map_err(|_| anyhow!("resume lookup thread panicked"))?
         }
@@ -728,7 +1243,7 @@ async fn preview_main(args: PreviewArgs) -> anyhow::Result<()> {
     let repo = args
         .repo
         .or_else(|| env::var("GITHUB_REPOSITORY").ok())
-        .unwrap_or_else(|| "hanzoai/dev".to_string());
+        .unwrap_or_else(|| "just-every/code".to_string());
     let (owner, name) = repo
         .split_once('/')
         .map(|(o, n)| (o.to_string(), n.to_string()))
@@ -875,7 +1390,14 @@ async fn preview_main(args: PreviewArgs) -> anyhow::Result<()> {
             };
             let _ = fs::rename(&exe, &dest).or_else(|_| { fs::copy(&exe, &dest).map(|_| () ) });
             println!("Downloaded preview to {}", dest.display());
-            if !args.extra.is_empty() { let _ = std::process::Command::new(&dest).args(&args.extra).spawn(); } else { let _ = std::process::Command::new(&dest).spawn(); }
+            if !args.extra.is_empty() {
+                let mut cmd = std::process::Command::new(&dest);
+                cmd.args(&args.extra);
+                let _ = spawn_std_command_with_retry(&mut cmd);
+            } else {
+                let mut cmd = std::process::Command::new(&dest);
+                let _ = spawn_std_command_with_retry(&mut cmd);
+            }
             return Ok(());
         }
     }
@@ -996,7 +1518,7 @@ async fn doctor_main() -> anyhow::Result<()> {
         let bun_coder = format!("{}/coder", bun_bin);
         if coder_paths.iter().any(|p| p == &bun_coder) {
             println!("\nBun shim detected for 'coder': {}", bun_coder);
-            println!("Suggestion: remove old Bun global with: bun remove -g @hanzo/dev");
+            println!("Suggestion: remove old Bun global with: bun remove -g @just-every/code");
         }
         let bun_code = format!("{}/code", bun_bin);
         if code_paths.iter().any(|p| p == &bun_code) {
@@ -1027,8 +1549,8 @@ async fn doctor_main() -> anyhow::Result<()> {
     }
 
     println!("\nIf versions differ, remove older installs and keep one package manager:");
-    println!("  - Bun: bun remove -g @hanzo/dev");
-    println!("  - npm/pnpm: npm uninstall -g @hanzo/dev");
+    println!("  - Bun: bun remove -g @just-every/code");
+    println!("  - npm/pnpm: npm uninstall -g @just-every/code");
     println!("  - Homebrew: brew uninstall code");
     println!("  - Prefer using 'coder' to avoid conflicts with VS Code's 'code'.");
 
@@ -1040,11 +1562,13 @@ mod tests {
     use std::io::Write;
     use std::path::{Path, PathBuf};
     use std::sync::Mutex;
+    use std::time::{Duration, SystemTime};
 
+    use filetime::{set_file_mtime, FileTime};
     use tempfile::TempDir;
     use uuid::Uuid;
 
-    use code_protocol::mcp_protocol::ConversationId;
+    use code_protocol::models::{ContentItem, ResponseItem};
     use code_protocol::protocol::EventMsg as ProtoEventMsg;
     use code_protocol::protocol::RecordedEvent;
     use code_protocol::protocol::RolloutItem;
@@ -1053,6 +1577,7 @@ mod tests {
     use code_protocol::protocol::SessionMetaLine;
     use code_protocol::protocol::SessionSource;
     use code_protocol::protocol::UserMessageEvent;
+    use code_protocol::ThreadId;
 
     #[test]
     fn bash_completion_uses_code_command_name() {
@@ -1068,7 +1593,9 @@ mod tests {
         let MultitoolCli {
             interactive,
             config_overrides: root_overrides,
+            auto_drive: _,
             subcommand,
+            ..
         } = cli;
 
         let Subcommand::Resume(ResumeCommand {
@@ -1085,9 +1612,9 @@ mod tests {
 
     #[test]
     fn resume_model_flag_applies_when_no_root_flags() {
-        let interactive = finalize_from_args(["codex", "resume", "-m", "gpt-5-test"].as_ref());
+        let interactive = finalize_from_args(["codex", "resume", "-m", "gpt-5.1-test"].as_ref());
 
-        assert_eq!(interactive.model.as_deref(), Some("gpt-5-test"));
+        assert_eq!(interactive.model.as_deref(), Some("gpt-5.1-test"));
         assert!(interactive.resume_picker);
         assert!(!interactive.resume_last);
         assert_eq!(interactive.resume_session_id, None);
@@ -1103,11 +1630,13 @@ mod tests {
 
     static CODE_HOME_MUTEX: Mutex<()> = Mutex::new(());
 
-    fn with_temp_code_home<F, R>(f: F) -> R
-    where
-        F: FnOnce(&Path) -> R,
-    {
-        let _guard = CODE_HOME_MUTEX.lock().expect("lock CODE_HOME mutex");
+fn with_temp_code_home<F, R>(f: F) -> R
+where
+    F: FnOnce(&Path) -> R,
+{
+    let _guard = CODE_HOME_MUTEX
+        .lock()
+        .unwrap_or_else(|poison| poison.into_inner());
         let temp_home = TempDir::new().expect("temp code home");
         let prev_code_home = std::env::var("CODE_HOME").ok();
         let prev_codex_home = std::env::var("CODEX_HOME").ok();
@@ -1137,6 +1666,26 @@ mod tests {
     }
 
     fn create_session_fixture(code_home: &Path, id: &Uuid) -> PathBuf {
+        create_session_fixture_with_details(
+            code_home,
+            id,
+            "2025-10-06T12:00:00Z",
+            "2025-10-06T12:00:00Z",
+            Path::new("/project"),
+            SessionSource::Cli,
+            "Hello",
+        )
+    }
+
+    fn create_session_fixture_with_details(
+        code_home: &Path,
+        id: &Uuid,
+        created_at: &str,
+        last_event_at: &str,
+        cwd: &Path,
+        source: SessionSource,
+        user_message: &str,
+    ) -> PathBuf {
         let sessions_dir = code_home
             .join("sessions")
             .join("2025")
@@ -1144,24 +1693,28 @@ mod tests {
             .join("06");
         std::fs::create_dir_all(&sessions_dir).expect("create sessions dir");
 
-        let timestamp = "2025-10-06T12-00-00";
-        let filename = format!("rollout-{timestamp}-{id}.jsonl");
+        let filename = format!(
+            "rollout-{}-{}.jsonl",
+            created_at.replace(':', "-"),
+            id
+        );
         let path = sessions_dir.join(filename);
 
-        let session_id_str = id.to_string();
-
         let session_meta = SessionMeta {
-            id: ConversationId::from(*id),
-            timestamp: timestamp.to_string(),
-            cwd: Path::new(".").to_path_buf(),
+            id: ThreadId::from_string(&id.to_string()).expect("valid thread id"),
+            timestamp: created_at.to_string(),
+            cwd: cwd.to_path_buf(),
             originator: "test".to_string(),
             cli_version: "0.0.0-test".to_string(),
-            instructions: None,
-            source: SessionSource::Cli,
+            source,
+            model_provider: None,
+            base_instructions: None,
+            dynamic_tools: None,
+            forked_from_id: None,
         };
 
         let session_line = RolloutLine {
-            timestamp: timestamp.to_string(),
+            timestamp: created_at.to_string(),
             item: RolloutItem::SessionMeta(SessionMetaLine {
                 meta: session_meta,
                 git: None,
@@ -1169,16 +1722,43 @@ mod tests {
         };
 
         let event_line = RolloutLine {
-            timestamp: timestamp.to_string(),
+            timestamp: last_event_at.to_string(),
             item: RolloutItem::Event(RecordedEvent {
                 id: "event-0".to_string(),
                 event_seq: 0,
                 order: None,
                 msg: ProtoEventMsg::UserMessage(UserMessageEvent {
-                    message: "Hello".to_string(),
-                    kind: None,
+                    message: user_message.to_string(),
                     images: None,
+                    local_images: vec![],
+                    text_elements: vec![],
                 }),
+            }),
+        };
+
+        let user_line = RolloutLine {
+            timestamp: last_event_at.to_string(),
+            item: RolloutItem::ResponseItem(ResponseItem::Message {
+                id: Some(format!("user-{}", id)),
+                role: "user".to_string(),
+                content: vec![ContentItem::InputText {
+                    text: user_message.to_string(),
+                }],
+                end_turn: None,
+                phase: None,
+            }),
+        };
+
+        let response_line = RolloutLine {
+            timestamp: last_event_at.to_string(),
+            item: RolloutItem::ResponseItem(ResponseItem::Message {
+                id: Some(format!("msg-{}", id)),
+                role: "assistant".to_string(),
+                content: vec![ContentItem::OutputText {
+                    text: format!("Ack: {}", user_message),
+                }],
+                end_turn: None,
+                phase: None,
             }),
         };
 
@@ -1187,16 +1767,11 @@ mod tests {
         writer.write_all(b"\n").expect("newline");
         serde_json::to_writer(&mut writer, &event_line).expect("write event");
         writer.write_all(b"\n").expect("newline");
+        serde_json::to_writer(&mut writer, &user_line).expect("write user message");
+        writer.write_all(b"\n").expect("newline");
+        serde_json::to_writer(&mut writer, &response_line).expect("write response");
+        writer.write_all(b"\n").expect("newline");
         writer.flush().expect("flush session file");
-
-        let runtime = TokioRuntimeBuilder::new_current_thread()
-            .enable_all()
-            .build()
-            .expect("build runtime for session lookup");
-        runtime
-            .block_on(find_conversation_path_by_id_str(code_home, &session_id_str))
-            .expect("lookup session by id")
-            .expect("session file should be discoverable");
 
         path
     }
@@ -1236,6 +1811,109 @@ mod tests {
     }
 
     #[test]
+    fn resolve_resume_path_uses_catalog_for_last() {
+        with_temp_code_home(|code_home| {
+            let cwd = Path::new("/project");
+            let older_id = Uuid::parse_str("11111111-1111-4111-8111-111111111111").unwrap();
+            let newer_id = Uuid::parse_str("22222222-2222-4222-8222-222222222222").unwrap();
+
+            create_session_fixture_with_details(
+                code_home,
+                &older_id,
+                "2025-11-15T10:00:00Z",
+                "2025-11-15T10:00:10Z",
+                cwd,
+                SessionSource::Cli,
+                "older",
+            );
+            create_session_fixture_with_details(
+                code_home,
+                &newer_id,
+                "2025-11-16T10:00:00Z",
+                "2025-11-16T10:00:10Z",
+                cwd,
+                SessionSource::Exec,
+                "newer",
+            );
+
+            let path = resolve_resume_path(None, true).expect("query").expect("path");
+            let path_str = path.to_string_lossy();
+            assert!(
+                path_str.contains("22222222-2222-4222-8222-222222222222"),
+                "path resolved to {}",
+                path_str
+            );
+        });
+    }
+
+    #[test]
+    fn resolve_resume_path_prefix_lookup() {
+        with_temp_code_home(|code_home| {
+            let cwd = Path::new("/project");
+            let session_id = Uuid::parse_str("33333333-3333-4333-8333-333333333333").unwrap();
+            create_session_fixture_with_details(
+                code_home,
+                &session_id,
+                "2025-11-16T12:00:00Z",
+                "2025-11-16T12:00:05Z",
+                cwd,
+                SessionSource::Cli,
+                "prefix",
+            );
+
+            let result = resolve_resume_path(Some("33333333"), false)
+                .expect("query")
+                .expect("path");
+            let result_str = result.to_string_lossy();
+            assert!(
+                result_str.contains("33333333-3333-4333-8333-333333333333"),
+                "path resolved to {}",
+                result_str
+            );
+        });
+    }
+
+    #[test]
+    fn resolve_resume_path_handles_sync_like_mtime() {
+        with_temp_code_home(|code_home| {
+            let cwd = Path::new("/project");
+            let older_id = Uuid::parse_str("44444444-4444-4444-8444-444444444444").unwrap();
+            let newer_id = Uuid::parse_str("55555555-5555-4555-8555-555555555555").unwrap();
+
+            let older_path = create_session_fixture_with_details(
+                code_home,
+                &older_id,
+                "2025-11-10T10:00:00Z",
+                "2025-11-10T10:05:00Z",
+                cwd,
+                SessionSource::Cli,
+                "older",
+            );
+            let newer_path = create_session_fixture_with_details(
+                code_home,
+                &newer_id,
+                "2025-11-16T10:00:00Z",
+                "2025-11-16T10:05:00Z",
+                cwd,
+                SessionSource::Exec,
+                "newer",
+            );
+
+            let base = SystemTime::now();
+            set_file_mtime(&older_path, FileTime::from_system_time(base + Duration::from_secs(300))).unwrap();
+            set_file_mtime(&newer_path, FileTime::from_system_time(base + Duration::from_secs(60))).unwrap();
+
+            let path = resolve_resume_path(None, true).expect("query").expect("path");
+            let path_str = path.to_string_lossy();
+            assert!(
+                path_str.contains("55555555-5555-4555-8555-555555555555"),
+                "path resolved to {}",
+                path_str
+            );
+        });
+    }
+
+    #[test]
     fn resume_merges_option_flags_and_full_auto() {
         with_temp_code_home(|code_home| {
             let session_id = Uuid::new_v4();
@@ -1254,7 +1932,7 @@ mod tests {
                 "--ask-for-approval".to_string(),
                 "on-request".to_string(),
                 "-m".to_string(),
-                "gpt-5-test".to_string(),
+                "gpt-5.1-test".to_string(),
                 "-p".to_string(),
                 "my-profile".to_string(),
                 "-C".to_string(),
@@ -1266,7 +1944,7 @@ mod tests {
 
             let interactive = finalize_from_args(&arg_refs);
 
-            assert_eq!(interactive.model.as_deref(), Some("gpt-5-test"));
+            assert_eq!(interactive.model.as_deref(), Some("gpt-5.1-test"));
             assert!(interactive.oss);
             assert_eq!(interactive.config_profile.as_deref(), Some("my-profile"));
             assert!(matches!(

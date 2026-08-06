@@ -1,66 +1,69 @@
 #![cfg(not(target_os = "windows"))]
 
+use core_test_support::test_codex::local_selections;
+use std::fs;
+
 use assert_matches::assert_matches;
-use codex_core::model_family::find_family_for_model;
-use codex_core::protocol::AskForApproval;
-use codex_core::protocol::EventMsg;
-use codex_core::protocol::InputItem;
-use codex_core::protocol::Op;
-use codex_core::protocol::SandboxPolicy;
-use codex_protocol::config_types::ReasoningSummary;
+use codex_protocol::items::TurnItem;
+use codex_protocol::models::PermissionProfile;
 use codex_protocol::plan_tool::StepStatus;
+use codex_protocol::protocol::AskForApproval;
+use codex_protocol::protocol::EventMsg;
+use codex_protocol::protocol::Op;
+use codex_protocol::user_input::UserInput;
+use core_test_support::TempDirExt;
 use core_test_support::assert_regex_match;
 use core_test_support::responses;
-use core_test_support::responses::ev_apply_patch_function_call;
+use core_test_support::responses::ResponsesRequest;
+use core_test_support::responses::ev_apply_patch_custom_tool_call;
 use core_test_support::responses::ev_assistant_message;
 use core_test_support::responses::ev_completed;
 use core_test_support::responses::ev_function_call;
-use core_test_support::responses::ev_local_shell_call;
 use core_test_support::responses::ev_response_created;
 use core_test_support::responses::sse;
 use core_test_support::responses::start_mock_server;
 use core_test_support::skip_if_no_network;
 use core_test_support::test_codex::TestCodex;
 use core_test_support::test_codex::test_codex;
+use core_test_support::test_codex::turn_permission_fields;
 use core_test_support::wait_for_event;
 use serde_json::Value;
 use serde_json::json;
-use wiremock::matchers::any;
-
-fn function_call_output(body: &Value) -> Option<&Value> {
-    body.get("input")
-        .and_then(Value::as_array)
-        .and_then(|items| {
-            items.iter().find(|item| {
-                item.get("type").and_then(Value::as_str) == Some("function_call_output")
-            })
-        })
+fn call_output(req: &ResponsesRequest, call_id: &str) -> (String, Option<bool>) {
+    let raw = req.function_call_output(call_id);
+    assert_eq!(
+        raw.get("call_id").and_then(Value::as_str),
+        Some(call_id),
+        "mismatched call_id in function_call_output"
+    );
+    let (content_opt, success) = req
+        .function_call_output_content_and_success(call_id)
+        .expect("function_call_output present");
+    let content = content_opt.expect("function_call_output content present");
+    (content, success)
 }
 
-fn extract_output_text(item: &Value) -> Option<&str> {
-    item.get("output").and_then(|value| match value {
-        Value::String(text) => Some(text.as_str()),
-        Value::Object(obj) => obj.get("content").and_then(Value::as_str),
-        _ => None,
-    })
-}
-
-fn find_request_with_function_call_output(requests: &[Value]) -> Option<&Value> {
-    requests
-        .iter()
-        .find(|body| function_call_output(body).is_some())
+fn custom_call_output(req: &ResponsesRequest, call_id: &str) -> (String, Option<bool>) {
+    let raw = req.custom_tool_call_output(call_id);
+    assert_eq!(
+        raw.get("call_id").and_then(Value::as_str),
+        Some(call_id),
+        "mismatched call_id in custom_tool_call_output"
+    );
+    let (content_opt, success) = req
+        .custom_tool_call_output_content_and_success(call_id)
+        .expect("custom_tool_call_output present");
+    let content = content_opt.expect("custom_tool_call_output content present");
+    (content, success)
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn shell_tool_executes_command_and_streams_output() -> anyhow::Result<()> {
+async fn shell_command_tool_executes_command_and_streams_output() -> anyhow::Result<()> {
     skip_if_no_network!(Ok(()));
 
     let server = start_mock_server().await;
 
-    let mut builder = test_codex().with_config(|config| {
-        config.model = "gpt-5".to_string();
-        config.model_family = find_family_for_model("gpt-5").expect("gpt-5 is a valid model");
-    });
+    let mut builder = test_codex().with_model("test-gpt-5-codex");
     let TestCodex {
         codex,
         cwd,
@@ -68,56 +71,65 @@ async fn shell_tool_executes_command_and_streams_output() -> anyhow::Result<()> 
         ..
     } = builder.build(&server).await?;
 
-    let call_id = "shell-tool-call";
-    let command = vec!["/bin/echo", "tool harness"];
+    let call_id = "shell-command-tool-call";
+    let command_args = json!({
+        "command": "echo tool harness",
+        "login": false,
+    })
+    .to_string();
     let first_response = sse(vec![
         ev_response_created("resp-1"),
-        ev_local_shell_call(call_id, "completed", command),
+        ev_function_call(call_id, "shell_command", &command_args),
         ev_completed("resp-1"),
     ]);
-    responses::mount_sse_once_match(&server, any(), first_response).await;
+    responses::mount_sse_once(&server, first_response).await;
 
     let second_response = sse(vec![
         ev_assistant_message("msg-1", "all done"),
         ev_completed("resp-2"),
     ]);
-    responses::mount_sse_once_match(&server, any(), second_response).await;
+    let second_mock = responses::mount_sse_once(&server, second_response).await;
 
     let session_model = session_configured.model.clone();
+    let cwd_path = cwd.abs();
+    let (sandbox_policy, permission_profile) =
+        turn_permission_fields(PermissionProfile::Disabled, cwd_path.as_path());
 
     codex
-        .submit(Op::UserTurn {
-            items: vec![InputItem::Text {
+        .submit(Op::UserInput {
+            items: vec![UserInput::Text {
                 text: "please run the shell command".into(),
+                text_elements: Vec::new(),
             }],
             final_output_json_schema: None,
-            cwd: cwd.path().to_path_buf(),
-            approval_policy: AskForApproval::Never,
-            sandbox_policy: SandboxPolicy::DangerFullAccess,
-            model: session_model,
-            effort: None,
-            summary: ReasoningSummary::Auto,
+            responsesapi_client_metadata: None,
+            additional_context: Default::default(),
+            thread_settings: codex_protocol::protocol::ThreadSettingsOverrides {
+                environments: Some(local_selections(cwd_path)),
+                approval_policy: Some(AskForApproval::Never),
+                sandbox_policy: Some(sandbox_policy),
+                permission_profile,
+                collaboration_mode: Some(codex_protocol::config_types::CollaborationMode {
+                    mode: codex_protocol::config_types::ModeKind::Default,
+                    settings: codex_protocol::config_types::Settings {
+                        model: session_model,
+                        reasoning_effort: None,
+                        developer_instructions: None,
+                    },
+                }),
+                ..Default::default()
+            },
         })
         .await?;
 
-    wait_for_event(&codex, |event| matches!(event, EventMsg::TaskComplete(_))).await;
+    wait_for_event(&codex, |event| matches!(event, EventMsg::TurnComplete(_))).await;
 
-    let requests = server.received_requests().await.expect("recorded requests");
-    assert!(!requests.is_empty(), "expected at least one POST request");
-
-    let request_bodies = requests
-        .iter()
-        .map(|req| req.body_json::<Value>().expect("request json"))
-        .collect::<Vec<_>>();
-
-    let body_with_tool_output = find_request_with_function_call_output(&request_bodies)
-        .expect("function_call_output item not found in requests");
-    let output_item = function_call_output(body_with_tool_output).expect("tool output item");
-    let output_text = extract_output_text(output_item).expect("output text present");
-    let exec_output: Value = serde_json::from_str(output_text)?;
-    assert_eq!(exec_output["metadata"]["exit_code"], 0);
-    let stdout = exec_output["output"].as_str().expect("stdout field");
-    assert_regex_match(r"(?s)^tool harness\n?$", stdout);
+    let req = second_mock.single_request();
+    let (output_text, _) = call_output(&req, call_id);
+    assert_regex_match(
+        r"(?s)^Exit code: 0\nWall time: [0-9]+(?:\.[0-9]+)? seconds\nOutput:\ntool harness\n?$",
+        &output_text,
+    );
 
     Ok(())
 }
@@ -128,9 +140,7 @@ async fn update_plan_tool_emits_plan_update_event() -> anyhow::Result<()> {
 
     let server = start_mock_server().await;
 
-    let mut builder = test_codex().with_config(|config| {
-        config.include_plan_tool = true;
-    });
+    let mut builder = test_codex();
     let TestCodex {
         codex,
         cwd,
@@ -153,28 +163,43 @@ async fn update_plan_tool_emits_plan_update_event() -> anyhow::Result<()> {
         ev_function_call(call_id, "update_plan", &plan_args),
         ev_completed("resp-1"),
     ]);
-    responses::mount_sse_once_match(&server, any(), first_response).await;
+    responses::mount_sse_once(&server, first_response).await;
 
     let second_response = sse(vec![
         ev_assistant_message("msg-1", "plan acknowledged"),
         ev_completed("resp-2"),
     ]);
-    responses::mount_sse_once_match(&server, any(), second_response).await;
+    let second_mock = responses::mount_sse_once(&server, second_response).await;
 
     let session_model = session_configured.model.clone();
+    let cwd_path = cwd.abs();
+    let (sandbox_policy, permission_profile) =
+        turn_permission_fields(PermissionProfile::Disabled, cwd_path.as_path());
 
     codex
-        .submit(Op::UserTurn {
-            items: vec![InputItem::Text {
+        .submit(Op::UserInput {
+            items: vec![UserInput::Text {
                 text: "please update the plan".into(),
+                text_elements: Vec::new(),
             }],
             final_output_json_schema: None,
-            cwd: cwd.path().to_path_buf(),
-            approval_policy: AskForApproval::Never,
-            sandbox_policy: SandboxPolicy::DangerFullAccess,
-            model: session_model,
-            effort: None,
-            summary: ReasoningSummary::Auto,
+            responsesapi_client_metadata: None,
+            additional_context: Default::default(),
+            thread_settings: codex_protocol::protocol::ThreadSettingsOverrides {
+                environments: Some(local_selections(cwd_path)),
+                approval_policy: Some(AskForApproval::Never),
+                sandbox_policy: Some(sandbox_policy),
+                permission_profile,
+                collaboration_mode: Some(codex_protocol::config_types::CollaborationMode {
+                    mode: codex_protocol::config_types::ModeKind::Default,
+                    settings: codex_protocol::config_types::Settings {
+                        model: session_model,
+                        reasoning_effort: None,
+                        developer_instructions: None,
+                    },
+                }),
+                ..Default::default()
+            },
         })
         .await?;
 
@@ -190,29 +215,15 @@ async fn update_plan_tool_emits_plan_update_event() -> anyhow::Result<()> {
             assert_matches!(update.plan[1].status, StepStatus::Pending);
             false
         }
-        EventMsg::TaskComplete(_) => true,
+        EventMsg::TurnComplete(_) => true,
         _ => false,
     })
     .await;
 
     assert!(saw_plan_update, "expected PlanUpdate event");
 
-    let requests = server.received_requests().await.expect("recorded requests");
-    assert!(!requests.is_empty(), "expected at least one POST request");
-
-    let request_bodies = requests
-        .iter()
-        .map(|req| req.body_json::<Value>().expect("request json"))
-        .collect::<Vec<_>>();
-
-    let body_with_tool_output = find_request_with_function_call_output(&request_bodies)
-        .expect("function_call_output item not found in requests");
-    let output_item = function_call_output(body_with_tool_output).expect("tool output item");
-    assert_eq!(
-        output_item.get("call_id").and_then(Value::as_str),
-        Some(call_id)
-    );
-    let output_text = extract_output_text(output_item).expect("output text present");
+    let req = second_mock.single_request();
+    let (output_text, _success_flag) = call_output(&req, call_id);
     assert_eq!(output_text, "Plan updated");
 
     Ok(())
@@ -224,9 +235,7 @@ async fn update_plan_tool_rejects_malformed_payload() -> anyhow::Result<()> {
 
     let server = start_mock_server().await;
 
-    let mut builder = test_codex().with_config(|config| {
-        config.include_plan_tool = true;
-    });
+    let mut builder = test_codex();
     let TestCodex {
         codex,
         cwd,
@@ -245,28 +254,43 @@ async fn update_plan_tool_rejects_malformed_payload() -> anyhow::Result<()> {
         ev_function_call(call_id, "update_plan", &invalid_args),
         ev_completed("resp-1"),
     ]);
-    responses::mount_sse_once_match(&server, any(), first_response).await;
+    responses::mount_sse_once(&server, first_response).await;
 
     let second_response = sse(vec![
         ev_assistant_message("msg-1", "malformed plan payload"),
         ev_completed("resp-2"),
     ]);
-    responses::mount_sse_once_match(&server, any(), second_response).await;
+    let second_mock = responses::mount_sse_once(&server, second_response).await;
 
     let session_model = session_configured.model.clone();
+    let cwd_path = cwd.abs();
+    let (sandbox_policy, permission_profile) =
+        turn_permission_fields(PermissionProfile::Disabled, cwd_path.as_path());
 
     codex
-        .submit(Op::UserTurn {
-            items: vec![InputItem::Text {
+        .submit(Op::UserInput {
+            items: vec![UserInput::Text {
                 text: "please update the plan".into(),
+                text_elements: Vec::new(),
             }],
             final_output_json_schema: None,
-            cwd: cwd.path().to_path_buf(),
-            approval_policy: AskForApproval::Never,
-            sandbox_policy: SandboxPolicy::DangerFullAccess,
-            model: session_model,
-            effort: None,
-            summary: ReasoningSummary::Auto,
+            responsesapi_client_metadata: None,
+            additional_context: Default::default(),
+            thread_settings: codex_protocol::protocol::ThreadSettingsOverrides {
+                environments: Some(local_selections(cwd_path)),
+                approval_policy: Some(AskForApproval::Never),
+                sandbox_policy: Some(sandbox_policy),
+                permission_profile,
+                collaboration_mode: Some(codex_protocol::config_types::CollaborationMode {
+                    mode: codex_protocol::config_types::ModeKind::Default,
+                    settings: codex_protocol::config_types::Settings {
+                        model: session_model,
+                        reasoning_effort: None,
+                        developer_instructions: None,
+                    },
+                }),
+                ..Default::default()
+            },
         })
         .await?;
 
@@ -276,7 +300,7 @@ async fn update_plan_tool_rejects_malformed_payload() -> anyhow::Result<()> {
             saw_plan_update = true;
             false
         }
-        EventMsg::TaskComplete(_) => true,
+        EventMsg::TurnComplete(_) => true,
         _ => false,
     })
     .await;
@@ -286,32 +310,13 @@ async fn update_plan_tool_rejects_malformed_payload() -> anyhow::Result<()> {
         "did not expect PlanUpdate event for malformed payload"
     );
 
-    let requests = server.received_requests().await.expect("recorded requests");
-    assert!(!requests.is_empty(), "expected at least one POST request");
-
-    let request_bodies = requests
-        .iter()
-        .map(|req| req.body_json::<Value>().expect("request json"))
-        .collect::<Vec<_>>();
-
-    let body_with_tool_output = find_request_with_function_call_output(&request_bodies)
-        .expect("function_call_output item not found in requests");
-    let output_item = function_call_output(body_with_tool_output).expect("tool output item");
-    assert_eq!(
-        output_item.get("call_id").and_then(Value::as_str),
-        Some(call_id)
-    );
-    let output_text = extract_output_text(output_item).expect("output text present");
+    let req = second_mock.single_request();
+    let (output_text, success_flag) = call_output(&req, call_id);
     assert!(
         output_text.contains("failed to parse function arguments"),
         "expected parse error message in output text, got {output_text:?}"
     );
-    if let Some(success_flag) = output_item
-        .get("output")
-        .and_then(|value| value.as_object())
-        .and_then(|obj| obj.get("success"))
-        .and_then(serde_json::Value::as_bool)
-    {
+    if let Some(success_flag) = success_flag {
         assert!(
             !success_flag,
             "expected tool output to mark success=false for malformed payload"
@@ -327,9 +332,7 @@ async fn apply_patch_tool_executes_and_emits_patch_events() -> anyhow::Result<()
 
     let server = start_mock_server().await;
 
-    let mut builder = test_codex().with_config(|config| {
-        config.include_apply_patch_tool = true;
-    });
+    let mut builder = test_codex();
     let TestCodex {
         codex,
         cwd,
@@ -337,45 +340,85 @@ async fn apply_patch_tool_executes_and_emits_patch_events() -> anyhow::Result<()
         ..
     } = builder.build(&server).await?;
 
+    let file_name = "notes.txt";
+    let file_path = cwd.path().join(file_name);
     let call_id = "apply-patch-call";
-    let patch_content = r#"*** Begin Patch
-*** Add File: notes.txt
+    let patch_content = format!(
+        r#"*** Begin Patch
+*** Add File: {file_name}
 +Tool harness apply patch
-*** End Patch"#;
+*** End Patch"#
+    );
 
     let first_response = sse(vec![
         ev_response_created("resp-1"),
-        ev_apply_patch_function_call(call_id, patch_content),
+        ev_apply_patch_custom_tool_call(call_id, &patch_content),
         ev_completed("resp-1"),
     ]);
-    responses::mount_sse_once_match(&server, any(), first_response).await;
+    responses::mount_sse_once(&server, first_response).await;
 
     let second_response = sse(vec![
         ev_assistant_message("msg-1", "patch complete"),
         ev_completed("resp-2"),
     ]);
-    responses::mount_sse_once_match(&server, any(), second_response).await;
+    let second_mock = responses::mount_sse_once(&server, second_response).await;
 
     let session_model = session_configured.model.clone();
+    let cwd_path = cwd.abs();
+    let (sandbox_policy, permission_profile) =
+        turn_permission_fields(PermissionProfile::Disabled, cwd_path.as_path());
 
     codex
-        .submit(Op::UserTurn {
-            items: vec![InputItem::Text {
+        .submit(Op::UserInput {
+            items: vec![UserInput::Text {
                 text: "please apply a patch".into(),
+                text_elements: Vec::new(),
             }],
             final_output_json_schema: None,
-            cwd: cwd.path().to_path_buf(),
-            approval_policy: AskForApproval::Never,
-            sandbox_policy: SandboxPolicy::DangerFullAccess,
-            model: session_model,
-            effort: None,
-            summary: ReasoningSummary::Auto,
+            responsesapi_client_metadata: None,
+            additional_context: Default::default(),
+            thread_settings: codex_protocol::protocol::ThreadSettingsOverrides {
+                environments: Some(local_selections(cwd_path)),
+                approval_policy: Some(AskForApproval::Never),
+                sandbox_policy: Some(sandbox_policy),
+                permission_profile,
+                collaboration_mode: Some(codex_protocol::config_types::CollaborationMode {
+                    mode: codex_protocol::config_types::ModeKind::Default,
+                    settings: codex_protocol::config_types::Settings {
+                        model: session_model,
+                        reasoning_effort: None,
+                        developer_instructions: None,
+                    },
+                }),
+                ..Default::default()
+            },
         })
         .await?;
 
+    let mut saw_file_change_started = false;
+    let mut saw_file_change_completed = false;
     let mut saw_patch_begin = false;
     let mut patch_end_success = None;
     wait_for_event(&codex, |event| match event {
+        EventMsg::ItemStarted(started) => {
+            if let TurnItem::FileChange(item) = &started.item {
+                saw_file_change_started = true;
+                assert_eq!(item.id, call_id);
+                assert_eq!(item.status, None);
+            }
+            false
+        }
+        EventMsg::ItemCompleted(completed) => {
+            if let TurnItem::FileChange(item) = &completed.item {
+                saw_file_change_completed = true;
+                assert_eq!(item.id, call_id);
+                assert_eq!(
+                    item.status,
+                    Some(codex_protocol::protocol::PatchApplyStatus::Completed)
+                );
+            }
+            false
+        }
         EventMsg::PatchApplyBegin(begin) => {
             saw_patch_begin = true;
             assert_eq!(begin.call_id, call_id);
@@ -386,64 +429,42 @@ async fn apply_patch_tool_executes_and_emits_patch_events() -> anyhow::Result<()
             patch_end_success = Some(end.success);
             false
         }
-        EventMsg::TaskComplete(_) => true,
+        EventMsg::TurnComplete(_) => true,
         _ => false,
     })
     .await;
 
+    assert!(
+        saw_file_change_started,
+        "expected ItemStarted for TurnItem::FileChange"
+    );
+    assert!(
+        saw_file_change_completed,
+        "expected ItemCompleted for TurnItem::FileChange"
+    );
     assert!(saw_patch_begin, "expected PatchApplyBegin event");
     let patch_end_success =
         patch_end_success.expect("expected PatchApplyEnd event to capture success flag");
+    assert!(patch_end_success);
 
-    let requests = server.received_requests().await.expect("recorded requests");
-    assert!(!requests.is_empty(), "expected at least one POST request");
+    let req = second_mock.single_request();
+    let (output_text, _success_flag) = custom_call_output(&req, call_id);
 
-    let request_bodies = requests
-        .iter()
-        .map(|req| req.body_json::<Value>().expect("request json"))
-        .collect::<Vec<_>>();
-
-    let body_with_tool_output = find_request_with_function_call_output(&request_bodies)
-        .expect("function_call_output item not found in requests");
-    let output_item = function_call_output(body_with_tool_output).expect("tool output item");
-    assert_eq!(
-        output_item.get("call_id").and_then(Value::as_str),
-        Some(call_id)
+    let expected_pattern = format!(
+        r"(?s)^Exit code: 0
+Wall time: [0-9]+(?:\.[0-9]+)? seconds
+Output:
+Success. Updated the following files:
+A {file_name}
+?$"
     );
-    let output_text = extract_output_text(output_item).expect("output text present");
+    assert_regex_match(&expected_pattern, &output_text);
 
-    if let Ok(exec_output) = serde_json::from_str::<Value>(output_text) {
-        let exit_code = exec_output["metadata"]["exit_code"]
-            .as_i64()
-            .expect("exit_code present");
-        let summary = exec_output["output"].as_str().expect("output field");
-        assert_eq!(
-            exit_code, 0,
-            "expected apply_patch exit_code=0, got {exit_code}, summary: {summary:?}"
-        );
-        assert!(
-            patch_end_success,
-            "expected PatchApplyEnd success flag, summary: {summary:?}"
-        );
-        assert!(
-            summary.contains("Success."),
-            "expected apply_patch summary to note success, got {summary:?}"
-        );
-
-        let patched_path = cwd.path().join("notes.txt");
-        let contents = std::fs::read_to_string(&patched_path)
-            .unwrap_or_else(|e| panic!("failed reading {}: {e}", patched_path.display()));
-        assert_eq!(contents, "Tool harness apply patch\n");
-    } else {
-        assert!(
-            output_text.contains("codex-run-as-apply-patch"),
-            "expected apply_patch failure message to mention codex-run-as-apply-patch, got {output_text:?}"
-        );
-        assert!(
-            !patch_end_success,
-            "expected PatchApplyEnd to report success=false when apply_patch invocation fails"
-        );
-    }
+    let updated_contents = fs::read_to_string(file_path)?;
+    assert_eq!(
+        updated_contents, "Tool harness apply patch\n",
+        "expected updated file content"
+    );
 
     Ok(())
 }
@@ -454,9 +475,7 @@ async fn apply_patch_reports_parse_diagnostics() -> anyhow::Result<()> {
 
     let server = start_mock_server().await;
 
-    let mut builder = test_codex().with_config(|config| {
-        config.include_apply_patch_tool = true;
-    });
+    let mut builder = test_codex();
     let TestCodex {
         codex,
         cwd,
@@ -471,52 +490,53 @@ async fn apply_patch_reports_parse_diagnostics() -> anyhow::Result<()> {
 
     let first_response = sse(vec![
         ev_response_created("resp-1"),
-        ev_apply_patch_function_call(call_id, patch_content),
+        ev_apply_patch_custom_tool_call(call_id, patch_content),
         ev_completed("resp-1"),
     ]);
-    responses::mount_sse_once_match(&server, any(), first_response).await;
+    responses::mount_sse_once(&server, first_response).await;
 
     let second_response = sse(vec![
         ev_assistant_message("msg-1", "failed"),
         ev_completed("resp-2"),
     ]);
-    responses::mount_sse_once_match(&server, any(), second_response).await;
+    let second_mock = responses::mount_sse_once(&server, second_response).await;
 
     let session_model = session_configured.model.clone();
+    let cwd_path = cwd.abs();
+    let (sandbox_policy, permission_profile) =
+        turn_permission_fields(PermissionProfile::Disabled, cwd_path.as_path());
 
     codex
-        .submit(Op::UserTurn {
-            items: vec![InputItem::Text {
+        .submit(Op::UserInput {
+            items: vec![UserInput::Text {
                 text: "please apply a patch".into(),
+                text_elements: Vec::new(),
             }],
             final_output_json_schema: None,
-            cwd: cwd.path().to_path_buf(),
-            approval_policy: AskForApproval::Never,
-            sandbox_policy: SandboxPolicy::DangerFullAccess,
-            model: session_model,
-            effort: None,
-            summary: ReasoningSummary::Auto,
+            responsesapi_client_metadata: None,
+            additional_context: Default::default(),
+            thread_settings: codex_protocol::protocol::ThreadSettingsOverrides {
+                environments: Some(local_selections(cwd_path)),
+                approval_policy: Some(AskForApproval::Never),
+                sandbox_policy: Some(sandbox_policy),
+                permission_profile,
+                collaboration_mode: Some(codex_protocol::config_types::CollaborationMode {
+                    mode: codex_protocol::config_types::ModeKind::Default,
+                    settings: codex_protocol::config_types::Settings {
+                        model: session_model,
+                        reasoning_effort: None,
+                        developer_instructions: None,
+                    },
+                }),
+                ..Default::default()
+            },
         })
         .await?;
 
-    wait_for_event(&codex, |event| matches!(event, EventMsg::TaskComplete(_))).await;
+    wait_for_event(&codex, |event| matches!(event, EventMsg::TurnComplete(_))).await;
 
-    let requests = server.received_requests().await.expect("recorded requests");
-    assert!(!requests.is_empty(), "expected at least one POST request");
-
-    let request_bodies = requests
-        .iter()
-        .map(|req| req.body_json::<Value>().expect("request json"))
-        .collect::<Vec<_>>();
-
-    let body_with_tool_output = find_request_with_function_call_output(&request_bodies)
-        .expect("function_call_output item not found in requests");
-    let output_item = function_call_output(body_with_tool_output).expect("tool output item");
-    assert_eq!(
-        output_item.get("call_id").and_then(Value::as_str),
-        Some(call_id)
-    );
-    let output_text = extract_output_text(output_item).expect("output text present");
+    let req = second_mock.single_request();
+    let (output_text, success_flag) = custom_call_output(&req, call_id);
 
     assert!(
         output_text.contains("apply_patch verification failed"),
@@ -527,12 +547,7 @@ async fn apply_patch_reports_parse_diagnostics() -> anyhow::Result<()> {
         "expected parse diagnostics in output text, got {output_text:?}"
     );
 
-    if let Some(success_flag) = output_item
-        .get("output")
-        .and_then(|value| value.as_object())
-        .and_then(|obj| obj.get("success"))
-        .and_then(serde_json::Value::as_bool)
-    {
+    if let Some(success_flag) = success_flag {
         assert!(
             !success_flag,
             "expected tool output to mark success=false for parse failures"

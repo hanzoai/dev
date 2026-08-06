@@ -2,10 +2,12 @@ use crate::ApplyOutcome;
 use crate::ApplyStatus;
 use crate::AttemptStatus;
 use crate::CloudBackend;
+use crate::CloudBackendFuture;
 use crate::CloudTaskError;
 use crate::DiffSummary;
 use crate::Result;
 use crate::TaskId;
+use crate::TaskListPage;
 use crate::TaskStatus;
 use crate::TaskSummary;
 use crate::TurnAttempt;
@@ -13,8 +15,11 @@ use crate::api::TaskText;
 use chrono::DateTime;
 use chrono::Utc;
 
+use codex_api::SharedAuthProvider;
 use codex_backend_client as backend;
 use codex_backend_client::CodeTaskDetailsResponseExt;
+use codex_git_utils::ApplyGitRequest;
+use codex_git_utils::apply_git_patch;
 
 #[derive(Clone)]
 pub struct HttpClient {
@@ -23,19 +28,22 @@ pub struct HttpClient {
 }
 
 impl HttpClient {
-    pub fn new(base_url: impl Into<String>) -> anyhow::Result<Self> {
+    pub fn new(
+        base_url: impl Into<String>,
+        http_client_factory: codex_http_client::HttpClientFactory,
+    ) -> Self {
         let base_url = base_url.into();
-        let backend = backend::Client::new(base_url.clone())?;
-        Ok(Self { base_url, backend })
-    }
-
-    pub fn with_bearer_token(mut self, token: impl Into<String>) -> Self {
-        self.backend = self.backend.clone().with_bearer_token(token);
-        self
+        let backend = backend::Client::new(base_url.clone(), http_client_factory);
+        Self { base_url, backend }
     }
 
     pub fn with_user_agent(mut self, ua: impl Into<String>) -> Self {
         self.backend = self.backend.clone().with_user_agent(ua);
+        self
+    }
+
+    pub fn with_auth_provider(mut self, auth: SharedAuthProvider) -> Self {
+        self.backend = self.backend.clone().with_auth_provider(auth);
         self
     }
 
@@ -57,55 +65,77 @@ impl HttpClient {
     }
 }
 
-#[async_trait::async_trait]
 impl CloudBackend for HttpClient {
-    async fn list_tasks(&self, env: Option<&str>) -> Result<Vec<TaskSummary>> {
-        self.tasks_api().list(env).await
+    fn list_tasks<'a>(
+        &'a self,
+        env: Option<&'a str>,
+        limit: Option<i64>,
+        cursor: Option<&'a str>,
+    ) -> CloudBackendFuture<'a, TaskListPage> {
+        Box::pin(async move { self.tasks_api().list(env, limit, cursor).await })
     }
 
-    async fn get_task_diff(&self, id: TaskId) -> Result<Option<String>> {
-        self.tasks_api().diff(id).await
+    fn get_task_summary(&self, id: TaskId) -> CloudBackendFuture<'_, TaskSummary> {
+        Box::pin(async move { self.tasks_api().summary(id).await })
     }
 
-    async fn get_task_messages(&self, id: TaskId) -> Result<Vec<String>> {
-        self.tasks_api().messages(id).await
+    fn get_task_diff(&self, id: TaskId) -> CloudBackendFuture<'_, Option<String>> {
+        Box::pin(async move { self.tasks_api().diff(id).await })
     }
 
-    async fn get_task_text(&self, id: TaskId) -> Result<TaskText> {
-        self.tasks_api().task_text(id).await
+    fn get_task_messages(&self, id: TaskId) -> CloudBackendFuture<'_, Vec<String>> {
+        Box::pin(async move { self.tasks_api().messages(id).await })
     }
 
-    async fn list_sibling_attempts(
+    fn get_task_text(&self, id: TaskId) -> CloudBackendFuture<'_, TaskText> {
+        Box::pin(async move { self.tasks_api().task_text(id).await })
+    }
+
+    fn list_sibling_attempts(
         &self,
         task: TaskId,
         turn_id: String,
-    ) -> Result<Vec<TurnAttempt>> {
-        self.attempts_api().list(task, turn_id).await
+    ) -> CloudBackendFuture<'_, Vec<TurnAttempt>> {
+        Box::pin(async move { self.attempts_api().list(task, turn_id).await })
     }
 
-    async fn apply_task(&self, id: TaskId, diff_override: Option<String>) -> Result<ApplyOutcome> {
-        self.apply_api().run(id, diff_override, false).await
-    }
-
-    async fn apply_task_preflight(
+    fn apply_task(
         &self,
         id: TaskId,
         diff_override: Option<String>,
-    ) -> Result<ApplyOutcome> {
-        self.apply_api().run(id, diff_override, true).await
+    ) -> CloudBackendFuture<'_, ApplyOutcome> {
+        Box::pin(async move {
+            self.apply_api()
+                .run(id, diff_override, /*preflight*/ false)
+                .await
+        })
     }
 
-    async fn create_task(
+    fn apply_task_preflight(
         &self,
-        env_id: &str,
-        prompt: &str,
-        git_ref: &str,
+        id: TaskId,
+        diff_override: Option<String>,
+    ) -> CloudBackendFuture<'_, ApplyOutcome> {
+        Box::pin(async move {
+            self.apply_api()
+                .run(id, diff_override, /*preflight*/ true)
+                .await
+        })
+    }
+
+    fn create_task<'a>(
+        &'a self,
+        env_id: &'a str,
+        prompt: &'a str,
+        git_ref: &'a str,
         qa_mode: bool,
         best_of_n: usize,
-    ) -> Result<crate::CreatedTask> {
-        self.tasks_api()
-            .create(env_id, prompt, git_ref, qa_mode, best_of_n)
-            .await
+    ) -> CloudBackendFuture<'a, crate::CreatedTask> {
+        Box::pin(async move {
+            self.tasks_api()
+                .create(env_id, prompt, git_ref, qa_mode, best_of_n)
+                .await
+        })
     }
 }
 
@@ -128,10 +158,16 @@ mod api {
             }
         }
 
-        pub(crate) async fn list(&self, env: Option<&str>) -> Result<Vec<TaskSummary>> {
+        pub(crate) async fn list(
+            &self,
+            env: Option<&str>,
+            limit: Option<i64>,
+            cursor: Option<&str>,
+        ) -> Result<TaskListPage> {
+            let limit_i32 = limit.and_then(|lim| i32::try_from(lim).ok());
             let resp = self
                 .backend
-                .list_tasks(Some(20), Some("current"), env)
+                .list_tasks(limit_i32, Some("current"), env, cursor)
                 .await
                 .map_err(|e| CloudTaskError::Http(format!("list_tasks failed: {e}")))?;
 
@@ -142,11 +178,88 @@ mod api {
                 .collect();
 
             append_error_log(&format!(
-                "http.list_tasks: env={} items={}",
+                "http.list_tasks: env={} limit={} cursor_in={} cursor_out={} items={}",
                 env.unwrap_or("<all>"),
+                limit_i32
+                    .map(|v| v.to_string())
+                    .unwrap_or_else(|| "<default>".to_string()),
+                cursor.unwrap_or("<none>"),
+                resp.cursor.as_deref().unwrap_or("<none>"),
                 tasks.len()
             ));
-            Ok(tasks)
+            Ok(TaskListPage {
+                tasks,
+                cursor: resp.cursor,
+            })
+        }
+
+        pub(crate) async fn summary(&self, id: TaskId) -> Result<TaskSummary> {
+            let id_str = id.0.clone();
+            let (details, body, ct) = self
+                .details_with_body(&id.0)
+                .await
+                .map_err(|e| CloudTaskError::Http(format!("get_task_details failed: {e}")))?;
+            let parsed: Value = serde_json::from_str(&body).map_err(|e| {
+                CloudTaskError::Http(format!(
+                    "Decode error for {}: {e}; content-type={ct}; body={body}",
+                    id.0
+                ))
+            })?;
+            let task_obj = parsed
+                .get("task")
+                .and_then(Value::as_object)
+                .ok_or_else(|| {
+                    CloudTaskError::Http(format!("Task metadata missing from details for {id_str}"))
+                })?;
+            let status_display = parsed
+                .get("task_status_display")
+                .or_else(|| task_obj.get("task_status_display"))
+                .and_then(Value::as_object)
+                .map(|m| {
+                    m.iter()
+                        .map(|(k, v)| (k.clone(), v.clone()))
+                        .collect::<HashMap<String, Value>>()
+                });
+            let status = map_status(status_display.as_ref());
+            let mut summary = diff_summary_from_status_display(status_display.as_ref());
+            if summary.files_changed == 0
+                && summary.lines_added == 0
+                && summary.lines_removed == 0
+                && let Some(diff) = details.unified_diff()
+            {
+                summary = diff_summary_from_diff(&diff);
+            }
+            let updated_at_raw = task_obj
+                .get("updated_at")
+                .and_then(Value::as_f64)
+                .or_else(|| task_obj.get("created_at").and_then(Value::as_f64))
+                .or_else(|| latest_turn_timestamp(status_display.as_ref()));
+            let environment_id = task_obj
+                .get("environment_id")
+                .and_then(Value::as_str)
+                .map(str::to_string);
+            let environment_label = env_label_from_status_display(status_display.as_ref());
+            let attempt_total = attempt_total_from_status_display(status_display.as_ref());
+            let title = task_obj
+                .get("title")
+                .and_then(Value::as_str)
+                .unwrap_or("<untitled>")
+                .to_string();
+            let is_review = task_obj
+                .get("is_review")
+                .and_then(Value::as_bool)
+                .unwrap_or(false);
+            Ok(TaskSummary {
+                id,
+                title,
+                status,
+                updated_at: parse_updated_at(updated_at_raw.as_ref()),
+                environment_id,
+                environment_label,
+                summary,
+                is_review,
+                attempt_total,
+            })
         }
 
         pub(crate) async fn diff(&self, id: TaskId) -> Result<Option<String>> {
@@ -362,13 +475,13 @@ mod api {
                 });
             }
 
-            let req = codex_git_apply::ApplyGitRequest {
+            let req = ApplyGitRequest {
                 cwd: std::env::current_dir().unwrap_or_else(|_| std::env::temp_dir()),
                 diff: diff.clone(),
                 revert: false,
                 preflight,
             };
-            let r = codex_git_apply::apply_git_patch(&req)
+            let r = apply_git_patch(&req)
                 .map_err(|e| CloudTaskError::Io(format!("git apply failed to run: {e}")))?;
 
             let status = if r.exit_code == 0 {
@@ -440,8 +553,8 @@ mod api {
                 let _ = writeln!(
                     &mut log,
                     "stdout_tail=\n{}\nstderr_tail=\n{}",
-                    tail(&r.stdout, 2000),
-                    tail(&r.stderr, 2000)
+                    tail(&r.stdout, /*max*/ 2000),
+                    tail(&r.stderr, /*max*/ 2000)
                 );
                 let _ = writeln!(&mut log, "{summary}");
                 let _ = writeln!(
@@ -679,6 +792,34 @@ mod api {
             .map(str::to_string)
     }
 
+    fn diff_summary_from_diff(diff: &str) -> DiffSummary {
+        let mut files_changed = 0usize;
+        let mut lines_added = 0usize;
+        let mut lines_removed = 0usize;
+        for line in diff.lines() {
+            if line.starts_with("diff --git ") {
+                files_changed += 1;
+                continue;
+            }
+            if line.starts_with("+++") || line.starts_with("---") || line.starts_with("@@") {
+                continue;
+            }
+            match line.as_bytes().first() {
+                Some(b'+') => lines_added += 1,
+                Some(b'-') => lines_removed += 1,
+                _ => {}
+            }
+        }
+        if files_changed == 0 && !diff.trim().is_empty() {
+            files_changed = 1;
+        }
+        DiffSummary {
+            files_changed,
+            lines_added,
+            lines_removed,
+        }
+    }
+
     fn diff_summary_from_status_display(v: Option<&HashMap<String, Value>>) -> DiffSummary {
         let mut out = DiffSummary::default();
         let Some(map) = v else { return out };
@@ -698,6 +839,17 @@ mod api {
             }
         }
         out
+    }
+
+    fn latest_turn_timestamp(v: Option<&HashMap<String, Value>>) -> Option<f64> {
+        let map = v?;
+        let latest = map
+            .get("latest_turn_status_display")
+            .and_then(Value::as_object)?;
+        latest
+            .get("updated_at")
+            .or_else(|| latest.get("created_at"))
+            .and_then(Value::as_f64)
     }
 
     fn attempt_total_from_status_display(v: Option<&HashMap<String, Value>>) -> Option<usize> {

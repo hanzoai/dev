@@ -1,6 +1,20 @@
 packages:
-  - docs
+  - codex-cli
+  - codex-rs/responses-api-proxy/npm
   - sdk/typescript
+  - shell-tool-mcp
 
 ignoredBuiltDependencies:
   - esbuild
+
+minimumReleaseAge: 10080
+minimumReleaseAgeExclude: []
+
+blockExoticSubdeps: true
+strictDepBuilds: true
+trustPolicy: no-downgrade
+trustPolicyIgnoreAfter: 10080
+trustPolicyExclude: []
+allowBuilds:
+  # Build only the official MCP conformance CLI pinned by the TypeScript SDK.
+  "@modelcontextprotocol/conformance": true

@@ -1,5 +1,5 @@
-use unicode_width::UnicodeWidthChar;
-use unicode_width::UnicodeWidthStr;
+use crate::width::display_width;
+use unicode_segmentation::UnicodeSegmentation;
 
 /// A single visual row produced by RowBuilder.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -11,7 +11,7 @@ pub struct Row {
 
 impl Row {
     pub fn width(&self) -> usize {
-        self.text.width()
+        display_width(&self.text)
     }
 }
 
@@ -33,10 +33,6 @@ impl RowBuilder {
             current_line: String::new(),
             rows: Vec::new(),
         }
-    }
-
-    pub fn width(&self) -> usize {
-        self.target_width
     }
 
     pub fn set_width(&mut self, width: usize) {
@@ -66,7 +62,7 @@ impl RowBuilder {
                 if start < i {
                     self.current_line.push_str(&fragment[start..i]);
                 }
-                self.flush_current_line(true);
+                self.flush_current_line(/*explicit_break*/ true);
                 start = i + ch.len_utf8();
             }
         }
@@ -74,16 +70,6 @@ impl RowBuilder {
             self.current_line.push_str(&fragment[start..]);
             self.wrap_current_line();
         }
-    }
-
-    /// Mark the end of the current logical line (equivalent to pushing a '\n').
-    pub fn end_line(&mut self) {
-        self.flush_current_line(true);
-    }
-
-    /// Drain and return all produced rows.
-    pub fn drain_rows(&mut self) -> Vec<Row> {
-        std::mem::take(&mut self.rows)
     }
 
     /// Return a snapshot of produced rows (non-draining).
@@ -154,9 +140,9 @@ impl RowBuilder {
             let (prefix, suffix, taken) =
                 take_prefix_by_width(&self.current_line, self.target_width);
             if taken == 0 {
-                // Avoid infinite loop on pathological inputs; take one scalar and continue.
-                if let Some((i, ch)) = self.current_line.char_indices().next() {
-                    let len = i + ch.len_utf8();
+                // Avoid an infinite loop on an indivisible grapheme wider than the target.
+                if let Some(grapheme) = self.current_line.graphemes(/*is_extended*/ true).next() {
+                    let len = grapheme.len();
                     let p = self.current_line[..len].to_string();
                     self.rows.push(Row {
                         text: p,
@@ -190,13 +176,13 @@ pub fn take_prefix_by_width(text: &str, max_cols: usize) -> (String, &str, usize
     }
     let mut cols = 0usize;
     let mut end_idx = 0usize;
-    for (i, ch) in text.char_indices() {
-        let ch_width = UnicodeWidthChar::width(ch).unwrap_or(0);
-        if cols.saturating_add(ch_width) > max_cols {
+    for (i, grapheme) in text.grapheme_indices(/*is_extended*/ true) {
+        let grapheme_width = display_width(grapheme);
+        if cols.saturating_add(grapheme_width) > max_cols {
             break;
         }
-        cols += ch_width;
-        end_idx = i + ch.len_utf8();
+        cols += grapheme_width;
+        end_idx = i + grapheme.len();
         if cols == max_cols {
             break;
         }
@@ -213,7 +199,7 @@ mod tests {
 
     #[test]
     fn rows_do_not_exceed_width_ascii() {
-        let mut rb = RowBuilder::new(10);
+        let mut rb = RowBuilder::new(/*target_width*/ 10);
         rb.push_fragment("hello whirl this is a test");
         let rows = rb.rows().to_vec();
         assert_eq!(
@@ -234,7 +220,7 @@ mod tests {
     #[test]
     fn rows_do_not_exceed_width_emoji_cjk() {
         // 😀 is width 2; 你/好 are width 2.
-        let mut rb = RowBuilder::new(6);
+        let mut rb = RowBuilder::new(/*target_width*/ 6);
         rb.push_fragment("😀😀 你好");
         let rows = rb.rows().to_vec();
         // At width 6, we expect the first row to fit exactly two emojis and a space
@@ -250,13 +236,29 @@ mod tests {
     }
 
     #[test]
+    fn halfwidth_sound_marks_stay_with_their_grapheme_when_wrapping() {
+        assert_eq!(
+            take_prefix_by_width("abｶﾞc", /*max_cols*/ 3),
+            ("ab".to_string(), "ｶﾞc", 2)
+        );
+        assert_eq!(
+            take_prefix_by_width("abｶﾞc", /*max_cols*/ 4),
+            ("abｶﾞ".to_string(), "c", 4)
+        );
+
+        let mut row_builder = RowBuilder::new(/*target_width*/ 1);
+        row_builder.push_fragment("ｶﾞx");
+        assert_eq!(row_builder.rows()[0].text, "ｶﾞ");
+    }
+
+    #[test]
     fn fragmentation_invariance_long_token() {
         let s = "ABCDEFGHIJKLMNOPQRSTUVWXYZ"; // 26 chars
-        let mut rb_all = RowBuilder::new(7);
+        let mut rb_all = RowBuilder::new(/*target_width*/ 7);
         rb_all.push_fragment(s);
         let all_rows = rb_all.rows().to_vec();
 
-        let mut rb_chunks = RowBuilder::new(7);
+        let mut rb_chunks = RowBuilder::new(/*target_width*/ 7);
         for i in (0..s.len()).step_by(3) {
             let end = (i + 3).min(s.len());
             rb_chunks.push_fragment(&s[i..end]);
@@ -268,7 +270,7 @@ mod tests {
 
     #[test]
     fn newline_splits_rows() {
-        let mut rb = RowBuilder::new(10);
+        let mut rb = RowBuilder::new(/*target_width*/ 10);
         rb.push_fragment("hello\nworld");
         let rows = rb.display_rows();
         assert!(rows.iter().any(|r| r.explicit_break));
@@ -279,10 +281,10 @@ mod tests {
 
     #[test]
     fn rewrap_on_width_change() {
-        let mut rb = RowBuilder::new(10);
+        let mut rb = RowBuilder::new(/*target_width*/ 10);
         rb.push_fragment("abcdefghijK");
         assert!(!rb.rows().is_empty());
-        rb.set_width(5);
+        rb.set_width(/*width*/ 5);
         for r in rb.rows() {
             assert!(r.width() <= 5);
         }

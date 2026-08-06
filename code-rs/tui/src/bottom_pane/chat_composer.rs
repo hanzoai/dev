@@ -1,8 +1,10 @@
 use ratatui::buffer::Buffer;
 use ratatui::layout::{Constraint, Layout, Margin, Rect};
-use ratatui::style::{Modifier, Style, Stylize};
+use ratatui::style::{Color, Modifier, Style, Stylize};
 use ratatui::text::{Line, Span};
-use ratatui::widgets::{Block, Borders, StatefulWidgetRef, WidgetRef};
+use ratatui::widgets::{Block, BorderType, Borders, StatefulWidgetRef, WidgetRef};
+use code_core::config_types::ContextMode;
+use code_core::protocol::AutoContextPhase;
 use code_core::protocol::TokenUsage;
 use crossterm::event::KeyCode;
 use crossterm::event::KeyEvent;
@@ -17,8 +19,12 @@ use super::paste_burst::PasteBurst;
 use crate::slash_command::{built_in_slash_commands, SlashCommand};
 use code_protocol::custom_prompts::CustomPrompt;
 use code_protocol::custom_prompts::PROMPTS_CMD_PREFIX;
+use code_core::model_family::EXTENDED_CONTEXT_WINDOW_1M;
 
 use crate::app_event_sender::AppEventSender;
+use crate::auto_drive_style::{BorderGradient, ComposerStyle};
+use crate::chatwidget::AutoReviewIndicatorStatus;
+use crate::thread_spawner;
 use crate::bottom_pane::textarea::TextArea;
 use crate::bottom_pane::textarea::TextAreaState;
 use crate::clipboard_paste::normalize_pasted_path;
@@ -70,10 +76,18 @@ pub enum InputResult {
     None,
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum ComposerRenderMode {
+    Full,
+    FooterOnly,
+}
+
 struct TokenUsageInfo {
     _total_token_usage: TokenUsage,
     last_token_usage: TokenUsage,
     model_context_window: Option<u64>,
+    context_mode: Option<ContextMode>,
+    auto_context_phase: Option<AutoContextPhase>,
     /// Baseline token count present in the context before the user's first
     /// message content is considered. This is used to normalize the
     /// "context left" percentage so it reflects the portion the user can
@@ -83,6 +97,25 @@ struct TokenUsageInfo {
     /// Preferred source is `cached_input_tokens` from the first turn (when
     /// available), otherwise we fall back to 0.
     initial_prompt_tokens: u64,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum AutoReviewPhase {
+    Reviewing,
+    Resolving,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) struct AutoReviewFooterStatus {
+    pub(crate) status: AutoReviewIndicatorStatus,
+    pub(crate) findings: Option<usize>,
+    pub(crate) phase: AutoReviewPhase,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum AgentHintLabel {
+    Agents,
+    Review,
 }
 
 // Format an integer with thousands separators (e.g., 125,654).
@@ -98,6 +131,25 @@ fn format_with_thousands(n: u64) -> String {
         count += 1;
     }
     out.chars().rev().collect()
+}
+
+fn context_window_footer_label(
+    context_window: u64,
+    context_mode: Option<ContextMode>,
+    auto_context_phase: Option<AutoContextPhase>,
+) -> Option<&'static str> {
+    if context_window != EXTENDED_CONTEXT_WINDOW_1M {
+        return None;
+    }
+
+    Some(match auto_context_phase {
+        Some(AutoContextPhase::Checking) => "Checking context...",
+        Some(AutoContextPhase::Compacting) => "Compacting...",
+        None => match context_mode {
+        Some(ContextMode::Auto) => "1M Auto",
+        _ => "1M Context",
+        },
+    })
 }
 
 pub(crate) struct ChatComposer {
@@ -127,10 +179,15 @@ pub(crate) struct ChatComposer {
     // Animation thread for spinning icon when task is running
     animation_running: Option<Arc<AtomicBool>>,
     using_chatgpt_auth: bool,
+    custom_prompts: Vec<CustomPrompt>,
     // Ephemeral footer notice and its expiry
     footer_notice: Option<(String, std::time::Instant)>,
     // Persistent hint for specific modes (e.g., standard terminal mode)
     standard_terminal_hint: Option<String>,
+    // Auto Review status displayed in the footer
+    auto_review_status: Option<AutoReviewFooterStatus>,
+    // Agent hint label to display alongside Auto Review footer state
+    agent_hint_label: AgentHintLabel,
     // Persistent/ephemeral access-mode indicator shown on the left
     access_mode_label: Option<String>,
     access_mode_label_expiry: Option<std::time::Instant>,
@@ -147,6 +204,10 @@ pub(crate) struct ChatComposer {
     paste_burst: PasteBurst,
     post_paste_space_guard: Option<PostPasteSpaceGuard>,
     footer_hint_override: Option<Vec<(String, String)>>,
+    embedded_mode: bool,
+    render_mode: ComposerRenderMode,
+    auto_drive_active: bool,
+    auto_drive_style: Option<ComposerStyle>,
 }
 
 /// Popup state – at most one can be visible at any time.
@@ -159,6 +220,20 @@ enum ActivePopup {
 enum FilePopupOrigin {
     Auto,
     Manual { token: String },
+}
+
+impl Drop for ChatComposer {
+    fn drop(&mut self) {
+        // Make sure the spinner ticker thread (if any) is told to stop even
+        // if `set_task_running(false)` was never called, e.g. when this
+        // composer is torn down (view switch, session end, app exit) while
+        // a task was still marked running. Otherwise the thread keeps
+        // waking up and requesting redraws against a channel nobody reads
+        // from anymore indefinitely.
+        if let Some(animation_flag) = self.animation_running.take() {
+            animation_flag.store(false, Ordering::Relaxed);
+        }
+    }
 }
 
 impl ChatComposer {
@@ -192,8 +267,11 @@ impl ChatComposer {
             status_message: String::from("coding"),
             animation_running: None,
             using_chatgpt_auth,
+            custom_prompts: Vec::new(),
             footer_notice: None,
             standard_terminal_hint: None,
+            auto_review_status: None,
+            agent_hint_label: AgentHintLabel::Agents,
             access_mode_label: None,
             access_mode_label_expiry: None,
             access_mode_hint_expiry: None,
@@ -204,11 +282,28 @@ impl ChatComposer {
             paste_burst: PasteBurst::default(),
             post_paste_space_guard: None,
             footer_hint_override: None,
+            embedded_mode: false,
+            render_mode: ComposerRenderMode::Full,
+            auto_drive_active: false,
+            auto_drive_style: None,
         }
     }
 
     pub fn set_using_chatgpt_auth(&mut self, using: bool) {
         self.using_chatgpt_auth = using;
+    }
+
+    pub(crate) fn set_auto_review_status(&mut self, status: Option<AutoReviewFooterStatus>) {
+        self.auto_review_status = status;
+    }
+
+    pub(crate) fn set_agent_hint_label(&mut self, label: AgentHintLabel) {
+        self.agent_hint_label = label;
+    }
+
+    #[cfg(test)]
+    pub(crate) fn auto_review_status(&self) -> Option<AutoReviewFooterStatus> {
+        self.auto_review_status
     }
 
     /// Returns true if the input starts with a slash command and the cursor
@@ -248,7 +343,8 @@ impl ChatComposer {
                 // phase‑aligned, monotonic scheduler to minimize drift and
                 // reduce perceived frame skipping under load. We purposely
                 // avoid very small intervals to keep CPU impact low.
-                thread::spawn(move || {
+                let fallback_tx = self.app_event_tx.clone();
+                if thread_spawner::spawn_lightweight("composer-anim", move || {
                     use std::time::Instant;
                     // Default to ~120ms if spinner state is not yet initialized
                     let default_ms: u64 = 120;
@@ -277,7 +373,12 @@ impl ChatComposer {
                             thread::sleep(sleep_dur);
                         } else {
                             // If we're late (system busy), request a redraw immediately.
-                            app_event_tx_clone.send(crate::app_event::AppEvent::RequestRedraw);
+                            // If the app event channel is gone (receiver dropped), there is
+                            // no one left to redraw for: stop the ticker instead of spinning
+                            // forever re-sending into a closed channel.
+                            if !app_event_tx_clone.send_with_result(crate::app_event::AppEvent::RequestRedraw) {
+                                break;
+                            }
                             // Step the schedule forward by whole periods to avoid
                             // bursty catch‑up redraws.
                             let mut target = next;
@@ -287,9 +388,14 @@ impl ChatComposer {
                             next = target;
                         }
                     }
-                });
-
-                self.animation_running = Some(animation_flag);
+                })
+                .is_none()
+                {
+                    animation_flag.store(false, Ordering::Relaxed);
+                    fallback_tx.send(crate::app_event::AppEvent::RequestRedraw);
+                } else {
+                    self.animation_running = Some(animation_flag);
+                }
             }
         } else {
             // Stop animation thread
@@ -315,6 +421,26 @@ impl ChatComposer {
     pub fn flash_footer_notice(&mut self, text: String) {
         let expiry = std::time::Instant::now() + std::time::Duration::from_secs(2);
         self.footer_notice = Some((text, expiry));
+    }
+
+    pub(crate) fn set_embedded_mode(&mut self, enabled: bool) {
+        if self.embedded_mode != enabled {
+            self.embedded_mode = enabled;
+        }
+    }
+
+    pub(crate) fn set_render_mode(&mut self, mode: ComposerRenderMode) {
+        if self.render_mode != mode {
+            self.render_mode = mode;
+        }
+    }
+
+    pub(crate) fn set_auto_drive_active(&mut self, active: bool) {
+        self.auto_drive_active = active;
+    }
+
+    pub(crate) fn set_auto_drive_style(&mut self, style: Option<ComposerStyle>) {
+        self.auto_drive_style = style;
     }
 
     /// Override the footer hint line with a simple key/label list.
@@ -384,8 +510,16 @@ impl ChatComposer {
 
         let lower = technical_message.to_lowercase();
 
-        // Auto Drive manual edit indicator
-        if lower.contains("auto drive goal") {
+        // Auto Review: preserve the phase text so the footer shows
+        // "Auto Review: Reviewing/Resolving" instead of a generic label.
+        if lower.contains("auto review") {
+            let cleaned = technical_message.trim();
+            if cleaned.is_empty() {
+                "Auto Review".to_string()
+            } else {
+                cleaned.to_string()
+            }
+        } else if lower.contains("auto drive goal") {
             "Auto Drive Goal".to_string()
         } else if lower.contains("auto drive") {
             "Auto Drive".to_string()
@@ -446,6 +580,9 @@ impl ChatComposer {
             || lower.contains("stream error")
             || lower.contains("stream closed")
             || lower.contains("timeout")
+            || lower.contains("transport")
+            || lower.contains("network")
+            || lower.contains("connection")
         {
             "Reconnecting".to_string()
         }
@@ -462,7 +599,9 @@ impl ChatComposer {
         // Catch some common technical terms
         else if lower.contains("processing") || lower.contains("analyzing") {
             "Thinking".to_string()
-        } else if lower.contains("reading") || lower.contains("searching") {
+        } else if lower == "search" || lower.contains("searching") {
+            "Searching".to_string()
+        } else if lower.contains("reading") {
             "Reading".to_string()
         } else {
             // Default fallback - use "working" for unknown status
@@ -472,10 +611,11 @@ impl ChatComposer {
 
     pub fn desired_height(&self, width: u16) -> u16 {
         // Calculate hint/popup height
-        let hint_height = match &self.active_popup {
-            ActivePopup::None => 1u16,
-            ActivePopup::Command(c) => c.calculate_required_height(),
-            ActivePopup::File(c) => c.calculate_required_height(),
+        let hint_height = match (&self.active_popup, self.embedded_mode) {
+            (ActivePopup::Command(c), _) => c.calculate_required_height(),
+            (ActivePopup::File(c), _) => c.calculate_required_height(),
+            (ActivePopup::None, true) => 0,
+            (ActivePopup::None, false) => 1,
         };
 
         // IMPORTANT: `width` here is the full BottomPane width. Subtract the
@@ -492,14 +632,11 @@ impl ChatComposer {
 
     pub fn cursor_pos(&self, area: Rect) -> Option<(u16, u16)> {
         // Split area: textarea with border at top, hints/popup at bottom
-        let hint_height = if matches!(self.active_popup, ActivePopup::None) {
-            1
-        } else {
-            match &self.active_popup {
-                ActivePopup::Command(popup) => popup.calculate_required_height(),
-                ActivePopup::File(popup) => popup.calculate_required_height(),
-                ActivePopup::None => 1,
-            }
+        let hint_height = match (&self.active_popup, self.embedded_mode) {
+            (ActivePopup::Command(popup), _) => popup.calculate_required_height(),
+            (ActivePopup::File(popup), _) => popup.calculate_required_height(),
+            (ActivePopup::None, true) => 0,
+            (ActivePopup::None, false) => 1,
         };
         // Calculate dynamic height based on content
         let content_width = area.width.saturating_sub(4); // Account for border and padding
@@ -540,6 +677,7 @@ impl ChatComposer {
         total_token_usage: TokenUsage,
         last_token_usage: TokenUsage,
         model_context_window: Option<u64>,
+        context_mode: Option<ContextMode>,
     ) {
         let initial_prompt_tokens = self
             .token_usage_info
@@ -551,8 +689,19 @@ impl ChatComposer {
             _total_token_usage: total_token_usage,
             last_token_usage,
             model_context_window,
+            context_mode,
+            auto_context_phase: self
+                .token_usage_info
+                .as_ref()
+                .and_then(|info| info.auto_context_phase),
             initial_prompt_tokens,
         });
+    }
+
+    pub(crate) fn set_auto_context_phase(&mut self, phase: Option<AutoContextPhase>) {
+        if let Some(info) = self.token_usage_info.as_mut() {
+            info.auto_context_phase = phase;
+        }
     }
 
     /// Record the history metadata advertised by `SessionConfiguredEvent` so
@@ -575,6 +724,7 @@ impl ChatComposer {
         };
         self.textarea.set_text(&text);
         self.textarea.set_cursor(0);
+        self.resync_popups();
         true
     }
 
@@ -831,12 +981,18 @@ impl ChatComposer {
         self.standard_terminal_hint = hint;
     }
 
+    pub fn standard_terminal_hint(&self) -> Option<&str> {
+        self.standard_terminal_hint.as_deref()
+    }
+
     pub fn set_text_content(&mut self, text: String) {
         self.textarea.set_text(&text);
         *self.textarea_state.borrow_mut() = TextAreaState::default();
         if !text.is_empty() {
             self.typed_anything = true;
         }
+        self.sync_command_popup();
+        self.sync_file_search_popup();
     }
 
     pub(crate) fn insert_str(&mut self, text: &str) {
@@ -863,8 +1019,88 @@ impl ChatComposer {
         }
     }
 
+    pub(crate) fn file_popup_visible(&self) -> bool {
+        matches!(self.active_popup, ActivePopup::File(_))
+    }
+
     /// Handle a key event coming from the main UI.
     pub fn handle_key_event(&mut self, key_event: KeyEvent) -> (InputResult, bool) {
+        let now = Instant::now();
+
+        // Track rapid plain-character bursts (common when bracketed paste is
+        // unavailable) so we can suppress Enter-based submissions and insert
+        // literal newlines instead.
+        if matches!(key_event.kind, KeyEventKind::Press | KeyEventKind::Repeat) {
+            match key_event.code {
+                KeyCode::Char(_) => {
+                    let unmodified = key_event.modifiers.is_empty()
+                        || key_event.modifiers == KeyModifiers::SHIFT;
+                    if unmodified {
+                        self.paste_burst.record_plain_char_for_enter_window(now);
+                    } else {
+                        self.paste_burst.clear_enter_window();
+                    }
+                }
+                KeyCode::Tab => {
+                    // Tabs often appear in per-key pastes of code; treat as pastey input.
+                    self.paste_burst.record_plain_char_for_enter_window(now);
+                }
+                KeyCode::Enter => {
+                    // handled below
+                }
+                _ => self.paste_burst.clear_enter_window(),
+            }
+        } else if key_event.kind == KeyEventKind::Release {
+            // Ignore releases to keep burst window intact when enhanced keys
+            // emit press+release for every character.
+        } else {
+            self.paste_burst.clear_enter_window();
+        }
+
+        let enter_should_newline = matches!(
+            key_event,
+            KeyEvent {
+                code: KeyCode::Enter,
+                modifiers: KeyModifiers::NONE,
+                kind: KeyEventKind::Press | KeyEventKind::Repeat,
+                ..
+            }
+        ) && (self.paste_burst.enter_should_insert_newline(now) || self.paste_burst.recent_plain_char(now));
+
+        if enter_should_newline {
+            // Enter is a non-Down key, so clear the sticky scroll flag.
+            self.next_down_scrolls_history = false;
+
+            // Treat Enter as literal newline when a paste-like burst is active.
+            self.insert_str("\n");
+            self.history.reset_navigation();
+            self.paste_burst.extend_enter_window(now);
+
+            // Keep popups in sync just like the main path.
+            self.resync_popups();
+
+            return (InputResult::None, true);
+        }
+
+        // Treat Tab as literal input while we're inside a paste-like burst to
+        // avoid launching file search or other Tab handlers mid-paste. This
+        // keeps per-key pastes containing tabs (common in code blocks) intact.
+        if matches!(
+            key_event,
+            KeyEvent {
+                code: KeyCode::Tab,
+                modifiers: KeyModifiers::NONE,
+                kind: KeyEventKind::Press | KeyEventKind::Repeat,
+                ..
+            }
+        ) && self.paste_burst.enter_should_insert_newline(now)
+        {
+            self.insert_str("\t");
+            self.history.reset_navigation();
+            self.paste_burst.extend_enter_window(now);
+            return (InputResult::None, true);
+        }
+
         // Any non-Down key clears the sticky flag; handled before popup routing
         if !matches!(key_event.code, KeyCode::Down) {
             self.next_down_scrolls_history = false;
@@ -876,12 +1112,7 @@ impl ChatComposer {
         };
 
         // Update (or hide/show) popup after processing the key.
-        self.sync_command_popup();
-        if matches!(self.active_popup, ActivePopup::Command(_)) {
-            self.dismissed_file_popup_token = None;
-        } else {
-            self.sync_file_search_popup();
-        }
+        self.resync_popups();
 
         result
     }
@@ -944,13 +1175,18 @@ impl ChatComposer {
                         CommandItem::UserPrompt(idx) => {
                             if let Some(prompt) = popup.prompt(idx) {
                                 let name = prompt.name.clone();
-                                let starts_with_cmd = first_line
-                                    .trim_start()
-                                    .starts_with(format!("/{PROMPTS_CMD_PREFIX}:{name}").as_str());
+                                let trimmed = first_line.trim_start();
+                                let wants_prefixed = trimmed.starts_with(&format!(
+                                    "/{PROMPTS_CMD_PREFIX}:{name}"
+                                )) || trimmed.starts_with(&format!("/{PROMPTS_CMD_PREFIX}:"));
+                                let target = if wants_prefixed {
+                                    format!("/{PROMPTS_CMD_PREFIX}:{name} ")
+                                } else {
+                                    format!("/{name} ")
+                                };
+                                let starts_with_cmd = trimmed.starts_with(target.trim_end());
                                 if !starts_with_cmd {
-                                    self.textarea.set_text(
-                                        format!("/{PROMPTS_CMD_PREFIX}:{name} ").as_str(),
-                                    );
+                                    self.textarea.set_text(target.as_str());
                                 }
                             }
                         }
@@ -1389,6 +1625,16 @@ impl ChatComposer {
                 self.app_event_tx.send(crate::app_event::AppEvent::CycleAccessMode);
                 (InputResult::None, true)
             }
+            KeyEvent {
+                code: KeyCode::Tab,
+                modifiers: KeyModifiers::NONE,
+                ..
+            } if self.auto_drive_active && self.has_focus => {
+                self
+                    .app_event_tx
+                    .send(crate::app_event::AppEvent::CycleAutoDriveVariant);
+                (InputResult::None, true)
+            }
             // -------------------------------------------------------------
             // Tab-press file search when not using @ or ./ and not in slash cmd
             // -------------------------------------------------------------
@@ -1503,6 +1749,7 @@ impl ChatComposer {
             KeyEvent {
                 code: KeyCode::Enter,
                 modifiers: KeyModifiers::NONE,
+                kind: KeyEventKind::Press | KeyEventKind::Repeat,
                 ..
             } => {
                 if self.handle_backslash_continuation() {
@@ -1708,6 +1955,9 @@ impl ChatComposer {
             _ => {
                 if input_starts_with_slash && in_slash_head {
                     let mut command_popup = CommandPopup::new_with_filter(self.using_chatgpt_auth);
+                    if !self.custom_prompts.is_empty() {
+                        command_popup.set_prompts(self.custom_prompts.clone());
+                    }
                     // Load saved subagent commands to include in autocomplete (exclude built-ins)
                     if let Ok(cfg) = code_core::config::Config::load_with_cli_overrides(vec![], code_core::config::ConfigOverrides::default()) {
                         let mut names: Vec<String> = cfg
@@ -1734,6 +1984,7 @@ impl ChatComposer {
 
     #[allow(dead_code)]
     pub(crate) fn set_custom_prompts(&mut self, prompts: Vec<CustomPrompt>) {
+        self.custom_prompts = prompts.clone();
         if let ActivePopup::Command(popup) = &mut self.active_popup {
             popup.set_prompts(prompts);
         }
@@ -1816,6 +2067,17 @@ impl ChatComposer {
         }
     }
 
+    /// Refresh popup state after a text change that didn't flow through the
+    /// main key-event path (e.g., history navigation or async fetches).
+    fn resync_popups(&mut self) {
+        self.sync_command_popup();
+        if matches!(self.active_popup, ActivePopup::Command(_)) {
+            self.dismissed_file_popup_token = None;
+        } else {
+            self.sync_file_search_popup();
+        }
+    }
+
     pub(crate) fn set_has_focus(&mut self, has_focus: bool) {
         self.has_focus = has_focus;
     }
@@ -1833,6 +2095,7 @@ impl ChatComposer {
         if let Some(text) = self.history.navigate_up(self.textarea.text(), &self.app_event_tx) {
             self.textarea.set_text(&text);
             self.textarea.set_cursor(0);
+            self.resync_popups();
         }
         true
     }
@@ -1848,6 +2111,7 @@ impl ChatComposer {
         if let Some(text) = self.history.navigate_down(&self.app_event_tx) {
             self.textarea.set_text(&text);
             self.textarea.set_cursor(0);
+            self.resync_popups();
         }
         true
     }
@@ -1856,10 +2120,6 @@ impl ChatComposer {
 
     pub(crate) fn mark_next_down_scrolls_history(&mut self) {
         self.next_down_scrolls_history = true;
-    }
-
-    pub(crate) fn standard_terminal_hint(&self) -> Option<&str> {
-        self.standard_terminal_hint.as_deref()
     }
 
     pub(crate) fn token_usage_spans(&self, label_style: Style) -> Vec<Span<'static>> {
@@ -1879,53 +2139,226 @@ impl ChatComposer {
                     };
                     spans.push(Span::from(" (").style(label_style));
                     spans.push(Span::from(percent_remaining.to_string()).style(label_style.add_modifier(Modifier::BOLD)));
-                    spans.push(Span::from("% left)").style(label_style));
+                    spans.push(Span::from("% left").style(label_style));
+                    if let Some(context_label) =
+                        context_window_footer_label(
+                            context_window,
+                            token_usage_info.context_mode,
+                            token_usage_info.auto_context_phase,
+                        )
+                    {
+                        spans.push(Span::from(" • ").style(label_style));
+                        spans.push(
+                            Span::from(context_label).style(label_style.add_modifier(Modifier::BOLD)),
+                        );
+                    }
+                    spans.push(Span::from(")").style(label_style));
                 }
             }
         }
         spans
     }
-}
 
-impl WidgetRef for ChatComposer {
-    fn render_ref(&self, area: Rect, buf: &mut Buffer) {
-        let popup_height = match &self.active_popup {
-            ActivePopup::Command(popup) => popup.calculate_required_height(),
-            ActivePopup::File(popup) => popup.calculate_required_height(),
-            ActivePopup::None => 1,
+    pub(crate) fn token_usage_spans_compact(&self, label_style: Style) -> Vec<Span<'static>> {
+        let mut spans: Vec<Span<'static>> = Vec::new();
+        if let Some(token_usage_info) = &self.token_usage_info {
+            if let Some(context_window) = token_usage_info.model_context_window {
+                if context_window > 0 {
+                    let tokens_used = token_usage_info.last_token_usage.tokens_in_context_window();
+                    let percent_remaining = {
+                        let percent = 100.0
+                            - (tokens_used as f32 / context_window as f32 * 100.0);
+                        percent.clamp(0.0, 100.0) as u8
+                    };
+                    spans.push(Span::from("(").style(label_style));
+                    spans.push(Span::from(percent_remaining.to_string()).style(label_style.add_modifier(Modifier::BOLD)));
+                    spans.push(Span::from("% left").style(label_style));
+                    if let Some(context_label) =
+                        context_window_footer_label(
+                            context_window,
+                            token_usage_info.context_mode,
+                            token_usage_info.auto_context_phase,
+                        )
+                    {
+                        spans.push(Span::from(" • ").style(label_style));
+                        spans.push(
+                            Span::from(context_label).style(label_style.add_modifier(Modifier::BOLD)),
+                        );
+                    }
+                    spans.push(Span::from(")").style(label_style));
+                }
+            }
+        }
+        spans
+    }
+
+    fn build_auto_drive_hint_spans(
+        text: &str,
+        key_style: Style,
+        label_style: Style,
+    ) -> Vec<Span<'static>> {
+        let mut spans: Vec<Span<'static>> = Vec::new();
+        let leading_bullet = text.trim_start().starts_with('•');
+        let parts: Vec<String> = text
+            .split('•')
+            .map(|part| part.trim())
+            .filter(|part| !part.is_empty())
+            .map(|part| part.to_string())
+            .collect();
+
+        for (index, part) in parts.iter().enumerate() {
+            if index > 0 {
+                spans.push(Span::from("  • ").style(label_style));
+            } else if leading_bullet {
+                spans.push(Span::from("• ").style(label_style));
+            }
+            let (key, label) = Self::split_auto_drive_key_label(part);
+            if let Some(key) = key {
+                spans.push(Span::from(key).style(key_style));
+                if !label.is_empty() {
+                    spans.push(Span::from(format!(" {}", label)).style(label_style));
+                }
+            } else if !label.is_empty() {
+                spans.push(Span::from(label).style(label_style));
+            }
+        }
+
+        spans
+    }
+
+    fn split_auto_drive_key_label(part: &str) -> (Option<String>, String) {
+        let trimmed = part.trim();
+        if trimmed.is_empty() {
+            return (None, String::new());
+        }
+        if let Some((first, rest)) = trimmed.split_once(' ') {
+            let key = first.trim();
+            let remainder = rest.trim_start();
+            if Self::is_auto_drive_key(key) {
+                return (Some(key.to_string()), remainder.to_string());
+            }
+        }
+        (None, trimmed.to_string())
+    }
+
+    fn is_auto_drive_key(token: &str) -> bool {
+        let normalized = token.trim();
+        if normalized.is_empty() {
+            return false;
+        }
+        if normalized.contains('+') {
+            return true;
+        }
+        matches!(normalized, "Esc" | "Enter" | "Tab" | "Space" | "Backspace")
+    }
+
+    fn auto_review_footer_sections(
+        status: AutoReviewFooterStatus,
+        agent_hint_label: AgentHintLabel,
+    ) -> (Vec<Span<'static>>, Vec<Span<'static>>) {
+        let key_hint_style = Style::default().fg(crate::colors::function());
+        let label_style = Style::default().fg(crate::colors::text_dim());
+
+        let agent_hint_label_text = match agent_hint_label {
+            AgentHintLabel::Review => " show review",
+            AgentHintLabel::Agents => " show agents",
         };
-        // Split area: textarea with border at top, hints/popup at bottom
-        let hint_height = if matches!(self.active_popup, ActivePopup::None) {
-            1
-        } else {
-            popup_height
+
+        let agent_hint_spans = vec![
+            Span::styled("Ctrl+A", key_hint_style),
+            Span::from(agent_hint_label_text).style(label_style),
+        ];
+
+        let status_spans = match status.status {
+            AutoReviewIndicatorStatus::Running => {
+                let phase_label = match status.phase {
+                    AutoReviewPhase::Resolving => "Auto Review: Resolving",
+                    AutoReviewPhase::Reviewing => "Auto Review: Reviewing",
+                };
+                let status_style = key_hint_style;
+                vec![
+                    Span::styled("Auto Review: ", label_style),
+                    Span::styled("•", status_style),
+                    Span::from(" "),
+                    Span::styled(
+                        phase_label.trim_start_matches("Auto Review: "),
+                        status_style,
+                    ),
+                ]
+            }
+            AutoReviewIndicatorStatus::Clean => {
+                let icon_style = key_hint_style;
+                vec![
+                    Span::styled("Auto Review: ", label_style),
+                    Span::styled("✔", icon_style),
+                    Span::from(" "),
+                    Span::styled("Correct", icon_style),
+                ]
+            }
+            AutoReviewIndicatorStatus::Fixed => {
+                let icon_style = Style::default().fg(crate::colors::success());
+                let text = if let Some(count) = status.findings {
+                    let plural = if count == 1 { "Issue" } else { "Issues" };
+                    format!("{count} {plural} Fixed")
+                } else {
+                    "Issues Fixed".to_string()
+                };
+                vec![
+                    Span::styled("Auto Review: ", label_style),
+                    Span::styled("✔", icon_style),
+                    Span::from(" "),
+                    Span::styled(text, icon_style),
+                ]
+            }
+            AutoReviewIndicatorStatus::Failed => {
+                let icon_style = Style::default().fg(crate::colors::error());
+                vec![
+                    Span::styled("Auto Review: ", label_style),
+                    Span::styled("✖", icon_style),
+                    Span::from(" "),
+                    Span::styled("Failed", icon_style),
+                ]
+            }
         };
 
-        // Calculate dynamic height based on content
-        let content_width = area.width.saturating_sub(4); // Account for border and padding
-        let content_lines = self.textarea.desired_height(content_width).max(1);
-        let desired_input_height = (content_lines + 2).max(3); // Parent layout enforces max
+        (status_spans, agent_hint_spans)
+    }
 
-        // Use desired height but don't exceed available space
-        let input_height = desired_input_height.min(area.height.saturating_sub(hint_height));
-        let [input_area, hint_area] = Layout::vertical([
-            Constraint::Length(input_height),
-            Constraint::Length(hint_height),
-        ])
-        .areas(area);
+    pub(crate) fn footer_height(&self) -> u16 {
+        if self.render_mode == ComposerRenderMode::FooterOnly {
+            return if self.standard_terminal_hint.is_some() { 1 } else { 0 };
+        }
+
+        match (&self.active_popup, self.embedded_mode) {
+            (ActivePopup::Command(popup), _) => popup.calculate_required_height(),
+            (ActivePopup::File(popup), _) => popup.calculate_required_height(),
+            (ActivePopup::None, true) => 0,
+            (ActivePopup::None, false) => 1,
+        }
+    }
+
+    fn render_footer(&self, area: Rect, buf: &mut Buffer) {
+        if area.width == 0 || area.height == 0 {
+            return;
+        }
+
         match &self.active_popup {
             ActivePopup::Command(popup) => {
-                popup.render_ref(hint_area, buf);
+                popup.render_ref(area, buf);
             }
             ActivePopup::File(popup) => {
-                popup.render_ref(hint_area, buf);
+                popup.render_ref(area, buf);
             }
             ActivePopup::None => {
-                let bottom_line_rect = hint_area;
+                if self.embedded_mode {
+                    return;
+                }
+
+                let key_hint_style = Style::default().fg(crate::colors::function());
+                let label_style = Style::default().fg(crate::colors::text_dim());
+
                 if let Some(hints) = &self.footer_hint_override {
-                    let key_hint_style = Style::default().fg(crate::colors::function());
-                    let label_style = Style::default().fg(crate::colors::text_dim());
-                    let mut left_spans: Vec<Span> = vec![Span::from("  ")];
+                    let mut left_spans: Vec<Span<'static>> = vec![Span::from("  ")];
                     for (idx, (key, label)) in hints.iter().enumerate() {
                         if idx > 0 {
                             left_spans.push(Span::from("   ").style(label_style));
@@ -1939,10 +2372,10 @@ impl WidgetRef for ChatComposer {
                         }
                     }
 
-                    let token_spans: Vec<Span> = self.token_usage_spans(label_style);
+                    let token_spans: Vec<Span<'static>> = self.token_usage_spans(label_style);
                     let left_len: usize = left_spans.iter().map(|s| s.content.chars().count()).sum();
                     let right_len: usize = token_spans.iter().map(|s| s.content.chars().count()).sum();
-                    let total_width = bottom_line_rect.width as usize;
+                    let total_width = area.width as usize;
                     let trailing_pad = 1usize;
                     let spacer = if total_width > left_len + right_len + trailing_pad {
                         " ".repeat(total_width - left_len - right_len - trailing_pad)
@@ -1961,203 +2394,556 @@ impl WidgetRef for ChatComposer {
                                 .fg(crate::colors::text_dim())
                                 .add_modifier(Modifier::DIM),
                         )
-                        .render_ref(bottom_line_rect, buf);
-                } else {
-                    let key_hint_style = Style::default().fg(crate::colors::function());
-                    let label_style = Style::default().fg(crate::colors::text_dim());
-                    // Left side: padding + notices (and Ctrl+C again-to-quit notice if active)
-                    let mut left_spans: Vec<Span> = Vec::new();
-                    left_spans.push(Span::from("  "));
+                        .render_ref(area, buf);
+                    return;
+                }
 
-                    // Access mode indicator (Read Only / Write with Approval / Full Access)
-                    // When the label is ephemeral, hide it after expiry. The "(Shift+Tab change)"
-                    // suffix is shown for a short time even for persistent labels.
-                    let show_access_label = if let Some(until) = self.access_mode_label_expiry {
-                        std::time::Instant::now() <= until
-                    } else { true };
-                    if show_access_label {
-                        if let Some(label) = &self.access_mode_label {
-                            // Access label without bold per design
-                            left_spans.push(Span::from(label.clone()).style(label_style));
-                            // Show the hint suffix while the hint timer is active; if the whole label
-                            // is ephemeral, keep the suffix visible for the same duration.
-                            let show_suffix = if let Some(until) = self.access_mode_hint_expiry {
-                                std::time::Instant::now() <= until
-                            } else {
-                                // If label itself is ephemeral, mirror its lifetime for the suffix
-                                self.access_mode_label_expiry.is_some()
-                            };
-                            if show_suffix {
-                                left_spans.push(Span::from("  (").style(label_style));
-                                left_spans.push(Span::from("Shift+Tab").style(key_hint_style));
-                                left_spans.push(Span::from(" change)").style(label_style));
+                // Build footer content as ordered sections so we can prune by priority.
+                let mut left_sections: Vec<(u8, Vec<Span<'static>>, bool)> = Vec::new();
+                let mut right_sections: Vec<(u8, Vec<Span<'static>>, bool)> = Vec::new();
+
+                // Auto Review status + agent hint
+                let mut auto_review_status_spans: Vec<Span<'static>> = Vec::new();
+                let mut auto_review_agent_hint: Vec<Span<'static>> = Vec::new();
+                if let Some(status) = self.auto_review_status {
+                    let (status_spans, agent_hint_spans) =
+                        Self::auto_review_footer_sections(status, self.agent_hint_label);
+                    auto_review_status_spans = status_spans;
+                    auto_review_agent_hint = agent_hint_spans;
+                }
+
+                if !auto_review_status_spans.is_empty() {
+                    left_sections.push((3, auto_review_status_spans, true));
+                }
+
+                if !auto_review_agent_hint.is_empty() {
+                    // Keep the Auto Review hint on the right so spacing stays tight even
+                    // when the status text changes; left-side padding was previously
+                    // reintroducing the "Correct     •" regression.
+                    right_sections.push((3, auto_review_agent_hint, true));
+                }
+
+                // Access mode label + hint (misc left, removable priority 6)
+                let show_access_label = if let Some(until) = self.access_mode_label_expiry {
+                    std::time::Instant::now() <= until
+                } else {
+                    true
+                };
+                let mut left_misc_before_ctrlc: Vec<Span<'static>> = Vec::new();
+                if show_access_label && !self.auto_drive_active {
+                    if let Some(label) = &self.access_mode_label {
+                        left_misc_before_ctrlc.push(Span::from(label.clone()).style(label_style));
+                        let show_suffix = if let Some(until) = self.access_mode_hint_expiry {
+                            std::time::Instant::now() <= until
+                        } else {
+                            self.access_mode_label_expiry.is_some()
+                        };
+                        if show_suffix {
+                            left_misc_before_ctrlc.push(Span::from("  (").style(label_style));
+                            left_misc_before_ctrlc.push(Span::from("Shift+Tab").style(key_hint_style));
+                            left_misc_before_ctrlc.push(Span::from(" change)").style(label_style));
+                        }
+                    }
+                }
+
+                // Ctrl+C quit hint (priority 2)
+                let mut ctrl_c_spans: Vec<Span<'static>> = Vec::new();
+                if self.ctrl_c_quit_hint {
+                    if !left_misc_before_ctrlc.is_empty() {
+                        ctrl_c_spans.push(Span::from("   "));
+                    }
+                    ctrl_c_spans.push(Span::from("Ctrl+C").style(key_hint_style));
+                    ctrl_c_spans.push(Span::from(" again to quit").style(label_style));
+                }
+                let ctrl_c_present = !ctrl_c_spans.is_empty();
+
+                // Standard hint / footer notice / auto-drive left hints (priority 6)
+                let mut left_misc_after_ctrlc: Vec<Span<'static>> = Vec::new();
+                if let Some(hint) = &self.standard_terminal_hint {
+                    if self.auto_drive_active {
+                        let (left_hint, right_hint) = match hint.split_once('\t') {
+                            Some((left, right)) => (left.trim().to_string(), Some(right.trim().to_string())),
+                            None => (hint.trim().to_string(), None),
+                        };
+
+                        let auto_label_style = Style::default().fg(crate::colors::text_dim());
+                        let auto_key_style = Style::default().fg(crate::colors::info());
+
+                        if !left_hint.is_empty() {
+                            if !left_misc_after_ctrlc.is_empty() {
+                                left_misc_after_ctrlc.push(Span::from("   ").style(auto_label_style));
+                            }
+                            let spans = Self::build_auto_drive_hint_spans(
+                                &left_hint,
+                                auto_key_style,
+                                auto_label_style,
+                            );
+                            left_misc_after_ctrlc.extend(spans);
+                        }
+
+                        if let Some(right_hint) = right_hint {
+                            if !right_hint.is_empty() {
+                                let spans = Self::build_auto_drive_hint_spans(
+                                    &right_hint,
+                                    auto_key_style,
+                                    auto_label_style,
+                                );
+                                if !spans.is_empty() {
+                                    right_sections.push((7, spans, true));
+                                }
                             }
                         }
-                    }
-
-                    if self.ctrl_c_quit_hint {
-                        // Treat as a notice; keep on the left
-                        if !self.access_mode_label.is_none() { left_spans.push(Span::from("   ")); }
-                        left_spans.push(Span::from("Ctrl+C").style(key_hint_style));
-                        left_spans.push(Span::from(" again to quit").style(label_style));
-                    }
-
-                    if let Some(hint) = &self.standard_terminal_hint {
-                        if left_spans.len() > 1 {
-                            left_spans.push(Span::from("   "));
+                    } else {
+                        if !left_misc_after_ctrlc.is_empty() {
+                            left_misc_after_ctrlc.push(Span::from("   "));
                         }
-                        left_spans.push(
+                        left_misc_after_ctrlc.push(
                             Span::from(hint.clone())
                                 .style(Style::default().fg(crate::colors::warning()).add_modifier(Modifier::BOLD)),
                         );
                     }
+                }
 
-                    // Append ephemeral footer notice if present and not expired
-                    if let Some((msg, until)) = &self.footer_notice {
-                        if std::time::Instant::now() <= *until {
-                            if left_spans.len() > 1 {
-                                left_spans.push(Span::from("   "));
-                            }
-                            left_spans.push(Span::from(msg.clone()).style(Style::default().add_modifier(Modifier::DIM)));
+                if let Some((msg, until)) = &self.footer_notice {
+                    if std::time::Instant::now() <= *until {
+                        if !left_misc_after_ctrlc.is_empty() {
+                            left_misc_after_ctrlc.push(Span::from("   "));
                         }
+                        left_misc_after_ctrlc.push(
+                            Span::from(msg.clone()).style(Style::default().add_modifier(Modifier::DIM)),
+                        );
+                    }
+                }
+
+                if !left_misc_before_ctrlc.is_empty() {
+                    left_sections.push((6, left_misc_before_ctrlc, true));
+                }
+                if ctrl_c_present {
+                    left_sections.push((2, ctrl_c_spans, true));
+                }
+                if !left_misc_after_ctrlc.is_empty() {
+                    left_sections.push((6, left_misc_after_ctrlc, true));
+                }
+
+                // Tokens (priority 1) with compact fallback
+                let token_spans_full: Vec<Span<'static>> = self.token_usage_spans(label_style);
+                let token_spans_compact: Vec<Span<'static>> =
+                    self.token_usage_spans_compact(label_style);
+                let mut include_tokens = !token_spans_full.is_empty() || !token_spans_compact.is_empty();
+                let mut token_use_compact = false;
+
+                // Editor hint (priority 4) — only when not auto-drive and not showing quit hint
+                let editor_spans: Vec<Span<'static>> = if !self.auto_drive_active && !self.ctrl_c_quit_hint {
+                    vec![
+                        Span::from("Ctrl+G").style(key_hint_style),
+                        Span::from(" editor").style(label_style),
+                    ]
+                } else {
+                    Vec::new()
+                };
+                let editor_present = !editor_spans.is_empty();
+                if editor_present {
+                    right_sections.push((4, editor_spans, true));
+                }
+
+                // Tokens placeholder (actual spans chosen later)
+                right_sections.push((1, Vec::new(), include_tokens));
+
+                // Auth label (priority 7)
+                if !self.using_chatgpt_auth {
+                    right_sections.push((7, vec![Span::from("API key").style(label_style)], true));
+                }
+
+                // Base right sections (auto-drive hints) were already inserted with priority 7 above.
+
+                // Assemble with pruning according to priority rules.
+                let total_width = area.width as usize;
+                let trailing_pad = 1usize;
+                let separator = Span::from("  •  ").style(label_style);
+                let separator_len = separator.content.chars().count();
+
+                // Base padding for left-aligned footer content when Auto Review is present.
+                let base_left_pad = Span::from("  ").style(label_style);
+                let base_left_pad_len = base_left_pad.content.chars().count();
+
+                let leading_bullet_pad = Span::from(" ").style(label_style);
+                let leading_bullet_pad_len = leading_bullet_pad.content.chars().count();
+
+                let mut include_auto_review_status = left_sections.iter().any(|(p, _, inc)| *p == 3 && *inc);
+                let mut include_auto_review_agent_hint =
+                    right_sections.iter().any(|(p, _, inc)| *p == 3 && *inc);
+                let mut include_left_misc = true;
+                let mut include_ctrl_c = ctrl_c_present;
+                let mut include_editor = editor_present;
+                let mut include_right_other = true; // covers priority 7 sections
+
+                // helper closures to rebuild assembled spans based on current flags
+                let span_len = |spans: &[Span<'static>]| -> usize {
+                    spans.iter().map(|s| s.content.chars().count()).sum()
+                };
+
+                let spans_start_with_bullet = |spans: &[Span<'static>]| -> bool {
+                    spans
+                        .iter()
+                        .find_map(|span| {
+                            let trimmed = span.content.trim_start();
+                            (!trimmed.is_empty()).then(|| trimmed.starts_with('•'))
+                        })
+                        .unwrap_or(false)
+                };
+
+                let build_left = |
+                    include_auto_review_status: bool,
+                    include_left_misc: bool,
+                    include_ctrl_c: bool,
+                | -> (Vec<Span<'static>>, usize) {
+                    let mut spans: Vec<Span<'static>> = Vec::new();
+                    let mut len = 0usize;
+                    let mut last_section_was_separator = false;
+
+                    let is_separator = |section: &[Span<'static>]| {
+                        section.len() == 1 && section[0].content.trim() == "•"
+                    };
+
+                    let starts_with_bullet = |section: &[Span<'static>]| {
+                        section.iter().find_map(|span| {
+                            let trimmed = span.content.trim_start();
+                            (!trimmed.is_empty()).then(|| trimmed.starts_with('•'))
+                        })
+                        .unwrap_or(false)
+                    };
+
+                    for (priority, section, included) in &left_sections {
+                        let include = match *priority {
+                            3 => include_auto_review_status && *included,
+                            2 => include_ctrl_c && *included,
+                            6 => include_left_misc && *included,
+                            _ => *included,
+                        };
+                        if !include {
+                            continue;
+                        }
+
+                        let section_is_separator = is_separator(section);
+                        if !spans.is_empty() && !last_section_was_separator && !section_is_separator {
+                            let pad_text = if starts_with_bullet(section) { "  " } else { "   " };
+                            let pad = Span::from(pad_text).style(label_style);
+                            len += pad.content.chars().count();
+                            spans.push(pad);
+                        }
+
+                        spans.extend(section.clone());
+                        len += span_len(section);
+                        last_section_was_separator = section_is_separator;
                     }
 
-                    // Right side: command key hints (Ctrl+R/D/H), token usage, and a small auth notice
-                    // when using an API key instead of ChatGPT auth. We elide hints first if space is tight.
-                    let mut right_spans: Vec<Span> = Vec::new();
+                    (spans, len)
+                };
 
-                    // Prepare token usage spans (always shown when available)
-                    let token_spans: Vec<Span> = self.token_usage_spans(label_style);
+                let build_right = |
+                    include_tokens: bool,
+                    use_compact_tokens: bool,
+                    include_auto_review_agent_hint: bool,
+                    include_editor: bool,
+                    include_right_other: bool,
+                | -> (Vec<Span<'static>>, usize) {
+                    let mut assembled: Vec<Span<'static>> = Vec::new();
+                    let mut len = 0usize;
 
-                    // Helper to build hint spans based on inclusion flags
-                    let build_hints = |include_reasoning: bool, include_diff: bool| -> Vec<Span> {
-                        let mut spans: Vec<Span> = Vec::new();
-                        if !self.ctrl_c_quit_hint {
-                            if self.show_reasoning_hint && include_reasoning {
-                                if !spans.is_empty() { spans.push(Span::from("  •  ").style(label_style)); }
-                                spans.push(Span::from("Ctrl+R").style(key_hint_style));
-                                let label = if self.reasoning_shown { " hide reasoning" } else { " show reasoning" };
-                                spans.push(Span::from(label).style(label_style));
-                            }
-                            if self.show_diffs_hint && include_diff {
-                                if !spans.is_empty() { spans.push(Span::from("  •  ").style(label_style)); }
-                                spans.push(Span::from("Ctrl+D").style(key_hint_style));
-                                spans.push(Span::from(" diff viewer").style(label_style));
-                            }
-                            // Always show help at the end of the command hints
-                            if !spans.is_empty() { spans.push(Span::from("  •  ").style(label_style)); }
-                            spans.push(Span::from("Ctrl+H").style(key_hint_style));
-                            spans.push(Span::from(" help").style(label_style));
+                    for (priority, section, included) in &right_sections {
+                        let include = match *priority {
+                            1 => include_tokens && *included,
+                            3 => include_auto_review_agent_hint && *included,
+                            4 => include_editor && *included,
+                            7 => include_right_other && *included,
+                            _ => *included,
+                        };
+                        if !include {
+                            continue;
                         }
-                        spans
-                    };
 
-                    // Start with all hints included
-                    let mut include_reasoning = true;
-                    let mut include_diff = true;
-                    let mut hint_spans = build_hints(include_reasoning, include_diff);
-
-                    // Measure function for spans length
-                    let measure = |spans: &Vec<Span>| -> usize {
-                        spans.iter().map(|s| s.content.chars().count()).sum()
-                    };
-
-                    // Compute spacer between left and right to make right content right-aligned
-                    let left_len: usize = left_spans.iter().map(|s| s.content.chars().count()).sum();
-                    let total_width = bottom_line_rect.width as usize;
-                    let trailing_pad = 1usize; // one space on the right edge
-
-                    // Optional auth notice: show a small "API key" tag when not using ChatGPT auth
-                    let mut auth_spans: Vec<Span> = Vec::new();
-                    if !self.using_chatgpt_auth {
-                        auth_spans.push(Span::from("API key").style(label_style));
-                    }
-
-                    // We'll add separators between sections when both are present
-                    let sep_len = "  •  ".chars().count();
-                    let combined_len = |h: &Vec<Span>, t: &Vec<Span>, a: &Vec<Span>| -> usize {
-                        let mut len = measure(h) + measure(t) + measure(a);
-                        if !h.is_empty() && !t.is_empty() { len += sep_len; }
-                        if (!h.is_empty() || !t.is_empty()) && !a.is_empty() { len += sep_len; }
-                        len
-                    };
-
-                    // Elide hints in order until content fits
-                    while left_len + combined_len(&hint_spans, &token_spans, &auth_spans) + trailing_pad > total_width {
-                        if include_reasoning {
-                            include_reasoning = false;
-                        } else if include_diff {
-                            include_diff = false;
-                        } else if !auth_spans.is_empty() {
-                            // If still too tight, drop the auth tag as a last resort
-                            auth_spans.clear();
+                        let spans = if *priority == 1 {
+                            if use_compact_tokens {
+                                &token_spans_compact
+                            } else {
+                                &token_spans_full
+                            }
                         } else {
+                            section
+                        };
+
+                        if spans.is_empty() {
+                            continue;
+                        }
+
+                        if !assembled.is_empty() {
+                            assembled.push(separator.clone());
+                            len += separator_len;
+                        }
+                        assembled.extend(spans.clone());
+                        len += span_len(spans);
+                    }
+
+                    (assembled, len)
+                };
+
+                let mut removal_stage = 0usize;
+                let final_left: Vec<Span<'static>>;
+                let final_right: Vec<Span<'static>>;
+                let mut left_len;
+                let mut right_len;
+
+                loop {
+                    let (left_spans_eval, l_len) = build_left(
+                        include_auto_review_status,
+                        include_left_misc,
+                        include_ctrl_c,
+                    );
+                    let (right_spans_eval, r_len) = build_right(
+                        include_tokens,
+                        token_use_compact,
+                        include_auto_review_agent_hint,
+                        include_editor,
+                        include_right_other,
+                    );
+
+                    let add_base_pad = include_auto_review_status && !left_spans_eval.is_empty();
+                    let add_leading_bullet_pad = self.auto_drive_active
+                        && !include_auto_review_status
+                        && spans_start_with_bullet(&left_spans_eval);
+                    left_len = l_len
+                        + if add_base_pad { base_left_pad_len } else { 0 }
+                        + if add_leading_bullet_pad {
+                            leading_bullet_pad_len
+                        } else {
+                            0
+                        };
+                    right_len = r_len;
+                    let total_len = left_len + right_len + trailing_pad;
+
+                    if total_len <= total_width {
+                        let mut with_pad = left_spans_eval;
+                        if add_base_pad {
+                            with_pad.insert(0, base_left_pad.clone());
+                        }
+                        if add_leading_bullet_pad {
+                            with_pad.insert(0, leading_bullet_pad.clone());
+                        }
+                        final_left = with_pad;
+                        final_right = right_spans_eval;
+                        break;
+                    }
+
+                    // Priority step 1: collapse token usage if possible
+                    if include_tokens && !token_use_compact && !token_spans_compact.is_empty() {
+                        token_use_compact = true;
+                        continue;
+                    }
+
+                    // Removal order: 7 (right other) -> 6 (left misc) -> 5 (Ctrl+A hint)
+                    // -> 4 (editor) -> 3 (auto review status) -> 2 (Ctrl+C) -> 1 (tokens)
+                    match removal_stage {
+                        0 => {
+                            include_right_other = false;
+                        }
+                        1 => {
+                            include_left_misc = false;
+                        }
+                        2 => {
+                            include_auto_review_agent_hint = false;
+                        }
+                        3 => {
+                            include_editor = false;
+                        }
+                        4 => {
+                            include_auto_review_status = false;
+                            include_auto_review_agent_hint = false;
+                        }
+                        5 => {
+                            include_ctrl_c = false;
+                        }
+                        6 => {
+                            include_tokens = false;
+                        }
+                        _ => {
+                            // Last resort: fall back to truncating the left spans
+                            let mut with_pad = left_spans_eval;
+                            if add_base_pad {
+                                with_pad.insert(0, base_left_pad.clone());
+                            }
+                            if add_leading_bullet_pad {
+                                with_pad.insert(0, leading_bullet_pad.clone());
+                            }
+                            final_left = with_pad;
+                            final_right = right_spans_eval;
                             break;
                         }
-                        hint_spans = build_hints(include_reasoning, include_diff);
                     }
 
-                    // Compose final right spans: hints, optional separator, then tokens
-                    if !hint_spans.is_empty() { right_spans.extend(hint_spans); }
-                    if !right_spans.is_empty() && !token_spans.is_empty() {
-                        right_spans.push(Span::from("  •  ").style(label_style));
-                    }
-                    right_spans.extend(token_spans);
-                    // Append auth notice at the very end (right-most) if present
-                    if !right_spans.is_empty() && !auth_spans.is_empty() {
-                        right_spans.push(Span::from("  •  ").style(label_style));
-                    }
-                    right_spans.extend(auth_spans);
-
-                    // Recompute spacer after elision
-                    let right_len: usize = right_spans.iter().map(|s| s.content.chars().count()).sum();
-                    let spacer = if total_width > left_len + right_len + trailing_pad {
-                        " ".repeat(total_width - left_len - right_len - trailing_pad)
-                    } else { String::from(" ") };
-
-                    let mut line_spans = left_spans;
-                    line_spans.push(Span::from(spacer));
-                    line_spans.extend(right_spans);
-                    line_spans.push(Span::from(" "));
-
-                    Line::from(line_spans)
-                        .style(
-                            Style::default()
-                                .fg(crate::colors::text_dim())
-                                .add_modifier(Modifier::DIM),
-                        )
-                        .render_ref(bottom_line_rect, buf);
+                    removal_stage += 1;
                 }
+
+                // If still too wide, truncate left as a final safety net.
+                let mut left_spans = final_left;
+                let right_spans = final_right;
+                let mut left_len = left_len;
+                if left_len + right_len + trailing_pad > total_width {
+                    let mut remaining = total_width.saturating_sub(right_len + trailing_pad);
+                    if remaining == 0 {
+                        left_spans.clear();
+                    } else {
+                        let mut truncated: Vec<Span> = Vec::new();
+                        for span in left_spans.iter() {
+                            if remaining == 0 {
+                                break;
+                            }
+                            let span_len = span.content.chars().count();
+                            if span_len <= remaining {
+                                truncated.push(span.clone());
+                                remaining -= span_len;
+                                continue;
+                            }
+
+                            if span.content.trim().is_empty() {
+                                truncated.push(Span::from(" ".repeat(remaining)).style(span.style));
+                                remaining = 0;
+                            } else if remaining <= 1 {
+                                truncated.push(Span::from("…").style(span.style));
+                                remaining = 0;
+                            } else {
+                                let mut collected = span
+                                    .content
+                                    .chars()
+                                    .take(remaining)
+                                    .collect::<String>();
+                                if !collected.is_empty() {
+                                    collected.pop();
+                                }
+                                collected.push('…');
+                                truncated.push(Span::from(collected).style(span.style));
+                                remaining = 0;
+                            }
+                        }
+                        if truncated.is_empty() {
+                            truncated.push(Span::from("  "));
+                        }
+                        left_spans = truncated;
+                    }
+                    left_len = left_spans.iter().map(|s| s.content.chars().count()).sum();
+                }
+
+                let spacer = if total_width > left_len + right_len + trailing_pad {
+                    " ".repeat(total_width - left_len - right_len - trailing_pad)
+                } else {
+                    String::from(" ")
+                };
+
+                let mut line_spans = left_spans;
+                line_spans.push(Span::from(spacer));
+                line_spans.extend(right_spans);
+                line_spans.push(Span::from(" "));
+
+                Line::from(line_spans)
+                    .style(
+                        Style::default()
+                            .fg(crate::colors::text_dim())
+                            .add_modifier(Modifier::DIM),
+                    )
+                    .render_ref(area, buf);
             }
         }
-        // Draw border around input area with optional "Coding" title when task is running
-        let mut input_block = Block::default()
-            .borders(Borders::ALL)
-            .border_style(Style::default().fg(crate::colors::border()))
-            // Fill input block with theme background so underlying content
-            // never shows through when the composer grows/shrinks.
-            .style(Style::default().bg(crate::colors::background()));
+    }
+}
 
-        if self.is_task_running {
-            if self.status_message.eq_ignore_ascii_case("auto drive") {
-                let title_line = Line::from(Span::styled(
-                    " Auto Drive ",
-                    Style::default()
-                        .fg(crate::colors::text())
-                        .add_modifier(Modifier::BOLD),
-                ));
-                input_block = input_block.title(title_line);
-            } else if self.status_message.eq_ignore_ascii_case("auto drive goal") {
-                let title_line = Line::from(Span::styled(
-                    " Auto Drive Goal ",
-                    Style::default()
-                        .fg(crate::colors::text())
-                        .add_modifier(Modifier::BOLD),
-                ));
-                input_block = input_block.title(title_line);
+impl WidgetRef for ChatComposer {
+    fn render_ref(&self, area: Rect, buf: &mut Buffer) {
+        if self.render_mode == ComposerRenderMode::FooterOnly {
+            let footer_height = self.footer_height();
+            if footer_height == 0 {
+                return;
+            }
+            let footer_area = Rect {
+                x: area.x,
+                y: area.y + area.height.saturating_sub(footer_height),
+                width: area.width,
+                height: footer_height,
+            };
+            self.render_footer(footer_area, buf);
+            return;
+        }
+
+        let footer_height = self.footer_height();
+
+        let content_width = area.width.saturating_sub(4);
+        let content_lines = self.textarea.desired_height(content_width).max(1);
+        let desired_input_height = (content_lines + 2).max(3);
+
+        let available_height = area.height.saturating_sub(footer_height);
+        if available_height == 0 {
+            return;
+        }
+        let input_height = desired_input_height.min(available_height);
+
+        let (input_area, footer_area) = if footer_height == 0 {
+            (
+                Rect {
+                    x: area.x,
+                    y: area.y,
+                    width: area.width,
+                    height: available_height,
+                },
+                None,
+            )
+        } else {
+            let [input_area, footer_area] = Layout::vertical([
+                Constraint::Length(input_height),
+                Constraint::Length(footer_height),
+            ])
+            .areas(area);
+            (input_area, Some(footer_area))
+        };
+
+        if let Some(area) = footer_area {
+            self.render_footer(area, buf);
+        }
+        // Draw border around input area with optional variant title when task is running
+        let mut input_block = Block::default().borders(Borders::ALL);
+        let mut auto_drive_border_gradient = None;
+        if let Some(style) = self
+            .auto_drive_style
+            .as_ref()
+            .filter(|_| self.auto_drive_active)
+        {
+            auto_drive_border_gradient = style.border_gradient;
+            input_block = input_block
+                .border_style(style.border_style.clone())
+                .border_type(style.border_type)
+                .style(style.background_style.clone());
+        } else {
+            input_block = input_block
+                .border_style(Style::default().fg(crate::colors::border()))
+                .border_type(BorderType::Plain)
+                .style(Style::default().bg(crate::colors::background()));
+        }
+
+        if self.is_task_running && !self.embedded_mode {
+            if self.auto_drive_active {
+                if let Some(style) = self.auto_drive_style.as_ref() {
+                    if self
+                        .status_message
+                        .eq_ignore_ascii_case("auto drive goal")
+                    {
+                        let title_text = format!(
+                            "{}Auto Drive Goal{}",
+                            style.goal_title_prefix, style.goal_title_suffix
+                        );
+                        let title_line =
+                            Line::from(Span::styled(title_text, style.title_style.clone()));
+                        input_block = input_block.title(title_line);
+                    }
+                }
             } else {
                 use std::time::{SystemTime, UNIX_EPOCH};
-                // Use selected spinner style
                 let now_ms = SystemTime::now()
                     .duration_since(UNIX_EPOCH)
                     .unwrap_or_default()
@@ -2165,14 +2951,13 @@ impl WidgetRef for ChatComposer {
                 let def = crate::spinner::current_spinner();
                 let spinner_str = crate::spinner::frame_at_time(def, now_ms);
 
-                // Create centered title with spinner and spaces
                 let title_line = Line::from(vec![
-                    Span::raw(" "), // Space before spinner
+                    Span::raw(" "),
                     Span::styled(spinner_str, Style::default().fg(crate::colors::info())),
                     Span::styled(
                         format!(" {}... ", self.status_message),
                         Style::default().fg(crate::colors::info()),
-                    ), // Space after spinner and after text
+                    ),
                 ])
                 .centered();
                 input_block = input_block.title(title_line);
@@ -2181,6 +2966,9 @@ impl WidgetRef for ChatComposer {
 
         let textarea_rect = input_block.inner(input_area);
         input_block.render_ref(input_area, buf);
+        if let Some(gradient) = auto_drive_border_gradient {
+            apply_auto_drive_border_gradient(buf, input_area, gradient);
+        }
 
         // Add padding inside the text area (1 char horizontal only, no vertical padding)
         let padded_textarea_rect = textarea_rect.inner(Margin::new(1, 0));
@@ -2211,7 +2999,8 @@ impl WidgetRef for ChatComposer {
             .textarea
             .cursor_pos_with_state(padded_textarea_rect, *self.textarea_state.borrow())
         {
-            let cursor_bg = crate::theme::current_theme().cursor;
+            let theme = crate::theme::current_theme();
+            let cursor_bg = theme.cursor;
             if cx < buf.area.width.saturating_add(buf.area.x)
                 && cy < buf.area.height.saturating_add(buf.area.y)
             {
@@ -2221,7 +3010,291 @@ impl WidgetRef for ChatComposer {
                 // cursor while processing arrow keys; preserving the foreground color
                 // keeps the caret location visible instead of flashing blank cells.
                 cell.set_bg(cursor_bg);
+                let fg_bg_ratio = contrast_ratio(theme.background, cursor_bg);
+                let fg_text_ratio = contrast_ratio(theme.text_bright, cursor_bg);
+                let cursor_fg = if fg_text_ratio >= fg_bg_ratio {
+                    theme.text_bright
+                } else {
+                    theme.background
+                };
+                cell.set_fg(cursor_fg);
             }
         }
+    }
+}
+
+fn relative_luminance(rgb: (u8, u8, u8)) -> f32 {
+    (0.2126 * rgb.0 as f32 + 0.7152 * rgb.1 as f32 + 0.0722 * rgb.2 as f32) / 255.0
+}
+
+fn contrast_ratio(foreground: Color, background: Color) -> f32 {
+    let lf = relative_luminance(crate::colors::color_to_rgb(foreground));
+    let lb = relative_luminance(crate::colors::color_to_rgb(background));
+    let (bright, dark) = if lf >= lb { (lf, lb) } else { (lb, lf) };
+    (bright + 0.05) / (dark + 0.05)
+}
+
+fn apply_auto_drive_border_gradient(
+    buf: &mut Buffer,
+    area: Rect,
+    gradient: BorderGradient,
+) {
+    let width = area.width as usize;
+    let height = area.height as usize;
+    if width == 0 || height == 0 {
+        return;
+    }
+
+    let horizontal_span = (width.saturating_sub(1)) as f32;
+    for dx in 0..width {
+        let ratio = if horizontal_span <= 0.0 {
+            0.0
+        } else {
+            dx as f32 / horizontal_span
+        };
+        let color = lerp_gradient_color(gradient, ratio);
+        let x = area.x + dx as u16;
+        let top = &mut buf[(x, area.y)];
+        top.set_fg(color);
+
+        if height > 1 {
+            let bottom_y = area.y + area.height.saturating_sub(1);
+            let bottom = &mut buf[(x, bottom_y)];
+            bottom.set_fg(color);
+        }
+    }
+
+    if height <= 2 {
+        return;
+    }
+
+    let left_x = area.x;
+    let right_x = area.x + area.width.saturating_sub(1);
+    for dy in 1..height.saturating_sub(1) {
+        let y = area.y + dy as u16;
+        buf[(left_x, y)].set_fg(gradient.left);
+        buf[(right_x, y)].set_fg(gradient.right);
+    }
+}
+
+fn lerp_gradient_color(gradient: BorderGradient, ratio: f32) -> Color {
+    let clamped = ratio.clamp(0.0, 1.0);
+    let (lr, lg, lb) = crate::colors::color_to_rgb(gradient.left);
+    let (rr, rg, rb) = crate::colors::color_to_rgb(gradient.right);
+    let mix = |a: u8, b: u8| -> u8 {
+        let a = a as f32;
+        let b = b as f32;
+        (a + (b - a) * clamped).round().clamp(0.0, 255.0) as u8
+    };
+    Color::Rgb(mix(lr, rr), mix(lg, rg), mix(lb, rb))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::app_event::AppEvent;
+    use ratatui::buffer::Buffer;
+    use ratatui::layout::Rect;
+
+    #[test]
+    fn auto_review_status_stays_left_with_auto_drive_footer() {
+        let (tx, _rx) = std::sync::mpsc::channel::<AppEvent>();
+        let app_tx = AppEventSender::new(tx);
+        let mut composer = ChatComposer::new(true, app_tx, true, false);
+
+        composer.auto_drive_active = true;
+        composer.standard_terminal_hint = Some("Esc stop\tCtrl+S settings".to_string());
+        composer.set_auto_review_status(Some(AutoReviewFooterStatus {
+            status: AutoReviewIndicatorStatus::Running,
+            findings: None,
+            phase: AutoReviewPhase::Reviewing,
+        }));
+
+        let area = Rect {
+            x: 0,
+            y: 0,
+            width: 64,
+            height: 1,
+        };
+        let mut buf = Buffer::empty(area);
+        composer.render_footer(area, &mut buf);
+
+        let line: String = (0..area.width)
+            .map(|x| buf[(area.x + x, area.y)].symbol().to_string())
+            .collect();
+
+        let auto_idx = line
+            .find("Auto Review")
+            .expect("footer should show auto review text");
+        let esc_idx = line.find("Esc stop").unwrap_or(line.len());
+
+        assert!(auto_idx < esc_idx, "Auto Review status should be left-most");
+    }
+
+    #[test]
+    fn footer_shows_1m_context_suffix_when_extended_context_is_active() {
+        let (tx, _rx) = std::sync::mpsc::channel::<AppEvent>();
+        let app_tx = AppEventSender::new(tx);
+        let mut composer = ChatComposer::new(true, app_tx, true, false);
+
+        let token_usage = TokenUsage {
+            input_tokens: 13_290,
+            cached_input_tokens: 0,
+            cache_write_input_tokens: 0,
+            output_tokens: 0,
+            reasoning_output_tokens: 0,
+            total_tokens: 13_290,
+        };
+        composer.set_token_usage(
+            token_usage.clone(),
+            token_usage,
+            Some(EXTENDED_CONTEXT_WINDOW_1M),
+            Some(ContextMode::OneM),
+        );
+
+        let area = Rect {
+            x: 0,
+            y: 0,
+            width: 96,
+            height: 1,
+        };
+        let mut buf = Buffer::empty(area);
+        composer.render_footer(area, &mut buf);
+
+        let line: String = (0..area.width)
+            .map(|x| buf[(area.x + x, area.y)].symbol().to_string())
+            .collect();
+
+        assert!(line.contains("13,290 tokens"));
+        assert!(line.contains("1M Context"));
+    }
+
+    #[test]
+    fn footer_shows_1m_auto_suffix_when_auto_context_is_active() {
+        let (tx, _rx) = std::sync::mpsc::channel::<AppEvent>();
+        let app_tx = AppEventSender::new(tx);
+        let mut composer = ChatComposer::new(true, app_tx, true, false);
+
+        let token_usage = TokenUsage {
+            input_tokens: 13_290,
+            cached_input_tokens: 0,
+            cache_write_input_tokens: 0,
+            output_tokens: 0,
+            reasoning_output_tokens: 0,
+            total_tokens: 13_290,
+        };
+        composer.set_token_usage(
+            token_usage.clone(),
+            token_usage,
+            Some(EXTENDED_CONTEXT_WINDOW_1M),
+            Some(ContextMode::Auto),
+        );
+
+        let area = Rect {
+            x: 0,
+            y: 0,
+            width: 96,
+            height: 1,
+        };
+        let mut buf = Buffer::empty(area);
+
+        composer.render_footer(area, &mut buf);
+
+        let line: String = (0..area.width)
+            .map(|x| buf[(x, 0)].symbol().to_string())
+            .collect();
+        assert!(line.contains("1M Auto"));
+    }
+
+    #[test]
+    fn footer_shows_checking_context_while_auto_context_check_is_running() {
+        let (tx, _rx) = std::sync::mpsc::channel::<AppEvent>();
+        let app_tx = AppEventSender::new(tx);
+        let mut composer = ChatComposer::new(true, app_tx, true, false);
+
+        let token_usage = TokenUsage {
+            input_tokens: 13_290,
+            cached_input_tokens: 0,
+            cache_write_input_tokens: 0,
+            output_tokens: 0,
+            reasoning_output_tokens: 0,
+            total_tokens: 13_290,
+        };
+        composer.set_token_usage(
+            token_usage.clone(),
+            token_usage,
+            Some(EXTENDED_CONTEXT_WINDOW_1M),
+            Some(ContextMode::Auto),
+        );
+        composer.set_auto_context_phase(Some(AutoContextPhase::Checking));
+
+        let area = Rect {
+            x: 0,
+            y: 0,
+            width: 96,
+            height: 1,
+        };
+        let mut buf = Buffer::empty(area);
+
+        composer.render_footer(area, &mut buf);
+
+        let line: String = (0..area.width)
+            .map(|x| buf[(x, 0)].symbol().to_string())
+            .collect();
+        assert!(line.contains("Checking context..."));
+    }
+
+    #[test]
+    fn footer_shows_compacting_while_auto_context_compact_is_running() {
+        let (tx, _rx) = std::sync::mpsc::channel::<AppEvent>();
+        let app_tx = AppEventSender::new(tx);
+        let mut composer = ChatComposer::new(true, app_tx, true, false);
+
+        let token_usage = TokenUsage {
+            input_tokens: 13_290,
+            cached_input_tokens: 0,
+            cache_write_input_tokens: 0,
+            output_tokens: 0,
+            reasoning_output_tokens: 0,
+            total_tokens: 13_290,
+        };
+        composer.set_token_usage(
+            token_usage.clone(),
+            token_usage,
+            Some(EXTENDED_CONTEXT_WINDOW_1M),
+            Some(ContextMode::Auto),
+        );
+        composer.set_auto_context_phase(Some(AutoContextPhase::Compacting));
+
+        let area = Rect {
+            x: 0,
+            y: 0,
+            width: 96,
+            height: 1,
+        };
+        let mut buf = Buffer::empty(area);
+
+        composer.render_footer(area, &mut buf);
+
+        let line: String = (0..area.width)
+            .map(|x| buf[(x, 0)].symbol().to_string())
+            .collect();
+        assert!(line.contains("Compacting..."));
+    }
+
+    #[test]
+    fn map_status_message_shows_searching_for_search_status() {
+        assert_eq!(
+            ChatComposer::map_status_message("Search"),
+            "Searching".to_string()
+        );
+        assert_eq!(
+            ChatComposer::map_status_message("searching files"),
+            "Searching".to_string()
+        );
+        assert_eq!(
+            ChatComposer::map_status_message("waiting for user input"),
+            "Working".to_string()
+        );
     }
 }

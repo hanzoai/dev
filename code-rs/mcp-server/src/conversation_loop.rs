@@ -40,7 +40,9 @@ pub async fn run_conversation_loop(
                         command,
                         cwd,
                         call_id,
+                        approval_id,
                         reason: _,
+                        ..
                     }) => {
                         handle_exec_approval_request(
                             command,
@@ -51,6 +53,7 @@ pub async fn run_conversation_loop(
                             request_id_str.clone(),
                             event.id.clone(),
                             call_id,
+                            approval_id,
                         )
                         .await;
                         continue;
@@ -93,6 +96,7 @@ pub async fn run_conversation_loop(
                     }
                     EventMsg::AgentReasoningRawContent(_)
                     | EventMsg::AgentReasoningRawContentDelta(_)
+                    | EventMsg::TaskLifecycle(_)
                     | EventMsg::TaskStarted
                     | EventMsg::TokenCount(_)
                     | EventMsg::AgentReasoning(_)
@@ -112,6 +116,7 @@ pub async fn run_conversation_loop(
                     | EventMsg::AgentStatusUpdate(_)
                     | EventMsg::ShutdownComplete
                     | EventMsg::CustomToolCallBegin(_)
+                    | EventMsg::CustomToolCallUpdate(_)
                     | EventMsg::CustomToolCallEnd(_) => {
                         // For now, we do not do anything extra for these
                         // events. Note that

@@ -10,8 +10,9 @@ use crate::history::state::{HistoryId, HistoryRecord, HistoryState};
 use crate::history_cell::{
     assistant_markdown_lines,
     compute_assistant_layout,
-    explore_lines_from_record_with_force,
     diff_lines_from_record,
+    explore_lines_from_record_with_force,
+    explore_lines_without_truncation,
     exec_display_lines_from_record,
     merged_exec_lines_from_record,
     stream_lines_from_state,
@@ -31,15 +32,20 @@ use unicode_width::UnicodeWidthStr;
 pub(crate) struct HistoryRenderState {
     pub(crate) layout_cache: RefCell<HashMap<CacheKey, Rc<CachedLayout>>>,
     pub(crate) height_cache: RefCell<HashMap<CacheKey, u16>>,
+    fallback_cache: RefCell<HashMap<HistoryId, Rc<Vec<Line<'static>>>>>,
     pub(crate) height_cache_last_width: Cell<u16>,
     pub(crate) prefix_sums: RefCell<Vec<u16>>,
     pub(crate) last_prefix_width: Cell<u16>,
     pub(crate) last_prefix_count: Cell<usize>,
     pub(crate) last_total_height: Cell<u16>,
+    pub(crate) last_history_count: Cell<usize>,
     pub(crate) prefix_valid: Cell<bool>,
     // Row intervals that correspond to inter-cell spacing so we can avoid
     // landing the viewport on empty gaps when scrolling.
     spacing_ranges: RefCell<Vec<(u16, u16)>>,
+    bottom_spacer_range: Cell<Option<(u16, u16)>>,
+    bottom_spacer_lines: Cell<u16>,
+    pending_bottom_spacer_lines: Cell<Option<u16>>,
 }
 
 impl HistoryRenderState {
@@ -47,23 +53,33 @@ impl HistoryRenderState {
         Self {
             layout_cache: RefCell::new(HashMap::new()),
             height_cache: RefCell::new(HashMap::new()),
+            fallback_cache: RefCell::new(HashMap::new()),
             height_cache_last_width: Cell::new(0),
             prefix_sums: RefCell::new(Vec::new()),
             last_prefix_width: Cell::new(0),
             last_prefix_count: Cell::new(0),
             last_total_height: Cell::new(0),
+            last_history_count: Cell::new(0),
             prefix_valid: Cell::new(false),
             spacing_ranges: RefCell::new(Vec::new()),
+            bottom_spacer_range: Cell::new(None),
+            bottom_spacer_lines: Cell::new(0),
+            pending_bottom_spacer_lines: Cell::new(None),
         }
     }
 
     pub(crate) fn invalidate_height_cache(&self) {
         self.layout_cache.borrow_mut().clear();
         self.height_cache.borrow_mut().clear();
+        self.fallback_cache.borrow_mut().clear();
         self.prefix_sums.borrow_mut().clear();
         self.last_total_height.set(0);
+        self.last_history_count.set(0);
         self.prefix_valid.set(false);
         self.spacing_ranges.borrow_mut().clear();
+        self.bottom_spacer_range.set(None);
+        self.bottom_spacer_lines.set(0);
+        self.pending_bottom_spacer_lines.set(None);
     }
 
     pub(crate) fn handle_width_change(&self, width: u16) {
@@ -74,11 +90,16 @@ impl HistoryRenderState {
             self.height_cache
                 .borrow_mut()
                 .retain(|key, _| key.width == width);
+            self.fallback_cache.borrow_mut().clear();
             self.prefix_sums.borrow_mut().clear();
             self.last_total_height.set(0);
+            self.last_history_count.set(0);
             self.prefix_valid.set(false);
             self.height_cache_last_width.set(width);
             self.spacing_ranges.borrow_mut().clear();
+            self.bottom_spacer_range.set(None);
+            self.bottom_spacer_lines.set(0);
+            self.pending_bottom_spacer_lines.set(None);
         }
     }
 
@@ -92,19 +113,40 @@ impl HistoryRenderState {
         self.height_cache
             .borrow_mut()
             .retain(|key, _| key.history_id != id);
+        self.fallback_cache.borrow_mut().remove(&id);
         self.prefix_sums.borrow_mut().clear();
         self.last_total_height.set(0);
+        self.last_history_count.set(0);
         self.prefix_valid.set(false);
         self.spacing_ranges.borrow_mut().clear();
+        self.bottom_spacer_range.set(None);
+        self.bottom_spacer_lines.set(0);
+        self.pending_bottom_spacer_lines.set(None);
     }
 
     pub(crate) fn invalidate_all(&self) {
         self.layout_cache.borrow_mut().clear();
         self.height_cache.borrow_mut().clear();
+        self.fallback_cache.borrow_mut().clear();
         self.prefix_sums.borrow_mut().clear();
         self.last_total_height.set(0);
+        self.last_history_count.set(0);
         self.prefix_valid.set(false);
         self.spacing_ranges.borrow_mut().clear();
+        self.bottom_spacer_range.set(None);
+        self.bottom_spacer_lines.set(0);
+        self.pending_bottom_spacer_lines.set(None);
+    }
+
+    pub(crate) fn invalidate_prefix_only(&self) {
+        self.prefix_sums.borrow_mut().clear();
+        self.last_total_height.set(0);
+        self.last_history_count.set(0);
+        self.prefix_valid.set(false);
+        self.spacing_ranges.borrow_mut().clear();
+        self.bottom_spacer_range.set(None);
+        self.bottom_spacer_lines.set(0);
+        self.pending_bottom_spacer_lines.set(None);
     }
 
     pub(crate) fn should_rebuild_prefix(&self, width: u16, count: usize) -> bool {
@@ -126,6 +168,7 @@ impl HistoryRenderState {
         prefix: Vec<u16>,
         total_height: u16,
         count: usize,
+        history_count: usize,
     ) {
         {
             let mut ps = self.prefix_sums.borrow_mut();
@@ -134,11 +177,70 @@ impl HistoryRenderState {
         self.last_prefix_width.set(width);
         self.last_prefix_count.set(count);
         self.last_total_height.set(total_height);
+        self.last_history_count.set(history_count);
         self.prefix_valid.set(true);
+    }
+
+    pub(crate) fn cached_fallback_lines<F>(&self, history_id: HistoryId, build: F) -> Rc<Vec<Line<'static>>>
+    where
+        F: FnOnce() -> Vec<Line<'static>>,
+    {
+        if history_id == HistoryId::ZERO {
+            return Rc::new(build());
+        }
+        if let Some(lines) = self.fallback_cache.borrow().get(&history_id) {
+            return Rc::clone(lines);
+        }
+        let lines = Rc::new(build());
+        self.fallback_cache
+            .borrow_mut()
+            .insert(history_id, Rc::clone(&lines));
+        lines
+    }
+
+    pub(crate) fn cached_height(&self, history_id: HistoryId, settings: RenderSettings) -> Option<u16> {
+        if history_id == HistoryId::ZERO {
+            return None;
+        }
+        let key = CacheKey::new(history_id, settings);
+        self.height_cache.borrow().get(&key).copied()
     }
 
     pub(crate) fn update_spacing_ranges(&self, ranges: Vec<(u16, u16)>) {
         *self.spacing_ranges.borrow_mut() = ranges;
+    }
+
+    pub(crate) fn set_bottom_spacer_range(&self, range: Option<(u16, u16)>) {
+        self.bottom_spacer_range.set(range);
+    }
+
+    pub(crate) fn select_bottom_spacer_lines(&self, requested: u16) -> (u16, bool) {
+        let current = self.bottom_spacer_lines.get();
+        if requested >= current {
+            self.bottom_spacer_lines.set(requested);
+            self.pending_bottom_spacer_lines.set(None);
+            return (requested, false);
+        }
+
+        let pending = self.pending_bottom_spacer_lines.get();
+        if pending == Some(requested) {
+            self.bottom_spacer_lines.set(requested);
+            self.pending_bottom_spacer_lines.set(None);
+            (requested, false)
+        } else {
+            self.pending_bottom_spacer_lines.set(Some(requested));
+            (current, true)
+        }
+    }
+
+    #[cfg(any(test, feature = "test-helpers"))]
+    pub(crate) fn bottom_spacer_lines_for_test(&self) -> u16 {
+        self.bottom_spacer_lines.get()
+    }
+
+    #[cfg(any(test, feature = "test-helpers"))]
+    pub(crate) fn pending_bottom_spacer_lines_for_test(&self) -> Option<u16> {
+        self.pending_bottom_spacer_lines.get()
     }
 
     pub(crate) fn adjust_scroll_to_content(&self, mut scroll_pos: u16) -> u16 {
@@ -146,20 +248,29 @@ impl HistoryRenderState {
             return scroll_pos;
         }
         let ranges = self.spacing_ranges.borrow();
-        if ranges.is_empty() {
+        let bottom_spacer = self.bottom_spacer_range.get();
+        if ranges.is_empty() && bottom_spacer.is_none() {
             return scroll_pos;
         }
         // Walk backwards until we hit a true cell row or run out of history.
         loop {
             let mut adjusted = false;
-            for &(start, end) in ranges.iter() {
-                if start == 0 {
-                    continue;
-                }
-                if scroll_pos >= start && scroll_pos < end {
+            if let Some((start, end)) = bottom_spacer {
+                if start > 0 && scroll_pos >= start && scroll_pos < end {
                     scroll_pos = start.saturating_sub(1);
                     adjusted = true;
-                    break;
+                }
+            }
+            if !adjusted {
+                for &(start, end) in ranges.iter() {
+                    if start == 0 {
+                        continue;
+                    }
+                    if scroll_pos >= start && scroll_pos < end {
+                        scroll_pos = start.saturating_sub(1);
+                        adjusted = true;
+                        break;
+                    }
                 }
             }
             if !adjusted || scroll_pos == 0 {
@@ -176,6 +287,63 @@ impl HistoryRenderState {
 
     pub(crate) fn last_total_height(&self) -> u16 {
         self.last_total_height.get()
+    }
+
+    pub(crate) fn last_prefix_count(&self) -> usize {
+        self.last_prefix_count.get()
+    }
+
+    pub(crate) fn last_history_count(&self) -> usize {
+        self.last_history_count.get()
+    }
+
+    pub(crate) fn can_append_prefix(&self, width: u16, count: usize) -> bool {
+        self.prefix_valid.get()
+            && self.last_prefix_width.get() == width
+            && count == self.last_prefix_count.get().saturating_add(1)
+    }
+
+    pub(crate) fn extend_prefix_for_append(
+        &self,
+        width: u16,
+        spacing: u16,
+        new_height: u16,
+        new_history_count: usize,
+    ) -> Option<(u16, u16)> {
+        if !self.prefix_valid.get() || self.last_prefix_width.get() != width {
+            return None;
+        }
+        let prev_count = self.last_prefix_count.get();
+        if prev_count == 0 {
+            return None;
+        }
+        if new_history_count != self.last_history_count.get().saturating_add(1) {
+            return None;
+        }
+        let mut ps = self.prefix_sums.borrow_mut();
+        if ps.len() != prev_count.saturating_add(1) {
+            return None;
+        }
+        let old_total = *ps.last().unwrap_or(&0);
+        let spacing_start = old_total;
+        let spacing_end = spacing_start.saturating_add(spacing);
+        if let Some(last) = ps.last_mut() {
+            *last = spacing_end;
+        } else {
+            return None;
+        }
+        let new_total = spacing_end.saturating_add(new_height);
+        ps.push(new_total);
+        self.last_total_height.set(new_total);
+        self.last_prefix_count.set(prev_count.saturating_add(1));
+        self.last_history_count.set(new_history_count);
+        self.last_prefix_width.set(width);
+        self.prefix_valid.set(true);
+        if spacing > 0 { Some((spacing_start, spacing_end)) } else { None }
+    }
+
+    pub(crate) fn append_spacing_range(&self, range: (u16, u16)) {
+        self.spacing_ranges.borrow_mut().push(range);
     }
 
     pub(crate) fn visible_cells<'a>(
@@ -496,7 +664,7 @@ pub(crate) struct RenderRequest<'a> {
     pub cell: Option<&'a dyn HistoryCell>,
     pub assistant: Option<&'a AssistantMarkdownCell>,
     pub use_cache: bool,
-    pub fallback_lines: Option<Vec<Line<'static>>>,
+    pub fallback_lines: Option<Rc<Vec<Line<'static>>>>,
     pub kind: RenderRequestKind,
     pub config: &'a Config,
 }
@@ -518,8 +686,16 @@ impl<'a> RenderRequest<'a> {
             }
         }
 
-        if let RenderRequestKind::Explore { id, hold_header } = self.kind {
+        if let RenderRequestKind::Explore {
+            id,
+            hold_header,
+            full_detail,
+        } = self.kind
+        {
             if let Some(HistoryRecord::Explore(record)) = history_state.record(id) {
+                if full_detail {
+                    return explore_lines_without_truncation(record, hold_header);
+                }
                 return explore_lines_from_record_with_force(record, hold_header);
             }
         }
@@ -547,7 +723,7 @@ impl<'a> RenderRequest<'a> {
         }
 
         if let Some(lines) = &self.fallback_lines {
-            return lines.clone();
+            return lines.as_ref().clone();
         }
         Vec::new()
     }
@@ -561,7 +737,11 @@ pub(crate) enum RenderRequestKind {
     Legacy,
     Exec { id: HistoryId },
     MergedExec { id: HistoryId },
-    Explore { id: HistoryId, hold_header: bool },
+    Explore {
+        id: HistoryId,
+        hold_header: bool,
+        full_detail: bool,
+    },
     Diff { id: HistoryId },
     Streaming { id: HistoryId },
     Assistant { id: HistoryId },

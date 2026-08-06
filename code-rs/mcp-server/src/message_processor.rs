@@ -19,11 +19,11 @@ use crate::session_store::SessionMap;
 use agent_client_protocol as acp;
 use anyhow::anyhow;
 use anyhow::Context as _;
-use code_app_server_protocol::ClientRequest;
+use code_protocol::mcp_protocol::ClientRequest;
 use code_protocol::ConversationId;
 use code_protocol::protocol::SessionSource;
 
-use code_common::model_presets::{builtin_model_presets, ModelPreset};
+use code_common::model_presets::{builtin_model_presets, clamp_reasoning_effort_for_model, ModelPreset};
 use code_core::AuthManager;
 use code_core::ConversationManager;
 use code_core::config_types::{ClientTools, McpServerConfig, McpServerTransportConfig, ReasoningEffort};
@@ -983,6 +983,8 @@ impl MessageProcessor {
             cwd: Some(request.cwd),
             mcp_servers: Some(mcp_servers),
             experimental_client_tools: client_tools,
+            compact_prompt_override: None,
+            compact_prompt_override_file: None,
             ..Default::default()
         };
 
@@ -1461,6 +1463,8 @@ fn convert_mcp_servers(
                         },
                         startup_timeout_sec: None,
                         tool_timeout_sec: None,
+                        enabled_tools: None,
+                        disabled_tools: None,
                     },
                 );
             }
@@ -1488,13 +1492,33 @@ struct ModelSelection {
     effort: ReasoningEffort,
 }
 
+fn model_picker_auth_state(config: &Config) -> (Option<AuthMode>, bool) {
+    let preferred_auth_mode = if config.using_chatgpt_auth {
+        AuthMode::Chatgpt
+    } else {
+        AuthMode::ApiKey
+    };
+    let auth_manager = AuthManager::shared_with_mode_and_originator(
+        config.code_home.clone(),
+        preferred_auth_mode,
+        config.responses_originator_header.clone(),
+    );
+    let auth_mode = auth_manager
+        .auth()
+        .map(|auth| auth.mode)
+        .or(Some(preferred_auth_mode));
+    let supports_pro_only_models = auth_manager.supports_pro_only_models();
+    (auth_mode, supports_pro_only_models)
+}
+
 fn session_models_from_config(config: &Config) -> Option<acp::SessionModelState> {
-    let presets = builtin_model_presets(None);
+    let (auth_mode, supports_pro_only_models) = model_picker_auth_state(config);
+    let presets = builtin_model_presets(auth_mode, supports_pro_only_models);
     let mut available_models = Vec::new();
     let mut current_model_id: Option<acp::ModelId> = None;
 
     for preset in presets.iter() {
-        let id = acp::ModelId(Arc::from(preset.id));
+        let id = acp::ModelId(Arc::from(preset.id.as_str()));
         let description = if preset.description.is_empty() {
             None
         } else {
@@ -1502,7 +1526,7 @@ fn session_models_from_config(config: &Config) -> Option<acp::SessionModelState>
         };
         available_models.push(acp::ModelInfo {
             model_id: id.clone(),
-            name: preset.label.to_string(),
+            name: preset.display_name.to_string(),
             description,
             meta: None,
         });
@@ -1551,19 +1575,18 @@ fn session_models_from_config(config: &Config) -> Option<acp::SessionModelState>
 }
 
 fn preset_effort(preset: &ModelPreset) -> ReasoningEffort {
-    preset
-        .effort
-        .map(ReasoningEffort::from)
-        .unwrap_or(ReasoningEffort::Medium)
+    preset.default_reasoning_effort.clone().into()
 }
 
 fn resolve_model_selection(model_id: &acp::ModelId, config: &Config) -> Option<ModelSelection> {
     let requested = model_id.to_string();
     let requested_lower = requested.to_ascii_lowercase();
 
-    for preset in builtin_model_presets(None).iter() {
+    let (auth_mode, supports_pro_only_models) = model_picker_auth_state(config);
+
+    for preset in builtin_model_presets(auth_mode, supports_pro_only_models).iter() {
         if preset.id.eq_ignore_ascii_case(&requested)
-            || preset.label.eq_ignore_ascii_case(&requested)
+            || preset.display_name.eq_ignore_ascii_case(&requested)
             || preset.model.eq_ignore_ascii_case(&requested)
         {
             return Some(ModelSelection {
@@ -1596,6 +1619,10 @@ fn resolve_model_selection(model_id: &acp::ModelId, config: &Config) -> Option<M
 }
 
 fn apply_model_selection(config: &mut Config, model: &str, effort: ReasoningEffort) -> bool {
+    let requested_effort: code_protocol::config_types::ReasoningEffort = effort.into();
+    let clamped_effort: ReasoningEffort =
+        clamp_reasoning_effort_for_model(model, requested_effort).into();
+
     let mut updated = false;
     if !config.model.eq_ignore_ascii_case(model) {
         config.model = model.to_string();
@@ -1604,8 +1631,8 @@ fn apply_model_selection(config: &mut Config, model: &str, effort: ReasoningEffo
         updated = true;
     }
 
-    if config.model_reasoning_effort != effort {
-        config.model_reasoning_effort = effort;
+    if config.model_reasoning_effort != clamped_effort {
+        config.model_reasoning_effort = clamped_effort;
         updated = true;
     }
 
@@ -1616,9 +1643,15 @@ fn configure_session_op_from_config(config: &Config) -> Op {
     Op::ConfigureSession {
         provider: config.model_provider.clone(),
         model: config.model.clone(),
+        model_explicit: config.model_explicit,
         model_reasoning_effort: config.model_reasoning_effort,
+        preferred_model_reasoning_effort: config.preferred_model_reasoning_effort,
         model_reasoning_summary: config.model_reasoning_summary,
         model_text_verbosity: config.model_text_verbosity,
+        service_tier: config.service_tier,
+        context_mode: config.context_mode,
+        model_context_window: config.model_context_window,
+        model_auto_compact_token_limit: config.model_auto_compact_token_limit,
         user_instructions: config.user_instructions.clone(),
         base_instructions: config.base_instructions.clone(),
         approval_policy: config.approval_policy.clone(),
@@ -1627,6 +1660,8 @@ fn configure_session_op_from_config(config: &Config) -> Op {
         notify: config.notify.clone(),
         cwd: config.cwd.clone(),
         resume_path: None,
+        demo_developer_message: config.demo_developer_message.clone(),
+        dynamic_tools: config.dynamic_tools.clone(),
     }
 }
 

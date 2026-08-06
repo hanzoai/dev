@@ -6,6 +6,8 @@ use crate::config_types::ReasoningEffort;
 use crate::config_types::ReasoningSummary;
 use crate::config_types::SandboxMode;
 use crate::config_types::Verbosity;
+use crate::dynamic_tools::DynamicToolSpec;
+use crate::models::PermissionProfile;
 use crate::protocol::AskForApproval;
 use crate::protocol::EventMsg;
 use crate::protocol::FileChange;
@@ -99,6 +101,23 @@ impl GitSha {
 pub enum AuthMode {
     ApiKey,
     ChatGPT,
+    #[serde(rename = "chatgptAuthTokens")]
+    #[ts(rename = "chatgptAuthTokens")]
+    #[strum(serialize = "chatgptAuthTokens")]
+    ChatgptAuthTokens,
+    #[serde(rename = "headers")]
+    #[ts(rename = "headers")]
+    #[strum(serialize = "headers")]
+    Headers,
+}
+
+impl AuthMode {
+    pub fn is_chatgpt(self) -> bool {
+        matches!(
+            self,
+            AuthMode::ChatGPT | AuthMode::ChatgptAuthTokens | AuthMode::Headers
+        )
+    }
 }
 
 /// Request from the client to the server.
@@ -239,6 +258,22 @@ pub enum ClientRequest {
 #[serde(rename_all = "camelCase")]
 pub struct InitializeParams {
     pub client_info: ClientInfo,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub capabilities: Option<InitializeCapabilities>,
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq, Default, TS)]
+#[serde(rename_all = "camelCase")]
+pub struct InitializeCapabilities {
+    /// Opt into receiving experimental API methods and fields.
+    #[serde(default)]
+    pub experimental_api: bool,
+
+    /// Exact notification method names that should be suppressed for this
+    /// connection (for example `codex/event/session_configured`).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[ts(optional = nullable)]
+    pub opt_out_notification_methods: Option<Vec<String>>,
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Default, TS)]
@@ -297,6 +332,10 @@ pub struct NewConversationParams {
     /// Whether to include the apply patch tool in the conversation.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub include_apply_patch_tool: Option<bool>,
+
+    /// Dynamic tool specifications injected by the client.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub dynamic_tools: Option<Vec<DynamicToolSpec>>,
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq, TS)]
@@ -669,6 +708,7 @@ pub enum InputItem {
 
 pub const APPLY_PATCH_APPROVAL_METHOD: &str = "applyPatchApproval";
 pub const EXEC_COMMAND_APPROVAL_METHOD: &str = "execCommandApproval";
+pub const DYNAMIC_TOOL_CALL_METHOD: &str = "dynamicToolCall";
 
 /// Request initiated from the server and sent to the client.
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq, TS)]
@@ -685,6 +725,12 @@ pub enum ServerRequest {
         #[serde(rename = "id")]
         request_id: RequestId,
         params: ExecCommandApprovalParams,
+    },
+    /// Request to execute a dynamic tool.
+    DynamicToolCall {
+        #[serde(rename = "id")]
+        request_id: RequestId,
+        params: DynamicToolCallParams,
     },
 }
 
@@ -710,15 +756,38 @@ pub struct ExecCommandApprovalParams {
     /// Use to correlate this with [code_core::protocol::ExecCommandBeginEvent]
     /// and [code_core::protocol::ExecCommandEndEvent].
     pub call_id: String,
+    /// Identifier for this specific approval callback.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub approval_id: Option<String>,
     pub command: Vec<String>,
     pub cwd: PathBuf,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub reason: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub additional_permissions: Option<PermissionProfile>,
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq, TS)]
 pub struct ExecCommandApprovalResponse {
     pub decision: ReviewDecision,
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, TS)]
+pub struct DynamicToolCallParams {
+    pub conversation_id: ConversationId,
+    pub turn_id: String,
+    pub call_id: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub namespace: Option<String>,
+    pub tool: String,
+    pub arguments: serde_json::Value,
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, TS)]
+pub struct DynamicToolCallResponse {
+    pub output: String,
+    pub success: bool,
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq, TS)]
@@ -850,7 +919,7 @@ mod tests {
         let request = ClientRequest::NewConversation {
             request_id: RequestId::Integer(42),
             params: NewConversationParams {
-                model: Some("gpt-5-codex".to_string()),
+                model: Some("gpt-5.1-codex".to_string()),
                 profile: None,
                 cwd: None,
                 approval_policy: Some(AskForApproval::OnRequest),
@@ -859,6 +928,7 @@ mod tests {
                 base_instructions: None,
                 include_plan_tool: None,
                 include_apply_patch_tool: None,
+                dynamic_tools: None,
             },
         };
         assert_eq!(
@@ -866,7 +936,7 @@ mod tests {
                 "method": "newConversation",
                 "id": 42,
                 "params": {
-                    "model": "gpt-5-codex",
+                    "model": "gpt-5.1-codex",
                     "approvalPolicy": "on-request"
                 }
             }),

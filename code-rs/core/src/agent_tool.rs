@@ -4,22 +4,346 @@ use chrono::Utc;
 use serde::Deserialize;
 use serde::Serialize;
 use uuid::Uuid;
+use std::fs::{self, OpenOptions};
+use std::io::Write as IoWrite;
 use std::collections::BTreeMap;
 use std::collections::HashMap;
+use std::collections::HashSet;
 use std::path::PathBuf;
 use std::process::Stdio;
-use std::sync::Arc;
 use tokio::process::Command;
-use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
+use tokio::io::{AsyncBufReadExt, AsyncRead, AsyncWriteExt, BufReader};
+use tokio::runtime::Builder as TokioRuntimeBuilder;
 use tokio::sync::RwLock;
 use tokio::sync::mpsc;
 use tokio::task::JoinHandle;
+use tokio::time::Duration as TokioDuration;
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::Arc;
+use std::thread;
+use std::time::{Duration as StdDuration, Instant};
+use crate::spawn::spawn_tokio_command_with_retry;
+use crate::protocol::AgentSourceKind;
+use tracing::{debug, info, warn};
 
+#[cfg(target_os = "windows")]
+fn default_pathext_or_default() -> Vec<String> {
+    std::env::var("PATHEXT")
+        .ok()
+        .filter(|v| !v.is_empty())
+        .map(|v| {
+            v.split(';')
+                .filter(|s| !s.is_empty())
+                .map(|s| s.to_ascii_lowercase())
+                .collect()
+        })
+        // Keep a sane default set even if PATHEXT is missing or empty. Include
+        // .ps1 because PowerShell users can invoke scripts without specifying
+        // the extension; CreateProcess still resolves fine when we provide the
+        // full path with extension.
+        .unwrap_or_else(|| vec![
+            ".com".into(),
+            ".exe".into(),
+            ".bat".into(),
+            ".cmd".into(),
+            ".ps1".into(),
+        ])
+}
+
+#[cfg(target_os = "windows")]
+fn resolve_in_path(command: &str) -> Option<std::path::PathBuf> {
+    use std::path::Path;
+
+    let cmd_path = Path::new(command);
+
+    // Absolute or contains separators: respect it directly if it points to a file.
+    if cmd_path.is_absolute() || command.contains(['\\', '/']) {
+        if cmd_path.is_file() {
+            return Some(cmd_path.to_path_buf());
+        }
+    }
+
+    // Search PATH with PATHEXT semantics and return the first hit.
+    let exts = default_pathext_or_default();
+    let Some(path_os) = std::env::var_os("PATH") else { return None; };
+    let has_ext = cmd_path.extension().is_some();
+    for dir in std::env::split_paths(&path_os) {
+        if dir.as_os_str().is_empty() {
+            continue;
+        }
+        if has_ext {
+            let candidate = dir.join(command);
+            if candidate.is_file() {
+                return Some(candidate);
+            }
+        } else {
+            for ext in &exts {
+                let candidate = dir.join(format!("{command}{ext}"));
+                if candidate.is_file() {
+                    return Some(candidate);
+                }
+            }
+        }
+    }
+
+    None
+}
+
+#[cfg(target_os = "windows")]
+fn is_executable_file(path: &std::path::Path) -> bool {
+    path.is_file()
+}
+
+#[cfg(target_os = "windows")]
+fn resolve_existing_path_with_pathext(path: &std::path::Path) -> Option<std::path::PathBuf> {
+    if is_executable_file(path) {
+        return Some(path.to_path_buf());
+    }
+
+    if path.extension().is_some() {
+        return None;
+    }
+
+    let Some(file_name) = path.file_name() else {
+        return None;
+    };
+
+    let base = file_name.to_os_string();
+    for ext in default_pathext_or_default() {
+        let mut name = base.clone();
+        name.push(ext);
+        let candidate = path.with_file_name(name);
+        if is_executable_file(&candidate) {
+            return Some(candidate);
+        }
+    }
+
+    None
+}
+
+#[cfg(not(target_os = "windows"))]
+fn is_executable_file(path: &std::path::Path) -> bool {
+    use std::os::unix::fs::PermissionsExt;
+
+    let Ok(meta) = std::fs::metadata(path) else {
+        return false;
+    };
+
+    meta.is_file() && (meta.permissions().mode() & 0o111 != 0)
+}
+
+#[cfg(target_os = "windows")]
+fn resolve_explicit_command_path(path: &std::path::Path) -> Option<std::path::PathBuf> {
+    resolve_existing_path_with_pathext(path)
+}
+
+#[cfg(not(target_os = "windows"))]
+fn resolve_explicit_command_path(path: &std::path::Path) -> Option<std::path::PathBuf> {
+    is_executable_file(path).then_some(path.to_path_buf())
+}
+
+#[cfg(target_os = "windows")]
+fn resolve_command_on_path(command: &str) -> Option<std::path::PathBuf> {
+    resolve_in_path(command)
+}
+
+#[cfg(not(target_os = "windows"))]
+fn resolve_command_on_path(command: &str) -> Option<std::path::PathBuf> {
+    let path_os = std::env::var_os("PATH")?;
+    for dir in std::env::split_paths(&path_os) {
+        if dir.as_os_str().is_empty() {
+            continue;
+        }
+        let candidate = dir.join(command);
+        if is_executable_file(&candidate) {
+            return Some(candidate);
+        }
+    }
+    None
+}
+
+fn home_fallback_command_candidates(command: &str) -> Vec<std::path::PathBuf> {
+    let mut candidates = Vec::new();
+
+    let home = std::env::var_os("HOME").map(std::path::PathBuf::from);
+    if let Some(home) = home.as_ref() {
+        candidates.push(home.join(".local/bin").join(command));
+        candidates.push(home.join(".n/bin").join(command));
+        candidates.push(home.join(".npm-global/bin").join(command));
+    }
+
+    if command.eq_ignore_ascii_case("claude") {
+        if let Some(claude_config_dir) = std::env::var_os("CLAUDE_CONFIG_DIR") {
+            candidates.push(std::path::PathBuf::from(claude_config_dir).join("local").join(command));
+        }
+        if let Some(home) = home {
+            candidates.push(home.join(".claude/local").join(command));
+        }
+    }
+
+    candidates
+}
+
+pub(crate) fn resolve_external_agent_command_path(command: &str) -> Option<std::path::PathBuf> {
+    let trimmed = command.trim();
+    if trimmed.is_empty() {
+        return None;
+    }
+
+    if trimmed.contains(std::path::MAIN_SEPARATOR) || trimmed.contains('/') || trimmed.contains('\\') {
+        let path = std::path::PathBuf::from(trimmed);
+        return resolve_explicit_command_path(&path);
+    }
+
+    if let Some(path) = resolve_command_on_path(trimmed) {
+        return Some(path);
+    }
+
+    for candidate in home_fallback_command_candidates(trimmed) {
+        if let Some(path) = resolve_explicit_command_path(&candidate) {
+            return Some(path);
+        }
+    }
+
+    None
+}
+
+pub fn external_agent_command_exists(command: &str) -> bool {
+    resolve_external_agent_command_path(command).is_some()
+}
+
+use crate::agent_defaults::{agent_model_spec, default_params_for};
+use shlex::split as shlex_split;
 use crate::config_types::AgentConfig;
 use crate::openai_tools::JsonSchema;
 use crate::openai_tools::OpenAiTool;
 use crate::openai_tools::ResponsesApiTool;
 use crate::protocol::AgentInfo;
+
+fn current_code_binary_path() -> Result<std::path::PathBuf, String> {
+    if let Ok(path) = std::env::var("CODE_BINARY_PATH") {
+        let p = std::path::PathBuf::from(path);
+        if !p.exists() {
+            return Err(format!(
+                "CODE_BINARY_PATH points to '{}' but that file is missing. Rebuild with ./build-fast.sh or update CODE_BINARY_PATH.",
+                p.display()
+            ));
+        }
+        return Ok(p);
+    }
+    let exe = std::env::current_exe().map_err(|e| format!("Failed to resolve current executable: {}", e))?;
+
+    // If the kernel reports the path as "(deleted)", strip the suffix and prefer the live file
+    // at the same location (common when a rebuild replaces the inode under a long-running process).
+    let cleaned = strip_deleted_suffix(&exe);
+    if cleaned.exists() {
+        return Ok(cleaned);
+    }
+
+    if let Some(fallback) = fallback_code_binary_path() {
+        return Ok(fallback);
+    }
+
+    Err(format!(
+        "Current code binary is missing on disk ({}). It may have been deleted while running. Rebuild with ./build-fast.sh or reinstall 'code' to continue.",
+        exe.display()
+    ))
+}
+
+fn strip_deleted_suffix(path: &std::path::Path) -> std::path::PathBuf {
+    const DELETED_SUFFIX: &str = " (deleted)";
+    let s = path.to_string_lossy();
+    if let Some(stripped) = s.strip_suffix(DELETED_SUFFIX) {
+        return std::path::PathBuf::from(stripped);
+    }
+    path.to_path_buf()
+}
+
+fn fallback_code_binary_path() -> Option<std::path::PathBuf> {
+    // If the running binary was pruned (e.g., shared target cache rotation), try to locate
+    // a fresh dev build in the repository, and if missing, trigger a quick rebuild.
+    let repo_root = find_repo_root(std::env::current_dir().ok()?)?;
+    let workspace = repo_root.join("code-rs");
+
+    // Probe likely build outputs in priority order.
+    let mut candidates = vec![
+        workspace.join("target/dev-fast/code"),
+        workspace.join("target/debug/code"),
+        workspace.join("target/release-prod/code"),
+        workspace.join("target/release/code"),
+        workspace.join("bin/code"),
+    ];
+
+    if let Some(found) = candidates.iter().find(|p| p.exists()).cloned() {
+        return Some(found);
+    }
+
+    // Best-effort rebuild; swallow errors so caller can surface the original message.
+    let status = std::process::Command::new("bash")
+        .current_dir(&repo_root)
+        .args(["-lc", "./build-fast.sh >/dev/null 2>&1"])
+        .status()
+        .ok();
+
+    if status.map(|s| s.success()).unwrap_or(false) {
+        candidates.retain(|p| p.exists());
+        if let Some(found) = candidates.first().cloned() {
+            return Some(found);
+        }
+    }
+
+    None
+}
+
+fn find_repo_root(start: std::path::PathBuf) -> Option<std::path::PathBuf> {
+    let mut dir = Some(start.as_path());
+    while let Some(path) = dir {
+        if path.join(".git").exists() {
+            return Some(path.to_path_buf());
+        }
+        dir = path.parent();
+    }
+    None
+}
+
+/// Format a helpful error message when an agent command is not found.
+/// Provides platform-specific guidance for resolving PATH issues.
+fn format_agent_not_found_error(agent_name: &str, command: &str) -> String {
+    let mut msg = format!("Agent '{}' could not be found.", agent_name);
+
+    #[cfg(target_os = "windows")]
+    {
+        msg.push_str(&format!(
+            "\n\nTroubleshooting steps:\n\
+            1. Check if '{}' is installed and available in your PATH\n\
+            2. Try using an absolute path in your config.toml:\n\
+               [[agents]]\n\
+               name = \"{}\"\n\
+               command = \"C:\\\\Users\\\\YourUser\\\\AppData\\\\Roaming\\\\npm\\\\{}.cmd\"\n\
+            3. Verify your PATH includes the directory containing '{}'\n\
+            4. On Windows, ensure the file has a valid extension (.exe, .cmd, .bat, .com)\n\n\
+            For more information, see: https://github.com/just-every/code/blob/main/code-rs/config.md",
+            command, agent_name, command, command
+        ));
+    }
+
+    #[cfg(not(target_os = "windows"))]
+    {
+        msg.push_str(&format!(
+            "\n\nTroubleshooting steps:\n\
+            1. Check if '{}' is installed: which {}\n\
+            2. Verify '{}' is in your PATH: echo $PATH\n\
+            3. Try using an absolute path in your config.toml:\n\
+               [[agents]]\n\
+               name = \"{}\"\n\
+               command = \"/absolute/path/to/{}\"\n\n\
+            For more information, see: https://github.com/just-every/code/blob/main/code-rs/config.md",
+            command, command, command, agent_name, command
+        ));
+    }
+
+    msg
+}
 
 // Agent status enum
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -38,6 +362,8 @@ pub struct Agent {
     pub id: String,
     pub batch_id: Option<String>,
     pub model: String,
+    #[serde(default)]
+    pub name: Option<String>,
     pub prompt: String,
     pub context: Option<String>,
     pub output_goal: Option<String>,
@@ -52,9 +378,18 @@ pub struct Agent {
     pub progress: Vec<String>,
     pub worktree_path: Option<String>,
     pub branch_name: Option<String>,
+    #[serde(default)]
+    pub worktree_base: Option<String>,
+    #[serde(default)]
+    pub source_kind: Option<AgentSourceKind>,
+    #[serde(skip)]
+    pub log_tag: Option<String>,
     #[serde(skip)]
     #[allow(dead_code)]
     pub config: Option<AgentConfig>,
+    pub reasoning_effort: code_protocol::config_types::ReasoningEffort,
+    #[serde(skip)]
+    pub last_activity: DateTime<Utc>,
 }
 
 // Global agent manager
@@ -64,8 +399,56 @@ lazy_static::lazy_static! {
 
 pub struct AgentManager {
     agents: HashMap<String, Agent>,
+    // Session-scoped archive so pruned terminal agents remain queryable
+    // (including worktree/branch metadata) for the full Auto Drive run.
+    archived_terminal_agents: HashMap<String, Agent>,
     handles: HashMap<String, JoinHandle<()>>,
     event_sender: Option<mpsc::UnboundedSender<AgentStatusUpdatePayload>>,
+    debug_log_root: Option<PathBuf>,
+    watchdog_handle: Option<JoinHandle<()>>,
+    inactivity_timeout: Duration,
+    diagnostics: AgentManagerDiagnostics,
+}
+
+#[derive(Debug, Clone, Default)]
+struct AgentManagerDiagnostics {
+    terminal_compactions: u64,
+    progress_entries_trimmed: u64,
+    progress_lines_truncated: u64,
+    payloads_truncated: u64,
+    terminal_agents_pruned: u64,
+    archived_terminal_agents: u64,
+    status_terminal_agents_omitted: u64,
+}
+
+#[derive(Debug, Clone, Copy, Default)]
+struct AgentCompactionDelta {
+    progress_entries_trimmed: usize,
+    progress_lines_truncated: usize,
+    payloads_truncated: usize,
+}
+
+impl AgentCompactionDelta {
+    fn any(self) -> bool {
+        self.progress_entries_trimmed > 0
+            || self.progress_lines_truncated > 0
+            || self.payloads_truncated > 0
+    }
+}
+
+const MAX_AGENT_PROGRESS_ENTRIES: usize = 96;
+const MAX_AGENT_PROGRESS_LINE_BYTES: usize = 2048;
+const MAX_AGENT_RESULT_BYTES: usize = 64 * 1024;
+const MAX_TRACKED_TERMINAL_AGENTS: usize = 512;
+const MAX_STATUS_TERMINAL_AGENTS: usize = 128;
+pub(crate) const CODE_AGENT_SPAWN_DEPTH_ENV: &str = "CODE_AGENT_SPAWN_DEPTH";
+
+pub(crate) fn current_agent_spawn_depth() -> i32 {
+    std::env::var(CODE_AGENT_SPAWN_DEPTH_ENV)
+        .ok()
+        .and_then(|value| value.trim().parse::<i32>().ok())
+        .filter(|depth| *depth >= 0)
+        .unwrap_or(0)
 }
 
 #[derive(Debug, Clone)]
@@ -79,23 +462,363 @@ impl AgentManager {
     pub fn new() -> Self {
         Self {
             agents: HashMap::new(),
+            archived_terminal_agents: HashMap::new(),
             handles: HashMap::new(),
             event_sender: None,
+            debug_log_root: None,
+            watchdog_handle: None,
+            inactivity_timeout: Duration::minutes(30),
+            diagnostics: AgentManagerDiagnostics::default(),
         }
     }
 
     pub fn set_event_sender(&mut self, sender: mpsc::UnboundedSender<AgentStatusUpdatePayload>) {
         self.event_sender = Some(sender);
+        // New session lifecycle: keep only live agents and reset per-session
+        // diagnostics/archives so long-lived UIs start from a clean slate.
+        self.archived_terminal_agents.clear();
+        self.diagnostics = AgentManagerDiagnostics::default();
+        self.start_watchdog();
     }
 
-    async fn send_agent_status_update(&self) {
+    fn start_watchdog(&mut self) {
+        if self.watchdog_handle.is_some() {
+            return;
+        }
+
+        let timeout = self.inactivity_timeout;
+        let manager = Arc::downgrade(&AGENT_MANAGER);
+        self.watchdog_handle = Some(tokio::spawn(async move {
+            let mut ticker = tokio::time::interval(TokioDuration::from_secs(60));
+            loop {
+                ticker.tick().await;
+
+                let Some(manager_arc) = manager.upgrade() else { break; };
+
+                let mut mgr = manager_arc.write().await;
+                let now = Utc::now();
+                let timeout_ids: Vec<String> = mgr
+                    .agents
+                    .iter()
+                    .filter(|(_, agent)| matches!(agent.status, AgentStatus::Pending | AgentStatus::Running))
+                    .filter(|(_, agent)| now - agent.last_activity > timeout)
+                    .map(|(id, _)| id.clone())
+                    .collect();
+
+                if timeout_ids.is_empty() {
+                    continue;
+                }
+
+                for agent_id in timeout_ids.iter() {
+                    if let Some(handle) = mgr.handles.remove(agent_id) {
+                        handle.abort();
+                    }
+                    if let Some(agent) = mgr.agents.get_mut(agent_id) {
+                        agent.status = AgentStatus::Failed;
+                        agent.error = Some(format!(
+                            "Agent timed out after {} minutes of inactivity.",
+                            timeout.num_minutes()
+                        ));
+                        agent.completed_at = Some(now);
+                        Self::record_activity(agent);
+                    }
+                    mgr.finalize_terminal_agent(agent_id);
+                }
+
+                // Notify listeners once per sweep.
+                mgr.send_agent_status_update().await;
+            }
+        }));
+    }
+
+    pub fn set_debug_log_root(&mut self, root: Option<PathBuf>) {
+        self.debug_log_root = root;
+    }
+
+    async fn touch_agent(agent_id: &str) {
+        if let Some(manager) = Arc::downgrade(&AGENT_MANAGER).upgrade() {
+            let mut mgr = manager.write().await;
+            if let Some(agent) = mgr.agents.get_mut(agent_id) {
+                Self::record_activity(agent);
+            }
+        }
+    }
+
+    fn record_activity(agent: &mut Agent) {
+        agent.last_activity = Utc::now();
+    }
+
+    fn trim_to_tail_utf8(text: &str, max_bytes: usize) -> String {
+        let bytes = text.as_bytes();
+        if bytes.len() <= max_bytes {
+            return text.to_string();
+        }
+
+        let mut start = bytes.len().saturating_sub(max_bytes);
+        while start < bytes.len() && (bytes[start] & 0b1100_0000) == 0b1000_0000 {
+            start += 1;
+        }
+
+        let tail = String::from_utf8_lossy(&bytes[start..]).to_string();
+        format!("…{tail}")
+    }
+
+    fn compact_terminal_agent(agent: &mut Agent) -> AgentCompactionDelta {
+        let mut delta = AgentCompactionDelta::default();
+
+        if agent.progress.len() > MAX_AGENT_PROGRESS_ENTRIES {
+            let drain = agent.progress.len() - MAX_AGENT_PROGRESS_ENTRIES;
+            agent.progress.drain(0..drain);
+            delta.progress_entries_trimmed = drain;
+        }
+
+        for line in &mut agent.progress {
+            let original_len = line.len();
+            let trimmed = Self::trim_to_tail_utf8(line, MAX_AGENT_PROGRESS_LINE_BYTES);
+            if trimmed.len() < original_len {
+                delta.progress_lines_truncated = delta.progress_lines_truncated.saturating_add(1);
+            }
+            *line = trimmed;
+        }
+
+        if let Some(result) = agent.result.as_mut() {
+            let original_len = result.len();
+            let trimmed = Self::trim_to_tail_utf8(result, MAX_AGENT_RESULT_BYTES);
+            if trimmed.len() < original_len {
+                delta.payloads_truncated = delta.payloads_truncated.saturating_add(1);
+            }
+            *result = trimmed;
+        }
+
+        if let Some(error) = agent.error.as_mut() {
+            let original_len = error.len();
+            let trimmed = Self::trim_to_tail_utf8(error, MAX_AGENT_RESULT_BYTES);
+            if trimmed.len() < original_len {
+                delta.payloads_truncated = delta.payloads_truncated.saturating_add(1);
+            }
+            *error = trimmed;
+        }
+
+        // Keep branch/worktree metadata so users can still merge/inspect results,
+        // but release heavy prompt payloads once an agent is terminal.
+        agent.prompt.clear();
+        agent.context = None;
+        agent.output_goal = None;
+        agent.files.clear();
+
+        delta
+    }
+
+    fn prune_terminal_agents(&mut self) {
+        let terminal_count = self
+            .agents
+            .values()
+            .filter(|agent| {
+                matches!(
+                    agent.status,
+                    AgentStatus::Completed | AgentStatus::Failed | AgentStatus::Cancelled
+                )
+            })
+            .count();
+
+        if terminal_count <= MAX_TRACKED_TERMINAL_AGENTS {
+            return;
+        }
+
+        let mut terminal: Vec<(DateTime<Utc>, String)> = self
+            .agents
+            .iter()
+            .filter(|(_, agent)| {
+                matches!(
+                    agent.status,
+                    AgentStatus::Completed | AgentStatus::Failed | AgentStatus::Cancelled
+                )
+            })
+            .map(|(id, agent)| {
+                (
+                    agent.completed_at.unwrap_or(agent.created_at),
+                    id.clone(),
+                )
+            })
+            .collect();
+
+        terminal.sort_by_key(|(completed_at, _)| *completed_at);
+
+        let mut to_remove = terminal_count.saturating_sub(MAX_TRACKED_TERMINAL_AGENTS);
+        let mut pruned = 0usize;
+        for (_, agent_id) in terminal {
+            if to_remove == 0 {
+                break;
+            }
+
+            self.handles.remove(&agent_id);
+            if let Some(agent) = self.agents.remove(&agent_id) {
+                self.archived_terminal_agents.insert(agent_id.clone(), agent);
+            }
+            pruned = pruned.saturating_add(1);
+            to_remove = to_remove.saturating_sub(1);
+        }
+
+        if pruned > 0 {
+            self.diagnostics.terminal_agents_pruned = self
+                .diagnostics
+                .terminal_agents_pruned
+                .saturating_add(pruned as u64);
+            self.diagnostics.archived_terminal_agents = self.archived_terminal_agents.len() as u64;
+            info!(
+                pruned,
+                retained = self.agents.len(),
+                archived = self.archived_terminal_agents.len(),
+                "agent manager pruned terminal agents from live cache"
+            );
+        }
+    }
+
+    fn finalize_terminal_agent(&mut self, agent_id: &str) {
+        self.handles.remove(agent_id);
+
+        if let Some(agent) = self.agents.get_mut(agent_id) {
+            let delta = Self::compact_terminal_agent(agent);
+            self.diagnostics.terminal_compactions =
+                self.diagnostics.terminal_compactions.saturating_add(1);
+            self.diagnostics.progress_entries_trimmed = self
+                .diagnostics
+                .progress_entries_trimmed
+                .saturating_add(delta.progress_entries_trimmed as u64);
+            self.diagnostics.progress_lines_truncated = self
+                .diagnostics
+                .progress_lines_truncated
+                .saturating_add(delta.progress_lines_truncated as u64);
+            self.diagnostics.payloads_truncated = self
+                .diagnostics
+                .payloads_truncated
+                .saturating_add(delta.payloads_truncated as u64);
+            if delta.any() {
+                debug!(
+                    agent_id,
+                    progress_entries_trimmed = delta.progress_entries_trimmed,
+                    progress_lines_truncated = delta.progress_lines_truncated,
+                    payloads_truncated = delta.payloads_truncated,
+                    total_terminal_compactions = self.diagnostics.terminal_compactions,
+                    total_progress_entries_trimmed = self.diagnostics.progress_entries_trimmed,
+                    total_progress_lines_truncated = self.diagnostics.progress_lines_truncated,
+                    total_payloads_truncated = self.diagnostics.payloads_truncated,
+                    "compacted terminal agent state"
+                );
+            }
+        }
+
+        self.prune_terminal_agents();
+    }
+
+    fn visible_agents_for_status(&self) -> Vec<&Agent> {
+        let mut active: Vec<&Agent> = self
+            .agents
+            .values()
+            .filter(|agent| matches!(agent.status, AgentStatus::Pending | AgentStatus::Running))
+            .collect();
+
+        active.sort_by_key(|agent| agent.created_at);
+
+        let mut terminal: Vec<&Agent> = self
+            .agents
+            .values()
+            .filter(|agent| {
+                matches!(
+                    agent.status,
+                    AgentStatus::Completed | AgentStatus::Failed | AgentStatus::Cancelled
+                )
+            })
+            .collect();
+
+        terminal.sort_by_key(|agent| agent.completed_at.unwrap_or(agent.created_at));
+
+        if terminal.len() > MAX_STATUS_TERMINAL_AGENTS {
+            let keep_from = terminal.len() - MAX_STATUS_TERMINAL_AGENTS;
+            terminal = terminal.split_off(keep_from);
+        }
+
+        active.extend(terminal);
+        active
+    }
+
+    pub fn status_visible_agents(&self) -> Vec<Agent> {
+        self.visible_agents_for_status()
+            .into_iter()
+            .cloned()
+            .collect()
+    }
+
+    fn append_agent_log(&self, log_tag: &str, line: &str) {
+        let Some(root) = &self.debug_log_root else { return; };
+        let dir = root.join(log_tag);
+        if let Err(err) = fs::create_dir_all(&dir) {
+            warn!("failed to create agent log dir {:?}: {}", dir, err);
+            return;
+        }
+
+        let file = dir.join("progress.log");
+        match OpenOptions::new().create(true).append(true).open(&file) {
+            Ok(mut fh) => {
+                if let Err(err) = writeln!(fh, "{}", line) {
+                    warn!("failed to write agent log {:?}: {}", file, err);
+                }
+            }
+            Err(err) => warn!("failed to open agent log {:?}: {}", file, err),
+        }
+    }
+
+    async fn send_agent_status_update(&mut self) {
         if let Some(ref sender) = self.event_sender {
-            let agents: Vec<AgentInfo> = self
+            let now = Utc::now();
+
+            let total_terminal = self
                 .agents
                 .values()
+                .filter(|agent| {
+                    matches!(
+                        agent.status,
+                        AgentStatus::Completed | AgentStatus::Failed | AgentStatus::Cancelled
+                    )
+                })
+                .count();
+            let omitted_terminal = total_terminal.saturating_sub(MAX_STATUS_TERMINAL_AGENTS);
+            if omitted_terminal > 0 {
+                self.diagnostics.status_terminal_agents_omitted = self
+                    .diagnostics
+                    .status_terminal_agents_omitted
+                    .saturating_add(omitted_terminal as u64);
+                debug!(
+                    omitted_terminal,
+                    total_terminal,
+                    running_agents = self
+                        .agents
+                        .values()
+                        .filter(|agent| {
+                            matches!(agent.status, AgentStatus::Pending | AgentStatus::Running)
+                        })
+                        .count(),
+                    cumulative_omitted = self.diagnostics.status_terminal_agents_omitted,
+                    "omitting terminal agents from status payload to keep UI responsive"
+                );
+            }
+
+            let agents: Vec<AgentInfo> = self
+                .visible_agents_for_status()
+                .into_iter()
                 .map(|agent| {
                     // Just show the model name - status provides the useful info
-                    let name = agent.model.clone();
+                    let name = agent
+                        .name
+                        .as_ref()
+                        .map(|value| value.clone())
+                        .unwrap_or_else(|| agent.model.clone());
+                    let start = agent.started_at.unwrap_or(agent.created_at);
+                    let end = agent.completed_at.unwrap_or(now);
+                    let elapsed_ms = match end.signed_duration_since(start).num_milliseconds() {
+                        value if value >= 0 => Some(value as u64),
+                        _ => None,
+                    };
 
                     AgentInfo {
                         id: agent.id.clone(),
@@ -106,15 +829,36 @@ impl AgentManager {
                         last_progress: agent.progress.last().cloned(),
                         result: agent.result.clone(),
                         error: agent.error.clone(),
+                        elapsed_ms,
+                        token_count: None,
+                        last_activity_at: match agent.status {
+                            AgentStatus::Pending | AgentStatus::Running => {
+                                Some(agent.last_activity.to_rfc3339())
+                            }
+                            _ => None,
+                        },
+                        seconds_since_last_activity: match agent.status {
+                            AgentStatus::Pending | AgentStatus::Running => Some(
+                                Utc::now()
+                                    .signed_duration_since(agent.last_activity)
+                                    .num_seconds()
+                                    .max(0) as u64,
+                            ),
+                            _ => None,
+                        },
+                        source_kind: agent.source_kind.clone(),
                     }
                 })
                 .collect();
 
-            // Get context and task from the first agent (they're all the same)
-            let (context, task) = self
+            // Prefer active agents for shared context/task; terminal agents may
+            // have had heavy fields compacted already.
+            let source_agent = self
                 .agents
                 .values()
-                .next()
+                .find(|agent| matches!(agent.status, AgentStatus::Pending | AgentStatus::Running))
+                .or_else(|| self.agents.values().next());
+            let (context, task) = source_agent
                 .map(|agent| {
                     let context = agent
                         .context
@@ -140,15 +884,18 @@ impl AgentManager {
     pub async fn create_agent(
         &mut self,
         model: String,
+        name: Option<String>,
         prompt: String,
         context: Option<String>,
         output_goal: Option<String>,
         files: Vec<String>,
         read_only: bool,
         batch_id: Option<String>,
+        reasoning_effort: code_protocol::config_types::ReasoningEffort,
     ) -> String {
         self.create_agent_internal(
             model,
+            name,
             prompt,
             context,
             output_goal,
@@ -156,6 +903,10 @@ impl AgentManager {
             read_only,
             batch_id,
             None,
+            None,
+            None,
+            None,
+            reasoning_effort,
         )
         .await
     }
@@ -163,6 +914,7 @@ impl AgentManager {
     pub async fn create_agent_with_config(
         &mut self,
         model: String,
+        name: Option<String>,
         prompt: String,
         context: Option<String>,
         output_goal: Option<String>,
@@ -170,9 +922,11 @@ impl AgentManager {
         read_only: bool,
         batch_id: Option<String>,
         config: AgentConfig,
+        reasoning_effort: code_protocol::config_types::ReasoningEffort,
     ) -> String {
         self.create_agent_internal(
             model,
+            name,
             prompt,
             context,
             output_goal,
@@ -180,13 +934,19 @@ impl AgentManager {
             read_only,
             batch_id,
             Some(config),
+            None,
+            None,
+            None,
+            reasoning_effort,
         )
         .await
     }
 
-    async fn create_agent_internal(
+    #[allow(dead_code)]
+    pub async fn create_agent_with_options(
         &mut self,
         model: String,
+        name: Option<String>,
         prompt: String,
         context: Option<String>,
         output_goal: Option<String>,
@@ -194,13 +954,60 @@ impl AgentManager {
         read_only: bool,
         batch_id: Option<String>,
         config: Option<AgentConfig>,
+        worktree_branch: Option<String>,
+        worktree_base: Option<String>,
+        source_kind: Option<AgentSourceKind>,
+        reasoning_effort: code_protocol::config_types::ReasoningEffort,
+    ) -> String {
+        self
+            .create_agent_internal(
+                model,
+                name,
+                prompt,
+                context,
+                output_goal,
+                files,
+                read_only,
+                batch_id,
+                config,
+                worktree_branch,
+                worktree_base,
+                source_kind,
+                reasoning_effort,
+            )
+            .await
+    }
+
+    async fn create_agent_internal(
+        &mut self,
+        model: String,
+        name: Option<String>,
+        prompt: String,
+        context: Option<String>,
+        output_goal: Option<String>,
+        files: Vec<String>,
+        read_only: bool,
+        batch_id: Option<String>,
+        config: Option<AgentConfig>,
+        worktree_branch: Option<String>,
+        worktree_base: Option<String>,
+        source_kind: Option<AgentSourceKind>,
+        reasoning_effort: code_protocol::config_types::ReasoningEffort,
     ) -> String {
         let agent_id = Uuid::new_v4().to_string();
+
+        let log_tag = match source_kind {
+            Some(AgentSourceKind::AutoReview) => {
+                Some(format!("agents/auto-review/{}", agent_id))
+            }
+            _ => None,
+        };
 
         let agent = Agent {
             id: agent_id.clone(),
             batch_id,
             model,
+            name: normalize_agent_name(name),
             prompt,
             context,
             output_goal,
@@ -214,8 +1021,13 @@ impl AgentManager {
             completed_at: None,
             progress: Vec::new(),
             worktree_path: None,
-            branch_name: None,
+            branch_name: worktree_branch,
+            worktree_base,
+            source_kind,
+            log_tag,
             config: config.clone(),
+            reasoning_effort,
+            last_activity: Utc::now(),
         };
 
         self.agents.insert(agent_id.clone(), agent.clone());
@@ -235,7 +1047,11 @@ impl AgentManager {
     }
 
     pub fn get_agent(&self, agent_id: &str) -> Option<Agent> {
-        self.agents.get(agent_id).cloned()
+        self
+            .agents
+            .get(agent_id)
+            .cloned()
+            .or_else(|| self.archived_terminal_agents.get(agent_id).cloned())
     }
 
     pub fn get_all_agents(&self) -> impl Iterator<Item = &Agent> {
@@ -254,28 +1070,38 @@ impl AgentManager {
             None
         };
 
-        self.agents
-            .values()
-            .filter(|agent| {
-                if let Some(ref filter) = status_filter {
-                    if agent.status != *filter {
-                        return false;
-                    }
+        let mut out = Vec::new();
+        let mut seen_ids: HashSet<String> = HashSet::new();
+
+        let mut collect_filtered = |agent: &Agent| {
+            if let Some(ref filter) = status_filter {
+                if agent.status != *filter {
+                    return;
                 }
-                if let Some(ref batch) = batch_id {
-                    if agent.batch_id.as_ref() != Some(batch) {
-                        return false;
-                    }
+            }
+            if let Some(ref batch) = batch_id {
+                if agent.batch_id.as_ref() != Some(batch) {
+                    return;
                 }
-                if let Some(cutoff) = cutoff {
-                    if agent.created_at < cutoff {
-                        return false;
-                    }
+            }
+            if let Some(cutoff) = cutoff {
+                if agent.created_at < cutoff {
+                    return;
                 }
-                true
-            })
-            .cloned()
-            .collect()
+            }
+            if seen_ids.insert(agent.id.clone()) {
+                out.push(agent.clone());
+            }
+        };
+
+        for agent in self.agents.values() {
+            collect_filtered(agent);
+        }
+        for agent in self.archived_terminal_agents.values() {
+            collect_filtered(agent);
+        }
+
+        out
     }
 
     pub fn has_active_agents(&self) -> bool {
@@ -291,6 +1117,7 @@ impl AgentManager {
                 agent.status = AgentStatus::Cancelled;
                 agent.completed_at = Some(Utc::now());
             }
+            self.finalize_terminal_agent(agent_id);
             true
         } else {
             false
@@ -315,6 +1142,7 @@ impl AgentManager {
     }
 
     pub async fn update_agent_status(&mut self, agent_id: &str, status: AgentStatus) {
+        let mut terminal = false;
         if let Some(agent) = self.agents.get_mut(agent_id) {
             agent.status = status;
             if agent.status == AgentStatus::Running && agent.started_at.is_none() {
@@ -325,14 +1153,43 @@ impl AgentManager {
                 AgentStatus::Completed | AgentStatus::Failed | AgentStatus::Cancelled
             ) {
                 agent.completed_at = Some(Utc::now());
+                terminal = true;
             }
-            // Send status update event
-            self.send_agent_status_update().await;
+            Self::record_activity(agent);
         }
+
+        if terminal {
+            self.finalize_terminal_agent(agent_id);
+        }
+
+        // Send status update event
+        self.send_agent_status_update().await;
     }
 
     pub async fn update_agent_result(&mut self, agent_id: &str, result: Result<String, String>) {
-        if let Some(agent) = self.agents.get_mut(agent_id) {
+        let debug_enabled = self.debug_log_root.is_some();
+        let mut updated = false;
+
+        if let Some((log_tag, log_lines)) = self.agents.get_mut(agent_id).map(|agent| {
+            let log_tag = if debug_enabled { agent.log_tag.clone() } else { None };
+
+            let mut log_lines: Vec<String> = Vec::new();
+            if debug_enabled {
+                let stamp = Utc::now().format("%H:%M:%S");
+                match &result {
+                    Ok(output) => {
+                        log_lines.push(format!("{stamp}: [result] completed"));
+                        if !output.trim().is_empty() {
+                            log_lines.push(output.trim_end().to_string());
+                        }
+                    }
+                    Err(error) => {
+                        log_lines.push(format!("{stamp}: [result] failed"));
+                        log_lines.push(error.clone());
+                    }
+                }
+            }
+
             match result {
                 Ok(output) => {
                     agent.result = Some(output);
@@ -344,16 +1201,68 @@ impl AgentManager {
                 }
             }
             agent.completed_at = Some(Utc::now());
+            Self::record_activity(agent);
+            updated = true;
+
+            (log_tag, log_lines)
+        }) {
+            if let Some(tag) = log_tag {
+                for line in log_lines {
+                    self.append_agent_log(&tag, &line);
+                }
+            }
+            if updated {
+                self.finalize_terminal_agent(agent_id);
+            }
             // Send status update event
             self.send_agent_status_update().await;
         }
     }
 
     pub async fn add_progress(&mut self, agent_id: &str, message: String) {
-        if let Some(agent) = self.agents.get_mut(agent_id) {
-            agent
-                .progress
-                .push(format!("{}: {}", Utc::now().format("%H:%M:%S"), message));
+        let debug_enabled = self.debug_log_root.is_some();
+
+        if let Some((log_tag, entry, line_truncated, entries_trimmed)) =
+            self.agents.get_mut(agent_id).map(|agent| {
+            let raw_entry = format!("{}: {}", Utc::now().format("%H:%M:%S"), message);
+            let line_truncated = raw_entry.len() > MAX_AGENT_PROGRESS_LINE_BYTES;
+            let entry = Self::trim_to_tail_utf8(&raw_entry, MAX_AGENT_PROGRESS_LINE_BYTES);
+            let log_tag = if debug_enabled { agent.log_tag.clone() } else { None };
+            agent.progress.push(entry.clone());
+            let mut entries_trimmed = 0usize;
+            if agent.progress.len() > MAX_AGENT_PROGRESS_ENTRIES {
+                let drain = agent.progress.len() - MAX_AGENT_PROGRESS_ENTRIES;
+                agent.progress.drain(0..drain);
+                entries_trimmed = drain;
+            }
+            Self::record_activity(agent);
+            (log_tag, entry, line_truncated, entries_trimmed)
+        }) {
+            if line_truncated {
+                self.diagnostics.progress_lines_truncated = self
+                    .diagnostics
+                    .progress_lines_truncated
+                    .saturating_add(1);
+            }
+            if entries_trimmed > 0 {
+                self.diagnostics.progress_entries_trimmed = self
+                    .diagnostics
+                    .progress_entries_trimmed
+                    .saturating_add(entries_trimmed as u64);
+            }
+            if line_truncated || entries_trimmed > 0 {
+                debug!(
+                    agent_id,
+                    line_truncated,
+                    entries_trimmed,
+                    total_progress_lines_truncated = self.diagnostics.progress_lines_truncated,
+                    total_progress_entries_trimmed = self.diagnostics.progress_entries_trimmed,
+                    "trimmed agent progress backlog"
+                );
+            }
+            if let Some(tag) = log_tag {
+                self.append_agent_log(&tag, &entry);
+            }
             // Send updated agent status with the latest progress
             self.send_agent_status_update().await;
         }
@@ -448,11 +1357,15 @@ async fn execute_agent(agent_id: String, config: Option<AgentConfig>) {
         .await;
 
     let model = agent.model.clone();
+    let model_spec = agent_model_spec(&model);
     let prompt = agent.prompt.clone();
     let read_only = agent.read_only;
     let context = agent.context.clone();
     let output_goal = agent.output_goal.clone();
     let files = agent.files.clone();
+    let reasoning_effort = agent.reasoning_effort;
+    let source_kind = agent.source_kind.clone();
+    let log_tag = agent.log_tag.clone();
 
     drop(manager); // Release the lock before executing
 
@@ -467,7 +1380,13 @@ async fn execute_agent(agent_id: String, config: Option<AgentConfig>) {
         }
     }
     if let Some(context) = &context {
-        full_prompt = format!("Context: {}\n\nAgent: {}", context, full_prompt);
+        let trimmed = full_prompt.trim_start();
+        if trimmed.starts_with('/') {
+            // Preserve leading slash commands so downstream executors can parse them.
+            full_prompt = format!("{full_prompt}\n\nContext: {context}");
+        } else {
+            full_prompt = format!("Context: {context}\n\nAgent: {full_prompt}");
+        }
     }
     if let Some(output_goal) = &output_goal {
         full_prompt = format!("{}\n\nDesired output: {}", full_prompt, output_goal);
@@ -477,11 +1396,28 @@ async fn execute_agent(agent_id: String, config: Option<AgentConfig>) {
     }
 
     // Setup working directory and execute
+    let gating_error_message = |spec: &crate::agent_defaults::AgentModelSpec| {
+        if let Some(flag) = spec.gating_env {
+            format!(
+                "agent model '{}' is disabled; set {}=1 to enable it",
+                spec.slug, flag
+            )
+        } else {
+            format!("agent model '{}' is disabled", spec.slug)
+        }
+    };
+
+    // Track optional review output path for /review agents (AutoReview)
+    let mut review_output_json_path_capture: Option<PathBuf> = None;
+
     let result = if !read_only {
         // Check git and setup worktree for non-read-only mode
         match get_git_root().await {
             Ok(git_root) => {
-                let branch_id = generate_branch_id(&model, &prompt);
+                let branch_id = agent
+                    .branch_name
+                    .clone()
+                    .unwrap_or_else(|| generate_branch_id(&model, &prompt));
 
                 let mut manager = AGENT_MANAGER.write().await;
                 manager
@@ -489,7 +1425,7 @@ async fn execute_agent(agent_id: String, config: Option<AgentConfig>) {
                     .await;
                 drop(manager);
 
-                match setup_worktree(&git_root, &branch_id).await {
+                match setup_worktree(&git_root, &branch_id, agent.worktree_base.as_deref()).await {
                     Ok((worktree_path, used_branch)) => {
                         let mut manager = AGENT_MANAGER.write().await;
                         manager
@@ -507,16 +1443,58 @@ async fn execute_agent(agent_id: String, config: Option<AgentConfig>) {
                             .await;
                         drop(manager);
 
+                        // Prepare optional review-output JSON path for /review agents
+                        let review_output_json_path: Option<PathBuf> = agent
+                            .source_kind
+                            .as_ref()
+                            .and_then(|kind| matches!(kind, AgentSourceKind::AutoReview).then(|| {
+                                let filename = format!("{}.review-output.json", agent_id);
+                                std::env::temp_dir().join(filename)
+                            }));
+                        review_output_json_path_capture = review_output_json_path.clone();
+
                         // Execute with full permissions in the worktree
-                        if model.to_ascii_lowercase() == "cloud" && config.is_none() {
-                            execute_cloud_built_in_streaming(&agent_id, &full_prompt, Some(worktree_path), config.clone()).await
+                        let use_built_in_cloud = config.is_none()
+                            && model_spec
+                                .map(|spec| spec.cli.eq_ignore_ascii_case("cloud"))
+                                .unwrap_or_else(|| model.eq_ignore_ascii_case("cloud"));
+
+                        if use_built_in_cloud {
+                            if let Some(spec) = model_spec {
+                                if !spec.is_enabled() {
+                                    Err(gating_error_message(spec))
+                                } else {
+                                    execute_cloud_built_in_streaming(
+                                        &agent_id,
+                                        &full_prompt,
+                                        Some(worktree_path),
+                                        config.clone(),
+                                        spec.slug,
+                                    )
+                                    .await
+                                }
+                            } else {
+                                execute_cloud_built_in_streaming(
+                                    &agent_id,
+                                    &full_prompt,
+                                    Some(worktree_path),
+                                    config.clone(),
+                                    model.as_str(),
+                                )
+                                .await
+                            }
                         } else {
                             execute_model_with_permissions(
+                                &agent_id,
                                 &model,
                                 &full_prompt,
                                 false,
                                 Some(worktree_path),
                                 config.clone(),
+                                reasoning_effort,
+                                review_output_json_path.as_ref(),
+                                source_kind.clone(),
+                                log_tag.as_deref(),
                             )
                             .await
                         }
@@ -532,71 +1510,107 @@ async fn execute_agent(agent_id: String, config: Option<AgentConfig>) {
             "{}\n\n[Running in read-only mode - no modifications allowed]",
             full_prompt
         );
-        if model.to_ascii_lowercase() == "cloud" && config.is_none() {
-            execute_cloud_built_in_streaming(&agent_id, &full_prompt, None, config).await
+        let use_built_in_cloud = config.is_none()
+            && model_spec
+                .map(|spec| spec.cli.eq_ignore_ascii_case("cloud"))
+                .unwrap_or_else(|| model.eq_ignore_ascii_case("cloud"));
+
+        if use_built_in_cloud {
+            if let Some(spec) = model_spec {
+                if !spec.is_enabled() {
+                    Err(gating_error_message(spec))
+                } else {
+                    execute_cloud_built_in_streaming(&agent_id, &full_prompt, None, config, spec.slug).await
+                }
+            } else {
+                execute_cloud_built_in_streaming(&agent_id, &full_prompt, None, config, model.as_str()).await
+            }
         } else {
-            execute_model_with_permissions(&model, &full_prompt, true, None, config).await
+            execute_model_with_permissions(
+                &agent_id,
+                &model,
+                &full_prompt,
+                true,
+                None,
+                config,
+                reasoning_effort,
+                None,
+                source_kind,
+                log_tag.as_deref(),
+            )
+            .await
         }
     };
 
-    // Update result
+    // Update result; if a review-output JSON was produced, prefer its contents.
+    let final_result = prefer_json_result(review_output_json_path_capture.as_ref(), result);
     let mut manager = AGENT_MANAGER.write().await;
-    manager.update_agent_result(&agent_id, result).await;
+    manager.update_agent_result(&agent_id, final_result).await;
+}
+
+fn prefer_json_result(path: Option<&PathBuf>, fallback: Result<String, String>) -> Result<String, String> {
+    if let Some(p) = path {
+        let json = std::fs::read_to_string(p).ok();
+        if let Err(err) = std::fs::remove_file(p) {
+            tracing::debug!("failed to clean review output file {}: {err}", p.display());
+        }
+        if let Some(json) = json {
+            return Ok(json);
+        }
+    }
+    fallback
 }
 
 async fn execute_model_with_permissions(
+    agent_id: &str,
     model: &str,
     prompt: &str,
     read_only: bool,
     working_dir: Option<PathBuf>,
     config: Option<AgentConfig>,
+    reasoning_effort: code_protocol::config_types::ReasoningEffort,
+    review_output_json_path: Option<&PathBuf>,
+    source_kind: Option<AgentSourceKind>,
+    log_tag: Option<&str>,
 ) -> Result<String, String> {
-    // Helper: cross‑platform check whether an executable is available in PATH
-    // and is directly spawnable by std::process::Command (no shell wrappers).
-    fn command_exists(cmd: &str) -> bool {
-        // Absolute/relative path with separators: check directly (files only).
-        if cmd.contains(std::path::MAIN_SEPARATOR) || cmd.contains('/') || cmd.contains('\\') {
-            return std::fs::metadata(cmd).map(|m| m.is_file()).unwrap_or(false);
-        }
+    let spec_opt = agent_model_spec(model)
+        .or_else(|| config.as_ref().and_then(|cfg| agent_model_spec(&cfg.name)))
+        .or_else(|| config.as_ref().and_then(|cfg| agent_model_spec(&cfg.command)));
 
-        #[cfg(target_os = "windows")]
-        {
-            // On Windows, ensure we only accept spawnable extensions. PowerShell
-            // scripts like .ps1 are not directly spawnable via Command::new.
-            if let Ok(p) = which::which(cmd) {
-                if !p.is_file() { return false; }
-                match p.extension().and_then(|e| e.to_str()).map(|s| s.to_ascii_lowercase()) {
-                    Some(ext) if matches!(ext.as_str(), "exe" | "com" | "cmd" | "bat") => true,
-                    _ => false,
-                }
-            } else {
-                false
+    if let Some(spec) = spec_opt {
+        if !spec.is_enabled() {
+            if let Some(flag) = spec.gating_env {
+                return Err(format!(
+                    "agent model '{}' is disabled; set {}=1 to enable it",
+                    spec.slug, flag
+                ));
             }
-        }
-
-        #[cfg(not(target_os = "windows"))]
-        {
-            use std::os::unix::fs::PermissionsExt;
-            let Some(path_os) = std::env::var_os("PATH") else { return false; };
-            for dir in std::env::split_paths(&path_os) {
-                if dir.as_os_str().is_empty() { continue; }
-                let candidate = dir.join(cmd);
-                if let Ok(meta) = std::fs::metadata(&candidate) {
-                    if meta.is_file() {
-                        let mode = meta.permissions().mode();
-                        if mode & 0o111 != 0 { return true; }
-                    }
-                }
-            }
-            false
+            return Err(format!("agent model '{}' is disabled", spec.slug));
         }
     }
 
-    // Use config command if provided, otherwise use model name
+    // Use config command if provided, otherwise fall back to the spec CLI (or the
+    // lowercase model string).
     let command = if let Some(ref cfg) = config {
-        cfg.command.clone()
+        let cmd = cfg.command.trim();
+        if !cmd.is_empty() {
+            cfg.command.clone()
+        } else if let Some(spec) = spec_opt {
+            spec.cli.to_string()
+        } else {
+            cfg.name.clone()
+        }
+    } else if let Some(spec) = spec_opt {
+        spec.cli.to_string()
     } else {
         model.to_lowercase()
+    };
+
+    let (command_base, command_extra_args) = split_command_and_args(&command);
+    let command_for_spawn = if command_base.is_empty() {
+        command.clone()
+    } else {
+        command_base.clone()
     };
 
     // Special case: for the built‑in Codex agent, prefer invoking the currently
@@ -604,51 +1618,28 @@ async fn execute_model_with_permissions(
     // `codex` binary to be present on PATH. This improves portability,
     // especially on Windows where global shims may be missing.
     let model_lower = model.to_lowercase();
-    let mut cmd = if ((model_lower == "code" || model_lower == "codex") || model_lower == "cloud") && config.is_none() {
-        match std::env::current_exe() {
-            Ok(path) => Command::new(path),
-            Err(e) => return Err(format!("Failed to resolve current executable: {}", e)),
-        }
-    } else {
-        Command::new(command.clone())
-    };
-
-    // Set working directory if provided
-    if let Some(dir) = working_dir.clone() {
-        cmd.current_dir(dir);
-    }
-
-    // Add environment variables from config if provided
-    if let Some(ref cfg) = config {
-        if let Some(ref env) = cfg.env {
-            for (key, value) in env {
-                cmd.env(key, value);
-            }
-        }
-
-        // Add any configured args first, preferring mode‑specific values
-        if read_only {
-            if let Some(ro) = cfg.args_read_only.as_ref() {
-                for arg in ro { cmd.arg(arg); }
-            } else {
-                for arg in &cfg.args { cmd.arg(arg); }
-            }
-        } else if let Some(w) = cfg.args_write.as_ref() {
-            for arg in w { cmd.arg(arg); }
-        } else {
-            for arg in &cfg.args { cmd.arg(arg); }
-        }
-    }
-
-    // Build command based on model and permissions
-    // Determine agent family for behavior (claude/gemini/qwen/code/codex/cloud).
-    // Prefer the model name; if it's not a known family, fall back to the configured
-    // command so aliases like command = "cloud-agent" still get cloud behavior.
-    let command_lower = command.to_ascii_lowercase();
+    let command_lower = command_for_spawn.to_ascii_lowercase();
     fn is_known_family(s: &str) -> bool {
-        matches!(s, "claude" | "gemini" | "qwen" | "codex" | "code" | "cloud")
+        matches!(
+            s,
+            "claude"
+                | "gemini"
+                | "antigravity"
+                | "agy"
+                | "copilot"
+                | "qwen"
+                | "codex"
+                | "code"
+                | "cloud"
+                | "coder"
+        )
     }
-    let family = if is_known_family(model_lower.as_str()) {
+
+    let slug_for_defaults = spec_opt.map(|spec| spec.slug).unwrap_or(model);
+    let spec_family = spec_opt.map(|spec| spec.family);
+    let family = if let Some(spec_family) = spec_family {
+        spec_family
+    } else if is_known_family(model_lower.as_str()) {
         model_lower.as_str()
     } else if is_known_family(command_lower.as_str()) {
         command_lower.as_str()
@@ -656,260 +1647,621 @@ async fn execute_model_with_permissions(
         model_lower.as_str()
     };
 
-    let built_in_cloud = family == "cloud" && config.is_none();
-    match family {
-        "claude" | "gemini" | "qwen" => {
-            let mut defaults = crate::agent_defaults::default_params_for(family, read_only);
-            defaults.push("-p".into());
-            defaults.push(prompt.to_string());
-            cmd.args(defaults);
-        }
-        "codex" | "code" => {
-            // If config provided explicit args for this mode, do not append defaults.
-            let have_mode_args = config.as_ref().map(|c| if read_only { c.args_read_only.is_some() } else { c.args_write.is_some() }).unwrap_or(false);
-            if have_mode_args {
-                cmd.arg(prompt);
+    let command_missing = !external_agent_command_exists(&command_for_spawn);
+    let use_current_exe = should_use_current_exe_for_agent(family, command_missing, config.as_ref());
+
+    let mut final_args: Vec<String> = command_extra_args;
+
+    if let Some(ref cfg) = config {
+        if read_only {
+            if let Some(ro) = cfg.args_read_only.as_ref() {
+                final_args.extend(ro.iter().cloned());
             } else {
-                let mut defaults = crate::agent_defaults::default_params_for(family, read_only);
-                defaults.push(prompt.to_string());
-                cmd.args(defaults);
+                final_args.extend(cfg.args.iter().cloned());
+            }
+        } else if let Some(w) = cfg.args_write.as_ref() {
+            final_args.extend(w.iter().cloned());
+        } else {
+            final_args.extend(cfg.args.iter().cloned());
+        }
+    }
+
+    strip_model_flags(&mut final_args);
+
+    let spec_model_args: Vec<String> = if let Some(spec) = spec_opt {
+        spec.model_args.iter().map(|arg| (*arg).to_string()).collect()
+    } else {
+        Vec::new()
+    };
+
+    let built_in_cloud = family == "cloud" && config.is_none();
+
+    // Clamp reasoning effort to what the target model supports.
+    let clamped_effort = match reasoning_effort {
+        code_protocol::config_types::ReasoningEffort::XHigh => {
+            let lower = slug_for_defaults.to_ascii_lowercase();
+            if lower.contains("max") {
+                reasoning_effort
+            } else {
+                code_protocol::config_types::ReasoningEffort::High
             }
         }
-        // Cloud agent: built-in path uses `code cloud submit <prompt>`; external
-        // command path falls back to positional prompt with optional defaults.
-        "cloud" => {
-            if built_in_cloud { cmd.args(["cloud", "submit", "--wait"]); }
+        other => other,
+    };
+
+    // Configuration overrides for Codex CLI families. External CLIs (claude,
+    // gemini, antigravity, copilot, qwen) do not understand our config flags,
+    // so only attach these when launching Codex binaries.
+    let effort_override = format!(
+        "model_reasoning_effort={}",
+        clamped_effort.to_string().to_ascii_lowercase()
+    );
+    let auto_effort_override = format!(
+        "auto_drive.model_reasoning_effort={}",
+        clamped_effort.to_string().to_ascii_lowercase()
+    );
+    match family {
+        "copilot" => {
+            let mut defaults = default_params_for(slug_for_defaults, read_only);
+            strip_model_flags(&mut defaults);
+            final_args.extend(defaults);
+            final_args.extend(spec_model_args.iter().cloned());
+            final_args.push("--reasoning-effort".into());
+            final_args.push(clamped_effort.to_string().to_ascii_lowercase());
+            final_args.push("-p".into());
+            final_args.push(prompt.to_string());
+        }
+        "claude" | "gemini" | "antigravity" | "agy" | "qwen" => {
+            let mut defaults = default_params_for(slug_for_defaults, read_only);
+            strip_model_flags(&mut defaults);
+            final_args.extend(defaults);
+            final_args.extend(spec_model_args.iter().cloned());
+            final_args.push("-p".into());
+            final_args.push(prompt.to_string());
+        }
+        "codex" | "code" => {
             let have_mode_args = config
                 .as_ref()
                 .map(|c| if read_only { c.args_read_only.is_some() } else { c.args_write.is_some() })
                 .unwrap_or(false);
-            if have_mode_args {
-                cmd.arg(prompt);
-            } else {
-                let mut defaults = crate::agent_defaults::default_params_for(family, read_only);
-                defaults.push(prompt.to_string());
-                cmd.args(defaults);
+            if !have_mode_args {
+                let mut defaults = default_params_for(slug_for_defaults, read_only);
+                strip_model_flags(&mut defaults);
+                final_args.extend(defaults);
+            }
+            final_args.extend(spec_model_args.iter().cloned());
+            final_args.push("-c".into());
+            final_args.push(effort_override.clone());
+            final_args.push("-c".into());
+            final_args.push(auto_effort_override.clone());
+            final_args.push(prompt.to_string());
+        }
+        "cloud" => {
+            if built_in_cloud {
+                final_args.extend(["cloud", "submit", "--wait"].map(String::from));
+            }
+            let have_mode_args = config
+                .as_ref()
+                .map(|c| if read_only { c.args_read_only.is_some() } else { c.args_write.is_some() })
+                .unwrap_or(false);
+            if !have_mode_args {
+                let mut defaults = default_params_for(slug_for_defaults, read_only);
+                strip_model_flags(&mut defaults);
+                final_args.extend(defaults);
+            }
+            final_args.extend(spec_model_args.iter().cloned());
+            final_args.push("-c".into());
+            final_args.push(effort_override.clone());
+            final_args.push("-c".into());
+            final_args.push(auto_effort_override);
+            final_args.push(prompt.to_string());
+        }
+        _ => {
+            final_args.extend(spec_model_args.iter().cloned());
+            final_args.push(prompt.to_string());
+        }
+    }
+
+    let log_tag_owned = log_tag.map(str::to_string);
+    let debug_subagent = debug_subagents_enabled()
+        && matches!(source_kind, Some(AgentSourceKind::AutoReview));
+    let child_log_tag: Option<String> = if debug_subagent {
+        Some(log_tag_owned.clone().unwrap_or_else(|| format!("agents/{agent_id}")))
+    } else {
+        log_tag_owned
+    };
+
+    if debug_subagent && use_current_exe && !has_debug_flag(&final_args) {
+        final_args.insert(0, "--debug".to_string());
+    }
+
+    if let Some(path) = review_output_json_path {
+        final_args.push("--review-output-json".to_string());
+        final_args.push(path.display().to_string());
+    }
+
+    if use_current_exe
+        && (final_args.iter().any(|arg| arg == "exec") || review_output_json_path.is_some())
+    {
+        let mut reordered: Vec<String> = Vec::with_capacity(final_args.len() + 1);
+        reordered.push("exec".to_string());
+        for arg in final_args.into_iter() {
+            if arg != "exec" {
+                reordered.push(arg);
             }
         }
-        _ => { return Err(format!("Unknown model: {}", model)); }
+        final_args = reordered;
     }
 
     // Proactively check for presence of external command before spawn when not
     // using the current executable fallback. This avoids confusing OS errors
     // like "program not found" and lets us surface a cleaner message.
     if !(family == "codex" || family == "code" || (family == "cloud" && config.is_none()))
-        && !command_exists(&command)
+        && !external_agent_command_exists(&command_for_spawn)
     {
-        return Err(format!("Required agent '{}' is not installed or not in PATH", command));
+        return Err(format_agent_not_found_error(&command, &command_for_spawn));
     }
 
     // Agents: run without OS sandboxing; rely on per-branch worktrees for isolation.
     use crate::protocol::SandboxPolicy;
     use crate::spawn::StdioPolicy;
+    // Build env from current process then overlay any config-provided vars.
+    let mut env: std::collections::HashMap<String, String> = std::env::vars().collect();
+    let orig_home: Option<String> = env.get("HOME").cloned();
+    if let Some(ref cfg) = config {
+        if let Some(ref e) = cfg.env { for (k, v) in e { env.insert(k.clone(), v.clone()); } }
+    }
+    let child_spawn_depth = current_agent_spawn_depth().saturating_add(1);
+    env.insert(
+        CODE_AGENT_SPAWN_DEPTH_ENV.to_string(),
+        child_spawn_depth.to_string(),
+    );
+
+    if debug_subagent {
+        env.entry("CODE_SUBAGENT_DEBUG".to_string())
+            .or_insert_with(|| "1".to_string());
+        if let Some(tag) = child_log_tag.as_ref() {
+            env.insert("CODE_DEBUG_LOG_TAG".to_string(), tag.clone());
+        }
+    }
+
+    // Tag OpenAI requests originating from agent runs so server-side telemetry
+    // can distinguish subagent traffic.
+    if use_current_exe || family == "codex" || family == "code" {
+        let subagent = match source_kind {
+            Some(AgentSourceKind::AutoReview) => "review",
+            _ => "agent",
+        };
+        env.entry("CODE_OPENAI_SUBAGENT".to_string())
+            .or_insert_with(|| subagent.to_string());
+    }
+
+    // Convenience: map common key names so external CLIs "just work".
+    if let Some(google_key) = env.get("GOOGLE_API_KEY").cloned() {
+        env.entry("GEMINI_API_KEY".to_string()).or_insert(google_key);
+    }
+    if let Some(claude_key) = env.get("CLAUDE_API_KEY").cloned() {
+        env.entry("ANTHROPIC_API_KEY".to_string()).or_insert(claude_key);
+    }
+    if let Some(anthropic_key) = env.get("ANTHROPIC_API_KEY").cloned() {
+        env.entry("CLAUDE_API_KEY".to_string()).or_insert(anthropic_key);
+    }
+    if let Some(anthropic_base) = env.get("ANTHROPIC_BASE_URL").cloned() {
+        env.entry("CLAUDE_BASE_URL".to_string()).or_insert(anthropic_base);
+    }
+    // Qwen/DashScope convenience: mirror API keys and base URLs both ways so
+    // either variable name works across tools.
+    if let Some(qwen_key) = env.get("QWEN_API_KEY").cloned() {
+        env.entry("DASHSCOPE_API_KEY".to_string()).or_insert(qwen_key);
+    }
+    if let Some(dashscope_key) = env.get("DASHSCOPE_API_KEY").cloned() {
+        env.entry("QWEN_API_KEY".to_string()).or_insert(dashscope_key);
+    }
+    if let Some(qwen_base) = env.get("QWEN_BASE_URL").cloned() {
+        env.entry("DASHSCOPE_BASE_URL".to_string()).or_insert(qwen_base);
+    }
+    if let Some(ds_base) = env.get("DASHSCOPE_BASE_URL").cloned() {
+        env.entry("QWEN_BASE_URL".to_string()).or_insert(ds_base);
+    }
+    if family == "qwen" {
+        env.insert("OPENAI_API_KEY".to_string(), String::new());
+    }
+    // Reduce startup overhead for Claude CLI: disable auto-updater/telemetry.
+    env.entry("DISABLE_AUTOUPDATER".to_string()).or_insert("1".to_string());
+    env.entry("CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC".to_string()).or_insert("1".to_string());
+    env.entry("DISABLE_ERROR_REPORTING".to_string()).or_insert("1".to_string());
+    // Prefer explicit Claude config dir to avoid touching $HOME/.claude.json.
+    // Do not force CLAUDE_CONFIG_DIR here; leave CLI free to use its default
+    // (including Keychain) unless we explicitly redirect HOME below.
+
+    // If GEMINI_API_KEY not provided, try pointing to host config for read‑only
+    // discovery (Gemini CLI supports GEMINI_CONFIG_DIR). We keep HOME as-is so
+    // CLIs that require ~/.gemini and ~/.claude continue to work with your
+    // existing config.
+    maybe_set_gemini_config_dir(&mut env, orig_home.clone());
+
     let output = if !read_only {
-        // Build env from current process then overlay any config-provided vars.
-        let mut env: std::collections::HashMap<String, String> = std::env::vars().collect();
-        let orig_home: Option<String> = env.get("HOME").cloned();
-        if let Some(ref cfg) = config {
-            if let Some(ref e) = cfg.env { for (k, v) in e { env.insert(k.clone(), v.clone()); } }
-        }
-
-        // Convenience: map common key names so external CLIs "just work".
-        if let Some(google_key) = env.get("GOOGLE_API_KEY").cloned() {
-            env.entry("GEMINI_API_KEY".to_string()).or_insert(google_key);
-        }
-        if let Some(claude_key) = env.get("CLAUDE_API_KEY").cloned() {
-            env.entry("ANTHROPIC_API_KEY".to_string()).or_insert(claude_key);
-        }
-        if let Some(anthropic_key) = env.get("ANTHROPIC_API_KEY").cloned() {
-            env.entry("CLAUDE_API_KEY".to_string()).or_insert(anthropic_key);
-        }
-        if let Some(anthropic_base) = env.get("ANTHROPIC_BASE_URL").cloned() {
-            env.entry("CLAUDE_BASE_URL".to_string()).or_insert(anthropic_base);
-        }
-        // Qwen/DashScope convenience: mirror API keys and base URLs both ways so
-        // either variable name works across tools.
-        if let Some(qwen_key) = env.get("QWEN_API_KEY").cloned() {
-            env.entry("DASHSCOPE_API_KEY".to_string()).or_insert(qwen_key);
-        }
-        if let Some(dashscope_key) = env.get("DASHSCOPE_API_KEY").cloned() {
-            env.entry("QWEN_API_KEY".to_string()).or_insert(dashscope_key);
-        }
-        if let Some(qwen_base) = env.get("QWEN_BASE_URL").cloned() {
-            env.entry("DASHSCOPE_BASE_URL".to_string()).or_insert(qwen_base);
-        }
-        if let Some(ds_base) = env.get("DASHSCOPE_BASE_URL").cloned() {
-            env.entry("QWEN_BASE_URL".to_string()).or_insert(ds_base);
-        }
-        // Reduce startup overhead for Claude CLI: disable auto-updater/telemetry.
-        env.entry("DISABLE_AUTOUPDATER".to_string()).or_insert("1".to_string());
-        env.entry("CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC".to_string()).or_insert("1".to_string());
-        env.entry("DISABLE_ERROR_REPORTING".to_string()).or_insert("1".to_string());
-        // Prefer explicit Claude config dir to avoid touching $HOME/.claude.json.
-        // Do not force CLAUDE_CONFIG_DIR here; leave CLI free to use its default
-        // (including Keychain) unless we explicitly redirect HOME below.
-
-        // If GEMINI_API_KEY not provided, try pointing to host config for read‑only
-        // discovery (Gemini CLI supports GEMINI_CONFIG_DIR). We keep HOME as-is so
-        // CLIs that require ~/.gemini and ~/.claude continue to work with your
-        // existing config.
-        if env.get("GEMINI_API_KEY").is_none() {
-            if let Some(h) = orig_home.clone() {
-                let host_gem_cfg = std::path::PathBuf::from(&h).join(".gemini");
-                if host_gem_cfg.is_dir() {
-                    env.insert(
-                        "GEMINI_CONFIG_DIR".to_string(),
-                        host_gem_cfg.to_string_lossy().to_string(),
-                    );
-                }
-            }
-        }
-
-        // No OS sandbox.
-
         // Resolve the command and args we prepared above into Vec<String> for spawn helpers.
-        // Intentionally build args fresh for sandbox helpers; `Command` does not expose argv.
-        // Rebuild the invocation as `command` + args set above.
-        // We reconstruct to run under our sandbox helpers.
-        let program = if ((model_lower == "code" || model_lower == "codex") || model_lower == "cloud") && config.is_none() {
-            // Use current exe path
-            std::env::current_exe().map_err(|e| format!("Failed to resolve current executable: {}", e))?
-        } else {
-            // Use program name; PATH resolution will be handled by spawn helper with provided env.
-            std::path::PathBuf::from(&command)
-        };
+        let program = resolve_program_path(use_current_exe, &command_for_spawn)?;
+        let args = final_args.clone();
 
-        // Rebuild args exactly as above
-        let mut args: Vec<String> = Vec::new();
-        // Include configured args (mode‑specific preferred) first, to mirror the
-        // immediate-Command path above.
-        if let Some(ref cfg) = config {
-            if read_only {
-                if let Some(ro) = cfg.args_read_only.as_ref() {
-                    args.extend(ro.iter().cloned());
-                } else {
-                    args.extend(cfg.args.iter().cloned());
-                }
-            } else if let Some(w) = cfg.args_write.as_ref() {
-                args.extend(w.iter().cloned());
-            } else {
-                args.extend(cfg.args.iter().cloned());
-            }
-        }
-
-        let built_in_cloud = family == "cloud" && config.is_none();
-        match family {
-            "claude" | "gemini" | "qwen" => {
-                let mut defaults = crate::agent_defaults::default_params_for(family, read_only);
-                defaults.push("-p".into());
-                defaults.push(prompt.to_string());
-                args.extend(defaults);
-            }
-            "codex" | "code" => {
-                let have_mode_args = config.as_ref().map(|c| if read_only { c.args_read_only.is_some() } else { c.args_write.is_some() }).unwrap_or(false);
-                if have_mode_args {
-                    args.push(prompt.to_string());
-                } else {
-                    let mut defaults = crate::agent_defaults::default_params_for(family, read_only);
-                    defaults.push(prompt.to_string());
-                    args.extend(defaults);
-                }
-            }
-            "cloud" => {
-                if built_in_cloud { args.extend(["cloud", "submit", "--wait"].map(String::from)); }
-                let have_mode_args = config
-                    .as_ref()
-                    .map(|c| if read_only { c.args_read_only.is_some() } else { c.args_write.is_some() })
-                    .unwrap_or(false);
-                if have_mode_args {
-                    args.push(prompt.to_string());
-                } else {
-                    let mut defaults = crate::agent_defaults::default_params_for(family, read_only);
-                    defaults.push(prompt.to_string());
-                    args.extend(defaults);
-                }
-            }
-            _ => {}
-        }
-
-        // Always run agents without OS sandboxing.
-        let sandbox_type = crate::exec::SandboxType::None;
-
-        // Spawn via helpers and capture output
-        let child_result: std::io::Result<tokio::process::Child> = match sandbox_type {
-            crate::exec::SandboxType::None | crate::exec::SandboxType::MacosSeatbelt | crate::exec::SandboxType::LinuxSeccomp => {
-                crate::spawn::spawn_child_async(
-                    program.clone(),
-                    args.clone(),
-                    Some(program.to_string_lossy().as_ref()),
-                    working_dir.clone().unwrap_or_else(|| std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from("."))),
-                    &SandboxPolicy::DangerFullAccess,
-                    StdioPolicy::RedirectForShellTool,
-                    env.clone(),
-                )
-                .await
-            }
-        };
+        let child_result: std::io::Result<tokio::process::Child> = crate::spawn::spawn_child_async(
+            program.clone(),
+            args.clone(),
+            Some(program.to_string_lossy().as_ref()),
+            working_dir.clone().unwrap_or_else(|| std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from("."))),
+            &SandboxPolicy::DangerFullAccess,
+            StdioPolicy::RedirectForShellTool,
+            env.clone(),
+        )
+        .await;
 
         match child_result {
-            Ok(child) => child
-                .wait_with_output()
-                .await
-                .map_err(|e| format!("Failed to read output: {}", e))?,
+            Ok(child) => stream_child_output(agent_id, child).await?,
             Err(e) => {
                 if e.kind() == std::io::ErrorKind::NotFound {
-                    return Err(format!(
-                        "Required agent '{}' is not installed or not in PATH",
-                        command
-                    ));
+                    return Err(format_agent_not_found_error(&command, &command_for_spawn));
                 }
                 return Err(format!("Failed to spawn sandboxed agent: {}", e));
             }
         }
     } else {
-        // Read-only path: use prior behavior
-        match cmd.output().await {
-            Ok(o) => o,
+        // Read-only path: must honor resolve_program_path (and CODE_BINARY_PATH) just
+        // like the write path; skipping this can regress to PATH resolution and
+        // launch the npm shim on Windows (issue #497).
+        let program = resolve_program_path(use_current_exe, &command_for_spawn)?;
+        let mut cmd = Command::new(program);
+
+        if let Some(dir) = working_dir.clone() {
+            cmd.current_dir(dir);
+        }
+
+        cmd.args(final_args.clone());
+        cmd.stdout(Stdio::piped());
+        cmd.stderr(Stdio::piped());
+        for (k, v) in &env {
+            cmd.env(k, v);
+        }
+
+        // Ensure the child is terminated if this process dies unexpectedly.
+        cmd.kill_on_drop(true);
+
+        match spawn_tokio_command_with_retry(&mut cmd).await {
+            Ok(child) => stream_child_output(agent_id, child).await?,
             Err(e) => {
-                // Only fall back for external CLIs (not the built-in code/codex path)
-                if family == "codex" || family == "code" {
-                    return Err(format!("Failed to execute {}: {}", model, e));
+                if e.kind() == std::io::ErrorKind::NotFound {
+                    return Err(format_agent_not_found_error(&command, &command_for_spawn));
                 }
-                let mut fb = match std::env::current_exe() {
-                    Ok(p) => Command::new(p),
-                    Err(e2) => return Err(format!(
-                        "Failed to execute {} and could not resolve built-in fallback: {} / {}",
-                        model, e, e2
-                    )),
-                };
-                if read_only {
-                    fb.args(["-s", "read-only", "-a", "never", "exec", "--skip-git-repo-check", prompt]);
-                } else {
-                    fb.args(["-s", "workspace-write", "-a", "never", "exec", "--skip-git-repo-check", prompt]);
-                }
-                fb.output().await.map_err(|e2| {
-                    format!(
-                        "Failed to execute {} ({}). Built-in fallback also failed: {}",
-                        model, e, e2
-                    )
-                })?
+
+                return Err(format!("Failed to execute {}: {}", model, e));
             }
         }
     };
 
-    if output.status.success() {
-        Ok(String::from_utf8_lossy(&output.stdout).to_string())
+    let (status, stdout_buf, stderr_buf) = output;
+
+    if status.success() {
+        Ok(stdout_buf)
     } else {
-        let stderr = String::from_utf8_lossy(&output.stderr);
-        let stdout = String::from_utf8_lossy(&output.stdout);
-        let combined = if stderr.trim().is_empty() {
-            stdout.trim().to_string()
-        } else if stdout.trim().is_empty() {
-            stderr.trim().to_string()
+        let stderr = stderr_buf.trim();
+        let stdout = stdout_buf.trim();
+        let combined = if stderr.is_empty() {
+            stdout.to_string()
+        } else if stdout.is_empty() {
+            stderr.to_string()
         } else {
-            format!("{}\n{}", stderr.trim(), stdout.trim())
+            format!("{}\n{}", stderr, stdout)
         };
         Err(format!("Command failed: {}", combined))
+    }
+}
+
+const STREAM_PROGRESS_INTERVAL: StdDuration = StdDuration::from_secs(2);
+const STREAM_PROGRESS_BYTES: usize = 2 * 1024;
+
+async fn stream_child_output(
+    agent_id: &str,
+    mut child: tokio::process::Child,
+) -> Result<(std::process::ExitStatus, String, String), String> {
+    let agent_id_owned = agent_id.to_string();
+    let stop_flag = Arc::new(AtomicBool::new(false));
+    let stop_clone = stop_flag.clone();
+    let heartbeat = tokio::spawn(async move {
+        let mut ticker = tokio::time::interval(TokioDuration::from_secs(30));
+        loop {
+            ticker.tick().await;
+            if stop_clone.load(Ordering::Relaxed) {
+                break;
+            }
+            AgentManager::touch_agent(&agent_id_owned).await;
+        }
+    });
+
+    let stdout_task = child.stdout.take().map(|stdout| {
+        let agent = agent_id.to_string();
+        tokio::spawn(async move { stream_reader_to_progress(agent, "stdout", stdout).await })
+    });
+
+    let stderr_task = child.stderr.take().map(|stderr| {
+        let agent = agent_id.to_string();
+        tokio::spawn(async move { stream_reader_to_progress(agent, "stderr", stderr).await })
+    });
+
+    let status = child
+        .wait()
+        .await
+        .map_err(|e| format!("Failed to wait for agent process: {e}"))?;
+
+    let stdout_buf = match stdout_task {
+        Some(handle) => handle
+            .await
+            .map_err(|e| format!("Failed to read agent stdout: {e}"))?,
+        None => String::new(),
+    };
+
+    let stderr_buf = match stderr_task {
+        Some(handle) => handle
+            .await
+            .map_err(|e| format!("Failed to read agent stderr: {e}"))?,
+        None => String::new(),
+    };
+
+    stop_flag.store(true, Ordering::Relaxed);
+    heartbeat.abort();
+
+    Ok((status, stdout_buf, stderr_buf))
+}
+
+async fn stream_reader_to_progress<R>(agent_id: String, label: &str, reader: R) -> String
+where
+    R: AsyncRead + Unpin,
+{
+    let mut lines = BufReader::new(reader).lines();
+    let mut full = String::new();
+    let mut chunk = String::new();
+    let mut last_flush = Instant::now();
+
+    while let Ok(Some(line)) = lines.next_line().await {
+        let clean = line.trim_end_matches('\r');
+        full.push_str(clean);
+        full.push('\n');
+        chunk.push_str(clean);
+        chunk.push('\n');
+
+        if chunk.len() >= STREAM_PROGRESS_BYTES || last_flush.elapsed() >= STREAM_PROGRESS_INTERVAL {
+            flush_progress(&agent_id, label, &mut chunk).await;
+            last_flush = Instant::now();
+        }
+    }
+
+    if !chunk.is_empty() {
+        flush_progress(&agent_id, label, &mut chunk).await;
+    }
+
+    full
+}
+
+async fn flush_progress(agent_id: &str, label: &str, chunk: &mut String) {
+    let message = format!("[{label}] {}", chunk.trim_end());
+    let mut mgr = AGENT_MANAGER.write().await;
+    mgr.add_progress(agent_id, message).await;
+    chunk.clear();
+}
+
+fn debug_subagents_enabled() -> bool {
+    match std::env::var("CODE_SUBAGENT_DEBUG") {
+        Ok(val) => {
+            let lower = val.to_ascii_lowercase();
+            matches!(lower.as_str(), "1" | "true" | "yes" | "on")
+        }
+        Err(_) => false,
+    }
+}
+
+fn has_debug_flag(args: &[String]) -> bool {
+    args.iter().any(|arg| arg == "--debug" || arg == "-d")
+}
+
+fn maybe_set_gemini_config_dir(env: &mut HashMap<String, String>, orig_home: Option<String>) {
+    if env.get("GEMINI_API_KEY").is_some() {
+        return;
+    }
+
+    let Some(home) = orig_home else { return; };
+    let host_gem_cfg = std::path::PathBuf::from(&home).join(".gemini");
+    if host_gem_cfg.is_dir() {
+        env.insert(
+            "GEMINI_CONFIG_DIR".to_string(),
+            host_gem_cfg.to_string_lossy().to_string(),
+        );
+    }
+}
+
+pub(crate) fn should_use_current_exe_for_agent(
+    family: &str,
+    command_missing: bool,
+    config: Option<&AgentConfig>,
+) -> bool {
+    if !matches!(family, "code" | "codex" | "cloud" | "coder") {
+        return false;
+    }
+
+    // If the command is missing/empty, always use the current binary.
+    if command_missing {
+        return true;
+    }
+
+    if let Some(cfg) = config {
+        let trimmed = cfg.command.trim();
+        if trimmed.is_empty() {
+            return true;
+        }
+
+        // If the configured command matches the canonical CLI for this spec, prefer self.
+        if let Some(spec) = agent_model_spec(&cfg.name).or_else(|| agent_model_spec(trimmed)) {
+            if trimmed.eq_ignore_ascii_case(spec.cli) {
+                return true;
+            }
+        }
+
+        // Otherwise assume the user intentionally set a custom command; do not override.
+        false
+    } else {
+        // No explicit config: built-in families should use the current binary.
+        true
+    }
+}
+
+fn resolve_program_path(use_current_exe: bool, command_for_spawn: &str) -> Result<std::path::PathBuf, String> {
+    if use_current_exe {
+        return current_code_binary_path();
+    }
+
+    if let Some(path) = resolve_external_agent_command_path(command_for_spawn) {
+        return Ok(path);
+    }
+
+    Ok(std::path::PathBuf::from(command_for_spawn))
+}
+
+fn strip_model_flags(args: &mut Vec<String>) {
+    let mut i = 0;
+    while i < args.len() {
+        let lowered = args[i].to_ascii_lowercase();
+        if lowered == "--model" || lowered == "-m" {
+            args.remove(i);
+            if i < args.len() {
+                args.remove(i);
+            }
+            continue;
+        }
+        if lowered.starts_with("--model=") || lowered.starts_with("-m=") {
+            args.remove(i);
+            continue;
+        }
+        i += 1;
+    }
+}
+
+pub fn split_command_and_args(command: &str) -> (String, Vec<String>) {
+    let trimmed = command.trim();
+    if trimmed.is_empty() {
+        return (String::new(), Vec::new());
+    }
+    if let Some(tokens) = shlex_split(trimmed) {
+        if let Some((first, rest)) = tokens.split_first() {
+            return (first.clone(), rest.to_vec());
+        }
+    }
+
+    let tokens: Vec<String> = trimmed.split_whitespace().map(|s| s.to_string()).collect();
+    if tokens.is_empty() {
+        (String::new(), Vec::new())
+    } else {
+        let head = tokens[0].clone();
+        (head, tokens[1..].to_vec())
+    }
+}
+
+const AGENT_SMOKE_TEST_PROMPT: &str = "Reply only with the string \"ok\". Do not include any other words.";
+const AGENT_SMOKE_TEST_EXPECTED: &str = "ok";
+const AGENT_SMOKE_TEST_TIMEOUT: TokioDuration = TokioDuration::from_secs(20);
+
+fn should_validate_in_read_only(_cfg: &AgentConfig) -> bool { true }
+
+async fn run_agent_smoke_test(cfg: AgentConfig) -> Result<String, String> {
+    let model_name = cfg.name.clone();
+    let read_only = should_validate_in_read_only(&cfg);
+    let mut task = tokio::spawn(async move {
+        execute_model_with_permissions(
+            "agent-smoke-test",
+            &model_name,
+            AGENT_SMOKE_TEST_PROMPT,
+            read_only,
+            None,
+            Some(cfg),
+            code_protocol::config_types::ReasoningEffort::High,
+            None,
+            None,
+            None,
+        )
+        .await
+    });
+    let timer = tokio::time::sleep(AGENT_SMOKE_TEST_TIMEOUT);
+    tokio::pin!(timer);
+    tokio::select! {
+        res = &mut task => {
+            res.map_err(|e| format!("agent validation task failed: {e}"))?
+        }
+        _ = timer.as_mut() => {
+            task.abort();
+            let _ = task.await;
+            return Err(format!(
+                "agent validation timed out after {}s",
+                AGENT_SMOKE_TEST_TIMEOUT.as_secs()
+            ));
+        }
+    }
+}
+
+fn summarize_agent_output(output: &str) -> String {
+    let trimmed = output.trim();
+    if trimmed.is_empty() {
+        return "<empty response>".to_string();
+    }
+    const MAX_LEN: usize = 240;
+    if trimmed.len() <= MAX_LEN {
+        trimmed.to_string()
+    } else {
+        let mut cutoff = MAX_LEN.min(trimmed.len());
+        while cutoff > 0 && !trimmed.is_char_boundary(cutoff) {
+            cutoff -= 1;
+        }
+        if cutoff == 0 {
+            // Fallback: take first char to avoid empty slice
+            let mut chars = trimmed.chars();
+            if let Some(first) = chars.next() {
+                format!("{}…", first)
+            } else {
+                "…".to_string()
+            }
+        } else {
+            format!("{}…", &trimmed[..cutoff])
+        }
+    }
+}
+
+pub async fn smoke_test_agent(cfg: AgentConfig) -> Result<(), String> {
+    let output = run_agent_smoke_test(cfg).await?;
+    let normalized = output.trim().to_ascii_lowercase();
+    if normalized == AGENT_SMOKE_TEST_EXPECTED {
+        Ok(())
+    } else {
+        Err(format!(
+            "agent response missing \"ok\": {}",
+            summarize_agent_output(&output)
+        ))
+    }
+}
+
+fn run_smoke_test_with_new_runtime(cfg: AgentConfig) -> Result<(), String> {
+    TokioRuntimeBuilder::new_current_thread()
+        .enable_all()
+        .build()
+        .map_err(|e| format!("failed to build validation runtime: {}", e))?
+        .block_on(smoke_test_agent(cfg))
+}
+
+pub fn smoke_test_agent_blocking(cfg: AgentConfig) -> Result<(), String> {
+    if tokio::runtime::Handle::try_current().is_ok() {
+        thread::Builder::new()
+            .name("agent-smoke-test".into())
+            .spawn(move || run_smoke_test_with_new_runtime(cfg))
+            .map_err(|e| format!("failed to spawn agent validation thread: {}", e))?
+            .join()
+            .map_err(|_| "agent validation thread panicked".to_string())?
+    } else {
+        run_smoke_test_with_new_runtime(cfg)
     }
 }
 
@@ -921,16 +2273,15 @@ async fn execute_cloud_built_in_streaming(
     prompt: &str,
     working_dir: Option<std::path::PathBuf>,
     _config: Option<AgentConfig>,
+    model_slug: &str,
 ) -> Result<String, String> {
     // Program and argv
-    let program = std::env::current_exe()
-        .map_err(|e| format!("Failed to resolve current executable: {}", e))?;
-    let args: Vec<String> = vec![
-        "cloud".into(),
-        "submit".into(),
-        "--wait".into(),
-        prompt.into(),
-    ];
+    let program = current_code_binary_path()?;
+    let mut args: Vec<String> = vec!["cloud".into(), "submit".into(), "--wait".into()];
+    if let Some(spec) = agent_model_spec(model_slug) {
+        args.extend(spec.model_args.iter().map(|arg| (*arg).to_string()));
+    }
+    args.push(prompt.into());
 
     // Baseline env mirrors behavior in execute_model_with_permissions
     let env: std::collections::HashMap<String, String> = std::env::vars().collect();
@@ -995,8 +2346,8 @@ async fn execute_cloud_built_in_streaming(
                 apply.current_dir(dir);
                 apply.stdin(Stdio::piped());
 
-                let mut child = apply
-                    .spawn()
+                let mut child = spawn_tokio_command_with_retry(&mut apply)
+                    .await
                     .map_err(|e| format!("Failed to spawn git apply: {}", e))?;
 
                 if let Some(mut stdin) = child.stdin.take() {
@@ -1054,15 +2405,29 @@ pub fn create_agent_tool(allowed_models: &[String]) -> OpenAiTool {
         },
     );
 
-    properties.insert(
-        "task".to_string(),
+    let mut create_properties = BTreeMap::new();
+    create_properties.insert(
+        "name".to_string(),
         JsonSchema::String {
-            description: Some("For action=create: task prompt to execute".to_string()),
+            description: Some("Display name shown in the UI (e.g., \"Plan TUI Refactor\")".to_string()),
             allowed_values: None,
         },
     );
-
-    properties.insert(
+    create_properties.insert(
+        "task".to_string(),
+        JsonSchema::String {
+            description: Some("Task prompt to execute".to_string()),
+            allowed_values: None,
+        },
+    );
+    create_properties.insert(
+        "context".to_string(),
+        JsonSchema::String {
+            description: Some("Optional background context".to_string()),
+            allowed_values: None,
+        },
+    );
+    create_properties.insert(
         "models".to_string(),
         JsonSchema::Array {
             items: Box::new(JsonSchema::String {
@@ -1073,30 +2438,12 @@ pub fn create_agent_tool(allowed_models: &[String]) -> OpenAiTool {
                     Some(allowed_models.iter().cloned().collect())
                 },
             }),
-            description: Some(
-                "For action=create: optional array of model names (e.g., ['claude','gemini','qwen','code','cloud'])"
-                    .to_string(),
-            ),
+                description: Some(
+                    "Optional array of model names (e.g., ['code-gpt-5.5','claude-sonnet-4.6','code-gpt-5.4-mini','gemini-3.5-flash'])".to_string(),
+                ),
         },
     );
-
-    properties.insert(
-        "context".to_string(),
-        JsonSchema::String {
-            description: Some("For action=create: optional background context".to_string()),
-            allowed_values: None,
-        },
-    );
-
-    properties.insert(
-        "output".to_string(),
-        JsonSchema::String {
-            description: Some("For action=create: optional desired output description".to_string()),
-            allowed_values: None,
-        },
-    );
-
-    properties.insert(
+    create_properties.insert(
         "files".to_string(),
         JsonSchema::Array {
             items: Box::new(JsonSchema::String {
@@ -1104,75 +2451,171 @@ pub fn create_agent_tool(allowed_models: &[String]) -> OpenAiTool {
                 allowed_values: None,
             }),
             description: Some(
-                "For action=create: optional array of file paths to include in context".to_string(),
+                "Optional array of file paths to include in context".to_string(),
             ),
         },
     );
-
-    properties.insert(
+    create_properties.insert(
+        "output".to_string(),
+        JsonSchema::String {
+            description: Some("Optional desired output description".to_string()),
+            allowed_values: None,
+        },
+    );
+    create_properties.insert(
+        "write".to_string(),
+        JsonSchema::Boolean {
+            description: Some(
+                "Enable isolated write worktrees for each agent (default: true). Set false to keep the agent read-only.".to_string(),
+            ),
+        },
+    );
+    create_properties.insert(
         "read_only".to_string(),
         JsonSchema::Boolean {
             description: Some(
-                "For action=create: when true, run in read-only mode (default: false)".to_string(),
+                "Deprecated: inverse of `write`. Prefer setting `write` instead.".to_string(),
             ),
         },
     );
-
     properties.insert(
+        "create".to_string(),
+        JsonSchema::Object {
+            properties: create_properties,
+            required: Some(vec!["task".to_string()]),
+            additional_properties: Some(false.into()),
+        },
+    );
+
+    let mut status_properties = BTreeMap::new();
+    status_properties.insert(
         "agent_id".to_string(),
         JsonSchema::String {
-            description: Some(
-                "For actions=status/result/cancel/wait: specify the target agent ID".to_string(),
-            ),
+            description: Some("Agent identifier to inspect".to_string()),
             allowed_values: None,
         },
     );
-
     properties.insert(
+        "status".to_string(),
+        JsonSchema::Object {
+            properties: status_properties,
+            required: Some(vec!["agent_id".to_string()]),
+            additional_properties: Some(false.into()),
+        },
+    );
+
+    let mut result_properties = BTreeMap::new();
+    result_properties.insert(
+        "agent_id".to_string(),
+        JsonSchema::String {
+            description: Some("Agent identifier whose result should be fetched".to_string()),
+            allowed_values: None,
+        },
+    );
+    properties.insert(
+        "result".to_string(),
+        JsonSchema::Object {
+            properties: result_properties,
+            required: Some(vec!["agent_id".to_string()]),
+            additional_properties: Some(false.into()),
+        },
+    );
+
+    let mut cancel_properties = BTreeMap::new();
+    cancel_properties.insert(
+        "agent_id".to_string(),
+        JsonSchema::String {
+            description: Some("Cancel a specific agent".to_string()),
+            allowed_values: None,
+        },
+    );
+    cancel_properties.insert(
         "batch_id".to_string(),
         JsonSchema::String {
-            description: Some(
-                "For actions=cancel/wait/list: optional batch identifier".to_string(),
-            ),
+            description: Some("Cancel all agents in the batch".to_string()),
             allowed_values: None,
         },
     );
-
     properties.insert(
+        "cancel".to_string(),
+        JsonSchema::Object {
+            properties: cancel_properties,
+            required: Some(Vec::new()),
+            additional_properties: Some(false.into()),
+        },
+    );
+
+    let mut wait_properties = BTreeMap::new();
+    wait_properties.insert(
+        "agent_id".to_string(),
+        JsonSchema::String {
+            description: Some("Wait for a specific agent".to_string()),
+            allowed_values: None,
+        },
+    );
+    wait_properties.insert(
+        "batch_id".to_string(),
+        JsonSchema::String {
+            description: Some("Wait for any agent in the batch".to_string()),
+            allowed_values: None,
+        },
+    );
+    wait_properties.insert(
         "timeout_seconds".to_string(),
         JsonSchema::Number {
             description: Some(
-                "For action=wait: optional timeout before giving up (default 300, max 600)".to_string(),
+                "Optional timeout before giving up (default 300, max 600)".to_string(),
             ),
         },
     );
-
-    properties.insert(
+    wait_properties.insert(
         "return_all".to_string(),
         JsonSchema::Boolean {
             description: Some(
-                "For action=wait with batch_id: return all completed agents instead of the first".to_string(),
+                "When waiting on a batch, return all completed agents instead of the first".to_string(),
             ),
         },
     );
-
     properties.insert(
+        "wait".to_string(),
+        JsonSchema::Object {
+            properties: wait_properties,
+            required: Some(Vec::new()),
+            additional_properties: Some(false.into()),
+        },
+    );
+
+    let mut list_properties = BTreeMap::new();
+    list_properties.insert(
         "status_filter".to_string(),
         JsonSchema::String {
             description: Some(
-                "For action=list: optional status filter (pending, running, completed, failed, cancelled)"
-                    .to_string(),
+                "Optional status filter (pending, running, completed, failed, cancelled)".to_string(),
             ),
             allowed_values: None,
         },
     );
-
-    properties.insert(
+    list_properties.insert(
+        "batch_id".to_string(),
+        JsonSchema::String {
+            description: Some("Limit results to a batch".to_string()),
+            allowed_values: None,
+        },
+    );
+    list_properties.insert(
         "recent_only".to_string(),
         JsonSchema::Boolean {
             description: Some(
-                "For action=list: when true, only include agents from the last two hours".to_string(),
+                "When true, only include agents from the last two hours".to_string(),
             ),
+        },
+    );
+    properties.insert(
+        "list".to_string(),
+        JsonSchema::Object {
+            properties: list_properties,
+            required: Some(Vec::new()),
+            additional_properties: Some(false.into()),
         },
     );
 
@@ -1199,27 +2642,170 @@ pub struct RunAgentParams {
     pub context: Option<String>,
     pub output: Option<String>,
     pub files: Option<Vec<String>>,
+    #[serde(default)]
+    pub write: Option<bool>,
+    #[serde(default)]
     pub read_only: Option<bool>,
+    pub name: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct AgentToolRequest {
-    pub action: String,
-    #[serde(default)]
+pub struct AgentCreateOptions {
     pub task: Option<String>,
     #[serde(default, deserialize_with = "deserialize_models_field")]
     pub models: Vec<String>,
     pub context: Option<String>,
     pub output: Option<String>,
-    #[serde(default)]
     pub files: Option<Vec<String>>,
+    #[serde(default)]
+    pub write: Option<bool>,
+    #[serde(default)]
     pub read_only: Option<bool>,
+    pub name: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct AgentIdentifierOptions {
+    pub agent_id: Option<String>,
+    pub batch_id: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct AgentCancelOptions {
+    pub agent_id: Option<String>,
+    pub batch_id: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct AgentWaitOptions {
     pub agent_id: Option<String>,
     pub batch_id: Option<String>,
     pub timeout_seconds: Option<u64>,
     pub return_all: Option<bool>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct AgentListOptions {
     pub status_filter: Option<String>,
+    pub batch_id: Option<String>,
     pub recent_only: Option<bool>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct AgentToolRequest {
+    pub action: String,
+    pub create: Option<AgentCreateOptions>,
+    pub status: Option<AgentIdentifierOptions>,
+    pub result: Option<AgentIdentifierOptions>,
+    pub cancel: Option<AgentCancelOptions>,
+    pub wait: Option<AgentWaitOptions>,
+    pub list: Option<AgentListOptions>,
+}
+
+pub(crate) fn normalize_agent_name(name: Option<String>) -> Option<String> {
+    let Some(name) = name.map(|value| value.trim().to_string()) else {
+        return None;
+    };
+
+    if name.is_empty() {
+        return None;
+    }
+
+    let canonicalized = canonicalize_agent_word_boundaries(&name);
+    let words: Vec<&str> = canonicalized.split_whitespace().collect();
+    if words.is_empty() {
+        return None;
+    }
+
+    Some(
+        words
+            .into_iter()
+            .map(format_agent_word)
+            .collect::<Vec<_>>()
+            .join(" "),
+    )
+}
+
+fn canonicalize_agent_word_boundaries(input: &str) -> String {
+    let mut tokens: Vec<String> = Vec::new();
+    let mut current = String::new();
+    let mut chars = input.chars().peekable();
+    let mut prev_char: Option<char> = None;
+    let mut uppercase_run: usize = 0;
+
+    while let Some(ch) = chars.next() {
+        if ch.is_whitespace() || matches!(ch, '_' | '-' | '/' | ':' | '.') {
+            if !current.is_empty() {
+                tokens.push(std::mem::take(&mut current));
+            }
+            prev_char = None;
+            uppercase_run = 0;
+            continue;
+        }
+
+        let next_char = chars.peek().copied();
+        let mut split = false;
+
+        if !current.is_empty() {
+            if let Some(prev) = prev_char {
+                if prev.is_ascii_lowercase() && ch.is_ascii_uppercase() {
+                    split = true;
+                } else if prev.is_ascii_uppercase()
+                    && ch.is_ascii_uppercase()
+                    && uppercase_run > 0
+                    && next_char.map_or(false, |c| c.is_ascii_lowercase())
+                {
+                    split = true;
+                }
+            }
+        }
+
+        if split {
+            tokens.push(std::mem::take(&mut current));
+            uppercase_run = 0;
+        }
+
+        current.push(ch);
+
+        if ch.is_ascii_uppercase() {
+            uppercase_run += 1;
+        } else {
+            uppercase_run = 0;
+        }
+
+        prev_char = Some(ch);
+    }
+
+    if !current.is_empty() {
+        tokens.push(current);
+    }
+
+    tokens.join(" ")
+}
+
+const AGENT_NAME_ACRONYMS: &[&str] = &[
+    "AI", "API", "CLI", "CPU", "DB", "GPU", "HTTP", "HTTPS", "ID", "LLM", "SDK", "SQL", "TUI", "UI", "UX",
+];
+
+fn format_agent_word(word: &str) -> String {
+    if word.is_empty() {
+        return String::new();
+    }
+
+    let uppercase = word.to_ascii_uppercase();
+    if AGENT_NAME_ACRONYMS.contains(&uppercase.as_str()) {
+        return uppercase;
+    }
+
+    let mut chars = word.chars();
+    let Some(first) = chars.next() else {
+        return String::new();
+    };
+
+    let mut formatted = String::new();
+    formatted.extend(first.to_uppercase());
+    formatted.push_str(&chars.flat_map(char::to_lowercase).collect::<String>());
+    formatted
 }
 
 fn deserialize_models_field<'de, D>(deserializer: D) -> Result<Vec<String>, D::Error>
@@ -1241,14 +2827,599 @@ where
     })
 }
 
+#[cfg(test)]
+mod tests {
+    use super::Agent;
+    use super::AgentManager;
+    use super::AgentStatus;
+    use super::MAX_AGENT_PROGRESS_ENTRIES;
+    use super::MAX_AGENT_RESULT_BYTES;
+    use super::MAX_TRACKED_TERMINAL_AGENTS;
+    use super::normalize_agent_name;
+    use super::maybe_set_gemini_config_dir;
+    use super::execute_model_with_permissions;
+    use super::resolve_program_path;
+    use super::should_use_current_exe_for_agent;
+    use super::prefer_json_result;
+    use super::current_code_binary_path;
+    use crate::config_types::AgentConfig;
+    use code_protocol::config_types::ReasoningEffort;
+    use std::collections::HashMap;
+    use std::ffi::OsString;
+    use tempfile::tempdir;
+    use std::path::Path;
+    use std::path::PathBuf;
+    use std::sync::{Mutex, OnceLock};
+
+    #[test]
+    fn drops_empty_names() {
+        assert_eq!(normalize_agent_name(None), None);
+        assert_eq!(normalize_agent_name(Some("   ".into())), None);
+    }
+
+    #[test]
+    fn title_cases_and_restores_separators() {
+        assert_eq!(
+            normalize_agent_name(Some("plan_tui_refactor".into())),
+            Some("Plan TUI Refactor".into())
+        );
+        assert_eq!(
+            normalize_agent_name(Some("run-ui-tests".into())),
+            Some("Run UI Tests".into())
+        );
+    }
+
+    #[test]
+    fn handles_camel_case_and_acronyms() {
+        assert_eq!(
+            normalize_agent_name(Some("shipCloudAPI".into())),
+            Some("Ship Cloud API".into())
+        );
+    }
+
+    #[test]
+    fn prefer_json_result_uses_json_when_available() {
+        let dir = tempdir().unwrap();
+        let path = dir.path().join("out.json");
+        let payload = "{\"findings\":[],\"overall_explanation\":\"ok\"}";
+        std::fs::write(&path, payload).unwrap();
+
+        let res = prefer_json_result(Some(&path), Err("fallback".to_string()));
+        assert_eq!(res.unwrap(), payload);
+        assert!(!path.exists(), "review output file should be cleaned up");
+    }
+
+    #[test]
+    fn prefer_json_result_falls_back_when_missing() {
+        let missing = PathBuf::from("/nonexistent/path.json");
+        let res = prefer_json_result(Some(&missing), Ok("orig".to_string()));
+        assert_eq!(res.unwrap(), "orig");
+    }
+
+    fn agent_with_command(command: &str) -> AgentConfig {
+        AgentConfig {
+            name: "code-gpt-5.3-codex".to_string(),
+            command: command.to_string(),
+            args: Vec::new(),
+            read_only: false,
+            enabled: true,
+            description: None,
+            env: None,
+            args_read_only: None,
+            args_write: None,
+            instructions: None,
+        }
+    }
+
+    #[test]
+    fn code_family_falls_back_when_command_missing() {
+        let cfg = agent_with_command("definitely-not-present-429");
+        let use_current = should_use_current_exe_for_agent("code", true, Some(&cfg));
+        assert!(use_current);
+    }
+
+    #[test]
+    fn code_family_prefers_current_exe_even_if_coder_in_path() {
+        let cfg = agent_with_command("coder");
+        let use_current = should_use_current_exe_for_agent("code", false, Some(&cfg));
+        assert!(use_current);
+    }
+
+    #[test]
+    fn code_family_respects_custom_command_override() {
+        let cfg = agent_with_command("/usr/local/bin/my-coder");
+        let use_current = should_use_current_exe_for_agent("code", false, Some(&cfg));
+        assert!(!use_current);
+    }
+
+    #[test]
+    fn program_path_uses_current_exe_when_requested() {
+        let expected = current_code_binary_path().expect("current binary path");
+        let resolved = resolve_program_path(true, "coder").expect("resolved program");
+        assert_eq!(resolved, expected);
+
+        let custom = resolve_program_path(false, "custom-coder").expect("resolved custom");
+        assert_eq!(custom, std::path::PathBuf::from("custom-coder"));
+    }
+
+    #[tokio::test]
+    async fn read_only_agents_use_code_binary_path() {
+        let _lock = env_lock().lock().expect("env lock");
+        let _reset_path = EnvReset::capture("PATH");
+        let _reset_binary = EnvReset::capture("CODE_BINARY_PATH");
+
+        let dir = tempdir().expect("tempdir");
+        let current = script_path(dir.path(), "current");
+        let shim = script_path(dir.path(), "coder");
+
+        write_script(&current, "current");
+        write_script(&shim, "path");
+
+        unsafe {
+            std::env::set_var("CODE_BINARY_PATH", &current);
+            std::env::set_var("PATH", prepend_path(dir.path()));
+        }
+
+        let output = execute_model_with_permissions(
+            "agent-test",
+            "code-gpt-5.5",
+            "ok",
+            true,
+            None,
+            None,
+            ReasoningEffort::Low,
+            None,
+            None,
+            None,
+        )
+        .await
+        .expect("execute read-only agent");
+
+        assert_eq!(output.trim(), "current");
+    }
+
+    #[cfg(not(target_os = "windows"))]
+    #[tokio::test]
+    async fn claude_agent_uses_local_install_when_not_on_path() {
+        let _lock = env_lock().lock().expect("env lock");
+        let _reset_path = EnvReset::capture("PATH");
+        let _reset_home = EnvReset::capture("HOME");
+
+        let dir = tempdir().expect("tempdir");
+        let claude_dir = dir.path().join(".claude").join("local");
+        std::fs::create_dir_all(&claude_dir).expect("create claude dir");
+        let claude_script = claude_dir.join("claude");
+        write_script(&claude_script, "local-claude");
+
+        unsafe {
+            std::env::set_var("HOME", dir.path());
+            std::env::set_var("PATH", "/usr/bin:/bin");
+        }
+
+        let cfg = AgentConfig {
+            name: "claude-sonnet-4.6".to_string(),
+            command: "claude".to_string(),
+            args: Vec::new(),
+            read_only: true,
+            enabled: true,
+            description: None,
+            env: None,
+            args_read_only: None,
+            args_write: None,
+            instructions: None,
+        };
+
+        let output = execute_model_with_permissions(
+            "agent-test",
+            "claude-sonnet-4.6",
+            "ok",
+            true,
+            None,
+            Some(cfg),
+            ReasoningEffort::Low,
+            None,
+            None,
+            None,
+        )
+        .await
+        .expect("execute claude with local fallback");
+
+        assert_eq!(output.trim(), "local-claude");
+    }
+
+    #[tokio::test]
+    async fn github_copilot_launches_with_agent_mode_flags() {
+        let dir = tempdir().expect("tempdir");
+        let copilot = script_path(dir.path(), "copilot");
+        write_argv_script(&copilot);
+
+        let cfg = AgentConfig {
+            name: "github-copilot".to_string(),
+            command: copilot.display().to_string(),
+            args: Vec::new(),
+            read_only: true,
+            enabled: true,
+            description: None,
+            env: None,
+            args_read_only: None,
+            args_write: None,
+            instructions: None,
+        };
+
+        let output = execute_model_with_permissions(
+            "agent-test",
+            "github-copilot",
+            "hello from copilot",
+            true,
+            None,
+            Some(cfg),
+            ReasoningEffort::Low,
+            None,
+            None,
+            None,
+        )
+        .await
+        .expect("execute copilot agent");
+
+        let args: Vec<&str> = output.trim().split('|').collect();
+        assert_eq!(
+            args,
+            vec![
+                "--autopilot",
+                "--allow-all-tools",
+                "--no-ask-user",
+                "-s",
+                "--reasoning-effort",
+                "low",
+                "-p",
+                "hello from copilot",
+            ]
+        );
+    }
+
+    #[tokio::test]
+    async fn github_copilot_write_mode_uses_yolo() {
+        let dir = tempdir().expect("tempdir");
+        let copilot = script_path(dir.path(), "copilot");
+        write_argv_script(&copilot);
+
+        let cfg = AgentConfig {
+            name: "github-copilot".to_string(),
+            command: copilot.display().to_string(),
+            args: Vec::new(),
+            read_only: false,
+            enabled: true,
+            description: None,
+            env: None,
+            args_read_only: None,
+            args_write: None,
+            instructions: None,
+        };
+
+        let output = execute_model_with_permissions(
+            "agent-test",
+            "github-copilot",
+            "hello from copilot",
+            false,
+            None,
+            Some(cfg),
+            ReasoningEffort::High,
+            None,
+            None,
+            None,
+        )
+        .await
+        .expect("execute copilot write agent");
+
+        let args: Vec<&str> = output.trim().split('|').collect();
+        assert_eq!(
+            args,
+            vec![
+                "--autopilot",
+                "--yolo",
+                "--no-ask-user",
+                "-s",
+                "--reasoning-effort",
+                "high",
+                "-p",
+                "hello from copilot",
+            ]
+        );
+    }
+
+    fn env_lock() -> &'static Mutex<()> {
+        static LOCK: OnceLock<Mutex<()>> = OnceLock::new();
+        LOCK.get_or_init(|| Mutex::new(()))
+    }
+
+    struct EnvReset {
+        key: &'static str,
+        value: Option<OsString>,
+    }
+
+    impl EnvReset {
+        fn capture(key: &'static str) -> Self {
+            let value = std::env::var_os(key);
+            Self { key, value }
+        }
+    }
+
+    impl Drop for EnvReset {
+        fn drop(&mut self) {
+            unsafe {
+                match &self.value {
+                    Some(value) => std::env::set_var(self.key, value),
+                    None => std::env::remove_var(self.key),
+                }
+            }
+        }
+    }
+
+    fn prepend_path(dir: &Path) -> OsString {
+        let original = std::env::var_os("PATH");
+        let mut parts: Vec<OsString> = Vec::new();
+        parts.push(dir.as_os_str().to_os_string());
+        if let Some(orig) = original {
+            parts.extend(std::env::split_paths(&orig).map(|p| p.into_os_string()));
+        }
+        std::env::join_paths(parts).expect("join PATH")
+    }
+
+    #[cfg(target_os = "windows")]
+    fn script_path(dir: &Path, name: &str) -> PathBuf {
+        dir.join(format!("{name}.cmd"))
+    }
+
+    #[cfg(not(target_os = "windows"))]
+    fn script_path(dir: &Path, name: &str) -> PathBuf {
+        dir.join(name)
+    }
+
+    #[cfg(target_os = "windows")]
+    fn write_script(path: &Path, marker: &str) {
+        let script = format!("@echo off\r\necho {marker}\r\nexit /b 0\r\n");
+        std::fs::write(path, script).expect("write cmd");
+    }
+
+    #[cfg(not(target_os = "windows"))]
+    fn write_script(path: &Path, marker: &str) {
+        let script = format!("#!/bin/sh\necho {marker}\nexit 0\n");
+        std::fs::write(path, script).expect("write script");
+        let mut perms = std::fs::metadata(path)
+            .expect("script metadata")
+            .permissions();
+        use std::os::unix::fs::PermissionsExt;
+        perms.set_mode(0o755);
+        std::fs::set_permissions(path, perms).expect("chmod script");
+    }
+
+    #[cfg(target_os = "windows")]
+    fn write_argv_script(path: &Path) {
+        let script = "@echo off\r\nsetlocal enabledelayedexpansion\r\nset out=\r\n:loop\r\nif \"%~1\"==\"\" goto done\r\nif defined out (set out=!out!|%~1) else (set out=%~1)\r\nshift\r\ngoto loop\r\n:done\r\necho %out%\r\nexit /b 0\r\n";
+        std::fs::write(path, script).expect("write argv cmd");
+    }
+
+    #[cfg(not(target_os = "windows"))]
+    fn write_argv_script(path: &Path) {
+        let script = "#!/bin/sh\nprintf '%s' \"$1\"\nshift\nfor arg in \"$@\"; do\n  printf '|%s' \"$arg\"\ndone\nprintf '\\n'\nexit 0\n";
+        std::fs::write(path, script).expect("write argv script");
+        let mut perms = std::fs::metadata(path)
+            .expect("script metadata")
+            .permissions();
+        use std::os::unix::fs::PermissionsExt;
+        perms.set_mode(0o755);
+        std::fs::set_permissions(path, perms).expect("chmod script");
+    }
+
+    #[test]
+    fn gemini_config_dir_is_injected_when_missing_api_key() {
+        let tmp = tempfile::tempdir().expect("tempdir");
+        let gem_dir = tmp.path().join(".gemini");
+        std::fs::create_dir_all(&gem_dir).expect("create .gemini");
+
+        let mut env: HashMap<String, String> = HashMap::new();
+        maybe_set_gemini_config_dir(&mut env, Some(tmp.path().to_string_lossy().to_string()));
+
+        assert_eq!(
+            env.get("GEMINI_CONFIG_DIR"),
+            Some(&gem_dir.to_string_lossy().to_string())
+        );
+    }
+
+    #[test]
+    fn gemini_config_dir_not_overwritten_when_api_key_present() {
+        let tmp = tempfile::tempdir().expect("tempdir");
+        let mut env: HashMap<String, String> = HashMap::new();
+        env.insert("GEMINI_API_KEY".to_string(), "abc".to_string());
+
+        maybe_set_gemini_config_dir(&mut env, Some(tmp.path().to_string_lossy().to_string()));
+
+        assert!(!env.contains_key("GEMINI_CONFIG_DIR"));
+    }
+
+    #[test]
+    fn prune_terminal_agents_caps_completed_state() {
+        let mut manager = AgentManager::new();
+        let now = chrono::Utc::now();
+        let total = MAX_TRACKED_TERMINAL_AGENTS + 64;
+
+        for idx in 0..total {
+            let id = format!("agent-{idx}");
+            manager.agents.insert(
+                id.clone(),
+                Agent {
+                    id,
+                    batch_id: Some("batch-1".to_string()),
+                    model: "code-gpt-5.3-codex".to_string(),
+                    name: Some("Prune Test".to_string()),
+                    prompt: "prompt".repeat(256),
+                    context: Some("ctx".repeat(256)),
+                    output_goal: Some("goal".repeat(256)),
+                    files: vec!["a".repeat(256)],
+                    read_only: false,
+                    status: AgentStatus::Completed,
+                    result: Some("result".repeat(1024)),
+                    error: None,
+                    created_at: now,
+                    started_at: Some(now),
+                    completed_at: Some(now + chrono::Duration::seconds(idx as i64)),
+                    progress: vec!["progress".repeat(1024)],
+                    worktree_path: Some("/tmp/wt".to_string()),
+                    branch_name: Some("code-branch".to_string()),
+                    worktree_base: None,
+                    source_kind: None,
+                    log_tag: None,
+                    config: None,
+                    reasoning_effort: ReasoningEffort::Low,
+                    last_activity: now,
+                },
+            );
+        }
+
+        manager.prune_terminal_agents();
+
+        assert!(manager.agents.len() <= MAX_TRACKED_TERMINAL_AGENTS);
+        assert!(
+            manager
+                .agents
+                .values()
+                .all(|agent| !agent.worktree_path.as_deref().unwrap_or_default().is_empty()),
+            "worktree metadata should be retained for remaining terminal agents"
+        );
+    }
+
+    #[test]
+    fn finalize_terminal_agent_compacts_heavy_fields_and_keeps_worktree() {
+        let mut manager = AgentManager::new();
+        let now = chrono::Utc::now();
+        let agent_id = "agent-finalize".to_string();
+
+        manager.agents.insert(
+            agent_id.clone(),
+            Agent {
+                id: agent_id.clone(),
+                batch_id: Some("batch-compact".to_string()),
+                model: "code-gpt-5.3-codex".to_string(),
+                name: Some("Finalize".to_string()),
+                prompt: "prompt".repeat(1024),
+                context: Some("context".repeat(1024)),
+                output_goal: Some("goal".repeat(1024)),
+                files: vec!["file".repeat(1024)],
+                read_only: false,
+                status: AgentStatus::Completed,
+                result: Some("result".repeat(32 * 1024)),
+                error: None,
+                created_at: now,
+                started_at: Some(now),
+                completed_at: Some(now),
+                progress: (0..(MAX_AGENT_PROGRESS_ENTRIES + 20))
+                    .map(|idx| format!("progress-entry-{idx}-{}", "x".repeat(512)))
+                    .collect(),
+                worktree_path: Some("/tmp/wt-stays".to_string()),
+                branch_name: Some("branch-stays".to_string()),
+                worktree_base: None,
+                source_kind: None,
+                log_tag: None,
+                config: None,
+                reasoning_effort: ReasoningEffort::Low,
+                last_activity: now,
+            },
+        );
+
+        manager.finalize_terminal_agent(&agent_id);
+
+        let agent = manager
+            .agents
+            .get(&agent_id)
+            .expect("agent should still be tracked");
+        assert!(agent.prompt.is_empty());
+        assert!(agent.context.is_none());
+        assert!(agent.output_goal.is_none());
+        assert!(agent.files.is_empty());
+        assert_eq!(agent.worktree_path.as_deref(), Some("/tmp/wt-stays"));
+        assert_eq!(agent.branch_name.as_deref(), Some("branch-stays"));
+        assert!(agent.progress.len() <= MAX_AGENT_PROGRESS_ENTRIES);
+
+        let result_len = agent
+            .result
+            .as_ref()
+            .map(String::len)
+            .expect("result retained");
+        assert!(
+            result_len <= MAX_AGENT_RESULT_BYTES + 4,
+            "result should be compacted to bounded size"
+        );
+    }
+
+    #[test]
+    fn pruned_terminal_agent_remains_queryable_for_session() {
+        let mut manager = AgentManager::new();
+        let now = chrono::Utc::now();
+        let batch_id = "batch-session".to_string();
+        let total = MAX_TRACKED_TERMINAL_AGENTS + 8;
+
+        for idx in 0..total {
+            let id = format!("agent-{idx}");
+            manager.agents.insert(
+                id.clone(),
+                Agent {
+                    id,
+                    batch_id: Some(batch_id.clone()),
+                    model: "code-gpt-5.3-codex".to_string(),
+                    name: Some("Archive Test".to_string()),
+                    prompt: "prompt".to_string(),
+                    context: None,
+                    output_goal: None,
+                    files: Vec::new(),
+                    read_only: false,
+                    status: AgentStatus::Completed,
+                    result: Some("ok".to_string()),
+                    error: None,
+                    created_at: now,
+                    started_at: Some(now),
+                    completed_at: Some(now + chrono::Duration::seconds(idx as i64)),
+                    progress: vec!["progress".to_string()],
+                    worktree_path: Some(format!("/tmp/worktree-{idx}")),
+                    branch_name: Some(format!("code-branch-{idx}")),
+                    worktree_base: None,
+                    source_kind: None,
+                    log_tag: None,
+                    config: None,
+                    reasoning_effort: ReasoningEffort::Low,
+                    last_activity: now,
+                },
+            );
+        }
+
+        manager.prune_terminal_agents();
+
+        let archived_id = "agent-0";
+        assert!(manager.agents.get(archived_id).is_none());
+        let archived = manager
+            .get_agent(archived_id)
+            .expect("pruned agent should remain queryable");
+        assert_eq!(archived.worktree_path.as_deref(), Some("/tmp/worktree-0"));
+        assert_eq!(archived.branch_name.as_deref(), Some("code-branch-0"));
+
+        let listed = manager.list_agents(None, Some(batch_id), false);
+        assert!(listed.iter().any(|agent| {
+            agent.id == archived_id
+                && agent.worktree_path.as_deref() == Some("/tmp/worktree-0")
+                && agent.branch_name.as_deref() == Some("code-branch-0")
+        }));
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct CheckAgentStatusParams {
     pub agent_id: String,
+    pub batch_id: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct GetAgentResultParams {
     pub agent_id: String,
+    pub batch_id: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

@@ -6,10 +6,12 @@ use std::io::BufWriter;
 use std::io::Write;
 use std::path::{Path, PathBuf};
 
+use filetime::{set_file_mtime, FileTime};
 use tempfile::TempDir;
 use time::OffsetDateTime;
 use time::PrimitiveDateTime;
 use time::format_description::FormatItem;
+use time::format_description::well_known::Rfc3339;
 use time::macros::format_description;
 use uuid::Uuid;
 
@@ -19,8 +21,9 @@ use crate::rollout::list::ConversationsPage;
 use crate::rollout::list::Cursor;
 use crate::rollout::list::get_conversation;
 use crate::rollout::list::get_conversations;
+use std::time::{Duration, SystemTime};
 use code_protocol::models::{ContentItem, ResponseItem};
-use code_protocol::ConversationId;
+use code_protocol::ThreadId;
 use code_protocol::protocol::{
     EventMsg as ProtoEventMsg,
     RecordedEvent,
@@ -117,15 +120,18 @@ fn write_session_file(
     let file = File::create(file_path)?;
     let mut writer = BufWriter::new(file);
 
-    let conversation_id = ConversationId::from(uuid);
+    let conversation_id = ThreadId::from_string(&uuid.to_string()).unwrap();
     let session_meta = SessionMeta {
         id: conversation_id,
         timestamp: ts_str.to_string(),
         cwd: Path::new(".").to_path_buf(),
         originator: "test_originator".to_string(),
         cli_version: "test_version".to_string(),
-        instructions: None,
         source: source.unwrap_or_default(),
+        model_provider: None,
+        base_instructions: None,
+        dynamic_tools: None,
+        forked_from_id: None,
     };
     let session_meta_line = RolloutLine {
         timestamp: ts_str.to_string(),
@@ -144,8 +150,9 @@ fn write_session_file(
             order: None,
             msg: ProtoEventMsg::UserMessage(UserMessageEvent {
                 message: format!("Message {i}"),
-                kind: None,
                 images: None,
+                local_images: vec![],
+                text_elements: vec![],
             }),
         };
         let line = RolloutLine {
@@ -181,13 +188,16 @@ async fn test_resume_reconstruct_history_drops_user_events() {
     let mut writer = BufWriter::new(File::create(&rollout_path).unwrap());
 
     let session_meta = SessionMeta {
-        id: ConversationId::from(session_uuid),
+        id: ThreadId::from_string(&session_uuid.to_string()).unwrap(),
         timestamp: "2025-10-06T09:00:00.000Z".to_string(),
         cwd: workspace.clone(),
         originator: "regression-test".to_string(),
         cli_version: "0.0.0-test".to_string(),
-        instructions: Some("explain async/await".to_string()),
         source: SessionSource::Cli,
+        model_provider: None,
+        base_instructions: None,
+        dynamic_tools: None,
+        forked_from_id: None,
     };
     serde_json::to_writer(&mut writer, &RolloutLine {
         timestamp: session_meta.timestamp.clone(),
@@ -205,8 +215,9 @@ async fn test_resume_reconstruct_history_drops_user_events() {
         order: None,
         msg: ProtoEventMsg::UserMessage(UserMessageEvent {
             message: "hi there".to_string(),
-            kind: None,
             images: None,
+            local_images: vec![],
+            text_elements: vec![],
         }),
     };
     serde_json::to_writer(&mut writer, &RolloutLine {
@@ -221,8 +232,7 @@ async fn test_resume_reconstruct_history_drops_user_events() {
         role: "assistant".to_string(),
         content: vec![ContentItem::OutputText {
             text: "Sure, let's talk about async/await.".to_string(),
-        }],
-    };
+        }], end_turn: None, phase: None};
     serde_json::to_writer(&mut writer, &RolloutLine {
         timestamp: "2025-10-06T09:00:02.000Z".to_string(),
         item: RolloutItem::ResponseItem(assistant_response),
@@ -426,7 +436,7 @@ async fn test_pagination_cursor() {
     ];
     let expected_cursor1: Cursor =
         serde_json::from_str(&format!("\"2025-03-04T09-00-00|{u4}\"")).unwrap();
-    assert_page_summary(&page1, &expected_page1_items, Some(expected_cursor1.clone()), 3);
+    assert_page_summary(&page1, &expected_page1_items, Some(expected_cursor1.clone()), 5);
 
     let page2 = get_conversations(
         home,
@@ -522,6 +532,69 @@ async fn test_get_conversation_contents() {
         let item_type = value.get("type").and_then(|v| v.as_str());
         assert_eq!(item_type, Some("event"), "line {idx} should be event");
     }
+}
+
+#[tokio::test]
+async fn test_list_conversations_prefers_recent_mtime() {
+    let temp = TempDir::new().unwrap();
+    let home = temp.path();
+
+    let older_uuid = Uuid::from_u128(0x11);
+    let newer_uuid = Uuid::from_u128(0x22);
+
+    write_session_file(
+        home,
+        "2025-08-01T10-00-00",
+        older_uuid,
+        1,
+        Some(SessionSource::VSCode),
+    )
+    .unwrap();
+    write_session_file(
+        home,
+        "2025-09-01T10-00-00",
+        newer_uuid,
+        1,
+        Some(SessionSource::VSCode),
+    )
+    .unwrap();
+
+    let older_path = home
+        .join("sessions")
+        .join("2025")
+        .join("08")
+        .join("01")
+        .join(format!("rollout-2025-08-01T10-00-00-{older_uuid}.jsonl"));
+
+    let future_time = SystemTime::now() + Duration::from_secs(300);
+    set_file_mtime(&older_path, FileTime::from_system_time(future_time)).unwrap();
+
+    let page = get_conversations(home, 1, None, INTERACTIVE_SESSION_SOURCES)
+        .await
+        .unwrap();
+
+    let first = page.items.first().expect("expected at least one session");
+    assert_eq!(first.path, older_path);
+
+    let modified_at = first
+        .modified_at
+        .as_deref()
+        .expect("expected modified_at");
+    let updated_at = first
+        .updated_at
+        .as_deref()
+        .expect("expected updated_at");
+
+    let modified_dt = OffsetDateTime::parse(modified_at, &Rfc3339).expect("parse modified_at");
+    let format: &[FormatItem] =
+        format_description!("[year]-[month]-[day]T[hour]-[minute]-[second]");
+    let updated_dt = PrimitiveDateTime::parse(updated_at, format)
+        .expect("parse updated_at")
+        .assume_utc();
+    assert!(
+        modified_dt > updated_dt,
+        "modified_at should reflect newer filesystem mtime"
+    );
 }
 
 #[tokio::test]

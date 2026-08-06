@@ -92,6 +92,7 @@ pub fn current_theme() -> Theme {
     CURRENT_THEME.read().unwrap().clone()
 }
 
+#[allow(dead_code)]
 pub(crate) fn current_theme_name() -> ThemeName {
     *CURRENT_THEME_NAME.read().unwrap()
 }
@@ -102,11 +103,13 @@ pub fn custom_theme_label() -> Option<String> {
 }
 
 /// Set/update the custom theme's label at runtime
+#[allow(dead_code)]
 pub fn set_custom_theme_label(label: String) {
     *CUSTOM_THEME_LABEL.write().unwrap() = Some(label);
 }
 
 /// Set/update the custom theme's colors at runtime
+#[allow(dead_code)]
 pub fn set_custom_theme_colors(colors: code_core::config_types::ThemeColors) {
     *CUSTOM_THEME_COLORS.write().unwrap() = Some(colors);
 }
@@ -116,6 +119,7 @@ pub fn custom_theme_colors() -> Option<code_core::config_types::ThemeColors> {
     CUSTOM_THEME_COLORS.read().unwrap().clone()
 }
 
+#[allow(dead_code)]
 pub fn set_custom_theme_is_dark(is_dark: Option<bool>) {
     *CUSTOM_THEME_IS_DARK.write().unwrap() = is_dark;
 }

@@ -1,4 +1,5 @@
 use crate::exec::ExecToolCallOutput;
+use chrono::{DateTime, Duration as ChronoDuration, Utc};
 use reqwest::StatusCode;
 use serde_json;
 use std::io;
@@ -36,9 +37,48 @@ pub enum SandboxErr {
     #[error("command was killed by a signal")]
     Signal(i32),
 
+    /// Command exceeded its memory limit and was killed.
+    #[error(
+        "command exceeded memory limit{}",
+        memory_max_bytes
+            .map(|bytes| format!(": {} bytes", bytes))
+            .unwrap_or_default()
+    )]
+    OutOfMemory {
+        output: Box<ExecToolCallOutput>,
+        memory_max_bytes: Option<u64>,
+    },
+
     /// Error from linux landlock
     #[error("Landlock was not able to fully enforce all sandbox rules")]
     LandlockRestrict,
+}
+
+#[derive(Debug, Clone)]
+pub struct RetryAfter {
+    pub delay: Duration,
+    pub resume_at: DateTime<Utc>,
+}
+
+impl RetryAfter {
+    pub fn from_duration(delay: Duration, now: DateTime<Utc>) -> Self {
+        let resume_at = now
+            + ChronoDuration::from_std(delay)
+                .unwrap_or_else(|_| ChronoDuration::zero());
+        Self { delay, resume_at }
+    }
+
+    pub fn from_resume_at(resume_at: DateTime<Utc>, now: DateTime<Utc>) -> Self {
+        let clamped = if resume_at < now { now } else { resume_at };
+        let delay = clamped
+            .signed_duration_since(now)
+            .to_std()
+            .unwrap_or_else(|_| Duration::ZERO);
+        Self {
+            delay,
+            resume_at: clamped,
+        }
+    }
 }
 
 #[derive(Error, Debug)]
@@ -50,7 +90,7 @@ pub enum CodexErr {
     ///
     /// Optionally includes the requested delay before retrying the turn.
     #[error("stream disconnected before completion: {0}")]
-    Stream(String, Option<Duration>),
+    Stream(String, Option<RetryAfter>, Option<String>),
 
     #[error("no conversation with id: {0}")]
     ConversationNotFound(Uuid),
@@ -79,6 +119,15 @@ pub enum CodexErr {
     #[error("{0}")]
     UsageLimitReached(UsageLimitReachedError),
 
+    #[error("{0}")]
+    ModelCap(ModelCapError),
+
+    #[error("Quota exceeded. Check your plan and billing details.")]
+    QuotaExceeded,
+
+    #[error("Authentication expired. {0}")]
+    AuthRefreshPermanent(String),
+
     #[error(
         "To use Codex with your ChatGPT plan, upgrade to Plus: https://openai.com/chatgpt/pricing."
     )]
@@ -91,6 +140,9 @@ pub enum CodexErr {
     /// without having to plumb additional fields everywhere.
     #[error("{0}")]
     ServerError(String),
+
+    #[error("server overloaded")]
+    ServerOverloaded,
 
     /// Retry limit exceeded.
     #[error("{0}")]
@@ -164,6 +216,9 @@ impl std::error::Error for UnexpectedResponseError {}
 pub struct RetryLimitReachedError {
     pub status: StatusCode,
     pub request_id: Option<String>,
+    /// Whether the underlying failure looked transient (network/5xx/429/etc.).
+    /// Callers can use this to decide if longer-horizon retries are safe.
+    pub retryable: bool,
 }
 
 impl std::fmt::Display for RetryLimitReachedError {
@@ -184,6 +239,14 @@ impl std::fmt::Display for RetryLimitReachedError {
 pub struct UsageLimitReachedError {
     pub plan_type: Option<String>,
     pub resets_in_seconds: Option<u64>,
+}
+
+impl UsageLimitReachedError {
+    pub fn retry_after(&self, now: DateTime<Utc>) -> Option<RetryAfter> {
+        let seconds = self.resets_in_seconds?;
+        let delay = Duration::from_secs(seconds).saturating_add(Duration::from_secs(5));
+        Some(RetryAfter::from_duration(delay, now))
+    }
 }
 
 impl std::fmt::Display for UsageLimitReachedError {
@@ -216,6 +279,30 @@ impl std::fmt::Display for UsageLimitReachedError {
     }
 }
 
+#[derive(Debug)]
+pub struct ModelCapError {
+    pub model: String,
+    pub reset_after_seconds: Option<u64>,
+}
+
+impl std::fmt::Display for ModelCapError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let mut message = format!(
+            "Model {} is at capacity. Please try a different model.",
+            self.model
+        );
+        if let Some(seconds) = self.reset_after_seconds {
+            message.push_str(&format!(
+                " Try again in {}.",
+                format_duration_short(seconds)
+            ));
+        } else {
+            message.push_str(" Try again later.");
+        }
+        write!(f, "{message}")
+    }
+}
+
 fn format_reset_duration(total_secs: u64) -> String {
     let days = total_secs / 86_400;
     let hours = (total_secs % 86_400) / 3_600;
@@ -244,6 +331,32 @@ fn format_reset_duration(total_secs: u64) -> String {
         2 => format!("{} {}", parts[0], parts[1]),
         _ => format!("{} {} {}", parts[0], parts[1], parts[2]),
     }
+}
+
+fn format_duration_short(seconds: u64) -> String {
+    if seconds < 60 {
+        return "less than a minute".to_string();
+    }
+
+    let minutes = seconds / 60;
+    let hours = minutes / 60;
+    let days = hours / 24;
+
+    if days > 0 {
+        let unit = if days == 1 { "day" } else { "days" };
+        return format!("{days} {unit}");
+    }
+    if hours > 0 {
+        let unit = if hours == 1 { "hour" } else { "hours" };
+        let remainder_minutes = minutes % 60;
+        if remainder_minutes == 0 {
+            return format!("{hours} {unit}");
+        }
+        let min_unit = if remainder_minutes == 1 { "minute" } else { "minutes" };
+        return format!("{hours} {unit} {remainder_minutes} {min_unit}");
+    }
+    let unit = if minutes == 1 { "minute" } else { "minutes" };
+    format!("{minutes} {unit}")
 }
 
 #[derive(Debug)]
@@ -278,6 +391,15 @@ impl CodexErr {
 pub fn get_error_message_ui(e: &CodexErr) -> String {
     match e {
         CodexErr::Sandbox(SandboxErr::Denied { output }) => output.stderr.text.clone(),
+        CodexErr::Sandbox(SandboxErr::OutOfMemory {
+            output,
+            memory_max_bytes,
+        }) => {
+            let limit_note = memory_max_bytes
+                .map(|bytes| format!(" (memory.max={bytes} bytes)"))
+                .unwrap_or_default();
+            format!("error: command exceeded memory limit{limit_note}\n{}", output.stderr.text)
+        }
         // Timeouts are not sandbox errors from a UX perspective; present them plainly
         CodexErr::Sandbox(SandboxErr::Timeout { output }) => format!(
             "error: command timed out after {} ms",

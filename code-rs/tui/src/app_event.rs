@@ -1,32 +1,50 @@
+use code_core::config_types::AutoDriveModelRoutingEntry;
 use code_core::config_types::ReasoningEffort;
+use code_core::config_types::ContextMode;
+use code_core::config_types::ServiceTier;
 use code_core::config_types::TextVerbosity;
 use code_core::config_types::ThemeName;
 use code_core::protocol::Event;
 use code_core::protocol::OrderMeta;
 use code_core::protocol::ValidationGroup;
 use code_core::protocol::ApprovedCommandMatchKind;
+use code_core::protocol::TokenUsage;
 use code_core::git_info::CommitLogEntry;
 use code_core::protocol::ReviewContextMetadata;
 use code_file_search::FileMatch;
+use code_common::model_presets::ModelPreset;
 use crossterm::event::KeyEvent;
 use crossterm::event::MouseEvent;
 use ratatui::text::Line;
 use crate::streaming::StreamKind;
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum ModelSelectionKind {
+    Session,
+    Review,
+    Planning,
+    AutoDrive,
+    ReviewResolve,
+    AutoReview,
+    AutoReviewResolve,
+}
 use crate::history::state::HistorySnapshot;
 use std::time::Duration;
+use uuid::Uuid;
 
 use code_git_tooling::{GhostCommit, GitToolingError};
 use code_cloud_tasks_client::{ApplyOutcome, CloudTaskError, CreatedTask, TaskSummary};
 
 use crate::app::ChatWidgetArgs;
-use crate::bottom_pane::chrome_selection_view::ChromeLaunchOption;
+use crate::chrome_launch::ChromeLaunchOption;
 use crate::slash_command::SlashCommand;
 use code_protocol::models::ResponseItem;
+use code_protocol::request_user_input::RequestUserInputResponse;
 use std::fmt;
 use std::path::PathBuf;
 use std::sync::mpsc::Sender as StdSender;
 use crate::cloud_tasks_service::CloudEnvironment;
-use crate::chatwidget::auto_coordinator::TurnConfig;
+use crate::resume::discovery::ResumeCandidate;
 
 /// Wrapper to allow including non-Debug types in Debug enums without leaking internals.
 pub(crate) struct Redacted<T>(pub T);
@@ -70,6 +88,12 @@ pub(crate) enum TerminalAfter {
     RefreshAgentsAndClose { selected_index: usize },
 }
 
+#[derive(Debug, Clone)]
+pub(crate) enum GitInitResume {
+    SubmitText { text: String },
+    DispatchCommand { command: SlashCommand, command_text: String },
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum BackgroundPlacement {
     /// Default: append to the end of the current request/history window.
@@ -78,83 +102,13 @@ pub(crate) enum BackgroundPlacement {
     BeforeNextOutput,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) enum AutoCoordinatorStatus {
-    Continue,
-    Success,
-    Failed,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) enum AutoObserverStatus {
-    Ok,
-    Failing,
-}
-
-impl Default for AutoObserverStatus {
-    fn default() -> Self {
-        Self::Ok
-    }
-}
-
-#[derive(Debug, Clone, Default)]
-pub(crate) struct AutoObserverTelemetry {
-    pub trigger_count: u64,
-    pub last_status: AutoObserverStatus,
-    pub last_intervention: Option<String>,
-}
-
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub(crate) enum AutoContinueMode {
-    Immediate,
-    TenSeconds,
-    SixtySeconds,
-    Manual,
-}
-
-impl Default for AutoContinueMode {
-    fn default() -> Self {
-        Self::TenSeconds
-    }
-}
-
-impl AutoContinueMode {
-    pub fn seconds(self) -> Option<u8> {
-        match self {
-            Self::Immediate => Some(0),
-            Self::TenSeconds => Some(10),
-            Self::SixtySeconds => Some(60),
-            Self::Manual => None,
-        }
-    }
-
-    pub fn label(self) -> &'static str {
-        match self {
-            Self::Immediate => "Immediate",
-            Self::TenSeconds => "10 seconds",
-            Self::SixtySeconds => "60 seconds",
-            Self::Manual => "Manual approval",
-        }
-    }
-
-    pub fn cycle_forward(self) -> Self {
-        match self {
-            Self::Immediate => Self::TenSeconds,
-            Self::TenSeconds => Self::SixtySeconds,
-            Self::SixtySeconds => Self::Manual,
-            Self::Manual => Self::Immediate,
-        }
-    }
-
-    pub fn cycle_backward(self) -> Self {
-        match self {
-            Self::Immediate => Self::Manual,
-            Self::TenSeconds => Self::Immediate,
-            Self::SixtySeconds => Self::TenSeconds,
-            Self::Manual => Self::SixtySeconds,
-        }
-    }
-}
+pub(crate) use code_auto_drive_core::{
+    AutoContinueMode,
+    AutoCoordinatorStatus,
+    AutoTurnAgentsAction,
+    AutoTurnAgentsTiming,
+    AutoTurnCliAction,
+};
 
 #[allow(clippy::large_enum_variant)]
 #[derive(Debug)]
@@ -163,6 +117,17 @@ pub(crate) enum AppEvent {
 
     /// Request a redraw which will be debounced by the [`App`].
     RequestRedraw,
+
+    /// Update the model preset list used by the TUI model picker.
+    ///
+    /// The picker boots with built-in presets; when a remote-merged list arrives
+    /// asynchronously, the in-memory list is swapped and any open model
+    /// selection view is updated in-place.
+    #[allow(dead_code)]
+    ModelPresetsUpdated {
+        presets: Vec<ModelPreset>,
+        default_model: Option<String>,
+    },
 
     /// Actually draw the next frame.
     Redraw,
@@ -184,10 +149,24 @@ pub(crate) enum AppEvent {
         elapsed: Duration,
     },
 
+    /// Background auto-review baseline capture finished (non-blocking).
+    AutoReviewBaselineCaptured {
+        turn_sequence: u64,
+        result: Result<GhostCommit, GitToolingError>,
+    },
+
     /// Internal: flush any pending out-of-order ExecEnd events that did not
     /// receive a matching ExecBegin within a short pairing window. This lets
     /// the TUI render a fallback "Ran call_<id>" cell so output is not lost.
     FlushPendingExecEnds,
+    /// Internal: refresh frozen history cell heights after resize.
+    SyncHistoryVirtualization,
+    /// Internal: when interrupts queue up behind a stalled/idle stream,
+    /// finalize the stream and flush the queue so Exec/Tool cells render.
+    FlushInterruptsIfIdle,
+    /// Internal: re-check whether a turn-level spinner is truly stuck after a
+    /// short grace period.
+    RecheckSpinnerIfIdle,
 
     KeyEvent(KeyEvent),
 
@@ -196,41 +175,79 @@ pub(crate) enum AppEvent {
     /// Text pasted from the terminal clipboard.
     Paste(String),
 
+    /// Open the external editor with the current composer text.
+    OpenExternalEditor { initial: String },
+
     /// Request to exit the application gracefully.
     ExitRequest,
+
+    /// Clear the terminal UI and start a fresh chat.
+    ClearUi,
 
     /// Forward an `Op` to the Agent. Using an `AppEvent` for this avoids
     /// bubbling channels through layers of widgets.
     CodexOp(code_core::protocol::Op),
 
+    /// Submit a response for a pending `request_user_input` tool call.
+    RequestUserInputAnswer {
+        turn_id: String,
+        response: RequestUserInputResponse,
+    },
+
     AutoCoordinatorDecision {
+        seq: u64,
         status: AutoCoordinatorStatus,
-        progress_past: Option<String>,
-        progress_current: Option<String>,
-        cli_context: Option<String>,
-        cli_prompt: Option<String>,
+        status_title: Option<String>,
+        status_sent_to_user: Option<String>,
+        goal: Option<String>,
+        cli: Option<AutoTurnCliAction>,
+        agents_timing: Option<AutoTurnAgentsTiming>,
+        agents: Vec<AutoTurnAgentsAction>,
         transcript: Vec<ResponseItem>,
-        turn_config: Option<TurnConfig>,
+    },
+    AutoCoordinatorUserReply {
+        user_response: Option<String>,
+        cli_command: Option<String>,
     },
     AutoCoordinatorThinking {
         delta: String,
         summary_index: Option<u32>,
     },
+    AutoCoordinatorAction {
+        message: String,
+    },
+    AutoCoordinatorTokenMetrics {
+        total_usage: TokenUsage,
+        last_turn_usage: TokenUsage,
+        turn_count: u32,
+        duplicate_items: u32,
+        replay_updates: u32,
+    },
+    AutoCoordinatorCompactedHistory {
+        conversation: std::sync::Arc<[ResponseItem]>,
+        show_notice: bool,
+    },
+    AutoCoordinatorStopAck,
     AutoCoordinatorCountdown {
         countdown_id: u64,
         seconds_left: u8,
     },
-    AutoObserverReport {
-        status: AutoObserverStatus,
-        telemetry: AutoObserverTelemetry,
-        replace_message: Option<String>,
-        additional_instructions: Option<String>,
+    /// Trigger an automatic Auto Drive restart after a transient failure.
+    AutoCoordinatorRestart {
+        token: u64,
+        attempt: u32,
     },
-    AutoSetupToggleReview,
-    AutoSetupToggleSubagents,
-    AutoSetupSelectCountdown(AutoContinueMode),
-    AutoSetupConfirm,
-    AutoSetupCancel,
+    ShowAutoDriveSettings,
+    CloseAutoDriveSettings,
+    AutoDriveSettingsChanged {
+        review_enabled: bool,
+        agents_enabled: bool,
+        cross_check_enabled: bool,
+        qa_automation_enabled: bool,
+        model_routing_enabled: bool,
+        model_routing_entries: Vec<AutoDriveModelRoutingEntry>,
+        continue_mode: AutoContinueMode,
+    },
 
     /// Dispatch a recognized slash command from the UI (composer) to the app
     /// layer so it can be handled centrally. Includes the full command text.
@@ -248,6 +265,18 @@ pub(crate) enum AppEvent {
     /// initial prompt once the new session is ready.
     SwitchCwd(std::path::PathBuf, Option<String>),
 
+    /// Resume picker data finished loading
+    ResumePickerLoaded {
+        cwd: std::path::PathBuf,
+        candidates: Vec<ResumeCandidate>,
+    },
+
+    /// Resume picker failed to load
+    ResumePickerLoadFailed { message: String },
+
+    /// Session nickname update finished
+    SessionRenameCompleted { message: String },
+
     /// Signal that agents are about to start (triggered when /plan, /solve, /code commands are entered)
     PrepareAgents,
 
@@ -257,13 +286,93 @@ pub(crate) enum AppEvent {
         effort: Option<ReasoningEffort>,
     },
 
+    /// Update the session Fast mode service tier.
+    UpdateServiceTierSelection {
+        service_tier: Option<ServiceTier>,
+    },
+
+    /// Update the session context mode.
+    UpdateSessionContextModeSelection {
+        context_mode: Option<ContextMode>,
+    },
+
+    /// Update the dedicated review model + reasoning effort
+    UpdateReviewModelSelection {
+        model: String,
+        effort: ReasoningEffort,
+    },
+    /// Update the resolve model + reasoning effort for /review auto-resolve
+    UpdateReviewResolveModelSelection {
+        model: String,
+        effort: ReasoningEffort,
+    },
+    /// Toggle review model inheritance from chat model
+    UpdateReviewUseChatModel(bool),
+    /// Toggle resolve model inheritance from chat model
+    UpdateReviewResolveUseChatModel(bool),
+    /// Update the planning (read-only) model + reasoning effort
+    UpdatePlanningModelSelection {
+        model: String,
+        effort: ReasoningEffort,
+    },
+    /// Toggle planning model inheritance from chat model
+    UpdatePlanningUseChatModel(bool),
+
+    /// Update the Auto Drive model + reasoning effort
+    UpdateAutoDriveModelSelection {
+        model: String,
+        effort: ReasoningEffort,
+    },
+    /// Toggle Auto Drive model inheritance from chat model
+    UpdateAutoDriveUseChatModel(bool),
+
+    /// Update the Auto Review model + reasoning effort
+    UpdateAutoReviewModelSelection {
+        model: String,
+        effort: ReasoningEffort,
+    },
+    /// Toggle Auto Review model inheritance from chat model
+    UpdateAutoReviewUseChatModel(bool),
+
+    /// Update the Auto Review resolve model + reasoning effort
+    UpdateAutoReviewResolveModelSelection {
+        model: String,
+        effort: ReasoningEffort,
+    },
+    /// Toggle Auto Review resolve model inheritance from chat model
+    UpdateAutoReviewResolveUseChatModel(bool),
+
+    /// Model selection UI closed (accepted or cancelled)
+    ModelSelectionClosed {
+        target: ModelSelectionKind,
+        accepted: bool,
+    },
+
     /// Update the text verbosity level
     UpdateTextVerbosity(TextVerbosity),
 
-    /// Update GitHub workflow monitoring toggle
-    UpdateGithubWatcher(bool),
     /// Update the TUI notifications toggle
     UpdateTuiNotifications(bool),
+    /// Enable or disable Auto Resolve for review flows
+    UpdateReviewAutoResolveEnabled(bool),
+    /// Enable or disable background Auto Review
+    UpdateAutoReviewEnabled(bool),
+    /// Set the maximum number of Auto Resolve re-review attempts
+    UpdateReviewAutoResolveAttempts(u32),
+    /// Set the maximum number of Auto Review follow-up reviews
+    UpdateAutoReviewFollowupAttempts(u32),
+    /// Open the review model selector overlay
+    ShowReviewModelSelector,
+    /// Open the resolve model selector overlay for /review auto-resolve
+    ShowReviewResolveModelSelector,
+    /// Open the planning model selector overlay
+    ShowPlanningModelSelector,
+    /// Open the Auto Drive model selector overlay
+    ShowAutoDriveModelSelector,
+    /// Open the Auto Review review model selector overlay
+    ShowAutoReviewModelSelector,
+    /// Open the Auto Review resolve model selector overlay
+    ShowAutoReviewResolveModelSelector,
     /// Enable/disable a specific validation tool
     UpdateValidationTool { name: String, enable: bool },
     /// Enable/disable an entire validation group
@@ -272,13 +381,31 @@ pub(crate) enum AppEvent {
     RequestValidationToolInstall { name: String, command: String },
 
     /// Enable/disable a specific MCP server
+    #[allow(dead_code)]
     UpdateMcpServer { name: String, enable: bool },
 
     /// Prefill the composer input with the given text
+    #[allow(dead_code)]
     PrefillComposer(String),
+
+    /// Confirm and run git init, then resume a pending action.
+    ConfirmGitInit { resume: GitInitResume },
+    /// Continue without git; disables git-dependent actions for this session.
+    DeclineGitInit,
+    /// Git init completed (success or failure).
+    GitInitFinished { ok: bool, message: String },
 
     /// Submit a message with hidden preface instructions
     SubmitTextWithPreface { visible: String, preface: String },
+
+    /// Submit a hidden message that is not rendered in history but still sent to the LLM.
+    /// When `surface_notice` is true, the TUI shows a developer-style notice with the
+    /// injected text; when false, the injection is silent.
+    SubmitHiddenTextWithPreface {
+        agent_text: String,
+        preface: String,
+        surface_notice: bool,
+    },
 
     /// Run a review with an explicit prompt/hint pair (used by TUI selections)
     RunReviewWithScope {
@@ -289,11 +416,26 @@ pub(crate) enum AppEvent {
         auto_resolve: bool,
     },
 
+    /// Background Auto Review lifecycle notifications
+    BackgroundReviewStarted {
+        worktree_path: PathBuf,
+        branch: String,
+        agent_id: Option<String>,
+        snapshot: Option<String>,
+    },
+    BackgroundReviewFinished {
+        worktree_path: PathBuf,
+        branch: String,
+        has_findings: bool,
+        findings: usize,
+        summary: Option<String>,
+        error: Option<String>,
+        agent_id: Option<String>,
+        snapshot: Option<String>,
+    },
+
     /// Run the review command with the given argument string (mirrors `/review <args>`)
     RunReviewCommand(String),
-
-    /// Toggle the persisted auto-resolve setting for reviews.
-    ToggleReviewAutoResolve,
 
     /// Open a bottom-pane form that lets the user select a commit to review.
     StartReviewCommitPicker,
@@ -347,6 +489,7 @@ pub(crate) enum AppEvent {
     },
 
     /// Update the theme (with history event)
+    #[allow(dead_code)]
     UpdateTheme(ThemeName),
     /// Add or update a subagent command in memory (UI already persisted to config.toml)
     UpdateSubagentCommand(code_core::config_types::SubagentCommandConfig),
@@ -358,6 +501,8 @@ pub(crate) enum AppEvent {
     ShowAgentsOverview,
     /// Open the agent editor form for a specific agent name
     ShowAgentEditor { name: String },
+    /// Open a blank agent editor form for adding a new agent
+    ShowAgentEditorNew,
     // ShowSubagentEditor removed; use ShowSubagentEditorForName or ShowSubagentEditorNew
     /// Open the subagent editor for a specific command name; ChatWidget supplies data
     ShowSubagentEditorForName { name: String },
@@ -365,13 +510,18 @@ pub(crate) enum AppEvent {
     ShowSubagentEditorNew,
 
     /// Preview theme (no history event)
+    #[allow(dead_code)]
     PreviewTheme(ThemeName),
     /// Update the loading spinner style (with history event)
+    #[allow(dead_code)]
     UpdateSpinner(String),
     /// Preview loading spinner (no history event)
+    #[allow(dead_code)]
     PreviewSpinner(String),
     /// Rotate access/safety preset (Read Only → Write with Approval → Full Access)
     CycleAccessMode,
+    /// Cycle Auto Drive composer styling variants (Sentinel → Whisper → …)
+    CycleAutoDriveVariant,
     /// Bottom composer expanded (e.g., slash command popup opened)
     ComposerExpanded,
 
@@ -413,6 +563,9 @@ pub(crate) enum AppEvent {
     /// Background rate limit refresh failed (threaded request).
     RateLimitFetchFailed { message: String },
 
+    /// Background rate limit refresh persisted an account snapshot.
+    RateLimitSnapshotStored { account_id: String },
+
     #[allow(dead_code)]
     StartCommitAnimation,
     #[allow(dead_code)]
@@ -425,10 +578,18 @@ pub(crate) enum AppEvent {
 
     /// Begin ChatGPT login flow from the in-app login manager.
     LoginStartChatGpt,
+    /// Begin device code login flow from the in-app login manager.
+    LoginStartDeviceCode,
     /// Cancel an in-progress ChatGPT login flow triggered via `/login`.
     LoginCancelChatGpt,
     /// ChatGPT login flow has completed (success or failure).
     LoginChatGptComplete { result: Result<(), String> },
+    /// Device code login flow produced a user code/link.
+    LoginDeviceCodeReady { authorize_url: String, user_code: String },
+    /// Device code login flow failed before completion.
+    LoginDeviceCodeFailed { message: String },
+    /// Device code login flow completed (success or failure).
+    LoginDeviceCodeComplete { result: Result<(), String> },
     /// The active authentication mode changed (e.g., switched accounts).
     LoginUsingChatGptChanged { using_chatgpt_auth: bool },
 
@@ -511,12 +672,19 @@ pub(crate) enum AppEvent {
         ack: Redacted<StdSender<TerminalCommandGate>>,
     },
     TerminalApprovalDecision { id: u64, approved: bool },
+    StartAutoDriveCelebration {
+        message: Option<String>,
+    },
+    StopAutoDriveCelebration,
     RunUpdateCommand {
         command: Vec<String>,
         display: String,
         latest_version: Option<String>,
     },
     SetAutoUpgradeEnabled(bool),
+    SetMemoriesEnabled(bool),
+    SetAutoSwitchAccountsOnRateLimit(bool),
+    SetApiKeyFallbackOnAllAccountsLimited(bool),
     RequestAgentInstall { name: String, selected_index: usize },
     AgentsOverviewSelectionChanged { index: usize },
     /// Add or update an agent's settings (enabled, params, instructions)
@@ -526,6 +694,13 @@ pub(crate) enum AppEvent {
         args_read_only: Option<Vec<String>>,
         args_write: Option<Vec<String>>,
         instructions: Option<String>,
+        description: Option<String>,
+        command: String,
+    },
+    AgentValidationFinished {
+        name: String,
+        result: Result<(), String>,
+        attempt_id: Uuid,
     },
     
 }

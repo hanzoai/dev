@@ -2,36 +2,43 @@
 
 use crate::app_event::AppEvent;
 use crate::app_event_sender::AppEventSender;
+use crate::auto_drive_style::AutoDriveVariant;
+use crate::bottom_pane::chat_composer::ComposerRenderMode;
 use crate::chatwidget::BackgroundOrderTicket;
 use crate::user_approval_widget::{ApprovalRequest, UserApprovalWidget};
-use bottom_pane_view::BottomPaneView;
+use crate::thread_spawner;
+pub(crate) use bottom_pane_view::BottomPaneView;
+pub(crate) use bottom_pane_view::ConditionalUpdate;
 use crate::util::buffer::fill_rect;
+use code_protocol::custom_prompts::CustomPrompt;
+use code_protocol::skills::Skill;
 use code_core::protocol::TokenUsage;
 use code_file_search::FileMatch;
 use crossterm::event::{KeyCode, KeyEvent, KeyEventKind};
 use ratatui::buffer::Buffer;
 use ratatui::layout::Rect;
-use ratatui::text::{Line, Span};
-use ratatui::widgets::{Widget, WidgetRef};
+use ratatui::widgets::WidgetRef;
 use std::time::Duration;
 
 mod approval_modal_view;
 #[cfg(feature = "code-fork")]
 mod approval_ui;
 mod auto_coordinator_view;
+mod auto_drive_settings_view;
+mod account_switch_settings_view;
+mod memories_settings_view;
 mod bottom_pane_view;
 mod chat_composer;
 mod chat_composer_history;
-pub mod chrome_selection_view;
 mod diff_popup;
 mod custom_prompt_view;
+pub(crate) mod prompt_args;
 mod command_popup;
 mod file_search_popup;
 mod paste_burst;
 mod popup_consts;
-mod agent_editor_view;
-mod agents_overview_view;
-mod model_selection_view;
+pub(crate) mod agent_editor_view;
+pub(crate) mod model_selection_view;
 mod scroll_state;
 mod selection_popup_common;
 pub mod list_selection_view;
@@ -41,18 +48,25 @@ mod cloud_tasks_view;
 pub(crate) use cloud_tasks_view::CloudTasksView;
 pub mod resume_selection_view;
 pub mod agents_settings_view;
-mod github_settings_view;
 pub mod mcp_settings_view;
 mod login_accounts_view;
 // no direct use of list_selection_view or its items here
 mod textarea;
 pub mod form_text_field;
+pub mod prompts_settings_view;
+pub mod skills_settings_view;
 mod theme_selection_view;
+mod planning_settings_view;
 mod verbosity_selection_view;
 pub(crate) mod validation_settings_view;
 mod update_settings_view;
 mod undo_timeline_view;
 mod notifications_settings_view;
+mod settings_overlay;
+mod request_user_input_view;
+pub(crate) use settings_overlay::SettingsSection;
+pub(crate) mod review_settings_view;
+pub mod settings_panel;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum CancellationEvent {
@@ -60,16 +74,18 @@ pub(crate) enum CancellationEvent {
     Handled,
 }
 
-pub(crate) use chat_composer::ChatComposer;
+pub(crate) use chat_composer::{AgentHintLabel, AutoReviewFooterStatus, AutoReviewPhase, ChatComposer};
 pub(crate) use chat_composer::InputResult;
 pub(crate) use auto_coordinator_view::{
     AutoActiveViewModel,
     AutoCoordinatorButton,
     AutoCoordinatorView,
     AutoCoordinatorViewModel,
-    AutoSetupViewModel,
     CountdownState,
 };
+pub(crate) use auto_drive_settings_view::AutoDriveSettingsView;
+pub(crate) use account_switch_settings_view::AccountSwitchSettingsView;
+pub(crate) use memories_settings_view::MemoriesSettingsView;
 pub(crate) use login_accounts_view::{
     LoginAccountsState,
     LoginAccountsView,
@@ -79,19 +95,25 @@ pub(crate) use login_accounts_view::{
 
 pub(crate) use update_settings_view::{UpdateSettingsView, UpdateSharedState};
 pub(crate) use notifications_settings_view::{NotificationsMode, NotificationsSettingsView};
-
-use code_core::protocol::Op;
+pub(crate) use validation_settings_view::ValidationSettingsView;
+pub(crate) use review_settings_view::ReviewSettingsView;
+pub(crate) use planning_settings_view::PlanningSettingsView;
 use approval_modal_view::ApprovalModalView;
 #[cfg(feature = "code-fork")]
 use approval_ui::ApprovalUi;
 use code_common::model_presets::ModelPreset;
 use code_core::config_types::ReasoningEffort;
+use code_core::config_types::ContextMode;
+use code_core::protocol::AutoContextPhase;
+use code_core::config_types::ServiceTier;
 use code_core::config_types::TextVerbosity;
 use code_core::config_types::ThemeName;
-use model_selection_view::ModelSelectionView;
-use theme_selection_view::ThemeSelectionView;
+pub(crate) use model_selection_view::{ModelSelectionTarget, ModelSelectionView};
+pub(crate) use mcp_settings_view::McpSettingsView;
+pub(crate) use theme_selection_view::ThemeSelectionView;
 use verbosity_selection_view::VerbositySelectionView;
 pub(crate) use undo_timeline_view::{UndoTimelineEntry, UndoTimelineEntryKind, UndoTimelineView};
+pub(crate) use request_user_input_view::RequestUserInputView;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum ActiveViewKind {
@@ -125,6 +147,13 @@ pub(crate) struct BottomPane<'a> {
     top_spacer_enabled: bool,
 
     pub(crate) using_chatgpt_auth: bool,
+
+    auto_drive_variant: AutoDriveVariant,
+    auto_drive_active: bool,
+
+    custom_prompts: Vec<CustomPrompt>,
+    skills: Vec<Skill>,
+
 }
 
 pub(crate) struct BottomPaneParams {
@@ -132,6 +161,7 @@ pub(crate) struct BottomPaneParams {
     pub(crate) has_input_focus: bool,
     pub(crate) enhanced_keys_supported: bool,
     pub(crate) using_chatgpt_auth: bool,
+    pub(crate) auto_drive_variant: AutoDriveVariant,
 }
 
 impl BottomPane<'_> {
@@ -139,13 +169,15 @@ impl BottomPane<'_> {
     const BOTTOM_PAD_LINES: u16 = 1;
     pub fn new(params: BottomPaneParams) -> Self {
         let enhanced_keys_supported = params.enhanced_keys_supported;
+        let composer = ChatComposer::new(
+            params.has_input_focus,
+            params.app_event_tx.clone(),
+            enhanced_keys_supported,
+            params.using_chatgpt_auth,
+        );
+
         Self {
-            composer: ChatComposer::new(
-                params.has_input_focus,
-                params.app_event_tx.clone(),
-                enhanced_keys_supported,
-                params.using_chatgpt_auth,
-            ),
+            composer,
             active_view: None,
             active_view_kind: ActiveViewKind::None,
             app_event_tx: params.app_event_tx,
@@ -155,63 +187,87 @@ impl BottomPane<'_> {
             status_view_active: false,
             top_spacer_enabled: true,
             using_chatgpt_auth: params.using_chatgpt_auth,
+            auto_drive_variant: params.auto_drive_variant,
+            auto_drive_active: false,
+            custom_prompts: Vec::new(),
+            skills: Vec::new(),
         }
     }
 
-    /// Show Agents overview (Agents + Commands sections)
-    pub fn show_agents_overview(
-        &mut self,
-        agents: Vec<(String, bool, bool, String)>,
-        commands: Vec<String>,
-        selected_index: usize,
-    ) {
-        use agents_overview_view::AgentsOverviewView;
-        let view = AgentsOverviewView::new(agents, commands, selected_index, self.app_event_tx.clone());
-        self.active_view = Some(Box::new(view));
-        self.active_view_kind = ActiveViewKind::Other;
-        self.status_view_active = false;
-        self.request_redraw();
+    fn auto_view_mut(&mut self) -> Option<&mut AutoCoordinatorView> {
+        if self.active_view_kind != ActiveViewKind::AutoCoordinator {
+            return None;
+        }
+        self.active_view
+            .as_mut()
+            .and_then(|view| view.as_any_mut())
+            .and_then(|any| any.downcast_mut::<AutoCoordinatorView>())
     }
 
-    pub fn show_update_settings(&mut self, view: update_settings_view::UpdateSettingsView) {
-        if !crate::updates::upgrade_ui_enabled() {
-            self.request_redraw();
+    #[cfg(test)]
+    pub(crate) fn auto_view_model(&self) -> Option<AutoCoordinatorViewModel> {
+        if self.active_view_kind != ActiveViewKind::AutoCoordinator {
+            return None;
+        }
+
+        self.active_view
+            .as_ref()
+            .and_then(|view| view.as_any())
+            .and_then(|any| any.downcast_ref::<AutoCoordinatorView>())
+            .map(|view| view.model().clone())
+    }
+
+    fn apply_auto_drive_style(&mut self) {
+        if !self.auto_drive_active {
+            self.composer.set_auto_drive_style(None);
             return;
         }
 
-        self.active_view = Some(Box::new(view));
-        self.active_view_kind = ActiveViewKind::Other;
-        self.status_view_active = false;
+        let style = self.auto_drive_variant.style();
+        self.composer.set_auto_drive_active(true);
+        self.composer
+            .set_auto_drive_style(Some(style.composer.clone()));
+        if let Some(view) = self.auto_view_mut() {
+            view.set_style(style.clone());
+        }
+
         self.request_redraw();
     }
 
+    fn enable_auto_drive_style(&mut self) {
+        if !self.auto_drive_active {
+            self.auto_drive_active = true;
+            self.composer.set_auto_drive_active(true);
+        }
+        self.apply_auto_drive_style();
+    }
+
+    fn disable_auto_drive_style(&mut self) {
+        if !self.auto_drive_active {
+            return;
+        }
+        self.auto_drive_active = false;
+        self.composer.set_auto_drive_active(false);
+        self.composer.set_auto_drive_style(None);
+        let style = self.auto_drive_variant.style();
+        if let Some(view) = self.auto_view_mut() {
+            view.set_style(style);
+        }
+        self.request_redraw();
+    }
+
+    pub(crate) fn set_auto_drive_variant(&mut self, variant: AutoDriveVariant) {
+        if self.auto_drive_variant == variant {
+            return;
+        }
+        self.auto_drive_variant = variant;
+        if self.auto_drive_active {
+            self.apply_auto_drive_style();
+        }
+    }
+
+    #[allow(dead_code)]
     pub fn show_notifications_settings(&mut self, view: NotificationsSettingsView) {
-        self.active_view = Some(Box::new(view));
-        self.active_view_kind = ActiveViewKind::Other;
-        self.status_view_active = false;
-        self.request_redraw();
-    }
-
-    /// Show per-agent editor
-    pub fn show_agent_editor(
-        &mut self,
-        name: String,
-        enabled: bool,
-        args_read_only: Option<Vec<String>>,
-        args_write: Option<Vec<String>>,
-        instructions: Option<String>,
-        command: String,
-    ) {
-        use agent_editor_view::AgentEditorView;
-        let view = AgentEditorView::new(
-            name,
-            enabled,
-            args_read_only,
-            args_write,
-            instructions,
-            command,
-            self.app_event_tx.clone(),
-        );
         self.active_view = Some(Box::new(view));
         self.active_view_kind = ActiveViewKind::Other;
         self.status_view_active = false;
@@ -240,6 +296,11 @@ impl BottomPane<'_> {
         }
     }
 
+    #[allow(dead_code)]
+    pub(crate) fn has_active_view(&self) -> bool {
+        self.active_view.is_some()
+    }
+
     pub fn set_has_chat_history(&mut self, has_history: bool) {
         self.composer.set_has_chat_history(has_history);
     }
@@ -247,13 +308,39 @@ impl BottomPane<'_> {
     pub fn desired_height(&self, width: u16) -> u16 {
         let (view_height, pad_lines) = if let Some(view) = self.active_view.as_ref() {
             let is_auto = matches!(self.active_view_kind, ActiveViewKind::AutoCoordinator);
-            let top_spacer = if is_auto && self.top_spacer_enabled { 1 } else { 0 };
+            let top_spacer = if is_auto {
+                0
+            } else if self.top_spacer_enabled {
+                1
+            } else {
+                0
+            };
+            let composer_height = if is_auto {
+                let composer_visible = view
+                    .as_ref()
+                    .as_any()
+                    .and_then(|any| any.downcast_ref::<AutoCoordinatorView>())
+                    .map(|auto_view| auto_view.composer_visible())
+                    .unwrap_or(true);
+                if composer_visible {
+                    self.composer.desired_height(width)
+                } else {
+                    self.composer.footer_height()
+                }
+            } else {
+                0
+            };
             let pad = if is_auto {
                 BottomPane::BOTTOM_PAD_LINES
             } else {
                 0
             };
-            (view.desired_height(width).saturating_add(top_spacer), pad)
+            let base_height = view
+                .desired_height(width)
+                .saturating_add(top_spacer)
+                .saturating_add(composer_height);
+
+            (base_height, pad)
         } else {
             // Optionally add 1 for the empty line above the composer
             let spacer = if self.top_spacer_enabled { 1 } else { 0 };
@@ -278,9 +365,10 @@ impl BottomPane<'_> {
                 x: area.x + horizontal_padding,
                 y: area.y + y_offset,
                 width: area.width.saturating_sub(horizontal_padding * 2),
-                height: (area.height.saturating_sub(y_offset))
-                    - BottomPane::BOTTOM_PAD_LINES
+                height: (area.height.saturating_sub(y_offset)).saturating_sub(
+                    BottomPane::BOTTOM_PAD_LINES
                         .min((area.height.saturating_sub(y_offset)).saturating_sub(1)),
+                ),
             };
             self.composer.cursor_pos(composer_rect)
         }
@@ -290,48 +378,69 @@ impl BottomPane<'_> {
     pub fn handle_key_event(&mut self, key_event: KeyEvent) -> InputResult {
         if let Some(mut view) = self.active_view.take() {
             let kind = self.active_view_kind;
+            if matches!(kind, ActiveViewKind::AutoCoordinator) {
+                let consumed = if let Some(auto_view) = view
+                    .as_any_mut()
+                    .and_then(|any| any.downcast_mut::<AutoCoordinatorView>())
+                {
+                    auto_view.handle_active_key_event(self, key_event)
+                } else {
+                    view.handle_key_event(self, key_event);
+                    true
+                };
+
+                if !view.is_complete() {
+                    self.active_view = Some(view);
+                    self.active_view_kind = kind;
+                } else {
+                    self.active_view_kind = ActiveViewKind::None;
+                    self.set_standard_terminal_hint(None);
+                }
+
+                if consumed {
+                    self.request_redraw();
+                    if matches!(key_event.kind, KeyEventKind::Press | KeyEventKind::Repeat) {
+                        match key_event.code {
+                            KeyCode::Up => return InputResult::ScrollUp,
+                            KeyCode::Down => return InputResult::ScrollDown,
+                            _ => {}
+                        }
+                    }
+                    return InputResult::None;
+                }
+
+                return self.handle_composer_key_event(key_event);
+            }
+
             view.handle_key_event(self, key_event);
             if !view.is_complete() {
                 self.active_view = Some(view);
                 self.active_view_kind = kind;
             } else {
                 self.active_view_kind = ActiveViewKind::None;
+                self.set_standard_terminal_hint(None);
             }
             // Don't create a status view - keep composer visible
             // Debounce view navigation redraws to reduce render thrash
             self.request_redraw();
 
-            if matches!(kind, ActiveViewKind::AutoCoordinator)
-                && matches!(key_event.kind, KeyEventKind::Press | KeyEventKind::Repeat)
-            {
-                match key_event.code {
-                    KeyCode::Up => return InputResult::ScrollUp,
-                    KeyCode::Down => return InputResult::ScrollDown,
-                    _ => {}
-                }
-            }
-
             InputResult::None
         } else {
-            // If a task is running and a status line is visible, allow Esc to
-            // send an interrupt even while the composer has focus.
-            if matches!(key_event.code, crossterm::event::KeyCode::Esc) && self.is_task_running {
-                // Send Op::Interrupt directly when a task is running so Esc can cancel.
-                self.app_event_tx.send(AppEvent::CodexOp(Op::Interrupt));
-                self.request_redraw();
-                return InputResult::None;
-            }
-            let (input_result, needs_redraw) = self.composer.handle_key_event(key_event);
-            if needs_redraw {
-                // Route input updates through the app's debounced redraw path
-                // so typing doesn't attempt a full-screen redraw per key.
-                self.request_redraw();
-            }
-            if self.composer.is_in_paste_burst() {
-                self.request_redraw_in(ChatComposer::recommended_paste_flush_delay());
-            }
-            input_result
+            self.handle_composer_key_event(key_event)
         }
+    }
+
+    fn handle_composer_key_event(&mut self, key_event: KeyEvent) -> InputResult {
+        let (input_result, needs_redraw) = self.composer.handle_key_event(key_event);
+        if needs_redraw {
+            // Route input updates through the app's debounced redraw path so typing
+            // doesn't attempt a full-screen redraw per key.
+            self.request_redraw();
+        }
+        if self.composer.is_in_paste_burst() {
+            self.request_redraw_in(ChatComposer::recommended_paste_flush_delay());
+        }
+        input_result
     }
 
     /// Attempt to navigate history upwards from the composer. Returns true if consumed.
@@ -371,6 +480,7 @@ impl BottomPane<'_> {
                     self.active_view_kind = kind;
                 } else {
                     self.active_view_kind = ActiveViewKind::None;
+                    self.set_standard_terminal_hint(None);
                 }
                 // Don't create a status view - keep composer visible
                 self.show_ctrl_c_quit_hint();
@@ -384,11 +494,19 @@ impl BottomPane<'_> {
     }
 
     pub fn handle_paste(&mut self, pasted: String) {
-        if let Some(ref mut view) = self.active_view {
+        if let Some(mut view) = self.active_view.take() {
             use crate::bottom_pane::bottom_pane_view::ConditionalUpdate;
-            match view.handle_paste(pasted) {
-                ConditionalUpdate::NeedsRedraw => self.request_redraw(),
-                ConditionalUpdate::NoRedraw => {}
+            let kind = self.active_view_kind;
+            let update = view.handle_paste_with_composer(&mut self.composer, pasted);
+            if !view.is_complete() {
+                self.active_view = Some(view);
+                self.active_view_kind = kind;
+            } else {
+                self.active_view_kind = ActiveViewKind::None;
+                self.set_standard_terminal_hint(None);
+            }
+            if matches!(update, ConditionalUpdate::NeedsRedraw) {
+                self.request_redraw();
             }
             return;
         }
@@ -401,6 +519,11 @@ impl BottomPane<'_> {
 
     pub(crate) fn insert_str(&mut self, text: &str) {
         self.composer.insert_str(text);
+        self.request_redraw();
+    }
+
+    pub(crate) fn set_composer_text(&mut self, text: String) {
+        self.composer.set_text_content(text);
         self.request_redraw();
     }
 
@@ -417,14 +540,44 @@ impl BottomPane<'_> {
         closed
     }
 
+    pub(crate) fn file_popup_visible(&self) -> bool {
+        self.composer.file_popup_visible()
+    }
+
     /// True if a modal/overlay view is currently displayed (not the composer popup).
     pub(crate) fn has_active_modal_view(&self) -> bool {
         // Consider a modal inactive once it has completed to avoid blocking
         // Esc routing and other overlay checks after a decision is made.
         match self.active_view.as_ref() {
+            Some(_) if matches!(self.active_view_kind, ActiveViewKind::AutoCoordinator) => false,
             Some(view) => !view.is_complete(),
             None => false,
         }
+    }
+
+    pub(crate) fn auto_drive_view_active(&self) -> bool {
+        matches!(self.active_view_kind, ActiveViewKind::AutoCoordinator)
+    }
+
+    pub(crate) fn auto_drive_style_active(&self) -> bool {
+        self.auto_drive_active
+    }
+
+    pub(crate) fn set_custom_prompts(&mut self, prompts: Vec<CustomPrompt>) {
+        self.custom_prompts = prompts.clone();
+        self.composer.set_custom_prompts(prompts);
+    }
+
+    pub(crate) fn custom_prompts(&self) -> &[CustomPrompt] {
+        &self.custom_prompts
+    }
+
+    pub(crate) fn set_skills(&mut self, skills: Vec<Skill>) {
+        self.skills = skills;
+    }
+
+    pub(crate) fn skills(&self) -> &[Skill] {
+        &self.skills
     }
 
     /// Enable or disable compact compose mode. When enabled, the spacer line
@@ -462,6 +615,25 @@ impl BottomPane<'_> {
     pub(crate) fn set_standard_terminal_hint(&mut self, hint: Option<String>) {
         self.composer.set_standard_terminal_hint(hint);
         self.request_redraw();
+    }
+
+    pub(crate) fn standard_terminal_hint(&self) -> Option<&str> {
+        self.composer.standard_terminal_hint()
+    }
+
+    pub(crate) fn set_auto_review_status(&mut self, status: Option<AutoReviewFooterStatus>) {
+        self.composer.set_auto_review_status(status);
+        self.request_redraw();
+    }
+
+    pub(crate) fn set_agent_hint_label(&mut self, label: AgentHintLabel) {
+        self.composer.set_agent_hint_label(label);
+        self.request_redraw();
+    }
+
+    #[cfg(test)]
+    pub(crate) fn auto_review_status(&self) -> Option<AutoReviewFooterStatus> {
+        self.composer.auto_review_status()
     }
 
     pub(crate) fn show_ctrl_c_quit_hint(&mut self) {
@@ -502,6 +674,7 @@ impl BottomPane<'_> {
                     self.active_view_kind = kind;
                 } else {
                     self.active_view_kind = ActiveViewKind::None;
+                    self.set_standard_terminal_hint(None);
                 }
                 self.status_view_active = false;
             }
@@ -530,9 +703,19 @@ impl BottomPane<'_> {
         total_token_usage: TokenUsage,
         last_token_usage: TokenUsage,
         model_context_window: Option<u64>,
+        context_mode: Option<ContextMode>,
     ) {
-        self.composer
-            .set_token_usage(total_token_usage, last_token_usage, model_context_window);
+        self.composer.set_token_usage(
+            total_token_usage,
+            last_token_usage,
+            model_context_window,
+            context_mode,
+        );
+        self.request_redraw();
+    }
+
+    pub(crate) fn set_auto_context_phase(&mut self, phase: Option<AutoContextPhase>) {
+        self.composer.set_auto_context_phase(phase);
         self.request_redraw();
     }
 
@@ -570,8 +753,21 @@ impl BottomPane<'_> {
         presets: Vec<ModelPreset>,
         current_model: String,
         current_effort: ReasoningEffort,
+        current_service_tier: Option<ServiceTier>,
+        current_context_mode: Option<ContextMode>,
+        use_chat_model: bool,
+        target: ModelSelectionTarget,
     ) {
-        let view = ModelSelectionView::new(presets, current_model, current_effort, self.app_event_tx.clone());
+        let view = ModelSelectionView::new(
+            presets,
+            current_model,
+            current_effort,
+            current_service_tier,
+            current_context_mode,
+            use_chat_model,
+            target,
+            self.app_event_tx.clone(),
+        );
         self.active_view = Some(Box::new(view));
         self.active_view_kind = ActiveViewKind::Other;
         // Status shown in composer title now
@@ -579,6 +775,7 @@ impl BottomPane<'_> {
         self.request_redraw()
     }
 
+    #[allow(dead_code)]
     /// Show the theme selection UI
     pub fn show_theme_selection(
         &mut self,
@@ -592,17 +789,6 @@ impl BottomPane<'_> {
             tail_ticket,
             before_ticket,
         );
-        self.active_view = Some(Box::new(view));
-        self.active_view_kind = ActiveViewKind::Other;
-        // Status shown in composer title now
-        self.status_view_active = false;
-        self.request_redraw()
-    }
-
-    /// Show the Chrome launch options UI
-    pub fn show_chrome_selection(&mut self, port: Option<u16>) {
-        use chrome_selection_view::ChromeSelectionView;
-        let view = ChromeSelectionView::new(self.app_event_tx.clone(), port);
         self.active_view = Some(Box::new(view));
         self.active_view_kind = ActiveViewKind::Other;
         // Status shown in composer title now
@@ -636,6 +822,29 @@ impl BottomPane<'_> {
         self.active_view_kind = ActiveViewKind::Other;
         self.status_view_active = false;
         self.request_redraw();
+    }
+
+    pub(crate) fn show_request_user_input(&mut self, view: RequestUserInputView) {
+        self.active_view = Some(Box::new(view));
+        self.active_view_kind = ActiveViewKind::Other;
+        self.status_view_active = false;
+        self.request_redraw();
+    }
+
+    pub(crate) fn close_request_user_input_view(&mut self) {
+        let should_close = self
+            .active_view
+            .as_ref()
+            .and_then(|view| view.as_any())
+            .is_some_and(|any| any.is::<RequestUserInputView>());
+        if !should_close {
+            return;
+        }
+
+        self.active_view = None;
+        self.active_view_kind = ActiveViewKind::None;
+        self.set_standard_terminal_hint(None);
+        self.status_view_active = false;
     }
 
     /// Show a generic list selection popup with items and actions.
@@ -675,16 +884,6 @@ impl BottomPane<'_> {
         self.request_redraw()
     }
 
-    /// Show GitHub settings (token status + watcher toggle)
-    pub fn show_github_settings(&mut self, watcher_enabled: bool, token_status: String, ready: bool) {
-        use github_settings_view::GithubSettingsView;
-        let view = GithubSettingsView::new(watcher_enabled, token_status, ready, self.app_event_tx.clone());
-        self.active_view = Some(Box::new(view));
-        self.active_view_kind = ActiveViewKind::Other;
-        self.status_view_active = false;
-        self.request_redraw();
-    }
-
     pub fn show_undo_timeline_view(&mut self, view: UndoTimelineView) {
         self.active_view = Some(Box::new(view));
         self.active_view_kind = ActiveViewKind::Other;
@@ -693,39 +892,10 @@ impl BottomPane<'_> {
     }
 
     /// Show MCP servers status/toggle UI
+    #[allow(dead_code)]
     pub fn show_mcp_settings(&mut self, rows: crate::bottom_pane::mcp_settings_view::McpServerRows) {
         use mcp_settings_view::McpSettingsView;
         let view = McpSettingsView::new(rows, self.app_event_tx.clone());
-        self.active_view = Some(Box::new(view));
-        self.active_view_kind = ActiveViewKind::Other;
-        self.status_view_active = false;
-        self.request_redraw();
-    }
-
-    /// Show validation harness settings (master toggle + per-tool toggles).
-    pub fn show_validation_settings(
-        &mut self,
-        groups: Vec<(validation_settings_view::GroupStatus, bool)>,
-        tools: Vec<validation_settings_view::ToolRow>,
-    ) {
-        use validation_settings_view::ValidationSettingsView;
-        let view = ValidationSettingsView::new(groups, tools, self.app_event_tx.clone());
-        self.active_view = Some(Box::new(view));
-        self.active_view_kind = ActiveViewKind::Other;
-        self.status_view_active = false;
-        self.request_redraw();
-    }
-
-    /// Show Subagent editor UI
-    pub fn show_subagent_editor(
-        &mut self,
-        name: String,
-        available_agents: Vec<String>,
-        existing: Vec<code_core::config_types::SubagentCommandConfig>,
-        is_new: bool,
-    ) {
-        use crate::bottom_pane::agents_settings_view::SubagentEditorView;
-        let view = SubagentEditorView::new_with_data(name, available_agents, existing, is_new, self.app_event_tx.clone());
         self.active_view = Some(Box::new(view));
         self.active_view_kind = ActiveViewKind::Other;
         self.status_view_active = false;
@@ -738,12 +908,21 @@ impl BottomPane<'_> {
                 if let Some(existing_any) = existing.as_any_mut() {
                     if let Some(auto_view) = existing_any.downcast_mut::<AutoCoordinatorView>() {
                         auto_view.update_model(model);
+                        auto_view.set_style(self.auto_drive_variant.style());
                         let status_text = self
                             .composer
                             .status_message()
                             .map_or_else(String::new, str::to_string);
                         let _ = auto_view.update_status_text(status_text);
+                        let mode = if auto_view.composer_visible() {
+                            ComposerRenderMode::Full
+                        } else {
+                            ComposerRenderMode::FooterOnly
+                        };
+                        self.composer.set_render_mode(mode);
                         self.status_view_active = false;
+                        self.composer.set_embedded_mode(false);
+                        self.enable_auto_drive_style();
                         self.request_redraw();
                         return;
                     }
@@ -752,33 +931,78 @@ impl BottomPane<'_> {
         }
 
         if self.active_view.is_some() && self.active_view_kind != ActiveViewKind::AutoCoordinator {
+            self.composer.set_render_mode(ComposerRenderMode::Full);
             return;
         }
 
-        let mut view = AutoCoordinatorView::new(model, self.app_event_tx.clone());
+        let mut view = AutoCoordinatorView::new(
+            model,
+            self.app_event_tx.clone(),
+            self.auto_drive_variant.style(),
+        );
         let status_text = self
             .composer
             .status_message()
             .map_or_else(String::new, str::to_string);
         let _ = view.update_status_text(status_text);
+        let mode = if view.composer_visible() {
+            ComposerRenderMode::Full
+        } else {
+            ComposerRenderMode::FooterOnly
+        };
         self.active_view = Some(Box::new(view));
         self.active_view_kind = ActiveViewKind::AutoCoordinator;
         self.status_view_active = false;
+        self.composer.set_embedded_mode(false);
+        self.composer.set_render_mode(mode);
+        self.enable_auto_drive_style();
         self.request_redraw();
     }
 
-    pub(crate) fn clear_auto_coordinator_view(&mut self) {
+    pub(crate) fn clear_auto_coordinator_view(&mut self, disable_style: bool) {
         if self.active_view_kind == ActiveViewKind::AutoCoordinator {
             self.active_view = None;
             self.active_view_kind = ActiveViewKind::None;
+            self.set_standard_terminal_hint(None);
             self.status_view_active = false;
+            self.composer.set_embedded_mode(false);
+            self.composer.set_render_mode(ComposerRenderMode::Full);
+            if disable_style {
+                self.disable_auto_drive_style();
+            } else if self.auto_drive_active {
+                self.apply_auto_drive_style();
+            }
             self.request_redraw();
+            return;
         }
+
+        if disable_style {
+            self.disable_auto_drive_style();
+        }
+    }
+
+    pub(crate) fn release_auto_drive_style(&mut self) {
+        self.disable_auto_drive_style();
     }
 
     /// Height (terminal rows) required by the current bottom pane.
     pub(crate) fn request_redraw(&self) {
         self.app_event_tx.send(AppEvent::RequestRedraw)
+    }
+
+    pub(crate) fn update_model_selection_presets(&mut self, presets: Vec<ModelPreset>) {
+        let Some(view) = self.active_view.as_mut() else {
+            return;
+        };
+        let Some(model_view) = view
+            .as_any_mut()
+            .and_then(|any| any.downcast_mut::<ModelSelectionView>())
+        else {
+            return;
+        };
+
+        model_view.update_presets(presets);
+        self.request_redraw();
     }
 
     // Immediate redraw path removed; all UI updates flow through the
@@ -888,10 +1112,15 @@ impl BottomPane<'_> {
         let dur = Duration::from_secs(4);
         self.composer.set_access_mode_hint_for(dur);
         let tx = self.app_event_tx.clone();
-        std::thread::spawn(move || {
+        let fallback_tx = self.app_event_tx.clone();
+        if thread_spawner::spawn_lightweight("access-hint", move || {
             std::thread::sleep(dur + Duration::from_millis(120));
             tx.send(AppEvent::RequestRedraw);
-        });
+        })
+        .is_none()
+        {
+            fallback_tx.send(AppEvent::RequestRedraw);
+        }
         self.request_redraw();
     }
 
@@ -899,70 +1128,20 @@ impl BottomPane<'_> {
         self.composer.set_access_mode_label_ephemeral(label, dur);
         // Schedule a redraw after expiry without blocking other scheduled frames.
         let tx = self.app_event_tx.clone();
-        std::thread::spawn(move || {
+        let fallback_tx = self.app_event_tx.clone();
+        if thread_spawner::spawn_lightweight("access-hint-ephemeral", move || {
             std::thread::sleep(dur + Duration::from_millis(120));
             tx.send(AppEvent::RequestRedraw);
-        });
+        })
+        .is_none()
+        {
+            fallback_tx.send(AppEvent::RequestRedraw);
+        }
         self.request_redraw();
     }
 
-    fn spans_char_width(spans: &[Span]) -> usize {
-        spans.iter().map(|s| s.content.chars().count()).sum()
-    }
-
-    fn render_auto_coordinator_footer(&self, area: Rect, buf: &mut Buffer) {
-        if area.height == 0 {
-            return;
-        }
-
-        let base_style = ratatui::style::Style::default()
-            .bg(crate::colors::background())
-            .fg(crate::colors::text());
-        fill_rect(buf, area, Some(' '), base_style);
-
-        let hint_text = self
-            .composer
-            .standard_terminal_hint()
-            .unwrap_or("Esc to stop Auto Drive");
-
-        let warning_style = ratatui::style::Style::default()
-            .fg(crate::colors::warning())
-            .add_modifier(ratatui::style::Modifier::BOLD);
-        let label_style = ratatui::style::Style::default().fg(crate::colors::text_dim());
-
-        let mut content_spans: Vec<Span> = Vec::new();
-        if let Some((first, rest)) = hint_text.split_once(' ') {
-            content_spans.push(Span::from(first.to_string()).style(warning_style));
-            if !rest.is_empty() {
-                content_spans.push(Span::from(format!(" {}", rest)).style(label_style));
-            }
-        } else {
-            content_spans.push(Span::from(hint_text.to_string()).style(warning_style));
-        }
-
-        let token_spans = self.composer.token_usage_spans(label_style);
-        if !token_spans.is_empty() {
-            content_spans.push(Span::from("  •  ").style(label_style));
-            content_spans.extend(token_spans);
-        }
-
-        let total_width = area.width as usize;
-        let trailing_pad = 1usize;
-        let content_len = BottomPane::spans_char_width(&content_spans);
-        let padding = total_width
-            .saturating_sub(content_len + trailing_pad)
-            .max(1);
-
-        let mut line_spans: Vec<Span> = Vec::new();
-        line_spans.push(Span::from(" ".repeat(padding)));
-        line_spans.extend(content_spans);
-        line_spans.push(Span::from(" "));
-
-        let line = Line::from(line_spans)
-            .style(ratatui::style::Style::default().bg(crate::colors::background()));
-
-        ratatui::widgets::Paragraph::new(line).render(area, buf);
-    }
+    #[allow(dead_code)]
+    fn render_auto_coordinator_footer(&self, _area: Rect, _buf: &mut Buffer) {}
 
     // Removed restart_live_status_with_text – no longer used by the current streaming UI.
 }
@@ -995,84 +1174,110 @@ impl WidgetRef for &BottomPane<'_> {
             .fg(crate::colors::text());
         fill_rect(buf, area, Some(' '), base_style);
 
-        let mut y_offset = 0u16;
+        let mut composer_rect = compute_composer_rect(area, self.top_spacer_enabled);
+        let mut composer_needs_render = true;
+        let horizontal_padding = 1u16;
 
-        // When a modal view is active and not yet complete, it owns the whole content area.
         if let Some(view) = &self.active_view {
-            if view.is_complete() {
-                // Modal finished—render composer instead on this frame.
-                // We intentionally avoid mutating state here; key handling will
-                // clear the view on the next interaction. This keeps render pure.
-            } else if y_offset < area.height {
-                if y_offset < area.height {
-                    // Reserve bottom padding lines; keep at least 1 line for the view.
-                    let mut avail = area.height - y_offset;
-                    let is_auto = matches!(self.active_view_kind, ActiveViewKind::AutoCoordinator);
-                    let horizontal_padding = 1u16;
+            if !view.is_complete() {
+                let is_auto = matches!(self.active_view_kind, ActiveViewKind::AutoCoordinator);
+                if is_auto {
+                    let content_width = area.width.saturating_sub(horizontal_padding * 2);
+                    let composer_visible = view
+                        .as_ref()
+                        .as_any()
+                        .and_then(|any| any.downcast_ref::<AutoCoordinatorView>())
+                        .map(|auto_view| auto_view.composer_visible())
+                        .unwrap_or(true);
+                    let composer_height = if composer_visible {
+                        self.composer.desired_height(area.width)
+                    } else {
+                        self.composer.footer_height()
+                    };
+                    let pad = BottomPane::BOTTOM_PAD_LINES;
+                    let max_view_height = area
+                        .height
+                        .saturating_sub(composer_height)
+                        .saturating_sub(pad);
+                    let desired_height = view.desired_height(content_width);
+                    let view_height = desired_height.min(max_view_height);
 
-                    if is_auto && self.top_spacer_enabled && avail > 0 {
-                        y_offset = y_offset.saturating_add(1);
+                    if view_height > 0 {
+                        let view_rect = Rect {
+                            x: area.x + horizontal_padding,
+                            y: area.y,
+                            width: content_width,
+                            height: view_height,
+                        };
+                        let view_bg = ratatui::style::Style::default().bg(crate::colors::background());
+                        fill_rect(buf, view_rect, None, view_bg);
+                        view.render(view_rect, buf);
+                        let remaining_height = area.height.saturating_sub(view_height);
+                        if remaining_height > 0 {
+                            let composer_area = Rect {
+                                x: area.x,
+                                y: view_rect.y.saturating_add(view_rect.height),
+                                width: area.width,
+                                height: remaining_height,
+                            };
+                            composer_rect = compute_composer_rect(composer_area, false);
+                        }
+                    } else {
+                        composer_rect = compute_composer_rect(area, self.top_spacer_enabled);
+                    }
+                } else {
+                    let mut avail = area.height;
+                    if self.top_spacer_enabled && avail > 0 {
                         avail = avail.saturating_sub(1);
                     }
-
-                    if avail == 0 {
-                        return;
-                    }
-
-                    let pad = if is_auto {
-                        BottomPane::BOTTOM_PAD_LINES.min(avail.saturating_sub(1))
-                    } else {
-                        0
-                    };
-
-                    let view_height = avail.saturating_sub(pad);
-                    if view_height == 0 {
-                        return;
-                    }
-
-                    let view_rect = Rect {
-                        x: area.x + horizontal_padding,
-                        y: area.y + y_offset,
-                        width: area.width.saturating_sub(horizontal_padding * 2),
-                        height: view_height,
-                    };
-                    // Ensure view background is painted under its content
-                    let view_bg = ratatui::style::Style::default().bg(crate::colors::background());
-                    fill_rect(buf, view_rect, None, view_bg);
-                    view.render(view_rect, buf);
-
-                    if is_auto && pad > 0 {
-                        let footer_rect = Rect {
-                            x: area.x + horizontal_padding,
-                            y: view_rect.y.saturating_add(view_rect.height),
-                            width: area.width.saturating_sub(horizontal_padding * 2),
-                            height: pad,
-                        };
-                        self.render_auto_coordinator_footer(footer_rect, buf);
+                    if avail > 0 {
+                        let pad = BottomPane::BOTTOM_PAD_LINES.min(avail.saturating_sub(1));
+                        let view_height = avail.saturating_sub(pad);
+                        if view_height > 0 {
+                            let y_base = if self.top_spacer_enabled {
+                                area.y + 1
+                            } else {
+                                area.y
+                            };
+                            let view_rect = Rect {
+                                x: area.x + horizontal_padding,
+                                y: y_base,
+                                width: area.width.saturating_sub(horizontal_padding * 2),
+                                height: view_height,
+                            };
+                            let view_bg = ratatui::style::Style::default().bg(crate::colors::background());
+                            fill_rect(buf, view_rect, None, view_bg);
+                            view.render_with_composer(view_rect, buf, &self.composer);
+                            composer_needs_render = false;
+                        }
                     }
                 }
-                return;
             }
-        } else if y_offset < area.height {
-            // Optionally add an empty line above the input box
-            if self.top_spacer_enabled {
-                y_offset = y_offset.saturating_add(1);
-            }
-
-            // Add horizontal padding (2 chars on each side) for Message input
-            let horizontal_padding = 1u16;
-        let composer_rect = Rect {
-            x: area.x + horizontal_padding,
-            y: area.y + y_offset,
-            width: area.width.saturating_sub(horizontal_padding * 2),
-            // Reserve bottom padding
-            height: (area.height - y_offset)
-                - BottomPane::BOTTOM_PAD_LINES.min((area.height - y_offset).saturating_sub(1)),
-        };
-        // Paint the composer area background before rendering widgets
-        let comp_bg = ratatui::style::Style::default().bg(crate::colors::background());
-        fill_rect(buf, composer_rect, None, comp_bg);
-        (&self.composer).render_ref(composer_rect, buf);
         }
+
+        if composer_needs_render && composer_rect.width > 0 && composer_rect.height > 0 {
+            let comp_bg = ratatui::style::Style::default().bg(crate::colors::background());
+            fill_rect(buf, composer_rect, None, comp_bg);
+            (&self.composer).render_ref(composer_rect, buf);
+        }
+
+    }
+}
+
+fn compute_composer_rect(area: Rect, top_spacer_enabled: bool) -> Rect {
+    let horizontal_padding = 1u16;
+    let mut y_offset = 0u16;
+    if top_spacer_enabled {
+        y_offset = y_offset.saturating_add(1);
+    }
+    let available = area.height.saturating_sub(y_offset);
+    let height = available.saturating_sub(
+        BottomPane::BOTTOM_PAD_LINES.min(available.saturating_sub(1)),
+    );
+    Rect {
+        x: area.x + horizontal_padding,
+        y: area.y + y_offset,
+        width: area.width.saturating_sub(horizontal_padding * 2),
+        height,
     }
 }

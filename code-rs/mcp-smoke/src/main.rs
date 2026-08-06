@@ -28,6 +28,8 @@ async fn main() -> Result<()> {
         },
         startup_timeout_sec: Some(Duration::from_millis(500)),
         tool_timeout_sec: None,
+        enabled_tools: None,
+        disabled_tools: None,
     };
     // Slow-one: 2s but we allow 3s
     let slow_ok = McpServerConfig {
@@ -41,6 +43,8 @@ async fn main() -> Result<()> {
         },
         startup_timeout_sec: Some(Duration::from_millis(3000)),
         tool_timeout_sec: None,
+        enabled_tools: None,
+        disabled_tools: None,
     };
     // Slow-two: 3s but we allow 1s (should fail)
     let slow_fail = McpServerConfig {
@@ -54,6 +58,8 @@ async fn main() -> Result<()> {
         },
         startup_timeout_sec: Some(Duration::from_millis(1000)),
         tool_timeout_sec: None,
+        enabled_tools: None,
+        disabled_tools: None,
     };
 
     let mut servers = HashMap::new();
@@ -61,7 +67,8 @@ async fn main() -> Result<()> {
     servers.insert("slow_ok".to_string(), slow_ok);
     servers.insert("slow_fail".to_string(), slow_fail);
 
-    let (mgr, errs) = McpConnectionManager::new(servers, false, std::collections::HashSet::new()).await?;
+    let (mgr, errs) =
+        McpConnectionManager::new(servers, std::collections::HashSet::new()).await?;
     println!("Errors: {}", errs.len());
     for (name, e) in &errs {
         println!("  {}: {}", name, e);

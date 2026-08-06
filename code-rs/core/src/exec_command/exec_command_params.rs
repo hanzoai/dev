@@ -1,6 +1,9 @@
 use serde::Deserialize;
 use serde::Serialize;
 
+use code_protocol::models::PermissionProfile;
+use code_protocol::models::SandboxPermissions;
+
 use crate::exec_command::session_id::SessionId;
 
 #[derive(Debug, Clone, Deserialize)]
@@ -13,11 +16,23 @@ pub struct ExecCommandParams {
     #[serde(default = "max_output_tokens")]
     pub(crate) max_output_tokens: u64,
 
+    #[serde(default)]
+    pub(crate) workdir: Option<String>,
+
     #[serde(default = "default_shell")]
     pub(crate) shell: String,
 
     #[serde(default = "default_login")]
     pub(crate) login: bool,
+
+    #[serde(default)]
+    pub(crate) sandbox_permissions: Option<SandboxPermissions>,
+
+    #[serde(default)]
+    pub(crate) additional_permissions: Option<PermissionProfile>,
+
+    #[serde(default)]
+    pub(crate) justification: Option<String>,
 }
 
 fn default_yield_time() -> u64 {
@@ -39,6 +54,7 @@ fn default_shell() -> String {
 #[derive(Debug, Deserialize, Serialize)]
 pub struct WriteStdinParams {
     pub(crate) session_id: SessionId,
+    #[serde(default)]
     pub(crate) chars: String,
 
     #[serde(default = "write_stdin_default_yield_time_ms")]

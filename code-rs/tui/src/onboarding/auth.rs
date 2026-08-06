@@ -77,6 +77,8 @@ impl KeyboardHandler for AuthModeWidget {
             KeyCode::Enter => match self.sign_in_state {
                 SignInState::PickMode => match self.highlighted_mode {
                     AuthMode::ChatGPT => self.start_chatgpt_login(),
+                    AuthMode::ChatgptAuthTokens => self.start_chatgpt_login(),
+                    AuthMode::Headers => self.start_chatgpt_login(),
                     AuthMode::ApiKey => self.verify_api_key(),
                 },
                 SignInState::EnvVarMissing => self.sign_in_state = SignInState::PickMode,
@@ -130,10 +132,18 @@ impl AuthModeWidget {
         // If the user is already authenticated but the method differs from their
         // preferred auth method, show a brief explanation.
         if let LoginStatus::AuthMode(current) = self.login_status {
-            if current != self.preferred_auth_method {
+            let is_chatgpt = |mode: AuthMode| {
+                matches!(
+                    mode,
+                    AuthMode::ChatGPT | AuthMode::ChatgptAuthTokens | AuthMode::Headers
+                )
+            };
+            if is_chatgpt(current) != is_chatgpt(self.preferred_auth_method) {
                 let to_label = |mode: AuthMode| match mode {
                     AuthMode::ApiKey => "API key",
-                    AuthMode::ChatGPT => "ChatGPT",
+                    AuthMode::ChatGPT | AuthMode::ChatgptAuthTokens | AuthMode::Headers => {
+                        "ChatGPT"
+                    }
                 };
                 let msg = format!(
                     "  You’re currently using {} while your preferred method is {}.",
@@ -179,8 +189,12 @@ impl AuthModeWidget {
 
             vec![line1, line2]
         };
-        let chatgpt_label = if matches!(self.login_status, LoginStatus::AuthMode(AuthMode::ChatGPT))
-        {
+        let chatgpt_label = if matches!(
+            self.login_status,
+            LoginStatus::AuthMode(
+                AuthMode::ChatGPT | AuthMode::ChatgptAuthTokens | AuthMode::Headers
+            )
+        ) {
             "Continue using ChatGPT"
         } else {
             "Sign in with ChatGPT"
@@ -329,7 +343,12 @@ impl AuthModeWidget {
     fn start_chatgpt_login(&mut self) {
         // If we're already authenticated with ChatGPT, don't start a new login –
         // just proceed to the success message flow.
-        if matches!(self.login_status, LoginStatus::AuthMode(AuthMode::ChatGPT)) {
+        if matches!(
+            self.login_status,
+            LoginStatus::AuthMode(
+                AuthMode::ChatGPT | AuthMode::ChatgptAuthTokens | AuthMode::Headers
+            )
+        ) {
             self.apply_chatgpt_login_side_effects();
             self.sign_in_state = SignInState::ChatGptSuccess;
             self.event_tx.send(AppEvent::RequestRedraw);
@@ -388,7 +407,7 @@ impl AuthModeWidget {
             if args
                 .config
                 .model
-                .eq_ignore_ascii_case("gpt-5")
+                .eq_ignore_ascii_case("gpt-5.1")
             {
                 let new_model = GPT_5_CODEX_MEDIUM_MODEL.to_string();
                 args.config.model = new_model.clone();

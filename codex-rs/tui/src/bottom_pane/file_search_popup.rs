@@ -1,3 +1,5 @@
+use std::path::PathBuf;
+
 use codex_file_search::FileMatch;
 use ratatui::buffer::Buffer;
 use ratatui::layout::Rect;
@@ -43,18 +45,10 @@ impl FileSearchPopup {
             return;
         }
 
-        // Determine if current matches are still relevant.
-        let keep_existing = query.starts_with(&self.display_query);
-
         self.pending_query.clear();
         self.pending_query.push_str(query);
 
         self.waiting = true; // waiting for new results
-
-        if !keep_existing {
-            self.matches.clear();
-            self.state.reset();
-        }
     }
 
     /// Put the popup into an "idle" state used for an empty query (just "@").
@@ -76,7 +70,7 @@ impl FileSearchPopup {
         }
 
         self.display_query = query.to_string();
-        self.matches = matches;
+        self.matches = matches.into_iter().take(MAX_POPUP_ROWS).collect();
         self.waiting = false;
         let len = self.matches.len();
         self.state.clamp_selection(len);
@@ -97,11 +91,11 @@ impl FileSearchPopup {
         self.state.ensure_visible(len, len.min(MAX_POPUP_ROWS));
     }
 
-    pub(crate) fn selected_match(&self) -> Option<&str> {
+    pub(crate) fn selected_match(&self) -> Option<&PathBuf> {
         self.state
             .selected_idx
             .and_then(|idx| self.matches.get(idx))
-            .map(|file_match| file_match.path.as_str())
+            .map(|file_match| &file_match.path)
     }
 
     pub(crate) fn calculate_required_height(&self) -> u16 {
@@ -124,14 +118,18 @@ impl WidgetRef for &FileSearchPopup {
             self.matches
                 .iter()
                 .map(|m| GenericDisplayRow {
-                    name: m.path.clone(),
+                    name: m.path.to_string_lossy().to_string(),
+                    name_prefix_spans: Vec::new(),
                     match_indices: m
                         .indices
                         .as_ref()
                         .map(|v| v.iter().map(|&i| i as usize).collect()),
-                    is_current: false,
                     display_shortcut: None,
                     description: None,
+                    category_tag: None,
+                    wrap_indent: None,
+                    is_disabled: false,
+                    disabled_reason: None,
                 })
                 .collect()
         };
@@ -143,12 +141,44 @@ impl WidgetRef for &FileSearchPopup {
         };
 
         render_rows(
-            area.inset(Insets::tlbr(0, 2, 0, 0)),
+            area.inset(Insets::tlbr(
+                /*top*/ 0, /*left*/ 2, /*bottom*/ 0, /*right*/ 0,
+            )),
             buf,
             &rows_all,
             &self.state,
             MAX_POPUP_ROWS,
             empty_message,
         );
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use codex_file_search::MatchType;
+    use pretty_assertions::assert_eq;
+
+    fn file_match(index: usize) -> FileMatch {
+        FileMatch {
+            score: index as u32,
+            path: PathBuf::from(format!("src/file_{index:02}.rs")),
+            match_type: MatchType::File,
+            root: PathBuf::from("/tmp/repo"),
+            indices: None,
+        }
+    }
+
+    #[test]
+    fn set_matches_keeps_only_the_first_page_of_results() {
+        let mut popup = FileSearchPopup::new();
+        popup.set_query("file");
+        popup.set_matches("file", (0..(MAX_POPUP_ROWS + 2)).map(file_match).collect());
+
+        assert_eq!(
+            popup.matches,
+            (0..MAX_POPUP_ROWS).map(file_match).collect::<Vec<_>>()
+        );
+        assert_eq!(popup.calculate_required_height(), MAX_POPUP_ROWS as u16);
     }
 }

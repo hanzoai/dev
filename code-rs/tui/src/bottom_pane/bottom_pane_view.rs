@@ -5,6 +5,7 @@ use std::any::Any;
 use ratatui::buffer::Buffer;
 use ratatui::layout::Rect;
 
+use super::ChatComposer;
 use super::BottomPane;
 use super::CancellationEvent;
 
@@ -37,6 +38,25 @@ pub(crate) trait BottomPaneView<'a> {
     /// Render the view: this will be displayed in place of the composer.
     fn render(&self, area: Rect, buf: &mut Buffer);
 
+    /// Render the view when the caller maintains a persistent composer instance.
+    /// Default implementation falls back to `render` for views that do not need
+    /// direct access to the composer.
+    fn render_with_composer(
+        &self,
+        area: Rect,
+        buf: &mut Buffer,
+        composer: &ChatComposer,
+    ) {
+        let _ = composer;
+        self.render(area, buf);
+    }
+
+    /// Allow read-only downcasting for views that expose additional APIs.
+    #[allow(dead_code)]
+    fn as_any(&self) -> Option<&dyn Any> {
+        None
+    }
+
     /// Update the status indicator text.
     fn update_status_text(&mut self, _text: String) -> ConditionalUpdate {
         ConditionalUpdate::NoRedraw
@@ -66,5 +86,16 @@ pub(crate) trait BottomPaneView<'a> {
     /// is needed. Default: ignore paste.
     fn handle_paste(&mut self, _text: String) -> ConditionalUpdate {
         ConditionalUpdate::NoRedraw
+    }
+
+    /// Handle pasted text when a persistent composer is available.
+    /// Default implementation forwards to `handle_paste` to preserve
+    /// existing behaviour for views that do not interact with the composer.
+    fn handle_paste_with_composer(
+        &mut self,
+        _composer: &mut ChatComposer,
+        text: String,
+    ) -> ConditionalUpdate {
+        self.handle_paste(text)
     }
 }

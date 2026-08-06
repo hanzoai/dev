@@ -9,9 +9,11 @@ In the codex-rs folder where the rust code lives:
 Completion/build step
 
 - Always validate using `./build-fast.sh` from the repo root. This is the single required check and must pass cleanly.
+- `./build-fast.sh` can take 20+min to run from a cold cache!!! Please use long timeout when running `./build-fast.sh` or waiting for it to complete.
 - Policy: All errors AND all warnings must be fixed before you’re done. Treat any compiler warning as a failure and address it (rename unused vars with `_`, remove `mut`, delete dead code, etc.).
 - Do not run additional format/lint/test commands on completion (e.g., `just fmt`, `just fix`, `cargo test`) unless explicitly requested for a specific task.
 - ***NEVER run rustfmt***
+- Before pushing to `main`, run `./pre-release.sh` to mirror the release preflight (dev-fast build, CLI smokes, workspace nextest).
 
 Optional regression checks (recommended when touching the Rust workspace):
 
@@ -19,6 +21,7 @@ Optional regression checks (recommended when touching the Rust workspace):
 - Focused sweeps stay quick and green: `cargo test -p code-tui --features test-helpers`, `cargo test -p code-cloud-tasks --tests`, and `cargo test -p mcp-types --tests`.
 
 When debugging regressions or bugs, write a failing test (or targeted reproduction script) first and confirm it captures the issue before touching code—if it can’t fail, you can’t be confident the fix works.
+
 
 ## Product identity — do not let a merge take it back
 
@@ -33,20 +36,21 @@ these are contract, not preference:
 | Canonical binary | `dev` (declared first; `code` is an alias to the same program) | `code-rs/cli/Cargo.toml` |
 | npm | `@hanzo/dev` + `@hanzo/dev-<target>` | `codex-cli/package.json`, `.github/workflows/release.yml` |
 | Homebrew | `hanzoai/homebrew-tap`, `Formula/hanzo-dev.rb`, assets `dev-<triple>` | `scripts/generate-homebrew-formula.sh` |
+| Release repo | `hanzoai/dev` | `code-rs/tui/src/updates.rs`, `codex-cli/postinstall.js` |
 
 **`code-rs/` is the workspace that SHIPS.** `codex-rs/` is the vendored upstream
 copy. A change that only edits `codex-rs/` changes nothing a user runs — this is
 the single easiest mistake to make here, and `.github/merge-policy.json` made it
 for a long time (every glob pointed at `codex-rs/**`).
 
-**Why there is a test for all of this.** `upstream-merge.yml` merges
-`openai/codex` every 30 minutes. A one-time edit to a default is a suggestion
-that lasts until the next merge. `code-rs/core/tests/hanzo_identity.rs` asserts
-every row above and fails the build if any regresses. Upstream has no file at
-that path, so a merge can neither conflict with it nor carry it away along with
-the thing it guards. If it goes red after a merge: re-apply the identity, do not
-delete the test. (It is not decorative — it caught the un-retargeted release
-pipeline and only went green once the pipeline was genuinely fixed.)
+**Why there is a test for all of this.** A one-time edit to a default is a
+suggestion that lasts until the next merge. `code-rs/core/tests/hanzo_identity.rs`
+asserts every row above and fails the build if any regresses. Upstream has no
+file at that path, so a merge can neither conflict with it nor carry it away
+along with the thing it guards. If it goes red after a merge: re-apply the
+identity, do not delete the test. (It is not decorative — it caught the
+un-retargeted release pipeline and only went green once the pipeline was
+genuinely fixed.)
 
 **Model ids are not guessable.** `GET https://api.hanzo.ai/v1/models` needs a
 bearer and is the only authority. The previous default, `gpt-5-codex`, is not in
@@ -60,6 +64,43 @@ ids answer on chat/completions but return system-prompt text on responses.
 (`code-rs/tui/src/updates.rs`), must point at `hanzoai/dev`. `codex-cli/.pack/`
 is `npm pack` output that CI regenerates — it is gitignored on purpose; when it
 was committed it was a second, stale home for that download URL.
+
+## Upstream lineage — where the code actually comes from
+
+Read this before attempting a sync. The directory names lie about the topology.
+
+- **Proximate upstream is `just-every/code`**, not `openai/codex`. Our history
+  is just-every's history with every author email rewritten to `dev@hanzo.ai`,
+  which is why `git merge-base` against just-every returns nothing: identical
+  trees, different SHAs, disjoint graph.
+- **`codex-rs/` is not ours to track.** just-every carries it as a read-only
+  mirror of `openai/codex:main` and refreshes it with "Refresh codex-rs mirror
+  to upstream/main" commits. It reaches us through them. We never merge
+  openai/codex directly. (The `upstream` git remote pointing at openai/codex is
+  a leftover — it is not the sync path.)
+- **`code-rs/` is the product.** It is what builds and what ships.
+
+### Syncing
+
+Because the graphs are disjoint, `git merge` needs a merge base supplied by
+hand. The base is the just-every commit matching our last sync — recorded here,
+and nowhere else:
+
+    upstream        just-every/code
+    synced-to       e4fe007150  (v0.6.169)
+    merge-base-used e92d81b496  ("fix(tui/auto-drive): block resume while auto-resolve pending")
+
+To sync: fetch just-every, `git replace --graft <our-fork-point> <its-parent>
+<merge-base-used>`, `git merge`, resolve, `git replace -d <our-fork-point>`,
+then update the two SHAs above. Conflicts concentrate in the TUI chatwidget,
+`core/src/config.rs`, and every file carrying our name.
+
+## Documentation hygiene
+
+- Keep docs clean, clear, and current; prune stale instructions instead of piling on caveats.
+- Avoid excessive verbosity; prioritize concise guidance over long narratives.
+- Do not document minor or non-core features; focus on system-critical flows and expectations.
+- Never commit temporary "working" docs, plans, or scratch notes.
 
 ## Strict Ordering In The TUI History
 
@@ -132,6 +173,20 @@ The command execution flow in Codex follows an event-driven pattern:
    - Handles syntax highlighting via `ParsedCommand`
 
 This architecture separates concerns between execution logic (core), UI state management (chatwidget), and rendering (history_cell).
+
+### Auto Drive Escape Handling
+
+- All Auto Drive escape routing lives in `code-rs/tui/src/chatwidget.rs`. The
+  `ChatWidget::auto_should_handle_global_esc` helper decides whether the global
+  Esc handler in `app.rs` should defer to Auto Drive, and
+  `ChatWidget::handle_key_event` owns the actual stop / pause behaviour. When
+  you need to tweak Esc semantics, update those two locations together.
+- The approval pane must *never* swallow Esc. `code-rs/tui/src/bottom_pane/auto_coordinator_view.rs`
+  intentionally lets Esc (and the other approval shortcuts) bubble back to the
+  chat widget; keep this contract intact when editing the view layer.
+- Avoid adding additional Esc handlers elsewhere for Auto Drive flows. Doing
+  so breaks the modal-first ordering in `app.rs` and prevents users from
+  reliably stopping a run.
 
 ## Writing New UI Regression Tests
 
