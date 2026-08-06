@@ -273,7 +273,7 @@ jobs:
               STRICT_CARGO_HOME="1" \
               GIT_TERMINAL_PROMPT="0" \
               GIT_ASKPASS="/bin/false" \
-              npx -y @just-every/code@latest \
+              npx -y @hanzo/dev@latest \
               exec \
               -s workspace-write \
               -c sandbox_workspace_write.network_access=true \

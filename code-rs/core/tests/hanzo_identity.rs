@@ -26,7 +26,7 @@ fn is_zen_model(slug: &str) -> bool {
 
 #[test]
 fn the_hanzo_cloud_is_a_built_in_provider() {
-    let providers = built_in_model_providers();
+    let providers = built_in_model_providers(None);
     let hanzo = providers
         .get(HANZO_PROVIDER_ID)
         .expect("the Hanzo Cloud must be a built-in provider");

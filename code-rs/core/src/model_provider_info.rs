@@ -826,6 +826,8 @@ pub fn create_hanzo_provider() -> ModelProviderInfo {
              https://hanzo.ai/settings/keys."
                 .into(),
         ),
+        experimental_bearer_token: None,
+        auth: None,
         wire_api: WireApi::Responses,
         query_params: None,
         http_headers: Some(
@@ -837,6 +839,7 @@ pub fn create_hanzo_provider() -> ModelProviderInfo {
         request_max_retries: None,
         stream_max_retries: None,
         stream_idle_timeout_ms: None,
+        websocket_connect_timeout_ms: None,
         requires_openai_auth: false,
         openrouter: None,
     }

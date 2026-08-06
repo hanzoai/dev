@@ -454,7 +454,7 @@ command = "npx"
 args = ["-y", "mcp-server"]
 # Optional: propagate additional env vars to the MCP server.
 # A default whitelist of env vars will be propagated to the MCP server.
-# https://github.com/just-every/code/blob/main/code-rs/rmcp-client/src/utils.rs#L82
+# https://github.com/hanzoai/dev/blob/main/code-rs/rmcp-client/src/utils.rs#L82
 env = { "API_KEY" = "value" }
 ```
 
