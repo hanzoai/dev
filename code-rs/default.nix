@@ -27,9 +27,9 @@ rec {
       openssl
     ];
     meta = with pkgs.lib; {
-      description = "OpenAI Codex command‑line interface rust implementation";
+      description = "Hanzo Dev — the Hanzo coding agent (Rust implementation)";
       license = licenses.asl20;
-      homepage = "https://github.com/openai/codex";
+      homepage = "https://github.com/hanzoai/dev";
     };
   };
   devShell = pkgs.mkShell {

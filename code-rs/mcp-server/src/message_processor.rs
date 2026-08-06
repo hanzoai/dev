@@ -401,7 +401,7 @@ impl MessageProcessor {
         let server_info = serde_json::json!({
             "name": "code-mcp-server",
             "version": env!("CARGO_PKG_VERSION"),
-            "title": "Codex",
+            "title": "Hanzo Dev",
             "user_agent": get_code_user_agent_default(),
         });
 
@@ -578,7 +578,7 @@ impl MessageProcessor {
                             content: vec![ContentBlock::TextContent(TextContent {
                                 r#type: "text".to_owned(),
                                 text: format!(
-                                    "Failed to load Codex configuration from overrides: {e}"
+                                    "Failed to load configuration from overrides: {e}"
                                 ),
                                 annotations: None,
                             })],
@@ -594,7 +594,7 @@ impl MessageProcessor {
                     let result = CallToolResult {
                         content: vec![ContentBlock::TextContent(TextContent {
                             r#type: "text".to_owned(),
-                            text: format!("Failed to parse configuration for Codex tool: {e}"),
+                            text: format!("Failed to parse configuration for the Hanzo Dev tool: {e}"),
                             annotations: None,
                         })],
                         is_error: Some(true),
@@ -662,7 +662,7 @@ impl MessageProcessor {
                     let result = CallToolResult {
                         content: vec![ContentBlock::TextContent(TextContent {
                             r#type: "text".to_owned(),
-                            text: format!("Failed to parse configuration for Codex tool: {e}"),
+                            text: format!("Failed to parse configuration for the Hanzo Dev tool: {e}"),
                             annotations: None,
                         })],
                         is_error: Some(true),

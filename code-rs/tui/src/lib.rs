@@ -481,7 +481,7 @@ pub async fn run_main(
         Ok(code_home) => code_home,
         #[allow(clippy::print_stderr)]
         Err(err) => {
-            eprintln!("Error finding codex home: {err}");
+            eprintln!("Error finding the Hanzo Dev home directory: {err}");
             std::process::exit(1);
         }
     };

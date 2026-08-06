@@ -311,7 +311,7 @@ impl McpConnectionManager {
                     client_info: Implementation {
                         name: "codex-mcp-client".to_owned(),
                         version: env!("CARGO_PKG_VERSION").to_owned(),
-                        title: Some("Codex".into()),
+                        title: Some("Hanzo Dev".into()),
                         // This field is used by Codex when it is an MCP
                         // server: it should not be used when Codex is
                         // an MCP client.

@@ -39471,7 +39471,7 @@ impl ChatWidget<'_> {
     pub(crate) fn show_cloud_tasks_loading(&mut self) {
         let loading_item = SelectionItem {
             name: "Loading cloud tasks…".to_string(),
-            description: Some("Fetching latest tasks from Codex Cloud".to_string()),
+            description: Some("Fetching latest cloud tasks".to_string()),
             is_current: true,
             actions: Vec::new(),
         };
@@ -39527,7 +39527,7 @@ impl ChatWidget<'_> {
     pub(crate) fn show_cloud_environment_loading(&mut self) {
         let loading_item = SelectionItem {
             name: "Loading environments…".to_string(),
-            description: Some("Fetching available Codex Cloud environments".to_string()),
+            description: Some("Fetching available cloud environments".to_string()),
             is_current: true,
             actions: Vec::new(),
         };
@@ -39752,7 +39752,7 @@ impl ChatWidget<'_> {
 
         let view = CustomPromptView::new(
             format!("Create cloud task ({env_display})"),
-            "Describe the change you want Codex to implement".to_string(),
+            "Describe the change you want Hanzo Dev to implement".to_string(),
             Some("Press Enter to submit · Esc cancel".to_string()),
             self.app_event_tx.clone(),
             None,

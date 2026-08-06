@@ -60,7 +60,7 @@ pub async fn run_code_tool_session(
             let result = CallToolResult {
                 content: vec![ContentBlock::TextContent(TextContent {
                     r#type: "text".to_string(),
-                    text: format!("Failed to start Codex session: {e}"),
+                    text: format!("Failed to start Hanzo Dev session: {e}"),
                     annotations: None,
                 })],
                 is_error: Some(true),
@@ -367,7 +367,7 @@ async fn run_code_tool_session_inner(
                 let result = CallToolResult {
                     content: vec![ContentBlock::TextContent(TextContent {
                         r#type: "text".to_string(),
-                        text: format!("Codex runtime error: {e}"),
+                        text: format!("Hanzo Dev runtime error: {e}"),
                         annotations: None,
                     })],
                     is_error: Some(true),
