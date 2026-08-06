@@ -70,7 +70,7 @@ pub const BROWSER_SNAPSHOT_OPEN_TAG: &str = "<browser_snapshot>";
 pub const BROWSER_SNAPSHOT_CLOSE_TAG: &str = "</browser_snapshot>";
 pub const COLLABORATION_MODE_OPEN_TAG: &str = "<collaboration_mode>";
 pub const COLLABORATION_MODE_CLOSE_TAG: &str = "</collaboration_mode>";
-pub const USER_MESSAGE_BEGIN: &str = "## My request for Codex:";
+pub const USER_MESSAGE_BEGIN: &str = "## My request for Hanzo Dev:";
 
 /// Submission Queue Entry - requests from user
 #[derive(Debug, Clone, Deserialize, Serialize, JsonSchema)]

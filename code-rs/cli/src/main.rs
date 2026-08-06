@@ -39,6 +39,8 @@ use tokio::runtime::{Builder as TokioRuntimeBuilder, Handle as TokioHandle};
 mod mcp_cmd;
 
 use crate::mcp_cmd::McpCli;
+use code_cli::proto;
+use code_cli::proto::ProtoCli;
 
 const CLI_COMMAND_NAME: &str = "dev";
 pub(crate) const CODEX_SECURE_MODE_ENV_VAR: &str = "CODEX_SECURE_MODE";
@@ -121,6 +123,12 @@ enum Subcommand {
 
     /// [experimental] Run the app server.
     AppServer,
+
+    /// [experimental] Speak the agent protocol on stdin/stdout: Submission
+    /// JSON lines in, Event JSON lines out. Unlike `app-server` this exposes
+    /// the whole `Op` set, so a controller can steer a turn in flight
+    /// (`queue_user_input`) rather than only interrupt it.
+    Proto(ProtoCli),
 
     /// Generate shell completion scripts.
     Completion(CompletionCommand),
@@ -494,6 +502,10 @@ async fn cli_main(code_linux_sandbox_exe: Option<PathBuf>) -> anyhow::Result<()>
         }
         Some(Subcommand::AppServer) => {
             code_app_server::run_main(code_linux_sandbox_exe, root_config_overrides).await?;
+        }
+        Some(Subcommand::Proto(mut proto_cli)) => {
+            prepend_config_flags(&mut proto_cli.config_overrides, root_config_overrides.clone());
+            proto::run_main(proto_cli).await?;
         }
         Some(Subcommand::Resume(ResumeCommand {
             session_id,
@@ -1260,7 +1272,7 @@ async fn preview_main(args: PreviewArgs) -> anyhow::Result<()> {
         _ => bail!(format!("Unsupported platform: {}/{}", os, arch)),
     };
 
-    let client = reqwest::Client::builder().user_agent("codex-preview/1").build()?;
+    let client = reqwest::Client::builder().user_agent("hanzo-dev-preview/1").build()?;
 
     // Resolve slug/tag from id
     let id = args.slug.trim().to_string();

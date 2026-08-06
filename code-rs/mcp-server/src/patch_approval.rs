@@ -56,7 +56,7 @@ pub(crate) async fn handle_patch_approval_request(
     if let Some(r) = &reason {
         message_lines.push(r.clone());
     }
-    message_lines.push("Allow Codex to apply proposed code changes?".to_string());
+    message_lines.push("Allow Hanzo Dev to apply proposed code changes?".to_string());
 
     let params = PatchApprovalElicitRequestParams {
         message: message_lines.join("\n"),

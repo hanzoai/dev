@@ -42,7 +42,7 @@ pub async fn new_session(
             let result = CallToolResult {
                 content: vec![ContentBlock::TextContent(TextContent {
                     r#type: "text".to_string(),
-                    text: format!("Failed to start Codex session: {err}"),
+                    text: format!("Failed to start Hanzo Dev session: {err}"),
                     annotations: None,
                 })],
                 is_error: Some(true),
@@ -78,7 +78,7 @@ pub async fn prompt(
             final_output_json_schema: None,
         })
         .await
-        .context("failed to submit prompt to Codex")?;
+        .context("failed to submit prompt to Hanzo Dev")?;
 
     let mut stop_reason = acp::StopReason::EndTurn;
 

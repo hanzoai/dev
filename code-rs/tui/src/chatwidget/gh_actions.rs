@@ -59,7 +59,7 @@ pub(super) fn maybe_watch_after_push(
         let api_base = format!("https://api.github.com/repos/{owner}/{repo}/actions/runs");
         let token = get_github_token().map(|(t, _)| t);
         let client = reqwest::Client::builder()
-            .user_agent("codex-cli-rs/github-monitor")
+            .user_agent("hanzo-dev/github-monitor")
             .build()
             .unwrap_or_else(|_| reqwest::Client::new());
 

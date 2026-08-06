@@ -233,7 +233,7 @@ pub async fn run_main(cli: Cli, _code_linux_sandbox_exe: Option<PathBuf>) -> any
                     }
                     _ => {
                         eprintln!(
-                            "Not signed in. Please run 'dev login' to sign in with ChatGPT, then re-run 'codex cloud'."
+                            "Not signed in. Please run 'dev login' to sign in with ChatGPT, then re-run 'dev cloud'."
                         );
                         std::process::exit(1);
                     }
@@ -241,7 +241,7 @@ pub async fn run_main(cli: Cli, _code_linux_sandbox_exe: Option<PathBuf>) -> any
             }
             None => {
                 eprintln!(
-                    "Not signed in. Please run 'dev login' to sign in with ChatGPT, then re-run 'codex cloud'."
+                    "Not signed in. Please run 'dev login' to sign in with ChatGPT, then re-run 'dev cloud'."
                 );
                 std::process::exit(1);
             }
