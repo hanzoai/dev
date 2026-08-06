@@ -3,11 +3,11 @@ source: tui/tests/vt100_chatwidget_snapshot.rs
 expression: output
 ---
  +------------------------------------------------------------------------------------------------+
- |                                           Every Code                                           |
+ |                                            Hanzo Dev                                           |
  +------------------------------------------------------------------------------------------------+
  +Settings ▸ Overview-----------------------------------------------------------------------------+
  |                                                                                                |
- | › Model              Model: GPT-5.5 (Medium)                                                   |
+ | › Model              Model: ZEN5-Coder (Medium)                                                |
  |   + Choose the language model used for new completions.                                        |
  |                                                                                                |
  |   Theme              Theme: Light - Photon (16-color) · Spinner: Diamond                       |

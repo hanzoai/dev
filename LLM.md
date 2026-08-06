@@ -43,6 +43,14 @@ copy. A change that only edits `codex-rs/` changes nothing a user runs — this 
 the single easiest mistake to make here, and `.github/merge-policy.json` made it
 for a long time (every glob pointed at `codex-rs/**`).
 
+That sentence only became true with the v0.6.169 merge. Before it, building
+`dev` compiled ten crates out of `codex-rs/` — they were real path
+dependencies, so the "read-only mirror" was load-bearing. Upstream finished
+the migration and the two workspaces are now separate. One thread remains:
+`codex-rs/models-manager/models.json` is `include_str!`'d by
+`code-version/src/lib.rs`, `core/src/model_family.rs` and
+`core/src/agent_defaults.rs`. Deleting `codex-rs/` would not build.
+
 **Why there is a test for all of this.** A one-time edit to a default is a
 suggestion that lasts until the next merge. `code-rs/core/tests/hanzo_identity.rs`
 asserts every row above and fails the build if any regresses. Upstream has no

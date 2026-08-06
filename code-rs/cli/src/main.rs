@@ -1592,11 +1592,14 @@ mod tests {
     use code_protocol::ThreadId;
 
     #[test]
-    fn bash_completion_uses_code_command_name() {
+    fn bash_completion_uses_our_command_name() {
         let mut buf = Vec::new();
         write_completion(Shell::Bash, &mut buf);
         let script = String::from_utf8(buf).expect("completion output should be valid UTF-8");
-        assert!(script.contains("_code()"), "expected bash completion function to be named _code");
+        assert!(
+            script.contains(&format!("_{CLI_COMMAND_NAME}()")),
+            "expected bash completion function to be named _{CLI_COMMAND_NAME}"
+        );
         assert!(!script.contains("_codex()"), "bash completion output should not use legacy codex prefix");
     }
 
