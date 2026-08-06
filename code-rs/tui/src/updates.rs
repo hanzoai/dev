@@ -185,9 +185,9 @@ pub fn resolve_upgrade_resolution() -> UpgradeResolution {
                 "npm".to_string(),
                 "install".to_string(),
                 "-g".to_string(),
-                "@just-every/code@latest".to_string(),
+                "@hanzo/dev@latest".to_string(),
             ],
-            display: "npm install -g @just-every/code@latest".to_string(),
+            display: "npm install -g @hanzo/dev@latest".to_string(),
         };
     }
 

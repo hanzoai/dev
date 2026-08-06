@@ -40,7 +40,7 @@ mod mcp_cmd;
 
 use crate::mcp_cmd::McpCli;
 
-const CLI_COMMAND_NAME: &str = "code";
+const CLI_COMMAND_NAME: &str = "dev";
 pub(crate) const CODEX_SECURE_MODE_ENV_VAR: &str = "CODEX_SECURE_MODE";
 
 /// As early as possible in the process lifecycle, apply hardening measures
@@ -62,20 +62,20 @@ fn pre_main_hardening() {
     }
 }
 
-/// Codex CLI
+/// Hanzo Dev — the Hanzo coding agent.
 ///
 /// If no subcommand is specified, options will be forwarded to the interactive CLI.
 #[derive(Debug, Parser)]
 #[clap(
     author,
-    name = "code",
+    name = "dev",
     version = code_version::version(),
     // If a sub‑command is given, ignore requirements of the default args.
     subcommand_negates_reqs = true,
     // The executable is sometimes invoked via a platform‑specific name like
-    // `codex-x86_64-unknown-linux-musl`, but the help output should always use
-    // the generic `code` command name that users run.
-    bin_name = "code"
+    // `dev-x86_64-unknown-linux-musl`, or via the `code` alias, but the help
+    // output should always name the product: `dev`.
+    bin_name = "dev"
 )]
 struct MultitoolCli {
     #[clap(flatten)]
@@ -98,7 +98,7 @@ struct MultitoolCli {
 
 #[derive(Debug, clap::Subcommand)]
 enum Subcommand {
-    /// Run Codex non-interactively.
+    /// Run Hanzo Dev non-interactively.
     #[clap(visible_alias = "e")]
     Exec(ExecCli),
 
@@ -112,11 +112,11 @@ enum Subcommand {
     /// Remove stored authentication credentials.
     Logout(LogoutCommand),
 
-    /// [experimental] Run Codex as an MCP server and manage MCP servers.
+    /// [experimental] Run Hanzo Dev as an MCP server and manage MCP servers.
     #[clap(visible_alias = "acp")]
     Mcp(McpCli),
 
-    /// [experimental] Run the Codex MCP server (stdio transport).
+    /// [experimental] Run the Hanzo Dev MCP server (stdio transport).
     McpServer,
 
     /// [experimental] Run the app server.
@@ -128,11 +128,11 @@ enum Subcommand {
     /// Internal debugging commands.
     Debug(DebugArgs),
 
-    /// Debug: replay ordering from response.json and codex-tui.log
+    /// Debug: replay ordering from response.json and the TUI log
     #[clap(hide = false)]
     OrderReplay(OrderReplayArgs),
 
-    /// Apply the latest diff produced by Codex agent as a `git apply` to your local working tree.
+    /// Apply the latest diff produced by the agent as a `git apply` to your local working tree.
     #[clap(visible_alias = "a")]
     Apply(ApplyCommand),
 
@@ -142,7 +142,7 @@ enum Subcommand {
     /// Internal: generate TypeScript protocol bindings.
     #[clap(hide = true)]
     GenerateTs(GenerateTsCommand),
-    /// [EXPERIMENTAL] Browse tasks from Codex Cloud and apply changes locally.
+    /// [EXPERIMENTAL] Browse cloud tasks and apply changes locally.
     #[clap(name = "cloud", alias = "cloud-tasks")]
     Cloud(CloudTasksCli),
 
@@ -320,7 +320,7 @@ struct LoginCommand {
 
     #[arg(
         long = "with-api-key",
-        help = "Read the API key from stdin (e.g. `printenv OPENAI_API_KEY | codex login --with-api-key`)"
+        help = "Read the API key from stdin (e.g. `printenv OPENAI_API_KEY | dev login --with-api-key`)"
     )]
     with_api_key: bool,
 
@@ -386,7 +386,7 @@ struct OrderReplayArgs {
 struct PreviewArgs {
     /// Slug identifier (e.g., faster-downloads)
     slug: String,
-    /// Optional owner/repo to override (defaults to just-every/code or $GITHUB_REPOSITORY)
+    /// Optional owner/repo to override (defaults to hanzoai/dev or $GITHUB_REPOSITORY)
     #[arg(long = "repo", value_name = "OWNER/REPO")]
     repo: Option<String>,
     /// Output directory where the binary will be extracted
@@ -545,7 +545,7 @@ async fn cli_main(code_linux_sandbox_exe: Option<PathBuf>) -> anyhow::Result<()>
                         .await;
                     } else if login_cli.api_key.is_some() {
                         eprintln!(
-                            "The --api-key flag is no longer supported. Pipe the key instead, e.g. `printenv OPENAI_API_KEY | codex login --with-api-key`."
+                            "The --api-key flag is no longer supported. Pipe the key instead, e.g. `printenv OPENAI_API_KEY | dev login --with-api-key`."
                         );
                         std::process::exit(1);
                     } else if login_cli.with_api_key {
@@ -1086,7 +1086,7 @@ fn resolve_resume_path(session_id: Option<&str>, last: bool) -> anyhow::Result<O
     }
 
     let code_home = code_core::config::find_code_home()
-        .context("failed to locate Codex home directory")?;
+        .context("failed to locate the Hanzo Dev home directory")?;
 
     let sess = session_id.map(|s| s.to_string());
     let fetch = async move {
@@ -1243,7 +1243,7 @@ async fn preview_main(args: PreviewArgs) -> anyhow::Result<()> {
     let repo = args
         .repo
         .or_else(|| env::var("GITHUB_REPOSITORY").ok())
-        .unwrap_or_else(|| "just-every/code".to_string());
+        .unwrap_or_else(|| "hanzoai/dev".to_string());
     let (owner, name) = repo
         .split_once('/')
         .map(|(o, n)| (o.to_string(), n.to_string()))
@@ -1518,7 +1518,7 @@ async fn doctor_main() -> anyhow::Result<()> {
         let bun_coder = format!("{}/coder", bun_bin);
         if coder_paths.iter().any(|p| p == &bun_coder) {
             println!("\nBun shim detected for 'coder': {}", bun_coder);
-            println!("Suggestion: remove old Bun global with: bun remove -g @just-every/code");
+            println!("Suggestion: remove old Bun global with: bun remove -g @hanzo/dev");
         }
         let bun_code = format!("{}/code", bun_bin);
         if code_paths.iter().any(|p| p == &bun_code) {
@@ -1549,8 +1549,8 @@ async fn doctor_main() -> anyhow::Result<()> {
     }
 
     println!("\nIf versions differ, remove older installs and keep one package manager:");
-    println!("  - Bun: bun remove -g @just-every/code");
-    println!("  - npm/pnpm: npm uninstall -g @just-every/code");
+    println!("  - Bun: bun remove -g @hanzo/dev");
+    println!("  - npm/pnpm: npm uninstall -g @hanzo/dev");
     println!("  - Homebrew: brew uninstall code");
     println!("  - Prefer using 'coder' to avoid conflicts with VS Code's 'code'.");
 

@@ -1322,6 +1322,7 @@ dependencies = [
  "code-git-tooling",
  "code-ollama",
  "code-protocol",
+ "code-version",
  "codex-utils-rustls-provider",
  "filetime",
  "libc",
