@@ -146,6 +146,8 @@ export type { PlanItem } from "./PlanItem";
 export type { PlanItemArg } from "./PlanItemArg";
 export type { PlanType } from "./PlanType";
 export type { Profile } from "./Profile";
+export type { QueueUserMessageParams } from "./QueueUserMessageParams";
+export type { QueueUserMessageResponse } from "./QueueUserMessageResponse";
 export type { RateLimitSnapshot } from "./RateLimitSnapshot";
 export type { RateLimitWindow } from "./RateLimitWindow";
 export type { RawResponseItemEvent } from "./RawResponseItemEvent";
