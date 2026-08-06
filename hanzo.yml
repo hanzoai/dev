@@ -1,0 +1,35 @@
+# hanzoai/dev — the `dev` CLI (Rust workspace under code-rs/: core, tui, exec,
+# app-server, mcp client/server, and ~30 more crates).
+#
+# Gate only. This repo ships signed per-platform binaries and an npm wrapper
+# from .github/workflows/release.yml; there is no image and nothing to deploy.
+#
+# THE GATE IS THE COMPILE, because for this repo nothing else is. There is no
+# meaningful lint-only proxy: the workspace is where the product lives, and a
+# type error in core/ is invisible to the root `prettier --check *.json *.md`
+# that is the only thing package.json offers.
+#
+# `cargo check`, not `cargo build`: it runs the full front end of the compiler
+# over every crate in the workspace — resolution, typeck, borrowck — and skips
+# only codegen and linking. That catches every break a `build` would, at roughly
+# a third of the cost, on a fleet of ten shared runners.
+#
+# --locked so Cargo.lock is a fact rather than a suggestion: an out-of-date lock
+# fails here instead of silently resolving to versions no release will ever use.
+#
+# The toolchain is installed by this gate. hanzoai/ci provisions Rust only when
+# a Cargo.toml sits at the repo ROOT, and this workspace lives one directory
+# down — so without these three lines the gate dies at `cargo: command not
+# found` (exit 127) and never reads a single crate. --default-toolchain none
+# leaves the choice to code-rs/rust-toolchain.toml, which pins 1.90.0.
+test:
+  - name: cargo-check
+    run: |
+      set -euo pipefail
+      if ! command -v cargo >/dev/null 2>&1; then
+        curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs \
+          | sh -s -- -y --profile minimal --default-toolchain none
+      fi
+      export PATH="$HOME/.cargo/bin:$PATH"
+      cd code-rs
+      cargo check --workspace --locked
