@@ -152,6 +152,11 @@ jobs:
     needs: [determine-version]
     runs-on: ${{ matrix.os }}
     strategy:
+      # One target failing must not cancel the other four. With the default
+      # fail-fast the aarch64 leg died four seconds in and took every sibling
+      # with it, so `release` was skipped and npm published nothing — a red run
+      # that looked like one broken architecture was actually zero shipped.
+      fail-fast: false
       matrix:
         include:
           # Linux builds
@@ -375,25 +380,22 @@ jobs:
             rm -f "$f"
           done
 
+      # v4, not v3. The v3 pin came from git.hanzo.ai, which presents as GHES and
+      # whose runners reject v4 with GHESNotSupportedError. But this file is under
+      # .github/workflows/, so it runs on github.com — and github.com now hard-fails
+      # v3 during "Set up job", before a single step executes:
+      #   "This request has been automatically failed because it uses a deprecated
+      #    version of `actions/upload-artifact: v3`."
+      # One host per path: v3 belongs only under .hanzo/workflows/.
       - name: Upload binaries (compressed)
-        # v3, not v4+: this workflow runs on git.hanzo.ai, which presents as GHES.
-        # The v4 action refuses outright — "GHESNotSupportedError: @actions/artifact
-        # v2.0.0+ ... not currently supported on GHES" — so the job builds its
-        # artifact and then discards it at the last step, and reads as a build
-        # failure when the build actually succeeded.
-        uses: actions/upload-artifact@v3
+        uses: actions/upload-artifact@v4
         with:
           name: binaries-${{ matrix.target }}
           path: artifacts/
           compression-level: 0
 
       - name: Upload cargo timings
-        # v3, not v4+: this workflow runs on git.hanzo.ai, which presents as GHES.
-        # The v4 action refuses outright — "GHESNotSupportedError: @actions/artifact
-        # v2.0.0+ ... not currently supported on GHES" — so the job builds its
-        # artifact and then discards it at the last step, and reads as a build
-        # failure when the build actually succeeded.
-        uses: actions/upload-artifact@v3
+        uses: actions/upload-artifact@v4
         with:
           name: cargo-timings-${{ matrix.target }}
           path: code-rs/target/cargo-timings/*.html
@@ -433,13 +435,10 @@ jobs:
           PORT=5058 LOG_DEST=stdout EXIT_ON_5XX=1 RESPONSES_BETA="responses=v1" node scripts/openai-proxy.js > .github/auto/openai-proxy.log 2>&1 &
           for i in {1..30}; do if nc -z 127.0.0.1 5058; then break; else sleep 0.2; fi; done || true
 
+      # v4 to match the uploads above. Each artifact lands in its own subdirectory
+      # under artifacts/; "Prepare release assets" already walks it recursively.
       - name: Download all artifacts
-        # v3, not v4+: this workflow runs on git.hanzo.ai, which presents as GHES.
-        # The v4 action refuses outright — "GHESNotSupportedError: @actions/artifact
-        # v2.0.0+ ... not currently supported on GHES" — so the job builds its
-        # artifact and then discards it at the last step, and reads as a build
-        # failure when the build actually succeeded.
-        uses: actions/download-artifact@v3
+        uses: actions/download-artifact@v4
         with:
           path: artifacts/
 
@@ -455,6 +454,30 @@ jobs:
           done < <(find artifacts -type f -name 'dev-*' -print0)
           # Show what we collected
           ls -la release-assets/ || true
+
+      # Every architecture, or nothing. The packaging step below iterates over
+      # whatever happens to be in release-assets/ and `continue`s past anything
+      # it does not recognise, so a target that never built produced a smaller
+      # set of npm packages and a green release — while @hanzo/dev still listed
+      # all five in optionalDependencies and users on the missing arch got a
+      # wrapper with no binary under it. Name the five here and refuse early.
+      - name: Assert every architecture built
+        shell: bash
+        run: |
+          set -euo pipefail
+          missing=()
+          for t in x86_64-unknown-linux-musl \
+                   aarch64-unknown-linux-musl \
+                   x86_64-apple-darwin \
+                   aarch64-apple-darwin \
+                   x86_64-pc-windows-msvc.exe; do
+            compgen -G "release-assets/dev-${t}*" >/dev/null || missing+=("$t")
+          done
+          if [ ${#missing[@]} -gt 0 ]; then
+            printf '::error::no binary for: %s — refusing to publish a partial matrix\n' "${missing[*]}"
+            exit 1
+          fi
+          echo "all 5 target binaries present"
 
       - name: Build per-target npm binary packages
         shell: bash

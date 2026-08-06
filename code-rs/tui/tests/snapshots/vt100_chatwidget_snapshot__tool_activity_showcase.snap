@@ -3,15 +3,8 @@ source: tui/tests/vt100_chatwidget_snapshot.rs
 expression: output
 ---
  ┌────────────────────────────────────────────────────────────────────────────┐
- │                                    Code                                    │
+ │  Code  •  Model: zen5-coder  •  Reasoning: medium  •  Directory: /snapshot │
  └────────────────────────────────────────────────────────────────────────────┘
-
-     Plan
-       • Init workspace
-       • Nextest smoke
-       • Summarize
-
-     Status
        (no status updates yet)
 
      Latest result
@@ -19,8 +12,12 @@ expression: output
        - 58 tests passed
        - 0 failures
 
+     Actions
+       Started agent run for qa-bot
+       Agent run completed in 1m34s
+
  ⚙ ┌───────────────────────────────────────────────────────────────────────────
-   │ Agent Run • agent-pending                                        Running │
+   │ Agent Run • deploy-helper                                        Running │
    └───────────────────────────────────────────────────────────────────────────
 
      Plan
@@ -29,7 +26,10 @@ expression: output
      Status
        (no status updates yet)
 
+     Actions
+       (no recorded actions yet)
+
  ┌────────────────────────────────────────────────────────────────────────────┐
  │ What can I code for you today?                                             │
  └────────────────────────────────────────────────────────────────────────────┘
-   Read Only  (Shift+Tab change)                                   Ctrl+H help
+   Read Only  (Shift+Tab change)                       Ctrl+H help  •  API key

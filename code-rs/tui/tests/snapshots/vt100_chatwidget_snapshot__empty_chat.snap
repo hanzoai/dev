@@ -3,7 +3,7 @@ source: tui/tests/vt100_chatwidget_snapshot.rs
 expression: output
 ---
  ┌────────────────────────────────────────────────────────────────────────────┐
- │                                    Code                                    │
+ │  Code  •  Model: zen5-coder  •  Reasoning: medium  •  Directory: /snapshot │
  └────────────────────────────────────────────────────────────────────────────┘
 
 
@@ -24,4 +24,4 @@ expression: output
  ┌────────────────────────────────────────────────────────────────────────────┐
  │ What can I code for you today?                                             │
  └────────────────────────────────────────────────────────────────────────────┘
-   Read Only  (Shift+Tab change)                                   Ctrl+H help
+   Read Only  (Shift+Tab change)                       Ctrl+H help  •  API key
