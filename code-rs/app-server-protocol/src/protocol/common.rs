@@ -418,6 +418,11 @@ client_request_definitions! {
         params: v1::SendUserMessageParams,
         response: v1::SendUserMessageResponse,
     },
+    /// Steer the running turn without tearing it down.
+    QueueUserMessage {
+        params: v1::QueueUserMessageParams,
+        response: v1::QueueUserMessageResponse,
+    },
     SendUserTurn {
         params: v1::SendUserTurnParams,
         response: v1::SendUserTurnResponse,

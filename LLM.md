@@ -73,6 +73,31 @@ ids answer on chat/completions but return system-prompt text on responses.
 is `npm pack` output that CI regenerates — it is gitignored on purpose; when it
 was committed it was a second, stale home for that download URL.
 
+### Moving releases to git.hanzo.ai — the precondition
+
+Releases are served by GitHub today. Nothing in this repo points at
+`git.hanzo.ai`, and retargeting it blind breaks every installed copy, because
+the updater and the installer both fetch a URL the user already has baked in.
+There are exactly four places, and they must move together:
+
+| What | Where | Currently |
+|---|---|---|
+| Update check | `code-rs/tui/src/updates.rs` `LATEST_RELEASE_URL` | `api.github.com/repos/hanzoai/dev/releases/latest` |
+| Release page | `code-rs/tui/src/updates.rs` `CODE_RELEASE_URL` | `github.com/hanzoai/dev/releases/latest` |
+| Binary download | `codex-cli/postinstall.js` `downloadUrl` | `github.com/hanzoai/dev/releases/download/v${version}/…` |
+| Asset upload | `.github/workflows/release.yml` | GitHub release assets |
+
+The forge serves its API at `/v1/`, **not** `/api/v1/` — so the update check
+becomes `git.hanzo.ai/v1/repos/hanzoai/dev/releases/latest`, and the JSON it
+returns must keep the `tag_name` and `assets[].name` fields `updates.rs` reads.
+
+**The flip is safe only once the forge is serving release assets for a tag that
+already exists on GitHub**, so an old client fetching the GitHub URL and a new
+client fetching the forge URL get the same bytes. Publish to both for one full
+release cycle, then move the updater, then stop publishing to GitHub. Moving the
+updater first strands everyone who has not yet updated — they poll a host that
+has no releases, and the CLI silently stops offering upgrades.
+
 ## Upstream lineage — where the code actually comes from
 
 Read this before attempting a sync. The directory names lie about the topology.

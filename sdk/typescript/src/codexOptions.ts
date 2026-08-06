@@ -7,4 +7,6 @@ export type CodexOptions = {
   baseUrl?: string;
   apiKey?: string;
   configOverrides?: CodexConfigObject;
+  /** Environment for the agent process. Replaces the inherited environment. */
+  env?: Record<string, string>;
 };

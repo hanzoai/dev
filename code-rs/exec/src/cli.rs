@@ -86,7 +86,7 @@ pub struct Cli {
     pub color: Color,
 
     /// Print events to stdout as JSONL.
-    #[arg(long = "json", default_value_t = false)]
+    #[arg(long = "json", alias = "experimental-json", default_value_t = false)]
     pub json: bool,
 
     /// Maximum wall-clock time budget (seconds) before aborting the run.

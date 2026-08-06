@@ -5,7 +5,7 @@ use std::sync::atomic::AtomicU64;
 use crate::event_processor::CodexStatus;
 use crate::event_processor::EventProcessor;
 use crate::event_processor::handle_last_message;
-use crate::exec_events::AssistantMessageItem;
+use crate::exec_events::AgentMessageItem;
 use crate::exec_events::CommandExecutionItem;
 use crate::exec_events::CommandExecutionStatus;
 use crate::exec_events::FileChangeItem;
@@ -46,8 +46,7 @@ use code_core::protocol::PatchApplyBeginEvent;
 use code_core::protocol::PatchApplyEndEvent;
 use code_core::protocol::SessionConfiguredEvent;
 use code_core::protocol::TaskCompleteEvent;
-use code_core::protocol::TaskStartedEvent;
-use code_core::protocol::WebSearchEndEvent;
+use code_core::protocol::WebSearchCompleteEvent;
 use tracing::error;
 use tracing::warn;
 
@@ -109,14 +108,14 @@ impl ExperimentalEventProcessorWithJsonOutput {
             EventMsg::PatchApplyBegin(ev) => self.handle_patch_apply_begin(ev),
             EventMsg::PatchApplyEnd(ev) => self.handle_patch_apply_end(ev),
             EventMsg::WebSearchBegin(_) => Vec::new(),
-            EventMsg::WebSearchEnd(ev) => self.handle_web_search_end(ev),
+            EventMsg::WebSearchComplete(ev) => self.handle_web_search_complete(ev),
             EventMsg::TokenCount(ev) => {
                 if let Some(info) = &ev.info {
                     self.last_total_token_usage = Some(info.total_token_usage.clone());
                 }
                 Vec::new()
             }
-            EventMsg::TaskStarted(ev) => self.handle_task_started(ev),
+            EventMsg::TaskStarted => self.handle_task_started(),
             EventMsg::TaskComplete(_) => self.handle_task_complete(),
             EventMsg::Error(ev) => {
                 let error = ThreadErrorEvent {
@@ -125,9 +124,6 @@ impl ExperimentalEventProcessorWithJsonOutput {
                 self.last_critical_error = Some(error.clone());
                 vec![ThreadEvent::Error(error)]
             }
-            EventMsg::StreamError(ev) => vec![ThreadEvent::Error(ThreadErrorEvent {
-                message: ev.message.clone(),
-            })],
             EventMsg::PlanUpdate(ev) => self.handle_plan_update(ev),
             _ => Vec::new(),
         }
@@ -147,11 +143,11 @@ impl ExperimentalEventProcessorWithJsonOutput {
         })]
     }
 
-    fn handle_web_search_end(&self, ev: &WebSearchEndEvent) -> Vec<ThreadEvent> {
+    fn handle_web_search_complete(&self, ev: &WebSearchCompleteEvent) -> Vec<ThreadEvent> {
         let item = ThreadItem {
             id: self.get_next_item_id(),
             details: ThreadItemDetails::WebSearch(WebSearchItem {
-                query: ev.query.clone(),
+                query: ev.query.clone().unwrap_or_default(),
             }),
         };
 
@@ -162,7 +158,7 @@ impl ExperimentalEventProcessorWithJsonOutput {
         let item = ThreadItem {
             id: self.get_next_item_id(),
 
-            details: ThreadItemDetails::AssistantMessage(AssistantMessageItem {
+            details: ThreadItemDetails::AgentMessage(AgentMessageItem {
                 text: payload.message.clone(),
             }),
         };
@@ -339,7 +335,7 @@ impl ExperimentalEventProcessorWithJsonOutput {
 
             details: ThreadItemDetails::CommandExecution(CommandExecutionItem {
                 command,
-                aggregated_output: ev.aggregated_output.clone(),
+                aggregated_output: format!("{}{}", ev.stdout, ev.stderr),
                 exit_code: Some(ev.exit_code),
                 status,
             }),
@@ -382,7 +378,7 @@ impl ExperimentalEventProcessorWithJsonOutput {
         vec![ThreadEvent::ItemStarted(ItemStartedEvent { item })]
     }
 
-    fn handle_task_started(&mut self, _: &TaskStartedEvent) -> Vec<ThreadEvent> {
+    fn handle_task_started(&mut self) -> Vec<ThreadEvent> {
         self.last_critical_error = None;
         vec![ThreadEvent::TurnStarted(TurnStartedEvent {})]
     }
@@ -392,7 +388,9 @@ impl ExperimentalEventProcessorWithJsonOutput {
             Usage {
                 input_tokens: u.input_tokens,
                 cached_input_tokens: u.cached_input_tokens,
+                cache_write_input_tokens: u.cache_write_input_tokens,
                 output_tokens: u.output_tokens,
+                reasoning_output_tokens: u.reasoning_output_tokens,
             }
         } else {
             Usage::default()
@@ -420,26 +418,29 @@ impl ExperimentalEventProcessorWithJsonOutput {
     }
 }
 
+impl ExperimentalEventProcessorWithJsonOutput {
+    fn emit(&self, events: Vec<ThreadEvent>) {
+        for event in events {
+            match serde_json::to_string(&event) {
+                Ok(line) => println!("{line}"),
+                Err(e) => error!("Failed to serialize event: {e:?}"),
+            }
+        }
+    }
+}
+
 impl EventProcessor for ExperimentalEventProcessorWithJsonOutput {
-    fn print_config_summary(&mut self, _: &Config, _: &str, ev: &SessionConfiguredEvent) {
-        self.process_event(Event {
-            id: "".to_string(),
-            msg: EventMsg::SessionConfigured(ev.clone()),
-        });
+    /// JSON mode emits no human-readable preamble.
+    fn print_config_summary(&mut self, _: &Config, _: &str) {}
+
+    fn on_session_configured(&mut self, ev: &SessionConfiguredEvent) {
+        let started = self.handle_session_configured(ev);
+        self.emit(started);
     }
 
     fn process_event(&mut self, event: Event) -> CodexStatus {
         let aggregated = self.collect_thread_events(&event);
-        for conv_event in aggregated {
-            match serde_json::to_string(&conv_event) {
-                Ok(line) => {
-                    println!("{line}");
-                }
-                Err(e) => {
-                    error!("Failed to serialize event: {e:?}");
-                }
-            }
-        }
+        self.emit(aggregated);
 
         let Event { msg, .. } = event;
 

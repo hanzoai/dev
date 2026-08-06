@@ -3,9 +3,11 @@ import path from "node:path";
 import { Codex } from "../src/codex";
 import type { CodexConfigObject } from "../src/codexOptions";
 
+// code-rs is the workspace that ships; codex-rs is the read-only upstream
+// mirror and building it produces nothing a user runs.
 export const codexExecPath =
   process.env.CODEX_EXEC_PATH ??
-  path.join(process.cwd(), "..", "..", "codex-rs", "target", "debug", "codex");
+  path.join(process.cwd(), "..", "..", "code-rs", "target", "debug", "dev");
 
 type CreateTestClientOptions = {
   apiKey?: string;
@@ -46,7 +48,7 @@ export function createTestClient(options: CreateTestClientOptions = {}): TestCli
       codexPathOverride: codexExecPath,
       baseUrl: options.baseUrl,
       apiKey: options.apiKey,
-      config: mergeTestConfig(options.baseUrl, options.config),
+      configOverrides: mergeTestConfig(options.baseUrl, options.config),
       env,
     }),
   };

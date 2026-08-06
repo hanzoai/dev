@@ -60,8 +60,14 @@ pub struct Usage {
     pub input_tokens: u64,
     /// The number of cached input tokens used during the turn.
     pub cached_input_tokens: u64,
+    /// The number of input tokens written to the prompt cache during the turn.
+    #[serde(default)]
+    pub cache_write_input_tokens: u64,
     /// The number of output tokens used during the turn.
     pub output_tokens: u64,
+    /// The number of reasoning output tokens used during the turn.
+    #[serde(default)]
+    pub reasoning_output_tokens: u64,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, TS)]
