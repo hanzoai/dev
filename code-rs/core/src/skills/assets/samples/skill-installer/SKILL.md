@@ -27,7 +27,7 @@ Skills from {repo}:
 Which ones would you like installed?
 """
 
-After installing a skill, tell the user: "Restart Codex to pick up new skills."
+After installing a skill, tell the user: "Restart Hanzo Dev to pick up new skills."
 
 ## Scripts
 

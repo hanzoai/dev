@@ -30329,7 +30329,7 @@ Have we met every part of this goal and is there no further work to do?"#
 
             // Title follows theme text color
             spans.push(Span::styled(
-                "Every Code",
+                "Hanzo Dev",
                 Style::default()
                     .fg(crate::colors::text())
                     .add_modifier(Modifier::BOLD),
@@ -31598,10 +31598,14 @@ use code_core::protocol::OrderMeta;
 
         let cfg_text = std::fs::read_to_string(&config_path).expect("read config");
         let cfg = toml::from_str::<ConfigToml>(&cfg_text).expect("parse config");
+        // 272k is the GPT-5 family's context window. `dev` defaults to
+        // zen5-coder, which has no fixed window, so name the model this
+        // assertion is actually about rather than lean on the default.
         let reloaded = Config::load_from_base_config_with_overrides(
             cfg,
             ConfigOverrides {
                 cwd: Some(code_home.path().to_path_buf()),
+                model: Some("gpt-5.5".to_string()),
                 ..Default::default()
             },
             code_home.path().to_path_buf(),

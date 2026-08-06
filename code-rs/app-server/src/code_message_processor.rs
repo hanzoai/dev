@@ -1964,10 +1964,27 @@ mod tests {
         CodexMessageProcessor,
         mpsc::UnboundedReceiver<crate::outgoing_message::OutgoingMessage>,
     ) {
+        make_processor_with_provider_for_tests(auth_manager, None)
+    }
+
+    /// `dev`'s default provider is `hanzo`, which sets `requires_openai_auth:
+    /// false` — so anything exercising the ChatGPT auth path has to ask for the
+    /// `openai` provider by name rather than rely on the default.
+    fn make_processor_with_provider_for_tests(
+        auth_manager: Arc<AuthManager>,
+        model_provider: Option<&str>,
+    ) -> (
+        CodexMessageProcessor,
+        mpsc::UnboundedReceiver<crate::outgoing_message::OutgoingMessage>,
+    ) {
         let (outgoing_tx, outgoing_rx) = mpsc::unbounded_channel();
         let outgoing = Arc::new(OutgoingMessageSender::new(outgoing_tx));
+        let overrides = ConfigOverrides {
+            model_provider: model_provider.map(str::to_string),
+            ..ConfigOverrides::default()
+        };
         let config = Arc::new(
-            Config::load_with_cli_overrides(Vec::new(), ConfigOverrides::default())
+            Config::load_with_cli_overrides(Vec::new(), overrides)
                 .expect("load default config"),
         );
         let conversation_manager = Arc::new(ConversationManager::new(
@@ -2061,7 +2078,8 @@ mod tests {
             RefreshTokenError::permanent("refresh token already used"),
         );
 
-        let (processor, mut outgoing_rx) = make_processor_with_auth_for_tests(auth_manager);
+        let (processor, mut outgoing_rx) =
+            make_processor_with_provider_for_tests(auth_manager, Some("openai"));
         processor
             .get_auth_status(
                 RequestId::Integer(42),
